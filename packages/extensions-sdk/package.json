@@ -15,7 +15,8 @@
 	"exports": {
 		".": "./dist/index.js",
 		"./cli": "./dist/cli/index.js",
-		"./package.json": "./package.json"
+		"./package.json": "./package.json",
+		"./cli/commands/helpers/generate-bundle-entrypoint": "./dist/cli/commands/helpers/generate-bundle-entrypoint.js"
 	},
 	"main": "dist/index.js",
 	"bin": {
@@ -47,6 +48,7 @@
 		"esbuild": "0.17.19",
 		"execa": "7.1.1",
 		"fs-extra": "11.1.1",
+		"glob": "^10.3.14",
 		"inquirer": "9.2.4",
 		"ora": "6.3.1",
 		"rollup": "3.22.0",

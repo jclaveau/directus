@@ -308,17 +308,60 @@ class ExtensionManager {
 			}
 		});
 
+		const watchPaths = ((config) => {
+			if (! config) {
+				return [];
+			} 
+			else if (typeof config === 'string') {
+				return [config];
+			}
+			else if (Array.isArray(config)) {
+				return config;
+			}
+			else {
+				throw new Error('Unhandled config var EXTENSIONS_WATCHER_PATHS: ' + JSON.stringify(config));
+			}
+		})(env['EXTENSIONS_WATCHER_PATHS'])
+
+		const chokidarPaths = [
+			path.resolve('package.json'), 
+			path.posix.join(extensionDirUrl, '*', 'package.json'), 
+			...localExtensionUrls,
+			...watchPaths.map((configPath) => {
+				if (configPath[0] === '/') {
+					return configPath;
+				}
+				else {
+					// mandatory for paths containing symlinks
+					return path.posix.join(process.cwd(), extensionDirUrl, configPath);
+				}
+			}),
+		]
+
 		this.watcher = chokidar.watch(
-			[path.resolve('package.json'), path.posix.join(extensionDirUrl, '*', 'package.json'), ...localExtensionUrls],
+			chokidarPaths,
 			{
+				ignored: ['**/node_modules'],
 				ignoreInitial: true,
 			}
-		);
+		)
+
+		let timeout: NodeJS.Timeout | null = null
+
+		const requestReload = () => {
+			if (timeout) {
+				clearTimeout(timeout);
+			}
+
+			timeout = setTimeout(() => {
+				this.reload()
+			}, 200);
+		}
 
 		this.watcher
-			.on('add', () => this.reload())
-			.on('change', () => this.reload())
-			.on('unlink', () => this.reload());
+			.on('add', requestReload)
+			.on('change', requestReload)
+			.on('unlink', requestReload);
 	}
 
 	private async closeWatcher(): Promise<void> {

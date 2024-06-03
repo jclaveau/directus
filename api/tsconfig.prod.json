@@ -1,4 +1,9 @@
 {
 	"extends": "./tsconfig.json",
-	"exclude": ["**/*.test.ts"]
+	"exclude": [
+		"**/*.test.ts"
+	],
+	"compilerOptions": {
+		"declaration": false, // https://stackoverflow.com/a/75406419/2714285
+	}
 }
