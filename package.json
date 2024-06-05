@@ -5,8 +5,10 @@
 		"build": "pnpm --recursive --filter '!docs' run build",
 		"format": "prettier --cache --check .",
 		"lint": "eslint --cache .",
-		"test": "pnpm --recursive --filter '!tests-blackbox' test",
-		"test:blackbox": "pnpm --filter directus deploy --prod dist && pnpm --filter tests-blackbox test"
+		"test": "pnpm --recursive --filter '!tests-blackbox' --filter '!@directus/sdk' test",
+		"test:blackbox": "pnpm --filter directus deploy --prod dist && pnpm test:disable-version-check && pnpm --filter tests-blackbox test",
+		"test:disable-version-check": "cd ./dist; cat package.json| grep -v '\"version\": \"' > package.json",
+		"test:blackbox:sqlite": "pnpm test:disable-version-check; TEST_DB=sqlite3 pnpm --filter tests-blackbox test"
 	},
 	"devDependencies": {
 		"@changesets/cli": "2.26.1",

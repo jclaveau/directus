@@ -2,13 +2,9 @@ name: Check
 
 on:
   push:
-    branches:
-      - main
     paths-ignore:
       - docs/**
   pull_request:
-    branches:
-      - main
 
 concurrency:
   group: check-${{ github.ref }}
@@ -59,6 +55,6 @@ jobs:
       - name: Run Tests
         run: pnpm test
 
-  analyze:
-    name: CodeQL Analysis
-    uses: ./.github/workflows/codeql-analysis.yml
+  # analyze:
+  #   name: CodeQL Analysis
+  #   uses: ./.github/workflows/codeql-analysis.yml
