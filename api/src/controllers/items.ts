@@ -10,13 +10,17 @@ import type { PrimaryKey } from '../types/index.js';
 import asyncHandler from '../utils/async-handler.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
+
 const router = express.Router();
 
 router.post(
 	'/:collection',
 	collectionExists,
 	asyncHandler(async (req, res, next) => {
-		if (req.params['collection']!.startsWith('directus_')) throw new ForbiddenError();
+		if (req.params['collection']!.startsWith('directus_')) {
+			console.error('Forbidden access to directus_* collections');
+			throw new ForbiddenError();
+		}
 
 		if (req.singleton) {
 			throw new RouteNotFoundError({ path: req.path });
@@ -59,7 +63,10 @@ router.post(
 );
 
 const readHandler = asyncHandler(async (req, res, next) => {
-	if (req.params['collection']!.startsWith('directus_')) throw new ForbiddenError();
+	if (req.params['collection']!.startsWith('directus_')) {
+		console.error('Forbidden access to directus_* collections');
+		throw new ForbiddenError();
+	}
 
 	const service = new ItemsService(req.collection, {
 		accountability: req.accountability,
@@ -98,7 +105,10 @@ router.get(
 	'/:collection/:pk',
 	collectionExists,
 	asyncHandler(async (req, res, next) => {
-		if (req.params['collection']!.startsWith('directus_')) throw new ForbiddenError();
+		if (req.params['collection']!.startsWith('directus_')) {
+			console.error('Forbidden access to directus_* collections');
+			throw new ForbiddenError();
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
@@ -121,7 +131,10 @@ router.patch(
 	collectionExists,
 	validateBatch('update'),
 	asyncHandler(async (req, res, next) => {
-		if (req.params['collection']!.startsWith('directus_')) throw new ForbiddenError();
+		if (req.params['collection']!.startsWith('directus_')) {
+			console.error('Forbidden access to directus_* collections');
+			throw new ForbiddenError();
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
@@ -167,7 +180,10 @@ router.patch(
 	'/:collection/:pk',
 	collectionExists,
 	asyncHandler(async (req, res, next) => {
-		if (req.params['collection']!.startsWith('directus_')) throw new ForbiddenError();
+		if (req.params['collection']!.startsWith('directus_')) {
+			console.error('Forbidden access to directus_* collections');
+			throw new ForbiddenError();
+		}
 
 		if (req.singleton) {
 			throw new RouteNotFoundError({ path: req.path });
@@ -201,7 +217,10 @@ router.delete(
 	collectionExists,
 	validateBatch('delete'),
 	asyncHandler(async (req, _res, next) => {
-		if (req.params['collection']!.startsWith('directus_')) throw new ForbiddenError();
+		if (req.params['collection']!.startsWith('directus_')) {
+			console.error('Forbidden access to directus_* collections');
+			throw new ForbiddenError();
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
@@ -226,7 +245,10 @@ router.delete(
 	'/:collection/:pk',
 	collectionExists,
 	asyncHandler(async (req, _res, next) => {
-		if (req.params['collection']!.startsWith('directus_')) throw new ForbiddenError();
+		if (req.params['collection']!.startsWith('directus_')) {
+			console.error('Forbidden access to directus_* collections');
+			throw new ForbiddenError();
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
