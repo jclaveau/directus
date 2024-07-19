@@ -63,6 +63,7 @@ export class AuthorizationService {
 		const uniqueCollectionsRequestedCount = uniq(collectionsRequested.map(({ collection }) => collection)).length;
 
 		if (uniqueCollectionsRequestedCount !== permissionsForCollections.length) {
+			console.error(`Missing permissions for '${action}' one of [${collectionsRequested.map(({ collection }) => collection).join(', ')}]`);
 			throw new ForbiddenError();
 		}
 
@@ -135,7 +136,11 @@ export class AuthorizationService {
 
 						for (const column of Object.values(aliasMap)) {
 							if (column === '*') continue;
-							if (allowedFields.includes(column) === false) throw new ForbiddenError();
+
+							if (allowedFields.includes(column) === false) {
+								console.error(`Access to '${collection}.${column}' for aggregate not allowed`);
+								throw new ForbiddenError();
+							}
 						}
 					}
 				}
@@ -151,6 +156,7 @@ export class AuthorizationService {
 					const fieldKey = stripFunction(childNode.name);
 
 					if (allowedFields.includes(fieldKey) === false) {
+						console.error(`Access to '${collection}.${fieldKey}' not allowed`);
 						throw new ForbiddenError();
 					}
 				}
@@ -277,7 +283,10 @@ export class AuthorizationService {
 								});
 
 								// Filter key not found in parent collection
-								if (!relation) throw new ForbiddenError();
+								if (!relation) {
+									console.error(`Filter key not found in parent collection for a2o filter: ${parentCollection}.${parentField}`);
+									throw new ForbiddenError();
+								}
 
 								const relatedCollectionName =
 									relation.related_collection === parentCollection ? relation.collection : relation.related_collection!;
@@ -304,7 +313,10 @@ export class AuthorizationService {
 								});
 
 								// Filter key not found in parent collection
-								if (!relation) throw new ForbiddenError();
+								if (!relation) {
+									console.error(`Filter key not found in parent collection: ${parentCollection}.${parentField}`);
+									throw new ForbiddenError();
+								}
 
 								parentCollection =
 									relation.related_collection === parentCollection ? relation.collection : relation.related_collection!;
@@ -387,6 +399,7 @@ export class AuthorizationService {
 						);
 
 						if (!actionPermission || !actionPermission.fields) {
+							console.error(`Action permission not found for collection ${collection} and action ${action}`);
 							throw new ForbiddenError();
 						}
 
@@ -394,6 +407,7 @@ export class AuthorizationService {
 							? [...permission.fields, schema.collections[collection]!.primary]
 							: [schema.collections[collection]!.primary];
 					} else if (!permission || !permission.fields) {
+						console.error(`Permission not found for collection ${collection}`);
 						throw new ForbiddenError();
 					} else {
 						allowedFields = permission.fields;
@@ -499,7 +513,10 @@ export class AuthorizationService {
 				return permission.collection === collection && permission.action === action;
 			});
 
-			if (!permission) throw new ForbiddenError();
+			if (!permission) {
+				console.error(`No permission at all for ${action}.${collection}`);
+				throw new ForbiddenError();
+			}
 
 			// Check if you have permission to access the fields you're trying to access
 
@@ -510,6 +527,9 @@ export class AuthorizationService {
 				const invalidKeys = keysInData.filter((fieldKey) => allowedFields.includes(fieldKey) === false);
 
 				if (invalidKeys.length > 0) {
+					// console.log('accountability', JSON.stringify(this.accountability))
+					// console.log('permission', JSON.stringify(permission, null, 2))
+					console.error(`Missing permissions for ${action}.${collection}[${invalidKeys.join(', ')}]`);
 					throw new ForbiddenError();
 				}
 			}
@@ -604,11 +624,18 @@ export class AuthorizationService {
 
 		if (Array.isArray(pk)) {
 			const result = await itemsService.readMany(pk, { ...query, limit: pk.length }, { permissionsAction: action });
-			if (!result) throw new ForbiddenError();
-			if (result.length !== pk.length) throw new ForbiddenError();
+
+			if (!result || result.length !== pk.length) {
+				console.error(`Missing permissions for ${action} ${collection}[${pk.join(', ')}]`);
+				throw new ForbiddenError();
+			}
 		} else {
 			const result = await itemsService.readOne(pk, query, { permissionsAction: action });
-			if (!result) throw new ForbiddenError();
+
+			if (!result) {
+				console.error(`Missing permissions for ${action} ${collection}[${pk}]`);
+				throw new ForbiddenError();
+			}
 		}
 	}
 }
