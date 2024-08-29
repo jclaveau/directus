@@ -218,6 +218,9 @@ importers:
       knex:
         specifier: 2.4.2
         version: 2.4.2(mysql@2.18.1)(pg@8.11.0)(sqlite3@5.1.6)(tedious@16.1.0)
+      knex-schema-inspector:
+        specifier: github:Niikelion/knex-schema-inspector#ee34075da6b70036eba2325e645b45dbc8ddeefa
+        version: github.com/Niikelion/knex-schema-inspector/ee34075da6b70036eba2325e645b45dbc8ddeefa
       ldapjs:
         specifier: 2.3.3
         version: 2.3.3
@@ -15484,7 +15487,6 @@ packages:
 
   /lodash.flatten@4.4.0:
     resolution: {integrity: sha512-C5N2Z3DgnnKr0LOpv/hKCgKdb7ZZwafIrsesve6lmzvZIRZRGaZ/l6Q8+2W7NaT+ZwO3fFlSCzCzrDCFdJfZ4g==}
-    dev: true
 
   /lodash.get@4.4.2:
     resolution: {integrity: sha512-z+Uw/vLuy6gQe8cfaFWD7p0wVv8fJl3mbzXh33RS+0oW2wvUqiRXiQ69gLWSLpgB5/6sU+r6BlQR0MBILadqTQ==}
@@ -15496,6 +15498,10 @@ packages:
   /lodash.isequal@4.5.0:
     resolution: {integrity: sha512-pDo3lu8Jhfjqls6GkMgpahsF9kCyayhgykjyLMNFTKWrpVdAQtYyB4muAMWozBB4ig/dtWAmsMxLEI8wuz+DYQ==}
     dev: true
+
+  /lodash.isnil@4.0.0:
+    resolution: {integrity: sha512-up2Mzq3545mwVnMhTDMdfoG1OurpA/s5t88JmQX809eH3C8491iu2sfKhTfhQtKY78oPNhiaHJUpT/dUDAAtng==}
+    dev: false
 
   /lodash.memoize@4.1.2:
     resolution: {integrity: sha512-t7j+NzmgnQzTAYXcsHYLgimltOV1MXHtlOWf6GjL9Kj8GK5FInw5JotxvbOs+IvV1/Dzo04/fCGfLVs7aXb4Ag==}
@@ -22894,3 +22900,12 @@ packages:
   /zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
     dev: true
+
+  github.com/Niikelion/knex-schema-inspector/ee34075da6b70036eba2325e645b45dbc8ddeefa:
+    resolution: {tarball: https://codeload.github.com/Niikelion/knex-schema-inspector/tar.gz/ee34075da6b70036eba2325e645b45dbc8ddeefa}
+    name: knex-schema-inspector
+    version: 3.1.0
+    dependencies:
+      lodash.flatten: 4.4.0
+      lodash.isnil: 4.0.0
+    dev: false
