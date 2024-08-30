@@ -151,6 +151,15 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 					  )
 					: payload;
 
+			if (payloadAfterHooks === undefined) {
+				throw new InvalidPayloadError({ reason: 'Create filter returned undefined' });
+			}
+
+			if (typeof payloadAfterHooks !== 'object') {
+				// primary key(s) or null
+				return payloadAfterHooks;
+			}
+
 			const payloadWithPresets = this.accountability
 				? authorizationService.validatePayload('create', this.collection, payloadAfterHooks)
 				: payloadAfterHooks;
