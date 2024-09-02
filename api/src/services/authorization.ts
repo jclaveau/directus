@@ -427,6 +427,10 @@ export class AuthorizationService {
 						}
 
 						if (!allowedFields.includes(originalFieldName)) {
+							console.error(
+								`Field '${originalFieldName}' not found in allowedFields of '${collection}': ${JSON.stringify(allowedFields, null, 2)}`
+							);
+
 							throw new ForbiddenError();
 						}
 					}

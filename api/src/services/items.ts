@@ -411,6 +411,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 		});
 
 		if (records === null) {
+			console.error(`runAST returned null in items.readByQuery(): ${JSON.stringify(query, null, 2)}`);
 			throw new ForbiddenError();
 		}
 
@@ -463,6 +464,7 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 		const results = await this.readByQuery(queryWithKey, opts);
 
 		if (results.length === 0) {
+			console.error(`No result found for key ${key} in ${this.collection} during items.readOne()`);
 			throw new ForbiddenError();
 		}
 
