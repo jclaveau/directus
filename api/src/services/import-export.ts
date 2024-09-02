@@ -44,7 +44,10 @@ export class ImportService {
 	}
 
 	async import(collection: string, mimetype: string, stream: Readable): Promise<void> {
-		if (this.accountability?.admin !== true && collection.startsWith('directus_')) throw new ForbiddenError();
+		if (this.accountability?.admin !== true && collection.startsWith('directus_')) {
+			console.error(`'${this.accountability?.user}' can't import to '${collection}' as not being an admin`);
+			throw new ForbiddenError();
+		}
 
 		const createPermissions = this.accountability?.permissions?.find(
 			(permission) => permission.collection === collection && permission.action === 'create'
@@ -55,6 +58,7 @@ export class ImportService {
 		);
 
 		if (this.accountability?.admin !== true && (!createPermissions || !updatePermissions)) {
+			console.error(`'${this.accountability?.user}' can't import to '${collection}' as not allowed to create or update items`);
 			throw new ForbiddenError();
 		}
 

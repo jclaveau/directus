@@ -49,6 +49,7 @@ export class RelationsService {
 
 	async readAll(collection?: string, opts?: QueryOptions): Promise<Relation[]> {
 		if (this.accountability && this.accountability.admin !== true && this.hasReadAccess === false) {
+			console.error(`'${this.accountability.user}' is not allowed to read relations`);
 			throw new ForbiddenError();
 		}
 
@@ -80,6 +81,7 @@ export class RelationsService {
 	async readOne(collection: string, field: string): Promise<Relation> {
 		if (this.accountability && this.accountability.admin !== true) {
 			if (this.hasReadAccess === false) {
+				console.error(`'${this.accountability.user}' is not allowed to read a relation`);
 				throw new ForbiddenError();
 			}
 
@@ -87,11 +89,18 @@ export class RelationsService {
 				return permission.action === 'read' && permission.collection === collection;
 			});
 
-			if (!permissions || !permissions.fields) throw new ForbiddenError();
+			if (!permissions || !permissions.fields) {
+				console.error(`'${this.accountability.user}' has no read permission to action read on '${collection}'`);
+				throw new ForbiddenError();
+			}
 
 			if (permissions.fields.includes('*') === false) {
 				const allowedFields = permissions.fields;
-				if (allowedFields.includes(field) === false) throw new ForbiddenError();
+
+				if (allowedFields.includes(field) === false) {
+					console.error(`'${this.accountability.user}' has no read permission to field '${field}' on '${collection}'`);
+					throw new ForbiddenError();
+				}
 			}
 		}
 
@@ -121,6 +130,7 @@ export class RelationsService {
 		const results = await this.filterForbidden(stitched);
 
 		if (results.length === 0) {
+			console.error(`No result found for relation ${collection}.${field} during items.readOne()`);
 			throw new ForbiddenError();
 		}
 
@@ -132,6 +142,7 @@ export class RelationsService {
 	 */
 	async createOne(relation: Partial<Relation>, opts?: MutationOptions): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' is not allowed to create a relation`);
 			throw new ForbiddenError();
 		}
 
@@ -252,6 +263,7 @@ export class RelationsService {
 		opts?: MutationOptions
 	): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' is not allowed to update a relation`);
 			throw new ForbiddenError();
 		}
 
@@ -364,6 +376,7 @@ export class RelationsService {
 	 */
 	async deleteOne(collection: string, field: string, opts?: MutationOptions): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' is not allowed to delete relations`);
 			throw new ForbiddenError();
 		}
 

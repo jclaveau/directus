@@ -617,6 +617,7 @@ export class PayloadService {
 							.first();
 
 						if (!!existingRecord === false) {
+							console.error(`Could not find a '${relation.collection}' record having the primary key ${record} in payloads.processO2M()`);
 							throw new ForbiddenError();
 						}
 

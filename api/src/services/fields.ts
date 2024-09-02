@@ -61,6 +61,7 @@ export class FieldsService {
 		let fields: FieldMeta[];
 
 		if (this.accountability && this.accountability.admin !== true && this.hasReadAccess === false) {
+			console.error(`'${this.accountability.user}' does not have access to read fields of '${collection}'`);
 			throw new ForbiddenError();
 		}
 
@@ -161,6 +162,7 @@ export class FieldsService {
 			});
 
 			if (collection && collection in allowedFieldsInCollection === false) {
+				console.error(`'${this.accountability.user}' does not have access to read fields of '${collection}'`);
 				throw new ForbiddenError();
 			}
 
@@ -189,6 +191,7 @@ export class FieldsService {
 	async readOne(collection: string, field: string): Promise<Record<string, any>> {
 		if (this.accountability && this.accountability.admin !== true) {
 			if (this.hasReadAccess === false) {
+				console.error(`'${this.accountability.user}' does not have read access to '${collection}'`);
 				throw new ForbiddenError();
 			}
 
@@ -196,11 +199,18 @@ export class FieldsService {
 				return permission.action === 'read' && permission.collection === collection;
 			});
 
-			if (!permissions || !permissions.fields) throw new ForbiddenError();
+			if (!permissions || !permissions.fields) {
+				console.error(`'${this.accountability.user}' does not have read access to '${collection}'`);
+				throw new ForbiddenError();
+			}
 
 			if (permissions.fields.includes('*') === false) {
 				const allowedFields = permissions.fields;
-				if (allowedFields.includes(field) === false) throw new ForbiddenError();
+
+				if (allowedFields.includes(field) === false) {
+					console.error(`'${this.accountability.user}' does not have access to read field '${field}' of '${collection}'`);
+					throw new ForbiddenError();
+				}
 			}
 		}
 
@@ -221,7 +231,10 @@ export class FieldsService {
 			// Do nothing
 		}
 
-		if (!column && !fieldInfo) throw new ForbiddenError();
+		if (!column && !fieldInfo) {
+			console.error(`Can't retrieve the schema info for the column '${field}' of '${collection}'`);
+			throw new ForbiddenError();
+		}
 
 		const type = getLocalType(column, fieldInfo);
 
@@ -250,6 +263,7 @@ export class FieldsService {
 		opts?: MutationOptions
 	): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' does not have the permission to create the field '${field}' in '${collection}'`);
 			throw new ForbiddenError();
 		}
 
@@ -372,6 +386,7 @@ export class FieldsService {
 
 	async updateField(collection: string, field: RawField, opts?: MutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' does not have the permission to update the field '${field}' in '${collection}'`);
 			throw new ForbiddenError();
 		}
 
@@ -495,6 +510,7 @@ export class FieldsService {
 
 	async deleteField(collection: string, field: string, opts?: MutationOptions): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' does not have the permission to delete the field '${field}' in '${collection}'`);
 			throw new ForbiddenError();
 		}
 

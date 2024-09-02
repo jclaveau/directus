@@ -59,6 +59,7 @@ export class CollectionsService {
 	 */
 	async createOne(payload: RawCollection, opts?: MutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' can't create the collection '${payload.collection}' as it's not an admin`);
 			throw new ForbiddenError();
 		}
 
@@ -355,7 +356,10 @@ export class CollectionsService {
 	async readOne(collectionKey: string): Promise<Collection> {
 		const result = await this.readMany([collectionKey]);
 
-		if (result.length === 0) throw new ForbiddenError();
+		if (result.length === 0) {
+			console.error(`Collection '${collectionKey}' not found`);
+			throw new ForbiddenError();
+		}
 
 		return result[0]!;
 	}
@@ -374,6 +378,7 @@ export class CollectionsService {
 
 				for (const collectionKey of collectionKeys) {
 					if (collectionsYouHavePermissionToRead.includes(collectionKey) === false) {
+						console.error(`'${this.accountability.user}' does not have permission to read '${collectionKey}'`);
 						throw new ForbiddenError();
 					}
 				}
@@ -389,6 +394,7 @@ export class CollectionsService {
 	 */
 	async updateOne(collectionKey: string, data: Partial<Collection>, opts?: MutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' does not have permission to update '${collectionKey}'`);
 			throw new ForbiddenError();
 		}
 
@@ -456,6 +462,7 @@ export class CollectionsService {
 	 */
 	async updateBatch(data: Partial<Collection>[], opts?: MutationOptions): Promise<string[]> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' does not have permission to update collections`);
 			throw new ForbiddenError();
 		}
 
@@ -517,6 +524,7 @@ export class CollectionsService {
 	 */
 	async updateMany(collectionKeys: string[], data: Partial<Collection>, opts?: MutationOptions): Promise<string[]> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' does not have permission to update collections`);
 			throw new ForbiddenError();
 		}
 
@@ -566,6 +574,7 @@ export class CollectionsService {
 	 */
 	async deleteOne(collectionKey: string, opts?: MutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' does not have permission to delete collections`);
 			throw new ForbiddenError();
 		}
 
@@ -577,6 +586,7 @@ export class CollectionsService {
 			const collectionToBeDeleted = collections.find((collection) => collection.collection === collectionKey);
 
 			if (!!collectionToBeDeleted === false) {
+				console.error(`Collection to delete '${collectionKey}' does not exist`);
 				throw new ForbiddenError();
 			}
 
@@ -701,6 +711,7 @@ export class CollectionsService {
 	 */
 	async deleteMany(collectionKeys: string[], opts?: MutationOptions): Promise<string[]> {
 		if (this.accountability && this.accountability.admin !== true) {
+			console.error(`'${this.accountability.user}' can't delete many collections`);
 			throw new ForbiddenError();
 		}
 
