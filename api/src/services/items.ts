@@ -2,6 +2,7 @@ import { Action } from '@directus/constants';
 import type { Accountability, PermissionsAction, Query, SchemaOverview } from '@directus/types';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
+import { SchemaInspector } from 'knex-schema-inspector';
 import { assign, clone, cloneDeep, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
 import { getHelpers } from '../database/helpers/index.js';
@@ -772,6 +773,12 @@ export class ItemsService<Item extends AnyItem = AnyItem> implements AbstractSer
 		if (primaryKey) {
 			validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
 		}
+
+		// TODO
+		console.log('!!!!!!!!!!! uniqueConstraintes before')
+		const inspector = SchemaInspector(this.knex);
+		const uniqueConstraintes = await inspector.uniqueConstraints();
+		console.log('!!!!!!!!!!! uniqueConstraintes', uniqueConstraintes)
 
 		const exists =
 			primaryKey &&
