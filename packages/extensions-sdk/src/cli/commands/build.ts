@@ -524,12 +524,13 @@ function getRollupOptions({
 			nodeResolve({ browser: mode === 'browser', preferBuiltins: mode === 'node' }),
 			commonjs({ esmExternals: mode === 'browser', sourceMap: sourcemap }),
 			json(),
-			replace({
-				values: {
-					'process.env.NODE_ENV': JSON.stringify('production'),
-				},
-				preventAssignment: true,
-			}),
+			// This breaks rollup-plugin-istanbul
+			// replace({
+			// 	values: {
+			// 		'process.env.NODE_ENV': JSON.stringify('production'),
+			// 	},
+			// 	preventAssignment: true,
+			// }),
 			minify ? terser() : null,
 		],
 		onwarn(warning, warn) {
