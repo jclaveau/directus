@@ -1,4 +1,4 @@
-import type { Item, Query, SchemaOverview } from '@directus/types';
+import type { Item, PrimaryKey, Query, SchemaOverview } from '@directus/types';
 import { toArray } from '@directus/utils';
 import type { Knex } from 'knex';
 import { clone, cloneDeep, isNil, merge, pick, uniq } from 'lodash-es';
@@ -443,32 +443,94 @@ function mergeWithParentItems(
 	const parentItems = clone(toArray(parentItem));
 
 	if (nestedNode.type === 'm2o') {
-		for (const parentItem of parentItems) {
-			const itemChild = nestedItems.find((nestedItem) => {
-				return (
-					nestedItem[schema.collections[nestedNode.relation.related_collection!]!.primary] ==
-					parentItem[nestedNode.relation.field]
-				);
-			});
 
-			parentItem[nestedNode.fieldKey] = itemChild || null;
+		const parentsByForeignKey = parentItems.reduce((
+			acc: Record<PrimaryKey, typeof parentItems[number][]>,
+			parentItem: typeof parentItems[number]
+		) => {
+			const relationKey = parentItem[nestedNode.relation.field];
+
+			if (acc[relationKey] === undefined) {
+				acc[relationKey] = [];
+			}
+
+			parentItem[nestedNode.fieldKey] = null;
+			acc[relationKey].push(parentItem);
+			return acc;
+		}, {});
+
+		const nestPrimaryKeyField = schema.collections[nestedNode.relation.related_collection!]!.primary;
+
+		for (const nestedItem of nestedItems) {
+			const nestedPK = nestedItem[nestPrimaryKeyField];
+
+			for (const parentItem of parentsByForeignKey[nestedPK]) {
+				parentItem[nestedNode.fieldKey] = nestedItem;
+			}
 		}
+
 	} else if (nestedNode.type === 'o2m') {
+
+		const parentCollectionName = nestedNode.relation.related_collection
+		const parentPrimaryKeyField = schema.collections[parentCollectionName!]!.primary
+		const parentRelationField = nestedNode.fieldKey
+		const nestedParentKeyField = nestedNode.relation.field
+
+		const parentsByPrimaryKey = parentItems.reduce((
+			acc: Record<PrimaryKey, typeof parentItems[number]>,
+			parentItem: typeof parentItems[number]
+		) => {
+			// TODO monitor without previous reduce
+			if (!parentItem[parentRelationField])
+				parentItem[parentRelationField] = [];
+
+			const parentPrimaryKey = parentItem[parentPrimaryKeyField]
+
+			if (acc[parentPrimaryKey] !== undefined) {
+				throw new Error(
+					`Duplicate parent primary key '${parentPrimaryKey}' of '${parentCollectionName}' when merging o2m nested items`
+				)
+			}
+
+			acc[parentPrimaryKey] = parentItem
+			return acc;
+		}, {});
+
+
+
+		const toAddToAllParents: typeof nestedItems = []
+
+		nestedItems.forEach((nestedItem) => {
+			if (nestedItem === null)
+				return;
+
+			if (Array.isArray(nestedItem[nestedParentKeyField])) {
+				toAddToAllParents.push(nestedItem); // ????
+				return // Avoids adding the nestedItem twice
+			}
+
+			const parentPrimaryKey = nestedItem[nestedParentKeyField]?.[parentPrimaryKeyField]
+				?? nestedItem[nestedParentKeyField]
+
+			const parentItem = parentsByPrimaryKey[parentPrimaryKey];
+
+			if (!parentItem) {
+				throw new Error(
+					`Missing parentItem '${nestedItem[nestedParentKeyField]}' of '${parentCollectionName}' when merging o2m nested items`
+				)
+			}
+
+			parentsByPrimaryKey[parentPrimaryKey][parentRelationField].push(nestedItem);
+		});
+
+		if (toAddToAllParents.length) {
+			for (const parentItem of parentItems) {
+				parentItem[parentRelationField].push(...toAddToAllParents);
+			}
+		}
+
+
 		for (const parentItem of parentItems) {
-			if (!parentItem[nestedNode.fieldKey]) parentItem[nestedNode.fieldKey] = [] as Item[];
-
-			const itemChildren = nestedItems.filter((nestedItem) => {
-				if (nestedItem === null) return false;
-				if (Array.isArray(nestedItem[nestedNode.relation.field])) return true;
-
-				return (
-					nestedItem[nestedNode.relation.field] ==
-						parentItem[schema.collections[nestedNode.relation.related_collection!]!.primary] ||
-					nestedItem[nestedNode.relation.field]?.[
-						schema.collections[nestedNode.relation.related_collection!]!.primary
-					] == parentItem[schema.collections[nestedNode.relation.related_collection!]!.primary]
-				);
-			});
 
 			parentItem[nestedNode.fieldKey].push(...itemChildren);
 
