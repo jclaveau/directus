@@ -444,31 +444,28 @@ function mergeWithParentItems(
 
 	if (nestedNode.type === 'm2o') {
 
-		const parentsByForeignKey = parentItems.reduce((
-			acc: Record<PrimaryKey, typeof parentItems[number][]>,
-			parentItem: typeof parentItems[number]
-		) => {
+		const parentsByForeignKey = new Map()
+
+		parentItems.forEach((parentItem: typeof parentItems[number]) => {
 			const relationKey = parentItem[nestedNode.relation.field];
 
-			if (acc[relationKey] === undefined) {
-				acc[relationKey] = [];
+			if (!parentsByForeignKey.has(relationKey)) {
+				parentsByForeignKey.set(relationKey, [])
 			}
 
 			parentItem[nestedNode.fieldKey] = null;
-			acc[relationKey].push(parentItem);
-			return acc;
-		}, {});
+			parentsByForeignKey.get(relationKey).push(parentItem);
+		})
 
 		const nestPrimaryKeyField = schema.collections[nestedNode.relation.related_collection!]!.primary;
 
 		for (const nestedItem of nestedItems) {
 			const nestedPK = nestedItem[nestPrimaryKeyField];
 
-			for (const parentItem of parentsByForeignKey[nestedPK]) {
+			for (const parentItem of parentsByForeignKey.get(nestedPK)) {
 				parentItem[nestedNode.fieldKey] = nestedItem;
 			}
 		}
-
 	} else if (nestedNode.type === 'o2m') {
 
 		const parentCollectionName = nestedNode.relation.related_collection
@@ -476,27 +473,22 @@ function mergeWithParentItems(
 		const parentRelationField = nestedNode.fieldKey
 		const nestedParentKeyField = nestedNode.relation.field
 
-		const parentsByPrimaryKey = parentItems.reduce((
-			acc: Record<PrimaryKey, typeof parentItems[number]>,
-			parentItem: typeof parentItems[number]
-		) => {
-			// TODO monitor without previous reduce
+		const parentsByPrimaryKey = new Map();
+
+		parentItems.forEach((parentItem: typeof parentItems[number]) => {
 			if (!parentItem[parentRelationField])
 				parentItem[parentRelationField] = [];
 
 			const parentPrimaryKey = parentItem[parentPrimaryKeyField]
 
-			if (acc[parentPrimaryKey] !== undefined) {
+			if (parentsByPrimaryKey.has(parentPrimaryKey)) {
 				throw new Error(
 					`Duplicate parent primary key '${parentPrimaryKey}' of '${parentCollectionName}' when merging o2m nested items`
 				)
 			}
 
-			acc[parentPrimaryKey] = parentItem
-			return acc;
-		}, {});
-
-
+			parentsByPrimaryKey.set(parentPrimaryKey, parentItem);
+		})
 
 		const toAddToAllParents: typeof nestedItems = []
 
@@ -505,14 +497,14 @@ function mergeWithParentItems(
 				return;
 
 			if (Array.isArray(nestedItem[nestedParentKeyField])) {
-				toAddToAllParents.push(nestedItem); // ????
+				toAddToAllParents.push(nestedItem); // TODO explain this odd case
 				return // Avoids adding the nestedItem twice
 			}
 
 			const parentPrimaryKey = nestedItem[nestedParentKeyField]?.[parentPrimaryKeyField]
 				?? nestedItem[nestedParentKeyField]
 
-			const parentItem = parentsByPrimaryKey[parentPrimaryKey];
+			const parentItem = parentsByPrimaryKey.get(parentPrimaryKey);
 
 			if (!parentItem) {
 				throw new Error(
@@ -520,19 +512,11 @@ function mergeWithParentItems(
 				)
 			}
 
-			parentsByPrimaryKey[parentPrimaryKey][parentRelationField].push(nestedItem);
+			parentItem[parentRelationField].push(nestedItem);
 		});
 
-		if (toAddToAllParents.length) {
-			for (const parentItem of parentItems) {
-				parentItem[parentRelationField].push(...toAddToAllParents);
-			}
-		}
-
-
 		for (const parentItem of parentItems) {
-
-			parentItem[nestedNode.fieldKey].push(...itemChildren);
+			parentItem[parentRelationField].push(...toAddToAllParents);
 
 			if (nestedNode.query.page && nestedNode.query.page > 1) {
 				parentItem[nestedNode.fieldKey] = parentItem[nestedNode.fieldKey].slice(
