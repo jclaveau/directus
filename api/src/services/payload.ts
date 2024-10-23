@@ -168,16 +168,13 @@ export class PayloadService {
 			});
 		}
 
-		await Promise.all(
-			processedPayload.map(async (record: any) => {
-				await Promise.all(
-					specialFieldsInCollection.map(async ([name, field]) => {
-						const newValue = await this.processField(field, record, action, this.accountability);
-						if (newValue !== undefined) record[name] = newValue;
-					})
-				);
-			})
-		);
+		for (const record of processedPayload) {
+			for (const [name, field] of specialFieldsInCollection) {
+				const newValue = await this.processField(field, record, action, this.accountability);
+				if (newValue !== undefined)
+					record[name] = newValue;
+			}
+		}
 
 		this.processGeometries(processedPayload, action);
 		this.processDates(processedPayload, action);
