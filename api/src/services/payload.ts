@@ -171,8 +171,7 @@ export class PayloadService {
 		for (const record of processedPayload) {
 			for (const [name, field] of specialFieldsInCollection) {
 				const newValue = await this.processField(field, record, action, this.accountability);
-				if (newValue !== undefined)
-					record[name] = newValue;
+				if (newValue !== undefined) record[name] = newValue;
 			}
 		}
 
@@ -614,7 +613,9 @@ export class PayloadService {
 							.first();
 
 						if (!!existingRecord === false) {
-							console.error(`Could not find a '${relation.collection}' record having the primary key ${record} in payloads.processO2M()`);
+							console.error(
+								`Could not find a '${relation.collection}' record having the primary key ${record} in payloads.processO2M()`
+							);
 							throw new ForbiddenError();
 						}
 
