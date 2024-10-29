@@ -40,5 +40,5 @@ jobs:
           git add '**/dist/**'
 
           git commit -m "Add dist folders content"
-          git push origin HEAD
+          git push -f origin HEAD
         shell: bash
