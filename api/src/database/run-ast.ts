@@ -1,4 +1,4 @@
-import type { Item, Query, SchemaOverview } from '@directus/types';
+import type { Item, PrimaryKey, Query, SchemaOverview } from '@directus/types';
 import { toArray } from '@directus/utils';
 import type { Knex } from 'knex';
 import { clone, cloneDeep, isNil, merge, pick, uniq } from 'lodash-es';
@@ -443,34 +443,76 @@ function mergeWithParentItems(
 	const parentItems = clone(toArray(parentItem));
 
 	if (nestedNode.type === 'm2o') {
-		for (const parentItem of parentItems) {
-			const itemChild = nestedItems.find((nestedItem) => {
-				return (
-					nestedItem[schema.collections[nestedNode.relation.related_collection!]!.primary] ==
-					parentItem[nestedNode.relation.field]
-				);
-			});
+		const parentsByForeignKey = new Map();
 
-			parentItem[nestedNode.fieldKey] = itemChild || null;
+		parentItems.forEach((parentItem: (typeof parentItems)[number]) => {
+			const relationKey = parentItem[nestedNode.relation.field];
+
+			if (!parentsByForeignKey.has(relationKey)) {
+				parentsByForeignKey.set(relationKey, []);
+			}
+
+			parentItem[nestedNode.fieldKey] = null;
+			parentsByForeignKey.get(relationKey).push(parentItem);
+		});
+
+		const nestPrimaryKeyField = schema.collections[nestedNode.relation.related_collection!]!.primary;
+
+		for (const nestedItem of nestedItems) {
+			const nestedPK = nestedItem[nestPrimaryKeyField];
+
+			for (const parentItem of parentsByForeignKey.get(nestedPK)) {
+				parentItem[nestedNode.fieldKey] = nestedItem;
+			}
 		}
 	} else if (nestedNode.type === 'o2m') {
-		for (const parentItem of parentItems) {
-			if (!parentItem[nestedNode.fieldKey]) parentItem[nestedNode.fieldKey] = [] as Item[];
+		const parentCollectionName = nestedNode.relation.related_collection;
+		const parentPrimaryKeyField = schema.collections[parentCollectionName!]!.primary;
+		const parentRelationField = nestedNode.fieldKey;
+		const nestedParentKeyField = nestedNode.relation.field;
 
-			const itemChildren = nestedItems.filter((nestedItem) => {
-				if (nestedItem === null) return false;
-				if (Array.isArray(nestedItem[nestedNode.relation.field])) return true;
+		const parentsByPrimaryKey = new Map();
 
-				return (
-					nestedItem[nestedNode.relation.field] ==
-						parentItem[schema.collections[nestedNode.relation.related_collection!]!.primary] ||
-					nestedItem[nestedNode.relation.field]?.[
-						schema.collections[nestedNode.relation.related_collection!]!.primary
-					] == parentItem[schema.collections[nestedNode.relation.related_collection!]!.primary]
+		parentItems.forEach((parentItem: (typeof parentItems)[number]) => {
+			if (!parentItem[parentRelationField]) parentItem[parentRelationField] = [];
+
+			const parentPrimaryKey = parentItem[parentPrimaryKeyField];
+
+			if (parentsByPrimaryKey.has(parentPrimaryKey)) {
+				throw new Error(
+					`Duplicate parent primary key '${parentPrimaryKey}' of '${parentCollectionName}' when merging o2m nested items`
 				);
-			});
+			}
 
-			parentItem[nestedNode.fieldKey].push(...itemChildren);
+			parentsByPrimaryKey.set(parentPrimaryKey, parentItem);
+		});
+
+		const toAddToAllParents: typeof nestedItems = [];
+
+		nestedItems.forEach((nestedItem) => {
+			if (nestedItem === null) return;
+
+			if (Array.isArray(nestedItem[nestedParentKeyField])) {
+				toAddToAllParents.push(nestedItem); // TODO explain this odd case
+				return; // Avoids adding the nestedItem twice
+			}
+
+			const parentPrimaryKey =
+				nestedItem[nestedParentKeyField]?.[parentPrimaryKeyField] ?? nestedItem[nestedParentKeyField];
+
+			const parentItem = parentsByPrimaryKey.get(parentPrimaryKey);
+
+			if (!parentItem) {
+				throw new Error(
+					`Missing parentItem '${nestedItem[nestedParentKeyField]}' of '${parentCollectionName}' when merging o2m nested items`
+				);
+			}
+
+			parentItem[parentRelationField].push(nestedItem);
+		});
+
+		for (const parentItem of parentItems) {
+			parentItem[parentRelationField].push(...toAddToAllParents);
 
 			if (nestedNode.query.page && nestedNode.query.page > 1) {
 				parentItem[nestedNode.fieldKey] = parentItem[nestedNode.fieldKey].slice(
