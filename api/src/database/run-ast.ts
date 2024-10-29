@@ -1,4 +1,4 @@
-import type { Item, PrimaryKey, Query, SchemaOverview } from '@directus/types';
+import type { Item, Query, SchemaOverview } from '@directus/types';
 import { toArray } from '@directus/utils';
 import type { Knex } from 'knex';
 import { clone, cloneDeep, isNil, merge, pick, uniq } from 'lodash-es';
