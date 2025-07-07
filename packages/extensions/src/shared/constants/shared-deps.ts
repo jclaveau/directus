@@ -9,4 +9,37 @@ export const APP_SHARED_DEPS = ['@directus/extensions-sdk', 'vue', 'vue-router',
  * Dependencies that we guarantee are available in the node_modules of the API when API extensions
  * are used. The `directus:*` extensions are virtual entrypoints available in the sandbox
  */
-export const API_SHARED_DEPS = ['directus', 'directus:api'];
+export const API_SHARED_DEPS = [
+  'directus',
+  'directus:api',
+  // Breaking imports of @directus/api in extension
+  'snappy',
+  'isolated-vm',
+  'pm2',
+  // Slowing imports of @directus/api in extension
+  // 'tar',
+  // 'prom-client',
+  // // exps
+  // 'get-port',
+  // 'proxy-addr',
+  // 'p-queue',
+  // 'p-limit',
+  // 'mnemonist',
+  // 'ip-matching',
+  // 'glob-to-regexp',
+  // 'cookie',
+  // 'async-mutex',
+  // '@tus/server',
+  // '@tus/utils',
+  'rollup',
+
+  // db clients
+  'better-sqlite3',
+  'pg',
+  'pg-query-stream',
+  'mysql2',
+  'oracledb',
+
+  'node-xmllint', // eval warning
+
+];
