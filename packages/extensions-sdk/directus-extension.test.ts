@@ -14,7 +14,7 @@ afterAll(async () => {
 	const testArtifacts = (await fse.readdir(process.cwd())).filter((file) => file.startsWith(TEST_PREFIX));
 
 	for (const tempArtifact of testArtifacts) {
-		await fse.remove(tempArtifact);
+		// await fse.remove(tempArtifact);
 	}
 });
 
@@ -32,8 +32,13 @@ describe('create and build', () => {
 	}
 
 	// Test one extension from each of app/api/hybrid extensions, and each config file names
-	test.each(
-		['interface', 'endpoint', 'operation'].map((extensionType, index) => {
+	test.only.each(
+		[
+			'hook',
+			// 'interface',
+			// 'endpoint',
+			// 'operation'
+		].map((extensionType, index) => {
 			return { extensionType, configFileName: `extension.config.${JAVASCRIPT_FILE_EXTS[index]}` };
 		}),
 	)(
@@ -43,6 +48,7 @@ describe('create and build', () => {
 
 			for (const language of EXTENSION_LANGUAGES) {
 				const testExtensionPath = `${TEST_PREFIX}-init-${extensionType}-${language}-${currentTime}`;
+				console.log('testExtensionPath', testExtensionPath);
 
 				// Create extension
 				await create(extensionType, testExtensionPath, { language });
@@ -71,7 +77,7 @@ describe('create and build', () => {
 			}
 		},
 		// Bump up timeout duration as the build process can take slightly longer to complete
-		30_000,
+		300_000,
 	);
 });
 

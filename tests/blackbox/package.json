@@ -5,7 +5,9 @@
 	"type": "module",
 	"scripts": {
 		"test": "vitest --watch=false",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"start:postgres": "docker compose up postgres -d --quiet-pull --wait; docker compose up auth-saml redis minio minio-mc -d --quiet-pull --wait",
+		"test:e2e": "TEST_DB=postgres pnpm run test:blackbox -- --project db"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "3.0.0",

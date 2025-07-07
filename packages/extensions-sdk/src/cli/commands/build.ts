@@ -579,6 +579,9 @@ function getRollupOutputOptions({
 		exports: 'auto',
 		inlineDynamicImports: true,
 		sourcemap,
+
+		// dir: `${output}-modules`,
+		// preserveModules: true,
 	};
 }
 
