@@ -689,7 +689,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				})
 			}
 			catch (err: any) {
-				throw await translateDatabaseError(err, itemsValues)
+				throw await translateDatabaseError(err, data)
 			}
 
 			// TODO
