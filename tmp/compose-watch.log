@@ -1,0 +1,1734 @@
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Sync fork main from upstream
+  * Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Sync fork main from upstream
+  * Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Sync fork main from upstream
+  * Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Sync fork main from upstream
+  * Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Sync fork main from upstream
+  * Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  * Sync fork main from upstream
+  * Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  * Compose hhh-main
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-main
+  * Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+* compose (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  ✓ Test api
+  ✓ Publish hhh-main
+  - Report skipped PRs or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+✓ pr-controle compose-hhh-main · 27717817009
+Triggered via workflow_dispatch about 6 minutes ago
+
+JOBS
+✓ compose in 6m15s (ID 81995178298)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Sync fork main from upstream
+  ✓ Discover open hhh-main copy PRs
+  ✓ Compose hhh-main
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  ✓ Test api
+  ✓ Publish hhh-main
+  - Report skipped PRs or failed tests
+  ✓ Post Install + build
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job
+
+ANNOTATIONS
+! Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-node@v4, pnpm/action-setup@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+compose: .github#2
+

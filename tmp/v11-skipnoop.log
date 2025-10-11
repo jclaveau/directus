@@ -1,0 +1,1758 @@
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Resolve base ref
+  * Fetch base tag + refuse MSCL
+  * Materialize hhh-v11-base
+  * Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Resolve base ref
+  * Fetch base tag + refuse MSCL
+  * Materialize hhh-v11-base
+  * Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Resolve base ref
+  * Fetch base tag + refuse MSCL
+  * Materialize hhh-v11-base
+  * Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Resolve base ref
+  * Fetch base tag + refuse MSCL
+  * Materialize hhh-v11-base
+  * Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Resolve base ref
+  * Fetch base tag + refuse MSCL
+  * Materialize hhh-v11-base
+  * Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Resolve base ref
+  * Fetch base tag + refuse MSCL
+  * Materialize hhh-v11-base
+  * Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  * Run actions/checkout@v4
+  * Configure git identity
+  * Resolve base ref
+  * Fetch base tag + refuse MSCL
+  * Materialize hhh-v11-base
+  * Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  * Compose hhh-v11
+  * Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch less than a minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 1 minute ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 2 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  * Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 3 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 4 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  * Test api
+  * Publish hhh-v11
+  * Report skipped features or failed tests
+  * Post Install + build
+  * Post Run actions/checkout@v4
+Refreshing run status every 3 seconds. Press Ctrl+C to quit.
+
+* pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+* compose (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  X Test api
+  - Publish hhh-v11
+  ✓ Report skipped features or failed tests
+  ✓ Post Install + build
+  * Post Run actions/checkout@v4
+X pr-controle compose-hhh-v11 · 27751934786
+Triggered via workflow_dispatch about 5 minutes ago
+
+JOBS
+X compose in 5m11s (ID 82104285699)
+  ✓ Set up job
+  ✓ Run actions/checkout@v4
+  ✓ Configure git identity
+  ✓ Resolve base ref
+  ✓ Fetch base tag + refuse MSCL
+  ✓ Materialize hhh-v11-base
+  ✓ Discover open fork-feat PRs
+  ✓ Compose hhh-v11
+  ✓ Allowlist compose bot for CLA
+  ✓ Install + build
+  X Test api
+  - Publish hhh-v11
+  ✓ Report skipped features or failed tests
+  ✓ Post Install + build
+  ✓ Post Run actions/checkout@v4
+  ✓ Complete job

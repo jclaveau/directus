@@ -20,7 +20,7 @@ import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
-import { translateDatabaseError } from '../database/errors/translate.js';
+import { throwDatabaseError, translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
@@ -278,7 +278,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					delete dbError.extensions.primaryKey;
 				}
 
-				throw dbError;
+				if (dbError) {
+					throw dbError;
+				}
 			}
 
 			// Most database support returning, those who don't tend to return the PK anyways
@@ -712,7 +714,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					}
 				});
 			} catch (err: any) {
-				throw await translateDatabaseError(err, data);
+				// console.log('Sql error', {
+				// 	err,
+				// 	data,
+				// 	sqliteFieldsRequiringValue
+				// })
+
+				await throwDatabaseError(err, data);
 			}
 
 			// TODO
@@ -1295,7 +1303,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						await trx(this.collection).update(payloadWithTypeCasting).where(primaryKeyField, keys[0]);
 					}
 				} catch (err: any) {
-					throw await translateDatabaseError(err, data);
+					await throwDatabaseError(err, data);
 				}
 			}
 

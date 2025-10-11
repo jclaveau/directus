@@ -25,7 +25,7 @@ import type { Knex } from 'knex';
 import { isEqual, isNil, merge } from 'lodash-es';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
 import { ALIAS_TYPES, ALLOWED_DB_DEFAULT_FUNCTIONS } from '../constants.js';
-import { translateDatabaseError } from '../database/errors/translate.js';
+import { throwDatabaseError } from '../database/errors/translate.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getSchemaInspector } from '../database/index.js';
@@ -537,7 +537,11 @@ export class FieldsService {
 							});
 						});
 					} catch (err: any) {
-						throw await translateDatabaseError(err, field);
+						await throwDatabaseError(err, {
+								collection,
+								field,
+								existingColumn
+						});
 					}
 				}
 			}
