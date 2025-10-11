@@ -1,0 +1,960 @@
+
+> @directus/api@36.0.2 test /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api
+> vitest run
+
+
+ RUN  v3.2.6 /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api
+
+ ✓ src/utils/encrypt.test.ts (12 tests) 3340ms
+   ✓ encrypt/decrypt (AES-256-GCM with scrypt KDF, v1 envelope) > round-trips plaintext with the same key  311ms
+   ✓ encrypt/decrypt (AES-256-GCM with scrypt KDF, v1 envelope) > uses a random IV so encrypting the same input twice yields different outputs  1006ms
+   ✓ encrypt/decrypt (AES-256-GCM with scrypt KDF, v1 envelope) > throws when decrypting with the wrong key  334ms
+   ✓ encrypt/decrypt (AES-256-GCM with scrypt KDF, v1 envelope) > throws when the tag is tampered with  338ms
+ ✓ src/deployment/drivers/vercel.test.ts (43 tests) 4652ms
+   ✓ VercelDriver > rate limiting > should retry on 429 and succeed on second attempt  1008ms
+   ✓ VercelDriver > rate limiting > should throw HitRateLimitError after 3 retries  3179ms
+ ❯ src/utils/schedule.test.ts (7 tests | 3 failed) 6448ms
+   ✓ validateCron > Returns true for valid cron expression 103ms
+   ✓ validateCron > Returns false for invalid cron expression 5ms
+   ✓ scheduleSynchronizedJob > long-running scenarios (25+ days) > Should execute daily job for 26 consecutive days  636ms
+   × scheduleSynchronizedJob > long-running scenarios (25+ days) > Should execute hourly job beyond setTimeout limit 5020ms
+     → Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+   × scheduleSynchronizedJob > long-running scenarios (25+ days) > Should execute daily job for 30 days without missing executions 512ms
+     → expected "spy" to be called 30 times, but got 25 times
+   ✓ scheduleSynchronizedJob > long-running scenarios (25+ days) > Should stop job execution after stop() is called 117ms
+   × scheduleSynchronizedJob > CronJob execution timing > cron job fires at scheduled time 34ms
+     → expected "spy" to be called 2 times, but got 3 times
+ ✓ src/flows.test.ts (2 tests) 8652ms
+   ✓ FlowManager > getFlow returns undefined when no flows are loaded  8515ms
+ ✓ src/services/mcp-oauth/index.test.ts (290 tests) 4357ms
+ ✓ src/controllers/mcp/oauth.test.ts (42 tests) 731ms
+ ✓ src/services/fields.test.ts (40 tests) 1049ms
+   ✓ Integration Tests > Services / Fields > columnInfo > should use cache when available  724ms
+ ✓ src/database/helpers/schema/dialects/mysql.test.ts (19 tests) 1081ms
+   ✓ SchemaHelperMySQL > parseCollectionName > should return collection name in lowercase if lower_case_table_names === 1  410ms
+   ✓ SchemaHelperMySQL > parseCollectionName > should return original collection name if lower_case_table_names !== 1  478ms
+18:21:22 [vite] (ssr) warning: invalid import "./${pathToRelativeUrl(url, dirname(fileURLToPath(root)))}${options.fresh ? `?t=${Date.now()}` : ""}". A file extension must be included in the static part of the import. For example: import(`./foo/${bar}.js`).
+  Plugin: vite:dynamic-import-vars
+  File: /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/utils/import-file-url.ts
+ ✓ src/operations/exec/index.test.ts (12 tests) 1096ms
+   ✓ Rejects when operation runs for longer than allowed   664ms
+ ✓ src/services/mail/rate-limiter.test.ts (6 tests) 901ms
+ ✓ src/mailer.test.ts (4 tests) 599ms
+   ✓ getMailer > should not throw when creating SES transport  592ms
+[18:21:41.133] WARN: Couldn't save file test-file-id-123.txt
+[18:21:41.144] WARN: fs error
+    err: {
+      "type": "Error",
+      "message": "fs error",
+      "stack":
+          Error: fs error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files.test.ts:319:64
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:863:59
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+      "code": "EROFS"
+    }
+[18:21:41.185] WARN: Couldn't save file test-file-id-123.txt
+[18:21:41.187] WARN: fs error
+    err: {
+      "type": "Error",
+      "message": "fs error",
+      "stack":
+          Error: fs error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files.test.ts:319:64
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:863:59
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+      "code": "EACCES"
+    }
+[18:21:41.204] WARN: Couldn't save file test-file-id-123.txt
+[18:21:41.159] ERROR: Background import to test_collection failed
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at ImportService.service.importCSV (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/import-export.test.ts:946:11)
+              at ImportService.import (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/import-export.ts:290:19)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/import-export.test.ts:957:4
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+    }
+[18:21:41.205] WARN: fs error
+    err: {
+      "type": "Error",
+      "message": "fs error",
+      "stack":
+          Error: fs error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files.test.ts:319:64
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:863:59
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+      "code": "EPERM"
+    }
+[18:21:41.214] WARN: Couldn't save file test-file-id-123.txt
+[18:21:41.215] WARN: Error
+    err: {
+      "type": "Error",
+      "message": "Error",
+      "stack":
+          Error: Error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files.test.ts:333:64
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:21:41.328] WARN: Couldn't save file test-file-id-123.txt
+[18:21:41.330] WARN: fs error
+    err: {
+      "type": "Error",
+      "message": "fs error",
+      "stack":
+          Error: fs error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files.test.ts:537:62
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+      "code": "EROFS"
+    }
+[18:21:41.370] WARN: Couldn't save file test-file-id-123.txt
+[18:21:41.371] WARN: fs error
+    err: {
+      "type": "Error",
+      "message": "fs error",
+      "stack":
+          Error: fs error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files.test.ts:537:62
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+      "code": "EACCES"
+    }
+[18:21:41.383] WARN: Couldn't save file test-file-id-123.txt
+[18:21:41.383] WARN: fs error
+    err: {
+      "type": "Error",
+      "message": "fs error",
+      "stack":
+          Error: fs error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files.test.ts:537:62
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+      "code": "EPERM"
+    }
+ ✓ src/services/import-export.test.ts (37 tests) 739ms
+ ✓ src/services/users.test.ts (69 tests) 1732ms
+   ✓ Integration Tests > Services / Users > requestPasswordReset > should throw ForbiddenError for external provider users  505ms
+   ✓ Integration Tests > Services / Users > requestPasswordReset > should send reset email for default provider users  502ms
+   ✓ Integration Tests > Services / Users > requestPasswordReset > should throw a ForbiddenError with a reason for inactive users  501ms
+ ✓ src/services/files.test.ts (48 tests) 1767ms
+   ✓ Service / Files > updateMany > should delete original file when remote file exists and FILES_DELETE_ORIGINAL_ON_MOVE is true  538ms
+   ✓ Service / Files > updateMany > should not delete original file when remote file exists and FILES_DELETE_ORIGINAL_ON_MOVE is false  554ms
+[18:21:44.481] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:44.542] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713304817,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/","query":{},"params":{},"headers":{"host":"127.0.0.1:39949","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":302,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","location":"./admin","vary":"Accept","content-type":"text/plain; charset=utf-8","content-length":"29"}},"responseTime":10,"msg":"request completed"}
+[18:21:44.866] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:44.868] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713304949,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/","query":{},"params":{},"headers":{"host":"127.0.0.1:43423","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":302,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","location":"./admin","vary":"Accept","content-type":"text/plain; charset=utf-8","content-length":"29"}},"responseTime":9,"msg":"request completed"}
+[18:21:44.961] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:44.963] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305003,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/robots.txt","query":{},"params":{},"headers":{"host":"127.0.0.1:37335","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":200,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","content-type":"text/plain; charset=utf-8","content-length":"25","etag":"W/\"19-2NTlN/votVlrfMtAaltZ799LfR0\""}},"responseTime":5,"msg":"request completed"}
+[18:21:45.023] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.025] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305096,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/admin","query":{},"params":{},"headers":{"host":"127.0.0.1:33973","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":200,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","cache-control":"no-cache","vary":"Origin, Cache-Control","content-type":"text/html; charset=utf-8","content-length":"3339","etag":"W/\"d0b-l/a/rH2EWro3gG4DcDUaDXRRe4w\""}},"responseTime":2,"msg":"request completed"}
+[18:21:45.116] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.128] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305222,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/admin","query":{},"params":{},"headers":{"host":"127.0.0.1:34353","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":200,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","cache-control":"no-cache","vary":"Origin, Cache-Control","content-type":"text/html; charset=utf-8","content-length":"3339","etag":"W/\"d0b-l/a/rH2EWro3gG4DcDUaDXRRe4w\""}},"responseTime":4,"msg":"request completed"}
+[18:21:45.235] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.236] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+ ✓ src/services/mcp-oauth/utils/cimd-egress.test.ts (25 tests) 632ms
+{"level":30,"time":1781713305334,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/admin","query":{},"params":{},"headers":{"host":"127.0.0.1:38857","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":200,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","cache-control":"no-cache","vary":"Origin, Cache-Control","content-type":"text/html; charset=utf-8","content-length":"3363","etag":"W/\"d23-7fgmlpT4JSBzRuh+gWarCMk9tVE\""}},"responseTime":1,"msg":"request completed"}
+[18:21:45.340] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.341] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305356,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/admin","query":{},"params":{},"headers":{"host":"127.0.0.1:38705","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":200,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","cache-control":"no-cache","vary":"Origin, Cache-Control","content-type":"text/html; charset=utf-8","content-length":"3363","etag":"W/\"d23-mGTdOrixkIOuDkhzWTjx5ajR3ys\""}},"responseTime":2,"msg":"request completed"}
+[18:21:45.362] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.363] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305392,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/server/ping","query":{},"params":{},"headers":{"host":"127.0.0.1:42505","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":200,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","content-type":"text/html; charset=utf-8","content-length":"4","etag":"W/\"4-DlFKBmK8tp3IY5U9HOJuPUDoGoc\""}},"responseTime":5,"msg":"request completed"}
+[18:21:45.405] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.406] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+[18:21:45.575] ERROR: (0 , __vite_ssr_import_1__.getLicenseManager)(...).isLocked is not a function
+    err: {
+      "type": "TypeError",
+      "message": "(0 , __vite_ssr_import_1__.getLicenseManager)(...).isLocked is not a function",
+      "stack":
+          TypeError: (0 , __vite_ssr_import_1__.getLicenseManager)(...).isLocked is not a function
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/middleware/is-locked.ts:12:33
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/utils/async-handler.ts:4:18
+              at Layer.handle [as handle_request] (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/layer.js:95:5)
+              at trim_prefix (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:328:13)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:286:9
+              at Function.process_params (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:346:12)
+              at next (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:280:10)
+              at Function.handle (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:175:3)
+              at router (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:47:12)
+              at Layer.handle [as handle_request] (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/layer.js:95:5)
+    }
+{"level":30,"time":1781713305616,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/items/test","query":{},"params":{},"headers":{"host":"127.0.0.1:35605","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":500,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","content-type":"application/json; charset=utf-8","content-length":"102","etag":"W/\"66-Nud5VyBm1ylGuQBca9jYWsctOKg\""}},"err":{"type":"Error","message":"failed with status code 500","stack":"Error: failed with status code 500\n    at onResFinished (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/pino-http@10.5.0/node_modules/pino-http/logger.js:115:39)\n    at ServerResponse.onResponseComplete (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/pino-http@10.5.0/node_modules/pino-http/logger.js:178:14)\n    at ServerResponse.emit (node:events:531:35)\n    at onFinish (node:_http_outgoing:1082:10)\n    at callback (node:internal/streams/writable:766:21)\n    at afterWrite (node:internal/streams/writable:710:5)\n    at afterWriteTick (node:internal/streams/writable:696:10)\n    at processTicksAndRejections (node:internal/process/task_queues:89:21)"},"responseTime":76,"msg":"request errored"}
+[18:21:45.635] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.636] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+[18:21:45.655] ERROR: Invalid MCP_OAUTH_CLEANUP_SCHEDULE: "undefined". OAuth cleanup disabled.
+[18:21:45.663] ERROR: (0 , __vite_ssr_import_1__.getLicenseManager)(...).isLocked is not a function
+    err: {
+      "type": "TypeError",
+      "message": "(0 , __vite_ssr_import_1__.getLicenseManager)(...).isLocked is not a function",
+      "stack":
+          TypeError: (0 , __vite_ssr_import_1__.getLicenseManager)(...).isLocked is not a function
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/middleware/is-locked.ts:12:33
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/utils/async-handler.ts:4:18
+              at Layer.handle [as handle_request] (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/layer.js:95:5)
+              at trim_prefix (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:328:13)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:286:9
+              at Function.process_params (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:346:12)
+              at next (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:280:10)
+              at Function.handle (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:175:3)
+              at router (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/index.js:47:12)
+              at Layer.handle [as handle_request] (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/express@4.21.2/node_modules/express/lib/router/layer.js:95:5)
+    }
+{"level":30,"time":1781713305667,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/items/test","query":{},"params":{},"headers":{"host":"127.0.0.1:43411","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":500,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","content-type":"application/json; charset=utf-8","content-length":"102","etag":"W/\"66-Nud5VyBm1ylGuQBca9jYWsctOKg\""}},"err":{"type":"Error","message":"failed with status code 500","stack":"Error: failed with status code 500\n    at onResFinished (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/pino-http@10.5.0/node_modules/pino-http/logger.js:115:39)\n    at ServerResponse.onResponseComplete (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/pino-http@10.5.0/node_modules/pino-http/logger.js:178:14)\n    at ServerResponse.emit (node:events:531:35)\n    at onFinish (node:_http_outgoing:1082:10)\n    at callback (node:internal/streams/writable:766:21)\n    at afterWrite (node:internal/streams/writable:710:5)\n    at afterWriteTick (node:internal/streams/writable:696:10)\n    at processTicksAndRejections (node:internal/process/task_queues:89:21)"},"responseTime":8,"msg":"request errored"}
+[18:21:45.674] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.676] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305692,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/custom-endpoint-to-test","query":{},"params":{},"headers":{"host":"127.0.0.1:44217","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":404,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","content-type":"application/json; charset=utf-8","content-length":"146","etag":"W/\"92-GaU/phs+ZPfL3MRC9KeKOkipuEU\""}},"responseTime":3,"msg":"request completed"}
+[18:21:45.702] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.704] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305717,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/custom-endpoint-to-test","query":{},"params":{},"headers":{"host":"127.0.0.1:40365","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":200,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","content-type":"application/json; charset=utf-8","content-length":"15","etag":"W/\"f-IoRYCVqVAgcPwRPZlQQiam/5Cpo\""}},"responseTime":2,"msg":"request completed"}
+[18:21:45.722] WARN: "SECRET" env variable is shorter than 32 bytes which is insecure. This is not appropriate for production usage.
+[18:21:45.723] WARN: Extensions directory (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/extensions) is not readable!
+{"level":30,"time":1781713305760,"pid":3915706,"hostname":"jean-ThinkPad-X1-Carbon-6th","req":{"id":1,"method":"GET","url":"/this-route-does-not-exist","query":{},"params":{},"headers":{"host":"127.0.0.1:35451","connection":"keep-alive","accept":"*/*","accept-language":"*","sec-fetch-mode":"cors","user-agent":"node","accept-encoding":"gzip, deflate"}},"res":{"statusCode":404,"headers":{"content-security-policy":"script-src 'self' 'unsafe-eval';worker-src 'self' blob:;child-src 'self' blob:;img-src 'self' data: blob: https://raw.githubusercontent.com https://avatars.githubusercontent.com;media-src 'self';connect-src 'self' https://* wss://*;default-src 'self';base-uri 'self';font-src 'self' https: data:;form-action 'self';frame-ancestors 'self';object-src 'none';script-src-attr 'none';style-src 'self' https: 'unsafe-inline'","x-powered-by":"Directus","content-type":"application/json; charset=utf-8","content-length":"150","etag":"W/\"96-8Hn6piYDlIZELG5/eAUTxX2kgws\""}},"responseTime":3,"msg":"request completed"}
+ ✓ src/app.test.ts (13 tests) 1352ms
+   ✓ createApp > Content Security Policy > Should set content-security-policy header by default  408ms
+[18:21:46.905] WARN: An error was thrown while executing action "test.items.create"
+[18:21:46.954] WARN: boom
+    err: {
+      "type": "Error",
+      "message": "boom",
+      "stack":
+          Error: boom
+              at EventEmitter.handler (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/items.test.ts:731:42)
+              at EventEmitter.emitAsync (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/eventemitter2@6.4.9/node_modules/eventemitter2/lib/eventemitter2.js:1160:36)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/emitter.ts:78:24
+              at Array.map (<anonymous>)
+              at Emitter.emitAction (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/emitter.ts:77:11)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/items.ts:54:15
+              at Array.map (<anonymous>)
+              at emitActionEvents (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/items.ts:51:16)
+              at ItemsService.createMany (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/items.ts:586:10)
+              at ItemsService.createOne (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/items.ts:155:24)
+    }
+ ✓ src/services/items.test.ts (49 tests) 1165ms
+18:21:48 [vite] (ssr) warning: File URL host must be "localhost" or empty on linux
+  Plugin: vite:dynamic-import-vars
+  File: /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/database/migrations/run.ts
+18:21:48 [vite] (ssr) warning: File URL host must be "localhost" or empty on linux
+  Plugin: vite:dynamic-import-vars
+  File: /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/database/migrations/run.ts
+18:21:48 [vite] (ssr) warning: File URL host must be "localhost" or empty on linux
+  Plugin: vite:dynamic-import-vars
+  File: /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/database/migrations/run.ts
+ ✓ src/operations/mail/rate-limiter.test.ts (5 tests) 552ms
+[18:21:50.857] ERROR: [Collab] Failed to initialize collaborative editing settings
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/collab.test.ts:1026:56
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:21:50.857] ERROR: [Collab] Failed to initialize collaborative editing settings
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/collab.test.ts:1026:56
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:21:50.956] ERROR: [Collab] Failed to initialize collaborative editing settings
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/collab.test.ts:1026:56
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:21:50.956] ERROR: [Collab] Failed to initialize collaborative editing settings
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/collab.test.ts:1026:56
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:21:50.976] ERROR: [Collab] Failed to initialize collaborative editing settings
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/collab.test.ts:1026:56
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:21:51.035] ERROR: [Collab] Failed to initialize collaborative editing settings
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/collab.test.ts:1026:56
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+ ✓ src/websocket/collab/collab.test.ts (53 tests) 1021ms
+[18:21:54.998] INFO: Applying Remove Collection Foreign Keys...
+[18:21:55.086] INFO: Applying Remove System Relations...
+[18:21:55.157] INFO: Applying Remove Collection Foreign Keys...
+[18:21:55.170] INFO: Applying Remove Collection Foreign Keys...
+ ✓ src/database/migrations/run.test.ts (12 tests) 1764ms
+   ✓ run > when migration keys collide > throws an error listing the colliding version and its files  400ms
+   ✓ run > when migration keys collide > formats each collision as a tab-dashed line listing comma-separated files  397ms
+   ✓ run > when migration keys collide > lists every colliding version when several versions collide  367ms
+ ✓ src/services/authentication.test.ts (20 tests) 422ms
+ ✓ src/services/assets.test.ts (19 tests) 193ms
+[18:22:05.219] WARN: Failed to emit nested translation actions after generate-translations commit
+    err: {
+      "type": "Error",
+      "message": "schema refresh failed",
+      "stack":
+          Error: schema refresh failed
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/utils/generate-translations.test.ts:866:27
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:22:05.275] WARN: Failed to emit nested translation actions after generate-translations commit
+    err: {
+      "type": "Error",
+      "message": "schema refresh failed",
+      "stack":
+          Error: schema refresh failed
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/utils/generate-translations.test.ts:1097:46
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runFiles (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1787:3)
+    }
+ ✓ src/utils/generate-translations.test.ts (26 tests) 199ms
+ ✓ src/ai/mcp/server.test.ts (54 tests) 493ms
+ ✓ src/websocket/collab/room.test.ts (68 tests) 672ms
+ ✓ src/ai/telemetry/index.test.ts (13 tests) 338ms
+ ✓ src/auth/drivers/ldap.test.ts (62 tests) 325ms
+[18:22:16.024] WARN: [webhook:netlify] Missing webhook token
+[18:22:16.039] WARN: [webhook:netlify] Token mismatch
+ ✓ src/deployment/drivers/netlify.test.ts (47 tests) 218ms
+ ✓ src/services/payload.test.ts (53 tests) 107ms
+ ✓ src/auth/drivers/openid.test.ts (51 tests) 164ms
+ ✓ src/operations/mail/index.test.ts (7 tests) 156ms
+ ✓ src/utils/apply-diff.test.ts (20 tests) 421ms
+ ✓ src/utils/validate-query.test.ts (92 tests) 319ms
+ ✓ src/services/collections.test.ts (36 tests) 237ms
+ ✓ src/auth/drivers/oauth2.test.ts (58 tests) 330ms
+ ✓ src/ai/chat/controllers/chat.post.test.ts (21 tests) 111ms
+ ✓ src/services/deployment.test.ts (23 tests) 390ms
+ ✓ src/services/versions.test.ts (20 tests) 366ms
+ ✓ src/middleware/request-counter.test.ts (9 tests) 188ms
+ ✓ src/middleware/error-handler.test.ts (16 tests) 190ms
+ ✓ src/controllers/mcp/oauth-consent-page.test.ts (6 tests) 232ms
+ ✓ src/utils/get-snapshot-diff.test.ts (37 tests) 126ms
+ ✓ src/cli/index.test.ts (16 tests) 135ms
+ ✓ src/ai/files/controllers/upload.test.ts (21 tests) 221ms
+ ✓ src/ai/chat/lib/create-ui-stream.test.ts (16 tests) 343ms
+[18:22:38.517] ERROR: [Collab] verifyPermissions failed for user "Mock User", collection "articles", and item "1"
+    err: {
+      "type": "Error",
+      "message": "DB Error",
+      "stack":
+          Error: DB Error
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/verify-permissions.test.ts:479:53
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+    }
+[18:22:38.631] ERROR: [Collab] verifyPermissions failed for user "Mock User", collection "articles", and item "1"
+    err: {
+      "type": "Error",
+      "message": "",
+      "stack":
+          Error: 
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/verify-permissions.test.ts:588:10
+              at mockCall (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+spy@3.2.6/node_modules/@vitest/spy/dist/index.js:96:15)
+              at getService (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/tinyspy@4.0.4/node_modules/tinyspy/dist/index.js:47:80)
+              at Module.verifyPermissions (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/verify-permissions.ts:45:24)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/websocket/collab/verify-permissions.test.ts:591:24
+              at processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:20
+    }
+ ✓ src/websocket/collab/verify-permissions.test.ts (22 tests) 422ms
+[18:22:44.958] ERROR: Failed to flush buffered counter for requests:get
+[18:22:44.981] ERROR: Failed to flush buffered counter for requests:get
+[18:22:45.009] ERROR: Failed to flush buffered counter for requests:get
+ ✓ src/telemetry/counter/use-buffered-counter.test.ts (48 tests) 275ms
+ ✓ src/extensions/lib/sync/sync.test.ts (18 tests) 243ms
+ ✓ src/schedules/metrics.test.ts (4 tests) 91ms
+ ✓ src/schedules/retention.test.ts (4 tests) 163ms
+ ✓ src/websocket/collab/permissions-integration.test.ts (18 tests) 74ms
+[18:22:53.892] ERROR: An error message
+    err: {
+      "type": "GraphQLError",
+      "message": "An error message",
+      "stack":
+          GraphQLError: An error message
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/graphql/utils/process-error.test.ts:8:22
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:734:40
+              at runWithSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1849:8)
+              at Object.collect (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:734:10)
+              at Object.collect (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:738:54)
+              at processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at collectTests (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1179:25)
+              at startTests (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1817:17)
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/vitest@3.2.6_@types+node@22.13.14_@vitest+ui@3.2.6_happy-dom@20.8.9_jiti@2.6.1_jsdom@20_adb1f9f62293ec4388afdb2696b45de7/node_modules/vitest/dist/chunks/runBaseTests.9Ij9_de-.js:117:26
+              at withEnv (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/vitest@3.2.6_@types+node@22.13.14_@vitest+ui@3.2.6_happy-dom@20.8.9_jiti@2.6.1_jsdom@20_adb1f9f62293ec4388afdb2696b45de7/node_modules/vitest/dist/chunks/runBaseTests.9Ij9_de-.js:84:3)
+      "path": [
+        "test_collection"
+      ],
+      "extensions": {}
+    }
+[18:22:53.950] ERROR: An error message
+    err: {
+      "type": "GraphQLError",
+      "message": "An error message",
+      "stack":
+          GraphQLError: An error message
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/graphql/utils/process-error.test.ts:8:22
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:734:40
+              at runWithSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1849:8)
+              at Object.collect (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:734:10)
+              at Object.collect (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:738:54)
+              at processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at collectTests (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1179:25)
+              at startTests (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1817:17)
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/vitest@3.2.6_@types+node@22.13.14_@vitest+ui@3.2.6_happy-dom@20.8.9_jiti@2.6.1_jsdom@20_adb1f9f62293ec4388afdb2696b45de7/node_modules/vitest/dist/chunks/runBaseTests.9Ij9_de-.js:117:26
+              at withEnv (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/vitest@3.2.6_@types+node@22.13.14_@vitest+ui@3.2.6_happy-dom@20.8.9_jiti@2.6.1_jsdom@20_adb1f9f62293ec4388afdb2696b45de7/node_modules/vitest/dist/chunks/runBaseTests.9Ij9_de-.js:84:3)
+      "path": [
+        "test_collection"
+      ],
+      "extensions": {}
+    }
+[18:22:53.954] ERROR: An error message
+    err: {
+      "type": "GraphQLError",
+      "message": "An error message",
+      "stack":
+          GraphQLError: An error message
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/graphql/utils/process-error.test.ts:8:22
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:734:40
+              at runWithSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1849:8)
+              at Object.collect (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:734:10)
+              at Object.collect (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:738:54)
+              at processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at collectTests (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1179:25)
+              at startTests (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1817:17)
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/vitest@3.2.6_@types+node@22.13.14_@vitest+ui@3.2.6_happy-dom@20.8.9_jiti@2.6.1_jsdom@20_adb1f9f62293ec4388afdb2696b45de7/node_modules/vitest/dist/chunks/runBaseTests.9Ij9_de-.js:117:26
+              at withEnv (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/vitest@3.2.6_@types+node@22.13.14_@vitest+ui@3.2.6_happy-dom@20.8.9_jiti@2.6.1_jsdom@20_adb1f9f62293ec4388afdb2696b45de7/node_modules/vitest/dist/chunks/runBaseTests.9Ij9_de-.js:84:3)
+      "path": [
+        "test_collection"
+      ],
+      "extensions": {}
+    }
+[18:22:53.962] ERROR: An error message
+    err: {
+      "type": "GraphQLError",
+      "message": "An error message",
+      "stack":
+          DirectusError: Something went wrong...
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/graphql/utils/process-error.test.ts:45:19
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+              at new Promise (<anonymous>)
+              at runWithTimeout (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1863:10)
+              at runTest (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1574:12)
+              at processTicksAndRejections (node:internal/process/task_queues:105:5)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+              at runSuite (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1729:8)
+      "path": [
+        "test_collection"
+      ],
+      "extensions": {}
+    }
+ ✓ src/services/graphql/utils/process-error.test.ts (4 tests) 265ms
+ ✓ src/ai/tools/items/index.test.ts (30 tests) 135ms
+ ✓ src/utils/apply-snapshot.test.ts (5 tests) 123ms
+ ✓ src/redis/lib/create-redis.test.ts (2 tests) 129ms
+ ✓ src/ai/chat/controllers/object.post.test.ts (20 tests) 105ms
+ ✓ src/ai/providers/options.test.ts (10 tests) 19ms
+ ✓ src/utils/get-snapshot.test.ts (17 tests) 108ms
+ ✓ src/utils/deep-freeze.test.ts (14 tests) 12ms
+[18:22:57.842] ERROR: Anthropic file support: could not parse request body
+[18:22:57.874] ERROR: Anthropic file support: could not parse request body
+ ✓ src/ai/providers/anthropic-file-support.test.ts (10 tests) 109ms
+ ✓ src/websocket/collab/payload-permissions-sanitize.test.ts (37 tests) 73ms
+ ✓ src/database/helpers/fn/json/parse-function.test.ts (115 tests) 160ms
+ ✓ src/schedules/oauth-cleanup.test.ts (4 tests) 130ms
+ ✓ src/cli/commands/schema/apply.test.ts (24 tests) 81ms
+[18:23:03.512] WARN: GraphQL skipping collection "123table" because it is not a valid name matching /^[_A-Za-z][_0-9A-Za-z]*$/ or starts with __
+[18:23:03.524] WARN: GraphQL skipping collection "__underscore" because it is not a valid name matching /^[_A-Za-z][_0-9A-Za-z]*$/ or starts with __
+[18:23:03.528] WARN: GraphQL skipping collection "a-dash" because it is not a valid name matching /^[_A-Za-z][_0-9A-Za-z]*$/ or starts with __
+[18:23:03.529] WARN: GraphQL skipping collection "Schrödinger" because it is not a valid name matching /^[_A-Za-z][_0-9A-Za-z]*$/ or starts with __
+[18:23:03.531] WARN: GraphQL skipping collection "" because it is not a valid name matching /^[_A-Za-z][_0-9A-Za-z]*$/ or starts with __
+[18:23:03.537] WARN: GraphQL skipping collection "Subscription" because it is a reserved keyword
+[18:23:03.538] WARN: GraphQL skipping collection "Mutation" because it is a reserved keyword
+[18:23:03.539] WARN: GraphQL skipping collection "String" because it is a reserved keyword
+[18:23:03.545] WARN: GraphQL skipping collection "__invalid_collection" because it is not a valid name matching /^[_A-Za-z][_0-9A-Za-z]*$/ or starts with __
+[18:23:03.547] WARN: GraphQL skipping relation "normal_collection.test" because it links to a non-existent or invalid collection.
+[18:23:03.548] WARN: GraphQL skipping relation "__invalid_collection.test" because it links to a non-existent or invalid collection.
+[18:23:03.548] WARN: GraphQL skipping relation "normal_collection.test" because it links to a non-existent or invalid collection.
+ ✓ src/services/graphql/utils/sanitize-gql-schema.test.ts (4 tests) 109ms
+ ✓ src/services/deployment-projects.test.ts (5 tests) 74ms
+ ✓ src/services/mcp-oauth/utils/redirect.test.ts (43 tests) 72ms
+ ✓ src/controllers/tus.test.ts (11 tests) 58ms
+ ✓ src/ai/telemetry/braintrust.test.ts (2 tests) 89ms
+ ✓ src/websocket/handlers/logs.test.ts (5 tests) 113ms
+ ✓ src/services/specifications.test.ts (2 tests) 80ms
+ ✓ src/database/run-ast/lib/apply-query/search.test.ts (17 tests) 64ms
+ ✓ src/utils/split-fields.test.ts (48 tests) 78ms
+ ✓ src/database/run-ast/lib/apply-query/sort.test.ts (15 tests) 93ms
+ ✓ src/websocket/handlers/subscribe.test.ts (5 tests) 93ms
+ ✓ src/redis/lib/use-redis.test.ts (2 tests) 62ms
+ ✓ src/ai/providers/registry.test.ts (16 tests) 61ms
+[18:23:13.131] WARN: File part missing providerMetadata.directus.fileId, filtering out
+[18:23:13.147] WARN: File part missing providerMetadata.directus.fileId, filtering out
+[18:23:13.150] WARN: File part missing providerMetadata.directus.fileId, filtering out
+ ✓ src/ai/chat/lib/transform-file-parts.test.ts (7 tests) 109ms
+ ✓ src/database/run-ast/lib/apply-query/filter/index.test.ts (32 tests) 141ms
+ ✓ src/services/mcp-oauth/cimd.test.ts (70 tests) 148ms
+ ✓ src/websocket/collab/payload-permissions-validate.test.ts (14 tests) 75ms
+[18:23:16.685] ERROR: test
+    err: {
+      "type": "Error",
+      "message": "test",
+      "stack":
+          Error: test
+              at Object.<anonymous> (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files/utils/get-metadata.test.ts:19:9)
+              at Object.mockCall (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+spy@3.2.6/node_modules/@vitest/spy/dist/index.js:96:15)
+              at Object.spy [as metadata] (file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/tinyspy@4.0.4/node_modules/tinyspy/dist/index.js:47:80)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files/utils/get-metadata.ts:26:16
+              at new Promise (<anonymous>)
+              at Module.getMetadata (/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files/utils/get-metadata.ts:23:9)
+              at /home/jean/dev/Hippocast/dev/deps/directus-cms-2/api/src/services/files/utils/get-metadata.test.ts:26:23
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:155:11
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:752:26
+              at file:///home/jean/dev/Hippocast/dev/deps/directus-cms-2/node_modules/.pnpm/@vitest+runner@3.2.6/node_modules/@vitest/runner/dist/chunk-hooks.js:1897:20
+    }
+ ✓ src/services/files/utils/get-metadata.test.ts (2 tests) 35ms
+ ✓ src/services/graphql/schema/parse-query.test.ts (24 tests) 40ms
+ ✓ src/websocket/collab/payload-permissions.test.ts (6 tests) 81ms
+ ✓ src/utils/get-cache-key.test.ts (28 tests) 88ms
+ ✓ src/database/helpers/capabilities/capabilities.test.ts (18 tests) 43ms
+ ✓ src/utils/validate-diff.test.ts (22 tests) 54ms
+ ✓ src/ai/files/adapters/google.test.ts (12 tests) 116ms
+ ✓ src/services/graphql/utils/dedupe-resolvers.test.ts (13 tests) 36ms
+ ✓ src/utils/md.test.ts (3 tests) 74ms
+ ✓ src/websocket/handlers/items.test.ts (11 tests) 64ms
+ ✓ src/utils/get-ip-from-req.test.ts (9 tests) 65ms
+ ✓ src/telemetry/utils/get-field-count.test.ts (3 tests) 65ms
+ ✓ src/schedules/utils/duration-to-cron.test.ts (13 tests) 97ms
+ ✓ src/ai/tools/fields/index.test.ts (34 tests) 83ms
+ ✓ src/services/roles.test.ts (6 tests) 37ms
+ ✓ src/permissions/modules/validate-access/lib/validate-item-access.test.ts (20 tests) 55ms
+ ✓ src/operations/item-read/index.test.ts (20 tests) 49ms
+ ✓ src/utils/get-accountability-for-token.test.ts (13 tests) 62ms
+ ✓ src/services/relations.test.ts (4 tests) 15ms
+ ✓ src/permissions/modules/fetch-allowed-collections/fetch-allowed-collections.test.ts (2 tests) 12ms
+ ✓ src/ai/files/adapters/openai.test.ts (10 tests) 40ms
+ ✓ src/database/helpers/schema/dialects/default.test.ts (8 tests) 46ms
+ ✓ src/websocket/collab/permissions-cache.test.ts (28 tests) 40ms
+ ✓ src/utils/is-url-allowed.test.ts (5 tests) 93ms
+ ✓ src/websocket/collab/messenger.test.ts (27 tests) 77ms
+ ✓ src/operations/throw-error/index.test.ts (6 tests) 13ms
+ ✓ src/database/run-ast/lib/apply-query/filter/operator.test.ts (15 tests) 122ms
+ ✓ src/auth/utils/resolve-login-redirect.test.ts (72 tests) 58ms
+ ✓ src/request/is-denied-ip.test.ts (10 tests) 77ms
+ ✓ src/operations/item-update/index.test.ts (20 tests) 42ms
+ ✓ src/request/agent-with-ip-validation.test.ts (7 tests) 45ms
+ ✓ src/services/meta.test.ts (22 tests) 92ms
+ ✓ src/utils/url.test.ts (30 tests) 43ms
+ ✓ src/license/utils/compute-license-status.test.ts (11 tests) 48ms
+ ✓ src/database/run-ast/lib/apply-query/pagination.test.ts (8 tests) 26ms
+ ✓ src/permissions/modules/process-ast/lib/inject-cases.test.ts (9 tests) 31ms
+ ✓ src/services/comments.test.ts (7 tests) 34ms
+ ✓ src/ai/chat/utils/chat-request-tool-to-ai-sdk-tool.test.ts (9 tests) 74ms
+ ✓ src/ai/chat/utils/format-context.test.ts (17 tests) 22ms
+ ✓ src/middleware/validate-batch.test.ts (8 tests) 37ms
+ ✓ src/ai/tools/folders/index.test.ts (15 tests) 47ms
+ ✓ src/schedules/project.test.ts (4 tests) 83ms
+ ✓ src/utils/sanitize-query.test.ts (59 tests) 62ms
+ ✓ src/utils/get-cache-headers.test.ts (13 tests) 16ms
+ ✓ src/telemetry/utils/get-filesize-sum.test.ts (3 tests) 39ms
+ ✓ src/database/run-ast/utils/get-column.test.ts (5 tests) 35ms
+ ✓ src/ai/tools/files/index.test.ts (8 tests) 27ms
+ ✓ src/operations/json-web-token/index.test.ts (12 tests) 59ms
+ ✓ src/license/utils/get-core-grace-expires-at.test.ts (5 tests) 34ms
+ ✓ src/ai/tools/collections/index.test.ts (11 tests) 47ms
+ ✓ src/operations/condition/index.test.ts (4 tests) 30ms
+ ✓ src/permissions/modules/process-ast/process-ast.test.ts (6 tests) 31ms
+ ✓ src/utils/store.test.ts (14 tests) 53ms
+ ✓ src/services/folders.test.ts (13 tests) 38ms
+ ✓ src/utils/validate-user-count-integrity.test.ts (16 tests) 34ms
+ ✓ src/utils/get-address.test.ts (4 tests) 24ms
+ ✓ src/telemetry/lib/send-report.test.ts (4 tests) 73ms
+ ✓ src/utils/get-accountability-for-role.test.ts (4 tests) 60ms
+ ✓ src/ai/tools/operations/index.test.ts (9 tests) 77ms
+ ✓ src/permissions/modules/process-payload/process-payload.test.ts (13 tests) 117ms
+ ✓ src/utils/get-allowed-log-levels.test.ts (4 tests) 12ms
+ ✓ src/utils/redact-object.test.ts (14 tests) 47ms
+ ✓ src/telemetry/utils/check-user-limits.test.ts (2 tests) 13ms
+ ✓ src/extensions/lib/installation/manager.test.ts (4 tests) 27ms
+ ✓ src/utils/is-admin.test.ts (6 tests) 13ms
+ ✓ src/ai/tools/relations/index.test.ts (10 tests) 30ms
+ ✓ src/services/graphql/schema/read.test.ts (4 tests) 44ms
+ ✓ src/telemetry/counter/use-counters.test.ts (6 tests) 46ms
+ ✓ src/storage/get-storage-driver.test.ts (2 tests) 167ms
+ ✓ src/ai/tools/schema/index.test.ts (20 tests) 151ms
+ ✓ src/utils/deep-map-response.test.ts (11 tests) 101ms
+ ✓ src/license/entitlements/lib/seats.test.ts (15 tests) 70ms
+ ✓ src/middleware/authenticate.test.ts (7 tests) 75ms
+ ✓ src/services/server.test.ts (2 tests) 31ms
+ ✓ src/ai/telemetry/langfuse.test.ts (9 tests) 68ms
+ ✓ src/services/tus/server.test.ts (2 tests) 72ms
+ ✓ src/database/run-ast/utils/merge-with-parent-items.test.ts (18 tests) 69ms
+ ✓ src/operations/sleep/index.test.ts (2 tests) 41ms
+ ✓ src/telemetry/lib/track.test.ts (4 tests) 20ms
+ ✓ src/services/assets/name-deduper.test.ts (24 tests) 74ms
+ ✓ src/schedules/tus.test.ts (2 tests) 51ms
+ ✓ src/database/get-ast-from-query/utils/get-relation.test.ts (4 tests) 46ms
+ ✓ src/websocket/utils/message.test.ts (7 tests) 73ms
+ ✓ src/database/run-ast/lib/apply-query/add-join.test.ts (7 tests) 106ms
+ ✓ src/ai/tools/utils.test.ts (15 tests) 26ms
+ ✓ src/ai/tools/assets/index.test.ts (12 tests) 94ms
+ ✓ src/license/entitlements/lib/custom-permission-rules-enabled.test.ts (22 tests) 51ms
+ ✓ src/ai/files/adapters/anthropic.test.ts (8 tests) 56ms
+ ✓ src/websocket/handlers/heartbeat.test.ts (3 tests) 43ms
+ ✓ src/websocket/utils/wait-for-message.test.ts (6 tests) 41ms
+ ✓ src/services/schema.test.ts (9 tests) 55ms
+ ✓ src/services/fields/build-collection-and-field-relations.test.ts (4 tests) 22ms
+ ✓ src/middleware/extract-token.test.ts (12 tests) 19ms
+ ✓ src/request/index.test.ts (2 tests) 27ms
+ ✓ src/database/helpers/schema/dialects/cockroachdb.test.ts (8 tests) 19ms
+ ✓ src/permissions/modules/process-ast/lib/extract-fields-from-children.test.ts (12 tests) 64ms
+ ✓ src/operations/item-create/index.test.ts (10 tests) 34ms
+ ✓ src/permissions/lib/fetch-policies.test.ts (6 tests) 32ms
+ ✓ src/operations/item-delete/index.test.ts (20 tests) 36ms
+ ✓ src/permissions/modules/process-ast/utils/flatten-filter.test.ts (13 tests | 1 skipped) 18ms
+ ✓ src/database/get-ast-from-query/lib/convert-wildcards.test.ts (20 tests) 37ms
+ ✓ src/services/mcp-oauth/utils/loopback.test.ts (10 tests) 13ms
+ ✓ src/services/graphql/utils/aggregate-query.test.ts (17 tests) 29ms
+ ✓ src/utils/is-unauthenticated.test.ts (7 tests) 10ms
+ ✓ src/ai/files/lib/fetch-provider.test.ts (4 tests) 42ms
+ ✓ src/database/get-ast-from-query/lib/parse-fields.test.ts (11 tests) 30ms
+ ✓ src/services/mcp-oauth/utils/registration-debug.test.ts (1 test) 13ms
+ ✓ src/database/run-ast/lib/apply-query/filter/validate-operator.test.ts (3 tests) 32ms
+ ✓ src/utils/stall.test.ts (6 tests) 21ms
+ ✓ src/utils/validate-keys.test.ts (10 tests) 30ms
+ ✓ src/websocket/errors.test.ts (7 tests) 47ms
+ ✓ src/database/run-ast/lib/apply-query/aggregate.test.ts (8 tests) 28ms
+ ✓ src/redis/utils/redis-config-available.test.ts (5 tests) 14ms
+ ✓ src/ai/chat/utils/parse-json-schema-7.test.ts (12 tests) 54ms
+ ✓ src/logger/redact-query.test.ts (2 tests) 37ms
+ ✓ src/database/helpers/schema/dialects/sqlite.test.ts (7 tests) 28ms
+ ✓ src/database/run-ast/utils/generate-alias.test.ts (18 tests) 26ms
+ ✓ src/ai/chat/middleware/load-settings.test.ts (8 tests) 198ms
+ ✓ src/utils/jwt.test.ts (10 tests) 31ms
+ ✓ src/services/utils.test.ts (2 tests) 35ms
+ ✓ src/storage/index.test.ts (6 tests) 17ms
+ ✓ src/utils/get-config-from-env.test.ts (6 tests) 30ms
+ ✓ src/telemetry/utils/get-item-count.test.ts (7 tests) 29ms
+ ✓ src/permissions/utils/with-cache.test.ts (7 tests) 27ms
+ ✓ src/controllers/files.test.ts (5 tests) 34ms
+ ✓ src/utils/versioning/merge-version-data.test.ts (3 tests) 16ms
+ ✓ src/database/helpers/fn/dialects/sqlite.test.ts (3 tests) 48ms
+ ✓ src/logger/logs-stream.test.ts (5 tests) 60ms
+ ✓ src/permissions/modules/validate-access/lib/validate-collection-access.test.ts (2 tests) 27ms
+ ✓ src/telemetry/lib/get-report.test.ts (9 tests) 42ms
+ ✓ src/database/get-ast-from-query/utils/get-deep-query.test.ts (4 tests) 11ms
+ ✓ src/permissions/lib/fetch-permissions.test.ts (5 tests) 75ms
+ ✓ src/websocket/utils/get-expires-at-for-token.test.ts (3 tests) 19ms
+ ✓ src/database/helpers/schema/dialects/mssql.test.ts (13 tests) 25ms
+ ✓ src/permissions/modules/process-ast/lib/field-map-from-ast.test.ts (1 test) 15ms
+ ✓ src/license/entitlements/lib/sso-enabled.test.ts (9 tests) 54ms
+ ✓ src/permissions/modules/fetch-inconsistent-field-map/fetch-inconsistent-field-map.test.ts (2 tests) 19ms
+ ✓ src/ai/files/lib/upload-to-provider.test.ts (7 tests) 61ms
+ ✓ src/cli/commands/cache/clear.test.ts (6 tests) 28ms
+ ✓ src/ai/chat/utils/fix-error-tool-calls.test.ts (15 tests) 31ms
+ ✓ src/utils/destroy-piped-stream.test.ts (1 test) 58ms
+ ✓ src/services/graphql/resolvers/query.test.ts (9 tests) 29ms
+ ✓ src/utils/extract-function-name.test.ts (8 tests) 21ms
+ ✓ src/services/files/lib/get-sharp-instance.test.ts (1 test) 15ms
+ ✓ src/utils/get-string-byte-size.test.ts (12 tests) 16ms
+ ✓ src/database/helpers/schema/dialects/oracle.test.ts (12 tests) 30ms
+ ✓ src/ai/tools/flows/index.test.ts (10 tests) 39ms
+ ✓ src/utils/transformations.test.ts (16 tests) 21ms
+ ✓ src/utils/validate-snapshot.test.ts (8 tests) 29ms
+ ✓ src/permissions/utils/get-permissions-for-share.test.ts (6 tests) 29ms
+ ✓ src/auth/utils/generate-callback-url.test.ts (9 tests) 15ms
+ ✓ src/utils/sanitize-schema.test.ts (11 tests) 22ms
+ ✓ src/storage/register-drivers.test.ts (5 tests) 59ms
+ ✓ src/middleware/mcp-oauth-guard.test.ts (17 tests) 28ms
+ ✓ src/services/permissions.test.ts (8 tests) 23ms
+ ✓ src/database/helpers/schema/types.test.ts (7 tests) 19ms
+ ✓ src/database/run-ast/lib/apply-query/get-operation.test.ts (10 tests) 19ms
+ ✓ src/permissions/modules/process-ast/utils/format-a2o-key.test.ts (1 test) 7ms
+ ✓ src/permissions/modules/process-ast/utils/extract-paths-from-query.test.ts (16 tests) 28ms
+ ✓ src/permissions/modules/process-ast/utils/validate-path/validate-path-existence.test.ts (4 tests) 15ms
+ ✓ src/services/mail/index.test.ts (6 tests) 60ms
+ ✓ src/extensions/lib/sync/utils.test.ts (13 tests) 61ms
+ ✓ src/websocket/authenticate.test.ts (10 tests) 24ms
+ ✓ src/permissions/utils/filter-policies-by-ip.test.ts (2 tests) 23ms
+ ✓ src/ai/chat/utils/prompt-caching.test.ts (13 tests) 25ms
+ ✓ src/telemetry/utils/should-check-user-limits.test.ts (4 tests) 10ms
+ ✓ src/utils/get-field-relational-depth.test.ts (9 tests) 14ms
+ ✓ src/utils/fetch-user-count/fetch-access-roles.test.ts (8 tests) 37ms
+ ✓ src/database/helpers/fn/dialects/postgres.test.ts (6 tests) 22ms
+ ✓ src/telemetry/utils/format-api-request-counts.test.ts (8 tests) 14ms
+ ✓ src/utils/is-directus-jwt.test.ts (4 tests) 22ms
+ ✓ src/database/helpers/schema/dialects/postgres.test.ts (10 tests) 21ms
+ ✓ src/database/helpers/fn/types.test.ts (3 tests) 34ms
+ ✓ src/operations/request/index.test.ts (5 tests) 20ms
+ ✓ src/services/graphql/schema/get-types.test.ts (8 tests) 22ms
+ ✓ src/utils/parse-oauth-scope.test.ts (10 tests) 29ms
+ ✓ src/database/helpers/fn/dialects/mysql.test.ts (5 tests) 48ms
+ ✓ src/database/get-ast-from-query/utils/get-allowed-sort.test.ts (8 tests) 23ms
+ ✓ src/operations/notification/index.test.ts (8 tests) 23ms
+ ✓ src/database/run-ast/lib/apply-query/join-filter-with-cases.test.ts (4 tests) 23ms
+ ✓ src/ai/tools/trigger-flow/index.test.ts (8 tests) 31ms
+ ✓ src/telemetry/utils/get-settings.test.ts (4 tests) 47ms
+ ✓ src/schedules/license.test.ts (5 tests) 26ms
+ ✓ src/permissions/modules/process-ast/lib/extract-fields-from-query.test.ts (5 tests) 18ms
+ ✓ src/utils/should-skip-cache.test.ts (12 tests) 22ms
+ ✓ src/services/fields/get-collection-relation-list.test.ts (5 tests) 19ms
+ ✓ src/utils/get-column-path.test.ts (8 tests) 14ms
+ ✓ src/database/helpers/fn/json/postgres-json-path.test.ts (22 tests) 20ms
+ ✓ src/permissions/utils/merge-fields.test.ts (26 tests) 33ms
+ ✓ src/controllers/mcp/index.test.ts (3 tests) 27ms
+ ✓ src/extensions/lib/sync/tracker.test.ts (6 tests) 40ms
+ ✓ src/storage/register-locations.test.ts (2 tests) 42ms
+ ✓ src/services/graphql/utils/replace-fragments.test.ts (7 tests) 29ms
+ ✓ src/utils/validate-env.test.ts (2 tests) 11ms
+ ✓ src/database/run-ast/lib/apply-query/normalize-filter.test.ts (17 tests) 22ms
+ ✓ src/license/entitlements/lib/collections.test.ts (6 tests) 24ms
+ ✓ src/services/extensions.test.ts (1 test) 16ms
+ ✓ src/utils/calculate-field-depth.test.ts (7 tests) 16ms
+ ✓ src/extensions/lib/sync/status.test.ts (6 tests) 19ms
+ ✓ src/deployment.test.ts (4 tests) 27ms
+ ✓ src/permissions/modules/fetch-accountability-collection-access/fetch-accountability-collection-access.test.ts (5 tests) 16ms
+ ✓ src/utils/freeze-schema.test.ts (7 tests) 15ms
+ ✓ src/services/graphql/types/json-filter.test.ts (12 tests) 17ms
+ ✓ src/ai/chat/utils/add-additional-properties-to-json-schema.test.ts (9 tests) 14ms
+ ✓ src/permissions/utils/fetch-dynamic-variable-data.test.ts (3 tests) 21ms
+ ✓ src/utils/verify-session-jwt.test.ts (4 tests) 19ms
+ ✓ src/utils/filter-items.test.ts (4 tests) 18ms
+ ✓ src/services/websocket.test.ts (4 tests) 20ms
+ ✓ src/services/graphql/utils/filter-replace-m2a.test.ts (15 tests) 50ms
+ ✓ src/lock/lib/use-lock.test.ts (5 tests) 16ms
+ ✓ src/permissions/modules/process-ast/utils/collections-in-field-map.test.ts (1 test) 8ms
+ ✓ src/operations/transform/index.test.ts (2 tests) 25ms
+ ✓ src/utils/translations-shared.test.ts (3 tests) 42ms
+ ✓ src/metrics/lib/use-metrics.test.ts (3 tests) 293ms
+ ✓ src/utils/get-collection-from-alias.test.ts (2 tests) 139ms
+ ✓ src/database/helpers/fn/dialects/oracle.test.ts (5 tests) 154ms
+ ✓ src/license/utils/is-in-core-grace-period.test.ts (3 tests) 272ms
+ ✓ src/schedules/telemetry.test.ts (6 tests) 126ms
+ ✓ src/database/run-ast/utils/apply-function-to-column-name.test.ts (7 tests) 71ms
+ ✓ src/extensions/lib/get-extensions-settings.test.ts (3 tests) 326ms
+ ✓ src/utils/get-milliseconds.test.ts (16 tests) 59ms
+ ✓ src/utils/get-auth-providers.test.ts (4 tests) 91ms
+ ✓ src/permissions/modules/fetch-allowed-field-map/fetch-allowed-field-map.test.ts (2 tests) 42ms
+ ✓ src/permissions/modules/process-ast/utils/dedupe-access.test.ts (3 tests) 57ms
+ ✓ src/services/fields/get-collection-meta-updates.test.ts (12 tests) 175ms
+ ✓ src/database/helpers/fn/dialects/mssql.test.ts (3 tests) 57ms
+ ✓ src/operations/trigger/index.test.ts (5 tests) 77ms
+ ✓ src/database/run-ast/lib/apply-query/filter/get-filter-type.test.ts (4 tests) 98ms
+ ✓ src/bus/lib/use-bus.test.ts (5 tests) 119ms
+ ✓ src/emitter.test.ts (5 tests) 106ms
+ ✓ src/database/helpers/fn/json/mysql-json-path.test.ts (20 tests) 64ms
+ ✓ src/permissions/modules/process-payload/lib/is-field-nullable.test.ts (4 tests) 33ms
+ ✓ src/telemetry/utils/get-random-wait-time.test.ts (1 test) 42ms
+ ✓ src/permissions/utils/merge-permissions.test.ts (3 tests) 51ms
+ ✓ src/utils/versioning/split-recursive.test.ts (4 tests) 67ms
+ ✓ src/permissions/modules/fetch-accountability-policy-globals/fetch-accountability-policy-globals.test.ts (2 tests) 49ms
+ ✓ src/utils/user-name.test.ts (13 tests) 46ms
+ ✓ src/license/utils/is-sso-bypass-allowed.test.ts (4 tests) 88ms
+ ✓ src/websocket/collab/filter-to-fields.test.ts (6 tests) 63ms
+ ✓ src/ai/tools/system/index.test.ts (7 tests) 110ms
+ ✓ src/utils/split-field-path.test.ts (7 tests) 70ms
+ ✓ src/database/get-ast-from-query/utils/get-related-collection.test.ts (5 tests) 60ms
+ ✓ src/utils/get-service.test.ts (2 tests) 93ms
+ ✓ src/operations/log/index.test.ts (2 tests) 69ms
+ ✓ src/utils/get-secret.test.ts (2 tests) 159ms
+ ✓ src/utils/is-field-allowed.test.ts (10 tests) 45ms
+ ✓ src/utils/permissions-cacheable.test.ts (15 tests) 86ms
+ ✓ src/utils/get-versioned-hash.test.ts (3 tests) 87ms
+ ✓ src/permissions/lib/with-app-minimal-permissions.test.ts (2 tests) 120ms
+ ✓ src/controllers/utils/handle-registry-error.test.ts (4 tests) 43ms
+ ✓ src/services/mcp-oauth/utils/domain.test.ts (7 tests) 193ms
+ ✓ src/utils/parse-filter-key.test.ts (5 tests) 46ms
+ ✓ src/ai/providers/anthropic-tool-search.test.ts (5 tests) 136ms
+ ✓ src/database/helpers/schema/utils/prep-query-params.test.ts (4 tests) 42ms
+ ✓ src/permissions/modules/process-ast/utils/get-info-for-path.test.ts (4 tests) 39ms
+ ✓ src/telemetry/utils/get-user-item-count.test.ts (3 tests) 89ms
+ ✓ src/permissions/modules/process-ast/utils/validate-path/validate-path-permissions.test.ts (4 tests) 60ms
+ ✓ src/license/entitlements/lib/custom-llms-enabled.test.ts (8 tests) 49ms
+ ✓ src/utils/is-valid-uuid.test.ts (6 tests) 41ms
+ ✓ src/utils/should-clear-cache.test.ts (8 tests) 87ms
+ ✓ src/permissions/utils/extract-required-dynamic-variable-context.test.ts (2 tests) 38ms
+ ✓ src/utils/get-graphql-query-and-variables.test.ts (2 tests) 64ms
+ ✓ src/permissions/modules/process-ast/utils/has-item-permissions.test.ts (3 tests) 75ms
+ ✓ src/permissions/modules/process-ast/utils/context-has-dynamic-variables.test.ts (2 tests) 26ms
+ ✓ src/permissions/modules/fetch-allowed-fields/fetch-allowed-fields.test.ts (2 tests) 112ms
+ ✓ src/utils/async-handler.test.ts (1 test) 54ms
+ ✓ src/permissions/modules/process-ast/utils/stringify-query-path.test.ts (1 test) 36ms
+ ✓ src/database/run-ast/lib/apply-query/get-filter-path.test.ts (4 tests) 62ms
+ ✓ src/permissions/modules/process-ast/utils/find-related-collection.test.ts (3 tests) 34ms
+ ✓ src/permissions/modules/validate-access/validate-access.test.ts (5 tests) 57ms
+ ✓ src/telemetry/utils/get-extension-count.test.ts (1 test) 35ms
+ ✓ src/services/shares.test.ts (1 test) 14ms
+ ✓ src/services/notifications.test.ts (1 test) 21ms
+ ✓ src/services/policies.test.ts (1 test) 25ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/utils/schedule.test.ts > scheduleSynchronizedJob > long-running scenarios (25+ days) > Should execute hourly job beyond setTimeout limit
+Error: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/utils/schedule.test.ts:58:3
+     56|   });
+     57| 
+     58|   test('Should execute hourly job beyond setTimeout limit', async () =…
+       |   ^
+     59|    const callback = vi.fn().mockResolvedValue(undefined);
+     60|    const startTime = new Date('2025-01-01T00:00:00.000Z');
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  src/utils/schedule.test.ts > scheduleSynchronizedJob > long-running scenarios (25+ days) > Should execute daily job for 30 days without missing executions
+AssertionError: expected "spy" to be called 30 times, but got 25 times
+ ❯ src/utils/schedule.test.ts:99:21
+     97|    }
+     98| 
+     99|    expect(callback).toHaveBeenCalledTimes(30);
+       |                     ^
+    100|    await job.stop();
+    101|   });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  src/utils/schedule.test.ts > scheduleSynchronizedJob > CronJob execution timing > cron job fires at scheduled time
+AssertionError: expected "spy" to be called 2 times, but got 3 times
+ ❯ src/utils/schedule.test.ts:157:25
+    155|    await vi.advanceTimersByTimeAsync(60 * 1000);
+    156| 
+    157|    expect(mockCallback).toHaveBeenCalledTimes(2);
+       |                         ^
+    158| 
+    159|    vi.useRealTimers();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  1 failed | 354 passed (355)
+      Tests  3 failed | 4579 passed | 1 todo (4583)
+   Start at  18:20:58
+   Duration  457.17s (transform 46.76s, setup 0ms, collect 2588.89s, tests 68.49s, environment 326ms, prepare 166.15s)
+
+/home/jean/dev/Hippocast/dev/deps/directus-cms-2/api:
+ ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @directus/api@36.0.2 test: `vitest run`
+Exit status 1
