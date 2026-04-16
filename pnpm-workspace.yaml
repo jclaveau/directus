@@ -6,3 +6,6 @@ packages:
   - sdk
   - packages/*
   - tests/*
+
+catalog:
+  vue: 3.5.24
