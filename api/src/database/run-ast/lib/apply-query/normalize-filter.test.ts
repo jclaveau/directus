@@ -29,6 +29,7 @@ describe('normalizeFilter', () => {
 			},
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [
 				{ rel: { field_a: { _eq: 1 } } },
@@ -47,6 +48,7 @@ describe('normalizeFilter', () => {
 			},
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [
 				{ a: { b: { c: { _eq: 1 } } } },
@@ -66,6 +68,7 @@ describe('normalizeFilter', () => {
 			},
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [
 				{ a: { b: { x: { _eq: 1 } } } },
@@ -87,6 +90,7 @@ describe('normalizeFilter', () => {
 			],
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [
 				{
@@ -111,6 +115,7 @@ describe('normalizeFilter', () => {
 			],
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_or: [
 				{
@@ -131,6 +136,7 @@ describe('normalizeFilter', () => {
 			},
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [
 				{ field: { sub: { _eq: 'nested' } } },
@@ -152,6 +158,7 @@ describe('normalizeFilter', () => {
 			},
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [
 				{ rel: { _some: { field: { _eq: 1 } } } },
@@ -168,6 +175,7 @@ describe('normalizeFilter', () => {
 			},
 		};
 
+		// prettier-ignore
 		expect(normalizeFilter(filter)).toEqual({
 			_and: [
 				{ rel: { _none: { field: { _eq: 1 } } } },
