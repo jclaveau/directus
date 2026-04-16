@@ -75,8 +75,14 @@ describe('Integration Tests', () => {
 		});
 
 		describe('updateMany', () => {
-			it('should validate user count if requested', async () => {
+			it('should not validate user count when payload is empty', async () => {
 				await service.updateMany([1], {}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+
+				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+			});
+
+			it('should validate user count if requested with non-empty payload', async () => {
+				await service.updateMany([1], { name: 'test' }, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
