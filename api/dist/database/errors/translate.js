@@ -1,0 +1,57 @@
+import getDatabase, { getDatabaseClient } from '../index.js';
+import emitter from '../../emitter.js';
+import { extractError as mssql } from './dialects/mssql.js';
+import { extractError as mysql } from './dialects/mysql.js';
+import { extractError as oracle } from './dialects/oracle.js';
+import { extractError as postgres } from './dialects/postgres.js';
+import { extractError as sqlite } from './dialects/sqlite.js';
+/**
+ * Translates an error thrown by any of the databases into a pre-defined Exception. Currently
+ * supports:
+ * - Invalid Foreign Key
+ * - Not Null Violation
+ * - Record Not Unique
+ * - Value Out of Range
+ * - Value Too Long
+ */
+export async function translateDatabaseError(error, data) {
+    const client = getDatabaseClient();
+    let defaultError;
+    switch (client) {
+        case 'mysql':
+            defaultError = mysql(error, data);
+            break;
+        case 'cockroachdb':
+        case 'postgres':
+            defaultError = postgres(error, data);
+            break;
+        case 'sqlite':
+            defaultError = sqlite(error, data);
+            break;
+        case 'oracle':
+            defaultError = oracle(error);
+            break;
+        case 'mssql':
+            defaultError = await mssql(error, data);
+            break;
+    }
+    const mainThreadError = new Error(defaultError.message, {
+        cause: defaultError,
+    });
+    if (mainThreadError) {
+        // @ts-expect-error data doesn't exist on Error
+        mainThreadError.data = data;
+    }
+    const hookError = await emitter.emitFilter('database.error', mainThreadError, { client }, {
+        database: getDatabase(),
+        schema: null,
+        accountability: null,
+    });
+    return hookError;
+}
+export async function throwDatabaseError(error, data) {
+    const filteredError = await translateDatabaseError(error, data);
+    if (filteredError) {
+        throw filteredError;
+    }
+}
