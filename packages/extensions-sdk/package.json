@@ -1,6 +1,6 @@
 {
 	"name": "@directus/extensions-sdk",
-	"version": "14.0.0",
+	"version": "14.0.0-jclaveau.2026-04-17-08-30-15",
 	"description": "A toolkit to develop extensions to extend Directus",
 	"homepage": "https://directus.io",
 	"repository": {

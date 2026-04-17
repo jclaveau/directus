@@ -1,6 +1,6 @@
 {
 	"name": "@directus/validation",
-	"version": "2.0.6",
+	"version": "2.0.6-jclaveau.2026-04-17-08-30-15",
 	"type": "module",
 	"sideEffects": false,
 	"scripts": {

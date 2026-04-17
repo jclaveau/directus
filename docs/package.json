@@ -1,7 +1,7 @@
 {
 	"name": "docs",
 	"private": true,
-	"version": "0.0.0",
+	"version": "0.0.0-jclaveau.2026-04-17-08-30-15",
 	"type": "module",
 	"scripts": {
 		"build:packages": "pnpm --recursive --filter '!docs' --filter '!api' --filter '!app' run build",

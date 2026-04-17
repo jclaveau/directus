@@ -1,6 +1,6 @@
 {
 	"name": "create-directus-extension",
-	"version": "11.0.15",
+	"version": "11.0.15-jclaveau.2026-04-17-08-30-15",
 	"description": "A small util that will scaffold a Directus extension",
 	"keywords": [
 		"directus",

@@ -1,6 +1,6 @@
 {
 	"name": "@directus/stores",
-	"version": "1.0.2",
+	"version": "1.0.2-jclaveau.2026-04-17-08-30-15",
 	"description": "Shared Pinia stores used in @directus/app",
 	"homepage": "https://directus.io",
 	"repository": {

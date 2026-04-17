@@ -1,6 +1,6 @@
 {
 	"name": "@directus/update-check",
-	"version": "13.0.1",
+	"version": "13.0.1-jclaveau.2026-04-17-08-30-15",
 	"description": "Check if an update for Directus is available",
 	"homepage": "https://directus.io",
 	"repository": {

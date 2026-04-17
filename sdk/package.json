@@ -1,6 +1,6 @@
 {
 	"name": "@directus/sdk",
-	"version": "20.0.0",
+	"version": "20.0.0-jclaveau.2026-04-17-08-30-15",
 	"description": "Directus JavaScript SDK",
 	"homepage": "https://directus.io",
 	"repository": {

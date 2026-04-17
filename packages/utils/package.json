@@ -1,6 +1,6 @@
 {
 	"name": "@directus/utils",
-	"version": "13.0.7",
+	"version": "13.0.7-jclaveau.2026-04-17-08-30-15",
 	"description": "Utilities shared between the Directus packages",
 	"homepage": "https://directus.io",
 	"repository": {
