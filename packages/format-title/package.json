@@ -32,13 +32,13 @@
 	],
 	"scripts": {
 		"build": "pnpm run '/^bundle|typecheck$/'",
-		"bundle": "tsup src/index.ts --format=esm --dts",
+		"bundle": "tsdown src/index.ts --dts",
 		"test": "vitest --watch=false",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "3.0.0",
-		"tsup": "8.4.0",
+		"tsdown": "catalog:",
 		"typescript": "5.8.2",
 		"vitest": "2.1.9"
 	}

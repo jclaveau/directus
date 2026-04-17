@@ -31,8 +31,8 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "tsup src/index.ts --format=esm --dts",
-		"dev": "tsup src/index.ts --format=esm --dts --watch",
+		"build": "tsdown src/index.ts --dts",
+		"dev": "tsdown src/index.ts --dts --watch",
 		"test": "vitest --watch=false"
 	},
 	"dependencies": {
@@ -42,7 +42,7 @@
 	"devDependencies": {
 		"@directus/tsconfig": "3.0.0",
 		"@types/lodash-es": "4.17.12",
-		"tsup": "8.4.0",
+		"tsdown": "catalog:",
 		"typescript": "5.8.2",
 		"vitest": "2.1.9"
 	}

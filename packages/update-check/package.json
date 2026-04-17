@@ -22,7 +22,7 @@
 	],
 	"scripts": {
 		"build": "pnpm run '/^bundle|typecheck$/'",
-		"bundle": "tsup src/index.ts --format=esm --dts",
+		"bundle": "tsdown src/index.ts --dts",
 		"test": "vitest --watch=false",
 		"typecheck": "tsc --noEmit"
 	},
@@ -41,7 +41,7 @@
 		"@types/semver": "7.5.8",
 		"@vitest/coverage-v8": "2.1.9",
 		"strip-ansi": "7.1.0",
-		"tsup": "8.4.0",
+		"tsdown": "catalog:",
 		"typescript": "5.8.2",
 		"vitest": "2.1.9"
 	}
