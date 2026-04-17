@@ -531,12 +531,14 @@ function getRollupOptions({
 	const hasTSCongig = fse.existsSync('tsconfig.json');
 	return defineConfig({
 		resolve: {
-			...hasTSCongig ? {
-				tsconfigFilename: `tsconfig.json`,
-			} : {},
+			...(hasTSCongig
+				? {
+						tsconfigFilename: `tsconfig.json`,
+				  }
+				: {}),
 		},
 		input: typeof input !== 'string' ? 'entry' : input,
-		external: mode === 'browser' ? APP_SHARED_DEPS : API_SHARED_DEPS,
+		external: [...(mode === 'browser' ? APP_SHARED_DEPS : API_SHARED_DEPS)],
 		platform: mode!, // TODO why is undefined possible (and triggering an error) only during extensions-sdk's build?
 		plugins: [
 			typeof input !== 'string' ? virtual(input) : null,

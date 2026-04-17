@@ -1,7 +1,7 @@
 import type { FieldsWildcard, HasManyToAnyRelation, PickRelationalFields } from './fields.js';
 import type { MappedFunctionFields } from './functions.js';
-import type { ItemType } from './schema.js';
-import type { IfAny, IsNullable, Merge, Mutable, UnpackList, Prettify } from './utils.js';
+import type { ItemType, RemoveRelationships } from './schema.js';
+import type { IfAny, IsNullable, Merge, Mutable, Prettify, UnpackList } from './utils.js';
 
 /**
  * Apply the configured fields query parameter on a given Item type
@@ -23,7 +23,11 @@ export type ApplyQueryFields<
 	Prettify<
 		Merge<
 			MappedFunctionFields<Schema, CollectionItem> extends infer FF
-				? MapFlatFields<CollectionItem, FlatFields, FF extends Record<string, string> ? FF : Record<string, string>>
+				? MapFlatFields<
+						RemoveRelationships<Schema, CollectionItem>,
+						FlatFields,
+						FF extends Record<string, string> ? FF : Record<string, string>
+				  >
 				: never,
 			RelationalFields extends never
 				? never
@@ -124,6 +128,8 @@ export type FieldOutputMap = {
 	json: JsonValue;
 	csv: string[];
 	datetime: string;
+	date: string;
+	time: string;
 };
 
 // all functions return a numeric type

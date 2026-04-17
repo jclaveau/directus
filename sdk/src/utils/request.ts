@@ -1,4 +1,4 @@
-import type { FetchInterface, DirectusError } from '../index.js';
+import type { FetchInterface } from '../index.js';
 import { extractData } from './extract-data.js';
 
 /**
@@ -21,15 +21,15 @@ export const request = async <Output = any>(
 
 	return fetcher(url, options).then((response) => {
 		return extractData(response).catch((reason) => {
-			const result: DirectusError = {
-				message: 'Unknown api error',
+			const result: { response: unknown; message: string; errors: any; data?: any } = {
+				message: '',
 				errors: reason && typeof reason === 'object' && 'errors' in reason ? reason.errors : reason,
-				response: response as Response,
+				response,
 			};
 
 			if (reason && typeof reason === 'object' && 'data' in reason) result.data = reason.data;
 
-			if (result.errors[0] && result.errors[0].message) { // TODO first or last error?
+			if (Array.isArray(result.errors) && result.errors[0]?.message) {
 				result.message = result.errors[0].message;
 			}
 
