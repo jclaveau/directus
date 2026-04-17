@@ -101,7 +101,7 @@ export type AggregationOutput<
 							>]: TranslateFunctionField<NamesMap, Field> extends keyof Item
 								? Item[TranslateFunctionField<NamesMap, Field>]
 								: never;
-						}
+					  }
 					: never
 				: never
 			: never
@@ -113,12 +113,12 @@ export type AggregationOutput<
 					[Field in UnpackList<Options['aggregate'][Func]>]: Field extends '*'
 						? AggregationTypes[Func]['output']
 						: { [SubField in Field]: AggregationTypes[Func]['output'] }[Field];
-				}
+			  }
 			: Options['aggregate'][Func] extends string
-				? Options['aggregate'][Func] extends '*'
+			  ? Options['aggregate'][Func] extends '*'
 					? AggregationTypes[Func]['output']
 					: { [SubField in Options['aggregate'][Func]]: AggregationTypes[Func]['output'] }[Options['aggregate'][Func]]
-				: never
+			  : never
 		: never;
 })[];
 
@@ -139,5 +139,5 @@ type TranslateFunctionField<FieldMap, Field> = Field extends keyof FieldMap
 		? FieldMap[Field]
 		: never
 	: Field extends string
-		? Field
-		: never;
+	  ? Field
+	  : never;

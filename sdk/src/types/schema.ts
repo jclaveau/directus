@@ -66,7 +66,7 @@ export type MergeCoreCollection<Schema, Collection extends keyof Schema | string
 		? UnpackList<Schema[Collection]> extends infer Item
 			? {
 					[Field in Exclude<keyof Item, keyof BuiltinCollection>]: Item[Field];
-				} & BuiltinCollection
+			  } & BuiltinCollection
 			: never
 		: BuiltinCollection
 >;
@@ -74,16 +74,15 @@ export type MergeCoreCollection<Schema, Collection extends keyof Schema | string
 /**
  * Merge custom and core schema objects
  */
-export type CompleteSchema<Schema> =
-	CoreSchema<Schema> extends infer Core
-		? {
-				[Collection in keyof Schema | keyof Core]: Collection extends keyof Core
-					? Core[Collection]
-					: Collection extends keyof Schema
-						? Schema[Collection]
-						: never;
-			}
-		: never;
+export type CompleteSchema<Schema> = CoreSchema<Schema> extends infer Core
+	? {
+			[Collection in keyof Schema | keyof Core]: Collection extends keyof Core
+				? Core[Collection]
+				: Collection extends keyof Schema
+				  ? Schema[Collection]
+				  : never;
+	  }
+	: never;
 
 /**
  * Merge custom schema with core schema
@@ -99,8 +98,8 @@ export type GetCollection<
 > = CollectionName extends keyof CoreSchema<Schema>
 	? CoreSchema<Schema>[CollectionName]
 	: CollectionName extends keyof Schema
-		? Schema[CollectionName]
-		: never;
+	  ? Schema[CollectionName]
+	  : never;
 
 /**
  * Helper to extract a collection name
