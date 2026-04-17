@@ -1,6 +1,6 @@
 {
 	"name": "@directus/constants",
-	"version": "13.0.1-jclaveau.2026-04-17-08-30-15",
+	"version": "14.3.0-jclaveau.2026-04-17-08-30-15",
 	"description": "Shared constants for Directus",
 	"homepage": "https://directus.io",
 	"repository": {
