@@ -58,7 +58,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "rimraf ./dist && tsc --project tsconfig.prod.json && copyfiles \"src/**/*.{yaml,liquid}\" -u 1 dist",
+		"build": "tsdown && copyfiles \"src/**/*.{yaml,liquid,md}\" -u 1 dist",
 		"cli": "NODE_ENV=development SERVE_APP=false tsx src/cli/run.ts",
 		"dev": "NODE_ENV=development SERVE_APP=true tsx watch --ignore extensions --clear-screen=false src/start.ts",
 		"test": "vitest run",
@@ -227,6 +227,7 @@
 		"form-data": "4.0.2",
 		"get-port": "7.1.0",
 		"knex-mock-client": "3.0.2",
+		"tsdown": "catalog:",
 		"typescript": "5.8.2",
 		"vitest": "2.1.9"
 	},
