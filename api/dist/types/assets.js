@@ -1,0 +1,42 @@
+//#region src/types/assets.ts
+const TransformationMethods = [
+	"toFormat",
+	"jpeg",
+	"png",
+	"tiff",
+	"webp",
+	"avif",
+	"resize",
+	"extend",
+	"extract",
+	"trim",
+	"rotate",
+	"flip",
+	"flop",
+	"sharpen",
+	"median",
+	"blur",
+	"flatten",
+	"gamma",
+	"negate",
+	"normalise",
+	"normalize",
+	"clahe",
+	"convolve",
+	"threshold",
+	"linear",
+	"recomb",
+	"modulate",
+	"tint",
+	"greyscale",
+	"grayscale",
+	"toColorspace",
+	"toColourspace",
+	"removeAlpha",
+	"ensureAlpha",
+	"extractChannel",
+	"bandbool"
+];
+
+//#endregion
+export { TransformationMethods };

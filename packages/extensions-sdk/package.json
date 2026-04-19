@@ -1,68 +1,68 @@
 {
-	"name": "@directus/extensions-sdk",
-	"version": "14.0.0-jclaveau.2026-04-17-08-30-15",
-	"description": "A toolkit to develop extensions to extend Directus",
-	"homepage": "https://directus.io",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/directus/directus.git",
-		"directory": "packages/extensions-sdk"
-	},
-	"funding": "https://github.com/directus/directus?sponsor=1",
-	"license": "MIT",
-	"author": "Nicola Krumschmidt",
-	"type": "module",
-	"exports": {
-		".": "./dist/index.js",
-		"./cli": "./dist/cli/index.js",
-		"./package.json": "./package.json"
-	},
-	"main": "dist/index.js",
-	"bin": {
-		"directus-extension": "cli.js"
-	},
-	"files": [
-		"dist",
-		"templates"
-	],
-	"scripts": {
-		"build": "tsc --project tsconfig.prod.json",
-		"dev": "tsc --watch",
-		"test": "vitest --watch=false"
-	},
-	"dependencies": {
-		"@directus/composables": "workspace:*",
-		"@directus/constants": "workspace:*",
-		"@directus/extensions": "workspace:*",
-		"@directus/themes": "workspace:*",
-		"@directus/types": "workspace:*",
-		"@directus/utils": "workspace:*",
-		"@rollup/plugin-replace": "5.0.7",
-		"@rollup/plugin-terser": "0.4.4",
-		"@rollup/plugin-virtual": "3.0.2",
-		"@vitejs/plugin-vue": "5.2.3",
-		"chalk": "5.4.1",
-		"commander": "10.0.1",
-		"execa": "7.2.0",
-		"fs-extra": "11.3.0",
-		"inquirer": "12.4.2",
-		"ora": "6.3.1",
-		"rolldown": "1.0.0-rc.16",
-		"rollup-plugin-styler": "2.0.0",
-		"semver": "7.7.1",
-		"vite": "4.5.14",
-		"vue": "catalog:"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "3.0.0",
-		"@types/fs-extra": "11.0.4",
-		"@types/inquirer": "9.0.7",
-		"@types/semver": "7.5.8",
-		"@vitest/coverage-v8": "2.1.9",
-		"typescript": "5.8.2",
-		"vitest": "2.1.9"
-	},
-	"engines": {
-		"node": ">=12.20.0"
-	}
+  "name": "@directus/extensions-sdk",
+  "version": "14.0.0-jclaveau.2026-04-17-08-30-15",
+  "description": "A toolkit to develop extensions to extend Directus",
+  "homepage": "https://directus.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/directus/directus.git",
+    "directory": "packages/extensions-sdk"
+  },
+  "funding": "https://github.com/directus/directus?sponsor=1",
+  "license": "MIT",
+  "author": "Nicola Krumschmidt",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./cli": "./dist/cli/index.js",
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "bin": {
+    "directus-extension": "cli.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "dependencies": {
+    "@rollup/plugin-replace": "5.0.7",
+    "@rollup/plugin-terser": "0.4.4",
+    "@rollup/plugin-virtual": "3.0.2",
+    "@vitejs/plugin-vue": "5.2.3",
+    "chalk": "5.4.1",
+    "commander": "10.0.1",
+    "execa": "7.2.0",
+    "fs-extra": "11.3.0",
+    "inquirer": "12.4.2",
+    "ora": "6.3.1",
+    "rolldown": "1.0.0-rc.16",
+    "rollup-plugin-styler": "2.0.0",
+    "semver": "7.7.1",
+    "vite": "4.5.14",
+    "vue": "3.5.24",
+    "@directus/constants": "14.3.0-jclaveau.2026-04-17-08-30-15",
+    "@directus/extensions": "3.0.24-jclaveau.2026-04-17-08-30-15",
+    "@directus/composables": "11.4.0-jclaveau.2026-04-17-08-30-15",
+    "@directus/types": "13.2.0-jclaveau.2026-04-17-08-30-15",
+    "@directus/themes": "1.1.2-jclaveau.2026-04-17-08-30-15",
+    "@directus/utils": "13.4.0-jclaveau.2026-04-17-08-30-15"
+  },
+  "devDependencies": {
+    "@directus/tsconfig": "3.0.0",
+    "@types/fs-extra": "11.0.4",
+    "@types/inquirer": "9.0.7",
+    "@types/semver": "7.5.8",
+    "@vitest/coverage-v8": "2.1.9",
+    "typescript": "5.8.2",
+    "vitest": "2.1.9"
+  },
+  "engines": {
+    "node": ">=12.20.0"
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.prod.json",
+    "dev": "tsc --watch",
+    "test": "vitest --watch=false"
+  }
 }

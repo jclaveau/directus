@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/revisions`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/revisions/${t}`,params:n??{},method:`GET`});export{n as readRevision,t as readRevisions};
+//# sourceMappingURL=revisions.js.map
