@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Provider cannot be empty`),{path:`/deployments/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`}),n=(t,n)=>()=>(e.throwIfEmpty(t,`Provider cannot be empty`),{path:`/deployments/${t}/projects`,body:JSON.stringify(n),method:`PATCH`});exports.updateDeployment=t,exports.updateDeploymentProjects=n;
+//# sourceMappingURL=deployment.cjs.map

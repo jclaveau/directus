@@ -1,0 +1,2 @@
+const e=e=>{let t=(e,n=[])=>{if(typeof e==`object`){let r=[];for(let i in e){let a=e[i]??[];if(Array.isArray(a))for(let e of a)r.push(t(e,[...n,i]));else if(typeof a==`object`)for(let e of Object.keys(a)){let o=a[e];for(let a of o)r.push(t(a,[...n,`${i}:${e}`]))}}return r.flatMap(e=>e)}return[...n,String(e)].join(`.`)};return e.flatMap(e=>t(e))};exports.formatFields=e;
+//# sourceMappingURL=format-fields.cjs.map

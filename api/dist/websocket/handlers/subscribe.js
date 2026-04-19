@@ -1,0 +1,137 @@
+import { useBus } from "../../bus/lib/use-bus.js";
+import "../../bus/index.js";
+import emitter_default from "../../emitter.js";
+import { getSchema } from "../../utils/get-schema.js";
+import { getPayload } from "../utils/items.js";
+import { sanitizeQuery } from "../../utils/sanitize-query.js";
+import { WebSocketError, handleWebSocketError } from "../errors.js";
+import { WebSocketSubscribeMessage } from "../messages.js";
+import { fmtMessage, getMessageType } from "../utils/message.js";
+import { InvalidPayloadError } from "@directus/errors";
+import "@directus/memory";
+
+//#region src/websocket/handlers/subscribe.ts
+/**
+* Handler responsible for subscriptions
+*/
+var SubscribeHandler = class {
+	subscriptions;
+	messenger;
+	/**
+	* Initialize the handler
+	*/
+	constructor() {
+		this.subscriptions = {};
+		this.messenger = useBus();
+		this.bindWebSocket();
+		this.messenger.subscribe("websocket.event", (message) => {
+			try {
+				this.dispatch(message);
+			} catch {}
+		});
+	}
+	/**
+	* Hook into websocket client lifecycle events
+	*/
+	bindWebSocket() {
+		emitter_default.onAction("websocket.message", ({ client, message }) => {
+			if (!["subscribe", "unsubscribe"].includes(getMessageType(message))) return;
+			try {
+				this.onMessage(client, WebSocketSubscribeMessage.parse(message));
+			} catch (error) {
+				handleWebSocketError(client, error, "subscribe");
+			}
+		});
+		emitter_default.onAction("websocket.error", ({ client }) => this.unsubscribe(client));
+		emitter_default.onAction("websocket.close", ({ client }) => this.unsubscribe(client));
+	}
+	/**
+	* Register a subscription
+	* @param subscription
+	*/
+	subscribe(subscription) {
+		const { collection } = subscription;
+		if ("item" in subscription && ["directus_fields", "directus_relations"].includes(collection)) throw new InvalidPayloadError({ reason: `Cannot subscribe to a specific item in the ${collection} collection.` });
+		if (!this.subscriptions[collection]) this.subscriptions[collection] = /* @__PURE__ */ new Set();
+		this.subscriptions[collection]?.add(subscription);
+	}
+	/**
+	* Remove a subscription
+	* @param subscription
+	*/
+	unsubscribe(client, uid) {
+		if (uid !== void 0) {
+			const subscription = this.getSubscription(client, String(uid));
+			if (subscription) this.subscriptions[subscription.collection]?.delete(subscription);
+		} else for (const key of Object.keys(this.subscriptions)) {
+			const subscriptions = Array.from(this.subscriptions[key] || []);
+			for (let i = subscriptions.length - 1; i >= 0; i--) {
+				const subscription = subscriptions[i];
+				if (!subscription) continue;
+				if (subscription.client === client && (!uid || subscription.uid === uid)) this.subscriptions[key]?.delete(subscription);
+			}
+		}
+	}
+	/**
+	* Dispatch event to subscriptions
+	*/
+	async dispatch(event) {
+		const subscriptions = this.subscriptions[event.collection];
+		if (!subscriptions || subscriptions.size === 0) return;
+		const schema = await getSchema();
+		for (const subscription of subscriptions) {
+			const { client } = subscription;
+			if (subscription.event !== void 0 && event.action !== subscription.event) continue;
+			if ("item" in subscription) {
+				if ("keys" in event && !event.keys.includes(subscription.item)) continue;
+				if ("key" in event && event.key !== subscription.item) continue;
+			}
+			try {
+				const result = await getPayload(subscription, client.accountability, schema, event);
+				if (Array.isArray(result?.["data"]) && result?.["data"]?.length === 0) continue;
+				client.send(fmtMessage("subscription", result, subscription.uid));
+			} catch (err) {
+				handleWebSocketError(client, err, "subscribe");
+			}
+		}
+	}
+	/**
+	* Handle incoming (un)subscribe requests
+	*/
+	async onMessage(client, message) {
+		if (getMessageType(message) === "subscribe") try {
+			const collection = String(message.collection);
+			const accountability = client.accountability;
+			const schema = await getSchema();
+			if (!accountability?.admin && !schema.collections[collection]) throw new WebSocketError("subscribe", "INVALID_COLLECTION", "The provided collection does not exists or is not accessible.", message.uid);
+			const subscription = {
+				client,
+				collection
+			};
+			if ("event" in message) subscription.event = message.event;
+			if (message.query) subscription.query = await sanitizeQuery(message.query, schema, accountability);
+			if ("item" in message) subscription.item = String(message.item);
+			if ("uid" in message) {
+				subscription.uid = String(message.uid);
+				this.unsubscribe(client, subscription.uid);
+			}
+			const data = subscription.event === void 0 ? await getPayload(subscription, accountability, schema) : { event: "init" };
+			this.subscribe(subscription);
+			client.send(fmtMessage("subscription", data, subscription.uid));
+		} catch (err) {
+			handleWebSocketError(client, err, "subscribe");
+		}
+		if (getMessageType(message) === "unsubscribe") try {
+			this.unsubscribe(client, message.uid);
+			client.send(fmtMessage("subscription", { event: "unsubscribe" }, message.uid));
+		} catch (err) {
+			handleWebSocketError(client, err, "unsubscribe");
+		}
+	}
+	getSubscription(client, uid) {
+		for (const userSubscriptions of Object.values(this.subscriptions)) for (const subscription of userSubscriptions) if (subscription.client === client && subscription.uid === uid) return subscription;
+	}
+};
+
+//#endregion
+export { SubscribeHandler };

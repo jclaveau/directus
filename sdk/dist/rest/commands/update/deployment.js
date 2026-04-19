@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r)=>()=>(e(t,`Provider cannot be empty`),{path:`/deployments/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`}),n=(t,n)=>()=>(e(t,`Provider cannot be empty`),{path:`/deployments/${t}/projects`,body:JSON.stringify(n),method:`PATCH`});export{t as updateDeployment,n as updateDeploymentProjects};
+//# sourceMappingURL=deployment.js.map

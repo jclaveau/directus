@@ -1,0 +1,139 @@
+import { useLogger } from "../../logger/index.js";
+import { getDatabaseClient } from "../index.js";
+import { createInspector } from "@directus/schema";
+
+//#region src/database/migrations/20210519A-add-system-fk-triggers.ts
+/**
+* Things to keep in mind:
+*
+* - Can't have circular constraints (field -> parent_field)
+* - Can't have two constraints from/to the same table (user_created/user_modified -> users)
+*
+* The following updates are all the times we can rely on the DB to do the cascade. The rest will
+* have to be handled in the API. I don't make the rules.
+*/
+const updates = [
+	{
+		table: "directus_files",
+		constraints: [{
+			column: "folder",
+			references: "directus_folders.id",
+			on_delete: "SET NULL"
+		}]
+	},
+	{
+		table: "directus_permissions",
+		constraints: [{
+			column: "role",
+			references: "directus_roles.id",
+			on_delete: "CASCADE"
+		}]
+	},
+	{
+		table: "directus_presets",
+		constraints: [{
+			column: "user",
+			references: "directus_users.id",
+			on_delete: "CASCADE"
+		}, {
+			column: "role",
+			references: "directus_roles.id",
+			on_delete: "CASCADE"
+		}]
+	},
+	{
+		table: "directus_revisions",
+		constraints: [{
+			column: "activity",
+			references: "directus_activity.id",
+			on_delete: "CASCADE"
+		}]
+	},
+	{
+		table: "directus_sessions",
+		constraints: [{
+			column: "user",
+			references: "directus_users.id",
+			on_delete: "CASCADE"
+		}]
+	},
+	{
+		table: "directus_users",
+		constraints: [{
+			column: "role",
+			references: "directus_roles.id",
+			on_delete: "SET NULL"
+		}]
+	}
+];
+async function up(knex) {
+	const logger = useLogger();
+	const foreignKeys = await createInspector(knex).foreignKeys();
+	for (const update of updates) for (const constraint of update.constraints) {
+		const existingForeignKey = foreignKeys.find((fk) => fk.table === update.table && fk.column === constraint.column && fk.foreign_key_table === constraint.references.split(".")[0] && fk.foreign_key_column === constraint.references.split(".")[1]);
+		try {
+			await knex.schema.alterTable(update.table, (table) => {
+				table.dropForeign([constraint.column], existingForeignKey?.constraint_name || void 0);
+			});
+		} catch (err) {
+			logger.warn(`Couldn't drop foreign key ${update.table}.${constraint.column}->${constraint.references}`);
+			logger.warn(err);
+		}
+		/**
+		* MySQL won't delete the index when you drop the foreign key constraint. Gotta make
+		* sure to clean those up as well
+		*/
+		if (getDatabaseClient(knex) === "mysql") try {
+			await knex.schema.alterTable(update.table, (table) => {
+				table.dropIndex([constraint.column], `${update.table}_${constraint.column}_foreign`);
+			});
+		} catch (err) {
+			logger.warn(`Couldn't clean up index for foreign key ${update.table}.${constraint.column}->${constraint.references}`);
+			logger.warn(err);
+		}
+		try {
+			await knex.schema.alterTable(update.table, (table) => {
+				table.foreign(constraint.column).references(constraint.references).onDelete(constraint.on_delete);
+			});
+		} catch (err) {
+			logger.warn(`Couldn't add foreign key to ${update.table}.${constraint.column}->${constraint.references}`);
+			logger.warn(err);
+		}
+	}
+}
+async function down(knex) {
+	const logger = useLogger();
+	for (const update of updates) for (const constraint of update.constraints) {
+		try {
+			await knex.schema.alterTable(update.table, (table) => {
+				table.dropForeign([constraint.column]);
+			});
+		} catch (err) {
+			logger.warn(`Couldn't drop foreign key ${update.table}.${constraint.column}->${constraint.references}`);
+			logger.warn(err);
+		}
+		/**
+		* MySQL won't delete the index when you drop the foreign key constraint. Gotta make
+		* sure to clean those up as well
+		*/
+		if (getDatabaseClient(knex) === "mysql") try {
+			await knex.schema.alterTable(update.table, (table) => {
+				table.dropIndex([constraint.column], `${update.table}_${constraint.column}_foreign`);
+			});
+		} catch (err) {
+			logger.warn(`Couldn't clean up index for foreign key ${update.table}.${constraint.column}->${constraint.references}`);
+			logger.warn(err);
+		}
+		try {
+			await knex.schema.alterTable(update.table, (table) => {
+				table.foreign(constraint.column).references(constraint.references);
+			});
+		} catch (err) {
+			logger.warn(`Couldn't add foreign key to ${update.table}.${constraint.column}->${constraint.references}`);
+			logger.warn(err);
+		}
+	}
+}
+
+//#endregion
+export { down, up };

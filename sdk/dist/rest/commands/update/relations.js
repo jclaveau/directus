@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r,i)=>()=>(e(t,`Collection cannot be empty`),e(n,`Field cannot be empty`),{path:`/relations/${t}/${n}`,params:i??{},body:JSON.stringify(r),method:`PATCH`});export{t as updateRelation};
+//# sourceMappingURL=relations.js.map

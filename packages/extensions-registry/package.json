@@ -1,41 +1,41 @@
 {
-	"name": "@directus/extensions-registry",
-	"version": "3.0.7-jclaveau.2026-04-17-08-30-15",
-	"description": "Abstraction for exploring Directus extensions on a package registry",
-	"homepage": "https://directus.io",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/directus/directus.git",
-		"directory": "packages/extensions-registry"
-	},
-	"funding": "https://github.com/directus/directus?sponsor=1",
-	"license": "MIT",
-	"author": "Rijk van Zanten <rijkvanzanten@me.com>",
-	"type": "module",
-	"exports": {
-		".": "./dist/index.js",
-		"./package.json": "./package.json"
-	},
-	"main": "dist/index.js",
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsdown src/index.ts --dts",
-		"dev": "tsdown src/index.ts --dts --watch",
-		"test": "vitest --watch=false"
-	},
-	"dependencies": {
-		"@directus/errors": "workspace:*",
-		"@directus/extensions": "workspace:*",
-		"ky": "1.7.5",
-		"zod": "3.24.2"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "3.0.0",
-		"@vitest/coverage-v8": "2.1.9",
-		"tsdown": "catalog:",
-		"typescript": "5.8.2",
-		"vitest": "2.1.9"
-	}
+  "name": "@directus/extensions-registry",
+  "version": "3.0.7-jclaveau.2026-04-17-08-30-15",
+  "description": "Abstraction for exploring Directus extensions on a package registry",
+  "homepage": "https://directus.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/directus/directus.git",
+    "directory": "packages/extensions-registry"
+  },
+  "funding": "https://github.com/directus/directus?sponsor=1",
+  "license": "MIT",
+  "author": "Rijk van Zanten <rijkvanzanten@me.com>",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "ky": "1.7.5",
+    "zod": "3.24.2",
+    "@directus/errors": "2.0.2-jclaveau.2026-04-17-08-30-15",
+    "@directus/extensions": "3.0.24-jclaveau.2026-04-17-08-30-15"
+  },
+  "devDependencies": {
+    "@directus/tsconfig": "3.0.0",
+    "@vitest/coverage-v8": "2.1.9",
+    "tsdown": "0.15.11",
+    "typescript": "5.8.2",
+    "vitest": "2.1.9"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --dts",
+    "dev": "tsdown src/index.ts --dts --watch",
+    "test": "vitest --watch=false"
+  }
 }
