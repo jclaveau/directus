@@ -5,7 +5,7 @@ type ExtendedQuery<Schema, Item> = Query<Schema, Item> & {
 	groupBy?: (string | GroupByFields<Schema, Item>)[];
 };
 
-export const formatFields = (fields: (string | Record<string, any>)[]) => {
+export const formatFields = (fields: (string | Record<string, any>)[]): string[] => {
 	type FieldItem = (typeof fields)[number];
 
 	const walkFields = (value: FieldItem, chain: string[] = []): string | string[] => {
