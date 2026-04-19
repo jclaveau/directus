@@ -3,4 +3,5 @@
  * @param delay number in MS
  * @returns void
  */
-export const sleep = (delay: number): Promise<void> => new Promise<void>((resolve) => setTimeout(() => resolve(), delay));
+export const sleep = (delay: number): Promise<void> =>
+	new Promise<void>((resolve) => setTimeout(() => resolve(), delay));
