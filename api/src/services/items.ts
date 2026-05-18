@@ -125,7 +125,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		// We read the IDs of the items based on the query, and then run `updateMany`. `updateMany` does it's own
 		// permissions check for the keys, so we don't have to make this an authenticated read
-		const items = await itemsService.readByQuery(readQuery);
+		const items = await itemsService.readByQuery(readQuery, {
+			emitEvents: false,
+		});
+
 		return items.map((item: AnyItem) => item[primaryKeyField]).filter((pk) => pk);
 	}
 

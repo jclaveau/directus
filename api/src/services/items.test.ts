@@ -94,5 +94,22 @@ describe('Integration Tests', () => {
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
 		});
+
+		describe('getKeysByQuery', () => {
+			it('should not emit read events for the internal readByQuery lookup', async () => {
+				const readByQuerySpy = vi
+					.spyOn(ItemsService.prototype, 'readByQuery')
+					.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+
+				await service.getKeysByQuery({});
+
+				expect(readByQuerySpy).toHaveBeenCalledWith(
+					expect.anything(),
+					expect.objectContaining({ emitEvents: false }),
+				);
+
+				readByQuerySpy.mockRestore();
+			});
+		});
 	});
 });
