@@ -7,10 +7,29 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { collectionArtists } from './no-relation.seed';
 
+// Vendors where ItemsService.createMany emits a single multi-row INSERT … RETURNING (the
+// "reliable batch" path in api/src/services/items.ts). All other vendors fall through the
+// per-row loop and emit one INSERT per item. Both paths must produce the same observable
+// result (count, distinct PKs, fields round-trip, explicit PKs preserved) — only the
+// expected number of INSERT statements differs.
 const RETURNING_VENDORS = ['postgres', 'postgres10', 'cockroachdb', 'mssql', 'oracle'] as const satisfies readonly Vendor[];
-const returningVendors = vendors.filter((v) => (RETURNING_VENDORS as readonly Vendor[]).includes(v));
+
+function isReliableBatchVendor(vendor: Vendor): boolean {
+	return (RETURNING_VENDORS as readonly Vendor[]).includes(vendor);
+}
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// NOTE on response ordering: POST /items returns `data` via `service.readMany(savedKeys)` →
+// `WHERE id _in (savedKeys)` (api/src/services/items.ts readMany), with no ORDER BY tying
+// output rows to the input keys array. The DB returns rows in plan-dependent order — for
+// an IN-list lookup on a UUID PK that is alphabetical by id (index-scan order), NOT
+// insertion order. So response positions are not aligned with request positions; assert
+// via name/id lookup, not by index. (If we ever change `readMany` to preserve key order,
+// the lookup helper below still works.)
+function indexResponseByName<T extends { name: string }>(items: T[]): Map<string, T> {
+	return new Map(items.map((item) => [item.name, item]));
+}
 
 type Artist = {
 	id?: number | string;
@@ -49,12 +68,12 @@ async function fetchInsertQueriesForNonce(vendor: Vendor, nonce: string, collect
 	return data.filter((q) => q.sql.toLowerCase().includes(collection.toLowerCase()));
 }
 
-describe.each(PRIMARY_KEY_TYPES)('/items batch-insert (RETURNING vendors)', (pkType) => {
+describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 	const localCollectionArtists = `${collectionArtists}_${pkType}`;
 
 	describe(`pkType: ${pkType}`, () => {
-		describe('createMany returns N items with distinct PKs, input order preserved, fields round-trip', () => {
-			it.each(returningVendors)('%s', async (vendor) => {
+		describe('createMany returns N items with distinct PKs, fields round-trip', () => {
+			it.each(vendors)('%s', async (vendor) => {
 				const N = 5;
 				const nonce = randomUUID();
 				const artists = Array.from({ length: N }, (_, i) => buildArtist(pkType, i, nonce));
@@ -73,9 +92,13 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert (RETURNING vendors)', (pkT
 
 				expect(new Set(data.map((d) => d.id)).size).toBe(N);
 
-				for (let i = 0; i < N; i++) {
-					expect(data[i]!.name).toBe(artists[i]!.name);
-					expect(data[i]!.company).toBe(artists[i]!.company);
+				// Round-trip via name lookup (response order is NOT guaranteed; see header note)
+				const byName = indexResponseByName(data);
+
+				for (const artist of artists) {
+					const got = byName.get(artist.name);
+					expect(got, `missing inserted artist with name ${artist.name}`).toBeDefined();
+					expect(got!.company).toBe(artist.company);
 				}
 
 				for (const id of data.map((d) => d.id)) {
@@ -91,8 +114,10 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert (RETURNING vendors)', (pkT
 					}
 				}
 
+				// Query-count is the only branch: reliable vendors emit one multi-row INSERT,
+				// loop-bucket vendors emit one INSERT per row.
 				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
-				expect(inserts).toHaveLength(1);
+				expect(inserts).toHaveLength(isReliableBatchVendor(vendor) ? 1 : N);
 			});
 		});
 
@@ -101,15 +126,16 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert (RETURNING vendors)', (pkT
 		}
 
 		describe('createMany preserves explicit PKs and auto-generates the rest', () => {
-			it.each(returningVendors)('%s', async (vendor) => {
+			it.each(vendors)('%s', async (vendor) => {
+				const N = 5;
 				const nonce = randomUUID();
 				const explicitIndices = new Set([0, 2, 4]);
 
-				const artists: Artist[] = Array.from({ length: 5 }, (_, i) =>
+				const artists: Artist[] = Array.from({ length: N }, (_, i) =>
 					buildArtist(pkType, i, nonce, { explicitId: explicitIndices.has(i) }),
 				);
 
-				const explicitIds = [...explicitIndices].map((i) => artists[i]!.id!);
+				const explicitIds = new Set([...explicitIndices].map((i) => artists[i]!.id!));
 
 				await resetQueryCounter(vendor);
 
@@ -121,27 +147,30 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert (RETURNING vendors)', (pkT
 				expect(response.statusCode).toBe(200);
 
 				const data = response.body.data as Array<{ id: string; name: string; company: string }>;
-				expect(data).toHaveLength(5);
+				expect(data).toHaveLength(N);
 
+				const byName = indexResponseByName(data);
+
+				// Explicit PKs survive on the items that supplied them
 				for (const i of explicitIndices) {
-					expect(data[i]!.id).toBe(artists[i]!.id);
+					const got = byName.get(artists[i]!.name);
+					expect(got).toBeDefined();
+					expect(got!.id).toBe(artists[i]!.id);
 				}
 
+				// Auto-gen items got non-empty distinct ids not colliding with explicit ones
 				for (const i of [1, 3]) {
-					const id = data[i]!.id;
-					expect(typeof id).toBe('string');
-					expect(id.length).toBeGreaterThan(0);
-					expect(explicitIds).not.toContain(id);
+					const got = byName.get(artists[i]!.name);
+					expect(got).toBeDefined();
+					expect(typeof got!.id).toBe('string');
+					expect(got!.id.length).toBeGreaterThan(0);
+					expect(explicitIds.has(got!.id)).toBe(false);
 				}
 
-				expect(new Set(data.map((d) => d.id)).size).toBe(5);
-
-				for (let i = 0; i < 5; i++) {
-					expect(data[i]!.name).toBe(artists[i]!.name);
-				}
+				expect(new Set(data.map((d) => d.id)).size).toBe(N);
 
 				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
-				expect(inserts).toHaveLength(1);
+				expect(inserts).toHaveLength(isReliableBatchVendor(vendor) ? 1 : N);
 			});
 		});
 	});

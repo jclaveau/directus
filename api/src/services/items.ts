@@ -1,7 +1,8 @@
 import { Action } from '@directus/constants';
 import { useEnv } from '@directus/env';
-import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
+import { toBoolean } from '@directus/utils';
 import type {
 	Accountability,
 	Item as AnyItem,
@@ -9,16 +10,13 @@ import type {
 	PrimaryKey,
 	Query,
 	SchemaOverview,
-	JsonValue,
 } from '@directus/types';
-
-type Primitive = undefined | null | string | number | boolean | bigint | symbol; // Why isn't it exported from @directus/types?
 
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { assign, clone, cloneDeep, omit, pick, without, isEqual, reduce } from 'lodash-es';
+import { assign, clone, cloneDeep, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
-import { throwDatabaseError, translateDatabaseError } from '../database/errors/translate.js';
+import { throwDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
@@ -133,432 +131,16 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	}
 
 	/**
-	 * Create a single new item.
+	 * Create a single new item. Delegates to {@link createMany}.
 	 */
 	async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey> {
-		// TODO use createMany here
-
-		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
-
-		if (!opts.bypassLimits) {
-			opts.mutationTracker.trackMutations(1);
-		}
-
-		const { ActivityService } = await import('./activity.js');
-		const { RevisionsService } = await import('./revisions.js');
-
-		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
-
-		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
-			.filter((field) => field.alias === true)
-			.map((field) => field.field);
-
-		const payload: AnyItem = cloneDeep(data);
-		let actionHookPayload = payload;
-		const nestedActionEvents: ActionEventParams[] = [];
-
-		/**
-		 * By wrapping the logic in a transaction, we make sure we automatically roll back all the
-		 * changes in the DB if any of the parts contained within throws an error. This also means
-		 * that any errors thrown in any nested relational changes will bubble up and cancel the whole
-		 * update tree
-		 */
-		const primaryKey: PrimaryKey = await transaction(this.knex, async (trx) => {
-			// Run all hooks that are attached to this event so the end user has the chance to augment the
-			// item that is about to be saved
-			const payloadAfterHooks =
-				opts.emitEvents !== false
-					? await emitter.emitFilter(
-							this.eventScope === 'items'
-								? ['items.create', `${this.collection}.items.create`]
-								: `${this.eventScope}.create`,
-							payload,
-							{
-								collection: this.collection,
-							},
-							{
-								database: trx,
-								schema: this.schema,
-								accountability: this.accountability,
-							},
-					  )
-					: payload;
-
-			if (
-				payloadAfterHooks === null ||
-				typeof payloadAfterHooks === 'string' ||
-				typeof payloadAfterHooks === 'number'
-			) {
-				return payloadAfterHooks;
-			}
-
-			const payloadWithPresets = this.accountability
-				? await processPayload(
-						{
-							accountability: this.accountability,
-							action: 'create',
-							collection: this.collection,
-							payload: payloadAfterHooks,
-							nested: this.nested,
-						},
-						{
-							knex: trx,
-							schema: this.schema,
-						},
-				  )
-				: payloadAfterHooks;
-
-			if (opts.preMutationError) {
-				throw opts.preMutationError;
-			}
-
-			// Ensure the action hook payload has the post filter hook + preset changes
-			actionHookPayload = payloadWithPresets;
-
-			// We're creating new services instances so they can use the transaction as their Knex interface
-			const payloadService = new PayloadService(this.collection, {
-				accountability: this.accountability,
-				knex: trx,
-				schema: this.schema,
-				nested: this.nested,
-			});
-
-			const {
-				payload: payloadWithM2O,
-				revisions: revisionsM2O,
-				nestedActionEvents: nestedActionEventsM2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
-			} = await payloadService.processM2O(payloadWithPresets, opts);
-
-			const {
-				payload: payloadWithA2O,
-				revisions: revisionsA2O,
-				nestedActionEvents: nestedActionEventsA2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
-			} = await payloadService.processA2O(payloadWithM2O, opts);
-
-			const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
-			const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
-
-			// The primary key can already exist in the payload.
-			// In case of manual string / UUID primary keys it's always provided at this point.
-			// In case of an (big) integer primary key, it might be provided as the user can specify the value manually.
-			let primaryKey: undefined | PrimaryKey = payloadWithTypeCasting[primaryKeyField];
-
-			if (primaryKey) {
-				validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
-			}
-
-			// If a PK of type number was provided, although the PK is set the auto_increment,
-			// depending on the database, the sequence might need to be reset to protect future PK collisions.
-			let autoIncrementSequenceNeedsToBeReset = false;
-
-			const pkField = this.schema.collections[this.collection]!.fields[primaryKeyField];
-
-			if (
-				primaryKey &&
-				pkField &&
-				!opts.bypassAutoIncrementSequenceReset &&
-				['integer', 'bigInteger'].includes(pkField.type) &&
-				pkField.defaultValue === 'AUTO_INCREMENT'
-			) {
-				autoIncrementSequenceNeedsToBeReset = true;
-			}
-
-			try {
-
-				let dbQuery = trx
-					.insert(payloadWithoutAliases)
-					.into(this.collection)
-					.returning(primaryKeyField)
-					.then((result) => result[0]);
-
-				dbQuery = (await emitter.emitFilter(
-					['items.db.insert', `${this.collection}.db.insert`],
-					dbQuery,
-					{
-						collection: this.collection,
-						payload,
-						// payloadWithoutAliases,
-					},
-					{
-						database: trx,
-						schema: this.schema,
-						accountability: this.accountability,
-					},
-				)) as unknown as typeof dbQuery // TODO: fix emitFilter typing
-
-				const result = await dbQuery;
-
-				const filteredResult = (await emitter.emitFilter(
-					['items.db.inserted', `${this.collection}.db.inserted`],
-					result,
-					{
-						collection: this.collection,
-						payload,
-					},
-					{
-						database: trx,
-						schema: this.schema,
-						accountability: this.accountability,
-					},
-				))
-
-				const returnedKey = typeof filteredResult === 'object'
-					? filteredResult[primaryKeyField]
-					: filteredResult;
-
-				if (pkField!.type === 'uuid') {
-					primaryKey = getHelpers(trx).schema.formatUUID(primaryKey ?? returnedKey);
-				} else {
-					primaryKey = primaryKey ?? returnedKey;
-				}
-			} catch (err: any) {
-				// console.log('createOne(): Sql error', {
-				// 	err,
-				// 	data,
-				// })
-
-				const dbError = await translateDatabaseError(err, data);
-
-				if (isDirectusError(dbError, ErrorCode.RecordNotUnique) && dbError.extensions.primaryKey) {
-					// This is a MySQL specific thing we need to handle here, since MySQL does not return the field name
-					// if the unique constraint is the primary key
-					dbError.extensions.field = pkField?.field ?? null;
-
-					delete dbError.extensions.primaryKey;
-				}
-
-				if (dbError) {
-					throw dbError;
-				}
-			}
-
-			// Most database support returning, those who don't tend to return the PK anyways
-			// (MySQL/SQLite). In case the primary key isn't know yet, we'll do a best-attempt at
-			// fetching it based on the last inserted row
-			if (!primaryKey) {
-				// Fetching it with max should be safe, as we're in the context of the current transaction
-				const result = await trx.max(primaryKeyField, { as: 'id' }).from(this.collection).first();
-				primaryKey = result.id;
-
-				// Set the primary key on the input item, in order for the "after" event hook to be able
-				// to read from it
-				actionHookPayload[primaryKeyField] = primaryKey;
-			}
-
-			// At this point, the primary key is guaranteed to be set.
-			primaryKey = primaryKey as PrimaryKey;
-
-			const {
-				revisions: revisionsO2M,
-				nestedActionEvents: nestedActionEventsO2M,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
-			} = await payloadService.processO2M(payloadWithPresets, primaryKey, opts);
-
-			nestedActionEvents.push(...nestedActionEventsM2O);
-			nestedActionEvents.push(...nestedActionEventsA2O);
-			nestedActionEvents.push(...nestedActionEventsO2M);
-
-			const userIntegrityCheckFlags =
-				(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) |
-				userIntegrityCheckFlagsM2O |
-				userIntegrityCheckFlagsA2O |
-				userIntegrityCheckFlagsO2M;
-
-			if (userIntegrityCheckFlags) {
-				if (opts.onRequireUserIntegrityCheck) {
-					opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-				} else {
-					await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex: trx });
-				}
-			}
-
-			// If this is an authenticated action, and accountability tracking is enabled, save activity row
-			if (this.accountability && this.schema.collections[this.collection]!.accountability !== null) {
-				const activityService = new ActivityService({
-					knex: trx,
-					schema: this.schema,
-				});
-
-				const activity = await activityService.createOne({
-					action: Action.CREATE,
-					user: this.accountability!.user,
-					collection: this.collection,
-					ip: this.accountability!.ip,
-					user_agent: this.accountability!.userAgent,
-					origin: this.accountability!.origin,
-					item: primaryKey,
-				});
-
-				// If revisions are tracked, create revisions record
-				if (this.schema.collections[this.collection]!.accountability === 'all') {
-					const revisionsService = new RevisionsService({
-						knex: trx,
-						schema: this.schema,
-					});
-
-					const revisionDelta = await payloadService.prepareDelta(payloadAfterHooks);
-
-					const revision = await revisionsService.createOne({
-						activity: activity,
-						collection: this.collection,
-						item: primaryKey,
-						data: revisionDelta,
-						delta: revisionDelta,
-					});
-
-					// Make sure to set the parent field of the child-revision rows
-					const childrenRevisions = [...revisionsM2O, ...revisionsA2O, ...revisionsO2M];
-
-					if (childrenRevisions.length > 0) {
-						await revisionsService.updateMany(childrenRevisions, { parent: revision });
-					}
-
-					if (opts.onRevisionCreate) {
-						opts.onRevisionCreate(revision);
-					}
-				}
-			}
-
-			if (autoIncrementSequenceNeedsToBeReset) {
-				await getHelpers(trx).sequence.resetAutoIncrementSequence(this.collection, primaryKeyField);
-			}
-
-			return primaryKey;
-		});
-
-		if (opts.emitEvents !== false) {
-			const actionEvent = {
-				event:
-					this.eventScope === 'items'
-						? ['items.create', `${this.collection}.items.create`]
-						: `${this.eventScope}.create`,
-				meta: {
-					payload: actionHookPayload,
-					key: primaryKey,
-					collection: this.collection,
-				},
-				context: {
-					database: getDatabase(),
-					schema: this.schema,
-					accountability: this.accountability,
-				},
-			};
-
-			if (opts.bypassEmitAction) {
-				await opts.bypassEmitAction(actionEvent);
-			} else {
-				await emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context);
-			}
-
-			for (const nestedActionEvent of nestedActionEvents) {
-				if (opts.bypassEmitAction) {
-					await opts.bypassEmitAction(nestedActionEvent);
-				} else {
-					await emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
-		}
-
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
-		}
-
-		return primaryKey;
+		const [primaryKey] = await this.createMany([data], opts);
+		return primaryKey as PrimaryKey;
 	}
 
-	/**
-	 * Create multiple new items at once. Inserts all provided records sequentially wrapped in a transaction.
-	 *
-	 * Uses `this.createOne` under the hood.
-	 */
+
 	async createMany(
 		data: Partial<Item>[],
-		opts: MutationOptions = {}
-	): Promise<PrimaryKey[]> {
-		return await this.createManyAtOnce(data, opts);
-		// if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
-
-		// const { primaryKeys, nestedActionEvents } = await transaction(this.knex, async (knex) => {
-		// 	const service = this.fork({ knex });
-
-		// 	let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
-
-		// 	const primaryKeys: PrimaryKey[] = [];
-		// 	const nestedActionEvents: ActionEventParams[] = [];
-
-		// 	const pkField = this.schema.collections[this.collection]!.primary;
-
-		// 	for (const [index, payload] of data.entries()) {
-		// 		let bypassAutoIncrementSequenceReset = true;
-
-		// 		// the auto_increment sequence needs to be reset if the current item contains a manual PK and
-		// 		// if it's the last item of the batch or if the next item doesn't include a PK and hence one needs to be generated
-		// 		if (payload[pkField] && (index === data.length - 1 || !data[index + 1]?.[pkField])) {
-		// 			bypassAutoIncrementSequenceReset = false;
-		// 		}
-
-		// 		const primaryKey = await service.createOne(payload, {
-		// 			...(opts || {}),
-		// 			autoPurgeCache: false,
-		// 			onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-		// 			bypassEmitAction: (params) => nestedActionEvents.push(params),
-		// 			mutationTracker: opts.mutationTracker,
-		// 			bypassAutoIncrementSequenceReset,
-		// 		});
-
-		// 		primaryKeys.push(primaryKey);
-		// 	}
-
-		// 	if (userIntegrityCheckFlags) {
-		// 		if (opts.onRequireUserIntegrityCheck) {
-		// 			opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-		// 		} else {
-		// 			await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex });
-		// 		}
-		// 	}
-
-		// 	return { primaryKeys, nestedActionEvents };
-		// });
-
-		// if (opts.emitEvents !== false) {
-		// 	for (const nestedActionEvent of nestedActionEvents) {
-		// 		if (opts.bypassEmitAction) {
-		// 			await opts.bypassEmitAction(nestedActionEvent);
-		// 		} else {
-		// 			await emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-		// 		}
-		// 	}
-		// }
-
-		// if (shouldClearCache(this.cache, opts, this.collection)) {
-		// 	await this.cache.clear();
-		// }
-
-		// return primaryKeys;
-	}
-
-
-	isMariaDbStore: boolean | undefined
-	async isMariaDb() {
-		if (this.isMariaDbStore !== undefined) {
-			return this.isMariaDbStore
-		}
-
-		const { version } = await this.knex
-		.select(this.knex.raw('VERSION() as version'))
-		.first();
-
-		const isMariaDb = version.split('-').includes('MariaDB');
-		return this.isMariaDbStore = isMariaDb
-	}
-
-
-	async createManyAtOnce<T extends AnyItem>(
-		this: ItemsService,
-		data: Partial<T>[],
 		opts: MutationOptions = {}
 	): Promise<PrimaryKey[]> {
 		if (data.length === 0) {
@@ -789,22 +371,66 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 
 			try {
-				let dbQuery = trx
-				.batchInsert<Exclude<ItemValues, number | string>['payloadWithoutAliases']>(
-					this.collection,
-					itemsToInsert.map((v) => {
-						return {
-							...sqliteFieldsRequiringValue,
-							...v.payloadWithoutAliases
-						}
-					})
-				)
-				.returning(primaryKeyField)
+				const client = this.knex.client.config.client
 
+				const reliable =
+					['pg', 'cockroachdb', 'oracledb'].includes(client)
+					|| (client === 'mssql' && toBoolean(env['DB_MSSQL_TRUST_BATCH_RETURNING']))
 
-				dbQuery = (await emitter.emitFilter(
-					['items.db.insert', `${this.collection}.db.insert`],
-					dbQuery,
+				const rowsToInsert = itemsToInsert.map((v) => {
+					return {
+						...sqliteFieldsRequiringValue,
+						...v.payloadWithoutAliases,
+					}
+				})
+
+				let insertedRows: Record<string, unknown>[]
+
+				if (reliable) {
+					const chunkSize = Number(env['DB_BATCH_INSERT_CHUNK_SIZE'] ?? 1000)
+
+					let dbQuery = trx
+					.batchInsert<Exclude<ItemValues, number | string>['payloadWithoutAliases']>(
+						this.collection,
+						rowsToInsert,
+						chunkSize,
+					)
+					.returning(primaryKeyField)
+
+					dbQuery = (await emitter.emitFilter(
+						['items.db.insert', `${this.collection}.db.insert`],
+						dbQuery,
+						{
+							collection: this.collection,
+							payload: data,
+						},
+						{
+							database: trx,
+							schema: this.schema,
+							accountability: this.accountability,
+						},
+					)) as unknown as typeof dbQuery // TODO: fix emitFilter typing
+
+					insertedRows = await dbQuery as Record<string, unknown>[]
+				}
+				else {
+					insertedRows = []
+
+					for (const row of rowsToInsert) {
+						const result = await trx.insert(row).into(this.collection).returning(primaryKeyField)
+						insertedRows.push(result[0] as Record<string, unknown>)
+					}
+				}
+
+				if (insertedRows.length !== itemsToInsert.length) {
+					throw new Error(
+						`Insert returned ${insertedRows.length} rows but expected ${itemsToInsert.length}`,
+					)
+				}
+
+				const filteredResult = (await emitter.emitFilter(
+					['items.db.inserted', `${this.collection}.db.inserted`],
+					insertedRows,
 					{
 						collection: this.collection,
 						payload: data,
@@ -814,342 +440,33 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						schema: this.schema,
 						accountability: this.accountability,
 					},
-				)) as unknown as typeof dbQuery // TODO: fix emitFilter typing
+				))
 
-				const results = await dbQuery;
+				filteredResult.forEach((result, index) => {
+					const preparedValues = itemsToInsert[index]
 
-				// MySQL, MariaDB and Sqlite will only return the id of the last item
-				if (results.length === itemsToInsert.length) {
-
-					const filteredResult = (await emitter.emitFilter(
-						['items.db.inserted', `${this.collection}.db.inserted`],
-						results,
-						{
-							collection: this.collection,
-							payload: data,
-						},
-						{
-							database: trx,
-							schema: this.schema,
-							accountability: this.accountability,
-						},
-					))
-
-
-					filteredResult.forEach((result, index) => {
-						const preparedValues = itemsToInsert[index]
-
-						if (! preparedValues) {
-							throw new Error(`No batchInsert itemInput found for index ${index}`) // Should never happend
-						}
-
-						// TODO .returning(primaryKeyField) should avoid this case
-						const returnedKey = typeof result === `object` ? result[primaryKeyField] : result
-
-						if (this.schema.collections[this.collection]!.fields[primaryKeyField]!.type === `uuid`) {
-							preparedValues.primaryKey = getHelpers(trx).schema.formatUUID(
-								(preparedValues.primaryKey ?? returnedKey) as string
-							)
-						}
-						else {
-							preparedValues.primaryKey = preparedValues.primaryKey ?? returnedKey
-						}
-					})
-				}
-				else {
-					// Most database support returning, those who don't tend to return the PK anyways
-					// (MySQL/SQLite). In case the primary key isn't know yet, we'll do a best-attempt at
-					// fetching it based on the last inserted row
-
-
-					// Fetching it with max should be safe, as we're in the context of the current transaction
-					// const result = await trx.max(primaryKeyField, { as: `id` })
-					// .first()
-					// primaryKey = result.id
-
-					// const inputKeys = Object.keys(itemsToInsert[0]!.payloadWithoutAliases)
-					const inputKeys = [...new Set(itemsToInsert.map(item => {
-						return Object.keys(item.payloadWithoutAliases)
-					}).flat())].sort()
-
-					const itemsToInsertWithoutPk = itemsToInsert.filter((item) => {
-						return item.primaryKey === undefined
-					})
-
-					const itemsToInsertWithPk = itemsToInsert.filter((item) => {
-						return item.primaryKey !== undefined && item.primaryKey !== null
-					})
-
-					// https://www.geeksforgeeks.org/sql/sql-query-to-get-the-latest-record-from-the-table/
-					const lastRows = await trx.select(primaryKeyField, ...inputKeys)
-					.from(this.collection)
-					.orderBy(primaryKeyField, 'desc')
-					.limit(itemsToInsertWithoutPk.length)
-
-					// If some primary keys are given in the inputs and do not belong to the lastAddedRows (as ordered by id):
-					// - It's not an issue because they are already set in itemsToInsert
-					// - We need to jump them
-
-
-					// TODO what if the id is specified but within the lastAddedRows?
-					// console.log('!!!!! fetching missing pks', JSON.stringify({
-					// 	itemsToInsert,
-					// 	results,
-					// 	lastAddedRows,
-					// 	inputKeys,
-					// 	// fieldTypes: collectionSchema.fields,
-					// 	fieldTypes: Object.fromEntries( Object.entries(collectionSchema.fields).map(([fieldName, field]) => [fieldName, field.type])),
-					// }, null, 2))
-
-					const pkInInput = itemsToInsertWithPk.map(item => item.primaryKey)
-
-					const lastAddedRows = lastRows.filter((addedRow) => {
-						// If a fetched item already has an item, skip it as its order in the input may mismatch the fetched order (-by primary key)
-						return ! pkInInput.includes(addedRow[primaryKeyField])
-					})
-
-
-
-					// TODO should this filter be before the fake .returning() behavior?
-					const filteredLastAddedRows = (await emitter.emitFilter(
-						['items.db.inserted', `${this.collection}.db.inserted`],
-						lastAddedRows,
-						{
-							collection: this.collection,
-							payload: data,
-						},
-						{
-							database: trx,
-							schema: this.schema,
-							accountability: this.accountability,
-						},
-					))
-
-
-					// const collectionSchema = this.schema.collections[this.collection]!.fields[primaryKeyField]!.type === `uuid`
-
-					const emptyItemInput = Object.fromEntries(inputKeys.map(key => [key, undefined]))
-
-					const isMariaDb = await this.isMariaDb()
-
-					filteredLastAddedRows.map((addedRow, index) => {
-						const itemIndex = itemsToInsertWithoutPk.length - 1 - index
-						const item = itemsToInsertWithoutPk[itemIndex]
-
-						if (item === undefined) {
-							throw new Error(`Missing item to insert at ${itemIndex} during primary keys attribution for MySql / MariaDB / SQlite`) // should never happend
-						}
-
-						// The following check is overkill in production and may be replaced by proper testing
-						// but it helped to ensure the Sqlite / MySQL / MariaDB work (even if I don't use them)
-						// TODO
-						// - Finish MySQL / Sqlite / MarioaDB support
-						// - TEST
-						//   - SQL DEFAULT
-						//   - All the field types
-						//   - pks in input with values OUTSIDE the select
-						//   - pks in input with values INSIDE the select
-
-						if (! [
-							// TODO replace this condition by develop env?
-							'mssql',
-							// 'sqlite3'
-						].includes(this.knex.client.config.client)) {
-							const sqlifyEntries = <T extends Record<string, Primitive | Date>>(input: T) => {
-								const entries = Object.entries(input)
-
-								type SqlValue = string | number | null | JsonValue | Date
-
-								const castedEntries = entries.reduce((acc, entry) => {
-									const field = collectionSchema?.fields[entry[0]]
-
-									if (! field) {
-										throw new Error(`Field ${entry[0]} missing in the schema of the collection ${this.collection}`)
-									}
-
-									let value: SqlValue
-
-									if (entry[1] === null || entry[1] === undefined) {
-										// This must not be in the if else block as default values are not sql ones
-										// e.g: default value can be "true" which must be casted as "1"
-										entry[1] = field.defaultValue
-									}
-
-									if (entry[1] === null || entry[1] === undefined) {
-										value = null
-									}
-									else if ('boolean' === field.type) {
-										if (entry[1] === true) {
-											value = 1
-										}
-										else if (entry[1] === false) {
-											value = 0
-										}
-										else {
-											throw new Error(`Invalid valid for boolean input: ${JSON.stringify(entry[1])}`)
-										}
-									}
-									else if ([
-										'string', 'text',
-										'csv',
-										'uuid',
-										'time', // e.g. 00:00:00
-									].includes(field.type)) {
-										value = entry[1].toString()
-									}
-									else if ([
-										'json',
-									].includes(field.type)) {
-										if (typeof entry[1] === 'string') {
-											// TODO is it normal Json entries are not automatically parsed with MariaDb?
-											value = isMariaDb ? entry[1] : JSON.parse(entry[1])
-										}
-										else {
-											throw new Error(`Bad input value for JSON field: ${String(entry[1])}`)
-										}
-									}
-									else if ([
-										'timestamp',
-										'date', 'dateTime',
-									].includes(field.type)) {
-										if (entry[1] instanceof Date) {
-											if ( field.type === "timestamp"
-												|| field.type === "dateTime"
-											) {
-												if (isMariaDb) {
-													value = new Date( Math.floor(entry[1].getTime() / 1000) * 1000) // Flooring to seconds for MariaDb
-												}
-												else {
-													value = new Date( Math.round(entry[1].getTime() / 1000) * 1000) // Rounding to seconds for Mysql
-												}
-											}
-											else if (field.type === "date") {
-												value = new Date(entry[1])
-												value.setHours(0, 0, 0, 0)
-											}
-											else {
-												// TODO throw error ?
-												value = entry[1]
-											}
-										}
-										else {
-											throw new Error(`Unimplemented support for date/time input '${entry[0]}' having schema type '${field.type}' and value type ${typeof entry[1]}`)
-										}
-									}
-									else if ([
-										'integer', // example: primary key
-										'float',
-										'bigInteger',
-									].includes(field.type)) {
-										value = Number(entry[1])
-									}
-									else if ([
-										'decimal',
-									].includes(field.type)) {
-										value = Number(entry[1]).toFixed(5)
-									}
-									else if (field.type === "alias") {
-										throw new Error('Alias fields should already be removed here') //  as input is based on payloadWithoutAliases
-									}
-									else {
-										// console.log('!!!!! fetching missing pks', JSON.stringify({
-										// 	itemsToInsert,
-										// 	results,
-										// 	lastAddedRows,
-										// 	inputKeys,
-										// 	// fieldTypes: collectionSchema.fields,
-										// 	fieldTypes: Object.fromEntries( Object.entries(collectionSchema.fields).map(([fieldName, field]) => [fieldName, field.type])),
-										// 	fieldDefaults: Object.fromEntries( Object.entries(collectionSchema.fields).map(([fieldName, field]) => [fieldName, field.defaultValue])),
-										// }, null, 2))
-
-										throw new Error(`Unimplemented support for input entry '${entry[0]}' having schema type '${field.type}' and value type ${typeof entry[1]}`)
-									}
-
-									return [
-										...acc,
-										[
-											entry[0],
-											value,
-										] as [string, SqlValue], // "as" avoids type conversion to SqlValue[]
-									]
-								}, [] as [string, SqlValue][])
-
-								return Object.fromEntries(castedEntries) as Record<keyof T, SqlValue>
-							}
-
-
-							const sqlifiedItemInput = sqlifyEntries({
-								[primaryKeyField]: addedRow[primaryKeyField],
-								...emptyItemInput,
-								...item.payloadWithoutAliases,
-							})
-
-							if (! isEqual(sqlifiedItemInput, addedRow)) {
-
-								function objectDiff(obj1: Record<string, unknown>, obj2: Record<string, unknown>) {
-									return reduce(obj1, (result, value, key) => {
-										if (! isEqual(value, obj2[key])) {
-											result[key] = { new: obj2[key], old: value };
-										}
-
-										return result;
-									}, {} as Record<string, unknown>);
-								}
-
-								// console.log('!!!!! fetching missing pks', JSON.stringify({
-								// 	// itemsToInsert,
-								// 	itemsInputToInsert: itemsToInsert.map(i => i.payloadWithoutAliases),
-								// 	results,
-								// 	lastAddedRows,
-								// 	inputKeys,
-								// 	fieldTypes: Object.fromEntries( Object.entries(collectionSchema.fields).map(([fieldName, field]) => [fieldName, field.type])),
-								// 	fieldDefaults: Object.fromEntries( Object.entries(collectionSchema.fields).map(([fieldName, field]) => [fieldName, field.defaultValue])),
-								// }, null, 2))
-
-								throw new Error(
-									`Invalid primary key assignment of added row ${JSON.stringify(addedRow, null, 2)}`
-									+ ` to inserted item ${JSON.stringify(sqlifiedItemInput, null, 2)}`
-									+ ` differing by ${JSON.stringify(objectDiff(sqlifiedItemInput, addedRow), null, 2)}`
-								)
-							}
-						}
-					})
-
-					filteredLastAddedRows.forEach((addedRow, index) => {
-						const itemIndex = itemsToInsertWithoutPk.length - 1 - index
-						const item = itemsToInsertWithoutPk[itemIndex]
-
-						if (item === undefined) {
-							throw new Error(`Missing item to insert at ${itemIndex} during primary keys attribution for MySql / MariaDB / SQlite`) // should never happend
-						}
-
-						item.primaryKey = addedRow.id
-
-						// Set the primary key on the input item, in order for the "after" event hook to be able
-						// to read from it
-						item.payloadWithoutAliases[primaryKeyField] = item.primaryKey
-						item.actionHookPayload[primaryKeyField] = item.primaryKey
-					})
-
-
-					const insertedItemsWithoutPk = itemsToInsert.filter((item) => {
-						return item.primaryKey === undefined
-					})
-
-					if (insertedItemsWithoutPk.length !== 0) {
-						throw new Error(`Remaining inserted items with no primary key: ${JSON.stringify(insertedItemsWithoutPk, null, 2)}`)
+					if (! preparedValues) {
+						throw new Error(`No insert itemInput found for index ${index}`) // Should never happen
 					}
-				}
+
+					const returnedKey = typeof result === `object` && result !== null
+						? (result as Record<string, unknown>)[primaryKeyField]
+						: result
+
+					if (this.schema.collections[this.collection]!.fields[primaryKeyField]!.type === `uuid`) {
+						preparedValues.primaryKey = getHelpers(trx).schema.formatUUID(
+							(preparedValues.primaryKey ?? returnedKey) as string
+						)
+					}
+					else {
+						preparedValues.primaryKey = (preparedValues.primaryKey ?? returnedKey) as PrimaryKey
+					}
+				})
 			}
 			catch (err: any) {
-				// console.log('Sql error', {
-				// 	err,
-				// 	data,
-				// 	sqliteFieldsRequiringValue
-				// })
-
 				await throwDatabaseError(err, data)
 			}
+
 
 
 			// TODO should Promise.allSettled be replaced by a slower sequential await?
@@ -1450,6 +767,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			{ ast, action: 'read', accountability: this.accountability },
 			{ knex: this.knex, schema: this.schema },
 		);
+
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
