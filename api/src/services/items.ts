@@ -387,7 +387,23 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			try {
 				const client = this.knex.client.config.client;
 
-				const reliable =
+				// MariaDB ≥ 10.5 natively supports INSERT ... RETURNING, but knex's mysql/mysql2
+				// compiler silently drops `.returning()` for both MySQL and MariaDB. So even on
+				// MariaDB we fall through to the loop branch below. Tracked upstream — fix once
+				// knex/knex#4572 lands (or a dedicated `mariadb` dialect is added).
+				//
+				// MSSQL: opt-in via DB_MSSQL_TRUST_BATCH_RETURNING. Microsoft says OUTPUT row
+				// order isn't guaranteed (https://learn.microsoft.com/sql/t-sql/queries/output-clause-transact-sql);
+				// knex emits `OUTPUT INSERTED.<col> INTO #out; SELECT … FROM #out` with no
+				// ORDER BY (https://github.com/knex/knex/blob/3.2.10/lib/dialects/mssql/query/mssql-querycompiler.js#L358-L381).
+				// Empirically it stays insertion-ordered because OUTPUT into a table variable
+				// forces a serial plan, but that's not contractual. knex's docs list MSSQL as
+				// fully supported and warn only about triggers, silent on ordering
+				// (https://knexjs.org/guide/query-builder.html#returning) — hence the flag:
+				// knex says trust, Microsoft says don't. No SQL Server version, compat level,
+				// trace flag, or `OUTPUT ORDERED` clause unlocks a guarantee; only a knex-side
+				// row-number passthrough would.
+				const dbReturnsInsertIds =
 					['pg', 'cockroachdb', 'oracledb'].includes(client) ||
 					(client === 'mssql' && toBoolean(env['DB_MSSQL_TRUST_BATCH_RETURNING'])) ||
 					(client === 'sqlite3' && (await sqliteSupportsReturning(trx)));
@@ -401,7 +417,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 				let insertedRows: Record<string, unknown>[];
 
-				if (reliable) {
+				if (dbReturnsInsertIds) {
 					// When DB_BATCH_INSERT_CHUNK_SIZE is unset we pass `undefined` so knex falls
 					// back to its own default (currently 1000 rows per INSERT statement).
 					// https://knexjs.org/guide/query-builder.html#batchinsert
