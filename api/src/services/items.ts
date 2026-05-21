@@ -26,6 +26,7 @@ import { processPayload } from '../permissions/modules/process-payload/process-p
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import type { AbstractService, AbstractServiceOptions, ActionEventParams, MutationOptions } from '../types/index.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+import { isNotPrimaryKey, isPrimaryKey } from '../utils/is-primary-key.js';
 import { transaction } from '../utils/transaction.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { UserIntegrityCheckFlag, validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
@@ -156,15 +157,6 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
-
-		// TODO move it to a lib
-		const isPrimaryKey = (it: unknown): it is PrimaryKey => {
-			return typeof it === 'number' || typeof it === 'string';
-		};
-
-		const isNotPrimaryKey = <T>(it: T): it is T extends PrimaryKey ? never : T => {
-			return !isPrimaryKey(it);
-		};
 
 		// By wrapping the logic in a transaction, we make sure we automatically roll back all the
 		// changes in the DB if any of the parts contained within throws an error. This also means
