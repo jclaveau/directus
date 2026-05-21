@@ -22,6 +22,7 @@
 		"get-port": "7.1.0",
 		"globby": "14.1.0",
 		"graphql-ws": "5.16.2",
+		"ioredis": "5.5.0",
 		"js-yaml": "4.1.0",
 		"json-to-graphql-query": "2.3.0",
 		"knex": "3.1.0",

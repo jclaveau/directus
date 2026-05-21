@@ -36,7 +36,7 @@ export async function requestGraphQL(
 }
 
 export function createWebSocketConn(host: string, config?: WebSocketOptions) {
-	const defaults = { waitTimeout: 5000 };
+	const defaults = { waitTimeout: 15000 };
 	const parsedHost = host.split('//').slice(1).join('/');
 
 	const conn = new WebSocket(
@@ -246,7 +246,7 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 }
 
 export function createWebSocketGql(host: string, config?: WebSocketOptionsGql) {
-	const defaults = { waitTimeout: 5000 };
+	const defaults = { waitTimeout: 15000 };
 	const parsedHost = host.split('//').slice(1).join('/');
 	let conn: WebSocket | null;
 	let isConnReady = false;
