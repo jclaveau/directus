@@ -2,7 +2,6 @@ import { Action } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
-import { toBoolean } from '@directus/utils';
 import type {
 	Accountability,
 	Item as AnyItem,
@@ -33,28 +32,6 @@ import { UserIntegrityCheckFlag, validateUserCountIntegrity } from '../utils/val
 import { PayloadService } from './payload.js';
 
 const env = useEnv();
-
-// SQLite gained `INSERT … RETURNING` in 3.35.0 (2021-03-12). Below that version the only
-// id available after an insert is `last_insert_rowid()` (the last item only), so the
-// batch path can't be trusted. We probe the runtime version once per knex client.
-// https://www.sqlite.org/lang_returning.html
-const SQLITE_RETURNING_MIN_VERSION: [number, number] = [3, 35];
-const sqliteReturningSupportCache = new WeakMap<object, boolean>();
-
-async function sqliteSupportsReturning(trx: Knex): Promise<boolean> {
-	const clientKey = trx.client as object;
-	const cached = sqliteReturningSupportCache.get(clientKey);
-	if (cached !== undefined) return cached;
-
-	const row = await trx.select(trx.raw('sqlite_version() as version')).first<{ version?: string }>();
-	const versionStr = String(row?.version ?? '0');
-	const [major = 0, minor = 0] = versionStr.split('.').map(Number);
-	const [minMajor, minMinor] = SQLITE_RETURNING_MIN_VERSION;
-	const supports = major > minMajor || (major === minMajor && minor >= minMinor);
-
-	sqliteReturningSupportCache.set(clientKey, supports);
-	return supports;
-}
 
 export type QueryOptions = {
 	stripNonRequested?: boolean;
@@ -385,28 +362,12 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				: {};
 
 			try {
-				const client = this.knex.client.config.client;
-
-				// MariaDB ≥ 10.5 natively supports INSERT ... RETURNING, but knex's mysql/mysql2
-				// compiler silently drops `.returning()` for both MySQL and MariaDB. So even on
-				// MariaDB we fall through to the loop branch below. Tracked upstream — fix once
-				// knex/knex#4572 lands (or a dedicated `mariadb` dialect is added).
-				//
-				// MSSQL: opt-in via DB_MSSQL_TRUST_BATCH_RETURNING. Microsoft says OUTPUT row
-				// order isn't guaranteed (https://learn.microsoft.com/sql/t-sql/queries/output-clause-transact-sql);
-				// knex emits `OUTPUT INSERTED.<col> INTO #out; SELECT … FROM #out` with no
-				// ORDER BY (https://github.com/knex/knex/blob/3.2.10/lib/dialects/mssql/query/mssql-querycompiler.js#L358-L381).
-				// Empirically it stays insertion-ordered because OUTPUT into a table variable
-				// forces a serial plan, but that's not contractual. knex's docs list MSSQL as
-				// fully supported and warn only about triggers, silent on ordering
-				// (https://knexjs.org/guide/query-builder.html#returning) — hence the flag:
-				// knex says trust, Microsoft says don't. No SQL Server version, compat level,
-				// trace flag, or `OUTPUT ORDERED` clause unlocks a guarantee; only a knex-side
-				// row-number passthrough would.
-				const dbReturnsInsertIds =
-					['pg', 'cockroachdb', 'oracledb'].includes(client) ||
-					(client === 'mssql' && toBoolean(env['DB_MSSQL_TRUST_BATCH_RETURNING'])) ||
-					(client === 'sqlite3' && (await sqliteSupportsReturning(trx)));
+				// "Does INSERT … RETURNING (or equivalent) preserve insertion order on this
+				// dialect?" — answered per-dialect in api/src/database/helpers/capabilities/dialects/*.
+				// Notably, MariaDB ≥ 10.5 supports INSERT … RETURNING but knex's mysql compiler
+				// silently drops .returning() for both MySQL and MariaDB (tracked upstream at
+				// knex/knex#4572), so MariaDB stays in the loop bucket regardless of server version.
+				const dbReturnsInsertIds = await getHelpers(trx).capabilities.preservesInsertOrderInReturning();
 
 				const rowsToInsert = itemsToInsert.map((v) => {
 					return {

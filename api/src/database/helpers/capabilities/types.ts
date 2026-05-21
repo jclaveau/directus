@@ -14,4 +14,17 @@ export class CapabilitiesHelper extends DatabaseHelper {
 	supportsDeduplicationOfParameters(): boolean {
 		return true;
 	}
+
+	/**
+	 * Whether INSERT … RETURNING (or the dialect equivalent like MSSQL's OUTPUT clause)
+	 * yields rows in insertion order with a contractual guarantee. When true, ItemsService
+	 * can use a single multi-row INSERT and map the returned PKs back to the input array
+	 * positionally; when false, it must fall back to a per-row insert loop.
+	 *
+	 * Default: false (the conservative answer). Override in dialects where the underlying
+	 * RETURNING semantics — and the knex driver path emitting them — both preserve order.
+	 */
+	async preservesInsertOrderInReturning(): Promise<boolean> {
+		return false;
+	}
 }
