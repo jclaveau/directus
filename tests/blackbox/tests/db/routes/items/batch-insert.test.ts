@@ -12,7 +12,13 @@ import { collectionArtists } from './no-relation.seed';
 // per-row loop and emit one INSERT per item. Both paths must produce the same observable
 // result (count, distinct PKs, fields round-trip, explicit PKs preserved) — only the
 // expected number of INSERT statements differs.
-const RETURNING_VENDORS = ['postgres', 'postgres10', 'cockroachdb', 'mssql', 'oracle'] as const satisfies readonly Vendor[];
+const RETURNING_VENDORS = [
+	'postgres',
+	'postgres10',
+	'cockroachdb',
+	'mssql',
+	'oracle',
+] as const satisfies readonly Vendor[];
 
 function isReliableBatchVendor(vendor: Vendor): boolean {
 	return (RETURNING_VENDORS as readonly Vendor[]).includes(vendor);
@@ -37,7 +43,12 @@ type Artist = {
 	company: string;
 };
 
-function buildArtist(pkType: PrimaryKeyType, index: number, nonce: string, opts: { explicitId?: boolean } = {}): Artist {
+function buildArtist(
+	pkType: PrimaryKeyType,
+	index: number,
+	nonce: string,
+	opts: { explicitId?: boolean } = {},
+): Artist {
 	const artist: Artist = {
 		name: `batch-${index}-${nonce}`,
 		company: `co-${index}-${nonce}`,
@@ -53,9 +64,7 @@ function buildArtist(pkType: PrimaryKeyType, index: number, nonce: string, opts:
 }
 
 async function resetQueryCounter(vendor: Vendor) {
-	await request(getUrl(vendor))
-		.post('/query-counter/reset')
-		.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+	await request(getUrl(vendor)).post('/query-counter/reset').set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 }
 
 async function fetchInsertQueriesForNonce(vendor: Vendor, nonce: string, collection: string) {

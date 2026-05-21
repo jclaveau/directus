@@ -425,9 +425,8 @@ export class FieldsService {
 						: field;
 
 				if (hookAdjustedField.type && ALIAS_TYPES.includes(hookAdjustedField.type) === false) {
-
 					try {
-						const existingIndexes = await this.listExistingIndexes(trx)
+						const existingIndexes = await this.listExistingIndexes(trx);
 
 						if (table) {
 							this.addColumnToTable(table, collection, hookAdjustedField as Field, null, existingIndexes);
@@ -438,8 +437,8 @@ export class FieldsService {
 						}
 					} catch (err: any) {
 						await throwDatabaseError(err, {
-								collection,
-								field,
+							collection,
+							field,
 						});
 					}
 				}
@@ -575,7 +574,7 @@ export class FieldsService {
 				if (!isEqual(columnToCompare, hookAdjustedField.schema)) {
 					try {
 						await transaction(this.knex, async (trx) => {
-							const existingIndexes = await this.listExistingIndexes(trx)
+							const existingIndexes = await this.listExistingIndexes(trx);
 
 							await trx.schema.alterTable(collection, async (table) => {
 								if (!hookAdjustedField.schema) return;
@@ -584,9 +583,9 @@ export class FieldsService {
 						});
 					} catch (err: any) {
 						await throwDatabaseError(err, {
-								collection,
-								field,
-								existingColumn
+							collection,
+							field,
+							existingColumn,
 						});
 					}
 				}
@@ -903,9 +902,9 @@ export class FieldsService {
 		//   https://github.com/knex/knex/issues/2836
 		//   So the followiong query MUST be called before addColumnToTable()
 
-
-		const existingIndexes = this.knex.client.config.client === 'postgres'
-		? await trx.raw(`
+		const existingIndexes =
+			this.knex.client.config.client === 'postgres'
+				? await trx.raw(`
 			select
 					t.relname as table,
 					a.attname as column
@@ -926,13 +925,13 @@ export class FieldsService {
 					t.relname,
 					i.relname;
 		`)
-		: []
+				: [];
 
 		return existingIndexes.rows as {
-			table: string,
-			column: string,
-			index: string,
-		}[]
+			table: string;
+			column: string;
+			index: string;
+		}[];
 	}
 
 	public addColumnToTable(
@@ -1035,15 +1034,16 @@ export class FieldsService {
 				}
 			} else if (field.schema?.is_indexed === false) {
 				if (existing?.is_indexed === true) {
-					const indexName = this.helpers.schema.generateIndexName('index', collection, field.field)
+					const indexName = this.helpers.schema.generateIndexName('index', collection, field.field);
 
-					if (existingIndexes.find((row: Record<string, string>) => {
-						return row['index'] === indexName
-					})) {
+					if (
+						existingIndexes.find((row: Record<string, string>) => {
+							return row['index'] === indexName;
+						})
+					) {
 						table.dropIndex([field.field], indexName);
-					}
-					else {
-						console.log(`Index '${indexName}' not found so not dropped`) // eslint-disable-line no-console
+					} else {
+						console.log(`Index '${indexName}' not found so not dropped`); // eslint-disable-line no-console
 					}
 				}
 			}

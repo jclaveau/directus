@@ -103,10 +103,7 @@ describe('Integration Tests', () => {
 
 				await service.getKeysByQuery({});
 
-				expect(readByQuerySpy).toHaveBeenCalledWith(
-					expect.anything(),
-					expect.objectContaining({ emitEvents: false }),
-				);
+				expect(readByQuerySpy).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ emitEvents: false }));
 
 				readByQuerySpy.mockRestore();
 			});

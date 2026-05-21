@@ -24,7 +24,6 @@ export async function setup() {
 						return {
 							title: config.names[vendor],
 							task: async () => {
-
 								try {
 									const database = knex(config.knexConfig[vendor]);
 									await awaitDatabaseConnection(database, config.knexConfig[vendor].waitTestSQL);
@@ -60,9 +59,7 @@ export async function setup() {
 										const logFilePath = join(paths.cwd, `server-log-${vendor}.txt`);
 										console.log(`Saving server logs to ${logFilePath}`);
 
-										const logFile = process.env['TEST_SAVE_LOGS']
-										? fs.openSync(logFilePath, 'w')
-										: null;
+										const logFile = process.env['TEST_SAVE_LOGS'] ? fs.openSync(logFilePath, 'w') : null;
 
 										if (logFile) {
 											fs.writeFileSync(logFile, '');
@@ -79,7 +76,7 @@ export async function setup() {
 										});
 
 										server.on('exit', async (code) => {
-											if (logFile){
+											if (logFile) {
 												fs.closeSync(logFile);
 											}
 
@@ -101,9 +98,7 @@ export async function setup() {
 										const logFilePathNoCache = join(paths.cwd, `server-log-${vendor}-no-cache.txt`);
 										console.log(`Saving no-cache server logs to ${logFilePathNoCache}`);
 
-										const logFileNoCache = process.env['TEST_SAVE_LOGS']
-										? fs.openSync(logFilePathNoCache, 'w')
-										: null;
+										const logFileNoCache = process.env['TEST_SAVE_LOGS'] ? fs.openSync(logFilePathNoCache, 'w') : null;
 
 										if (logFileNoCache) {
 											fs.writeFileSync(logFileNoCache, '');
@@ -121,7 +116,9 @@ export async function setup() {
 											}
 
 											if (code !== null) {
-												throw new Error(`Directus-${vendor}-no-cache server failed (${code}): \n Logs in ${logFilePathNoCache}`);
+												throw new Error(
+													`Directus-${vendor}-no-cache server failed (${code}): \n Logs in ${logFilePathNoCache}`,
+												);
 											}
 										});
 

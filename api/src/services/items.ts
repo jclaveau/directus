@@ -138,64 +138,60 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		return primaryKey as PrimaryKey;
 	}
 
-
-	async createMany(
-		data: Partial<Item>[],
-		opts: MutationOptions = {}
-	): Promise<PrimaryKey[]> {
+	async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
 		if (data.length === 0) {
-			return []
+			return [];
 		}
 
-		if (! opts.mutationTracker) {
-			opts.mutationTracker = this.createMutationTracker()
+		if (!opts.mutationTracker) {
+			opts.mutationTracker = this.createMutationTracker();
 		}
 
-		if (! opts.bypassLimits) {
-			opts.mutationTracker.trackMutations(data.length)
+		if (!opts.bypassLimits) {
+			opts.mutationTracker.trackMutations(data.length);
 		}
 
-		const primaryKeyField = this.schema.collections[this.collection]!.primary
-		const fields = Object.keys(this.schema.collections[this.collection]!.fields)
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
-		.filter((field) => field.alias === true)
-		.map((field) => field.field)
+			.filter((field) => field.alias === true)
+			.map((field) => field.field);
 
 		// TODO move it to a lib
 		const isPrimaryKey = (it: unknown): it is PrimaryKey => {
-			return typeof it === 'number' || typeof it === 'string'
-		}
+			return typeof it === 'number' || typeof it === 'string';
+		};
 
 		const isNotPrimaryKey = <T>(it: T): it is T extends PrimaryKey ? never : T => {
-			return ! isPrimaryKey(it)
-		}
-
+			return !isPrimaryKey(it);
+		};
 
 		// By wrapping the logic in a transaction, we make sure we automatically roll back all the
 		// changes in the DB if any of the parts contained within throws an error. This also means
 		// that any errors thrown in any nested relational changes will bubble up and cancel the whole
 		// update tree
-		type ItemValues = PrimaryKey
-		| {
-			primaryKey: PrimaryKey,
+		type ItemValues =
+			| PrimaryKey
+			| {
+					primaryKey: PrimaryKey;
 
-			actionHookPayload: any, // TODO better typing from processPayload()
-			payloadAfterHooks: Partial<typeof data[number]>,
-			payloadWithPresets: Partial<typeof data[number]>,
-			payloadWithoutAliases: Pick<Partial<AnyItem>, string>,
+					actionHookPayload: any; // TODO better typing from processPayload()
+					payloadAfterHooks: Partial<(typeof data)[number]>;
+					payloadWithPresets: Partial<(typeof data)[number]>;
+					payloadWithoutAliases: Pick<Partial<AnyItem>, string>;
 
-			revisionsM2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`revisions`],
-			revisionsA2O: Awaited<ReturnType<PayloadService[`processA2O`]>>[`revisions`],
-			revisionsO2M?: Awaited<ReturnType<PayloadService[`processO2M`]>>[`revisions`],
+					revisionsM2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`revisions`];
+					revisionsA2O: Awaited<ReturnType<PayloadService[`processA2O`]>>[`revisions`];
+					revisionsO2M?: Awaited<ReturnType<PayloadService[`processO2M`]>>[`revisions`];
 
-			nestedActionEventsM2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`nestedActionEvents`],
-			nestedActionEventsA2O: Awaited<ReturnType<PayloadService[`processA2O`]>>[`nestedActionEvents`],
-			nestedActionEventsO2M?: Awaited<ReturnType<PayloadService[`processO2M`]>>[`nestedActionEvents`],
+					nestedActionEventsM2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`nestedActionEvents`];
+					nestedActionEventsA2O: Awaited<ReturnType<PayloadService[`processA2O`]>>[`nestedActionEvents`];
+					nestedActionEventsO2M?: Awaited<ReturnType<PayloadService[`processO2M`]>>[`nestedActionEvents`];
 
-			userIntegrityCheckFlagsM2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`userIntegrityCheckFlags`],
-			userIntegrityCheckFlagsA2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`userIntegrityCheckFlags`],
-		}
+					userIntegrityCheckFlagsM2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`userIntegrityCheckFlags`];
+					userIntegrityCheckFlagsA2O: Awaited<ReturnType<PayloadService[`processM2O`]>>[`userIntegrityCheckFlags`];
+			  };
 
 		// If a PK of type number was provided, although the PK is set the auto_increment,
 		// depending on the database, the sequence might need to be reset to protect future PK collisions.
@@ -207,44 +203,46 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				accountability: this.accountability,
 				knex: trx,
 				schema: this.schema,
-			})
+			});
 
-			const preparedItems: ItemValues[] = []
+			const preparedItems: ItemValues[] = [];
 
 			for (const payloadToClone of data) {
-				const payload = cloneDeep(payloadToClone)
+				const payload = cloneDeep(payloadToClone);
 
 				// Run all hooks that are attached to this event so the end user has the chance to augment the
 				// item that is about to be saved
 				const payloadAfterHooks =
 					opts.emitEvents !== false
 						? await emitter.emitFilter(
-							this.eventScope === `items`
-								? [`items.create`, `${this.collection}.items.create`]
-								: `${this.eventScope}.create`,
-							payload,
-							{
-								collection: this.collection,
-							},
-							{
-								database: trx,
-								schema: this.schema,
-								accountability: this.accountability,
-							}
-						)
-						: payload
+								this.eventScope === `items`
+									? [`items.create`, `${this.collection}.items.create`]
+									: `${this.eventScope}.create`,
+								payload,
+								{
+									collection: this.collection,
+								},
+								{
+									database: trx,
+									schema: this.schema,
+									accountability: this.accountability,
+								},
+						  )
+						: payload;
 
-				if ( payloadAfterHooks === null) { // skip creation
-					continue
+				if (payloadAfterHooks === null) {
+					// skip creation
+					continue;
 				}
 
-				if ( false // eslint-disable-line
-					|| typeof payloadAfterHooks === 'string' // replace new creation by an existing item having a uuid as its primary key
-					|| typeof payloadAfterHooks === 'number' // replace new creation by an existing item having a number as its primary key
+				if (
+					false || // eslint-disable-line
+					typeof payloadAfterHooks === 'string' || // replace new creation by an existing item having a uuid as its primary key
+					typeof payloadAfterHooks === 'number' // replace new creation by an existing item having a number as its primary key
 				) {
-					preparedItems.push(payloadAfterHooks)
+					preparedItems.push(payloadAfterHooks);
 
-					continue
+					continue;
 				}
 
 				const payloadWithPresets = this.accountability
@@ -260,12 +258,11 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 								knex: trx,
 								schema: this.schema,
 							},
-						)
+					  )
 					: payloadAfterHooks;
 
-
 				if (opts.preMutationError) {
-					throw opts.preMutationError
+					throw opts.preMutationError;
 				}
 
 				// Ensure the action hook payload has the post filter hook + preset changes
@@ -293,16 +290,15 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
 				} = await payloadService.processA2O(payloadWithM2O, opts);
 
-				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases))
-				const payloadWithTypeCasting = await payloadService.processValues(`create`, payloadWithoutAliases)
+				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
+				const payloadWithTypeCasting = await payloadService.processValues(`create`, payloadWithoutAliases);
 
 				// In case of manual string / UUID primary keys, the PK already exists in the object we're saving.
-				const primaryKey = payloadWithTypeCasting[primaryKeyField]
+				const primaryKey = payloadWithTypeCasting[primaryKeyField];
 
 				if (primaryKey) {
 					validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
 				}
-
 
 				const pkField = this.schema.collections[this.collection]!.fields[primaryKeyField];
 
@@ -333,69 +329,65 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 					userIntegrityCheckFlagsM2O,
 					userIntegrityCheckFlagsA2O,
-				})
+				});
 			}
 
-			const itemsToInsert = preparedItems.filter(isNotPrimaryKey)
+			const itemsToInsert = preparedItems.filter(isNotPrimaryKey);
 
+			const collectionSchema = this.schema.collections[this.collection];
 
-
-
-
-			const collectionSchema = this.schema.collections[this.collection]
-
-			if (! collectionSchema) {
-				throw new Error(`Can't find collection schema of ${this.collection}`)
+			if (!collectionSchema) {
+				throw new Error(`Can't find collection schema of ${this.collection}`);
 			}
 
-			const collectionFieldsSchema = collectionSchema.fields
+			const collectionFieldsSchema = collectionSchema.fields;
 
-			if (! collectionFieldsSchema) {
-				throw new Error(`Can't find collection's fields schema of ${this.collection}`)
+			if (!collectionFieldsSchema) {
+				throw new Error(`Can't find collection's fields schema of ${this.collection}`);
 			}
 
-			const isSqlite = this.knex.client.config.client === 'sqlite3'
+			const isSqlite = this.knex.client.config.client === 'sqlite3';
 
 			// Non nullable fields do not support "undefined" as value in batchInsert()
 			// https://github.com/knex/knex/issues/332#issuecomment-2204047144
-			const sqliteFieldsRequiringValue = isSqlite ? Object.fromEntries(
-				Object.entries(collectionFieldsSchema)
-				.filter(([fieldName, field]) => {
-					return fieldName !== primaryKeyField
-					&& field.nullable === false
-				})
-				.map(([fieldName, field]) => {
-					return [fieldName, field.defaultValue]
-				})
-			) : {}
-
+			const sqliteFieldsRequiringValue = isSqlite
+				? Object.fromEntries(
+						Object.entries(collectionFieldsSchema)
+							.filter(([fieldName, field]) => {
+								return fieldName !== primaryKeyField && field.nullable === false;
+							})
+							.map(([fieldName, field]) => {
+								return [fieldName, field.defaultValue];
+							}),
+				  )
+				: {};
 
 			try {
-				const client = this.knex.client.config.client
+				const client = this.knex.client.config.client;
 
 				const reliable =
-					['pg', 'cockroachdb', 'oracledb'].includes(client)
-					|| (client === 'mssql' && toBoolean(env['DB_MSSQL_TRUST_BATCH_RETURNING']))
+					['pg', 'cockroachdb', 'oracledb'].includes(client) ||
+					(client === 'mssql' && toBoolean(env['DB_MSSQL_TRUST_BATCH_RETURNING']));
 
 				const rowsToInsert = itemsToInsert.map((v) => {
 					return {
 						...sqliteFieldsRequiringValue,
 						...v.payloadWithoutAliases,
-					}
-				})
+					};
+				});
 
-				let insertedRows: Record<string, unknown>[]
+				let insertedRows: Record<string, unknown>[];
 
 				if (reliable) {
-					const chunkSize = Number(env['DB_BATCH_INSERT_CHUNK_SIZE'] ?? 1000)
+					const chunkSize = Number(env['DB_BATCH_INSERT_CHUNK_SIZE'] ?? 1000);
 
 					let dbQuery = trx
-					.batchInsert<Exclude<ItemValues, number | string>['payloadWithoutAliases']>(
-						this.collection,
-						rowsToInsert,
-						chunkSize,
-					)
-					.returning(primaryKeyField)
+						.batchInsert<Exclude<ItemValues, number | string>['payloadWithoutAliases']>(
+							this.collection,
+							rowsToInsert,
+							chunkSize,
+						)
+						.returning(primaryKeyField);
 
 					dbQuery = (await emitter.emitFilter(
 						['items.db.insert', `${this.collection}.db.insert`],
@@ -409,26 +401,23 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 							schema: this.schema,
 							accountability: this.accountability,
 						},
-					)) as unknown as typeof dbQuery // TODO: fix emitFilter typing
+					)) as unknown as typeof dbQuery; // TODO: fix emitFilter typing
 
-					insertedRows = await dbQuery as Record<string, unknown>[]
-				}
-				else {
-					insertedRows = []
+					insertedRows = (await dbQuery) as Record<string, unknown>[];
+				} else {
+					insertedRows = [];
 
 					for (const row of rowsToInsert) {
-						const result = await trx.insert(row).into(this.collection).returning(primaryKeyField)
-						insertedRows.push(result[0] as Record<string, unknown>)
+						const result = await trx.insert(row).into(this.collection).returning(primaryKeyField);
+						insertedRows.push(result[0] as Record<string, unknown>);
 					}
 				}
 
 				if (insertedRows.length !== itemsToInsert.length) {
-					throw new Error(
-						`Insert returned ${insertedRows.length} rows but expected ${itemsToInsert.length}`,
-					)
+					throw new Error(`Insert returned ${insertedRows.length} rows but expected ${itemsToInsert.length}`);
 				}
 
-				const filteredResult = (await emitter.emitFilter(
+				const filteredResult = await emitter.emitFilter(
 					['items.db.inserted', `${this.collection}.db.inserted`],
 					insertedRows,
 					{
@@ -440,237 +429,221 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						schema: this.schema,
 						accountability: this.accountability,
 					},
-				))
+				);
 
 				filteredResult.forEach((result, index) => {
-					const preparedValues = itemsToInsert[index]
+					const preparedValues = itemsToInsert[index];
 
-					if (! preparedValues) {
-						throw new Error(`No insert itemInput found for index ${index}`) // Should never happen
+					if (!preparedValues) {
+						throw new Error(`No insert itemInput found for index ${index}`); // Should never happen
 					}
 
-					const returnedKey = typeof result === `object` && result !== null
-						? (result as Record<string, unknown>)[primaryKeyField]
-						: result
+					const returnedKey =
+						typeof result === `object` && result !== null
+							? (result as Record<string, unknown>)[primaryKeyField]
+							: result;
 
 					if (this.schema.collections[this.collection]!.fields[primaryKeyField]!.type === `uuid`) {
 						preparedValues.primaryKey = getHelpers(trx).schema.formatUUID(
-							(preparedValues.primaryKey ?? returnedKey) as string
-						)
+							(preparedValues.primaryKey ?? returnedKey) as string,
+						);
+					} else {
+						preparedValues.primaryKey = (preparedValues.primaryKey ?? returnedKey) as PrimaryKey;
 					}
-					else {
-						preparedValues.primaryKey = (preparedValues.primaryKey ?? returnedKey) as PrimaryKey
-					}
-				})
+				});
+			} catch (err: any) {
+				await throwDatabaseError(err, data);
 			}
-			catch (err: any) {
-				await throwDatabaseError(err, data)
-			}
-
-
 
 			// TODO should Promise.allSettled be replaced by a slower sequential await?
-			const preparedForPostInsertProcessResponses = await Promise.allSettled( itemsToInsert.map(async (
-				preparedItem
-			) => {
-				const {
-					primaryKey,
-					payloadAfterHooks,
-					payloadWithPresets,
-					revisionsM2O,
-					revisionsA2O,
-					userIntegrityCheckFlagsM2O,
-					userIntegrityCheckFlagsA2O,
-				} = preparedItem
+			const preparedForPostInsertProcessResponses = await Promise.allSettled(
+				itemsToInsert.map(async (preparedItem) => {
+					const {
+						primaryKey,
+						payloadAfterHooks,
+						payloadWithPresets,
+						revisionsM2O,
+						revisionsA2O,
+						userIntegrityCheckFlagsM2O,
+						userIntegrityCheckFlagsA2O,
+					} = preparedItem;
 
-				const {
-					revisions: revisionsO2M,
-					nestedActionEvents: nestedActionEventsO2M,
-					userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
-				} = await payloadService.processO2M(
-					payloadWithPresets,
-					primaryKey,
-					opts
-				)
+					const {
+						revisions: revisionsO2M,
+						nestedActionEvents: nestedActionEventsO2M,
+						userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
+					} = await payloadService.processO2M(payloadWithPresets, primaryKey, opts);
 
-				const userIntegrityCheckFlags =
-					(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) |
-					userIntegrityCheckFlagsM2O |
-					userIntegrityCheckFlagsA2O |
-					userIntegrityCheckFlagsO2M;
+					const userIntegrityCheckFlags =
+						(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) |
+						userIntegrityCheckFlagsM2O |
+						userIntegrityCheckFlagsA2O |
+						userIntegrityCheckFlagsO2M;
 
-				if (userIntegrityCheckFlags) {
-					if (opts.onRequireUserIntegrityCheck) {
-						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-					} else {
-						await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex: trx });
-					}
-				}
-
-
-				const activityInput = this.accountability
-					&& this.schema.collections[this.collection]!.accountability !== null
-				?	{
-					action: Action.CREATE,
-					user: this.accountability!.user,
-					collection: this.collection,
-					ip: this.accountability!.ip,
-					user_agent: this.accountability!.userAgent,
-					origin: this.accountability!.origin,
-					item: primaryKey,
-				}
-				: undefined
-
-
-				const revisionInput = activityInput !== undefined
-					&& this.schema.collections[this.collection]!.accountability === `all`
-				? await (async () => {
-						const revisionDelta = await payloadService.prepareDelta(payloadAfterHooks)
-						return {
-							// activity, // will be added once activity rows are inserted
-							collection: this.collection,
-							item: primaryKey,
-							data: revisionDelta,
-							delta: revisionDelta,
+					if (userIntegrityCheckFlags) {
+						if (opts.onRequireUserIntegrityCheck) {
+							opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+						} else {
+							await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex: trx });
 						}
-				})()
-				: undefined
+					}
 
-				let activity: PrimaryKey | undefined
-				let revision: PrimaryKey | undefined
+					const activityInput =
+						this.accountability && this.schema.collections[this.collection]!.accountability !== null
+							? {
+									action: Action.CREATE,
+									user: this.accountability!.user,
+									collection: this.collection,
+									ip: this.accountability!.ip,
+									user_agent: this.accountability!.userAgent,
+									origin: this.accountability!.origin,
+									item: primaryKey,
+							  }
+							: undefined;
 
-				return {
-					...preparedItem,
-					nestedActionEventsO2M,
-					activityInput,
-					activity,
-					revisionInput,
-					revision,
-					childrenRevisions: [...revisionsM2O, ...revisionsA2O, ...revisionsO2M],
-				}
-			}))
+					const revisionInput =
+						activityInput !== undefined && this.schema.collections[this.collection]!.accountability === `all`
+							? await (async () => {
+									const revisionDelta = await payloadService.prepareDelta(payloadAfterHooks);
+									return {
+										// activity, // will be added once activity rows are inserted
+										collection: this.collection,
+										item: primaryKey,
+										data: revisionDelta,
+										delta: revisionDelta,
+									};
+							  })()
+							: undefined;
 
+					let activity: PrimaryKey | undefined;
+					let revision: PrimaryKey | undefined;
+
+					return {
+						...preparedItem,
+						nestedActionEventsO2M,
+						activityInput,
+						activity,
+						revisionInput,
+						revision,
+						childrenRevisions: [...revisionsM2O, ...revisionsA2O, ...revisionsO2M],
+					};
+				}),
+			);
 
 			// TODO move them to a lib
 			// From https://stackoverflow.com/a/69451755
 			const isRejected = (input: PromiseSettledResult<unknown>): input is PromiseRejectedResult => {
-				return input.status === 'rejected'
-			}
+				return input.status === 'rejected';
+			};
 
 			const isFulfilled = <T>(input: PromiseSettledResult<T>): input is PromiseFulfilledResult<T> => {
-				return input.status === 'fulfilled'
-			}
+				return input.status === 'fulfilled';
+			};
 
-			const errorReasons = preparedForPostInsertProcessResponses.filter(isRejected)?.map(i => i.reason)
+			const errorReasons = preparedForPostInsertProcessResponses.filter(isRejected)?.map((i) => i.reason);
 
 			if (errorReasons.length) {
 				// console.log('errorReasons', errorReasons)
-				throw errorReasons[0]
+				throw errorReasons[0];
 				// TODO how to pass all the errors ?
 			}
 
-			const preparedForPostInsert = preparedForPostInsertProcessResponses.filter(isFulfilled)?.map(item => item.value)
+			const preparedForPostInsert = preparedForPostInsertProcessResponses
+				.filter(isFulfilled)
+				?.map((item) => item.value);
 
-
-			const itemsWithActivityInput = preparedForPostInsert
-			.filter(isNotPrimaryKey)
-			.filter((item) => {
-				return item.activityInput !== undefined
-			})
+			const itemsWithActivityInput = preparedForPostInsert.filter(isNotPrimaryKey).filter((item) => {
+				return item.activityInput !== undefined;
+			});
 
 			const { ActivityService } = await import('./activity.js');
 
-			const itemsWithActivity = (await new ActivityService({
-				knex: trx,
-				schema: this.schema,
-			})
-			.createMany(itemsWithActivityInput.map((item) => {
-				return item.activityInput!
-			})))
-			.map((activityPk, index) => {
-				if (! (index in itemsWithActivityInput) || itemsWithActivityInput[index] === undefined) {
-					throw new Error(`Unable to find '${index}' in activitiesItems`)
+			const itemsWithActivity = (
+				await new ActivityService({
+					knex: trx,
+					schema: this.schema,
+				}).createMany(
+					itemsWithActivityInput.map((item) => {
+						return item.activityInput!;
+					}),
+				)
+			).map((activityPk, index) => {
+				if (!(index in itemsWithActivityInput) || itemsWithActivityInput[index] === undefined) {
+					throw new Error(`Unable to find '${index}' in activitiesItems`);
 				}
 
 				return {
 					...itemsWithActivityInput[index],
 					activity: activityPk,
-				}
-			})
+				};
+			});
 
-
-			const itemsWithRevisionInput = itemsWithActivity
-			.filter((item) => {
-				return item.revisionInput !== undefined
-			})
+			const itemsWithRevisionInput = itemsWithActivity.filter((item) => {
+				return item.revisionInput !== undefined;
+			});
 
 			const { RevisionsService } = await import('./revisions.js');
 
 			const revisionsService = new RevisionsService({
 				knex: trx,
 				schema: this.schema,
-			})
+			});
 
-			const itemsWithActivityAndRevision =(await revisionsService.createMany(itemsWithRevisionInput.map((
-				item
-			) => {
-				return {
-					...item.revisionInput,
-					activity: item.activity,
-				}
-			})))
-			.map((revisionPk, index) => {
-				if (! (index in itemsWithRevisionInput) || itemsWithRevisionInput[index] === undefined) {
-					throw new Error(`Unable to find '${index}' in itemsWithRevisionInput`)
+			const itemsWithActivityAndRevision = (
+				await revisionsService.createMany(
+					itemsWithRevisionInput.map((item) => {
+						return {
+							...item.revisionInput,
+							activity: item.activity,
+						};
+					}),
+				)
+			).map((revisionPk, index) => {
+				if (!(index in itemsWithRevisionInput) || itemsWithRevisionInput[index] === undefined) {
+					throw new Error(`Unable to find '${index}' in itemsWithRevisionInput`);
 				}
 
 				return {
 					...itemsWithRevisionInput[index],
 					revision: revisionPk,
-				}
-			})
-
+				};
+			});
 
 			// Make sure to set the parent field of the child-revision rows
-			const updateRevisionsChildrenResponses = await Promise.allSettled( itemsWithActivityAndRevision.map(async (item) => {
-				if (item.childrenRevisions.length > 0) {
-					await revisionsService.updateMany(item.childrenRevisions, { parent: item.revision })
-				}
+			const updateRevisionsChildrenResponses = await Promise.allSettled(
+				itemsWithActivityAndRevision.map(async (item) => {
+					if (item.childrenRevisions.length > 0) {
+						await revisionsService.updateMany(item.childrenRevisions, { parent: item.revision });
+					}
 
-				if (opts.onRevisionCreate) {
-					opts.onRevisionCreate(item.revision)
-				}
-			}))
+					if (opts.onRevisionCreate) {
+						opts.onRevisionCreate(item.revision);
+					}
+				}),
+			);
 
-			const revisionErrorReasons = updateRevisionsChildrenResponses.filter(isRejected)?.map(i => i.reason)
+			const revisionErrorReasons = updateRevisionsChildrenResponses.filter(isRejected)?.map((i) => i.reason);
 
 			if (revisionErrorReasons.length) {
 				// console.log('revisionErrorReasons', revisionErrorReasons)
-				throw revisionErrorReasons[0]
+				throw revisionErrorReasons[0];
 				// TODO how to pass all the errors ?
 			}
-
 
 			if (autoIncrementSequenceNeedsToBeReset) {
 				await getHelpers(trx).sequence.resetAutoIncrementSequence(this.collection, primaryKeyField);
 			}
 
-			return preparedForPostInsert
-		})
-
+			return preparedForPostInsert;
+		});
 
 		for (const itemValues of itemsValues.filter(isNotPrimaryKey)) {
 			if (opts.emitEvents === false) {
-				continue
+				continue;
 			}
 
-			const {
-				primaryKey,
-				actionHookPayload,
-				nestedActionEventsM2O,
-				nestedActionEventsA2O,
-				nestedActionEventsO2M,
-			} = itemValues
+			const { primaryKey, actionHookPayload, nestedActionEventsM2O, nestedActionEventsA2O, nestedActionEventsO2M } =
+				itemValues;
 
 			const actionEvent = {
 				event:
@@ -687,46 +660,36 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					schema: this.schema,
 					accountability: this.accountability,
 				},
-			}
+			};
 
 			if (opts.bypassEmitAction) {
-				await opts.bypassEmitAction(actionEvent)
-			}
-			else {
-				await emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context)
+				await opts.bypassEmitAction(actionEvent);
+			} else {
+				await emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context);
 			}
 
-			const nestedActionEvents = [
-				...nestedActionEventsO2M || [],
-				...nestedActionEventsA2O,
-				...nestedActionEventsM2O,
-			]
+			const nestedActionEvents = [...(nestedActionEventsO2M || []), ...nestedActionEventsA2O, ...nestedActionEventsM2O];
 
 			for (const nestedActionEvent of nestedActionEvents) {
 				if (opts.bypassEmitAction) {
-					await opts.bypassEmitAction(nestedActionEvent)
-				}
-				else {
-					await emitter.emitAction(
-						nestedActionEvent.event,
-						nestedActionEvent.meta,
-						nestedActionEvent.context
-					)
+					await opts.bypassEmitAction(nestedActionEvent);
+				} else {
+					await emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
 				}
 			}
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear()
+			await this.cache.clear();
 		}
 
 		return itemsValues.map((itemValues) => {
 			if (isPrimaryKey(itemValues)) {
-				return itemValues
+				return itemValues;
 			}
 
-			return itemValues.primaryKey
-		})
+			return itemValues.primaryKey;
+		});
 	}
 
 	/**
@@ -767,7 +730,6 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			{ ast, action: 'read', accountability: this.accountability },
 			{ knex: this.knex, schema: this.schema },
 		);
-
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
@@ -986,15 +948,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				: payload;
 
 		// TODO add null to payloadAfterHooks possible types
-		const payloadKeys = Object.keys(payloadAfterHooks ?? {})
+		const payloadKeys = Object.keys(payloadAfterHooks ?? {});
 
-		if ( payloadKeys.length === 0 // payloadAfterHooks == {} || null
-			|| (
-				payloadKeys.length === 1
-				&& payloadKeys[0] === primaryKeyField
-			) // payloadAfterHooks == {id: xxx}
+		if (
+			payloadKeys.length === 0 || // payloadAfterHooks == {} || null
+			(payloadKeys.length === 1 && payloadKeys[0] === primaryKeyField) // payloadAfterHooks == {id: xxx}
 		) {
-			return []
+			return [];
 		}
 
 		// Sort keys to ensure that the order is maintained

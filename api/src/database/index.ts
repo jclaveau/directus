@@ -356,14 +356,15 @@ async function validateDatabaseCharset(database?: Knex): Promise<void> {
 			.select({ name: 'TABLE_NAME', collation: 'TABLE_COLLATION' })
 			.where({ TABLE_SCHEMA: env['DB_DATABASE'] });
 
-		const columns = await database('information_schema.columns')
+		const columns = (await database('information_schema.columns')
 			.select({ table_name: 'TABLE_NAME', name: 'COLUMN_NAME', collation: 'COLLATION_NAME', type: 'COLUMN_TYPE' })
 			.where({ TABLE_SCHEMA: env['DB_DATABASE'] })
 			.whereNot({ COLLATION_NAME: collation })
 			// On MariaDB ignore for type LONGTEXT and collation utf8mb4_bin which is used as an alias for json type
-			.modify(queryBuilder => isMariaDB && queryBuilder
-				.andWhereNot({ COLUMN_TYPE: 'longtext', COLLATION_NAME: 'utf8mb4_bin' })
-			) as any[];
+			.modify(
+				(queryBuilder) =>
+					isMariaDB && queryBuilder.andWhereNot({ COLUMN_TYPE: 'longtext', COLLATION_NAME: 'utf8mb4_bin' }),
+			)) as any[];
 
 		const excludedTables: string[] = toArray(env['DB_EXCLUDE_TABLES']);
 

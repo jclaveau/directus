@@ -73,8 +73,6 @@ import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { Url } from './utils/url.js';
 import { validateStorage } from './utils/validate-storage.js';
 
-
-
 const require = createRequire(import.meta.url);
 
 export default async function createApp(): Promise<express.Application> {

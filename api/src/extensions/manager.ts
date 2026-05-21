@@ -11,9 +11,7 @@ import type {
 } from '@directus/extensions';
 import { APP_SHARED_DEPS, HYBRID_EXTENSION_TYPES, type RegisterFunctions } from '@directus/extensions';
 import { generateExtensionsEntrypoint } from '@directus/extensions/node';
-import type {
-	PromiseCallback,
-} from '@directus/types';
+import type { PromiseCallback } from '@directus/types';
 import { isTypeIn, toBoolean } from '@directus/utils';
 import { pathToRelativeUrl, processId } from '@directus/utils/node';
 import aliasDefault from '@rollup/plugin-alias';

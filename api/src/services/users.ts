@@ -411,9 +411,10 @@ export class UsersService extends ItemsService {
 			scope: string;
 		};
 
-		if (scope !== 'invite') throw new ForbiddenError({
-			reason: 'Not an invite token',
-		});
+		if (scope !== 'invite')
+			throw new ForbiddenError({
+				reason: 'Not an invite token',
+			});
 
 		const user = await this.getUserByEmail(email);
 
@@ -456,7 +457,7 @@ export class UsersService extends ItemsService {
 
 		if (settings?.['public_registration'] == false) {
 			throw new ForbiddenError({
-				reason: 'Public registration is disabled'
+				reason: 'Public registration is disabled',
 			});
 		}
 
@@ -480,7 +481,7 @@ export class UsersService extends ItemsService {
 		if (emailFilter && validatePayload(emailFilter, { email: input.email }).length !== 0) {
 			await stall(STALL_TIME, timeStart);
 			throw new ForbiddenError({
-				reason: 'Invalid payload'
+				reason: 'Invalid payload',
 			});
 		}
 
@@ -541,9 +542,10 @@ export class UsersService extends ItemsService {
 			scope: string;
 		};
 
-		if (scope !== 'pending-registration') throw new ForbiddenError({
-			reason: 'Not a pending registration token',
-		});
+		if (scope !== 'pending-registration')
+			throw new ForbiddenError({
+				reason: 'Not a pending registration token',
+			});
 
 		const user = await this.getUserByEmail(email);
 
@@ -565,7 +567,7 @@ export class UsersService extends ItemsService {
 		if (user?.status !== 'active') {
 			await stall(STALL_TIME, timeStart);
 			throw new ForbiddenError({
-				reason: 'Inactive user'
+				reason: 'Inactive user',
 			});
 		}
 
@@ -614,9 +616,10 @@ export class UsersService extends ItemsService {
 			hash: string;
 		};
 
-		if (scope !== 'password-reset' || !hash) throw new ForbiddenError({
-			reason: 'Not a password reset token',
-		});
+		if (scope !== 'password-reset' || !hash)
+			throw new ForbiddenError({
+				reason: 'Not a password reset token',
+			});
 
 		const opts: MutationOptions = {};
 
@@ -636,7 +639,7 @@ export class UsersService extends ItemsService {
 
 		if (hash !== getSimpleHash('' + user.password)) {
 			throw new ForbiddenError({
-				reason: 'Bad user credentials'
+				reason: 'Bad user credentials',
 			});
 		}
 
