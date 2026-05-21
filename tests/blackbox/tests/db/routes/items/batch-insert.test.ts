@@ -12,12 +12,17 @@ import { collectionArtists } from './no-relation.seed';
 // per-row loop and emit one INSERT per item. Both paths must produce the same observable
 // result (count, distinct PKs, fields round-trip, explicit PKs preserved) — only the
 // expected number of INSERT statements differs.
+//
+// sqlite3 is included here because it sits on top of SQLite ≥ 3.35, where INSERT … RETURNING
+// is supported natively; ItemsService probes the version at runtime and falls back to the
+// loop path on older builds. https://www.sqlite.org/lang_returning.html
 const RETURNING_VENDORS = [
 	'postgres',
 	'postgres10',
 	'cockroachdb',
 	'mssql',
 	'oracle',
+	'sqlite3',
 ] as const satisfies readonly Vendor[];
 
 function isReliableBatchVendor(vendor: Vendor): boolean {

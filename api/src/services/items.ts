@@ -34,6 +34,28 @@ import { PayloadService } from './payload.js';
 
 const env = useEnv();
 
+// SQLite gained `INSERT … RETURNING` in 3.35.0 (2021-03-12). Below that version the only
+// id available after an insert is `last_insert_rowid()` (the last item only), so the
+// batch path can't be trusted. We probe the runtime version once per knex client.
+// https://www.sqlite.org/lang_returning.html
+const SQLITE_RETURNING_MIN_VERSION: [number, number] = [3, 35];
+const sqliteReturningSupportCache = new WeakMap<object, boolean>();
+
+async function sqliteSupportsReturning(trx: Knex): Promise<boolean> {
+	const clientKey = trx.client as object;
+	const cached = sqliteReturningSupportCache.get(clientKey);
+	if (cached !== undefined) return cached;
+
+	const row = await trx.select(trx.raw('sqlite_version() as version')).first<{ version?: string }>();
+	const versionStr = String(row?.version ?? '0');
+	const [major = 0, minor = 0] = versionStr.split('.').map(Number);
+	const [minMajor, minMinor] = SQLITE_RETURNING_MIN_VERSION;
+	const supports = major > minMajor || (major === minMajor && minor >= minMinor);
+
+	sqliteReturningSupportCache.set(clientKey, supports);
+	return supports;
+}
+
 export type QueryOptions = {
 	stripNonRequested?: boolean;
 	permissionsAction?: PermissionsAction;
@@ -367,7 +389,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 				const reliable =
 					['pg', 'cockroachdb', 'oracledb'].includes(client) ||
-					(client === 'mssql' && toBoolean(env['DB_MSSQL_TRUST_BATCH_RETURNING']));
+					(client === 'mssql' && toBoolean(env['DB_MSSQL_TRUST_BATCH_RETURNING'])) ||
+					(client === 'sqlite3' && (await sqliteSupportsReturning(trx)));
 
 				const rowsToInsert = itemsToInsert.map((v) => {
 					return {
@@ -379,7 +402,11 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				let insertedRows: Record<string, unknown>[];
 
 				if (reliable) {
-					const chunkSize = Number(env['DB_BATCH_INSERT_CHUNK_SIZE'] ?? 1000);
+					// When DB_BATCH_INSERT_CHUNK_SIZE is unset we pass `undefined` so knex falls
+					// back to its own default (currently 1000 rows per INSERT statement).
+					// https://knexjs.org/guide/query-builder.html#batchinsert
+					const chunkSizeEnv = env['DB_BATCH_INSERT_CHUNK_SIZE'];
+					const chunkSize = chunkSizeEnv !== undefined ? Number(chunkSizeEnv) : undefined;
 
 					let dbQuery = trx
 						.batchInsert<Exclude<ItemValues, number | string>['payloadWithoutAliases']>(
