@@ -232,15 +232,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 			});
 		});
 
-		if (pkType !== 'uuid') {
-			// The mixed (some-explicit, some-auto in one batch) variant only runs for
-			// UUID because integer PKs in a mixed batch have dialect-specific
-			// auto-increment-advance semantics that aren't a regression target —
-			// the homogeneous-explicit test above already verifies explicit PKs
-			// survive on the integer path.
-			return;
-		}
-
 		describe('createMany preserves explicit PKs and auto-generates the rest (mixed batch)', () => {
 			it.each(vendors)('%s', async (vendor) => {
 				const N = 5;
@@ -260,9 +251,19 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 					.send(artists)
 					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
+				// Same IDENTITY_INSERT limitation as the homogeneous-explicit block —
+				// mssql + integer PK can't accept explicit values without the toggle
+				// that Directus doesn't emit. Pin the failure.
+				if (pkType === 'integer' && vendor === 'mssql') {
+					expect(response.statusCode).toBeGreaterThanOrEqual(400);
+					expect(Array.isArray(response.body.errors)).toBe(true);
+					expect(response.body.errors.length).toBeGreaterThan(0);
+					return;
+				}
+
 				expect(response.statusCode).toBe(200);
 
-				const data = response.body.data as Array<{ id: string; name: string; company: string }>;
+				const data = response.body.data as Array<{ id: string | number; name: string; company: string }>;
 				expect(data).toHaveLength(N);
 
 				const byName = indexResponseByName(data);
@@ -278,8 +279,15 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 				for (const i of [1, 3]) {
 					const got = byName.get(artists[i]!.name);
 					expect(got).toBeDefined();
-					expect(typeof got!.id).toBe('string');
-					expect(got!.id.length).toBeGreaterThan(0);
+
+					if (pkType === 'integer') {
+						expect(typeof got!.id).toBe('number');
+						expect(got!.id as number).toBeGreaterThan(0);
+					} else {
+						expect(typeof got!.id).toBe('string');
+						expect((got!.id as string).length).toBeGreaterThan(0);
+					}
+
 					expect(explicitIds.has(got!.id)).toBe(false);
 				}
 
