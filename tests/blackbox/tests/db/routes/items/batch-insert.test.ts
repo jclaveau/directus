@@ -301,13 +301,12 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 				// formatUUID does .toUpperCase()); our explicit randomUUID() values are
 				// lowercase. Uppercase only the explicit-slot IDs — the auto-slot matcher
 				// is already case-insensitive via UUID_REGEX `/i`.
+				const explicitIdFor = (a: Artist) =>
+					pkType === 'uuid' && vendor === 'mssql' ? (a.id as string).toUpperCase() : a.id;
+
 				const expected = artists
 					.map((a, i) => ({
-						id: !explicitIndices.has(i)
-							? autoIdMatcher
-							: pkType === 'uuid' && vendor === 'mssql'
-							  ? (a.id as string).toUpperCase()
-							  : a.id,
+						id: explicitIndices.has(i) ? explicitIdFor(a) : autoIdMatcher,
 						name: a.name,
 						company: a.company,
 					}))
