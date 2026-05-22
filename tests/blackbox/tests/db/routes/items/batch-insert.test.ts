@@ -2,6 +2,7 @@ import { getUrl } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import type { PrimaryKeyType } from '@common/types';
 import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
+import { setDirectusEnv } from '@utils/set-directus-env';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -77,23 +78,6 @@ function buildArtist(
 
 async function resetQueryCounter(vendor: Vendor) {
 	await request(getUrl(vendor)).post('/query-counter/reset').set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
-}
-
-// Mutates a single key on the running Directus's cached env object via the
-// `env-inject` extension. Lets a test flip a runtime-checked env var (like
-// DB_MSSQL_TRUST_BATCH_RETURNING) on the SAME spawned Directus instance,
-// without restarting it. Only works for env vars that are re-read on each
-// access via the `env` reference from useEnv() — vars captured into a const
-// at module load aren't affected.
-async function setDirectusEnv(vendor: Vendor, key: string, value: string) {
-	const response = await request(getUrl(vendor))
-		.post('/env-inject/set')
-		.send({ key, value })
-		.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
-
-	if (response.statusCode !== 200) {
-		throw new Error(`env-inject set ${key} failed (${response.statusCode}): ${JSON.stringify(response.body)}`);
-	}
 }
 
 const sortByName = (x: { name: string }, y: { name: string }) => x.name.localeCompare(y.name);
@@ -274,7 +258,14 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 					buildArtist(pkType, i, nonce, { explicitId: explicitIndices.has(i) }),
 				);
 
-				const explicitIds = new Set([...explicitIndices].map((i) => artists[i]!.id!));
+				// MSSQL's UNIQUEIDENTIFIER round-trips UUIDs uppercase (Directus's mssql
+				// formatUUID does .toUpperCase()); our explicit randomUUID() values are
+				// lowercase. Normalize both `expected` and `explicitIds` through this
+				// helper so the assertions below match what the server returns.
+				const explicitIdFor = (a: Artist) =>
+					pkType === 'uuid' && vendor === 'mssql' ? (a.id as string).toUpperCase() : a.id;
+
+				const explicitIds = new Set([...explicitIndices].map((i) => explicitIdFor(artists[i]!)!));
 
 				await resetQueryCounter(vendor);
 
@@ -296,13 +287,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 				expect(response.statusCode).toBe(200);
 
 				const autoIdMatcher = pkType === 'integer' ? expect.any(Number) : expect.stringMatching(UUID_REGEX);
-
-				// MSSQL's UNIQUEIDENTIFIER round-trips UUIDs uppercase (Directus's mssql
-				// formatUUID does .toUpperCase()); our explicit randomUUID() values are
-				// lowercase. Uppercase only the explicit-slot IDs — the auto-slot matcher
-				// is already case-insensitive via UUID_REGEX `/i`.
-				const explicitIdFor = (a: Artist) =>
-					pkType === 'uuid' && vendor === 'mssql' ? (a.id as string).toUpperCase() : a.id;
 
 				const expected = artists
 					.map((a, i) => ({
