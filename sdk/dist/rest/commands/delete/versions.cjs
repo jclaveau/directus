@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/versions`,body:JSON.stringify(t),method:`DELETE`}),n=t=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/versions/${t}`,method:`DELETE`});exports.deleteContentVersion=n,exports.deleteContentVersions=t;
+//# sourceMappingURL=versions.cjs.map

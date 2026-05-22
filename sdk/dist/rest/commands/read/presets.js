@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/presets`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/presets/${t}`,params:n??{},method:`GET`});export{n as readPreset,t as readPresets};
+//# sourceMappingURL=presets.js.map

@@ -1,0 +1,64 @@
+//#region src/activity.d.ts
+declare enum Action {
+  CREATE = "create",
+  UPDATE = "update",
+  DELETE = "delete",
+  REVERT = "revert",
+  VERSION_SAVE = "version_save",
+  COMMENT = "comment",
+  UPLOAD = "upload",
+  LOGIN = "login",
+  LOGOUT = "logout",
+  RUN = "run",
+  INSTALL = "install",
+}
+//#endregion
+//#region src/extensions.d.ts
+declare const APP_EXTENSION_TYPES: readonly ["interface", "display", "layout", "module", "panel", "theme"];
+declare const API_EXTENSION_TYPES: readonly ["hook", "endpoint"];
+declare const HYBRID_EXTENSION_TYPES: readonly ["operation"];
+declare const BUNDLE_EXTENSION_TYPES: readonly ["bundle"];
+declare const EXTENSION_TYPES: readonly ['interface', 'display', 'layout', 'module', 'panel', 'theme', 'hook', 'endpoint', 'operation', 'bundle'];
+declare const NESTED_EXTENSION_TYPES: readonly ['interface', 'display', 'layout', 'module', 'panel', 'theme', 'hook', 'endpoint', 'operation'];
+declare const APP_OR_HYBRID_EXTENSION_TYPES: readonly ['interface', 'display', 'layout', 'module', 'panel', 'theme', 'operation'];
+declare const APP_OR_HYBRID_EXTENSION_PACKAGE_TYPES: readonly ['interface', 'display', 'layout', 'module', 'panel', 'theme', 'operation', 'bundle'];
+//#endregion
+//#region src/fields.d.ts
+declare const KNEX_TYPES: readonly ["bigInteger", "boolean", "date", "dateTime", "decimal", "float", "integer", "json", "string", "text", "time", "timestamp", "binary", "uuid"];
+declare const TYPES: ['bigInteger', 'boolean', 'date', 'dateTime', 'decimal', 'float', 'integer', 'json', 'string', 'text', 'time', 'timestamp', 'binary', 'uuid', 'alias', 'hash', 'csv', 'geometry', 'geometry.Point', 'geometry.LineString', 'geometry.Polygon', 'geometry.MultiPoint', 'geometry.MultiLineString', 'geometry.MultiPolygon', 'unknown'];
+declare const NUMERIC_TYPES: readonly ["bigInteger", "decimal", "float", "integer"];
+declare const GEOMETRY_TYPES: readonly ["Point", "LineString", "Polygon", "MultiPoint", "MultiLineString", "MultiPolygon"];
+declare const GEOMETRY_FORMATS: readonly ["native", "geojson", "wkt", "lnglat"];
+declare const LOCAL_TYPES: readonly ["standard", "file", "files", "m2o", "o2m", "m2m", "m2a", "presentation", "translations", "group"];
+declare const RELATIONAL_TYPES: readonly ["file", "files", "m2o", "o2m", "m2m", "m2a", "translations"];
+declare const GENERATE_SPECIAL: readonly ["uuid", "date-created", "date-updated", "role-created", "role-updated", "user-created", "user-updated"];
+declare const TRANSLATIONS_STRIPPED_ON_CLONE_SPECIALS: [...typeof GENERATE_SPECIAL, 'no-data', 'cast-timestamp'];
+declare const FUNCTIONS: readonly ["year", "month", "week", "day", "weekday", "hour", "minute", "second", "count", "json"];
+declare const SEARCHABLE_TYPES: readonly ["text", "string", "integer", "bigInteger", "float", "decimal", "uuid"];
+//#endregion
+//#region src/files.d.ts
+declare const JAVASCRIPT_FILE_EXTS: readonly ["js", "mjs", "cjs"];
+declare const DEFAULT_CHUNK_SIZE = 8388608;
+//#endregion
+//#region src/injection.d.ts
+declare const STORES_INJECT = "stores";
+declare const API_INJECT = "api";
+declare const SDK_INJECT = "sdk";
+declare const EXTENSIONS_INJECT = "extensions";
+//#endregion
+//#region src/number.d.ts
+declare const DEFAULT_NUMERIC_PRECISION = 10;
+declare const DEFAULT_NUMERIC_SCALE = 5;
+declare const MAX_SAFE_INT64: bigint;
+declare const MIN_SAFE_INT64: bigint;
+declare const MAX_SAFE_INT32: number;
+declare const MIN_SAFE_INT32: number;
+//#endregion
+//#region src/permissions.d.ts
+declare const PERMISSION_ACTIONS: readonly ["create", "read", "update", "delete", "share"];
+//#endregion
+//#region src/regex.d.ts
+declare const REGEX_BETWEEN_PARENS: RegExp;
+declare const REGEX_DB_SAFE_IDENTIFIER: RegExp;
+//#endregion
+export { API_EXTENSION_TYPES, API_INJECT, APP_EXTENSION_TYPES, APP_OR_HYBRID_EXTENSION_PACKAGE_TYPES, APP_OR_HYBRID_EXTENSION_TYPES, Action, BUNDLE_EXTENSION_TYPES, DEFAULT_CHUNK_SIZE, DEFAULT_NUMERIC_PRECISION, DEFAULT_NUMERIC_SCALE, EXTENSIONS_INJECT, EXTENSION_TYPES, FUNCTIONS, GENERATE_SPECIAL, GEOMETRY_FORMATS, GEOMETRY_TYPES, HYBRID_EXTENSION_TYPES, JAVASCRIPT_FILE_EXTS, KNEX_TYPES, LOCAL_TYPES, MAX_SAFE_INT32, MAX_SAFE_INT64, MIN_SAFE_INT32, MIN_SAFE_INT64, NESTED_EXTENSION_TYPES, NUMERIC_TYPES, PERMISSION_ACTIONS, REGEX_BETWEEN_PARENS, REGEX_DB_SAFE_IDENTIFIER, RELATIONAL_TYPES, SDK_INJECT, SEARCHABLE_TYPES, STORES_INJECT, TRANSLATIONS_STRIPPED_ON_CLONE_SPECIALS, TYPES };

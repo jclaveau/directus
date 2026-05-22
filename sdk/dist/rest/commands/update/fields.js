@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r,i)=>()=>(e(t,`Keys cannot be empty`),e(n,`Field cannot be empty`),{path:`/fields/${t}/${n}`,params:i??{},body:JSON.stringify(r),method:`PATCH`});export{t as updateField};
+//# sourceMappingURL=fields.js.map

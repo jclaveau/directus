@@ -1,44 +1,44 @@
 {
-	"name": "@directus/storage-driver-supabase",
-	"version": "3.0.6-jclaveau.2026-04-17-08-30-15",
-	"description": "Supabase file storage abstraction for `@directus/storage`",
-	"homepage": "https://directus.io",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/directus/directus.git",
-		"directory": "packages/storage-driver-supabase"
-	},
-	"funding": "https://github.com/directus/directus?sponsor=1",
-	"license": "BUSL-1.1",
-	"author": "Matthew Rollinson <matt@rolley.io>",
-	"type": "module",
-	"exports": {
-		".": "./dist/index.js",
-		"./package.json": "./package.json"
-	},
-	"main": "dist/index.js",
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsdown src/index.ts --dts",
-		"dev": "tsdown src/index.ts --dts --watch",
-		"test": "vitest --watch=false"
-	},
-	"dependencies": {
-		"@directus/constants": "workspace:*",
-		"@directus/storage": "workspace:*",
-		"@directus/utils": "workspace:*",
-		"@supabase/storage-js": "2.7.1",
-		"tus-js-client": "4.3.1",
-		"undici": "7.5.0"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "3.0.0",
-		"@ngneat/falso": "7.3.0",
-		"@vitest/coverage-v8": "2.1.9",
-		"tsdown": "catalog:",
-		"typescript": "5.8.2",
-		"vitest": "2.1.9"
-	}
+  "name": "@directus/storage-driver-supabase",
+  "version": "3.0.6-jclaveau.2026-04-17-08-30-15",
+  "description": "Supabase file storage abstraction for `@directus/storage`",
+  "homepage": "https://directus.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/directus/directus.git",
+    "directory": "packages/storage-driver-supabase"
+  },
+  "funding": "https://github.com/directus/directus?sponsor=1",
+  "license": "BUSL-1.1",
+  "author": "Matthew Rollinson <matt@rolley.io>",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@supabase/storage-js": "2.7.1",
+    "tus-js-client": "4.3.1",
+    "undici": "7.5.0",
+    "@directus/constants": "14.3.0-jclaveau.2026-04-17-08-30-15",
+    "@directus/utils": "13.4.0-jclaveau.2026-04-17-08-30-15",
+    "@directus/storage": "12.0.0-jclaveau.2026-04-17-08-30-15"
+  },
+  "devDependencies": {
+    "@directus/tsconfig": "3.0.0",
+    "@ngneat/falso": "7.3.0",
+    "@vitest/coverage-v8": "2.1.9",
+    "tsdown": "0.15.11",
+    "typescript": "5.8.2",
+    "vitest": "2.1.9"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --dts",
+    "dev": "tsdown src/index.ts --dts --watch",
+    "test": "vitest --watch=false"
+  }
 }
