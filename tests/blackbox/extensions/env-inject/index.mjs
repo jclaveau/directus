@@ -1,11 +1,7 @@
-import { useEnv } from '@directus/env';
-
-export default (router) => {
+export default (router, { env }) => {
 	router.post('/set', (req, res) => {
-		const env = useEnv();
-
 		if (!env) {
-			return res.status(500).json({ errors: [{ message: 'env cache not initialized' }] });
+			return res.status(500).json({ errors: [{ message: 'env not provided in extension context' }] });
 		}
 
 		const { key, value } = req.body ?? {};

@@ -2228,9 +2228,6 @@ importers:
 
   tests/blackbox:
     devDependencies:
-      '@directus/env':
-        specifier: workspace:*
-        version: link:../../packages/env
       '@directus/tsconfig':
         specifier: 3.0.0
         version: 3.0.0
