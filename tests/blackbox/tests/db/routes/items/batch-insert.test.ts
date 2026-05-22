@@ -76,6 +76,8 @@ async function resetQueryCounter(vendor: Vendor) {
 	await request(getUrl(vendor)).post('/query-counter/reset').set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 }
 
+const sortByName = (x: { name: string }, y: { name: string }) => x.name.localeCompare(y.name);
+
 async function fetchInsertQueriesForNonce(vendor: Vendor, nonce: string, collection: string) {
 	const response = await request(getUrl(vendor))
 		.get(`/query-counter/queries`)
@@ -124,19 +126,27 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				expect(response.statusCode).toBe(200);
 
-				const expected = artists
-					.map((a) => ({
-						id: a.id ?? (pkType === 'integer' ? expect.any(Number) : expect.stringMatching(UUID_REGEX)),
-						name: a.name,
-						company: a.company,
-					}))
-					.sort((x, y) => x.name.localeCompare(y.name));
+				const expected = artists.map((a) => ({
+					id: a.id ?? (pkType === 'integer' ? expect.any(Number) : expect.stringMatching(UUID_REGEX)),
+					name: a.name,
+					company: a.company,
+				}));
 
-				const got = [...(response.body.data as Array<{ id: number | string; name: string; company: string }>)].sort(
-					(x, y) => x.name.localeCompare(y.name),
-				);
+				const got = response.body.data as Array<{ id: number | string; name: string; company: string }>;
 
-				expect(got).toEqual(expected);
+				if (pkType === 'integer') {
+					// Integer-PK collections get DB_DEFAULT_ORDER_READS_BY_PK = ORDER BY pk ASC.
+					// Auto-increment IDs are assigned in insertion order, so PK ASC == input
+					// order. Comparing without any sort actively pins that the default
+					// ordering kicked in — if DB_DEFAULT_ORDER_READS_BY_PK gets disabled or
+					// the integer-PK branch in readByQuery regresses, this assertion fails.
+					expect(got).toEqual(expected);
+				} else {
+					// UUID / string PKs are intentionally excluded from the default sort, so
+					// the response is in plan-dependent order. Sort both sides by `name` to
+					// compare order-independently.
+					expect([...got].sort(sortByName)).toEqual([...expected].sort(sortByName));
+				}
 
 				// Engine UNIQUE prevents row-level PK dups; this pins that createMany's
 				// PK reassignment reports them back distinctly — catches off-by-one or
@@ -204,15 +214,21 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				expect(response.statusCode).toBe(200);
 
-				const expected = artists
-					.map((a) => ({ id: a.id, name: a.name, company: a.company }))
-					.sort((x, y) => x.name.localeCompare(y.name));
+				const expected = artists.map((a) => ({ id: a.id, name: a.name, company: a.company }));
+				const got = response.body.data as Array<{ id: string | number; name: string; company: string }>;
 
-				const got = [...(response.body.data as Array<{ id: string | number; name: string; company: string }>)].sort(
-					(x, y) => x.name.localeCompare(y.name),
-				);
-
-				expect(got).toEqual(expected);
+				if (pkType === 'integer') {
+					// Explicit integer IDs are monotonically ascending (1B + nonceHash + index),
+					// so PK ASC (DB_DEFAULT_ORDER_READS_BY_PK) puts `got` in the same order as
+					// `expected` (input order). Comparing without any sort actively pins that
+					// the default ordering kicked in.
+					expect(got).toEqual(expected);
+				} else {
+					// UUID PKs are intentionally excluded from the default sort; response
+					// order is plan-dependent. Sort both sides by `name` to compare
+					// order-independently.
+					expect([...got].sort(sortByName)).toEqual([...expected].sort(sortByName));
+				}
 
 				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
 				expect(inserts).toHaveLength(isReliableBatchVendor(vendor) ? 1 : N);
@@ -258,10 +274,15 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 						name: a.name,
 						company: a.company,
 					}))
-					.sort((x, y) => x.name.localeCompare(y.name));
+					.sort(sortByName);
 
+				// PK ASC is dialect-dependent for a mixed-integer batch (postgres/oracle
+				// put auto-row small IDs before explicit 1B+ IDs; mysql/maria/sqlite bump
+				// AUTO_INCREMENT past explicits so the auto IDs interleave). UUID mixed
+				// has random PK order. Either way response order isn't a meaningful
+				// invariant to pin here — sort by `name` and compare order-independently.
 				const got = [...(response.body.data as Array<{ id: string | number; name: string; company: string }>)].sort(
-					(x, y) => x.name.localeCompare(y.name),
+					sortByName,
 				);
 
 				expect(got).toEqual(expected);
