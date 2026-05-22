@@ -249,13 +249,11 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				expect(response.statusCode).toBe(200);
 
+				const autoIdMatcher = pkType === 'integer' ? expect.any(Number) : expect.stringMatching(UUID_REGEX);
+
 				const expected = artists
 					.map((a, i) => ({
-						id: explicitIndices.has(i)
-							? a.id
-							: pkType === 'integer'
-							  ? expect.any(Number)
-							  : expect.stringMatching(UUID_REGEX),
+						id: explicitIndices.has(i) ? a.id : autoIdMatcher,
 						name: a.name,
 						company: a.company,
 					}))
