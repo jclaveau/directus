@@ -1,8 +1,10 @@
-import { _cache } from '@directus/env';
+import { useEnv } from '@directus/env';
 
 export default (router) => {
 	router.post('/set', (req, res) => {
-		if (!_cache.env) {
+		const env = useEnv();
+
+		if (!env) {
 			return res.status(500).json({ errors: [{ message: 'env cache not initialized' }] });
 		}
 
@@ -12,7 +14,7 @@ export default (router) => {
 			return res.status(400).json({ errors: [{ message: 'missing string "key"' }] });
 		}
 
-		_cache.env[key] = value;
+		env[key] = value;
 		res.json({ data: { key, value } });
 	});
 };
