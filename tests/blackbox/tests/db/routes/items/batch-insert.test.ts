@@ -190,9 +190,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 				const N = 3;
 				const nonce = randomUUID();
 
-				const artists = Array.from({ length: N }, (_, i) =>
-					buildArtist(pkType, i, nonce, { explicitId: true }),
-				);
+				const artists = Array.from({ length: N }, (_, i) => buildArtist(pkType, i, nonce, { explicitId: true }));
 
 				const sentIds = artists.map((a) => a.id!);
 
