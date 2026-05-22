@@ -52,9 +52,9 @@ jobs:
           - postgres
           - mysql
           - maria
-          # - mssql TODO fix https://github.com/jclaveau/directus/issues/30
+          - mssql
           - oracle
-          # - cockroachdb
+          - cockroachdb
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
