@@ -35,12 +35,8 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 // `WHERE id _in (savedKeys)` (api/src/services/items.ts readMany), with no ORDER BY tying
 // output rows to the input keys array. The DB returns rows in plan-dependent order — for
 // an IN-list lookup on a UUID PK that is alphabetical by id (index-scan order), NOT
-// insertion order. So response positions are not aligned with request positions; assert
-// via name/id lookup, not by index. (If we ever change `readMany` to preserve key order,
-// the lookup helper below still works.)
-function indexResponseByName<T extends { name: string }>(items: T[]): Map<string, T> {
-	return new Map(items.map((item) => [item.name, item]));
-}
+// insertion order. Tests below sort both `expected` and `got` by `name` before deep-equal
+// to make assertions independent of the response order.
 
 type Artist = {
 	id?: number | string;
@@ -127,32 +123,25 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				expect(response.statusCode).toBe(200);
 
-				const data = response.body.data as Array<{ id: number | string; name: string; company: string }>;
-				expect(data).toHaveLength(N);
+				const expected = artists
+					.map((a) => ({
+						id: a.id ?? (pkType === 'integer' ? expect.any(Number) : expect.stringMatching(UUID_REGEX)),
+						name: a.name,
+						company: a.company,
+					}))
+					.sort((x, y) => x.name.localeCompare(y.name));
 
-				expect(new Set(data.map((d) => d.id)).size).toBe(N);
+				const got = [...(response.body.data as Array<{ id: number | string; name: string; company: string }>)].sort(
+					(x, y) => x.name.localeCompare(y.name),
+				);
 
-				// Round-trip via name lookup (response order is NOT guaranteed; see header note)
-				const byName = indexResponseByName(data);
+				expect(got).toEqual(expected);
 
-				for (const artist of artists) {
-					const got = byName.get(artist.name);
-					expect(got, `missing inserted artist with name ${artist.name}`).toBeDefined();
-					expect(got!.company).toBe(artist.company);
-				}
-
-				for (const id of data.map((d) => d.id)) {
-					if (pkType === 'integer') {
-						expect(typeof id).toBe('number');
-						expect(id as number).toBeGreaterThan(0);
-					} else if (pkType === 'uuid') {
-						expect(typeof id).toBe('string');
-						expect(id as string).toMatch(UUID_REGEX);
-					} else {
-						expect(typeof id).toBe('string');
-						expect((id as string).length).toBeGreaterThan(0);
-					}
-				}
+				// Engine UNIQUE prevents row-level PK dups; this pins that createMany's
+				// PK reassignment reports them back distinctly — catches off-by-one or
+				// shuffle regressions in the insertedRows → itemsToInsert mapping at
+				// items.ts:430-449.
+				expect(new Set(got.map((g) => g.id)).size).toBe(N);
 
 				// Query-count is the only branch: reliable vendors emit one multi-row INSERT,
 				// loop-bucket vendors emit one INSERT per row.
@@ -192,8 +181,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				const artists = Array.from({ length: N }, (_, i) => buildArtist(pkType, i, nonce, { explicitId: true }));
 
-				const sentIds = artists.map((a) => a.id!);
-
 				await resetQueryCounter(vendor);
 
 				const response = await request(getUrl(vendor))
@@ -216,16 +203,15 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				expect(response.statusCode).toBe(200);
 
-				const data = response.body.data as Array<{ id: string | number; name: string }>;
-				const byName = indexResponseByName(data);
+				const expected = artists
+					.map((a) => ({ id: a.id, name: a.name, company: a.company }))
+					.sort((x, y) => x.name.localeCompare(y.name));
 
-				for (const artist of artists) {
-					const got = byName.get(artist.name);
-					expect(got).toBeDefined();
-					expect(got!.id).toBe(artist.id);
-				}
+				const got = [...(response.body.data as Array<{ id: string | number; name: string; company: string }>)].sort(
+					(x, y) => x.name.localeCompare(y.name),
+				);
 
-				expect(new Set(data.map((d) => d.id))).toEqual(new Set(sentIds));
+				expect(got).toEqual(expected);
 
 				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
 				expect(inserts).toHaveLength(isReliableBatchVendor(vendor) ? 1 : N);
@@ -263,35 +249,31 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				expect(response.statusCode).toBe(200);
 
-				const data = response.body.data as Array<{ id: string | number; name: string; company: string }>;
-				expect(data).toHaveLength(N);
+				const expected = artists
+					.map((a, i) => ({
+						id: explicitIndices.has(i)
+							? a.id
+							: pkType === 'integer'
+							  ? expect.any(Number)
+							  : expect.stringMatching(UUID_REGEX),
+						name: a.name,
+						company: a.company,
+					}))
+					.sort((x, y) => x.name.localeCompare(y.name));
 
-				const byName = indexResponseByName(data);
+				const got = [...(response.body.data as Array<{ id: string | number; name: string; company: string }>)].sort(
+					(x, y) => x.name.localeCompare(y.name),
+				);
 
-				// Explicit PKs survive on the items that supplied them
-				for (const i of explicitIndices) {
-					const got = byName.get(artists[i]!.name);
-					expect(got).toBeDefined();
-					expect(got!.id).toBe(artists[i]!.id);
-				}
+				expect(got).toEqual(expected);
 
-				// Auto-gen items got non-empty distinct ids not colliding with explicit ones
-				for (const i of [1, 3]) {
-					const got = byName.get(artists[i]!.name);
-					expect(got).toBeDefined();
-
-					if (pkType === 'integer') {
-						expect(typeof got!.id).toBe('number');
-						expect(got!.id as number).toBeGreaterThan(0);
-					} else {
-						expect(typeof got!.id).toBe('string');
-						expect((got!.id as string).length).toBeGreaterThan(0);
-					}
-
-					expect(explicitIds.has(got!.id)).toBe(false);
-				}
-
-				expect(new Set(data.map((d) => d.id)).size).toBe(N);
+				// Engine UNIQUE prevents row-level PK dups; these pin that createMany's
+				// PK reassignment reports them back distinctly AND keeps explicit IDs
+				// disjoint from auto-gen ones — catches off-by-one or shuffle regressions
+				// in the insertedRows → itemsToInsert mapping at items.ts:430-449.
+				const allIds = new Set(got.map((g) => g.id));
+				expect(allIds.size).toBe(N);
+				expect([...allIds].filter((id) => explicitIds.has(id))).toHaveLength(explicitIndices.size);
 
 				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
 				expect(inserts).toHaveLength(isReliableBatchVendor(vendor) ? 1 : N);
