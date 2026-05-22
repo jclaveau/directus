@@ -712,12 +712,20 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		// changing the default for those collections would be a surprise with no
 		// payoff. Callers can still pass an explicit `sort` for any pkType.
 		//
+		// Skipped also when the query uses `group` or `aggregate`: ORDER BY a column
+		// not in the GROUP BY / aggregate list is a SQL error on every dialect.
+		//
 		// Disable via DB_DEFAULT_ORDER_READS_BY_PK=false to restore the prior behavior
 		// (e.g. while you migrate existing queries to pass their own sort).
 		//
 		// Note: `updatedQuery` returned by emitFilter is frozen / non-extensible, so
 		// we replace the reference with a spread instead of mutating in place.
-		if (toBoolean(env['DB_DEFAULT_ORDER_READS_BY_PK'] ?? true) && !updatedQuery.sort?.length) {
+		if (
+			toBoolean(env['DB_DEFAULT_ORDER_READS_BY_PK'] ?? true) &&
+			!updatedQuery.sort?.length &&
+			!updatedQuery.group?.length &&
+			!updatedQuery.aggregate
+		) {
 			const primaryKeyField = this.schema.collections[this.collection]!.primary;
 			const pkFieldType = this.schema.collections[this.collection]!.fields[primaryKeyField]?.type;
 
