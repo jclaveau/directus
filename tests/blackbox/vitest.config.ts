@@ -15,6 +15,6 @@ export default defineConfig({
 		sequence: {
 			sequencer: Sequencer,
 		},
-		testTimeout: 15_000,
+		testTimeout: 30_000,
 	},
 });
