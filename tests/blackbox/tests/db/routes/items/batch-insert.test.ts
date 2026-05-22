@@ -5,7 +5,7 @@ import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
 import { setDirectusEnv } from '@utils/set-directus-env';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { collectionArtists } from './no-relation.seed';
 
 // Vendors where ItemsService.createMany emits a single multi-row INSERT … RETURNING (the
@@ -333,31 +333,34 @@ if ((vendors as readonly Vendor[]).includes('mssql')) {
 		const vendor: Vendor = 'mssql';
 		const localCollectionArtists = `${collectionArtists}_integer`;
 
-		beforeAll(async () => {
-			await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', 'true');
-		});
-
-		afterAll(async () => {
-			await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', '');
-		});
-
 		it('createMany emits one multi-row INSERT', async () => {
-			const N = 5;
-			const nonce = randomUUID();
-			const artists = Array.from({ length: N }, (_, i) => buildArtist('integer', i, nonce));
+			// Scope the env flip tightly to this test: setting it in beforeAll keeps
+			// trust-batch=true on the shared mssql Directus instance for the entire
+			// describe lifecycle, which races against any other test file running
+			// concurrently against the same instance (they'd unexpectedly hit the
+			// batch path). try/finally narrows the window to this test's body only.
+			await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', 'true');
 
-			await resetQueryCounter(vendor);
+			try {
+				const N = 5;
+				const nonce = randomUUID();
+				const artists = Array.from({ length: N }, (_, i) => buildArtist('integer', i, nonce));
 
-			const response = await request(getUrl(vendor))
-				.post(`/items/${localCollectionArtists}`)
-				.send(artists)
-				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+				await resetQueryCounter(vendor);
 
-			expect(response.statusCode).toBe(200);
-			expect(response.body.data).toHaveLength(N);
+				const response = await request(getUrl(vendor))
+					.post(`/items/${localCollectionArtists}`)
+					.send(artists)
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
-			expect(inserts).toHaveLength(1);
+				expect(response.statusCode).toBe(200);
+				expect(response.body.data).toHaveLength(N);
+
+				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
+				expect(inserts).toHaveLength(1);
+			} finally {
+				await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', '');
+			}
 		});
 	});
 }
