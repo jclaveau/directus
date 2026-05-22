@@ -8,6 +8,7 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
+		"@directus/env": "workspace:*",
 		"@directus/tsconfig": "3.0.0",
 		"@directus/types": "workspace:*",
 		"@directus/utils": "workspace:*",
