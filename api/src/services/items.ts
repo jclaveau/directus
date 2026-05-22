@@ -701,16 +701,26 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				  )
 				: query;
 
-		// Default to ORDER BY <primary key> ASC when no explicit sort was requested.
-		// Without it, the DB returns rows in plan-dependent order — a problem after
-		// batch insert because multiple rows in the same transaction share `date_created`
-		// (NOW() per transaction), breaking consumers that relied on date_created as a
-		// stable tiebreaker. Disable via DB_DEFAULT_ORDER_READS_BY_PK=false to restore
-		// the prior behavior (e.g. while you migrate existing queries to pass their
-		// own sort).
+		// Default to ORDER BY <primary key> ASC for integer / bigInteger PKs when no
+		// explicit sort was requested. Auto-increment integer PKs encode insertion
+		// order, so this restores temporal ordering that batch insert broke: rows in
+		// the same transaction share `date_created` (NOW() per transaction), breaking
+		// consumers that relied on date_created as a stable tiebreaker.
+		//
+		// UUID / string PKs are deliberately excluded — sorting by a random UUID or a
+		// user-supplied string is deterministic but not semantically meaningful, so
+		// changing the default for those collections would be a surprise with no
+		// payoff. Callers can still pass an explicit `sort` for any pkType.
+		//
+		// Disable via DB_DEFAULT_ORDER_READS_BY_PK=false to restore the prior behavior
+		// (e.g. while you migrate existing queries to pass their own sort).
 		if (toBoolean(env['DB_DEFAULT_ORDER_READS_BY_PK'] ?? true) && !updatedQuery.sort?.length) {
 			const primaryKeyField = this.schema.collections[this.collection]!.primary;
-			updatedQuery.sort = [primaryKeyField];
+			const pkFieldType = this.schema.collections[this.collection]!.fields[primaryKeyField]?.type;
+
+			if (pkFieldType === 'integer' || pkFieldType === 'bigInteger') {
+				updatedQuery.sort = [primaryKeyField];
+			}
 		}
 
 		let ast = await getAstFromQuery(

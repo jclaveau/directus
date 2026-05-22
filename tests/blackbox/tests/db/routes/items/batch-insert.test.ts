@@ -32,11 +32,12 @@ function isReliableBatchVendor(vendor: Vendor): boolean {
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // NOTE on response ordering: POST /items returns `data` via `service.readMany(savedKeys)`.
-// As of the DB_DEFAULT_ORDER_READS_BY_PK default in readByQuery, responses are ORDER BY
-// <primary key> ASC unless a caller passes an explicit `sort`. Tests below still sort both
-// `expected` and `got` by `name` before deep-equal: name is a more semantic key for these
-// assertions and keeps the tests resilient if the default ordering is later changed or
-// turned off (e.g. for perf via DB_DEFAULT_ORDER_READS_BY_PK=false).
+// As of the DB_DEFAULT_ORDER_READS_BY_PK default in readByQuery, responses for collections
+// with an integer / bigInteger PK are ORDER BY <primary key> ASC (unless the caller passes
+// an explicit `sort`); UUID / string PK collections remain plan-dependent. Tests below sort
+// both `expected` and `got` by `name` before deep-equal: name is a stable semantic key
+// across every pkType, and keeps assertions resilient if the default ordering changes or
+// is turned off (e.g. DB_DEFAULT_ORDER_READS_BY_PK=false).
 
 type Artist = {
 	id?: number | string;
