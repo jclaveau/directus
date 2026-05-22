@@ -4,7 +4,7 @@ import type { PrimaryKeyType } from '@common/types';
 import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { collectionArtists } from './no-relation.seed';
 
 // Vendors where ItemsService.createMany emits a single multi-row INSERT … RETURNING (the
@@ -20,9 +20,12 @@ const RETURNING_VENDORS = [
 	'postgres',
 	'postgres10',
 	'cockroachdb',
-	'mssql',
 	'oracle',
 	'sqlite3',
+	// mssql is opt-in only via DB_MSSQL_TRUST_BATCH_RETURNING (see
+	// api/src/database/helpers/capabilities/dialects/mssql.ts). When the env var
+	// isn't set — which is the case in CI by default — mssql falls through the
+	// per-row loop bucket and emits N INSERTs.
 ] as const satisfies readonly Vendor[];
 
 function isReliableBatchVendor(vendor: Vendor): boolean {
@@ -74,6 +77,23 @@ function buildArtist(
 
 async function resetQueryCounter(vendor: Vendor) {
 	await request(getUrl(vendor)).post('/query-counter/reset').set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+}
+
+// Mutates a single key on the running Directus's cached env object via the
+// `env-inject` extension. Lets a test flip a runtime-checked env var (like
+// DB_MSSQL_TRUST_BATCH_RETURNING) on the SAME spawned Directus instance,
+// without restarting it. Only works for env vars that are re-read on each
+// access via the `env` reference from useEnv() — vars captured into a const
+// at module load aren't affected.
+async function setDirectusEnv(vendor: Vendor, key: string, value: string) {
+	const response = await request(getUrl(vendor))
+		.post('/env-inject/set')
+		.send({ key, value })
+		.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+	if (response.statusCode !== 200) {
+		throw new Error(`env-inject set ${key} failed (${response.statusCode}): ${JSON.stringify(response.body)}`);
+	}
 }
 
 const sortByName = (x: { name: string }, y: { name: string }) => x.name.localeCompare(y.name);
@@ -214,7 +234,16 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				expect(response.statusCode).toBe(200);
 
-				const expected = artists.map((a) => ({ id: a.id, name: a.name, company: a.company }));
+				const expected = artists.map((a) => ({
+					// MSSQL's UNIQUEIDENTIFIER column round-trips UUIDs uppercase
+					// (Directus's mssql schema helper does .toUpperCase() in formatUUID);
+					// our explicit randomUUID() values are lowercase, so adjust expected
+					// to match.
+					id: pkType === 'uuid' && vendor === 'mssql' ? (a.id as string).toUpperCase() : a.id,
+					name: a.name,
+					company: a.company,
+				}));
+
 				const got = response.body.data as Array<{ id: string | number; name: string; company: string }>;
 
 				if (pkType === 'integer') {
@@ -268,9 +297,17 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 
 				const autoIdMatcher = pkType === 'integer' ? expect.any(Number) : expect.stringMatching(UUID_REGEX);
 
+				// MSSQL's UNIQUEIDENTIFIER round-trips UUIDs uppercase (Directus's mssql
+				// formatUUID does .toUpperCase()); our explicit randomUUID() values are
+				// lowercase. Uppercase only the explicit-slot IDs — the auto-slot matcher
+				// is already case-insensitive via UUID_REGEX `/i`.
 				const expected = artists
 					.map((a, i) => ({
-						id: explicitIndices.has(i) ? a.id : autoIdMatcher,
+						id: !explicitIndices.has(i)
+							? autoIdMatcher
+							: pkType === 'uuid' && vendor === 'mssql'
+							  ? (a.id as string).toUpperCase()
+							  : a.id,
 						name: a.name,
 						company: a.company,
 					}))
@@ -301,3 +338,43 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 		});
 	});
 });
+
+// MSSQL is opt-in for the batch bucket (see DB_MSSQL_TRUST_BATCH_RETURNING in
+// api/src/database/helpers/capabilities/dialects/mssql.ts). The blocks above
+// cover the default (loop-bucket) behavior; this block flips the env var via
+// the `env-inject` test extension to verify the opt-in path emits one
+// multi-row INSERT instead of N per-row ones — on the SAME spawned Directus
+// instance, without a restart. See setDirectusEnv() for how that works.
+if ((vendors as readonly Vendor[]).includes('mssql')) {
+	describe('/items batch-insert: mssql DB_MSSQL_TRUST_BATCH_RETURNING=true (opt-in batch bucket)', () => {
+		const vendor: Vendor = 'mssql';
+		const localCollectionArtists = `${collectionArtists}_integer`;
+
+		beforeAll(async () => {
+			await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', 'true');
+		});
+
+		afterAll(async () => {
+			await setDirectusEnv(vendor, 'DB_MSSQL_TRUST_BATCH_RETURNING', '');
+		});
+
+		it('createMany emits one multi-row INSERT', async () => {
+			const N = 5;
+			const nonce = randomUUID();
+			const artists = Array.from({ length: N }, (_, i) => buildArtist('integer', i, nonce));
+
+			await resetQueryCounter(vendor);
+
+			const response = await request(getUrl(vendor))
+				.post(`/items/${localCollectionArtists}`)
+				.send(artists)
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.data).toHaveLength(N);
+
+			const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
+			expect(inserts).toHaveLength(1);
+		});
+	});
+}
