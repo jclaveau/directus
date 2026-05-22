@@ -61,8 +61,15 @@ function buildArtist(
 
 	if (pkType === 'string') {
 		artist.id = `artist-${nonce}-${index}`;
-	} else if (opts.explicitId && pkType === 'uuid') {
-		artist.id = randomUUID();
+	} else if (opts.explicitId) {
+		if (pkType === 'uuid') {
+			artist.id = randomUUID();
+		} else if (pkType === 'integer') {
+			// 1B+ offset stays above per-table AUTO_INCREMENT in fresh test DBs;
+			// nonce hash makes consecutive runs use disjoint ranges.
+			const nonceNum = parseInt(nonce.replace(/-/g, '').slice(0, 8), 16);
+			artist.id = 1_000_000_000 + (nonceNum % 100_000_000) + index;
+		}
 	}
 
 	return artist;
@@ -86,6 +93,25 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 	const localCollectionArtists = `${collectionArtists}_${pkType}`;
 
 	describe(`pkType: ${pkType}`, () => {
+		describe('createMany short-circuits on empty input', () => {
+			it.each(vendors)('%s', async (vendor) => {
+				const nonce = randomUUID();
+
+				await resetQueryCounter(vendor);
+
+				const response = await request(getUrl(vendor))
+					.post(`/items/${localCollectionArtists}`)
+					.send([])
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+				expect(response.statusCode).toBe(200);
+				expect(response.body.data).toEqual([]);
+
+				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
+				expect(inserts).toHaveLength(0);
+			});
+		});
+
 		describe('createMany returns N items with distinct PKs, fields round-trip', () => {
 			it.each(vendors)('%s', async (vendor) => {
 				const N = 5;
@@ -135,11 +161,76 @@ describe.each(PRIMARY_KEY_TYPES)('/items batch-insert', (pkType) => {
 			});
 		});
 
-		if (pkType !== 'uuid') {
+		describe('createOne (single-object POST) returns one item via createMany([one])', () => {
+			it.each(vendors)('%s', async (vendor) => {
+				const nonce = randomUUID();
+				const artist = buildArtist(pkType, 0, nonce);
+
+				await resetQueryCounter(vendor);
+
+				const response = await request(getUrl(vendor))
+					.post(`/items/${localCollectionArtists}`)
+					.send(artist)
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+				expect(response.statusCode).toBe(200);
+				expect(response.body.data).toMatchObject({ name: artist.name, company: artist.company });
+
+				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
+				expect(inserts).toHaveLength(1);
+			});
+		});
+
+		if (pkType === 'string') {
 			return;
 		}
 
-		describe('createMany preserves explicit PKs and auto-generates the rest', () => {
+		describe('createMany preserves explicit PKs (homogeneous-explicit batch)', () => {
+			it.each(vendors)('%s', async (vendor) => {
+				const N = 3;
+				const nonce = randomUUID();
+
+				const artists = Array.from({ length: N }, (_, i) =>
+					buildArtist(pkType, i, nonce, { explicitId: true }),
+				);
+
+				const sentIds = artists.map((a) => a.id!);
+
+				await resetQueryCounter(vendor);
+
+				const response = await request(getUrl(vendor))
+					.post(`/items/${localCollectionArtists}`)
+					.send(artists)
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+				expect(response.statusCode).toBe(200);
+
+				const data = response.body.data as Array<{ id: string | number; name: string }>;
+				const byName = indexResponseByName(data);
+
+				for (const artist of artists) {
+					const got = byName.get(artist.name);
+					expect(got).toBeDefined();
+					expect(got!.id).toBe(artist.id);
+				}
+
+				expect(new Set(data.map((d) => d.id))).toEqual(new Set(sentIds));
+
+				const inserts = await fetchInsertQueriesForNonce(vendor, nonce, localCollectionArtists);
+				expect(inserts).toHaveLength(isReliableBatchVendor(vendor) ? 1 : N);
+			});
+		});
+
+		if (pkType !== 'uuid') {
+			// The mixed (some-explicit, some-auto in one batch) variant only runs for
+			// UUID because integer PKs in a mixed batch have dialect-specific
+			// auto-increment-advance semantics that aren't a regression target —
+			// the homogeneous-explicit test above already verifies explicit PKs
+			// survive on the integer path.
+			return;
+		}
+
+		describe('createMany preserves explicit PKs and auto-generates the rest (mixed batch)', () => {
 			it.each(vendors)('%s', async (vendor) => {
 				const N = 5;
 				const nonce = randomUUID();

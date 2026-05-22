@@ -227,7 +227,6 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				}
 
 				if (
-					false || // eslint-disable-line
 					typeof payloadAfterHooks === 'string' || // replace new creation by an existing item having a uuid as its primary key
 					typeof payloadAfterHooks === 'number' // replace new creation by an existing item having a number as its primary key
 				) {
@@ -354,13 +353,6 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				: {};
 
 			try {
-				// "Does INSERT … RETURNING (or equivalent) preserve insertion order on this
-				// dialect?" — answered per-dialect in api/src/database/helpers/capabilities/dialects/*.
-				// Notably, MariaDB ≥ 10.5 supports INSERT … RETURNING but knex's mysql compiler
-				// silently drops .returning() for both MySQL and MariaDB (tracked upstream at
-				// knex/knex#4572), so MariaDB stays in the loop bucket regardless of server version.
-				const dbReturnsInsertIds = await getHelpers(trx).capabilities.preservesInsertOrderInReturning();
-
 				const rowsToInsert = itemsToInsert.map((v) => {
 					return {
 						...sqliteFieldsRequiringValue,
@@ -370,10 +362,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 				let insertedRows: Record<string, unknown>[];
 
-				if (dbReturnsInsertIds) {
-					// When DB_BATCH_INSERT_CHUNK_SIZE is unset we pass `undefined` so knex falls
-					// back to its own default (currently 1000 rows per INSERT statement).
-					// https://knexjs.org/guide/query-builder.html#batchinsert
+				if (await getHelpers(trx).capabilities.preservesInsertOrderInReturning()) {
+					// undefined → knex default (1000): https://knexjs.org/guide/query-builder.html#batchinsert
 					const chunkSizeEnv = env['DB_BATCH_INSERT_CHUNK_SIZE'];
 					const chunkSize = chunkSizeEnv !== undefined ? Number(chunkSizeEnv) : undefined;
 
