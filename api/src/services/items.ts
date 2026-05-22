@@ -683,7 +683,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 * Get items by query.
 	 */
 	async readByQuery(query: Query, opts?: QueryOptions): Promise<Item[]> {
-		const updatedQuery =
+		let updatedQuery =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
 						this.eventScope === 'items'
@@ -714,12 +714,15 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		//
 		// Disable via DB_DEFAULT_ORDER_READS_BY_PK=false to restore the prior behavior
 		// (e.g. while you migrate existing queries to pass their own sort).
+		//
+		// Note: `updatedQuery` returned by emitFilter is frozen / non-extensible, so
+		// we replace the reference with a spread instead of mutating in place.
 		if (toBoolean(env['DB_DEFAULT_ORDER_READS_BY_PK'] ?? true) && !updatedQuery.sort?.length) {
 			const primaryKeyField = this.schema.collections[this.collection]!.primary;
 			const pkFieldType = this.schema.collections[this.collection]!.fields[primaryKeyField]?.type;
 
 			if (pkFieldType === 'integer' || pkFieldType === 'bigInteger') {
-				updatedQuery.sort = [primaryKeyField];
+				updatedQuery = { ...updatedQuery, sort: [primaryKeyField] };
 			}
 		}
 
