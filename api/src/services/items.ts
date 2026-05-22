@@ -10,6 +10,7 @@ import type {
 	Query,
 	SchemaOverview,
 } from '@directus/types';
+import { toBoolean } from '@directus/utils';
 
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
@@ -699,6 +700,18 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						},
 				  )
 				: query;
+
+		// Default to ORDER BY <primary key> ASC when no explicit sort was requested.
+		// Without it, the DB returns rows in plan-dependent order — a problem after
+		// batch insert because multiple rows in the same transaction share `date_created`
+		// (NOW() per transaction), breaking consumers that relied on date_created as a
+		// stable tiebreaker. Disable via DB_DEFAULT_ORDER_READS_BY_PK=false to restore
+		// the prior behavior (e.g. while you migrate existing queries to pass their
+		// own sort).
+		if (toBoolean(env['DB_DEFAULT_ORDER_READS_BY_PK'] ?? true) && !updatedQuery.sort?.length) {
+			const primaryKeyField = this.schema.collections[this.collection]!.primary;
+			updatedQuery.sort = [primaryKeyField];
+		}
 
 		let ast = await getAstFromQuery(
 			{
