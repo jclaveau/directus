@@ -93,4 +93,45 @@ describe('SchemaHelperOracle', () => {
 			'my_custom_column',
 		]);
 	});
+
+	describe('drop ... ifExists (catalog-gated, no native IF EXISTS on oracle)', () => {
+		function makeKnex(indexRow: unknown) {
+			const first = vi.fn().mockResolvedValue(indexRow);
+			const qb = { select: vi.fn(), from: vi.fn(), where: vi.fn(), first };
+			qb.select.mockReturnValue(qb);
+			qb.from.mockReturnValue(qb);
+			qb.where.mockReturnValue(qb);
+			const table = { dropIndex: vi.fn(), dropUnique: vi.fn() };
+			const alterTable = vi.fn(async (_table: string, cb: (t: typeof table) => void) => cb(table));
+			const knex = { select: qb.select, schema: { alterTable } } as unknown as Knex;
+			return { knex, table, alterTable };
+		}
+
+		test('dropIndexIfExists drops the index when user_indexes lists it', async () => {
+			const { helper } = createHelper();
+			const { knex, table } = makeKnex({ index_name: 'users_email_index' });
+
+			await helper.dropIndexIfExists(knex, 'users', 'email');
+
+			expect(table.dropIndex).toHaveBeenCalledWith(['email'], 'users_email_index');
+		});
+
+		test('dropIndexIfExists is a no-op when the index is missing', async () => {
+			const { helper } = createHelper();
+			const { knex, alterTable } = makeKnex(undefined);
+
+			await helper.dropIndexIfExists(knex, 'users', 'email');
+
+			expect(alterTable).not.toHaveBeenCalled();
+		});
+
+		test('dropUniqueIfExists drops the unique constraint when it exists', async () => {
+			const { helper } = createHelper();
+			const { knex, table } = makeKnex({ index_name: 'users_email_unique' });
+
+			await helper.dropUniqueIfExists(knex, 'users', 'email');
+
+			expect(table.dropUnique).toHaveBeenCalledWith(['email'], 'users_email_unique');
+		});
+	});
 });

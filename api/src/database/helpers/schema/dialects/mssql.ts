@@ -12,6 +12,14 @@ export class SchemaHelperMSSQL extends SchemaHelper {
 		return getDefaultIndexName(type, collection, fields, { maxLength: 128 });
 	}
 
+	// SQL Server's DROP INDEX requires the table: DROP INDEX [IF EXISTS] name ON table.
+	// dropUniqueIfExists inherits the base (knex emits the correct mssql constraint drop).
+	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const indexName = this.generateIndexName('index', collection, field);
+
+		await knex.raw('DROP INDEX IF EXISTS ?? ON ??', [indexName, collection]);
+	}
+
 	override applyLimit(rootQuery: Knex.QueryBuilder, limit: number): void {
 		// The ORDER BY clause is invalid in views, inline functions, derived tables, subqueries,
 		// and common table expressions, unless TOP, OFFSET or FOR XML is also specified.
