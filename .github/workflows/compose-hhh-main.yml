@@ -3,11 +3,13 @@
 #
 # hhh-main is DERIVED, never authored. It is force-rebuilt from:
 #   - fork `main` (fast-forwarded from upstream directus/directus), plus
-#   - every open, non-draft PR targeting `main` (discovered, not hardcoded).
+#   - every open, non-draft PR titled `upstream-draft: …` targeting `main`
+#     (discovered by title prefix, not hardcoded).
 #
 # Never commit directly to hhh-main — this workflow force-pushes over it.
-# Put your work on a `feature/*` branch and PR it into `main`; it then
-# auto-integrates here.
+# Put your work on a `feature/*` branch and open a PR into `main` titled
+# `upstream-draft: …`; it then auto-integrates here while it soaks before an
+# upstream proposal.
 #
 # Policy:
 #   - A PR that does not merge cleanly is SKIPPED (it wouldn't be accepted
@@ -61,16 +63,19 @@ jobs:
           git merge upstream/main -m "Sync upstream into main"
           git push origin main
 
-      - name: Discover open PRs targeting main
+      - name: Discover open upstream-draft PRs targeting main
         id: discover
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Only integrate PRs titled `upstream-draft: …` — work staged for an
+          # upstream proposal that we soak-test in hhh-main first. Other PRs into
+          # main are left out.
           gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
-            --json number,headRefName,isDraft \
-            --jq '[.[] | select(.isDraft | not) | select(.headRefName != "hhh-main")]' \
+            --json number,headRefName,isDraft,title \
+            --jq '[.[] | select(.isDraft | not) | select(.title | startswith("upstream-draft: "))]' \
             > prs.json
-          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.headRefName)"' prs.json
+          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.title)"' prs.json
           echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
 
       - name: Compose hhh-main
