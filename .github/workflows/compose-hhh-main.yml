@@ -56,7 +56,10 @@ jobs:
         run: |
           git remote add upstream https://github.com/directus/directus.git
           git fetch upstream main
-          git checkout main
+          # checkout lands on the PR merge ref (detached HEAD), and fetching
+          # upstream/main makes a bare `git checkout main` ambiguous (two remotes
+          # carry main). Pin the source explicitly so git's DWIM never guesses.
+          git checkout -B main origin/main
           # main = upstream + our thin overlay (this workflow), so it is ahead
           # of upstream and cannot fast-forward. Merge keeps the overlay; stays
           # clean unless upstream edits the same file.
