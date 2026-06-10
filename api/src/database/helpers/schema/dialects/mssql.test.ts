@@ -189,4 +189,13 @@ describe('SchemaHelperMSSQL', () => {
 			'my_custom_column',
 		]);
 	});
+
+	test('dropIndexIfExists emits DROP INDEX IF EXISTS ... ON <table>', async () => {
+		const { helper } = createHelper();
+		const knex = { raw: vi.fn() } as unknown as Knex;
+
+		await helper.dropIndexIfExists(knex, 'users', 'email');
+
+		expect(knex.raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ?? ON ??', ['users_email_index', 'users']);
+	});
 });

@@ -27,6 +27,35 @@ export class SchemaHelperOracle extends SchemaHelper {
 		return indexName;
 	}
 
+	// Oracle has no DROP ... IF EXISTS for indexes/constraints, so check the catalog first.
+	// knex quotes identifiers on creation, so the name is stored case-sensitively as generated;
+	// a unique constraint's backing index shares the name, so user_indexes covers both drops.
+	private async hasIndex(knex: Knex, indexName: string): Promise<boolean> {
+		const result = await knex.select('index_name').from('user_indexes').where({ index_name: indexName }).first();
+
+		return Boolean(result);
+	}
+
+	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const constraintName = this.generateIndexName('unique', collection, field);
+
+		if (await this.hasIndex(knex, constraintName)) {
+			await knex.schema.alterTable(collection, (table) => {
+				table.dropUnique([field], constraintName);
+			});
+		}
+	}
+
+	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const indexName = this.generateIndexName('index', collection, field);
+
+		if (await this.hasIndex(knex, indexName)) {
+			await knex.schema.alterTable(collection, (table) => {
+				table.dropIndex([field], indexName);
+			});
+		}
+	}
+
 	override async changeToType(
 		table: string,
 		column: string,

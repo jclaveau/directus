@@ -226,6 +226,25 @@ export abstract class SchemaHelper extends DatabaseHelper {
 		return this.knex.raw(`CREATE ${isUnique ? 'UNIQUE ' : ''}INDEX ?? ON ?? (??)`, [constraintName, collection, field]);
 	}
 
+	// Default uses knex's native dropUniqueIfExists (postgres / sqlite / cockroachdb / mssql).
+	// mysql + oracle have no DROP ... IF EXISTS syntax and override with an existence check.
+	async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const constraintName = this.generateIndexName('unique', collection, field);
+
+		await knex.schema.alterTable(collection, (table) => {
+			table.dropUniqueIfExists([field], constraintName);
+		});
+	}
+
+	// knex has no dropIndexIfExists for plain indexes on any dialect, so emit the DB-native
+	// IF EXISTS directly (postgres / sqlite / cockroachdb). mssql needs ON <table>; mysql + oracle
+	// lack the syntax and override with an existence check.
+	async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const indexName = this.generateIndexName('index', collection, field);
+
+		await knex.raw('DROP INDEX IF EXISTS ??', [indexName]);
+	}
+
 	async parseCollectionName(collection: string): Promise<string> {
 		return collection;
 	}
