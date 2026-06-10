@@ -1,0 +1,128 @@
+# Composes the `hhh-main` integration branch = "main as it would be if our
+# proposed PRs were accepted upstream".
+#
+# hhh-main is DERIVED, never authored. It is force-rebuilt from:
+#   - fork `main` (fast-forwarded from upstream directus/directus), plus
+#   - every open, non-draft PR targeting `main` (discovered, not hardcoded).
+#
+# Never commit directly to hhh-main — this workflow force-pushes over it.
+# Put your work on a `feature/*` branch and PR it into `main`; it then
+# auto-integrates here.
+#
+# Policy:
+#   - A PR that does not merge cleanly is SKIPPED (it wouldn't be accepted
+#     as-is) and reported, but the rest still compose.
+#   - A composed tree that fails build/api-tests BLOCKS the publish — hhh-main
+#     only ever points at a green tree.
+name: compose-hhh-main
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # daily; offset minute to dodge the top-of-hour rush
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, closed, ready_for_review]
+    branches: [main]
+
+# Collapse rapid re-runs (a burst of PR pushes) onto one compose.
+concurrency:
+  group: compose-hhh-main
+  cancel-in-progress: true
+
+permissions:
+  contents: write # push main + force-push hhh-main
+  pull-requests: read # discover open PRs
+  issues: write # report skipped PRs / red tests
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    # Cross-repo PRs run with a read-only token and no secrets, so they cannot
+    # push. The scheduled run is the reliable path; PR triggers only help for
+    # same-repo branches.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "hhh-bot"
+          git config user.email "hhh-bot@users.noreply.github.com"
+
+      - name: Sync fork main from upstream
+        run: |
+          git remote add upstream https://github.com/directus/directus.git
+          git fetch upstream main
+          git checkout main
+          # main = upstream + our thin overlay (this workflow), so it is ahead
+          # of upstream and cannot fast-forward. Merge keeps the overlay; stays
+          # clean unless upstream edits the same file.
+          git merge upstream/main -m "Sync upstream into main"
+          git push origin main
+
+      - name: Discover open PRs targeting main
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
+            --json number,headRefName,isDraft \
+            --jq '[.[] | select(.isDraft | not) | select(.headRefName != "hhh-main")]' \
+            > prs.json
+          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.headRefName)"' prs.json
+          echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Compose hhh-main
+        id: compose
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git checkout -B hhh-main main
+          skipped=""
+          for num in $(jq -r '.[].number' prs.json); do
+            # refs/pull/N/head works for same-repo AND cross-repo PR heads.
+            git fetch origin "refs/pull/$num/head:pr-$num"
+            if git merge --no-ff -m "Integrate #$num" "pr-$num"; then
+              echo "merged #$num"
+            else
+              git merge --abort
+              echo "::warning::PR #$num does not merge cleanly into hhh-main — skipped"
+              skipped="$skipped #$num"
+            fi
+          done
+          echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
+
+      - name: Install + build
+        uses: ./.github/actions/prepare
+
+      - name: Test api
+        run: pnpm --filter @directus/api test
+
+      - name: Publish hhh-main
+        if: success()
+        # Force: hhh-main is a derived branch, fast-forwarded main slides under
+        # it every run. Concurrency group above prevents racing pushes.
+        run: git push --force origin hhh-main
+
+      - name: Report skipped PRs or failed tests
+        if: always() && (steps.compose.outputs.skipped != '' || failure())
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="compose-hhh-main: integration needs attention"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body="Last \`compose-hhh-main\` run ($run_url) could not produce a clean, green hhh-main."
+          if [ -n "${{ steps.compose.outputs.skipped }}" ]; then
+            body="$body"$'\n\n'"**Skipped (merge conflict, not integrated):**${{ steps.compose.outputs.skipped }}"
+          fi
+          if [ "${{ job.status }}" = "failure" ]; then
+            body="$body"$'\n\n'"**Build or api tests failed** — hhh-main was NOT force-pushed and still points at the previous green tree."
+          fi
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "in:title $title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
