@@ -233,6 +233,8 @@ export abstract class SchemaHelper extends DatabaseHelper {
 	// knex has no dropIndexIfExists for plain indexes on any dialect, so emit the DB-native
 	// IF EXISTS directly (postgres / sqlite / cockroachdb). mssql needs ON <table>; mysql + oracle
 	// lack the syntax and override with an existence check.
+	// Proposed upstream as a native conditional sibling of dropIndex — https://github.com/knex/knex/issues/6467
+	// If it lands, the native-IF-EXISTS branches here + in mssql collapse onto table.dropIndexIfExists(...).
 	async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
 		const indexName = this.generateIndexName('index', collection, field);
 
