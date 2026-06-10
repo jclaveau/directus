@@ -13,7 +13,8 @@ export class SchemaHelperMSSQL extends SchemaHelper {
 	}
 
 	// SQL Server's DROP INDEX requires the table: DROP INDEX [IF EXISTS] name ON table.
-	// dropUniqueIfExists inherits the base (knex emits the correct mssql constraint drop).
+	// dropUniqueIfExists inherits the base — SQL Server 2016+ accepts ALTER TABLE ... DROP
+	// CONSTRAINT IF EXISTS unchanged.
 	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
 		const indexName = this.generateIndexName('index', collection, field);
 

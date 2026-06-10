@@ -102,15 +102,15 @@ describe('SchemaHelperPostgres', () => {
 		expect(knex.raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ??', ['users_email_index']);
 	});
 
-	test('dropUniqueIfExists uses knex native dropUniqueIfExists', async () => {
+	test('dropUniqueIfExists emits ALTER TABLE DROP CONSTRAINT IF EXISTS', async () => {
 		const { helper } = createHelper();
-		const table = { dropUniqueIfExists: vi.fn() };
-		const alterTable = vi.fn(async (_table: string, cb: (t: typeof table) => void) => cb(table));
-		const knex = { schema: { alterTable } } as unknown as Knex;
+		const knex = { raw: vi.fn() } as unknown as Knex;
 
 		await helper.dropUniqueIfExists(knex, 'users', 'email');
 
-		expect(alterTable).toHaveBeenCalledWith('users', expect.any(Function));
-		expect(table.dropUniqueIfExists).toHaveBeenCalledWith(['email'], 'users_email_unique');
+		expect(knex.raw).toHaveBeenCalledWith('ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??', [
+			'users',
+			'users_email_unique',
+		]);
 	});
 });
