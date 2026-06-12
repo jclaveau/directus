@@ -255,7 +255,7 @@ describe('Integration Tests', () => {
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
 
-			it('should cancel the update and return [] when a filter returns null and cancel is allowed', async () => {
+			it('should cancel the update and return a null per key when a filter returns null and cancel is allowed', async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 				const transactionSpy = vi.spyOn(db, 'transaction');
 
@@ -283,7 +283,7 @@ describe('Integration Tests', () => {
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
 
-			it('should cancel the deletion and return [] when a filter returns null and cancel is allowed', async () => {
+			it('should cancel the deletion and return a null per key when a filter returns null and cancel is allowed', async () => {
 				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 				const transactionSpy = vi.spyOn(db, 'transaction');
 
