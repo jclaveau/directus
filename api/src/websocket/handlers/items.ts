@@ -49,11 +49,12 @@ export class ItemsHandler {
 			const query = await sanitizeQuery(message?.query ?? {}, schema, accountability);
 
 			if (Array.isArray(message.data)) {
-				const keys = await service.createMany(message.data);
+				const keys = await service.createMany(message.data, { allowFilterCancel: true });
 				result = await service.readMany(keys, query);
 			} else {
-				const key = await service.createOne(message.data);
-				result = await service.readOne(key, query);
+				const key = await service.createOne(message.data, { allowFilterCancel: true });
+				// A filter hook may cancel the create (null key); there is then no item to read back.
+				result = key !== null ? await service.readOne(key, query) : null;
 			}
 		}
 

@@ -46,8 +46,9 @@ export async function resolveMutation(
 	try {
 		if (single) {
 			if (action === 'create') {
-				const key = await service.createOne(args['data']);
-				return hasQuery ? await service.readOne(key, query) : true;
+				const key = await service.createOne(args['data'], { allowFilterCancel: true });
+				// A filter hook may cancel the create (null key); there is then no item to read back.
+				return hasQuery && key !== null ? await service.readOne(key, query) : true;
 			}
 
 			if (action === 'update') {

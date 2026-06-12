@@ -33,20 +33,27 @@ router.post(
 		const savedKeys: PrimaryKey[] = [];
 
 		if (Array.isArray(req.body)) {
-			const keys = await service.createMany(req.body);
+			const keys = await service.createMany(req.body, { allowFilterCancel: true });
 			savedKeys.push(...keys);
 		} else {
-			const key = await service.createOne(req.body);
-			savedKeys.push(key);
+			const key = await service.createOne(req.body, { allowFilterCancel: true });
+
+			if (key !== null) {
+				// A filter hook may cancel the creation by returning null; nothing to read back then.
+				savedKeys.push(key);
+			}
 		}
 
 		try {
 			if (Array.isArray(req.body)) {
 				const result = await service.readMany(savedKeys, req.sanitizedQuery);
 				res.locals['payload'] = { data: result || null };
-			} else {
+			} else if (savedKeys.length > 0) {
 				const result = await service.readOne(savedKeys[0]!, req.sanitizedQuery);
 				res.locals['payload'] = { data: result || null };
+			} else {
+				// The single create was cancelled by a filter hook: no item to return.
+				res.locals['payload'] = { data: null };
 			}
 		} catch (error: any) {
 			if (isDirectusError(error, ErrorCode.Forbidden)) {

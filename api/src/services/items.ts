@@ -494,7 +494,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					bypassAutoIncrementSequenceReset = false;
 				}
 
-				const primaryKey = await service.createOne(payload, {
+				// `allowFilterCancel` is propagated via `opts`; the overload resolves to the non-null
+				// signature, but a cancelling filter can still return null at runtime — hence the guard.
+				const primaryKey: PrimaryKey | null = await service.createOne(payload, {
 					...(opts || {}),
 					autoPurgeCache: false,
 					onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
@@ -504,7 +506,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					bypassAutoIncrementSequenceReset,
 				});
 
-				primaryKeys.push(primaryKey);
+				// A filter hook may cancel an individual create (null); a cancelled item yields no key.
+				if (primaryKey !== null) {
+					primaryKeys.push(primaryKey);
+				}
 			}
 
 			if (userIntegrityCheckFlags) {
