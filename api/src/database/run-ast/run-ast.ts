@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { Accountability, Filter, Item, Permission, Query, SchemaOverview } from '@directus/types';
 import { cloneDeep, merge } from 'lodash-es';
+import emitter from '../../emitter.js';
 import { fetchPermissions } from '../../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../../permissions/lib/fetch-policies.js';
 import { PayloadService } from '../../services/payload.js';
@@ -85,7 +86,23 @@ export async function runAst(
 			{ schema, knex },
 		);
 
-		const rawItems: Item | Item[] = await dbQuery;
+		// Let hooks rewrite the query builder before it runs (e.g. add a hint or extra clause).
+		const filteredQuery = await emitter.emitFilter(
+			['items.db.select', `${collection}.db.select`],
+			dbQuery,
+			{ collection, query },
+			{ database: knex, schema, accountability },
+		);
+
+		let rawItems: Item | Item[] = await filteredQuery;
+
+		// Let hooks inspect or replace the raw rows straight off the database, before any transform.
+		rawItems = await emitter.emitFilter(
+			['items.db.selected', `${collection}.db.selected`],
+			rawItems,
+			{ collection, query },
+			{ database: knex, schema, accountability },
+		);
 
 		if (!rawItems) return null;
 
