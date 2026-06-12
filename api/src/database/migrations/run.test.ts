@@ -107,4 +107,34 @@ describe('run', () => {
 			});
 		});
 	});
+
+	describe('when migration keys collide', () => {
+		afterEach(() => {
+			vi.doUnmock('fs-extra');
+			vi.resetModules();
+		});
+
+		it('throws an error listing the colliding version and its files', async () => {
+			vi.resetModules();
+
+			vi.doMock('fs-extra', () => ({
+				default: {
+					readdir: vi.fn().mockResolvedValue(['20201028A-first.js', '20201028A-second.js']),
+					pathExists: vi.fn().mockResolvedValue(false),
+				},
+			}));
+
+			const { default: runWithCollision } = await import('./run.js');
+
+			tracker.on.select('directus_migrations').response([]);
+
+			const error = await runWithCollision(db, 'up').catch((e: Error) => e);
+
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toContain('Migration keys collide!');
+			expect((error as Error).message).toContain('"20201028A"');
+			expect((error as Error).message).toContain('first.js');
+			expect((error as Error).message).toContain('second.js');
+		});
+	});
 });
