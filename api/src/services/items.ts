@@ -124,7 +124,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	/**
 	 * Create a single new item.
 	 */
-	async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey> {
+	async createOne(data: Partial<Item>, opts: MutationOptions & { allowFilterCancel: true }): Promise<PrimaryKey | null>;
+	async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey>;
+	async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey | null> {
 		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
 
 		if (!opts.bypassLimits) {
@@ -153,14 +155,14 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		 * that any errors thrown in any nested relational changes will bubble up and cancel the whole
 		 * update tree
 		 */
-		const primaryKey: PrimaryKey = await transaction(this.knex, async (trx) => {
+		const primaryKey: PrimaryKey | null = await transaction(this.knex, async (trx) => {
 			const previousSeatCount = await captureSeatCount(trx, opts.userIntegrityCheckFlags);
 
 			// Run all hooks that are attached to this event so the end user has the chance to augment the
 			// item that is about to be saved
 			const payloadAfterHooks =
 				opts.emitEvents !== false
-					? await emitter.emitFilter<AnyItem, PrimaryKey>(
+					? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
 							this.eventScope === 'items'
 								? ['items.create', `${this.collection}.items.create`]
 								: `${this.eventScope}.create`,
@@ -180,6 +182,17 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				// A filter hook returned a primary key instead of a payload: it has taken over the
 				// creation, so short-circuit and surface that key.
 				return payloadAfterHooks;
+			}
+
+			if (payloadAfterHooks === null) {
+				if (!opts.allowFilterCancel) {
+					throw new InvalidPayloadError({
+						reason: `A filter hook cancelled the creation, but this operation requires a created item`,
+					});
+				}
+
+				// The filter cancelled the creation: no item is inserted and no key is produced.
+				return null;
 			}
 
 			const payloadWithPresets = this.accountability
@@ -401,6 +414,11 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 			return primaryKey;
 		});
+
+		// A filter hook cancelled the creation: nothing was inserted, so skip the action hooks entirely.
+		if (primaryKey === null) {
+			return null;
+		}
 
 		if (opts.emitEvents !== false) {
 			const actionEvent = {

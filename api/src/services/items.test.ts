@@ -1,4 +1,5 @@
 import { VERSION_KEY_PUBLISHED, VERSION_KEY_PUBLISHED_LEGACY } from '@directus/constants';
+import { InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex, { type Knex } from 'knex';
@@ -187,6 +188,37 @@ describe('Integration Tests', () => {
 				expect(insert).not.toHaveBeenCalled();
 
 				transactionSpy.mockRestore();
+			});
+
+			it('should cancel the create and return null when a filter returns null and cancel is allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				const insert = vi.fn().mockReturnThis();
+
+				const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+					return await callback({ ...db, insert } as any);
+				});
+
+				const result = await service.createOne({ name: 'Test' }, { allowFilterCancel: true });
+
+				expect(result).toBeNull();
+				expect(insert).not.toHaveBeenCalled();
+
+				transactionSpy.mockRestore();
+				filterSpy.mockRestore();
+			});
+
+			it('should throw when a filter returns null but cancel is not allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+					return await callback({ ...db } as any);
+				});
+
+				await expect(service.createOne({ name: 'Test' })).rejects.toThrow(InvalidPayloadError);
+
+				transactionSpy.mockRestore();
+				filterSpy.mockRestore();
 			});
 		});
 

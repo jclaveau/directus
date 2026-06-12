@@ -5,6 +5,7 @@ import type {
 	CachedResult,
 	Credentials,
 	DeploymentConfig,
+	MutationOptions,
 	Options,
 	PrimaryKey,
 	Project,
@@ -34,7 +35,7 @@ export class DeploymentService extends ItemsService<DeploymentConfig> {
 		super('directus_deployments', options);
 	}
 
-	override async createOne(data: Partial<DeploymentConfig>, opts?: any): Promise<PrimaryKey> {
+	override async createOne(data: Partial<DeploymentConfig>, opts?: MutationOptions): Promise<PrimaryKey> {
 		const provider = data.provider as ProviderType | undefined;
 
 		if (!provider) {
