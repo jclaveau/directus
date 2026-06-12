@@ -3,7 +3,7 @@ import { useEnv } from '@directus/env';
 import { toArray } from '@directus/utils';
 import type { Knex } from 'knex';
 import { getDefaultIndexName } from '../../../../utils/get-default-index-name.js';
-import { type CreateIndexOptions, SchemaHelper, type SortRecord } from '../types.js';
+import { type CreateIndexOptions, type InvalidCollationColumn, SchemaHelper, type SortRecord } from '../types.js';
 
 const env = useEnv();
 let lowerCaseTableNames: number | undefined;
@@ -132,5 +132,26 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		}
 
 		return collection;
+	}
+
+	override async getColumnsWithInvalidCollation(schema: string, collation: string): Promise<InvalidCollationColumn[]> {
+		const { version } = await this.knex.select(this.knex.raw('VERSION() as version')).first();
+		const isMariaDB = String(version).split('-').includes('MariaDB');
+
+		return this.knex('information_schema.columns')
+			.select<InvalidCollationColumn[]>({
+				table_name: 'TABLE_NAME',
+				name: 'COLUMN_NAME',
+				collation: 'COLLATION_NAME',
+			})
+			.where({ TABLE_SCHEMA: schema })
+			.whereNot({ COLLATION_NAME: collation })
+			.modify((queryBuilder) => {
+				// MariaDB has no native JSON type; it stores JSON as LONGTEXT with the utf8mb4_bin
+				// collation, so that pairing is expected rather than a real collation mismatch.
+				if (isMariaDB) {
+					queryBuilder.andWhereNot({ COLUMN_TYPE: 'longtext', COLLATION_NAME: 'utf8mb4_bin' });
+				}
+			});
 	}
 }
