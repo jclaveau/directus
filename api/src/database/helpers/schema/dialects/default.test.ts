@@ -1,4 +1,5 @@
-import type { Knex } from 'knex';
+import knex, { type Knex } from 'knex';
+import { createTracker, MockClient } from 'knex-mock-client';
 import { describe, expect, test, vi } from 'vitest';
 import { SchemaHelperDefault } from './default.js';
 
@@ -64,5 +65,21 @@ describe('SchemaHelperDefault', () => {
 			'categories',
 			'name',
 		]);
+	});
+
+	describe('getColumnsWithInvalidCollation', () => {
+		test('queries information_schema columns without dialect-specific exclusions', async () => {
+			const db = knex.default({ client: MockClient });
+			const tracker = createTracker(db);
+			tracker.on.select('information_schema').response([]);
+			const helper = new SchemaHelperDefault(db);
+
+			await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
+
+			expect(query?.sql).not.toMatch(/column_type/i);
+			expect(query?.bindings).toEqual(expect.arrayContaining(['directus', 'utf8mb4_general_ci']));
+		});
 	});
 });

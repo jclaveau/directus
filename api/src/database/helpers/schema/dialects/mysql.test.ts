@@ -1,5 +1,6 @@
-import type { Knex } from 'knex';
-import { describe, expect, test, vi } from 'vitest';
+import knex, { type Knex } from 'knex';
+import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { SchemaHelperMySQL } from './mysql.js';
 
 vi.mock('../../index.js', () => ({
@@ -147,6 +148,44 @@ describe('SchemaHelperMySQL', () => {
 
 			expect(result).toBe('MyCollection');
 			expect(mockRaw).toHaveBeenCalledWith('SELECT @@lower_case_table_names AS lctn');
+		});
+	});
+
+	describe('getColumnsWithInvalidCollation', () => {
+		let tracker: Tracker;
+
+		function setup(version: string) {
+			const db = knex.default({ client: MockClient });
+			tracker = createTracker(db);
+			tracker.on.select('VERSION()').response([{ version }]);
+			tracker.on.select('information_schema').response([]);
+			return new SchemaHelperMySQL(db);
+		}
+
+		afterEach(() => {
+			tracker?.reset();
+		});
+
+		test('excludes JSON-as-longtext (utf8mb4_bin) on MariaDB', async () => {
+			const helper = setup('10.11.2-MariaDB-1:10.11.2+maria~ubu2204');
+
+			await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
+
+			expect(query?.sql).toMatch(/column_type/i);
+			expect(query?.bindings).toEqual(expect.arrayContaining(['longtext', 'utf8mb4_bin']));
+		});
+
+		test('does not exclude longtext on MySQL', async () => {
+			const helper = setup('8.0.34');
+
+			await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
+
+			expect(query?.sql).not.toMatch(/column_type/i);
+			expect(query?.bindings).not.toContain('longtext');
 		});
 	});
 });
