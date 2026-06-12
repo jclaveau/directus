@@ -5,6 +5,7 @@ import knex, { type Knex } from 'knex';
 import { createTracker, MockClient, Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, type MockedFunction, test, vi } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
+import emitter from '../emitter.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { handleVersion } from '../utils/versioning/handle-version.js';
 import { ItemsService } from './index.js';
@@ -169,6 +170,74 @@ describe('Integration Tests', () => {
 				expect(mockReturning).toHaveBeenCalledWith('id', undefined);
 
 				transactionSpy.mockRestore();
+			});
+
+			it('awaits async action handlers before resolving when awaitActionHooks is set', async () => {
+				let actionCompleted = false;
+
+				// Resolve on a macrotask: a fire-and-forget emitAction would let createOne
+				// return before this runs, leaving actionCompleted false.
+				const handler = () =>
+					new Promise<void>((resolve) => {
+						setTimeout(() => {
+							actionCompleted = true;
+							resolve();
+						}, 0);
+					});
+
+				emitter.onAction('test.items.create', handler);
+
+				try {
+					await service.createOne({ name: 'Test' }, { awaitActionHooks: true });
+					expect(actionCompleted).toBe(true);
+				} finally {
+					emitter.offAction('test.items.create', handler);
+				}
+			});
+
+			it('does not await action handlers by default (fire-and-forget)', async () => {
+				let actionCompleted = false;
+
+				const handler = () =>
+					new Promise<void>((resolve) => {
+						setTimeout(() => {
+							actionCompleted = true;
+							resolve();
+						}, 0);
+					});
+
+				emitter.onAction('test.items.create', handler);
+
+				try {
+					await service.createOne({ name: 'Test' });
+					// Without awaitActionHooks, createOne resolves without waiting for the macrotask handler.
+					expect(actionCompleted).toBe(false);
+				} finally {
+					emitter.offAction('test.items.create', handler);
+				}
+			});
+
+			it('runs the scoped action events in parallel when awaited', async () => {
+				let signalSecondStarted!: () => void;
+				const secondStarted = new Promise<void>((resolve) => (signalSecondStarted = resolve));
+
+				// The first handler only finishes once the second has started. Run sequentially
+				// this deadlocks (the second never starts), so the test only passes when parallel.
+				const firstHandler = () => secondStarted;
+
+				const secondHandler = () => {
+					signalSecondStarted();
+				};
+
+				emitter.onAction('items.create', firstHandler);
+				emitter.onAction('test.items.create', secondHandler);
+
+				try {
+					await service.createOne({ name: 'Test' }, { awaitActionHooks: true });
+				} finally {
+					emitter.offAction('items.create', firstHandler);
+					emitter.offAction('test.items.create', secondHandler);
+				}
 			});
 		});
 
