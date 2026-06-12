@@ -186,6 +186,69 @@ test(`filtering m2o relation`, async () => {
 	expect(rawQuery.bindings).toEqual(['username']);
 });
 
+test(`filtering nested m2o with sibling relational keys`, async () => {
+	const schema = new SchemaBuilder()
+		.collection('root', (c) => {
+			c.field('id').id();
+			c.field('rel_1').m2o('table_1');
+		})
+		.collection('table_1', (c) => {
+			c.field('id').id();
+			c.field('rel_2').m2o('table_2');
+		})
+		.collection('table_2', (c) => {
+			c.field('id').id();
+			c.field('status').string();
+			c.field('rel_3').m2o('table_3');
+		})
+		.collection('table_3', (c) => {
+			c.field('id').id();
+			c.field('status').string();
+			c.field('rel_4').m2o('table_4');
+		})
+		.collection('table_4', (c) => {
+			c.field('id').id();
+			c.field('status').string();
+		})
+		.build();
+
+	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		schema,
+		queryBuilder,
+		{
+			rel_1: {
+				rel_2: {
+					rel_3: {
+						status: { _eq: 'active' },
+						rel_4: {
+							status: { _eq: 'active' },
+						},
+					},
+					status: { _eq: 'active' },
+				},
+			},
+		},
+		'root',
+		{},
+		[],
+		[],
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	// All three conditions should appear in the WHERE clause
+	expect(rawQuery.sql).toContain('where');
+	expect(rawQuery.bindings).toContain('active');
+
+	// Should be 3: one for each sibling filter (table_3.status, table_4.status, table_2.status)
+	const activeBindings = rawQuery.bindings.filter((b: unknown) => b === 'active');
+	expect(activeBindings).toHaveLength(3);
+});
+
 const o2m_schema = new SchemaBuilder()
 	.collection('article', (c) => {
 		c.field('id').id();
