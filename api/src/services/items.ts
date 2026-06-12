@@ -788,7 +788,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		// item that is about to be saved
 		const payloadAfterHooks =
 			opts.emitEvents !== false
-				? await emitter.emitFilter(
+				? await emitter.emitFilter<Partial<AnyItem>, null>(
 						this.eventScope === 'items'
 							? ['items.update', `${this.collection}.items.update`]
 							: `${this.eventScope}.update`,
@@ -804,6 +804,17 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						},
 					)
 				: payload;
+
+		if (payloadAfterHooks === null) {
+			if (!opts.allowFilterCancel) {
+				throw new InvalidPayloadError({
+					reason: `A filter hook cancelled the update, but this operation requires it`,
+				});
+			}
+
+			// The filter cancelled the update: nothing is written and no keys are returned.
+			return [];
+		}
 
 		// Sort keys to ensure that the order is maintained
 		keys.sort();
@@ -1144,7 +1155,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		const keysAfterHooks =
 			opts.emitEvents !== false
-				? await emitter.emitFilter(
+				? await emitter.emitFilter<PrimaryKey[], null>(
 						this.eventScope === 'items'
 							? ['items.delete', `${this.collection}.items.delete`]
 							: `${this.eventScope}.delete`,
@@ -1159,6 +1170,17 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						},
 					)
 				: keys;
+
+		if (keysAfterHooks === null) {
+			if (!opts.allowFilterCancel) {
+				throw new InvalidPayloadError({
+					reason: `A filter hook cancelled the deletion, but this operation requires it`,
+				});
+			}
+
+			// The filter cancelled the deletion: nothing is deleted and no keys are returned.
+			return [];
+		}
 
 		if (this.accountability) {
 			await validateAccess(

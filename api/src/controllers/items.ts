@@ -149,12 +149,12 @@ router.patch(
 		let keys: PrimaryKey[] = [];
 
 		if (Array.isArray(req.body)) {
-			keys = await service.updateBatch(req.body);
+			keys = await service.updateBatch(req.body, { allowFilterCancel: true });
 		} else if (req.body.keys) {
-			keys = await service.updateMany(req.body.keys, req.body.data);
+			keys = await service.updateMany(req.body.keys, req.body.data, { allowFilterCancel: true });
 		} else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			keys = await service.updateByQuery(sanitizedQuery, req.body.data);
+			keys = await service.updateByQuery(sanitizedQuery, req.body.data, { allowFilterCancel: true });
 		}
 
 		try {
@@ -188,7 +188,7 @@ router.patch(
 			schema: req.schema,
 		});
 
-		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body);
+		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, { allowFilterCancel: true });
 
 		try {
 			const result = await service.readOne(updatedPrimaryKey, req.sanitizedQuery);
@@ -219,12 +219,12 @@ router.delete(
 		});
 
 		if (Array.isArray(req.body)) {
-			await service.deleteMany(req.body);
+			await service.deleteMany(req.body, { allowFilterCancel: true });
 		} else if (req.body.keys) {
-			await service.deleteMany(req.body.keys);
+			await service.deleteMany(req.body.keys, { allowFilterCancel: true });
 		} else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			await service.deleteByQuery(sanitizedQuery);
+			await service.deleteByQuery(sanitizedQuery, { allowFilterCancel: true });
 		}
 
 		return next();
@@ -243,7 +243,7 @@ router.delete(
 			schema: req.schema,
 		});
 
-		await service.deleteOne(req.params['pk']!);
+		await service.deleteOne(req.params['pk']!, { allowFilterCancel: true });
 		return next();
 	}),
 	respond,

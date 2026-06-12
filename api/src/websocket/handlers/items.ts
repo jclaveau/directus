@@ -78,10 +78,10 @@ export class ItemsHandler {
 			const query = await sanitizeQuery(message.query ?? {}, schema, accountability);
 
 			if (message.id) {
-				const key = await service.updateOne(message.id, message.data);
+				const key = await service.updateOne(message.id, message.data, { allowFilterCancel: true });
 				result = await service.readOne(key);
 			} else if (message.ids) {
-				const keys = await service.updateMany(message.ids, message.data);
+				const keys = await service.updateMany(message.ids, message.data, { allowFilterCancel: true });
 				meta = await metaService.getMetaForQuery(message.collection, query);
 				result = await service.readMany(keys, query);
 			} else if (isSingleton) {
@@ -92,7 +92,7 @@ export class ItemsHandler {
 				meta = await metaService.getMetaForQuery(message.collection, query);
 				result = await service.readMany(keys, query);
 			} else {
-				const keys = await service.updateByQuery(query, message.data);
+				const keys = await service.updateByQuery(query, message.data, { allowFilterCancel: true });
 				meta = await metaService.getMetaForQuery(message.collection, query);
 				result = await service.readMany(keys, query);
 			}
@@ -100,14 +100,14 @@ export class ItemsHandler {
 
 		if (message.action === 'delete') {
 			if (message.id) {
-				await service.deleteOne(message.id);
+				await service.deleteOne(message.id, { allowFilterCancel: true });
 				result = message.id;
 			} else if (message.ids) {
-				await service.deleteMany(message.ids);
+				await service.deleteMany(message.ids, { allowFilterCancel: true });
 				result = message.ids;
 			} else if (message.query) {
 				const query = await sanitizeQuery(message.query, schema, accountability);
-				result = await service.deleteByQuery(query);
+				result = await service.deleteByQuery(query, { allowFilterCancel: true });
 			} else {
 				throw new WebSocketError(
 					'items',
