@@ -20,6 +20,7 @@ vi.mock('../utils/versioning/handle-version.js', { spy: true });
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
 		c.field('id').id();
+		c.field('name').string();
 	})
 	.collection('directus_versions', (c) => {
 		c.field('id').id();
@@ -193,6 +194,25 @@ describe('Integration Tests', () => {
 				await service.updateMany([1], {}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
+			});
+
+			it('should match a single key with an exact `where` instead of `whereIn`', async () => {
+				await service.updateMany([1], { name: 'Test' });
+
+				const update = tracker.history.all.find((query) => query.method === 'update');
+
+				expect(update?.sql).toMatch(/where .*=/i);
+				expect(update?.sql).not.toMatch(/ in \(/i);
+				expect(update?.bindings).toContain(1);
+			});
+
+			it('should match several keys with `whereIn`', async () => {
+				await service.updateMany([1, 2], { name: 'Test' });
+
+				const update = tracker.history.all.find((query) => query.method === 'update');
+
+				expect(update?.sql).toMatch(/ in \(/i);
+				expect(update?.bindings).toEqual(expect.arrayContaining([1, 2]));
 			});
 		});
 

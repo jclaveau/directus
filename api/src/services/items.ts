@@ -845,7 +845,15 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 			if (Object.keys(payloadWithTypeCasting).length > 0) {
 				try {
-					await trx(this.collection).update(payloadWithTypeCasting).whereIn(primaryKeyField, keys);
+					const query = trx(this.collection).update(payloadWithTypeCasting);
+
+					// A single-key update narrows to an exact `WHERE pk = ?` so the database takes a
+					// precise record lock instead of the wider range lock an `IN (...)` can acquire.
+					if (keys.length === 1) {
+						await query.where(primaryKeyField, keys[0]);
+					} else {
+						await query.whereIn(primaryKeyField, keys);
+					}
 				} catch (err: any) {
 					throw await translateDatabaseError(err, data);
 				}
