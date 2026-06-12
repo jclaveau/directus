@@ -228,6 +228,16 @@ describe('Integration Tests', () => {
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
+
+			it('should keep cancelled creates as null to stay index-aligned with the input', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				const result = await service.createMany([{ name: 'A' }, { name: 'B' }], { allowFilterCancel: true });
+
+				expect(result).toEqual([null, null]);
+
+				filterSpy.mockRestore();
+			});
 		});
 
 		describe('updateBatch', () => {
@@ -251,7 +261,7 @@ describe('Integration Tests', () => {
 
 				const result = await service.updateMany([1], { name: 'Test' }, { allowFilterCancel: true });
 
-				expect(result).toEqual([]);
+				expect(result).toEqual([null]);
 				expect(transactionSpy).not.toHaveBeenCalled();
 
 				filterSpy.mockRestore();
@@ -279,7 +289,7 @@ describe('Integration Tests', () => {
 
 				const result = await service.deleteMany([1], { allowFilterCancel: true });
 
-				expect(result).toEqual([]);
+				expect(result).toEqual([null]);
 				expect(transactionSpy).not.toHaveBeenCalled();
 
 				filterSpy.mockRestore();

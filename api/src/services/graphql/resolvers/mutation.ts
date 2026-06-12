@@ -74,7 +74,11 @@ export async function resolveMutation(
 				if (batchUpdate) {
 					keys.push(...(await service.updateBatch(args['data'])));
 				} else {
-					keys.push(...(await service.updateMany(args['ids'], args['data'], { allowFilterCancel: true })));
+					keys.push(
+						...(await service.updateMany(args['ids'], args['data'], { allowFilterCancel: true })).filter(
+							(key): key is PrimaryKey => key !== null,
+						),
+					);
 				}
 
 				return hasQuery ? await service.readMany(keys, query) : true;

@@ -1,4 +1,5 @@
 import { isSystemCollection } from '@directus/system-data';
+import type { PrimaryKey } from '@directus/types';
 import emitter from '../../emitter.js';
 import { ItemsService, MetaService } from '../../services/index.js';
 import { getSchema } from '../../utils/get-schema.js';
@@ -50,7 +51,11 @@ export class ItemsHandler {
 
 			if (Array.isArray(message.data)) {
 				const keys = await service.createMany(message.data, { allowFilterCancel: true });
-				result = await service.readMany(keys, query);
+
+				result = await service.readMany(
+					keys.filter((key): key is PrimaryKey => key !== null),
+					query,
+				);
 			} else {
 				const key = await service.createOne(message.data, { allowFilterCancel: true });
 				// A filter hook may cancel the create (null key); there is then no item to read back.
@@ -83,7 +88,11 @@ export class ItemsHandler {
 			} else if (message.ids) {
 				const keys = await service.updateMany(message.ids, message.data, { allowFilterCancel: true });
 				meta = await metaService.getMetaForQuery(message.collection, query);
-				result = await service.readMany(keys, query);
+
+				result = await service.readMany(
+					keys.filter((key): key is PrimaryKey => key !== null),
+					query,
+				);
 			} else if (isSingleton) {
 				await service.upsertSingleton(message.data);
 				result = await service.readSingleton(query);

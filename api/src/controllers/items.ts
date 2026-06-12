@@ -34,7 +34,8 @@ router.post(
 
 		if (Array.isArray(req.body)) {
 			const keys = await service.createMany(req.body, { allowFilterCancel: true });
-			savedKeys.push(...keys);
+			// Cancelled creates come back as null; drop them before reading the created items.
+			savedKeys.push(...keys.filter((key): key is PrimaryKey => key !== null));
 		} else {
 			const key = await service.createOne(req.body, { allowFilterCancel: true });
 
@@ -146,7 +147,7 @@ router.patch(
 			return next();
 		}
 
-		let keys: PrimaryKey[] = [];
+		let keys: (PrimaryKey | null)[] = [];
 
 		if (Array.isArray(req.body)) {
 			keys = await service.updateBatch(req.body, { allowFilterCancel: true });
@@ -158,7 +159,12 @@ router.patch(
 		}
 
 		try {
-			const result = await service.readMany(keys, req.sanitizedQuery);
+			// Cancelled updates come back as null; drop them before reading the affected items.
+			const result = await service.readMany(
+				keys.filter((key): key is PrimaryKey => key !== null),
+				req.sanitizedQuery,
+			);
+
 			res.locals['payload'] = { data: result };
 		} catch (error: any) {
 			if (isDirectusError(error, ErrorCode.Forbidden)) {
