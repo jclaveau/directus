@@ -5,6 +5,7 @@ import knex, { type Knex } from 'knex';
 import { createTracker, MockClient, Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, type MockedFunction, test, vi } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
+import emitter from '../emitter.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { handleVersion } from '../utils/versioning/handle-version.js';
 import { ItemsService } from './index.js';
@@ -167,6 +168,23 @@ describe('Integration Tests', () => {
 				await service.createOne({ name: 'Test' });
 
 				expect(mockReturning).toHaveBeenCalledWith('id', undefined);
+
+				transactionSpy.mockRestore();
+			});
+
+			it('should short-circuit and return the key when a create filter returns a primary key', async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue(5);
+
+				const insert = vi.fn().mockReturnThis();
+
+				const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+					return await callback({ ...db, insert } as any);
+				});
+
+				const result = await service.createOne({ name: 'Test' });
+
+				expect(result).toBe(5);
+				expect(insert).not.toHaveBeenCalled();
 
 				transactionSpy.mockRestore();
 			});
