@@ -1,4 +1,4 @@
-import { Action, isPublishedVersionKey } from '@directus/constants';
+import { Action, ALTERATIONS_KEYS, isPublishedVersionKey } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import { isSystemCollection } from '@directus/system-data';
@@ -7,6 +7,7 @@ import type {
 	AbstractServiceOptions,
 	Accountability,
 	ActionEventParams,
+	Alterations,
 	Item as AnyItem,
 	MutationOptions,
 	MutationTracker,
@@ -19,7 +20,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { getRelationsForCollection } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { assign, clone, cloneDeep, difference, omit, pick, without } from 'lodash-es';
+import { assign, clone, cloneDeep, difference, isPlainObject, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
@@ -775,6 +776,48 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						},
 					)
 				: payload;
+
+		if (payloadAfterHooks === null) {
+			// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
+			// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
+			// option; on its own a null payload is invalid rather than a silent no-op.
+			throw new InvalidPayloadError({
+				reason: `A filter hook cancelled the update, but this operation requires it`,
+			});
+		}
+
+		const isEmptyAlterations = (value: unknown): boolean => {
+			// A bare `[]` is not empty here: for o2m it removes every existing child (see processO2M),
+			// so only the `{ create, update, delete }` object form can count as no change.
+			if (!isPlainObject(value)) return false;
+
+			const alterations = value as Partial<Alterations>;
+
+			// Guard against a JSON column that merely looks like an alterations object.
+			const isNotAlterationsShaped = Object.keys(alterations).some(
+				(key) => !ALTERATIONS_KEYS.includes(key as keyof Alterations),
+			);
+
+			if (isNotAlterationsShaped) return false;
+
+			// None of create / update / delete carries an item.
+			return ALTERATIONS_KEYS.every((operation) => !alterations[operation]?.length);
+		};
+
+		const changesNothing = (field: string): boolean => {
+			if (field === primaryKeyField) return true;
+			if (aliases.includes(field)) return isEmptyAlterations(payloadAfterHooks![field]);
+			return false;
+		};
+
+		const changedFields = Object.keys(payloadAfterHooks ?? {}).filter((field) => !changesNothing(field));
+
+		if (changedFields.length === 0) {
+			// An empty payload, a PK-only update, or a filter hook that cleared every field to an
+			// empty alterations object leaves nothing to change — skip the transaction,
+			// activity/revision rows and integrity checks.
+			return [];
+		}
 
 		// Sort keys to ensure that the order is maintained
 		keys.sort();
