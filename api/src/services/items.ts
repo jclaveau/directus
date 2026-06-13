@@ -185,7 +185,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			// item that is about to be saved
 			const payloadAfterHooks =
 				opts.emitEvents !== false
-					? await emitter.emitFilter(
+					? await emitter.emitFilter<AnyItem, PrimaryKey>(
 							this.eventScope === 'items'
 								? ['items.create', `${this.collection}.items.create`]
 								: `${this.eventScope}.create`,
@@ -200,6 +200,12 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 							},
 						)
 					: payload;
+
+			if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
+				// A filter hook returned a primary key instead of a payload: it has taken over the
+				// creation, so short-circuit and surface that key.
+				return payloadAfterHooks;
+			}
 
 			const payloadWithPresets = this.accountability
 				? await processPayload(

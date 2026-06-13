@@ -263,6 +263,23 @@ describe('Integration Tests', () => {
 					emitter.offAction('test.items.create', secondHandler);
 				}
 			});
+
+			it('should short-circuit and return the key when a create filter returns a primary key', async () => {
+				vi.spyOn(emitter, 'emitFilter').mockResolvedValue(5);
+
+				const insert = vi.fn().mockReturnThis();
+
+				const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+					return await callback({ ...db, insert } as any);
+				});
+
+				const result = await service.createOne({ name: 'Test' });
+
+				expect(result).toBe(5);
+				expect(insert).not.toHaveBeenCalled();
+
+				transactionSpy.mockRestore();
+			});
 		});
 
 		describe('createMany', () => {
