@@ -838,7 +838,10 @@ export class PayloadService {
 
 					if (typeof relatedRecord === 'string' || typeof relatedRecord === 'number') {
 						if (!existingRecord) {
-							throw new ForbiddenError();
+							// 404 / InvalidPayload?
+							throw new ForbiddenError({
+								reason: `Could not find a '${relation.collection}' record having the primary key ${record} while processing O2M relation`,
+							});
 						}
 
 						// If the related item is already associated to the current item, and there's no

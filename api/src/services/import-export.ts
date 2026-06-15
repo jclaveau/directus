@@ -221,7 +221,10 @@ export class ImportService {
 		stream: Readable,
 		options?: { background: boolean },
 	): Promise<void> {
-		if (this.accountability?.admin !== true && isSystemCollection(collection)) throw new ForbiddenError();
+		if (this.accountability?.admin !== true && isSystemCollection(collection))
+			throw new ForbiddenError({
+				reason: `'${this.accountability?.user}' can't import to '${collection}' as not being an admin`,
+			});
 
 		if (this.accountability) {
 			await validateAccess(

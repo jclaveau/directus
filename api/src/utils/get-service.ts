@@ -81,7 +81,10 @@ export function getService(collection: string, opts: AbstractServiceOptions): It
 			return new DeploymentRunsService(opts);
 		default:
 			// Deny usage of other system collections via ItemsService
-			if (collection.startsWith('directus_')) throw new ForbiddenError();
+			if (collection.startsWith('directus_'))
+				throw new ForbiddenError({
+					reason: 'Forbidden access to directus_* collections',
+				});
 
 			return new ItemsService(collection, opts);
 	}

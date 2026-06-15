@@ -566,7 +566,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		// TODO when would this happen?
 		if (records === null) {
-			throw new ForbiddenError();
+			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
 
 		const filteredRecords =
@@ -622,7 +622,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		if (results.length === 0) {
 			throw new ForbiddenError({
-				reason: `Item "${key}" in collection "${this.collection}" was not found, or you don't have permission to access it.`,
+				// 404 / InvalidPayload?
+				reason: `No result found for key ${key} in ${this.collection} during items.readOne()`,
 			});
 		}
 
