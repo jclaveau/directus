@@ -79,7 +79,33 @@ describe('SchemaHelperDefault', () => {
 			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
 
 			expect(query?.sql).not.toMatch(/column_type/i);
-			expect(query?.bindings).toEqual(expect.arrayContaining(['directus', 'utf8mb4_general_ci']));
+			expect(query?.bindings).toEqual(expect.arrayContaining(['directus', 'utf8mb4_general_ci']));		});
+	});
+
+	describe('drop ... ifExists (redshift/default: plain knex drop, no existence check)', () => {
+		function makeKnex() {
+			const table = { dropIndex: vi.fn(), dropUnique: vi.fn() };
+			const alterTable = vi.fn(async (_table: string, cb: (t: typeof table) => void) => cb(table));
+			const knex = { schema: { alterTable } } as unknown as Knex;
+			return { knex, table, alterTable };
+		}
+
+		test('dropUniqueIfExists drops the unique constraint unconditionally', async () => {
+			const { helper } = createHelper();
+			const { knex, table } = makeKnex();
+
+			await helper.dropUniqueIfExists(knex, 'users', 'email');
+
+			expect(table.dropUnique).toHaveBeenCalledWith(['email'], expect.stringMatching(/unique/));
+		});
+
+		test('dropIndexIfExists drops the index unconditionally', async () => {
+			const { helper } = createHelper();
+			const { knex, table } = makeKnex();
+
+			await helper.dropIndexIfExists(knex, 'users', 'email');
+
+			expect(table.dropIndex).toHaveBeenCalledWith(['email'], expect.stringMatching(/index/));
 		});
 	});
 });

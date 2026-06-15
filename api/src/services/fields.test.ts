@@ -77,6 +77,8 @@ vi.mock('../utils/should-clear-cache.js', () => ({
 }));
 
 const mockCreateIndexSpy = vi.fn().mockResolvedValue(undefined);
+const mockDropUniqueIfExistsSpy = vi.fn().mockResolvedValue(undefined);
+const mockDropIndexIfExistsSpy = vi.fn().mockResolvedValue(undefined);
 
 // Expose a mutable flag so individual tests can toggle the MSSQL client simulation
 let mockIsOneOfClientsMSSQL = false;
@@ -85,6 +87,8 @@ vi.mock('../database/helpers/index.js', () => ({
 	getHelpers: vi.fn(() => ({
 		schema: {
 			createIndex: mockCreateIndexSpy,
+			dropUniqueIfExists: mockDropUniqueIfExistsSpy,
+			dropIndexIfExists: mockDropIndexIfExistsSpy,
 			processFieldType: vi.fn((field) => field.type),
 			preColumnChange: vi.fn().mockResolvedValue(true),
 			postColumnChange: vi.fn().mockResolvedValue(undefined),
@@ -667,6 +671,67 @@ describe('Integration Tests', () => {
 				await service.updateField('test_collection', field);
 
 				expect(createOneSpy).toHaveBeenCalled();
+			});
+
+			test('drops a toggled-off unique/index through the schema helpers (tolerant of a missing one)', async () => {
+				mockDropUniqueIfExistsSpy.mockClear();
+				mockDropIndexIfExistsSpy.mockClear();
+
+				const service = new FieldsService({
+					knex: db,
+					schema,
+					accountability: null,
+				});
+
+				const baseColumn = {
+					name: 'name',
+					table: 'test_collection',
+					data_type: 'varchar',
+					default_value: null,
+					max_length: 255,
+					numeric_precision: null,
+					numeric_scale: null,
+					is_generated: false,
+					generation_expression: null,
+					is_nullable: true,
+					is_primary_key: false,
+					has_auto_increment: false,
+					foreign_key_column: null,
+					foreign_key_table: null,
+				};
+
+				// existing column currently has both a unique constraint and an index
+				vi.spyOn(service, 'columnInfo').mockResolvedValue({
+					...baseColumn,
+					is_unique: true,
+					is_indexed: true,
+				} as any);
+
+				// isolate the drop dispatch from the real DDL builder
+				vi.spyOn(service as any, 'addColumnToTable').mockReturnValue(undefined);
+				db.schema.alterTable = vi.fn(async (_collection: string, cb: (t: any) => void) => cb({})) as any;
+
+				tracker.on.select('directus_fields').response([]);
+
+				const field: Field = {
+					collection: 'test_collection',
+					field: 'name',
+					type: 'string',
+					schema: {
+						...baseColumn,
+						is_unique: false,
+						is_indexed: false,
+					} as any,
+					meta: null,
+					name: '',
+				};
+
+				// the helper spies resolve undefined (the missing-index case): the update must still succeed
+				await expect(service.updateField('test_collection', field)).resolves.not.toThrow();
+
+				// trx === knex under mockTransaction
+				expect(mockDropUniqueIfExistsSpy).toHaveBeenCalledWith(db, 'test_collection', 'name');
+				expect(mockDropIndexIfExistsSpy).toHaveBeenCalledWith(db, 'test_collection', 'name');
 			});
 		});
 

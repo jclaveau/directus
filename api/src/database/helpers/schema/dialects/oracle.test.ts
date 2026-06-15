@@ -133,5 +133,14 @@ describe('SchemaHelperOracle', () => {
 
 			expect(table.dropUnique).toHaveBeenCalledWith(['email'], 'users_email_unique');
 		});
+
+		test('dropUniqueIfExists is a no-op when the constraint is missing', async () => {
+			const { helper } = createHelper();
+			const { knex, alterTable } = makeKnex(undefined);
+
+			await helper.dropUniqueIfExists(knex, 'users', 'email');
+
+			expect(alterTable).not.toHaveBeenCalled();
+		});
 	});
 });
