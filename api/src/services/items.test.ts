@@ -345,6 +345,50 @@ describe('Integration Tests', () => {
 					createRevisionsSpy.mockRestore();
 				}
 			});
+
+			it('should not emit an action hook when the update is skipped as a no-op', async () => {
+				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+
+				const keys = await service.updateMany([1], {});
+
+				expect(keys).toEqual([]);
+				expect(emitActionSpy).not.toHaveBeenCalled();
+
+				emitActionSpy.mockRestore();
+			});
+
+			it('should emit an action hook for a real write (control for the skip case)', async () => {
+				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+
+				await service.updateMany([1], { name: 'test' });
+
+				expect(emitActionSpy).toHaveBeenCalled();
+
+				emitActionSpy.mockRestore();
+			});
+
+			it('should skip when a filter hook strips the only changed field down to the primary key', async () => {
+				// the decision is made on the post-hook payload, so a hook can turn a write into a no-op
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1 });
+
+				const keys = await service.updateMany([1], { name: 'changed' });
+
+				expect(keys).toEqual([]);
+				expect(tracker.history.all).toHaveLength(0);
+
+				emitFilterSpy.mockRestore();
+			});
+
+			it('should write when a filter hook adds a real field to a would-be no-op payload', async () => {
+				// the inverse: a PK-only payload that a hook enriches must no longer be skipped
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1, name: 'added' });
+
+				await service.updateMany([1], { id: 1 });
+
+				expect(tracker.history.all.length).toBeGreaterThan(0);
+
+				emitFilterSpy.mockRestore();
+			});
 		});
 
 		describe('deleteMany', () => {
