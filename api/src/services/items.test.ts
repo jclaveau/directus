@@ -1,5 +1,5 @@
 import { VERSION_KEY_PUBLISHED, VERSION_KEY_PUBLISHED_LEGACY } from '@directus/constants';
-import { InvalidPayloadError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { type Accountability, UserIntegrityCheckFlag } from '@directus/types';
 import knex, { type Knex } from 'knex';
@@ -128,6 +128,20 @@ describe('Integration Tests', () => {
 				await service.readSingleton({ version: VERSION_KEY_PUBLISHED_LEGACY });
 
 				expect(handleVersion).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('readOne', () => {
+			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
+				service.readByQuery = vi.fn(async () => []);
+
+				const error = await service.readOne(999).catch((err) => err);
+
+				expect(error).toBeInstanceOf(ForbiddenError);
+
+				expect(error.message).toBe(
+					'Item "999" in collection "test" was not found, or you don\'t have permission to access it.',
+				);
 			});
 		});
 
