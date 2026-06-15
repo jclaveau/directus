@@ -117,6 +117,10 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(service.createOne({ collection: 'test_collection' })).rejects.toThrow(ForbiddenError);
+
+				await expect(service.createOne({ collection: 'test_collection' })).rejects.toThrowError(
+					`'undefined' can't create the collection 'test_collection' as it's not an admin`,
+				);
 			});
 
 			const invalidPayloads: Array<[any, string]> = [
@@ -419,6 +423,8 @@ describe('Integration Tests', () => {
 				vi.spyOn(service, 'readMany').mockResolvedValue([]);
 
 				await expect(service.readOne('nonexistent')).rejects.toThrow(ForbiddenError);
+
+				await expect(service.readOne('nonexistent')).rejects.toThrowError(`Collection 'nonexistent' not found`);
 			});
 		});
 
@@ -453,6 +459,10 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(service.updateOne('test_collection', {})).rejects.toThrow(ForbiddenError);
+
+				await expect(service.updateOne('test_collection', {})).rejects.toThrowError(
+					`'undefined' does not have permission to update collections`,
+				);
 			});
 
 			test('should update existing collection meta', async () => {
@@ -505,6 +515,10 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(service.updateBatch([])).rejects.toThrow(ForbiddenError);
+
+				await expect(service.updateBatch([])).rejects.toThrowError(
+					`'undefined' does not have permission to update collections`,
+				);
 			});
 
 			test('should throw InvalidPayloadError when data is not an array', async () => {
@@ -559,6 +573,10 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(service.updateMany([], {})).rejects.toThrow(ForbiddenError);
+
+				await expect(service.updateMany([], {})).rejects.toThrowError(
+					`'undefined' does not have permission to update collections`,
+				);
 			});
 
 			test('should update multiple collections with same data', async () => {
@@ -594,6 +612,10 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(service.deleteOne('test_collection')).rejects.toThrow(ForbiddenError);
+
+				await expect(service.deleteOne('test_collection')).rejects.toThrowError(
+					`'undefined' does not have permission to delete collections`,
+				);
 			});
 
 			test('should throw ForbiddenError when collection does not exist', async () => {
@@ -606,6 +628,10 @@ describe('Integration Tests', () => {
 				vi.spyOn(service, 'readByQuery').mockResolvedValue([]);
 
 				await expect(service.deleteOne('nonexistent')).rejects.toThrow(ForbiddenError);
+
+				await expect(service.deleteOne('nonexistent')).rejects.toThrowError(
+					`Collection to delete 'nonexistent' does not exist`,
+				);
 			});
 
 			test('should delete collection with schema', async () => {
@@ -691,6 +717,8 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(service.deleteMany([])).rejects.toThrow(ForbiddenError);
+
+				await expect(service.deleteMany([])).rejects.toThrowError(`'undefined' can't delete many collections`);
 			});
 
 			test('should delete multiple collections', async () => {
