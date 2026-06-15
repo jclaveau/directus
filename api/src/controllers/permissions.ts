@@ -92,7 +92,9 @@ router.get(
 	'/me',
 	asyncHandler(async (req, res, next) => {
 		if (!req.accountability?.user && !req.accountability?.role && !req.accountability?.share)
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `Can't access /me without being logged in`,
+			});
 
 		const result = await fetchAccountabilityCollectionAccess(req.accountability, {
 			schema: req.schema,

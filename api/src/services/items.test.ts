@@ -139,9 +139,7 @@ describe('Integration Tests', () => {
 
 				expect(error).toBeInstanceOf(ForbiddenError);
 
-				expect(error.message).toBe(
-					'Item "999" in collection "test" was not found, or you don\'t have permission to access it.',
-				);
+				expect(error.message).toBe('No result found for key 999 in test during items.readOne()');
 			});
 		});
 

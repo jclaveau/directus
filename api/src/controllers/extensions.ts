@@ -49,7 +49,9 @@ router.get(
 	'/registry',
 	asyncHandler(async (req, res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${req.accountability?.user}' does not have permission to access registry`,
+			});
 		}
 
 		const { search, limit, offset, sort, filter } = req.sanitizedQuery;
@@ -84,7 +86,7 @@ router.get(
 
 			if (type) {
 				if (isIn(type, EXTENSION_TYPES) === false) {
-					throw new ForbiddenError();
+					throw new ForbiddenError(); // InvalidPayload ? 404 ?
 				}
 
 				query.type = type;
@@ -185,13 +187,15 @@ router.post(
 	'/registry/install',
 	asyncHandler(async (req, _res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${req.accountability?.user}' does not have permission to access registry/install`,
+			});
 		}
 
 		const { version, extension } = req.body;
 
 		if (!version || !extension) {
-			throw new ForbiddenError();
+			throw new ForbiddenError(); // InvalidPayload ?
 		}
 
 		const service = new ExtensionsService({
@@ -209,13 +213,15 @@ router.post(
 	'/registry/reinstall',
 	asyncHandler(async (req, _res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${req.accountability?.user}' does not have permission to access registry/reinstall`,
+			});
 		}
 
 		const { extension } = req.body;
 
 		if (!extension) {
-			throw new ForbiddenError();
+			throw new ForbiddenError(); // InvalidPayload ?
 		}
 
 		const service = new ExtensionsService({
@@ -233,13 +239,15 @@ router.delete(
 	`/registry/uninstall/:pk(${UUID_REGEX})`,
 	asyncHandler(async (req, _res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${req.accountability?.user}' does not have permission to access registry/uninstall`,
+			});
 		}
 
 		const pk = req.params['pk'];
 
 		if (typeof pk !== 'string') {
-			throw new ForbiddenError();
+			throw new ForbiddenError(); // InvalidPayload ?
 		}
 
 		const service = new ExtensionsService({
@@ -257,11 +265,13 @@ router.patch(
 	`/:pk(${UUID_REGEX})`,
 	asyncHandler(async (req, res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${req.accountability?.user}' cannot update extension`,
+			});
 		}
 
 		if (typeof req.params['pk'] !== 'string') {
-			throw new ForbiddenError();
+			throw new ForbiddenError(); // InvalidPayload
 		}
 
 		const service = new ExtensionsService({
@@ -295,7 +305,9 @@ router.delete(
 	`/:pk(${UUID_REGEX})`,
 	asyncHandler(async (req, _res, next) => {
 		if (req.accountability && req.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${req.accountability?.user}' can't delete extension`,
+			});
 		}
 
 		const service = new ExtensionsService({
@@ -306,7 +318,7 @@ router.delete(
 		const pk = req.params['pk'];
 
 		if (typeof pk !== 'string') {
-			throw new ForbiddenError();
+			throw new ForbiddenError(); // InvalidPayload
 		}
 
 		await service.deleteOne(pk);

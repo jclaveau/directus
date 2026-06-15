@@ -431,7 +431,9 @@ router.post(
 		}
 
 		if (!req.accountability.admin || !req.params['pk']) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `You are not allowed to disable TFA for this user`,
+			});
 		}
 
 		const service = new TFAService({
