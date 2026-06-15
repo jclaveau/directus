@@ -1,0 +1,20 @@
+# --- codeload tarball shrink (export-ignore = git-archive only; clone/build unaffected) ---
+# Downstream monorepos consume this fork as `github:jclaveau/directus#<ref>&path:<sub>`.
+# codeload has no subpath extraction, so EVERY subpath fetch downloads the whole-repo
+# tarball and keeps one subdir. These paths are never a consumed subpath and never imported
+# at runtime (packages ship dist/), so drop them from the archive to shrink every fetch.
+# See https://github.com/jclaveau/directus/issues/63 (the registry publish is the real fix).
+**/src/            export-ignore
+**/src/**          export-ignore
+docs/              export-ignore
+tests/             export-ignore
+pnpm-lock.yaml     export-ignore
+.github/           export-ignore
+**/.storybook/**   export-ignore
+**/*.stories.*     export-ignore
+**/*.test.*        export-ignore
+**/*.spec.*        export-ignore
+*.md               export-ignore
+Dockerfile         export-ignore
+docker-compose.yml export-ignore
+.changeset/        export-ignore
