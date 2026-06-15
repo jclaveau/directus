@@ -126,7 +126,8 @@ export class PermissionsService extends ItemsService {
 	}
 
 	async getItemPermissions(collection: string, primaryKey?: string): Promise<ItemPermissions> {
-		if (!this.accountability?.user) throw new ForbiddenError();
+		if (!this.accountability?.user)
+			throw new ForbiddenError({ reason: 'You must be authenticated to read item permissions.' });
 
 		if (this.accountability?.admin) {
 			return {

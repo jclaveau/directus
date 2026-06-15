@@ -141,7 +141,8 @@ export class SharesService extends ItemsService {
 	 * if you have read access to that particular share
 	 */
 	async invite(payload: { emails: string[]; share: PrimaryKey }) {
-		if (!this.accountability?.user) throw new ForbiddenError();
+		if (!this.accountability?.user)
+			throw new ForbiddenError({ reason: 'You must be authenticated to send a share invite.' });
 
 		const share = await this.readOne(payload.share, { fields: ['collection'] });
 
