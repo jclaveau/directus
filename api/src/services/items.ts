@@ -621,7 +621,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const results: Item[] = await this.readByQuery(queryWithKey, { ...opts, key });
 
 		if (results.length === 0) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `Item "${key}" in collection "${this.collection}" was not found, or you don't have permission to access it.`,
+			});
 		}
 
 		return results[0]!;
