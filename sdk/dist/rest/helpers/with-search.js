@@ -1,0 +1,2 @@
+import{formatFields as e}from"../utils/query-to-params.js";import"../index.js";function t(t){return()=>{let n=t();return n.method===`GET`&&n.params&&(n.method=`SEARCH`,n.body=JSON.stringify({query:{...n.params,fields:e(n.params.fields??[])}}),delete n.params),n}}export{t as withSearch};
+//# sourceMappingURL=with-search.js.map

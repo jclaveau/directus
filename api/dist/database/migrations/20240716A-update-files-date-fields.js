@@ -1,0 +1,25 @@
+import { getDatabaseClient } from "../index.js";
+
+//#region src/database/migrations/20240716A-update-files-date-fields.ts
+async function up(knex) {
+	if (getDatabaseClient(knex) === "mysql") await knex.schema.raw("ALTER TABLE `directus_files` CHANGE `uploaded_on` `created_on` TIMESTAMP NOT NULL DEFAULT current_timestamp();");
+	else await knex.schema.alterTable("directus_files", (table) => {
+		table.renameColumn("uploaded_on", "created_on");
+	});
+	await knex.schema.alterTable("directus_files", (table) => {
+		table.timestamp("uploaded_on");
+	});
+	await knex("directus_files").update("uploaded_on", knex.ref("created_on"));
+}
+async function down(knex) {
+	await knex.schema.alterTable("directus_files", (table) => {
+		table.dropColumn("uploaded_on");
+	});
+	if (getDatabaseClient(knex) === "mysql") await knex.schema.raw("ALTER TABLE `directus_files` CHANGE `created_on` `uploaded_on` TIMESTAMP NOT NULL DEFAULT current_timestamp();");
+	else await knex.schema.alterTable("directus_files", (table) => {
+		table.renameColumn("created_on", "uploaded_on");
+	});
+}
+
+//#endregion
+export { down, up };
