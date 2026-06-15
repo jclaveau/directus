@@ -65,4 +65,31 @@ describe('SchemaHelperDefault', () => {
 			'name',
 		]);
 	});
+
+	describe('drop ... ifExists (redshift/default: plain knex drop, no existence check)', () => {
+		function makeKnex() {
+			const table = { dropIndex: vi.fn(), dropUnique: vi.fn() };
+			const alterTable = vi.fn(async (_table: string, cb: (t: typeof table) => void) => cb(table));
+			const knex = { schema: { alterTable } } as unknown as Knex;
+			return { knex, table, alterTable };
+		}
+
+		test('dropUniqueIfExists drops the unique constraint unconditionally', async () => {
+			const { helper } = createHelper();
+			const { knex, table } = makeKnex();
+
+			await helper.dropUniqueIfExists(knex, 'users', 'email');
+
+			expect(table.dropUnique).toHaveBeenCalledWith(['email'], expect.stringMatching(/unique/));
+		});
+
+		test('dropIndexIfExists drops the index unconditionally', async () => {
+			const { helper } = createHelper();
+			const { knex, table } = makeKnex();
+
+			await helper.dropIndexIfExists(knex, 'users', 'email');
+
+			expect(table.dropIndex).toHaveBeenCalledWith(['email'], expect.stringMatching(/index/));
+		});
+	});
 });
