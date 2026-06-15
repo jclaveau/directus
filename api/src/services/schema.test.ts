@@ -83,6 +83,7 @@ describe('Services / Schema', () => {
 			const service = new SchemaService({ knex: db, accountability: { role: 'test', admin: false } as Accountability });
 
 			await expect(service.snapshot()).rejects.toThrowError(ForbiddenError);
+			await expect(service.snapshot()).rejects.toThrowError('Only administrators can read a schema snapshot.');
 		});
 
 		test('should return snapshot for admin user', async () => {
@@ -111,6 +112,11 @@ describe('Services / Schema', () => {
 			const service = new SchemaService({ knex: db, accountability: { role: 'test', admin: false } as Accountability });
 
 			await expect(service.apply(snapshotDiffWithHash)).rejects.toThrowError(ForbiddenError);
+
+			await expect(service.apply(snapshotDiffWithHash)).rejects.toThrowError(
+				'Only administrators can apply a schema diff.',
+			);
+
 			expect(vi.mocked(applyDiff)).not.toHaveBeenCalledOnce();
 		});
 
@@ -161,6 +167,10 @@ describe('Services / Schema', () => {
 
 			await expect(service.diff(snapshotToApply, { currentSnapshot: testSnapshot, force: true })).rejects.toThrowError(
 				ForbiddenError,
+			);
+
+			await expect(service.diff(snapshotToApply, { currentSnapshot: testSnapshot, force: true })).rejects.toThrowError(
+				'Only administrators can diff the schema.',
 			);
 		});
 

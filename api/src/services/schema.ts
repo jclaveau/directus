@@ -26,7 +26,8 @@ export class SchemaService {
 	}
 
 	async snapshot(): Promise<Snapshot> {
-		if (this.accountability?.admin !== true) throw new ForbiddenError();
+		if (this.accountability?.admin !== true)
+			throw new ForbiddenError({ reason: 'Only administrators can read a schema snapshot.' });
 
 		const currentSnapshot = await getSnapshot({ database: this.knex });
 
@@ -34,7 +35,8 @@ export class SchemaService {
 	}
 
 	async apply(payload: SnapshotDiffWithHash, options?: { force?: boolean }): Promise<void> {
-		if (this.accountability?.admin !== true) throw new ForbiddenError();
+		if (this.accountability?.admin !== true)
+			throw new ForbiddenError({ reason: 'Only administrators can apply a schema diff.' });
 
 		const currentSnapshot = await this.snapshot();
 
@@ -49,7 +51,8 @@ export class SchemaService {
 		snapshot: Snapshot,
 		options?: { currentSnapshot?: Snapshot; force?: boolean },
 	): Promise<SnapshotDiff | null> {
-		if (this.accountability?.admin !== true) throw new ForbiddenError();
+		if (this.accountability?.admin !== true)
+			throw new ForbiddenError({ reason: 'Only administrators can diff the schema.' });
 
 		validateSnapshot(snapshot, options?.force);
 
