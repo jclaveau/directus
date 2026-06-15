@@ -478,5 +478,73 @@ describe('Integration Tests', () => {
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
 			});
 		});
+
+		describe('action hook emission (await / bypass)', () => {
+			const macrotaskHandler = (onDone: () => void) => () =>
+				new Promise<void>((resolve) => {
+					setTimeout(() => {
+						onDone();
+						resolve();
+					}, 0);
+				});
+
+			it('still resolves when an awaited action handler throws (error caught and logged)', async () => {
+				const handler = () => Promise.reject(new Error('boom'));
+
+				emitter.onAction('test.items.create', handler);
+
+				try {
+					// emitter.emitAction swallows per-event errors, so the mutation must not reject
+					const outcome = await service.createOne({ name: 'Test' }, { awaitActionHooks: true }).then(
+						() => 'resolved',
+						() => 'rejected',
+					);
+
+					expect(outcome).toBe('resolved');
+				} finally {
+					emitter.offAction('test.items.create', handler);
+				}
+			});
+
+			it('routes action events to bypassEmitAction and skips the emitter', async () => {
+				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+				const bypassEmitAction = vi.fn().mockResolvedValue(undefined);
+
+				await service.createOne({ name: 'Test' }, { bypassEmitAction, awaitActionHooks: true });
+
+				expect(bypassEmitAction).toHaveBeenCalled();
+				expect(emitActionSpy).not.toHaveBeenCalled();
+
+				emitActionSpy.mockRestore();
+			});
+
+			it('awaits async action handlers on update when awaitActionHooks is set', async () => {
+				let actionCompleted = false;
+				const handler = macrotaskHandler(() => (actionCompleted = true));
+
+				emitter.onAction('test.items.update', handler);
+
+				try {
+					await service.updateMany([1], { name: 'test' }, { awaitActionHooks: true });
+					expect(actionCompleted).toBe(true);
+				} finally {
+					emitter.offAction('test.items.update', handler);
+				}
+			});
+
+			it('awaits async action handlers on delete when awaitActionHooks is set', async () => {
+				let actionCompleted = false;
+				const handler = macrotaskHandler(() => (actionCompleted = true));
+
+				emitter.onAction('test.items.delete', handler);
+
+				try {
+					await service.deleteMany([1], { awaitActionHooks: true });
+					expect(actionCompleted).toBe(true);
+				} finally {
+					emitter.offAction('test.items.delete', handler);
+				}
+			});
+		});
 	});
 });
