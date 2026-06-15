@@ -19,6 +19,12 @@ describe('validate keys', () => {
 			expect(() => validateKeys(schema, 'pk_integer', 'id', NaN)).toThrowError();
 		});
 
+		it('Throws an error with a reason naming the expected integer type', () => {
+			expect(() => validateKeys(schema, 'pk_integer', 'id', 'invalid')).toThrowError(
+				'Primary key of pk_integer must be an integer instead of "invalid"',
+			);
+		});
+
 		it('Throws an error when provided with an array containing an invalid integer key', () => {
 			expect(() => validateKeys(schema, 'pk_integer', 'id', [111, 'invalid', 222])).toThrowError();
 			expect(() => validateKeys(schema, 'pk_integer', 'id', [555, NaN, 666])).toThrowError();
@@ -41,6 +47,12 @@ describe('validate keys', () => {
 			expect(() => validateKeys(schema, 'pk_uuid', 'id', 'invalid')).toThrowError();
 			expect(() => validateKeys(schema, 'pk_uuid', 'id', NaN)).toThrowError();
 			expect(() => validateKeys(schema, 'pk_uuid', 'id', 111)).toThrowError();
+		});
+
+		it('Throws an error with a reason naming the expected uuid type', () => {
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', 'invalid')).toThrowError(
+				'Primary key of pk_uuid must be a uuid instead of "invalid"',
+			);
 		});
 
 		it('Throws an error when provided with an array containing an invalid uuid key', () => {

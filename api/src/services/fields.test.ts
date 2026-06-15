@@ -254,7 +254,11 @@ describe('Integration Tests', () => {
 
 				tracker.on.select('directus_fields').response([]);
 
-				await expect(service.readAll('test_collection')).rejects.toThrow(ForbiddenError);
+				const error = await service.readAll('test_collection').catch((err) => err);
+
+				expect(error).toBeInstanceOf(ForbiddenError);
+
+				expect(error.message).toBe(`'undefined' does not have permission to read fields from 'test_collection'.`);
 			});
 		});
 
@@ -296,6 +300,10 @@ describe('Integration Tests', () => {
 				tracker.on.select('directus_fields').response([]);
 
 				await expect(service.readOne('test_collection', 'nonexistent')).rejects.toThrow(ForbiddenError);
+
+				await expect(service.readOne('test_collection', 'nonexistent')).rejects.toThrowError(
+					`Can't retrieve the schema info for the column 'nonexistent' of 'test_collection'`,
+				);
 			});
 
 			test('should throw ForbiddenError for non-admin users without access', async () => {
@@ -319,7 +327,11 @@ describe('Integration Tests', () => {
 
 				tracker.on.select('directus_fields').response([]);
 
-				await expect(service.readOne('test_collection', 'name')).rejects.toThrow(ForbiddenError);
+				const error = await service.readOne('test_collection', 'name').catch((err) => err);
+
+				expect(error).toBeInstanceOf(ForbiddenError);
+
+				expect(error.message).toBe(`'undefined' does not have permission to read 'test_collection.name'`);
 			});
 		});
 
@@ -341,6 +353,10 @@ describe('Integration Tests', () => {
 				};
 
 				await expect(service.createField('test_collection', field)).rejects.toThrow(ForbiddenError);
+
+				await expect(service.createField('test_collection', field)).rejects.toThrowError(
+					`'undefined' does not have the permission to create the field '[object Object]' in 'test_collection'`,
+				);
 			});
 
 			test('should throw InvalidPayloadError when field already exists', async () => {
@@ -505,6 +521,10 @@ describe('Integration Tests', () => {
 				};
 
 				await expect(service.updateField('test_collection', field)).rejects.toThrow(ForbiddenError);
+
+				await expect(service.updateField('test_collection', field)).rejects.toThrowError(
+					`'undefined' does not have the permission to update the field '[object Object]' in 'test_collection'`,
+				);
 			});
 
 			test('should throw InvalidPayloadError when changing alias type', async () => {
@@ -735,6 +755,10 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(service.deleteField('test_collection', 'name')).rejects.toThrow(ForbiddenError);
+
+				await expect(service.deleteField('test_collection', 'name')).rejects.toThrowError(
+					`'undefined' does not have the permission to delete the field 'name' in 'test_collection'`,
+				);
 			});
 
 			test('should delete field meta', async () => {
