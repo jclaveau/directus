@@ -244,6 +244,22 @@ describe('Integration Tests', () => {
 
 				transactionSpy.mockRestore();
 			});
+
+			it('throws when batchInsert returns fewer rows than prepared (positional mapping would be wrong)', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				// two rows in, only one key back -> the positional row->key mapping is unsafe
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => callback({ ...db, batchInsert } as any));
+
+				await expect(batchService().createMany([{ name: 'a' }, { name: 'b' }])).rejects.toThrow(/expected 2/);
+
+				transactionSpy.mockRestore();
+			});
 		});
 
 		describe('updateBatch', () => {
