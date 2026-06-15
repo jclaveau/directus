@@ -149,8 +149,12 @@ export class SchemaHelperMySQL extends SchemaHelper {
 			.modify((queryBuilder) => {
 				// MariaDB has no native JSON type; it stores JSON as LONGTEXT with the utf8mb4_bin
 				// collation, so that pairing is expected rather than a real collation mismatch.
+				// Exclude only the pairing — NOT(longtext AND utf8mb4_bin) — so a longtext column
+				// with a genuinely wrong collation (or a utf8mb4_bin non-longtext) is still reported.
 				if (isMariaDB) {
-					queryBuilder.andWhereNot({ COLUMN_TYPE: 'longtext', COLLATION_NAME: 'utf8mb4_bin' });
+					queryBuilder.andWhereNot((qb) => {
+						void qb.where({ COLUMN_TYPE: 'longtext' }).andWhere({ COLLATION_NAME: 'utf8mb4_bin' });
+					});
 				}
 			});
 	}
