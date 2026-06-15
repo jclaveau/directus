@@ -65,6 +65,42 @@ describe('normalizeFilter', () => {
 		});
 	});
 
+	test('never nests _and/_or inside a relational value (the getFilterPath invariant)', () => {
+		// liftAndPush must keep the logical wrapper at the top, not buried in a relational value
+		// where getFilterPath (which only follows Object.keys(value)[0]) would mishandle it.
+		const filter = {
+			a: {
+				b: {
+					c: { _eq: 1 },
+					d: { _eq: 2 },
+				},
+				e: { _eq: 3 },
+			},
+		};
+
+		const isPlainObject = (node: unknown): node is Record<string, unknown> =>
+			typeof node === 'object' && node !== null && !Array.isArray(node);
+
+		const relationalValueContainsLogical = (node: unknown): boolean => {
+			if (!isPlainObject(node)) return false;
+
+			for (const [key, value] of Object.entries(node)) {
+				if (key === '_and' || key === '_or') {
+					// a top-level logical wrapper is fine; recurse into its sub-filters
+					if ((value as unknown[]).some(relationalValueContainsLogical)) return true;
+				} else if (isPlainObject(value)) {
+					// `value` is a relational/operator object: it must not introduce a logical wrapper
+					if ('_and' in value || '_or' in value) return true;
+					if (relationalValueContainsLogical(value)) return true;
+				}
+			}
+
+			return false;
+		};
+
+		expect(relationalValueContainsLogical(normalizeFilter(filter))).toBe(false);
+	});
+
 	test('preserves _and arrays and normalizes their contents', () => {
 		const filter = {
 			_and: [
