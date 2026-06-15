@@ -170,6 +170,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		const payload: AnyItem = cloneDeep(data);
 		let actionHookPayload = payload;
+		let createWasTakenOver = false;
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		/**
@@ -203,7 +204,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 			if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
 				// A filter hook returned a primary key instead of a payload: it has taken over the
-				// creation, so short-circuit and surface that key.
+				// creation, so short-circuit and surface that key. No row was created through this
+				// service, so the items.create action must not fire with the original payload — the
+				// hook that took over owns any events.
+				createWasTakenOver = true;
 				return payloadAfterHooks;
 			}
 
@@ -427,7 +431,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			return primaryKey;
 		});
 
-		if (opts.emitEvents !== false) {
+		if (opts.emitEvents !== false && !createWasTakenOver) {
 			const actionEvent = {
 				event:
 					this.eventScope === 'items'

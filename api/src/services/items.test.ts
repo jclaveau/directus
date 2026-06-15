@@ -280,6 +280,58 @@ describe('Integration Tests', () => {
 
 				transactionSpy.mockRestore();
 			});
+
+			it('should short-circuit and return the key when a create filter returns a string primary key', async () => {
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue('abc');
+
+				const insert = vi.fn().mockReturnThis();
+
+				const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+					return await callback({ ...db, insert } as any);
+				});
+
+				const result = await service.createOne({ name: 'Test' });
+
+				expect(result).toBe('abc');
+				expect(insert).not.toHaveBeenCalled();
+
+				transactionSpy.mockRestore();
+				emitFilterSpy.mockRestore();
+			});
+
+			it('should NOT emit an items.create action when a filter takes over the create', async () => {
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(5);
+				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+
+				const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+					return await callback({ ...db } as any);
+				});
+
+				await service.createOne({ name: 'Test' });
+
+				// the row was never created through this service, so the action must not fire
+				expect(emitActionSpy).not.toHaveBeenCalled();
+
+				transactionSpy.mockRestore();
+				emitActionSpy.mockRestore();
+				emitFilterSpy.mockRestore();
+			});
+
+			it('should insert and emit the action normally when a filter returns a payload object (no take-over)', async () => {
+				// control case: a filter that returns the payload (not a key) leaves creation to the service
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockImplementation(async (_event: any, payload: any) => payload);
+
+				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+
+				await service.createOne({ name: 'Test' });
+
+				expect(emitActionSpy).toHaveBeenCalled();
+
+				emitActionSpy.mockRestore();
+				emitFilterSpy.mockRestore();
+			});
 		});
 
 		describe('createMany', () => {
