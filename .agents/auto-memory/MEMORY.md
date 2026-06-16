@@ -10,6 +10,9 @@
 - [Directus v12 license → dual-target compose](project_directus_v12_license_dual_compose.md) — v12+ needs a license key;
   v11.9.2 = last license-free release Hippocast runs; fork keeps last-v11 + main lines; compose infra (#64/#65) targets
   main only for now, last-v11 is a deferred phase; `upstream-diff:` = fork-permanent, lands on main, never upstream
+- [Compose stack order rubric](project_directus_compose_stack_order_rubric.md) — hhh-main rebased-copy tree: roots =
+  only isolated PRs; order root→leaf bugfix → perf → light contract consistency (payload/reasons) → contract changes
+  (light→heavy) → refused-upstream; deps override rank only when a branch carries another's code
 - [knex >=3.2 breaks Directus deep sort](project_directus_knex_deepsort_regression.md) — knex 3.2.10 #6392 wraps window
   aliases; Directus pre-wraps directus_row_number → double-escape → 500 on every o2m/m2m/m2a sort; pin knex 3.1.0
 - [Codecov per-package flags; blackbox not in api unit flag](project_directus_codecov_flags.md) — codecov/patch/<pkg>
