@@ -258,12 +258,12 @@ describe('Integration Tests', () => {
 			});
 		});
 
-		describe('createOne item-less on singleton', () => {
+		describe('createMany item-less on singleton', () => {
 			test('throws when the singleton already contains a published item', async () => {
 				tracker.on.select('singleton_collection').response([{ id: 1 }]);
 
 				await expect(
-					service.createOne({ key: 'draft', collection: 'singleton_collection', item: null }),
+					service.createMany([{ key: 'draft', collection: 'singleton_collection', item: null }]),
 				).rejects.toThrowError(/already contains an item/);
 			});
 
@@ -273,7 +273,7 @@ describe('Integration Tests', () => {
 				vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([{ count: 1 }] as any);
 
 				await expect(
-					service.createOne({ key: 'draft', collection: 'singleton_collection', item: null }),
+					service.createMany([{ key: 'draft', collection: 'singleton_collection', item: null }]),
 				).rejects.toThrowError(/already has an item-less version/);
 			});
 
@@ -283,7 +283,7 @@ describe('Integration Tests', () => {
 				vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([{ count: 0 }] as any);
 
 				await expect(
-					service.createOne({ key: 'draft', collection: 'singleton_collection', item: null }),
+					service.createMany([{ key: 'draft', collection: 'singleton_collection', item: null }]),
 				).resolves.not.toThrow();
 			});
 
@@ -296,7 +296,7 @@ describe('Integration Tests', () => {
 				});
 
 				await expect(
-					service.createOne({ key: 'draft', collection: 'articles_track_all', item: null }),
+					service.createMany([{ key: 'draft', collection: 'articles_track_all', item: null }]),
 				).resolves.not.toThrow();
 
 				expect(selectSpy).not.toHaveBeenCalled();

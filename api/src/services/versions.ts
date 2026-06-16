@@ -183,20 +183,6 @@ export class VersionsService extends ItemsService<ContentVersion> {
 		return versions;
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		await this.validateCreateData(data);
-
-		if (data['item']) {
-			const mainItem = await this.getMainItem(data['collection'], data['item']);
-
-			data['hash'] = objectHash(mainItem);
-		} else {
-			data['hash'] = null;
-		}
-
-		return super.createOne(data, opts);
-	}
-
 	override async readOne(key: PrimaryKey, query: Query = {}, opts?: QueryOptions): Promise<ContentVersion> {
 		const version = await super.readOne(key, query, opts);
 
@@ -213,8 +199,16 @@ export class VersionsService extends ItemsService<ContentVersion> {
 		const keyCombos = new Set();
 
 		for (const item of data) {
+			await this.validateCreateData(item);
+
 			// Itemless versions are allowed to share a key within a collection
-			if (isNil(item['item'])) continue;
+			if (isNil(item['item'])) {
+				item['hash'] = null;
+				continue;
+			}
+
+			const mainItem = await this.getMainItem(item['collection'], item['item']);
+			item['hash'] = objectHash(mainItem);
 
 			const keyCombo = `${item['key']}-${item['collection']}-${item['item']}`;
 

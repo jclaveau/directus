@@ -2,6 +2,7 @@ import { ForbiddenError, InvalidInviteError, InvalidPayloadError, RecordNotUniqu
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { FailedValidationError } from '@directus/validation';
 import jwt from 'jsonwebtoken';
 import knex from 'knex';
 import { createTracker, MockClient } from 'knex-mock-client';
@@ -76,7 +77,8 @@ describe('Integration Tests', () => {
 			schema,
 		});
 
-		const superCreateOneSpy = vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue('user-id-1');
+		const superCreateOneSpy = vi.spyOn(ItemsService.prototype, 'createOne');
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['user-id-1']);
 		const superUpdateOneSpy = vi.spyOn(ItemsService.prototype, 'updateOne').mockResolvedValue('user-id-1');
 		const superUpdateManySpy = vi.spyOn(ItemsService.prototype, 'updateMany').mockResolvedValue(['user-id-2']);
 
@@ -141,6 +143,66 @@ describe('Integration Tests', () => {
 				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.UserLimits);
 			});
 
+			it('should set preMutationError to FailedValidationError when email is null', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createOne({ email: null as any }, opts);
+
+				expect(opts.preMutationError).toBeInstanceOf(FailedValidationError);
+				expect(checkUniqueEmailsSpy).not.toBeCalled();
+			});
+
+			it('should set preMutationError to FailedValidationError when email is empty string', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createOne({ email: '' }, opts);
+
+				expect(opts.preMutationError).toBeInstanceOf(FailedValidationError);
+				expect(checkUniqueEmailsSpy).not.toBeCalled();
+			});
+
+			it('should checkPasswordPolicy when password is null', async () => {
+				await service.createOne({ password: null as any });
+
+				expect(checkPasswordPolicySpy).toBeCalledWith([null]);
+			});
+
+			it('should checkPasswordPolicy when password is empty string', async () => {
+				await service.createOne({ password: '' });
+
+				expect(checkPasswordPolicySpy).toBeCalledWith(['']);
+			});
+
+			it('should set UserLimits flag when status is active', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createOne({ status: 'active' }, opts);
+
+				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.UserLimits);
+			});
+
+			it('should not set UserLimits flag when status is inactive', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createOne({ status: 'inactive' }, opts);
+
+				expect(opts.userIntegrityCheckFlags).toBeUndefined();
+			});
+
+			it('should OR existing userIntegrityCheckFlags and invoke onRequireUserIntegrityCheck', async () => {
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				const opts: MutationOptions = {
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.RemainingAdmins,
+					onRequireUserIntegrityCheck,
+				};
+
+				await service.createOne({}, opts);
+
+				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
+				expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
+			});
+
 			describe('SSO provider entitlement', () => {
 				it('should block a custom provider when not entitled to SSO', async () => {
 					isEntitledMock.mockReturnValue(false);
@@ -174,8 +236,6 @@ describe('Integration Tests', () => {
 		});
 
 		describe('createMany', () => {
-			vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue([1]);
-
 			it('should not checkUniqueEmails', async () => {
 				await service.createMany([{}]);
 
@@ -206,6 +266,72 @@ describe('Integration Tests', () => {
 				await service.createMany([{}], opts);
 
 				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.UserLimits);
+			});
+
+			it('should set preMutationError to FailedValidationError if any email is null', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createMany([{ email: 'good@example.com' }, { email: null as any }], opts);
+
+				expect(opts.preMutationError).toBeInstanceOf(FailedValidationError);
+			});
+
+			it('should set preMutationError to FailedValidationError if any email is empty string', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createMany([{ email: 'good@example.com' }, { email: '' }], opts);
+
+				expect(opts.preMutationError).toBeInstanceOf(FailedValidationError);
+			});
+
+			it('should checkPasswordPolicy when any password is null', async () => {
+				await service.createMany([{ password: 'testpassword' }, { password: null as any }]);
+
+				expect(checkPasswordPolicySpy).toBeCalledWith(['testpassword', null]);
+			});
+
+			it('should checkPasswordPolicy when any password is empty string', async () => {
+				await service.createMany([{ password: 'testpassword' }, { password: '' }]);
+
+				expect(checkPasswordPolicySpy).toBeCalledWith(['testpassword', '']);
+			});
+
+			it('should set UserLimits flag if any row is active', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createMany([{ status: 'active' }, { status: 'inactive' }], opts);
+
+				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.UserLimits);
+			});
+
+			it('should set UserLimits flag if any row has no status', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createMany([{}, { status: 'inactive' }], opts);
+
+				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.UserLimits);
+			});
+
+			it('should not set UserLimits flag if all rows are inactive', async () => {
+				const opts: MutationOptions = {};
+
+				await service.createMany([{ status: 'inactive' }, { status: 'inactive' }], opts);
+
+				expect(opts.userIntegrityCheckFlags).toBeUndefined();
+			});
+
+			it('should OR existing userIntegrityCheckFlags and invoke onRequireUserIntegrityCheck', async () => {
+				const onRequireUserIntegrityCheck = vi.fn();
+
+				const opts: MutationOptions = {
+					userIntegrityCheckFlags: UserIntegrityCheckFlag.RemainingAdmins,
+					onRequireUserIntegrityCheck,
+				};
+
+				await service.createMany([{}, { status: 'active' }], opts);
+
+				expect(opts.userIntegrityCheckFlags).toBe(UserIntegrityCheckFlag.All);
+				expect(onRequireUserIntegrityCheck).toHaveBeenCalledWith(UserIntegrityCheckFlag.All);
 			});
 
 			describe('SSO provider entitlement', () => {

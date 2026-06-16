@@ -42,10 +42,6 @@ export class RevisionsService extends ItemsService {
 		return opts;
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		return super.createOne(data, this.setDefaultOptions(opts));
-	}
-
 	override async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
 		return super.createMany(data, this.setDefaultOptions(opts));
 	}
