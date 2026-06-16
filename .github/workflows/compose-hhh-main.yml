@@ -2,14 +2,16 @@
 # proposed PRs were accepted upstream".
 #
 # hhh-main is DERIVED, never authored. It is force-rebuilt from:
-#   - fork `main` (fast-forwarded from upstream directus/directus), plus
-#   - every open, non-draft PR titled `upstream-draft: …` targeting `main`
-#     (discovered by title prefix, not hardcoded).
+#   - fork `main` (synced from upstream directus/directus), plus
+#   - the full TREE of open, non-draft PRs titled `upstream-draft: …`,
+#     applied in dependency order. A PR stacked on another PR's branch
+#     (base != main) is integrated after its parent (discovered by base/head,
+#     not hardcoded).
 #
 # Never commit directly to hhh-main — this workflow force-pushes over it.
-# Put your work on a `feature/*` branch and open a PR into `main` titled
-# `upstream-draft: …`; it then auto-integrates here while it soaks before an
-# upstream proposal.
+# Put your work on a `feature/*` branch and open a PR titled `upstream-draft: …`
+# (base `main`, or another upstream-draft PR's branch to stack it); it then
+# auto-integrates here while it soaks before an upstream proposal.
 #
 # Policy:
 #   - A PR that does not merge cleanly is SKIPPED (it wouldn't be accepted
@@ -71,40 +73,71 @@ jobs:
           git merge upstream/main -m "Sync upstream into main"
           git push origin main
 
-      - name: Discover open upstream-draft PRs targeting main
+      - name: Discover open upstream-draft PRs
         id: discover
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Only integrate PRs titled `upstream-draft: …` — work staged for an
-          # upstream proposal that we soak-test in hhh-main first. Other PRs into
-          # main are left out.
-          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
-            --json number,headRefName,isDraft,title \
-            --jq '[.[] | select(.isDraft | not) | select(.title | startswith("upstream-draft: "))]' \
+          # The full tree of `upstream-draft: …` PRs — any base, so PRs stacked on
+          # another PR's branch are included. `experiments` (held WIP) and
+          # `superseded` (replaced) labels exclude an otherwise-matching PR.
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,headRefName,baseRefName,isDraft,title,labels \
+            --jq '[.[]
+              | select(.isDraft | not)
+              | select(.title | startswith("upstream-draft: "))
+              | select(any(.labels[].name; . == "experiments" or . == "superseded") | not)]' \
             > prs.json
-          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.title)"' prs.json
+          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.baseRefName) <- \(.headRefName)"' prs.json
           echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
 
       - name: Compose hhh-main
         id: compose
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           git checkout -B hhh-main main
-          skipped=""
-          for num in $(jq -r '.[].number' prs.json); do
-            # refs/pull/N/head works for same-repo AND cross-repo PR heads.
-            git fetch origin "refs/pull/$num/head:pr-$num"
-            if git merge --no-ff -m "Integrate #$num" "pr-$num"; then
-              echo "merged #$num"
-            else
-              git merge --abort
-              echo "::warning::PR #$num does not merge cleanly into hhh-main — skipped"
-              skipped="$skipped #$num"
-            fi
+          # Apply the PR tree in dependency order. A PR whose base is `main` (or any
+          # branch that is not itself a selected PR head) is a ROOT, applied first.
+          # A PR stacked on another PR's head waits until that parent merges.
+          # Skip-on-conflict, and cascade-skip the descendants of a skipped PR so a
+          # conflicted parent can't slip in through its child's branch.
+          declare -A STATUS IS_HEAD
+          mapfile -t ROWS < <(jq -c '.[]' prs.json)
+          for r in "${ROWS[@]}"; do IS_HEAD["$(jq -r .headRefName <<<"$r")"]=1; done
+          pending=("${ROWS[@]}"); merged=""; skip_conflict=""; skip_dep=""; progress=1
+          while [ ${#pending[@]} -gt 0 ] && [ "$progress" -eq 1 ]; do
+            progress=0; next=()
+            for r in "${pending[@]}"; do
+              num=$(jq -r .number <<<"$r"); head=$(jq -r .headRefName <<<"$r"); base=$(jq -r .baseRefName <<<"$r")
+              if [ "$base" = "main" ] || [ -z "${IS_HEAD[$base]:-}" ]; then baseskip=0
+              elif [ "${STATUS[$base]:-}" = "merged" ]; then baseskip=0
+              elif [ "${STATUS[$base]:-}" = "skipped" ]; then baseskip=1
+              else next+=("$r"); continue; fi   # parent still pending — revisit next pass
+              progress=1
+              if [ "$baseskip" = 1 ]; then
+                STATUS[$head]=skipped; skip_dep="$skip_dep #$num"
+                echo "::warning::PR #$num skipped — its base PR was skipped"; continue
+              fi
+              # refs/pull/N/head works for same-repo AND cross-repo PR heads.
+              git fetch origin "refs/pull/$num/head:pr-$num"
+              if git merge --no-ff -m "Integrate #$num" "pr-$num"; then
+                STATUS[$head]=merged; merged="$merged #$num"; echo "merged #$num"
+              else
+                git merge --abort; STATUS[$head]=skipped; skip_conflict="$skip_conflict #$num"
+                echo "::warning::PR #$num does not merge cleanly into hhh-main — skipped"
+              fi
+            done
+            pending=("${next[@]}")
           done
-          echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
+          # Anything still pending depends on a branch that is neither main nor a
+          # merged/skipped selected head — a base cycle or an unknown base.
+          skip_cycle=""
+          for r in "${pending[@]:-}"; do [ -n "$r" ] && skip_cycle="$skip_cycle #$(jq -r .number <<<"$r")"; done
+          echo "merged=$merged"
+          { echo "merged=$merged"
+            echo "skip_conflict=$skip_conflict"
+            echo "skip_dep=$skip_dep"
+            echo "skip_cycle=$skip_cycle"
+            echo "skipped=$skip_conflict$skip_dep$skip_cycle"; } >> "$GITHUB_OUTPUT"
 
       - name: Allowlist compose bot for CLA
         # hhh-main's "Integrate #N" commits are authored by hhh-bot. directus/cla-bot
@@ -138,8 +171,14 @@ jobs:
           title="compose-hhh-main: integration needs attention"
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           body="Last \`compose-hhh-main\` run ($run_url) could not produce a clean, green hhh-main."
-          if [ -n "${{ steps.compose.outputs.skipped }}" ]; then
-            body="$body"$'\n\n'"**Skipped (merge conflict, not integrated):**${{ steps.compose.outputs.skipped }}"
+          if [ -n "${{ steps.compose.outputs.skip_conflict }}" ]; then
+            body="$body"$'\n\n'"**Skipped (merge conflict):**${{ steps.compose.outputs.skip_conflict }}"
+          fi
+          if [ -n "${{ steps.compose.outputs.skip_dep }}" ]; then
+            body="$body"$'\n\n'"**Skipped (base PR was skipped):**${{ steps.compose.outputs.skip_dep }}"
+          fi
+          if [ -n "${{ steps.compose.outputs.skip_cycle }}" ]; then
+            body="$body"$'\n\n'"**Skipped (unresolved/cyclic base):**${{ steps.compose.outputs.skip_cycle }}"
           fi
           if [ "${{ job.status }}" = "failure" ]; then
             body="$body"$'\n\n'"**Build or api tests failed** — hhh-main was NOT force-pushed and still points at the previous green tree."
