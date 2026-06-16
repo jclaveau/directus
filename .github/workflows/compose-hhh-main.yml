@@ -3,15 +3,16 @@
 #
 # hhh-main is DERIVED, never authored. It is force-rebuilt from:
 #   - fork `main` (synced from upstream directus/directus), plus
-#   - the full TREE of open, non-draft PRs titled `upstream-draft: …`,
-#     applied in dependency order. A PR stacked on another PR's branch
-#     (base != main) is integrated after its parent (discovered by base/head,
-#     not hardcoded).
+#   - the TREE of open, non-draft `hhh-main-root:` / `hhh-main-stacked:` copy
+#     PRs, applied in dependency order (a stacked copy after its parent copy).
+#
+# These copies are the CONFLICT-RESOLVED form of the isolated `upstream-draft:`
+# PRs (which stay clean off `main` for upstream submission). Compose consumes the
+# copies, so it no longer blocks on raw inter-PR conflicts — a conflict here now
+# means the stack is STALE vs `main` and must be re-rebased (each copy PR carries
+# its re-rebase recipe). Build the stack with a manual call; see #67.
 #
 # Never commit directly to hhh-main — this workflow force-pushes over it.
-# Put your work on a `feature/*` branch and open a PR titled `upstream-draft: …`
-# (base `main`, or another upstream-draft PR's branch to stack it); it then
-# auto-integrates here while it soaks before an upstream proposal.
 #
 # Policy (all-or-nothing):
 #   - Any PR that does not merge cleanly (or whose base never resolves) BLOCKS
@@ -75,19 +76,20 @@ jobs:
           git merge upstream/main -m "Sync upstream into main"
           git push origin main
 
-      - name: Discover open upstream-draft PRs
+      - name: Discover open hhh-main copy PRs
         id: discover
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The full tree of `upstream-draft: …` PRs — any base, so PRs stacked on
-          # another PR's branch are included. `experiments` (held WIP) and
-          # `superseded` (replaced) labels exclude an otherwise-matching PR.
+          # The compose input is the resolved copy tree: `hhh-main-root:` (isolated,
+          # base main) and `hhh-main-stacked:` (rebased on a parent copy). Any base,
+          # so stacked copies are included and applied after their parent.
+          # `experiments` / `superseded` labels exclude an otherwise-matching copy.
           gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
             --json number,headRefName,baseRefName,isDraft,title,labels \
             --jq '[.[]
               | select(.isDraft | not)
-              | select(.title | startswith("upstream-draft: "))
+              | select(.title | startswith("hhh-main-root: ") or startswith("hhh-main-stacked: "))
               | select(any(.labels[].name; . == "experiments" or . == "superseded") | not)]' \
             > prs.json
           echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.baseRefName) <- \(.headRefName)"' prs.json
@@ -145,7 +147,7 @@ jobs:
           # conflict is reported at once, but we fail now — Publish (if: success())
           # is skipped, so hhh-main keeps pointing at the last fully-composed tree.
           if [ -n "$skip_conflict$skip_cycle" ]; then
-            echo "::error::Conflicting/unresolved PRs block the compose:$skip_conflict$skip_cycle (dependents:$skip_dep)"
+            echo "::error::Stack is stale vs main — re-rebase these copies:$skip_conflict$skip_cycle (dependents:$skip_dep). See each copy PR's re-rebase recipe."
             exit 1
           fi
 
