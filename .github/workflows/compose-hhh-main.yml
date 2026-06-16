@@ -46,12 +46,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # GITHUB_TOKEN (a GitHub App token) is forbidden from pushing workflow
-          # file changes — which both the main sync (upstream edits .github/*) and
-          # the hhh-main force-push carry. A PAT with `workflows` scope lifts that.
-          # Falls back to the default token if the secret is unset (push will then
-          # fail on any workflow-file change, as before).
-          token: ${{ secrets.COMPOSE_PAT || github.token }}
+          # Push over an SSH deploy key, not GITHUB_TOKEN: App tokens are forbidden
+          # from pushing workflow-file changes, which both the main sync (upstream
+          # edits .github/*) and the hhh-main force-push carry. SSH is not an App
+          # token, so it is exempt.
+          ssh-key: ${{ secrets.COMPOSE_SSH_KEY }}
 
       - name: Configure git identity
         run: |
