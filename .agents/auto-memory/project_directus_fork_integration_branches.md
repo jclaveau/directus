@@ -1,15 +1,35 @@
 ---
 name: directus-fork-integration-branches
 description:
-  jclaveau/directus branch model — main = upstream + thin overlay, hhh-main = derived integration branch auto-composed
-  from open PRs by compose-hhh-main.yml; plus blackbox/e2e label-gating + mssql fork-runner saturation
+  jclaveau/directus branch model — pr-controle = default/trunk (fork CI), main = clean upstream base, hhh-main = derived
+  integration auto-composed from the hhh-main-* copy stack; plus blackbox/e2e label-gating + mssql fork-runner
+  saturation
 metadata:
   type: project
 ---
 
 The fork `jclaveau/directus` runs a soft-fork integration setup (built 2026-06-10).
 
-## Branch model
+## CURRENT topology (2026-06-16) — supersedes the "Branch model" block below
+
+The original "main = upstream + overlay" model was replaced by a **dedicated default branch** once the overlay outgrew
+one file (denylist, release-fork, .gitattributes, codecov, copy-stack hack). See [[directus-compose-copy-stack]] for the
+full compose architecture.
+
+```
+pr-controle = DEFAULT branch / fork trunk: upstream content + ALL fork CI
+              (compose-hhh-main.yml, release-fork.yml, .gitattributes, codecov token, denylist).
+              schedule/dispatch fire from here. Patch fork CI by DIRECT COMMIT to pr-controle (SSH push).
+main        = clean upstream mirror — base for `upstream-draft:` PRs (clean diffs). (purification still in progress)
+hhh-main    = DERIVED, force-pushed: composed from the hhh-main-root:/hhh-main-stacked: copy PRs. never authored.
+```
+
+Trade-off accepted vs the old single-overlay model: lose the `pull_request` instant compose-trigger (rely on schedule +
+dispatch), PRs default-base to pr-controle (retarget upstream-draft to main), one GitHub default flip. Win: clean
+upstream PR bases, no keep-ours overlay-conflict dance, fork CI has an honest home. `upstream-diff:` = fork-permanent
+change that lands on the trunk, never headed upstream (vs `upstream-draft:`).
+
+## Branch model (HISTORICAL — superseded by the topology above)
 
 ```
 main      = upstream directus/directus + ONE overlay: .github/workflows/compose-hhh-main.yml

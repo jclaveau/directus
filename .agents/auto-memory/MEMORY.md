@@ -4,9 +4,17 @@
   `git commit --amend` + `git push --force-with-lease` over layered fix-up commits
 - [Don't ask before pnpm install / build in this repo](feedback_no_ask_for_build_install.md) — project override of the
   global ask-before-install rule; routine install/build steps run silently, dep-modifying commands still ask
-- [Fork integration branches (main overlay + hhh-main)](project_directus_fork_integration_branches.md) — main =
-  upstream + compose-hhh-main.yml overlay; hhh-main auto-composed from open PRs; blackbox/e2e label-gated;
-  blackbox-pr.yml is name:Check; CI gates = build+eslint+stylelint (no tsc); mssql dropped (fork-runner saturation)
+- [Fork integration branches (pr-controle topology)](project_directus_fork_integration_branches.md) — pr-controle =
+  default/trunk (all fork CI); main = clean upstream base; hhh-main = derived from the copy stack; supersedes old
+  main-overlay model; blackbox/e2e label-gated; blackbox-pr.yml is name:Check; CI gates = build+eslint+stylelint (no
+  tsc)
+- [Compose copy-stack architecture](project_directus_compose_copy_stack.md) — upstream-draft PRs isolated for upstream;
+  parallel hhh-main-root/stacked copies resolve overlaps once; compose consumes the copies; SSH deploy key for
+  workflow-file pushes; cla-bot reads contributors.yml from head ref → inject hhh-bot
+- [Stacked copy rebuild gotchas](project_directus_stacked_rebuild_gotchas.md) — cherry-pick branches independent (fix
+  low → rebuild above); divergent stacked history ≠ rebase (#52); merge-tree forced-base lies when behind main;
+  test-file two-block merge must close the first block; semantic interactions (#50 vs #58) only surface in the full api
+  test
 - [Directus v12 license → dual-target compose](project_directus_v12_license_dual_compose.md) — v12+ needs a license key;
   v11.9.2 = last license-free release Hippocast runs; fork keeps last-v11 + main lines; compose infra (#64/#65) targets
   main only for now, last-v11 is a deferred phase; `upstream-diff:` = fork-permanent, lands on main, never upstream
