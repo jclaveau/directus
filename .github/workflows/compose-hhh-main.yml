@@ -73,10 +73,14 @@ jobs:
         run: |
           # Only integrate PRs titled `upstream-draft: …` — work staged for an
           # upstream proposal that we soak-test in hhh-main first. Other PRs into
-          # main are left out.
+          # main are left out. `experiments` (held WIP) and `superseded`
+          # (replaced) labels exclude an otherwise-matching PR.
           gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
-            --json number,headRefName,isDraft,title \
-            --jq '[.[] | select(.isDraft | not) | select(.title | startswith("upstream-draft: "))]' \
+            --json number,headRefName,isDraft,title,labels \
+            --jq '[.[]
+              | select(.isDraft | not)
+              | select(.title | startswith("upstream-draft: "))
+              | select(any(.labels[].name; . == "experiments" or . == "superseded") | not)]' \
             > prs.json
           echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.title)"' prs.json
           echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
