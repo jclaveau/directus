@@ -35,6 +35,7 @@ permissions:
   contents: write # push main + force-push hhh-main
   pull-requests: read # discover open PRs
   issues: write # report skipped PRs / red tests
+  actions: write # dispatch release-fork to build hhh-main-dist
 
 jobs:
   compose:
@@ -73,10 +74,14 @@ jobs:
         run: |
           # Only integrate PRs titled `upstream-draft: …` — work staged for an
           # upstream proposal that we soak-test in hhh-main first. Other PRs into
-          # main are left out.
+          # main are left out. `experiments` (held WIP) and `superseded`
+          # (replaced) labels exclude an otherwise-matching PR.
           gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
-            --json number,headRefName,isDraft,title \
-            --jq '[.[] | select(.isDraft | not) | select(.title | startswith("upstream-draft: "))]' \
+            --json number,headRefName,isDraft,title,labels \
+            --jq '[.[]
+              | select(.isDraft | not)
+              | select(.title | startswith("upstream-draft: "))
+              | select(any(.labels[].name; . == "experiments" or . == "superseded") | not)]' \
             > prs.json
           echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.title)"' prs.json
           echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
@@ -112,6 +117,15 @@ jobs:
         # Force: hhh-main is a derived branch, fast-forwarded main slides under
         # it every run. Concurrency group above prevents racing pushes.
         run: git push --force origin hhh-main
+
+      - name: Build hhh-main-dist
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # release-fork.yml builds <ref>-dist (committed build for the codeload
+        # tarball deploy). Dispatch, not push: the force-push above uses
+        # GITHUB_TOKEN, which never triggers downstream push workflows.
+        run: gh workflow run release-fork.yml --ref hhh-main
 
       - name: Report skipped PRs or failed tests
         if: always() && (steps.compose.outputs.skipped != '' || failure())
