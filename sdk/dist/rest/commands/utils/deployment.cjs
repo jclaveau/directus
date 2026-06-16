@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Provider cannot be empty`),e.throwIfEmpty(n,`Project ID cannot be empty`),{path:`/deployments/${t}/projects/${n}/deploy`,method:`POST`,...r&&{body:JSON.stringify(r)}}),n=(t,n)=>()=>(e.throwIfEmpty(t,`Provider cannot be empty`),e.throwIfEmpty(n,`Run ID cannot be empty`),{path:`/deployments/${t}/runs/${n}/cancel`,method:`POST`});exports.cancelDeployment=n,exports.triggerDeployment=t;
+//# sourceMappingURL=deployment.cjs.map

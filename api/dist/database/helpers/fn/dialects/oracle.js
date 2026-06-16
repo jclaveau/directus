@@ -1,0 +1,57 @@
+import { FnHelper } from "../types.js";
+import { InvalidQueryError } from "@directus/errors";
+
+//#region src/database/helpers/fn/dialects/oracle.ts
+const parseLocaltime = (columnType) => {
+	if (columnType === "timestamp") return ` AT TIME ZONE 'UTC'`;
+	return "";
+};
+var FnHelperOracle = class extends FnHelper {
+	year(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'IYYY')`, [table, column]);
+	}
+	month(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'MM')`, [table, column]);
+	}
+	week(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'IW')`, [table, column]);
+	}
+	day(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'DD')`, [table, column]);
+	}
+	weekday(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'D')`, [table, column]);
+	}
+	hour(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'HH24')`, [table, column]);
+	}
+	minute(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'MI')`, [table, column]);
+	}
+	second(table, column, options) {
+		return this.knex.raw(`TO_CHAR(??.??${parseLocaltime(options?.type)}, 'SS')`, [table, column]);
+	}
+	count(table, column, options) {
+		const collectionName = options?.originalCollectionName || table;
+		const type = this.schema.collections?.[collectionName]?.fields?.[column]?.type ?? "unknown";
+		if (type === "json") return this.knex.raw("json_value(??.??, '$.size()')", [table, column]);
+		if (type === "alias") return this._relationalCount(table, column, options);
+		throw new Error(`Couldn't extract type from ${table}.${column}`);
+	}
+	json(table, column, options) {
+		const collectionName = options?.originalCollectionName || table;
+		const fieldSchema = this.schema.collections?.[collectionName]?.fields?.[column];
+		if (!fieldSchema || fieldSchema.type !== "json" || !options?.jsonPath) throw new InvalidQueryError({ reason: `${collectionName}.${column} is not a JSON field` });
+		const jsonPath = "$" + options.jsonPath;
+		if (options?.jsonReturnType === "numeric") return this.knex.raw(`JSON_VALUE(??.??, '${jsonPath}' RETURNING NUMBER)`, [table, column]);
+		return this.knex.raw(`COALESCE(JSON_QUERY(??.??, '${jsonPath}'), JSON_VALUE(??.??, '${jsonPath}'))`, [
+			table,
+			column,
+			table,
+			column
+		]);
+	}
+};
+
+//#endregion
+export { FnHelperOracle };

@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Id cannot be empty`),{path:`/extensions/registry/uninstall/${t}`,method:`DELETE`}),n=t=>()=>(e.throwIfEmpty(t,`Id cannot be empty`),{path:`/extensions/${t}`,method:`DELETE`});exports.deleteExtension=n,exports.uninstallRegistryExtension=t;
+//# sourceMappingURL=extensions.cjs.map

@@ -1,0 +1,1 @@
+import{i as e}from"./startOfWeek-Bxd3V7OW.js";function t(t,...n){let r=e.bind(null,t||n.find(e=>typeof e==`object`));return n.map(r)}export{t};

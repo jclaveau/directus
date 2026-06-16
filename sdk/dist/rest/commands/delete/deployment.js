@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=t=>()=>(e(t,`Provider cannot be empty`),{path:`/deployments/${t}`,method:`DELETE`});export{t as deleteDeployment};
+//# sourceMappingURL=deployment.js.map

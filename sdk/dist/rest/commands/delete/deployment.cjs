@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Provider cannot be empty`),{path:`/deployments/${t}`,method:`DELETE`});exports.deleteDeployment=t;
+//# sourceMappingURL=deployment.cjs.map

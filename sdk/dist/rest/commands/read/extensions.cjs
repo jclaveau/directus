@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=()=>()=>({path:`/extensions/`,method:`GET`}),n=e=>()=>({path:`/extensions/registry`,params:e??{},method:`GET`}),r=t=>()=>(e.throwIfEmpty(t,`Publisher key cannot be empty`),{path:`/extensions/registry/account/${t}`,method:`GET`}),i=t=>()=>(e.throwIfEmpty(t,`Extension key cannot be empty`),{path:`/extensions/registry/extension/${t}`,method:`GET`});exports.readExtensions=t,exports.readRegistryAccount=r,exports.readRegistryExtension=i,exports.readRegistryExtensions=n;
+//# sourceMappingURL=extensions.cjs.map
