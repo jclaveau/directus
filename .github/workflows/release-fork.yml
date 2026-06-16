@@ -1,0 +1,72 @@
+name: Release Fork
+
+# Builds the committed-dist branch `<ref>-dist` consumed by the codeload
+# tarball deploy (packages ship dist/, .gitattributes export-ignore strips
+# src/tests/.github from the archive). One `-dist` per source branch,
+# delete-then-recreate so it stays fresh.
+#
+# Triggers:
+#   - push: a branch push refreshes its own `-dist`.
+#   - workflow_dispatch: compose-hhh-main dispatches `--ref hhh-main` after a
+#     green compose, because its GITHUB_TOKEN force-push can't trigger `push`.
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Configure Git
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Create new branch if it doesn't exist
+        id: create_branch
+        run: |
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          DIST_BRANCH="${CURRENT_BRANCH}-dist"
+          git push origin --delete ${DIST_BRANCH} || true
+          git checkout -b ${DIST_BRANCH}
+        shell: bash
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          registry: https://registry.npmjs.org
+
+      - name: Pack and extract dist folders
+        run: |
+          pnpm -r --include-workspace-root exec sh -c '
+            tarball=$(pnpm pack --pack-destination . 2>/dev/null | tail -1)
+            if [ -f "$tarball" ]; then
+              tar xf "$tarball" --strip-components=1 "package/package.json"
+              echo "Extracted package.json from $tarball in $(pwd)"
+              if tar tf "$tarball" | grep -q "^package/dist/"; then
+                rm -rf dist
+                tar xf "$tarball" --strip-components=1 "package/dist/"
+                echo "Extracted dist from $tarball in $(pwd)"
+              fi
+              rm "$tarball"
+            fi
+          '
+        shell: bash
+
+      - name: Add and commit dist folder
+        run: |
+          # remove dist/ from gitignore
+          mv .gitignore .gitignore.bak
+          grep -v 'dist/' .gitignore.bak > .gitignore
+          # cat .gitignore
+
+          git add '**/dist/**'
+          git add '**/package.json'
+
+          git commit -m "Add dist folders content"
+          git push -f origin HEAD
+        shell: bash
