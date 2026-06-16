@@ -13,11 +13,13 @@
 # (base `main`, or another upstream-draft PR's branch to stack it); it then
 # auto-integrates here while it soaks before an upstream proposal.
 #
-# Policy:
-#   - A PR that does not merge cleanly is SKIPPED (it wouldn't be accepted
-#     as-is) and reported, but the rest still compose.
-#   - A composed tree that fails build/api-tests BLOCKS the publish — hhh-main
-#     only ever points at a green tree.
+# Policy (all-or-nothing):
+#   - Any PR that does not merge cleanly (or whose base never resolves) BLOCKS
+#     the whole run — no partial publish. The full tree is still attempted so
+#     every conflict is reported in one run, then the job fails.
+#   - A composed tree that fails build/api-tests also BLOCKS the publish.
+#   - hhh-main is only ever force-pushed when the ENTIRE tree merges clean+green;
+#     otherwise it keeps pointing at the last fully-composed tree.
 name: compose-hhh-main
 
 on:
@@ -138,6 +140,14 @@ jobs:
             echo "skip_dep=$skip_dep"
             echo "skip_cycle=$skip_cycle"
             echo "skipped=$skip_conflict$skip_dep$skip_cycle"; } >> "$GITHUB_OUTPUT"
+          # A clean tree is all-or-nothing: any PR that won't merge (or whose base
+          # never resolved) BLOCKS the run. The whole loop still ran so every
+          # conflict is reported at once, but we fail now — Publish (if: success())
+          # is skipped, so hhh-main keeps pointing at the last fully-composed tree.
+          if [ -n "$skip_conflict$skip_cycle" ]; then
+            echo "::error::Conflicting/unresolved PRs block the compose:$skip_conflict$skip_cycle (dependents:$skip_dep)"
+            exit 1
+          fi
 
       - name: Allowlist compose bot for CLA
         # hhh-main's "Integrate #N" commits are authored by hhh-bot. directus/cla-bot
