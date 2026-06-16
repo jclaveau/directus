@@ -106,6 +106,18 @@ jobs:
           done
           echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
 
+      - name: Allowlist compose bot for CLA
+        # hhh-main's "Integrate #N" commits are authored by hhh-bot. directus/cla-bot
+        # reads contributors.yml from the head ref (hhh-main), so the bot must be
+        # signed there. Inject it here rather than storing it on main — keeps main
+        # a clean upstream base; the entry lives only on the derived hhh-main.
+        run: |
+          if ! grep -qxF '- hhh-bot' contributors.yml; then
+            echo '- hhh-bot' >> contributors.yml
+            git add contributors.yml
+            git commit -m "ci: sign CLA for hhh-bot (compose identity)"
+          fi
+
       - name: Install + build
         uses: ./.github/actions/prepare
 
