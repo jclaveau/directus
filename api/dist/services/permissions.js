@@ -1,0 +1,153 @@
+import { clearSystemCache } from "../cache.js";
+import { withAppMinimalPermissions } from "../permissions/lib/with-app-minimal-permissions.js";
+import { fetchPolicies } from "../permissions/lib/fetch-policies.js";
+import { fetchPermissions } from "../permissions/lib/fetch-permissions.js";
+import { validateAccess } from "../permissions/modules/validate-access/validate-access.js";
+import { ItemsService } from "./items.js";
+import { hasCustomRule, isRecommendedAppPermission } from "../license/entitlements/lib/custom-permission-rules-enabled.js";
+import { getEntitlementManager } from "../license/entitlements/manager.js";
+import "../license/index.js";
+import { ForbiddenError, ResourceRestrictedError } from "@directus/errors";
+import { omit, uniq } from "lodash-es";
+
+//#region src/services/permissions.ts
+var PermissionsService = class extends ItemsService {
+	constructor(options) {
+		super("directus_permissions", options);
+	}
+	async clearCaches(opts) {
+		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
+		await getEntitlementManager().clearCache("custom_permission_rules_enabled");
+		if (this.cache && opts?.autoPurgeCache !== false) await this.cache.clear();
+	}
+	async readByQuery(query, opts) {
+		if (getEntitlementManager().isEntitled("custom_permission_rules_enabled")) {
+			const result = await super.readByQuery(query, opts);
+			return withAppMinimalPermissions(this.accountability, result, query.filter);
+		}
+		const requiredFields = [
+			"fields",
+			"permissions",
+			"validation",
+			"presets"
+		];
+		let extraFields = [];
+		if (query.fields && !query.fields.includes("*")) {
+			extraFields = requiredFields.filter((f) => !query.fields?.includes(f));
+			query.fields = [...query.fields, ...extraFields];
+		}
+		const filteredPermissions = (await super.readByQuery(query, opts)).filter((p) => !hasCustomRule(p) || isRecommendedAppPermission(p));
+		const mappedPermissions = extraFields.length > 0 ? filteredPermissions.map((p) => omit(p, extraFields)) : filteredPermissions;
+		return withAppMinimalPermissions(this.accountability, mappedPermissions, query.filter);
+	}
+	async createOne(data, opts) {
+		if (!getEntitlementManager().isEntitled("custom_permission_rules_enabled") && hasCustomRule(data) && !isRecommendedAppPermission(data)) throw new ResourceRestrictedError({ category: "custom_permission_rules_enabled" });
+		const res = await super.createOne(data, opts);
+		await this.clearCaches(opts);
+		return res;
+	}
+	async updateMany(keys, data, opts) {
+		if (!getEntitlementManager().isEntitled("custom_permission_rules_enabled") && hasCustomRule(data) && !isRecommendedAppPermission(data)) throw new ResourceRestrictedError({ category: "custom_permission_rules_enabled" });
+		const res = await super.updateMany(keys, data, opts);
+		await this.clearCaches(opts);
+		return res;
+	}
+	async createMany(data, opts) {
+		const res = await super.createMany(data, opts);
+		await this.clearCaches(opts);
+		return res;
+	}
+	async updateBatch(data, opts) {
+		const res = await super.updateBatch(data, opts);
+		await this.clearCaches(opts);
+		return res;
+	}
+	async upsertMany(payloads, opts) {
+		const res = await super.upsertMany(payloads, opts);
+		await this.clearCaches(opts);
+		return res;
+	}
+	async deleteMany(keys, opts) {
+		const res = await super.deleteMany(keys, opts);
+		await this.clearCaches(opts);
+		return res;
+	}
+	async getItemPermissions(collection, primaryKey) {
+		if (!this.accountability?.user) throw new ForbiddenError();
+		if (this.accountability?.admin) return {
+			update: { access: true },
+			delete: { access: true },
+			share: { access: true }
+		};
+		const itemPermissions = {
+			update: { access: false },
+			delete: { access: false },
+			share: { access: false }
+		};
+		let updateAction = "update";
+		const schema = this.schema.collections[collection];
+		if (schema?.singleton) {
+			const itemsService = new ItemsService(collection, {
+				knex: this.knex,
+				schema: this.schema
+			});
+			const query = {
+				fields: [schema.primary],
+				limit: 1
+			};
+			try {
+				if (!(await itemsService.readByQuery(query))[0]) updateAction = "create";
+			} catch {
+				updateAction = "create";
+			}
+		}
+		await Promise.all(Object.keys(itemPermissions).map((key) => {
+			const action = key;
+			const checkAction = action === "update" ? updateAction : action;
+			if (!this.accountability) {
+				itemPermissions[action].access = true;
+				return Promise.resolve();
+			}
+			const opts = {
+				accountability: this.accountability,
+				action: checkAction,
+				collection
+			};
+			if (primaryKey) opts.primaryKeys = [primaryKey];
+			return validateAccess(opts, {
+				schema: this.schema,
+				knex: this.knex
+			}).then(() => itemPermissions[action].access = true).catch(() => {});
+		}));
+		if (schema?.singleton && itemPermissions.update.access) {
+			const context = {
+				schema: this.schema,
+				knex: this.knex
+			};
+			const permissions = await fetchPermissions({
+				policies: await fetchPolicies(this.accountability, context),
+				accountability: this.accountability,
+				action: updateAction,
+				collections: [collection]
+			}, context);
+			let fields = [];
+			let presets = {};
+			for (const permission of permissions) {
+				if (permission.fields && fields[0] !== "*") {
+					fields = uniq([...fields, ...permission.fields]);
+					if (fields.includes("*")) fields = ["*"];
+				}
+				if (permission.presets) presets = {
+					...presets ?? {},
+					...permission.presets
+				};
+			}
+			itemPermissions.update.fields = fields;
+			itemPermissions.update.presets = presets;
+		}
+		return itemPermissions;
+	}
+};
+
+//#endregion
+export { PermissionsService };

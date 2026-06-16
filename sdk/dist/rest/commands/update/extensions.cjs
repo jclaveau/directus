@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=t=>()=>(e.throwIfEmpty(t,`Extension id cannot be empty`),{path:`/extensions/registry/reinstall`,body:JSON.stringify({extension:t}),method:`POST`}),n=(t,n)=>()=>(e.throwIfEmpty(t,`Id cannot be empty`),{path:`/extensions/${t}`,params:{},body:JSON.stringify(n),method:`PATCH`});exports.reinstallRegistryExtension=t,exports.updateExtension=n;
+//# sourceMappingURL=extensions.cjs.map

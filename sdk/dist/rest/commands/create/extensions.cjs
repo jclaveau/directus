@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n)=>()=>(e.throwIfEmpty(t,`Extension id cannot be empty`),e.throwIfEmpty(n,`Version cannot be empty`),{path:`/extensions/registry/install`,body:JSON.stringify({extension:t,version:n}),method:`POST`});exports.installRegistryExtension=t;
+//# sourceMappingURL=extensions.cjs.map

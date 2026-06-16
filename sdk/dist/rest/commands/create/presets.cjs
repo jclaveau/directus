@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/presets`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/presets`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createPreset=t,exports.createPresets=e;
+//# sourceMappingURL=presets.cjs.map

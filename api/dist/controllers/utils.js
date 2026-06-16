@@ -1,0 +1,140 @@
+import async_handler_default from "../utils/async-handler.js";
+import { useLogger } from "../logger/index.js";
+import { clearSystemCache } from "../cache.js";
+import { getDatabase } from "../database/index.js";
+import { generateHash } from "../utils/generate-hash.js";
+import { RevisionsService } from "../services/revisions.js";
+import { ExportService, ImportService } from "../services/import-export.js";
+import { respond } from "../middleware/respond.js";
+import { resolveLoginRedirect } from "../auth/utils/resolve-login-redirect.js";
+import { sanitizeQuery } from "../utils/sanitize-query.js";
+import { UtilsService } from "../services/utils.js";
+import collection_exists_default from "../middleware/collection-exists.js";
+import { generateTranslations } from "../utils/generate-translations.js";
+import { ForbiddenError, InvalidPayloadError, InvalidQueryError, UnsupportedMediaTypeError } from "@directus/errors";
+import { toBoolean } from "@directus/utils";
+import { Router } from "express";
+import Joi from "joi";
+import argon2 from "argon2";
+import Busboy from "busboy";
+
+//#region src/controllers/utils.ts
+const router = Router();
+const randomStringSchema = Joi.object({ length: Joi.number().integer().min(1).max(500).default(32) });
+router.get("/random/string", async_handler_default(async (req, res) => {
+	const { nanoid } = await import("nanoid");
+	const { error, value } = randomStringSchema.validate(req.query, { allowUnknown: true });
+	if (error) throw new InvalidQueryError({ reason: error.message });
+	return res.json({ data: nanoid(value.length) });
+}));
+router.post("/hash/generate", async_handler_default(async (req, res) => {
+	if (!req.body?.string) throw new InvalidPayloadError({ reason: `"string" is required` });
+	const hash = await generateHash(req.body.string);
+	return res.json({ data: hash });
+}));
+router.post("/hash/verify", async_handler_default(async (req, res) => {
+	if (!req.body?.string) throw new InvalidPayloadError({ reason: `"string" is required` });
+	if (!req.body?.hash) throw new InvalidPayloadError({ reason: `"hash" is required` });
+	try {
+		const result = await argon2.verify(req.body.hash, req.body.string);
+		return res.json({ data: result });
+	} catch {
+		throw new InvalidPayloadError({ reason: `Invalid "hash" or "string"` });
+	}
+}));
+const SortSchema = Joi.object({
+	item: Joi.alternatives(Joi.string(), Joi.number()).required(),
+	to: Joi.alternatives(Joi.string(), Joi.number()).required()
+});
+router.post("/sort/:collection", collection_exists_default, async_handler_default(async (req, res) => {
+	const { error } = SortSchema.validate(req.body);
+	if (error) throw new InvalidPayloadError({ reason: error.message });
+	await new UtilsService({
+		accountability: req.accountability,
+		schema: req.schema
+	}).sort(req.collection, req.body);
+	return res.status(200).end();
+}));
+router.post("/revert/:revision", async_handler_default(async (req, _res, next) => {
+	await new RevisionsService({
+		accountability: req.accountability,
+		schema: req.schema
+	}).revert(req.params["revision"]);
+	next();
+}), respond);
+router.post("/import/:collection", collection_exists_default, async_handler_default(async (req, res, next) => {
+	if (req.is("multipart/form-data") === false) throw new UnsupportedMediaTypeError({
+		mediaType: req.headers["content-type"],
+		where: "Content-Type header"
+	});
+	const service = new ImportService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	let headers;
+	if (req.headers["content-type"]) headers = req.headers;
+	else headers = {
+		...req.headers,
+		"content-type": "application/octet-stream"
+	};
+	const busboy = Busboy({ headers });
+	busboy.on("file", async (_fieldname, fileStream, { mimeType }) => {
+		try {
+			await service.import(req.params["collection"], mimeType, fileStream, { background: toBoolean(req.query["background"]) });
+		} catch (err) {
+			return next(err);
+		}
+		return res.status(200).end();
+	});
+	busboy.on("error", (err) => next(err));
+	req.pipe(busboy);
+}));
+router.post("/export/:collection", collection_exists_default, async_handler_default(async (req, _res, next) => {
+	if (!req.body.query) throw new InvalidPayloadError({ reason: `"query" is required` });
+	if (!req.body.format) throw new InvalidPayloadError({ reason: `"format" is required` });
+	const service = new ExportService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability ?? null);
+	service.exportToFile(req.params["collection"], sanitizedQuery, req.body.format, { file: req.body.file });
+	return next();
+}), respond);
+router.post("/translations/generate", async_handler_default(async (req, res, next) => {
+	if (!req.accountability?.admin) throw new ForbiddenError();
+	const result = await generateTranslations(req.body, {
+		knex: getDatabase(),
+		schema: req.schema,
+		accountability: req.accountability
+	});
+	try {
+		await clearSystemCache({ forced: true });
+	} catch (error) {
+		useLogger().error(error, "Failed to clear system cache after translation changes");
+	}
+	res.locals["payload"] = { data: result };
+	return next();
+}), respond);
+router.post("/cache/clear", async_handler_default(async (req, res) => {
+	const service = new UtilsService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const clearSystemCache$1 = "system" in req.query && (req.query["system"] === "" || Boolean(req.query["system"]));
+	await service.clearCache({ system: clearSystemCache$1 });
+	res.status(200).end();
+}));
+router.post("/resolve-redirect", async_handler_default(async (req, res) => {
+	if (!req.body?.redirect) throw new InvalidPayloadError({ reason: `"redirect" is required` });
+	if (req.body?.provider && typeof req.body.provider !== "string") throw new InvalidPayloadError({ reason: `"provider" must be a string` });
+	try {
+		const resolved = resolveLoginRedirect(req.body.redirect, { provider: req.body.provider });
+		return res.json({ data: resolved });
+	} catch {
+		throw new InvalidPayloadError({ reason: `Invalid "redirect" provided` });
+	}
+}));
+var utils_default = router;
+
+//#endregion
+export { utils_default as default };

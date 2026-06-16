@@ -1,0 +1,2 @@
+var e=class extends Error{name=`RequestError`;response;errors;data;constructor(e,t){super(e),this.response=t.response,this.errors=t.errors,t.data!==void 0&&(this.data=t.data)}};exports.RequestError=e;
+//# sourceMappingURL=error.cjs.map

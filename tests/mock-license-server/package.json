@@ -1,40 +1,39 @@
 {
-	"name": "@directus/mock-license-server",
-	"version": "1.0.0",
-	"description": "Mock implmentation of the Directus license service",
-	"homepage": "https://directus.com",
-	"scripts": {
-		"build": "tsdown src/index.ts src/run.ts --dts",
-		"start": "node dist/run.js",
-		"dev": "tsx watch src/run.ts"
-	},
-	"exports": {
-		".": "./dist/index.js",
-		"./package.json": "./package.json"
-	},
-	"keywords": [],
-	"type": "module",
-	"author": "Nils Twelker (nils@directus.io)",
-	"private": true,
-	"packageManager": "pnpm@10.14.0",
-	"dependencies": {
-		"@directus/license": "catalog:",
-		"@directus/tsconfig": "catalog:",
-		"@directus/types": "workspace:*",
-		"@fastify/type-provider-typebox": "catalog:",
-		"@types/lodash-es": "catalog:",
-		"@types/node": "catalog:",
-		"fastify": "catalog:",
-		"fastify-type-provider-zod": "catalog:",
-		"jose": "catalog:",
-		"lodash-es": "catalog:",
-		"tsdown": "catalog:",
-		"tsx": "catalog:",
-		"typebox": "catalog:",
-		"typescript": "catalog:",
-		"zod": "catalog:"
-	},
-	"engines": {
-		"node": ">=22"
-	}
+  "name": "@directus/mock-license-server",
+  "version": "1.0.0",
+  "description": "Mock implmentation of the Directus license service",
+  "homepage": "https://directus.com",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "keywords": [],
+  "type": "module",
+  "author": "Nils Twelker (nils@directus.io)",
+  "private": true,
+  "dependencies": {
+    "@directus/license": "0.2.0",
+    "@directus/tsconfig": "4.0.0",
+    "@fastify/type-provider-typebox": "6.1.0",
+    "@types/lodash-es": "4.17.12",
+    "@types/node": "22.13.14",
+    "fastify": "5.8.5",
+    "fastify-type-provider-zod": "6.1.0",
+    "jose": "6.2.3",
+    "lodash-es": "4.18.1",
+    "tsdown": "0.15.11",
+    "tsx": "4.20.6",
+    "typebox": "1.1.37",
+    "typescript": "5.9.3",
+    "zod": "4.1.12",
+    "@directus/types": "16.0.0-rc.1"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts src/run.ts --dts",
+    "start": "node dist/run.js",
+    "dev": "tsx watch src/run.ts"
+  }
 }

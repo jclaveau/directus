@@ -1,0 +1,394 @@
+import async_handler_default from "../../utils/async-handler.js";
+import { getConfigFromEnv } from "../../utils/get-config-from-env.js";
+import { useLogger } from "../../logger/index.js";
+import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from "../../constants.js";
+import database_default from "../../database/index.js";
+import emitter_default from "../../emitter.js";
+import { getSecret } from "../../utils/get-secret.js";
+import { Url } from "../../utils/url.js";
+import { createDefaultAccountability } from "../../permissions/utils/create-default-accountability.js";
+import { verifyJWT } from "../../utils/jwt.js";
+import { getSchema } from "../../utils/get-schema.js";
+import { respond } from "../../middleware/respond.js";
+import { getIPFromReq } from "../../utils/get-ip-from-req.js";
+import { LocalAuthDriver } from "./local.js";
+import { checkSsoEnabled } from "../utils/check-sso-enabled.js";
+import { generateCallbackUrl } from "../utils/generate-callback-url.js";
+import { resolveLoginRedirect } from "../utils/resolve-login-redirect.js";
+import { getAuthProvider } from "../../auth.js";
+import { AuthenticationService } from "../../services/authentication.js";
+import { useEnv } from "@directus/env";
+import { ErrorCode, InvalidCredentialsError, InvalidPayloadError, InvalidProviderConfigError, InvalidProviderError, InvalidTokenError, ServiceUnavailableError, isDirectusError } from "@directus/errors";
+import { parseJSON, toArray } from "@directus/utils";
+import express, { Router } from "express";
+import jwt from "jsonwebtoken";
+import { flatten } from "flat";
+import { Issuer, custom, errors, generators } from "openid-client";
+
+//#region src/auth/drivers/openid.ts
+var OpenIDAuthDriver = class extends LocalAuthDriver {
+	client;
+	config;
+	roleMap;
+	constructor(options, config) {
+		super(options, config);
+		const logger = useLogger();
+		const { issuerUrl, clientId, clientSecret, clientPrivateKeys, clientTokenEndpointAuthMethod, provider, issuerDiscoveryMustSucceed } = config;
+		if (!issuerUrl || !clientId || !(clientSecret || clientTokenEndpointAuthMethod === "private_key_jwt" && clientPrivateKeys) || !provider) {
+			logger.error("Invalid provider config");
+			throw new InvalidProviderConfigError({ provider });
+		}
+		this.config = config;
+		this.roleMap = {};
+		const roleMapping = this.config["roleMapping"];
+		if (roleMapping) this.roleMap = roleMapping;
+		if (roleMapping instanceof Array) {
+			logger.error("[OpenID] Expected a JSON-Object as role mapping, got an Array instead. Make sure you declare the variable with 'json:' prefix.");
+			throw new InvalidProviderError();
+		}
+		this.client = null;
+		this.getClient().catch((e) => {
+			logger.error(e, "[OpenID] Failed to fetch provider config");
+			if (issuerDiscoveryMustSucceed !== false) {
+				logger.error(`AUTH_${provider.toUpperCase()}_ISSUER_DISCOVERY_MUST_SUCCEED is enabled and discovery failed, exiting`);
+				process.exit(1);
+			}
+		});
+	}
+	async getClient() {
+		if (this.client) return this.client;
+		const logger = useLogger();
+		const { issuerUrl, clientId, clientSecret, clientPrivateKeys, clientTokenEndpointAuthMethod, provider } = this.config;
+		const isPrivateKeyJwtAuthMethod = clientTokenEndpointAuthMethod === "private_key_jwt";
+		const clientHttpOptions = getConfigFromEnv(`AUTH_${provider.toUpperCase()}_CLIENT_HTTP_`);
+		if (clientHttpOptions) Issuer[custom.http_options] = (_, options) => {
+			return {
+				...options,
+				...clientHttpOptions
+			};
+		};
+		const issuer = await Issuer.discover(issuerUrl);
+		if (!issuer.metadata["response_types_supported"]?.includes("code")) {
+			logger.error("OpenID provider does not support required code flow");
+			throw new InvalidProviderConfigError({ provider });
+		}
+		const clientOptionsOverrides = getConfigFromEnv(`AUTH_${provider.toUpperCase()}_CLIENT_`, {
+			omitKey: [
+				`AUTH_${provider.toUpperCase()}_CLIENT_ID`,
+				`AUTH_${provider.toUpperCase()}_CLIENT_SECRET`,
+				`AUTH_${provider.toUpperCase()}_CLIENT_PRIVATE_KEYS`
+			],
+			omitPrefix: [`AUTH_${provider.toUpperCase()}_CLIENT_HTTP_`],
+			type: "underscore"
+		});
+		const client = new issuer.Client({
+			client_id: clientId,
+			...!isPrivateKeyJwtAuthMethod && { client_secret: clientSecret },
+			response_types: ["code"],
+			...clientOptionsOverrides
+		}, isPrivateKeyJwtAuthMethod ? { keys: clientPrivateKeys } : void 0);
+		if (clientHttpOptions) client[custom.http_options] = (_, options) => {
+			return {
+				...options,
+				...clientHttpOptions
+			};
+		};
+		this.client = client;
+		return client;
+	}
+	generateCodeVerifier() {
+		return generators.codeVerifier();
+	}
+	async generateAuthUrl(codeVerifier, prompt = false, callbackUrl) {
+		const { plainCodeChallenge } = this.config;
+		try {
+			const client = await this.getClient();
+			const codeChallenge = plainCodeChallenge ? codeVerifier : generators.codeChallenge(codeVerifier);
+			const paramsConfig = typeof this.config["params"] === "object" ? this.config["params"] : {};
+			return client.authorizationUrl({
+				scope: this.config["scope"] ?? "openid profile email",
+				access_type: "offline",
+				prompt: prompt ? "consent" : void 0,
+				...paramsConfig,
+				code_challenge: codeChallenge,
+				code_challenge_method: plainCodeChallenge ? "plain" : "S256",
+				state: codeChallenge,
+				nonce: codeChallenge,
+				redirect_uri: callbackUrl
+			});
+		} catch (e) {
+			throw handleError(e);
+		}
+	}
+	async fetchUserId(identifier) {
+		return (await this.knex.select("id").from("directus_users").whereRaw("LOWER(??) = ?", ["external_identifier", identifier.toLowerCase()]).first())?.id;
+	}
+	async getUserID(payload) {
+		const logger = useLogger();
+		if (!payload["code"] || !payload["codeVerifier"] || !payload["state"]) {
+			logger.warn("[OpenID] No code, codeVerifier or state in payload");
+			throw new InvalidCredentialsError();
+		}
+		const { plainCodeChallenge } = this.config;
+		let tokenSet;
+		let userInfo;
+		try {
+			const client = await this.getClient();
+			const codeChallenge = plainCodeChallenge ? payload["codeVerifier"] : generators.codeChallenge(payload["codeVerifier"]);
+			tokenSet = await client.callback(payload["callbackUrl"], {
+				code: payload["code"],
+				state: payload["state"],
+				iss: payload["iss"]
+			}, {
+				code_verifier: payload["codeVerifier"],
+				state: codeChallenge,
+				nonce: codeChallenge
+			});
+			userInfo = tokenSet.claims();
+			if (client.issuer.metadata["userinfo_endpoint"]) userInfo = {
+				...userInfo,
+				...await client.userinfo(tokenSet.access_token)
+			};
+		} catch (e) {
+			throw handleError(e);
+		}
+		let role = this.config["defaultRoleId"];
+		const groupClaimName = this.config["groupClaimName"] ?? "groups";
+		const groups = userInfo[groupClaimName] ? toArray(userInfo[groupClaimName]) : [];
+		if (groups.length > 0) {
+			for (const key in this.roleMap) if (groups.includes(key)) {
+				role = this.roleMap[key];
+				break;
+			}
+		} else if (Object.keys(this.roleMap).length > 0) logger.debug(`[OpenID] Configured group claim with name "${groupClaimName}" does not exist or is empty.`);
+		userInfo = flatten(userInfo);
+		const { provider, identifierKey, allowPublicRegistration, requireVerifiedEmail, syncUserInfo } = this.config;
+		const email = userInfo["email"] ? String(userInfo["email"]) : void 0;
+		const identifier = userInfo[identifierKey ?? "sub"] ? String(userInfo[identifierKey ?? "sub"]) : email;
+		if (!identifier) {
+			logger.warn(`[OpenID] Failed to find user identifier for provider "${provider}"`);
+			throw new InvalidCredentialsError();
+		}
+		const userPayload = {
+			provider,
+			first_name: userInfo["given_name"],
+			last_name: userInfo["family_name"],
+			email,
+			external_identifier: identifier,
+			role,
+			auth_data: tokenSet.refresh_token && JSON.stringify({ refreshToken: tokenSet.refresh_token })
+		};
+		const userId = await this.fetchUserId(identifier);
+		if (userId) {
+			let emitPayload = { auth_data: userPayload.auth_data };
+			if (this.config["roleMapping"]) emitPayload["role"] = role;
+			if (syncUserInfo) emitPayload = {
+				...emitPayload,
+				first_name: userPayload.first_name,
+				last_name: userPayload.last_name,
+				email: userPayload.email
+			};
+			const schema$1 = await getSchema();
+			const updatedUserPayload$1 = await emitter_default.emitFilter(`auth.update`, emitPayload, {
+				identifier,
+				provider: this.config["provider"],
+				providerPayload: {
+					accessToken: tokenSet.access_token,
+					idToken: tokenSet.id_token,
+					userInfo
+				}
+			}, {
+				database: database_default(),
+				schema: schema$1,
+				accountability: null
+			});
+			if (Object.values(updatedUserPayload$1).some((value) => value !== void 0)) await this.getUsersService(schema$1).updateOne(userId, updatedUserPayload$1);
+			return userId;
+		}
+		const isEmailVerified = !requireVerifiedEmail || userInfo["email_verified"];
+		if (!allowPublicRegistration || !isEmailVerified) {
+			logger.warn(`[OpenID] User doesn't exist, and public registration not allowed for provider "${provider}"`);
+			throw new InvalidCredentialsError();
+		}
+		const schema = await getSchema();
+		const updatedUserPayload = await emitter_default.emitFilter(`auth.create`, userPayload, {
+			identifier,
+			provider: this.config["provider"],
+			providerPayload: {
+				accessToken: tokenSet.access_token,
+				idToken: tokenSet.id_token,
+				userInfo
+			}
+		}, {
+			database: database_default(),
+			schema,
+			accountability: null
+		});
+		try {
+			await this.getUsersService(schema).createOne(updatedUserPayload);
+		} catch (e) {
+			if (isDirectusError(e, ErrorCode.RecordNotUnique)) {
+				logger.warn(e, "[OpenID] Failed to register user. User not unique");
+				throw new InvalidProviderError();
+			}
+			throw e;
+		}
+		return await this.fetchUserId(identifier);
+	}
+	async login(user) {
+		return this.refresh(user);
+	}
+	async refresh(user) {
+		const logger = useLogger();
+		let authData = user.auth_data;
+		if (typeof authData === "string") try {
+			authData = parseJSON(authData);
+		} catch {
+			logger.warn(`[OpenID] Session data isn't valid JSON: ${authData}`);
+		}
+		if (authData?.["refreshToken"]) try {
+			const tokenSet = await (await this.getClient()).refresh(authData["refreshToken"]);
+			if (tokenSet.refresh_token) await this.getUsersService(await getSchema()).updateOne(user.id, { auth_data: JSON.stringify({ refreshToken: tokenSet.refresh_token }) });
+		} catch (e) {
+			throw handleError(e);
+		}
+	}
+};
+const handleError = (e) => {
+	const logger = useLogger();
+	if (e instanceof errors.OPError) {
+		if (e.error === "invalid_grant") {
+			logger.warn(e, `[OpenID] Invalid grant`);
+			return new InvalidTokenError();
+		}
+		logger.warn(e, `[OpenID] Unknown OP error`);
+		return new ServiceUnavailableError({
+			service: "openid",
+			reason: `Service returned unexpected response: ${e.error_description}`
+		});
+	} else if (e instanceof errors.RPError) {
+		logger.warn(e, `[OpenID] Unknown RP error`);
+		return new InvalidCredentialsError();
+	}
+	logger.warn(e, `[OpenID] Unknown error`);
+	return e;
+};
+function createOpenIDAuthRouter(providerName) {
+	const env = useEnv();
+	const router = Router();
+	router.use(checkSsoEnabled);
+	router.get("/", async_handler_default(async (req, res) => {
+		const provider = getAuthProvider(providerName);
+		const codeVerifier = provider.generateCodeVerifier();
+		const prompt = !!req.query["prompt"];
+		let redirect = req.query["redirect"];
+		const otp = req.query["otp"];
+		try {
+			redirect = resolveLoginRedirect(redirect, { provider: providerName });
+		} catch (e) {
+			useLogger().error(e);
+			throw new InvalidPayloadError({ reason: `URL "${redirect}" can't be used to redirect after login` });
+		}
+		const callbackUrl = generateCallbackUrl(providerName, `${req.protocol}://${req.get("host")}`);
+		const token = jwt.sign({
+			verifier: codeVerifier,
+			redirect,
+			prompt,
+			otp,
+			callbackUrl
+		}, getSecret(), {
+			expiresIn: env[`AUTH_${providerName.toUpperCase()}_LOGIN_TIMEOUT`] ?? "5m",
+			issuer: "directus"
+		});
+		res.cookie(`openid.${providerName}`, token, {
+			httpOnly: true,
+			sameSite: "lax",
+			secure: Boolean(env[`AUTH_${providerName.toUpperCase()}_COOKIE_SECURE`])
+		});
+		try {
+			return res.redirect(await provider.generateAuthUrl(codeVerifier, prompt, callbackUrl));
+		} catch {
+			return res.redirect(new Url(env["PUBLIC_URL"]).addPath("admin", "login").setQuery("reason", ErrorCode.ServiceUnavailable).toString());
+		}
+	}), respond);
+	router.post("/callback", express.urlencoded({ extended: false }), (req, res) => {
+		res.redirect(303, `./callback?${new URLSearchParams(req.body)}`);
+	}, respond);
+	router.get("/callback", async_handler_default(async (req, res, next) => {
+		const env$1 = useEnv();
+		const logger = useLogger();
+		let tokenData;
+		try {
+			tokenData = verifyJWT(req.cookies[`openid.${providerName}`], getSecret());
+		} catch (e) {
+			logger.warn(e, `[OpenID] Couldn't verify OpenID cookie`);
+			const url = new Url(env$1["PUBLIC_URL"]).addPath("admin", "login");
+			return res.redirect(`${url.toString()}?reason=${ErrorCode.InvalidCredentials}`);
+		}
+		const { verifier, prompt, otp, callbackUrl } = tokenData;
+		let { redirect } = tokenData;
+		const accountability = createDefaultAccountability({ ip: getIPFromReq(req) });
+		const userAgent = req.get("user-agent")?.substring(0, 1024);
+		if (userAgent) accountability.userAgent = userAgent;
+		const origin = req.get("origin");
+		if (origin) accountability.origin = origin;
+		const authenticationService = new AuthenticationService({
+			accountability,
+			schema: req.schema
+		});
+		const authMode = env$1[`AUTH_${providerName.toUpperCase()}_MODE`] ?? "session";
+		let authResponse;
+		try {
+			res.clearCookie(`openid.${providerName}`);
+			authResponse = await authenticationService.login(providerName, {
+				code: req.query["code"],
+				codeVerifier: verifier,
+				state: req.query["state"],
+				iss: req.query["iss"],
+				callbackUrl
+			}, {
+				session: authMode === "session",
+				...otp ? { otp: String(otp) } : {}
+			});
+		} catch (error) {
+			if (isDirectusError(error, ErrorCode.InvalidToken) && !prompt) return res.redirect(`./?${redirect ? `redirect=${redirect}&` : ""}prompt=true`);
+			logger.warn(error);
+			if (redirect) {
+				let reason = "UNKNOWN_EXCEPTION";
+				if (isDirectusError(error)) reason = error.code;
+				else logger.warn(error, `[OpenID] Unexpected error during OpenID login`);
+				return res.redirect(`${redirect.split("?")[0]}?reason=${reason}`);
+			}
+			logger.warn(error, `[OpenID] Unexpected error during OpenID login`);
+			throw error;
+		}
+		const { accessToken, refreshToken, expires } = authResponse;
+		try {
+			if (verifyJWT(accessToken, getSecret())?.enforce_tfa === true) {
+				const url = new Url(env$1["PUBLIC_URL"]).addPath("admin", "tfa-setup");
+				if (redirect) {
+					url.setQuery("redirect", redirect);
+					url.setQuery("provider", providerName);
+				}
+				redirect = url.toString();
+			}
+		} catch (e) {
+			logger.warn(e, `[OpenID] Unexpected error during OpenID login`);
+		}
+		if (redirect) {
+			if (authMode === "session") res.cookie(env$1["SESSION_COOKIE_NAME"], accessToken, SESSION_COOKIE_OPTIONS);
+			else res.cookie(env$1["REFRESH_TOKEN_COOKIE_NAME"], refreshToken, REFRESH_COOKIE_OPTIONS);
+			return res.redirect(redirect);
+		}
+		res.locals["payload"] = { data: {
+			access_token: accessToken,
+			refresh_token: refreshToken,
+			expires
+		} };
+		next();
+	}), respond);
+	return router;
+}
+
+//#endregion
+export { OpenIDAuthDriver, createOpenIDAuthRouter };
