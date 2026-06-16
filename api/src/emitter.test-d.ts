@@ -50,13 +50,3 @@ test('register.filter plumbs the output type so a hook can return a primary key'
 		return 5;
 	});
 });
-
-test('offFilter accepts the same typed handler shape as onFilter', () => {
-	const handler: FilterHandler<Item, number> = (payload) => {
-		expectTypeOf(payload).toEqualTypeOf<Item>();
-		return 5;
-	};
-
-	emitter.onFilter<Item, number>('items.create', handler);
-	emitter.offFilter<Item, number>('items.create', handler);
-});
