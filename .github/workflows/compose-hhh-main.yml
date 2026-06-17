@@ -2,20 +2,25 @@
 # proposed PRs were accepted upstream".
 #
 # hhh-main is DERIVED, never authored. It is force-rebuilt from:
-#   - fork `main` (fast-forwarded from upstream directus/directus), plus
-#   - every open, non-draft PR titled `upstream-draft: …` targeting `main`
-#     (discovered by title prefix, not hardcoded).
+#   - fork `main` (synced from upstream directus/directus), plus
+#   - the TREE of open, non-draft `hhh-main-root:` / `hhh-main-stacked:` copy
+#     PRs, applied in dependency order (a stacked copy after its parent copy).
+#
+# These copies are the CONFLICT-RESOLVED form of the isolated `upstream-draft:`
+# PRs (which stay clean off `main` for upstream submission). Compose consumes the
+# copies, so it no longer blocks on raw inter-PR conflicts — a conflict here now
+# means the stack is STALE vs `main` and must be re-rebased (each copy PR carries
+# its re-rebase recipe). Build the stack with a manual call; see #67.
 #
 # Never commit directly to hhh-main — this workflow force-pushes over it.
-# Put your work on a `feature/*` branch and open a PR into `main` titled
-# `upstream-draft: …`; it then auto-integrates here while it soaks before an
-# upstream proposal.
 #
-# Policy:
-#   - A PR that does not merge cleanly is SKIPPED (it wouldn't be accepted
-#     as-is) and reported, but the rest still compose.
-#   - A composed tree that fails build/api-tests BLOCKS the publish — hhh-main
-#     only ever points at a green tree.
+# Policy (all-or-nothing):
+#   - Any PR that does not merge cleanly (or whose base never resolves) BLOCKS
+#     the whole run — no partial publish. The full tree is still attempted so
+#     every conflict is reported in one run, then the job fails.
+#   - A composed tree that fails build/api-tests also BLOCKS the publish.
+#   - hhh-main is only ever force-pushed when the ENTIRE tree merges clean+green;
+#     otherwise it keeps pointing at the last fully-composed tree.
 name: compose-hhh-main
 
 on:
@@ -46,6 +51,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Push over an SSH deploy key, not GITHUB_TOKEN: App tokens are forbidden
+          # from pushing workflow-file changes, which both the main sync (upstream
+          # edits .github/*) and the hhh-main force-push carry. SSH is not an App
+          # token, so it is exempt.
+          ssh-key: ${{ secrets.COMPOSE_SSH_KEY }}
 
       - name: Configure git identity
         run: |
@@ -66,44 +76,92 @@ jobs:
           git merge upstream/main -m "Sync upstream into main"
           git push origin main
 
-      - name: Discover open upstream-draft PRs targeting main
+      - name: Discover open hhh-main copy PRs
         id: discover
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Only integrate PRs titled `upstream-draft: …` — work staged for an
-          # upstream proposal that we soak-test in hhh-main first. Other PRs into
-          # main are left out. `experiments` (held WIP) and `superseded`
-          # (replaced) labels exclude an otherwise-matching PR.
-          gh pr list --repo "$GITHUB_REPOSITORY" --base main --state open \
-            --json number,headRefName,isDraft,title,labels \
+          # The compose input is the resolved copy tree: `hhh-main-root:` (isolated,
+          # base main) and `hhh-main-stacked:` (rebased on a parent copy). Any base,
+          # so stacked copies are included and applied after their parent.
+          # `experiments` / `superseded` labels exclude an otherwise-matching copy.
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,headRefName,baseRefName,isDraft,title,labels \
             --jq '[.[]
               | select(.isDraft | not)
-              | select(.title | startswith("upstream-draft: "))
+              | select(.title | startswith("hhh-main-root: ") or startswith("hhh-main-stacked: "))
               | select(any(.labels[].name; . == "experiments" or . == "superseded") | not)]' \
             > prs.json
-          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.title)"' prs.json
+          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.baseRefName) <- \(.headRefName)"' prs.json
           echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
 
       - name: Compose hhh-main
         id: compose
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           git checkout -B hhh-main main
-          skipped=""
-          for num in $(jq -r '.[].number' prs.json); do
-            # refs/pull/N/head works for same-repo AND cross-repo PR heads.
-            git fetch origin "refs/pull/$num/head:pr-$num"
-            if git merge --no-ff -m "Integrate #$num" "pr-$num"; then
-              echo "merged #$num"
-            else
-              git merge --abort
-              echo "::warning::PR #$num does not merge cleanly into hhh-main — skipped"
-              skipped="$skipped #$num"
-            fi
+          # Apply the PR tree in dependency order. A PR whose base is `main` (or any
+          # branch that is not itself a selected PR head) is a ROOT, applied first.
+          # A PR stacked on another PR's head waits until that parent merges.
+          # Skip-on-conflict, and cascade-skip the descendants of a skipped PR so a
+          # conflicted parent can't slip in through its child's branch.
+          declare -A STATUS IS_HEAD
+          mapfile -t ROWS < <(jq -c '.[]' prs.json)
+          for r in "${ROWS[@]}"; do IS_HEAD["$(jq -r .headRefName <<<"$r")"]=1; done
+          pending=("${ROWS[@]}"); merged=""; skip_conflict=""; skip_dep=""; progress=1
+          while [ ${#pending[@]} -gt 0 ] && [ "$progress" -eq 1 ]; do
+            progress=0; next=()
+            for r in "${pending[@]}"; do
+              num=$(jq -r .number <<<"$r"); head=$(jq -r .headRefName <<<"$r"); base=$(jq -r .baseRefName <<<"$r")
+              if [ "$base" = "main" ] || [ -z "${IS_HEAD[$base]:-}" ]; then baseskip=0
+              elif [ "${STATUS[$base]:-}" = "merged" ]; then baseskip=0
+              elif [ "${STATUS[$base]:-}" = "skipped" ]; then baseskip=1
+              else next+=("$r"); continue; fi   # parent still pending — revisit next pass
+              progress=1
+              if [ "$baseskip" = 1 ]; then
+                STATUS[$head]=skipped; skip_dep="$skip_dep #$num"
+                echo "::warning::PR #$num skipped — its base PR was skipped"; continue
+              fi
+              # refs/pull/N/head works for same-repo AND cross-repo PR heads.
+              git fetch origin "refs/pull/$num/head:pr-$num"
+              if git merge --no-ff -m "Integrate #$num" "pr-$num"; then
+                STATUS[$head]=merged; merged="$merged #$num"; echo "merged #$num"
+              else
+                git merge --abort; STATUS[$head]=skipped; skip_conflict="$skip_conflict #$num"
+                echo "::warning::PR #$num does not merge cleanly into hhh-main — skipped"
+              fi
+            done
+            pending=("${next[@]}")
           done
-          echo "skipped=$skipped" >> "$GITHUB_OUTPUT"
+          # Anything still pending depends on a branch that is neither main nor a
+          # merged/skipped selected head — a base cycle or an unknown base.
+          skip_cycle=""
+          for r in "${pending[@]:-}"; do [ -n "$r" ] && skip_cycle="$skip_cycle #$(jq -r .number <<<"$r")"; done
+          echo "merged=$merged"
+          { echo "merged=$merged"
+            echo "skip_conflict=$skip_conflict"
+            echo "skip_dep=$skip_dep"
+            echo "skip_cycle=$skip_cycle"
+            echo "skipped=$skip_conflict$skip_dep$skip_cycle"; } >> "$GITHUB_OUTPUT"
+          # A clean tree is all-or-nothing: any PR that won't merge (or whose base
+          # never resolved) BLOCKS the run. The whole loop still ran so every
+          # conflict is reported at once, but we fail now — Publish (if: success())
+          # is skipped, so hhh-main keeps pointing at the last fully-composed tree.
+          if [ -n "$skip_conflict$skip_cycle" ]; then
+            echo "::error::Stack is stale vs main — re-rebase these copies:$skip_conflict$skip_cycle (dependents:$skip_dep). See each copy PR's re-rebase recipe."
+            exit 1
+          fi
+
+      - name: Allowlist compose bot for CLA
+        # hhh-main's "Integrate #N" commits are authored by hhh-bot. directus/cla-bot
+        # reads contributors.yml from the head ref (hhh-main), so the bot must be
+        # signed there. Inject it here rather than storing it on main — keeps main
+        # a clean upstream base; the entry lives only on the derived hhh-main.
+        run: |
+          if ! grep -qxF '- hhh-bot' contributors.yml; then
+            echo '- hhh-bot' >> contributors.yml
+            git add contributors.yml
+            git commit -m "ci: sign CLA for hhh-bot (compose identity)"
+          fi
 
       - name: Install + build
         uses: ./.github/actions/prepare
@@ -125,8 +183,14 @@ jobs:
           title="compose-hhh-main: integration needs attention"
           run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           body="Last \`compose-hhh-main\` run ($run_url) could not produce a clean, green hhh-main."
-          if [ -n "${{ steps.compose.outputs.skipped }}" ]; then
-            body="$body"$'\n\n'"**Skipped (merge conflict, not integrated):**${{ steps.compose.outputs.skipped }}"
+          if [ -n "${{ steps.compose.outputs.skip_conflict }}" ]; then
+            body="$body"$'\n\n'"**Skipped (merge conflict):**${{ steps.compose.outputs.skip_conflict }}"
+          fi
+          if [ -n "${{ steps.compose.outputs.skip_dep }}" ]; then
+            body="$body"$'\n\n'"**Skipped (base PR was skipped):**${{ steps.compose.outputs.skip_dep }}"
+          fi
+          if [ -n "${{ steps.compose.outputs.skip_cycle }}" ]; then
+            body="$body"$'\n\n'"**Skipped (unresolved/cyclic base):**${{ steps.compose.outputs.skip_cycle }}"
           fi
           if [ "${{ job.status }}" = "failure" ]; then
             body="$body"$'\n\n'"**Build or api tests failed** — hhh-main was NOT force-pushed and still points at the previous green tree."
