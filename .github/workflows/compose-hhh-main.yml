@@ -44,6 +44,11 @@ permissions:
 jobs:
   compose:
     runs-on: ubuntu-latest
+    # Skip the compare PR #67 (hhh-main -> main): each compose force-pushes
+    # hhh-main over an SSH deploy key, and SSH/PAT pushes (unlike GITHUB_TOKEN)
+    # re-fire workflows — so a #67 `synchronize` would re-compose, push, and
+    # loop forever. Schedule / dispatch / draft-PR triggers still run.
+    if: github.event_name != 'pull_request' || github.head_ref != 'hhh-main'
     # Cross-repo PRs run with a read-only token and no secrets, so they cannot
     # push. The scheduled run is the reliable path; PR triggers only help for
     # same-repo branches.
