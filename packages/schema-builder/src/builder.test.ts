@@ -151,7 +151,7 @@ test('Create o2m relation', () => {
 		      "collection": "countries",
 		      "fields": {
 		        "cities": {
-		          "alias": false,
+		          "alias": true,
 		          "dbType": null,
 		          "defaultValue": null,
 		          "field": "cities",
@@ -363,7 +363,7 @@ test('Create m2m relation', () => {
 		          "validation": null,
 		        },
 		        "tags": {
-		          "alias": false,
+		          "alias": true,
 		          "dbType": null,
 		          "defaultValue": null,
 		          "field": "tags",
@@ -540,7 +540,7 @@ test('Create m2a relation', () => {
 		      "collection": "blog",
 		      "fields": {
 		        "blocks": {
-		          "alias": false,
+		          "alias": true,
 		          "dbType": null,
 		          "defaultValue": null,
 		          "field": "blocks",
@@ -926,7 +926,7 @@ test('Create translations relation', () => {
 		          "validation": null,
 		        },
 		        "translations": {
-		          "alias": false,
+		          "alias": true,
 		          "dbType": null,
 		          "defaultValue": null,
 		          "field": "translations",
