@@ -152,6 +152,74 @@ describe('Integration Tests', () => {
 				transactionSpy.mockRestore();
 				filterSpy.mockRestore();
 			});
+
+			it('awaits async action handlers before resolving when awaitActionHooks is set', async () => {
+				let actionCompleted = false;
+
+				// Resolve on a macrotask: a fire-and-forget emitAction would let createOne
+				// return before this runs, leaving actionCompleted false.
+				const handler = () =>
+					new Promise<void>((resolve) => {
+						setTimeout(() => {
+							actionCompleted = true;
+							resolve();
+						}, 0);
+					});
+
+				emitter.onAction('test.items.create', handler);
+
+				try {
+					await service.createOne({ name: 'Test' }, { awaitActionHooks: true });
+					expect(actionCompleted).toBe(true);
+				} finally {
+					emitter.offAction('test.items.create', handler);
+				}
+			});
+
+			it('does not await action handlers by default (fire-and-forget)', async () => {
+				let actionCompleted = false;
+
+				const handler = () =>
+					new Promise<void>((resolve) => {
+						setTimeout(() => {
+							actionCompleted = true;
+							resolve();
+						}, 0);
+					});
+
+				emitter.onAction('test.items.create', handler);
+
+				try {
+					await service.createOne({ name: 'Test' });
+					// Without awaitActionHooks, createOne resolves without waiting for the macrotask handler.
+					expect(actionCompleted).toBe(false);
+				} finally {
+					emitter.offAction('test.items.create', handler);
+				}
+			});
+
+			it('runs the scoped action events in parallel when awaited', async () => {
+				let signalSecondStarted!: () => void;
+				const secondStarted = new Promise<void>((resolve) => (signalSecondStarted = resolve));
+
+				// The first handler only finishes once the second has started. Run sequentially
+				// this deadlocks (the second never starts), so the test only passes when parallel.
+				const firstHandler = () => secondStarted;
+
+				const secondHandler = () => {
+					signalSecondStarted();
+				};
+
+				emitter.onAction('items.create', firstHandler);
+				emitter.onAction('test.items.create', secondHandler);
+
+				try {
+					await service.createOne({ name: 'Test' }, { awaitActionHooks: true });
+				} finally {
+					emitter.offAction('items.create', firstHandler);
+					emitter.offAction('test.items.create', secondHandler);
+				}
+			});
 		});
 
 		describe('createMany', () => {
@@ -368,6 +436,74 @@ describe('Integration Tests', () => {
 
 				transactionSpy.mockRestore();
 				filterSpy.mockRestore();
+			});
+		});
+
+		describe('action hook emission (await / bypass)', () => {
+			const macrotaskHandler = (onDone: () => void) => () =>
+				new Promise<void>((resolve) => {
+					setTimeout(() => {
+						onDone();
+						resolve();
+					}, 0);
+				});
+
+			it('still resolves when an awaited action handler throws (error caught and logged)', async () => {
+				const handler = () => Promise.reject(new Error('boom'));
+
+				emitter.onAction('test.items.create', handler);
+
+				try {
+					// emitter.emitAction swallows per-event errors, so the mutation must not reject
+					const outcome = await service.createOne({ name: 'Test' }, { awaitActionHooks: true }).then(
+						() => 'resolved',
+						() => 'rejected',
+					);
+
+					expect(outcome).toBe('resolved');
+				} finally {
+					emitter.offAction('test.items.create', handler);
+				}
+			});
+
+			it('routes action events to bypassEmitAction and skips the emitter', async () => {
+				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+				const bypassEmitAction = vi.fn().mockResolvedValue(undefined);
+
+				await service.createOne({ name: 'Test' }, { bypassEmitAction, awaitActionHooks: true });
+
+				expect(bypassEmitAction).toHaveBeenCalled();
+				expect(emitActionSpy).not.toHaveBeenCalled();
+
+				emitActionSpy.mockRestore();
+			});
+
+			it('awaits async action handlers on update when awaitActionHooks is set', async () => {
+				let actionCompleted = false;
+				const handler = macrotaskHandler(() => (actionCompleted = true));
+
+				emitter.onAction('test.items.update', handler);
+
+				try {
+					await service.updateMany([1], { name: 'test' }, { awaitActionHooks: true });
+					expect(actionCompleted).toBe(true);
+				} finally {
+					emitter.offAction('test.items.update', handler);
+				}
+			});
+
+			it('awaits async action handlers on delete when awaitActionHooks is set', async () => {
+				let actionCompleted = false;
+				const handler = macrotaskHandler(() => (actionCompleted = true));
+
+				emitter.onAction('test.items.delete', handler);
+
+				try {
+					await service.deleteMany([1], { awaitActionHooks: true });
+					expect(actionCompleted).toBe(true);
+				} finally {
+					emitter.offAction('test.items.delete', handler);
+				}
 			});
 		});
 	});

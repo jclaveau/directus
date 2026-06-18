@@ -38,6 +38,30 @@ import { PayloadService } from './payload.js';
 
 const env = useEnv();
 
+/**
+ * Emit a mutation's action events (the item's own event plus any queued nested ones) in parallel.
+ * They run together, so a slow handler on one event doesn't serialize the rest. By default the
+ * mutation does not wait for them (Directus' historical fire-and-forget behaviour); pass
+ * `awaitActionHooks` to block until every handler has settled.
+ */
+async function emitActionEvents(actionEvents: ActionEventParams[], opts: MutationOptions): Promise<void> {
+	const emitting = Promise.all(
+		actionEvents.map((actionEvent) =>
+			opts.bypassEmitAction
+				? opts.bypassEmitAction(actionEvent)
+				: emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context),
+		),
+	);
+
+	if (opts.awaitActionHooks) {
+		await emitting;
+	} else {
+		// Per-event errors are already caught and logged inside emitter.emitAction; swallow here so
+		// an un-awaited rejection (e.g. from a bypassEmitAction handler) doesn't go unhandled.
+		emitting.catch(() => {});
+	}
+}
+
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
 	implements AbstractService<Item>
 {
@@ -418,19 +442,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				},
 			};
 
-			if (opts.bypassEmitAction) {
-				opts.bypassEmitAction(actionEvent);
-			} else {
-				emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context);
-			}
-
-			for (const nestedActionEvent of nestedActionEvents) {
-				if (opts.bypassEmitAction) {
-					opts.bypassEmitAction(nestedActionEvent);
-				} else {
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			await emitActionEvents([actionEvent, ...nestedActionEvents], opts);
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
@@ -501,13 +513,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (opts.emitEvents !== false) {
-			for (const nestedActionEvent of nestedActionEvents) {
-				if (opts.bypassEmitAction) {
-					opts.bypassEmitAction(nestedActionEvent);
-				} else {
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			await emitActionEvents(nestedActionEvents, opts);
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
@@ -585,7 +591,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				: records;
 
 		if (opts?.emitEvents !== false) {
-			emitter.emitAction(
+			// Read action hooks stay fire-and-forget; the await opt-in (`awaitActionHooks`) is for mutations.
+			void emitter.emitAction(
 				this.eventScope === 'items' ? ['items.read', `${this.collection}.items.read`] : `${this.eventScope}.read`,
 				{
 					payload: filteredRecords,
@@ -1021,19 +1028,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				},
 			};
 
-			if (opts.bypassEmitAction) {
-				opts.bypassEmitAction(actionEvent);
-			} else {
-				emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context);
-			}
-
-			for (const nestedActionEvent of nestedActionEvents) {
-				if (opts.bypassEmitAction) {
-					opts.bypassEmitAction(nestedActionEvent);
-				} else {
-					emitter.emitAction(nestedActionEvent.event, nestedActionEvent.meta, nestedActionEvent.context);
-				}
-			}
+			await emitActionEvents([actionEvent, ...nestedActionEvents], opts);
 		}
 
 		return keys;
@@ -1262,11 +1257,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				},
 			};
 
-			if (opts.bypassEmitAction) {
-				opts.bypassEmitAction(actionEvent);
-			} else {
-				emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context);
-			}
+			await emitActionEvents([actionEvent], opts);
 		}
 
 		return keys;
