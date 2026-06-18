@@ -162,7 +162,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			// item that is about to be saved
 			const payloadAfterHooks: AnyItem | PrimaryKey | null =
 				opts.emitEvents !== false
-					? await emitter.emitFilter<AnyItem, PrimaryKey>(
+					? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
 							this.eventScope === 'items'
 								? ['items.create', `${this.collection}.items.create`]
 								: `${this.eventScope}.create`,
@@ -395,6 +395,11 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			return primaryKey;
 		});
 
+		// A filter hook cancelled the creation: nothing was inserted, so skip the action hooks entirely.
+		if (primaryKey === null) {
+			return null;
+		}
+
 		if (opts.emitEvents !== false && !createWasTakenOver) {
 			const actionEvent = {
 				event:
@@ -440,7 +445,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 *
 	 * Uses `this.createOne` under the hood.
 	 */
-	async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+	async createMany(
+		data: Partial<Item>[],
+		opts: MutationOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
+
+	async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]>;
+	async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<(PrimaryKey | null)[]> {
 		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
 
 		const { primaryKeys, nestedActionEvents } = await transaction(this.knex, async (knex) => {
@@ -448,7 +459,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 
-			const primaryKeys: PrimaryKey[] = [];
+			const primaryKeys: (PrimaryKey | null)[] = [];
 			const nestedActionEvents: ActionEventParams[] = [];
 
 			const pkField = this.schema.collections[this.collection]!.primary;
@@ -462,7 +473,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					bypassAutoIncrementSequenceReset = false;
 				}
 
-				const primaryKey = await service.createOne(payload, {
+				// `allowFilterCancel` is propagated via `opts`; the overload resolves to the non-null
+				// signature, but a cancelling filter can still return null at runtime — hence the guard.
+				const primaryKey: PrimaryKey | null = await service.createOne(payload, {
 					...(opts || {}),
 					autoPurgeCache: false,
 					onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
@@ -471,6 +484,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					bypassAutoIncrementSequenceReset,
 				});
 
+				// A filter hook may cancel an individual create by returning null; the null is kept in
+				// place so the result stays index-aligned with the input (mirrors createOne).
 				primaryKeys.push(primaryKey);
 			}
 
@@ -710,7 +725,18 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	/**
 	 * Update many items by primary key, setting all items to the same change.
 	 */
-	async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+	async updateMany(
+		keys: PrimaryKey[],
+		data: Partial<Item>,
+		opts: MutationOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
+
+	async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]>;
+	async updateMany(
+		keys: PrimaryKey[],
+		data: Partial<Item>,
+		opts: MutationOptions = {},
+	): Promise<(PrimaryKey | null)[]> {
 		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
 
 		if (!opts.bypassLimits) {
@@ -736,7 +762,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		// item that is about to be saved
 		const payloadAfterHooks =
 			opts.emitEvents !== false
-				? await emitter.emitFilter(
+				? await emitter.emitFilter<Partial<AnyItem>, null>(
 						this.eventScope === 'items'
 							? ['items.update', `${this.collection}.items.update`]
 							: `${this.eventScope}.update`,
@@ -754,12 +780,18 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				: payload;
 
 		if (payloadAfterHooks === null) {
-			// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
-			// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
-			// option; on its own a null payload is invalid rather than a silent no-op.
-			throw new InvalidPayloadError({
-				reason: `A filter hook cancelled the update, but this operation requires it`,
-			});
+			if (!opts.allowFilterCancel) {
+				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
+				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
+				// option; on its own a null payload is invalid rather than a silent no-op.
+				throw new InvalidPayloadError({
+					reason: `A filter hook cancelled the update, but this operation requires it`,
+				});
+			}
+
+			// The filter cancelled the update: nothing is written; return a null per key so the
+			// result stays index-aligned with the input keys.
+			return keys.map(() => null);
 		}
 
 		const isEmptyAlterations = (value: unknown): boolean => {
@@ -1094,7 +1126,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	/**
 	 * Delete multiple items by primary key.
 	 */
-	async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+	async deleteMany(
+		keys: PrimaryKey[],
+		opts: MutationOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
+
+	async deleteMany(keys: PrimaryKey[], opts?: MutationOptions): Promise<PrimaryKey[]>;
+	async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<(PrimaryKey | null)[]> {
 		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
 
 		if (!opts.bypassLimits) {
@@ -1105,6 +1143,36 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
+
+		const keysAfterHooks =
+			opts.emitEvents !== false
+				? await emitter.emitFilter<PrimaryKey[], null>(
+						this.eventScope === 'items'
+							? ['items.delete', `${this.collection}.items.delete`]
+							: `${this.eventScope}.delete`,
+						keys,
+						{
+							collection: this.collection,
+						},
+						{
+							database: this.knex,
+							schema: this.schema,
+							accountability: this.accountability,
+						},
+					)
+				: keys;
+
+		if (keysAfterHooks === null) {
+			if (!opts.allowFilterCancel) {
+				throw new InvalidPayloadError({
+					reason: `A filter hook cancelled the deletion, but this operation requires it`,
+				});
+			}
+
+			// The filter cancelled the deletion: nothing is deleted; return a null per key so the
+			// result stays index-aligned with the input keys.
+			return keys.map(() => null);
+		}
 
 		if (this.accountability) {
 			await validateAccess(

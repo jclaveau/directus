@@ -34,20 +34,28 @@ router.post(
 		const savedKeys: PrimaryKey[] = [];
 
 		if (Array.isArray(req.body)) {
-			const keys = await service.createMany(req.body);
-			savedKeys.push(...keys);
+			const keys = await service.createMany(req.body, { allowFilterCancel: true });
+			// Cancelled creates come back as null; drop them before reading the created items.
+			savedKeys.push(...keys.filter((key): key is PrimaryKey => key !== null));
 		} else {
-			const key = await service.createOne(req.body);
-			savedKeys.push(key);
+			const key = await service.createOne(req.body, { allowFilterCancel: true });
+
+			if (key !== null) {
+				// A filter hook may cancel the creation by returning null; nothing to read back then.
+				savedKeys.push(key);
+			}
 		}
 
 		try {
 			if (Array.isArray(req.body)) {
 				const result = await service.readMany(savedKeys, req.sanitizedQuery);
 				res.locals['payload'] = { data: result || null };
-			} else {
+			} else if (savedKeys.length > 0) {
 				const result = await service.readOne(savedKeys[0]!, req.sanitizedQuery);
 				res.locals['payload'] = { data: result || null };
+			} else {
+				// The single create was cancelled by a filter hook: no item to return.
+				res.locals['payload'] = { data: null };
 			}
 		} catch (error: any) {
 			if (isDirectusError(error, ErrorCode.Forbidden)) {
@@ -150,19 +158,24 @@ router.patch(
 			return next();
 		}
 
-		let keys: PrimaryKey[] = [];
+		let keys: (PrimaryKey | null)[] = [];
 
 		if (Array.isArray(req.body)) {
-			keys = await service.updateBatch(req.body);
+			keys = await service.updateBatch(req.body, { allowFilterCancel: true });
 		} else if (req.body.keys) {
-			keys = await service.updateMany(req.body.keys, req.body.data);
+			keys = await service.updateMany(req.body.keys, req.body.data, { allowFilterCancel: true });
 		} else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			keys = await service.updateByQuery(sanitizedQuery, req.body.data);
+			keys = await service.updateByQuery(sanitizedQuery, req.body.data, { allowFilterCancel: true });
 		}
 
 		try {
-			const result = await service.readMany(keys, req.sanitizedQuery);
+			// Cancelled updates come back as null; drop them before reading the affected items.
+			const result = await service.readMany(
+				keys.filter((key): key is PrimaryKey => key !== null),
+				req.sanitizedQuery,
+			);
+
 			res.locals['payload'] = { data: result };
 		} catch (error: any) {
 			if (isDirectusError(error, ErrorCode.Forbidden)) {
@@ -195,7 +208,7 @@ router.patch(
 			schema: req.schema,
 		});
 
-		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body);
+		const updatedPrimaryKey = await service.updateOne(req.params['pk']!, req.body, { allowFilterCancel: true });
 
 		try {
 			const result = await service.readOne(updatedPrimaryKey, req.sanitizedQuery);
@@ -229,12 +242,12 @@ router.delete(
 		});
 
 		if (Array.isArray(req.body)) {
-			await service.deleteMany(req.body);
+			await service.deleteMany(req.body, { allowFilterCancel: true });
 		} else if (req.body.keys) {
-			await service.deleteMany(req.body.keys);
+			await service.deleteMany(req.body.keys, { allowFilterCancel: true });
 		} else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
-			await service.deleteByQuery(sanitizedQuery);
+			await service.deleteByQuery(sanitizedQuery, { allowFilterCancel: true });
 		}
 
 		return next();
@@ -256,7 +269,7 @@ router.delete(
 			schema: req.schema,
 		});
 
-		await service.deleteOne(req.params['pk']!);
+		await service.deleteOne(req.params['pk']!, { allowFilterCancel: true });
 		return next();
 	}),
 	respond,
