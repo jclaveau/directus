@@ -1,4 +1,4 @@
-import { ForbiddenError } from '@directus/errors';
+import { InvalidPayloadError } from '@directus/errors';
 import type { PrimaryKey, SchemaOverview } from '@directus/types';
 import { isValidUuid } from './is-valid-uuid.js';
 
@@ -19,9 +19,13 @@ export function validateKeys(
 		const primaryKeyFieldType = schema.collections[collection]?.fields[keyField]?.type;
 
 		if (primaryKeyFieldType === 'uuid' && !isValidUuid(String(keys))) {
-			throw new ForbiddenError();
+			throw new InvalidPayloadError({
+				reason: `Primary key of ${collection} must be a uuid instead of ${JSON.stringify(keys, null, 2)}`,
+			});
 		} else if (primaryKeyFieldType === 'integer' && !Number.isInteger(Number(keys))) {
-			throw new ForbiddenError();
+			throw new InvalidPayloadError({
+				reason: `Primary key of ${collection} must be an integer instead of ${JSON.stringify(keys, null, 2)}`,
+			});
 		}
 	}
 }
