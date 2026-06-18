@@ -46,17 +46,18 @@ export async function resolveMutation(
 	try {
 		if (single) {
 			if (action === 'create') {
-				const key = await service.createOne(args['data']);
-				return hasQuery ? await service.readOne(key, query) : true;
+				const key = await service.createOne(args['data'], { allowFilterCancel: true });
+				// A filter hook may cancel the create (null key); there is then no item to read back.
+				return hasQuery && key !== null ? await service.readOne(key, query) : true;
 			}
 
 			if (action === 'update') {
-				const key = await service.updateOne(args['id'], args['data']);
+				const key = await service.updateOne(args['id'], args['data'], { allowFilterCancel: true });
 				return hasQuery ? await service.readOne(key, query) : true;
 			}
 
 			if (action === 'delete') {
-				await service.deleteOne(args['id']);
+				await service.deleteOne(args['id'], { allowFilterCancel: true });
 				return { id: args['id'] };
 			}
 
@@ -73,14 +74,18 @@ export async function resolveMutation(
 				if (batchUpdate) {
 					keys.push(...(await service.updateBatch(args['data'])));
 				} else {
-					keys.push(...(await service.updateMany(args['ids'], args['data'])));
+					keys.push(
+						...(await service.updateMany(args['ids'], args['data'], { allowFilterCancel: true })).filter(
+							(key): key is PrimaryKey => key !== null,
+						),
+					);
 				}
 
 				return hasQuery ? await service.readMany(keys, query) : true;
 			}
 
 			if (action === 'delete') {
-				const keys = await service.deleteMany(args['ids']);
+				const keys = await service.deleteMany(args['ids'], { allowFilterCancel: true });
 				return { ids: keys };
 			}
 

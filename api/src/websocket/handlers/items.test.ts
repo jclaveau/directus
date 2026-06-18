@@ -118,7 +118,9 @@ describe('WebSocket heartbeat handler', () => {
 		// do mocking
 		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
 
-		const createMany = vi.fn(),
+		// A filter hook may cancel an individual create, leaving a null in place; the handler
+		// must drop those before reading back, so the read only sees the surviving key.
+		const createMany = vi.fn().mockResolvedValue([1, null]),
 			readMany = vi.fn();
 
 		(ItemsService as Mock).mockImplementation(() => ({ createMany, readMany }));
@@ -137,7 +139,7 @@ describe('WebSocket heartbeat handler', () => {
 		await vi.runAllTimersAsync(); // flush promises to make sure the event is handled
 		// expect service functions
 		expect(createMany).toBeCalled();
-		expect(readMany).toBeCalled();
+		expect(readMany).toBeCalledWith([1], expect.anything());
 		expect(fakeClient.send).toBeCalled();
 	});
 
@@ -198,7 +200,9 @@ describe('WebSocket heartbeat handler', () => {
 		// do mocking
 		(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
 
-		const updateMany = vi.fn(),
+		// A filter hook may cancel an individual update, leaving a null in place; the handler
+		// must drop those before reading back, so the read only sees the surviving key.
+		const updateMany = vi.fn().mockResolvedValue([1, null]),
 			readMany = vi.fn();
 
 		(ItemsService as Mock).mockImplementation(() => ({ updateMany, readMany }));
@@ -220,7 +224,7 @@ describe('WebSocket heartbeat handler', () => {
 		// expect service functions
 		expect(updateMany).toBeCalled();
 		expect(getMetaForQuery).toBeCalled();
-		expect(readMany).toBeCalled();
+		expect(readMany).toBeCalledWith([1], expect.anything());
 		expect(fakeClient.send).toBeCalled();
 	});
 
