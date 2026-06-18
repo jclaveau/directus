@@ -14,6 +14,40 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		return getDefaultIndexName(type, collection, fields, { maxLength: 64 });
 	}
 
+	// MySQL has no DROP ... IF EXISTS for indexes/constraints (and MariaDB rides this same client),
+	// so check the catalog first. Unique constraints and plain indexes both surface in
+	// information_schema.statistics, so one lookup serves both drops below.
+	private async hasIndex(knex: Knex, collection: string, indexName: string): Promise<boolean> {
+		const result = await knex
+			.select('index_name')
+			.from('information_schema.statistics')
+			.whereRaw('table_schema = database()')
+			.andWhere({ table_name: collection, index_name: indexName })
+			.first();
+
+		return Boolean(result);
+	}
+
+	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const constraintName = this.generateIndexName('unique', collection, field);
+
+		if (await this.hasIndex(knex, collection, constraintName)) {
+			await knex.schema.alterTable(collection, (table) => {
+				table.dropUnique([field], constraintName);
+			});
+		}
+	}
+
+	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const indexName = this.generateIndexName('index', collection, field);
+
+		if (await this.hasIndex(knex, collection, indexName)) {
+			await knex.schema.alterTable(collection, (table) => {
+				table.dropIndex([field], indexName);
+			});
+		}
+	}
+
 	override async getDatabaseSize(): Promise<number | null> {
 		try {
 			const result = (await this.knex
