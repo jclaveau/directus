@@ -25,7 +25,7 @@ import { getCache } from '../cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
-import getDatabase, { getDatabaseClient } from '../database/index.js';
+import getDatabase from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
@@ -152,10 +152,29 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	async createOne(data: Partial<Item>, opts: MutationOptions & { allowFilterCancel: true }): Promise<PrimaryKey | null>;
 	async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey>;
 	async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey | null> {
+		const [primaryKey] = await this.createMany([data], opts);
+		return primaryKey ?? null;
+	}
+
+	/**
+	 * Create one or more new items at once, wrapped in a transaction. Uses a single batchInsert
+	 * where the vendor preserves RETURNING order, otherwise falls back to per-row inserts.
+	 */
+	async createMany(
+		data: Partial<Item>[],
+		opts: MutationOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
+
+	async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]>;
+	async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<(PrimaryKey | null)[]> {
 		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
 
+		if (data.length === 0) {
+			return [];
+		}
+
 		if (!opts.bypassLimits) {
-			opts.mutationTracker.trackMutations(1);
+			opts.mutationTracker.trackMutations(data.length);
 		}
 
 		if (this.collection === 'directus_users') {
@@ -170,150 +189,238 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
 
-		const payload: AnyItem = cloneDeep(data);
-		let actionHookPayload = payload;
-		const nestedActionEvents: ActionEventParams[] = [];
+		const pkField = this.schema.collections[this.collection]!.fields[primaryKeyField];
 
-		/**
-		 * By wrapping the logic in a transaction, we make sure we automatically roll back all the
-		 * changes in the DB if any of the parts contained within throws an error. This also means
-		 * that any errors thrown in any nested relational changes will bubble up and cancel the whole
-		 * update tree
-		 */
-		const primaryKey: PrimaryKey | null = await transaction(this.knex, async (trx) => {
+		// Index-aligned results: a filter hook can take over a row (returns its own PK) or cancel
+		// it (returns null), in which case that row is never inserted but still occupies its slot.
+		const results: (PrimaryKey | null)[] = new Array(data.length);
+
+		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
+
+		const { nestedActionEvents, actionPayloads } = await transaction(this.knex, async (trx) => {
 			const previousSeatCount = await captureSeatCount(trx, opts.userIntegrityCheckFlags);
 
-			// Run all hooks that are attached to this event so the end user has the chance to augment the
-			// item that is about to be saved
-			const payloadAfterHooks =
-				opts.emitEvents !== false
-					? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
-							this.eventScope === 'items'
-								? ['items.create', `${this.collection}.items.create`]
-								: `${this.eventScope}.create`,
-							payload,
-							{
-								collection: this.collection,
-							},
-							{
-								database: trx,
-								schema: this.schema,
-								accountability: this.accountability,
-							},
-						)
-					: payload;
-
-			if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
-				// A filter hook returned a primary key instead of a payload: it has taken over the
-				// creation, so short-circuit and surface that key.
-				return payloadAfterHooks;
-			}
-
-			if (payloadAfterHooks === null) {
-				if (!opts.allowFilterCancel) {
-					throw new InvalidPayloadError({
-						reason: `A filter hook cancelled the creation, but this operation requires a created item`,
-					});
-				}
-
-				// The filter cancelled the creation: no item is inserted and no key is produced.
-				return null;
-			}
-
-			const payloadWithPresets = this.accountability
-				? await processPayload(
-						{
-							accountability: this.accountability,
-							action: 'create',
-							collection: this.collection,
-							payload: payloadAfterHooks,
-							nested: this.nested,
-						},
-						{
-							knex: trx,
-							schema: this.schema,
-						},
-					)
-				: payloadAfterHooks;
-
-			if (opts.preMutationError) {
-				throw opts.preMutationError;
-			}
-
-			// Ensure the action hook payload has the post filter hook + preset changes
-			actionHookPayload = payloadWithPresets;
-
-			// We're creating new services instances so they can use the transaction as their Knex interface
-			const payloadService = new PayloadService(this.collection, {
-				accountability: this.accountability,
-				knex: trx,
-				schema: this.schema,
-				nested: this.nested,
-				overwriteDefaults: opts.overwriteDefaults,
-			});
-
-			const {
-				payload: payloadWithM2O,
-				revisions: revisionsM2O,
-				nestedActionEvents: nestedActionEventsM2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
-			} = await payloadService.processM2O(payloadWithPresets, opts);
-
-			const {
-				payload: payloadWithA2O,
-				revisions: revisionsA2O,
-				nestedActionEvents: nestedActionEventsA2O,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
-			} = await payloadService.processA2O(payloadWithM2O, opts);
-
-			const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
-			const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
-
-			// The primary key can already exist in the payload.
-			// In case of manual string / UUID primary keys it's always provided at this point.
-			// In case of an (big) integer primary key, it might be provided as the user can specify the value manually.
-			let primaryKey: undefined | PrimaryKey = payloadWithTypeCasting[primaryKeyField];
-
-			if (primaryKey) {
-				validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
-			}
-
-			// If a PK of type number was provided, although the PK is set the auto_increment,
-			// depending on the database, the sequence might need to be reset to protect future PK collisions.
+			const nestedActionEvents: ActionEventParams[] = [];
+			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
 			let autoIncrementSequenceNeedsToBeReset = false;
 
-			const pkField = this.schema.collections[this.collection]!.fields[primaryKeyField];
+			type PreparedRow = {
+				index: number;
+				actionHookPayload: AnyItem;
+				payloadAfterHooks: AnyItem;
+				payloadWithPresets: AnyItem;
+				payloadWithoutAliases: Record<string, unknown>;
+				primaryKey: PrimaryKey | undefined;
+				revisionsM2O: Awaited<ReturnType<PayloadService['processM2O']>>['revisions'];
+				revisionsA2O: Awaited<ReturnType<PayloadService['processA2O']>>['revisions'];
+				nestedActionEventsM2O: ActionEventParams[];
+				nestedActionEventsA2O: ActionEventParams[];
+				userIntegrityCheckFlagsM2O: UserIntegrityCheckFlag;
+				userIntegrityCheckFlagsA2O: UserIntegrityCheckFlag;
+				payloadService: PayloadService;
+			};
 
-			if (
-				primaryKey &&
-				pkField &&
-				!opts.bypassAutoIncrementSequenceReset &&
-				['integer', 'bigInteger'].includes(pkField.type) &&
-				pkField.defaultValue === 'AUTO_INCREMENT'
-			) {
-				autoIncrementSequenceNeedsToBeReset = true;
-			}
+			const prepared: PreparedRow[] = [];
 
-			try {
-				let returningOptions = undefined;
+			for (const [index, payloadInput] of data.entries()) {
+				const payload: AnyItem = cloneDeep(payloadInput);
 
-				// Support MSSQL tables that have triggers.
-				if (getDatabaseClient(trx) === 'mssql') {
-					returningOptions = { includeTriggerModifications: true };
+				// Run all hooks that are attached to this event so the end user has the chance to augment the
+				// item that is about to be saved
+				const payloadAfterHooks =
+					opts.emitEvents !== false
+						? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
+								this.eventScope === 'items'
+									? ['items.create', `${this.collection}.items.create`]
+									: `${this.eventScope}.create`,
+								payload,
+								{ collection: this.collection },
+								{
+									database: trx,
+									schema: this.schema,
+									accountability: this.accountability,
+								},
+							)
+						: payload;
+
+				if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
+					// A filter hook returned a primary key instead of a payload: it has taken over the
+					// creation of this row. Surface that key, insert nothing, and let the hook that took
+					// over own the action event.
+					results[index] = payloadAfterHooks;
+					continue;
 				}
 
-				const result = await trx
-					.insert(payloadWithoutAliases)
-					.into(this.collection)
-					.returning(primaryKeyField, returningOptions)
-					.then((result) => result[0]);
+				if (payloadAfterHooks === null) {
+					if (!opts.allowFilterCancel) {
+						throw new InvalidPayloadError({
+							reason: `A filter hook cancelled the creation, but this operation requires a created item`,
+						});
+					}
 
-				const returnedKey = typeof result === 'object' ? result[primaryKeyField] : result;
+					// The filter cancelled this row: nothing is inserted; the null slot keeps the result
+					// index-aligned with the input.
+					results[index] = null;
+					continue;
+				}
 
-				if (pkField!.type === 'uuid') {
-					primaryKey = getHelpers(trx).schema.formatUUID(primaryKey ?? returnedKey);
+				const payloadWithPresets = this.accountability
+					? await processPayload(
+							{
+								accountability: this.accountability,
+								action: 'create',
+								collection: this.collection,
+								payload: payloadAfterHooks,
+								nested: this.nested,
+							},
+							{ knex: trx, schema: this.schema },
+						)
+					: payloadAfterHooks;
+
+				if (opts.preMutationError) {
+					throw opts.preMutationError;
+				}
+
+				// Ensure the action hook payload has the post filter hook + preset changes
+				const actionHookPayload = payloadWithPresets;
+
+				// We're creating new services instances so they can use the transaction as their Knex interface
+				const payloadService = new PayloadService(this.collection, {
+					accountability: this.accountability,
+					knex: trx,
+					schema: this.schema,
+					nested: this.nested,
+					overwriteDefaults: opts.overwriteDefaults?.[index],
+				});
+
+				const {
+					payload: payloadWithM2O,
+					revisions: revisionsM2O,
+					nestedActionEvents: nestedActionEventsM2O,
+					userIntegrityCheckFlags: userIntegrityCheckFlagsM2O,
+				} = await payloadService.processM2O(payloadWithPresets, opts);
+
+				const {
+					payload: payloadWithA2O,
+					revisions: revisionsA2O,
+					nestedActionEvents: nestedActionEventsA2O,
+					userIntegrityCheckFlags: userIntegrityCheckFlagsA2O,
+				} = await payloadService.processA2O(payloadWithM2O, opts);
+
+				const payloadWithoutAliases = pick(payloadWithA2O, without(fields, ...aliases));
+				const payloadWithTypeCasting = await payloadService.processValues('create', payloadWithoutAliases);
+
+				// The primary key can already exist in the payload.
+				// In case of manual string / UUID primary keys it's always provided at this point.
+				// In case of an (big) integer primary key, it might be provided as the user can specify the value manually.
+				const primaryKey: PrimaryKey | undefined = payloadWithTypeCasting[primaryKeyField];
+
+				if (primaryKey) {
+					validateKeys(this.schema, this.collection, primaryKeyField, primaryKey);
+				}
+
+				// If a PK of type number was provided, although the PK is set the auto_increment,
+				// depending on the database, the sequence might need to be reset to protect future PK collisions.
+				if (
+					primaryKey &&
+					pkField &&
+					!opts.bypassAutoIncrementSequenceReset &&
+					['integer', 'bigInteger'].includes(pkField.type) &&
+					pkField.defaultValue === 'AUTO_INCREMENT'
+				) {
+					autoIncrementSequenceNeedsToBeReset = true;
+				}
+
+				prepared.push({
+					index,
+					actionHookPayload,
+					payloadAfterHooks,
+					payloadWithPresets,
+					payloadWithoutAliases,
+					primaryKey,
+					revisionsM2O,
+					revisionsA2O,
+					nestedActionEventsM2O,
+					nestedActionEventsA2O,
+					userIntegrityCheckFlagsM2O,
+					userIntegrityCheckFlagsA2O,
+					payloadService,
+				});
+			}
+
+			const useBatchInsert =
+				prepared.length > 1 && (await getHelpers(trx).capabilities.preservesInsertOrderInReturning());
+
+			try {
+				if (useBatchInsert) {
+					const chunkSize = env['DB_BATCH_INSERT_CHUNK_SIZE'] as number | undefined;
+
+					const rowsToInsert = getHelpers(trx).capabilities.padRowsForBatchInsert(
+						prepared.map((p) => p.payloadWithoutAliases),
+						{
+							fields: this.schema.collections[this.collection]!.fields,
+							primaryKeyField,
+						},
+					);
+
+					const insertedRows = (await trx
+						.batchInsert(this.collection, rowsToInsert, chunkSize)
+						.returning(primaryKeyField)) as unknown as Array<Record<string, unknown> | PrimaryKey>;
+
+					if (insertedRows.length !== prepared.length) {
+						throw new Error(`batchInsert returned ${insertedRows.length} rows but expected ${prepared.length}`);
+					}
+
+					for (let i = 0; i < prepared.length; i++) {
+						const row = insertedRows[i]!;
+						const p = prepared[i]!;
+
+						const returnedKey =
+							typeof row === 'object' && row !== null ? (row as Record<string, unknown>)[primaryKeyField] : row;
+
+						if (pkField?.type === 'uuid') {
+							p.primaryKey = getHelpers(trx).schema.formatUUID((p.primaryKey ?? (returnedKey as string)) as string);
+						} else {
+							p.primaryKey = (p.primaryKey ?? returnedKey) as PrimaryKey;
+						}
+
+						p.actionHookPayload[primaryKeyField] = p.primaryKey;
+					}
 				} else {
-					primaryKey = primaryKey ?? returnedKey;
+					const returningOptions = getHelpers(trx).capabilities.insertReturningOptions();
+
+					for (const p of prepared) {
+						const result = await trx
+							.insert(p.payloadWithoutAliases)
+							.into(this.collection)
+							.returning(primaryKeyField, returningOptions)
+							.then((rows) => rows[0]);
+
+						const returnedKey =
+							typeof result === 'object' && result !== null
+								? (result as Record<string, unknown>)[primaryKeyField]
+								: result;
+
+						if (pkField?.type === 'uuid') {
+							p.primaryKey = getHelpers(trx).schema.formatUUID((p.primaryKey ?? (returnedKey as string)) as string);
+						} else {
+							p.primaryKey = (p.primaryKey ?? returnedKey) as PrimaryKey;
+						}
+
+						// Most database support returning, those who don't tend to return the PK anyways
+						// (MySQL/SQLite). In case the primary key isn't know yet, we'll do a best-attempt at
+						// fetching it based on the last inserted row
+						if (!p.primaryKey) {
+							// Fetching it with max should be safe, as we're in the context of the current transaction
+							const maxResult = await trx.max(primaryKeyField, { as: 'id' }).from(this.collection).first();
+
+							p.primaryKey = maxResult?.id;
+						}
+
+						// Set the primary key on the input item, in order for the "after" event hook to be able
+						// to read from it
+						p.actionHookPayload[primaryKeyField] = p.primaryKey;
+					}
 				}
 			} catch (err: any) {
 				const dbError = await translateDatabaseError(err, data);
@@ -322,44 +429,42 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					// This is a MySQL specific thing we need to handle here, since MySQL does not return the field name
 					// if the unique constraint is the primary key
 					dbError.extensions.field = pkField?.field ?? null;
-
 					delete dbError.extensions.primaryKey;
 				}
 
 				throw dbError;
 			}
 
-			// Most database support returning, those who don't tend to return the PK anyways
-			// (MySQL/SQLite). In case the primary key isn't know yet, we'll do a best-attempt at
-			// fetching it based on the last inserted row
-			if (!primaryKey) {
-				// Fetching it with max should be safe, as we're in the context of the current transaction
-				const result = await trx.max(primaryKeyField, { as: 'id' }).from(this.collection).first();
-				primaryKey = result.id;
+			type PostRow = PreparedRow & {
+				primaryKey: PrimaryKey;
+				revisionsO2M: Awaited<ReturnType<PayloadService['processO2M']>>['revisions'];
+				nestedActionEventsO2M: ActionEventParams[];
+			};
 
-				// Set the primary key on the input item, in order for the "after" event hook to be able
-				// to read from it
-				actionHookPayload[primaryKeyField] = primaryKey;
+			const postPrepared: PostRow[] = [];
+
+			for (const p of prepared) {
+				// At this point, the primary key is guaranteed to be set.
+				const primaryKey = p.primaryKey as PrimaryKey;
+
+				const {
+					revisions: revisionsO2M,
+					nestedActionEvents: nestedActionEventsO2M,
+					userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
+				} = await p.payloadService.processO2M(p.payloadWithPresets, primaryKey, opts);
+
+				userIntegrityCheckFlags |=
+					p.userIntegrityCheckFlagsM2O | p.userIntegrityCheckFlagsA2O | userIntegrityCheckFlagsO2M;
+
+				nestedActionEvents.push(...p.nestedActionEventsM2O, ...p.nestedActionEventsA2O, ...nestedActionEventsO2M);
+
+				postPrepared.push({
+					...p,
+					primaryKey,
+					revisionsO2M,
+					nestedActionEventsO2M,
+				});
 			}
-
-			// At this point, the primary key is guaranteed to be set.
-			primaryKey = primaryKey as PrimaryKey;
-
-			const {
-				revisions: revisionsO2M,
-				nestedActionEvents: nestedActionEventsO2M,
-				userIntegrityCheckFlags: userIntegrityCheckFlagsO2M,
-			} = await payloadService.processO2M(payloadWithPresets, primaryKey, opts);
-
-			nestedActionEvents.push(...nestedActionEventsM2O);
-			nestedActionEvents.push(...nestedActionEventsA2O);
-			nestedActionEvents.push(...nestedActionEventsO2M);
-
-			const userIntegrityCheckFlags =
-				(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) |
-				userIntegrityCheckFlagsM2O |
-				userIntegrityCheckFlagsA2O |
-				userIntegrityCheckFlagsO2M;
 
 			if (userIntegrityCheckFlags) {
 				if (opts.onRequireUserIntegrityCheck) {
@@ -382,49 +487,54 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				const { ActivityService } = await import('./activity.js');
 				const { RevisionsService } = await import('./revisions.js');
 
-				const activityService = new ActivityService({
-					knex: trx,
-					schema: this.schema,
-				});
+				const activityService = new ActivityService({ knex: trx, schema: this.schema });
 
-				const activity = await activityService.createOne({
-					action: Action.CREATE,
-					user: this.accountability!.user,
-					collection: this.collection,
-					ip: this.accountability!.ip,
-					user_agent: this.accountability!.userAgent,
-					origin: this.accountability!.origin,
-					item: primaryKey,
-				});
+				const activityIds = await activityService.createMany(
+					postPrepared.map((p) => ({
+						action: Action.CREATE,
+						user: this.accountability!.user,
+						collection: this.collection,
+						ip: this.accountability!.ip,
+						user_agent: this.accountability!.userAgent,
+						origin: this.accountability!.origin,
+						item: p.primaryKey,
+					})),
+				);
 
 				// If revisions are tracked, create revisions record
 				if (this.schema.collections[this.collection]!.accountability === 'all') {
-					const revisionsService = new RevisionsService({
-						knex: trx,
-						schema: this.schema,
-					});
-
+					const revisionsService = new RevisionsService({ knex: trx, schema: this.schema });
 					const relationalFields = getRelationsForCollection(this.schema, this.collection);
 
-					const revisionPayload = await payloadService.prepareDelta(omit(payloadWithPresets, relationalFields));
+					const revisionInputs = await Promise.all(
+						postPrepared.map(async (p, index) => {
+							const revisionPayload = await p.payloadService.prepareDelta(omit(p.payloadWithPresets, relationalFields));
 
-					const revision = await revisionsService.createOne({
-						activity: activity,
-						collection: this.collection,
-						item: primaryKey,
-						data: revisionPayload,
-						delta: revisionPayload,
-					});
+							return {
+								activity: activityIds[index]!,
+								collection: this.collection,
+								item: p.primaryKey,
+								data: revisionPayload,
+								delta: revisionPayload,
+							};
+						}),
+					);
 
-					// Make sure to set the parent field of the child-revision rows
-					const childrenRevisions = [...revisionsM2O, ...revisionsA2O, ...revisionsO2M];
+					const revisionIds = await revisionsService.createMany(revisionInputs);
 
-					if (childrenRevisions.length > 0) {
-						await revisionsService.updateMany(childrenRevisions, { parent: revision });
-					}
+					for (let i = 0; i < postPrepared.length; i++) {
+						const p = postPrepared[i]!;
+						const revisionId = revisionIds[i]!;
+						// Make sure to set the parent field of the child-revision rows
+						const childrenRevisions = [...p.revisionsM2O, ...p.revisionsA2O, ...p.revisionsO2M];
 
-					if (opts.onRevisionCreate) {
-						opts.onRevisionCreate(revision);
+						if (childrenRevisions.length > 0) {
+							await revisionsService.updateMany(childrenRevisions, { parent: revisionId });
+						}
+
+						if (opts.onRevisionCreate) {
+							opts.onRevisionCreate(revisionId);
+						}
 					}
 				}
 			}
@@ -434,23 +544,31 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			}
 
 			if (opts.onItemCreate) {
-				opts.onItemCreate(this.collection, primaryKey);
+				for (const p of postPrepared) {
+					opts.onItemCreate(this.collection, p.primaryKey);
+				}
 			}
 
-			return primaryKey;
+			// Fill the index-aligned result with the keys of the rows that were actually inserted;
+			// taken-over / cancelled slots were already set in the prepare loop.
+			for (const p of postPrepared) {
+				results[p.index] = p.primaryKey;
+			}
+
+			return {
+				nestedActionEvents,
+				actionPayloads: postPrepared.map(
+					(p): ActionPayload => ({ primaryKey: p.primaryKey, actionHookPayload: p.actionHookPayload }),
+				),
+			};
 		});
 
-		// A filter hook cancelled the creation: nothing was inserted, so skip the action hooks entirely.
-		if (primaryKey === null) {
-			return null;
-		}
-
 		if (opts.emitEvents !== false) {
-			const actionEvent = {
-				event:
-					this.eventScope === 'items'
-						? ['items.create', `${this.collection}.items.create`]
-						: `${this.eventScope}.create`,
+			const eventName =
+				this.eventScope === 'items' ? ['items.create', `${this.collection}.items.create`] : `${this.eventScope}.create`;
+
+			const actionEvents: ActionEventParams[] = actionPayloads.map(({ primaryKey, actionHookPayload }) => ({
+				event: eventName,
 				meta: {
 					payload: actionHookPayload,
 					key: primaryKey,
@@ -461,99 +579,18 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					schema: this.schema,
 					accountability: this.accountability,
 				},
-			};
+			}));
 
-			await emitActionEvents([actionEvent, ...nestedActionEvents], opts);
+			// Route through emitActionEvents so the create path honours `awaitActionHooks` (#58) and
+			// `bypassEmitAction` (nested mutations), instead of an un-awaited raw emit.
+			await emitActionEvents([...actionEvents, ...nestedActionEvents], opts);
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			await this.cache.clear();
 		}
 
-		return primaryKey;
-	}
-
-	/**
-	 * Create multiple new items at once. Inserts all provided records sequentially wrapped in a transaction.
-	 *
-	 * Uses `this.createOne` under the hood.
-	 */
-	async createMany(
-		data: Partial<Item>[],
-		opts: MutationOptions & { allowFilterCancel: true },
-	): Promise<(PrimaryKey | null)[]>;
-
-	async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]>;
-	async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<(PrimaryKey | null)[]> {
-		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
-
-		if (this.collection === 'directus_users') {
-			opts.userIntegrityCheckFlags =
-				(opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None) | UserIntegrityCheckFlag.UserLimits;
-		}
-
-		const { primaryKeys, nestedActionEvents } = await transaction(this.knex, async (knex) => {
-			const previousSeatCount = await captureSeatCount(knex, opts.userIntegrityCheckFlags);
-
-			const service = this.fork({ knex });
-
-			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
-
-			const primaryKeys: (PrimaryKey | null)[] = [];
-			const nestedActionEvents: ActionEventParams[] = [];
-
-			const pkField = this.schema.collections[this.collection]!.primary;
-
-			for (const [index, payload] of data.entries()) {
-				let bypassAutoIncrementSequenceReset = true;
-
-				// the auto_increment sequence needs to be reset if the current item contains a manual PK and
-				// if it's the last item of the batch or if the next item doesn't include a PK and hence one needs to be generated
-				if (payload[pkField] && (index === data.length - 1 || !data[index + 1]?.[pkField])) {
-					bypassAutoIncrementSequenceReset = false;
-				}
-
-				// `allowFilterCancel` is propagated via `opts`; the overload resolves to the non-null
-				// signature, but a cancelling filter can still return null at runtime — hence the guard.
-				const primaryKey: PrimaryKey | null = await service.createOne(payload, {
-					...(opts || {}),
-					autoPurgeCache: false,
-					onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-					bypassEmitAction: (params) => nestedActionEvents.push(params),
-					mutationTracker: opts.mutationTracker,
-					overwriteDefaults: opts.overwriteDefaults?.[index],
-					bypassAutoIncrementSequenceReset,
-				});
-
-				// A filter hook may cancel an individual create by returning null; the null is kept in
-				// place so the result stays index-aligned with the input (mirrors createOne).
-				primaryKeys.push(primaryKey);
-			}
-
-			if (userIntegrityCheckFlags) {
-				if (opts.onRequireUserIntegrityCheck) {
-					opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-				} else {
-					await validateUserCountIntegrity({
-						flags: userIntegrityCheckFlags,
-						knex,
-						previousSeatCount,
-					});
-				}
-			}
-
-			return { primaryKeys, nestedActionEvents };
-		});
-
-		if (opts.emitEvents !== false) {
-			await emitActionEvents(nestedActionEvents, opts);
-		}
-
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
-		}
-
-		return primaryKeys;
+		return results;
 	}
 
 	/**
@@ -564,7 +601,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			return (await handleVersion(this, opts?.key ?? null, query, opts)) as Item[];
 		}
 
-		const updatedQuery =
+		let updatedQuery =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
 						this.eventScope === 'items'
@@ -581,6 +618,43 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						},
 					)
 				: query;
+
+		// Default to ORDER BY <primary key> ASC for integer / bigInteger PKs when no
+		// explicit sort was requested.
+		//
+		// - Why this restores ordering broken by batch insert:
+		//   - Auto-increment integer PKs encode insertion order.
+		//   - Batch insert collapses N transactions into one, so all rows share
+		//     `date_created` (NOW() per transaction).
+		//   - That breaks consumers that relied on `date_created` as a stable tiebreaker.
+		//
+		// - Excluded cases (deliberately not defaulted):
+		//   - UUID / string PKs — sorting by a random UUID or user-supplied string is
+		//     deterministic but not semantically meaningful; changing the default for
+		//     those collections would be a surprise with no payoff.
+		//   - Queries using `group` or `aggregate` — `ORDER BY` a column not in the
+		//     `GROUP BY` / aggregate list is a SQL error on every dialect.
+		//   - Callers can still pass an explicit `sort` for any pkType.
+		//
+		// - Escape hatch: disable via `DB_DEFAULT_ORDER_READS_BY_PK=false` (e.g. while
+		//   migrating existing queries to pass their own sort).
+		//
+		// - Implementation note: `updatedQuery` returned by emitFilter is frozen /
+		//   non-extensible, so we replace the reference with a spread instead of
+		//   mutating in place.
+		if (
+			env['DB_DEFAULT_ORDER_READS_BY_PK'] &&
+			!updatedQuery.sort?.length &&
+			!updatedQuery.group?.length &&
+			!updatedQuery.aggregate
+		) {
+			const primaryKeyField = this.schema.collections[this.collection]!.primary;
+			const pkFieldType = this.schema.collections[this.collection]!.fields[primaryKeyField]?.type;
+
+			if (pkFieldType === 'integer' || pkFieldType === 'bigInteger') {
+				updatedQuery = { ...updatedQuery, sort: [primaryKeyField] };
+			}
+		}
 
 		let ast = await getAstFromQuery(
 			{

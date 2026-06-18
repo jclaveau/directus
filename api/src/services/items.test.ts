@@ -341,6 +341,17 @@ describe('Integration Tests', () => {
 		});
 
 		describe('createMany', () => {
+			const batchSchema = new SchemaBuilder()
+				.collection('test', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			function batchService() {
+				return new ItemsService('test', { knex: db, schema: batchSchema });
+			}
+
 			it('should validate user count if requested', async () => {
 				await service.createMany([{}], { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
@@ -355,6 +366,77 @@ describe('Integration Tests', () => {
 				expect(result).toEqual([null, null]);
 
 				filterSpy.mockRestore();
+			});
+
+			it('uses a single batchInsert and maps the returned keys positionally when the dialect preserves RETURNING order', async () => {
+				// postgres preserves insert order in RETURNING -> the batch path is taken for >1 row
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }, { id: 20 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => callback({ ...db, batchInsert } as any));
+
+				const result = await batchService().createMany([{ name: 'a' }, { name: 'b' }]);
+
+				expect(batchInsert).toHaveBeenCalledTimes(1);
+				expect(batchInsert.mock.calls[0]![1]).toEqual([{ name: 'a' }, { name: 'b' }]);
+				expect(result).toEqual([10, 20]);
+
+				transactionSpy.mockRestore();
+			});
+
+			it('falls back to a per-row insert loop when the dialect does not preserve RETURNING order', async () => {
+				// mysql has no order-preserving RETURNING -> each row is inserted individually
+				vi.mocked(getDatabaseClient).mockReturnValue('mysql');
+
+				const returning = vi
+					.fn()
+					.mockResolvedValueOnce([{ id: 1 }])
+					.mockResolvedValueOnce([{ id: 2 }]);
+
+				const into = vi.fn().mockReturnValue({ returning });
+				const insert = vi.fn().mockReturnValue({ into });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => callback({ ...db, insert } as any));
+
+				const result = await batchService().createMany([{ name: 'a' }, { name: 'b' }]);
+
+				expect(insert).toHaveBeenCalledTimes(2);
+				expect(result).toEqual([1, 2]);
+
+				transactionSpy.mockRestore();
+			});
+
+			it('returns an empty array without opening a transaction for an empty input', async () => {
+				const transactionSpy = vi.spyOn(db, 'transaction');
+
+				const result = await batchService().createMany([]);
+
+				expect(result).toEqual([]);
+				expect(transactionSpy).not.toHaveBeenCalled();
+
+				transactionSpy.mockRestore();
+			});
+
+			it('throws when batchInsert returns fewer rows than prepared (positional mapping would be wrong)', async () => {
+				vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+				// two rows in, only one key back -> the positional row->key mapping is unsafe
+				const batchReturning = vi.fn().mockResolvedValue([{ id: 10 }]);
+				const batchInsert = vi.fn().mockReturnValue({ returning: batchReturning });
+
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => callback({ ...db, batchInsert } as any));
+
+				await expect(batchService().createMany([{ name: 'a' }, { name: 'b' }])).rejects.toThrow(/expected 2/);
+
+				transactionSpy.mockRestore();
 			});
 		});
 

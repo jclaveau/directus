@@ -2,6 +2,7 @@ import { PassThrough, Readable } from 'node:stream';
 import { useEnv } from '@directus/env';
 import { ForbiddenError, InternalServerError, InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
 import { Driver, StorageManager } from '@directus/storage';
+import type { PrimaryKey } from '@directus/types';
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, test, vi } from 'vitest';
 import { getAxios } from '../request/index.js';
 import { getStorage } from '../storage/index.js';
@@ -66,6 +67,11 @@ describe('Service / Files', () => {
 				knex: db,
 				schema: { collections: {}, relations: [] },
 			});
+
+			vi.mocked(ItemsService.prototype.createOne).mockImplementation(async function (this: ItemsService, data, opts) {
+				const [pk] = await this.createMany([data], opts ?? {});
+				return pk as PrimaryKey;
+			});
 		});
 
 		test('throws InvalidPayloadError when "type" is not provided', async () => {
@@ -80,7 +86,7 @@ describe('Service / Files', () => {
 				expect(err.message).toBe('Invalid payload. "type" is required.');
 			}
 
-			expect(ItemsService.prototype.createOne).not.toHaveBeenCalled();
+			expect(ItemsService.prototype.createMany).not.toHaveBeenCalled();
 		});
 
 		test('should throw ForbiddenError deferred when filename_disk is not unique', async () => {
@@ -93,11 +99,13 @@ describe('Service / Files', () => {
 				filename_disk: 'existing-file.jpg',
 			});
 
-			expect(ItemsService.prototype.createOne).toHaveBeenCalledWith(
-				{
-					type: 'application/octet-stream',
-					filename_disk: 'existing-file.jpg',
-				},
+			expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+				[
+					{
+						type: 'application/octet-stream',
+						filename_disk: 'existing-file.jpg',
+					},
+				],
 				expect.objectContaining({ preMutationError: expect.any(ForbiddenError) }),
 			);
 		});
@@ -110,7 +118,7 @@ describe('Service / Files', () => {
 				type: 'application/octet-stream',
 			});
 
-			expect(ItemsService.prototype.createOne).toHaveBeenCalled();
+			expect(ItemsService.prototype.createMany).toHaveBeenCalled();
 		});
 
 		test('should normalize filename_disk path', async () => {
@@ -121,8 +129,153 @@ describe('Service / Files', () => {
 				filename_disk: '/folder/../new-file.jpg',
 			});
 
-			expect(ItemsService.prototype.createOne).toHaveBeenCalledWith(
-				{ filename_disk: 'new-file.jpg', type: 'application/octet-stream' },
+			expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+				[{ filename_disk: 'new-file.jpg', type: 'application/octet-stream' }],
+				{},
+			);
+		});
+	});
+
+	describe('createMany', () => {
+		let service: FilesService;
+
+		beforeEach(() => {
+			service = new FilesService({
+				knex: db,
+				schema: { collections: {}, relations: [] },
+			});
+		});
+
+		test('throws InvalidPayloadError when "type" is not provided', async () => {
+			try {
+				await service.createMany([
+					{
+						title: 'Test File',
+						storage: 'local',
+						filename_download: 'test_file',
+					},
+				]);
+			} catch (err: any) {
+				expect(err).toBeInstanceOf(InvalidPayloadError);
+				expect(err.message).toBe('Invalid payload. "type" is required.');
+			}
+
+			expect(ItemsService.prototype.createMany).not.toHaveBeenCalled();
+		});
+
+		test('should throw ForbiddenError deferred when filename_disk is not unique', async () => {
+			tracker.on
+				.select('select "filename_disk" from "directus_files" where "filename_disk" = ?')
+				.response([{ filename_disk: 'existing-file.jpg' }]);
+
+			await service.createMany([
+				{
+					type: 'application/octet-stream',
+					filename_disk: 'existing-file.jpg',
+				},
+			]);
+
+			expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+				[
+					{
+						type: 'application/octet-stream',
+						filename_disk: 'existing-file.jpg',
+					},
+				],
+				expect.objectContaining({ preMutationError: expect.any(ForbiddenError) }),
+			);
+		});
+
+		test('creates a file entry when "type" is provided', async () => {
+			await service.createMany([
+				{
+					title: 'Test File',
+					storage: 'local',
+					filename_download: 'test_file',
+					type: 'application/octet-stream',
+				},
+			]);
+
+			expect(ItemsService.prototype.createMany).toHaveBeenCalled();
+		});
+
+		test('should normalize filename_disk path', async () => {
+			tracker.on.select('select "filename_disk" from "directus_files" where "filename_disk" = ?').response([]);
+
+			await service.createMany([
+				{
+					type: 'application/octet-stream',
+					filename_disk: '/folder/../new-file.jpg',
+				},
+			]);
+
+			expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+				[{ filename_disk: 'new-file.jpg', type: 'application/octet-stream' }],
+				{},
+			);
+		});
+
+		test('throws InvalidPayloadError when any file in a multi-file payload is missing "type"', async () => {
+			try {
+				await service.createMany([
+					{ type: 'application/octet-stream', filename_download: 'good.txt' },
+					{ storage: 'local', filename_download: 'no-type.txt' },
+				]);
+			} catch (err: any) {
+				expect(err).toBeInstanceOf(InvalidPayloadError);
+				expect(err.message).toBe('Invalid payload. "type" is required.');
+			}
+
+			expect(ItemsService.prototype.createMany).not.toHaveBeenCalled();
+		});
+
+		test('should throw ForbiddenError deferred when any filename_disk in a multi-file payload is not unique', async () => {
+			tracker.on
+				.select('select "filename_disk" from "directus_files" where "filename_disk" = ?')
+				.response([{ filename_disk: 'existing-file.jpg' }]);
+
+			await service.createMany([
+				{ type: 'application/octet-stream', filename_disk: 'first-file.jpg' },
+				{ type: 'application/octet-stream', filename_disk: 'second-file.jpg' },
+			]);
+
+			expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+				[
+					{ type: 'application/octet-stream', filename_disk: 'first-file.jpg' },
+					{ type: 'application/octet-stream', filename_disk: 'second-file.jpg' },
+				],
+				expect.objectContaining({ preMutationError: expect.any(ForbiddenError) }),
+			);
+		});
+
+		test('creates multiple file entries when all "type" fields are provided', async () => {
+			await service.createMany([
+				{ type: 'application/octet-stream', filename_download: 'first.txt' },
+				{ type: 'image/jpeg', filename_download: 'second.jpg' },
+			]);
+
+			expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+				[
+					{ type: 'application/octet-stream', filename_download: 'first.txt' },
+					{ type: 'image/jpeg', filename_download: 'second.jpg' },
+				],
+				{},
+			);
+		});
+
+		test('should normalize each filename_disk path in a multi-file payload', async () => {
+			tracker.on.select('select "filename_disk" from "directus_files" where "filename_disk" = ?').response([]);
+
+			await service.createMany([
+				{ type: 'application/octet-stream', filename_disk: '/folder/../first.jpg' },
+				{ type: 'application/octet-stream', filename_disk: '/other/../second.jpg' },
+			]);
+
+			expect(ItemsService.prototype.createMany).toHaveBeenCalledWith(
+				[
+					{ type: 'application/octet-stream', filename_disk: 'first.jpg' },
+					{ type: 'application/octet-stream', filename_disk: 'second.jpg' },
+				],
 				{},
 			);
 		});
