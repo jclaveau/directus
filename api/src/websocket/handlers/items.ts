@@ -1,3 +1,4 @@
+import type { PrimaryKey } from '@directus/types';
 import emitter from '../../emitter.js';
 import { ItemsService, MetaService } from '../../services/index.js';
 import { getSchema } from '../../utils/get-schema.js';
@@ -49,11 +50,16 @@ export class ItemsHandler {
 			const query = await sanitizeQuery(message?.query ?? {}, schema, accountability);
 
 			if (Array.isArray(message.data)) {
-				const keys = await service.createMany(message.data);
-				result = await service.readMany(keys, query);
+				const keys = await service.createMany(message.data, { allowFilterCancel: true });
+
+				result = await service.readMany(
+					keys.filter((key): key is PrimaryKey => key !== null),
+					query,
+				);
 			} else {
-				const key = await service.createOne(message.data);
-				result = await service.readOne(key, query);
+				const key = await service.createOne(message.data, { allowFilterCancel: true });
+				// A filter hook may cancel the create (null key); there is then no item to read back.
+				result = key !== null ? await service.readOne(key, query) : null;
 			}
 		}
 
@@ -77,12 +83,16 @@ export class ItemsHandler {
 			const query = await sanitizeQuery(message.query ?? {}, schema, accountability);
 
 			if (message.id) {
-				const key = await service.updateOne(message.id, message.data);
+				const key = await service.updateOne(message.id, message.data, { allowFilterCancel: true });
 				result = await service.readOne(key);
 			} else if (message.ids) {
-				const keys = await service.updateMany(message.ids, message.data);
+				const keys = await service.updateMany(message.ids, message.data, { allowFilterCancel: true });
 				meta = await metaService.getMetaForQuery(message.collection, query);
-				result = await service.readMany(keys, query);
+
+				result = await service.readMany(
+					keys.filter((key): key is PrimaryKey => key !== null),
+					query,
+				);
 			} else if (isSingleton) {
 				await service.upsertSingleton(message.data);
 				result = await service.readSingleton(query);
@@ -91,7 +101,7 @@ export class ItemsHandler {
 				meta = await metaService.getMetaForQuery(message.collection, query);
 				result = await service.readMany(keys, query);
 			} else {
-				const keys = await service.updateByQuery(query, message.data);
+				const keys = await service.updateByQuery(query, message.data, { allowFilterCancel: true });
 				meta = await metaService.getMetaForQuery(message.collection, query);
 				result = await service.readMany(keys, query);
 			}
@@ -99,14 +109,14 @@ export class ItemsHandler {
 
 		if (message.action === 'delete') {
 			if (message.id) {
-				await service.deleteOne(message.id);
+				await service.deleteOne(message.id, { allowFilterCancel: true });
 				result = message.id;
 			} else if (message.ids) {
-				await service.deleteMany(message.ids);
+				await service.deleteMany(message.ids, { allowFilterCancel: true });
 				result = message.ids;
 			} else if (message.query) {
 				const query = await sanitizeQuery(message.query, schema, accountability);
-				result = await service.deleteByQuery(query);
+				result = await service.deleteByQuery(query, { allowFilterCancel: true });
 			} else {
 				throw new WebSocketError(
 					'items',
