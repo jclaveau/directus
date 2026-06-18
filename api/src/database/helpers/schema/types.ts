@@ -18,6 +18,12 @@ export type SortRecord = {
 	column: Knex.Raw;
 };
 
+export type InvalidCollationColumn = {
+	table_name: string;
+	name: string;
+	collation: string;
+};
+
 export abstract class SchemaHelper extends DatabaseHelper {
 	isOneOfClients(clients: DatabaseClient[]): boolean {
 		return clients.includes(getDatabaseClient(this.knex));
@@ -209,5 +215,16 @@ export abstract class SchemaHelper extends DatabaseHelper {
 		const indexName = this.generateIndexName('index', collection, field);
 
 		await knex.raw('DROP INDEX IF EXISTS ??', [indexName]);
+	}
+
+	async getColumnsWithInvalidCollation(schema: string, collation: string): Promise<InvalidCollationColumn[]> {
+		return this.knex('information_schema.columns')
+			.select<InvalidCollationColumn[]>({
+				table_name: 'TABLE_NAME',
+				name: 'COLUMN_NAME',
+				collation: 'COLLATION_NAME',
+			})
+			.where({ TABLE_SCHEMA: schema })
+			.whereNot({ COLLATION_NAME: collation });
 	}
 }
