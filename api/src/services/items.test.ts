@@ -75,10 +75,24 @@ describe('Integration Tests', () => {
 		});
 
 		describe('updateMany', () => {
-			it('should validate user count if requested', async () => {
-				await service.updateMany([1], {}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+			it('should validate user count for a non-empty payload', async () => {
+				await service.updateMany([1], { name: 'test' }, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
+			});
+
+			it('should skip and not validate user count when the payload is empty', async () => {
+				const keys = await service.updateMany([1], {}, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+
+				expect(keys).toEqual([]);
+				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+			});
+
+			it('should skip when the payload only contains the primary key', async () => {
+				const keys = await service.updateMany([1], { id: 1 }, { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+
+				expect(keys).toEqual([]);
+				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
 			});
 		});
 
