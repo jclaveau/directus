@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { ForbiddenError } from '@directus/errors';
 import knex, { type Knex } from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -91,5 +92,18 @@ describe('ServerService', () => {
 		expect(info['mcp_oauth_enabled']).toBe(true);
 		expect(info['mcp_oauth_dcr_enabled']).toBe(false);
 		expect(info['mcp_oauth_cimd_enabled']).toBe(true);
+	});
+
+	test('health throws a ForbiddenError with a reason for unauthenticated users', async () => {
+		const service = new ServerService({
+			knex: db,
+			schema: {} as any,
+			accountability: { role: null, user: null } as any,
+		});
+
+		const error = await service.health().catch((err) => err);
+
+		expect(error).toBeInstanceOf(ForbiddenError);
+		expect(error.message).toBe('Authentication is required to read server health.');
 	});
 });

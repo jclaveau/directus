@@ -1,3 +1,4 @@
+import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, Item, PayloadAction } from '@directus/types';
 import type { Knex } from 'knex';
@@ -912,6 +913,32 @@ describe('Integration Tests', () => {
 				await service.processAggregates(payload, { min: ['secret', 'name'] });
 
 				expect(payload[0]!['min']).toMatchObject({ secret: REDACT_STR, name: 'Alice' });
+			});
+		});
+
+		describe('processO2M', () => {
+			const schema = new SchemaBuilder()
+				.collection('countries', (c) => {
+					c.field('id').id();
+					c.field('cities').o2m('cities', 'country_id');
+				})
+				.collection('cities', (c) => {
+					c.field('id').id();
+				})
+				.build();
+
+			test('throws a ForbiddenError with a reason when an O2M related record cannot be found', async () => {
+				const service = new PayloadService('countries', { knex: db, schema });
+
+				tracker.on.select('cities').response([]);
+
+				const error = await service.processO2M({ cities: [42] }, 1).catch((err) => err);
+
+				expect(error).toBeInstanceOf(ForbiddenError);
+
+				expect(error.message).toBe(
+					`Could not find a 'cities' record having the primary key 42 while processing O2M relation`,
+				);
 			});
 		});
 	});

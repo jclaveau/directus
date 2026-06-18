@@ -195,7 +195,7 @@ export class ServerService {
 
 	async health(): Promise<ServerHealth | Pick<ServerHealth, 'status'>> {
 		if (isUnauthenticated(this.accountability)) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({ reason: 'Authentication is required to read server health.' });
 		}
 
 		const healthResult = await store(async (store) => {

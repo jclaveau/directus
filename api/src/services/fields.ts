@@ -261,7 +261,9 @@ export class FieldsService {
 			});
 
 			if (collection && collection in allowedFieldsInCollection === false) {
-				throw new ForbiddenError();
+				throw new ForbiddenError({
+					reason: `'${this.accountability.user}' does not have permission to read fields from '${collection}'.`,
+				});
 			}
 
 			result = result.filter((field) => {
@@ -313,7 +315,9 @@ export class FieldsService {
 			}
 
 			if (!hasAccess) {
-				throw new ForbiddenError();
+				throw new ForbiddenError({
+					reason: `'${this.accountability.user}' does not have permission to read '${collection}.${field}'`,
+				});
 			}
 		}
 
@@ -334,7 +338,12 @@ export class FieldsService {
 			// Do nothing
 		}
 
-		if (!column && !fieldInfo) throw new ForbiddenError();
+		if (!column && !fieldInfo) {
+			// 404 / InvalidPayload / CorruptedSchema?
+			throw new ForbiddenError({
+				reason: `Can't retrieve the schema info for the column '${field}' of '${collection}'`,
+			});
+		}
 
 		const type = getLocalType(column, fieldInfo);
 
@@ -363,7 +372,9 @@ export class FieldsService {
 		opts?: FieldMutationOptions,
 	): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have the permission to create the field '${field}' in '${collection}'`,
+			});
 		}
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
@@ -502,7 +513,9 @@ export class FieldsService {
 
 	async updateField(collection: string, field: RawField, opts?: FieldMutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have the permission to update the field '${field}' in '${collection}'`,
+			});
 		}
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
@@ -707,7 +720,9 @@ export class FieldsService {
 
 	async deleteField(collection: string, field: string, opts?: MutationOptions): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have the permission to delete the field '${field}' in '${collection}'`,
+			});
 		}
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();

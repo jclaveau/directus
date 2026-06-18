@@ -736,6 +736,10 @@ describe('ImportService', () => {
 			const stream = Readable.from(['test']);
 
 			await expect(importService.import('directus_users', 'text/csv', stream)).rejects.toThrow(ForbiddenError);
+
+			await expect(importService.import('directus_users', 'text/csv', stream)).rejects.toThrowError(
+				`'null' can't import to 'directus_users' as not being an admin`,
+			);
 		});
 
 		test('validates create and update permissions', async () => {

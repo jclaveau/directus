@@ -64,7 +64,9 @@ export class CollectionsService {
 	 */
 	async createOne(payload: RawCollection, opts?: FieldMutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' can't create the collection '${payload.collection}' as it's not an admin`,
+			});
 		}
 
 		if (!('collection' in payload)) throw new InvalidPayloadError({ reason: `"collection" is required` });
@@ -414,7 +416,11 @@ export class CollectionsService {
 	async readOne(collectionKey: string): Promise<Collection> {
 		const result = await this.readMany([collectionKey]);
 
-		if (result.length === 0) throw new ForbiddenError();
+		if (result.length === 0) {
+			throw new ForbiddenError({
+				reason: `Collection '${collectionKey}' not found`, // 404 ?
+			});
+		}
 
 		return result[0]!;
 	}
@@ -451,7 +457,9 @@ export class CollectionsService {
 	 */
 	async updateOne(collectionKey: string, payload: DeepPartial<Collection>, opts?: MutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have permission to update collections`,
+			});
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];
@@ -521,7 +529,9 @@ export class CollectionsService {
 	 */
 	async updateBatch(data: DeepPartial<Collection>[], opts?: MutationOptions): Promise<string[]> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have permission to update collections`,
+			});
 		}
 
 		if (!Array.isArray(data)) {
@@ -583,7 +593,9 @@ export class CollectionsService {
 	 */
 	async updateMany(collectionKeys: string[], data: DeepPartial<Collection>, opts?: MutationOptions): Promise<string[]> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have permission to update collections`,
+			});
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];
@@ -633,7 +645,9 @@ export class CollectionsService {
 	 */
 	async deleteOne(collectionKey: string, opts?: MutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have permission to delete collections`,
+			});
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];
@@ -644,7 +658,9 @@ export class CollectionsService {
 			const collectionToBeDeleted = collections.find((collection) => collection.collection === collectionKey);
 
 			if (!!collectionToBeDeleted === false) {
-				throw new ForbiddenError();
+				throw new ForbiddenError({
+					reason: `Collection to delete '${collectionKey}' does not exist`, // 404 ?
+				});
 			}
 
 			await transaction(this.knex, async (trx) => {
@@ -817,7 +833,9 @@ export class CollectionsService {
 	 */
 	async deleteMany(collectionKeys: string[], opts?: MutationOptions): Promise<string[]> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' can't delete many collections`,
+			});
 		}
 
 		const nestedActionEvents: ActionEventParams[] = [];

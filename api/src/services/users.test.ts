@@ -467,6 +467,30 @@ describe('Integration Tests', () => {
 
 				expect(mailService.send).toHaveBeenCalledTimes(1);
 			});
+
+			it('should throw a ForbiddenError with a reason for inactive users', async () => {
+				tracker.on.select('directus_users').response({
+					id: 'user-id-inactive',
+					role: 'role-id',
+					status: 'suspended',
+					password: 'hashed',
+					email: 'inactive@example.com',
+					provider: 'default',
+				});
+
+				const mailService = new MailService({ schema });
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.requestPasswordReset('inactive@example.com', null).catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Inactive user');
+				expect(mailService.send).not.toHaveBeenCalled();
+			});
 		});
 
 		describe('invite', () => {
@@ -592,7 +616,10 @@ describe('Integration Tests', () => {
 					schema,
 				});
 
-				await expect(service.acceptInvite('fake-token', 'Password123!')).rejects.toThrow(ForbiddenError);
+				const err = await service.acceptInvite('fake-token', 'Password123!').catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Not an invite token');
 			});
 		});
 
@@ -633,6 +660,39 @@ describe('Integration Tests', () => {
 				expect(signSpy.mock.calls[0]![1]).not.toBe('');
 				expect(mailService.send).toHaveBeenCalledTimes(1);
 			});
+
+			it('should throw a ForbiddenError with a reason when public registration is disabled', async () => {
+				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce({
+					public_registration: false,
+				});
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.registerUser({ email: 'test@example.com', password: 'Password123!' }).catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Public registration is disabled');
+			});
+
+			it('should throw a ForbiddenError with a reason when the email is rejected by the email filter', async () => {
+				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce({
+					public_registration: true,
+					public_registration_email_filter: { email: { _ends_with: '@allowed.com' } },
+				});
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.registerUser({ email: 'test@example.com', password: 'Password123!' }).catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Invalid payload');
+			});
 		});
 
 		describe('verifyRegistration', () => {
@@ -655,6 +715,100 @@ describe('Integration Tests', () => {
 				expect(verifyJWT).toHaveBeenCalledWith('fake-token', expect.any(String));
 				expect(vi.mocked(verifyJWT).mock.calls[0]![1]).not.toBe('');
 				expect(superUpdateOneSpy).toHaveBeenCalledWith('user-id-18', { status: 'active' });
+			});
+
+			it('should throw a ForbiddenError with a reason for non-pending-registration scope tokens', async () => {
+				vi.mocked(verifyJWT).mockReturnValueOnce({ email: 'test@example.com', scope: 'invite' });
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.verifyRegistration('fake-token').catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Not a pending registration token');
+			});
+		});
+
+		describe('resetPassword', () => {
+			it('should throw a ForbiddenError with a reason for non-password-reset scope tokens', async () => {
+				vi.mocked(verifyJWT).mockReturnValueOnce({ email: 'test@example.com', scope: 'invite', hash: 'some-hash' });
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.resetPassword('fake-token', 'Password123!').catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Not a password reset token');
+			});
+
+			it('should throw a ForbiddenError with a reason when the token has no hash', async () => {
+				vi.mocked(verifyJWT).mockReturnValueOnce({ email: 'test@example.com', scope: 'password-reset', hash: '' });
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.resetPassword('fake-token', 'Password123!').catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Not a password reset token');
+			});
+
+			it('should throw a ForbiddenError with the "Inactive user" reason for inactive users', async () => {
+				vi.mocked(verifyJWT).mockReturnValueOnce({
+					email: 'test@example.com',
+					scope: 'password-reset',
+					hash: 'some-hash',
+				});
+
+				mockGetUserByEmail({
+					id: 'user-id-reset',
+					status: 'suspended',
+					password: 'hashed',
+					email: 'test@example.com',
+				});
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.resetPassword('fake-token', 'Password123!').catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Inactive user');
+			});
+
+			it('should throw a ForbiddenError with the "Bad user credentials" reason on a hash mismatch', async () => {
+				vi.mocked(verifyJWT).mockReturnValueOnce({
+					email: 'test@example.com',
+					scope: 'password-reset',
+					hash: 'mismatching-hash',
+				});
+
+				mockGetUserByEmail({
+					id: 'user-id-reset',
+					status: 'active',
+					password: 'hashed',
+					email: 'test@example.com',
+				});
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+				});
+
+				const err = await service.resetPassword('fake-token', 'Password123!').catch((e) => e);
+
+				expect(err).toBeInstanceOf(ForbiddenError);
+				expect(err.message).toBe('Bad user credentials');
 			});
 		});
 	});
