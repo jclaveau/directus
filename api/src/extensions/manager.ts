@@ -823,7 +823,7 @@ export class ExtensionManager {
 		const unregisterFunctions: PromiseCallback[] = [];
 
 		const hookRegistrationContext = {
-			filter: <T = unknown>(event: string, handler: FilterHandler<T>) => {
+			filter: <TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>) => {
 				emitter.onFilter(event, handler);
 
 				unregisterFunctions.push(() => {
