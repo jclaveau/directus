@@ -63,16 +63,24 @@ export class Emitter {
 		return updatedPayload;
 	}
 
-	public emitAction(event: string | string[], meta: Record<string, any>, context: EventContext | null = null): void {
+	public async emitAction(
+		event: string | string[],
+		meta: Record<string, any>,
+		context: EventContext | null = null,
+	): Promise<void> {
 		const logger = useLogger();
 		const events = Array.isArray(event) ? event : [event];
 
-		for (const event of events) {
-			this.actionEmitter.emitAsync(event, { event, ...meta }, context ?? this.getDefaultContext()).catch((err) => {
-				logger.warn(`An error was thrown while executing action "${event}"`);
-				logger.warn(err);
-			});
-		}
+		// Run every event's listeners in parallel and await them together, so a slow
+		// handler on one event doesn't serialize behind the others.
+		await Promise.all(
+			events.map((event) =>
+				this.actionEmitter.emitAsync(event, { event, ...meta }, context ?? this.getDefaultContext()).catch((err) => {
+					logger.warn(`An error was thrown while executing action "${event}"`);
+					logger.warn(err);
+				}),
+			),
+		);
 	}
 
 	public async emitInit(event: string, meta: Record<string, any>): Promise<void> {
