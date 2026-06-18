@@ -37,9 +37,9 @@ describe('Integration Tests', () => {
 	});
 
 	describe('Services / Files', () => {
-		describe('createOne', () => {
+		describe('createMany', () => {
 			let service: FilesService;
-			let superCreateOne: MockInstance;
+			let superCreateMany: MockInstance;
 
 			beforeEach(() => {
 				service = new FilesService({
@@ -47,33 +47,60 @@ describe('Integration Tests', () => {
 					schema: { collections: {}, relations: [] },
 				});
 
-				superCreateOne = vi.spyOn(ItemsService.prototype, 'createOne').mockReturnValue(Promise.resolve(1));
+				superCreateMany = vi.spyOn(ItemsService.prototype, 'createMany').mockReturnValue(Promise.resolve([1]));
 			});
 
 			it('throws InvalidPayloadError when "type" is not provided', async () => {
 				try {
-					await service.createOne({
-						title: 'Test File',
-						storage: 'local',
-						filename_download: 'test_file',
-					});
+					await service.createMany([
+						{
+							title: 'Test File',
+							storage: 'local',
+							filename_download: 'test_file',
+						},
+					]);
 				} catch (err: any) {
 					expect(err).toBeInstanceOf(InvalidPayloadError);
 					expect(err.message).toBe('Invalid payload. "type" is required.');
 				}
 
-				expect(superCreateOne).not.toHaveBeenCalled();
+				expect(superCreateMany).not.toHaveBeenCalled();
 			});
 
 			it('creates a file entry when "type" is provided', async () => {
-				await service.createOne({
-					title: 'Test File',
-					storage: 'local',
-					filename_download: 'test_file',
-					type: 'application/octet-stream',
-				});
+				await service.createMany([
+					{
+						title: 'Test File',
+						storage: 'local',
+						filename_download: 'test_file',
+						type: 'application/octet-stream',
+					},
+				]);
 
-				expect(superCreateOne).toHaveBeenCalled();
+				expect(superCreateMany).toHaveBeenCalled();
+			});
+
+			it('throws InvalidPayloadError when any file in a multi-file payload is missing "type"', async () => {
+				try {
+					await service.createMany([
+						{ type: 'application/octet-stream', filename_download: 'good.txt' },
+						{ storage: 'local', filename_download: 'no-type.txt' },
+					]);
+				} catch (err: any) {
+					expect(err).toBeInstanceOf(InvalidPayloadError);
+					expect(err.message).toBe('Invalid payload. "type" is required.');
+				}
+
+				expect(superCreateMany).not.toHaveBeenCalled();
+			});
+
+			it('creates multiple file entries when all "type" fields are provided', async () => {
+				await service.createMany([
+					{ type: 'application/octet-stream', filename_download: 'first.txt' },
+					{ type: 'image/jpeg', filename_download: 'second.jpg' },
+				]);
+
+				expect(superCreateMany).toHaveBeenCalled();
 			});
 		});
 

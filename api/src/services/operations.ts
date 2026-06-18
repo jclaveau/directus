@@ -7,8 +7,8 @@ export class OperationsService extends ItemsService<OperationRaw> {
 		super('directus_operations', options);
 	}
 
-	override async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
-		const result = await super.createOne(data, opts);
+	override async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
+		const result = await super.createMany(data, opts);
 
 		const flowManager = getFlowManager();
 		await flowManager.reload();

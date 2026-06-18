@@ -26,117 +26,122 @@ export class CommentsService extends ItemsService {
 		this.usersService = new UsersService({ schema: this.schema });
 	}
 
-	override async createOne(data: Partial<Comment>, opts?: MutationOptions): Promise<PrimaryKey> {
+	override async createMany(data: Partial<Comment>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
 		if (!this.accountability?.user) throw new ForbiddenError();
 
-		if (!data['comment']) {
-			throw new InvalidPayloadError({ reason: `"comment" is required` });
-		}
+		for (const item of data) {
+			if (!item['comment']) {
+				throw new InvalidPayloadError({ reason: `"comment" is required` });
+			}
 
-		if (!data['collection']) {
-			throw new InvalidPayloadError({ reason: `"collection" is required` });
-		}
+			if (!item['collection']) {
+				throw new InvalidPayloadError({ reason: `"collection" is required` });
+			}
 
-		if (!data['item']) {
-			throw new InvalidPayloadError({ reason: `"item" is required` });
-		}
+			if (!item['item']) {
+				throw new InvalidPayloadError({ reason: `"item" is required` });
+			}
 
-		if (this.accountability) {
-			await validateAccess(
-				{
-					accountability: this.accountability,
-					action: 'read',
-					collection: data['collection'],
-					primaryKeys: [data['item']],
-				},
-				{
-					schema: this.schema,
-					knex: this.knex,
-				},
-			);
-		}
-
-		const result = await super.createOne(data, opts);
-
-		const usersRegExp = new RegExp(/@[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}/gi);
-
-		const mentions = uniq(data['comment'].match(usersRegExp) ?? []);
-
-		if (mentions.length === 0) {
-			return result;
-		}
-
-		const sender = await this.usersService.readOne(this.accountability.user, {
-			fields: ['id', 'first_name', 'last_name', 'email'],
-		});
-
-		for (const mention of mentions) {
-			const userID = mention.substring(1);
-
-			const user = await this.usersService.readOne(userID, {
-				fields: ['id', 'first_name', 'last_name', 'email', 'role.id'],
-			});
-
-			const accountability: Accountability = {
-				user: userID,
-				role: user['role']?.id ?? null,
-				admin: false,
-				app: false,
-				roles: await fetchRolesTree(user['role']?.id ?? null, this.knex),
-				ip: null,
-			};
-
-			const userGlobalAccess = await fetchGlobalAccess(accountability, this.knex);
-
-			accountability.admin = userGlobalAccess.admin;
-			accountability.app = userGlobalAccess.app;
-
-			const usersService = new UsersService({ schema: this.schema, accountability });
-
-			try {
+			if (this.accountability) {
 				await validateAccess(
 					{
-						accountability,
+						accountability: this.accountability,
 						action: 'read',
-						collection: data['collection'],
-						primaryKeys: [data['item']],
+						collection: item['collection'],
+						primaryKeys: [item['item']],
 					},
 					{
 						schema: this.schema,
 						knex: this.knex,
 					},
 				);
+			}
+		}
 
-				const templateData = await usersService.readByQuery({
-					fields: ['id', 'first_name', 'last_name', 'email'],
-					filter: { id: { _in: mentions.map((mention) => mention.substring(1)) } },
+		const keys = await super.createMany(data, opts);
+
+		const usersRegExp = new RegExp(/@[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}/gi);
+
+		for (const item of data) {
+			const mentions = uniq(item['comment']!.match(usersRegExp) ?? []);
+
+			if (mentions.length === 0) {
+				continue;
+			}
+
+			// Validated non-null in the pre-insert loop above.
+			const collection = item['collection']!;
+			const itemKey = item['item']!;
+
+			const sender = await this.usersService.readOne(this.accountability.user, {
+				fields: ['id', 'first_name', 'last_name', 'email'],
+			});
+
+			for (const mention of mentions) {
+				const userID = mention.substring(1);
+
+				const user = await this.usersService.readOne(userID, {
+					fields: ['id', 'first_name', 'last_name', 'email', 'role.id'],
 				});
 
-				const userPreviews = templateData.reduce(
-					(acc, user) => {
-						acc[user['id']] = `<em>${userName(user)}</em>`;
-						return acc;
-					},
-					{} as Record<string, string>,
-				);
+				const accountability: Accountability = {
+					user: userID,
+					role: user['role']?.id ?? null,
+					admin: false,
+					app: false,
+					roles: await fetchRolesTree(user['role']?.id ?? null, this.knex),
+					ip: null,
+				};
 
-				let comment = data['comment'];
+				const userGlobalAccess = await fetchGlobalAccess(accountability, this.knex);
 
-				for (const mention of mentions) {
-					const uuid = mention.substring(1);
-					// We only match on UUIDs in the first place. This is just an extra sanity check.
-					if (isValidUuid(uuid) === false) continue;
-					// Literal replace (not a user-built RegExp) avoids regex injection; mention is a literal @<uuid>.
-					comment = comment.replaceAll(mention, userPreviews[uuid] ?? '@Unknown User');
-				}
+				accountability.admin = userGlobalAccess.admin;
+				accountability.app = userGlobalAccess.app;
 
-				comment = `> ${comment.replace(/\n+/gm, '\n> ')}`;
+				const usersService = new UsersService({ schema: this.schema, accountability });
 
-				const href = new Url(env['PUBLIC_URL'] as string)
-					.addPath('admin', 'content', data['collection'], data['item'])
-					.toString();
+				try {
+					await validateAccess(
+						{
+							accountability,
+							action: 'read',
+							collection: collection,
+							primaryKeys: [itemKey],
+						},
+						{
+							schema: this.schema,
+							knex: this.knex,
+						},
+					);
 
-				const message = `
+					const templateData = await usersService.readByQuery({
+						fields: ['id', 'first_name', 'last_name', 'email'],
+						filter: { id: { _in: mentions.map((mention) => mention.substring(1)) } },
+					});
+
+					const userPreviews = templateData.reduce(
+						(acc, user) => {
+							acc[user['id']] = `<em>${userName(user)}</em>`;
+							return acc;
+						},
+						{} as Record<string, string>,
+					);
+
+					let comment = item['comment']!;
+
+					for (const mention of mentions) {
+						const uuid = mention.substring(1);
+						// We only match on UUIDs in the first place. This is just an extra sanity check.
+						if (isValidUuid(uuid) === false) continue;
+						// Literal replace (not a user-built RegExp) avoids regex injection; mention is a literal @<uuid>.
+						comment = comment.replaceAll(mention, userPreviews[uuid] ?? '@Unknown User');
+					}
+
+					comment = `> ${comment.replace(/\n+/gm, '\n> ')}`;
+
+					const href = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'content', collection, itemKey).toString();
+
+					const message = `
 Hello ${userName(user)},
 
 ${userName(sender)} has mentioned you in a comment:
@@ -146,24 +151,25 @@ ${comment}
 <a href="${href}">Click here to view.</a>
 `;
 
-				await this.notificationsService.createOne({
-					recipient: userID,
-					sender: sender['id'],
-					subject: `You were mentioned in ${data['collection']}`,
-					message,
-					collection: data['collection'],
-					item: data['item'],
-				});
-			} catch (err: any) {
-				if (isDirectusError(err, ErrorCode.Forbidden)) {
-					logger.warn(`User ${userID} doesn't have proper permissions to receive notification for this item.`);
-				} else {
-					throw err;
+					await this.notificationsService.createOne({
+						recipient: userID,
+						sender: sender['id'],
+						subject: `You were mentioned in ${collection}`,
+						message,
+						collection: collection,
+						item: itemKey,
+					});
+				} catch (err: any) {
+					if (isDirectusError(err, ErrorCode.Forbidden)) {
+						logger.warn(`User ${userID} doesn't have proper permissions to receive notification for this item.`);
+					} else {
+						throw err;
+					}
 				}
 			}
 		}
 
-		return result;
+		return keys;
 	}
 
 	override updateOne(key: PrimaryKey, data: Partial<Comment>, opts?: MutationOptions): Promise<PrimaryKey> {

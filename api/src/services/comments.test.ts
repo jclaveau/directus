@@ -81,8 +81,8 @@ describe('Services / Comments', () => {
 		vi.restoreAllMocks();
 	});
 
-	it('should expand a valid @mention into its user preview in the notification message (line 130)', async () => {
-		const superCreateOneSpy = vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue('comment-pk-1');
+	it('should expand a valid @mention into its user preview in the notification message (line 137)', async () => {
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['comment-pk-1']);
 
 		const service = new CommentsService({ knex: db, schema, accountability });
 
@@ -105,14 +105,16 @@ describe('Services / Comments', () => {
 			{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' },
 		]);
 
-		const result = await service.createOne({
-			comment: `hey @${mentionUuid} please review`,
-			collection: 'articles',
-			item: '42',
-		});
+		const result = await service.createMany([
+			{
+				comment: `hey @${mentionUuid} please review`,
+				collection: 'articles',
+				item: '42',
+			},
+		]);
 
-		expect(result).toBe('comment-pk-1');
-		expect(superCreateOneSpy).toHaveBeenCalledTimes(1);
+		expect(result).toEqual(['comment-pk-1']);
+		expect(superCreateManySpy).toHaveBeenCalledTimes(1);
 
 		expect(NotificationsService.prototype.createOne).toHaveBeenCalledTimes(1);
 
@@ -123,24 +125,26 @@ describe('Services / Comments', () => {
 		expect(notification.collection).toBe('articles');
 		expect(notification.item).toBe('42');
 
-		// line 130: the raw @<uuid> mention is replaced by the <em>userName</em> preview
+		// line 137: the raw @<uuid> mention is replaced by the <em>userName</em> preview
 		expect(notification.message).toContain('<em>Jane Doe</em>');
 		expect(notification.message).not.toContain(`@${mentionUuid}`);
 	});
 
-	it('should early-return without sending a notification when there are no mentions (lines 65-67)', async () => {
-		const superCreateOneSpy = vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue('comment-pk-2');
+	it('should early-continue without sending a notification when there are no mentions (lines 68-70)', async () => {
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['comment-pk-2']);
 
 		const service = new CommentsService({ knex: db, schema, accountability });
 
-		const result = await service.createOne({
-			comment: 'a plain comment with no mentions',
-			collection: 'articles',
-			item: '7',
-		});
+		const result = await service.createMany([
+			{
+				comment: 'a plain comment with no mentions',
+				collection: 'articles',
+				item: '7',
+			},
+		]);
 
-		expect(result).toBe('comment-pk-2');
-		expect(superCreateOneSpy).toHaveBeenCalledTimes(1);
+		expect(result).toEqual(['comment-pk-2']);
+		expect(superCreateManySpy).toHaveBeenCalledTimes(1);
 		expect(UsersService.prototype.readOne).not.toHaveBeenCalled();
 		expect(NotificationsService.prototype.createOne).not.toHaveBeenCalled();
 	});
