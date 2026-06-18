@@ -170,6 +170,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		const payload: AnyItem = cloneDeep(data);
 		let actionHookPayload = payload;
+		let createWasTakenOver = false;
 		const nestedActionEvents: ActionEventParams[] = [];
 
 		/**
@@ -185,7 +186,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			// item that is about to be saved
 			const payloadAfterHooks =
 				opts.emitEvents !== false
-					? await emitter.emitFilter(
+					? await emitter.emitFilter<AnyItem, PrimaryKey>(
 							this.eventScope === 'items'
 								? ['items.create', `${this.collection}.items.create`]
 								: `${this.eventScope}.create`,
@@ -200,6 +201,15 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 							},
 						)
 					: payload;
+
+			if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
+				// A filter hook returned a primary key instead of a payload: it has taken over the
+				// creation, so short-circuit and surface that key. No row was created through this
+				// service, so the items.create action must not fire with the original payload — the
+				// hook that took over owns any events.
+				createWasTakenOver = true;
+				return payloadAfterHooks;
+			}
 
 			const payloadWithPresets = this.accountability
 				? await processPayload(
@@ -421,7 +431,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			return primaryKey;
 		});
 
-		if (opts.emitEvents !== false) {
+		if (opts.emitEvents !== false && !createWasTakenOver) {
 			const actionEvent = {
 				event:
 					this.eventScope === 'items'
