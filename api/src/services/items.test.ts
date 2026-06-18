@@ -281,8 +281,8 @@ describe('Integration Tests', () => {
 				transactionSpy.mockRestore();
 			});
 
-			it('should short-circuit and return the key when a create filter returns a string primary key', async () => {
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue('abc');
+			it('should cancel the create and return null when a filter returns null and cancel is allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 
 				const insert = vi.fn().mockReturnThis();
 
@@ -290,47 +290,53 @@ describe('Integration Tests', () => {
 					return await callback({ ...db, insert } as any);
 				});
 
-				const result = await service.createOne({ name: 'Test' });
+				const result = await service.createOne({ name: 'Test' }, { allowFilterCancel: true });
 
-				expect(result).toBe('abc');
+				expect(result).toBeNull();
 				expect(insert).not.toHaveBeenCalled();
 
 				transactionSpy.mockRestore();
-				emitFilterSpy.mockRestore();
+				filterSpy.mockRestore();
 			});
 
-			it('should NOT emit an items.create action when a filter takes over the create', async () => {
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(5);
-				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+			it('should throw when a filter returns null but cancel is not allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
 
 				const transactionSpy = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
 					return await callback({ ...db } as any);
 				});
 
-				await service.createOne({ name: 'Test' });
-
-				// the row was never created through this service, so the action must not fire
-				expect(emitActionSpy).not.toHaveBeenCalled();
+				await expect(service.createOne({ name: 'Test' })).rejects.toThrow(InvalidPayloadError);
 
 				transactionSpy.mockRestore();
-				emitActionSpy.mockRestore();
-				emitFilterSpy.mockRestore();
+				filterSpy.mockRestore();
 			});
 
-			it('should insert and emit the action normally when a filter returns a payload object (no take-over)', async () => {
-				// control case: a filter that returns the payload (not a key) leaves creation to the service
-				const emitFilterSpy = vi
+			it('should create normally when a filter returns the payload (cancel allowed but not triggered)', async () => {
+				// control: the cancel/take-over guards must only fire on null / a key, never on a payload
+				const filterSpy = vi
 					.spyOn(emitter, 'emitFilter')
 					.mockImplementation(async (_event: any, payload: any) => payload);
 
-				const emitActionSpy = vi.spyOn(emitter, 'emitAction');
+				const mockReturning = vi.fn().mockResolvedValue([{ id: 1 }]);
 
-				await service.createOne({ name: 'Test' });
+				const mockQuery = {
+					insert: vi.fn().mockReturnThis(),
+					into: vi.fn().mockReturnThis(),
+					returning: mockReturning,
+				};
 
-				expect(emitActionSpy).toHaveBeenCalled();
+				const transactionSpy = vi
+					.spyOn(db, 'transaction')
+					.mockImplementation(async (callback) => callback({ ...db, ...mockQuery } as any));
 
-				emitActionSpy.mockRestore();
-				emitFilterSpy.mockRestore();
+				const result = await service.createOne({ name: 'Test' }, { allowFilterCancel: true });
+
+				expect(mockQuery.insert).toHaveBeenCalled();
+				expect(result).not.toBeNull();
+
+				transactionSpy.mockRestore();
+				filterSpy.mockRestore();
 			});
 		});
 
@@ -339,6 +345,16 @@ describe('Integration Tests', () => {
 				await service.createMany([{}], { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
+			});
+
+			it('should keep cancelled creates as null to stay index-aligned with the input', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				const result = await service.createMany([{ name: 'A' }, { name: 'B' }], { allowFilterCancel: true });
+
+				expect(result).toEqual([null, null]);
+
+				filterSpy.mockRestore();
 			});
 		});
 
@@ -538,6 +554,42 @@ describe('Integration Tests', () => {
 
 				emitFilterSpy.mockRestore();
 			});
+
+			it('should cancel the update and return a null per key when a filter returns null and cancel is allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+				const transactionSpy = vi.spyOn(db, 'transaction');
+
+				const result = await service.updateMany([1], { name: 'Test' }, { allowFilterCancel: true });
+
+				expect(result).toEqual([null]);
+				expect(transactionSpy).not.toHaveBeenCalled();
+
+				filterSpy.mockRestore();
+			});
+
+			it('should throw when a filter returns null but cancel is not allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				await expect(service.updateMany([1], { name: 'Test' })).rejects.toThrow(InvalidPayloadError);
+
+				filterSpy.mockRestore();
+			});
+
+			it('should run the update normally when a filter returns a non-null payload', async () => {
+				const filterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockImplementation(async (_event: any, payload: any) => payload);
+
+				const transactionSpy = vi.spyOn(db, 'transaction');
+
+				const result = await service.updateMany([1], { name: 'Test' }, { allowFilterCancel: true });
+
+				expect(transactionSpy).toHaveBeenCalled();
+				expect(result).toEqual([1]);
+
+				transactionSpy.mockRestore();
+				filterSpy.mockRestore();
+			});
 		});
 
 		describe('deleteMany', () => {
@@ -545,6 +597,42 @@ describe('Integration Tests', () => {
 				await service.deleteMany([1], { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
+			});
+
+			it('should cancel the deletion and return a null per key when a filter returns null and cancel is allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+				const transactionSpy = vi.spyOn(db, 'transaction');
+
+				const result = await service.deleteMany([1], { allowFilterCancel: true });
+
+				expect(result).toEqual([null]);
+				expect(transactionSpy).not.toHaveBeenCalled();
+
+				filterSpy.mockRestore();
+			});
+
+			it('should throw when a filter returns null but cancel is not allowed', async () => {
+				const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+				await expect(service.deleteMany([1])).rejects.toThrow(InvalidPayloadError);
+
+				filterSpy.mockRestore();
+			});
+
+			it('should run the deletion normally when a filter returns a non-null payload', async () => {
+				const filterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockImplementation(async (_event: any, payload: any) => payload);
+
+				const transactionSpy = vi.spyOn(db, 'transaction');
+
+				const result = await service.deleteMany([1], { allowFilterCancel: true });
+
+				expect(transactionSpy).toHaveBeenCalled();
+				expect(result).toEqual([1]);
+
+				transactionSpy.mockRestore();
+				filterSpy.mockRestore();
 			});
 		});
 

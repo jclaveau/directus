@@ -114,6 +114,12 @@ export type MutationOptions = {
 	 * Callback function that is called whenever a mutation requires a user integrity check to be made
 	 */
 	onRequireUserIntegrityCheck?: ((flags: UserIntegrityCheckFlag) => void) | undefined;
+
+	/**
+	 * Allow an `items.create` filter hook to cancel the creation by returning `null`. When set,
+	 * `createOne` resolves to `null` instead of a primary key; otherwise a `null` return throws.
+	 */
+	allowFilterCancel?: boolean | undefined;
 };
 
 export type FieldMutationOptions = MutationOptions & {
