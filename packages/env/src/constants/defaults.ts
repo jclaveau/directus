@@ -18,6 +18,7 @@ export const DEFAULTS = {
 	TEMP_PATH: './node_modules/.directus',
 
 	DB_EXCLUDE_TABLES: 'spatial_ref_sys,sysdiagrams',
+	DB_MSSQL_TRUST_BATCH_RETURNING: false,
 
 	STORAGE_LOCATIONS: 'local',
 	STORAGE_LOCAL_DRIVER: 'local',

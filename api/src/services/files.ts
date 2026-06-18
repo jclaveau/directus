@@ -266,13 +266,14 @@ export class FilesService extends ItemsService<File> {
 	 * Create a file (only applicable when it is not a multipart/data POST request)
 	 * Useful for associating metadata with existing file in storage
 	 */
-	override async createOne(data: Partial<File>, opts?: MutationOptions): Promise<PrimaryKey> {
-		if (!data.type) {
-			throw new InvalidPayloadError({ reason: `"type" is required` });
+	override async createMany(data: Partial<File>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
+		for (const item of data) {
+			if (!item.type) {
+				throw new InvalidPayloadError({ reason: `"type" is required` });
+			}
 		}
 
-		const key = await super.createOne(data, opts);
-		return key;
+		return super.createMany(data, opts);
 	}
 
 	/**
