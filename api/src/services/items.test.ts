@@ -1,3 +1,4 @@
+import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex, { type Knex } from 'knex';
@@ -56,6 +57,18 @@ describe('Integration Tests', () => {
 
 		afterEach(() => {
 			vi.clearAllMocks();
+		});
+
+		describe('readOne', () => {
+			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
+				service.readByQuery = vi.fn(async () => []);
+
+				const error = await service.readOne(999).catch((err) => err);
+
+				expect(error).toBeInstanceOf(ForbiddenError);
+
+				expect(error.message).toBe('No result found for key 999 in test during items.readOne()');
+			});
 		});
 
 		describe('createOne', () => {
