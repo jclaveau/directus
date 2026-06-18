@@ -193,6 +193,69 @@ test(`filtering m2o relation`, async () => {
 	expect(rawQuery.bindings).toEqual(['username']);
 });
 
+test(`filtering nested m2o with sibling relational keys`, async () => {
+	const schema = new SchemaBuilder()
+		.collection('root', (c) => {
+			c.field('id').id();
+			c.field('rel_1').m2o('table_1');
+		})
+		.collection('table_1', (c) => {
+			c.field('id').id();
+			c.field('rel_2').m2o('table_2');
+		})
+		.collection('table_2', (c) => {
+			c.field('id').id();
+			c.field('status').string();
+			c.field('rel_3').m2o('table_3');
+		})
+		.collection('table_3', (c) => {
+			c.field('id').id();
+			c.field('status').string();
+			c.field('rel_4').m2o('table_4');
+		})
+		.collection('table_4', (c) => {
+			c.field('id').id();
+			c.field('status').string();
+		})
+		.build();
+
+	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		schema,
+		queryBuilder,
+		{
+			rel_1: {
+				rel_2: {
+					rel_3: {
+						status: { _eq: 'active' },
+						rel_4: {
+							status: { _eq: 'active' },
+						},
+					},
+					status: { _eq: 'active' },
+				},
+			},
+		},
+		'root',
+		{},
+		[],
+		[],
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	// All three conditions should appear in the WHERE clause
+	expect(rawQuery.sql).toContain('where');
+	expect(rawQuery.bindings).toContain('active');
+
+	// Should be 3: one for each sibling filter (table_3.status, table_4.status, table_2.status)
+	const activeBindings = rawQuery.bindings.filter((b: unknown) => b === 'active');
+	expect(activeBindings).toHaveLength(3);
+});
+
 const o2m_schema = new SchemaBuilder()
 	.collection('article', (c) => {
 		c.field('id').id();
@@ -271,6 +334,87 @@ for (const quantifier of ['_some', '_none']) {
 		expect(rawQuery.bindings).toEqual([2]);
 	});
 }
+
+test(`filtering o2m relation with sibling relational keys`, async () => {
+	const schema = new SchemaBuilder()
+		.collection('article', (c) => {
+			c.field('id').id();
+			c.field('links').o2m('links_list', 'article_id');
+		})
+		.collection('links_list', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('status').string();
+		})
+		.build();
+
+	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		schema,
+		queryBuilder,
+		{
+			links: {
+				name: { _eq: 'a' },
+				status: { _eq: 'b' },
+			},
+		},
+		'article',
+		{},
+		[],
+		[],
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	// without normalization getFilterPath would drop one sibling; both must survive
+	expect(rawQuery.bindings).toContain('a');
+	expect(rawQuery.bindings).toContain('b');
+});
+
+test(`filtering o2m relation with sibling keys inside _some`, async () => {
+	const schema = new SchemaBuilder()
+		.collection('article', (c) => {
+			c.field('id').id();
+			c.field('links').o2m('links_list', 'article_id');
+		})
+		.collection('links_list', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('status').string();
+		})
+		.build();
+
+	const db = vi.mocked(knex.default({ client: Client_SQLite3 }));
+	const queryBuilder = db.queryBuilder();
+
+	applyFilter(
+		db,
+		schema,
+		queryBuilder,
+		{
+			links: {
+				_some: {
+					name: { _eq: 'a' },
+					status: { _eq: 'b' },
+				},
+			},
+		},
+		'article',
+		{},
+		[],
+		[],
+	);
+
+	const rawQuery = queryBuilder.toSQL();
+
+	// the quantifier still produces a subquery, and both siblings survive inside it
+	expect(rawQuery.sql).toContain('select');
+	expect(rawQuery.bindings).toContain('a');
+	expect(rawQuery.bindings).toContain('b');
+});
 
 test(`filtering a2o relation`, async () => {
 	const schema = new SchemaBuilder()
