@@ -65,4 +65,22 @@ describe('SchemaHelperSQLite', () => {
 			'name',
 		]);
 	});
+
+	test('dropUniqueIfExists drops the backing index (no DROP CONSTRAINT in SQLite)', async () => {
+		const { helper } = createHelper();
+		const knex = { raw: vi.fn() } as unknown as Knex;
+
+		await helper.dropUniqueIfExists(knex, 'users', 'email');
+
+		expect(knex.raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ??', ['users_email_unique']);
+	});
+
+	test('dropIndexIfExists emits DROP INDEX IF EXISTS (inherited base)', async () => {
+		const { helper } = createHelper();
+		const knex = { raw: vi.fn() } as unknown as Knex;
+
+		await helper.dropIndexIfExists(knex, 'users', 'email');
+
+		expect(knex.raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ??', ['users_email_index']);
+	});
 });

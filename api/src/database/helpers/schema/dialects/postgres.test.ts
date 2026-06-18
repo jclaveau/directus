@@ -92,4 +92,25 @@ describe('SchemaHelperPostgres', () => {
 			'my_custom_column',
 		]);
 	});
+
+	test('dropIndexIfExists emits DROP INDEX IF EXISTS', async () => {
+		const { helper } = createHelper();
+		const knex = { raw: vi.fn() } as unknown as Knex;
+
+		await helper.dropIndexIfExists(knex, 'users', 'email');
+
+		expect(knex.raw).toHaveBeenCalledWith('DROP INDEX IF EXISTS ??', ['users_email_index']);
+	});
+
+	test('dropUniqueIfExists emits ALTER TABLE DROP CONSTRAINT IF EXISTS', async () => {
+		const { helper } = createHelper();
+		const knex = { raw: vi.fn() } as unknown as Knex;
+
+		await helper.dropUniqueIfExists(knex, 'users', 'email');
+
+		expect(knex.raw).toHaveBeenCalledWith('ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??', [
+			'users',
+			'users_email_unique',
+		]);
+	});
 });
