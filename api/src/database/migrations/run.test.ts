@@ -107,4 +107,107 @@ describe('run', () => {
 			});
 		});
 	});
+
+	describe('when migration keys collide', () => {
+		afterEach(() => {
+			vi.doUnmock('fs-extra');
+			vi.resetModules();
+		});
+
+		it('throws an error listing the colliding version and its files', async () => {
+			vi.resetModules();
+
+			vi.doMock('fs-extra', () => ({
+				default: {
+					readdir: vi.fn().mockResolvedValue(['20201028A-first.js', '20201028A-second.js']),
+					pathExists: vi.fn().mockResolvedValue(false),
+				},
+			}));
+
+			const { default: runWithCollision } = await import('./run.js');
+
+			tracker.on.select('directus_migrations').response([]);
+
+			const error = await runWithCollision(db, 'up').catch((e: Error) => e);
+
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toContain('Migration keys collide!');
+			expect((error as Error).message).toContain('"20201028A"');
+			expect((error as Error).message).toContain('first.js');
+			expect((error as Error).message).toContain('second.js');
+		});
+
+		it('formats each collision as a tab-dashed line listing comma-separated files', async () => {
+			vi.resetModules();
+
+			vi.doMock('fs-extra', () => ({
+				default: {
+					readdir: vi.fn().mockResolvedValue(['20201028A-first.js', '20201028A-second.js']),
+					pathExists: vi.fn().mockResolvedValue(false),
+				},
+			}));
+
+			const { default: runWithCollision } = await import('./run.js');
+
+			tracker.on.select('directus_migrations').response([]);
+
+			const error = await runWithCollision(db, 'up').catch((e: Error) => e);
+
+			expect((error as Error).message).toMatch(
+				/\n\t- "20201028A": [^\n]*20201028A-[a-z]+\.js, [^\n]*20201028A-[a-z]+\.js/,
+			);
+		});
+
+		it('lists every colliding version when several versions collide', async () => {
+			vi.resetModules();
+
+			vi.doMock('fs-extra', () => ({
+				default: {
+					readdir: vi
+						.fn()
+						.mockResolvedValue([
+							'20201028A-first.js',
+							'20201028A-second.js',
+							'20201029B-third.js',
+							'20201029B-fourth.js',
+						]),
+					pathExists: vi.fn().mockResolvedValue(false),
+				},
+			}));
+
+			const { default: runWithCollision } = await import('./run.js');
+
+			tracker.on.select('directus_migrations').response([]);
+
+			const error = await runWithCollision(db, 'up').catch((e: Error) => e);
+
+			const message = (error as Error).message;
+
+			expect(message).toContain('"20201028A"');
+			expect(message).toContain('"20201029B"');
+			// one line per colliding version
+			expect(message.match(/\n\t- "/g)).toHaveLength(2);
+		});
+
+		it('does not report a collision when every version is unique', async () => {
+			vi.resetModules();
+
+			vi.doMock('fs-extra', () => ({
+				default: {
+					readdir: vi.fn().mockResolvedValue(['20201028A-first.js', '20201029B-second.js']),
+					pathExists: vi.fn().mockResolvedValue(false),
+				},
+			}));
+
+			const { default: runWithCollision } = await import('./run.js');
+
+			tracker.on.select('directus_migrations').response([]);
+
+			const result = await runWithCollision(db, 'up').catch((e: Error) => e);
+
+			if (result instanceof Error) {
+				expect(result.message).not.toContain('Migration keys collide!');
+			}
+		});
+	});
 });
