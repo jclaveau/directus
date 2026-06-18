@@ -1,5 +1,7 @@
-import type { Knex } from 'knex';
-import { describe, expect, test, vi } from 'vitest';
+import knex, { type Knex } from 'knex';
+import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
+import { afterEach, describe, expect, test, vi } from 'vitest';
+import type { InvalidCollationColumn } from '../types.js';
 import { SchemaHelperMySQL } from './mysql.js';
 
 vi.mock('../../index.js', () => ({
@@ -147,6 +149,80 @@ describe('SchemaHelperMySQL', () => {
 
 			expect(result).toBe('MyCollection');
 			expect(mockRaw).toHaveBeenCalledWith('SELECT @@lower_case_table_names AS lctn');
+		});
+	});
+
+	describe('getColumnsWithInvalidCollation', () => {
+		let tracker: Tracker;
+
+		function setup(version: string, columns: InvalidCollationColumn[] = []) {
+			const db = knex.default({ client: MockClient });
+			tracker = createTracker(db);
+			tracker.on.select('VERSION()').response([{ version }]);
+			tracker.on.select('information_schema').response(columns);
+			return new SchemaHelperMySQL(db);
+		}
+
+		afterEach(() => {
+			tracker?.reset();
+		});
+
+		test('excludes JSON-as-longtext (utf8mb4_bin) on MariaDB', async () => {
+			const helper = setup('10.11.2-MariaDB-1:10.11.2+maria~ubu2204');
+
+			await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
+
+			expect(query?.sql).toMatch(/column_type/i);
+			expect(query?.bindings).toEqual(expect.arrayContaining(['longtext', 'utf8mb4_bin']));
+		});
+
+		test('does not exclude longtext on MySQL', async () => {
+			const helper = setup('8.0.34');
+
+			await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
+
+			expect(query?.sql).not.toMatch(/column_type/i);
+			expect(query?.bindings).not.toContain('longtext');
+		});
+
+		test('only excludes longtext AND utf8mb4_bin together (a longtext with another collation still warns)', async () => {
+			const helper = setup('10.11.2-MariaDB-1:10.11.2+maria~ubu2204');
+
+			await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
+
+			// the exclusion is a compound NOT(type AND collation), not two independent excludes,
+			// so a longtext column with a different collation is NOT filtered out
+			expect(query?.sql).toMatch(/not \([^)]*column_type[^)]*and[^)]*collation_name[^)]*\)/i);
+		});
+
+		test('detects MariaDB even with the 5.5.5- client-compat version prefix', async () => {
+			const helper = setup('5.5.5-10.11.2-MariaDB-1:10.11.2+maria~ubu2204');
+
+			await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			const query = tracker.history.select.find((q) => q.sql.includes('information_schema'));
+
+			expect(query?.sql).toMatch(/column_type/i);
+		});
+
+		test('returns the columns reported by the database (genuine mismatches surface)', async () => {
+			const mismatch: InvalidCollationColumn = {
+				table_name: 'articles',
+				name: 'title',
+				collation: 'latin1_swedish_ci',
+			};
+
+			const helper = setup('10.11.2-MariaDB-1:10.11.2+maria~ubu2204', [mismatch]);
+
+			const result = await helper.getColumnsWithInvalidCollation('directus', 'utf8mb4_general_ci');
+
+			expect(result).toEqual([mismatch]);
 		});
 	});
 });

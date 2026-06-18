@@ -348,16 +348,14 @@ async function validateDatabaseCharset(database?: Knex): Promise<void> {
 	const logger = useLogger();
 
 	if (getDatabaseClient(database) === 'mysql') {
+		const helpers = getHelpers(database);
 		const { collation } = await database.select(database.raw(`@@collation_database as collation`)).first();
 
 		const tables = await database('information_schema.tables')
 			.select({ name: 'TABLE_NAME', collation: 'TABLE_COLLATION' })
 			.where({ TABLE_SCHEMA: env['DB_DATABASE'] });
 
-		const columns = await database('information_schema.columns')
-			.select({ table_name: 'TABLE_NAME', name: 'COLUMN_NAME', collation: 'COLLATION_NAME' })
-			.where({ TABLE_SCHEMA: env['DB_DATABASE'] })
-			.whereNot({ COLLATION_NAME: collation });
+		const columns = await helpers.schema.getColumnsWithInvalidCollation(env['DB_DATABASE'] as string, collation);
 
 		const excludedTables: string[] = toArray(env['DB_EXCLUDE_TABLES']);
 
