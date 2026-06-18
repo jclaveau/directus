@@ -1,0 +1,212 @@
+# Composes the `hhh-v11` integration branch = a chosen BSL-licensed Directus
+# release with all fork-permanent features applied. The fork rejects the
+# MSCL-1.0-GPL relicense (Directus v12.0.0-rc.1+), so it anchors on a pinned
+# pre-MSCL tag instead of tracking upstream `main`.
+#
+# hhh-v11 is DERIVED, never authored. It is force-rebuilt from:
+#   - `hhh-v11-base` = the upstream tag named in `.github/fork-base.txt`
+#     (overridable per-run via the `base_ref` input), refused if it is MSCL, plus
+#   - the TREE of open, non-draft `fork-feat: ` PRs, applied in dependency order
+#     (a stacked feature after its parent feature). Roots are based on
+#     `hhh-v11-base`; stacked features are based on their parent `fork-feat`
+#     branch, so the topo-merge orders them by base.
+#
+# Fork-permanent: these features are NOT submitted upstream (upstream is MSCL).
+# A conflict here means the stack is STALE vs the base tag and must be re-rebased.
+#
+# Never commit directly to hhh-v11 / hhh-v11-base — this workflow force-pushes them.
+#
+# Policy (all-or-nothing):
+#   - The base tag is refused if it carries the MSCL license.
+#   - Any feature that does not merge cleanly (or whose base never resolves)
+#     BLOCKS the whole run — no partial publish. The full tree is still attempted
+#     so every conflict is reported in one run, then the job fails.
+#   - A composed tree that fails build/api-tests also BLOCKS the publish.
+#   - hhh-v11 is only ever force-pushed when the ENTIRE tree merges clean+green.
+name: compose-hhh-v11
+
+on:
+  schedule:
+    - cron: '41 6 * * *' # daily; offset to avoid clashing with compose-hhh-main
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: 'Upstream Directus tag to anchor on (BSL only; overrides .github/fork-base.txt)'
+        required: false
+        type: string
+
+# Collapse rapid re-runs onto one compose.
+concurrency:
+  group: compose-hhh-v11
+  cancel-in-progress: true
+
+permissions:
+  contents: write # force-push hhh-v11-base + hhh-v11
+  pull-requests: read # discover open PRs
+  issues: write # report skipped features / red tests
+
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Push over an SSH deploy key, not GITHUB_TOKEN: App tokens cannot push
+          # workflow-file changes. There is no pull_request trigger here, so the
+          # SSH push fires no self-trigger loop.
+          ssh-key: ${{ secrets.COMPOSE_SSH_KEY }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "hhh-bot"
+          git config user.email "hhh-bot@users.noreply.github.com"
+
+      - name: Resolve base ref
+        id: base
+        run: |
+          BASE="${{ github.event.inputs.base_ref }}"
+          [ -z "$BASE" ] && BASE="$(cat .github/fork-base.txt)"
+          echo "ref=$BASE" >> "$GITHUB_OUTPUT"
+          echo "Anchoring on base tag: $BASE"
+
+      - name: Fetch base tag + refuse MSCL
+        run: |
+          git remote add upstream https://github.com/directus/directus.git
+          git fetch upstream tag "${{ steps.base.outputs.ref }}"
+          # License guard — the entire point of the v11 line is to stay off MSCL.
+          if git show "${{ steps.base.outputs.ref }}:license" | grep -qi 'MSCL\|Monospace Sustainable Core'; then
+            echo "::error::Base ${{ steps.base.outputs.ref }} carries the MSCL license — refusing to anchor on it."
+            exit 1
+          fi
+
+      - name: Materialize hhh-v11-base
+        run: |
+          git checkout -B hhh-v11-base "${{ steps.base.outputs.ref }}"
+          git push --force origin hhh-v11-base
+
+      - name: Discover open fork-feat PRs
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Compose input = the `fork-feat: ` PR tree. Roots are based on
+          # `hhh-v11-base`; stacked features on a parent `fork-feat` branch (any
+          # base, ordered after their parent). `experiments` / `superseded`
+          # labels exclude an otherwise-matching feature.
+          gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --json number,headRefName,baseRefName,isDraft,title,labels \
+            --jq '[.[]
+              | select(.isDraft | not)
+              | select(.title | startswith("fork-feat: "))
+              | select(any(.labels[].name; . == "experiments" or . == "superseded") | not)]' \
+            > prs.json
+          echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.baseRefName) <- \(.headRefName)"' prs.json
+          echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Compose hhh-v11
+        id: compose
+        run: |
+          git checkout -B hhh-v11 hhh-v11-base
+          # Apply the feature tree in dependency order. A PR whose base is
+          # `hhh-v11-base` (or any branch that is not itself a selected PR head)
+          # is a ROOT, applied first. A feature stacked on another feature's head
+          # waits until that parent merges. Skip-on-conflict, and cascade-skip the
+          # descendants of a skipped feature so a conflicted parent can't slip in
+          # through its child's branch.
+          declare -A STATUS IS_HEAD
+          mapfile -t ROWS < <(jq -c '.[]' prs.json)
+          for r in "${ROWS[@]}"; do IS_HEAD["$(jq -r .headRefName <<<"$r")"]=1; done
+          pending=("${ROWS[@]}"); merged=""; skip_conflict=""; skip_dep=""; progress=1
+          while [ ${#pending[@]} -gt 0 ] && [ "$progress" -eq 1 ]; do
+            progress=0; next=()
+            for r in "${pending[@]}"; do
+              num=$(jq -r .number <<<"$r"); head=$(jq -r .headRefName <<<"$r"); base=$(jq -r .baseRefName <<<"$r")
+              if [ "$base" = "hhh-v11-base" ] || [ -z "${IS_HEAD[$base]:-}" ]; then baseskip=0
+              elif [ "${STATUS[$base]:-}" = "merged" ]; then baseskip=0
+              elif [ "${STATUS[$base]:-}" = "skipped" ]; then baseskip=1
+              else next+=("$r"); continue; fi   # parent still pending — revisit next pass
+              progress=1
+              if [ "$baseskip" = 1 ]; then
+                STATUS[$head]=skipped; skip_dep="$skip_dep #$num"
+                echo "::warning::PR #$num skipped — its base feature was skipped"; continue
+              fi
+              # refs/pull/N/head works for same-repo AND cross-repo PR heads.
+              git fetch origin "refs/pull/$num/head:pr-$num"
+              if git merge --no-ff -m "Integrate #$num" "pr-$num"; then
+                STATUS[$head]=merged; merged="$merged #$num"; echo "merged #$num"
+              else
+                git merge --abort; STATUS[$head]=skipped; skip_conflict="$skip_conflict #$num"
+                echo "::warning::PR #$num does not merge cleanly into hhh-v11 — skipped"
+              fi
+            done
+            pending=("${next[@]}")
+          done
+          # Anything still pending depends on a branch that is neither the base nor
+          # a merged/skipped selected head — a base cycle or an unknown base.
+          skip_cycle=""
+          for r in "${pending[@]:-}"; do [ -n "$r" ] && skip_cycle="$skip_cycle #$(jq -r .number <<<"$r")"; done
+          echo "merged=$merged"
+          { echo "merged=$merged"
+            echo "skip_conflict=$skip_conflict"
+            echo "skip_dep=$skip_dep"
+            echo "skip_cycle=$skip_cycle"
+            echo "skipped=$skip_conflict$skip_dep$skip_cycle"; } >> "$GITHUB_OUTPUT"
+          # All-or-nothing: any feature that won't merge (or whose base never
+          # resolved) BLOCKS the run. The loop still ran so every conflict is
+          # reported at once, but we fail now — Publish (if: success()) is skipped,
+          # so hhh-v11 keeps pointing at the last fully-composed tree.
+          if [ -n "$skip_conflict$skip_cycle" ]; then
+            echo "::error::Stack is stale vs the base tag — re-rebase these features:$skip_conflict$skip_cycle (dependents:$skip_dep)."
+            exit 1
+          fi
+
+      - name: Allowlist compose bot for CLA
+        # hhh-v11's "Integrate #N" commits are authored by hhh-bot; the CLA bot
+        # reads contributors.yml from the head ref, so the bot must be signed
+        # there. Inject on the derived branch, not on a base.
+        run: |
+          if [ -f contributors.yml ] && ! grep -qxF '- hhh-bot' contributors.yml; then
+            echo '- hhh-bot' >> contributors.yml
+            git add contributors.yml
+            git commit -m "ci: sign CLA for hhh-bot (compose identity)"
+          fi
+
+      - name: Install + build
+        uses: ./.github/actions/prepare
+
+      - name: Test api
+        run: pnpm --filter @directus/api test
+
+      - name: Publish hhh-v11
+        if: success()
+        # Force: hhh-v11 is derived; hhh-v11-base is force-reset under it each run.
+        run: git push --force origin hhh-v11
+
+      - name: Report skipped features or failed tests
+        if: always() && (steps.compose.outputs.skipped != '' || failure())
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="compose-hhh-v11: integration needs attention"
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body="Last \`compose-hhh-v11\` run ($run_url) could not produce a clean, green hhh-v11."
+          if [ -n "${{ steps.compose.outputs.skip_conflict }}" ]; then
+            body="$body"$'\n\n'"**Skipped (merge conflict):**${{ steps.compose.outputs.skip_conflict }}"
+          fi
+          if [ -n "${{ steps.compose.outputs.skip_dep }}" ]; then
+            body="$body"$'\n\n'"**Skipped (base feature was skipped):**${{ steps.compose.outputs.skip_dep }}"
+          fi
+          if [ -n "${{ steps.compose.outputs.skip_cycle }}" ]; then
+            body="$body"$'\n\n'"**Skipped (unresolved/cyclic base):**${{ steps.compose.outputs.skip_cycle }}"
+          fi
+          if [ "${{ job.status }}" = "failure" ]; then
+            body="$body"$'\n\n'"**Build or api tests failed** — hhh-v11 was NOT force-pushed and still points at the previous green tree."
+          fi
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "in:title $title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
