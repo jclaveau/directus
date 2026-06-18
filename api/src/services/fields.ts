@@ -535,6 +535,17 @@ export class FieldsService {
 								if (!hookAdjustedField.schema) return;
 								this.addColumnToTable(table, collection, field, existingColumn);
 							});
+
+							// Drop a unique/index that was toggled off. Guarded against the index not
+							// physically existing (#35) — Directus decides from its own metadata, so a
+							// missing/renamed index would otherwise throw and fail the whole update.
+							if (field.schema?.is_unique === false && existingColumn?.is_unique === true) {
+								await this.helpers.schema.dropUniqueIfExists(trx, collection, field.field);
+							}
+
+							if (field.schema?.is_indexed === false && existingColumn?.is_indexed === true) {
+								await this.helpers.schema.dropIndexIfExists(trx, collection, field.field);
+							}
 						});
 					} catch (err: any) {
 						throw await translateDatabaseError(err, field);
@@ -923,21 +934,18 @@ export class FieldsService {
 				if (!existing || existing.is_unique === false) {
 					column.unique({ indexName: this.helpers.schema.generateIndexName('unique', collection, field.field) });
 				}
-			} else if (field.schema?.is_unique === false) {
-				if (existing?.is_unique === true) {
-					table.dropUnique([field.field], this.helpers.schema.generateIndexName('unique', collection, field.field));
-				}
 			}
 
 			if (field.schema?.is_indexed === true) {
 				if (!existing || existing.is_indexed === false) {
 					column.index(this.helpers.schema.generateIndexName('index', collection, field.field));
 				}
-			} else if (field.schema?.is_indexed === false) {
-				if (existing?.is_indexed === true) {
-					table.dropIndex([field.field], this.helpers.schema.generateIndexName('index', collection, field.field));
-				}
 			}
+
+			// Dropping an existing unique/index when toggled off is handled in updateField via
+			// helpers.schema.dropUniqueIfExists / dropIndexIfExists. It needs an async existence
+			// check on dialects without native IF EXISTS, which can't run inside this synchronous
+			// alterTable builder.
 		}
 
 		if (existing) {
