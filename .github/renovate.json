@@ -8,6 +8,7 @@
 		"workarounds:all"
 	],
 	"labels": [":robot: Dependency"],
+	"dependencyDashboard": true,
 	"forkProcessing": "enabled",
 	"baseBranches": ["v11.10.1-prepare"],
 	"enabledManagers": ["npm", "github-actions"],
