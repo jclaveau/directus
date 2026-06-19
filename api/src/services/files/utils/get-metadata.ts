@@ -53,14 +53,14 @@ export async function getMetadata(
 
 				if (sharpMetadata.exif) {
 					try {
-						const { Image, ThumbnailTags, Iop, GPSInfo, Photo } = exif(sharpMetadata.exif);
+						const { Image, Thumbnail, Iop, GPSInfo, Photo } = exif(sharpMetadata.exif);
 
 						if (Image) {
 							fullMetadata.ifd0 = Image;
 						}
 
-						if (ThumbnailTags) {
-							fullMetadata.ifd1 = ThumbnailTags;
+						if (Thumbnail) {
+							fullMetadata.ifd1 = Thumbnail;
 						}
 
 						if (Iop) {

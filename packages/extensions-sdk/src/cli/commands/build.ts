@@ -551,7 +551,8 @@ function getRollupOptions({
 					})
 				: null,
 			minify ? terser() : null,
-		],
+			// plugins resolve their Plugin type against their own bundled rollup, which skews vs ours
+		] as RollupOptions['plugins'],
 		onwarn(warning, warn) {
 			if (warning.code === 'CIRCULAR_DEPENDENCY' && warning.ids?.every((id) => /\bnode_modules\b/.test(id))) return;
 

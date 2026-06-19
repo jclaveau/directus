@@ -116,8 +116,8 @@ export class DriverSupabase implements TusDriver {
 		}
 
 		return {
-			size: data[0]?.metadata['contentLength'] ?? 0,
-			modified: new Date(data[0]?.metadata['lastModified'] || null),
+			size: data[0]?.metadata?.['contentLength'] ?? 0,
+			modified: new Date(data[0]?.metadata?.['lastModified'] || 0),
 		};
 	}
 

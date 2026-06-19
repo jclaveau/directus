@@ -3,7 +3,7 @@ import { REDACTED_TEXT, toArray, toBoolean } from '@directus/utils';
 import type { Request, RequestHandler } from 'express';
 import { merge } from 'lodash-es';
 import { URL } from 'node:url';
-import { pino, type Logger, type LoggerOptions } from 'pino';
+import { levels, multistream, pino, type Logger, type LoggerOptions } from 'pino';
 import { pinoHttp, stdSerializers, type AutoLoggingOptions } from 'pino-http';
 import { httpPrintFactory } from 'pino-http-print';
 import { build as pinoPretty } from 'pino-pretty';
@@ -48,7 +48,7 @@ export const getHttpLogsStream = (pretty: boolean) => {
 };
 
 export const getLoggerLevelValue = (level: string): number => {
-	return pino.levels.values[level] || pino.levels.values['info']!;
+	return levels.values[level] || levels.values['info']!;
 };
 
 export const createLogger = () => {
@@ -115,7 +115,7 @@ export const createLogger = () => {
 		});
 	}
 
-	return pino(mergedOptions, pino.multistream(streams));
+	return pino(mergedOptions, multistream(streams));
 };
 
 export const createExpressLogger = () => {
@@ -218,7 +218,7 @@ export const createExpressLogger = () => {
 	}
 
 	return pinoHttp({
-		logger: pino(mergedHttpOptions, pino.multistream(streams)),
+		logger: pino(mergedHttpOptions, multistream(streams)),
 		...httpLoggerEnvConfig,
 		serializers: {
 			req(request: Request) {
