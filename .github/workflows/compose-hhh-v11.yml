@@ -172,6 +172,30 @@ jobs:
             exit 1
           fi
 
+      - name: Guard — refuse MSCL-derived files
+        # The base-tag guard above keeps the BASE off MSCL; this keeps the FEATURE
+        # diffs off it too. A composed file is contamination when it is byte-identical
+        # to current MSCL Directus (`upstream/main`) yet differs from the pre-relicense
+        # BSL boundary (`v12.0.0-rc.1`, whose CODE predates the license flip) — i.e. a
+        # verbatim copy of post-relicense MSCL code. Matching the BSL boundary is fine
+        # (that code was BSL-available); the fork's own re-derivations match neither.
+        run: |
+          git fetch --no-tags upstream main
+          git fetch upstream tag v12.0.0-rc.1
+          bad=""
+          while read -r f; do
+            [ -z "$f" ] && continue
+            h=$(git rev-parse "hhh-v11:$f" 2>/dev/null) || continue
+            m=$(git rev-parse "upstream/main:$f" 2>/dev/null) || continue   # absent in main → not an MSCL copy
+            r=$(git rev-parse "v12.0.0-rc.1:$f" 2>/dev/null || echo "")
+            if [ "$h" = "$m" ] && [ "$h" != "$r" ]; then bad="$bad $f"; fi
+          done < <(git diff --name-only "${{ steps.base.outputs.branch }}...hhh-v11")
+          if [ -n "$bad" ]; then
+            echo "::error::MSCL contamination — composed file(s) byte-identical to post-relicense MSCL Directus and absent from the BSL boundary:$bad"
+            exit 1
+          fi
+          echo "MSCL diff guard: no composed file matches post-relicense MSCL Directus. Clean."
+
       - name: Allowlist compose bot for CLA
         # hhh-v11's "Integrate #N" commits are authored by hhh-bot; the CLA bot
         # reads contributors.yml from the head ref, so the bot must be signed
