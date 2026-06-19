@@ -11,6 +11,7 @@
 	"dependencyDashboard": true,
 	"forkProcessing": "enabled",
 	"baseBranches": ["v11.10.1-prepare"],
+	"constraints": { "node": "22", "pnpm": ">=10 <11" },
 	"constraintsFiltering": "strict",
 	"enabledManagers": ["npm", "github-actions"],
 	"vulnerabilityAlerts": {
