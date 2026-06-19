@@ -11,6 +11,7 @@
 	"dependencyDashboard": true,
 	"forkProcessing": "enabled",
 	"baseBranches": ["v11.10.1-prepare"],
+	"constraintsFiltering": "strict",
 	"enabledManagers": ["npm", "github-actions"],
 	"vulnerabilityAlerts": {
 		"enabled": false
