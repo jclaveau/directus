@@ -100,6 +100,10 @@ jobs:
         run: pnpm test:coverage --passWithNoTests
 
       - name: Upload coverage to Codecov
+        if: always()
+        continue-on-error: true # Scalabus: a failed upload must not red the test job
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
         run: |
           # Download and install Codecov uploader
           curl -Os https://cli.codecov.io/latest/linux/codecov
