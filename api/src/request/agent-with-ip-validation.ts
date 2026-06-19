@@ -34,7 +34,7 @@ export const agentWithIpValidation = (agent: Agent) => {
 		 */
 		if (isIP(host) !== 0 && isDeniedIp(host)) throw deniedError(host);
 
-		const socket = createConnection?.call(this, options, oncreate);
+		const socket = createConnection?.call(this, options, oncreate as Parameters<NonNullable<typeof createConnection>>[1]);
 
 		// Unexpected, but in that case the request is denied to be on the safe side
 		if (!socket) {

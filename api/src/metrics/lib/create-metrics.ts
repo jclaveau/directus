@@ -17,7 +17,11 @@ const isPM2 = 'PM2_HOME' in process.env;
 const METRICS_SYNC_PACKET = 'directus:metrics---data-sync';
 
 const listApps = promisify(pm2.list.bind(pm2));
-const sendDataToProcessId = promisify(pm2.sendDataToProcessId.bind(pm2));
+
+// pin to pm2's real (proc_id, packet, cb) runtime form; its new types make promisify mis-infer the overload
+const sendDataToProcessId = promisify(
+	pm2.sendDataToProcessId.bind(pm2) as (procId: number, packet: object, cb: (err: Error | null) => void) => void,
+);
 
 export function createMetrics() {
 	const env = useEnv();

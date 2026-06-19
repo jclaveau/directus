@@ -1,6 +1,6 @@
 import type { File, Transformation, TransformationFormat, TransformationSet } from '@directus/types';
 import { clamp } from 'lodash-es';
-import type { Region } from 'sharp';
+import type { FormatEnum, Region } from 'sharp';
 
 export function resolvePreset({ transformationParams, acceptFormat }: TransformationSet, file: File): Transformation[] {
 	const transforms = transformationParams.transforms ? [...transformationParams.transforms] : [];
@@ -8,7 +8,8 @@ export function resolvePreset({ transformationParams, acceptFormat }: Transforma
 	if (transformationParams.format || transformationParams.quality) {
 		transforms.push([
 			'toFormat',
-			getFormat(file, transformationParams.format, acceptFormat),
+			// directus uses 'jpg'; sharp 0.35 narrowed toFormat's type to 'jpeg' but accepts 'jpg' at runtime
+			getFormat(file, transformationParams.format, acceptFormat) as keyof FormatEnum,
 			{
 				quality: transformationParams.quality ? Number(transformationParams.quality) : undefined,
 			},
