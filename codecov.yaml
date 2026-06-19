@@ -5,8 +5,10 @@ flag_management:
       - type: project
         target: auto
         threshold: 5%
+        informational: true # Scalabus: report-only ramp; flip to blocking once baseline + dialect tests land
       - type: patch
         target: 80%
+        informational: true # Scalabus: report-only ramp; flip to blocking once baseline + dialect tests land
 
 comment:
   layout: 'header, diff, flags'

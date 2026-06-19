@@ -1,13 +1,17 @@
 name: Check
 
+# Scalabus: this workflow is inherited by every v11.10.1-feat/* branch (they root on
+# v11.10.1-prepare). GHA loads a pull_request workflow from the PR's base branch, so
+# retargeting the trigger here is what makes the coverage check fire on feature PRs.
 on:
   pull_request:
     branches:
-      - main
+      - v11.10.1-prepare
+      - 'v11.10.1-feat/**'
 
   push:
     branches:
-      - main
+      - v11.10.1-prepare
 
 permissions:
   contents: read
