@@ -42,6 +42,11 @@
 			"rangeStrategy": "update-lockfile"
 		},
 		{
+			"description": "hold - knex >=3.2 double-wraps directus_row_number, 500 on o2m/m2m/m2a sort - https://github.com/knex/knex/issues/6392",
+			"matchPackageNames": ["knex"],
+			"enabled": false
+		},
+		{
 			"description": "hold - https://github.com/directus/directus/issues/21995",
 			"matchPackageNames": ["samlify"],
 			"enabled": false
