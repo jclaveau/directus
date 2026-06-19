@@ -592,8 +592,8 @@ catalogs:
       specifier: 5.6.0
       version: 5.6.0
     knex:
-      specifier: 3.2.10
-      version: 3.2.10
+      specifier: 3.1.0
+      version: 3.1.0
     knex-mock-client:
       specifier: 3.0.2
       version: 3.0.2
@@ -1177,7 +1177,7 @@ importers:
         version: 5.6.0
       knex:
         specifier: 'catalog:'
-        version: 3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
       ldapjs:
         specifier: 'catalog:'
         version: 2.3.3
@@ -1430,7 +1430,7 @@ importers:
         version: 7.2.0
       knex-mock-client:
         specifier: 'catalog:'
-        version: 3.0.2(knex@3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2))
+        version: 3.0.2(knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2))
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
@@ -2064,7 +2064,7 @@ importers:
         version: 3.2.6(vitest@3.2.6(@types/node@22.19.21)(happy-dom@18.0.1)(jiti@1.21.7)(jsdom@20.0.3)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0))
       knex:
         specifier: 'catalog:'
-        version: 3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
       pino:
         specifier: 'catalog:'
         version: 9.14.0
@@ -2348,7 +2348,7 @@ importers:
     dependencies:
       knex:
         specifier: 'catalog:'
-        version: 3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
     devDependencies:
       '@directus/tsconfig':
         specifier: 'catalog:'
@@ -2813,7 +2813,7 @@ importers:
         version: 1.0.5
       knex:
         specifier: 'catalog:'
-        version: 3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
@@ -3049,8 +3049,8 @@ importers:
         specifier: 2.3.0
         version: 2.3.0
       knex:
-        specifier: 3.2.10
-        version: 3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        specifier: 3.1.0
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
       listr2:
         specifier: 8.3.3
         version: 8.3.3
@@ -10045,8 +10045,8 @@ packages:
     peerDependencies:
       knex: '>=2.0.0'
 
-  knex@3.2.10:
-    resolution: {integrity: sha512-oypTHfrc9i72iyxaUQBKHOxhcr0xM65MPf6FpN02nimsftXwzXprIkLjfXdubvhbu4PMWLp023q8o8CYvHSuZw==}
+  knex@3.1.0:
+    resolution: {integrity: sha512-GLoII6hR0c4ti243gMs5/1Rb3B+AjwMOfjYm97pu0FOQa7JH56hgBxYf5WK2525ceSbBY1cjeZ9yk99GPMB6Kw==}
     engines: {node: '>=16'}
     hasBin: true
     peerDependencies:
@@ -10055,7 +10055,6 @@ packages:
       mysql2: '*'
       pg: '*'
       pg-native: '*'
-      pg-query-stream: ^4.14.0
       sqlite3: '*'
       tedious: '*'
     peerDependenciesMeta:
@@ -10068,8 +10067,6 @@ packages:
       pg:
         optional: true
       pg-native:
-        optional: true
-      pg-query-stream:
         optional: true
       sqlite3:
         optional: true
@@ -14465,7 +14462,7 @@ snapshots:
       '@babel/traverse': 7.28.0
       '@babel/types': 7.28.2
       convert-source-map: 2.0.0
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       gensync: 1.0.0-beta.2
       json5: 2.2.3
       semver: 6.3.1
@@ -14636,7 +14633,7 @@ snapshots:
       '@babel/parser': 7.28.0
       '@babel/template': 7.27.2
       '@babel/types': 7.28.2
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -15325,7 +15322,7 @@ snapshots:
   '@eslint/config-array@0.21.2':
     dependencies:
       '@eslint/object-schema': 2.1.7
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       minimatch: 3.1.5
     transitivePeerDependencies:
       - supports-color
@@ -15341,7 +15338,7 @@ snapshots:
   '@eslint/eslintrc@3.3.5':
     dependencies:
       ajv: 6.15.0
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       espree: 10.4.0
       globals: 14.0.0
       ignore: 5.3.2
@@ -16428,7 +16425,7 @@ snapshots:
 
   '@pm2/pm2-version-check@1.0.4':
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -16582,7 +16579,7 @@ snapshots:
       '@pnpm/store-controller-types': 1004.0.1
       '@pnpm/store.cafs': 1000.0.16
       mem: 8.1.1
-      path-temp: 2.1.0
+      path-temp: 2.1.1
       ramda: '@pnpm/ramda@0.28.1'
 
   '@pnpm/create-cafs-store@1000.0.33(@pnpm/logger@1001.0.1)':
@@ -16771,11 +16768,11 @@ snapshots:
       '@pnpm/store-controller-types': 1004.0.1
       '@reflink/reflink': 0.1.19
       '@zkochan/rimraf': 3.0.2
-      fs-extra: 11.3.0
+      fs-extra: 11.3.5
       make-empty-dir: 3.0.2
       p-limit: 3.1.0
-      path-temp: 2.1.0
-      rename-overwrite: 6.0.3
+      path-temp: 2.1.1
+      rename-overwrite: 6.0.6
       sanitize-filename: 1.6.3
 
   '@pnpm/fs.indexed-pkg-importer@1000.1.26(@pnpm/logger@1001.0.1)':
@@ -17335,7 +17332,7 @@ snapshots:
       '@zkochan/rimraf': 3.0.2
       is-gzip: 2.0.0
       p-limit: 3.1.0
-      rename-overwrite: 6.0.3
+      rename-overwrite: 6.0.6
       ssri: 10.0.5
       strip-bom: 4.0.0
 
@@ -17996,7 +17993,7 @@ snapshots:
   '@tus/server@1.10.2':
     dependencies:
       '@tus/utils': 0.5.1
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       lodash.throttle: 4.1.1
     optionalDependencies:
       '@redis/client': 1.6.1
@@ -18343,7 +18340,7 @@ snapshots:
       '@typescript-eslint/types': 8.61.1
       '@typescript-eslint/typescript-estree': 8.61.1(typescript@5.8.3)
       '@typescript-eslint/visitor-keys': 8.61.1
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       eslint: 9.39.4(jiti@1.21.7)
       typescript: 5.8.3
     transitivePeerDependencies:
@@ -18353,7 +18350,7 @@ snapshots:
     dependencies:
       '@typescript-eslint/tsconfig-utils': 8.61.1(typescript@5.8.3)
       '@typescript-eslint/types': 8.61.1
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       typescript: 5.8.3
     transitivePeerDependencies:
       - supports-color
@@ -18372,7 +18369,7 @@ snapshots:
       '@typescript-eslint/types': 8.61.1
       '@typescript-eslint/typescript-estree': 8.61.1(typescript@5.8.3)
       '@typescript-eslint/utils': 8.61.1(eslint@9.39.4(jiti@1.21.7))(typescript@5.8.3)
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       eslint: 9.39.4(jiti@1.21.7)
       ts-api-utils: 2.5.0(typescript@5.8.3)
       typescript: 5.8.3
@@ -18387,7 +18384,7 @@ snapshots:
       '@typescript-eslint/tsconfig-utils': 8.61.1(typescript@5.8.3)
       '@typescript-eslint/types': 8.61.1
       '@typescript-eslint/visitor-keys': 8.61.1
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       minimatch: 10.2.5
       semver: 7.8.5
       tinyglobby: 0.2.17
@@ -18468,7 +18465,7 @@ snapshots:
       '@ampproject/remapping': 2.3.0
       '@bcoe/v8-coverage': 1.0.2
       ast-v8-to-istanbul: 0.3.4
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       istanbul-lib-coverage: 3.2.2
       istanbul-lib-report: 3.0.1
       istanbul-lib-source-maps: 5.0.6
@@ -18487,7 +18484,7 @@ snapshots:
       '@ampproject/remapping': 2.3.0
       '@bcoe/v8-coverage': 1.0.2
       ast-v8-to-istanbul: 0.3.4
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       istanbul-lib-coverage: 3.2.2
       istanbul-lib-report: 3.0.1
       istanbul-lib-source-maps: 5.0.6
@@ -18911,7 +18908,7 @@ snapshots:
 
   agent-base@6.0.2:
     dependencies:
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -19117,7 +19114,7 @@ snapshots:
 
   async@2.6.4:
     dependencies:
-      lodash: 4.17.21
+      lodash: 4.18.1
 
   async@3.2.6: {}
 
@@ -19998,15 +19995,15 @@ snapshots:
     dependencies:
       ms: 2.1.3
 
-  debug@4.4.1(supports-color@5.5.0):
+  debug@4.4.1:
+    dependencies:
+      ms: 2.1.3
+
+  debug@4.4.3(supports-color@5.5.0):
     dependencies:
       ms: 2.1.3
     optionalDependencies:
       supports-color: 5.5.0
-
-  debug@4.4.3:
-    dependencies:
-      ms: 2.1.3
 
   decamelize-keys@1.1.1:
     dependencies:
@@ -20456,7 +20453,7 @@ snapshots:
       ajv: 6.15.0
       chalk: 4.1.2
       cross-spawn: 7.0.6
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       escape-string-regexp: 4.0.0
       eslint-scope: 8.4.0
       eslint-visitor-keys: 4.2.1
@@ -21063,7 +21060,7 @@ snapshots:
     dependencies:
       basic-ftp: 5.0.5
       data-uri-to-buffer: 6.0.2
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -21206,7 +21203,7 @@ snapshots:
 
   graphlib@2.1.8:
     dependencies:
-      lodash: 4.17.21
+      lodash: 4.18.1
 
   graphql-compose@9.1.0(graphql@16.14.2):
     dependencies:
@@ -21412,7 +21409,7 @@ snapshots:
     dependencies:
       '@tootallnate/once': 1.1.2
       agent-base: 6.0.2
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
     optional: true
@@ -21421,14 +21418,14 @@ snapshots:
     dependencies:
       '@tootallnate/once': 2.0.0
       agent-base: 6.0.2
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
   http-proxy-agent@7.0.2:
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -21442,14 +21439,14 @@ snapshots:
   https-proxy-agent@5.0.1:
     dependencies:
       agent-base: 6.0.2
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
     transitivePeerDependencies:
       - supports-color
 
   https-proxy-agent@7.0.6:
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -21564,7 +21561,7 @@ snapshots:
     dependencies:
       '@ioredis/commands': 1.10.0
       cluster-key-slot: 1.1.1
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       denque: 2.1.0
       redis-errors: 1.2.0
       redis-parser: 3.0.0
@@ -21698,7 +21695,7 @@ snapshots:
   istanbul-lib-source-maps@5.0.6:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.29
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       istanbul-lib-coverage: 3.2.2
     transitivePeerDependencies:
       - supports-color
@@ -21823,7 +21820,7 @@ snapshots:
       commander: 4.1.1
       graphlib: 2.1.8
       js-yaml: 3.14.1
-      lodash: 4.17.21
+      lodash: 4.18.1
       native-promise-only: 0.8.1
       path-loader: 1.0.12
       slash: 3.0.0
@@ -21914,12 +21911,12 @@ snapshots:
 
   kind-of@6.0.3: {}
 
-  knex-mock-client@3.0.2(knex@3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)):
+  knex-mock-client@3.0.2(knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)):
     dependencies:
-      knex: 3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+      knex: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
       lodash.clonedeep: 4.5.0
 
-  knex@3.2.10(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2):
+  knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -22769,7 +22766,7 @@ snapshots:
   nodemon@3.1.10:
     dependencies:
       chokidar: 3.6.0
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       ignore-by-default: 1.0.1
       minimatch: 3.1.2
       pstree.remy: 1.1.8
@@ -23061,7 +23058,7 @@ snapshots:
     dependencies:
       '@tootallnate/quickjs-emscripten': 0.23.0
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       get-uri: 6.0.5
       http-proxy-agent: 7.0.2
       https-proxy-agent: 7.0.6
@@ -23384,7 +23381,7 @@ snapshots:
 
   pm2-axon-rpc@0.7.1:
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -23392,7 +23389,7 @@ snapshots:
     dependencies:
       amp: 0.3.1
       amp-message: 0.1.2
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       escape-string-regexp: 4.0.0
     transitivePeerDependencies:
       - supports-color
@@ -23409,7 +23406,7 @@ snapshots:
   pm2-sysmonit@1.2.8:
     dependencies:
       async: 3.2.6
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       pidusage: 2.0.21
       systeminformation: 5.27.7
       tx2: 1.0.5
@@ -23431,7 +23428,7 @@ snapshots:
       commander: 2.15.1
       croner: 4.1.97
       dayjs: 1.11.15
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       enquirer: 2.3.6
       eventemitter2: 5.0.1
       fclone: 1.0.11
@@ -23801,7 +23798,7 @@ snapshots:
   proxy-agent@6.4.0:
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       http-proxy-agent: 7.0.2
       https-proxy-agent: 7.0.6
       lru-cache: 7.18.3
@@ -24033,7 +24030,7 @@ snapshots:
 
   require-in-the-middle@5.2.0:
     dependencies:
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       module-details-from-path: 1.0.4
       resolve: 1.22.10
     transitivePeerDependencies:
@@ -24122,7 +24119,7 @@ snapshots:
 
   rollup-plugin-esbuild@6.2.1(esbuild@0.25.8)(rollup@4.62.2):
     dependencies:
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       es-module-lexer: 1.7.0
       esbuild: 0.25.8
       get-tsconfig: 4.10.1
@@ -24662,7 +24659,7 @@ snapshots:
   socks-proxy-agent@6.2.1:
     dependencies:
       agent-base: 6.0.2
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       socks: 2.8.6
     transitivePeerDependencies:
       - supports-color
@@ -24671,7 +24668,7 @@ snapshots:
   socks-proxy-agent@8.0.5:
     dependencies:
       agent-base: 7.1.4
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       socks: 2.8.6
     transitivePeerDependencies:
       - supports-color
@@ -24998,7 +24995,7 @@ snapshots:
       cosmiconfig: 9.0.0(typescript@5.8.3)
       css-functions-list: 3.2.3
       css-tree: 3.1.0
-      debug: 4.4.3
+      debug: 4.4.3(supports-color@5.5.0)
       fast-glob: 3.3.3
       fastest-levenshtein: 1.0.16
       file-entry-cache: 11.1.3
@@ -25051,7 +25048,7 @@ snapshots:
     dependencies:
       component-emitter: 1.3.1
       cookiejar: 2.1.4
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       fast-safe-stringify: 2.1.1
       form-data: 4.0.6
       formidable: 3.5.4
@@ -25065,7 +25062,7 @@ snapshots:
     dependencies:
       component-emitter: 1.3.1
       cookiejar: 2.1.4
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       fast-safe-stringify: 2.1.1
       form-data: 4.0.4
       formidable: 2.1.5
@@ -25394,7 +25391,7 @@ snapshots:
       cac: 6.7.14
       chokidar: 4.0.3
       consola: 3.4.2
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       esbuild: 0.27.7
       fix-dts-default-cjs-exports: 1.0.1
       joycon: 3.1.1
@@ -25423,7 +25420,7 @@ snapshots:
       cac: 6.7.14
       chokidar: 4.0.3
       consola: 3.4.2
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       esbuild: 0.27.7
       fix-dts-default-cjs-exports: 1.0.1
       joycon: 3.1.1
@@ -25696,7 +25693,7 @@ snapshots:
   vite-node@0.34.7(@types/node@24.2.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       mlly: 1.7.4
       pathe: 1.1.2
       picocolors: 1.1.1
@@ -25715,7 +25712,7 @@ snapshots:
   vite-node@1.6.1(@types/node@24.2.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       pathe: 1.1.2
       picocolors: 1.1.1
       vite: 5.4.19(@types/node@24.2.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)
@@ -25733,7 +25730,7 @@ snapshots:
   vite-node@3.2.4(@types/node@22.19.21)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       es-module-lexer: 1.7.0
       pathe: 2.0.3
       vite: 7.0.6(@types/node@22.19.21)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)
@@ -25754,7 +25751,7 @@ snapshots:
   vite-node@3.2.4(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       es-module-lexer: 1.7.0
       pathe: 2.0.3
       vite: 7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)
@@ -25779,7 +25776,7 @@ snapshots:
       '@volar/typescript': 2.4.22
       '@vue/language-core': 2.2.0(typescript@5.8.3)
       compare-versions: 6.1.1
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       kolorist: 1.8.0
       local-pkg: 1.1.1
       magic-string: 0.30.17
@@ -25795,7 +25792,7 @@ snapshots:
     dependencies:
       '@antfu/utils': 0.7.10
       '@rollup/pluginutils': 5.2.0(rollup@4.62.2)
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       error-stack-parser-es: 0.1.5
       fs-extra: 11.3.0
       open: 10.2.0
@@ -25840,7 +25837,7 @@ snapshots:
 
   vite-tsconfig-paths@5.1.4(typescript@5.8.3)(vite@7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)):
     dependencies:
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       globrex: 0.1.2
       tsconfck: 3.1.6(typescript@5.8.3)
     optionalDependencies:
@@ -25918,7 +25915,7 @@ snapshots:
       '@vitest/utils': 1.6.1
       acorn-walk: 8.3.4
       chai: 4.5.0
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       execa: 8.0.1
       local-pkg: 0.5.1
       magic-string: 0.30.17
@@ -25956,7 +25953,7 @@ snapshots:
       '@vitest/spy': 3.2.6
       '@vitest/utils': 3.2.6
       chai: 5.2.1
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       expect-type: 1.2.2
       magic-string: 0.30.17
       pathe: 2.0.3
@@ -25999,7 +25996,7 @@ snapshots:
       '@vitest/spy': 3.2.6
       '@vitest/utils': 3.2.6
       chai: 5.2.1
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.1
       expect-type: 1.2.2
       magic-string: 0.30.17
       pathe: 2.0.3
@@ -26054,13 +26051,13 @@ snapshots:
 
   vue-eslint-parser@10.2.0(eslint@9.39.4(jiti@1.21.7)):
     dependencies:
-      debug: 4.4.1(supports-color@5.5.0)
+      debug: 4.4.3(supports-color@5.5.0)
       eslint: 9.39.4(jiti@1.21.7)
       eslint-scope: 8.4.0
       eslint-visitor-keys: 4.2.1
       espree: 10.4.0
       esquery: 1.6.0
-      semver: 7.7.2
+      semver: 7.8.5
     transitivePeerDependencies:
       - supports-color
 
