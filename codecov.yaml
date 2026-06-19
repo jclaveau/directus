@@ -1,3 +1,14 @@
+# Aggregate (non-flag) statuses — report-only too, so the overall codecov/patch +
+# codecov/project don't red feature PRs during the ramp. Flip to blocking later.
+coverage:
+  status:
+    patch:
+      default:
+        informational: true
+    project:
+      default:
+        informational: true
+
 flag_management:
   default_rules:
     carryforward: true
