@@ -117,7 +117,12 @@ export async function processPackages(): Promise<{
 		if (version) {
 			newVersion = version;
 		} else if (workspacePackage.manifest.version) {
-			newVersion = semver.inc(workspacePackage.manifest.version, isPrerelease ? 'prerelease' : 'patch', prereleaseId);
+			const release = isPrerelease ? 'prerelease' : 'patch';
+
+			// @types/semver's inc() overloads reject a `string | undefined` identifier, so split on presence
+			newVersion = prereleaseId
+				? semver.inc(workspacePackage.manifest.version, release, prereleaseId)
+				: semver.inc(workspacePackage.manifest.version, release);
 		}
 
 		if (!newVersion) return;
