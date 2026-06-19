@@ -4,17 +4,22 @@
 # pre-MSCL tag instead of tracking upstream `main`.
 #
 # hhh-v11 is DERIVED, never authored. It is force-rebuilt from:
-#   - `hhh-v11-base` = the upstream tag named in `.github/fork-base.txt`
-#     (overridable per-run via the `base_ref` input), refused if it is MSCL, plus
-#   - the TREE of open, non-draft `fork-feat: ` PRs, applied in dependency order
-#     (a stacked feature after its parent feature). Roots are based on
-#     `hhh-v11-base`; stacked features are based on their parent `fork-feat`
-#     branch, so the topo-merge orders them by base.
+#   - `upstream-<tag>` = the upstream tag named in `.github/fork-base.txt`
+#     materialized as a version-namespaced branch (e.g. `upstream-v11.10.1`),
+#     overridable per-run via the `base_ref` input, refused if it is MSCL, plus
+#   - the TREE of open, non-draft `<tag>-feat: ` PRs (e.g. `v11.10.1-feat: `),
+#     applied in dependency order (a stacked feature after its parent feature).
+#     Roots are based on `upstream-<tag>`; stacked features are based on their
+#     parent `<tag>-feat` branch, so the topo-merge orders them by base.
+#
+# Names carry the tag so each upstream base owns its own materialized branch and
+# its own feature stack: bumping fork-base.txt DUPLICATES the line rather than
+# re-anchoring the existing one.
 #
 # Fork-permanent: these features are NOT submitted upstream (upstream is MSCL).
 # A conflict here means the stack is STALE vs the base tag and must be re-rebased.
 #
-# Never commit directly to hhh-v11 / hhh-v11-base — this workflow force-pushes them.
+# Never commit directly to hhh-v11 / `upstream-<tag>` — this workflow force-pushes them.
 #
 # Policy (all-or-nothing):
 #   - The base tag is refused if it carries the MSCL license.
@@ -41,7 +46,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write # force-push hhh-v11-base + hhh-v11
+  contents: write # force-push upstream-<tag> + hhh-v11
   pull-requests: read # discover open PRs
   issues: write # report skipped features / red tests
 
@@ -68,7 +73,12 @@ jobs:
           BASE="${{ github.event.inputs.base_ref }}"
           [ -z "$BASE" ] && BASE="$(cat .github/fork-base.txt)"
           echo "ref=$BASE" >> "$GITHUB_OUTPUT"
-          echo "Anchoring on base tag: $BASE"
+          # Names are version-namespaced: each upstream base gets its own materialized
+          # branch + its own feature stack, so bumping the tag duplicates rather than
+          # re-anchors. A single tag bump in fork-base.txt switches all three.
+          echo "branch=upstream-$BASE" >> "$GITHUB_OUTPUT"
+          echo "prefix=$BASE-feat: " >> "$GITHUB_OUTPUT"
+          echo "Anchoring on base tag: $BASE (branch upstream-$BASE, PR prefix '$BASE-feat: ')"
 
       - name: Fetch base tag + refuse MSCL
         run: |
@@ -80,36 +90,37 @@ jobs:
             exit 1
           fi
 
-      - name: Materialize hhh-v11-base
+      - name: Materialize base branch
         run: |
-          git checkout -B hhh-v11-base "${{ steps.base.outputs.ref }}"
-          git push --force origin hhh-v11-base
+          git checkout -B "${{ steps.base.outputs.branch }}" "${{ steps.base.outputs.ref }}"
+          git push --force origin "${{ steps.base.outputs.branch }}"
 
-      - name: Discover open fork-feat PRs
+      - name: Discover open feature PRs
         id: discover
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Compose input = the `fork-feat: ` PR tree. Roots are based on
-          # `hhh-v11-base`; stacked features on a parent `fork-feat` branch (any
-          # base, ordered after their parent). `experiments` / `superseded`
-          # labels exclude an otherwise-matching feature.
+          # Compose input = the `<base>-feat: ` PR tree. Roots are based on the
+          # materialized base branch (`upstream-<base>`); stacked features on a
+          # parent `<base>-feat` branch (any base, ordered after their parent).
+          # `experiments` / `superseded` labels exclude an otherwise-matching feature.
           gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
-            --json number,headRefName,baseRefName,isDraft,title,labels \
-            --jq '[.[]
+            --json number,headRefName,baseRefName,isDraft,title,labels > prs_all.json
+          jq --arg p "${{ steps.base.outputs.prefix }}" \
+            '[.[]
               | select(.isDraft | not)
-              | select(.title | startswith("fork-feat: "))
+              | select(.title | startswith($p))
               | select(any(.labels[].name; . == "experiments" or . == "superseded") | not)]' \
-            > prs.json
+            prs_all.json > prs.json
           echo "Discovered PRs:"; jq -r '.[] | "  #\(.number) \(.baseRefName) <- \(.headRefName)"' prs.json
           echo "count=$(jq length prs.json)" >> "$GITHUB_OUTPUT"
 
       - name: Compose hhh-v11
         id: compose
         run: |
-          git checkout -B hhh-v11 hhh-v11-base
+          git checkout -B hhh-v11 "${{ steps.base.outputs.branch }}"
           # Apply the feature tree in dependency order. A PR whose base is
-          # `hhh-v11-base` (or any branch that is not itself a selected PR head)
+          # the materialized base branch (or any branch that is not itself a selected PR head)
           # is a ROOT, applied first. A feature stacked on another feature's head
           # waits until that parent merges. Skip-on-conflict, and cascade-skip the
           # descendants of a skipped feature so a conflicted parent can't slip in
@@ -122,7 +133,7 @@ jobs:
             progress=0; next=()
             for r in "${pending[@]}"; do
               num=$(jq -r .number <<<"$r"); head=$(jq -r .headRefName <<<"$r"); base=$(jq -r .baseRefName <<<"$r")
-              if [ "$base" = "hhh-v11-base" ] || [ -z "${IS_HEAD[$base]:-}" ]; then baseskip=0
+              if [ "$base" = "${{ steps.base.outputs.branch }}" ] || [ -z "${IS_HEAD[$base]:-}" ]; then baseskip=0
               elif [ "${STATUS[$base]:-}" = "merged" ]; then baseskip=0
               elif [ "${STATUS[$base]:-}" = "skipped" ]; then baseskip=1
               else next+=("$r"); continue; fi   # parent still pending — revisit next pass
@@ -180,7 +191,7 @@ jobs:
 
       - name: Publish hhh-v11
         if: success()
-        # Force: hhh-v11 is derived; hhh-v11-base is force-reset under it each run.
+        # Force: hhh-v11 is derived; upstream-<tag> is force-reset under it each run.
         run: git push --force origin hhh-v11
 
       - name: Report skipped features or failed tests
