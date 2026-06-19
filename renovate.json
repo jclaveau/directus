@@ -7,7 +7,7 @@
 		"replacements:all",
 		"workarounds:all"
 	],
-	"labels": [":robot: Dependency"],
+	"labels": [":robot: Dependency", "Run Blackbox"],
 	"dependencyDashboard": true,
 	"forkProcessing": "enabled",
 	"baseBranches": ["v11.10.1-prepare"],
