@@ -116,6 +116,8 @@ export default function applyQuery(
 					order = 'desc';
 				}
 
+				// @ts-expect-error (orderBy does not accept Knex.Raw for some reason, even though it is handled correctly)
+				// https://github.com/knex/knex/issues/5711
 				dbQuery.orderBy([{ column: columns[0]!, order }]);
 			}
 		} else {
