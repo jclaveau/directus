@@ -64,7 +64,7 @@ catalog:
   '@rollup/plugin-replace': 6.0.3
   '@rollup/plugin-terser': 1.0.0
   '@rollup/plugin-virtual': 3.0.2
-  '@rollup/plugin-yaml': 4.1.2
+  '@rollup/plugin-yaml': 5.0.0
   '@shopify/semaphore': 3.1.0
   '@sinclair/typebox': 0.34.49
   '@sindresorhus/slugify': 2.2.1
