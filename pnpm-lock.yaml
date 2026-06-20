@@ -703,8 +703,8 @@ catalogs:
       specifier: 8.22.0
       version: 8.22.0
     pinia:
-      specifier: 2.3.1
-      version: 2.3.1
+      specifier: 3.0.4
+      version: 3.0.4
     pino:
       specifier: 9.14.0
       version: 9.14.0
@@ -1596,7 +1596,7 @@ importers:
         version: 8.0.2
       '@pinia/testing':
         specifier: 'catalog:'
-        version: 1.0.3(pinia@2.3.1(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3)))
+        version: 1.0.3(pinia@3.0.4(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3)))
       '@popperjs/core':
         specifier: 'catalog:'
         version: 2.11.8
@@ -1776,7 +1776,7 @@ importers:
         version: 8.1.1
       pinia:
         specifier: 'catalog:'
-        version: 2.3.1(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
+        version: 3.0.4(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
       pretty-ms:
         specifier: 'catalog:'
         version: 9.3.0
@@ -2673,7 +2673,7 @@ importers:
         version: 3.0.0
       pinia:
         specifier: 'catalog:'
-        version: 2.3.1(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
+        version: 3.0.4(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
       tsup:
         specifier: 'catalog:'
         version: 8.5.1(@microsoft/api-extractor@7.52.10(@types/node@24.2.0))(jiti@1.21.7)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.8.3)(yaml@2.9.0)
@@ -2734,7 +2734,7 @@ importers:
         version: 6.0.1(vite@5.4.21(@types/node@24.2.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1))(vue@3.5.38(typescript@5.8.3))
       pinia:
         specifier: 'catalog:'
-        version: 2.3.1(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
+        version: 3.0.4(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
       rollup-plugin-node-externals:
         specifier: 'catalog:'
         version: 8.1.2(rollup@4.62.2)
@@ -6989,6 +6989,9 @@ packages:
 
   '@vue/devtools-api@6.6.4':
     resolution: {integrity: sha512-sGhTPMuXqZ1rVOk32RylztWkfXTRhuS7vgAKv0zjqk8gbsHkJ7xfFf+jbySxt7tWObEJwyKaHMikV/WGDiQm8g==}
+
+  '@vue/devtools-api@7.7.9':
+    resolution: {integrity: sha512-kIE8wvwlcZ6TJTbNeU2HQNtaxLx3a84aotTITUuL/4bzfPxzajGBOoqjMhwZJ8L9qFYDU/lAYMEEm11dnZOD6g==}
 
   '@vue/devtools-core@7.7.9':
     resolution: {integrity: sha512-48jrBSwG4GVQRvVeeXn9p9+dlx+ISgasM7SxZZKczseohB0cBz+ITKr4YbLWjmJdy45UHL7UMPlR4Y0CWTRcSQ==}
@@ -11309,11 +11312,11 @@ packages:
     resolution: {integrity: sha512-uB80kBFb/tfd68bVleG9T5GGsGPjJrLAUpR5PZIrhBnIaRTQRjqdJSsIKkOP6OAIFbj7GOrcudc5pNjZ+geV2g==}
     engines: {node: '>=6'}
 
-  pinia@2.3.1:
-    resolution: {integrity: sha512-khUlZSwt9xXCaTbbxFYBKDc/bWAGWJjOgvxETwkTN7KRm66EeT1ZdZj6i2ceh9sP2Pzqsbc704r2yngBrxBVug==}
+  pinia@3.0.4:
+    resolution: {integrity: sha512-l7pqLUFTI/+ESXn6k3nu30ZIzW5E2WZF/LaHJEpoq6ElcLD+wduZoB2kBN19du6K/4FDpPMazY2wJr+IndBtQw==}
     peerDependencies:
-      typescript: '>=4.4.4'
-      vue: ^2.7.0 || ^3.5.11
+      typescript: '>=4.5.0'
+      vue: ^3.5.11
     peerDependenciesMeta:
       typescript:
         optional: true
@@ -13626,17 +13629,6 @@ packages:
 
   vue-component-type-helpers@3.3.5:
     resolution: {integrity: sha512-Fe1jyPJoUGpJOYKOri44jduR7My4yYINOMJISuMAbmrs+L5LbIDUc8NTWZYY3EJLK0yPLuCmcd5zoCsE4k2/KA==}
-
-  vue-demi@0.14.10:
-    resolution: {integrity: sha512-nMZBOwuzabUO0nLgIcc6rycZEebF6eeUfaiQx9+WSk8e29IbLvPU9feI6tqW4kTo3hvoYAJkMh8n8D0fuISphg==}
-    engines: {node: '>=12'}
-    hasBin: true
-    peerDependencies:
-      '@vue/composition-api': ^1.0.0-rc.1
-      vue: ^3.0.0-0 || ^2.6.0
-    peerDependenciesMeta:
-      '@vue/composition-api':
-        optional: true
 
   vue-eslint-parser@10.2.0:
     resolution: {integrity: sha512-CydUvFOQKD928UzZhTp4pr2vWz1L+H99t7Pkln2QSPdvmURT0MoC4wUccfCnuEaihNsu9aYYyk+bep8rlfkUXw==}
@@ -16368,9 +16360,9 @@ snapshots:
 
   '@phc/format@1.0.0': {}
 
-  '@pinia/testing@1.0.3(pinia@2.3.1(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3)))':
+  '@pinia/testing@1.0.3(pinia@3.0.4(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3)))':
     dependencies:
-      pinia: 2.3.1(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
+      pinia: 3.0.4(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3))
 
   '@pinojs/redact@0.4.0': {}
 
@@ -18696,6 +18688,10 @@ snapshots:
       he: 1.2.0
 
   '@vue/devtools-api@6.6.4': {}
+
+  '@vue/devtools-api@7.7.9':
+    dependencies:
+      '@vue/devtools-kit': 7.7.9
 
   '@vue/devtools-core@7.7.9(vite@5.4.21(@types/node@24.2.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1))(vue@3.5.38(typescript@5.8.3))':
     dependencies:
@@ -23264,15 +23260,12 @@ snapshots:
 
   pify@4.0.1: {}
 
-  pinia@2.3.1(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3)):
+  pinia@3.0.4(typescript@5.8.3)(vue@3.5.38(typescript@5.8.3)):
     dependencies:
-      '@vue/devtools-api': 6.6.4
+      '@vue/devtools-api': 7.7.9
       vue: 3.5.38(typescript@5.8.3)
-      vue-demi: 0.14.10(vue@3.5.38(typescript@5.8.3))
     optionalDependencies:
       typescript: 5.8.3
-    transitivePeerDependencies:
-      - '@vue/composition-api'
 
   pino-abstract-transport@0.4.0:
     dependencies:
@@ -26044,10 +26037,6 @@ snapshots:
       pbf: 3.3.0
 
   vue-component-type-helpers@3.3.5: {}
-
-  vue-demi@0.14.10(vue@3.5.38(typescript@5.8.3)):
-    dependencies:
-      vue: 3.5.38(typescript@5.8.3)
 
   vue-eslint-parser@10.2.0(eslint@9.39.4(jiti@1.21.7)):
     dependencies:
