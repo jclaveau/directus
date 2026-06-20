@@ -511,8 +511,8 @@ catalogs:
       specifier: 4.6.13
       version: 4.6.13
     focus-trap:
-      specifier: 7.8.0
-      version: 7.8.0
+      specifier: 8.2.1
+      version: 8.2.1
     form-data:
       specifier: 4.0.6
       version: 4.0.6
@@ -1671,7 +1671,7 @@ importers:
         version: 13.9.0(vue@3.5.38(typescript@5.8.3))
       '@vueuse/integrations':
         specifier: 'catalog:'
-        version: 13.9.0(axios@1.18.0)(focus-trap@7.8.0)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.38(typescript@5.8.3))
+        version: 13.9.0(axios@1.18.0)(focus-trap@8.2.1)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.38(typescript@5.8.3))
       '@vueuse/router':
         specifier: 'catalog:'
         version: 13.9.0(vue-router@4.6.4(vue@3.5.38(typescript@5.8.3)))(vue@3.5.38(typescript@5.8.3))
@@ -1725,7 +1725,7 @@ importers:
         version: 4.6.13
       focus-trap:
         specifier: 'catalog:'
-        version: 7.8.0
+        version: 8.2.1
       geojson:
         specifier: 'catalog:'
         version: 0.5.0
@@ -9064,8 +9064,8 @@ packages:
   focus-trap@5.1.0:
     resolution: {integrity: sha512-CkB/nrO55069QAUjWFBpX6oc+9V90Qhgpe6fBWApzruMq5gnlh90Oo7iSSDK7pKiV5ugG6OY2AXM5mxcmL3lwQ==}
 
-  focus-trap@7.8.0:
-    resolution: {integrity: sha512-/yNdlIkpWbM0ptxno3ONTuf+2g318kh2ez3KSeZN5dZ8YC6AAmgeWz+GasYYiBJPFaYcSAPeu4GfhUaChzIJXA==}
+  focus-trap@8.2.1:
+    resolution: {integrity: sha512-6CxwrrFRquH7pDXb1mWxudkU9LSfYBMRZutpgddb2o6iwCk7cIRrBhyY3c8SGKcmIKdeMTrGSNg4Bedh2RSF/w==}
 
   follow-redirects@1.15.11:
     resolution: {integrity: sha512-deG2P0JfjrTxl50XGCDyfI97ZGVCxIpfKYmfyrQ54n5FO/0gfIES8C/Psl6kWVDolizcaaxZJnTS0QSMxvnsBQ==}
@@ -18788,14 +18788,14 @@ snapshots:
       '@vueuse/shared': 13.9.0(vue@3.5.38(typescript@5.8.3))
       vue: 3.5.38(typescript@5.8.3)
 
-  '@vueuse/integrations@13.9.0(axios@1.18.0)(focus-trap@7.8.0)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.38(typescript@5.8.3))':
+  '@vueuse/integrations@13.9.0(axios@1.18.0)(focus-trap@8.2.1)(qrcode@1.5.4)(sortablejs@1.14.0)(vue@3.5.38(typescript@5.8.3))':
     dependencies:
       '@vueuse/core': 13.9.0(vue@3.5.38(typescript@5.8.3))
       '@vueuse/shared': 13.9.0(vue@3.5.38(typescript@5.8.3))
       vue: 3.5.38(typescript@5.8.3)
     optionalDependencies:
       axios: 1.18.0
-      focus-trap: 7.8.0
+      focus-trap: 8.2.1
       qrcode: 1.5.4
       sortablejs: 1.14.0
 
@@ -20841,7 +20841,7 @@ snapshots:
       tabbable: 4.0.0
       xtend: 4.0.2
 
-  focus-trap@7.8.0:
+  focus-trap@8.2.1:
     dependencies:
       tabbable: 6.4.0
 
