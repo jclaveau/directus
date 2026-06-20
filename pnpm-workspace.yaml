@@ -67,7 +67,7 @@ catalog:
   '@rollup/plugin-yaml': 4.1.2
   '@shopify/semaphore': 3.1.0
   '@sinclair/typebox': 0.34.49
-  '@sindresorhus/slugify': 2.2.1
+  '@sindresorhus/slugify': 3.0.0
   '@smithy/node-http-handler': 4.8.1
   '@supabase/storage-js': 2.108.2
   '@tinymce/tinymce-vue': 6.3.0
