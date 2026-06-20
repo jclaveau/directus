@@ -391,8 +391,8 @@ catalogs:
       specifier: 3.1.2
       version: 3.1.2
     camelcase:
-      specifier: 8.0.0
-      version: 8.0.0
+      specifier: 9.0.0
+      version: 9.0.0
     caret-pos:
       specifier: 2.0.0
       version: 2.0.0
@@ -1066,7 +1066,7 @@ importers:
         version: 3.1.2
       camelcase:
         specifier: 'catalog:'
-        version: 8.0.0
+        version: 9.0.0
       chalk:
         specifier: 'catalog:'
         version: 5.6.2
@@ -7646,6 +7646,10 @@ packages:
   camelcase@8.0.0:
     resolution: {integrity: sha512-8WB3Jcas3swSvjIeA2yvCJ+Miyz5l1ZmB6HFb9R1317dt9LCQoswg/BGrmAmkWVEszSrrg4RwmO46qIm2OEnSA==}
     engines: {node: '>=16'}
+
+  camelcase@9.0.0:
+    resolution: {integrity: sha512-TO9xmyXTZ9HUHI8M1OnvExxYB0eYVS/1e5s7IDMTAoIcwUd+aNcFODs6Xk83mobk0velyHFQgA1yIrvYc6wclw==}
+    engines: {node: '>=20'}
 
   can-link@2.0.0:
     resolution: {integrity: sha512-2W2yAdkQQrrL0WM6BrGqkrLkWlVon8riZch0EBNklid2CZsOzZnqR5HE7W3Q3BrMWUop+9I2dpjyZqhSOYh6Yg==}
@@ -19447,6 +19451,8 @@ snapshots:
   camelcase@6.3.0: {}
 
   camelcase@8.0.0: {}
+
+  camelcase@9.0.0: {}
 
   can-link@2.0.0: {}
 
