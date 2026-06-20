@@ -889,8 +889,8 @@ catalogs:
       specifier: 4.4.3
       version: 4.4.3
     zod-validation-error:
-      specifier: 4.0.2
-      version: 4.0.2
+      specifier: 5.0.0
+      version: 5.0.0
 
 overrides:
   tar-fs: 2.1.4
@@ -1309,7 +1309,7 @@ importers:
         version: 4.4.3
       zod-validation-error:
         specifier: 'catalog:'
-        version: 4.0.2(zod@4.4.3)
+        version: 5.0.0(zod@4.4.3)
     devDependencies:
       '@directus/tsconfig':
         specifier: 'catalog:'
@@ -13933,8 +13933,8 @@ packages:
   zhead@2.2.4:
     resolution: {integrity: sha512-8F0OI5dpWIA5IGG5NHUg9staDwz/ZPxZtvGVf01j7vHqSyZ0raHY+78atOVxRqb73AotX22uV1pXt3gYSstGag==}
 
-  zod-validation-error@4.0.2:
-    resolution: {integrity: sha512-Q6/nZLe6jxuU80qb/4uJ4t5v2VEZ44lzQjPDhYJNztRQ4wyWc6VF3D3Kb/fAuPetZQnhS3hnajCf9CsWesghLQ==}
+  zod-validation-error@5.0.0:
+    resolution: {integrity: sha512-hmk+pkyKq7Q71PiWVSDUc3VfpzpvcRHZ3QPw9yEMVvmtCekaMeOHnbr3WbxfrgEnQTv6haGP4cmv0Ojmihzsxw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -26307,7 +26307,7 @@ snapshots:
 
   zhead@2.2.4: {}
 
-  zod-validation-error@4.0.2(zod@4.4.3):
+  zod-validation-error@5.0.0(zod@4.4.3):
     dependencies:
       zod: 4.4.3
 
