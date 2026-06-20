@@ -227,7 +227,7 @@ catalog:
   nanoid: 5.1.14
   node-machine-id: 1.1.12
   node-schedule: 2.1.1
-  nodemailer: 7.0.13
+  nodemailer: 9.0.1
   nodemailer-mailgun-transport: 2.1.5
   npm-watch: 0.13.0
   object-hash: 3.0.0
