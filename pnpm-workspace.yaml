@@ -191,7 +191,7 @@ catalog:
   helmet: 8.2.0
   histoire: 0.17.17
   html-entities: 2.6.0
-  icc: 3.0.0
+  icc: 4.0.0
   inquirer: 12.11.1
   ioredis: 5.11.1
   ip-matching: 2.1.2
