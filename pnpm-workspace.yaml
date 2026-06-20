@@ -269,7 +269,7 @@ catalog:
   snappy: 7.3.3
   sqlite3: 5.1.7
   stream-json: 1.9.1
-  string-width: 7.2.0
+  string-width: 8.2.1
   strip-ansi: 7.2.0
   stylelint: 16.26.1
   stylelint-config-standard: 39.0.1

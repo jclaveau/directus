@@ -787,8 +787,8 @@ catalogs:
       specifier: 1.9.1
       version: 1.9.1
     string-width:
-      specifier: 7.2.0
-      version: 7.2.0
+      specifier: 8.2.1
+      version: 8.2.1
     strip-ansi:
       specifier: 7.2.0
       version: 7.2.0
@@ -1791,7 +1791,7 @@ importers:
         version: 7.8.5
       string-width:
         specifier: 'catalog:'
-        version: 7.2.0
+        version: 8.2.1
       tinymce:
         specifier: 'catalog:'
         version: 6.8.6
@@ -24923,7 +24923,12 @@ snapshots:
     dependencies:
       emoji-regex: 10.4.0
       get-east-asian-width: 1.3.0
-      strip-ansi: 7.1.0
+      strip-ansi: 7.2.0
+
+  string-width@8.2.1:
+    dependencies:
+      get-east-asian-width: 1.6.0
+      strip-ansi: 7.2.0
 
   string-width@8.2.1:
     dependencies:
@@ -26309,7 +26314,7 @@ snapshots:
     dependencies:
       ansi-styles: 6.2.1
       string-width: 7.2.0
-      strip-ansi: 7.1.0
+      strip-ansi: 7.2.0
 
   wrappy@1.0.2: {}
 
