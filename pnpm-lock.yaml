@@ -301,8 +301,8 @@ catalogs:
       specifier: 2.1.8
       version: 2.1.8
     '@types/nodemailer':
-      specifier: 6.4.24
-      version: 6.4.24
+      specifier: 8.0.1
+      version: 8.0.1
     '@types/object-hash':
       specifier: 3.0.6
       version: 3.0.6
@@ -1391,7 +1391,7 @@ importers:
         version: 2.1.8
       '@types/nodemailer':
         specifier: 'catalog:'
-        version: 6.4.24
+        version: 8.0.1
       '@types/object-hash':
         specifier: 'catalog:'
         version: 3.0.6
@@ -2773,7 +2773,7 @@ importers:
         version: 7946.0.16
       '@types/nodemailer':
         specifier: 'catalog:'
-        version: 6.4.24
+        version: 8.0.1
       '@types/ws':
         specifier: 'catalog:'
         version: 8.18.1
@@ -6693,8 +6693,8 @@ packages:
   '@types/node@24.2.0':
     resolution: {integrity: sha512-3xyG3pMCq3oYCNg7/ZP+E1ooTaGB4cG8JWRsqqOYQdbWNY4zbaV0Ennrd7stjiJEFZCaybcIgpTjJWHRfBSIDw==}
 
-  '@types/nodemailer@6.4.24':
-    resolution: {integrity: sha512-Ww4u0rT9wQNXh4JiQaIwx3QWdcOFXzOjQA2zc+jtFYNmQiT4mIUqcDin51bDFdkzKubFnQCZNK7FIHlPKQ/q9w==}
+  '@types/nodemailer@8.0.1':
+    resolution: {integrity: sha512-PxpaInm8V1JQDd4j0ds5HfvWQk8JupS1C0Picb96QJsrrRDjBH+DlK7L4ZdNSqNULhiZRQHc40nLVShaGxXAMw==}
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
@@ -18053,7 +18053,7 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 24.2.0
 
   '@types/content-disposition@0.5.9': {}
 
@@ -18207,9 +18207,9 @@ snapshots:
     dependencies:
       undici-types: 7.10.0
 
-  '@types/nodemailer@6.4.24':
+  '@types/nodemailer@8.0.1':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 24.2.0
 
   '@types/normalize-package-data@2.4.4': {}
 
@@ -18233,7 +18233,7 @@ snapshots:
 
   '@types/readable-stream@4.0.21':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 24.2.0
     optional: true
 
   '@types/request@2.48.13':
@@ -18270,7 +18270,7 @@ snapshots:
 
   '@types/ssri@7.1.5':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 24.2.0
 
   '@types/stream-chain@2.1.0':
     dependencies:
