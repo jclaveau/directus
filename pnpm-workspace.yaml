@@ -127,7 +127,7 @@ catalog:
   '@vueuse/core': 13.9.0
   '@vueuse/integrations': 13.9.0
   '@vueuse/router': 13.9.0
-  apexcharts: 4.7.0
+  apexcharts: 5.15.2
   argon2: 0.44.0
   async: 3.2.6
   async-mutex: 0.5.0
