@@ -817,8 +817,8 @@ catalogs:
       specifier: 7.5.16
       version: 7.5.16
     tedious:
-      specifier: 18.6.2
-      version: 18.6.2
+      specifier: 19.2.1
+      version: 19.2.1
     tinymce:
       specifier: 6.8.6
       version: 6.8.6
@@ -1177,7 +1177,7 @@ importers:
         version: 5.6.0
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1)
       ldapjs:
         specifier: 'catalog:'
         version: 2.3.3
@@ -1430,7 +1430,7 @@ importers:
         version: 7.2.0
       knex-mock-client:
         specifier: 'catalog:'
-        version: 3.0.2(knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2))
+        version: 3.0.2(knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1))
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
@@ -1458,7 +1458,7 @@ importers:
         version: 5.1.7
       tedious:
         specifier: 'catalog:'
-        version: 18.6.2
+        version: 19.2.1
 
   app:
     devDependencies:
@@ -2064,7 +2064,7 @@ importers:
         version: 3.2.6(vitest@3.2.6(@types/node@22.19.21)(happy-dom@18.0.1)(jiti@1.21.7)(jsdom@20.0.3)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0))
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1)
       pino:
         specifier: 'catalog:'
         version: 9.14.0
@@ -2348,7 +2348,7 @@ importers:
     dependencies:
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1)
     devDependencies:
       '@directus/tsconfig':
         specifier: 'catalog:'
@@ -2813,7 +2813,7 @@ importers:
         version: 1.0.5
       knex:
         specifier: 'catalog:'
-        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1)
       typescript:
         specifier: 'catalog:'
         version: 5.8.3
@@ -3050,7 +3050,7 @@ importers:
         version: 2.3.0
       knex:
         specifier: 3.1.0
-        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+        version: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1)
       listr2:
         specifier: 8.3.3
         version: 8.3.3
@@ -7498,8 +7498,8 @@ packages:
   bl@4.1.0:
     resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
 
-  bl@6.1.1:
-    resolution: {integrity: sha512-yYc8UIHrd1ZTLgNBIE7JjMzUPZH+dec3q7nWkrSHEbtvkQ3h6WKC63W9K5jthcL5EXFyMuWYq+2pq5WMSIgFHw==}
+  bl@6.1.6:
+    resolution: {integrity: sha512-jLsPgN/YSvPUg9UX0Kd73CXpm2Psg9FxMeCSXnk3WBO3CMT10JMwijubhGfHCnFu6TPn1ei3b975dxv7K2pWVg==}
 
   bluebird@3.7.2:
     resolution: {integrity: sha512-XpNj6GDQzdfW+r2Wnn7xiSAd7TM3jzkxGXBGTtWKuSXv1xUV+azxAm8jdWZN06QTQk+2N2XB9jRDkvbmQmcRtg==}
@@ -12945,9 +12945,9 @@ packages:
   tdigest@0.1.2:
     resolution: {integrity: sha512-+G0LLgjjo9BZX2MfdvPfH+MKLCrxlXSYec5DaPYP1fe6Iyhf0/fSmJ0bFiZ1F8BT6cGXl2LpltQptzjXKWEkKA==}
 
-  tedious@18.6.2:
-    resolution: {integrity: sha512-g7jC56o3MzLkE3lHkaFe2ZdOVFBahq5bsB60/M4NYUbocw/MCrS89IOEQUFr+ba6pb8ZHczZ/VqCyYeYq0xBAg==}
-    engines: {node: '>=18'}
+  tedious@19.2.1:
+    resolution: {integrity: sha512-pk1Q16Yl62iocuQB+RWbg6rFUFkIyzqOFQ6NfysCltRvQqKwfurgj8v/f2X+CKvDhSL4IJ0cCOfCHDg9PWEEYA==}
+    engines: {node: '>=18.17'}
 
   teeny-request@9.0.0:
     resolution: {integrity: sha512-resvxdc6Mgb7YEThw6G6bExlXKkv6+YbuzGg9xuXxSgxJF7Ozs+o8Y9+2R3sArdWdW8nOokoQb1yrpFB0pQK2g==}
@@ -18053,7 +18053,7 @@ snapshots:
 
   '@types/connect@3.4.38':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 24.2.0
 
   '@types/content-disposition@0.5.9': {}
 
@@ -18233,7 +18233,7 @@ snapshots:
 
   '@types/readable-stream@4.0.21':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 24.2.0
     optional: true
 
   '@types/request@2.48.13':
@@ -18270,7 +18270,7 @@ snapshots:
 
   '@types/ssri@7.1.5':
     dependencies:
-      '@types/node': 22.19.21
+      '@types/node': 24.2.0
 
   '@types/stream-chain@2.1.0':
     dependencies:
@@ -19222,7 +19222,7 @@ snapshots:
       inherits: 2.0.4
       readable-stream: 3.6.2
 
-  bl@6.1.1:
+  bl@6.1.6:
     dependencies:
       '@types/readable-stream': 4.0.21
       buffer: 6.0.3
@@ -21911,12 +21911,12 @@ snapshots:
 
   kind-of@6.0.3: {}
 
-  knex-mock-client@3.0.2(knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)):
+  knex-mock-client@3.0.2(knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1)):
     dependencies:
-      knex: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2)
+      knex: 3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1)
       lodash.clonedeep: 4.5.0
 
-  knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@18.6.2):
+  knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@5.1.7)(tedious@19.2.1):
     dependencies:
       colorette: 2.0.19
       commander: 10.0.1
@@ -21936,7 +21936,7 @@ snapshots:
       mysql2: 3.22.5(@types/node@22.19.21)
       pg: 8.22.0
       sqlite3: 5.1.7
-      tedious: 18.6.2
+      tedious: 19.2.1
     transitivePeerDependencies:
       - supports-color
 
@@ -25221,15 +25221,15 @@ snapshots:
     dependencies:
       bintrees: 1.0.2
 
-  tedious@18.6.2:
+  tedious@19.2.1:
     dependencies:
       '@azure/core-auth': 1.10.0
       '@azure/identity': 4.10.2
       '@azure/keyvault-keys': 4.10.0
       '@js-joda/core': 5.6.5
-      '@types/node': 22.19.21
-      bl: 6.1.1
-      iconv-lite: 0.6.3
+      '@types/node': 24.2.0
+      bl: 6.1.6
+      iconv-lite: 0.7.2
       js-md4: 0.3.2
       native-duplexpair: 1.0.0
       sprintf-js: 1.1.3
