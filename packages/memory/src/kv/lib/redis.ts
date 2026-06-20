@@ -68,7 +68,9 @@ export class KvRedis implements Kv {
 		if (typeof value === 'number') {
 			await this.redis.set(withNamespace(key, this.namespace), value);
 		} else {
-			let binaryArray = serialize(value);
+			// serialize() infers Uint8Array<ArrayBuffer> (TextEncoder) but compress() returns
+			// Uint8Array<ArrayBufferLike>; widen so the reassignment below type-checks under TS 5.9
+			let binaryArray: Uint8Array = serialize(value);
 
 			if (this.compression === true && binaryArray.byteLength >= this.compressionMinSize) {
 				binaryArray = await compress(binaryArray);
