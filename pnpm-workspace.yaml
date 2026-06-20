@@ -303,7 +303,7 @@ catalog:
   wellknown: 0.5.0
   ws: 8.21.0
   zod: 4.4.3
-  zod-validation-error: 4.0.2
+  zod-validation-error: 5.0.0
 
 catalogMode: strict
 
