@@ -466,8 +466,8 @@ catalogs:
       specifier: 2.0.0
       version: 2.0.0
     esbuild:
-      specifier: 0.25.8
-      version: 0.25.8
+      specifier: 0.28.1
+      version: 0.28.1
     esbuild-plugin-replace:
       specifier: 1.4.0
       version: 1.4.0
@@ -2170,7 +2170,7 @@ importers:
         version: 14.0.3
       esbuild:
         specifier: 'catalog:'
-        version: 0.25.8
+        version: 0.28.1
       execa:
         specifier: 'catalog:'
         version: 9.6.1
@@ -2188,7 +2188,7 @@ importers:
         version: 4.62.2
       rollup-plugin-esbuild:
         specifier: 'catalog:'
-        version: 6.2.1(esbuild@0.25.8)(rollup@4.62.2)
+        version: 6.2.1(esbuild@0.28.1)(rollup@4.62.2)
       rollup-plugin-styler:
         specifier: 'catalog:'
         version: 2.0.0(rollup@4.62.2)(typescript@5.9.3)
@@ -2691,10 +2691,10 @@ importers:
         version: 3.0.0
       esbuild:
         specifier: 'catalog:'
-        version: 0.25.8
+        version: 0.28.1
       esbuild-yaml:
         specifier: 'catalog:'
-        version: 3.2.1(esbuild@0.25.8)
+        version: 3.2.1(esbuild@0.28.1)
       tsup:
         specifier: 'catalog:'
         version: 8.5.1(@microsoft/api-extractor@7.52.10(@types/node@24.2.0))(jiti@1.21.7)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)(yaml@2.9.0)
@@ -20272,9 +20272,9 @@ snapshots:
     dependencies:
       magic-string: 0.25.9
 
-  esbuild-yaml@3.2.1(esbuild@0.25.8):
+  esbuild-yaml@3.2.1(esbuild@0.28.1):
     dependencies:
-      esbuild: 0.25.8
+      esbuild: 0.28.1
       yaml: 2.8.2
 
   esbuild@0.21.5:
@@ -24117,11 +24117,11 @@ snapshots:
       '@rolldown/binding-win32-ia32-msvc': 1.0.0-beta.9-commit.d91dfb5
       '@rolldown/binding-win32-x64-msvc': 1.0.0-beta.9-commit.d91dfb5
 
-  rollup-plugin-esbuild@6.2.1(esbuild@0.25.8)(rollup@4.62.2):
+  rollup-plugin-esbuild@6.2.1(esbuild@0.28.1)(rollup@4.62.2):
     dependencies:
       debug: 4.4.1
       es-module-lexer: 1.7.0
-      esbuild: 0.25.8
+      esbuild: 0.28.1
       get-tsconfig: 4.10.1
       rollup: 4.62.2
       unplugin-utils: 0.2.4
