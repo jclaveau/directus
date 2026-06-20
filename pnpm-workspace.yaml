@@ -298,7 +298,7 @@ catalog:
   vue-i18n: 11.4.6
   vue-router: 4.6.4
   vue-tsc: 3.3.5
-  vue-virtual-scroller: 2.0.1
+  vue-virtual-scroller: 3.0.4
   vuedraggable: 4.1.0
   wellknown: 0.5.0
   ws: 8.21.0
