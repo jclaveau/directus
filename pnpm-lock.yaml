@@ -553,8 +553,8 @@ catalogs:
       specifier: 2.6.0
       version: 2.6.0
     icc:
-      specifier: 3.0.0
-      version: 3.0.0
+      specifier: 4.0.0
+      version: 4.0.0
     inquirer:
       specifier: 12.11.1
       version: 12.11.1
@@ -1144,7 +1144,7 @@ importers:
         version: 8.2.0
       icc:
         specifier: 'catalog:'
-        version: 3.0.0
+        version: 4.0.0
       inquirer:
         specifier: 'catalog:'
         version: 12.11.1(@types/node@22.19.21)
@@ -9588,9 +9588,9 @@ packages:
   hyperid@3.3.0:
     resolution: {integrity: sha512-7qhCVT4MJIoEsNcbhglhdmBKb09QtcmJNiIQGq7js/Khf5FtQQ9bzcAuloeqBeee7XD7JqDeve9KNlQya5tSGQ==}
 
-  icc@3.0.0:
-    resolution: {integrity: sha512-UJ4TQuwih9YRoUIR/nGluSUXwPEPOQVFIcFziERtAv0OGWAeEg7E5FviTVLfI1b2eOVRVtqhLfosdOQHYO7EpA==}
-    engines: {node: '>=14'}
+  icc@4.0.0:
+    resolution: {integrity: sha512-gtkfKMx/NzH2xWBz2LQ9PJgEnuQZSemzb+UVug5ZeJIpXv/rYKNcqPx+wMvvNnKufG6JeFR8QId6TwneSKsuFQ==}
+    engines: {node: '>=20'}
 
   iceberg-js@0.8.1:
     resolution: {integrity: sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA==}
@@ -21468,7 +21468,7 @@ snapshots:
       uuid: 8.3.2
       uuid-parse: 1.1.0
 
-  icc@3.0.0: {}
+  icc@4.0.0: {}
 
   iceberg-js@0.8.1: {}
 
