@@ -3070,8 +3070,8 @@ importers:
         specifier: 11.1.1
         version: 11.1.1
       vite-tsconfig-paths:
-        specifier: 5.1.4
-        version: 5.1.4(typescript@5.8.3)(vite@7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0))
+        specifier: 6.1.1
+        version: 6.1.1(typescript@5.8.3)(vite@7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0))
       vitest:
         specifier: 1.6.1
         version: 1.6.1(@types/node@24.2.0)(happy-dom@18.0.1)(jsdom@20.0.3)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)
@@ -13451,13 +13451,10 @@ packages:
     peerDependencies:
       vite: ^3.0.0-0 || ^4.0.0-0 || ^5.0.0-0 || ^6.0.0-0 || ^7.0.0-0
 
-  vite-tsconfig-paths@5.1.4:
-    resolution: {integrity: sha512-cYj0LRuLV2c2sMqhqhGpaO3LretdtMn/BVX4cPLanIZuwwrkVl+lK84E/miEXkCHWXuq65rhNN4rXsBcOB3S4w==}
+  vite-tsconfig-paths@6.1.1:
+    resolution: {integrity: sha512-2cihq7zliibCCZ8P9cKJrQBkfgdvcFkOOc3Y02o3GWUDLgqjWsZudaoiuOwO/gzTzy17cS5F7ZPo4bsnS4DGkg==}
     peerDependencies:
       vite: '*'
-    peerDependenciesMeta:
-      vite:
-        optional: true
 
   vite@5.4.19:
     resolution: {integrity: sha512-qO3aKv3HoQC8QKiNSTuUM1l9o/XX3+c+VTgLHbJWHZGeTPVAg2XwazI9UWzoxjIJCGCV2zU60uqMzjeLZuULqA==}
@@ -21439,7 +21436,7 @@ snapshots:
   https-proxy-agent@5.0.1:
     dependencies:
       agent-base: 6.0.2
-      debug: 4.4.1
+      debug: 4.4.3(supports-color@5.5.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -21695,7 +21692,7 @@ snapshots:
   istanbul-lib-source-maps@5.0.6:
     dependencies:
       '@jridgewell/trace-mapping': 0.3.29
-      debug: 4.4.1
+      debug: 4.4.3(supports-color@5.5.0)
       istanbul-lib-coverage: 3.2.2
     transitivePeerDependencies:
       - supports-color
@@ -25693,7 +25690,7 @@ snapshots:
   vite-node@0.34.7(@types/node@24.2.0)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1
+      debug: 4.4.3(supports-color@5.5.0)
       mlly: 1.7.4
       pathe: 1.1.2
       picocolors: 1.1.1
@@ -25730,7 +25727,7 @@ snapshots:
   vite-node@3.2.4(@types/node@22.19.21)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1
+      debug: 4.4.3(supports-color@5.5.0)
       es-module-lexer: 1.7.0
       pathe: 2.0.3
       vite: 7.0.6(@types/node@22.19.21)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)
@@ -25751,7 +25748,7 @@ snapshots:
   vite-node@3.2.4(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0):
     dependencies:
       cac: 6.7.14
-      debug: 4.4.1
+      debug: 4.4.3(supports-color@5.5.0)
       es-module-lexer: 1.7.0
       pathe: 2.0.3
       vite: 7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)
@@ -25835,12 +25832,11 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  vite-tsconfig-paths@5.1.4(typescript@5.8.3)(vite@7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)):
+  vite-tsconfig-paths@6.1.1(typescript@5.8.3)(vite@7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)):
     dependencies:
-      debug: 4.4.1
+      debug: 4.4.3(supports-color@5.5.0)
       globrex: 0.1.2
       tsconfck: 3.1.6(typescript@5.8.3)
-    optionalDependencies:
       vite: 7.0.6(@types/node@24.2.0)(jiti@1.21.7)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.43.1)(tsx@4.22.4)(yaml@2.9.0)
     transitivePeerDependencies:
       - supports-color
