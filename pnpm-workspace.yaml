@@ -57,17 +57,17 @@ catalog:
   '@pnpm/workspace.find-packages': 1000.0.65
   '@pnpm/workspace.pkgs-graph': 1000.0.39
   '@popperjs/core': 2.11.8
-  '@rollup/plugin-alias': 5.1.1
-  '@rollup/plugin-commonjs': 29.0.3
+  '@rollup/plugin-alias': 6.0.0
+  '@rollup/plugin-commonjs': 28.0.9
   '@rollup/plugin-json': 6.1.0
   '@rollup/plugin-node-resolve': 16.0.3
   '@rollup/plugin-replace': 6.0.3
-  '@rollup/plugin-terser': 1.0.0
+  '@rollup/plugin-terser': 0.4.4
   '@rollup/plugin-virtual': 3.0.2
-  '@rollup/plugin-yaml': 5.0.0
+  '@rollup/plugin-yaml': 4.1.2
   '@shopify/semaphore': 3.1.0
   '@sinclair/typebox': 0.34.49
-  '@sindresorhus/slugify': 3.0.0
+  '@sindresorhus/slugify': 2.2.1
   '@smithy/node-http-handler': 4.8.1
   '@supabase/storage-js': 2.108.2
   '@tinymce/tinymce-vue': 6.3.0
@@ -86,7 +86,7 @@ catalog:
   '@types/deep-diff': 1.0.5
   '@types/destroy': 1.0.3
   '@types/diacritics': 1.3.3
-  '@types/diff': 8.0.0
+  '@types/diff': 7.0.2
   '@types/encodeurl': 1.0.3
   '@types/express': 4.17.25
   '@types/express-serve-static-core': 4.19.8
@@ -127,7 +127,7 @@ catalog:
   '@vueuse/core': 13.9.0
   '@vueuse/integrations': 13.9.0
   '@vueuse/router': 13.9.0
-  apexcharts: 5.15.2
+  apexcharts: 4.7.0
   argon2: 0.44.0
   async: 3.2.6
   async-mutex: 0.5.0
@@ -140,7 +140,7 @@ catalog:
   camelcase: 8.0.0
   caret-pos: 2.0.0
   chalk: 5.6.2
-  chokidar: 5.0.0
+  chokidar: 4.0.3
   chroma-js: 3.2.0
   codemirror: 5.65.21
   color: 5.0.3
@@ -151,18 +151,18 @@ catalog:
   copyfiles: 2.4.1
   cors: 2.8.6
   cron-parser: 4.9.0
-  cropperjs: 2.1.1
+  cropperjs: 1.6.2
   date-fns: 4.4.0
   decamelize: 6.0.1
   deep-diff: 1.0.2
   destroy: 1.2.0
   diacritics: 1.3.0
-  diff: 9.0.0
+  diff: 7.0.0
   dompurify: 3.4.11
   dotenv: 17.4.2
   editorjs-toggle-block: 0.3.16
   encodeurl: 2.0.0
-  esbuild: 0.28.1
+  esbuild: 0.25.8
   esbuild-plugin-replace: 1.4.0
   esbuild-yaml: 3.2.1
   escape-string-regexp: 5.0.0
@@ -183,7 +183,7 @@ catalog:
   geojson: 0.5.0
   get-port: 7.2.0
   glob-to-regexp: 0.4.1
-  globals: 17.6.0
+  globals: 16.5.0
   graphql: 16.14.2
   graphql-compose: 9.1.0
   graphql-ws: 6.0.8
@@ -191,11 +191,11 @@ catalog:
   helmet: 8.2.0
   histoire: 0.17.17
   html-entities: 2.6.0
-  icc: 4.0.0
+  icc: 3.0.0
   inquirer: 12.11.1
   ioredis: 5.11.1
   ip-matching: 2.1.2
-  isolated-vm: 6.1.2
+  isolated-vm: 5.0.4
   joi: 17.13.4
   js-yaml: 4.2.0
   js2xmlparser: 5.0.0
@@ -206,7 +206,7 @@ catalog:
   keyv: 5.6.0
   knex: 3.1.0
   knex-mock-client: 3.0.2
-  ky: 2.0.2
+  ky: 1.14.3
   ldapjs: 2.3.3
   liquidjs: 10.27.0
   lodash: 4.18.1
@@ -215,7 +215,7 @@ catalog:
   lru-cache: 11.5.1
   mapbox-gl: 1.13.3
   maplibre-gl: 1.15.3
-  marked: 18.0.5
+  marked: 16.4.2
   micromustache: 8.0.3
   mime: 4.1.0
   mime-types: 3.0.2
@@ -227,23 +227,23 @@ catalog:
   nanoid: 5.1.14
   node-machine-id: 1.1.12
   node-schedule: 2.1.1
-  nodemailer: 9.0.1
+  nodemailer: 7.0.13
   nodemailer-mailgun-transport: 2.1.5
   npm-watch: 0.13.0
   object-hash: 3.0.0
   ofetch: 1.5.1
   openapi3-ts: 4.6.0
   openid-client: 5.7.1
-  ora: 9.4.0
+  ora: 8.2.0
   oracledb: 6.10.0
   otplib: 12.0.1
-  p-limit: 7.3.0
+  p-limit: 6.2.0
   p-queue: 8.1.1
   papaparse: 5.5.4
   pg: 8.22.0
   pinia: 2.3.1
   pino: 9.14.0
-  pino-http: 11.0.0
+  pino-http: 10.5.0
   pino-http-print: 3.1.0
   pino-pretty: 13.1.3
   pm2: 6.0.14
@@ -269,7 +269,7 @@ catalog:
   snappy: 7.3.3
   sqlite3: 5.1.7
   stream-json: 1.9.1
-  string-width: 8.2.1
+  string-width: 7.2.0
   strip-ansi: 7.2.0
   stylelint: 16.26.1
   stylelint-config-standard: 39.0.1
@@ -279,17 +279,17 @@ catalog:
   swagger-cli: 4.0.4
   swagger-ui-watcher: 2.1.14
   tar: 7.5.16
-  tedious: 19.2.1
+  tedious: 18.6.2
   tinymce: 6.8.6
   tmp: 0.2.7
   tsup: 8.5.1
   tsx: 4.22.4
   tus-js-client: 4.3.1
-  typescript: 5.9.3
+  typescript: 5.8.3
   typescript-eslint: 8.61.1
   undici: 7.28.0
   update-check: 1.5.4
-  uuid: 14.0.0
+  uuid: 11.1.1
   vite: 5.4.21
   vite-plugin-dts: 4.5.4
   vite-plugin-vue-devtools: 7.7.9

@@ -63,7 +63,8 @@ import DriverLocal from '@directus/storage-driver-local';
 
 // Workaround for https://github.com/rollup/plugins/issues/1329
 const virtual = virtualDefault as unknown as typeof virtualDefault.default;
-const alias = aliasDefault as unknown as typeof aliasDefault.default;
+// @rollup/plugin-alias v6 is pure ESM with a callable default export, no .default interop
+const alias = aliasDefault;
 const nodeResolve = nodeResolveDefault as unknown as typeof nodeResolveDefault.default;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
