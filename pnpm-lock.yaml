@@ -685,8 +685,8 @@ catalogs:
       specifier: 8.2.0
       version: 8.2.0
     oracledb:
-      specifier: 6.10.0
-      version: 6.10.0
+      specifier: 7.0.0
+      version: 7.0.0
     otplib:
       specifier: 12.0.1
       version: 12.0.1
@@ -1449,7 +1449,7 @@ importers:
         version: 2.1.5(lodash@4.18.1)(underscore@1.13.7)
       oracledb:
         specifier: 'catalog:'
-        version: 6.10.0
+        version: 7.0.0
       pg:
         specifier: 'catalog:'
         version: 8.22.0
@@ -10988,8 +10988,8 @@ packages:
     resolution: {integrity: sha512-weP+BZ8MVNnlCm8c0Qdc1WSWq4Qn7I+9CJGm7Qali6g44e/PUzbjNqJX5NJ9ljlNMosfJvg1fKEGILklK9cwnw==}
     engines: {node: '>=18'}
 
-  oracledb@6.10.0:
-    resolution: {integrity: sha512-kGUumXmrEWbSpBuKJyb9Ip3rXcNgKK6grunI3/cLPzrRvboZ6ZoLi9JQ+z6M/RIG924tY8BLflihL4CKKQAYMA==}
+  oracledb@7.0.0:
+    resolution: {integrity: sha512-aPt1oB++zOQ0QsuRLlSbQjydTOg1RTMmfnShoEfETfgiZ0uzmCptHfK/pNLXovl6FVnFoevxX8yfrEme4ksbXg==}
     engines: {node: '>=14.17'}
 
   otplib@12.0.1:
@@ -22967,7 +22967,7 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.1.0
 
-  oracledb@6.10.0:
+  oracledb@7.0.0:
     optional: true
 
   otplib@12.0.1:
