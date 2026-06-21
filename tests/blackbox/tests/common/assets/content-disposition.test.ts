@@ -41,10 +41,14 @@ describe('/assets Content-Disposition contract', () => {
 			const read = (path: string) =>
 				request(getUrl(vendor)).get(path).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			// 1. Default inline — filename comes from filename_download
+			// 1. Default inline — filename comes from filename_download.
+			//    NOTE: content-disposition 2.x emits a *bare token* for simple filenames
+			//    (`filename=directus.png`), whereas 0.5.4 always quoted it
+			//    (`filename="directus.png"`). Both are RFC 6266-valid; this asserts the
+			//    post-bump form. See PR discussion — this is the one header that changed.
 			const def = await read(`/assets/${id}`);
 			expect(def.statusCode).toBe(200);
-			expect(def.headers['content-disposition']).toBe('inline; filename="directus.png"');
+			expect(def.headers['content-disposition']).toBe('inline; filename=directus.png');
 
 			// 2. Explicit ASCII filename (with a space) via the :filename route param
 			const ascii = await read(`/assets/${id}/${encodeURIComponent('my report.pdf')}`);
@@ -60,7 +64,10 @@ describe('/assets Content-Disposition contract', () => {
 				`inline; filename="????.png"; filename*=UTF-8''%D1%84%D0%B0%D0%B9%D0%BB.png`,
 			);
 
-			// 5. ?download — inline is skipped, express' attachment disposition remains
+			// 5. ?download — inline is skipped, express' attachment disposition remains.
+			//    express bundles content-disposition 0.5.4, so this path still QUOTES the
+			//    simple filename. After this bump directus therefore emits an unquoted
+			//    inline header but a quoted attachment header (acceptable; both RFC-valid).
 			const download = await read(`/assets/${id}?download`);
 			expect(download.headers['content-disposition']).toBe('attachment; filename="directus.png"');
 		});
