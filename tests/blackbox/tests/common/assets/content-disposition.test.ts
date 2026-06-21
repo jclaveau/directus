@@ -60,6 +60,7 @@ describe('/assets Content-Disposition contract', () => {
 
 			// 4. Non-ASCII filename — RFC 5987 extended encoding (the real regression risk)
 			const unicode = await read(`/assets/${id}/${encodeURIComponent('файл.png')}`);
+
 			expect(unicode.headers['content-disposition']).toBe(
 				`inline; filename="????.png"; filename*=UTF-8''%D1%84%D0%B0%D0%B9%D0%BB.png`,
 			);
