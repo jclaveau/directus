@@ -3,7 +3,7 @@ import { InvalidQueryError, RangeNotSatisfiableError } from '@directus/errors';
 import type { Range, TransformationFormat, TransformationParams } from '@directus/types';
 import { TransformationMethods } from '@directus/types';
 import { parseJSON } from '@directus/utils';
-import contentDisposition from 'content-disposition';
+import { create as contentDisposition } from 'content-disposition';
 import { Router } from 'express';
 import { merge, pick } from 'lodash-es';
 import { ASSET_TRANSFORM_QUERY_KEYS, SYSTEM_ASSET_ALLOW_LIST } from '../constants.js';
