@@ -9,6 +9,7 @@ import { httpPrintFactory } from 'pino-http-print';
 import { build as pinoPretty } from 'pino-pretty';
 import { getConfigFromEnv } from '../utils/get-config-from-env.js';
 import { LogsStream } from './logs-stream.js';
+import { redactHeaders } from './redact-headers.js';
 import { redactQuery } from './redact-query.js';
 
 export const _cache: {
@@ -135,19 +136,7 @@ export const createExpressLogger = () => {
 	if (env['LOG_STYLE'] === 'raw' || toBoolean(env['WEBSOCKETS_LOGS_ENABLED'])) {
 		httpLoggerOptions.redact = {
 			paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers', 'req.query.access_token'],
-			censor: (value, pathParts) => {
-				const path = pathParts.join('.');
-
-				if (path === 'res.headers') {
-					if ('set-cookie' in value) {
-						value['set-cookie'] = REDACTED_TEXT;
-					}
-
-					return value;
-				}
-
-				return REDACTED_TEXT;
-			},
+			censor: redactHeaders,
 		};
 	}
 
