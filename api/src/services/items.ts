@@ -126,10 +126,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 * Resolves to null when a filter hook cancels the create (returns null) and
 	 * `allowFilterCancel` is opted in; otherwise such a cancel is an InvalidPayloadError.
 	 */
-	async createOne(
-		data: Partial<Item>,
-		opts: MutationOptions & { allowFilterCancel: true },
-	): Promise<PrimaryKey | null>;
+	async createOne(data: Partial<Item>, opts: MutationOptions & { allowFilterCancel: true }): Promise<PrimaryKey | null>;
 
 	async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey>;
 	async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey | null> {
