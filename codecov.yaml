@@ -18,9 +18,13 @@ coverage:
 # unit-tested surface.
 # Auth drivers (SSO/LDAP/OAuth callbacks) are likewise integration-only — exercised through a
 # real IdP/login flow, not the unit suite — so their diff coverage can't gate patch either.
+# Build configs (tsdown/vite/rollup/vitest) are consumed by the bundler, never imported by a
+# test, so they are always 0% covered — exclude them rather than red every build-tooling PR.
 ignore:
   - 'api/src/controllers'
   - 'api/src/auth/drivers'
+  - '**/*.config.ts'
+  - '**/*.config.js'
 
 flag_management:
   default_rules:
