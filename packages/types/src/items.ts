@@ -72,6 +72,12 @@ export type MutationOptions = {
 	 */
 	preMutationError?: DirectusError | undefined;
 
+	/**
+	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
+	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
+	 */
+	allowFilterCancel?: boolean | undefined;
+
 	bypassAutoIncrementSequenceReset?: boolean;
 
 	/**
