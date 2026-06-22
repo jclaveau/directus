@@ -176,8 +176,31 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 
 	if (store === 'redis') {
 		const { default: KeyvRedis } = require('@keyv/redis');
-		config.store = new KeyvRedis(env['REDIS'] || getConfigFromEnv('REDIS'), { useRedisSets: false });
+		config.store = new KeyvRedis(getRedisConnection());
 	}
 
 	return config;
+}
+
+// @keyv/redis v5 is node-redis based: it accepts a URL string or node-redis RedisClientOptions
+// ({ socket: { host, port }, … }), not ioredis's flat { host, port }. env['REDIS'] is already a URL;
+// otherwise translate the REDIS_* (ioredis-shaped) config into node-redis options so a host/port
+// setup actually connects (a flat { host, port } silently falls back to localhost:6379 under v5).
+// Advanced setups (sentinel/cluster, cert-based TLS) should use the REDIS connection URL.
+export function getRedisConnection(): string | Record<string, unknown> {
+	const url = env['REDIS'];
+	if (url) return url as string;
+
+	const { host, port, username, password, db, tls } = getConfigFromEnv('REDIS') as Record<string, any>;
+
+	return {
+		socket: {
+			host,
+			...(port !== undefined && { port: Number(port) }),
+			...(tls && { tls: true }),
+		},
+		...(username !== undefined && { username }),
+		...(password !== undefined && { password }),
+		...(db !== undefined && { database: Number(db) }),
+	};
 }
