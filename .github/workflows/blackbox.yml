@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - v11.10.1-prepare
     paths:
       - api/**
       - tests/blackbox/**
