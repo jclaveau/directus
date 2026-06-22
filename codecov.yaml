@@ -16,8 +16,11 @@ coverage:
 # the blackbox suite, which does not feed the codecov unit flag — so they can't lift patch
 # coverage and would otherwise red every PR that touches them. Service-layer logic is the
 # unit-tested surface.
+# Auth drivers (SSO/LDAP/OAuth callbacks) are likewise integration-only — exercised through a
+# real IdP/login flow, not the unit suite — so their diff coverage can't gate patch either.
 ignore:
   - 'api/src/controllers'
+  - 'api/src/auth/drivers'
 
 flag_management:
   default_rules:
