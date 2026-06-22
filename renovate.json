@@ -47,6 +47,12 @@
 			"enabled": false
 		},
 		{
+			"description": "hold - v13 rejects <16-byte secrets (locks out v12-enrolled 2FA users) + createGuardrails not ESM-exported - jclaveau/directus#159",
+			"matchPackageNames": ["otplib"],
+			"matchUpdateTypes": ["major"],
+			"enabled": false
+		},
+		{
 			"description": "hold - https://github.com/directus/directus/issues/21995",
 			"matchPackageNames": ["samlify"],
 			"enabled": false
