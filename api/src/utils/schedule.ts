@@ -1,4 +1,4 @@
-import cron from 'cron-parser';
+import { CronExpressionParser } from 'cron-parser';
 import schedule from 'node-schedule';
 import { SynchronizedClock } from '../synchronization.js';
 
@@ -8,7 +8,7 @@ export interface ScheduledJob {
 
 export function validateCron(rule: string): boolean {
 	try {
-		cron.parseExpression(rule);
+		CronExpressionParser.parse(rule);
 	} catch {
 		return false;
 	}

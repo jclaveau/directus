@@ -32,7 +32,9 @@ export class BusRedis implements Bus {
 	}
 
 	async publish<T = unknown>(channel: string, message: T) {
-		let binaryArray = serialize(message);
+		// serialize() infers Uint8Array<ArrayBuffer> (TextEncoder) but compress() returns
+		// Uint8Array<ArrayBufferLike>; widen so the reassignment below type-checks under TS 5.9
+		let binaryArray: Uint8Array = serialize(message);
 
 		if (this.compression === true && binaryArray.byteLength >= this.compressionMinSize) {
 			binaryArray = await compress(binaryArray);

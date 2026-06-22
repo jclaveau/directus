@@ -1,3 +1,31 @@
+coverage:
+  status:
+    # Aggregate (non-flag) diff coverage is now BLOCKING — the dialect/unit tests the ramp
+    # waited for have landed (mariadb-json, drop-index, pino censor, rolldown build, …).
+    patch:
+      default:
+        target: auto
+        informational: false
+    # Overall coverage stays report-only: on a stacked feature line it mostly reflects
+    # base drift, not the PR's own diff (see the per-PR coverage diagnoses).
+    project:
+      default:
+        informational: true
+
+# Controllers are thin HTTP guards (e.g. isSystemCollection → ForbiddenError) exercised by
+# the blackbox suite, which does not feed the codecov unit flag — so they can't lift patch
+# coverage and would otherwise red every PR that touches them. Service-layer logic is the
+# unit-tested surface.
+# Auth drivers (SSO/LDAP/OAuth callbacks) are likewise integration-only — exercised through a
+# real IdP/login flow, not the unit suite — so their diff coverage can't gate patch either.
+# Build configs (tsdown/vite/rollup/vitest) are consumed by the bundler, never imported by a
+# test, so they are always 0% covered — exclude them rather than red every build-tooling PR.
+ignore:
+  - 'api/src/controllers'
+  - 'api/src/auth/drivers'
+  - '**/*.config.ts'
+  - '**/*.config.js'
+
 flag_management:
   default_rules:
     carryforward: true
