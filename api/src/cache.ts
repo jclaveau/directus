@@ -187,7 +187,7 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 // otherwise translate the REDIS_* (ioredis-shaped) config into node-redis options so a host/port
 // setup actually connects (a flat { host, port } silently falls back to localhost:6379 under v5).
 // Advanced setups (sentinel/cluster, cert-based TLS) should use the REDIS connection URL.
-function getRedisConnection(): string | Record<string, unknown> {
+export function getRedisConnection(): string | Record<string, unknown> {
 	const url = env['REDIS'];
 	if (url) return url as string;
 
