@@ -122,8 +122,17 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 	/**
 	 * Create a single new item.
+	 *
+	 * Resolves to null when a filter hook cancels the create (returns null) and
+	 * `allowFilterCancel` is opted in; otherwise such a cancel is an InvalidPayloadError.
 	 */
-	async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey> {
+	async createOne(
+		data: Partial<Item>,
+		opts: MutationOptions & { allowFilterCancel: true },
+	): Promise<PrimaryKey | null>;
+
+	async createOne(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey>;
+	async createOne(data: Partial<Item>, opts: MutationOptions = {}): Promise<PrimaryKey | null> {
 		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
 
 		if (!opts.bypassLimits) {
@@ -151,10 +160,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		 * that any errors thrown in any nested relational changes will bubble up and cancel the whole
 		 * update tree
 		 */
-		const primaryKey: PrimaryKey = await transaction(this.knex, async (trx) => {
+		const primaryKey: PrimaryKey | null = await transaction(this.knex, async (trx) => {
 			// Run all hooks that are attached to this event so the end user has the chance to augment the
 			// item that is about to be saved
-			const payloadAfterHooks =
+			const payloadAfterHooks: AnyItem | PrimaryKey | null =
 				opts.emitEvents !== false
 					? await emitter.emitFilter<AnyItem, PrimaryKey>(
 							this.eventScope === 'items'
@@ -179,6 +188,19 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				// hook that took over owns any events.
 				createWasTakenOver = true;
 				return payloadAfterHooks;
+			}
+
+			if (payloadAfterHooks === null) {
+				// A filter hook nulled the payload to cancel the create. With allowFilterCancel the
+				// caller opted into a null result; otherwise a null payload is a hard error. Either way
+				// no row is created, so suppress the items.create action (reuse the take-over guard).
+				createWasTakenOver = true;
+
+				if (opts.allowFilterCancel) {
+					return null;
+				}
+
+				throw new InvalidPayloadError({ reason: 'Item creation was cancelled by a filter hook' });
 			}
 
 			const payloadWithPresets = this.accountability
