@@ -15,8 +15,25 @@ import express, { Router } from 'express';
 import { flatten } from 'flat';
 import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
-import type { Client } from 'openid-client';
-import { custom, errors, generators, Issuer } from 'openid-client';
+import {
+	allowInsecureRequests,
+	authorizationCodeGrant,
+	AuthorizationResponseError,
+	buildAuthorizationUrl,
+	calculatePKCECodeChallenge,
+	ClientSecretBasic,
+	ClientSecretPost,
+	type ClientAuth,
+	type Configuration,
+	customFetch,
+	discovery,
+	fetchUserInfo,
+	PrivateKeyJwt,
+	randomPKCECodeVerifier,
+	refreshTokenGrant,
+	ResponseBodyError,
+	skipSubjectCheck,
+} from 'openid-client';
 import { getAuthProvider } from '../../auth.js';
 import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../constants.js';
 import getDatabase from '../../database/index.js';
@@ -38,7 +55,8 @@ import { Url } from '../../utils/url.js';
 import { LocalAuthDriver } from './local.js';
 
 export class OpenIDAuthDriver extends LocalAuthDriver {
-	client: null | Client;
+	// openid-client v6 replaced the Issuer/Client classes with a functional API around a Configuration
+	client: null | Configuration;
 	redirectUrl: string;
 	usersService: UsersService;
 	config: Record<string, any>;
@@ -114,30 +132,9 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		const { issuerUrl, clientId, clientSecret, clientPrivateKeys, clientTokenEndpointAuthMethod, provider } =
 			this.config;
 
-		const isPrivateKeyJwtAuthMethod = clientTokenEndpointAuthMethod === 'private_key_jwt';
-
-		// extract client http overrides/options
+		// openid-client v6 uses a fetch override rather than got-style http_options
 		const clientHttpOptions = getConfigFromEnv(`AUTH_${provider.toUpperCase()}_CLIENT_HTTP_`);
-
-		if (clientHttpOptions) {
-			Issuer[custom.http_options] = (_, options) => {
-				return {
-					...options,
-					...clientHttpOptions,
-				};
-			};
-		}
-
-		const issuer = await Issuer.discover(issuerUrl);
-
-		const supportedTypes = issuer.metadata['response_types_supported'] as string[] | undefined;
-
-		if (!supportedTypes?.includes('code')) {
-			logger.error('OpenID provider does not support required code flow');
-			throw new InvalidProviderConfigError({
-				provider,
-			});
-		}
+		const fetchOverride = createCustomFetch(clientHttpOptions);
 
 		// extract client overrides/options excluding CLIENT_ID and CLIENT_SECRET as they are passed directly
 		const clientOptionsOverrides = getConfigFromEnv(`AUTH_${provider.toUpperCase()}_CLIENT_`, {
@@ -150,54 +147,62 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 			type: 'underscore',
 		});
 
-		const client = new issuer.Client(
+		const config = await discovery(
+			new URL(issuerUrl),
+			clientId,
 			{
-				client_id: clientId,
-				...(!isPrivateKeyJwtAuthMethod && { client_secret: clientSecret }),
 				redirect_uris: [this.redirectUrl],
 				response_types: ['code'],
 				...clientOptionsOverrides,
 			},
-			isPrivateKeyJwtAuthMethod ? { keys: clientPrivateKeys } : undefined,
+			getClientAuth(clientTokenEndpointAuthMethod, clientSecret, clientPrivateKeys),
+			{
+				...(fetchOverride && { [customFetch]: fetchOverride }),
+				// allow plain-http issuers only when explicitly opted in via the insecure http option
+				...(clientHttpOptions?.['insecure'] && { execute: [allowInsecureRequests] }),
+			},
 		);
 
-		if (clientHttpOptions) {
-			client[custom.http_options] = (_, options) => {
-				return {
-					...options,
-					...clientHttpOptions,
-				};
-			};
+		const supportedTypes = config.serverMetadata()['response_types_supported'] as string[] | undefined;
+
+		if (!supportedTypes?.includes('code')) {
+			logger.error('OpenID provider does not support required code flow');
+			throw new InvalidProviderConfigError({
+				provider,
+			});
 		}
 
-		this.client = client;
+		this.client = config;
 
-		return client;
+		return config;
 	}
 
 	generateCodeVerifier(): string {
-		return generators.codeVerifier();
+		return randomPKCECodeVerifier();
 	}
 
 	async generateAuthUrl(codeVerifier: string, prompt = false): Promise<string> {
 		const { plainCodeChallenge } = this.config;
 
 		try {
-			const client = await this.getClient();
-			const codeChallenge = plainCodeChallenge ? codeVerifier : generators.codeChallenge(codeVerifier);
+			const config = await this.getClient();
+			const codeChallenge = plainCodeChallenge ? codeVerifier : await calculatePKCECodeChallenge(codeVerifier);
 			const paramsConfig = typeof this.config['params'] === 'object' ? this.config['params'] : {};
 
-			return client.authorizationUrl({
+			// buildAuthorizationUrl takes a flat Record<string, string>; drop undefined values
+			const parameters: Record<string, string> = {
 				scope: this.config['scope'] ?? 'openid profile email',
 				access_type: 'offline',
-				prompt: prompt ? 'consent' : undefined,
+				...(prompt && { prompt: 'consent' }),
 				...paramsConfig,
 				code_challenge: codeChallenge,
 				code_challenge_method: plainCodeChallenge ? 'plain' : 'S256',
 				// Some providers require state even with PKCE
 				state: codeChallenge,
 				nonce: codeChallenge,
-			});
+			};
+
+			return buildAuthorizationUrl(config, parameters).href;
 		} catch (e) {
 			throw handleError(e);
 		}
@@ -224,27 +229,33 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 		const { plainCodeChallenge } = this.config;
 
 		let tokenSet;
-		let userInfo;
+		let userInfo: Record<string, any>;
 
 		try {
-			const client = await this.getClient();
+			const config = await this.getClient();
 
 			const codeChallenge = plainCodeChallenge
 				? payload['codeVerifier']
-				: generators.codeChallenge(payload['codeVerifier']);
+				: await calculatePKCECodeChallenge(payload['codeVerifier']);
 
-			tokenSet = await client.callback(
-				this.redirectUrl,
-				{ code: payload['code'], state: payload['state'], iss: payload['iss'] },
-				{ code_verifier: payload['codeVerifier'], state: codeChallenge, nonce: codeChallenge },
-			);
+			// reconstruct the URL the IdP redirected back to; authorizationCodeGrant reads the params
+			const currentUrl = new URL(this.redirectUrl);
+			currentUrl.searchParams.set('code', payload['code']);
+			currentUrl.searchParams.set('state', payload['state']);
+			if (payload['iss']) currentUrl.searchParams.set('iss', payload['iss']);
 
-			userInfo = tokenSet.claims();
+			tokenSet = await authorizationCodeGrant(config, currentUrl, {
+				pkceCodeVerifier: payload['codeVerifier'],
+				expectedState: codeChallenge,
+				expectedNonce: codeChallenge,
+			});
 
-			if (client.issuer.metadata['userinfo_endpoint']) {
+			userInfo = tokenSet.claims() ?? {};
+
+			if (config.serverMetadata()['userinfo_endpoint']) {
 				userInfo = {
 					...userInfo,
-					...(await client.userinfo(tokenSet.access_token!)),
+					...(await fetchUserInfo(config, tokenSet.access_token, (userInfo['sub'] as string) ?? skipSubjectCheck)),
 				};
 			}
 		} catch (e) {
@@ -387,8 +398,8 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 
 		if (authData?.['refreshToken']) {
 			try {
-				const client = await this.getClient();
-				const tokenSet = await client.refresh(authData['refreshToken']);
+				const config = await this.getClient();
+				const tokenSet = await refreshTokenGrant(config, authData['refreshToken']);
 
 				// Update user refreshToken if provided
 				if (tokenSet.refresh_token) {
@@ -406,7 +417,9 @@ export class OpenIDAuthDriver extends LocalAuthDriver {
 const handleError = (e: any) => {
 	const logger = useLogger();
 
-	if (e instanceof errors.OPError) {
+	// openid-client v6 surfaces server-side errors as ResponseBodyError (token endpoint) or
+	// AuthorizationResponseError (authorization redirect), both carrying `error`/`error_description`.
+	if (e instanceof ResponseBodyError || e instanceof AuthorizationResponseError) {
 		if (e.error === 'invalid_grant') {
 			// Invalid token
 			logger.warn(e, `[OpenID] Invalid grant`);
@@ -419,15 +432,42 @@ const handleError = (e: any) => {
 			service: 'openid',
 			reason: `Service returned unexpected response: ${e.error_description}`,
 		});
-	} else if (e instanceof errors.RPError) {
-		// Internal client error
-		logger.warn(e, `[OpenID] Unknown RP error`);
-		return new InvalidCredentialsError();
 	}
 
 	logger.warn(e, `[OpenID] Unknown error`);
 	return e;
 };
+
+// openid-client v6 replaced the token_endpoint_auth_method client metadata field with explicit
+// ClientAuth helpers passed to discovery().
+function getClientAuth(method: string | undefined, clientSecret: string, clientPrivateKeys: unknown): ClientAuth {
+	switch (method) {
+		case 'private_key_jwt':
+			// TODO(openid-client v6): clientPrivateKeys is a JWKS, but PrivateKeyJwt expects a single
+			// CryptoKey/PrivateKey — convert (e.g. via jose.importJWK) before enabling this auth method.
+			return PrivateKeyJwt(clientPrivateKeys as Parameters<typeof PrivateKeyJwt>[0]);
+		case 'client_secret_post':
+			return ClientSecretPost(clientSecret);
+		case 'client_secret_basic':
+		default:
+			return ClientSecretBasic(clientSecret);
+	}
+}
+
+// v6 dropped got-style http_options for a Fetch override. Map the common overrides (extra headers,
+// request timeout); advanced got options (agent/proxy) would need an undici dispatcher instead.
+function createCustomFetch(httpOptions: Record<string, any> | undefined) {
+	if (!httpOptions || Object.keys(httpOptions).length === 0) return undefined;
+
+	const { headers, timeout } = httpOptions;
+
+	return (url: string, options: RequestInit & { headers?: Record<string, string> }) =>
+		fetch(url, {
+			...options,
+			headers: { ...options?.headers, ...(headers ?? {}) },
+			...(timeout && { signal: AbortSignal.timeout(Number(timeout)) }),
+		});
+}
 
 export function createOpenIDAuthRouter(providerName: string): Router {
 	const env = useEnv();

@@ -14,8 +14,19 @@ import { parseJSON, toArray } from '@directus/utils';
 import express, { Router } from 'express';
 import { flatten } from 'flat';
 import jwt from 'jsonwebtoken';
-import type { Client } from 'openid-client';
-import { errors, generators, Issuer } from 'openid-client';
+import {
+	authorizationCodeGrant,
+	AuthorizationResponseError,
+	buildAuthorizationUrl,
+	calculatePKCECodeChallenge,
+	ClientSecretBasic,
+	Configuration,
+	fetchUserInfo,
+	randomPKCECodeVerifier,
+	refreshTokenGrant,
+	ResponseBodyError,
+	skipSubjectCheck,
+} from 'openid-client';
 import { getAuthProvider } from '../../auth.js';
 import { REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../constants.js';
 import getDatabase from '../../database/index.js';
@@ -37,7 +48,8 @@ import { Url } from '../../utils/url.js';
 import { LocalAuthDriver } from './local.js';
 
 export class OAuth2AuthDriver extends LocalAuthDriver {
-	client: Client;
+	// openid-client v6 replaced the Issuer/Client classes with a functional API around a Configuration
+	client: Configuration;
 	redirectUrl: string;
 	usersService: UsersService;
 	config: Record<string, any>;
@@ -85,13 +97,6 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			throw new InvalidProviderError();
 		}
 
-		const issuer = new Issuer({
-			authorization_endpoint: authorizeUrl,
-			token_endpoint: accessUrl,
-			userinfo_endpoint: profileUrl,
-			issuer: additionalConfig['provider'],
-		});
-
 		// extract client overrides/options excluding CLIENT_ID and CLIENT_SECRET as they are passed directly
 		const clientOptionsOverrides = getConfigFromEnv(`AUTH_${config['provider'].toUpperCase()}_CLIENT_`, {
 			omitKey: [
@@ -101,36 +106,48 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 			type: 'underscore',
 		});
 
-		this.client = new issuer.Client({
-			client_id: clientId,
-			client_secret: clientSecret,
-			redirect_uris: [this.redirectUrl],
-			response_types: ['code'],
-			...clientOptionsOverrides,
-		});
+		// openid-client v6: build the Configuration directly from the explicit endpoints (no discovery)
+		this.client = new Configuration(
+			{
+				issuer: additionalConfig['provider'],
+				authorization_endpoint: authorizeUrl,
+				token_endpoint: accessUrl,
+				userinfo_endpoint: profileUrl,
+			},
+			clientId,
+			{
+				redirect_uris: [this.redirectUrl],
+				response_types: ['code'],
+				...clientOptionsOverrides,
+			},
+			ClientSecretBasic(clientSecret),
+		);
 	}
 
 	generateCodeVerifier(): string {
-		return generators.codeVerifier();
+		return randomPKCECodeVerifier();
 	}
 
-	generateAuthUrl(codeVerifier: string, prompt = false): string {
+	async generateAuthUrl(codeVerifier: string, prompt = false): Promise<string> {
 		const { plainCodeChallenge } = this.config;
 
 		try {
-			const codeChallenge = plainCodeChallenge ? codeVerifier : generators.codeChallenge(codeVerifier);
+			const codeChallenge = plainCodeChallenge ? codeVerifier : await calculatePKCECodeChallenge(codeVerifier);
 			const paramsConfig = typeof this.config['params'] === 'object' ? this.config['params'] : {};
 
-			return this.client.authorizationUrl({
+			// buildAuthorizationUrl takes a flat Record<string, string>; drop undefined values
+			const parameters: Record<string, string> = {
 				scope: this.config['scope'] ?? 'email',
 				access_type: 'offline',
-				prompt: prompt ? 'consent' : undefined,
+				...(prompt && { prompt: 'consent' }),
 				...paramsConfig,
 				code_challenge: codeChallenge,
 				code_challenge_method: plainCodeChallenge ? 'plain' : 'S256',
 				// Some providers require state even with PKCE
 				state: codeChallenge,
-			});
+			};
+
+			return buildAuthorizationUrl(this.client, parameters).href;
 		} catch (e) {
 			throw handleError(e);
 		}
@@ -157,20 +174,25 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 		const { plainCodeChallenge } = this.config;
 
 		let tokenSet;
-		let userInfo;
+		let userInfo: Record<string, any>;
 
 		try {
 			const codeChallenge = plainCodeChallenge
 				? payload['codeVerifier']
-				: generators.codeChallenge(payload['codeVerifier']);
+				: await calculatePKCECodeChallenge(payload['codeVerifier']);
 
-			tokenSet = await this.client.oauthCallback(
-				this.redirectUrl,
-				{ code: payload['code'], state: payload['state'] },
-				{ code_verifier: payload['codeVerifier'], state: codeChallenge },
-			);
+			// reconstruct the URL the provider redirected back to; authorizationCodeGrant reads the params
+			const currentUrl = new URL(this.redirectUrl);
+			currentUrl.searchParams.set('code', payload['code']);
+			currentUrl.searchParams.set('state', payload['state']);
 
-			userInfo = await this.client.userinfo(tokenSet.access_token!);
+			tokenSet = await authorizationCodeGrant(this.client, currentUrl, {
+				pkceCodeVerifier: payload['codeVerifier'],
+				expectedState: codeChallenge,
+			});
+
+			// plain OAuth2 has no id_token / verifiable subject, so skip the subject check
+			userInfo = await fetchUserInfo(this.client, tokenSet.access_token, skipSubjectCheck);
 		} catch (e) {
 			throw handleError(e);
 		}
@@ -309,7 +331,7 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 
 		if (authData?.['refreshToken']) {
 			try {
-				const tokenSet = await this.client.refresh(authData['refreshToken']);
+				const tokenSet = await refreshTokenGrant(this.client, authData['refreshToken']);
 
 				// Update user refreshToken if provided
 				if (tokenSet.refresh_token) {
@@ -327,7 +349,9 @@ export class OAuth2AuthDriver extends LocalAuthDriver {
 const handleError = (e: any) => {
 	const logger = useLogger();
 
-	if (e instanceof errors.OPError) {
+	// openid-client v6 surfaces server-side errors as ResponseBodyError (token endpoint) or
+	// AuthorizationResponseError (authorization redirect), both carrying error/error_description.
+	if (e instanceof ResponseBodyError || e instanceof AuthorizationResponseError) {
 		if (e.error === 'invalid_grant') {
 			// Invalid token
 			logger.warn(e, `[OAuth2] Invalid grant`);
@@ -340,10 +364,6 @@ const handleError = (e: any) => {
 			service: 'oauth2',
 			reason: `Service returned unexpected response: ${e.error_description}`,
 		});
-	} else if (e instanceof errors.RPError) {
-		// Internal client error
-		logger.warn(e, `[OAuth2] Unknown RP error`);
-		return new InvalidCredentialsError();
 	}
 
 	logger.warn(e, `[OAuth2] Unknown error`);
@@ -356,7 +376,7 @@ export function createOAuth2AuthRouter(providerName: string): Router {
 
 	router.get(
 		'/',
-		(req, res) => {
+		asyncHandler(async (req, res) => {
 			const provider = getAuthProvider(providerName) as OAuth2AuthDriver;
 			const codeVerifier = provider.generateCodeVerifier();
 			const prompt = !!req.query['prompt'];
@@ -376,8 +396,8 @@ export function createOAuth2AuthRouter(providerName: string): Router {
 				sameSite: 'lax',
 			});
 
-			return res.redirect(provider.generateAuthUrl(codeVerifier, prompt));
-		},
+			return res.redirect(await provider.generateAuthUrl(codeVerifier, prompt));
+		}),
 		respond,
 	);
 
