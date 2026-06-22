@@ -53,6 +53,12 @@
 			"enabled": false
 		},
 		{
+			"description": "hold - v6 is a full classes->functions rewrite of the oauth2 + openid drivers (~1067 lines) with no OIDC integration coverage to verify against - jclaveau/directus#156",
+			"matchPackageNames": ["openid-client"],
+			"matchUpdateTypes": ["major"],
+			"enabled": false
+		},
+		{
 			"description": "hold - https://github.com/directus/directus/issues/21995",
 			"matchPackageNames": ["samlify"],
 			"enabled": false
