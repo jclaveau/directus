@@ -1,6 +1,7 @@
 {
 	"extends": "@directus/tsconfig/vue3",
 	"compilerOptions": {
+		"ignoreDeprecations": "6.0",
 		"verbatimModuleSyntax": false,
 		"exactOptionalPropertyTypes": false,
 		"noPropertyAccessFromIndexSignature": false,

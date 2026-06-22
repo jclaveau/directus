@@ -1,6 +1,7 @@
 {
 	"extends": "@directus/tsconfig/node22",
 	"compilerOptions": {
+		"ignoreDeprecations": "6.0",
 		"isolatedDeclarations": false,
 		"verbatimModuleSyntax": false,
 		"lib": ["ES2023", "DOM"]
