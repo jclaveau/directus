@@ -151,9 +151,11 @@ export class LDAPAuthDriver extends AuthDriver {
 						return;
 					}
 
-					res.on('searchEntry', ({ object }: SearchEntry) => {
+					res.on('searchEntry', (entry: SearchEntry) => {
+						const object = ldapEntryToObject(entry);
+
 						const user: UserInfo = {
-							dn: object['dn'],
+							dn: entry.pojo.objectName,
 							userAccountControl: Number(getEntryValue(object['userAccountControl']) ?? 0),
 						};
 
@@ -202,11 +204,13 @@ export class LDAPAuthDriver extends AuthDriver {
 						return;
 					}
 
-					res.on('searchEntry', ({ object }: SearchEntry) => {
-						if (typeof object['cn'] === 'object') {
-							userGroups = [...userGroups, ...object['cn']];
-						} else if (object['cn']) {
-							userGroups.push(object['cn']);
+					res.on('searchEntry', (entry: SearchEntry) => {
+						const cn = ldapEntryToObject(entry)['cn'];
+
+						if (Array.isArray(cn)) {
+							userGroups = [...userGroups, ...cn];
+						} else if (cn) {
+							userGroups.push(cn);
 						}
 					});
 
@@ -415,6 +419,18 @@ const handleError = (e: Error) => {
 
 const getEntryValue = (value: string | string[] | undefined): string | undefined => {
 	return typeof value === 'object' ? value[0] : value;
+};
+
+// ldapjs v3's SearchEntry dropped the flat `.object` attribute map; rebuild it from
+// `.pojo.attributes`, collapsing single-value attributes to a string as v2 did.
+const ldapEntryToObject = (entry: SearchEntry): Record<string, string | string[] | undefined> => {
+	const object: Record<string, string | string[]> = {};
+
+	for (const { type, values } of entry.pojo.attributes) {
+		object[type] = values.length === 1 ? values[0]! : values;
+	}
+
+	return object;
 };
 
 export function createLDAPAuthRouter(provider: string): Router {
