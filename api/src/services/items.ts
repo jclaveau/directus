@@ -816,7 +816,6 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			const errorReasons = preparedForPostInsertProcessResponses.filter(isRejected)?.map((i) => i.reason);
 
 			if (errorReasons.length) {
-				console.log('errorReasons', errorReasons);
 				throw errorReasons[0];
 				// TODO how to pass all the errors ?
 			}

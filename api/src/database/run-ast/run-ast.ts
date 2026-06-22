@@ -95,8 +95,8 @@ export async function runAst(
 				database: knex,
 				schema,
 				accountability,
-			}
-		)
+			},
+		);
 
 		let rawItems: Item | Item[] = await dbQuery;
 
@@ -111,8 +111,8 @@ export async function runAst(
 				database: knex,
 				schema,
 				accountability,
-			}
-		)
+			},
+		);
 
 		if (!rawItems) return null;
 
