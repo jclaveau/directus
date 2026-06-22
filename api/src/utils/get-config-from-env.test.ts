@@ -19,6 +19,7 @@ beforeEach(() => {
 		OMIT_PREFIX_SECOND_KEY_VALUE: 'secondValue',
 		OMIT_KEY_FIRST_KEY: 'firstKey',
 		OMIT_KEY_FIRST_KEY_VALUE: 'firstValue',
+		AUTH_SAML_IDP_metadata: 'idp-xml',
 	});
 });
 
@@ -29,6 +30,13 @@ afterEach(() => {
 describe('get config from env', () => {
 	test('Should return config irrespective of prefix or key casing', () => {
 		expect(getConfigFromEnv('CaSInG_')).toStrictEqual({ key: 'key', keyValue: 'value' });
+	});
+
+	test('Strips the separator left when the prefix has no trailing underscore (camelcase v9 regression)', () => {
+		// AUTH_SAML_IDP_metadata sliced by prefix `AUTH_SAML_IDP` leaves `_metadata`; camelcase v9
+		// preserves the leading `_` (v8 dropped it), so without the fix this returns `{ _metadata }`
+		// and samlify can't find the IdP metadata → ERR_IDP_METADATA_MISSING_SINGLE_SIGN_ON_SERVICE.
+		expect(getConfigFromEnv('AUTH_SAML_IDP')).toStrictEqual({ metadata: 'idp-xml' });
 	});
 
 	test('Keys with double underscore should be an object', () => {

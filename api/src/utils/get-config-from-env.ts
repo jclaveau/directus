@@ -49,7 +49,10 @@ export function getConfigFromEnv(prefix: string, options?: GetConfigFromEnvOptio
 
 	function transform(key: string): string {
 		if (type === 'camelcase') {
-			return camelcase(key, { locale: false });
+			// Strip the leading separator left by slicing the prefix (e.g. `AUTH_SAML_IDP_metadata`
+			// → `_metadata`). camelcase v8 dropped a leading `_`; v9 preserves it, which would yield
+			// `_metadata` and break consumers (e.g. samlify's IdP metadata lookup → MISSING_SSO).
+			return camelcase(key.replace(/^_+/, ''), { locale: false });
 		} else if (type === 'underscore') {
 			return key.toLowerCase();
 		}
