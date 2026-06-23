@@ -15,3 +15,6 @@ jobs:
     name: Blackbox Tests
     if: contains(github.event.pull_request.labels.*.name, 'Run Blackbox')
     uses: ./.github/workflows/blackbox.yml
+    # Reusable workflows don't inherit caller secrets implicitly; blackbox.yml needs
+    # CODECOV_TOKEN to upload the `blackbox` coverage flag (protected repo rejects tokenless).
+    secrets: inherit
