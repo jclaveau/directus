@@ -92,7 +92,10 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 						});
 
 						// Assert
-						expect(response.statusCode).toBe(403);
+						// A malformed id for an integer/uuid PK is rejected by validateKeys as a payload
+						// error (400); for a string PK 'invalid_id' is a valid-format key that simply
+						// isn't found, so anti-enumeration still returns 403.
+						expect(response.statusCode).toBe(pkType === 'string' ? 403 : 400);
 
 						expect(gqlResponse.statusCode).toBe(200);
 
