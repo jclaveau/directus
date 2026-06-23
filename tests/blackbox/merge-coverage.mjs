@@ -1,3 +1,4 @@
+/* eslint-disable no-console */
 // Merge the per-server istanbul dumps written by api/src/server.ts on shutdown (one file per
 // spawned blackbox server) into a single lcov report for Codecov's `blackbox` flag. The dumps
 // are keyed by source path (src/controllers/*.ts, src/auth/drivers/*.ts, …) because the build
