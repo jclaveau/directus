@@ -152,6 +152,7 @@ export async function createServer(): Promise<http.Server> {
 
 		if (coverageDir && coverage) {
 			await mkdir(coverageDir, { recursive: true });
+
 			await writeFile(
 				join(coverageDir, `cov-${process.pid}-${process.hrtime.bigint()}.json`),
 				JSON.stringify(coverage),
