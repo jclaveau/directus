@@ -28,6 +28,9 @@ concurrency:
 
 env:
   NODE_OPTIONS: --max_old_space_size=6144
+  # Setting COVERAGE_DIR flips api/tsdown.config.ts to instrument with rolldown-plugin-istanbul,
+  # and the spawned blackbox servers (which inherit process.env) dump __coverage__ here on shutdown.
+  COVERAGE_DIR: ${{ github.workspace }}/coverage/blackbox
 
 jobs:
   setup:
@@ -65,6 +68,17 @@ jobs:
 
       - name: Run tests
         run: TEST_DB=sqlite3 pnpm run test:blackbox --project common
+
+      - name: Merge + upload blackbox coverage
+        if: always()
+        continue-on-error: true # Scalabus: a failed coverage upload must not red the test job
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
+        run: |
+          pnpm --filter tests-blackbox merge-coverage
+          curl -Os https://cli.codecov.io/latest/linux/codecov
+          chmod +x codecov
+          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search
 
   db:
     name: ${{ matrix.vendor }}
@@ -110,3 +124,14 @@ jobs:
 
       - name: Run tests
         run: TEST_DB=${{ matrix.vendor }} pnpm run test:blackbox --project db
+
+      - name: Merge + upload blackbox coverage
+        if: always()
+        continue-on-error: true # Scalabus: a failed coverage upload must not red the test job
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # required: protected repo rejects tokenless uploads
+        run: |
+          pnpm --filter tests-blackbox merge-coverage
+          curl -Os https://cli.codecov.io/latest/linux/codecov
+          chmod +x codecov
+          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search
