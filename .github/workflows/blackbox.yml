@@ -78,7 +78,11 @@ jobs:
           pnpm --filter tests-blackbox merge-coverage
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
-          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search
+          # Pin the PR head sha: in this reusable workflow the codecov CLI otherwise detects
+          # the checked-out merge commit, so the flag would land on the ephemeral merge ref
+          # instead of the PR head (where the unit flags live) and never show on the PR.
+          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
+            -C "${{ github.event.pull_request.head.sha || github.sha }}"
 
   db:
     name: ${{ matrix.vendor }}
@@ -134,4 +138,8 @@ jobs:
           pnpm --filter tests-blackbox merge-coverage
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
-          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search
+          # Pin the PR head sha: in this reusable workflow the codecov CLI otherwise detects
+          # the checked-out merge commit, so the flag would land on the ephemeral merge ref
+          # instead of the PR head (where the unit flags live) and never show on the PR.
+          ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
+            -C "${{ github.event.pull_request.head.sha || github.sha }}"
