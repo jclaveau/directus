@@ -1,6 +1,7 @@
 {
 	"extends": "@directus/tsconfig/node22",
 	"compilerOptions": {
+		"types": ["node","express","geojson","nodemailer","ws","deep-diff"],
 		"ignoreDeprecations": "6.0",
 		"rootDir": "./src",
 		"isolatedDeclarations": false,

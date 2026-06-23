@@ -1,6 +1,7 @@
 {
 	"extends": "@directus/tsconfig/node22",
 	"compilerOptions": {
+		"types": ["node","async","busboy","bytes","content-disposition","cookie-parser","cors","deep-diff","destroy","encodeurl","express","express-serve-static-core","fs-extra","glob-to-regexp","inquirer","js-yaml","json2csv","jsonwebtoken","ldapjs","lodash-es","mime-types","ms","node-schedule","nodemailer","object-hash","papaparse","proxy-addr","qs","sanitize-html","stream-json","wellknown","ws"],
 		"ignoreDeprecations": "6.0",
 		"rootDir": "./src",
 		"isolatedDeclarations": false,

@@ -1,6 +1,7 @@
 {
 	"extends": "@directus/tsconfig/node22",
 	"compilerOptions": {
+		"types": ["node","fs-extra","inquirer","semver"],
 		"ignoreDeprecations": "6.0",
 		"rootDir": "./src",
 		"isolatedDeclarations": false,
