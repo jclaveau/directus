@@ -228,6 +228,7 @@
 		"form-data": "catalog:",
 		"get-port": "catalog:",
 		"knex-mock-client": "catalog:",
+		"rolldown-plugin-istanbul": "catalog:",
 		"tsdown": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
