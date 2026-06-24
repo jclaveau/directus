@@ -7,8 +7,6 @@ import type { Request } from 'express';
 import type { ListenOptions } from 'net';
 import * as http from 'http';
 import * as https from 'https';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { once } from 'lodash-es';
 import qs from 'qs';
 import url from 'url';
@@ -16,6 +14,7 @@ import createApp from './app.js';
 import getDatabase from './database/index.js';
 import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
+import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
 import { getAddress } from './utils/get-address.js';
@@ -144,20 +143,7 @@ export async function createServer(): Promise<http.Server> {
 	}
 
 	async function onShutdown() {
-		// Dump istanbul coverage accumulated by rolldown-plugin-istanbul (COVERAGE_DIR builds) so the
-		// blackbox suite — which exercises this live server — contributes integration coverage. The
-		// process is short-lived per blackbox server, so pid+hrtime keeps the many dumps from colliding.
-		const coverageDir = process.env['COVERAGE_DIR'];
-		const coverage = (globalThis as Record<string, unknown>)['__coverage__'];
-
-		if (coverageDir && coverage) {
-			await mkdir(coverageDir, { recursive: true });
-
-			await writeFile(
-				join(coverageDir, `cov-${process.pid}-${process.hrtime.bigint()}.json`),
-				JSON.stringify(coverage),
-			);
-		}
+		await dumpCoverage();
 
 		emitter.emitAction(
 			'server.stop',
