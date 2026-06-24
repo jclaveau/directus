@@ -1,4 +1,4 @@
-import { InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -6,7 +6,9 @@ import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
+import { verifyJWT } from '../utils/jwt.js';
 import { ItemsService, MailService, UsersService } from './index.js';
+import { SettingsService } from './settings.js';
 
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
@@ -30,6 +32,14 @@ vi.mock('@directus/env', () => ({
 }));
 
 vi.mock('../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js');
+
+vi.mock('../utils/jwt.js', () => ({
+	verifyJWT: vi.fn(),
+}));
+
+vi.mock('../utils/stall.js', () => ({
+	stall: vi.fn().mockResolvedValue(undefined),
+}));
 
 const testRoleId = '4ccdb196-14b3-4ed1-b9da-c1978be07ca2';
 
@@ -391,6 +401,137 @@ describe('Integration Tests', () => {
 
 				expect(superUpdateManySpy.mock.lastCall![0]).toEqual([mockUser.id]);
 				expect(superUpdateManySpy.mock.lastCall![1]).toEqual({ role: 'invite-role' });
+			});
+		});
+
+		describe('acceptInvite', () => {
+			it('should reject a token whose scope is not "invite" (users.ts L420)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({ email: 'user@example.com', scope: 'password-reset' } as any);
+
+				const getUserByEmailSpy = vi.spyOn(UsersService.prototype as any, 'getUserByEmail');
+
+				const promise = service.acceptInvite('bad-token', 'new-password');
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Not an invite token');
+
+				expect(getUserByEmailSpy).not.toBeCalled();
+			});
+		});
+
+		describe('verifyRegistration', () => {
+			it('should reject a token whose scope is not "pending-registration" (users.ts L551)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({ email: 'user@example.com', scope: 'invite' } as any);
+
+				const getUserByEmailSpy = vi.spyOn(UsersService.prototype as any, 'getUserByEmail');
+
+				const promise = service.verifyRegistration('bad-token');
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Not a pending registration token');
+
+				expect(getUserByEmailSpy).not.toBeCalled();
+			});
+		});
+
+		describe('resetPassword', () => {
+			it('should reject a token whose scope is not "password-reset" (users.ts L625)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({ email: 'user@example.com', scope: 'invite', hash: 'abc' } as any);
+
+				const promise = service.resetPassword('bad-token', 'new-password');
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Not a password reset token');
+			});
+
+			it('should reject a password-reset token without a hash (users.ts L625)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({ email: 'user@example.com', scope: 'password-reset', hash: '' } as any);
+
+				const promise = service.resetPassword('bad-token', 'new-password');
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Not a password reset token');
+			});
+
+			it('should reject when the target user is not active (users.ts L640)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'password-reset',
+					hash: 'some-hash',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy').mockResolvedValue(undefined);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
+					id: 'user-id-reset-1',
+					status: 'suspended',
+					password: 'hashed',
+				});
+
+				const promise = service.resetPassword('reset-token', 'new-password');
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Inactive user');
+			});
+
+			it('should reject when the token hash does not match the user (users.ts L646)', async () => {
+				vi.mocked(verifyJWT).mockReturnValue({
+					email: 'user@example.com',
+					scope: 'password-reset',
+					hash: 'mismatching-hash',
+				} as any);
+
+				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy').mockResolvedValue(undefined);
+
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
+					id: 'user-id-reset-2',
+					status: 'active',
+					password: 'hashed',
+				});
+
+				const promise = service.resetPassword('reset-token', 'new-password');
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Bad user credentials');
+			});
+		});
+
+		describe('requestPasswordReset', () => {
+			it('should reject when the target user is not active (users.ts L575)', async () => {
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
+					id: 'user-id-req-1',
+					status: 'suspended',
+				});
+
+				const promise = service.requestPasswordReset('user@example.com', null);
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Inactive user');
+			});
+		});
+
+		describe('registerUser', () => {
+			it('should reject when public registration is disabled (users.ts L464)', async () => {
+				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce({
+					public_registration: false,
+				});
+
+				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Public registration is disabled');
+			});
+
+			it('should reject when the email fails the configured email filter (users.ts L489)', async () => {
+				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce({
+					public_registration: true,
+					public_registration_email_filter: { email: { _ends_with: '@allowed.com' } },
+				});
+
+				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
+
+				await expect(promise).rejects.toThrowError(ForbiddenError);
+				await expect(promise).rejects.toThrowError('Invalid payload');
 			});
 		});
 	});
