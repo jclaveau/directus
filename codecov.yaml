@@ -21,6 +21,12 @@ coverage:
 ignore:
   - '**/*.config.ts'
   - '**/*.config.js'
+  # Coverage-build / integration glue that can't feed the unit patch flag: the COVERAGE_DIR
+  # coverage dump (runs only in instrumented builds, on shutdown) and its merge script, plus the
+  # extension controller's request guards (install needs a live registry — no blackbox harness).
+  - 'api/src/utils/dump-coverage.ts'
+  - 'api/src/controllers/extensions.ts'
+  - 'tests/blackbox/merge-coverage.mjs'
 
 flag_management:
   default_rules:
