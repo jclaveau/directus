@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/folders`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/folders/${t}`,params:n??{},method:`GET`});exports.readFolder=n,exports.readFolders=t;
+//# sourceMappingURL=folders.cjs.map

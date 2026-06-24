@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/shares`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/shares/${t}`,params:n??{},method:`GET`});export{n as readShare,t as readShares};
+//# sourceMappingURL=shares.js.map

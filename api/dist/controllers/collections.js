@@ -1,0 +1,97 @@
+import async_handler_default from "../utils/async-handler.js";
+import { respond } from "../middleware/respond.js";
+import { MetaService } from "../services/meta.js";
+import { CollectionsService } from "../services/collections.js";
+import { validateBatch } from "../middleware/validate-batch.js";
+import { ErrorCode, isDirectusError } from "@directus/errors";
+import { Router } from "express";
+
+//#region src/controllers/collections.ts
+const router = Router();
+router.post("/", async_handler_default(async (req, res, next) => {
+	const collectionsService = new CollectionsService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const attemptConcurrentIndex = "concurrentIndexCreation" in req.query && req.query["concurrentIndexCreation"] !== "false";
+	if (Array.isArray(req.body)) {
+		const collectionKey = await collectionsService.createMany(req.body, { attemptConcurrentIndex });
+		const records = await collectionsService.readMany(collectionKey);
+		res.locals["payload"] = { data: records || null };
+	} else {
+		const collectionKey = await collectionsService.createOne(req.body, { attemptConcurrentIndex });
+		const record = await collectionsService.readOne(collectionKey);
+		res.locals["payload"] = { data: record || null };
+	}
+	return next();
+}), respond);
+const readHandler = async_handler_default(async (req, res, next) => {
+	const collectionsService = new CollectionsService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const metaService = new MetaService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	let result = [];
+	if (req.body.keys) result = await collectionsService.readMany(req.body.keys);
+	else result = await collectionsService.readByQuery();
+	const meta = await metaService.getMetaForQuery("directus_collections", {});
+	res.locals["payload"] = {
+		data: result,
+		meta
+	};
+	return next();
+});
+router.get("/", validateBatch("read"), readHandler, respond);
+router.search("/", validateBatch("read"), readHandler, respond);
+router.get("/:collection", async_handler_default(async (req, res, next) => {
+	const collection = await new CollectionsService({
+		accountability: req.accountability,
+		schema: req.schema
+	}).readOne(req.params["collection"]);
+	res.locals["payload"] = { data: collection || null };
+	return next();
+}), respond);
+router.patch("/", async_handler_default(async (req, res, next) => {
+	const collectionsService = new CollectionsService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	const collectionKeys = await collectionsService.updateBatch(req.body);
+	try {
+		const collections = await collectionsService.readMany(collectionKeys);
+		res.locals["payload"] = { data: collections || null };
+	} catch (error) {
+		if (isDirectusError(error, ErrorCode.Forbidden)) return next();
+		throw error;
+	}
+	return next();
+}), respond);
+router.patch("/:collection", async_handler_default(async (req, res, next) => {
+	const collectionsService = new CollectionsService({
+		accountability: req.accountability,
+		schema: req.schema
+	});
+	await collectionsService.updateOne(req.params["collection"], req.body);
+	try {
+		const collection = await collectionsService.readOne(req.params["collection"]);
+		res.locals["payload"] = { data: collection || null };
+	} catch (error) {
+		if (isDirectusError(error, ErrorCode.Forbidden)) return next();
+		throw error;
+	}
+	return next();
+}), respond);
+router.delete("/:collection", async_handler_default(async (req, _res, next) => {
+	await new CollectionsService({
+		accountability: req.accountability,
+		schema: req.schema
+	}).deleteOne(req.params["collection"]);
+	return next();
+}), respond);
+var collections_default = router;
+
+//#endregion
+export { collections_default as default };

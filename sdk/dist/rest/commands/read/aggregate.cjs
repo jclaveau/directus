@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=require(`../../utils/is-system-collection.cjs`);require(`../../../index.cjs`);const n=(n,r)=>()=>{let i=String(n);return e.throwIfEmpty(i,`Collection cannot be empty`),{path:t.isSystemCollection(i)?`/${i.substring(9)}`:`/items/${i}`,method:`GET`,params:{...r.query??{},...r.groupBy?{groupBy:r.groupBy}:{},aggregate:r.aggregate}}};exports.aggregate=n;
+//# sourceMappingURL=aggregate.cjs.map

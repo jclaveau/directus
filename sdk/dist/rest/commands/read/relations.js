@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=()=>()=>({path:`/relations`,method:`GET`}),n=e=>()=>({path:`/relations/${e}`,method:`GET`}),r=(t,n)=>()=>(e(t,`Collection cannot be empty`),e(n,`Field cannot be empty`),{path:`/relations/${t}/${n}`,method:`GET`});export{r as readRelation,n as readRelationByCollection,t as readRelations};
+//# sourceMappingURL=relations.js.map

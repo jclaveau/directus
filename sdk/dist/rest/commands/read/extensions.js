@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=()=>()=>({path:`/extensions/`,method:`GET`}),n=e=>()=>({path:`/extensions/registry`,params:e??{},method:`GET`}),r=t=>()=>(e(t,`Publisher key cannot be empty`),{path:`/extensions/registry/account/${t}`,method:`GET`}),i=t=>()=>(e(t,`Extension key cannot be empty`),{path:`/extensions/registry/extension/${t}`,method:`GET`});export{t as readExtensions,r as readRegistryAccount,i as readRegistryExtension,n as readRegistryExtensions};
+//# sourceMappingURL=extensions.js.map

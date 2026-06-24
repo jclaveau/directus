@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=t=>()=>(e(t,`Id cannot be empty`),{path:`/extensions/registry/uninstall/${t}`,method:`DELETE`}),n=t=>()=>(e(t,`Id cannot be empty`),{path:`/extensions/${t}`,method:`DELETE`});export{n as deleteExtension,t as uninstallRegistryExtension};
+//# sourceMappingURL=extensions.js.map

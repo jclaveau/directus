@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/files`,method:`POST`,body:e,params:t??{},headers:{"Content-Type":`multipart/form-data`}}),t=(e,t,n)=>()=>({path:`/files/import`,method:`POST`,body:JSON.stringify({url:e,data:t??{}}),params:n??{}});export{t as importFile,e as uploadFiles};
+//# sourceMappingURL=files.js.map

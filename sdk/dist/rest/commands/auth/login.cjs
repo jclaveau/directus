@@ -1,0 +1,2 @@
+const e=require(`../../utils/get-auth-endpoint.cjs`);function t(t,n={}){return()=>{let r=e.getAuthEndpoint(n.provider),i=t;return`otp`in n&&(i.otp=n.otp),i.mode=n.mode??`cookie`,{path:r,method:`POST`,body:JSON.stringify(i)}}}exports.login=t;
+//# sourceMappingURL=login.cjs.map

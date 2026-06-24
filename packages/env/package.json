@@ -1,44 +1,44 @@
 {
-	"name": "@directus/env",
-	"version": "6.0.0-rc.1",
-	"description": "Utilities around using global env configuration",
-	"homepage": "https://directus.com",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/directus/directus.git",
-		"directory": "packages/env"
-	},
-	"funding": "https://github.com/directus/directus?sponsor=1",
-	"license": "MIT",
-	"author": "Rijk van Zanten <rijkvanzanten@me.com>",
-	"type": "module",
-	"exports": {
-		".": "./dist/index.js",
-		"./package.json": "./package.json"
-	},
-	"main": "dist/index.js",
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsdown src/index.ts --dts",
-		"dev": "tsdown src/index.ts --dts --watch",
-		"test": "vitest run",
-		"test:coverage": "vitest run --coverage"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "catalog:",
-		"@types/lodash-es": "catalog:",
-		"@types/node": "catalog:",
-		"@vitest/coverage-v8": "catalog:",
-		"tsdown": "catalog:",
-		"typescript": "catalog:",
-		"vitest": "catalog:"
-	},
-	"dependencies": {
-		"@directus/constants": "workspace:*",
-		"@directus/utils": "workspace:*",
-		"dotenv": "catalog:",
-		"lodash-es": "catalog:"
-	}
+  "name": "@directus/env",
+  "version": "6.0.0-rc.1",
+  "description": "Utilities around using global env configuration",
+  "homepage": "https://directus.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/directus/directus.git",
+    "directory": "packages/env"
+  },
+  "funding": "https://github.com/directus/directus?sponsor=1",
+  "license": "MIT",
+  "author": "Rijk van Zanten <rijkvanzanten@me.com>",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@directus/tsconfig": "4.0.0",
+    "@types/lodash-es": "4.17.12",
+    "@types/node": "22.13.14",
+    "@vitest/coverage-v8": "3.2.4",
+    "tsdown": "0.15.11",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  },
+  "dependencies": {
+    "dotenv": "17.2.3",
+    "lodash-es": "4.18.1",
+    "@directus/constants": "14.4.0-rc.1",
+    "@directus/utils": "13.5.0-rc.1"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --dts",
+    "dev": "tsdown src/index.ts --dts --watch",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  }
 }

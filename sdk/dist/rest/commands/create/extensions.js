@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n)=>()=>(e(t,`Extension id cannot be empty`),e(n,`Version cannot be empty`),{path:`/extensions/registry/install`,body:JSON.stringify({extension:t,version:n}),method:`POST`});export{t as installRegistryExtension};
+//# sourceMappingURL=extensions.js.map

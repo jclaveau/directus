@@ -1,43 +1,43 @@
 {
-	"name": "@directus/sdk",
-	"version": "22.0.0-rc.1",
-	"description": "Directus JavaScript SDK",
-	"homepage": "https://directus.com",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/directus/directus.git",
-		"directory": "sdk"
-	},
-	"funding": "https://github.com/directus/directus?sponsor=1",
-	"license": "MIT",
-	"type": "module",
-	"exports": {
-		".": {
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		},
-		"./package.json": "./package.json"
-	},
-	"main": "./dist/index.js",
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "NODE_ENV=production tsdown",
-		"dev": "NODE_ENV=development tsdown",
-		"test": "vitest run --typecheck",
-		"test:coverage": "vitest run --coverage --typecheck"
-	},
-	"devDependencies": {
-		"@directus/system-data": "workspace:*",
-		"@directus/tsconfig": "catalog:",
-		"@vitest/coverage-v8": "catalog:",
-		"esbuild-plugin-replace": "catalog:",
-		"tsdown": "catalog:",
-		"typescript": "catalog:",
-		"vitest": "catalog:"
-	},
-	"engines": {
-		"node": ">=22"
-	}
+  "name": "@directus/sdk",
+  "version": "22.0.0-rc.1",
+  "description": "Directus JavaScript SDK",
+  "homepage": "https://directus.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/directus/directus.git",
+    "directory": "sdk"
+  },
+  "funding": "https://github.com/directus/directus?sponsor=1",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "@directus/tsconfig": "4.0.0",
+    "@vitest/coverage-v8": "3.2.4",
+    "esbuild-plugin-replace": "1.4.0",
+    "tsdown": "0.15.11",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4",
+    "@directus/system-data": "4.5.0-rc.1"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "NODE_ENV=production tsdown",
+    "dev": "NODE_ENV=development tsdown",
+    "test": "vitest run --typecheck",
+    "test:coverage": "vitest run --coverage --typecheck"
+  }
 }

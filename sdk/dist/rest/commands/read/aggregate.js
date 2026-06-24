@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";import{isSystemCollection as t}from"../../utils/is-system-collection.js";import"../../../index.js";const n=(n,r)=>()=>{let i=String(n);return e(i,`Collection cannot be empty`),{path:t(i)?`/${i.substring(9)}`:`/items/${i}`,method:`GET`,params:{...r.query??{},...r.groupBy?{groupBy:r.groupBy}:{},aggregate:r.aggregate}}};export{n as aggregate};
+//# sourceMappingURL=aggregate.js.map
