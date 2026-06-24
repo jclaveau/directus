@@ -1,6 +1,9 @@
 {
 	"extends": "@directus/tsconfig/base",
 	"compilerOptions": {
+		"types": ["node","semver"],
+		"ignoreDeprecations": "6.0",
+		"rootDir": "./src",
 		"target": "ES2022",
 		"lib": ["ES2023"],
 		"module": "CommonJS",
