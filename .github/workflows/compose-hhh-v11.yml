@@ -31,8 +31,10 @@
 name: compose-hhh-v11
 
 on:
-  schedule:
-    - cron: '41 6 * * *' # daily; offset to avoid clashing with compose-hhh-main
+  # Daily cron disabled: the v11.10.1 feature stack is now a single linear chain, so
+  # `hhh-dev` is maintained by merging the leaf PR (batch-insert → v11.10.1-hhh-dev),
+  # not by recomposing the tree. A cron rebuild would force-push over that PR-merge.
+  # Kept dispatch-only as a manual fallback (e.g. to re-anchor on a new base tag).
   workflow_dispatch:
     inputs:
       base_ref:
