@@ -126,7 +126,8 @@ export class CommentsService extends ItemsService {
 					const uuid = mention.substring(1);
 					// We only match on UUIDs in the first place. This is just an extra sanity check.
 					if (isValidUuid(uuid) === false) continue;
-					comment = comment.replace(new RegExp(mention, 'gm'), userPreviews[uuid] ?? '@Unknown User');
+					// Literal replace (not a user-built RegExp) avoids regex injection; mention is a literal @<uuid>.
+					comment = comment.replaceAll(mention, userPreviews[uuid] ?? '@Unknown User');
 				}
 
 				comment = `> ${comment.replace(/\n+/gm, '\n> ')}`;
