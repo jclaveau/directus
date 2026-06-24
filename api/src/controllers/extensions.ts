@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { ErrorCode, ForbiddenError, isDirectusError, RouteNotFoundError } from '@directus/errors';
+import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError, RouteNotFoundError } from '@directus/errors';
 import { EXTENSION_TYPES } from '@directus/constants';
 import {
 	account,
@@ -85,7 +85,7 @@ router.get(
 
 			if (type) {
 				if (isIn(type, EXTENSION_TYPES) === false) {
-					throw new ForbiddenError(); // InvalidPayload ? 404 ?
+					throw new InvalidPayloadError({ reason: `Unknown extension type "${type}"` });
 				}
 
 				query.type = type;
@@ -168,7 +168,7 @@ router.post(
 		const { version, extension } = req.body;
 
 		if (!version || !extension) {
-			throw new ForbiddenError(); // InvalidPayload ?
+			throw new InvalidPayloadError({ reason: 'Both "version" and "extension" are required' });
 		}
 
 		const service = new ExtensionsService({
@@ -194,7 +194,7 @@ router.post(
 		const { extension } = req.body;
 
 		if (!extension) {
-			throw new ForbiddenError(); // InvalidPayload ?
+			throw new InvalidPayloadError({ reason: '"extension" is required' });
 		}
 
 		const service = new ExtensionsService({
@@ -220,7 +220,7 @@ router.delete(
 		const pk = req.params['pk'];
 
 		if (typeof pk !== 'string') {
-			throw new ForbiddenError(); // InvalidPayload ?
+			throw new InvalidPayloadError({ reason: 'Extension primary key must be a string' });
 		}
 
 		const service = new ExtensionsService({
@@ -244,7 +244,7 @@ router.patch(
 		}
 
 		if (typeof req.params['pk'] !== 'string') {
-			throw new ForbiddenError(); // InvalidPayload
+			throw new InvalidPayloadError({ reason: 'Extension primary key must be a string' });
 		}
 
 		const service = new ExtensionsService({
@@ -291,7 +291,7 @@ router.delete(
 		const pk = req.params['pk'];
 
 		if (typeof pk !== 'string') {
-			throw new ForbiddenError(); // InvalidPayload
+			throw new InvalidPayloadError({ reason: 'Extension primary key must be a string' });
 		}
 
 		await service.deleteOne(pk);
