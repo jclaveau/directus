@@ -196,8 +196,8 @@ catalogs:
       specifier: 7.3.5
       version: 7.3.5
     '@tus/server':
-      specifier: 1.10.2
-      version: 1.10.2
+      specifier: 2.4.1
+      version: 2.4.1
     '@tus/utils':
       specifier: 0.7.0
       version: 0.7.0
@@ -1042,7 +1042,7 @@ importers:
         version: 3.0.2(rollup@4.62.2)
       '@tus/server':
         specifier: 'catalog:'
-        version: 1.10.2
+        version: 2.4.1(@opentelemetry/api@1.9.0)
       '@tus/utils':
         specifier: 'catalog:'
         version: 0.7.0
@@ -5903,9 +5903,17 @@ packages:
   '@popperjs/core@2.11.8':
     resolution: {integrity: sha512-P1st0aksCrn9sGZhp8GMYwBnQsbvAWsZAX44oXNNvLHGqAOcoVxmjZiohstwQ7SqKnbR47akdNi+uleWD8+g6A==}
 
-  '@redis/client@1.6.1':
-    resolution: {integrity: sha512-/KCsg3xSlR+nCK8/8ZYSknYxvXHwubJrU82F3Lm1Fp6789VQ0/3RJKfsmRXjqfaTA++23CvC3hqmqe/2GEt6Kw==}
-    engines: {node: '>=14'}
+  '@redis/client@5.12.1':
+    resolution: {integrity: sha512-7aPGWeqA3uFm43o19umzdl16CEjK/JQGtSXVPevplTaOU3VJA/rseBC1QvYUz9lLDIMBimc4SW/zrW4S89BaCA==}
+    engines: {node: '>= 18.19.0'}
+    peerDependencies:
+      '@node-rs/xxhash': ^1.1.0
+      '@opentelemetry/api': '>=1 <2'
+    peerDependenciesMeta:
+      '@node-rs/xxhash':
+        optional: true
+      '@opentelemetry/api':
+        optional: true
 
   '@redis/client@5.12.1':
     resolution: {integrity: sha512-7aPGWeqA3uFm43o19umzdl16CEjK/JQGtSXVPevplTaOU3VJA/rseBC1QvYUz9lLDIMBimc4SW/zrW4S89BaCA==}
@@ -6547,13 +6555,9 @@ packages:
   '@turf/projection@7.3.5':
     resolution: {integrity: sha512-G4bejYKT0vCQZryMhEoS9aLmP7ThDg6nb3zi3wPzELiTrGNOd2YgkWVheQDGCk4hcqEIWZc9fI2alaRSSkkLVw==}
 
-  '@tus/server@1.10.2':
-    resolution: {integrity: sha512-ig5MM886fDTSJ8l37kc/cWSEjl0eaaSv2JtksPSfzrwqx2UXdXwpCwBTLoonJIpMVCdY8nBLNRSCzVRG88KSVA==}
-    engines: {node: '>=16'}
-
-  '@tus/utils@0.5.1':
-    resolution: {integrity: sha512-2crDHBKX0hKZfQXgTF5QIQSccg5fzn8L+oxpVRWAuBbeAdAkBIm4zVXV/LfyuQ1FO5zXW7iV/BI9zNWG5merHQ==}
-    engines: {node: '>=16'}
+  '@tus/server@2.4.1':
+    resolution: {integrity: sha512-WShIwCqtthAL0x++f/VCF6ZpbULjRIYLPumQoOYNHa4NVMxW1pDBAKsNE3Y+rnVTzOttEumIXD1WDNRsIf7x7Q==}
+    engines: {node: '>=20.19.0'}
 
   '@tus/utils@0.7.0':
     resolution: {integrity: sha512-BPom8lVwR4fkk1EynPeQwuN0e5bH2gBphwt69uF5rS4wRD2N7IyHDPqdjcAY0I7gNEWfUitPyDodywbD4r7dEQ==}
@@ -9247,10 +9251,6 @@ packages:
 
   generate-function@2.3.1:
     resolution: {integrity: sha512-eeB5GfMNeevm/GRYq20ShmsaGcmI81kIX2K9XQx5miC8KdHaC6Jm0qQ8ZNeGOi7wYB8OsdxKs+Y2oVuTFuVwKQ==}
-
-  generic-pool@3.9.0:
-    resolution: {integrity: sha512-hymDOu5B53XvN4QT9dBmZxPX4CWhBPPLguTZ9MMFeFa/Kg0xWVfylOVNlJji/E7yTZWFd/q9GO5TxDLq156D7g==}
-    engines: {node: '>= 4'}
 
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
@@ -12342,6 +12342,9 @@ packages:
   set-blocking@2.0.0:
     resolution: {integrity: sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw==}
 
+  set-cookie-parser@2.7.2:
+    resolution: {integrity: sha512-oeM1lpU/UvhTxw+g3cIfxXHyJRc/uidd3yK1P242gzHds0udQBYzs3y8j4gCCW+ZJ7ad0yctld8RYO+bdurlvw==}
+
   setprototypeof@1.2.0:
     resolution: {integrity: sha512-E5LDX7Wrp85Kil5bhZv46j8jOeboKq5JMmYM3gVGdGH8xFpPWXUMsNrlODCrkoxMEeNi/XZIwuRvY4XNwYMJpw==}
 
@@ -12550,6 +12553,11 @@ packages:
   sqlite3@6.0.1:
     resolution: {integrity: sha512-X0czUUMG2tmSqJpEQa3tCuZSHKIx8PwM53vLZzKp/o6Rpy25fiVfjdbnZ988M8+O3ZWR1ih0K255VumCb3MAnQ==}
     engines: {node: '>=20.17.0'}
+
+  srvx@0.11.17:
+    resolution: {integrity: sha512-43yM4luKfCJamyCMhrUeHUPOrf8TdZe7kN8s5zayZCH5OeprYqi49Aso5ZvHXR4aB+DHaRNO/diNFgZSMNG8Xw==}
+    engines: {node: '>=20.16.0'}
+    hasBin: true
 
   ssri@10.0.5:
     resolution: {integrity: sha512-bSf16tAFkGeRlUNDjXu8FzaMQt6g2HZJrun7mtMbIPOddxt3GLMSz5VWUWcqTJUPfLEaDIepGxv+bYQW49596A==}
@@ -17611,11 +17619,11 @@ snapshots:
 
   '@popperjs/core@2.11.8': {}
 
-  '@redis/client@1.6.1':
+  '@redis/client@5.12.1(@opentelemetry/api@1.9.0)':
     dependencies:
       cluster-key-slot: 1.1.2
-      generic-pool: 3.9.0
-      yallist: 4.0.0
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.0
     optional: true
 
   '@redis/client@5.12.1(@opentelemetry/api@1.9.0)':
@@ -18122,18 +18130,20 @@ snapshots:
       '@types/geojson': 7946.0.16
       tslib: 2.8.1
 
-  '@tus/server@1.10.2':
+  '@tus/server@2.4.1(@opentelemetry/api@1.9.0)':
     dependencies:
-      '@tus/utils': 0.5.1
-      debug: 4.4.1
+      '@tus/utils': 0.7.0
+      debug: 4.4.3(supports-color@5.5.0)
       lodash.throttle: 4.1.1
+      set-cookie-parser: 2.7.2
+      srvx: 0.11.17
     optionalDependencies:
-      '@redis/client': 1.6.1
+      '@redis/client': 5.12.1(@opentelemetry/api@1.9.0)
       ioredis: 5.11.1
     transitivePeerDependencies:
+      - '@node-rs/xxhash'
+      - '@opentelemetry/api'
       - supports-color
-
-  '@tus/utils@0.5.1': {}
 
   '@tus/utils@0.7.0': {}
 
@@ -21063,9 +21073,6 @@ snapshots:
   generate-function@2.3.1:
     dependencies:
       is-property: 1.0.2
-    optional: true
-
-  generic-pool@3.9.0:
     optional: true
 
   gensync@1.0.0-beta.2: {}
@@ -24445,6 +24452,8 @@ snapshots:
 
   set-blocking@2.0.0: {}
 
+  set-cookie-parser@2.7.2: {}
+
   setprototypeof@1.2.0: {}
 
   sharp@0.35.2:
@@ -24731,6 +24740,8 @@ snapshots:
       - bare-buffer
       - react-native-b4a
     optional: true
+
+  srvx@0.11.17: {}
 
   ssri@10.0.5:
     dependencies:
