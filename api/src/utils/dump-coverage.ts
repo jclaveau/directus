@@ -12,9 +12,6 @@ export async function dumpCoverage(): Promise<void> {
 	if (coverageDir && coverage) {
 		await mkdir(coverageDir, { recursive: true });
 
-		await writeFile(
-			join(coverageDir, `cov-${process.pid}-${process.hrtime.bigint()}.json`),
-			JSON.stringify(coverage),
-		);
+		await writeFile(join(coverageDir, `cov-${process.pid}-${process.hrtime.bigint()}.json`), JSON.stringify(coverage));
 	}
 }
