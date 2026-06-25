@@ -14,6 +14,7 @@ import createApp from './app.js';
 import getDatabase from './database/index.js';
 import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
+import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
 import { getAddress } from './utils/get-address.js';
@@ -142,6 +143,8 @@ export async function createServer(): Promise<http.Server> {
 	}
 
 	async function onShutdown() {
+		await dumpCoverage();
+
 		emitter.emitAction(
 			'server.stop',
 			{ server },

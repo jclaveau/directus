@@ -17,12 +17,14 @@ export class NotificationsService extends ItemsService {
 		super('directus_notifications', options);
 	}
 
-	override async createOne(data: Partial<Notification>, opts?: MutationOptions): Promise<PrimaryKey> {
-		const response = await super.createOne(data, opts);
+	override async createMany(data: Partial<Notification>[], opts?: MutationOptions): Promise<PrimaryKey[]> {
+		const primaryKeys = await super.createMany(data, opts);
 
-		await this.sendEmail(data);
+		for (const notification of data) {
+			await this.sendEmail(notification);
+		}
 
-		return response;
+		return primaryKeys;
 	}
 
 	async sendEmail(data: Partial<Notification>) {

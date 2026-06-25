@@ -1,0 +1,50 @@
+import type { FieldOverview } from '@directus/types';
+import { CapabilitiesHelperDefault } from './default.js';
+
+/**
+ * SQLite gained `INSERT … RETURNING` in 3.35.0 (2021-03-12). Below that version the only
+ * id available after an insert is `last_insert_rowid()` (the last item only), so the
+ * batch path can't be trusted. Probe the runtime version once per knex client.
+ * https://www.sqlite.org/lang_returning.html
+ */
+const MIN_SQLITE_RETURNING_VERSION: [number, number] = [3, 35];
+
+export class CapabilitiesHelperSqlite extends CapabilitiesHelperDefault {
+	private preservesOrderCache?: boolean;
+
+	override async preservesInsertOrderInReturning(): Promise<boolean> {
+		if (this.preservesOrderCache !== undefined) return this.preservesOrderCache;
+
+		const row = await this.knex.select(this.knex.raw('sqlite_version() as version')).first<{ version?: string }>();
+		const versionStr = String(row?.version ?? '0');
+		const [major = 0, minor = 0] = versionStr.split('.').map(Number);
+		const [minMajor, minMinor] = MIN_SQLITE_RETURNING_VERSION;
+
+		this.preservesOrderCache = major > minMajor || (major === minMajor && minor >= minMinor);
+		return this.preservesOrderCache;
+	}
+
+	/**
+	 * SQLite batchInsert workaround (https://github.com/knex/knex/issues/332):
+	 *
+	 * - knex normalizes columns across all rows in the chunk.
+	 * - Columns missing from a row are bound as `undefined`.
+	 * - The sqlite3 driver translates that to `NULL` and the insert fails for
+	 *   non-nullable columns.
+	 *
+	 * Spread per-column defaults for non-nullable fields first so the payload
+	 * only overrides what it explicitly sets.
+	 */
+	override padRowsForBatchInsert<T extends Record<string, unknown>>(
+		rows: T[],
+		opts: { fields: Record<string, FieldOverview>; primaryKeyField: string },
+	): T[] {
+		const fieldsRequiringValue = Object.fromEntries(
+			Object.entries(opts.fields)
+				.filter(([fieldName, field]) => fieldName !== opts.primaryKeyField && field.nullable === false)
+				.map(([fieldName, field]) => [fieldName, field.defaultValue]),
+		);
+
+		return rows.map((row) => ({ ...fieldsRequiringValue, ...row }));
+	}
+}

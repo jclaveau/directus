@@ -12,19 +12,21 @@ coverage:
       default:
         informational: true
 
-# Controllers are thin HTTP guards (e.g. isSystemCollection → ForbiddenError) exercised by
-# the blackbox suite, which does not feed the codecov unit flag — so they can't lift patch
-# coverage and would otherwise red every PR that touches them. Service-layer logic is the
-# unit-tested surface.
-# Auth drivers (SSO/LDAP/OAuth callbacks) are likewise integration-only — exercised through a
-# real IdP/login flow, not the unit suite — so their diff coverage can't gate patch either.
+# Controllers (and auth drivers) used to be ignored — thin HTTP guards exercised only by the
+# blackbox suite, which fed no codecov flag, so they could not lift patch coverage. The
+# `blackbox` flag (instrumented build → __coverage__ dump → merged lcov, see blackbox.yml)
+# now carries their integration coverage, so the ignore is dropped.
 # Build configs (tsdown/vite/rollup/vitest) are consumed by the bundler, never imported by a
 # test, so they are always 0% covered — exclude them rather than red every build-tooling PR.
 ignore:
-  - 'api/src/controllers'
-  - 'api/src/auth/drivers'
   - '**/*.config.ts'
   - '**/*.config.js'
+  # Coverage-build / integration glue that can't feed the unit patch flag: the COVERAGE_DIR
+  # coverage dump (runs only in instrumented builds, on shutdown) and its merge script, plus the
+  # extension controller's request guards (install needs a live registry — no blackbox harness).
+  - 'api/src/utils/dump-coverage.ts'
+  - 'api/src/controllers/extensions.ts'
+  - 'tests/blackbox/merge-coverage.mjs'
 
 flag_management:
   default_rules:
@@ -37,6 +39,20 @@ flag_management:
       - type: patch
         target: 80%
         informational: true # Scalabus: report-only ramp; flip to blocking once baseline + dialect tests land
+  individual_flags:
+    # Blackbox is label-gated (runs only with the "Run Blackbox" label), so carryforward keeps
+    # its integration coverage alive on PRs that don't re-run it. Report-only: the suite is slow
+    # and containerised, so it must never block. NOTE: a controller/auth-driver diff on a PR that
+    # does NOT run blackbox is covered only for unchanged lines via carryforward — the changed
+    # lines stay uncovered and can red the (blocking) aggregate patch. Open question on the PR:
+    # run blackbox unconditionally, or keep these paths ignored until it is non-gated.
+    - name: blackbox
+      carryforward: true
+      statuses:
+        - type: project
+          informational: true
+        - type: patch
+          informational: true
 
 comment:
   layout: 'header, diff, flags'

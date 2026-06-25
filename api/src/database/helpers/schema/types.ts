@@ -18,6 +18,12 @@ export type SortRecord = {
 	column: Knex.Raw;
 };
 
+export type InvalidCollationColumn = {
+	table_name: string;
+	name: string;
+	collation: string;
+};
+
 export abstract class SchemaHelper extends DatabaseHelper {
 	isOneOfClients(clients: DatabaseClient[]): boolean {
 		return clients.includes(getDatabaseClient(this.knex));
@@ -178,5 +184,47 @@ export abstract class SchemaHelper extends DatabaseHelper {
 
 	getTableNameMaxLength() {
 		return 64;
+	}
+
+	// Emit the DB-native DROP CONSTRAINT IF EXISTS directly rather than knex's native
+	// table.dropUniqueIfExists. The native method only exists on knex >= 3.2, and bumping to it
+	// is not worth the regression it brings:
+	//
+	// - knex 3.2.10 (PR #6392, "Properly Escape Aliases in Analytic Functions") now wraps a
+	//   window-function alias through formatter.wrap. Directus pre-wraps its `directus_row_number`
+	//   alias via knex.ref(...).toQuery() in run-ast/get-db-query.ts, so 3.2.x double-escapes it
+	//   (e.g. `as ""directus_row_number""`) and every deep o2m/m2m sort 500s on all dialects.
+	// - So we stay on knex 3.1.x and hand-roll the conditional drop, the same way dropIndexIfExists
+	//   below already does.
+	//
+	// Coverage: postgres / cockroachdb (and mssql 2016+) accept DROP CONSTRAINT IF EXISTS; sqlite
+	// backs uniques with an index and overrides; mysql + oracle lack the syntax and override with a
+	// catalog existence check.
+	async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const constraintName = this.generateIndexName('unique', collection, field);
+
+		await knex.raw('ALTER TABLE ?? DROP CONSTRAINT IF EXISTS ??', [collection, constraintName]);
+	}
+
+	// knex has no dropIndexIfExists for plain indexes on any dialect, so emit the DB-native
+	// IF EXISTS directly (postgres / sqlite / cockroachdb). mssql needs ON <table>; mysql + oracle
+	// lack the syntax and override with an existence check.
+	// Proposed upstream as a native conditional sibling of dropIndex — https://github.com/knex/knex/issues/6467
+	// If it lands, the native-IF-EXISTS branches here + in mssql collapse onto table.dropIndexIfExists(...).
+	async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const indexName = this.generateIndexName('index', collection, field);
+
+		await knex.raw('DROP INDEX IF EXISTS ??', [indexName]);
+	}
+
+	async getColumnsWithInvalidCollation(schema: string, collation: string): Promise<InvalidCollationColumn[]> {
+		return this.knex('information_schema.columns')
+			.select<InvalidCollationColumn[]>({
+				table_name: 'TABLE_NAME',
+				name: 'COLUMN_NAME',
+				collation: 'COLLATION_NAME',
+			})
+			.where({ TABLE_SCHEMA: schema })
+			.whereNot({ COLLATION_NAME: collation });
 	}
 }

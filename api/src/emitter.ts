@@ -31,24 +31,28 @@ export class Emitter {
 		};
 	}
 
-	public async emitFilter<T>(
+	public async emitFilter<TIn = unknown, TOut = TIn>(
 		event: string | string[],
-		payload: T,
+		payload: TIn,
 		meta: Record<string, any>,
 		context: EventContext | null = null,
-	): Promise<T> {
+	): Promise<TIn | TOut> {
 		const events = Array.isArray(event) ? event : [event];
 
 		const eventListeners = events.map((event) => ({
 			event,
-			listeners: this.filterEmitter.listeners(event) as FilterHandler<T>[],
+			listeners: this.filterEmitter.listeners(event) as FilterHandler<TIn, TOut>[],
 		}));
 
-		let updatedPayload = payload;
+		let updatedPayload: TIn | TOut = payload;
 
 		for (const { event, listeners } of eventListeners) {
 			for (const listener of listeners) {
-				const result = await listener(updatedPayload, { event, ...meta }, context ?? this.getDefaultContext());
+				const result = await listener(
+					updatedPayload as TIn,
+					{ event, ...meta, originalPayload: payload },
+					context ?? this.getDefaultContext(),
+				);
 
 				if (result !== undefined) {
 					updatedPayload = result;
@@ -59,16 +63,24 @@ export class Emitter {
 		return updatedPayload;
 	}
 
-	public emitAction(event: string | string[], meta: Record<string, any>, context: EventContext | null = null): void {
+	public async emitAction(
+		event: string | string[],
+		meta: Record<string, any>,
+		context: EventContext | null = null,
+	): Promise<void> {
 		const logger = useLogger();
 		const events = Array.isArray(event) ? event : [event];
 
-		for (const event of events) {
-			this.actionEmitter.emitAsync(event, { event, ...meta }, context ?? this.getDefaultContext()).catch((err) => {
-				logger.warn(`An error was thrown while executing action "${event}"`);
-				logger.warn(err);
-			});
-		}
+		// Run every event's listeners in parallel and await them together, so a slow
+		// handler on one event doesn't serialize behind the others.
+		await Promise.all(
+			events.map((event) =>
+				this.actionEmitter.emitAsync(event, { event, ...meta }, context ?? this.getDefaultContext()).catch((err) => {
+					logger.warn(`An error was thrown while executing action "${event}"`);
+					logger.warn(err);
+				}),
+			),
+		);
 	}
 
 	public async emitInit(event: string, meta: Record<string, any>): Promise<void> {
@@ -82,7 +94,7 @@ export class Emitter {
 		}
 	}
 
-	public onFilter<T = unknown>(event: string, handler: FilterHandler<T>): void {
+	public onFilter<TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>): void {
 		this.filterEmitter.on(event, handler);
 	}
 
@@ -94,7 +106,7 @@ export class Emitter {
 		this.initEmitter.on(event, handler);
 	}
 
-	public offFilter<T = unknown>(event: string, handler: FilterHandler<T>): void {
+	public offFilter<TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>): void {
 		this.filterEmitter.off(event, handler);
 	}
 

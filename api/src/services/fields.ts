@@ -245,7 +245,9 @@ export class FieldsService {
 			});
 
 			if (collection && collection in allowedFieldsInCollection === false) {
-				throw new ForbiddenError();
+				throw new ForbiddenError({
+					reason: `'${this.accountability.user}' does not have permission to read fields from '${collection}'.`,
+				});
 			}
 
 			result = result.filter((field) => {
@@ -297,7 +299,9 @@ export class FieldsService {
 			}
 
 			if (!hasAccess) {
-				throw new ForbiddenError();
+				throw new ForbiddenError({
+					reason: `'${this.accountability.user}' does not have permission to read '${collection}.${field}'`,
+				});
 			}
 		}
 
@@ -318,7 +322,12 @@ export class FieldsService {
 			// Do nothing
 		}
 
-		if (!column && !fieldInfo) throw new ForbiddenError();
+		if (!column && !fieldInfo) {
+			// 404 / InvalidPayload / CorruptedSchema?
+			throw new ForbiddenError({
+				reason: `Can't retrieve the schema info for the column '${field}' of '${collection}'`,
+			});
+		}
 
 		const type = getLocalType(column, fieldInfo);
 
@@ -347,7 +356,9 @@ export class FieldsService {
 		opts?: MutationOptions,
 	): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have the permission to create the field '${field}' in '${collection}'`,
+			});
 		}
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
@@ -472,7 +483,9 @@ export class FieldsService {
 
 	async updateField(collection: string, field: RawField, opts?: MutationOptions): Promise<string> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have the permission to update the field '${field}' in '${collection}'`,
+			});
 		}
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
@@ -535,6 +548,17 @@ export class FieldsService {
 								if (!hookAdjustedField.schema) return;
 								this.addColumnToTable(table, collection, field, existingColumn);
 							});
+
+							// Drop a unique/index that was toggled off. Guarded against the index not
+							// physically existing (#35) — Directus decides from its own metadata, so a
+							// missing/renamed index would otherwise throw and fail the whole update.
+							if (field.schema?.is_unique === false && existingColumn?.is_unique === true) {
+								await this.helpers.schema.dropUniqueIfExists(trx, collection, field.field);
+							}
+
+							if (field.schema?.is_indexed === false && existingColumn?.is_indexed === true) {
+								await this.helpers.schema.dropIndexIfExists(trx, collection, field.field);
+							}
 						});
 					} catch (err: any) {
 						throw await translateDatabaseError(err, field);
@@ -649,7 +673,9 @@ export class FieldsService {
 
 	async deleteField(collection: string, field: string, opts?: MutationOptions): Promise<void> {
 		if (this.accountability && this.accountability.admin !== true) {
-			throw new ForbiddenError();
+			throw new ForbiddenError({
+				reason: `'${this.accountability.user}' does not have the permission to delete the field '${field}' in '${collection}'`,
+			});
 		}
 
 		const runPostColumnChange = await this.helpers.schema.preColumnChange();
@@ -923,21 +949,18 @@ export class FieldsService {
 				if (!existing || existing.is_unique === false) {
 					column.unique({ indexName: this.helpers.schema.generateIndexName('unique', collection, field.field) });
 				}
-			} else if (field.schema?.is_unique === false) {
-				if (existing?.is_unique === true) {
-					table.dropUnique([field.field], this.helpers.schema.generateIndexName('unique', collection, field.field));
-				}
 			}
 
 			if (field.schema?.is_indexed === true) {
 				if (!existing || existing.is_indexed === false) {
 					column.index(this.helpers.schema.generateIndexName('index', collection, field.field));
 				}
-			} else if (field.schema?.is_indexed === false) {
-				if (existing?.is_indexed === true) {
-					table.dropIndex([field.field], this.helpers.schema.generateIndexName('index', collection, field.field));
-				}
 			}
+
+			// Dropping an existing unique/index when toggled off is handled in updateField via
+			// helpers.schema.dropUniqueIfExists / dropIndexIfExists. It needs an async existence
+			// check on dialects without native IF EXISTS, which can't run inside this synchronous
+			// alterTable builder.
 		}
 
 		if (existing) {

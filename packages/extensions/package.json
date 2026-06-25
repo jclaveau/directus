@@ -24,9 +24,10 @@
 		"api.d.ts"
 	],
 	"scripts": {
+		"//build-no-clean": "build:node and build:shared both emit into dist/. When pnpm runs them sequentially (e.g. workspace-concurrency=1), the second tsdown cleans the first's output (index.js/node.js) before writing its own. --no-clean disables that step so both sets of outputs coexist.",
 		"build": "pnpm run '/^build:.*/'",
-		"build:node": "tsup src/node.ts --tsconfig src/node/tsconfig.json --out-dir dist --format=esm --dts",
-		"build:shared": "tsup src/index.ts --tsconfig src/tsconfig.json --out-dir dist --format=esm --dts",
+		"build:node": "tsdown src/node.ts --tsconfig src/node/tsconfig.json --out-dir dist --dts --no-clean",
+		"build:shared": "tsdown src/index.ts --tsconfig src/tsconfig.json --out-dir dist --dts --no-clean",
 		"dev": "pnpm run '/^build:.*/' --watch",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"
@@ -48,7 +49,7 @@
 		"@vitest/coverage-v8": "catalog:",
 		"knex": "catalog:",
 		"pino": "catalog:",
-		"tsup": "catalog:",
+		"tsdown": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:",
 		"vue": "catalog:",

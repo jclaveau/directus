@@ -5,7 +5,8 @@
 	"type": "module",
 	"scripts": {
 		"test": "vitest --watch=false",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"merge-coverage": "node merge-coverage.mjs"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "catalog:",
@@ -22,6 +23,9 @@
 		"get-port": "7.2.0",
 		"globby": "16.2.0",
 		"graphql-ws": "6.0.8",
+		"istanbul-lib-coverage": "3.2.2",
+		"istanbul-lib-report": "3.0.1",
+		"istanbul-reports": "3.1.7",
 		"js-yaml": "4.2.0",
 		"json-to-graphql-query": "2.3.0",
 		"knex": "3.1.0",

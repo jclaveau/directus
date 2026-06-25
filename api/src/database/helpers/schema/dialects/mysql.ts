@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { Knex } from 'knex';
 import { getDefaultIndexName } from '../../../../utils/get-default-index-name.js';
-import { SchemaHelper, type SortRecord } from '../types.js';
+import { type InvalidCollationColumn, SchemaHelper, type SortRecord } from '../types.js';
 
 const env = useEnv();
 
@@ -12,6 +12,40 @@ export class SchemaHelperMySQL extends SchemaHelper {
 		fields: string | string[],
 	): string {
 		return getDefaultIndexName(type, collection, fields, { maxLength: 64 });
+	}
+
+	// MySQL has no DROP ... IF EXISTS for indexes/constraints (and MariaDB rides this same client),
+	// so check the catalog first. Unique constraints and plain indexes both surface in
+	// information_schema.statistics, so one lookup serves both drops below.
+	private async hasIndex(knex: Knex, collection: string, indexName: string): Promise<boolean> {
+		const result = await knex
+			.select('index_name')
+			.from('information_schema.statistics')
+			.whereRaw('table_schema = database()')
+			.andWhere({ table_name: collection, index_name: indexName })
+			.first();
+
+		return Boolean(result);
+	}
+
+	override async dropUniqueIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const constraintName = this.generateIndexName('unique', collection, field);
+
+		if (await this.hasIndex(knex, collection, constraintName)) {
+			await knex.schema.alterTable(collection, (table) => {
+				table.dropUnique([field], constraintName);
+			});
+		}
+	}
+
+	override async dropIndexIfExists(knex: Knex, collection: string, field: string): Promise<void> {
+		const indexName = this.generateIndexName('index', collection, field);
+
+		if (await this.hasIndex(knex, collection, indexName)) {
+			await knex.schema.alterTable(collection, (table) => {
+				table.dropIndex([field], indexName);
+			});
+		}
 	}
 
 	override async getDatabaseSize(): Promise<number | null> {
@@ -69,5 +103,30 @@ export class SchemaHelperMySQL extends SchemaHelper {
 
 			groupByFields.push(...sortRecords.map(({ alias }) => alias));
 		}
+	}
+
+	override async getColumnsWithInvalidCollation(schema: string, collation: string): Promise<InvalidCollationColumn[]> {
+		const { version } = await this.knex.select(this.knex.raw('VERSION() as version')).first();
+		const isMariaDB = String(version).split('-').includes('MariaDB');
+
+		return this.knex('information_schema.columns')
+			.select<InvalidCollationColumn[]>({
+				table_name: 'TABLE_NAME',
+				name: 'COLUMN_NAME',
+				collation: 'COLLATION_NAME',
+			})
+			.where({ TABLE_SCHEMA: schema })
+			.whereNot({ COLLATION_NAME: collation })
+			.modify((queryBuilder) => {
+				// MariaDB has no native JSON type; it stores JSON as LONGTEXT with the utf8mb4_bin
+				// collation, so that pairing is expected rather than a real collation mismatch.
+				// Exclude only the pairing — NOT(longtext AND utf8mb4_bin) — so a longtext column
+				// with a genuinely wrong collation (or a utf8mb4_bin non-longtext) is still reported.
+				if (isMariaDB) {
+					queryBuilder.andWhereNot((qb) => {
+						void qb.where({ COLUMN_TYPE: 'longtext' }).andWhere({ COLLATION_NAME: 'utf8mb4_bin' });
+					});
+				}
+			});
 	}
 }

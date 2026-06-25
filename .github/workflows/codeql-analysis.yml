@@ -2,6 +2,7 @@ name: CodeQL Analysis
 
 on:
   workflow_call:
+  pull_request:
   schedule:
     - cron: '0 0 * * *'
 

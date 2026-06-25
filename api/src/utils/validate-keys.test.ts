@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { validateKeys } from './validate-keys.js';
@@ -15,13 +16,19 @@ const schema = new SchemaBuilder()
 describe('validate keys', () => {
 	describe('of integer type', () => {
 		it('Throws an error when provided with an invalid integer key', () => {
-			expect(() => validateKeys(schema, 'pk_integer', 'id', 'invalid')).toThrowError();
-			expect(() => validateKeys(schema, 'pk_integer', 'id', NaN)).toThrowError();
+			expect(() => validateKeys(schema, 'pk_integer', 'id', 'invalid')).toThrowError(InvalidPayloadError);
+			expect(() => validateKeys(schema, 'pk_integer', 'id', NaN)).toThrowError(InvalidPayloadError);
+		});
+
+		it('Throws an error with a reason naming the expected integer type', () => {
+			expect(() => validateKeys(schema, 'pk_integer', 'id', 'invalid')).toThrowError(
+				'Primary key of pk_integer must be an integer instead of "invalid"',
+			);
 		});
 
 		it('Throws an error when provided with an array containing an invalid integer key', () => {
-			expect(() => validateKeys(schema, 'pk_integer', 'id', [111, 'invalid', 222])).toThrowError();
-			expect(() => validateKeys(schema, 'pk_integer', 'id', [555, NaN, 666])).toThrowError();
+			expect(() => validateKeys(schema, 'pk_integer', 'id', [111, 'invalid', 222])).toThrowError(InvalidPayloadError);
+			expect(() => validateKeys(schema, 'pk_integer', 'id', [555, NaN, 666])).toThrowError(InvalidPayloadError);
 		});
 
 		it('Does not throw an error when provided with a valid integer key', () => {
@@ -37,20 +44,37 @@ describe('validate keys', () => {
 
 	describe('of uuid type', () => {
 		it('Throws an error when provided with an invalid uuid key', () => {
-			expect(() => validateKeys(schema, 'pk_uuid', 'id', 'fakeuuid-62d9-434d-a7c7-878c8376782e')).toThrowError();
-			expect(() => validateKeys(schema, 'pk_uuid', 'id', 'invalid')).toThrowError();
-			expect(() => validateKeys(schema, 'pk_uuid', 'id', NaN)).toThrowError();
-			expect(() => validateKeys(schema, 'pk_uuid', 'id', 111)).toThrowError();
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', 'fakeuuid-62d9-434d-a7c7-878c8376782e')).toThrowError(
+				InvalidPayloadError,
+			);
+
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', 'invalid')).toThrowError(InvalidPayloadError);
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', NaN)).toThrowError(InvalidPayloadError);
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', 111)).toThrowError(InvalidPayloadError);
+		});
+
+		it('Throws an error with a reason naming the expected uuid type', () => {
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', 'invalid')).toThrowError(
+				'Primary key of pk_uuid must be a uuid instead of "invalid"',
+			);
 		});
 
 		it('Throws an error when provided with an array containing an invalid uuid key', () => {
 			expect(() =>
 				validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), 'fakeuuid-62d9-434d-a7c7-878c8376782e', randomUUID()]),
-			).toThrowError();
+			).toThrowError(InvalidPayloadError);
 
-			expect(() => validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), 'invalid', randomUUID()])).toThrowError();
-			expect(() => validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), NaN, randomUUID()])).toThrowError();
-			expect(() => validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), 111, randomUUID()])).toThrowError();
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), 'invalid', randomUUID()])).toThrowError(
+				InvalidPayloadError,
+			);
+
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), NaN, randomUUID()])).toThrowError(
+				InvalidPayloadError,
+			);
+
+			expect(() => validateKeys(schema, 'pk_uuid', 'id', [randomUUID(), 111, randomUUID()])).toThrowError(
+				InvalidPayloadError,
+			);
 		});
 
 		it('Does not throw an error when provided with a valid uuid key', () => {

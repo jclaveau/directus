@@ -8,6 +8,7 @@ import { getHelpers } from '../database/helpers/index.js';
 import { PayloadService } from './index.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Item, Accountability } from '@directus/types';
+import { ForbiddenError } from '@directus/errors';
 
 vi.mock('../../src/database/index', () => ({
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
@@ -458,6 +459,39 @@ describe('Integration Tests', () => {
 				);
 
 				expect(result).toMatchObject({ other_string: 'not-redacted', other_hidden: REDACT_STR });
+			});
+		});
+
+		describe('processO2M', () => {
+			const schema = new SchemaBuilder()
+				.collection('country', (c) => {
+					c.field('id').id();
+					c.field('cities').o2m('city', 'country_id');
+				})
+				.collection('city', (c) => {
+					c.field('id').id();
+					c.field('country_id').integer();
+				})
+				.build();
+
+			let service: PayloadService;
+
+			beforeEach(() => {
+				service = new PayloadService('country', {
+					knex: db,
+					schema,
+				});
+			});
+
+			test('throws ForbiddenError when a referenced O2M primary key does not exist', async () => {
+				// The related-record lookup by PK resolves to no row, so the existing-record guard fails.
+				tracker.on.select('city').response([]);
+
+				await expect(service.processO2M({ cities: [99] }, 1)).rejects.toThrowError(ForbiddenError);
+
+				await expect(service.processO2M({ cities: [99] }, 1)).rejects.toThrowError(
+					"Could not find a 'city' record having the primary key 99 while processing O2M relation",
+				);
 			});
 		});
 	});

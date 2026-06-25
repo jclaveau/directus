@@ -13,8 +13,14 @@ permissions:
 jobs:
   blackbox-tests:
     name: Blackbox Tests
-    if: contains(github.event.pull_request.labels.*.name, 'Run Blackbox')
+    # `Run Blackbox` runs the pg+sqlite smoke set; `Run Blackbox Full` runs the whole vendor
+    # matrix (and triggers on its own, no need to also add `Run Blackbox`).
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'Run Blackbox') ||
+      contains(github.event.pull_request.labels.*.name, 'Run Blackbox Full')
     uses: ./.github/workflows/blackbox.yml
+    with:
+      full: ${{ contains(github.event.pull_request.labels.*.name, 'Run Blackbox Full') }}
     # Reusable workflows don't inherit caller secrets implicitly; blackbox.yml needs
     # CODECOV_TOKEN to upload the `blackbox` coverage flag (protected repo rejects tokenless).
     secrets: inherit

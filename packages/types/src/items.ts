@@ -55,7 +55,14 @@ export type MutationOptions = {
 	 * To bypass the emitting of action events if emitEvents is enabled
 	 * Can be used to queue up the nested events from item service's create, update and delete
 	 */
-	bypassEmitAction?: ((params: ActionEventParams) => void) | undefined;
+	bypassEmitAction?: ((params: ActionEventParams) => void) | ((params: ActionEventParams) => Promise<void>) | undefined;
+
+	/**
+	 * Await the mutation's action hooks before resolving, instead of firing them and forgetting.
+	 * Off by default (action hooks stay fire-and-forget); opt in when a client reads back a side
+	 * effect an action handler produces and would otherwise race it.
+	 */
+	awaitActionHooks?: boolean | undefined;
 
 	/**
 	 * To bypass limits so that functions would work as intended
@@ -71,6 +78,12 @@ export type MutationOptions = {
 	 * The validation error to throw right before the mutation takes place
 	 */
 	preMutationError?: DirectusError | undefined;
+
+	/**
+	 * Allow a filter hook to cancel the mutation by returning null. When set, the mutation
+	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
+	 */
+	allowFilterCancel?: boolean | undefined;
 
 	bypassAutoIncrementSequenceReset?: boolean;
 
