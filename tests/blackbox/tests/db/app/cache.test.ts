@@ -25,7 +25,7 @@ test('Seed Database Values', () => {
 describe('App Caching Tests', () => {
 	const databases = new Map<string, Knex>();
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
-	const envKeys = ['envMem', 'envMemPurge', 'envRedis', 'envRedisPurge'] as const;
+	const envKeys = ['envMem', 'envMemPurge', 'envRedis', 'envRedisPurge', 'envRedisScopedPurge'] as const;
 	type EnvTypes = Record<(typeof envKeys)[number], Env>;
 	const envs = {} as Record<Vendor, EnvTypes>;
 	const cacheNamespacePrefix = 'directus-app-cache';
@@ -61,29 +61,43 @@ describe('App Caching Tests', () => {
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
 			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_purge`;
 
+			// Auto-purge with scoped (tag-based) invalidation: a mutation drops only the cache entries
+			// that read the mutated collection, leaving other collections warm.
+			const envRedisScopedPurge = cloneDeep(envRedisPurge);
+			envRedisScopedPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
+			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_scoped`;
+
 			const newServerPortMem = await getPort();
 			const newServerPortMemPurge = await getPort();
 			const newServerPortRedis = await getPort();
 			const newServerPortRedisPurge = await getPort();
+			const newServerPortRedisScopedPurge = await getPort();
 
 			envMem[vendor].PORT = String(newServerPortMem);
 			envMemPurge[vendor].PORT = String(newServerPortMemPurge);
 			envRedis[vendor].PORT = String(newServerPortRedis);
 			envRedisPurge[vendor].PORT = String(newServerPortRedisPurge);
+			envRedisScopedPurge[vendor].PORT = String(newServerPortRedisScopedPurge);
 
 			const serverMem = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envMem[vendor] });
 			const serverMemPurge = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envMemPurge[vendor] });
 			const serverRedis = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envRedis[vendor] });
 			const serverRedisPurge = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envRedisPurge[vendor] });
 
-			directusInstances[vendor] = [serverMem, serverMemPurge, serverRedis, serverRedisPurge];
-			envs[vendor] = { envMem, envMemPurge, envRedis, envRedisPurge };
+			const serverRedisScopedPurge = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: envRedisScopedPurge[vendor],
+			});
+
+			directusInstances[vendor] = [serverMem, serverMemPurge, serverRedis, serverRedisPurge, serverRedisScopedPurge];
+			envs[vendor] = { envMem, envMemPurge, envRedis, envRedisPurge, envRedisScopedPurge };
 
 			promises.push(
 				awaitDirectusConnection(newServerPortMem),
 				awaitDirectusConnection(newServerPortMemPurge),
 				awaitDirectusConnection(newServerPortRedis),
 				awaitDirectusConnection(newServerPortRedisPurge),
+				awaitDirectusConnection(newServerPortRedisScopedPurge),
 			);
 		}
 
@@ -331,6 +345,45 @@ describe('App Caching Tests', () => {
 					}
 				});
 			});
+		});
+	});
+
+	describe('Scoped purge isolates the mutated collection from other collections', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// Setup
+			const env = envs[vendor].envRedisScopedPurge;
+
+			await request(getUrl(vendor, env)).post(`/utils/cache/clear`).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			// Warm both collections
+			await request(getUrl(vendor, env))
+				.get(`/items/${collectionFirst}`)
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			await request(getUrl(vendor, env))
+				.get(`/items/${collectionIgnored}`)
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			// Action: mutate only collectionFirst
+			await request(getUrl(vendor, env))
+				.post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			const mutated = await request(getUrl(vendor, env))
+				.get(`/items/${collectionFirst}`)
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			const untouched = await request(getUrl(vendor, env))
+				.get(`/items/${collectionIgnored}`)
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			// Assert: the mutated collection's cache is dropped, the other survives. Under full
+			// auto-purge `untouched` would be MISS (whole-namespace flush); scoped keeps it warm.
+			expect(mutated.statusCode).toBe(200);
+			expect(mutated.headers[cacheStatusHeader]).toBe('MISS');
+			expect(untouched.statusCode).toBe(200);
+			expect(untouched.headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });
