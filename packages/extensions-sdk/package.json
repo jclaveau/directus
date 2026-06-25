@@ -48,7 +48,7 @@
 		"fs-extra": "catalog:",
 		"inquirer": "catalog:",
 		"ora": "catalog:",
-		"rolldown": "1.0.0-rc.16",
+		"rolldown": "catalog:",
 		"rollup-plugin-styler": "catalog:",
 		"semver": "catalog:",
 		"vite": "catalog:",
