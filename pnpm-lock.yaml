@@ -739,8 +739,8 @@ catalogs:
       specifier: 6.1.3
       version: 6.1.3
     rolldown:
-      specifier: 1.0.0-beta.9-commit.d91dfb5
-      version: 1.0.0-beta.9-commit.d91dfb5
+      specifier: 1.1.3
+      version: 1.1.3
     rolldown-plugin-istanbul:
       specifier: git+https://github.com/jclaveau/rolldown-plugin-istanbul.git
       version: 5.0.1
@@ -1427,7 +1427,7 @@ importers:
         version: 3.0.2(knex@3.1.0(mysql2@3.22.5(@types/node@22.19.21))(pg@8.22.0)(sqlite3@6.0.1)(tedious@18.6.2))
       rolldown-plugin-istanbul:
         specifier: 'catalog:'
-        version: https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/7dc36ade898ed255aad00677d4e06a759f4be000(rolldown@1.0.0-beta.9-commit.d91dfb5)(rollup@4.62.2)
+        version: https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/7dc36ade898ed255aad00677d4e06a759f4be000(rolldown@1.1.3)(rollup@4.62.2)
       tsdown:
         specifier: 'catalog:'
         version: 0.15.11(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)(typescript@5.8.3)
@@ -23818,12 +23818,12 @@ snapshots:
     transitivePeerDependencies:
       - oxc-resolver
 
-  rolldown-plugin-istanbul@https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/7dc36ade898ed255aad00677d4e06a759f4be000(rolldown@1.0.0-beta.9-commit.d91dfb5)(rollup@4.62.2):
+  rolldown-plugin-istanbul@https://codeload.github.com/jclaveau/rolldown-plugin-istanbul/tar.gz/7dc36ade898ed255aad00677d4e06a759f4be000(rolldown@1.1.3)(rollup@4.62.2):
     dependencies:
       '@rollup/pluginutils': 5.4.0(rollup@4.62.2)
       istanbul-lib-instrument: 6.0.3
     optionalDependencies:
-      rolldown: 1.0.0-beta.9-commit.d91dfb5
+      rolldown: 1.1.3
       rollup: 4.62.2
     transitivePeerDependencies:
       - supports-color
