@@ -103,6 +103,8 @@ const readHandler = asyncHandler(async (req, res, next) => {
 		data: result,
 	};
 
+	res.locals['cacheTags'] = service.cacheTags;
+
 	return next();
 });
 

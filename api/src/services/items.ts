@@ -20,14 +20,16 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
-import { getCache } from '../cache.js';
+import { getCache, purgeCache, scopedCachePurgeEnabled } from '../cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
+import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
+import { collectionsInFieldMap } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
@@ -71,6 +73,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	eventScope: string;
 	schema: SchemaOverview;
 	cache: Keyv<any> | null;
+	/** Collections whose data fed reads on this instance; used to scope tag-based cache purging. */
+	cacheTags: Set<string>;
 	nested: string[];
 
 	constructor(collection: Collection, options: AbstractServiceOptions) {
@@ -80,6 +84,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		this.eventScope = isSystemCollection(this.collection) ? this.collection.substring(9) : 'items';
 		this.schema = options.schema;
 		this.cache = getCache().cache;
+		this.cacheTags = new Set();
 		this.nested = options.nested ?? [];
 
 		return this;
@@ -565,7 +570,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		return results;
@@ -609,6 +614,14 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			{ ast, action: 'read', accountability: this.accountability },
 			{ knex: this.knex, schema: this.schema },
 		);
+
+		// Record every collection this read touches (root + relations in fields/filter/sort) so a
+		// later mutation can drop just these cache entries instead of flushing the whole namespace.
+		if (scopedCachePurgeEnabled()) {
+			for (const collection of collectionsInFieldMap(fieldMapFromAst(ast, this.schema))) {
+				this.cacheTags.add(collection);
+			}
+		}
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
@@ -770,7 +783,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			});
 		} finally {
 			if (shouldClearCache(this.cache, opts, this.collection)) {
-				await this.cache.clear();
+				await purgeCache(this.cache, this.collection);
 			}
 		}
 
@@ -1055,7 +1068,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1133,7 +1146,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		return primaryKeys;
@@ -1284,7 +1297,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		if (opts.emitEvents !== false) {

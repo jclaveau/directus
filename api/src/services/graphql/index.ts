@@ -32,12 +32,15 @@ export class GraphQLService {
 	knex: Knex;
 	schema: SchemaOverview;
 	scope: GQLScope;
+	/** Collections read across this request's resolvers; used to scope tag-based cache purging. */
+	cacheTags: Set<string>;
 
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
 		this.schema = options.schema;
 		this.scope = options.scope;
+		this.cacheTags = new Set();
 	}
 
 	/**
@@ -109,6 +112,10 @@ export class GraphQLService {
 		const result = this.schema.collections[collection]!.singleton
 			? await service.readSingleton(query, { stripNonRequested: false })
 			: await service.readByQuery(query, { stripNonRequested: false });
+
+		for (const tag of service.cacheTags) {
+			this.cacheTags.add(tag);
+		}
 
 		return result;
 	}
