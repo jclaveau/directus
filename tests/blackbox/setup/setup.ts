@@ -69,7 +69,8 @@ export async function setup() {
 											await fs.writeFile(join(paths.cwd, `server-log-${vendor}.txt`), serverOutput);
 										}
 
-										if (code !== null)
+										// code 0 = graceful terminus shutdown (COVERAGE_DIR builds dump coverage then exit 0 on teardown SIGTERM); only non-zero is a real crash
+										if (code !== null && code !== 0)
 											throw new Error(`Directus-${vendor} server failed (${code}): \n ${serverOutput}`);
 									});
 
@@ -94,7 +95,8 @@ export async function setup() {
 											await fs.writeFile(join(paths.cwd, `server-log-${vendor}-no-cache.txt`), serverNoCacheOutput);
 										}
 
-										if (code !== null) {
+										// code 0 = graceful terminus shutdown (see above); only non-zero is a real crash
+										if (code !== null && code !== 0) {
 											throw new Error(`Directus-${vendor}-no-cache server failed (${code}): \n ${serverNoCacheOutput}`);
 										}
 									});
