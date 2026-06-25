@@ -535,7 +535,8 @@ function getRollupOptions({
 		external: [...(mode === 'browser' ? APP_SHARED_DEPS : API_SHARED_DEPS)],
 		platform: mode!, // TODO why is undefined possible (and triggering an error) only during extensions-sdk's build?
 		// match upstream: only app (browser) extensions are pinned to production; node extensions keep the real env
-		define: mode === 'browser' ? { 'process.env.NODE_ENV': JSON.stringify('production') } : {},
+		// rolldown 1.1+ moved `define` under `transform`
+		transform: mode === 'browser' ? { define: { 'process.env.NODE_ENV': JSON.stringify('production') } } : {},
 		plugins: [
 			typeof input !== 'string' ? virtual(input) : null,
 			mode === 'browser' ? vue({ isProduction: true }) : null,
