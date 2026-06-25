@@ -37,7 +37,7 @@ jobs:
       vendors: ${{ steps.matrix.outputs.vendors }}
     steps:
       # Default DB matrix is the pg+sqlite smoke set. The full vendor matrix runs on a
-      # push to a trunk branch, or on a PR carrying the `Blackbox-Full` label (passed in
+      # push to a trunk branch, or on a PR carrying the `Run Blackbox Full` label (passed in
       # as `inputs.full` by blackbox-pr.yml).
       - name: Select vendor matrix
         id: matrix
