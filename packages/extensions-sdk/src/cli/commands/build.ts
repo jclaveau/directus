@@ -9,7 +9,6 @@ import {
 import type { AppExtensionType, ApiExtensionType } from '@directus/types';
 import { APP_EXTENSION_TYPES, EXTENSION_TYPES, HYBRID_EXTENSION_TYPES } from '@directus/constants';
 import { isIn, isTypeIn } from '@directus/utils';
-// import replaceDefault from '@rollup/plugin-replace';
 import terserDefault from '@rollup/plugin-terser';
 import virtualDefault from '@rollup/plugin-virtual';
 import vue from '@vitejs/plugin-vue';
@@ -535,17 +534,13 @@ function getRollupOptions({
 		input: typeof input !== 'string' ? 'entry' : input,
 		external: [...(mode === 'browser' ? APP_SHARED_DEPS : API_SHARED_DEPS)],
 		platform: mode!, // TODO why is undefined possible (and triggering an error) only during extensions-sdk's build?
+		// match upstream: only app (browser) extensions are pinned to production; node extensions keep the real env
+		define: mode === 'browser' ? { 'process.env.NODE_ENV': JSON.stringify('production') } : {},
 		plugins: [
 			typeof input !== 'string' ? virtual(input) : null,
 			mode === 'browser' ? vue({ isProduction: true }) : null,
 			mode === 'browser' ? styles() : null,
 			...plugins,
-			// replace({
-			// 	values: {
-			// 		'process.env.NODE_ENV': JSON.stringify('production'),
-			// 	},
-			// 	preventAssignment: true,
-			// }),
 			minify ? terser() : null, // rolldown builtin minifier is in still alpha https://rolldown.rs/guide/features#minification
 		],
 		onwarn(warning, warn) {
