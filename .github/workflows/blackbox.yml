@@ -13,6 +13,11 @@ on:
       - pnpm-lock.yaml
       - .github/workflows/blackbox.yml
   workflow_call:
+    inputs:
+      full:
+        description: 'Run the full DB matrix (all vendors) instead of the pg+sqlite smoke set'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -25,6 +30,24 @@ env:
   NODE_OPTIONS: --max_old_space_size=6144
 
 jobs:
+  setup:
+    name: setup
+    runs-on: ubuntu-latest
+    outputs:
+      vendors: ${{ steps.matrix.outputs.vendors }}
+    steps:
+      # Default DB matrix is the pg+sqlite smoke set. The full vendor matrix runs on a
+      # push to a trunk branch, or on a PR carrying the `Blackbox-Full` label (passed in
+      # as `inputs.full` by blackbox-pr.yml).
+      - name: Select vendor matrix
+        id: matrix
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.full }}" = "true" ]; then
+            echo 'vendors=["sqlite3","postgres","mysql","maria","mssql","oracle"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'vendors=["sqlite3","postgres"]' >> "$GITHUB_OUTPUT"
+          fi
+
   common:
     name: common
     runs-on: ubuntu-latest
@@ -45,19 +68,15 @@ jobs:
 
   db:
     name: ${{ matrix.vendor }}
+    needs: setup
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        vendor:
-          - sqlite3
-          - postgres
-          - mysql
-          - maria
-          - mssql
-          - oracle
-          # - cockroachdb
+        # Smoke set (sqlite3 + postgres) by default; full vendor set when setup selects it.
+        # cockroachdb stays excluded everywhere for now.
+        vendor: ${{ fromJSON(needs.setup.outputs.vendors) }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
