@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	CacheTag,
 	GraphQLParams,
 	GQLScope,
 	Item,
@@ -38,14 +39,14 @@ export class GraphQLService {
 	 * cached entry assembled from many reads, so this aggregate is by design (unlike a per-query read,
 	 * whose tags ride its result via `getMeta()`). Stamped onto the execute() result.
 	 */
-	cacheTags: Set<string>;
+	cacheTags: CacheTag[];
 
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
 		this.schema = options.schema;
 		this.scope = options.scope;
-		this.cacheTags = new Set();
+		this.cacheTags = [];
 	}
 
 	/**
@@ -118,9 +119,7 @@ export class GraphQLService {
 			? await service.readSingleton(query, { stripNonRequested: false })
 			: await service.readByQuery(query, { stripNonRequested: false });
 
-		for (const tag of readMeta(result)?.cacheTags ?? []) {
-			this.cacheTags.add(tag);
-		}
+		this.cacheTags.push(...(readMeta(result)?.cacheTags ?? []));
 
 		return result;
 	}

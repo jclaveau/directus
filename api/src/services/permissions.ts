@@ -39,7 +39,7 @@ export class PermissionsService extends ItemsService {
 		// withAppMinimalPermissions returns a fresh array, so carry the read's cache-tag rider across.
 		return withMeta(
 			withAppMinimalPermissions(this.accountability, result, query.filter) as Partial<Item>[],
-			readMeta(result) ?? { cacheTags: new Set() },
+			readMeta(result) ?? { cacheTags: [] },
 		);
 	}
 

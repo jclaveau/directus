@@ -239,6 +239,13 @@ fields:
     options:
       collectionField: collection
 
+  - field: cache_scope_fields
+    special:
+      - cast-json
+    interface: system-field-tree
+    options:
+      collectionField: collection
+
   - field: sort
     hidden: true
 
