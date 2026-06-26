@@ -3,6 +3,7 @@ import { parseGraphQL } from '../middleware/graphql.js';
 import { respond } from '../middleware/respond.js';
 import { GraphQLService } from '../services/graphql/index.js';
 import asyncHandler from '../utils/async-handler.js';
+import { readMeta } from '../utils/read-meta.js';
 
 const router = Router();
 
@@ -17,6 +18,7 @@ router.use(
 		});
 
 		res.locals['payload'] = await service.execute(res.locals['graphqlParams']);
+		res.locals['cacheTags'] = readMeta(res.locals['payload'])?.cacheTags;
 
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;
@@ -38,6 +40,7 @@ router.use(
 		});
 
 		res.locals['payload'] = await service.execute(res.locals['graphqlParams']);
+		res.locals['cacheTags'] = readMeta(res.locals['payload'])?.cacheTags;
 
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;

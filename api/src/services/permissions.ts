@@ -8,6 +8,7 @@ import type {
 	PrimaryKey,
 	Query,
 	QueryOptions,
+	WithMeta,
 } from '@directus/types';
 import { uniq } from 'lodash-es';
 import { clearSystemCache } from '../cache.js';
@@ -16,6 +17,7 @@ import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { withAppMinimalPermissions } from '../permissions/lib/with-app-minimal-permissions.js';
 import type { ValidateAccessOptions } from '../permissions/modules/validate-access/validate-access.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 
 export class PermissionsService extends ItemsService {
@@ -31,10 +33,14 @@ export class PermissionsService extends ItemsService {
 		}
 	}
 
-	override async readByQuery(query: Query, opts?: QueryOptions): Promise<Partial<Item>[]> {
+	override async readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<Partial<Item>[]>> {
 		const result = (await super.readByQuery(query, opts)) as Permission[];
 
-		return withAppMinimalPermissions(this.accountability, result, query.filter);
+		// withAppMinimalPermissions returns a fresh array, so carry the read's cache-tag rider across.
+		return withMeta(
+			withAppMinimalPermissions(this.accountability, result, query.filter) as Partial<Item>[],
+			readMeta(result) ?? { cacheTags: new Set() },
+		);
 	}
 
 	override async createOne(data: Partial<Item>, opts?: MutationOptions) {

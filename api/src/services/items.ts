@@ -15,21 +15,25 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
+	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
-import { getCache } from '../cache.js';
+import { getCache, purgeCache, scopedCachePurgeEnabled } from '../cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
+import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
+import { collectionsInFieldMap } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import { validateKeys } from '../utils/validate-keys.js';
@@ -565,7 +569,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		return results;
@@ -574,7 +578,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	/**
 	 * Get items by query.
 	 */
-	async readByQuery(query: Query, opts?: QueryOptions): Promise<Item[]> {
+	async readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<Item[]>> {
 		const updatedQuery =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
@@ -609,6 +613,17 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			{ ast, action: 'read', accountability: this.accountability },
 			{ knex: this.knex, schema: this.schema },
 		);
+
+		// Collect every collection this read touches (root + relations in fields/filter/sort) so a
+		// later mutation can drop just these cache entries instead of flushing the whole namespace.
+		// Bounded to this read — it rides the result via `getMeta()`, not a service-level field.
+		const cacheTags = new Set<string>();
+
+		if (scopedCachePurgeEnabled()) {
+			for (const collection of collectionsInFieldMap(fieldMapFromAst(ast, this.schema))) {
+				cacheTags.add(collection);
+			}
+		}
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
@@ -655,7 +670,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			);
 		}
 
-		return filteredRecords as Item[];
+		return withMeta(filteredRecords as Item[], { cacheTags });
 	}
 
 	/**
@@ -663,7 +678,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	async readOne(key: PrimaryKey, query: Query = {}, opts?: QueryOptions): Promise<Item> {
+	async readOne(key: PrimaryKey, query: Query = {}, opts?: QueryOptions): Promise<WithMeta<Item>> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
@@ -679,7 +694,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			});
 		}
 
-		return results[0]!;
+		// Carry the read's metadata onto the single returned item.
+		return withMeta(results[0]!, readMeta(results) ?? { cacheTags: new Set() });
 	}
 
 	/**
@@ -687,7 +703,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	async readMany(keys: PrimaryKey[], query: Query = {}, opts?: QueryOptions): Promise<Item[]> {
+	async readMany(keys: PrimaryKey[], query: Query = {}, opts?: QueryOptions): Promise<WithMeta<Item[]>> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
@@ -770,7 +786,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			});
 		} finally {
 			if (shouldClearCache(this.cache, opts, this.collection)) {
-				await this.cache.clear();
+				await purgeCache(this.cache, this.collection);
 			}
 		}
 
@@ -1055,7 +1071,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1133,7 +1149,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		return primaryKeys;
@@ -1284,7 +1300,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.cache.clear();
+			await purgeCache(this.cache, this.collection);
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1314,12 +1330,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	/**
 	 * Read/treat collection as singleton.
 	 */
-	async readSingleton(query: Query, opts?: QueryOptions): Promise<Partial<Item>> {
+	async readSingleton(query: Query, opts?: QueryOptions): Promise<WithMeta<Partial<Item>>> {
 		query = clone(query);
 
 		query.limit = 1;
 
 		const records = await this.readByQuery(query, opts);
+		const meta = readMeta(records) ?? { cacheTags: new Set<string>() };
 		const record = records[0];
 
 		if (!record) {
@@ -1341,10 +1358,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				if (field.defaultValue !== null) defaults[name] = field.defaultValue;
 			}
 
-			return defaults as Partial<Item>;
+			return withMeta(defaults as Partial<Item>, meta);
 		}
 
-		return record;
+		return withMeta(record, meta);
 	}
 
 	/**

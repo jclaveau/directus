@@ -9,6 +9,7 @@ import { validateBatch } from '../middleware/validate-batch.js';
 import { ItemsService } from '../services/items.js';
 import { MetaService } from '../services/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import { readMeta } from '../utils/read-meta.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = express.Router();
@@ -102,6 +103,8 @@ const readHandler = asyncHandler(async (req, res, next) => {
 		meta: meta,
 		data: result,
 	};
+
+	res.locals['cacheTags'] = readMeta(result)?.cacheTags;
 
 	return next();
 });
