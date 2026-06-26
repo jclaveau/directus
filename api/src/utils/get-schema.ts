@@ -233,19 +233,19 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 /**
  * Read a JSON-column field list off a raw `directus_collections` row. The column comes back parsed
  * on Postgres but as a JSON string on MySQL/SQLite, so accept both and degrade to an empty list on
- * anything unexpected.
+ * anything unexpected. The string branch goes through `parseJSON` (prototype-pollution hardened),
+ * since a raw `knex.select` bypasses the `cast-json` items pipeline that would normally apply it.
  */
 function parseJsonFieldList(raw: unknown): string[] {
-	if (Array.isArray(raw)) return raw.filter((entry): entry is string => typeof entry === 'string');
+	let parsed: unknown = raw;
 
 	if (typeof raw === 'string' && raw.length > 0) {
 		try {
-			const parsed = JSON.parse(raw);
-			return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+			parsed = parseJSON(raw);
 		} catch {
 			return [];
 		}
 	}
 
-	return [];
+	return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
 }
