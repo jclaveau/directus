@@ -13,6 +13,7 @@ import { NoSchemaIntrospectionCustomRule, execute, specifiedRules, validate } fr
 import type { Knex } from 'knex';
 import getDatabase from '../../database/index.js';
 import { getService } from '../../utils/get-service.js';
+import { readMeta, withMeta } from '../../utils/read-meta.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
 import { generateSchema } from './schema/index.js';
@@ -32,7 +33,11 @@ export class GraphQLService {
 	knex: Knex;
 	schema: SchemaOverview;
 	scope: GQLScope;
-	/** Collections read across this request's resolvers; used to scope tag-based cache purging. */
+	/**
+	 * Union of cache tags across every read in this GraphQL request — a `/graphql` response is one
+	 * cached entry assembled from many reads, so this aggregate is by design (unlike a per-query read,
+	 * whose tags ride its result via `getMeta()`). Stamped onto the execute() result.
+	 */
 	cacheTags: Set<string>;
 
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
@@ -86,7 +91,7 @@ export class GraphQLService {
 
 		if (result['extensions']) formattedResult.extensions = result['extensions'];
 
-		return formattedResult;
+		return withMeta(formattedResult, { cacheTags: this.cacheTags });
 	}
 
 	/**
@@ -113,7 +118,7 @@ export class GraphQLService {
 			? await service.readSingleton(query, { stripNonRequested: false })
 			: await service.readByQuery(query, { stripNonRequested: false });
 
-		for (const tag of service.cacheTags) {
+		for (const tag of readMeta(result)?.cacheTags ?? []) {
 			this.cacheTags.add(tag);
 		}
 

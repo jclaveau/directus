@@ -14,7 +14,11 @@ vi.mock('../cache.js', () => ({
 vi.mock('../database/run-ast/run-ast.js', () => ({ runAst: vi.fn(async () => []) }));
 
 import { scopedCachePurgeEnabled } from '../cache.js';
+import { runAst } from '../database/run-ast/run-ast.js';
+import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
+
+const tagsOf = (result: object) => [...(readMeta(result)?.cacheTags ?? [])].sort();
 
 const schema = new SchemaBuilder()
 	.collection('articles', (c) => {
@@ -39,34 +43,45 @@ describe('readByQuery cache-tag accumulation', () => {
 	test('tags the root collection AND every collection reached through relations', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
-		await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
+		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect([...service.cacheTags].sort()).toEqual(['articles', 'users']);
+		expect(tagsOf(result)).toEqual(['articles', 'users']);
 	});
 
 	test('tags only the root collection for a non-relational read', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
-		await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
+		const result = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
 
-		expect([...service.cacheTags]).toEqual(['articles']);
+		expect(tagsOf(result)).toEqual(['articles']);
 	});
 
-	test('accumulates the union across multiple reads on the same instance', async () => {
+	test('tags are bounded per read — they do not accumulate across reads on one instance', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
-		await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
-		await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
+		const shallow = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
+		const deep = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect([...service.cacheTags].sort()).toEqual(['articles', 'users']);
+		// Each result carries only its own query's tags — the earlier read is not polluted by the later.
+		expect(tagsOf(shallow)).toEqual(['articles']);
+		expect(tagsOf(deep)).toEqual(['articles', 'users']);
 	});
 
-	test('skips accumulation entirely when scoped purge is disabled', async () => {
+	test('readOne / readSingleton carry the read tags onto the single returned value', async () => {
+		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
+		vi.mocked(runAst).mockResolvedValueOnce([{ id: 1, title: 't' }]);
+
+		const one = await service.readOne(1, { fields: ['*', 'author.*'] }, { emitEvents: false });
+
+		expect(tagsOf(one)).toEqual(['articles', 'users']);
+	});
+
+	test('emits empty tags (but still a meta rider) when scoped purge is disabled', async () => {
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(false);
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 
-		await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
+		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect(service.cacheTags.size).toBe(0);
+		expect(readMeta(result)?.cacheTags.size).toBe(0);
 	});
 });
