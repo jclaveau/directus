@@ -154,9 +154,10 @@ CACHE_ENABLED=false
 # Automatically purge the cache on create, update, and delete actions. [false]
 # CACHE_AUTO_PURGE=true
 
-# How `CACHE_AUTO_PURGE` invalidates: `full` flushes the whole cache on every mutation; `scoped`
-# (requires CACHE_STORE=redis) drops only entries whose response read the mutated collection. [full]
-# CACHE_AUTO_PURGE_MODE=scoped
+# How `CACHE_AUTO_PURGE` invalidates: `scoped` (requires CACHE_STORE=redis) drops only entries whose
+# response read the mutated collection; `full` flushes the whole cache on every mutation. With any
+# other store `scoped` falls back to `full`. [scoped]
+# CACHE_AUTO_PURGE_MODE=full
 
 # List of collections that prevent cache purging when `CACHE_AUTO_PURGE` is enabled. ["directus_activity,directus_presets"]
 # CACHE_AUTO_PURGE_IGNORE_LIST="directus_activity,directus_presets"

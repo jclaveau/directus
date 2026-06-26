@@ -59,6 +59,8 @@ describe('App Caching Tests', () => {
 
 			const envRedisPurge = cloneDeep(envRedis);
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
+			// scoped is the default now, so pin full explicitly to keep covering whole-namespace purge.
+			envRedisPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'full';
 			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_purge`;
 
 			// Auto-purge with scoped (tag-based) invalidation: a mutation drops only the cache entries

@@ -72,7 +72,7 @@ export const DEFAULTS = {
 	CACHE_TTL: '5m',
 	CACHE_NAMESPACE: 'system-cache',
 	CACHE_AUTO_PURGE: false,
-	CACHE_AUTO_PURGE_MODE: 'full',
+	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
 	CACHE_CONTROL_S_MAXAGE: '0',
 	CACHE_SCHEMA: true,
