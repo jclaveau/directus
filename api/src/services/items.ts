@@ -9,7 +9,6 @@ import type {
 	ActionEventParams,
 	Alterations,
 	Item as AnyItem,
-	CacheTag,
 	EventContext,
 	MutationTracker,
 	MutationOptions,
@@ -17,6 +16,7 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
+	ScopedCacheTag,
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -69,20 +69,20 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 }
 
 /**
- * Build value tags from the distinct scope-field values present across `rows`. With `requireAll` a
- * row missing any scope field makes the values unresolvable (returns `null`), so the caller falls
- * back to a coarse purge rather than leaving a slice stale — used on reads (a field that wasn't
+ * Build scoped cache tags from the distinct scope values present across `rows`. With `requireAll` a
+ * row missing any scoped cache field makes the values unresolvable (returns `null`), so the caller
+ * falls back to a coarse purge rather than leaving a slice stale — used on reads (a field that wasn't
  * projected) and creates (a field the payload omitted). Without it, missing fields are skipped, used
  * for update payloads where an absent field just means "unchanged" and the pre-update capture covers
  * the old value.
  */
-export function collectScopeValueTags(
+export function scopedCacheTagsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	requireAll: boolean,
-): CacheTag[] | null {
-	const tags: CacheTag[] = [];
+): ScopedCacheTag[] | null {
+	const tags: ScopedCacheTag[] = [];
 
 	for (const field of fields) {
 		const seen = new Set<unknown>();
@@ -127,26 +127,27 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	}
 
 	/**
-	 * Read the current scope-field values for the given keys as value tags, before a mutation runs.
-	 * Captures the *old* values an update/delete is about to change so their cache slices get purged
-	 * (an update that moves a row from `student=A` to `student=B` must drop both). Returns an empty
-	 * list when the collection has no scope fields or there are no keys (a bare purge then suffices).
+	 * Read the current scope values for the given keys as scoped cache tags, before a mutation runs.
+	 * Captures the *old* values an update/delete is about to change so their slices get purged (an
+	 * update that moves a row from `student=A` to `student=B` must drop both). Returns an empty list
+	 * when the collection has no scoped cache fields or there are no keys (a collection-level purge
+	 * then suffices).
 	 */
-	private async captureScopeValueTags(keys: PrimaryKey[]): Promise<CacheTag[] | null> {
+	private async captureScopedCacheTags(keys: PrimaryKey[]): Promise<ScopedCacheTag[] | null> {
 		if (!scopedCachePurgeEnabled()) return [];
 
-		const scopeFields = this.schema.collections[this.collection]?.cacheScopeFields ?? [];
-		if (scopeFields.length === 0 || keys.length === 0) return [];
+		const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+		if (scopedCacheFields.length === 0 || keys.length === 0) return [];
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
-		const rows = await this.knex.select(primaryKeyField, ...scopeFields).from(this.collection).whereIn(primaryKeyField, keys);
+		const rows = await this.knex.select(primaryKeyField, ...scopedCacheFields).from(this.collection).whereIn(primaryKeyField, keys);
 
-		return collectScopeValueTags(this.collection, scopeFields, rows, true);
+		return scopedCacheTagsFromRows(this.collection, scopedCacheFields, rows, true);
 	}
 
 	/** Event context handed to the `cache.purge` filter so extensions can resolve their own tags. */
-	private cachePurgeContext(): EventContext {
+	private scopedCachePurgeContext(): EventContext {
 		return { database: this.knex, schema: this.schema, accountability: this.accountability };
 	}
 
@@ -630,11 +631,11 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const scopeFields = this.schema.collections[this.collection]?.cacheScopeFields ?? [];
-			// New rows: a payload that omits a scope field has an unknown (default) value, so it can't
-			// be scoped — `collectScopeValueTags` returns null and purgeCache falls back to a full flush.
-			const valueTags = collectScopeValueTags(this.collection, scopeFields, data, true);
-			await purgeCache(this.cache, this.collection, valueTags, this.cachePurgeContext());
+			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+			// New rows: a payload that omits a scoped cache field has an unknown (default) value, so it can't
+			// be scoped — `scopedCacheTagsFromRows` returns null and purgeCache falls back to a full flush.
+			const scopedCacheTags = scopedCacheTagsFromRows(this.collection, scopedCacheFields, data, true);
+			await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
 		}
 
 		return results;
@@ -707,38 +708,38 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					)
 				: records;
 
-		// Scope this read for tag-based cache purging. The root collection gets value tags built from the
-		// scope-field values present in the returned rows, so one owner's/partition's later write drops
+		// Scope this read for cache purging. The root collection gets scoped cache tags built from the
+		// scope values present in the returned rows, so one owner's/partition's later write drops
 		// only their entries. Every other touched collection — and a root whose scope values can't be
 		// resolved (field not projected, empty result, none configured) — falls back to a bare collection
 		// tag. The `cache.scope` filter lets extensions augment these (e.g. resolve M2M owners); whatever
 		// they add here must be reproducible on the `cache.purge` side or it leaks. Bounded to this read —
 		// it rides the result via `getMeta()`, not a service-level field.
-		const cacheTags: CacheTag[] = [];
+		const scopedCacheTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
-			const scopeFields = this.schema.collections[this.collection]?.cacheScopeFields ?? [];
+			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
 
-			const rootValueTags =
-				scopeFields.length > 0 ? collectScopeValueTags(this.collection, scopeFields, filteredRecords, true) : null;
+			const rootScopedCacheTags =
+				scopedCacheFields.length > 0 ? scopedCacheTagsFromRows(this.collection, scopedCacheFields, filteredRecords, true) : null;
 
 			for (const collection of collectionsInFieldMap(fieldMapFromAst(ast, this.schema))) {
-				if (collection === this.collection && rootValueTags && rootValueTags.length > 0) {
-					cacheTags.push(...rootValueTags);
+				if (collection === this.collection && rootScopedCacheTags && rootScopedCacheTags.length > 0) {
+					scopedCacheTags.push(...rootScopedCacheTags);
 				} else {
-					cacheTags.push({ collection });
+					scopedCacheTags.push({ collection });
 				}
 			}
 
 			const scopedTags = (await emitter.emitFilter(
 				'cache.scope',
-				cacheTags,
+				scopedCacheTags,
 				{ collection: this.collection, query: updatedQuery },
 				{ database: this.knex, schema: this.schema, accountability: this.accountability },
-			)) as CacheTag[];
+			)) as ScopedCacheTag[];
 
-			cacheTags.length = 0;
-			cacheTags.push(...scopedTags);
+			scopedCacheTags.length = 0;
+			scopedCacheTags.push(...scopedTags);
 		}
 
 		if (opts?.emitEvents !== false) {
@@ -758,7 +759,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			);
 		}
 
-		return withMeta(filteredRecords as Item[], { cacheTags });
+		return withMeta(filteredRecords as Item[], { scopedCacheTags });
 	}
 
 	/**
@@ -783,7 +784,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		}
 
 		// Carry the read's metadata onto the single returned item.
-		return withMeta(results[0]!, readMeta(results) ?? { cacheTags: [] });
+		return withMeta(results[0]!, readMeta(results) ?? { scopedCacheTags: [] });
 	}
 
 	/**
@@ -850,7 +851,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			.map((item) => item[primaryKeyField])
 			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
 
-		const oldScopeValueTags = await this.captureScopeValueTags(batchKeys);
+		const oldScopedCacheTags = await this.captureScopedCacheTags(batchKeys);
 
 		try {
 			await transaction(this.knex, async (knex) => {
@@ -881,10 +882,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			});
 		} finally {
 			if (shouldClearCache(this.cache, opts, this.collection)) {
-				const scopeFields = this.schema.collections[this.collection]?.cacheScopeFields ?? [];
-				const newScopeValueTags = collectScopeValueTags(this.collection, scopeFields, data, false) ?? [];
-				const valueTags = oldScopeValueTags === null ? null : [...oldScopeValueTags, ...newScopeValueTags];
-				await purgeCache(this.cache, this.collection, valueTags, this.cachePurgeContext());
+				const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+				const newScopedCacheTags = scopedCacheTagsFromRows(this.collection, scopedCacheFields, data, false) ?? [];
+				const scopedCacheTags = oldScopedCacheTags === null ? null : [...oldScopedCacheTags, ...newScopedCacheTags];
+				await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
 			}
 		}
 
@@ -920,7 +921,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		// Capture the scope values these rows hold before the update so an update that moves a row to a
 		// new scope value purges both slices (old ∪ new). Empty when the collection isn't scoped.
-		const oldScopeValueTags = await this.captureScopeValueTags(keys);
+		const oldScopedCacheTags = await this.captureScopedCacheTags(keys);
 
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
@@ -1173,12 +1174,12 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const scopeFields = this.schema.collections[this.collection]?.cacheScopeFields ?? [];
+			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
 			// Old slices from the pre-update capture, plus the new value the update sets (if it touches a
-			// scope field). An absent scope field means "unchanged", already covered by the old capture.
-			const newScopeValueTags = collectScopeValueTags(this.collection, scopeFields, [data], false) ?? [];
-			const valueTags = oldScopeValueTags === null ? null : [...oldScopeValueTags, ...newScopeValueTags];
-			await purgeCache(this.cache, this.collection, valueTags, this.cachePurgeContext());
+			// scope field). An absent scoped cache field means "unchanged", already covered by the old capture.
+			const newScopedCacheTags = scopedCacheTagsFromRows(this.collection, scopedCacheFields, [data], false) ?? [];
+			const scopedCacheTags = oldScopedCacheTags === null ? null : [...oldScopedCacheTags, ...newScopedCacheTags];
+			await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1259,7 +1260,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			// Upserts mix inserts and updates per row, so old (pre-update) scope values can't be captured
 			// cheaply for the update subset. Fall back to a full flush (`null`) rather than risk leaving a
 			// moved-value slice stale. TODO(scoped-cache): resolve per-row once upsert churn is measured.
-			await purgeCache(this.cache, this.collection, null, this.cachePurgeContext());
+			await purgeCache(this.cache, this.collection, null, this.scopedCachePurgeContext());
 		}
 
 		return primaryKeys;
@@ -1345,7 +1346,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		// Capture the scope values of the rows about to be deleted; after the delete they're gone and
 		// can't be read, so a later purge couldn't tell which slices to drop.
-		const oldScopeValueTags = await this.captureScopeValueTags(keysAfterHooks);
+		const oldScopedCacheTags = await this.captureScopedCacheTags(keysAfterHooks);
 
 		if (this.accountability) {
 			await validateAccess(
@@ -1414,7 +1415,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await purgeCache(this.cache, this.collection, oldScopeValueTags, this.cachePurgeContext());
+			await purgeCache(this.cache, this.collection, oldScopedCacheTags, this.scopedCachePurgeContext());
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1450,7 +1451,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		query.limit = 1;
 
 		const records = await this.readByQuery(query, opts);
-		const meta = readMeta(records) ?? { cacheTags: [] };
+		const meta = readMeta(records) ?? { scopedCacheTags: [] };
 		const record = records[0];
 
 		if (!record) {

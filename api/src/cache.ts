@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import type { CacheTag, EventContext, SchemaOverview } from '@directus/types';
+import type { ScopedCacheTag, EventContext, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
 import emitter from './emitter.js';
@@ -167,13 +167,13 @@ export function scopedCachePurgeEnabled(): boolean {
 	return env['CACHE_AUTO_PURGE_MODE'] === 'scoped' && env['CACHE_STORE'] === 'redis' && redisConfigAvailable();
 }
 
-function serializeTagValue(value: unknown): string {
+function serializeScopedCacheTagValue(value: unknown): string {
 	return value === null || value === undefined ? 'null' : String(value);
 }
 
-function cacheTagKey(tag: CacheTag): string {
+function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
-	return tag.field === undefined ? base : `${base}:${tag.field}=${serializeTagValue(tag.value)}`;
+	return tag.field === undefined ? base : `${base}:${tag.field}=${serializeScopedCacheTagValue(tag.value)}`;
 }
 
 /**
@@ -182,10 +182,10 @@ function cacheTagKey(tag: CacheTag): string {
  * `__expires_at` sibling are tagged. Each tag set self-expires at twice the cache TTL as a safety net
  * against members orphaned by a crash between write and purge.
  */
-export async function tagCacheKeys(key: string, tags: Iterable<CacheTag>): Promise<void> {
+export async function tagScopedCacheKeys(key: string, tags: Iterable<ScopedCacheTag>): Promise<void> {
 	if (!scopedCachePurgeEnabled()) return;
 
-	const tagKeys = [...new Set([...tags].map(cacheTagKey))];
+	const tagKeys = [...new Set([...tags].map(scopedCacheTagKey))];
 	if (tagKeys.length === 0) return;
 
 	const redis = useRedis();
@@ -203,14 +203,14 @@ export async function tagCacheKeys(key: string, tags: Iterable<CacheTag>): Promi
 /**
  * Purge cached responses affected by a mutation on `collection`. Outside scoped mode the whole data
  * cache is flushed (legacy `cache.clear()` behavior). In scoped mode the bare collection tag (global
- * reads) is always purged alongside the resolved `valueTags` (the owner/partition slices the mutation
- * touched), leaving every other slice untouched. A `null` `valueTags` means "values couldn't be
- * resolved" → fall back to a full flush rather than risk leaving a stale value slice behind.
+ * reads) is always purged alongside the resolved `scopedCacheTags` (the owner/partition slices the mutation
+ * touched), leaving every other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
+ * resolved" → fall back to a full flush rather than risk leaving a stale slice behind.
  */
 export async function purgeCache(
 	cache: Keyv,
 	collection: string,
-	valueTags: CacheTag[] | null = [],
+	scopedCacheTags: ScopedCacheTag[] | null = [],
 	context: EventContext | null = null,
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled()) {
@@ -218,20 +218,20 @@ export async function purgeCache(
 		return;
 	}
 
-	if (valueTags === null) {
+	if (scopedCacheTags === null) {
 		await cache.clear();
 		return;
 	}
 
 	const tags = (await emitter.emitFilter(
 		'cache.purge',
-		[{ collection }, ...valueTags],
+		[{ collection }, ...scopedCacheTags],
 		{ collection },
 		context,
-	)) as CacheTag[];
+	)) as ScopedCacheTag[];
 
 	const redis = useRedis();
-	const tagKeys = [...new Set(tags.map(cacheTagKey))];
+	const tagKeys = [...new Set(tags.map(scopedCacheTagKey))];
 	const members = [...new Set((await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)))).flat())];
 
 	if (members.length > 0) {

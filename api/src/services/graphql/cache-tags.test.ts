@@ -35,26 +35,26 @@ describe('GraphQLService cache tags', () => {
 
 		vi.mocked(getService).mockReturnValueOnce({
 			readByQuery: async () =>
-				withMeta([{ id: 1 }], { cacheTags: [{ collection: 'articles' }, { collection: 'users' }] }),
+				withMeta([{ id: 1 }], { scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }] }),
 		} as any);
 
 		await gql.read('articles', {});
-		expect(gql.cacheTags.map((tag) => tag.collection).sort()).toEqual(['articles', 'users']);
+		expect(gql.scopedCacheTags.map((tag) => tag.collection).sort()).toEqual(['articles', 'users']);
 
 		// a second read on another collection adds to the same per-request union
 		vi.mocked(getService).mockReturnValueOnce({
-			readByQuery: async () => withMeta([{ id: 2 }], { cacheTags: [{ collection: 'directus_files' }] }),
+			readByQuery: async () => withMeta([{ id: 2 }], { scopedCacheTags: [{ collection: 'directus_files' }] }),
 		} as any);
 
 		await gql.read('files', {});
-		expect(gql.cacheTags.map((tag) => tag.collection).sort()).toEqual(['articles', 'directus_files', 'users']);
+		expect(gql.scopedCacheTags.map((tag) => tag.collection).sort()).toEqual(['articles', 'directus_files', 'users']);
 	});
 
 	test('execute() stamps the unioned tags onto its result via getMeta()', async () => {
 		const gql = makeService({});
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
 
-		gql.cacheTags.push({ collection: 'articles' }, { collection: 'users' });
+		gql.scopedCacheTags.push({ collection: 'articles' }, { collection: 'users' });
 
 		const result = await gql.execute({
 			document: {} as any,
@@ -64,6 +64,6 @@ describe('GraphQLService cache tags', () => {
 		});
 
 		expect(result.data).toEqual({ ok: true });
-		expect((readMeta(result)?.cacheTags ?? []).map((tag) => tag.collection).sort()).toEqual(['articles', 'users']);
+		expect((readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual(['articles', 'users']);
 	});
 });

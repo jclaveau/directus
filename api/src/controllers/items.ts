@@ -104,7 +104,7 @@ const readHandler = asyncHandler(async (req, res, next) => {
 		data: result,
 	};
 
-	res.locals['cacheTags'] = readMeta(result)?.cacheTags;
+	res.locals['scopedCacheTags'] = readMeta(result)?.scopedCacheTags;
 
 	return next();
 });

@@ -127,7 +127,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 
 	const collections = [
 		...(await database
-			.select('collection', 'singleton', 'note', 'sort_field', 'accountability', 'cache_scope_fields')
+			.select('collection', 'singleton', 'note', 'sort_field', 'accountability', 'scoped_cache_fields')
 			.from('directus_collections')),
 		...systemCollectionRows,
 	];
@@ -158,7 +158,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 			note: collectionMeta?.note || null,
 			sortField: collectionMeta?.sort_field || null,
 			accountability: collectionMeta ? collectionMeta.accountability : 'all',
-			cacheScopeFields: parseJsonFieldList(collectionMeta?.cache_scope_fields),
+			scopedCacheFields: parseJsonFieldList(collectionMeta?.scoped_cache_fields),
 			fields: mapValues(schemaOverview[collection]?.columns, (column) => {
 				return {
 					field: column.column_name,
