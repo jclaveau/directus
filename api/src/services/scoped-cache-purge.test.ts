@@ -41,8 +41,11 @@ const schema = new SchemaBuilder()
 // SchemaBuilder doesn't model the cache meta; attach the scope field directly.
 schema.collections['test']!.scopedCacheFields = ['student'];
 
-const tagFor = (value: unknown): ScopedCacheTag => ({ collection: 'test', field: 'student', value });
-const valueTagsOf = (call: unknown[]) => call[2];
+const studentTag = (value: unknown): ScopedCacheTag => ({ collection: 'test', field: 'student', value });
+
+// purgeCache(cache, collection, scopedCacheTags, context) — assert the scopedCacheTags it received.
+const purgedTags = (tags: ScopedCacheTag[] | null) =>
+	expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', tags, expect.anything());
 
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags (or null = full flush)
 // each mutation hands to purgeCache. The tag-derivation itself is unit-tested in scoped-cache-tags.test.ts;
@@ -75,7 +78,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		await service().updateMany([1], { student: 'B' });
 
 		expect(purgeCache).toHaveBeenCalledTimes(1);
-		expect(valueTagsOf(purgeCache.mock.calls[0]!)).toEqual([tagFor('A'), tagFor('B')]);
+		purgedTags([studentTag('A'), studentTag('B')]);
 	});
 
 	it('updateMany that leaves the scope field untouched purges only the captured old slice', async () => {
@@ -84,7 +87,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateMany([1], { name: 'renamed' });
 
-		expect(valueTagsOf(purgeCache.mock.calls[0]!)).toEqual([tagFor('A')]);
+		purgedTags([studentTag('A')]);
 	});
 
 	it('deleteMany purges the scope slices of the rows it deleted (captured before delete)', async () => {
@@ -98,7 +101,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		await service().deleteMany([1, 2]);
 
 		expect(purgeCache).toHaveBeenCalledTimes(1);
-		expect(valueTagsOf(purgeCache.mock.calls[0]!)).toEqual([tagFor('A'), tagFor('B')]);
+		purgedTags([studentTag('A'), studentTag('B')]);
 	});
 
 	it('upsertMany full-flushes (null) — the update-subset old values are not cheaply capturable', async () => {
@@ -107,6 +110,6 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
-		expect(valueTagsOf(purgeCache.mock.calls.at(-1)!)).toBeNull();
+		purgedTags(null);
 	});
 });
