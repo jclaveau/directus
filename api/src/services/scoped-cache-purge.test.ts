@@ -1,5 +1,4 @@
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { ScopedCacheTag } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
@@ -41,15 +40,10 @@ const schema = new SchemaBuilder()
 // SchemaBuilder doesn't model the cache meta; attach the scope field directly.
 schema.collections['test']!.scopedCacheFields = ['student'];
 
-const studentTag = (value: unknown): ScopedCacheTag => ({ collection: 'test', field: 'student', value });
-
-// purgeCache(cache, collection, scopedCacheTags, context) — assert the scopedCacheTags it received.
-const purgedTags = (tags: ScopedCacheTag[] | null) =>
-	expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', tags, expect.anything());
-
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags (or null = full flush)
-// each mutation hands to purgeCache. The tag-derivation itself is unit-tested in scoped-cache-tags.test.ts;
-// this pins the purge side (capture-before-write, old ∪ new, upsert full-flush).
+// each mutation hands to purgeCache — asserted via toHaveBeenCalledWith(cache, collection, tags, context).
+// The tag-derivation itself is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
+// (capture-before-write, old ∪ new, upsert full-flush).
 describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache tags)', () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
@@ -78,7 +72,16 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		await service().updateMany([1], { student: 'B' });
 
 		expect(purgeCache).toHaveBeenCalledTimes(1);
-		purgedTags([studentTag('A'), studentTag('B')]);
+
+		expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{ collection: 'test', field: 'student', value: 'A' },
+				{ collection: 'test', field: 'student', value: 'B' },
+			],
+			expect.anything(),
+		);
 	});
 
 	it('updateMany that leaves the scope field untouched purges only the captured old slice', async () => {
@@ -87,7 +90,12 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateMany([1], { name: 'renamed' });
 
-		purgedTags([studentTag('A')]);
+		expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[{ collection: 'test', field: 'student', value: 'A' }],
+			expect.anything(),
+		);
 	});
 
 	it('deleteMany purges the scope slices of the rows it deleted (captured before delete)', async () => {
@@ -101,7 +109,16 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		await service().deleteMany([1, 2]);
 
 		expect(purgeCache).toHaveBeenCalledTimes(1);
-		purgedTags([studentTag('A'), studentTag('B')]);
+
+		expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{ collection: 'test', field: 'student', value: 'A' },
+				{ collection: 'test', field: 'student', value: 'B' },
+			],
+			expect.anything(),
+		);
 	});
 
 	it('upsertMany full-flushes (null) — the update-subset old values are not cheaply capturable', async () => {
@@ -110,6 +127,6 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
-		purgedTags(null);
+		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
 	});
 });
