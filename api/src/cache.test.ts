@@ -1,4 +1,4 @@
-import type { CacheTag } from '@directus/types';
+import type { ScopedCacheTag } from '@directus/types';
 import type Keyv from 'keyv';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -34,7 +34,7 @@ vi.mock('./redis/index.js', () => ({
 	useRedis: () => redis,
 }));
 
-const { getRedisConnection, purgeCache, scopedCachePurgeEnabled, tagCacheKeys } = await import('./cache.js');
+const { getRedisConnection, purgeCache, scopedCachePurgeEnabled, tagScopedCacheKeys } = await import('./cache.js');
 
 function setEnv(values: Record<string, unknown>) {
 	for (const key of Object.keys(mockEnv.current)) delete mockEnv.current[key];
@@ -105,9 +105,9 @@ describe('scoped cache purging', () => {
 		});
 	});
 
-	describe('tagCacheKeys', () => {
+	describe('tagScopedCacheKeys', () => {
 		test('indexes the key + expires sibling under every bare collection tag, with a TTL', async () => {
-			await tagCacheKeys('resp-key', [{ collection: 'articles' }, { collection: 'directus_users' }]);
+			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }, { collection: 'directus_users' }]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith('system-cache:tag:articles', 'resp-key', 'resp-key__expires_at');
 
@@ -123,7 +123,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test('value tags encode field=value into the tag key', async () => {
-			await tagCacheKeys('resp-key', [
+			await tagScopedCacheKeys('resp-key', [
 				{ collection: 'slots', field: 'student', value: 'A' },
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
@@ -142,7 +142,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test('a null scope value serializes to a stable sentinel', async () => {
-			await tagCacheKeys('resp-key', [{ collection: 'slots', field: 'student', value: null }]);
+			await tagScopedCacheKeys('resp-key', [{ collection: 'slots', field: 'student', value: null }]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
 				'system-cache:tag:slots:student=null',
@@ -152,7 +152,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test('duplicate tags collapse to a single SADD', async () => {
-			await tagCacheKeys('resp-key', [
+			await tagScopedCacheKeys('resp-key', [
 				{ collection: 'slots', field: 'student', value: 'A' },
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
@@ -161,13 +161,13 @@ describe('scoped cache purging', () => {
 		});
 
 		test('no-op when no tags', async () => {
-			await tagCacheKeys('resp-key', []);
+			await tagScopedCacheKeys('resp-key', []);
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
 
 		test('no-op in full mode', async () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
-			await tagCacheKeys('resp-key', [{ collection: 'articles' }]);
+			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }]);
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
 	});
@@ -214,7 +214,7 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
-		test('null valueTags falls back to a full flush (unresolvable mutation)', async () => {
+		test('null scopedCacheTags falls back to a full flush (unresolvable mutation)', async () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeCache(cache, 'articles', null);
@@ -236,7 +236,7 @@ describe('scoped cache purging', () => {
 		});
 
 		test('cache.purge filter augments the purge set (extension-resolved tags get dropped)', async () => {
-			emitFilter.mockImplementation(async (_event: string, tags: CacheTag[]) => [
+			emitFilter.mockImplementation(async (_event: string, tags: ScopedCacheTag[]) => [
 				...tags,
 				{ collection: 'slots', field: 'owner', value: 'B' },
 			]);

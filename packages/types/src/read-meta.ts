@@ -1,9 +1,9 @@
 /**
- * A unit of cache scope. A bare tag (no `field`) covers every entry that read the collection — the
- * coarse bucket holding "global" reads that couldn't be narrowed. A value tag pins a single
- * `field=value` slice so one owner's/partition's writes drop only their own entries.
+ * A unit of cache scope. A collection-level tag (no `field`) covers every entry that read the
+ * collection — the coarse bucket holding "global" reads that couldn't be narrowed. A `field`+`value`
+ * tag pins a single slice so one owner's/partition's writes drop only their own entries.
  */
-export interface CacheTag {
+export interface ScopedCacheTag {
 	collection: string;
 	field?: string;
 	value?: unknown;
@@ -14,8 +14,8 @@ export interface CacheTag {
  * single read that produced it — never an accumulating service-level field.
  */
 export interface ReadMeta {
-	/** Scope tags whose data fed this read (root value slices + relations); scopes cache-tag invalidation. */
-	cacheTags: CacheTag[];
+	/** Scoped cache tags whose data fed this read (root scope tags + relation collection tags); scope invalidation. */
+	scopedCacheTags: ScopedCacheTag[];
 }
 
 /**

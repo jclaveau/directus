@@ -239,7 +239,7 @@ fields:
     options:
       collectionField: collection
 
-  - field: cache_scope_fields
+  - field: scoped_cache_fields
     special:
       - cast-json
     interface: system-field-tree
