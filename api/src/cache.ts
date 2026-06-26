@@ -167,6 +167,8 @@ export function scopedCachePurgeEnabled(): boolean {
 	return env['CACHE_AUTO_PURGE_MODE'] === 'scoped' && env['CACHE_STORE'] === 'redis' && redisConfigAvailable();
 }
 
+// `String(value)` collapses types (number 7 vs string "7", null vs "null"). Safe because a given
+// scope column has a stable type — tag and purge always resolve the value from the same column.
 function serializeScopedCacheTagValue(value: unknown): string {
 	return value === null || value === undefined ? 'null' : String(value);
 }
@@ -238,7 +240,8 @@ export async function purgeCache(
 		await Promise.all(members.map((member) => cache.delete(member)));
 	}
 
-	await redis.del(...tagKeys);
+	// A `cache.purge` filter could empty the tag set; `redis.del()` with no keys throws.
+	if (tagKeys.length > 0) await redis.del(...tagKeys);
 }
 
 function getKeyvInstance(store: Store, ttl: number | undefined, namespaceSuffix?: string): Keyv {
