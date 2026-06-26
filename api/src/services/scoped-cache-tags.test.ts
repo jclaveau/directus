@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { collectScopeValueTags } from './items.js';
+import { scopedCacheTagsFromRows } from './items.js';
 
-// Pure value-derivation behind read tagging (requireAll) and update-payload tagging (!requireAll).
-describe('collectScopeValueTags', () => {
+// Pure scope-tag derivation behind read tagging (requireAll) and update-payload tagging (!requireAll).
+describe('scopedCacheTagsFromRows', () => {
 	test('one tag per distinct value per field', () => {
 		const rows = [
 			{ student: 'A', course: 'math' },
@@ -10,7 +10,7 @@ describe('collectScopeValueTags', () => {
 			{ student: 'A', course: 'art' },
 		];
 
-		expect(collectScopeValueTags('slots', ['student', 'course'], rows, true)).toEqual([
+		expect(scopedCacheTagsFromRows('slots', ['student', 'course'], rows, true)).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
 			{ collection: 'slots', field: 'course', value: 'math' },
@@ -21,7 +21,7 @@ describe('collectScopeValueTags', () => {
 	test('null and numeric values are kept distinct', () => {
 		const rows = [{ student: null }, { student: 0 }, { student: null }];
 
-		expect(collectScopeValueTags('slots', ['student'], rows, true)).toEqual([
+		expect(scopedCacheTagsFromRows('slots', ['student'], rows, true)).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 			{ collection: 'slots', field: 'student', value: 0 },
 		]);
@@ -30,28 +30,28 @@ describe('collectScopeValueTags', () => {
 	test('requireAll returns null when a field is not present on a row (unprojected read / omitted create)', () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(collectScopeValueTags('slots', ['student'], rows, true)).toBeNull();
+		expect(scopedCacheTagsFromRows('slots', ['student'], rows, true)).toBeNull();
 	});
 
 	test('without requireAll a missing field is skipped, not fatal (update payload that leaves it unchanged)', () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(collectScopeValueTags('slots', ['student'], rows, false)).toEqual([
+		expect(scopedCacheTagsFromRows('slots', ['student'], rows, false)).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
 	});
 
 	test('a field present but holding null is resolvable (distinct from being absent)', () => {
-		expect(collectScopeValueTags('slots', ['student'], [{ student: null }], true)).toEqual([
+		expect(scopedCacheTagsFromRows('slots', ['student'], [{ student: null }], true)).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 		]);
 	});
 
-	test('empty rows resolve to an empty tag list, not null (caller falls back to a bare tag)', () => {
-		expect(collectScopeValueTags('slots', ['student'], [], true)).toEqual([]);
+	test('empty rows resolve to an empty tag list, not null (caller falls back to a collection-level tag)', () => {
+		expect(scopedCacheTagsFromRows('slots', ['student'], [], true)).toEqual([]);
 	});
 
-	test('no configured fields yields no value tags', () => {
-		expect(collectScopeValueTags('slots', [], [{ student: 'A' }], true)).toEqual([]);
+	test('no configured fields yields no scoped cache tags', () => {
+		expect(scopedCacheTagsFromRows('slots', [], [{ student: 'A' }], true)).toEqual([]);
 	});
 });
