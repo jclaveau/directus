@@ -127,13 +127,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	}
 
 	/**
-	 * Read the current scope values for the given keys as scoped cache tags, before a mutation runs.
-	 * Captures the *old* values an update/delete is about to change so their slices get purged (an
+	 * Snapshot the current scope values for the given keys as scoped cache tags, before a mutation runs.
+	 * Snapshots the *old* values an update/delete is about to change so their slices get purged (an
 	 * update that moves a row from `student=A` to `student=B` must drop both). Returns an empty list
 	 * when the collection has no scoped cache fields or there are no keys (a collection-level purge
 	 * then suffices).
 	 */
-	private async captureScopedCacheTags(keys: PrimaryKey[]): Promise<ScopedCacheTag[] | null> {
+	private async snapshotScopedCacheTags(keys: PrimaryKey[]): Promise<ScopedCacheTag[] | null> {
 		if (!scopedCachePurgeEnabled()) return [];
 
 		const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
@@ -851,7 +851,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			.map((item) => item[primaryKeyField])
 			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
 
-		const oldScopedCacheTags = await this.captureScopedCacheTags(batchKeys);
+		const oldScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
 
 		try {
 			await transaction(this.knex, async (knex) => {
@@ -921,7 +921,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		// Capture the scope values these rows hold before the update so an update that moves a row to a
 		// new scope value purges both slices (old ∪ new). Empty when the collection isn't scoped.
-		const oldScopedCacheTags = await this.captureScopedCacheTags(keys);
+		const oldScopedCacheTags = await this.snapshotScopedCacheTags(keys);
 
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
@@ -1346,7 +1346,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		// Capture the scope values of the rows about to be deleted; after the delete they're gone and
 		// can't be read, so a later purge couldn't tell which slices to drop.
-		const oldScopedCacheTags = await this.captureScopedCacheTags(keysAfterHooks);
+		const oldScopedCacheTags = await this.snapshotScopedCacheTags(keysAfterHooks);
 
 		if (this.accountability) {
 			await validateAccess(
