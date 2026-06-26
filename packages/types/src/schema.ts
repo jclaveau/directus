@@ -24,6 +24,8 @@ export type CollectionOverview = {
 	sortField: string | null;
 	note: string | null;
 	accountability: 'all' | 'activity' | null;
+	/** Field names whose values scope tag-based cache invalidation for this collection. */
+	cacheScopeFields?: string[];
 	fields: {
 		[name: string]: FieldOverview;
 	};

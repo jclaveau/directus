@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
-import { getCache, setCacheValue, tagCacheKeyCollections } from '../cache.js';
+import { getCache, setCacheValue, tagCacheKeys } from '../cache.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import { ExportService } from '../services/import-export.js';
@@ -49,7 +49,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		try {
 			await setCacheValue(cache, key, res.locals['payload'], getMilliseconds(env['CACHE_TTL']));
 			await setCacheValue(cache, `${key}__expires_at`, { exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0) });
-			await tagCacheKeyCollections(key, res.locals['cacheTags'] ?? []);
+			await tagCacheKeys(key, res.locals['cacheTags'] ?? []);
 		} catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
 		}

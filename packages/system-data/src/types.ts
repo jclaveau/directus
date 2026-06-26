@@ -37,6 +37,7 @@ export type CollectionMeta = {
 	unarchive_value: string | null;
 	archive_app_filter: boolean;
 	item_duplication_fields: string[] | null;
+	cache_scope_fields: string[] | null;
 	accountability: 'all' | 'activity' | null;
 	system: boolean | null;
 	sort: number | null;
@@ -54,6 +55,7 @@ export type BaseCollectionMeta = Pick<
 	| 'translations'
 	| 'versioning'
 	| 'item_duplication_fields'
+	| 'cache_scope_fields'
 	| 'accountability'
 	| 'group'
 	| 'system'

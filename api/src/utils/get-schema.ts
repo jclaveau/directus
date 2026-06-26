@@ -127,7 +127,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 
 	const collections = [
 		...(await database
-			.select('collection', 'singleton', 'note', 'sort_field', 'accountability')
+			.select('collection', 'singleton', 'note', 'sort_field', 'accountability', 'cache_scope_fields')
 			.from('directus_collections')),
 		...systemCollectionRows,
 	];
@@ -158,6 +158,7 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 			note: collectionMeta?.note || null,
 			sortField: collectionMeta?.sort_field || null,
 			accountability: collectionMeta ? collectionMeta.accountability : 'all',
+			cacheScopeFields: parseJsonFieldList(collectionMeta?.cache_scope_fields),
 			fields: mapValues(schemaOverview[collection]?.columns, (column) => {
 				return {
 					field: column.column_name,
@@ -227,4 +228,24 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 	result.relations = await relationsService.readAll(undefined, undefined, true);
 
 	return result;
+}
+
+/**
+ * Read a JSON-column field list off a raw `directus_collections` row. The column comes back parsed
+ * on Postgres but as a JSON string on MySQL/SQLite, so accept both and degrade to an empty list on
+ * anything unexpected.
+ */
+function parseJsonFieldList(raw: unknown): string[] {
+	if (Array.isArray(raw)) return raw.filter((entry): entry is string => typeof entry === 'string');
+
+	if (typeof raw === 'string' && raw.length > 0) {
+		try {
+			const parsed = JSON.parse(raw);
+			return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+		} catch {
+			return [];
+		}
+	}
+
+	return [];
 }
