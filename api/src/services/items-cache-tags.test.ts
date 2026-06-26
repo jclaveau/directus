@@ -67,13 +67,31 @@ describe('readByQuery cache-tag accumulation', () => {
 		expect(tagsOf(deep)).toEqual(['articles', 'users']);
 	});
 
-	test('readOne / readSingleton carry the read tags onto the single returned value', async () => {
+	test('readOne carries the read tags onto the single returned item', async () => {
 		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
 		vi.mocked(runAst).mockResolvedValueOnce([{ id: 1, title: 't' }]);
 
 		const one = await service.readOne(1, { fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(tagsOf(one)).toEqual(['articles', 'users']);
+	});
+
+	test('readSingleton carries the read tags onto the returned record', async () => {
+		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
+		vi.mocked(runAst).mockResolvedValueOnce([{ id: 1, title: 't' }]);
+
+		const record = await service.readSingleton({ fields: ['*', 'author.*'] }, { emitEvents: false });
+
+		expect(tagsOf(record)).toEqual(['articles', 'users']);
+	});
+
+	test('readSingleton carries the read tags onto the synthesized defaults when empty', async () => {
+		const service = new ItemsService('articles', { knex: db, schema, accountability: null });
+		vi.mocked(runAst).mockResolvedValueOnce([]); // no row → readSingleton builds a defaults object
+
+		const defaults = await service.readSingleton({ fields: ['*'] }, { emitEvents: false });
+
+		expect(tagsOf(defaults)).toEqual(['articles']);
 	});
 
 	test('emits empty tags (but still a meta rider) when scoped purge is disabled', async () => {
