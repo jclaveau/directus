@@ -106,7 +106,7 @@ describe('scoped cache purging', () => {
 	});
 
 	describe('tagScopedCacheKeys', () => {
-		test('indexes the key + expires sibling under every bare collection tag, with a TTL', async () => {
+		test('indexes the key + expires sibling under every collection-level tag, with a TTL', async () => {
 			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }, { collection: 'directus_users' }]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith('system-cache:tag:articles', 'resp-key', 'resp-key__expires_at');
@@ -122,7 +122,7 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.exec).toHaveBeenCalledOnce();
 		});
 
-		test('value tags encode field=value into the tag key', async () => {
+		test('scoped cache tags encode field=value into the tag key', async () => {
 			await tagScopedCacheKeys('resp-key', [
 				{ collection: 'slots', field: 'student', value: 'A' },
 				{ collection: 'slots', field: 'student', value: 7 },
@@ -173,7 +173,7 @@ describe('scoped cache purging', () => {
 	});
 
 	describe('purgeCache', () => {
-		test('always purges the bare collection tag (global readers) alongside value slices', async () => {
+		test('always purges the collection-level tag (global readers) alongside slices', async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) =>
 				tagKey === 'system-cache:tag:slots' ? ['global-key'] : ['key-a', 'key-a__expires_at'],
 			);
@@ -191,7 +191,7 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
-		test('spares other value slices — student=B is never touched when purging student=A', async () => {
+		test('spares other slices — student=B is never touched when purging student=A', async () => {
 			redis.smembers.mockResolvedValue([]);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
@@ -201,7 +201,7 @@ describe('scoped cache purging', () => {
 			expect(redis.del).not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
 		});
 
-		test('no value tags purges only the bare collection tag', async () => {
+		test('no scoped cache tags purges only the collection-level tag', async () => {
 			redis.smembers.mockResolvedValue(['key-a', 'key-a__expires_at', 'key-b']);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 

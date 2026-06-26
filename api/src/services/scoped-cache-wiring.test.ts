@@ -47,7 +47,7 @@ const valueTagsOf = (call: unknown[]) => call[2];
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags (or null = full flush)
 // each mutation hands to purgeCache. The tag-derivation itself is unit-tested in scoped-cache-tags.test.ts;
 // this pins the wiring (capture-before-write, old ∪ new, upsert full-flush).
-describe('scoped cache wiring (ItemsService mutation → purgeCache value tags)', () => {
+describe('scoped cache wiring (ItemsService mutation → purgeCache scoped cache tags)', () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
 
