@@ -29,6 +29,7 @@ vi.mock('../cache.js', () => ({
 
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
+const { default: emitter } = await import('../emitter.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -140,5 +141,40 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		const result = await service().readByQuery({});
 
 		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+	});
+
+	// A `cache.scope` listener can derive data-level tags: it receives the post-`items.read` records and
+	// can append a value slice that the bare AST scoping wouldn't produce (e.g. an enriched related row).
+	it('exposes the enriched records to a cache.scope listener, which can add data-derived tags', async () => {
+		tracker.on.select('test').response([
+			{ id: 1, student: 'A' },
+			{ id: 2, student: 'B' },
+		]);
+
+		let seenRecords: unknown;
+
+		const listener = async (tags: any, meta: any) => {
+			seenRecords = meta.records;
+			return [...tags, ...meta.records.map((r: any) => ({ collection: 'test', field: 'student', value: r.student }))];
+		};
+
+		emitter.onFilter('cache.scope', listener);
+
+		try {
+			const result = await service().readByQuery({});
+
+			expect(seenRecords).toEqual([
+				{ id: 1, student: 'A' },
+				{ id: 2, student: 'B' },
+			]);
+
+			expect(readMeta(result)?.scopedCacheTags).toEqual([
+				{ collection: 'test' },
+				{ collection: 'test', field: 'student', value: 'A' },
+				{ collection: 'test', field: 'student', value: 'B' },
+			]);
+		} finally {
+			emitter.offFilter('cache.scope', listener);
+		}
 	});
 });
