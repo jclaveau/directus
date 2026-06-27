@@ -10,7 +10,7 @@ import { cloneDeep } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, test } from 'vitest';
-import { collectionFirst, collectionIgnored, seedDBValues } from './cache.seed';
+import { collectionFirst, collectionIgnored, collectionRelated, seedDBValues } from './cache.seed';
 
 let isSeeded = false;
 
@@ -386,6 +386,45 @@ describe('App Caching Tests', () => {
 			expect(mutated.headers[cacheStatusHeader]).toBe('MISS');
 			expect(untouched.statusCode).toBe(200);
 			expect(untouched.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe('Scoped purge invalidates a read joining a related (m2o) collection when that related row is mutated', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			// A related row + a first row pointing at it.
+			const related = (
+				await request(url)
+					.post(`/items/${collectionRelated}`)
+					.send({ string_field: randomUUID() })
+					.set('Authorization', auth)
+			).body.data;
+
+			await request(url)
+				.post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID(), related: related.id })
+				.set('Authorization', auth);
+
+			// A read that joins the related collection — tagged under both collections.
+			const read = `/items/${collectionFirst}?fields=*,related.*`;
+
+			await request(url).post(`/utils/cache/clear`).set('Authorization', auth);
+			await request(url).get(read).set('Authorization', auth); // cold → cached
+			const warm = await request(url).get(read).set('Authorization', auth);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Mutate ONLY the related row — collectionFirst is untouched, yet the join read must drop.
+			await request(url)
+				.patch(`/items/${collectionRelated}/${related.id}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			const afterRelatedWrite = await request(url).get(read).set('Authorization', auth);
+			expect(afterRelatedWrite.statusCode).toBe(200);
+			expect(afterRelatedWrite.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });
