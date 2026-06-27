@@ -193,7 +193,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
-		const rows = await this.knex.select(primaryKeyField, ...scopedCacheFields).from(this.collection).whereIn(primaryKeyField, keys);
+		const rows = await this.knex
+			.select(primaryKeyField, ...scopedCacheFields)
+			.from(this.collection)
+			.whereIn(primaryKeyField, keys);
 
 		return scopedCacheTagsFromRows(this.collection, scopedCacheFields, rows, true);
 	}
@@ -765,9 +768,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		// later write drops only their entries. An unbounded root (no scope-field filter — e.g. an admin
 		// list) and every other touched collection fall back to a bare collection tag, so any write to
 		// them invalidates the read (a value-slice tag would miss an insert of a brand-new value). The
-		// `cache.scope` filter lets extensions augment these (e.g. resolve M2M owners); whatever they add
-		// here must be reproducible on the `cache.purge` side or it leaks. Bounded to this read — it rides
-		// the result via `getMeta()`, not a service-level field.
+		// `cache.scope` filter lets extensions augment these (e.g. resolve M2M owners, or tag a collection
+		// an `items.read` hook enriched from); it receives the enriched `records` so data-derived tags are
+		// possible. Whatever they add here must be reproducible on the `cache.purge` side or it leaks.
+		// Bounded to this read — it rides the result via `getMeta()`, not a service-level field.
 		let scopedCacheTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
@@ -785,7 +789,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			scopedCacheTags = (await emitter.emitFilter(
 				'cache.scope',
 				scopedCacheTags,
-				{ collection: this.collection, query: updatedQuery },
+				// `records` are the post-`items.read` rows, so a hook that enriched the response from
+				// another collection can derive value-level tags off the actual data it pulled.
+				{ collection: this.collection, query: updatedQuery, records: filteredRecords },
 				{ database: this.knex, schema: this.schema, accountability: this.accountability },
 			)) as ScopedCacheTag[];
 		}
