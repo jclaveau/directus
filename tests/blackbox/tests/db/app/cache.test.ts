@@ -10,7 +10,15 @@ import { cloneDeep } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, test } from 'vitest';
-import { collectionFirst, collectionIgnored, collectionRelated, seedDBValues } from './cache.seed';
+import {
+	collectionBlock,
+	collectionChild,
+	collectionFirst,
+	collectionIgnored,
+	collectionRelated,
+	collectionTag,
+	seedDBValues,
+} from './cache.seed';
 
 let isSeeded = false;
 
@@ -425,6 +433,38 @@ describe('App Caching Tests', () => {
 			const afterRelatedWrite = await request(url).get(read).set('Authorization', auth);
 			expect(afterRelatedWrite.statusCode).toBe(200);
 			expect(afterRelatedWrite.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	// o2m / m2m / m2a: a read that joins the target collection is tagged with it (from the query AST,
+	// regardless of whether any rows are linked), so a write to that target collection must drop the
+	// cached read. The deep field paths embed the target's own data (`tags.<fk>.*`, `blocks.item:<col>.*`).
+	describe.each([
+		{ relation: 'o2m', read: `/items/${collectionFirst}?fields=*,children.*`, target: collectionChild },
+		{ relation: 'm2m', read: `/items/${collectionFirst}?fields=*,tags.${collectionTag}_id.*`, target: collectionTag },
+		{
+			relation: 'm2a',
+			read: `/items/${collectionFirst}?fields=*,blocks.item:${collectionBlock}.*`,
+			target: collectionBlock,
+		},
+	])('Scoped purge invalidates a $relation join read when its target collection is mutated', ({ read, target }) => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url).post(`/utils/cache/clear`).set('Authorization', auth);
+			await request(url).get(read).set('Authorization', auth); // cold → cached
+			const warm = await request(url).get(read).set('Authorization', auth);
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write to the joined target collection — the join read is tagged with it, so it must drop.
+			await request(url).post(`/items/${target}`).send({ string_field: randomUUID() }).set('Authorization', auth);
+
+			const after = await request(url).get(read).set('Authorization', auth);
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });
