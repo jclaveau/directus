@@ -768,7 +768,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		// `cache.scope` filter lets extensions augment these (e.g. resolve M2M owners); whatever they add
 		// here must be reproducible on the `cache.purge` side or it leaks. Bounded to this read — it rides
 		// the result via `getMeta()`, not a service-level field.
-		const scopedCacheTags: ScopedCacheTag[] = [];
+		let scopedCacheTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
 			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
@@ -782,15 +782,12 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				}
 			}
 
-			const scopedTags = (await emitter.emitFilter(
+			scopedCacheTags = (await emitter.emitFilter(
 				'cache.scope',
 				scopedCacheTags,
 				{ collection: this.collection, query: updatedQuery },
 				{ database: this.knex, schema: this.schema, accountability: this.accountability },
 			)) as ScopedCacheTag[];
-
-			scopedCacheTags.length = 0;
-			scopedCacheTags.push(...scopedTags);
 		}
 
 		if (opts?.emitEvents !== false) {

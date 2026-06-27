@@ -28,6 +28,7 @@ vi.mock('../cache.js', () => ({
 }));
 
 const { ItemsService } = await import('./items.js');
+const { readMeta } = await import('../utils/read-meta.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -128,5 +129,16 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
 		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
+	});
+
+	// Regression: the `cache.scope` filter returns its payload unchanged when no extension listens, i.e.
+	// the SAME array reference. The read must still carry the bare collection tag — a clear-and-refill of
+	// that reference would wipe it, leaving every read untagged and unpurgeable (stale HIT after a write).
+	it('an unfiltered read carries the bare collection tag through the cache.scope filter', async () => {
+		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+		const result = await service().readByQuery({});
+
+		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
 	});
 });
