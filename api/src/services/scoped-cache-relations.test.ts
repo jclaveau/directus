@@ -77,10 +77,13 @@ describe('scoped cache read tagging across relation types', () => {
 
 	afterEach(() => tracker.reset());
 
-	async function taggedCollections(collection: string, schema: any, fields: string[]): Promise<string[]> {
-		const result = await new ItemsService(collection, { knex: db, schema }).readByQuery({ fields });
+	async function taggedForQuery(collection: string, schema: any, query: any): Promise<string[]> {
+		const result = await new ItemsService(collection, { knex: db, schema }).readByQuery(query);
 		return [...new Set((readMeta(result)?.scopedCacheTags ?? []).map((t: any) => t.collection))].sort();
 	}
+
+	const taggedCollections = (collection: string, schema: any, fields: string[]) =>
+		taggedForQuery(collection, schema, { fields });
 
 	it('m2o: tags the root and the related collection', async () => {
 		expect(await taggedCollections('cities', m2o, ['*', 'country.*'])).toEqual(['cities', 'countries']);
@@ -115,5 +118,17 @@ describe('scoped cache read tagging across relation types', () => {
 			'image',
 			'text',
 		]);
+	});
+
+	// A relational path used only in filter/sort (never selected) still tags the related collection:
+	// the read's result set depends on that collection, so a write to it must invalidate.
+	it('deep filter on a relation (not selected) tags the related collection', async () => {
+		const tags = await taggedForQuery('cities', m2o, { fields: ['id'], filter: { country: { id: { _eq: 1 } } } });
+		expect(tags).toEqual(['cities', 'countries']);
+	});
+
+	it('sort on a relational path (not selected) tags the related collection', async () => {
+		const tags = await taggedForQuery('cities', m2o, { fields: ['id'], sort: ['country.id'] });
+		expect(tags).toEqual(['cities', 'countries']);
 	});
 });
