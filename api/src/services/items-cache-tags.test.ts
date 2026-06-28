@@ -18,8 +18,6 @@ import { runAst } from '../database/run-ast/run-ast.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 
-const tagsOf = (result: object) => [...(readMeta(result)?.cacheTags ?? [])].sort();
-
 const schema = new SchemaBuilder()
 	.collection('articles', (c) => {
 		c.field('id').id();
@@ -45,7 +43,10 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect(tagsOf(result)).toEqual(['articles', 'users']);
+		expect((readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual([
+			'articles',
+			'users',
+		]);
 	});
 
 	test('tags only the root collection for a non-relational read', async () => {
@@ -53,7 +54,7 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const result = await service.readByQuery({ fields: ['*'] }, { emitEvents: false });
 
-		expect(tagsOf(result)).toEqual(['articles']);
+		expect((readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual(['articles']);
 	});
 
 	test('tags are bounded per read — they do not accumulate across reads on one instance', async () => {
@@ -63,8 +64,8 @@ describe('readByQuery cache-tag accumulation', () => {
 		const deep = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		// Each result carries only its own query's tags — the earlier read is not polluted by the later.
-		expect(tagsOf(shallow)).toEqual(['articles']);
-		expect(tagsOf(deep)).toEqual(['articles', 'users']);
+		expect((readMeta(shallow)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual(['articles']);
+		expect((readMeta(deep)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual(['articles', 'users']);
 	});
 
 	test('readOne carries the read tags onto the single returned item', async () => {
@@ -73,7 +74,7 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const one = await service.readOne(1, { fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect(tagsOf(one)).toEqual(['articles', 'users']);
+		expect((readMeta(one)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual(['articles', 'users']);
 	});
 
 	test('readSingleton carries the read tags onto the returned record', async () => {
@@ -82,7 +83,10 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const record = await service.readSingleton({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect(tagsOf(record)).toEqual(['articles', 'users']);
+		expect((readMeta(record)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual([
+			'articles',
+			'users',
+		]);
 	});
 
 	test('readSingleton carries the read tags onto the synthesized defaults when empty', async () => {
@@ -91,7 +95,7 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const defaults = await service.readSingleton({ fields: ['*'] }, { emitEvents: false });
 
-		expect(tagsOf(defaults)).toEqual(['articles']);
+		expect((readMeta(defaults)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual(['articles']);
 	});
 
 	test('emits empty tags (but still a meta rider) when scoped purge is disabled', async () => {
@@ -100,6 +104,6 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect(readMeta(result)?.cacheTags.size).toBe(0);
+		expect(readMeta(result)?.scopedCacheTags.length).toBe(0);
 	});
 });
