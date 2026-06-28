@@ -132,6 +132,66 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
 	});
 
+	// Purge tags come from the value actually stored, not the raw input: a create/update filter hook can
+	// rewrite a scope field, and a create hook can take over a row entirely (scope value unknowable).
+	it('create scopes off the post-hook payload — a filter hook that rewrites the scope field wins', async () => {
+		tracker.on.insert('test').response([1]);
+
+		const rewrite = async (payload: any) => ({ ...payload, student: 'B' });
+		emitter.onFilter('test.items.create', rewrite);
+
+		try {
+			await service().createOne({ name: 'x', student: 'A' });
+
+			expect(purgeCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[{ collection: 'test', field: 'student', value: 'B' }],
+				expect.anything(),
+			);
+		} finally {
+			emitter.offFilter('test.items.create', rewrite);
+		}
+	});
+
+	it('create full-flushes (null) when a hook takes over a row (returns a PK, scope value unknowable)', async () => {
+		const takeOver = async () => 99;
+		emitter.onFilter('test.items.create', takeOver);
+
+		try {
+			await service().createMany([{ name: 'x', student: 'A' }]);
+
+			expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
+		} finally {
+			emitter.offFilter('test.items.create', takeOver);
+		}
+	});
+
+	it('updateMany takes the new value from the post-hook payload, not the raw input', async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.update('test').response(1);
+
+		// Raw payload sets B, but a hook rewrites it to C — the new slice must be C, unioned with old A.
+		const rewrite = async (payload: any) => ({ ...payload, student: 'C' });
+		emitter.onFilter('test.items.update', rewrite);
+
+		try {
+			await service().updateMany([1], { student: 'B' });
+
+			expect(purgeCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[
+					{ collection: 'test', field: 'student', value: 'A' },
+					{ collection: 'test', field: 'student', value: 'C' },
+				],
+				expect.anything(),
+			);
+		} finally {
+			emitter.offFilter('test.items.update', rewrite);
+		}
+	});
+
 	// Regression: the `cache.scope` filter returns its payload unchanged when no extension listens, i.e.
 	// the SAME array reference. The read must still carry the bare collection tag — a clear-and-refill of
 	// that reference would wipe it, leaving every read untagged and unpurgeable (stale HIT after a write).

@@ -687,9 +687,28 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
-			// New rows: a payload that omits a scoped cache field has an unknown (default) value, so it can't
-			// be scoped — `scopedCacheTagsFromRows` returns null and purgeCache falls back to a full flush.
-			const scopedCacheTags = scopedCacheTagsFromRows(this.collection, scopedCacheFields, data, true);
+
+			// Scope off the post-hook payloads actually inserted, not the raw input:
+			//   - a create filter hook can rewrite a scope field, so `data`'s value may not be what's stored;
+			//   - a payload that omits a scoped cache field has an unknown (default) value, so
+			//     `scopedCacheTagsFromRows` returns null and purgeCache falls back to a full flush;
+			//   - a row a hook *took over* (returned a primary key, inserted itself) has an unknowable scope
+			//     value, so its presence forces a full flush too.
+			let scopedCacheTags: ScopedCacheTag[] | null = [];
+
+			if (scopedCacheFields.length > 0) {
+				const someRowTakenOver = results.filter((key) => key !== null).length > actionPayloads.length;
+
+				scopedCacheTags = someRowTakenOver
+					? null
+					: scopedCacheTagsFromRows(
+							this.collection,
+							scopedCacheFields,
+							actionPayloads.map(({ actionHookPayload }) => actionHookPayload),
+							true,
+						);
+			}
+
 			await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
 		}
 
@@ -936,9 +955,15 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			});
 		} finally {
 			if (shouldClearCache(this.cache, opts, this.collection)) {
-				const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
-				const newScopedCacheTags = scopedCacheTagsFromRows(this.collection, scopedCacheFields, data, false) ?? [];
-				const scopedCacheTags = oldScopedCacheTags === null ? null : [...oldScopedCacheTags, ...newScopedCacheTags];
+				// Per-item hooks can rewrite scope fields inside each forked updateOne, so the raw `data` may
+				// not be what's stored. Re-snapshot the now-committed rows for the new values (old ∪ new).
+				const newScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
+
+				const scopedCacheTags =
+					oldScopedCacheTags === null || newScopedCacheTags === null
+						? null
+						: [...oldScopedCacheTags, ...newScopedCacheTags];
+
 				await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
 			}
 		}
@@ -1229,9 +1254,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+
 			// Old slices from the pre-update capture, plus the new value the update sets (if it touches a
-			// scope field). An absent scoped cache field means "unchanged", already covered by the old capture.
-			const newScopedCacheTags = scopedCacheTagsFromRows(this.collection, scopedCacheFields, [data], false) ?? [];
+			// scope field). Derived from the post-hook payload, not the raw input — an update filter hook can
+			// rewrite a scope field. An absent scoped cache field means "unchanged", covered by the old capture.
+			const newScopedCacheTags =
+				scopedCacheTagsFromRows(this.collection, scopedCacheFields, [payloadAfterHooks], false) ?? [];
+
 			const scopedCacheTags = oldScopedCacheTags === null ? null : [...oldScopedCacheTags, ...newScopedCacheTags];
 			await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
 		}
