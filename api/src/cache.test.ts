@@ -109,7 +109,11 @@ describe('scoped cache purging', () => {
 		test('indexes the key + expires sibling under every collection-level tag, with a TTL', async () => {
 			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }, { collection: 'directus_users' }]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith('system-cache:tag:articles', 'resp-key', 'resp-key__expires_at');
+			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+				'system-cache:tag:articles',
+				'resp-key',
+				'resp-key__expires_at',
+			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
 				'system-cache:tag:directus_users',
@@ -146,6 +150,23 @@ describe('scoped cache purging', () => {
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
 				'system-cache:tag:slots:student=null',
+				'resp-key',
+				'resp-key__expires_at',
+			);
+		});
+
+		test('numeric and string scope values collapse to one tag key (stable column type)', async () => {
+			// A read pinned off a REST `_eq=7` carries the value as the string '7'; the row it came from
+			// holds the numeric 7. Both must land on the SAME tag set or the purge would miss the read.
+			await tagScopedCacheKeys('resp-key', [
+				{ collection: 'slots', field: 'student', value: 7 },
+				{ collection: 'slots', field: 'student', value: '7' },
+			]);
+
+			expect(redis._pipeline.sadd).toHaveBeenCalledOnce();
+
+			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+				'system-cache:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -233,6 +254,34 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).toHaveBeenCalledTimes(1);
 			expect(cache.delete).not.toHaveBeenCalled();
 			expect(redis.smembers).not.toHaveBeenCalled();
+		});
+
+		test('a numeric mutation value resolves the same slice a string-pinned read tagged', async () => {
+			// Read side tagged `student=7` off a REST string; the mutation resolves the value as numeric 7
+			// from the row. The purge must hit the string-keyed slice, not a separate `student=7` (number).
+			redis.smembers.mockResolvedValue(['read-key']);
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			await purgeCache(cache, 'slots', [{ collection: 'slots', field: 'student', value: 7 }]);
+
+			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots:student=7');
+			expect(cache.delete).toHaveBeenCalledWith('read-key');
+			expect(redis.del).toHaveBeenCalledWith('system-cache:tag:slots', 'system-cache:tag:slots:student=7');
+		});
+
+		test('a cache.purge filter that empties the tag set deletes nothing and never calls redis.del', async () => {
+			// `redis.del()` with no keys throws; an extension is free to drop every tag, so the empty set
+			// must be a no-op rather than a crash (and must not degrade into a full flush).
+			emitFilter.mockImplementation(async () => []);
+
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			await purgeCache(cache, 'slots', [{ collection: 'slots', field: 'student', value: 'A' }]);
+
+			expect(redis.smembers).not.toHaveBeenCalled();
+			expect(cache.delete).not.toHaveBeenCalled();
+			expect(redis.del).not.toHaveBeenCalled();
+			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
 		test('cache.purge filter augments the purge set (extension-resolved tags get dropped)', async () => {
