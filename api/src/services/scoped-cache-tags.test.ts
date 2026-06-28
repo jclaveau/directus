@@ -1,5 +1,8 @@
+import type { Accountability } from '@directus/types';
 import { describe, expect, test } from 'vitest';
-import { pinnedScopeTagsFromFilter, scopedCacheTagsFromRows } from './items.js';
+import { pinnedScopeTagsFromCases, pinnedScopeTagsFromFilter, scopedCacheTagsFromRows } from './items.js';
+
+const alice = { user: 'alice-id', role: 'student-role' } as Accountability;
 
 // Pure scope-tag derivation behind update-payload / create tagging
 // (requireAll toggles fatal-on-missing).
@@ -99,5 +102,59 @@ describe('pinnedScopeTagsFromFilter', () => {
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopeTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopeTagsFromFilter('slots', ['student'], {})).toEqual([]);
+	});
+});
+
+// Permission-aware read scoping: a single permission case bounds the result (rows
+// that don't match are excluded), so it pins like an explicit filter — after resolving
+// the trivial dynamic variables. This is what value-scopes a permission-isolated read
+// whose partition lives in permissions, not the API query.
+describe('pinnedScopeTagsFromCases', () => {
+	test('a single case with $CURRENT_USER on a scope field pins the resolved user id', () => {
+		expect(pinnedScopeTagsFromCases('slots', ['student'], [{ student: { _eq: '$CURRENT_USER' } }], alice)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'alice-id' },
+		]);
+	});
+
+	test('$CURRENT_ROLE resolves to the accountability role', () => {
+		expect(pinnedScopeTagsFromCases('slots', ['student'], [{ student: { _eq: '$CURRENT_ROLE' } }], alice)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'student-role' },
+		]);
+	});
+
+	test('a literal value in a single case pins directly', () => {
+		expect(pinnedScopeTagsFromCases('slots', ['student'], [{ student: { _eq: 'A' } }], alice)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test('a case reached through _and pins', () => {
+		const cases = [{ _and: [{ student: { _eq: '$CURRENT_USER' } }, { course: { _eq: 'math' } }] }];
+
+		expect(pinnedScopeTagsFromCases('slots', ['student', 'course'], cases, alice)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'alice-id' },
+			{ collection: 'slots', field: 'course', value: 'math' },
+		]);
+	});
+
+	test('multiple cases are OR-combined — none bounds, so nothing pins', () => {
+		const cases = [{ student: { _eq: '$CURRENT_USER' } }, { student: { _eq: 'shared' } }];
+		expect(pinnedScopeTagsFromCases('slots', ['student'], cases, alice)).toEqual([]);
+	});
+
+	test('no cases (unrestricted item access) pins nothing', () => {
+		expect(pinnedScopeTagsFromCases('slots', ['student'], [], alice)).toEqual([]);
+		expect(pinnedScopeTagsFromCases('slots', ['student'], undefined, alice)).toEqual([]);
+	});
+
+	test('an unresolvable dynamic ($CURRENT_USER.team) does not pin — read stays bare-tagged', () => {
+		expect(pinnedScopeTagsFromCases('slots', ['student'], [{ student: { _eq: '$CURRENT_USER.team' } }], alice)).toEqual(
+			[],
+		);
+	});
+
+	test('an _in mixing a concrete value and an unresolvable dynamic skips the field (no partial bound)', () => {
+		const cases = [{ student: { _in: ['A', '$CURRENT_POLICIES'] } }];
+		expect(pinnedScopeTagsFromCases('slots', ['student'], cases, alice)).toEqual([]);
 	});
 });
