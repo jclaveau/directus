@@ -116,15 +116,21 @@ export function pinnedScopeTagsFromFilter(
 	collection: string,
 	fields: string[],
 	filter: Filter | null | undefined,
+	resolveValue: (raw: unknown) => { resolved: boolean; value: unknown } = (raw) => ({ resolved: true, value: raw }),
 ): ScopedCacheTag[] {
 	if (!filter || fields.length === 0) return [];
 
 	const fieldSet = new Set(fields);
 	const pinned = new Map<string, Set<unknown>>();
 
-	function pin(field: string, values: unknown[]): void {
+	function pin(field: string, rawValues: unknown[]): void {
+		const resolved = rawValues.map(resolveValue);
+		// A bound we can't fully resolve (e.g. an `_in` mixing a concrete value with an unresolved dynamic
+		// variable) can't be soundly pinned — skip the field so the read keeps the bare collection tag.
+		if (resolved.some((entry) => !entry.resolved)) return;
+
 		const seen = pinned.get(field) ?? new Set<unknown>();
-		for (const value of values) seen.add(value);
+		for (const entry of resolved) seen.add(entry.value);
 		pinned.set(field, seen);
 	}
 
@@ -153,6 +159,45 @@ export function pinnedScopeTagsFromFilter(
 	}
 
 	return tags;
+}
+
+/**
+ * Resolve the trivial dynamic variables a permission case may use on a scope field, matching what the
+ * query layer's `parseDynamicVariable` does for the bare forms ($CURRENT_USER → `accountability.user`,
+ * $CURRENT_ROLE → `accountability.role`). Anything richer ($CURRENT_USER.field, $CURRENT_ROLES,
+ * $CURRENT_POLICIES, $NOW) needs the fetched dynamic-variable context, so it's reported unresolved and
+ * the read falls back to the bare collection tag rather than risk pinning a wrong value.
+ */
+function resolveScopeCaseValue(
+	raw: unknown,
+	accountability: Accountability | null,
+): { resolved: boolean; value: unknown } {
+	if (typeof raw !== 'string' || !raw.startsWith('$')) return { resolved: true, value: raw };
+	if (raw === '$CURRENT_USER') return { resolved: true, value: accountability?.user ?? null };
+	if (raw === '$CURRENT_ROLE') return { resolved: true, value: accountability?.role ?? null };
+	return { resolved: false, value: undefined };
+}
+
+/**
+ * Pin root scope tags off the permission cases injected into the AST — the read side, permission-aware.
+ * Item-read permissions bound the result by `{ _or: cases }` (`joinFilterWithCases`): a SINGLE case is a
+ * plain AND predicate that excludes every non-matching row, so it bounds the read exactly like an
+ * explicit `_eq`/`_in` filter. Multiple cases are OR'd (a row need match only one) and so don't bound; no
+ * case means unrestricted item access. We therefore pin only the single-case form, resolving its trivial
+ * dynamic variables the same way the query layer does. This is what scopes a permission-isolated read
+ * (e.g. the planner's "a student sees only their own rows") to a value slice instead of the bare
+ * collection tag — the partition lives in permissions, not in the API filter `pinnedScopeTagsFromFilter`
+ * sees.
+ */
+export function pinnedScopeTagsFromCases(
+	collection: string,
+	fields: string[],
+	cases: Filter[] | undefined,
+	accountability: Accountability | null,
+): ScopedCacheTag[] {
+	if (!cases || cases.length !== 1) return [];
+
+	return pinnedScopeTagsFromFilter(collection, fields, cases[0], (raw) => resolveScopeCaseValue(raw, accountability));
 }
 
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
@@ -795,7 +840,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		if (scopedCachePurgeEnabled()) {
 			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
-			const rootScopedCacheTags = pinnedScopeTagsFromFilter(this.collection, scopedCacheFields, updatedQuery.filter);
+
+			// Bound the root either by the API filter or by the permission cases injected into the AST — the
+			// latter is what scopes a permission-isolated read whose partition never appears in the query.
+			const rootScopedCacheTags = [
+				...pinnedScopeTagsFromFilter(this.collection, scopedCacheFields, updatedQuery.filter),
+				...pinnedScopeTagsFromCases(this.collection, scopedCacheFields, ast.cases, this.accountability),
+			];
 
 			for (const collection of collectionsInFieldMap(fieldMapFromAst(ast, this.schema))) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
