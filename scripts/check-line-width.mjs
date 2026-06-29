@@ -2,10 +2,11 @@
 // Diff-aware line-width gate: checks only lines ADDED vs the PR base, never pre-existing
 // ones. Comments are hard-capped (prettier never reflows them, so a wrap always sticks);
 // code is soft-warned only (prettier owns it at printWidth 120 and re-collapses shorter
-// breaks, so a hard cap there would be unfixable). See feedback_avoid_review_pane_soft_wrap.
+// breaks, so a hard cap there would be unfixable).
 //
 // Usage: node scripts/check-line-width.mjs <baseRef>
-//   baseRef defaults to $LINEWIDTH_BASE. The script diffs <merge-base(baseRef, HEAD)>...HEAD.
+//   baseRef defaults to $LINEWIDTH_BASE; the script diffs merge-base(baseRef, HEAD)
+//   against the working tree.
 
 import { execFileSync } from 'node:child_process';
 
