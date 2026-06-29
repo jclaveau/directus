@@ -27,6 +27,11 @@ ignore:
   - 'api/src/utils/dump-coverage.ts'
   - 'api/src/controllers/extensions.ts'
   - 'tests/blackbox/merge-coverage.mjs'
+  # Lint/style tooling for the diff-scoped style gate: a custom eslint rule and its CI runner,
+  # exercised by eslint / the gate itself, not by unit tests. (eslint.style.config.js already
+  # falls under the *.config.js rule above.)
+  - 'eslint-rules/**'
+  - 'scripts/lint-style-changes.mjs'
 
 flag_management:
   default_rules:
