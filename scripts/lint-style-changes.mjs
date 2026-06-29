@@ -36,6 +36,7 @@ if (!base) {
 // the config for the future eslint-as-formatter switch, where verticalization becomes enforceable.
 const STYLE_RULES = new Set([
 	'max-len',
+	'multiline-ternary',
 	'prefer-template',
 	'no-duplicate-imports',
 	'no-unexpected-multiline',
@@ -82,7 +83,14 @@ for (const raw of diff.split('\n')) {
 	}
 }
 
-const files = [...addedByFile.keys()].filter((f) => addedByFile.get(f).size > 0);
+// Lint/style tooling (eslint config, custom rules, this script's own dir) is exempt from the
+// style gate — same policy as the codecov ignore. It's exercised by eslint / the gate, not product
+// code, and shouldn't drag a vendored rule file under directus's style conventions.
+function isToolingPath(file) {
+	return file.startsWith('eslint-rules/') || file.startsWith('scripts/') || /\.config\.[cm]?[jt]s$/.test(file);
+}
+
+const files = [...addedByFile.keys()].filter((f) => addedByFile.get(f).size > 0 && !isToolingPath(f));
 
 if (files.length === 0) {
 	console.log('✓ no added lines to check');

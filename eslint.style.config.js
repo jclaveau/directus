@@ -119,6 +119,7 @@ export const eslintBaseConfig = defineConfig([
 
 
       // COMMENTABLE CODE
+      'multiline-ternary': [`error`, `always`],                     // each ?: arm on its own line → distinct branch coverage
       'brace-style': [`error`, `stroustrup`],                       // https://eslint.org/docs/latest/rules/brace-style#stroustrup
       'curly': `error`,
       'object-curly-newline': [`error`, { "consistent": true }],    // https://eslint.org/docs/latest/rules/object-curly-newline#consistent
