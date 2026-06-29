@@ -215,7 +215,14 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		const listener = async (tags: any, meta: any) => {
 			seenRecords = meta.records;
-			return [...tags, ...meta.records.map((r: any) => ({ collection: 'test', field: 'student', value: r.student }))];
+			return [
+				...tags,
+				...meta.records.map((r: any) => ({
+					collection: 'test',
+					field: 'student',
+					value: r.student,
+				})),
+			];
 		};
 
 		emitter.onFilter('cache.scope', listener);
