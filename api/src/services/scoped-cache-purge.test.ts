@@ -146,6 +146,29 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
 	});
 
+	it('updateBatch purges old ∪ new — re-snapshots the committed rows for the new values', async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.update('test').response(1);
+
+		await service().updateBatch([{ id: 1, name: 'renamed' }]);
+
+		expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
+			expect.anything(),
+		);
+	});
+
+	it('updateBatch full-flushes (null) when a batched row is missing the scope field', async () => {
+		tracker.on.select('test').response([{ id: 1 }]);
+		tracker.on.update('test').response(1);
+
+		await service().updateBatch([{ id: 1, name: 'renamed' }]);
+
+		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
+	});
+
 	// Purge tags come from the value actually stored, not the raw input: a
 	// create/update filter hook can rewrite a scope field, and a create hook can
 	// take over a row entirely (scope value unknowable).
@@ -218,6 +241,16 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		const result = await service().readByQuery({});
 
 		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+	});
+
+	// A filter that bounds the read to one scope value pins the value slice instead of the
+	// bare collection tag, so only that owner's/partition's writes purge it.
+	it('a read filtered to a scope value carries the value-slice tag, not the bare collection', async () => {
+		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+		const result = await service().readByQuery({ filter: { student: { _eq: 'A' } } });
+
+		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test', field: 'student', value: 'A' }]);
 	});
 
 	// A `cache.scope` listener can derive data-level tags: it receives the
