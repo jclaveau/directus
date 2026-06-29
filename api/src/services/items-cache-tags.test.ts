@@ -43,10 +43,9 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect((readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual([
-			'articles',
-			'users',
-		]);
+		expect(
+			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+		).toEqual(['articles', 'users']);
 	});
 
 	test('tags only the root collection for a non-relational read', async () => {
@@ -83,10 +82,9 @@ describe('readByQuery cache-tag accumulation', () => {
 
 		const record = await service.readSingleton({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
-		expect((readMeta(record)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort()).toEqual([
-			'articles',
-			'users',
-		]);
+		expect(
+			(readMeta(record)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
+		).toEqual(['articles', 'users']);
 	});
 
 	test('readSingleton carries the read tags onto the synthesized defaults when empty', async () => {

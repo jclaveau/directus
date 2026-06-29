@@ -79,9 +79,11 @@ describe('scoped cache read tagging across relation types', () => {
 
 	afterEach(() => tracker.reset());
 
-	async function taggedForQuery(collection: string, schema: any, query: any): Promise<string[]> {
-		const result = await new ItemsService(collection, { knex: db, schema }).readByQuery(query);
-		return [...new Set((readMeta(result)?.scopedCacheTags ?? []).map((t: any) => t.collection))].sort();
+	async function taggedForQuery(collection: string, schema: any, query: any) {
+		const service = new ItemsService(collection, { knex: db, schema });
+		const result = await service.readByQuery(query);
+		const tags = readMeta(result)?.scopedCacheTags ?? [];
+		return [...new Set(tags.map((t: any) => t.collection))].sort();
 	}
 
 	const taggedCollections = (collection: string, schema: any, fields: string[]) =>

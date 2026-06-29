@@ -21,6 +21,7 @@ export const collectionRelated = 'test_app_cache_related';
 export const collectionChild = 'test_app_cache_child';
 export const collectionTag = 'test_app_cache_tag';
 export const collectionBlock = 'test_app_cache_block';
+
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
 
@@ -62,7 +63,12 @@ export const seedDBStructure = () => {
 				});
 
 				// A target collection per relation type + the relation field on collectionFirst.
-				for (const target of [collectionRelated, collectionChild, collectionTag, collectionBlock]) {
+				for (const target of [
+					collectionRelated,
+					collectionChild,
+					collectionTag,
+					collectionBlock,
+				]) {
 					await CreateCollection(vendor, { collection: target });
 					await CreateField(vendor, { collection: target, field: 'string_field', type: 'string' });
 				}
