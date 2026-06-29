@@ -167,8 +167,9 @@ export function scopedCachePurgeEnabled(): boolean {
 	return env['CACHE_AUTO_PURGE_MODE'] === 'scoped' && env['CACHE_STORE'] === 'redis' && redisConfigAvailable();
 }
 
-// `String(value)` collapses types (number 7 vs string "7", null vs "null"). Safe because a given
-// scope column has a stable type — tag and purge always resolve the value from the same column.
+// `String(value)` collapses types (number 7 vs string "7", null vs "null"). Safe
+// because a given scope column has a stable type — tag and purge always resolve the
+// value from the same column.
 function serializeScopedCacheTagValue(value: unknown): string {
 	return value === null || value === undefined ? 'null' : String(value);
 }
@@ -179,10 +180,11 @@ function scopedCacheTagKey(tag: ScopedCacheTag): string {
 }
 
 /**
- * Index a freshly-cached response key under every tag its data came from, so a later mutation can
- * drop just the matching entries instead of the whole namespace. Both the payload key and its
- * `__expires_at` sibling are tagged. Each tag set self-expires at twice the cache TTL as a safety net
- * against members orphaned by a crash between write and purge.
+ * Index a freshly-cached response key under every tag its data came from, so a later
+ * mutation can drop just the matching entries instead of the whole namespace. Both the
+ * payload key and its `__expires_at` sibling are tagged. Each tag set self-expires at
+ * twice the cache TTL as a safety net against members orphaned by a crash between write
+ * and purge.
  */
 export async function tagScopedCacheKeys(key: string, tags: Iterable<ScopedCacheTag>): Promise<void> {
 	if (!scopedCachePurgeEnabled()) return;
@@ -203,10 +205,11 @@ export async function tagScopedCacheKeys(key: string, tags: Iterable<ScopedCache
 }
 
 /**
- * Purge cached responses affected by a mutation on `collection`. Outside scoped mode the whole data
- * cache is flushed (legacy `cache.clear()` behavior). In scoped mode the bare collection tag (global
- * reads) is always purged alongside the resolved `scopedCacheTags` (the owner/partition slices the mutation
- * touched), leaving every other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
+ * Purge cached responses affected by a mutation on `collection`. Outside scoped mode
+ * the whole data cache is flushed (legacy `cache.clear()` behavior). In scoped mode
+ * the bare collection tag (global reads) is always purged alongside the resolved
+ * `scopedCacheTags` (the owner/partition slices the mutation touched), leaving every
+ * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
  * resolved" → fall back to a full flush rather than risk leaving a stale slice behind.
  */
 export async function purgeCache(
