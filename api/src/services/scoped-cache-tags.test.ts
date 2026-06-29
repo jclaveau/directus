@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'vitest';
 import { pinnedScopeTagsFromFilter, scopedCacheTagsFromRows } from './items.js';
 
-// Pure scope-tag derivation behind update-payload / create tagging (requireAll toggles fatal-on-missing).
+// Pure scope-tag derivation behind update-payload / create tagging
+// (requireAll toggles fatal-on-missing).
 describe('scopedCacheTagsFromRows', () => {
 	test('one tag per distinct value per field', () => {
 		const rows = [
@@ -56,8 +57,9 @@ describe('scopedCacheTagsFromRows', () => {
 	});
 });
 
-// Read-side scoping: only a filter that BOUNDS the read to a scope value may scope it (else an insert
-// of a new value would silently miss the cached read). An empty result means "not bounded → bare tag".
+// Read-side scoping: only a filter that BOUNDS the read to a scope value may scope it
+// (else an insert of a new value would silently miss the cached read). An empty result
+// means "not bounded → bare tag".
 describe('pinnedScopeTagsFromFilter', () => {
 	test('_eq on a scope field pins that value', () => {
 		expect(pinnedScopeTagsFromFilter('slots', ['student'], { student: { _eq: 'A' } })).toEqual([

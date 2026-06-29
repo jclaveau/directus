@@ -18,7 +18,8 @@ vi.mock('../../src/database/index', () => ({
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
 
-// Spy purgeCache and force scoped mode; the cache itself just needs to be truthy for shouldClearCache.
+// Spy purgeCache and force scoped mode; the cache itself just needs to be truthy
+// for shouldClearCache.
 const purgeCache = vi.fn();
 
 vi.mock('../cache.js', () => ({
@@ -42,9 +43,10 @@ const schema = new SchemaBuilder()
 // SchemaBuilder doesn't model the cache meta; attach the scope field directly.
 schema.collections['test']!.scopedCacheFields = ['student'];
 
-// Drives the purge-tag resolution at every mutation site: which ScopedCacheTags (or null = full flush)
-// each mutation hands to purgeCache — asserted via toHaveBeenCalledWith(cache, collection, tags, context).
-// The tag-derivation itself is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
+// Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
+// (or null = full flush) each mutation hands to purgeCache — asserted via
+// toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation itself
+// is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
 // (capture-before-write, old ∪ new, upsert full-flush).
 describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache tags)', () => {
 	let db: MockedFunction<Knex>;
@@ -67,7 +69,8 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 	const service = () => new ItemsService('test', { knex: db, schema });
 
 	it('updateMany purges old ∪ new — a row moved student A→B drops both slices', async () => {
-		// captureScopedCacheTags selects the pre-update rows (old = A); the payload sets new = B.
+		// captureScopedCacheTags selects the pre-update rows (old = A);
+		// the payload sets new = B.
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
@@ -132,8 +135,9 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
 	});
 
-	// Purge tags come from the value actually stored, not the raw input: a create/update filter hook can
-	// rewrite a scope field, and a create hook can take over a row entirely (scope value unknowable).
+	// Purge tags come from the value actually stored, not the raw input: a
+	// create/update filter hook can rewrite a scope field, and a create hook can
+	// take over a row entirely (scope value unknowable).
 	it('create scopes off the post-hook payload — a filter hook that rewrites the scope field wins', async () => {
 		tracker.on.insert('test').response([1]);
 
@@ -171,7 +175,8 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
-		// Raw payload sets B, but a hook rewrites it to C — the new slice must be C, unioned with old A.
+		// Raw payload sets B, but a hook rewrites it to C — the new slice must be C,
+		// unioned with old A.
 		const rewrite = async (payload: any) => ({ ...payload, student: 'C' });
 		emitter.onFilter('test.items.update', rewrite);
 
@@ -192,9 +197,10 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		}
 	});
 
-	// Regression: the `cache.scope` filter returns its payload unchanged when no extension listens, i.e.
-	// the SAME array reference. The read must still carry the bare collection tag — a clear-and-refill of
-	// that reference would wipe it, leaving every read untagged and unpurgeable (stale HIT after a write).
+	// Regression: the `cache.scope` filter returns its payload unchanged when no
+	// extension listens, i.e. the SAME array reference. The read must still carry
+	// the bare collection tag — a clear-and-refill of that reference would wipe it,
+	// leaving every read untagged and unpurgeable (stale HIT after a write).
 	it('an unfiltered read carries the bare collection tag through the cache.scope filter', async () => {
 		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
@@ -203,8 +209,9 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
 	});
 
-	// A `cache.scope` listener can derive data-level tags: it receives the post-`items.read` records and
-	// can append a value slice that the bare AST scoping wouldn't produce (e.g. an enriched related row).
+	// A `cache.scope` listener can derive data-level tags: it receives the
+	// post-`items.read` records and can append a value slice that the bare AST
+	// scoping wouldn't produce (e.g. an enriched related row).
 	it('exposes the enriched records to a cache.scope listener, which can add data-derived tags', async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
