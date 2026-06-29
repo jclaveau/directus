@@ -64,22 +64,14 @@ jobs:
 
   format:
     name: Format
+    # Prettier disabled — `eslint.style.config.js` (via the Style (changes) job /
+    # `pnpm lint:style:changes`) is the style authority now. Kept as a passing no-op so a required
+    # "Format" check (if branch protection still lists it) goes green instead of stranding pending.
+    # Restore the prettier --check steps to re-enable.
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@v46
-
-      - name: Prepare
-        uses: ./.github/actions/prepare
-        with:
-          build: false
-
-      - name: Run Formatter
-        run: pnpm exec prettier --check --ignore-unknown ${{ steps.changed-files.outputs.all_changed_files }}
+      - name: Prettier disabled
+        run: echo "Formatting handled by eslint.style.config.js (see the Style (changes) job)."
 
   style-changes:
     name: Style (changes)
