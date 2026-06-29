@@ -81,6 +81,20 @@ jobs:
       - name: Run Formatter
         run: pnpm exec prettier --check --ignore-unknown ${{ steps.changed-files.outputs.all_changed_files }}
 
+  linewidth:
+    name: Line width
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Full history so the script can diff against the merge-base with the PR base.
+          fetch-depth: 0
+
+      - name: Check added comment line width
+        run: node scripts/check-line-width.mjs "${{ github.event.pull_request.base.sha }}"
+
   unit:
     name: Unit Tests
     runs-on: ubuntu-latest

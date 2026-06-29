@@ -36,7 +36,8 @@ export class PermissionsService extends ItemsService {
 	override async readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<Partial<Item>[]>> {
 		const result = (await super.readByQuery(query, opts)) as Permission[];
 
-		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache tag rider across.
+		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache
+		// tag rider across.
 		return withMeta(
 			withAppMinimalPermissions(this.accountability, result, query.filter) as Partial<Item>[],
 			readMeta(result) ?? { scopedCacheTags: [] },

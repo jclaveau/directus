@@ -231,10 +231,11 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 }
 
 /**
- * Read a JSON-column field list off a raw `directus_collections` row. The column comes back parsed
- * on Postgres but as a JSON string on MySQL/SQLite, so accept both and degrade to an empty list on
- * anything unexpected. The string branch goes through `parseJSON` (prototype-pollution hardened),
- * since a raw `knex.select` bypasses the `cast-json` items pipeline that would normally apply it.
+ * Read a JSON-column field list off a raw `directus_collections` row. The column comes
+ * back parsed on Postgres but as a JSON string on MySQL/SQLite, so accept both and
+ * degrade to an empty list on anything unexpected. The string branch goes through
+ * `parseJSON` (prototype-pollution hardened), since a raw `knex.select` bypasses the
+ * `cast-json` items pipeline that would normally apply it.
  */
 function parseJsonFieldList(raw: unknown): string[] {
 	let parsed: unknown = raw;
