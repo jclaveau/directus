@@ -103,6 +103,17 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		);
 	});
 
+	it('updateMany full-flushes (null) when a pre-update row is missing the scope field', async () => {
+		// snapshotScopedCacheTags needs every row to resolve all scope fields; a row missing
+		// `student` makes the old value unknowable → null → coarse full flush over the slices.
+		tracker.on.select('test').response([{ id: 1 }]);
+		tracker.on.update('test').response(1);
+
+		await service().updateMany([1], { student: 'B' });
+
+		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
+	});
+
 	it('deleteMany purges the scope slices of the rows it deleted (captured before delete)', async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
