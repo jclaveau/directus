@@ -171,12 +171,16 @@ export function scopedCachePurgeEnabled(): boolean {
 // because a given scope column has a stable type — tag and purge always resolve the
 // value from the same column.
 function serializeScopedCacheTagValue(value: unknown): string {
-	return value === null || value === undefined ? 'null' : String(value);
+	return value === null || value === undefined
+		? 'null'
+		: String(value);
 }
 
 function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
-	return tag.field === undefined ? base : `${base}:${tag.field}=${serializeScopedCacheTagValue(tag.value)}`;
+	return tag.field === undefined
+		? base
+		: `${base}:${tag.field}=${serializeScopedCacheTagValue(tag.value)}`;
 }
 
 /**

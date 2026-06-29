@@ -248,5 +248,7 @@ function parseJsonFieldList(raw: unknown): string[] {
 		}
 	}
 
-	return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : [];
+	return Array.isArray(parsed)
+		? parsed.filter((entry): entry is string => typeof entry === 'string')
+		: [];
 }

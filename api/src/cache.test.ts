@@ -198,7 +198,9 @@ describe('scoped cache purging', () => {
 	describe('purgeCache', () => {
 		test('always purges the collection-level tag (global readers) alongside slices', async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) =>
-				tagKey === 'system-cache:tag:slots' ? ['global-key'] : ['key-a', 'key-a__expires_at'],
+				tagKey === 'system-cache:tag:slots'
+					? ['global-key']
+					: ['key-a', 'key-a__expires_at'],
 			);
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
