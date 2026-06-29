@@ -186,7 +186,10 @@ function scopedCacheTagKey(tag: ScopedCacheTag): string {
  * twice the cache TTL as a safety net against members orphaned by a crash between write
  * and purge.
  */
-export async function tagScopedCacheKeys(key: string, tags: Iterable<ScopedCacheTag>): Promise<void> {
+export async function tagScopedCacheKeys(
+	key: string,
+	tags: Iterable<ScopedCacheTag>,
+): Promise<void> {
 	if (!scopedCachePurgeEnabled()) return;
 
 	const tagKeys = [...new Set([...tags].map(scopedCacheTagKey))];
@@ -237,7 +240,8 @@ export async function purgeCache(
 
 	const redis = useRedis();
 	const tagKeys = [...new Set(tags.map(scopedCacheTagKey))];
-	const members = [...new Set((await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)))).flat())];
+	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
+	const members = [...new Set(memberLists.flat())];
 
 	if (members.length > 0) {
 		await Promise.all(members.map((member) => cache.delete(member)));

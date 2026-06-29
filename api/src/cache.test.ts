@@ -23,7 +23,7 @@ const redis = vi.hoisted(() => {
 
 // Passthrough filter by default; individual tests override to assert extension
 // augmentation.
-const emitFilter = vi.hoisted(() => vi.fn(async (_event: string, payload: unknown) => payload));
+const emitFilter = vi.hoisted(() => vi.fn((_event: string, payload: unknown) => payload));
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
 vi.mock('./bus/index.js', () => ({ useBus: () => ({ subscribe: vi.fn(), publish: vi.fn() }) }));

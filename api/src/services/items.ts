@@ -188,10 +188,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 * must drop both). Returns an empty list when the collection has no scoped cache
 	 * fields or there are no keys (a collection-level purge then suffices).
 	 */
-	private async snapshotScopedCacheTags(keys: PrimaryKey[]): Promise<ScopedCacheTag[] | null> {
+	private async snapshotScopedCacheTags(keys: PrimaryKey[]) {
 		if (!scopedCachePurgeEnabled()) return [];
 
-		const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+		const scopedCacheFields = this.collectionScopedCacheFields;
 		if (scopedCacheFields.length === 0 || keys.length === 0) return [];
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
@@ -209,7 +209,19 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 * own tags.
 	 */
 	private scopedCachePurgeContext(): EventContext {
-		return { database: this.knex, schema: this.schema, accountability: this.accountability };
+		return {
+			database: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		};
+	}
+
+	private async purgeScopedCache(tags: ScopedCacheTag[] | null): Promise<void> {
+		await purgeCache(this.cache, this.collection, tags, this.scopedCachePurgeContext());
+	}
+
+	private get collectionScopedCacheFields(): string[] {
+		return this.schema.collections[this.collection]?.scopedCacheFields ?? [];
 	}
 
 	/**
@@ -692,7 +704,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+			const scopedCacheFields = this.collectionScopedCacheFields;
 
 			// Scope off the post-hook payloads actually inserted, not the raw input:
 			//   - a create filter hook can rewrite a scope field, so `data`'s value may
@@ -704,7 +716,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
 
 			if (scopedCacheFields.length > 0) {
-				const someRowTakenOver = results.filter((key) => key !== null).length > actionPayloads.length;
+				const liveKeyCount = results.filter((key) => key !== null).length;
+				const someRowTakenOver = liveKeyCount > actionPayloads.length;
 
 				scopedCacheTags = someRowTakenOver
 					? null
@@ -716,7 +729,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						);
 			}
 
-			await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
+			await this.purgeScopedCache(scopedCacheTags);
 		}
 
 		return results;
@@ -803,8 +816,13 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		let scopedCacheTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
-			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
-			const rootScopedCacheTags = pinnedScopeTagsFromFilter(this.collection, scopedCacheFields, updatedQuery.filter);
+			const scopedCacheFields = this.collectionScopedCacheFields;
+
+			const rootScopedCacheTags = pinnedScopeTagsFromFilter(
+				this.collection,
+				scopedCacheFields,
+				updatedQuery.filter,
+			);
 
 			for (const collection of collectionsInFieldMap(fieldMapFromAst(ast, this.schema))) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
@@ -975,7 +993,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						? null
 						: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-				await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
+				await this.purgeScopedCache(scopedCacheTags);
 			}
 		}
 
@@ -1265,17 +1283,26 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const scopedCacheFields = this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+			const scopedCacheFields = this.collectionScopedCacheFields;
 
 			// Old slices from the pre-update capture, plus the new value the update sets
 			// (if it touches a scope field). Derived from the post-hook payload, not the
 			// raw input — an update filter hook can rewrite a scope field. An absent scoped
 			// cache field means "unchanged", covered by the old capture.
 			const newScopedCacheTags =
-				scopedCacheTagsFromRows(this.collection, scopedCacheFields, [payloadAfterHooks], false) ?? [];
+				scopedCacheTagsFromRows(
+					this.collection,
+					scopedCacheFields,
+					[payloadAfterHooks],
+					false,
+				) ?? [];
 
-			const scopedCacheTags = oldScopedCacheTags === null ? null : [...oldScopedCacheTags, ...newScopedCacheTags];
-			await purgeCache(this.cache, this.collection, scopedCacheTags, this.scopedCachePurgeContext());
+			const scopedCacheTags =
+				oldScopedCacheTags === null
+					? null
+					: [...oldScopedCacheTags, ...newScopedCacheTags];
+
+			await this.purgeScopedCache(scopedCacheTags);
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1513,7 +1540,7 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await purgeCache(this.cache, this.collection, oldScopedCacheTags, this.scopedCachePurgeContext());
+			await this.purgeScopedCache(oldScopedCacheTags);
 		}
 
 		if (opts.emitEvents !== false) {
