@@ -81,8 +81,8 @@ jobs:
       - name: Run Formatter
         run: pnpm exec prettier --check --ignore-unknown ${{ steps.changed-files.outputs.all_changed_files }}
 
-  linewidth:
-    name: Line width
+  style-changes:
+    name: Style (changes)
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
@@ -92,7 +92,8 @@ jobs:
           # Full history so the script can diff against the merge-base with the PR base.
           fetch-depth: 0
 
-      - name: Check added comment line width
+      # Diff-based style rules over added lines only (mirrors `pnpm lint:style:changes`).
+      - name: Check changed-line style
         run: node scripts/check-line-width.mjs "${{ github.event.pull_request.base.sha }}"
 
   unit:
