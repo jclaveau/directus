@@ -3,11 +3,12 @@ import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 
-// A scoped-mode read must tag every collection whose DATA feeds the response, so a later write to any
-// of them purges the cached entry. These pin that the read-side field-map → tag derivation
-// (`collectionsInFieldMap(fieldMapFromAst(ast))`) covers every relation type — a regression that
-// silently dropped a relation from the tag set would leave reads joining it stale (HIT after a write).
-// Tags come from the AST, not the rows, so empty tracker responses are enough.
+// A scoped-mode read must tag every collection whose DATA feeds the response, so a
+// later write to any of them purges the cached entry. These pin that the read-side
+// field-map → tag derivation (`collectionsInFieldMap(fieldMapFromAst(ast))`) covers
+// every relation type — a regression that silently dropped a relation from the tag
+// set would leave reads joining it stale (HIT after a write). Tags come from the AST,
+// not the rows, so empty tracker responses are enough.
 const env: Record<string, any> = {
 	CACHE_AUTO_PURGE: true,
 	CACHE_AUTO_PURGE_IGNORE_LIST: [],
@@ -45,7 +46,8 @@ const o2m = new SchemaBuilder()
 	})
 	.build();
 
-// m2m('tags') generates the junction `articles_tags_junction` (fields: id, articles_id, tags_id) + `tags`.
+// m2m('tags') generates the junction `articles_tags_junction`
+// (fields: id, articles_id, tags_id) + `tags`.
 const m2m = new SchemaBuilder()
 	.collection('articles', (c) => {
 		c.field('id').id();
@@ -94,8 +96,9 @@ describe('scoped cache read tagging across relation types', () => {
 	});
 
 	it('m2m shallow (junction fields only): tags root + junction, not the unread target', async () => {
-		// `tags.*` resolves junction rows, not tag data — so the target need not be tagged, but the
-		// junction must be (a link add/remove is a junction write that has to invalidate the read).
+		// `tags.*` resolves junction rows, not tag data — so the target need not be
+		// tagged, but the junction must be (a link add/remove is a junction write
+		// that has to invalidate the read).
 		expect(await taggedCollections('articles', m2m, ['*', 'tags.*'])).toEqual(['articles', 'articles_tags_junction']);
 	});
 
@@ -120,8 +123,9 @@ describe('scoped cache read tagging across relation types', () => {
 		]);
 	});
 
-	// A relational path used only in filter/sort (never selected) still tags the related collection:
-	// the read's result set depends on that collection, so a write to it must invalidate.
+	// A relational path used only in filter/sort (never selected) still tags the
+	// related collection: the read's result set depends on that collection, so a
+	// write to it must invalidate.
 	it('deep filter on a relation (not selected) tags the related collection', async () => {
 		const tags = await taggedForQuery('cities', m2o, { fields: ['id'], filter: { country: { id: { _eq: 1 } } } });
 		expect(tags).toEqual(['cities', 'countries']);

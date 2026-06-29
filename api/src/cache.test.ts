@@ -21,7 +21,8 @@ const redis = vi.hoisted(() => {
 	};
 });
 
-// Passthrough filter by default; individual tests override to assert extension augmentation.
+// Passthrough filter by default; individual tests override to assert extension
+// augmentation.
 const emitFilter = vi.hoisted(() => vi.fn(async (_event: string, payload: unknown) => payload));
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
@@ -156,8 +157,9 @@ describe('scoped cache purging', () => {
 		});
 
 		test('numeric and string scope values collapse to one tag key (stable column type)', async () => {
-			// A read pinned off a REST `_eq=7` carries the value as the string '7'; the row it came from
-			// holds the numeric 7. Both must land on the SAME tag set or the purge would miss the read.
+			// A read pinned off a REST `_eq=7` carries the value as the string '7';
+			// the row it came from holds the numeric 7. Both must land on the SAME
+			// tag set or the purge would miss the read.
 			await tagScopedCacheKeys('resp-key', [
 				{ collection: 'slots', field: 'student', value: 7 },
 				{ collection: 'slots', field: 'student', value: '7' },
@@ -257,8 +259,9 @@ describe('scoped cache purging', () => {
 		});
 
 		test('a numeric mutation value resolves the same slice a string-pinned read tagged', async () => {
-			// Read side tagged `student=7` off a REST string; the mutation resolves the value as numeric 7
-			// from the row. The purge must hit the string-keyed slice, not a separate `student=7` (number).
+			// Read side tagged `student=7` off a REST string; the mutation resolves the
+			// value as numeric 7 from the row. The purge must hit the string-keyed slice,
+			// not a separate `student=7` (number).
 			redis.smembers.mockResolvedValue(['read-key']);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
@@ -270,8 +273,9 @@ describe('scoped cache purging', () => {
 		});
 
 		test('a cache.purge filter that empties the tag set deletes nothing and never calls redis.del', async () => {
-			// `redis.del()` with no keys throws; an extension is free to drop every tag, so the empty set
-			// must be a no-op rather than a crash (and must not degrade into a full flush).
+			// `redis.del()` with no keys throws; an extension is free to drop every
+			// tag, so the empty set must be a no-op rather than a crash (and must not
+			// degrade into a full flush).
 			emitFilter.mockImplementation(async () => []);
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
