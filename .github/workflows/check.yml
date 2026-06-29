@@ -92,9 +92,14 @@ jobs:
           # Full history so the script can diff against the merge-base with the PR base.
           fetch-depth: 0
 
-      # Diff-based style rules over added lines only (mirrors `pnpm lint:style:changes`).
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: false
+
+      # eslint max-len (comment width) over added lines only (mirrors `pnpm lint:style:changes`).
       - name: Check changed-line style
-        run: node scripts/check-line-width.mjs "${{ github.event.pull_request.base.sha }}"
+        run: node scripts/lint-style-changes.mjs "${{ github.event.pull_request.base.sha }}"
 
   unit:
     name: Unit Tests
