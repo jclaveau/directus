@@ -22,20 +22,24 @@ const env: Record<string, any> = {
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
-vi.mock('../../src/database/index', () => ({
-	default: vi.fn(),
-	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
-}));
+vi.mock('../../src/database/index', () => {
+	return {
+		default: vi.fn(),
+		getDatabaseClient: vi.fn().mockReturnValue('postgres'),
+	};
+});
 
 // Spy purgeCache and force scoped mode; the cache itself just needs to be truthy
 // for shouldClearCache.
 const purgeCache = vi.fn();
 
-vi.mock('../cache.js', () => ({
-	getCache: () => ({ cache: { clear: vi.fn(), delete: vi.fn() } }),
-	purgeCache,
-	scopedCachePurgeEnabled: () => true,
-}));
+vi.mock('../cache.js', () => {
+	return {
+		getCache: () => ({ cache: { clear: vi.fn(), delete: vi.fn() } }),
+		purgeCache,
+		scopedCachePurgeEnabled: () => true,
+	};
+});
 
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
@@ -302,11 +306,13 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 			seenRecords = meta.records;
 			return [
 				...tags,
-				...meta.records.map((r: any) => ({
-					collection: 'test',
-					field: 'student',
-					value: r.student,
-				})),
+				...meta.records.map((r: any) => {
+					return {
+						collection: 'test',
+						field: 'student',
+						value: r.student,
+					};
+				}),
 			];
 		};
 

@@ -203,9 +203,14 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 			>('id', 'collection', 'field', 'special', 'note', 'validation')
 			.from('directus_fields')),
 		...systemFieldRows,
-	].filter((field) => (field.special
-		? toArray(field.special)
-		: []).includes('no-data') === false);
+	].filter((field) => {
+		return (
+			(field.special
+				? toArray(field.special)
+				: []
+			).includes('no-data') === false
+		);
+	});
 
 	for (const field of fields) {
 		if (!result.collections[field.collection]) {
