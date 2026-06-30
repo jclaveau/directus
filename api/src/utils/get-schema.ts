@@ -70,8 +70,7 @@ export async function getSchema(
 		logger.trace('Schema cache is prepared in another process, waiting for result.');
 
 		const timeout: Promise<any> = new Promise((_, reject) =>
-			setTimeout(reject, env['CACHE_SCHEMA_SYNC_TIMEOUT'] as number),
-		);
+			setTimeout(reject, env['CACHE_SCHEMA_SYNC_TIMEOUT'] as number),);
 
 		const subscription = new Promise<SchemaOverview>((resolve, reject) => {
 			bus.subscribe(messageKey, busListener).catch(reject);
@@ -86,7 +85,8 @@ export async function getSchema(
 				try {
 					setMemorySchemaCache(options.schema);
 					resolve(options.schema);
-				} catch (e) {
+				}
+				catch (e) {
 					reject(e);
 				}
 			}
@@ -108,7 +108,8 @@ export async function getSchema(
 		schema = await getDatabaseSchema(database, schemaInspector);
 		setMemorySchemaCache(schema);
 		return schema;
-	} finally {
+	}
+	finally {
 		await bus.publish(messageKey, { schema });
 		await lock.delete(lockKey);
 	}
@@ -128,7 +129,14 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 
 	const collections = [
 		...(await database
-			.select('collection', 'singleton', 'note', 'sort_field', 'accountability', 'scoped_cache_fields')
+			.select(
+				'collection',
+				'singleton',
+				'note',
+				'sort_field',
+				'accountability',
+				'scoped_cache_fields',
+			)
 			.from('directus_collections')),
 		...systemCollectionRows,
 	];
@@ -158,7 +166,9 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 				collectionMeta?.singleton === true || collectionMeta?.singleton === 'true' || collectionMeta?.singleton === 1,
 			note: collectionMeta?.note || null,
 			sortField: collectionMeta?.sort_field || null,
-			accountability: collectionMeta ? collectionMeta.accountability : 'all',
+			accountability: collectionMeta
+				? collectionMeta.accountability
+				: 'all',
 			scopedCacheFields: parseJsonFieldList(collectionMeta?.scoped_cache_fields),
 			fields: mapValues(schemaOverview[collection]?.columns, (column) => {
 				return {
@@ -193,21 +203,32 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 			>('id', 'collection', 'field', 'special', 'note', 'validation')
 			.from('directus_fields')),
 		...systemFieldRows,
-	].filter((field) => (field.special ? toArray(field.special) : []).includes('no-data') === false);
+	].filter((field) => (field.special
+		? toArray(field.special)
+		: []).includes('no-data') === false);
 
 	for (const field of fields) {
-		if (!result.collections[field.collection]) continue;
+		if (!result.collections[field.collection]) {
+			continue;
+		}
 
 		const existing = result.collections[field.collection]?.fields[field.field];
 		const column = schemaOverview[field.collection]?.columns[field.field];
-		const special = field.special ? toArray(field.special) : [];
 
-		if (ALIAS_TYPES.some((type) => special.includes(type)) === false && !existing) continue;
+		const special = field.special
+			? toArray(field.special)
+			: [];
+
+		if (ALIAS_TYPES.some((type) => special.includes(type)) === false && !existing) {
+			continue;
+		}
 
 		const type = (existing && getLocalType(column, { special })) || 'alias';
 		let validation = field.validation ?? null;
 
-		if (validation && typeof validation === 'string') validation = parseJSON(validation);
+		if (validation && typeof validation === 'string') {
+			validation = parseJSON(validation);
+		}
 
 		result.collections[field.collection]!.fields[field.field] = {
 			field: field.field,

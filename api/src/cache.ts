@@ -57,7 +57,7 @@ export function getCache(): {
 	systemCache: Keyv;
 	localSchemaCache: Keyv;
 	lockCache: Keyv;
-} {
+	} {
 	if (env['CACHE_ENABLED'] === true && cache === null) {
 		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
 		cache = getKeyvInstance(env['CACHE_STORE'] as Store, getMilliseconds(env['CACHE_TTL']));
@@ -127,7 +127,8 @@ export async function getSystemCache(key: string): Promise<Record<string, any>> 
 export function setMemorySchemaCache(schema: SchemaOverview) {
 	if (Object.isFrozen(schema)) {
 		memorySchemaCache = schema;
-	} else {
+	}
+	else {
 		memorySchemaCache = freezeSchema(schema);
 	}
 }
@@ -135,7 +136,8 @@ export function setMemorySchemaCache(schema: SchemaOverview) {
 export function getMemorySchemaCache(): Readonly<SchemaOverview> | undefined {
 	if (env['CACHE_SCHEMA_FREEZE_ENABLED']) {
 		return memorySchemaCache ?? undefined;
-	} else if (memorySchemaCache) {
+	}
+	else if (memorySchemaCache) {
 		return unfreezeSchema(memorySchemaCache);
 	}
 
@@ -154,7 +156,11 @@ export async function setCacheValue(
 
 export async function getCacheValue(cache: Keyv, key: string): Promise<any> {
 	const value = await cache.get(key);
-	if (!value) return undefined;
+
+	if (!value) {
+		return undefined;
+	}
+
 	const decompressed = await decompress(value);
 	return decompressed;
 }
@@ -194,10 +200,15 @@ export async function tagScopedCacheKeys(
 	key: string,
 	tags: Iterable<ScopedCacheTag>,
 ): Promise<void> {
-	if (!scopedCachePurgeEnabled()) return;
+	if (!scopedCachePurgeEnabled()) {
+		return;
+	}
 
 	const tagKeys = [...new Set([...tags].map(scopedCacheTagKey))];
-	if (tagKeys.length === 0) return;
+
+	if (tagKeys.length === 0) {
+		return;
+	}
 
 	const redis = useRedis();
 	const ttlSeconds = Math.ceil(getMilliseconds(env['CACHE_TTL'], 0) / 1000) * 2;
@@ -205,7 +216,10 @@ export async function tagScopedCacheKeys(
 
 	for (const tagKey of tagKeys) {
 		pipeline.sadd(tagKey, key, `${key}__expires_at`);
-		if (ttlSeconds > 0) pipeline.expire(tagKey, ttlSeconds);
+
+		if (ttlSeconds > 0) {
+			pipeline.expire(tagKey, ttlSeconds);
+		}
 	}
 
 	await pipeline.exec();
@@ -252,7 +266,9 @@ export async function purgeCache(
 	}
 
 	// A `cache.purge` filter could empty the tag set; `redis.del()` with no keys throws.
-	if (tagKeys.length > 0) await redis.del(...tagKeys);
+	if (tagKeys.length > 0) {
+		await redis.del(...tagKeys);
+	}
 }
 
 function getKeyvInstance(store: Store, ttl: number | undefined, namespaceSuffix?: string): Keyv {
@@ -286,7 +302,10 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 // Advanced setups (sentinel/cluster, cert-based TLS) should use the REDIS connection URL.
 export function getRedisConnection(): string | Record<string, unknown> {
 	const url = env['REDIS'];
-	if (url) return url as string;
+
+	if (url) {
+		return url as string;
+	}
 
 	const { host, port, username, password, db, tls } = getConfigFromEnv('REDIS') as Record<string, any>;
 

@@ -3,11 +3,18 @@ import { readMeta, withMeta } from './read-meta.js';
 
 describe('withMeta / readMeta', () => {
 	test('round-trips the metadata via getMeta()', () => {
-		const meta = { scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }] };
+		const meta = {
+			scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }],
+		};
+
 		const result = withMeta([{ id: 1 }], meta);
 
 		expect(readMeta(result)).toBe(meta);
-		expect(readMeta(result)!.scopedCacheTags).toEqual([{ collection: 'articles' }, { collection: 'users' }]);
+
+		expect(readMeta(result)!.scopedCacheTags).toEqual([
+			{ collection: 'articles' },
+			{ collection: 'users' },
+		]);
 	});
 
 	test('getMeta is non-enumerable — invisible to JSON and spread', () => {

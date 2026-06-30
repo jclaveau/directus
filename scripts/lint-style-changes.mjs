@@ -1,14 +1,10 @@
 #!/usr/bin/env node
-// Diff-aware style gate (`pnpm lint:style:changes`). Runs eslint with the planner-derived
-// style layer (`eslint.style.config.js` — jean's config with indent/semi/quotes/space-unary-ops
-// commented so prettier keeps owning those) and reports ONLY violations on lines ADDED vs the PR
-// base. eslint is the engine (correct string/comment handling); the diff filter keeps it
-// new-code-only, so a touched file's pre-existing hits never pollute the PR.
-//
-// Only STYLE_RULES below are reported — the config also carries quality rules (no-explicit-any,
-// no-redeclare, …) that are noise on directus (which deliberately allows `any`); this gate is
-// about review-pane readability (line width + vertical alignment), not type hygiene.
-// See feedback_avoid_review_pane_soft_wrap + feedback_adopt_jeans_proven_configs.
+// Diff-aware style gate (`pnpm lint:style:changes`). Runs eslint with `eslint.style.config.js`
+// (the single source of truth for what's enforced) and reports every ERROR it emits — but ONLY on
+// lines ADDED vs the PR base. eslint is the engine; the diff filter keeps it new-code-only, so a
+// touched file's pre-existing hits never pollute the PR. To change what gates, edit the CONFIG —
+// turn a rule on/off there, not here. Quality/non-style rules are turned off in the config so they
+// don't fire. See feedback_avoid_review_pane_soft_wrap + feedback_adopt_jeans_proven_configs.
 //
 // Usage: node scripts/lint-style-changes.mjs <baseRef>
 //   baseRef defaults to $LINEWIDTH_BASE; diffs merge-base(baseRef, HEAD) vs the working tree.
@@ -22,28 +18,6 @@ if (!base) {
 	console.log('lint:style:changes: no base ref, skipping');
 	process.exit(0);
 }
-
-// The PRETTIER-SAFE subset of eslint.style.config.js — rules a contributor can actually satisfy
-// while prettier (printWidth 120) stays the formatter. `max-len` is the review-pane lever (fix by
-// restructuring/const, not by a break prettier would re-collapse); the rest either add what
-// prettier ignores (prefer-template, no-duplicate-imports, no-unexpected-multiline) or match what
-// prettier already enforces (arrow-parens, comma-dangle, no-trailing-spaces).
-//
-// DELIBERATELY EXCLUDED — the verticalization rules (brace-style, function-paren-newline,
-// function-call-argument-newline, newline-per-chained-call, object-curly-newline,
-// custom-array-element-newline). They force MORE breaking than prettier's width logic, so prettier
-// reverts the fix (proven) → gating them = permanently-red CI fighting the Format job. They live in
-// the config for the future eslint-as-formatter switch, where verticalization becomes enforceable.
-const STYLE_RULES = new Set([
-	'max-len',
-	'multiline-ternary',
-	'prefer-template',
-	'no-duplicate-imports',
-	'no-unexpected-multiline',
-	'arrow-parens',
-	'comma-dangle',
-	'no-trailing-spaces',
-]);
 
 function git(args) {
 	return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 128 * 1024 * 1024 });
@@ -117,7 +91,7 @@ for (const result of JSON.parse(raw)) {
 	if (!added) continue;
 
 	for (const message of result.messages) {
-		if (message.ruleId && STYLE_RULES.has(message.ruleId) && added.has(message.line)) {
+		if (message.severity === 2 && message.ruleId && added.has(message.line)) {
 			violations.push(`${rel}:${message.line}  ${message.ruleId}: ${message.message}`);
 		}
 	}

@@ -65,6 +65,12 @@ export const eslintBaseConfig = defineConfig([
       // does not work with type definitions
       'no-unused-vars': `off`,
       '@typescript-eslint/no-unused-vars': `off`,
+
+      // Preset (js/tseslint recommended) QUALITY rules that aren't style — turned off so the
+      // diff-scoped gate (scripts/lint-style-changes.mjs) reports only this config's style rules.
+      // directus leans on `any`; intentional interface merges trip no-redeclare.
+      '@typescript-eslint/no-explicit-any': `off`,
+      'no-redeclare': `off`,
       // '@typescript-eslint/no-unused-vars': [`warn`, {
       //   "argsIgnorePattern": `^_`,
       //   "varsIgnorePattern": `^_`,
@@ -94,8 +100,13 @@ export const eslintBaseConfig = defineConfig([
         ignoreUrls: true,
         ignoreTrailingComments: true,
         ignoreRegExpLiterals: true,
-        ignoreStrings: true,
+        // ignoreStrings disabled for scalabus (planner keeps it on for ts/js): a short mid-line
+        // string shouldn't exempt a long line from the 90-col cap — catches wrapping assertions.
+        // ignoreStrings: true,
         ignoreTemplateLiterals: true,
+        // test titles are unbreakable string literals — exempt `it(`/`describe(`/`test(` and the
+        // `.each([...])('title', cb)` form (whose title sits on a line starting with `])(`).
+        ignorePattern: `^\\s*(it|test|describe)\\(|^\\s*\\]\\)\\(`,
       }],
       "@typescript-eslint/no-unused-expressions": [                 // https://eslint.org/docs/latest/rules/no-unused-expressions
         `error`,

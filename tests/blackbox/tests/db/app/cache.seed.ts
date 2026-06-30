@@ -70,7 +70,12 @@ export const seedDBStructure = () => {
 					collectionBlock,
 				]) {
 					await CreateCollection(vendor, { collection: target });
-					await CreateField(vendor, { collection: target, field: 'string_field', type: 'string' });
+
+					await CreateField(vendor, {
+						collection: target,
+						field: 'string_field',
+						type: 'string',
+					});
 				}
 
 				// m2o: collectionFirst.related → collectionRelated
@@ -117,7 +122,8 @@ export const seedDBStructure = () => {
 				});
 
 				expect(true).toBeTruthy();
-			} catch (error) {
+			}
+			catch (error) {
 				expect(error).toBeFalsy();
 			}
 		},

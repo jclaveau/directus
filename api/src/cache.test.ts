@@ -27,7 +27,11 @@ const emitFilter = vi.hoisted(() => vi.fn((_event: string, payload: unknown) => 
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
 vi.mock('./bus/index.js', () => ({ useBus: () => ({ subscribe: vi.fn(), publish: vi.fn() }) }));
-vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn() {}, error() {}, info() {} }) }));
+
+vi.mock('./logger/index.js', () => ({
+	useLogger: () => ({ warn() {}, error() {}, info() {} }),
+}));
+
 vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 
 vi.mock('./redis/index.js', () => ({
@@ -35,10 +39,14 @@ vi.mock('./redis/index.js', () => ({
 	useRedis: () => redis,
 }));
 
-const { getRedisConnection, purgeCache, scopedCachePurgeEnabled, tagScopedCacheKeys } = await import('./cache.js');
+const { getRedisConnection, purgeCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
+	await import('./cache.js');
 
 function setEnv(values: Record<string, unknown>) {
-	for (const key of Object.keys(mockEnv.current)) delete mockEnv.current[key];
+	for (const key of Object.keys(mockEnv.current)) {
+		delete mockEnv.current[key];
+	}
+
 	Object.assign(mockEnv.current, values);
 }
 
@@ -108,7 +116,10 @@ describe('scoped cache purging', () => {
 
 	describe('tagScopedCacheKeys', () => {
 		test('indexes the key + expires sibling under every collection-level tag, with a TTL', async () => {
-			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }, { collection: 'directus_users' }]);
+			await tagScopedCacheKeys('resp-key', [
+				{ collection: 'articles' },
+				{ collection: 'directus_users' },
+			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
 				'system-cache:tag:articles',
@@ -123,7 +134,11 @@ describe('scoped cache purging', () => {
 			);
 
 			// 2 × CACHE_TTL (5m = 300s) = 600s
-			expect(redis._pipeline.expire).toHaveBeenCalledWith('system-cache:tag:articles', 600);
+			expect(redis._pipeline.expire).toHaveBeenCalledWith(
+				'system-cache:tag:articles',
+				600,
+			);
+
 			expect(redis._pipeline.exec).toHaveBeenCalledOnce();
 		});
 
@@ -147,7 +162,9 @@ describe('scoped cache purging', () => {
 		});
 
 		test('a null scope value serializes to a stable sentinel', async () => {
-			await tagScopedCacheKeys('resp-key', [{ collection: 'slots', field: 'student', value: null }]);
+			await tagScopedCacheKeys('resp-key', [
+				{ collection: 'slots', field: 'student', value: null },
+			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
 				'system-cache:tag:slots:student=null',
@@ -200,19 +217,25 @@ describe('scoped cache purging', () => {
 			redis.smembers.mockImplementation(async (tagKey: string) =>
 				tagKey === 'system-cache:tag:slots'
 					? ['global-key']
-					: ['key-a', 'key-a__expires_at'],
-			);
+					: ['key-a', 'key-a__expires_at'],);
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [{ collection: 'slots', field: 'student', value: 'A' }]);
+			await purgeCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
 
 			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots');
 			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots:student=A');
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.delete).toHaveBeenCalledWith('key-a__expires_at');
-			expect(redis.del).toHaveBeenCalledWith('system-cache:tag:slots', 'system-cache:tag:slots:student=A');
+
+			expect(redis.del).toHaveBeenCalledWith(
+				'system-cache:tag:slots',
+				'system-cache:tag:slots:student=A',
+			);
+
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -220,7 +243,9 @@ describe('scoped cache purging', () => {
 			redis.smembers.mockResolvedValue([]);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [{ collection: 'slots', field: 'student', value: 'A' }]);
+			await purgeCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
 
 			expect(redis.smembers).not.toHaveBeenCalledWith('system-cache:tag:slots:student=B');
 			expect(redis.del).not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
@@ -253,7 +278,9 @@ describe('scoped cache purging', () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'articles', [{ collection: 'articles', field: 'student', value: 'A' }]);
+			await purgeCache(cache, 'articles', [
+				{ collection: 'articles', field: 'student', value: 'A' },
+			]);
 
 			expect(cache.clear).toHaveBeenCalledTimes(1);
 			expect(cache.delete).not.toHaveBeenCalled();
@@ -267,11 +294,17 @@ describe('scoped cache purging', () => {
 			redis.smembers.mockResolvedValue(['read-key']);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [{ collection: 'slots', field: 'student', value: 7 }]);
+			await purgeCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 7 },
+			]);
 
 			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots:student=7');
 			expect(cache.delete).toHaveBeenCalledWith('read-key');
-			expect(redis.del).toHaveBeenCalledWith('system-cache:tag:slots', 'system-cache:tag:slots:student=7');
+
+			expect(redis.del).toHaveBeenCalledWith(
+				'system-cache:tag:slots',
+				'system-cache:tag:slots:student=7',
+			);
 		});
 
 		test('a cache.purge filter that empties the tag set deletes nothing and never calls redis.del', async () => {
@@ -282,7 +315,9 @@ describe('scoped cache purging', () => {
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [{ collection: 'slots', field: 'student', value: 'A' }]);
+			await purgeCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
 
 			expect(redis.smembers).not.toHaveBeenCalled();
 			expect(cache.delete).not.toHaveBeenCalled();
@@ -301,9 +336,19 @@ describe('scoped cache purging', () => {
 
 			await purgeCache(cache, 'slots', []);
 
-			expect(emitFilter).toHaveBeenCalledWith('cache.purge', [{ collection: 'slots' }], { collection: 'slots' }, null);
+			expect(emitFilter).toHaveBeenCalledWith(
+				'cache.purge',
+				[{ collection: 'slots' }],
+				{ collection: 'slots' },
+				null,
+			);
+
 			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots:owner=B');
-			expect(redis.del).toHaveBeenCalledWith('system-cache:tag:slots', 'system-cache:tag:slots:owner=B');
+
+			expect(redis.del).toHaveBeenCalledWith(
+				'system-cache:tag:slots',
+				'system-cache:tag:slots:owner=B',
+			);
 		});
 	});
 });
