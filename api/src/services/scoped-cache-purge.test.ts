@@ -29,9 +29,9 @@ vi.mock('../../src/database/index', () => {
 	};
 });
 
-// Spy purgeCache and force scoped mode; the cache itself just needs to be truthy
+// Spy purgeScopedCache and force scoped mode; the cache itself just needs to be truthy
 // for shouldClearCache.
-const purgeCache = vi.fn();
+const purgeScopedCache = vi.fn();
 
 vi.mock('../cache.js', () => {
 	return {
@@ -42,7 +42,7 @@ vi.mock('../cache.js', () => {
 vi.mock('../scoped-cache.js', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('../scoped-cache.js')>()),
-		purgeCache,
+		purgeScopedCache,
 		scopedCachePurgeEnabled: () => true,
 	};
 });
@@ -63,11 +63,11 @@ const schema = new SchemaBuilder()
 schema.collections['test']!.scopedCacheFields = ['student'];
 
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
-// (or null = full flush) each mutation hands to purgeCache — asserted via
+// (or null = full flush) each mutation hands to purgeScopedCache — asserted via
 // toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation itself
 // is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
 // (capture-before-write, old ∪ new, upsert full-flush).
-describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache tags)', () => {
+describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)', () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
 
@@ -82,7 +82,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 	afterEach(() => {
 		tracker.reset();
-		purgeCache.mockClear();
+		purgeScopedCache.mockClear();
 	});
 
 	const service = () => new ItemsService('test', { knex: db, schema });
@@ -95,9 +95,9 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateMany([1], { student: 'B' });
 
-		expect(purgeCache).toHaveBeenCalledTimes(1);
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
-		expect(purgeCache).toHaveBeenCalledWith(
+		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			[
@@ -114,7 +114,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateMany([1], { name: 'renamed' });
 
-		expect(purgeCache).toHaveBeenCalledWith(
+		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			[{ collection: 'test', field: 'student', value: 'A' }],
@@ -130,7 +130,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateMany([1], { student: 'B' });
 
-		expect(purgeCache).toHaveBeenCalledWith(
+		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			null,
@@ -148,9 +148,9 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().deleteMany([1, 2]);
 
-		expect(purgeCache).toHaveBeenCalledTimes(1);
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
-		expect(purgeCache).toHaveBeenCalledWith(
+		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			[
@@ -167,7 +167,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
-		expect(purgeCache).toHaveBeenCalledWith(
+		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			null,
@@ -181,7 +181,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateBatch([{ id: 1, name: 'renamed' }]);
 
-		expect(purgeCache).toHaveBeenCalledWith(
+		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
@@ -195,7 +195,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateBatch([{ id: 1, name: 'renamed' }]);
 
-		expect(purgeCache).toHaveBeenCalledWith(
+		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			null,
@@ -215,7 +215,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		try {
 			await service().createOne({ name: 'x', student: 'A' });
 
-			expect(purgeCache).toHaveBeenCalledWith(
+			expect(purgeScopedCache).toHaveBeenCalledWith(
 				expect.anything(),
 				'test',
 				[{ collection: 'test', field: 'student', value: 'B' }],
@@ -234,7 +234,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
 
-			expect(purgeCache).toHaveBeenCalledWith(
+			expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			null,
@@ -258,7 +258,7 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		try {
 			await service().updateMany([1], { student: 'B' });
 
-			expect(purgeCache).toHaveBeenCalledWith(
+			expect(purgeScopedCache).toHaveBeenCalledWith(
 				expect.anything(),
 				'test',
 				[

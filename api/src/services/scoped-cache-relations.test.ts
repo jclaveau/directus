@@ -43,7 +43,7 @@ vi.mock('../cache.js', () => {
 vi.mock('../scoped-cache.js', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('../scoped-cache.js')>()),
-		purgeCache: vi.fn(),
+		purgeScopedCache: vi.fn(),
 		scopedCachePurgeEnabled: () => true,
 	};
 });
