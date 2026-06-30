@@ -28,16 +28,20 @@ const emitFilter = vi.hoisted(() => vi.fn((_event: string, payload: unknown) => 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
 vi.mock('./bus/index.js', () => ({ useBus: () => ({ subscribe: vi.fn(), publish: vi.fn() }) }));
 
-vi.mock('./logger/index.js', () => ({
-	useLogger: () => ({ warn() {}, error() {}, info() {} }),
-}));
+vi.mock('./logger/index.js', () => {
+	return {
+		useLogger: () => ({ warn() {}, error() {}, info() {} }),
+	};
+});
 
 vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 
-vi.mock('./redis/index.js', () => ({
-	redisConfigAvailable: () => true,
-	useRedis: () => redis,
-}));
+vi.mock('./redis/index.js', () => {
+	return {
+		redisConfigAvailable: () => true,
+		useRedis: () => redis,
+	};
+});
 
 const { getRedisConnection, purgeCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
 	await import('./cache.js');
@@ -214,10 +218,11 @@ describe('scoped cache purging', () => {
 
 	describe('purgeCache', () => {
 		test('always purges the collection-level tag (global readers) alongside slices', async () => {
-			redis.smembers.mockImplementation(async (tagKey: string) =>
-				tagKey === 'system-cache:tag:slots'
+			redis.smembers.mockImplementation(async (tagKey: string) => {
+				return tagKey === 'system-cache:tag:slots'
 					? ['global-key']
-					: ['key-a', 'key-a__expires_at'],);
+					: ['key-a', 'key-a__expires_at'];
+			});
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
@@ -326,10 +331,9 @@ describe('scoped cache purging', () => {
 		});
 
 		test('cache.purge filter augments the purge set (extension-resolved tags get dropped)', async () => {
-			emitFilter.mockImplementation(async (_event: string, tags: ScopedCacheTag[]) => [
-				...tags,
-				{ collection: 'slots', field: 'owner', value: 'B' },
-			]);
+			emitFilter.mockImplementation(async (_event: string, tags: ScopedCacheTag[]) => {
+				return [...tags, { collection: 'slots', field: 'owner', value: 'B' }];
+			});
 
 			redis.smembers.mockResolvedValue(['owned-key']);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;

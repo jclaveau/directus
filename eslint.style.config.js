@@ -4,6 +4,7 @@ import js from "@eslint/js"
 import tseslint from 'typescript-eslint'
 import vue from "eslint-plugin-vue"
 import customArrayElementNewline from './eslint-rules/custom-array-element-newline.js'
+import arrowMultilineBlock from './eslint-rules/arrow-multiline-block.js'
 
 export const appGlobals = {
   front: {
@@ -47,7 +48,10 @@ export const eslintBaseConfig = defineConfig([
       },
     },
 
-    plugins: { local: { rules: { 'custom-array-element-newline': customArrayElementNewline } } },
+    plugins: { local: { rules: {
+      'custom-array-element-newline': customArrayElementNewline,
+      'arrow-multiline-block': arrowMultilineBlock,
+    } } },
 
     rules: {
       'prefer-promise-reject-errors': `off`,
@@ -137,6 +141,7 @@ export const eslintBaseConfig = defineConfig([
       'local/custom-array-element-newline': [`error`, {             // replaces the built-in array-element-newline
         pairCommandArgs: true,                                      // pair spawn/exec flag+value (off → plain consistent)
       }],
+      'local/arrow-multiline-block': `error`,                       // concise arrow body only for one-liners; else block + return
       'function-call-argument-newline': [`error`, `consistent`],    // https://eslint.org/docs/latest/rules/function-call-argument-newline
       'function-paren-newline': [`error`, `multiline-arguments`],   // https://eslint.org/docs/latest/rules/function-paren-newline
       // 'padding-line-between-statements': [                          // https://eslint.org/docs/latest/rules/padding-line-between-statements#rule-details

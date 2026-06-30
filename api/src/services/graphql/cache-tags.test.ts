@@ -34,10 +34,11 @@ describe('GraphQLService cache tags', () => {
 		const gql = makeService(schema);
 
 		vi.mocked(getService).mockReturnValueOnce({
-			readByQuery: async () =>
-				withMeta([{ id: 1 }], {
+			readByQuery: async () => {
+				return withMeta([{ id: 1 }], {
 					scopedCacheTags: [{ collection: 'articles' }, { collection: 'users' }],
-				}),
+				});
+			},
 		} as any);
 
 		await gql.read('articles', {});
@@ -49,10 +50,11 @@ describe('GraphQLService cache tags', () => {
 
 		// a second read on another collection adds to the same per-request union
 		vi.mocked(getService).mockReturnValueOnce({
-			readByQuery: async () =>
-				withMeta([{ id: 2 }], {
+			readByQuery: async () => {
+				return withMeta([{ id: 2 }], {
 					scopedCacheTags: [{ collection: 'directus_files' }],
-				}),
+				});
+			},
 		} as any);
 
 		await gql.read('files', {});
