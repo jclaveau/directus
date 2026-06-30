@@ -43,8 +43,10 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-const { getRedisConnection, purgeCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
-	await import('./cache.js');
+const { getRedisConnection } = await import('./cache.js');
+
+const { purgeCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
+	await import('./scoped-cache.js');
 
 function setEnv(values: Record<string, unknown>) {
 	for (const key of Object.keys(mockEnv.current)) {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { pinnedScopeTagsFromFilter, scopedCacheTagsFromRows } from './items.js';
+import { pinnedScopeTagsFromFilter, scopedCacheTagsFromRows } from '../scoped-cache.js';
 
 // Pure scope-tag derivation behind update-payload / create tagging
 // (requireAll toggles fatal-on-missing).
