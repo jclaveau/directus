@@ -12,7 +12,11 @@ const env = useEnv();
  * store, since the tag→keys index lives in Redis sets. Any other config falls back to full flush.
  */
 export function scopedCachePurgeEnabled(): boolean {
-	return env['CACHE_AUTO_PURGE_MODE'] === 'scoped' && env['CACHE_STORE'] === 'redis' && redisConfigAvailable();
+	return (
+		env['CACHE_AUTO_PURGE_MODE'] === 'scoped' &&
+		env['CACHE_STORE'] === 'redis' &&
+		redisConfigAvailable()
+	);
 }
 
 // `String(value)` collapses types (number 7 vs string "7", null vs "null"). Safe
