@@ -34,15 +34,6 @@ ignore:
   - 'scripts/lint-style-changes.mjs'
   # Migrations are DDL, run against a real DB by the migration runner — never unit-tested.
   - 'api/src/database/migrations/**'
-  # Scoped-cache HTTP wiring reached only via real requests (no controller/middleware unit tests
-  # here, and blackbox coverage isn't instrumented on this branch): the controllers/respond glue
-  # that thread `scopedCacheTags` through `res.locals` → `tagScopedCacheKeys`, and get-schema's
-  # raw-knex assembly. The one piece of pure logic (parseJsonFieldList) was extracted to its own
-  # unit-tested module rather than ignored.
-  - 'api/src/utils/get-schema.ts'
-  - 'api/src/controllers/graphql.ts'
-  - 'api/src/controllers/items.ts'
-  - 'api/src/middleware/respond.ts'
 
 flag_management:
   default_rules:
