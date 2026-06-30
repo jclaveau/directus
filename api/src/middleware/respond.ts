@@ -22,9 +22,15 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	let exceedsMaxSize = false;
 
 	if (env['CACHE_VALUE_MAX_SIZE'] !== false) {
-		const valueSize = res.locals['payload'] ? stringByteSize(JSON.stringify(res.locals['payload'])) : 0;
+		const valueSize = res.locals['payload']
+			? stringByteSize(JSON.stringify(res.locals['payload']))
+			: 0;
+
 		const maxSize = parseBytesConfiguration(env['CACHE_VALUE_MAX_SIZE'] as string);
-		if (maxSize !== null) exceedsMaxSize = valueSize > maxSize;
+
+		if (maxSize !== null) {
+			exceedsMaxSize = valueSize > maxSize;
+		}
 	}
 
 	if (
@@ -50,13 +56,15 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			await setCacheValue(cache, key, res.locals['payload'], getMilliseconds(env['CACHE_TTL']));
 			await setCacheValue(cache, `${key}__expires_at`, { exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0) });
 			await tagScopedCacheKeys(key, res.locals['scopedCacheTags'] ?? []);
-		} catch (err: any) {
+		}
+		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
 		}
 
 		res.setHeader('Cache-Control', getCacheControlHeader(req, getMilliseconds(env['CACHE_TTL']), true, true));
 		res.setHeader('Vary', 'Origin, Cache-Control');
-	} else {
+	}
+	else {
 		// Don't cache anything by default
 		res.setHeader('Cache-Control', 'no-cache');
 		res.setHeader('Vary', 'Origin, Cache-Control');
@@ -69,11 +77,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 		if (req.collection) {
 			filename += req.collection;
-		} else {
+		}
+		else {
 			filename += 'Export';
 		}
 
-		filename += ' ' + getDateFormatted();
+		filename += ` ${  getDateFormatted()}`;
 
 		if (req.sanitizedQuery.export === 'json') {
 			res.attachment(`${filename}.json`);
@@ -102,9 +111,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	if (Buffer.isBuffer(res.locals['payload'])) {
 		return res.end(res.locals['payload']);
-	} else if (res.locals['payload']) {
+	}
+	else if (res.locals['payload']) {
 		return res.json(res.locals['payload']);
-	} else {
+	}
+	else {
 		return res.status(204).end();
 	}
 });

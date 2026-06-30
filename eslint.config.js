@@ -22,7 +22,15 @@ export default typescriptEslint.config(
 
 	// Ignored files
 	{
-		ignores: ['**/dist/', 'packages/extensions-sdk/templates/', 'api/extensions/'],
+		ignores: [
+			'**/dist/',
+			'packages/extensions-sdk/templates/',
+			'api/extensions/',
+			// Scalabus style tooling — a vendored eslint rule + the diff-scoped gate's CLI runner.
+			// Linted by their own conventions (the gate / eslint itself), not directus's style.
+			'eslint-rules/**',
+			'scripts/lint-style-changes.mjs',
+		],
 	},
 
 	// Enable recommended rules for JS files

@@ -43,7 +43,9 @@ describe('scopedCacheTagsFromRows', () => {
 	});
 
 	test('a field present but holding null is resolvable (distinct from being absent)', () => {
-		expect(scopedCacheTagsFromRows('slots', ['student'], [{ student: null }], true)).toEqual([
+		expect(
+			scopedCacheTagsFromRows('slots', ['student'], [{ student: null }], true),
+		).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 		]);
 	});
@@ -62,13 +64,17 @@ describe('scopedCacheTagsFromRows', () => {
 // means "not bounded → bare tag".
 describe('pinnedScopeTagsFromFilter', () => {
 	test('_eq on a scope field pins that value', () => {
-		expect(pinnedScopeTagsFromFilter('slots', ['student'], { student: { _eq: 'A' } })).toEqual([
+		expect(
+			pinnedScopeTagsFromFilter('slots', ['student'], { student: { _eq: 'A' } }),
+		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
 	});
 
 	test('_in on a scope field pins every listed value (even those with no rows yet)', () => {
-		expect(pinnedScopeTagsFromFilter('slots', ['student'], { student: { _in: ['A', 'B'] } })).toEqual([
+		expect(
+			pinnedScopeTagsFromFilter('slots', ['student'], { student: { _in: ['A', 'B'] } }),
+		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
 		]);
@@ -89,11 +95,15 @@ describe('pinnedScopeTagsFromFilter', () => {
 	});
 
 	test('a non-equality operator (_gt) does not bound the read', () => {
-		expect(pinnedScopeTagsFromFilter('slots', ['student'], { student: { _gt: 'A' } })).toEqual([]);
+		expect(
+			pinnedScopeTagsFromFilter('slots', ['student'], { student: { _gt: 'A' } }),
+		).toEqual([]);
 	});
 
 	test('a filter on a non-scope field yields no pin (read falls back to the bare collection tag)', () => {
-		expect(pinnedScopeTagsFromFilter('slots', ['student'], { course: { _eq: 'math' } })).toEqual([]);
+		expect(
+			pinnedScopeTagsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
+		).toEqual([]);
 	});
 
 	test('empty / null filter yields no pin', () => {

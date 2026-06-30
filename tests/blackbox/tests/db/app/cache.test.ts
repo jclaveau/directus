@@ -224,11 +224,14 @@ describe('App Caching Tests', () => {
 
 					// Assert
 					if (collection === collectionFirst) {
-						const expectedCacheStatus = key.endsWith('Purge') ? 'HIT' : 'MISS';
+						const expectedCacheStatus = key.endsWith('Purge')
+							? 'HIT'
+							: 'MISS';
 
 						expect(response.statusCode).toBe(200);
 						expect(response.headers[cacheStatusHeader]).toBe(expectedCacheStatus);
-					} else {
+					}
+					else {
 						expect(response.statusCode).toBe(200);
 						expect(response.headers[cacheStatusHeader]).toBe('MISS');
 					}
@@ -264,11 +267,14 @@ describe('App Caching Tests', () => {
 
 					// Assert
 					if (collection === collectionFirst) {
-						const expectedCacheStatus = key.endsWith('Purge') ? 'MISS' : 'HIT';
+						const expectedCacheStatus = key.endsWith('Purge')
+							? 'MISS'
+							: 'HIT';
 
 						expect(response.statusCode).toBe(200);
 						expect(response.headers[cacheStatusHeader]).toBe(expectedCacheStatus);
-					} else {
+					}
+					else {
 						expect(response.statusCode).toBe(200);
 						expect(response.headers[cacheStatusHeader]).toBe('HIT');
 					}
@@ -345,11 +351,14 @@ describe('App Caching Tests', () => {
 
 					// Assert
 					if (collection === collectionFirst) {
-						const expectedCacheStatus = key.endsWith('Purge') ? 'MISS' : 'HIT';
+						const expectedCacheStatus = key.endsWith('Purge')
+							? 'MISS'
+							: 'HIT';
 
 						expect(response.statusCode).toBe(200);
 						expect(response.headers[cacheStatusHeader]).toBe(expectedCacheStatus);
-					} else {
+					}
+					else {
 						expect(response.statusCode).toBe(200);
 						expect(response.headers[cacheStatusHeader]).toBe('HIT');
 					}
@@ -363,7 +372,8 @@ describe('App Caching Tests', () => {
 			// Setup
 			const env = envs[vendor].envRedisScopedPurge;
 
-			await request(getUrl(vendor, env)).post(`/utils/cache/clear`).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+			await request(getUrl(vendor, env)).post(`/utils/cache/clear`)
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			// Warm both collections
 			await request(getUrl(vendor, env))
@@ -419,9 +429,15 @@ describe('App Caching Tests', () => {
 			// A read that joins the related collection — tagged under both collections.
 			const read = `/items/${collectionFirst}?fields=*,related.*`;
 
-			await request(url).post(`/utils/cache/clear`).set('Authorization', auth);
-			await request(url).get(read).set('Authorization', auth); // cold → cached
-			const warm = await request(url).get(read).set('Authorization', auth);
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
 			// Mutate ONLY the related row — collectionFirst is untouched, yet the join read
@@ -431,7 +447,9 @@ describe('App Caching Tests', () => {
 				.send({ string_field: randomUUID() })
 				.set('Authorization', auth);
 
-			const afterRelatedWrite = await request(url).get(read).set('Authorization', auth);
+			const afterRelatedWrite = await request(url).get(read)
+				.set('Authorization', auth);
+
 			expect(afterRelatedWrite.statusCode).toBe(200);
 			expect(afterRelatedWrite.headers[cacheStatusHeader]).toBe('MISS');
 		});
@@ -455,17 +473,27 @@ describe('App Caching Tests', () => {
 			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
-			await request(url).post(`/utils/cache/clear`).set('Authorization', auth);
-			await request(url).get(read).set('Authorization', auth); // cold → cached
-			const warm = await request(url).get(read).set('Authorization', auth);
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
 			expect(warm.statusCode).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
 			// A write to the joined target collection — the join read is tagged with it, so
 			// it must drop.
-			await request(url).post(`/items/${target}`).send({ string_field: randomUUID() }).set('Authorization', auth);
+			await request(url).post(`/items/${target}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
 
-			const after = await request(url).get(read).set('Authorization', auth);
+			const after = await request(url).get(read)
+				.set('Authorization', auth);
+
 			expect(after.statusCode).toBe(200);
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
 		});
@@ -481,9 +509,15 @@ describe('App Caching Tests', () => {
 			// tagged with it, because its result set depends on collectionRelated.
 			const read = `/items/${collectionFirst}?fields=id&filter[related][string_field][_eq]=${randomUUID()}`;
 
-			await request(url).post(`/utils/cache/clear`).set('Authorization', auth);
-			await request(url).get(read).set('Authorization', auth); // cold → cached
-			const warm = await request(url).get(read).set('Authorization', auth);
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
 			expect(warm.statusCode).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 
@@ -493,7 +527,9 @@ describe('App Caching Tests', () => {
 				.send({ string_field: randomUUID() })
 				.set('Authorization', auth);
 
-			const after = await request(url).get(read).set('Authorization', auth);
+			const after = await request(url).get(read)
+				.set('Authorization', auth);
+
 			expect(after.statusCode).toBe(200);
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
 		});

@@ -1,7 +1,16 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	type MockedFunction,
+} from 'vitest';
 
 // A scoped-mode read must tag every collection whose DATA feeds the response, so a
 // later write to any of them purges the cached entry. These pin that the read-side
@@ -90,18 +99,27 @@ describe('scoped cache read tagging across relation types', () => {
 		taggedForQuery(collection, schema, { fields });
 
 	it('m2o: tags the root and the related collection', async () => {
-		expect(await taggedCollections('cities', m2o, ['*', 'country.*'])).toEqual(['cities', 'countries']);
+		expect(await taggedCollections('cities', m2o, ['*', 'country.*'])).toEqual([
+			'cities',
+			'countries',
+		]);
 	});
 
 	it('o2m: tags the root and the related collection', async () => {
-		expect(await taggedCollections('countries', o2m, ['*', 'cities.*'])).toEqual(['cities', 'countries']);
+		expect(await taggedCollections('countries', o2m, ['*', 'cities.*'])).toEqual([
+			'cities',
+			'countries',
+		]);
 	});
 
 	it('m2m shallow (junction fields only): tags root + junction, not the unread target', async () => {
 		// `tags.*` resolves junction rows, not tag data — so the target need not be
 		// tagged, but the junction must be (a link add/remove is a junction write
 		// that has to invalidate the read).
-		expect(await taggedCollections('articles', m2m, ['*', 'tags.*'])).toEqual(['articles', 'articles_tags_junction']);
+		expect(await taggedCollections('articles', m2m, ['*', 'tags.*'])).toEqual([
+			'articles',
+			'articles_tags_junction',
+		]);
 	});
 
 	it('m2m deep (target fields read): tags root + junction + target', async () => {
@@ -113,28 +131,40 @@ describe('scoped cache read tagging across relation types', () => {
 	});
 
 	it('m2a shallow (junction only): tags root + junction, not the unread targets', async () => {
-		expect(await taggedCollections('blog', m2a, ['*', 'blocks.*'])).toEqual(['blog', 'blog_builder']);
+		expect(await taggedCollections('blog', m2a, ['*', 'blocks.*'])).toEqual([
+			'blog',
+			'blog_builder',
+		]);
 	});
 
 	it('m2a deep (item:collection fields): tags root + junction + every read target', async () => {
-		expect(await taggedCollections('blog', m2a, ['*', 'blocks.item:text.*', 'blocks.item:image.*'])).toEqual([
-			'blog',
-			'blog_builder',
-			'image',
-			'text',
-		]);
+		expect(
+			await taggedCollections('blog', m2a, [
+				'*',
+				'blocks.item:text.*',
+				'blocks.item:image.*',
+			]),
+		).toEqual(['blog', 'blog_builder', 'image', 'text']);
 	});
 
 	// A relational path used only in filter/sort (never selected) still tags the
 	// related collection: the read's result set depends on that collection, so a
 	// write to it must invalidate.
 	it('deep filter on a relation (not selected) tags the related collection', async () => {
-		const tags = await taggedForQuery('cities', m2o, { fields: ['id'], filter: { country: { id: { _eq: 1 } } } });
+		const tags = await taggedForQuery('cities', m2o, {
+			fields: ['id'],
+			filter: { country: { id: { _eq: 1 } } },
+		});
+
 		expect(tags).toEqual(['cities', 'countries']);
 	});
 
 	it('sort on a relational path (not selected) tags the related collection', async () => {
-		const tags = await taggedForQuery('cities', m2o, { fields: ['id'], sort: ['country.id'] });
+		const tags = await taggedForQuery('cities', m2o, {
+			fields: ['id'],
+			sort: ['country.id'],
+		});
+
 		expect(tags).toEqual(['cities', 'countries']);
 	});
 });

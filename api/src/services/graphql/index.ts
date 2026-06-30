@@ -61,8 +61,7 @@ export class GraphQLService {
 		const schema = await this.getSchema();
 
 		const validationErrors = validate(schema, document, validationRules).map((validationError) =>
-			addPathToValidationError(validationError),
-		);
+			addPathToValidationError(validationError),);
 
 		if (validationErrors.length > 0) {
 			throw new GraphQLValidationError({ errors: validationErrors });
@@ -78,19 +77,24 @@ export class GraphQLService {
 				variableValues: variables,
 				operationName,
 			});
-		} catch (err: any) {
+		}
+		catch (err: any) {
 			throw new GraphQLExecutionError({ errors: [err.message] });
 		}
 
 		const formattedResult: FormattedExecutionResult = {};
 
-		if (result['data']) formattedResult.data = result['data'];
+		if (result['data']) {
+			formattedResult.data = result['data'];
+		}
 
 		if (result['errors']) {
 			formattedResult.errors = result['errors'].map((error) => processError(this.accountability, error));
 		}
 
-		if (result['extensions']) formattedResult.extensions = result['extensions'];
+		if (result['extensions']) {
+			formattedResult.extensions = result['extensions'];
+		}
 
 		return withMeta(formattedResult, { scopedCacheTags: this.scopedCacheTags });
 	}
@@ -147,7 +151,8 @@ export class GraphQLService {
 			}
 
 			return true;
-		} catch (err: any) {
+		}
+		catch (err: any) {
 			throw formatError(err);
 		}
 	}

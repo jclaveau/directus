@@ -29,7 +29,10 @@ describe('PermissionsService.readByQuery override', () => {
 	test('carries the cache-tag rider across the withAppMinimalPermissions rebuild', async () => {
 		// super.readByQuery returns a tagged array; the override rebuilds it (new array) and must
 		// re-attach the rider so permissions reads stay scoped-invalidatable (not TTL-only).
-		const tagged = withMeta([{ id: 1 }], { scopedCacheTags: [{ collection: 'directus_permissions' }] });
+		const tagged = withMeta([{ id: 1 }], {
+			scopedCacheTags: [{ collection: 'directus_permissions' }],
+		});
+
 		vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue(tagged);
 
 		const service = new PermissionsService({ knex: db, schema: {} as any, accountability: null });
@@ -37,6 +40,9 @@ describe('PermissionsService.readByQuery override', () => {
 
 		// rebuilt (app-minimal appended) AND the rider survived
 		expect(result).toHaveLength(2);
-		expect(readMeta(result)?.scopedCacheTags ?? []).toEqual([{ collection: 'directus_permissions' }]);
+
+		expect(readMeta(result)?.scopedCacheTags ?? []).toEqual([
+			{ collection: 'directus_permissions' },
+		]);
 	});
 });

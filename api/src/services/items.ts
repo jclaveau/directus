@@ -56,13 +56,13 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 		actionEvents.map((actionEvent) =>
 			opts.bypassEmitAction
 				? opts.bypassEmitAction(actionEvent)
-				: emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context),
-		),
+				: emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context),),
 	);
 
 	if (opts.awaitActionHooks) {
 		await emitting;
-	} else {
+	}
+	else {
 		// Per-event errors are already caught and logged inside emitter.emitAction; swallow here so
 		// an un-awaited rejection (e.g. from a bypassEmitAction handler) doesn't go unhandled.
 		emitting.catch(() => {});
@@ -90,12 +90,19 @@ export function scopedCacheTagsFromRows(
 
 		for (const row of rows) {
 			if (!(field in row)) {
-				if (requireAll) return null;
+				if (requireAll) {
+					return null;
+				}
+
 				continue;
 			}
 
 			const value = row[field];
-			if (seen.has(value)) continue;
+
+			if (seen.has(value)) {
+				continue;
+			}
+
 			seen.add(value);
 			tags.push({ collection, field, value });
 		}
@@ -120,30 +127,51 @@ export function pinnedScopeTagsFromFilter(
 	fields: string[],
 	filter: Filter | null | undefined,
 ): ScopedCacheTag[] {
-	if (!filter || fields.length === 0) return [];
+	if (!filter || fields.length === 0) {
+		return [];
+	}
 
 	const fieldSet = new Set(fields);
 	const pinned = new Map<string, Set<unknown>>();
 
 	function pin(field: string, values: unknown[]): void {
 		const seen = pinned.get(field) ?? new Set<unknown>();
-		for (const value of values) seen.add(value);
+
+		for (const value of values) {
+			seen.add(value);
+		}
+
 		pinned.set(field, seen);
 	}
 
 	function walk(node: Filter): void {
 		for (const [key, value] of Object.entries(node)) {
 			if (key === '_and' && Array.isArray(value)) {
-				for (const sub of value) walk(sub as Filter);
+				for (const sub of value) {
+					walk(sub as Filter);
+				}
+
 				continue;
 			}
 
 			// `_or` doesn't bound the read; nothing under it can pin a scope.
-			if (key === '_or' || !fieldSet.has(key) || value === null || typeof value !== 'object') continue;
+			if (
+				key === '_or' ||
+				!fieldSet.has(key) ||
+				value === null ||
+				typeof value !== 'object'
+			) {
+				continue;
+			}
 
 			const ops = value as Record<string, unknown>;
-			if ('_eq' in ops) pin(key, [ops['_eq']]);
-			else if ('_in' in ops && Array.isArray(ops['_in'])) pin(key, ops['_in']);
+
+			if ('_eq' in ops) {
+				pin(key, [ops['_eq']]);
+			}
+			else if ('_in' in ops && Array.isArray(ops['_in'])) {
+				pin(key, ops['_in']);
+			}
 		}
 	}
 
@@ -152,15 +180,16 @@ export function pinnedScopeTagsFromFilter(
 	const tags: ScopedCacheTag[] = [];
 
 	for (const [field, values] of pinned) {
-		for (const value of values) tags.push({ collection, field, value });
+		for (const value of values) {
+			tags.push({ collection, field, value });
+		}
 	}
 
 	return tags;
 }
 
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
-	implements AbstractService<Item>
-{
+implements AbstractService<Item> {
 	collection: Collection;
 	knex: Knex;
 	accountability: Accountability | null;
@@ -173,7 +202,11 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		this.collection = collection;
 		this.knex = options.knex || getDatabase();
 		this.accountability = options.accountability || null;
-		this.eventScope = isSystemCollection(this.collection) ? this.collection.substring(9) : 'items';
+
+		this.eventScope = isSystemCollection(this.collection)
+			? this.collection.substring(9)
+			: 'items';
+
 		this.schema = options.schema;
 		this.cache = getCache().cache;
 		this.nested = options.nested ?? [];
@@ -189,10 +222,15 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 * fields or there are no keys (a collection-level purge then suffices).
 	 */
 	private async snapshotScopedCacheTags(keys: PrimaryKey[]) {
-		if (!scopedCachePurgeEnabled()) return [];
+		if (!scopedCachePurgeEnabled()) {
+			return [];
+		}
 
 		const scopedCacheFields = this.collectionScopedCacheFields;
-		if (scopedCacheFields.length === 0 || keys.length === 0) return [];
+
+		if (scopedCacheFields.length === 0 || keys.length === 0) {
+			return [];
+		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
@@ -304,7 +342,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 	async createMany(data: Partial<Item>[], opts?: MutationOptions): Promise<PrimaryKey[]>;
 	async createMany(data: Partial<Item>[], opts: MutationOptions = {}): Promise<(PrimaryKey | null)[]> {
-		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
+		if (!opts.mutationTracker) {
+			opts.mutationTracker = this.createMutationTracker();
+		}
 
 		if (data.length === 0) {
 			return [];
@@ -360,17 +400,17 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				const payloadAfterHooks =
 					opts.emitEvents !== false
 						? await emitter.emitFilter<AnyItem, PrimaryKey | null>(
-								this.eventScope === 'items'
-									? ['items.create', `${this.collection}.items.create`]
-									: `${this.eventScope}.create`,
-								payload,
-								{ collection: this.collection },
-								{
-									database: trx,
-									schema: this.schema,
-									accountability: this.accountability,
-								},
-							)
+							this.eventScope === 'items'
+								? ['items.create', `${this.collection}.items.create`]
+								: `${this.eventScope}.create`,
+							payload,
+							{ collection: this.collection },
+							{
+								database: trx,
+								schema: this.schema,
+								accountability: this.accountability,
+							},
+						)
 						: payload;
 
 				if (typeof payloadAfterHooks === 'string' || typeof payloadAfterHooks === 'number') {
@@ -396,15 +436,15 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 				const payloadWithPresets = this.accountability
 					? await processPayload(
-							{
-								accountability: this.accountability,
-								action: 'create',
-								collection: this.collection,
-								payload: payloadAfterHooks,
-								nested: this.nested,
-							},
-							{ knex: trx, schema: this.schema },
-						)
+						{
+							accountability: this.accountability,
+							action: 'create',
+							collection: this.collection,
+							payload: payloadAfterHooks,
+							nested: this.nested,
+						},
+						{ knex: trx, schema: this.schema },
+					)
 					: payloadAfterHooks;
 
 				if (opts.preMutationError) {
@@ -505,17 +545,21 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						const p = prepared[i]!;
 
 						const returnedKey =
-							typeof row === 'object' && row !== null ? (row as Record<string, unknown>)[primaryKeyField] : row;
+							typeof row === 'object' && row !== null
+								? (row as Record<string, unknown>)[primaryKeyField]
+								: row;
 
 						if (pkField?.type === 'uuid') {
 							p.primaryKey = getHelpers(trx).schema.formatUUID((p.primaryKey ?? (returnedKey as string)) as string);
-						} else {
+						}
+						else {
 							p.primaryKey = (p.primaryKey ?? returnedKey) as PrimaryKey;
 						}
 
 						p.actionHookPayload[primaryKeyField] = p.primaryKey;
 					}
-				} else {
+				}
+				else {
 					const returningOptions = getHelpers(trx).capabilities.insertReturningOptions();
 
 					for (const p of prepared) {
@@ -532,7 +576,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 						if (pkField?.type === 'uuid') {
 							p.primaryKey = getHelpers(trx).schema.formatUUID((p.primaryKey ?? (returnedKey as string)) as string);
-						} else {
+						}
+						else {
 							p.primaryKey = (p.primaryKey ?? returnedKey) as PrimaryKey;
 						}
 
@@ -541,7 +586,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						// fetching it based on the last inserted row
 						if (!p.primaryKey) {
 							// Fetching it with max should be safe, as we're in the context of the current transaction
-							const maxResult = await trx.max(primaryKeyField, { as: 'id' }).from(this.collection).first();
+							const maxResult = await trx.max(primaryKeyField, { as: 'id' })
+								.from(this.collection)
+								.first();
 
 							p.primaryKey = maxResult?.id;
 						}
@@ -551,7 +598,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 						p.actionHookPayload[primaryKeyField] = p.primaryKey;
 					}
 				}
-			} catch (err: any) {
+			}
+			catch (err: any) {
 				const dbError = await translateDatabaseError(err, data);
 
 				if (isDirectusError(dbError, ErrorCode.RecordNotUnique) && dbError.extensions.primaryKey) {
@@ -598,7 +646,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			if (userIntegrityCheckFlags) {
 				if (opts.onRequireUserIntegrityCheck) {
 					opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-				} else {
+				}
+				else {
 					await validateUserCountIntegrity({
 						flags: userIntegrityCheckFlags,
 						knex: trx,
@@ -682,7 +731,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		if (opts.emitEvents !== false) {
 			const eventName =
-				this.eventScope === 'items' ? ['items.create', `${this.collection}.items.create`] : `${this.eventScope}.create`;
+				this.eventScope === 'items'
+					? ['items.create', `${this.collection}.items.create`]
+					: `${this.eventScope}.create`;
 
 			const actionEvents: ActionEventParams[] = actionPayloads.map(({ primaryKey, actionHookPayload }) => ({
 				event: eventName,
@@ -722,11 +773,11 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				scopedCacheTags = someRowTakenOver
 					? null
 					: scopedCacheTagsFromRows(
-							this.collection,
-							scopedCacheFields,
-							actionPayloads.map(({ actionHookPayload }) => actionHookPayload),
-							true,
-						);
+						this.collection,
+						scopedCacheFields,
+						actionPayloads.map(({ actionHookPayload }) => actionHookPayload),
+						true,
+					);
 			}
 
 			await this.purgeScopedCache(scopedCacheTags);
@@ -742,19 +793,19 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const updatedQuery =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
-						this.eventScope === 'items'
-							? ['items.query', `${this.collection}.items.query`]
-							: `${this.eventScope}.query`,
-						query,
-						{
-							collection: this.collection,
-						},
-						{
-							database: this.knex,
-							schema: this.schema,
-							accountability: this.accountability,
-						},
-					)
+					this.eventScope === 'items'
+						? ['items.query', `${this.collection}.items.query`]
+						: `${this.eventScope}.query`,
+					query,
+					{
+						collection: this.collection,
+					},
+					{
+						database: this.knex,
+						schema: this.schema,
+						accountability: this.accountability,
+					},
+				)
 				: query;
 
 		let ast = await getAstFromQuery(
@@ -777,7 +828,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
 			// GraphQL requires relational keys to be returned regardless
-			stripNonRequested: opts?.stripNonRequested !== undefined ? opts.stripNonRequested : true,
+			stripNonRequested: opts?.stripNonRequested !== undefined
+				? opts.stripNonRequested
+				: true,
 		});
 
 		// TODO when would this happen?
@@ -788,18 +841,20 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const filteredRecords =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
-						this.eventScope === 'items' ? ['items.read', `${this.collection}.items.read`] : `${this.eventScope}.read`,
-						records,
-						{
-							query: updatedQuery,
-							collection: this.collection,
-						},
-						{
-							database: this.knex,
-							schema: this.schema,
-							accountability: this.accountability,
-						},
-					)
+					this.eventScope === 'items'
+						? ['items.read', `${this.collection}.items.read`]
+						: `${this.eventScope}.read`,
+					records,
+					{
+						query: updatedQuery,
+						collection: this.collection,
+					},
+					{
+						database: this.knex,
+						schema: this.schema,
+						accountability: this.accountability,
+					},
+				)
 				: records;
 
 		// Scope this read for cache purging. The root collection gets value slices only
@@ -827,7 +882,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			for (const collection of collectionsInFieldMap(fieldMapFromAst(ast, this.schema))) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
-				} else {
+				}
+				else {
 					scopedCacheTags.push({ collection });
 				}
 			}
@@ -845,7 +901,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		if (opts?.emitEvents !== false) {
 			// Read action hooks stay fire-and-forget; the await opt-in (`awaitActionHooks`) is for mutations.
 			void emitter.emitAction(
-				this.eventScope === 'items' ? ['items.read', `${this.collection}.items.read`] : `${this.eventScope}.read`,
+				this.eventScope === 'items'
+					? ['items.read', `${this.collection}.items.read`]
+					: `${this.eventScope}.read`,
 				{
 					payload: filteredRecords,
 					query: updatedQuery,
@@ -917,7 +975,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	async updateByQuery(query: Query, data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]> {
 		const keys = await this.getKeysByQuery(query);
 
-		return keys.length ? await this.updateMany(keys, data, opts) : [];
+		return keys.length
+			? await this.updateMany(keys, data, opts)
+			: [];
 	}
 
 	/**
@@ -940,7 +1000,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			throw new InvalidPayloadError({ reason: 'Input should be an array of items' });
 		}
 
-		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
+		if (!opts.mutationTracker) {
+			opts.mutationTracker = this.createMutationTracker();
+		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
@@ -962,7 +1024,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 				for (const item of data) {
 					const primaryKey = item[primaryKeyField];
-					if (!primaryKey) throw new InvalidPayloadError({ reason: `Item in update misses primary key` });
+
+					if (!primaryKey) {
+						throw new InvalidPayloadError({ reason: `Item in update misses primary key` });
+					}
 
 					const combinedOpts: MutationOptions = {
 						autoPurgeCache: false,
@@ -976,12 +1041,14 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				if (userIntegrityCheckFlags) {
 					if (opts.onRequireUserIntegrityCheck) {
 						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-					} else {
+					}
+					else {
 						await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex });
 					}
 				}
 			});
-		} finally {
+		}
+		finally {
 			if (shouldClearCache(this.cache, opts, this.collection)) {
 				// Per-item hooks can rewrite scope fields inside each forked updateOne, so
 				// the raw `data` may not be what's stored. Re-snapshot the now-committed
@@ -1015,7 +1082,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		data: Partial<Item>,
 		opts: MutationOptions = {},
 	): Promise<(PrimaryKey | null)[]> {
-		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
+		if (!opts.mutationTracker) {
+			opts.mutationTracker = this.createMutationTracker();
+		}
 
 		if (!opts.bypassLimits) {
 			opts.mutationTracker.trackMutations(keys.length);
@@ -1046,20 +1115,20 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const payloadAfterHooks =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<Partial<AnyItem>, null>(
-						this.eventScope === 'items'
-							? ['items.update', `${this.collection}.items.update`]
-							: `${this.eventScope}.update`,
-						payload,
-						{
-							keys,
-							collection: this.collection,
-						},
-						{
-							database: this.knex,
-							schema: this.schema,
-							accountability: this.accountability,
-						},
-					)
+					this.eventScope === 'items'
+						? ['items.update', `${this.collection}.items.update`]
+						: `${this.eventScope}.update`,
+					payload,
+					{
+						keys,
+						collection: this.collection,
+					},
+					{
+						database: this.knex,
+						schema: this.schema,
+						accountability: this.accountability,
+					},
+				)
 				: payload;
 
 		if (payloadAfterHooks === null) {
@@ -1080,7 +1149,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const isEmptyAlterations = (value: unknown): boolean => {
 			// A bare `[]` is not empty here: for o2m it removes every existing child (see processO2M),
 			// so only the `{ create, update, delete }` object form can count as no change.
-			if (!isPlainObject(value)) return false;
+			if (!isPlainObject(value)) {
+				return false;
+			}
 
 			const alterations = value as Partial<Alterations>;
 
@@ -1089,15 +1160,23 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 				(key) => !ALTERATIONS_KEYS.includes(key as keyof Alterations),
 			);
 
-			if (isNotAlterationsShaped) return false;
+			if (isNotAlterationsShaped) {
+				return false;
+			}
 
 			// None of create / update / delete carries an item.
 			return ALTERATIONS_KEYS.every((operation) => !alterations[operation]?.length);
 		};
 
 		const changesNothing = (field: string): boolean => {
-			if (field === primaryKeyField) return true;
-			if (aliases.includes(field)) return isEmptyAlterations(payloadAfterHooks![field]);
+			if (field === primaryKeyField) {
+				return true;
+			}
+
+			if (aliases.includes(field)) {
+				return isEmptyAlterations(payloadAfterHooks![field]);
+			}
+
 			return false;
 		};
 
@@ -1131,18 +1210,18 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		const payloadWithPresets = this.accountability
 			? await processPayload(
-					{
-						accountability: this.accountability,
-						action: 'update',
-						collection: this.collection,
-						payload: payloadAfterHooks,
-						nested: this.nested,
-					},
-					{
-						knex: this.knex,
-						schema: this.schema,
-					},
-				)
+				{
+					accountability: this.accountability,
+					action: 'update',
+					collection: this.collection,
+					payload: payloadAfterHooks,
+					nested: this.nested,
+				},
+				{
+					knex: this.knex,
+					schema: this.schema,
+				},
+			)
 			: payloadAfterHooks;
 
 		if (opts.preMutationError) {
@@ -1176,8 +1255,10 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 			if (Object.keys(payloadWithTypeCasting).length > 0) {
 				try {
-					await trx(this.collection).update(payloadWithTypeCasting).whereIn(primaryKeyField, keys);
-				} catch (err: any) {
+					await trx(this.collection).update(payloadWithTypeCasting)
+						.whereIn(primaryKeyField, keys);
+				}
+				catch (err: any) {
 					throw await translateDatabaseError(err, data);
 				}
 			}
@@ -1206,7 +1287,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 			if (userIntegrityCheckFlags) {
 				if (opts?.onRequireUserIntegrityCheck) {
 					opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-				} else {
+				}
+				else {
 					// Having no onRequireUserIntegrityCheck callback indicates that
 					// this is the top level invocation of the nested updates, so perform the user integrity check
 					await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex: trx });
@@ -1253,7 +1335,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 								collection: this.collection,
 								item: keys[index],
 								data:
-									snapshots && Array.isArray(snapshots) ? JSON.stringify(snapshots[index]) : JSON.stringify(snapshots),
+									snapshots && Array.isArray(snapshots)
+										? JSON.stringify(snapshots[index])
+										: JSON.stringify(snapshots),
 								delta: await payloadService.prepareDelta(payloadWithTypeCasting),
 							})),
 						)
@@ -1353,7 +1437,8 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		if (exists) {
 			const { [primaryKeyField]: _, ...data } = payload;
 			return await this.updateOne(primaryKey as PrimaryKey, data as Partial<Item>, opts);
-		} else {
+		}
+		else {
 			return await this.createOne(payload, opts);
 		}
 	}
@@ -1364,7 +1449,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	 * Uses `this.upsertOne` under the hood.
 	 */
 	async upsertMany(payloads: Partial<Item>[], opts: MutationOptions = {}): Promise<PrimaryKey[]> {
-		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
+		if (!opts.mutationTracker) {
+			opts.mutationTracker = this.createMutationTracker();
+		}
 
 		const primaryKeys = await transaction(this.knex, async (knex) => {
 			const service = this.fork({ knex });
@@ -1401,7 +1488,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
-		return keys.length ? await this.deleteMany(keys, opts) : [];
+		return keys.length
+			? await this.deleteMany(keys, opts)
+			: [];
 	}
 
 	/**
@@ -1427,7 +1516,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 	async deleteMany(keys: PrimaryKey[], opts?: MutationOptions): Promise<PrimaryKey[]>;
 	async deleteMany(keys: PrimaryKey[], opts: MutationOptions = {}): Promise<(PrimaryKey | null)[]> {
-		if (!opts.mutationTracker) opts.mutationTracker = this.createMutationTracker();
+		if (!opts.mutationTracker) {
+			opts.mutationTracker = this.createMutationTracker();
+		}
 
 		if (!opts.bypassLimits) {
 			opts.mutationTracker.trackMutations(keys.length);
@@ -1441,19 +1532,19 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		const keysAfterHooks =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<PrimaryKey[], null>(
-						this.eventScope === 'items'
-							? ['items.delete', `${this.collection}.items.delete`]
-							: `${this.eventScope}.delete`,
-						keys,
-						{
-							collection: this.collection,
-						},
-						{
-							database: this.knex,
-							schema: this.schema,
-							accountability: this.accountability,
-						},
-					)
+					this.eventScope === 'items'
+						? ['items.delete', `${this.collection}.items.delete`]
+						: `${this.eventScope}.delete`,
+					keys,
+					{
+						collection: this.collection,
+					},
+					{
+						database: this.knex,
+						schema: this.schema,
+						accountability: this.accountability,
+					},
+				)
 				: keys;
 
 		if (keysAfterHooks === null) {
@@ -1494,7 +1585,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 
 		if (opts.emitEvents !== false) {
 			await emitter.emitFilter(
-				this.eventScope === 'items' ? ['items.delete', `${this.collection}.items.delete`] : `${this.eventScope}.delete`,
+				this.eventScope === 'items'
+					? ['items.delete', `${this.collection}.items.delete`]
+					: `${this.eventScope}.delete`,
 				keys,
 				{
 					collection: this.collection,
@@ -1508,12 +1601,14 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 		}
 
 		await transaction(this.knex, async (trx) => {
-			await trx(this.collection).whereIn(primaryKeyField, keys).delete();
+			await trx(this.collection).whereIn(primaryKeyField, keys)
+				.delete();
 
 			if (opts.userIntegrityCheckFlags) {
 				if (opts.onRequireUserIntegrityCheck) {
 					opts.onRequireUserIntegrityCheck(opts.userIntegrityCheckFlags);
-				} else {
+				}
+				else {
 					await validateUserCountIntegrity({ flags: opts.userIntegrityCheckFlags, knex: trx });
 				}
 			}
@@ -1595,7 +1690,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 					continue;
 				}
 
-				if (field.defaultValue !== null) defaults[name] = field.defaultValue;
+				if (field.defaultValue !== null) {
+					defaults[name] = field.defaultValue;
+				}
 			}
 
 			return withMeta(defaults as Partial<Item>, meta);
@@ -1612,7 +1709,9 @@ export class ItemsService<Item extends AnyItem = AnyItem, Collection extends str
 	async upsertSingleton(data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
-		const record = await this.knex.select(primaryKeyField).from(this.collection).limit(1).first();
+		const record = await this.knex.select(primaryKeyField).from(this.collection)
+			.limit(1)
+			.first();
 
 		if (record) {
 			return await this.updateOne(record[primaryKeyField], data, opts);

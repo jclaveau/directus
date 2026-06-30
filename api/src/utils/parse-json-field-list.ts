@@ -13,7 +13,8 @@ export function parseJsonFieldList(raw: unknown): string[] {
 	if (typeof raw === 'string' && raw.length > 0) {
 		try {
 			parsed = parseJSON(raw);
-		} catch {
+		}
+		catch {
 			return [];
 		}
 	}

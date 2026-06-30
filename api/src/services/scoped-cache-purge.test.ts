@@ -1,7 +1,16 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	type MockedFunction,
+} from 'vitest';
 
 // Force auto-purge on and route shouldClearCache() to a real (truthy) cache.
 const env: Record<string, any> = {
@@ -111,7 +120,12 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateMany([1], { student: 'B' });
 
-		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
+		expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+		);
 	});
 
 	it('deleteMany purges the scope slices of the rows it deleted (captured before delete)', async () => {
@@ -143,7 +157,12 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
-		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
+		expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+		);
 	});
 
 	it('updateBatch purges old ∪ new — re-snapshots the committed rows for the new values', async () => {
@@ -166,7 +185,12 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		await service().updateBatch([{ id: 1, name: 'renamed' }]);
 
-		expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
+		expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+		);
 	});
 
 	// Purge tags come from the value actually stored, not the raw input: a
@@ -187,7 +211,8 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 				[{ collection: 'test', field: 'student', value: 'B' }],
 				expect.anything(),
 			);
-		} finally {
+		}
+		finally {
 			emitter.offFilter('test.items.create', rewrite);
 		}
 	});
@@ -199,8 +224,14 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 		try {
 			await service().createMany([{ name: 'x', student: 'A' }]);
 
-			expect(purgeCache).toHaveBeenCalledWith(expect.anything(), 'test', null, expect.anything());
-		} finally {
+			expect(purgeCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+		);
+		}
+		finally {
 			emitter.offFilter('test.items.create', takeOver);
 		}
 	});
@@ -226,7 +257,8 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 				],
 				expect.anything(),
 			);
-		} finally {
+		}
+		finally {
 			emitter.offFilter('test.items.update', rewrite);
 		}
 	});
@@ -250,7 +282,9 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 
 		const result = await service().readByQuery({ filter: { student: { _eq: 'A' } } });
 
-		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test', field: 'student', value: 'A' }]);
+		expect(readMeta(result)?.scopedCacheTags).toEqual([
+			{ collection: 'test', field: 'student', value: 'A' },
+		]);
 	});
 
 	// A `cache.scope` listener can derive data-level tags: it receives the
@@ -291,7 +325,8 @@ describe('scoped cache purge (ItemsService mutation → purgeCache scoped cache 
 				{ collection: 'test', field: 'student', value: 'A' },
 				{ collection: 'test', field: 'student', value: 'B' },
 			]);
-		} finally {
+		}
+		finally {
 			emitter.offFilter('cache.scope', listener);
 		}
 	});

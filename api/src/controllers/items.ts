@@ -18,10 +18,11 @@ router.post(
 	'/:collection',
 	collectionExists,
 	asyncHandler(async (req, res, next) => {
-		if (isSystemCollection(req.params['collection']!))
+		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
 			});
+		}
 
 		if (req.singleton) {
 			throw new RouteNotFoundError({ path: req.path });
@@ -38,7 +39,8 @@ router.post(
 			const keys = await service.createMany(req.body, { allowFilterCancel: true });
 			// Cancelled creates come back as null; drop them before reading the created items.
 			savedKeys.push(...keys.filter((key): key is PrimaryKey => key !== null));
-		} else {
+		}
+		else {
 			const key = await service.createOne(req.body, { allowFilterCancel: true });
 
 			if (key !== null) {
@@ -51,14 +53,17 @@ router.post(
 			if (Array.isArray(req.body)) {
 				const result = await service.readMany(savedKeys, req.sanitizedQuery);
 				res.locals['payload'] = { data: result || null };
-			} else if (savedKeys.length > 0) {
+			}
+			else if (savedKeys.length > 0) {
 				const result = await service.readOne(savedKeys[0]!, req.sanitizedQuery);
 				res.locals['payload'] = { data: result || null };
-			} else {
+			}
+			else {
 				// The single create was cancelled by a filter hook: no item to return.
 				res.locals['payload'] = { data: null };
 			}
-		} catch (error: any) {
+		}
+		catch (error: any) {
 			if (isDirectusError(error, ErrorCode.Forbidden)) {
 				return next();
 			}
@@ -72,10 +77,11 @@ router.post(
 );
 
 const readHandler = asyncHandler(async (req, res, next) => {
-	if (isSystemCollection(req.params['collection']!))
+	if (isSystemCollection(req.params['collection']!)) {
 		throw new ForbiddenError({
 			reason: 'Forbidden access to directus_* collections',
 		});
+	}
 
 	const service = new ItemsService(req.collection, {
 		accountability: req.accountability,
@@ -91,9 +97,11 @@ const readHandler = asyncHandler(async (req, res, next) => {
 
 	if (req.singleton) {
 		result = await service.readSingleton(req.sanitizedQuery);
-	} else if (req.body.keys) {
+	}
+	else if (req.body.keys) {
 		result = await service.readMany(req.body.keys, req.sanitizedQuery);
-	} else {
+	}
+	else {
 		result = await service.readByQuery(req.sanitizedQuery);
 	}
 
@@ -116,10 +124,11 @@ router.get(
 	'/:collection/:pk',
 	collectionExists,
 	asyncHandler(async (req, res, next) => {
-		if (isSystemCollection(req.params['collection']!))
+		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
 			});
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
@@ -143,10 +152,11 @@ router.patch(
 	collectionExists,
 	validateBatch('update'),
 	asyncHandler(async (req, res, next) => {
-		if (isSystemCollection(req.params['collection']!))
+		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
 			});
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
@@ -165,9 +175,11 @@ router.patch(
 
 		if (Array.isArray(req.body)) {
 			keys = await service.updateBatch(req.body, { allowFilterCancel: true });
-		} else if (req.body.keys) {
+		}
+		else if (req.body.keys) {
 			keys = await service.updateMany(req.body.keys, req.body.data, { allowFilterCancel: true });
-		} else {
+		}
+		else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
 			keys = await service.updateByQuery(sanitizedQuery, req.body.data, { allowFilterCancel: true });
 		}
@@ -180,7 +192,8 @@ router.patch(
 			);
 
 			res.locals['payload'] = { data: result };
-		} catch (error: any) {
+		}
+		catch (error: any) {
 			if (isDirectusError(error, ErrorCode.Forbidden)) {
 				return next();
 			}
@@ -197,10 +210,11 @@ router.patch(
 	'/:collection/:pk',
 	collectionExists,
 	asyncHandler(async (req, res, next) => {
-		if (isSystemCollection(req.params['collection']!))
+		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
 			});
+		}
 
 		if (req.singleton) {
 			throw new RouteNotFoundError({ path: req.path });
@@ -216,7 +230,8 @@ router.patch(
 		try {
 			const result = await service.readOne(updatedPrimaryKey, req.sanitizedQuery);
 			res.locals['payload'] = { data: result || null };
-		} catch (error: any) {
+		}
+		catch (error: any) {
 			if (isDirectusError(error, ErrorCode.Forbidden)) {
 				return next();
 			}
@@ -234,10 +249,11 @@ router.delete(
 	collectionExists,
 	validateBatch('delete'),
 	asyncHandler(async (req, _res, next) => {
-		if (isSystemCollection(req.params['collection']!))
+		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
 			});
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
@@ -246,9 +262,11 @@ router.delete(
 
 		if (Array.isArray(req.body)) {
 			await service.deleteMany(req.body, { allowFilterCancel: true });
-		} else if (req.body.keys) {
+		}
+		else if (req.body.keys) {
 			await service.deleteMany(req.body.keys, { allowFilterCancel: true });
-		} else {
+		}
+		else {
 			const sanitizedQuery = await sanitizeQuery(req.body.query, req.schema, req.accountability);
 			await service.deleteByQuery(sanitizedQuery, { allowFilterCancel: true });
 		}
@@ -262,10 +280,11 @@ router.delete(
 	'/:collection/:pk',
 	collectionExists,
 	asyncHandler(async (req, _res, next) => {
-		if (isSystemCollection(req.params['collection']!))
+		if (isSystemCollection(req.params['collection']!)) {
 			throw new ForbiddenError({
 				reason: 'Forbidden access to directus_* collections',
 			});
+		}
 
 		const service = new ItemsService(req.collection, {
 			accountability: req.accountability,
