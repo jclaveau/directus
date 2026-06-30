@@ -1,7 +1,9 @@
+import { GraphQLError, execute } from 'graphql';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
+import { GraphQLExecutionError } from './errors/index.js';
 
 // Keep graphql's rule set / error classes real; stub the heavy validate + execute so we can drive
 // GraphQLService.execute() without a generated schema.
@@ -84,5 +86,54 @@ describe('GraphQLService cache tags', () => {
 		expect(
 			(readMeta(result)?.scopedCacheTags ?? []).map((tag) => tag.collection).sort(),
 		).toEqual(['articles', 'users']);
+	});
+
+	test('execute() wraps a thrown execute() in GraphQLExecutionError', async () => {
+		const gql = makeService({});
+		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
+
+		vi.mocked(execute).mockRejectedValueOnce(new Error('boom'));
+
+		await expect(
+			gql.execute({
+				document: {} as any,
+				variables: {},
+				operationName: undefined,
+				contextValue: {},
+			}),
+		).rejects.toBeInstanceOf(GraphQLExecutionError);
+	});
+
+	test('execute() carries result extensions onto the formatted result', async () => {
+		const gql = makeService({});
+		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
+
+		vi.mocked(execute).mockResolvedValueOnce({
+			data: { ok: true },
+			extensions: { foo: 1 },
+		});
+
+		const result = await gql.execute({
+			document: {} as any,
+			variables: {},
+			operationName: undefined,
+			contextValue: {},
+		});
+
+		expect(result.extensions).toEqual({ foo: 1 });
+	});
+
+	test('upsertSingleton() rethrows a service error via formatError', async () => {
+		const gql = makeService({});
+
+		vi.mocked(getService).mockReturnValueOnce({
+			upsertSingleton: async () => {
+				throw new Error('nope');
+			},
+		} as any);
+
+		await expect(gql.upsertSingleton('articles', {}, {})).rejects.toBeInstanceOf(
+			GraphQLError,
+		);
 	});
 });
