@@ -10,6 +10,7 @@
 //   baseRef defaults to $LINEWIDTH_BASE; diffs merge-base(baseRef, HEAD) vs the working tree.
 
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { relative } from 'node:path';
 
 const base = process.argv[2] || process.env['LINEWIDTH_BASE'];
@@ -55,6 +56,18 @@ for (const raw of diff.split('\n')) {
 		addedByFile.get(file)?.add(newLine);
 		newLine++;
 	}
+}
+
+// `git diff` omits UNTRACKED new files, so a brand-new file's lines slip the gate locally and only
+// surface in CI once committed. Treat every line of an untracked lintable file as added.
+const untracked = git(['ls-files', '--others', '--exclude-standard', '--', '*.ts', '*.tsx', '*.vue', '*.js', '*.mjs'])
+	.split('\n')
+	.filter(Boolean);
+
+for (const path of untracked) {
+	if (path.startsWith('tmp/')) continue; // local scratch (worktrees, repros), never part of the PR
+	const lineCount = readFileSync(path, 'utf8').split('\n').length;
+	addedByFile.set(path, new Set(Array.from({ length: lineCount }, (_, index) => index + 1)));
 }
 
 // Lint/style tooling (eslint config, custom rules, this script's own dir) is exempt from the
