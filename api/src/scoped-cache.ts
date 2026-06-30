@@ -79,7 +79,7 @@ export async function tagScopedCacheKeys(
  * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
  * resolved" → fall back to a full flush rather than risk leaving a stale slice behind.
  */
-export async function purgeCache(
+export async function purgeScopedCache(
 	cache: Keyv,
 	collection: string,
 	scopedCacheTags: ScopedCacheTag[] | null = [],

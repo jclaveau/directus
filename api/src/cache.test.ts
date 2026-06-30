@@ -45,7 +45,7 @@ vi.mock('./redis/index.js', () => {
 
 const { getRedisConnection } = await import('./cache.js');
 
-const { purgeCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
+const { purgeScopedCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
 	await import('./scoped-cache.js');
 
 function setEnv(values: Record<string, unknown>) {
@@ -218,7 +218,7 @@ describe('scoped cache purging', () => {
 		});
 	});
 
-	describe('purgeCache', () => {
+	describe('purgeScopedCache', () => {
 		test('always purges the collection-level tag (global readers) alongside slices', async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
 				return tagKey === 'system-cache:tag:slots'
@@ -228,7 +228,7 @@ describe('scoped cache purging', () => {
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [
+			await purgeScopedCache(cache, 'slots', [
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
@@ -250,7 +250,7 @@ describe('scoped cache purging', () => {
 			redis.smembers.mockResolvedValue([]);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [
+			await purgeScopedCache(cache, 'slots', [
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
@@ -262,7 +262,7 @@ describe('scoped cache purging', () => {
 			redis.smembers.mockResolvedValue(['key-a', 'key-a__expires_at', 'key-b']);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'articles');
+			await purgeScopedCache(cache, 'articles');
 
 			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:articles');
 			expect(redis.smembers).toHaveBeenCalledOnce();
@@ -274,7 +274,7 @@ describe('scoped cache purging', () => {
 		test('null scopedCacheTags falls back to a full flush (unresolvable mutation)', async () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'articles', null);
+			await purgeScopedCache(cache, 'articles', null);
 
 			expect(cache.clear).toHaveBeenCalledTimes(1);
 			expect(cache.delete).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ describe('scoped cache purging', () => {
 			env['CACHE_AUTO_PURGE_MODE'] = 'full';
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'articles', [
+			await purgeScopedCache(cache, 'articles', [
 				{ collection: 'articles', field: 'student', value: 'A' },
 			]);
 
@@ -301,7 +301,7 @@ describe('scoped cache purging', () => {
 			redis.smembers.mockResolvedValue(['read-key']);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [
+			await purgeScopedCache(cache, 'slots', [
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
 
@@ -322,7 +322,7 @@ describe('scoped cache purging', () => {
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', [
+			await purgeScopedCache(cache, 'slots', [
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
@@ -340,7 +340,7 @@ describe('scoped cache purging', () => {
 			redis.smembers.mockResolvedValue(['owned-key']);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
-			await purgeCache(cache, 'slots', []);
+			await purgeScopedCache(cache, 'slots', []);
 
 			expect(emitFilter).toHaveBeenCalledWith(
 				'cache.purge',

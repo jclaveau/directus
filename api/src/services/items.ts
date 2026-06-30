@@ -26,7 +26,7 @@ import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lo
 import { getCache } from '../cache.js';
 import {
 	pinnedScopeTagsFromFilter,
-	purgeCache,
+	purgeScopedCache,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
 } from '../scoped-cache.js';
@@ -141,7 +141,12 @@ implements AbstractService<Item> {
 	}
 
 	private async purgeScopedCache(tags: ScopedCacheTag[] | null): Promise<void> {
-		await purgeCache(this.cache, this.collection, tags, this.scopedCachePurgeContext());
+		await purgeScopedCache(
+			this.cache,
+			this.collection,
+			tags,
+			this.scopedCachePurgeContext(),
+		);
 	}
 
 	private get collectionScopedCacheFields(): string[] {
@@ -647,7 +652,7 @@ implements AbstractService<Item> {
 			//   - a create filter hook can rewrite a scope field, so `data`'s value may
 			//     not be what's stored;
 			//   - a payload that omits a scoped cache field has an unknown (default) value,
-			//     so `scopedCacheTagsFromRows` returns null and purgeCache full-flushes;
+			//     so `scopedCacheTagsFromRows` returns null and purgeScopedCache full-flushes;
 			//   - a row a hook *took over* (returned a primary key, inserted itself) has an
 			//     unknowable scope value, so its presence forces a full flush too.
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
@@ -1357,7 +1362,7 @@ implements AbstractService<Item> {
 			// can't be captured cheaply for the update subset. Fall back to a full flush
 			// (`null`) rather than risk leaving a moved-value slice stale.
 			// TODO(scoped-cache): resolve per-row once upsert churn is measured.
-			await purgeCache(this.cache, this.collection, null, this.scopedCachePurgeContext());
+			await this.purgeScopedCache(null);
 		}
 
 		return primaryKeys;

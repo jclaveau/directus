@@ -11,7 +11,7 @@ vi.mock('../cache.js', () => ({
 
 vi.mock('../scoped-cache.js', () => {
 	return {
-		purgeCache: vi.fn(),
+		purgeScopedCache: vi.fn(),
 		scopedCachePurgeEnabled: vi.fn(() => true),
 	};
 });
