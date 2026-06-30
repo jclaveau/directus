@@ -170,7 +170,7 @@ export function scopedCacheTagsFromRows(
  * caller falls back to the bare collection tag so every write to the collection
  * invalidates the read.
  */
-export function pinnedScopeTagsFromFilter(
+export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
 	fields: string[],
 	filter: Filter | null | undefined,
