@@ -1,10 +1,10 @@
 coverage:
   status:
-    # Aggregate (non-flag) diff coverage is now BLOCKING — the dialect/unit tests the ramp
-    # waited for have landed (mariadb-json, drop-index, pino censor, rolldown build, …).
+    # Aggregate (non-flag) diff coverage is BLOCKING at a fixed 90% bar — new code must be
+    # ≥90% covered (was `auto` ≈ project%, which let weakly-covered diffs through).
     patch:
       default:
-        target: auto
+        target: 90%
         informational: false
     # Overall coverage stays report-only: on a stacked feature line it mostly reflects
     # base drift, not the PR's own diff (see the per-PR coverage diagnoses).
