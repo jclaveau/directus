@@ -37,6 +37,12 @@ vi.mock('../../src/database/index', () => {
 vi.mock('../cache.js', () => {
 	return {
 		getCache: () => ({ cache: { clear: vi.fn(), delete: vi.fn() } }),
+	};
+});
+
+vi.mock('../scoped-cache.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache.js')>()),
 		purgeCache: vi.fn(),
 		scopedCachePurgeEnabled: () => true,
 	};

@@ -7,13 +7,19 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 // tag-accumulation branch. runAst is the only DB-touching call in the read path; stub it out.
 vi.mock('../cache.js', () => ({
 	getCache: () => ({ cache: null }),
-	purgeCache: vi.fn(),
-	scopedCachePurgeEnabled: vi.fn(() => true),
 }));
+
+vi.mock('../scoped-cache.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache.js')>()),
+		purgeCache: vi.fn(),
+		scopedCachePurgeEnabled: vi.fn(() => true),
+	};
+});
 
 vi.mock('../database/run-ast/run-ast.js', () => ({ runAst: vi.fn(async () => []) }));
 
-import { scopedCachePurgeEnabled } from '../cache.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';

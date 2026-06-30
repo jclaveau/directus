@@ -7,9 +7,14 @@ import { withMeta } from '../utils/read-meta.js';
 vi.mock('../cache.js', () => ({
 	getCache: () => ({ cache: null }),
 	clearSystemCache: vi.fn(),
-	purgeCache: vi.fn(),
-	scopedCachePurgeEnabled: vi.fn(() => true),
 }));
+
+vi.mock('../scoped-cache.js', () => {
+	return {
+		purgeCache: vi.fn(),
+		scopedCachePurgeEnabled: vi.fn(() => true),
+	};
+});
 
 // withAppMinimalPermissions returns a FRESH array — so without an explicit re-attach the rider would
 // be lost. Returning a new array here is what makes this test meaningful.

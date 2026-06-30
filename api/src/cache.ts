@@ -1,11 +1,10 @@
 import { useEnv } from '@directus/env';
-import type { ScopedCacheTag, EventContext, SchemaOverview } from '@directus/types';
+import type { SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
-import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
-import { redisConfigAvailable, useRedis } from './redis/index.js';
+import { redisConfigAvailable } from './redis/index.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -163,112 +162,6 @@ export async function getCacheValue(cache: Keyv, key: string): Promise<any> {
 
 	const decompressed = await decompress(value);
 	return decompressed;
-}
-
-/**
- * Whether scoped (tag-based) cache purging is active. Requires the opt-in mode AND a Redis cache
- * store, since the tag→keys index lives in Redis sets. Any other config falls back to full flush.
- */
-export function scopedCachePurgeEnabled(): boolean {
-	return env['CACHE_AUTO_PURGE_MODE'] === 'scoped' && env['CACHE_STORE'] === 'redis' && redisConfigAvailable();
-}
-
-// `String(value)` collapses types (number 7 vs string "7", null vs "null"). Safe
-// because a given scope column has a stable type — tag and purge always resolve the
-// value from the same column.
-function serializeScopedCacheTagValue(value: unknown): string {
-	return value === null || value === undefined
-		? 'null'
-		: String(value);
-}
-
-function scopedCacheTagKey(tag: ScopedCacheTag): string {
-	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
-	return tag.field === undefined
-		? base
-		: `${base}:${tag.field}=${serializeScopedCacheTagValue(tag.value)}`;
-}
-
-/**
- * Index a freshly-cached response key under every tag its data came from, so a later
- * mutation can drop just the matching entries instead of the whole namespace. Both the
- * payload key and its `__expires_at` sibling are tagged. Each tag set self-expires at
- * twice the cache TTL as a safety net against members orphaned by a crash between write
- * and purge.
- */
-export async function tagScopedCacheKeys(
-	key: string,
-	tags: Iterable<ScopedCacheTag>,
-): Promise<void> {
-	if (!scopedCachePurgeEnabled()) {
-		return;
-	}
-
-	const tagKeys = [...new Set([...tags].map(scopedCacheTagKey))];
-
-	if (tagKeys.length === 0) {
-		return;
-	}
-
-	const redis = useRedis();
-	const ttlSeconds = Math.ceil(getMilliseconds(env['CACHE_TTL'], 0) / 1000) * 2;
-	const pipeline = redis.pipeline();
-
-	for (const tagKey of tagKeys) {
-		pipeline.sadd(tagKey, key, `${key}__expires_at`);
-
-		if (ttlSeconds > 0) {
-			pipeline.expire(tagKey, ttlSeconds);
-		}
-	}
-
-	await pipeline.exec();
-}
-
-/**
- * Purge cached responses affected by a mutation on `collection`. Outside scoped mode
- * the whole data cache is flushed (legacy `cache.clear()` behavior). In scoped mode
- * the bare collection tag (global reads) is always purged alongside the resolved
- * `scopedCacheTags` (the owner/partition slices the mutation touched), leaving every
- * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
- * resolved" → fall back to a full flush rather than risk leaving a stale slice behind.
- */
-export async function purgeCache(
-	cache: Keyv,
-	collection: string,
-	scopedCacheTags: ScopedCacheTag[] | null = [],
-	context: EventContext | null = null,
-): Promise<void> {
-	if (!scopedCachePurgeEnabled()) {
-		await cache.clear();
-		return;
-	}
-
-	if (scopedCacheTags === null) {
-		await cache.clear();
-		return;
-	}
-
-	const tags = (await emitter.emitFilter(
-		'cache.purge',
-		[{ collection }, ...scopedCacheTags],
-		{ collection },
-		context,
-	)) as ScopedCacheTag[];
-
-	const redis = useRedis();
-	const tagKeys = [...new Set(tags.map(scopedCacheTagKey))];
-	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
-	const members = [...new Set(memberLists.flat())];
-
-	if (members.length > 0) {
-		await Promise.all(members.map((member) => cache.delete(member)));
-	}
-
-	// A `cache.purge` filter could empty the tag set; `redis.del()` with no keys throws.
-	if (tagKeys.length > 0) {
-		await redis.del(...tagKeys);
-	}
 }
 
 function getKeyvInstance(store: Store, ttl: number | undefined, namespaceSuffix?: string): Keyv {
