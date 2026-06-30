@@ -1,17 +1,16 @@
 name: Check
 
-# Scalabus: this workflow is inherited by every v11.10.1-feat/* branch (they root on
-# v11.10.1-prepare). GHA loads a pull_request workflow from the PR's base branch, so
-# retargeting the trigger here is what makes the coverage check fire on feature PRs.
+# Scalabus: run the full gate on EVERY commit (any branch) plus every PR — not just PRs into
+# the release branches. hhh-dev became the work branch after the old base-branch filter was set,
+# so that filter silently skipped it (no unit tests, no coverage upload codecov needs). `push:`
+# (unfiltered) covers every commit; GHA loads a push workflow from the pushed branch itself, so it
+# fires regardless of base. `pull_request:` keeps the merge-ref context + the diff-scoped style gate
+# (note: pull_request workflows load from the PR's BASE branch, so this trigger only updates once
+# the change lands on the base).
 on:
   pull_request:
-    branches:
-      - v11.10.1-prepare
-      - 'v11.10.1-feat/**'
 
   push:
-    branches:
-      - v11.10.1-prepare
 
 permissions:
   contents: read
