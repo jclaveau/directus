@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'vitest';
-import { pinnedScopeTagsFromFilter, scopedCacheTagsFromRows } from '../scoped-cache.js';
+import {
+	pinnedScopedCacheTagsFromFilter,
+	scopedCacheTagsFromRows,
+} from '../scoped-cache.js';
 
 // Pure scope-tag derivation behind update-payload / create tagging
 // (requireAll toggles fatal-on-missing).
@@ -62,10 +65,10 @@ describe('scopedCacheTagsFromRows', () => {
 // Read-side scoping: only a filter that BOUNDS the read to a scope value may scope it
 // (else an insert of a new value would silently miss the cached read). An empty result
 // means "not bounded → bare tag".
-describe('pinnedScopeTagsFromFilter', () => {
+describe('pinnedScopedCacheTagsFromFilter', () => {
 	test('_eq on a scope field pins that value', () => {
 		expect(
-			pinnedScopeTagsFromFilter('slots', ['student'], { student: { _eq: 'A' } }),
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _eq: 'A' } }),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
@@ -73,7 +76,9 @@ describe('pinnedScopeTagsFromFilter', () => {
 
 	test('_in on a scope field pins every listed value (even those with no rows yet)', () => {
 		expect(
-			pinnedScopeTagsFromFilter('slots', ['student'], { student: { _in: ['A', 'B'] } }),
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], {
+				student: { _in: ['A', 'B'] },
+			}),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
@@ -83,7 +88,9 @@ describe('pinnedScopeTagsFromFilter', () => {
 	test('constraints reached through _and pin', () => {
 		const filter = { _and: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
 
-		expect(pinnedScopeTagsFromFilter('slots', ['student', 'course'], filter)).toEqual([
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'course', value: 'math' },
 		]);
@@ -91,23 +98,23 @@ describe('pinnedScopeTagsFromFilter', () => {
 
 	test('an _or branch does not bound the read, so nothing under it pins', () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
-		expect(pinnedScopeTagsFromFilter('slots', ['student'], filter)).toEqual([]);
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([]);
 	});
 
 	test('a non-equality operator (_gt) does not bound the read', () => {
 		expect(
-			pinnedScopeTagsFromFilter('slots', ['student'], { student: { _gt: 'A' } }),
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _gt: 'A' } }),
 		).toEqual([]);
 	});
 
 	test('a filter on a non-scope field yields no pin (read falls back to the bare collection tag)', () => {
 		expect(
-			pinnedScopeTagsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
 		).toEqual([]);
 	});
 
 	test('empty / null filter yields no pin', () => {
-		expect(pinnedScopeTagsFromFilter('slots', ['student'], null)).toEqual([]);
-		expect(pinnedScopeTagsFromFilter('slots', ['student'], {})).toEqual([]);
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
 	});
 });

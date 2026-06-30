@@ -25,7 +25,7 @@ import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
 import {
-	pinnedScopeTagsFromFilter,
+	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
@@ -749,7 +749,7 @@ implements AbstractService<Item> {
 				: records;
 
 		// Scope this read for cache purging. The root collection gets value slices only
-		// when the query filter *bounds* it to those values (`pinnedScopeTagsFromFilter`),
+		// when the query filter *bounds* it to those values (`pinnedScopedCacheTagsFromFilter`),
 		// so one owner's/partition's later write drops only their entries. An unbounded
 		// root (no scope-field filter — e.g. an admin list) and every other touched
 		// collection fall back to a bare collection tag, so any write to them invalidates
@@ -764,7 +764,7 @@ implements AbstractService<Item> {
 		if (scopedCachePurgeEnabled()) {
 			const scopedCacheFields = this.collectionScopedCacheFields;
 
-			const rootScopedCacheTags = pinnedScopeTagsFromFilter(
+			const rootScopedCacheTags = pinnedScopedCacheTagsFromFilter(
 				this.collection,
 				scopedCacheFields,
 				updatedQuery.filter,
