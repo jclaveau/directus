@@ -10,7 +10,12 @@ import { GraphQLExecutionError } from './errors/index.js';
 // GraphQLService.execute() without a generated schema.
 vi.mock('graphql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('graphql')>();
-	return { ...actual, validate: vi.fn(() => []), execute: vi.fn(async () => ({ data: { ok: true } })) };
+
+	return {
+		...actual,
+		validate: vi.fn(() => []),
+		execute: vi.fn(async () => ({ data: { ok: true } })),
+	};
 });
 
 vi.mock('../../utils/get-service.js', () => ({ getService: vi.fn() }));
@@ -23,17 +28,27 @@ import { GraphQLService } from './index.js';
 
 const db = knex({ client: MockClient });
 
-const makeService = (schema: object) =>
-	new GraphQLService({ knex: db, schema: schema as any, accountability: null, scope: 'items' });
+const makeService = (schema: object) => {
+	return new GraphQLService({
+		knex: db,
+		schema: schema as any,
+		accountability: null,
+		scope: 'items',
+	});
+};
 
-describe('GraphQLService cache tags', () => {
+describe('GraphQLService scoped cache tags', () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	test(oneLine`
 		read() unions each child read’s tags into the request-level aggregate
 	`, async () => {
 		const schema = {
-			collections: { articles: { singleton: false }, users: { singleton: false }, files: { singleton: false } },
+			collections: {
+				articles: { singleton: false },
+				users: { singleton: false },
+				files: { singleton: false },
+			},
 		};
 
 		const gql = makeService(schema);
