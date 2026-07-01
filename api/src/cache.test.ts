@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import type { ScopedCacheTag } from '@directus/types';
 import type Keyv from 'keyv';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -63,12 +64,16 @@ afterEach(() => {
 describe('getRedisConnection', () => {
 	beforeEach(() => setEnv({}));
 
-	test('passes a REDIS connection URL through unchanged (@keyv/redis v5 accepts URLs)', () => {
+	test(oneLine`
+		passes a REDIS connection URL through unchanged (@keyv/redis v5 accepts URLs)
+	`, () => {
 		setEnv({ REDIS: 'redis://localhost:6379/2' });
 		expect(getRedisConnection()).toBe('redis://localhost:6379/2');
 	});
 
-	test('translates ioredis-shaped REDIS_HOST/REDIS_PORT to node-redis socket options', () => {
+	test(oneLine`
+		translates ioredis-shaped REDIS_HOST/REDIS_PORT to node-redis socket options
+	`, () => {
 		setEnv({ REDIS_HOST: 'localhost', REDIS_PORT: '6108' });
 		expect(getRedisConnection()).toEqual({ socket: { host: 'localhost', port: 6108 } });
 	});
@@ -121,7 +126,9 @@ describe('scoped cache purging', () => {
 	});
 
 	describe('tagScopedCacheKeys', () => {
-		test('indexes the key + expires sibling under every collection-level tag, with a TTL', async () => {
+		test(oneLine`
+			indexes the key + expires sibling under every collection-level tag, with a TTL
+		`, async () => {
 			await tagScopedCacheKeys('resp-key', [
 				{ collection: 'articles' },
 				{ collection: 'directus_users' },
@@ -179,7 +186,9 @@ describe('scoped cache purging', () => {
 			);
 		});
 
-		test('numeric and string scope values collapse to one tag key (stable column type)', async () => {
+		test(oneLine`
+			numeric and string scope values collapse to one tag key (stable column type)
+		`, async () => {
 			// A read pinned off a REST `_eq=7` carries the value as the string '7';
 			// the row it came from holds the numeric 7. Both must land on the SAME
 			// tag set or the purge would miss the read.
@@ -219,7 +228,9 @@ describe('scoped cache purging', () => {
 	});
 
 	describe('purgeScopedCache', () => {
-		test('always purges the collection-level tag (global readers) alongside slices', async () => {
+		test(oneLine`
+			always purges the collection-level tag (global readers) alongside slices
+		`, async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
 				return tagKey === 'system-cache:tag:slots'
 					? ['global-key']
@@ -246,7 +257,9 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
-		test('spares other slices — student=B is never touched when purging student=A', async () => {
+		test(oneLine`
+			spares other slices — student=B is never touched when purging student=A
+		`, async () => {
 			redis.smembers.mockResolvedValue([]);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
@@ -271,7 +284,9 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
-		test('null scopedCacheTags falls back to a full flush (unresolvable mutation)', async () => {
+		test(oneLine`
+			null scopedCacheTags falls back to a full flush (unresolvable mutation)
+		`, async () => {
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', null);
@@ -294,7 +309,9 @@ describe('scoped cache purging', () => {
 			expect(redis.smembers).not.toHaveBeenCalled();
 		});
 
-		test('a numeric mutation value resolves the same slice a string-pinned read tagged', async () => {
+		test(oneLine`
+			a numeric mutation value resolves the same slice a string-pinned read tagged
+		`, async () => {
 			// Read side tagged `student=7` off a REST string; the mutation resolves the
 			// value as numeric 7 from the row. The purge must hit the string-keyed slice,
 			// not a separate `student=7` (number).
@@ -314,7 +331,9 @@ describe('scoped cache purging', () => {
 			);
 		});
 
-		test('a cache.purge filter that empties the tag set deletes nothing and never calls redis.del', async () => {
+		test(oneLine`
+			a cache.purge filter that empties the tag set deletes nothing and never calls redis.del
+		`, async () => {
 			// `redis.del()` with no keys throws; an extension is free to drop every
 			// tag, so the empty set must be a no-op rather than a crash (and must not
 			// degrade into a full flush).
@@ -332,7 +351,9 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
-		test('cache.purge filter augments the purge set (extension-resolved tags get dropped)', async () => {
+		test(oneLine`
+			cache.purge filter augments the purge set (extension-resolved tags get dropped)
+		`, async () => {
 			emitFilter.mockImplementation(async (_event: string, tags: ScopedCacheTag[]) => {
 				return [...tags, { collection: 'slots', field: 'owner', value: 'B' }];
 			});

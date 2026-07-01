@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import config, { getUrl, paths, type Env } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -407,7 +408,9 @@ describe('App Caching Tests', () => {
 		});
 	});
 
-	describe('Scoped purge invalidates a read joining a related (m2o) collection when that related row is mutated', () => {
+	describe(oneLine`
+		Scoped purge invalidates a read joining a related (m2o) collection when that related row is mutated
+	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -467,7 +470,9 @@ describe('App Caching Tests', () => {
 			read: `/items/${collectionFirst}?fields=*,blocks.item:${collectionBlock}.*`,
 			target: collectionBlock,
 		},
-	])('Scoped purge invalidates a $relation join read when its target collection is mutated', ({ read, target }) => {
+	])(oneLine`
+		Scoped purge invalidates a $relation join read when its target collection is mutated
+	`, ({ read, target }) => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -499,7 +504,9 @@ describe('App Caching Tests', () => {
 		});
 	});
 
-	describe('Scoped purge invalidates a read filtered by a relational path when that related collection is mutated', () => {
+	describe(oneLine`
+		Scoped purge invalidates a read filtered by a relational path when that related collection is mutated
+	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
