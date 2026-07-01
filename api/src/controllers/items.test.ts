@@ -94,7 +94,7 @@ function makeReq(overrides: any = {}) {
 	};
 }
 
-describe('items controller coverage', () => {
+describe('items controller', () => {
 	beforeEach(() => vi.clearAllMocks());
 
 	describe('POST /:collection', () => {

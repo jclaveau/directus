@@ -13,7 +13,7 @@ import { ItemsService } from './items.js';
 
 // Mirrors scoped-cache-purge.test.ts: force auto-purge on so shouldClearCache() routes to a
 // truthy cache, mock the database client to postgres, and stub the scoped-cache module so the
-// real redis/bus never loads. These stubs let the coverage describes exercise pre-existing
+// real redis/bus never loads. These stubs let the system/uuid/singleton describes exercise pre-existing
 // ItemsService branches (system-collection event names, uuid PKs, revisions, deleteByQuery,
 // singletons) without a full system schema, and are inert for the Integration Tests.
 // Hoisted so the hoisted `@directus/env` factory (and any eagerly-loaded module that calls
@@ -676,10 +676,8 @@ describe('Integration Tests', () => {
 	});
 });
 
-describe(oneLine`
-	ItemsService coverage — system collections, uuid PKs, revisions, singletons
-`, () => {
-	const coverageSchema = new SchemaBuilder()
+describe('ItemsService — system collections, uuid PKs, revisions, singletons', () => {
+	const shapesSchema = new SchemaBuilder()
 		.collection('test', (c) => {
 			c.field('id').id();
 			c.field('name').string();
@@ -703,8 +701,8 @@ describe(oneLine`
 		})
 		.build();
 
-	coverageSchema.collections['settings']!.singleton = true;
-	coverageSchema.collections['settings']!.fields['theme']!.defaultValue = 'auto';
+	shapesSchema.collections['settings']!.singleton = true;
+	shapesSchema.collections['settings']!.fields['theme']!.defaultValue = 'auto';
 
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
@@ -721,7 +719,7 @@ describe(oneLine`
 
 	describe('system collection event scope', () => {
 		const service = () => {
-			return new ItemsService('directus_users', { knex: db, schema: coverageSchema });
+			return new ItemsService('directus_users', { knex: db, schema: shapesSchema });
 		};
 
 		it('createOne on a system collection emits `<scope>.create` events', async () => {
@@ -762,7 +760,7 @@ describe(oneLine`
 
 	describe('uuid primary key', () => {
 		const service = () => {
-			return new ItemsService('uuid_coll', { knex: db, schema: coverageSchema });
+			return new ItemsService('uuid_coll', { knex: db, schema: shapesSchema });
 		};
 
 		const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -797,7 +795,7 @@ describe(oneLine`
 
 		it('createMany batchInsert reads a bare scalar returning value', async () => {
 			// A driver that returns bare PKs (not `{ id }` objects) exercises the `: row` arm.
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 			tracker.on.insert('test').response([1, 2]);
 
 			const keys = await service.createMany([{ name: 'a' }, { name: 'b' }]);
@@ -807,7 +805,7 @@ describe(oneLine`
 	});
 
 	describe('updateByQuery / deleteByQuery key resolution', () => {
-		const service = () => new ItemsService('test', { knex: db, schema: coverageSchema });
+		const service = () => new ItemsService('test', { knex: db, schema: shapesSchema });
 
 		it('deleteByQuery deletes the keys the query resolves', async () => {
 			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
@@ -881,7 +879,7 @@ describe(oneLine`
 		it('readSingleton synthesizes defaults for an empty collection', async () => {
 			tracker.on.select('settings').response([]);
 
-			const service = new ItemsService('settings', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('settings', { knex: db, schema: shapesSchema });
 			const record = await service.readSingleton({ fields: ['*'] });
 
 			expect(record).toEqual({ id: null, theme: 'auto' });
@@ -891,7 +889,7 @@ describe(oneLine`
 		it('readSingleton returns the existing record when present', async () => {
 			tracker.on.select('settings').response([{ id: 1, theme: 'dark' }]);
 
-			const service = new ItemsService('settings', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('settings', { knex: db, schema: shapesSchema });
 			const record = await service.readSingleton({ fields: ['*'] });
 
 			expect(record).toEqual({ id: 1, theme: 'dark' });
@@ -903,7 +901,7 @@ describe(oneLine`
 			tracker.on.select('settings').response([{ id: 1, theme: 'dark' }]);
 			tracker.on.update('settings').response(1);
 
-			const service = new ItemsService('settings', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('settings', { knex: db, schema: shapesSchema });
 			const key = await service.upsertSingleton({ theme: 'dark' });
 
 			expect(key).toBe(1);
@@ -914,7 +912,7 @@ describe(oneLine`
 			tracker.on.select('settings').response([]);
 			tracker.on.insert('settings').response([1]);
 
-			const service = new ItemsService('settings', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('settings', { knex: db, schema: shapesSchema });
 			const key = await service.upsertSingleton({ theme: 'dark' });
 
 			expect(key).toBe(1);
@@ -929,7 +927,7 @@ describe(oneLine`
 
 			const service = new ItemsService('test', {
 				knex: db,
-				schema: coverageSchema,
+				schema: shapesSchema,
 				accountability,
 			});
 
@@ -946,7 +944,7 @@ describe(oneLine`
 
 			const service = new ItemsService('test', {
 				knex: db,
-				schema: coverageSchema,
+				schema: shapesSchema,
 				accountability,
 			});
 
@@ -969,7 +967,7 @@ describe(oneLine`
 		it('createMany defers to the callback', async () => {
 			tracker.on.insert('test').response([1]);
 
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 
 			await service.createMany([{ name: 'x' }], {
 				userIntegrityCheckFlags: flags,
@@ -982,7 +980,7 @@ describe(oneLine`
 		it('updateMany defers to the callback', async () => {
 			tracker.on.update('test').response(1);
 
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 
 			await service.updateMany([1], { name: 'y' }, {
 				userIntegrityCheckFlags: flags,
@@ -995,7 +993,7 @@ describe(oneLine`
 		it('deleteMany defers to the callback', async () => {
 			tracker.on.delete('test').response(1);
 
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 
 			await service.deleteMany([1], {
 				userIntegrityCheckFlags: flags,
@@ -1008,7 +1006,7 @@ describe(oneLine`
 		it('updateBatch defers to the callback', async () => {
 			tracker.on.update('test').response(1);
 
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 
 			await service.updateBatch([{ id: 1, name: 'y' }], {
 				userIntegrityCheckFlags: flags,
@@ -1021,7 +1019,7 @@ describe(oneLine`
 
 	describe('misc reachable branches', () => {
 		it('updateBatch throws when a batched item misses its primary key', async () => {
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 
 			await expect(service.updateBatch([{ name: 'no-pk' }])).rejects.toThrow(/misses primary key/);
 		});
@@ -1030,7 +1028,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1 }]);
 			tracker.on.update('test').response(1);
 
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 			const key = await service.upsertOne({ id: 1, name: 'y' });
 
 			expect(key).toBe(1);
@@ -1039,7 +1037,7 @@ describe(oneLine`
 		it('updateMany translates a DB error raised by the UPDATE', async () => {
 			tracker.on.update('test').simulateError('boom');
 
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 
 			await expect(service.updateMany([1], { name: 'y' })).rejects.toThrow();
 		});
@@ -1047,7 +1045,7 @@ describe(oneLine`
 		it('readByQuery honours an explicit stripNonRequested=false', async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a' }]);
 
-			const service = new ItemsService('test', { knex: db, schema: coverageSchema });
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 			const result = await service.readByQuery({}, { stripNonRequested: false });
 
 			expect(result).toEqual([{ id: 1, name: 'a' }]);
