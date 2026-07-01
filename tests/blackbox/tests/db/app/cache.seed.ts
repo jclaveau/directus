@@ -21,9 +21,12 @@ export const collectionRelated = 'test_app_cache_related';
 export const collectionChild = 'test_app_cache_child';
 export const collectionTag = 'test_app_cache_tag';
 export const collectionBlock = 'test_app_cache_block';
-// A second hop off collectionRelated (related.grand → grandRelated), so a read nested two
-// relations deep can be shown to drop when the leaf collection is mutated.
+// Second-hop leaves, so a read nested two relations deep can be shown to drop when the leaf is
+// mutated. `grandRelated` is the m2o leaf reached from several first-hop targets (related.grand,
+// child.owner, tag.category, block.author); `grandChild` is the o2m leaf (related.subs,
+// child.subChildren). Between them they give a depth-2 chain per first-hop relation type.
 export const collectionGrandRelated = 'test_app_cache_grand_related';
+export const collectionGrandChild = 'test_app_cache_grand_child';
 
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
@@ -43,17 +46,19 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				// Delete existing collections — junctions first, then the FK-holders, then
-				// the targets.
+				// Delete existing collections — FK-holders before their targets. grandChild holds
+				// FKs to child + related; child holds FKs to first + grandRelated; first/related/
+				// tag/block all point at grandRelated, so grandRelated goes last.
 				await DeleteCollection(vendor, { collection: junctionTag });
 				await DeleteCollection(vendor, { collection: junctionBlock });
 				await DeleteCollection(vendor, { collection: collectionIgnored });
+				await DeleteCollection(vendor, { collection: collectionGrandChild });
 				await DeleteCollection(vendor, { collection: collectionChild });
 				await DeleteCollection(vendor, { collection: collectionFirst });
 				await DeleteCollection(vendor, { collection: collectionRelated });
-				await DeleteCollection(vendor, { collection: collectionGrandRelated });
 				await DeleteCollection(vendor, { collection: collectionTag });
 				await DeleteCollection(vendor, { collection: collectionBlock });
+				await DeleteCollection(vendor, { collection: collectionGrandRelated });
 
 				// Create first collection
 				await CreateCollection(vendor, {
@@ -73,6 +78,7 @@ export const seedDBStructure = () => {
 					collectionTag,
 					collectionBlock,
 					collectionGrandRelated,
+					collectionGrandChild,
 				]) {
 					await CreateCollection(vendor, { collection: target });
 
@@ -120,6 +126,45 @@ export const seedDBStructure = () => {
 					field: 'blocks',
 					relatedCollections: [collectionBlock],
 					junctionCollection: junctionBlock,
+				});
+
+				// Second-hop relations, one off each first-hop target, so a depth-2 read exists for
+				// every relation type. m2o leaves land on grandRelated, o2m leaves on grandChild.
+				// o2m→m2o: collectionChild.owner → grandRelated
+				await CreateFieldM2O(vendor, {
+					collection: collectionChild,
+					field: 'owner',
+					otherCollection: collectionGrandRelated,
+				});
+
+				// m2m→m2o: collectionTag.category → grandRelated
+				await CreateFieldM2O(vendor, {
+					collection: collectionTag,
+					field: 'category',
+					otherCollection: collectionGrandRelated,
+				});
+
+				// m2a→m2o: collectionBlock.author → grandRelated
+				await CreateFieldM2O(vendor, {
+					collection: collectionBlock,
+					field: 'author',
+					otherCollection: collectionGrandRelated,
+				});
+
+				// m2o→o2m: collectionRelated.subs → grandChild (FK `related_id` on grandChild)
+				await CreateFieldO2M(vendor, {
+					collection: collectionRelated,
+					field: 'subs',
+					otherCollection: collectionGrandChild,
+					otherField: 'related_id',
+				});
+
+				// o2m→o2m: collectionChild.subChildren → grandChild (FK `child_id` on grandChild)
+				await CreateFieldO2M(vendor, {
+					collection: collectionChild,
+					field: 'subChildren',
+					otherCollection: collectionGrandChild,
+					otherField: 'child_id',
 				});
 
 				// Create second collection
