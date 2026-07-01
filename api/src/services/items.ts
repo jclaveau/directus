@@ -917,7 +917,9 @@ implements AbstractService<Item> {
 					const primaryKey = item[primaryKeyField];
 
 					if (!primaryKey) {
-						throw new InvalidPayloadError({ reason: `Item in update misses primary key` });
+						throw new InvalidPayloadError({
+							reason: `Item in update misses primary key`,
+						});
 					}
 
 					const combinedOpts: MutationOptions = {

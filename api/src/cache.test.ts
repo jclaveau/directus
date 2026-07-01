@@ -332,7 +332,8 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			a cache.purge filter that empties the tag set deletes nothing and never calls redis.del
+			a cache.purge filter that empties the tag set deletes nothing and never calls
+			redis.del
 		`, async () => {
 			// `redis.del()` with no keys throws; an extension is free to drop every
 			// tag, so the empty set must be a no-op rather than a crash (and must not
