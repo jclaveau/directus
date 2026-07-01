@@ -33,7 +33,8 @@ describe('scopedCacheTagsFromRows', () => {
 	});
 
 	test(oneLine`
-		requireAll returns null when a field is not present on a row (unprojected read / omitted create)
+		requireAll returns null when a field is not present on a row (unprojected read /
+		omitted create)
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
@@ -41,7 +42,8 @@ describe('scopedCacheTagsFromRows', () => {
 	});
 
 	test(oneLine`
-		without requireAll a missing field is skipped, not fatal (update payload that leaves it unchanged)
+		without requireAll a missing field is skipped, not fatal (update payload that leaves
+		it unchanged)
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
@@ -61,7 +63,8 @@ describe('scopedCacheTagsFromRows', () => {
 	});
 
 	test(oneLine`
-		empty rows resolve to an empty tag list, not null (caller falls back to a collection-level tag)
+		empty rows resolve to an empty tag list, not null (caller falls back to a
+		collection-level tag)
 	`, () => {
 		expect(scopedCacheTagsFromRows('slots', ['student'], [], true)).toEqual([]);
 	});
@@ -119,7 +122,8 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	});
 
 	test(oneLine`
-		a filter on a non-scope field yields no pin (read falls back to the bare collection tag)
+		a filter on a non-scope field yields no pin (read falls back to the bare collection
+		tag)
 	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),

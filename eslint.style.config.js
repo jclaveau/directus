@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint'
 import vue from "eslint-plugin-vue"
 import customArrayElementNewline from './eslint-rules/custom-array-element-newline.js'
 import arrowMultilineBlock from './eslint-rules/arrow-multiline-block.js'
-import testTitleOneLine from './eslint-rules/test-title-oneline.js'
+import stringLiteralsMaxLen from './eslint-rules/string-literals-max-len.js'
 
 export const appGlobals = {
   front: {
@@ -52,7 +52,7 @@ export const eslintBaseConfig = defineConfig([
     plugins: { local: { rules: {
       'custom-array-element-newline': customArrayElementNewline,
       'arrow-multiline-block': arrowMultilineBlock,
-      'test-title-oneline': testTitleOneLine,
+      'string-literals-max-len': stringLiteralsMaxLen,
     } } },
 
     rules: {
@@ -106,13 +106,16 @@ export const eslintBaseConfig = defineConfig([
         ignoreUrls: true,
         ignoreTrailingComments: true,
         ignoreRegExpLiterals: true,
-        // ignoreStrings disabled for scalabus (planner keeps it on for ts/js): a short mid-line
-        // string shouldn't exempt a long line from the 90-col cap — catches wrapping assertions.
+        // Both string exemptions are OFF for scalabus (planner keeps them on for ts/js): a string
+        // literal — plain or template — must not exempt its line from the 90-col cap, or long
+        // strings (assertions, URLs, error text) hide behind it and soft-wrap in the review pane.
         // ignoreStrings: true,
-        ignoreTemplateLiterals: true,
-        // test titles are unbreakable string literals — exempt `it(`/`describe(`/`test(` and the
-        // `.each([...])('title', cb)` form (whose title sits on a line starting with `])(`). The
-        // `local/test-title-oneline` rule owns the length of those titles instead (wrap in oneLine).
+        // ignoreTemplateLiterals: true,
+        // The one carve-out: a `test`/`it`/`describe` title line (and the `.each([...])('title')`
+        // form, whose title sits on a line starting with `])(`). Those titles ARE breakable — the
+        // `local/string-literals-max-len` rule owns their length (wrap + word-wrap in oneLine), so
+        // exempt the opening line here to avoid a redundant report; the wrapped body lines are not
+        // exempt and still get checked.
         ignorePattern: `^\\s*(it|test|describe)\\(|^\\s*\\]\\)\\(`,
       }],
       "@typescript-eslint/no-unused-expressions": [                 // https://eslint.org/docs/latest/rules/no-unused-expressions
@@ -145,7 +148,7 @@ export const eslintBaseConfig = defineConfig([
         pairCommandArgs: true,                                      // pair spawn/exec flag+value (off → plain consistent)
       }],
       'local/arrow-multiline-block': `error`,                       // concise arrow body only for one-liners; else block + return
-      'local/test-title-oneline': [`error`, {                       // wrap an over-90-col test title in oneLine`…`
+      'local/string-literals-max-len': [`error`, {                  // wrap+word-wrap an over-90-col test title in oneLine`…`
         importModule: `@directus/utils`,                            // oneLine lives in packages/utils (api + blackbox both dep on it)
       }],
       'function-call-argument-newline': [`error`, `consistent`],    // https://eslint.org/docs/latest/rules/function-call-argument-newline
@@ -191,7 +194,8 @@ export const eslintBaseConfig = defineConfig([
         code: 90,
         comments: 110,
         // "template": 9000,
-        ignoreTemplateLiterals: true,
+        // ignoreTemplateLiterals off everywhere: a template literal must not exempt its line.
+        // "ignoreTemplateLiterals": true,
         ignoreUrls: true,
         ignoreTrailingComments: true,
         // "ignoreStrings": true,

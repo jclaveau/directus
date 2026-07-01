@@ -173,7 +173,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		upsertMany full-flushes (null) — the update-subset old values are not cheaply capturable
+		upsertMany full-flushes (null) — the update-subset old values are not cheaply
+		capturable
 	`, async () => {
 		tracker.on.select('test').response([]);
 		tracker.on.insert('test').response([1]);
@@ -224,7 +225,8 @@ describe(oneLine`
 	// create/update filter hook can rewrite a scope field, and a create hook can
 	// take over a row entirely (scope value unknowable).
 	it(oneLine`
-		create scopes off the post-hook payload — a filter hook that rewrites the scope field wins
+		create scopes off the post-hook payload — a filter hook that rewrites the scope field
+		wins
 	`, async () => {
 		tracker.on.insert('test').response([1]);
 
@@ -247,7 +249,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		create full-flushes (null) when a hook takes over a row (returns a PK, scope value unknowable)
+		create full-flushes (null) when a hook takes over a row (returns a PK, scope value
+		unknowable)
 	`, async () => {
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
@@ -328,7 +331,8 @@ describe(oneLine`
 	// post-`items.read` records and can append a value slice that the bare AST
 	// scoping wouldn't produce (e.g. an enriched related row).
 	it(oneLine`
-		exposes the enriched records to a cache.scope listener, which can add data-derived tags
+		exposes the enriched records to a cache.scope listener, which can add data-derived
+		tags
 	`, async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },

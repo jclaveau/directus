@@ -409,7 +409,8 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		Scoped purge invalidates a read joining a related (m2o) collection when that related row is mutated
+		Scoped purge invalidates a read joining a related (m2o) collection when that related
+		row is mutated
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -463,8 +464,16 @@ describe('App Caching Tests', () => {
 	// collection must drop the cached read. The deep field paths embed the target's own
 	// data (`tags.<fk>.*`, `blocks.item:<col>.*`).
 	describe.each([
-		{ relation: 'o2m', read: `/items/${collectionFirst}?fields=*,children.*`, target: collectionChild },
-		{ relation: 'm2m', read: `/items/${collectionFirst}?fields=*,tags.${collectionTag}_id.*`, target: collectionTag },
+		{
+			relation: 'o2m',
+			read: `/items/${collectionFirst}?fields=*,children.*`,
+			target: collectionChild,
+		},
+		{
+			relation: 'm2m',
+			read: `/items/${collectionFirst}?fields=*,tags.${collectionTag}_id.*`,
+			target: collectionTag,
+		},
 		{
 			relation: 'm2a',
 			read: `/items/${collectionFirst}?fields=*,blocks.item:${collectionBlock}.*`,
@@ -505,7 +514,8 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		Scoped purge invalidates a read filtered by a relational path when that related collection is mutated
+		Scoped purge invalidates a read filtered by a relational path when that related
+		collection is mutated
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -514,7 +524,8 @@ describe('App Caching Tests', () => {
 
 			// `related` is used only in the filter (not selected) — the read still gets
 			// tagged with it, because its result set depends on collectionRelated.
-			const read = `/items/${collectionFirst}?fields=id&filter[related][string_field][_eq]=${randomUUID()}`;
+			const relatedFilter = `filter[related][string_field][_eq]=${randomUUID()}`;
+			const read = `/items/${collectionFirst}?fields=id&${relatedFilter}`;
 
 			await request(url).post(`/utils/cache/clear`)
 				.set('Authorization', auth);
