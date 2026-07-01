@@ -15,6 +15,7 @@ import {
 	collectionBlock,
 	collectionChild,
 	collectionFirst,
+	collectionGrandChild,
 	collectionGrandRelated,
 	collectionIgnored,
 	collectionRelated,
@@ -560,6 +561,69 @@ describe('App Caching Tests', () => {
 
 			// A write to the joined target collection — the join read is tagged with it, so
 			// it must drop.
+			await request(url).post(`/items/${target}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			const after = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	// Depth-2 chains, one per first-hop relation type, ending on a second-hop leaf (grandRelated
+	// via m2o, grandChild via o2m). The read tags the whole path from the AST, so a write to the
+	// leaf — two relations down — must drop the cached read even though nothing is linked.
+	describe.each([
+		{
+			chain: 'm2o→o2m',
+			read: `/items/${collectionFirst}?fields=*,related.subs.*`,
+			target: collectionGrandChild,
+		},
+		{
+			chain: 'o2m→o2m',
+			read: `/items/${collectionFirst}?fields=*,children.subChildren.*`,
+			target: collectionGrandChild,
+		},
+		{
+			chain: 'o2m→m2o',
+			read: `/items/${collectionFirst}?fields=*,children.owner.*`,
+			target: collectionGrandRelated,
+		},
+		{
+			chain: 'm2m→m2o',
+			read: `/items/${collectionFirst}?fields=*,tags.${collectionTag}_id.category.*`,
+			target: collectionGrandRelated,
+		},
+		{
+			chain: 'm2a→m2o',
+			read: `/items/${collectionFirst}?fields=*,blocks.item:${collectionBlock}.author.*`,
+			target: collectionGrandRelated,
+		},
+	])(oneLine`
+		Scoped purge invalidates a $chain nested read when its second-hop leaf collection is
+		mutated
+	`, ({ read, target }) => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write to the leaf two hops down — the read is tagged with it, so it must drop.
 			await request(url).post(`/items/${target}`)
 				.send({ string_field: randomUUID() })
 				.set('Authorization', auth);
