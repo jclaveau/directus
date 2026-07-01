@@ -763,14 +763,31 @@ implements AbstractService<Item> {
 
 		if (scopedCachePurgeEnabled()) {
 			const scopedCacheFields = this.collectionScopedCacheFields;
+			const fieldMap = fieldMapFromAst(ast, this.schema);
 
-			const rootScopedCacheTags = pinnedScopedCacheTagsFromFilter(
-				this.collection,
-				scopedCacheFields,
-				updatedQuery.filter,
-			);
+			// Self-reference guard: pinning the root to a value slice is sound only while the
+			// filter bounds every row the read returns. A self-referential relation (the root
+			// collection reached again through a nested field) pulls rows the root filter
+			// doesn't bound — a parent/child can belong to any slice — so a write to another
+			// slice would leave this read stale. Detect it (the root collection at more than
+			// one field-map path) and fall back to the bare collection tag.
+			const rootPaths = new Set<string>();
 
-			for (const collection of collectionsInFieldMap(fieldMapFromAst(ast, this.schema))) {
+			for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+				if (entry.collection === this.collection) {
+					rootPaths.add(path);
+				}
+			}
+
+			const rootScopedCacheTags = rootPaths.size > 1
+				? []
+				: pinnedScopedCacheTagsFromFilter(
+					this.collection,
+					scopedCacheFields,
+					updatedQuery.filter,
+				);
+
+			for (const collection of collectionsInFieldMap(fieldMap)) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
 				}

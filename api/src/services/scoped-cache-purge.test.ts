@@ -63,6 +63,19 @@ const schema = new SchemaBuilder()
 // SchemaBuilder doesn't model the cache meta; attach the scope field directly.
 schema.collections['test']!.scopedCacheFields = ['student'];
 
+// Same scoped collection, but with a self-referential relation (`parent` → test). A read
+// that pulls `parent.*` reaches the root collection again through an unbounded path.
+const selfRefSchema = new SchemaBuilder()
+	.collection('test', (c) => {
+		c.field('id').id();
+		c.field('name').string();
+		c.field('student').string();
+		c.field('parent').m2o('test');
+	})
+	.build();
+
+selfRefSchema.collections['test']!.scopedCacheFields = ['student'];
+
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
 // (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
 // asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
@@ -327,6 +340,27 @@ describe(oneLine`
 		expect(readMeta(result)?.scopedCacheTags).toEqual([
 			{ collection: 'test', field: 'student', value: 'A' },
 		]);
+	});
+
+	// A self-referential relation pulls rows of the root collection the root filter can't
+	// bound (a parent belongs to any student), so pinning the root to a value slice would
+	// leave the read stale after a write to another slice. The root falls back to bare.
+	it(oneLine`
+		a self-referential read does not pin the root — the nested same-collection rows are
+		unbounded, so it tags the bare collection
+	`, async () => {
+		tracker.on
+			.select('test')
+			.response([{ id: 1, name: 'a', student: 'A', parent: null }]);
+
+		const selfRefService = new ItemsService('test', { knex: db, schema: selfRefSchema });
+
+		const result = await selfRefService.readByQuery({
+			filter: { student: { _eq: 'A' } },
+			fields: ['*', 'parent.*'],
+		});
+
+		expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
 	});
 
 	// A `cache.scope` listener can derive data-level tags: it receives the
