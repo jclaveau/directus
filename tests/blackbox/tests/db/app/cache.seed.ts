@@ -21,6 +21,9 @@ export const collectionRelated = 'test_app_cache_related';
 export const collectionChild = 'test_app_cache_child';
 export const collectionTag = 'test_app_cache_tag';
 export const collectionBlock = 'test_app_cache_block';
+// A second hop off collectionRelated (related.grand → grandRelated), so a read nested two
+// relations deep can be shown to drop when the leaf collection is mutated.
+export const collectionGrandRelated = 'test_app_cache_grand_related';
 
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
@@ -48,6 +51,7 @@ export const seedDBStructure = () => {
 				await DeleteCollection(vendor, { collection: collectionChild });
 				await DeleteCollection(vendor, { collection: collectionFirst });
 				await DeleteCollection(vendor, { collection: collectionRelated });
+				await DeleteCollection(vendor, { collection: collectionGrandRelated });
 				await DeleteCollection(vendor, { collection: collectionTag });
 				await DeleteCollection(vendor, { collection: collectionBlock });
 
@@ -68,6 +72,7 @@ export const seedDBStructure = () => {
 					collectionChild,
 					collectionTag,
 					collectionBlock,
+					collectionGrandRelated,
 				]) {
 					await CreateCollection(vendor, { collection: target });
 
@@ -83,6 +88,13 @@ export const seedDBStructure = () => {
 					collection: collectionFirst,
 					field: 'related',
 					otherCollection: collectionRelated,
+				});
+
+				// m2o 2nd hop: collectionRelated.grand → collectionGrandRelated (the chain leaf)
+				await CreateFieldM2O(vendor, {
+					collection: collectionRelated,
+					field: 'grand',
+					otherCollection: collectionGrandRelated,
 				});
 
 				// o2m: collectionFirst.children → collectionChild (FK `parent_id` on the child)
