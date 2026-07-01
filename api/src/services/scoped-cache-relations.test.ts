@@ -83,6 +83,31 @@ const m2a = new SchemaBuilder()
 	})
 	.build();
 
+// Multi-level chains: the read reaches a collection two relations deep, so the field-map
+// walker must recurse past the first hop. cities → countries → continents (m2o) and the
+// mirror continents → countries → cities (o2m).
+const m2oChain = new SchemaBuilder()
+	.collection('cities', (c) => {
+		c.field('id').id();
+		c.field('country').m2o('countries');
+	})
+	.collection('countries', (c) => {
+		c.field('id').id();
+		c.field('continent').m2o('continents');
+	})
+	.build();
+
+const o2mChain = new SchemaBuilder()
+	.collection('continents', (c) => {
+		c.field('id').id();
+		c.field('countries').o2m('countries', 'continent_id');
+	})
+	.collection('countries', (c) => {
+		c.field('id').id();
+		c.field('cities').o2m('cities', 'country_id');
+	})
+	.build();
+
 describe('scoped cache read tagging across relation types', () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
@@ -183,5 +208,32 @@ describe('scoped cache read tagging across relation types', () => {
 		});
 
 		expect(tags).toEqual(['cities', 'countries']);
+	});
+
+	// Two hops deep: a regression that recursed only one level would drop the leaf
+	// collection (`continents` / `cities`) and leave the read stale after a leaf write.
+	it('m2o chain (3 levels): tags every collection down the nested path', async () => {
+		expect(
+			await taggedCollections('cities', m2oChain, ['*', 'country.continent.*']),
+		).toEqual(['cities', 'continents', 'countries']);
+	});
+
+	it('o2m chain (3 levels): tags every collection down the nested path', async () => {
+		expect(
+			await taggedCollections('continents', o2mChain, ['*', 'countries.cities.*']),
+		).toEqual(['cities', 'continents', 'countries']);
+	});
+
+	// A filter nested two relations deep (nothing beyond the root selected) still tags the
+	// whole chain — proves the query walker, not just the field walker, recurses past hop one.
+	it(oneLine`
+		deep filter two relations down tags every collection on the path
+	`, async () => {
+		const tags = await taggedForQuery('cities', m2oChain, {
+			fields: ['id'],
+			filter: { country: { continent: { id: { _eq: 1 } } } },
+		});
+
+		expect(tags).toEqual(['cities', 'continents', 'countries']);
 	});
 });
