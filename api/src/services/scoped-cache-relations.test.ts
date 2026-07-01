@@ -144,6 +144,18 @@ const m2mThenM2o = new SchemaBuilder()
 	})
 	.build();
 
+// m2a('text') generates the junction `blog_builder`; text.author adds a further m2o off the target.
+const m2aThenM2o = new SchemaBuilder()
+	.collection('blog', (c) => {
+		c.field('id').id();
+		c.field('blocks').m2a(['text']);
+	})
+	.collection('text', (c) => {
+		c.field('id').id();
+		c.field('author').m2o('authors');
+	})
+	.build();
+
 describe('scoped cache read tagging across relation types', () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
@@ -291,5 +303,13 @@ describe('scoped cache read tagging across relation types', () => {
 		expect(
 			await taggedCollections('articles', m2mThenM2o, ['*', 'tags.tags_id.category.*']),
 		).toEqual(['articles', 'articles_tags_junction', 'categories', 'tags']);
+	});
+
+	it(oneLine`
+		mixed chain m2a(deep)→m2o: tags root + junction + target + the target's further m2o
+	`, async () => {
+		expect(
+			await taggedCollections('blog', m2aThenM2o, ['*', 'blocks.item:text.author.*']),
+		).toEqual(['authors', 'blog', 'blog_builder', 'text']);
 	});
 });
