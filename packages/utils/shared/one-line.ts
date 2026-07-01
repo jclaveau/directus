@@ -20,7 +20,13 @@ export function oneLine(strings: TemplateStringsArray, ...values: unknown[]): st
 		}
 	}
 
-	// Collapse every whitespace run that contains a newline (so CRLF and trailing indentation go
-	// too) to a single space; intra-line spacing, having no newline, is left untouched.
-	return raw.replace(/\s*\n\s*/g, ' ').trim();
+	// Collapse every newline-bearing whitespace run to a single space, keeping intra-line spacing.
+	// Done by splitting on newlines and trimming each line (rather than a `\s*\n\s*` regex, whose
+	// overlapping quantifiers backtrack polynomially — a ReDoS vector on library input): trimming
+	// drops the surrounding indentation and any stray CR, and empty lines fall out.
+	return raw
+		.split('\n')
+		.map((line) => line.trim())
+		.filter((line) => line !== '')
+		.join(' ');
 }
