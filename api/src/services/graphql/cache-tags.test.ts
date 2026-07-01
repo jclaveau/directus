@@ -123,6 +123,35 @@ describe('GraphQLService cache tags', () => {
 		expect(result.extensions).toEqual({ foo: 1 });
 	});
 
+	test('upsertSingleton() returns true when no fields are requested', async () => {
+		const gql = makeService({});
+
+		const upsertSingleton = vi.fn().mockResolvedValue(undefined);
+		const readSingleton = vi.fn();
+
+		vi.mocked(getService).mockReturnValueOnce({ upsertSingleton, readSingleton } as any);
+
+		await expect(gql.upsertSingleton('articles', { foo: 1 }, {})).resolves.toBe(true);
+		expect(upsertSingleton).toHaveBeenCalledWith({ foo: 1 });
+		// no fields → the read is skipped
+		expect(readSingleton).not.toHaveBeenCalled();
+	});
+
+	test('upsertSingleton() reads back the singleton when fields are requested', async () => {
+		const gql = makeService({});
+
+		const upsertSingleton = vi.fn().mockResolvedValue(undefined);
+		const readSingleton = vi.fn().mockResolvedValue({ id: 1 });
+
+		vi.mocked(getService).mockReturnValueOnce({ upsertSingleton, readSingleton } as any);
+
+		await expect(
+			gql.upsertSingleton('articles', { foo: 1 }, { fields: ['id'] }),
+		).resolves.toEqual({ id: 1 });
+
+		expect(readSingleton).toHaveBeenCalledWith({ fields: ['id'] });
+	});
+
 	test('upsertSingleton() rethrows a service error via formatError', async () => {
 		const gql = makeService({});
 
