@@ -1,10 +1,10 @@
 coverage:
   status:
-    # Aggregate (non-flag) diff coverage is BLOCKING at a fixed 90% bar — new code must be
-    # ≥90% covered (was `auto` ≈ project%, which let weakly-covered diffs through).
+    # Aggregate (non-flag) diff coverage is BLOCKING at a fixed 95% bar — new code must be
+    # ≥95% covered (was `auto` ≈ project%, which let weakly-covered diffs through).
     patch:
       default:
-        target: 90%
+        target: 95%
         informational: false
     # Overall coverage stays report-only: on a stacked feature line it mostly reflects
     # base drift, not the PR's own diff (see the per-PR coverage diagnoses).
