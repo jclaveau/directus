@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
@@ -67,7 +68,9 @@ schema.collections['test']!.scopedCacheFields = ['student'];
 // toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation itself
 // is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
 // (capture-before-write, old ∪ new, upsert full-flush).
-describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)', () => {
+describe(oneLine`
+	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
+`, () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
 
@@ -87,7 +90,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 
 	const service = () => new ItemsService('test', { knex: db, schema });
 
-	it('updateMany purges old ∪ new — a row moved student A→B drops both slices', async () => {
+	it(oneLine`
+		updateMany purges old ∪ new — a row moved student A→B drops both slices
+	`, async () => {
 		// captureScopedCacheTags selects the pre-update rows (old = A);
 		// the payload sets new = B.
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
@@ -108,7 +113,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		);
 	});
 
-	it('updateMany that leaves the scope field untouched purges only the captured old slice', async () => {
+	it(oneLine`
+		updateMany that leaves the scope field untouched purges only the captured old slice
+	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
@@ -122,7 +129,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		);
 	});
 
-	it('updateMany full-flushes (null) when a pre-update row is missing the scope field', async () => {
+	it(oneLine`
+		updateMany full-flushes (null) when a pre-update row is missing the scope field
+	`, async () => {
 		// snapshotScopedCacheTags needs every row to resolve all scope fields; a row missing
 		// `student` makes the old value unknowable → null → coarse full flush over the slices.
 		tracker.on.select('test').response([{ id: 1 }]);
@@ -138,7 +147,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		);
 	});
 
-	it('deleteMany purges the scope slices of the rows it deleted (captured before delete)', async () => {
+	it(oneLine`
+		deleteMany purges the scope slices of the rows it deleted (captured before delete)
+	`, async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
 			{ id: 2, student: 'B' },
@@ -161,7 +172,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		);
 	});
 
-	it('upsertMany full-flushes (null) — the update-subset old values are not cheaply capturable', async () => {
+	it(oneLine`
+		upsertMany full-flushes (null) — the update-subset old values are not cheaply capturable
+	`, async () => {
 		tracker.on.select('test').response([]);
 		tracker.on.insert('test').response([1]);
 
@@ -175,7 +188,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		);
 	});
 
-	it('updateBatch purges old ∪ new — re-snapshots the committed rows for the new values', async () => {
+	it(oneLine`
+		updateBatch purges old ∪ new — re-snapshots the committed rows for the new values
+	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
@@ -189,7 +204,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		);
 	});
 
-	it('updateBatch full-flushes (null) when a batched row is missing the scope field', async () => {
+	it(oneLine`
+		updateBatch full-flushes (null) when a batched row is missing the scope field
+	`, async () => {
 		tracker.on.select('test').response([{ id: 1 }]);
 		tracker.on.update('test').response(1);
 
@@ -206,7 +223,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 	// Purge tags come from the value actually stored, not the raw input: a
 	// create/update filter hook can rewrite a scope field, and a create hook can
 	// take over a row entirely (scope value unknowable).
-	it('create scopes off the post-hook payload — a filter hook that rewrites the scope field wins', async () => {
+	it(oneLine`
+		create scopes off the post-hook payload — a filter hook that rewrites the scope field wins
+	`, async () => {
 		tracker.on.insert('test').response([1]);
 
 		const rewrite = async (payload: any) => ({ ...payload, student: 'B' });
@@ -227,7 +246,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		}
 	});
 
-	it('create full-flushes (null) when a hook takes over a row (returns a PK, scope value unknowable)', async () => {
+	it(oneLine`
+		create full-flushes (null) when a hook takes over a row (returns a PK, scope value unknowable)
+	`, async () => {
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
 
@@ -246,7 +267,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 		}
 	});
 
-	it('updateMany takes the new value from the post-hook payload, not the raw input', async () => {
+	it(oneLine`
+		updateMany takes the new value from the post-hook payload, not the raw input
+	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
@@ -277,7 +300,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 	// extension listens, i.e. the SAME array reference. The read must still carry
 	// the bare collection tag — a clear-and-refill of that reference would wipe it,
 	// leaving every read untagged and unpurgeable (stale HIT after a write).
-	it('an unfiltered read carries the bare collection tag through the cache.scope filter', async () => {
+	it(oneLine`
+		an unfiltered read carries the bare collection tag through the cache.scope filter
+	`, async () => {
 		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 		const result = await service().readByQuery({});
@@ -287,7 +312,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 
 	// A filter that bounds the read to one scope value pins the value slice instead of the
 	// bare collection tag, so only that owner's/partition's writes purge it.
-	it('a read filtered to a scope value carries the value-slice tag, not the bare collection', async () => {
+	it(oneLine`
+		a read filtered to a scope value carries the value-slice tag, not the bare collection
+	`, async () => {
 		tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 		const result = await service().readByQuery({ filter: { student: { _eq: 'A' } } });
@@ -300,7 +327,9 @@ describe('scoped cache purge (ItemsService mutation → purgeScopedCache scoped 
 	// A `cache.scope` listener can derive data-level tags: it receives the
 	// post-`items.read` records and can append a value slice that the bare AST
 	// scoping wouldn't produce (e.g. an enriched related row).
-	it('exposes the enriched records to a cache.scope listener, which can add data-derived tags', async () => {
+	it(oneLine`
+		exposes the enriched records to a cache.scope listener, which can add data-derived tags
+	`, async () => {
 		tracker.on.select('test').response([
 			{ id: 1, student: 'A' },
 			{ id: 2, student: 'B' },

@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
 import {
 	pinnedScopedCacheTagsFromFilter,
@@ -31,13 +32,17 @@ describe('scopedCacheTagsFromRows', () => {
 		]);
 	});
 
-	test('requireAll returns null when a field is not present on a row (unprojected read / omitted create)', () => {
+	test(oneLine`
+		requireAll returns null when a field is not present on a row (unprojected read / omitted create)
+	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
 		expect(scopedCacheTagsFromRows('slots', ['student'], rows, true)).toBeNull();
 	});
 
-	test('without requireAll a missing field is skipped, not fatal (update payload that leaves it unchanged)', () => {
+	test(oneLine`
+		without requireAll a missing field is skipped, not fatal (update payload that leaves it unchanged)
+	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
 		expect(scopedCacheTagsFromRows('slots', ['student'], rows, false)).toEqual([
@@ -45,7 +50,9 @@ describe('scopedCacheTagsFromRows', () => {
 		]);
 	});
 
-	test('a field present but holding null is resolvable (distinct from being absent)', () => {
+	test(oneLine`
+		a field present but holding null is resolvable (distinct from being absent)
+	`, () => {
 		expect(
 			scopedCacheTagsFromRows('slots', ['student'], [{ student: null }], true),
 		).toEqual([
@@ -53,7 +60,9 @@ describe('scopedCacheTagsFromRows', () => {
 		]);
 	});
 
-	test('empty rows resolve to an empty tag list, not null (caller falls back to a collection-level tag)', () => {
+	test(oneLine`
+		empty rows resolve to an empty tag list, not null (caller falls back to a collection-level tag)
+	`, () => {
 		expect(scopedCacheTagsFromRows('slots', ['student'], [], true)).toEqual([]);
 	});
 
@@ -74,7 +83,9 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		]);
 	});
 
-	test('_in on a scope field pins every listed value (even those with no rows yet)', () => {
+	test(oneLine`
+		_in on a scope field pins every listed value (even those with no rows yet)
+	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromFilter('slots', ['student'], {
 				student: { _in: ['A', 'B'] },
@@ -107,7 +118,9 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		).toEqual([]);
 	});
 
-	test('a filter on a non-scope field yields no pin (read falls back to the bare collection tag)', () => {
+	test(oneLine`
+		a filter on a non-scope field yields no pin (read falls back to the bare collection tag)
+	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromFilter('slots', ['student'], { course: { _eq: 'math' } }),
 		).toEqual([]);

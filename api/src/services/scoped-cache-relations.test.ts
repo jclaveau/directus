@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
@@ -122,7 +123,9 @@ describe('scoped cache read tagging across relation types', () => {
 		]);
 	});
 
-	it('m2m shallow (junction fields only): tags root + junction, not the unread target', async () => {
+	it(oneLine`
+		m2m shallow (junction fields only): tags root + junction, not the unread target
+	`, async () => {
 		// `tags.*` resolves junction rows, not tag data — so the target need not be
 		// tagged, but the junction must be (a link add/remove is a junction write
 		// that has to invalidate the read).
@@ -140,14 +143,18 @@ describe('scoped cache read tagging across relation types', () => {
 		]);
 	});
 
-	it('m2a shallow (junction only): tags root + junction, not the unread targets', async () => {
+	it(oneLine`
+		m2a shallow (junction only): tags root + junction, not the unread targets
+	`, async () => {
 		expect(await taggedCollections('blog', m2a, ['*', 'blocks.*'])).toEqual([
 			'blog',
 			'blog_builder',
 		]);
 	});
 
-	it('m2a deep (item:collection fields): tags root + junction + every read target', async () => {
+	it(oneLine`
+		m2a deep (item:collection fields): tags root + junction + every read target
+	`, async () => {
 		expect(
 			await taggedCollections('blog', m2a, [
 				'*',

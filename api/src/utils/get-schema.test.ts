@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import {
@@ -138,7 +139,9 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 
 	// Postgres returns the JSON column already parsed as an array; parseJsonFieldList
 	// passes it straight through, so scopedCacheFields is populated.
-	it('assembles a collection with a Postgres-style (pre-parsed array) scoped_cache_fields', async () => {
+	it(oneLine`
+		assembles a collection with a Postgres-style (pre-parsed array) scoped_cache_fields
+	`, async () => {
 		overview.mockResolvedValue(overviewFor('test'));
 
 		tracker.on.select('directus_collections').response([
@@ -180,7 +183,9 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 	});
 
 	// MySQL/SQLite return the JSON column as a string; parseJsonFieldList must parse it.
-	it('parses a MySQL-style (JSON string) scoped_cache_fields through parseJsonFieldList', async () => {
+	it(oneLine`
+		parses a MySQL-style (JSON string) scoped_cache_fields through parseJsonFieldList
+	`, async () => {
 		overview.mockResolvedValue(overviewFor('test'));
 
 		tracker.on.select('directus_collections').response([

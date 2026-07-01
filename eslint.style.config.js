@@ -5,6 +5,7 @@ import tseslint from 'typescript-eslint'
 import vue from "eslint-plugin-vue"
 import customArrayElementNewline from './eslint-rules/custom-array-element-newline.js'
 import arrowMultilineBlock from './eslint-rules/arrow-multiline-block.js'
+import testTitleOneLine from './eslint-rules/test-title-oneline.js'
 
 export const appGlobals = {
   front: {
@@ -51,6 +52,7 @@ export const eslintBaseConfig = defineConfig([
     plugins: { local: { rules: {
       'custom-array-element-newline': customArrayElementNewline,
       'arrow-multiline-block': arrowMultilineBlock,
+      'test-title-oneline': testTitleOneLine,
     } } },
 
     rules: {
@@ -109,7 +111,8 @@ export const eslintBaseConfig = defineConfig([
         // ignoreStrings: true,
         ignoreTemplateLiterals: true,
         // test titles are unbreakable string literals — exempt `it(`/`describe(`/`test(` and the
-        // `.each([...])('title', cb)` form (whose title sits on a line starting with `])(`).
+        // `.each([...])('title', cb)` form (whose title sits on a line starting with `])(`). The
+        // `local/test-title-oneline` rule owns the length of those titles instead (wrap in oneLine).
         ignorePattern: `^\\s*(it|test|describe)\\(|^\\s*\\]\\)\\(`,
       }],
       "@typescript-eslint/no-unused-expressions": [                 // https://eslint.org/docs/latest/rules/no-unused-expressions
@@ -142,6 +145,9 @@ export const eslintBaseConfig = defineConfig([
         pairCommandArgs: true,                                      // pair spawn/exec flag+value (off → plain consistent)
       }],
       'local/arrow-multiline-block': `error`,                       // concise arrow body only for one-liners; else block + return
+      'local/test-title-oneline': [`error`, {                       // wrap an over-90-col test title in oneLine`…`
+        importModule: `@directus/utils`,                            // oneLine lives in packages/utils (api + blackbox both dep on it)
+      }],
       'function-call-argument-newline': [`error`, `consistent`],    // https://eslint.org/docs/latest/rules/function-call-argument-newline
       'function-paren-newline': [`error`, `multiline-arguments`],   // https://eslint.org/docs/latest/rules/function-paren-newline
       // 'padding-line-between-statements': [                          // https://eslint.org/docs/latest/rules/padding-line-between-statements#rule-details

@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { GraphQLError, execute } from 'graphql';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
@@ -28,7 +29,9 @@ const makeService = (schema: object) =>
 describe('GraphQLService cache tags', () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	test('read() unions each child read’s tags into the request-level aggregate', async () => {
+	test(oneLine`
+		read() unions each child read’s tags into the request-level aggregate
+	`, async () => {
 		const schema = {
 			collections: { articles: { singleton: false }, users: { singleton: false }, files: { singleton: false } },
 		};
@@ -137,7 +140,9 @@ describe('GraphQLService cache tags', () => {
 		expect(readSingleton).not.toHaveBeenCalled();
 	});
 
-	test('upsertSingleton() reads back the singleton when fields are requested', async () => {
+	test(oneLine`
+		upsertSingleton() reads back the singleton when fields are requested
+	`, async () => {
 		const gql = makeService({});
 
 		const upsertSingleton = vi.fn().mockResolvedValue(undefined);

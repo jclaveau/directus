@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
 
@@ -38,7 +39,9 @@ describe('graphql controller scopedCacheTags', () => {
 	test.each([
 		['system', systemHandler],
 		['items', itemsHandler],
-	])('%s handler stamps scopedCacheTags from the payload meta', async (_scope, getHandler) => {
+	])(oneLine`
+		%s handler stamps scopedCacheTags from the payload meta
+	`, async (_scope, getHandler) => {
 		const tags = [{ collection: 'articles' }];
 
 		execute.mockResolvedValueOnce(
@@ -59,7 +62,9 @@ describe('graphql controller scopedCacheTags', () => {
 	test.each([
 		['system', systemHandler],
 		['items', itemsHandler],
-	])('%s handler disables cache when the payload has errors', async (_scope, getHandler) => {
+	])(oneLine`
+		%s handler disables cache when the payload has errors
+	`, async (_scope, getHandler) => {
 		execute.mockResolvedValueOnce(
 			withMeta({ errors: [{ message: 'x' }] }, { scopedCacheTags: [] }),
 		);

@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability } from '@directus/types';
@@ -146,7 +147,9 @@ describe('PermissionsService.getItemPermissions', () => {
 
 	// Lines 145-147 (checkAction ternary): a non-singleton collection keeps updateAction
 	// = 'update', so the update branch passes 'update' through, not 'create'.
-	it('checks the update action with checkAction="update" for a non-singleton collection', async () => {
+	it(oneLine`
+		checks the update action with checkAction="update" for a non-singleton collection
+	`, async () => {
 		validateAccess.mockResolvedValue(undefined);
 
 		await service(nonAdmin).getItemPermissions('articles');

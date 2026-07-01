@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -100,7 +101,9 @@ afterEach(() => {
 });
 
 describe('respond middleware', () => {
-	test('cacheable GET MISS: sets cache value + expires_at and tags the scoped-cache keys', async () => {
+	test(oneLine`
+		cacheable GET MISS: sets cache value + expires_at and tags the scoped-cache keys
+	`, async () => {
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
 			{ scopedCacheTags: [{ collection: 'articles' }] },
@@ -175,7 +178,9 @@ describe('respond middleware', () => {
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache');
 	});
 
-	test('CACHE_VALUE_MAX_SIZE measures the payload and skips caching when it exceeds the limit', async () => {
+	test(oneLine`
+		CACHE_VALUE_MAX_SIZE measures the payload and skips caching when it exceeds the limit
+	`, async () => {
 		env['CACHE_VALUE_MAX_SIZE'] = '1b';
 		const res = makeRes({ data: [{ big: 'x'.repeat(100) }] });
 		const req = makeReq();
@@ -221,7 +226,9 @@ describe('respond middleware', () => {
 		expect(res.end).toHaveBeenCalled();
 	});
 
-	test('export json builds a collection-named attachment and transforms the payload', async () => {
+	test(oneLine`
+		export json builds a collection-named attachment and transforms the payload
+	`, async () => {
 		const res = makeRes({ data: [{ id: 1 }] });
 		const req = makeReq({ sanitizedQuery: { export: 'json' } as any });
 

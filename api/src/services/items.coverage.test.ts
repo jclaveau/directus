@@ -1,10 +1,10 @@
+import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import {
 	afterEach,
 	beforeAll,
-	beforeEach,
 	describe,
 	expect,
 	it,
@@ -123,7 +123,9 @@ const schema = new SchemaBuilder()
 schema.collections['settings']!.singleton = true;
 schema.collections['settings']!.fields['theme']!.defaultValue = 'auto';
 
-describe('ItemsService coverage — system collections, uuid PKs, revisions, singletons', () => {
+describe(oneLine`
+	ItemsService coverage — system collections, uuid PKs, revisions, singletons
+`, () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
 
@@ -148,7 +150,9 @@ describe('ItemsService coverage — system collections, uuid PKs, revisions, sin
 			expect(key).toBe(1);
 		});
 
-		it('readByQuery on a system collection emits `<scope>.query/read` events', async () => {
+		it(oneLine`
+			readByQuery on a system collection emits \`<scope>.query/read\` events
+		`, async () => {
 			tracker.on.select('directus_users').response([{ id: 1, name: 'admin' }]);
 
 			const result = await service().readByQuery({});
@@ -190,7 +194,9 @@ describe('ItemsService coverage — system collections, uuid PKs, revisions, sin
 			expect(key).toMatch(uuidPattern);
 		});
 
-		it('createMany formats uuid PKs through the batchInsert path (postgres returns in order)', async () => {
+		it(oneLine`
+			createMany formats uuid PKs through the batchInsert path (postgres returns in order)
+		`, async () => {
 			// >1 row + postgres preservesInsertOrderInReturning() → the batchInsert branch, where
 			// each returned uuid is run through formatUUID.
 			tracker.on.insert('uuid_coll').response([
@@ -343,7 +349,9 @@ describe('ItemsService coverage — system collections, uuid PKs, revisions, sin
 			expect(key).toBe(1);
 		});
 
-		it('updateMany with accountability runs validateAccess + processPayload', async () => {
+		it(oneLine`
+			updateMany with accountability runs validateAccess + processPayload
+		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'y' }]);
 			tracker.on.update('test').response(1);
 
@@ -354,7 +362,9 @@ describe('ItemsService coverage — system collections, uuid PKs, revisions, sin
 		});
 	});
 
-	describe('onRequireUserIntegrityCheck callback bubbles the flags up instead of validating', () => {
+	describe(oneLine`
+		onRequireUserIntegrityCheck callback bubbles the flags up instead of validating
+	`, () => {
 		const onRequireUserIntegrityCheck = vi.fn();
 		const flags = UserIntegrityCheckFlag.All;
 
