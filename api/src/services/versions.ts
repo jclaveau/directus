@@ -14,6 +14,7 @@ import { assign, pick } from 'lodash-es';
 import objectHash from 'object-hash';
 import { getCache } from '../cache.js';
 import emitter from '../emitter.js';
+import { purgeScopedCache } from '../scoped-cache.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { ActivityService } from './activity.js';
@@ -265,7 +266,10 @@ export class VersionsService extends ItemsService {
 		const { cache } = getCache();
 
 		if (shouldClearCache(cache, undefined, collection)) {
-			cache.clear();
+			// A version save changes content reads of `collection` merged via `?version=`,
+			// but an arbitrary delta pins no value slice → collection-wide purge (null)
+			// rather than flushing every other collection's cache.
+			await purgeScopedCache(cache, collection, null);
 		}
 
 		return finalVersionDelta;

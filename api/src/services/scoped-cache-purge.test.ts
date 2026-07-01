@@ -64,10 +64,10 @@ const schema = new SchemaBuilder()
 schema.collections['test']!.scopedCacheFields = ['student'];
 
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
-// (or null = full flush) each mutation hands to purgeScopedCache — asserted via
-// toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation itself
-// is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
-// (capture-before-write, old ∪ new, upsert full-flush).
+// (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
+// asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
+// itself is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
+// (capture-before-write, old ∪ new, upsert coarse purge).
 describe(oneLine`
 	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
 `, () => {
@@ -130,10 +130,11 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		updateMany full-flushes (null) when a pre-update row is missing the scope field
+		updateMany falls back to a coarse purge (null) when a pre-update row is missing
+		the scope field
 	`, async () => {
 		// snapshotScopedCacheTags needs every row to resolve all scope fields; a row missing
-		// `student` makes the old value unknowable → null → coarse full flush over the slices.
+		// `student` makes the old value unknowable → null → coarse collection-wide purge.
 		tracker.on.select('test').response([{ id: 1 }]);
 		tracker.on.update('test').response(1);
 
@@ -173,8 +174,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		upsertMany full-flushes (null) — the update-subset old values are not cheaply
-		capturable
+		upsertMany falls back to a coarse purge (null) — the update-subset old values are
+		not cheaply capturable
 	`, async () => {
 		tracker.on.select('test').response([]);
 		tracker.on.insert('test').response([1]);
@@ -206,7 +207,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		updateBatch full-flushes (null) when a batched row is missing the scope field
+		updateBatch falls back to a coarse purge (null) when a batched row is missing the
+		scope field
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1 }]);
 		tracker.on.update('test').response(1);
@@ -249,8 +251,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		create full-flushes (null) when a hook takes over a row (returns a PK, scope value
-		unknowable)
+		create falls back to a coarse purge (null) when a hook takes over a row (returns a
+		PK, scope value unknowable)
 	`, async () => {
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
