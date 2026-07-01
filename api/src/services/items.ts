@@ -652,9 +652,9 @@ implements AbstractService<Item> {
 			//   - a create filter hook can rewrite a scope field, so `data`'s value may
 			//     not be what's stored;
 			//   - a payload that omits a scoped cache field has an unknown (default) value,
-			//     so `scopedCacheTagsFromRows` returns null and purgeScopedCache full-flushes;
+			//     so `scopedCacheTagsFromRows` returns null → a collection-wide purge;
 			//   - a row a hook *took over* (returned a primary key, inserted itself) has an
-			//     unknowable scope value, so its presence forces a full flush too.
+			//     unknowable scope value, so its presence forces that collection-wide purge too.
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
 
 			if (scopedCacheFields.length > 0) {
@@ -1361,8 +1361,9 @@ implements AbstractService<Item> {
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// Upserts mix inserts and updates per row, so old (pre-update) scope values
-			// can't be captured cheaply for the update subset. Fall back to a full flush
-			// (`null`) rather than risk leaving a moved-value slice stale.
+			// can't be captured cheaply for the update subset. Fall back to a collection-wide
+			// purge (`null` → bare tag + every slice, other collections spared) rather than
+			// risk leaving a moved-value slice stale.
 			// TODO(scoped-cache): resolve per-row once upsert churn is measured.
 			await this.purgeScopedCache(null);
 		}

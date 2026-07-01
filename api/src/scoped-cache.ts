@@ -72,12 +72,74 @@ export async function tagScopedCacheKeys(
 }
 
 /**
+ * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
+ * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
+ */
+async function purgeTagKeys(cache: Keyv, tagKeys: string[]): Promise<void> {
+	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty collection
+	// scan) can leave nothing to purge.
+	if (tagKeys.length === 0) {
+		return;
+	}
+
+	const redis = useRedis();
+	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
+	const members = [...new Set(memberLists.flat())];
+
+	if (members.length > 0) {
+		await Promise.all(members.map((member) => cache.delete(member)));
+	}
+
+	await redis.del(...tagKeys);
+}
+
+/**
+ * Cursor-scan every Redis key matching `match`. The client is always standalone
+ * (never cluster), so a single-node SCAN covers the whole keyspace.
+ */
+async function scanTagKeys(match: string): Promise<string[]> {
+	const redis = useRedis();
+	const found: string[] = [];
+	let cursor = '0';
+
+	do {
+		const [next, batch] = await redis.scan(cursor, 'MATCH', match, 'COUNT', 250);
+		cursor = next;
+		found.push(...batch);
+	}
+	while (cursor !== '0');
+
+	return found;
+}
+
+/**
+ * Purge every cached read of `collection` — its bare collection tag plus all its value
+ * slices — without full-flushing the namespace. The fallback when a mutation's scope
+ * values are unresolvable (e.g. an upsert mixing inserts and updates): which slices
+ * changed is unknown, but only reads touching THIS collection can be stale, so scope the
+ * flush to its tag sets and spare every other collection's entries.
+ */
+export async function purgeCollectionScope(
+	cache: Keyv,
+	collection: string,
+): Promise<void> {
+	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
+
+	// Slice keys are `<bareKey>:<field>=<value>`; the `:` delimiter keeps a prefix-sharing
+	// sibling (`articles` vs `articles_archive`) out of the scan.
+	const sliceKeys = await scanTagKeys(`${bareKey}:*`);
+
+	await purgeTagKeys(cache, [bareKey, ...sliceKeys]);
+}
+
+/**
  * Purge cached responses affected by a mutation on `collection`. Outside scoped mode
  * the whole data cache is flushed (legacy `cache.clear()` behavior). In scoped mode
  * the bare collection tag (global reads) is always purged alongside the resolved
  * `scopedCacheTags` (the owner/partition slices the mutation touched), leaving every
  * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
- * resolved" → fall back to a full flush rather than risk leaving a stale slice behind.
+ * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
+ * risk leaving a slice stale; still narrower than nuking the whole namespace.
  */
 export async function purgeScopedCache(
 	cache: Keyv,
@@ -91,7 +153,7 @@ export async function purgeScopedCache(
 	}
 
 	if (scopedCacheTags === null) {
-		await cache.clear();
+		await purgeCollectionScope(cache, collection);
 		return;
 	}
 
@@ -102,19 +164,7 @@ export async function purgeScopedCache(
 		context,
 	)) as ScopedCacheTag[];
 
-	const redis = useRedis();
-	const tagKeys = [...new Set(tags.map(scopedCacheTagKey))];
-	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
-	const members = [...new Set(memberLists.flat())];
-
-	if (members.length > 0) {
-		await Promise.all(members.map((member) => cache.delete(member)));
-	}
-
-	// A `cache.purge` filter could empty the tag set; `redis.del()` with no keys throws.
-	if (tagKeys.length > 0) {
-		await redis.del(...tagKeys);
-	}
+	await purgeTagKeys(cache, [...new Set(tags.map(scopedCacheTagKey))]);
 }
 
 /**

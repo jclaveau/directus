@@ -17,6 +17,7 @@ const redis = vi.hoisted(() => {
 	return {
 		smembers: vi.fn(),
 		del: vi.fn(),
+		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
 	};
@@ -285,15 +286,75 @@ describe('scoped cache purging', () => {
 		});
 
 		test(oneLine`
-			null scopedCacheTags falls back to a full flush (unresolvable mutation)
+			null scopedCacheTags falls back to a collection-wide purge (bare tag + every
+			slice), sparing other collections
 		`, async () => {
+			redis.scan.mockResolvedValueOnce([
+				'0',
+				['system-cache:tag:articles:author=1', 'system-cache:tag:articles:author=2'],
+			]);
+
+			redis.smembers.mockImplementation(async (tagKey: string) => {
+				if (tagKey === 'system-cache:tag:articles') {
+					return ['global-key'];
+				}
+
+				return ['slice-key'];
+			});
+
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			expect(cache.clear).toHaveBeenCalledTimes(1);
-			expect(cache.delete).not.toHaveBeenCalled();
-			expect(redis.smembers).not.toHaveBeenCalled();
+			// The `:` delimiter keeps a prefix sibling (`articles_archive`) out of the scan.
+			expect(redis.scan).toHaveBeenCalledWith(
+				'0',
+				'MATCH',
+				'system-cache:tag:articles:*',
+				'COUNT',
+				250,
+			);
+
+			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:articles');
+			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:articles:author=1');
+			expect(cache.delete).toHaveBeenCalledWith('global-key');
+			expect(cache.delete).toHaveBeenCalledWith('slice-key');
+
+			expect(redis.del).toHaveBeenCalledWith(
+				'system-cache:tag:articles',
+				'system-cache:tag:articles:author=1',
+				'system-cache:tag:articles:author=2',
+			);
+
+			expect(cache.clear).not.toHaveBeenCalled();
+		});
+
+		test('the collection-wide purge follows the scan cursor across batches', async () => {
+			redis.scan
+				.mockResolvedValueOnce(['42', ['system-cache:tag:articles:author=1']])
+				.mockResolvedValueOnce(['0', ['system-cache:tag:articles:author=2']]);
+
+			redis.smembers.mockResolvedValue([]);
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'articles', null);
+
+			expect(redis.scan).toHaveBeenCalledTimes(2);
+
+			expect(redis.scan).toHaveBeenNthCalledWith(
+				2,
+				'42',
+				'MATCH',
+				'system-cache:tag:articles:*',
+				'COUNT',
+				250,
+			);
+
+			expect(redis.del).toHaveBeenCalledWith(
+				'system-cache:tag:articles',
+				'system-cache:tag:articles:author=1',
+				'system-cache:tag:articles:author=2',
+			);
 		});
 
 		test('full mode flushes the whole cache and never touches redis', async () => {
