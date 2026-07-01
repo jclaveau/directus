@@ -108,6 +108,42 @@ const o2mChain = new SchemaBuilder()
 	})
 	.build();
 
+// Mixed-type chains: the walker must recurse across a change of relation type between hops,
+// not just repeat one type. o2m→m2o, m2o→o2m, and m2m(deep)→m2o off the junction target.
+const o2mThenM2o = new SchemaBuilder()
+	.collection('authors', (c) => {
+		c.field('id').id();
+		c.field('books').o2m('books', 'author_id');
+	})
+	.collection('books', (c) => {
+		c.field('id').id();
+		c.field('publisher').m2o('publishers');
+	})
+	.build();
+
+const m2oThenO2m = new SchemaBuilder()
+	.collection('reviews', (c) => {
+		c.field('id').id();
+		c.field('book').m2o('books');
+	})
+	.collection('books', (c) => {
+		c.field('id').id();
+		c.field('chapters').o2m('chapters', 'book_id');
+	})
+	.build();
+
+// m2m('tags') generates the junction `articles_tags_junction`; tags.category adds a further m2o.
+const m2mThenM2o = new SchemaBuilder()
+	.collection('articles', (c) => {
+		c.field('id').id();
+		c.field('tags').m2m('tags');
+	})
+	.collection('tags', (c) => {
+		c.field('id').id();
+		c.field('category').m2o('categories');
+	})
+	.build();
+
 describe('scoped cache read tagging across relation types', () => {
 	let db: MockedFunction<Knex>;
 	let tracker: Tracker;
@@ -235,5 +271,25 @@ describe('scoped cache read tagging across relation types', () => {
 		});
 
 		expect(tags).toEqual(['cities', 'continents', 'countries']);
+	});
+
+	it('mixed chain o2m→m2o: tags every collection across the type change', async () => {
+		expect(
+			await taggedCollections('authors', o2mThenM2o, ['*', 'books.publisher.*']),
+		).toEqual(['authors', 'books', 'publishers']);
+	});
+
+	it('mixed chain m2o→o2m: tags every collection across the type change', async () => {
+		expect(
+			await taggedCollections('reviews', m2oThenO2m, ['*', 'book.chapters.*']),
+		).toEqual(['books', 'chapters', 'reviews']);
+	});
+
+	it(oneLine`
+		mixed chain m2m(deep)→m2o: tags root + junction + target + the target's further m2o
+	`, async () => {
+		expect(
+			await taggedCollections('articles', m2mThenM2o, ['*', 'tags.tags_id.category.*']),
+		).toEqual(['articles', 'articles_tags_junction', 'categories', 'tags']);
 	});
 });
