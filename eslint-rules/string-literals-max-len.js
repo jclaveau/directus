@@ -20,7 +20,9 @@
 
 import path from 'node:path'
 
-const TITLE_CALLERS = new Set([`test`, `it`, `describe`])
+// Call names whose leading argument is a display string literal safe to collapse via `oneLine`
+// (a test title/label). Value-bearing strings elsewhere (URLs, SQL) are left to core max-len.
+const WRAPPABLE_CALLERS = new Set([`test`, `it`, `describe`])
 
 // The module a missing `oneLine` is imported from: a fixed specifier (`@directus/utils`) if given,
 // else a path relative to the file being fixed (importDir/importFile).
@@ -92,10 +94,10 @@ function visualWidth(text, tabWidth) {
   return width
 }
 
-// The title text, whether written as a plain string literal or already wrapped in `oneLine`…`.
+// The string-literal value, whether written as a plain literal or already wrapped in `oneLine`…`.
 // Returns null for anything else (a non-oneLine tag, or a template with interpolations we can't
 // safely collapse).
-function titleText(node, tag) {
+function stringLiteralText(node, tag) {
   if (node.type === `Literal` && typeof node.value === `string`) {
     return node.value
   }
@@ -110,9 +112,9 @@ function titleText(node, tag) {
   return null
 }
 
-// Greedily pack the title words into `oneLine`…` where every source line — indentation included —
+// Greedily pack the string's words into `oneLine`…` where every source line — indentation included —
 // fits the column cap, so nothing soft-wraps in a diff/review pane.
-function wrapTitle(text, baseIndent, indentUnit, tag, code, tabWidth) {
+function wrapStringLiteral(text, baseIndent, indentUnit, tag, code, tabWidth) {
   const escaped = text.replace(/\\/g, `\\\\`).replace(/`/g, `\\\``).replace(/\$\{/g, `\\\${`)
   const budget = code - visualWidth(baseIndent + indentUnit, tabWidth)
 
@@ -144,7 +146,7 @@ export default {
     fixable: `code`,
     docs: {
       description:
-        `wrap an over-length test title in the oneLine tag instead of blowing the max-len cap`,
+        `wrap an over-length string literal in the oneLine tag instead of blowing the max-len cap`,
     },
     schema: [{
       type: `object`,
@@ -160,8 +162,8 @@ export default {
       additionalProperties: false,
     }],
     messages: {
-      wrapTitle:
-        `Title string exceeds the {{code}}-col cap — wrap it in \`{{tag}}\`\`…\`\` and word-wrap `
+      overLength:
+        `String literal exceeds the {{code}}-col cap — wrap it in \`{{tag}}\`\`…\`\` and word-wrap `
         + `so every source line fits (nothing soft-wraps in the review pane).`,
     },
   },
@@ -176,25 +178,25 @@ export default {
 
     return {
       CallExpression(node) {
-        if (!TITLE_CALLERS.has(rootCalleeName(node.callee))) {
+        if (!WRAPPABLE_CALLERS.has(rootCalleeName(node.callee))) {
           return
         }
 
-        const title = node.arguments[0]
-        if (!title) {
+        const literal = node.arguments[0]
+        if (!literal) {
           return
         }
 
-        const text = titleText(title, tag)
+        const text = stringLiteralText(literal, tag)
         if (text === null) {
           return
         }
 
-        // Report when any source line the title occupies — a plain literal's `it(` line, or one of
-        // an already-wrapped `oneLine`'s body lines — overflows the cap. A title that already fits
+        // Report when any source line the literal occupies — a plain literal's `it(` line, or one of
+        // an already-wrapped `oneLine`'s body lines — overflows the cap. A literal that already fits
         // (short literal, or a correctly-wrapped template) is left alone.
         let overflows = false
-        for (let ln = title.loc.start.line; ln <= title.loc.end.line; ln++) {
+        for (let ln = literal.loc.start.line; ln <= literal.loc.end.line; ln++) {
           if (visualWidth(sourceCode.lines[ln - 1], tabWidth) > code) {
             overflows = true
             break
@@ -204,15 +206,15 @@ export default {
           return
         }
 
-        const baseIndent = sourceCode.lines[title.loc.start.line - 1].match(/^[ \t]*/)[0]
+        const baseIndent = sourceCode.lines[literal.loc.start.line - 1].match(/^[ \t]*/)[0]
 
         context.report({
-          node: title,
-          messageId: `wrapTitle`,
+          node: literal,
+          messageId: `overLength`,
           data: { code: String(code), tag },
           fix(fixer) {
-            const wrapped = wrapTitle(text, baseIndent, indentUnit, tag, code, tabWidth)
-            const fixes = [fixer.replaceText(title, wrapped)]
+            const wrapped = wrapStringLiteral(text, baseIndent, indentUnit, tag, code, tabWidth)
+            const fixes = [fixer.replaceText(literal, wrapped)]
 
             const module = resolveImportModule(context.filename, options)
             if (module && !bindsLocalName(sourceCode, tag)) {
