@@ -29,6 +29,43 @@ vi.mock('../../src/database/index', () => {
 	};
 });
 
+// The non-bypass path reads/writes the in-memory schema cache and coordinates via lock+bus. Drive
+// each from the test so both the "cache hit" short-circuit and the "wait for another process" branch
+// are reachable.
+const memoryCache: { schema: any } = { schema: undefined };
+
+vi.mock('../cache.js', () => {
+	return {
+		getMemorySchemaCache: () => memoryCache.schema,
+		setMemorySchemaCache: (schema: any) => {
+			memoryCache.schema = schema;
+		},
+	};
+});
+
+const lockIncrement = vi.fn();
+const lockDelete = vi.fn();
+
+vi.mock('../lock/index.js', () => {
+	return { useLock: () => ({ increment: lockIncrement, delete: lockDelete }) };
+});
+
+const busSubscribe = vi.fn();
+const busUnsubscribe = vi.fn();
+const busPublish = vi.fn();
+
+function bus() {
+	return { subscribe: busSubscribe, unsubscribe: busUnsubscribe, publish: busPublish };
+}
+
+vi.mock('../bus/index.js', () => {
+	return { useBus: bus };
+});
+
+vi.mock('../logger/index.js', () => {
+	return { useLogger: () => ({ trace: vi.fn(), warn: vi.fn() }) };
+});
+
 // createInspector().overview() is the column/primary source; stub a single user
 // collection so the assembly loop (144-189) and the fields loop (215-252) both run.
 const overview = vi.fn();
@@ -240,6 +277,41 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 		expect(validation).toEqual({ _and: [] });
 	});
 
+	// A non-alias field row with no matching column is skipped (227-229): neither an alias
+	// special nor an existing column, so nothing is added.
+	it('skips a non-alias field row that has no matching column', async () => {
+		overview.mockResolvedValue(overviewFor('test'));
+
+		tracker.on.select('directus_collections').response([
+			{
+				collection: 'test',
+				singleton: false,
+				note: null,
+				sort_field: null,
+				accountability: 'all',
+				scoped_cache_fields: null,
+			},
+		]);
+
+		tracker.on.select('directus_fields').response([
+			{
+				id: 1,
+				collection: 'test',
+				field: 'phantom',
+				special: null,
+				note: null,
+				validation: null,
+			},
+		]);
+
+		const schema = await run();
+		const test = schema.collections['test'];
+
+		// only the two overview columns survive; the phantom field row was skipped
+		expect(Object.keys(test!.fields).sort()).toEqual(['id', 'student']);
+		expect(test!.fields['phantom']).toBeUndefined();
+	});
+
 	// A field row carrying an alias special with no matching column produces an alias
 	// field, exercising the fields loop's alias path (215-252).
 	it('maps an alias field row onto the collection', async () => {
@@ -274,5 +346,83 @@ describe('getDatabaseSchema (via getSchema bypassCache)', () => {
 		expect(test!.fields['children']!.type).toBe('alias');
 		expect(test!.fields['children']!.note).toBe('kids');
 		expect(test!.fields['children']!.special).toEqual(['o2m']);
+	});
+});
+
+describe('getSchema cached (non-bypass) path', () => {
+	let db: MockedFunction<Knex>;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = vi.mocked(knex.default({ client: MockClient }));
+		tracker = createTracker(db);
+	});
+
+	beforeEach(() => {
+		env['CACHE_SCHEMA'] = true;
+		memoryCache.schema = undefined;
+		overview.mockReset();
+		readAll.mockClear();
+		lockIncrement.mockReset();
+		lockDelete.mockReset();
+		busSubscribe.mockReset();
+		busUnsubscribe.mockReset();
+		busPublish.mockReset().mockResolvedValue(undefined);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		env['CACHE_SCHEMA'] = false;
+	});
+
+	// A populated in-memory cache short-circuits the whole build (48-50).
+	it('returns the in-memory cached schema without inspecting the database', async () => {
+		memoryCache.schema = { collections: { cached: {} }, relations: [] };
+
+		const schema = await getSchema({ database: db });
+
+		expect(schema).toBe(memoryCache.schema);
+		expect(lockIncrement).not.toHaveBeenCalled();
+		expect(overview).not.toHaveBeenCalled();
+	});
+
+	// processId === 1 → this process builds the schema, caches it and returns it (109-115).
+	it('builds and caches the schema when it wins the lock (processId 1)', async () => {
+		lockIncrement.mockResolvedValue(1);
+
+		overview.mockResolvedValue(overviewFor('test'));
+		tracker.on.select('directus_collections').response([]);
+		tracker.on.select('directus_fields').response([]);
+
+		const schema = await getSchema({ database: db });
+
+		expect(schema.collections['test']).toBeDefined();
+		// schema was written to the in-memory cache and the lock/bus were coordinated
+		expect(memoryCache.schema).toBe(schema);
+		expect(busPublish).toHaveBeenCalledWith('schemaCache--done', { schema });
+		expect(lockDelete).toHaveBeenCalledWith('schemaCache--preparing');
+	});
+
+	// processId !== 1 → this process waits on the bus; the listener resolves with the schema the
+	// winning process publishes (69-99, incl. the setMemorySchemaCache + resolve at 86-89).
+	it('waits for another process and resolves via the bus listener', async () => {
+		lockIncrement.mockResolvedValue(2);
+
+		const published = { collections: { fromBus: {} }, relations: [] };
+
+		busSubscribe.mockImplementation(
+			async (_key: string, listener: (opts: { schema: any }) => void) => {
+				// simulate the winning process publishing the finished schema
+				listener({ schema: published });
+			},
+		);
+
+		busUnsubscribe.mockResolvedValue(undefined);
+
+		const schema = await getSchema({ database: db });
+
+		expect(schema).toBe(published);
+		expect(memoryCache.schema).toBe(published);
+		expect(overview).not.toHaveBeenCalled();
 	});
 });
