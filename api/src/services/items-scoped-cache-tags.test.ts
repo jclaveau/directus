@@ -38,7 +38,7 @@ const schema = new SchemaBuilder()
 
 const db = knex({ client: MockClient });
 
-describe('readByQuery cache-tag accumulation', () => {
+describe('readByQuery scoped cache tag accumulation', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
