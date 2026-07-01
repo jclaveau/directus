@@ -15,6 +15,7 @@ import {
 	collectionBlock,
 	collectionChild,
 	collectionFirst,
+	collectionGrandRelated,
 	collectionIgnored,
 	collectionRelated,
 	collectionTag,
@@ -456,6 +457,64 @@ describe('App Caching Tests', () => {
 
 			expect(afterRelatedWrite.statusCode).toBe(200);
 			expect(afterRelatedWrite.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		Scoped purge invalidates a read nested two relations deep (related.grand) when the
+		leaf collection is mutated
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			// Build the chain leaf → up: grand ← related ← first.
+			const grand = (
+				await request(url)
+					.post(`/items/${collectionGrandRelated}`)
+					.send({ string_field: randomUUID() })
+					.set('Authorization', auth)
+			).body.data;
+
+			const related = (
+				await request(url)
+					.post(`/items/${collectionRelated}`)
+					.send({ string_field: randomUUID(), grand: grand.id })
+					.set('Authorization', auth)
+			).body.data;
+
+			await request(url)
+				.post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID(), related: related.id })
+				.set('Authorization', auth);
+
+			// A read two relations deep — the AST tags first, related AND grand.
+			const read = `/items/${collectionFirst}?fields=*,related.grand.*`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Mutate ONLY the leaf, two hops down; first + related untouched, yet the nested
+			// read must drop.
+			await request(url)
+				.patch(`/items/${collectionGrandRelated}/${grand.id}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			const afterGrandWrite = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterGrandWrite.statusCode).toBe(200);
+			expect(afterGrandWrite.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 
