@@ -228,19 +228,24 @@ export async function purgeScopedCache(
 }
 
 /**
- * Build scoped cache tags from the distinct scope values present across `rows` — the
- * purge side. With `requireAll` a row missing any scoped cache field makes the values
- * unresolvable (returns `null`), so the caller falls back to a coarse purge rather than
- * leaving a slice stale (a create whose payload omitted the field). Without it, missing
- * fields are skipped — for update payloads where an absent field just means "unchanged"
- * and the pre-update capture covers the old value. `fieldTypes` carries each field's schema
- * type so the tag's value canonicalizes the same way the read side's filter value does.
+ * Build scoped cache tags from the distinct scope values present across `rows` — the purge side.
+ *
+ * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*. `'coarse'`
+ *   returns `null` so the caller can fall back to a collection-wide purge rather than leave a
+ *   slice stale; `'skip'` best-effort skips just that row's contribution.
+ * - The `'coarse'` path only triggers for a caller feeding *unprojected* rows (e.g. a raw payload).
+ *   The sole production caller (`snapshotScopedCacheTags`) reads rows via an explicit projected
+ *   `select`, so every field key is always present and it never returns `null` there — an
+ *   update/delete/create snapshot always resolves. A create whose committed rows can't be trusted
+ *   is caught upstream by the row-count check (`someRowTakenOver`), not here.
+ * - `fieldTypes`: each field's schema type, so the tag value canonicalizes the same way the read
+ *   side's filter value does.
  */
 export function scopedCacheTagsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
-	requireAll: boolean,
+	onUnresolvable: 'coarse' | 'skip',
 	fieldTypes: Record<string, Type | undefined> = {},
 ): ScopedCacheTag[] | null {
 	const tags: ScopedCacheTag[] = [];
@@ -250,7 +255,7 @@ export function scopedCacheTagsFromRows(
 
 		for (const row of rows) {
 			if (!(field in row)) {
-				if (requireAll) {
+				if (onUnresolvable === 'coarse') {
 					return null;
 				}
 
