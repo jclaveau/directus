@@ -1,69 +1,69 @@
 {
-	"name": "@directus/utils",
-	"version": "13.0.9",
-	"description": "Utilities shared between the Directus packages",
-	"homepage": "https://directus.io",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/directus/directus.git",
-		"directory": "packages/utils"
-	},
-	"funding": "https://github.com/directus/directus?sponsor=1",
-	"license": "MIT",
-	"author": "Rijk van Zanten <rijkvanzanten@me.com>",
-	"sideEffects": false,
-	"type": "module",
-	"exports": {
-		".": "./dist/shared/index.js",
-		"./node": "./dist/node/index.js",
-		"./browser": "./dist/browser/index.js",
-		"./package.json": "./package.json"
-	},
-	"main": "dist/shared/index.js",
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "pnpm run '/^build:.*/'",
-		"build:browser": "tsdown browser/index.ts --tsconfig browser/tsconfig.json --out-dir dist/browser --dts",
-		"build:node": "tsdown node/index.ts --tsconfig node/tsconfig.json --out-dir dist/node --dts",
-		"build:shared": "tsdown shared/index.ts --tsconfig shared/tsconfig.json --out-dir dist/shared --dts",
-		"dev": "pnpm run '/^build:.*/' --watch",
-		"test": "vitest run",
-		"test:coverage": "vitest run --coverage"
-	},
-	"dependencies": {
-		"@directus/constants": "workspace:*",
-		"@directus/system-data": "workspace:*",
-		"date-fns": "catalog:",
-		"fs-extra": "catalog:",
-		"joi": "catalog:",
-		"js-yaml": "catalog:",
-		"lodash-es": "catalog:",
-		"micromustache": "catalog:"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "catalog:",
-		"@directus/schema-builder": "workspace:*",
-		"@directus/types": "workspace:*",
-		"@types/fs-extra": "catalog:",
-		"@types/js-yaml": "catalog:",
-		"@types/lodash-es": "catalog:",
-		"@types/node": "catalog:",
-		"@types/tmp": "catalog:",
-		"@vitest/coverage-v8": "catalog:",
-		"tmp": "catalog:",
-		"tsdown": "catalog:",
-		"typescript": "catalog:",
-		"vitest": "catalog:",
-		"vue": "catalog:"
-	},
-	"peerDependencies": {
-		"vue": "catalog:"
-	},
-	"peerDependenciesMeta": {
-		"vue": {
-			"optional": true
-		}
-	}
+  "name": "@directus/utils",
+  "version": "13.0.9",
+  "description": "Utilities shared between the Directus packages",
+  "homepage": "https://directus.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/directus/directus.git",
+    "directory": "packages/utils"
+  },
+  "funding": "https://github.com/directus/directus?sponsor=1",
+  "license": "MIT",
+  "author": "Rijk van Zanten <rijkvanzanten@me.com>",
+  "sideEffects": false,
+  "type": "module",
+  "exports": {
+    ".": "./dist/shared/index.js",
+    "./node": "./dist/node/index.js",
+    "./browser": "./dist/browser/index.js",
+    "./package.json": "./package.json"
+  },
+  "main": "dist/shared/index.js",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "date-fns": "4.4.0",
+    "fs-extra": "11.3.5",
+    "joi": "17.13.4",
+    "js-yaml": "4.2.0",
+    "lodash-es": "4.18.1",
+    "micromustache": "8.0.3",
+    "@directus/constants": "13.0.2",
+    "@directus/system-data": "3.2.1"
+  },
+  "devDependencies": {
+    "@directus/tsconfig": "4.0.0",
+    "@types/fs-extra": "11.0.4",
+    "@types/js-yaml": "4.0.9",
+    "@types/lodash-es": "4.17.12",
+    "@types/node": "22.19.21",
+    "@types/tmp": "0.2.6",
+    "@vitest/coverage-v8": "3.2.6",
+    "tmp": "0.2.7",
+    "tsdown": "0.15.11",
+    "typescript": "5.8.3",
+    "vitest": "3.2.6",
+    "vue": "3.5.38",
+    "@directus/types": "13.2.1",
+    "@directus/schema-builder": "0.0.4"
+  },
+  "peerDependencies": {
+    "vue": "3.5.38"
+  },
+  "peerDependenciesMeta": {
+    "vue": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "build": "pnpm run '/^build:.*/'",
+    "build:browser": "tsdown browser/index.ts --tsconfig browser/tsconfig.json --out-dir dist/browser --dts",
+    "build:node": "tsdown node/index.ts --tsconfig node/tsconfig.json --out-dir dist/node --dts",
+    "build:shared": "tsdown shared/index.ts --tsconfig shared/tsconfig.json --out-dir dist/shared --dts",
+    "dev": "pnpm run '/^build:.*/' --watch",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  }
 }

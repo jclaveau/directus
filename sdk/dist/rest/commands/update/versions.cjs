@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/versions`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/versions`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/versions/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updateContentVersion=r,exports.updateContentVersions=t,exports.updateContentVersionsBatch=n;
+//# sourceMappingURL=versions.cjs.map
