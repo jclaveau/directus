@@ -68,6 +68,7 @@ export const DEFAULTS = {
 	CORS_MAX_AGE: 18000,
 
 	CACHE_ENABLED: false,
+	CACHE_TYPES: 'api,service',
 	CACHE_STORE: 'memory',
 	CACHE_TTL: '5m',
 	CACHE_NAMESPACE: 'system-cache',

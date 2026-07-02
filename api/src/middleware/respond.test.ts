@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 const env: Record<string, any> = {
 	CACHE_ENABLED: true,
+	CACHE_TYPES: ['api', 'service'],
 	CACHE_VALUE_MAX_SIZE: false,
 	CACHE_TTL: '5m',
 	CACHE_STATUS_HEADER: 'x-cache-status',
@@ -92,6 +93,7 @@ function makeReq(overrides: Partial<Request> = {}) {
 
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
+	env['CACHE_TYPES'] = ['api', 'service'];
 	env['CACHE_VALUE_MAX_SIZE'] = false;
 	permissionsCachable.mockResolvedValue(true);
 });
@@ -169,6 +171,17 @@ describe('respond middleware', () => {
 
 	test('CACHE_ENABLED === false skips caching', async () => {
 		env['CACHE_ENABLED'] = false;
+		const res = makeRes({ data: [] });
+		const req = makeReq();
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache');
+	});
+
+	test('CACHE_TYPES without "api" skips the HTTP response cache', async () => {
+		env['CACHE_TYPES'] = ['service'];
 		const res = makeRes({ data: [] });
 		const req = makeReq();
 

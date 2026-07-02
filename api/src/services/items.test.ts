@@ -1077,6 +1077,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	describe('service-level read-through cache', () => {
 		beforeEach(() => {
 			env['CACHE_ENABLED'] = true;
+			env['CACHE_TYPES'] = ['api', 'service'];
 			env['CACHE_VALUE_MAX_SIZE'] = false;
 			env['CACHE_TTL'] = '5m';
 			vi.mocked(permissionsCachable).mockResolvedValue(true);
@@ -1086,6 +1087,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 		afterEach(() => {
 			delete env['CACHE_ENABLED'];
+			delete env['CACHE_TYPES'];
 			delete env['CACHE_VALUE_MAX_SIZE'];
 			delete env['CACHE_TTL'];
 		});
@@ -1218,6 +1220,17 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const result = await service.readByQuery({});
 
 			expect(result).toEqual([{ id: 3, name: 'live' }]);
+		});
+
+		it('skips the cache when CACHE_TYPES omits "service"', async () => {
+			env['CACHE_TYPES'] = ['api'];
+			tracker.on.select('test').response([{ id: 1, name: 'fresh' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			await service.readByQuery({});
+
+			expect(getCacheValue).not.toHaveBeenCalled();
+			expect(setCacheValue).not.toHaveBeenCalled();
 		});
 	});
 });

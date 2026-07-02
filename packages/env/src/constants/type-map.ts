@@ -19,6 +19,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	DB_MSSQL_TRUST_BATCH_RETURNING: 'boolean',
 
 	CACHE_SKIP_ALLOWED: 'boolean',
+	CACHE_TYPES: 'array',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_SCHEMA_MAX_ITERATIONS: 'number',
 	CACHE_SCHEMA_SYNC_TIMEOUT: 'number',

@@ -46,6 +46,7 @@ import { processPayload } from '../permissions/modules/process-payload/process-p
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { getReadThroughCacheKey } from '../utils/get-cache-key.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
+import { isCacheTypeEnabled } from '../utils/is-cache-type-enabled.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
@@ -724,6 +725,7 @@ implements AbstractService<Item> {
 		const cacheable =
 			opts?.cache !== false &&
 			env['CACHE_ENABLED'] === true &&
+			isCacheTypeEnabled('service') &&
 			this.cache !== null &&
 			!this.knex.isTransaction &&
 			!isSystemCollection(this.collection);
