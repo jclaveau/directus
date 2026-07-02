@@ -772,6 +772,9 @@ implements AbstractService<Item> {
 				}
 			}
 
+			// `updatedQuery.filter` already has dynamic vars resolved — sanitizeQuery
+			// (REST middleware + GraphQL parse-query) runs parseFilter before the service, so
+			// `$CURRENT_USER` is the concrete user id here, matching what a write's row yields.
 			const rootScopedCacheTags = rootPaths.size > 1
 				? []
 				: pinnedScopedCacheTagsFromFilter(

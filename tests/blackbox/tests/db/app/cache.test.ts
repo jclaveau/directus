@@ -996,4 +996,76 @@ describe('App Caching Tests', () => {
 			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
+
+	describe(oneLine`
+		$CURRENT_USER-filtered scoped read pins the resolved user id, not the
+		literal token — sanitizeQuery substitutes it before the read, so the
+		owner's own write purges the read
+	`, () => {
+		// Regression guard: the read-side pin consumes updatedQuery.filter, which looks like it
+		// could still hold the literal '$CURRENT_USER'. It doesn't — sanitizeQuery (REST middleware
+		// + GraphQL parse-query) resolves the dynamic var to the concrete user id before the service
+		// runs, so the scope tag is owner_field=<uuid>, matching what a write derives from the row.
+		// If that resolution ever regressed, the read would tag the literal token, the write would
+		// tag the uuid, they'd never match, and this read would stay a stale HIT after the write.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const me = (
+				await request(url).get('/users/me?fields=id')
+					.set('Authorization', auth)
+			).body.data;
+
+			// Rows owned by the current user (owner_field holds the user's id), plus a control slice.
+			await request(url)
+				.post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', auth);
+
+			// $CURRENT_USER resolves to me.id → pins slice owner_field=<me.id>.
+			const scopedItems = `/items/${collectionScoped}`;
+			const readMine = `${scopedItems}?filter[owner_field][_eq]=$CURRENT_USER`;
+			const readCtl = `${scopedItems}?filter[owner_field][_eq]=${scopedOwnerB}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(readMine)
+				.set('Authorization', auth);
+
+			await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			const warmMine = await request(url).get(readMine)
+				.set('Authorization', auth);
+
+			const warmCtl = await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			expect(warmMine.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmCtl.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in the current user's slice (owner_field=<me.id>) — the same value
+			// $CURRENT_USER resolved to. It must purge the $CURRENT_USER read.
+			await request(url)
+				.post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', auth);
+
+			const afterMine = await request(url).get(readMine)
+				.set('Authorization', auth);
+
+			const afterCtl = await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			// MISS proves the pin used the resolved uuid (matched the write); a literal-token pin
+			// would have left this a stale HIT. The control slice stays warm.
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterCtl.statusCode).toBe(200);
+			expect(afterCtl.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
 });
