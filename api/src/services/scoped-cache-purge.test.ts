@@ -80,7 +80,7 @@ selfRefSchema.collections['test']!.scopedCacheFields = ['student'];
 // (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
 // asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
 // itself is unit-tested in scoped-cache-tags.test.ts; this pins the purge side
-// (capture-before-write, old ∪ new, upsert coarse purge).
+// (capture-before-write, old ∪ new for update/delete/upsert).
 describe(oneLine`
 	scoped cache purge (ItemsService mutation → purgeScopedCache scoped cache tags)
 `, () => {
@@ -187,15 +187,42 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		upsertMany falls back to a coarse purge (null) — the update-subset old values are
-		not cheaply capturable
+		upsertMany (insert) purges the new slice — the committed row's scope value
 	`, async () => {
-		tracker.on.select('test').response([]);
+		// No key in the payload → pure insert; the new slice comes from the committed row.
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.insert('test').response([1]);
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
+		upsertMany (update) captures the pre-update slice — a keyed payload snapshots old
+		before the write (old ∪ new)
+	`, async () => {
+		// The payload carries the key → upsertOne takes the update path; the pre-snapshot
+		// reads the old slice (A) before the update runs.
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.update('test').response(1);
+
+		await service().upsertMany([{ id: 1, name: 'a', student: 'B' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
+			expect.anything(),
+		);
+
+		// Never the coarse null fallback now that old + new are both snapshotted.
+		expect(purgeScopedCache).not.toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			null,
