@@ -121,6 +121,18 @@ describe('scopedCacheTagsFromRows', () => {
 		]);
 	});
 
+	test('dedups on the canonical token, so 7 and "7" collapse to one tag', () => {
+		const rows = [{ student: 7 }, { student: '7' }];
+
+		expect(
+			scopedCacheTagsFromRows('slots', ['student'], rows, 'coarse', {
+				student: 'integer',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 7, type: 'integer' },
+		]);
+	});
+
 	test('null and numeric values are kept distinct', () => {
 		const rows = [{ student: null }, { student: 0 }, { student: null }];
 
@@ -213,6 +225,35 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	test('an _or branch does not bound the read, so nothing under it pins', () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([]);
+	});
+
+	test(oneLine`
+		a date-ish scope field is not pin-safe (filter↔row canonical can diverge), so an _eq
+		on it yields no pin — the read falls back to the bare collection tag
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['starts_at'],
+				{ starts_at: { _eq: '2026-01-01T00:00:00Z' } },
+				{ starts_at: 'dateTime' },
+			),
+		).toEqual([]);
+	});
+
+	test('a pin-safe field still pins alongside a skipped date field', () => {
+		const filter = {
+			_and: [{ student: { _eq: 'A' } }, { starts_at: { _eq: '2026-01-01' } }],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'starts_at'], filter, {
+				student: 'string',
+				starts_at: 'date',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A', type: 'string' },
+		]);
 	});
 
 	test('a non-equality operator (_gt) does not bound the read', () => {

@@ -83,6 +83,17 @@ export function canonicalScopedCacheValue(
 	return String(value);
 }
 
+// Types whose filter value and stored row value are NOT guaranteed to canonicalize to the same
+// token across drivers/timezones: a naive `dateTime`/`timestamp` column comes back as a local
+// `Date` from the driver but as an ISO string (possibly with an explicit `Z`) from a filter, so
+// the epoch-ms canonical can diverge. The read side never pins these — it falls back to the bare
+// collection tag so any write to the collection invalidates the read (over-purge, never stale).
+const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>(['date', 'dateTime', 'timestamp']);
+
+function isPinnableScopeType(type: Type | undefined): boolean {
+	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
+}
+
 function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
 	return tag.field === undefined
@@ -93,9 +104,10 @@ function scopedCacheTagKey(tag: ScopedCacheTag): string {
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the
- * payload key and its `__expires_at` sibling are tagged. Each tag set self-expires at
- * twice the cache TTL as a safety net against members orphaned by a crash between write
- * and purge.
+ * payload key and its `__expires_at` sibling are tagged. When a cache TTL is set, each tag
+ * set self-expires at twice that TTL as a safety net against members orphaned by a crash
+ * between write and purge; with no TTL (`CACHE_TTL` unset) the cached entries never expire
+ * either, so the tag sets are left unbounded to match — a normal purge still drains them.
  */
 export async function tagScopedCacheKeys(
 	key: string,
@@ -251,7 +263,9 @@ export function scopedCacheTagsFromRows(
 	const tags: ScopedCacheTag[] = [];
 
 	for (const field of fields) {
-		const seen = new Set<unknown>();
+		// Dedup on the canonical token, not the raw value, so `7` and `'7'` (or a boolean
+		// stored as `1`/`'t'`) collapse to one tag instead of emitting redundant slices.
+		const seen = new Set<string>();
 
 		for (const row of rows) {
 			if (!(field in row)) {
@@ -263,12 +277,13 @@ export function scopedCacheTagsFromRows(
 			}
 
 			const value = row[field];
+			const token = canonicalScopedCacheValue(value, fieldTypes[field]);
 
-			if (seen.has(value)) {
+			if (seen.has(token)) {
 				continue;
 			}
 
-			seen.add(value);
+			seen.add(token);
 			tags.push({ collection, field, value, type: fieldTypes[field] });
 		}
 	}
@@ -286,7 +301,8 @@ export function scopedCacheTagsFromRows(
  * matching the other branch still belongs). No pinned field → returns `[]`, and the
  * caller falls back to the bare collection tag so every write to the collection
  * invalidates the read. `fieldTypes` carries each field's schema type so the pinned
- * filter value canonicalizes the same way the purge side's stored row value does.
+ * filter value canonicalizes the same way the purge side's stored row value does — and
+ * so date-ish types (not pin-safe, see `PIN_UNSAFE_SCOPE_TYPES`) are skipped.
  */
 export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
@@ -321,10 +337,13 @@ export function pinnedScopedCacheTagsFromFilter(
 				continue;
 			}
 
-			// `_or` doesn't bound the read; nothing under it can pin a scope.
+			// `_or` doesn't bound the read; nothing under it can pin a scope. A date-ish field
+			// isn't pin-safe (filter↔row canonical can diverge), so it's skipped too — the read
+			// falls back to the bare collection tag.
 			if (
 				key === '_or' ||
 				!fieldSet.has(key) ||
+				!isPinnableScopeType(fieldTypes[key]) ||
 				value === null ||
 				typeof value !== 'object'
 			) {
