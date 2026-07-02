@@ -106,9 +106,11 @@ describe(oneLine`
 	it(oneLine`
 		updateMany purges old ∪ new — a row moved student A→B drops both slices
 	`, async () => {
-		// captureScopedCacheTags selects the pre-update rows (old = A);
-		// the payload sets new = B.
-		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		// snapshotScopedCacheTags reads the pre-update row (old = A), then re-reads the
+		// committed row after the write (new = B) — the stored row is authoritative, not the
+		// payload, so a trigger/coercion rewrite still resolves the right slice. old ∪ new.
+		tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+		tracker.on.select('test').responseOnce([{ id: 1, student: 'B' }]);
 		tracker.on.update('test').response(1);
 
 		await service().updateMany([1], { student: 'B' });
@@ -127,7 +129,8 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		updateMany that leaves the scope field untouched purges only the captured old slice
+		updateMany that leaves the scope field untouched still purges the captured slice —
+		old and re-read new both resolve to A
 	`, async () => {
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
@@ -137,7 +140,7 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			[{ collection: 'test', field: 'student', value: 'A' }],
+			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
 			expect.anything(),
 		);
 	});
@@ -334,13 +337,15 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		updateMany takes the new value from the post-hook payload, not the raw input
+		updateMany's new slice reflects a hook-rewritten scope value — it re-reads the
+		committed row, and the hook's payload is what got written
 	`, async () => {
-		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		// Old = A (pre-update). Raw payload sets B, but a hook rewrites it to C, so C is what
+		// the update writes; the post-commit re-read returns C → new slice C, unioned with A.
+		tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+		tracker.on.select('test').responseOnce([{ id: 1, student: 'C' }]);
 		tracker.on.update('test').response(1);
 
-		// Raw payload sets B, but a hook rewrites it to C — the new slice must be C,
-		// unioned with old A.
 		const rewrite = async (payload: any) => ({ ...payload, student: 'C' });
 		emitter.onFilter('test.items.update', rewrite);
 

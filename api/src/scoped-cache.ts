@@ -19,6 +19,23 @@ export function scopedCachePurgeEnabled(): boolean {
 	);
 }
 
+/**
+ * Fail fast at startup: scoped cache purging drives Redis SCAN + multi-key DEL over a single
+ * node, so it only works on a standalone client. A cluster client would silently under-purge
+ * (keys on other nodes never scanned) and leave stale slices. `useRedis()` always builds a
+ * standalone `Redis` in core, so this only bites a custom override — surface it at boot rather
+ * than as a mid-request stale HIT.
+ */
+export function assertScopedCacheRedisSupported(): void {
+	if (scopedCachePurgeEnabled() && useRedis().isCluster) {
+		throw new Error(
+			'CACHE_AUTO_PURGE_MODE=scoped is not implemented for Redis cluster clients '
+			+ '(SCAN and multi-key DEL are single-node). Use a standalone Redis or '
+			+ 'CACHE_AUTO_PURGE_MODE=full.',
+		);
+	}
+}
+
 // `String(value)` collapses types (number 7 vs string "7") — intentional and load-bearing:
 // a scope column has a stable type, but a REST string filter and the numeric DB value must
 // resolve the same slice. NULL gets a null-byte sentinel rather than String(null)='null', so
@@ -45,13 +62,13 @@ function scopedCacheTagKey(tag: ScopedCacheTag): string {
  */
 export async function tagScopedCacheKeys(
 	key: string,
-	tags: Iterable<ScopedCacheTag>,
+	scopedCacheTags: Iterable<ScopedCacheTag>,
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled()) {
 		return;
 	}
 
-	const tagKeys = [...new Set([...tags].map(scopedCacheTagKey))];
+	const tagKeys = [...new Set([...scopedCacheTags].map(scopedCacheTagKey))];
 
 	if (tagKeys.length === 0) {
 		return;
@@ -76,7 +93,7 @@ export async function tagScopedCacheKeys(
  * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
  * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
  */
-async function purgeTagKeys(cache: Keyv, tagKeys: string[]): Promise<void> {
+async function purgeScopedCacheTagKeys(cache: Keyv, tagKeys: string[]): Promise<void> {
 	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty collection
 	// scan) can leave nothing to purge.
 	if (tagKeys.length === 0) {
@@ -95,10 +112,12 @@ async function purgeTagKeys(cache: Keyv, tagKeys: string[]): Promise<void> {
 }
 
 /**
- * Cursor-scan every Redis key matching `match`. The client is always standalone
- * (never cluster), so a single-node SCAN covers the whole keyspace.
+ * Cursor-scan every Redis key matching `match`. A single-node SCAN only covers the whole
+ * keyspace on a standalone client; a cluster would miss keys on other nodes. Scoped mode is
+ * refused on a cluster at startup (`assertScopedCacheRedisSupported`), so the client here is
+ * always standalone.
  */
-async function scanTagKeys(match: string): Promise<string[]> {
+async function scanScopedCacheTagKeys(match: string): Promise<string[]> {
 	const redis = useRedis();
 	const found: string[] = [];
 	let cursor = '0';
@@ -120,7 +139,7 @@ async function scanTagKeys(match: string): Promise<string[]> {
  * changed is unknown, but only reads touching THIS collection can be stale, so scope the
  * flush to its tag sets and spare every other collection's entries.
  */
-export async function purgeCollectionScope(
+export async function purgeCollectionScopedCache(
 	cache: Keyv,
 	collection: string,
 ): Promise<void> {
@@ -128,9 +147,9 @@ export async function purgeCollectionScope(
 
 	// Slice keys are `<bareKey>:<field>=<value>`; the `:` delimiter keeps a prefix-sharing
 	// sibling (`articles` vs `articles_archive`) out of the scan.
-	const sliceKeys = await scanTagKeys(`${bareKey}:*`);
+	const sliceKeys = await scanScopedCacheTagKeys(`${bareKey}:*`);
 
-	await purgeTagKeys(cache, [bareKey, ...sliceKeys]);
+	await purgeScopedCacheTagKeys(cache, [bareKey, ...sliceKeys]);
 }
 
 /**
@@ -154,18 +173,21 @@ export async function purgeScopedCache(
 	}
 
 	if (scopedCacheTags === null) {
-		await purgeCollectionScope(cache, collection);
+		await purgeCollectionScopedCache(cache, collection);
 		return;
 	}
 
-	const tags = (await emitter.emitFilter(
+	const resolvedScopedCacheTags = (await emitter.emitFilter(
 		'cache.purge',
 		[{ collection }, ...scopedCacheTags],
 		{ collection },
 		context,
 	)) as ScopedCacheTag[];
 
-	await purgeTagKeys(cache, [...new Set(tags.map(scopedCacheTagKey))]);
+	await purgeScopedCacheTagKeys(
+		cache,
+		[...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))],
+	);
 }
 
 /**

@@ -1270,22 +1270,14 @@ implements AbstractService<Item> {
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const scopedCacheFields = this.collectionScopedCacheFields;
-
-			// Old slices from the pre-update capture, plus the new value the update sets
-			// (if it touches a scope field). Derived from the post-hook payload, not the
-			// raw input — an update filter hook can rewrite a scope field. An absent scoped
-			// cache field means "unchanged", covered by the old capture.
-			const newScopedCacheTags =
-				scopedCacheTagsFromRows(
-					this.collection,
-					scopedCacheFields,
-					[payloadAfterHooks],
-					false,
-				) ?? [];
+			// Old slices from the pre-update capture, plus the new value re-read from the
+			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
+			// type coercion can rewrite the scope column on write, so the stored row is
+			// authoritative, the payload isn't (same rule as createMany).
+			const newScopedCacheTags = await this.snapshotScopedCacheTags(keys);
 
 			const scopedCacheTags =
-				oldScopedCacheTags === null
+				oldScopedCacheTags === null || newScopedCacheTags === null
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 

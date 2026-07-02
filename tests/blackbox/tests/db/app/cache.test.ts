@@ -780,8 +780,10 @@ describe('App Caching Tests', () => {
 			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
-			// A pinned owner-A read plus a read of another collection.
+			// A pinned owner-A read, an unfiltered (bare-tagged) read of the same collection,
+			// and a read of another collection.
 			const readA = `/items/${collectionScoped}?filter[owner_field][_eq]=${scopedOwnerA}`;
+			const readBare = `/items/${collectionScoped}`;
 			const otherRead = `/items/${collectionIgnored}`;
 
 			await request(url).post(`/utils/cache/clear`)
@@ -790,16 +792,23 @@ describe('App Caching Tests', () => {
 			await request(url).get(readA)
 				.set('Authorization', auth);
 
+			await request(url).get(readBare)
+				.set('Authorization', auth);
+
 			await request(url).get(otherRead)
 				.set('Authorization', auth);
 
 			const warmA = await request(url).get(readA)
 				.set('Authorization', auth);
 
+			const warmBare = await request(url).get(readBare)
+				.set('Authorization', auth);
+
 			const warmOther = await request(url).get(otherRead)
 				.set('Authorization', auth);
 
 			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmBare.headers[cacheStatusHeader]).toBe('HIT');
 			expect(warmOther.headers[cacheStatusHeader]).toBe('HIT');
 
 			// Create a row that OMITS owner_field — it lands in the null slice, NOT A. The
@@ -814,13 +823,175 @@ describe('App Caching Tests', () => {
 			const afterA = await request(url).get(readA)
 				.set('Authorization', auth);
 
+			const afterBare = await request(url).get(readBare)
+				.set('Authorization', auth);
+
 			const afterOther = await request(url).get(otherRead)
 				.set('Authorization', auth);
 
 			// A's slice is spared (precise null-slice purge, not collection-wide); the other
-			// collection stays warm too.
+			// collection stays warm too. The bare read drops — witness that the create purged at
+			// all (bare is always purged), so A's survival isn't a vacuous no-op.
 			expect(afterA.statusCode).toBe(200);
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(afterBare.statusCode).toBe(200);
+			expect(afterBare.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
+		Value-scoped update moving a row across slices drops both the old and the new slice
+		(old ∪ new capture), sparing an untouched third slice
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const srcOwner = 'owner-move-src';
+			const dstOwner = 'owner-move-dst';
+			const ctlOwner = 'owner-move-ctl';
+
+			const readSrc = `/items/${collectionScoped}?filter[owner_field][_eq]=${srcOwner}`;
+			const readDst = `/items/${collectionScoped}?filter[owner_field][_eq]=${dstOwner}`;
+			const readCtl = `/items/${collectionScoped}?filter[owner_field][_eq]=${ctlOwner}`;
+			const otherRead = `/items/${collectionIgnored}`;
+
+			// A row in the source slice; the destination and control slices stay empty.
+			const moved = (
+				await request(url)
+					.post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: srcOwner })
+					.set('Authorization', auth)
+			).body.data;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			for (const read of [readSrc, readDst, readCtl, otherRead]) {
+				await request(url).get(read)
+					.set('Authorization', auth); // cold → cached
+			}
+
+			const warmSrc = await request(url).get(readSrc)
+				.set('Authorization', auth);
+
+			const warmDst = await request(url).get(readDst)
+				.set('Authorization', auth);
+
+			const warmCtl = await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			const warmOther = await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			expect(warmSrc.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmDst.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmCtl.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Move the row src → dst. The pre-update capture holds src, the committed re-read
+			// holds dst; their union purges both slices (+ bare), leaving the control slice — and
+			// every other collection — warm.
+			await request(url)
+				.patch(`/items/${collectionScoped}/${moved.id}`)
+				.send({ owner_field: dstOwner })
+				.set('Authorization', auth);
+
+			const afterSrc = await request(url).get(readSrc)
+				.set('Authorization', auth);
+
+			const afterDst = await request(url).get(readDst)
+				.set('Authorization', auth);
+
+			const afterCtl = await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			const afterOther = await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			// Old slice drops (the row left it), new slice drops (the row arrived); the control
+			// slice and the other collection are spared (no leak past the mutated slices).
+			expect(afterSrc.statusCode).toBe(200);
+			expect(afterSrc.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterDst.statusCode).toBe(200);
+			expect(afterDst.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterCtl.statusCode).toBe(200);
+			expect(afterCtl.headers[cacheStatusHeader]).toBe('HIT');
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
+		Value-scoped delete drops the removed row's slice (captured pre-delete) but spares
+		an untouched slice
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const delOwner = 'owner-del';
+			const ctlOwner = 'owner-del-ctl';
+
+			const readDel = `/items/${collectionScoped}?filter[owner_field][_eq]=${delOwner}`;
+			const readCtl = `/items/${collectionScoped}?filter[owner_field][_eq]=${ctlOwner}`;
+			const otherRead = `/items/${collectionIgnored}`;
+
+			const doomed = (
+				await request(url)
+					.post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: delOwner })
+					.set('Authorization', auth)
+			).body.data;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(readDel)
+				.set('Authorization', auth);
+
+			await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			const warmDel = await request(url).get(readDel)
+				.set('Authorization', auth);
+
+			const warmCtl = await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			const warmOther = await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			expect(warmDel.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmCtl.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// After the delete the row's scope value is gone, so it's captured before the delete.
+			await request(url)
+				.delete(`/items/${collectionScoped}/${doomed.id}`)
+				.set('Authorization', auth);
+
+			const afterDel = await request(url).get(readDel)
+				.set('Authorization', auth);
+
+			const afterCtl = await request(url).get(readCtl)
+				.set('Authorization', auth);
+
+			const afterOther = await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			// The deleted row's slice drops; the untouched slice and the other collection stay warm.
+			expect(afterDel.statusCode).toBe(200);
+			expect(afterDel.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterCtl.statusCode).toBe(200);
+			expect(afterCtl.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterOther.statusCode).toBe(200);
 			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
 		});
