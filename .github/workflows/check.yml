@@ -63,13 +63,12 @@ jobs:
 
   format:
     name: Format
-    # Prettier disabled — `eslint.style.config.js` (via the Style (changes) job /
-    # `pnpm lint:style:changes`) is the style authority now. Kept as a passing no-op so a required
-    # "Format" check (if branch protection still lists it) goes green instead of stranding pending.
-    # Restore the prettier --check steps to re-enable.
+    # `eslint.style.config.js` (via the Style (changes) job / `pnpm lint:style:changes`) is the
+    # style authority. Kept as a passing no-op so a required "Format" check (if branch protection
+    # still lists it) goes green instead of stranding pending.
     runs-on: ubuntu-latest
     steps:
-      - name: Prettier disabled
+      - name: Format check
         run: echo "Formatting handled by eslint.style.config.js (see the Style (changes) job)."
 
   style-changes:
