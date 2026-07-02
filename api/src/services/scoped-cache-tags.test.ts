@@ -199,6 +199,17 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	});
 
 	test(oneLine`
+		_eq: null pins the null slice — the read↔purge symmetry witness for a null-valued
+		scope (matches the null-value purge tag)
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _eq: null } }),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: null },
+		]);
+	});
+
+	test(oneLine`
 		_in on a scope field pins every listed value (even those with no rows yet)
 	`, () => {
 		expect(
