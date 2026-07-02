@@ -1363,6 +1363,17 @@ implements AbstractService<Item> {
 			opts.mutationTracker = this.createMutationTracker();
 		}
 
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+
+		// Old scope values for the update subset — any payload carrying an existing key. A
+		// pure-insert payload has no key (or points at no row yet), so it contributes nothing
+		// here; its new slice is picked up from the committed rows below (old ∪ new).
+		const inputKeys = payloads
+			.map((payload) => payload[primaryKeyField])
+			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
+
+		const oldScopedCacheTags = await this.snapshotScopedCacheTags(inputKeys);
+
 		const primaryKeys = await transaction(this.knex, async (knex) => {
 			const service = this.fork({ knex });
 
@@ -1377,12 +1388,19 @@ implements AbstractService<Item> {
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Upserts mix inserts and updates per row, so old (pre-update) scope values
-			// can't be captured cheaply for the update subset. Fall back to a collection-wide
-			// purge (`null` → bare tag + every slice, other collections spared) rather than
-			// risk leaving a moved-value slice stale.
-			// TODO(scoped-cache): resolve per-row once upsert churn is measured.
-			await this.purgeScopedCache(null);
+			// Re-snapshot the committed rows for their new scope values (covers both the
+			// inserts and the moved updates). Reading by returned key also captures a row a
+			// create hook took over — whatever's stored is what gets purged.
+			const newScopedCacheTags = await this.snapshotScopedCacheTags(
+				primaryKeys.filter((key): key is PrimaryKey => key !== null && key !== undefined),
+			);
+
+			const scopedCacheTags =
+				oldScopedCacheTags === null || newScopedCacheTags === null
+					? null
+					: [...oldScopedCacheTags, ...newScopedCacheTags];
+
+			await this.purgeScopedCache(scopedCacheTags);
 		}
 
 		return primaryKeys;
