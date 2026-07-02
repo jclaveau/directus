@@ -772,16 +772,15 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		Value-scoped fallback for an unresolvable mutation purges every slice of the
-		collection yet spares other collections
+		Value-scoped create resolves the DB-stored slice — a create omitting the scope field
+		lands in another slice, sparing a pinned read
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
-			// A pinned owner-A read (would survive a bare-only or other-slice purge) and a read
-			// of a different collection (would drop under a whole-namespace flush).
+			// A pinned owner-A read plus a read of another collection.
 			const readA = `/items/${collectionScoped}?filter[owner_field][_eq]=${scopedOwnerA}`;
 			const otherRead = `/items/${collectionIgnored}`;
 
@@ -803,8 +802,10 @@ describe('App Caching Tests', () => {
 			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(warmOther.headers[cacheStatusHeader]).toBe('HIT');
 
-			// Create a row that OMITS the scope field — its owner value is unresolvable, so the
-			// purge falls back to collection-wide (every slice), not a single owner slice.
+			// Create a row that OMITS owner_field — it lands in the null slice, NOT A. The
+			// purge re-reads the row's stored value and drops only that slice (+ bare), so the
+			// pinned owner-A read survives. A coarse collection-wide fallback would have
+			// dropped it.
 			await request(url)
 				.post(`/items/${collectionScoped}`)
 				.send({ string_field: randomUUID() })
@@ -816,10 +817,10 @@ describe('App Caching Tests', () => {
 			const afterOther = await request(url).get(otherRead)
 				.set('Authorization', auth);
 
-			// A's slice drops (collection-wide purge reached it); the other collection stays
-			// warm (a whole-namespace `cache.clear()` would have dropped it too).
+			// A's slice is spared (precise null-slice purge, not collection-wide); the other
+			// collection stays warm too.
 			expect(afterA.statusCode).toBe(200);
-			expect(afterA.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterOther.statusCode).toBe(200);
 			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
 		});

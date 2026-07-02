@@ -267,10 +267,12 @@ describe(oneLine`
 	// create/update filter hook can rewrite a scope field, and a create hook can
 	// take over a row entirely (scope value unknowable).
 	it(oneLine`
-		create scopes off the post-hook payload — a filter hook that rewrites the scope field
-		wins
+		create scopes off the committed row — a hook rewrites the scope field before insert,
+		so the re-read row (B) wins over the raw input (A)
 	`, async () => {
 		tracker.on.insert('test').response([1]);
+		// The hook stores B, so the post-commit re-snapshot reads B.
+		tracker.on.select('test').response([{ id: 1, student: 'B' }]);
 
 		const rewrite = async (payload: any) => ({ ...payload, student: 'B' });
 		emitter.onFilter('test.items.create', rewrite);
@@ -288,6 +290,25 @@ describe(oneLine`
 		finally {
 			emitter.offFilter('test.items.create', rewrite);
 		}
+	});
+
+	it(oneLine`
+		create resolves the DB-stored scope value when the payload omits the field — precise
+		slice, not a coarse purge
+	`, async () => {
+		// Payload has no `student`; the committed row carries the DB default, which the
+		// re-snapshot reads back — where the old payload-based path returned null.
+		tracker.on.insert('test').response([1]);
+		tracker.on.select('test').response([{ id: 1, student: 'default-owner' }]);
+
+		await service().createMany([{ name: 'x' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[{ collection: 'test', field: 'student', value: 'default-owner' }],
+			expect.anything(),
+		);
 	});
 
 	it(oneLine`

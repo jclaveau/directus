@@ -648,27 +648,20 @@ implements AbstractService<Item> {
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			const scopedCacheFields = this.collectionScopedCacheFields;
 
-			// Scope off the post-hook payloads actually inserted, not the raw input:
-			//   - a create filter hook can rewrite a scope field, so `data`'s value may
-			//     not be what's stored;
-			//   - a payload that omits a scoped cache field has an unknown (default) value,
-			//     so `scopedCacheTagsFromRows` returns null → a collection-wide purge;
-			//   - a row a hook *took over* (returned a primary key, inserted itself) has an
-			//     unknowable scope value, so its presence forces that collection-wide purge too.
+			// Scope off the committed rows' stored values (re-read by returned key), not the
+			// raw input: a create hook can rewrite a scope field, a value left to a DB default
+			// is only knowable after the insert, and a DB trigger/coercion can diverge from the
+			// payload — the row is authoritative, the payload isn't. A row a hook *took over*
+			// (more live keys than payloads) has an unknowable scope value → collection-wide purge.
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
 
 			if (scopedCacheFields.length > 0) {
-				const liveKeyCount = results.filter((key) => key !== null).length;
-				const someRowTakenOver = liveKeyCount > actionPayloads.length;
+				const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
+				const someRowTakenOver = liveKeys.length > actionPayloads.length;
 
 				scopedCacheTags = someRowTakenOver
 					? null
-					: scopedCacheTagsFromRows(
-						this.collection,
-						scopedCacheFields,
-						actionPayloads.map(({ actionHookPayload }) => actionHookPayload),
-						true,
-					);
+					: await this.snapshotScopedCacheTags(liveKeys);
 			}
 
 			await this.purgeScopedCache(scopedCacheTags);
