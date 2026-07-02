@@ -137,12 +137,16 @@ describe(oneLine`
 
 		await service().updateMany([1], { name: 'renamed' });
 
+		// Exact, not arrayContaining: the tags are old ∪ new, so an unchanged value repeats
+		// (the real purge dedups via a Set on the tag key). Pinning the whole array also
+		// witnesses that no OTHER slice leaks in.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([
+			[
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-			]),
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			],
 			expect.anything(),
 		);
 	});
@@ -200,12 +204,11 @@ describe(oneLine`
 
 		await service().upsertMany([{ name: 'a', student: 'A' }]);
 
+		// Pure insert → empty old snapshot, so the new slice is the whole tag set (exact).
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([
-				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-			]),
+			[{ collection: 'test', field: 'student', value: 'A', type: 'string' }],
 			expect.anything(),
 		);
 	});
@@ -215,7 +218,9 @@ describe(oneLine`
 		before the write (old ∪ new)
 	`, async () => {
 		// The payload carries the key → upsertOne takes the update path; the pre-snapshot
-		// reads the old slice (A) before the update runs.
+		// reads the old slice (A) before the update runs. arrayContaining (not exact): upsert
+		// issues a non-fixed number of selects, so the old ∪ new tag count isn't pinnable — the
+		// A→B exact-union witness lives in the updateMany test above.
 		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 		tracker.on.update('test').response(1);
 
@@ -247,12 +252,14 @@ describe(oneLine`
 
 		await service().updateBatch([{ id: 1, name: 'renamed' }]);
 
+		// Name-only change → scope stays A, so old ∪ new repeats it (exact; real purge dedups).
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([
+			[
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-			]),
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			],
 			expect.anything(),
 		);
 	});
