@@ -256,4 +256,3 @@ async function getDatabaseSchema(database: Knex, schemaInspector: SchemaInspecto
 
 	return result;
 }
-

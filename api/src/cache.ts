@@ -56,7 +56,7 @@ export function getCache(): {
 	systemCache: Keyv;
 	localSchemaCache: Keyv;
 	lockCache: Keyv;
-	} {
+} {
 	if (env['CACHE_ENABLED'] === true && cache === null) {
 		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
 		cache = getKeyvInstance(env['CACHE_STORE'] as Store, getMilliseconds(env['CACHE_TTL']));
