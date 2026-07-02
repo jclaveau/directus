@@ -898,7 +898,12 @@ implements AbstractService<Item> {
 
 			if (withinMaxSize) {
 				try {
-					await setCacheValue(this.cache!, cacheKey, filteredRecords, getMilliseconds(env['CACHE_TTL']));
+					await setCacheValue(
+						this.cache!,
+						cacheKey,
+						filteredRecords,
+						getMilliseconds(env['CACHE_TTL']),
+					);
 
 					await setCacheValue(this.cache!, `${cacheKey}__expires_at`, {
 						exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0),
