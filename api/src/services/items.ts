@@ -714,14 +714,15 @@ implements AbstractService<Item> {
 				)
 				: query;
 
-		// Service-level read-through cache. Every caller reaches this — a controller, a custom
-		// endpoint, a hook — not only requests routed through the HTTP cache middleware. It rides its
-		// own key namespace, separate from the HTTP response cache (`getCacheKey`): the two hold
-		// different shapes (raw service items here vs a shaped response there) so they must not share
-		// a key. Cheap guards run first; the async `permissionsCachable` probe only when they pass.
-		// Skipped for in-transaction reads (uncommitted), system collections (served via the system
-		// cache), and `$NOW`-dynamic permissions. A caller wanting a guaranteed-fresh read opts out
-		// with `{ cache: false }`.
+		// Service-level read-through cache. Every caller reaches this — a
+		// controller, a custom endpoint, a hook — not only requests that pass
+		// through the HTTP cache middleware. Own key namespace, separate from the
+		// HTTP response cache (`getCacheKey`): the two hold different shapes (raw
+		// service items here vs a shaped response there), so they must not share a
+		// key. Cheap guards run first; the async `permissionsCachable` probe only
+		// when they pass. Skipped for in-transaction reads (uncommitted), system
+		// collections (served via the system cache), and `$NOW`-dynamic
+		// permissions. Opt out per call with `{ cache: false }`.
 		const cacheable =
 			opts?.cache !== false &&
 			env['CACHE_ENABLED'] === true &&
@@ -747,12 +748,13 @@ implements AbstractService<Item> {
 				cached = await getCacheValue(this.cache!, cacheKey);
 			}
 			catch {
-				// A cache-store read failure must never fail the query — fall through to a live read.
+				// A cache read failure must never fail the query — fall back to a
+				// live read.
 			}
 
 			if (cached) {
-				// Already indexed under its scope tags at set-time, so a later mutation still purges
-				// it — no need to recompute or re-attach tags on a hit.
+				// Already indexed under its scope tags at set time, so a later
+				// mutation still purges it — no recompute or re-tag on a hit.
 				return withMeta(cached as Item[], { scopedCacheTags: [] });
 			}
 		}
@@ -887,9 +889,10 @@ implements AbstractService<Item> {
 			);
 		}
 
-		// Populate the read-through cache on a miss, then index it under the scope tags computed
-		// above so a later mutation purges exactly this slice (or a full/collection flush outside
-		// scoped mode). Best-effort: a store failure or an over-max-size payload just skips caching.
+		// Populate the read-through cache on a miss, then index it under the scope
+		// tags computed above so a later mutation purges exactly this slice (or a
+		// full/collection flush outside scoped mode). Best-effort: a store failure
+		// or an over-max-size payload just skips caching.
 		if (cacheKey) {
 			const maxSize = env['CACHE_VALUE_MAX_SIZE'] === false
 				? null
@@ -914,7 +917,8 @@ implements AbstractService<Item> {
 					await tagScopedCacheKeys(cacheKey, scopedCacheTags);
 				}
 				catch {
-					// Caching is best-effort; a store write failure must not fail the read.
+					// Caching is best-effort; a store write failure must not fail
+					// the read.
 				}
 			}
 		}
