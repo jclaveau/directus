@@ -19,7 +19,10 @@ import {
 	collectionGrandRelated,
 	collectionIgnored,
 	collectionRelated,
+	collectionScoped,
 	collectionTag,
+	scopedOwnerA,
+	scopedOwnerB,
 	seedDBValues,
 } from './cache.seed';
 
@@ -673,6 +676,152 @@ describe('App Caching Tests', () => {
 
 			expect(after.statusCode).toBe(200);
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		Value-scoped purge isolates one owner slice — a write to owner A drops A's read but
+		spares owner B's
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readA = `/items/${collectionScoped}?filter[owner_field][_eq]=${scopedOwnerA}`;
+			const readB = `/items/${collectionScoped}?filter[owner_field][_eq]=${scopedOwnerB}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm both owner slices.
+			await request(url).get(readA)
+				.set('Authorization', auth);
+
+			await request(url).get(readB)
+				.set('Authorization', auth);
+
+			const warmA = await request(url).get(readA)
+				.set('Authorization', auth);
+
+			const warmB = await request(url).get(readB)
+				.set('Authorization', auth);
+
+			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmB.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Mutate owner A only.
+			await request(url)
+				.post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerA })
+				.set('Authorization', auth);
+
+			const afterA = await request(url).get(readA)
+				.set('Authorization', auth);
+
+			const afterB = await request(url).get(readB)
+				.set('Authorization', auth);
+
+			// A's slice drops; B's is untouched.
+			expect(afterA.statusCode).toBe(200);
+			expect(afterA.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterB.statusCode).toBe(200);
+			expect(afterB.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
+		Value-scoped self-referential read is not owner-pinned — a write to another
+		owner still invalidates it (the nested same-collection rows are unbounded)
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			// Owner-A rows plus each row's `parent` — which may belong to ANY owner, so the
+			// filter doesn't bound the read. Reaches collectionScoped again through `parent.*`.
+			const scopedItems = `/items/${collectionScoped}`;
+			const ownerAFilter = `filter[owner_field][_eq]=${scopedOwnerA}`;
+			const read = `${scopedItems}?${ownerAFilter}&fields=*,parent.*`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Mutate a DIFFERENT owner (B). An owner-A-pinned read would wrongly survive; the
+			// self-reference guard tags this read bare, so it must drop.
+			await request(url)
+				.post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
+				.set('Authorization', auth);
+
+			const after = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		Value-scoped fallback for an unresolvable mutation purges every slice of the
+		collection yet spares other collections
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			// A pinned owner-A read (would survive a bare-only or other-slice purge) and a read
+			// of a different collection (would drop under a whole-namespace flush).
+			const readA = `/items/${collectionScoped}?filter[owner_field][_eq]=${scopedOwnerA}`;
+			const otherRead = `/items/${collectionIgnored}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await request(url).get(readA)
+				.set('Authorization', auth);
+
+			await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			const warmA = await request(url).get(readA)
+				.set('Authorization', auth);
+
+			const warmOther = await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Create a row that OMITS the scope field — its owner value is unresolvable, so the
+			// purge falls back to collection-wide (every slice), not a single owner slice.
+			await request(url)
+				.post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			const afterA = await request(url).get(readA)
+				.set('Authorization', auth);
+
+			const afterOther = await request(url).get(otherRead)
+				.set('Authorization', auth);
+
+			// A's slice drops (collection-wide purge reached it); the other collection stays
+			// warm (a whole-namespace `cache.clear()` would have dropped it too).
+			expect(afterA.statusCode).toBe(200);
+			expect(afterA.headers[cacheStatusHeader]).toBe('MISS');
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });
