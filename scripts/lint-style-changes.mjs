@@ -66,7 +66,10 @@ const untracked = git(['ls-files', '--others', '--exclude-standard', '--', '*.ts
 
 for (const path of untracked) {
 	if (path.startsWith('tmp/')) continue; // local scratch (worktrees, repros), never part of the PR
-	const lineCount = readFileSync(path, 'utf8').split('\n').length;
+	const content = readFileSync(path, 'utf8');
+	// A trailing newline makes split('\n') yield a final empty element — drop it, or the phantom
+	// last line inflates the count and flags a line that doesn't exist.
+	const lineCount = content.split('\n').length - (content.endsWith('\n') ? 1 : 0);
 	addedByFile.set(path, new Set(Array.from({ length: lineCount }, (_, index) => index + 1)));
 }
 
