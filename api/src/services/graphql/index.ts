@@ -60,8 +60,8 @@ export class GraphQLService {
 	}: GraphQLParams): Promise<FormattedExecutionResult> {
 		const schema = await this.getSchema();
 
-		const validationErrors = validate(schema, document, validationRules).map((validationError) =>
-			addPathToValidationError(validationError),);
+		const validationErrors = validate(schema, document, validationRules)
+			.map((validationError) => addPathToValidationError(validationError));
 
 		if (validationErrors.length > 0) {
 			throw new GraphQLValidationError({ errors: validationErrors });
