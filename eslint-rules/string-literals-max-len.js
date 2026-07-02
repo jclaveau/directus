@@ -47,16 +47,27 @@ function bindsLocalName(sourceCode, name) {
   })
 }
 
-// Merge `oneLine` into an existing named import from the same module if there is one (avoids a
-// duplicate import declaration), else add a fresh import line at the top.
+// Merge `oneLine` into an EXISTING import from the same module — whatever specifier shape it
+// has — so --fix never emits a second declaration from that module (no-duplicate-imports):
+//   `import { a } from 'm'`  → `import { a, oneLine } from 'm'`
+//   `import a from 'm'`      → `import a, { oneLine } from 'm'`
+// A namespace-only import (`import * as a from 'm'`) can't take named specifiers in the same
+// declaration, so that case (and no existing import) falls to a fresh import line at the top.
 function importFix(fixer, sourceCode, tag, module) {
   const fromModule = sourceCode.ast.body.find((statement) => {
     return statement.type === `ImportDeclaration` && statement.source.value === module
   })
-  const namedSpecifiers = fromModule?.specifiers.filter((spec) => spec.type === `ImportSpecifier`)
 
-  if (namedSpecifiers?.length) {
-    return fixer.insertTextAfter(namedSpecifiers[namedSpecifiers.length - 1], `, ${tag}`)
+  if (fromModule) {
+    const namedSpecifiers = fromModule.specifiers.filter((spec) => spec.type === `ImportSpecifier`)
+    if (namedSpecifiers.length) {
+      return fixer.insertTextAfter(namedSpecifiers[namedSpecifiers.length - 1], `, ${tag}`)
+    }
+
+    const defaultSpecifier = fromModule.specifiers.find((spec) => spec.type === `ImportDefaultSpecifier`)
+    if (defaultSpecifier) {
+      return fixer.insertTextAfter(defaultSpecifier, `, { ${tag} }`)
+    }
   }
 
   const statement = `import { ${tag} } from '${module}';\n`
