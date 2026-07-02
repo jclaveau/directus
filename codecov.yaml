@@ -1,10 +1,10 @@
 coverage:
   status:
-    # Aggregate (non-flag) diff coverage is now BLOCKING — the dialect/unit tests the ramp
-    # waited for have landed (mariadb-json, drop-index, pino censor, rolldown build, …).
+    # Aggregate (non-flag) diff coverage is BLOCKING at a fixed 95% bar — new code must be
+    # ≥95% covered (was `auto` ≈ project%, which let weakly-covered diffs through).
     patch:
       default:
-        target: auto
+        target: 95%
         informational: false
     # Overall coverage stays report-only: on a stacked feature line it mostly reflects
     # base drift, not the PR's own diff (see the per-PR coverage diagnoses).
@@ -27,6 +27,13 @@ ignore:
   - 'api/src/utils/dump-coverage.ts'
   - 'api/src/controllers/extensions.ts'
   - 'tests/blackbox/merge-coverage.mjs'
+  # Lint/style tooling for the diff-scoped style gate: a custom eslint rule and its CI runner,
+  # exercised by eslint / the gate itself, not by unit tests. (eslint.style.config.js already
+  # falls under the *.config.js rule above.)
+  - 'eslint-rules/**'
+  - 'scripts/lint-style-changes.mjs'
+  # Migrations are DDL, run against a real DB by the migration runner — never unit-tested.
+  - 'api/src/database/migrations/**'
 
 flag_management:
   default_rules:

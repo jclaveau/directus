@@ -1,17 +1,16 @@
 name: Check
 
-# Scalabus: this workflow is inherited by every v11.10.1-feat/* branch (they root on
-# v11.10.1-prepare). GHA loads a pull_request workflow from the PR's base branch, so
-# retargeting the trigger here is what makes the coverage check fire on feature PRs.
+# Scalabus: run the full gate on EVERY commit (any branch) plus every PR — not just PRs into
+# the release branches. hhh-dev became the work branch after the old base-branch filter was set,
+# so that filter silently skipped it (no unit tests, no coverage upload codecov needs). `push:`
+# (unfiltered) covers every commit; GHA loads a push workflow from the pushed branch itself, so it
+# fires regardless of base. `pull_request:` keeps the merge-ref context + the diff-scoped style gate
+# (note: pull_request workflows load from the PR's BASE branch, so this trigger only updates once
+# the change lands on the base).
 on:
   pull_request:
-    branches:
-      - v11.10.1-prepare
-      - 'v11.10.1-feat/**'
 
   push:
-    branches:
-      - v11.10.1-prepare
 
 permissions:
   contents: read
@@ -64,22 +63,36 @@ jobs:
 
   format:
     name: Format
+    # `eslint.style.config.js` (via the Style (changes) job / `pnpm lint:style:changes`) is the
+    # style authority. Kept as a passing no-op so a required "Format" check (if branch protection
+    # still lists it) goes green instead of stranding pending.
     runs-on: ubuntu-latest
+    steps:
+      - name: Format check
+        run: echo "Formatting handled by eslint.style.config.js (see the Style (changes) job)."
+
+  style-changes:
+    name: Style (changes)
+    runs-on: ubuntu-latest
+    # PR-only by design: the gate diffs added lines against the PR base, so a direct push to a base
+    # branch (no PR context, no base to diff) is intentionally NOT gated. Style on base branches
+    # rides in through the PRs that merged them.
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-
-      - name: Get changed files
-        id: changed-files
-        uses: tj-actions/changed-files@v46
+        with:
+          # Full history so the script can diff against the merge-base with the PR base.
+          fetch-depth: 0
 
       - name: Prepare
         uses: ./.github/actions/prepare
         with:
           build: false
 
-      - name: Run Formatter
-        run: pnpm exec prettier --check --ignore-unknown ${{ steps.changed-files.outputs.all_changed_files }}
+      # eslint max-len (comment width) over added lines only (mirrors `pnpm lint:style:changes`).
+      - name: Check changed-line style
+        run: node scripts/lint-style-changes.mjs "${{ github.event.pull_request.base.sha }}"
 
   unit:
     name: Unit Tests

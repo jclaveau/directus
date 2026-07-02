@@ -4,7 +4,7 @@ import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
-import { redisConfigAvailable, useRedis } from './redis/index.js';
+import { redisConfigAvailable } from './redis/index.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -126,7 +126,8 @@ export async function getSystemCache(key: string): Promise<Record<string, any>> 
 export function setMemorySchemaCache(schema: SchemaOverview) {
 	if (Object.isFrozen(schema)) {
 		memorySchemaCache = schema;
-	} else {
+	}
+	else {
 		memorySchemaCache = freezeSchema(schema);
 	}
 }
@@ -134,7 +135,8 @@ export function setMemorySchemaCache(schema: SchemaOverview) {
 export function getMemorySchemaCache(): Readonly<SchemaOverview> | undefined {
 	if (env['CACHE_SCHEMA_FREEZE_ENABLED']) {
 		return memorySchemaCache ?? undefined;
-	} else if (memorySchemaCache) {
+	}
+	else if (memorySchemaCache) {
 		return unfreezeSchema(memorySchemaCache);
 	}
 
@@ -153,68 +155,13 @@ export async function setCacheValue(
 
 export async function getCacheValue(cache: Keyv, key: string): Promise<any> {
 	const value = await cache.get(key);
-	if (!value) return undefined;
+
+	if (!value) {
+		return undefined;
+	}
+
 	const decompressed = await decompress(value);
 	return decompressed;
-}
-
-/**
- * Whether scoped (tag-based) cache purging is active. Requires the opt-in mode AND a Redis cache
- * store, since the tag→keys index lives in Redis sets. Any other config falls back to full flush.
- */
-export function scopedCachePurgeEnabled(): boolean {
-	return env['CACHE_AUTO_PURGE_MODE'] === 'scoped' && env['CACHE_STORE'] === 'redis' && redisConfigAvailable();
-}
-
-function cacheTagKey(collection: string): string {
-	return `${env['CACHE_NAMESPACE']}:tag:${collection}`;
-}
-
-/**
- * Index a freshly-cached response key under every collection its data came from, so a later mutation
- * on any of those collections can drop just this entry instead of the whole namespace. Both the
- * payload key and its `__expires_at` sibling are tagged. The tag set self-expires at twice the cache
- * TTL as a safety net against members orphaned by a crash between write and purge.
- */
-export async function tagCacheKeyCollections(key: string, collections: Iterable<string>): Promise<void> {
-	if (!scopedCachePurgeEnabled()) return;
-
-	const tags = [...collections];
-	if (tags.length === 0) return;
-
-	const redis = useRedis();
-	const ttlSeconds = Math.ceil(getMilliseconds(env['CACHE_TTL'], 0) / 1000) * 2;
-	const pipeline = redis.pipeline();
-
-	for (const collection of tags) {
-		const tagKey = cacheTagKey(collection);
-		pipeline.sadd(tagKey, key, `${key}__expires_at`);
-		if (ttlSeconds > 0) pipeline.expire(tagKey, ttlSeconds);
-	}
-
-	await pipeline.exec();
-}
-
-/**
- * Purge cached responses affected by a mutation on `collection`. In scoped mode only entries tagged
- * with that collection (plus their `__expires_at` siblings) are deleted; otherwise the whole data
- * cache is flushed (legacy `cache.clear()` behavior).
- */
-export async function purgeCache(cache: Keyv, collection: string): Promise<void> {
-	if (!scopedCachePurgeEnabled()) {
-		await cache.clear();
-		return;
-	}
-
-	const redis = useRedis();
-	const tagKey = cacheTagKey(collection);
-	const members = await redis.smembers(tagKey);
-
-	if (members.length > 0) {
-		await Promise.all(members.map((member) => cache.delete(member)));
-	}
-
-	await redis.del(tagKey);
 }
 
 function getKeyvInstance(store: Store, ttl: number | undefined, namespaceSuffix?: string): Keyv {
@@ -248,7 +195,10 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 // Advanced setups (sentinel/cluster, cert-based TLS) should use the REDIS connection URL.
 export function getRedisConnection(): string | Record<string, unknown> {
 	const url = env['REDIS'];
-	if (url) return url as string;
+
+	if (url) {
+		return url as string;
+	}
 
 	const { host, port, username, password, db, tls } = getConfigFromEnv('REDIS') as Record<string, any>;
 

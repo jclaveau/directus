@@ -1,10 +1,29 @@
+import type { Type } from './fields.js';
+
+/**
+ * A unit of cache scope. A collection-level tag (no `field`) covers every entry that
+ * read the collection — the coarse bucket holding "global" reads that couldn't be
+ * narrowed. A `field`+`value` tag pins a single slice so one owner's/partition's writes
+ * drop only their own entries. `type` is the field's schema type, used to canonicalize
+ * `value` so a filter value and the native DB row value resolve the same slice.
+ */
+export interface ScopedCacheTag {
+	collection: string;
+	field?: string;
+	value?: unknown;
+	type?: Type;
+}
+
 /**
  * Metadata about a read operation, carried alongside its result (see `WithMeta`). Bounded to the
  * single read that produced it — never an accumulating service-level field.
  */
 export interface ReadMeta {
-	/** Collections whose data fed this read (root + relations via fields/filter/sort); scopes cache-tag invalidation. */
-	cacheTags: Set<string>;
+	/**
+	 * Scoped cache tags whose data fed this read (root scope tags + relation collection
+	 * tags); scope invalidation.
+	 */
+	scopedCacheTags: ScopedCacheTag[];
 }
 
 /**
