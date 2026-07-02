@@ -28,6 +28,7 @@ export * from './merge-filters.js';
 export * from './move-in-array.js';
 export * from './normalize-path.js';
 export * from './number-generator.js';
+export * from './one-line.js';
 export * from './parse-filter-function-path.js';
 export * from './parse-filter.js';
 export * from './parse-json.js';

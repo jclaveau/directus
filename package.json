@@ -5,8 +5,8 @@
 	"type": "module",
 	"scripts": {
 		"build": "pnpm --recursive run build",
-		"format": "prettier --cache --check .",
 		"lint": "eslint --cache .",
+		"lint:style:changes": "node scripts/lint-style-changes.mjs",
 		"lint:style": "stylelint '**/*.{css,scss,vue}' --ignore-path .gitignore --cache",
 		"test": "pnpm --recursive --filter '!tests-blackbox' test",
 		"test:blackbox": "rimraf ./dist && pnpm --filter directus deploy --legacy --prod dist && pnpm --filter tests-blackbox test",
@@ -21,7 +21,6 @@
 		"eslint-plugin-vue": "catalog:",
 		"globals": "catalog:",
 		"postcss-html": "catalog:",
-		"prettier": "catalog:",
 		"rimraf": "catalog:",
 		"stylelint": "catalog:",
 		"stylelint-config-standard": "catalog:",

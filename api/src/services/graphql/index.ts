@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	ScopedCacheTag,
 	GraphQLParams,
 	GQLScope,
 	Item,
@@ -38,14 +39,14 @@ export class GraphQLService {
 	 * cached entry assembled from many reads, so this aggregate is by design (unlike a per-query read,
 	 * whose tags ride its result via `getMeta()`). Stamped onto the execute() result.
 	 */
-	cacheTags: Set<string>;
+	scopedCacheTags: ScopedCacheTag[];
 
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
 		this.schema = options.schema;
 		this.scope = options.scope;
-		this.cacheTags = new Set();
+		this.scopedCacheTags = [];
 	}
 
 	/**
@@ -59,9 +60,8 @@ export class GraphQLService {
 	}: GraphQLParams): Promise<FormattedExecutionResult> {
 		const schema = await this.getSchema();
 
-		const validationErrors = validate(schema, document, validationRules).map((validationError) =>
-			addPathToValidationError(validationError),
-		);
+		const validationErrors = validate(schema, document, validationRules)
+			.map((validationError) => addPathToValidationError(validationError));
 
 		if (validationErrors.length > 0) {
 			throw new GraphQLValidationError({ errors: validationErrors });
@@ -77,21 +77,26 @@ export class GraphQLService {
 				variableValues: variables,
 				operationName,
 			});
-		} catch (err: any) {
+		}
+		catch (err: any) {
 			throw new GraphQLExecutionError({ errors: [err.message] });
 		}
 
 		const formattedResult: FormattedExecutionResult = {};
 
-		if (result['data']) formattedResult.data = result['data'];
+		if (result['data']) {
+			formattedResult.data = result['data'];
+		}
 
 		if (result['errors']) {
 			formattedResult.errors = result['errors'].map((error) => processError(this.accountability, error));
 		}
 
-		if (result['extensions']) formattedResult.extensions = result['extensions'];
+		if (result['extensions']) {
+			formattedResult.extensions = result['extensions'];
+		}
 
-		return withMeta(formattedResult, { cacheTags: this.cacheTags });
+		return withMeta(formattedResult, { scopedCacheTags: this.scopedCacheTags });
 	}
 
 	/**
@@ -118,9 +123,7 @@ export class GraphQLService {
 			? await service.readSingleton(query, { stripNonRequested: false })
 			: await service.readByQuery(query, { stripNonRequested: false });
 
-		for (const tag of readMeta(result)?.cacheTags ?? []) {
-			this.cacheTags.add(tag);
-		}
+		this.scopedCacheTags.push(...(readMeta(result)?.scopedCacheTags ?? []));
 
 		return result;
 	}
@@ -148,7 +151,8 @@ export class GraphQLService {
 			}
 
 			return true;
-		} catch (err: any) {
+		}
+		catch (err: any) {
 			throw formatError(err);
 		}
 	}

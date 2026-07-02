@@ -36,10 +36,11 @@ export class PermissionsService extends ItemsService {
 	override async readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<Partial<Item>[]>> {
 		const result = (await super.readByQuery(query, opts)) as Permission[];
 
-		// withAppMinimalPermissions returns a fresh array, so carry the read's cache-tag rider across.
+		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache
+		// tag rider across.
 		return withMeta(
 			withAppMinimalPermissions(this.accountability, result, query.filter) as Partial<Item>[],
-			readMeta(result) ?? { cacheTags: new Set() },
+			readMeta(result) ?? { scopedCacheTags: [] },
 		);
 	}
 
@@ -92,8 +93,9 @@ export class PermissionsService extends ItemsService {
 	}
 
 	async getItemPermissions(collection: string, primaryKey?: string): Promise<ItemPermissions> {
-		if (!this.accountability?.user)
+		if (!this.accountability?.user) {
 			throw new ForbiddenError({ reason: 'You must be authenticated to read item permissions.' });
+		}
 
 		if (this.accountability?.admin) {
 			return {
@@ -126,8 +128,12 @@ export class PermissionsService extends ItemsService {
 
 			try {
 				const result = await itemsService.readByQuery(query);
-				if (!result[0]) updateAction = 'create';
-			} catch {
+
+				if (!result[0]) {
+					updateAction = 'create';
+				}
+			}
+			catch {
 				updateAction = 'create';
 			}
 		}
@@ -135,7 +141,10 @@ export class PermissionsService extends ItemsService {
 		await Promise.all(
 			Object.keys(itemPermissions).map((key) => {
 				const action = key as keyof ItemPermissions;
-				const checkAction = action === 'update' ? updateAction : action;
+
+				const checkAction = action === 'update'
+					? updateAction
+					: action;
 
 				if (!this.accountability) {
 					itemPermissions[action].access = true;
