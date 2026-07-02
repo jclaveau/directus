@@ -323,6 +323,27 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		create with a NULL scope value purges that null slice — a present-but-null value is a
+		real slice (canonical \x00null tag), not the coarse fallback
+	`, async () => {
+		// The committed row resolves `student` to NULL (unset column, DB default null). The field
+		// key IS present, so it's a precise null-slice purge — distinct from a MISSING field key,
+		// which is the coarse (null-tags) fallback above. A read filtered `student: { _eq: null }`
+		// pins the same slice, so the two sides meet.
+		tracker.on.insert('test').response([1]);
+		tracker.on.select('test').response([{ id: 1, student: null }]);
+
+		await service().createMany([{ name: 'x' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[{ collection: 'test', field: 'student', value: null, type: 'string' }],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
 		create falls back to a coarse purge (null) when a hook takes over a row (returns a
 		PK, scope value unknowable)
 	`, async () => {
