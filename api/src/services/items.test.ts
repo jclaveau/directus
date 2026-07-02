@@ -64,9 +64,10 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 	};
 });
 
-// The read-through cache guard calls permissionsCachable (real one hits the permissions DB) and
-// getReadThroughCacheKey (real one hashes + probes ip_access). Stub both so the service-cache tests
-// stay hermetic; permissionsCachable defaults to cachable and the key is fixed for assertions.
+// The read-through cache guard calls permissionsCachable (real one hits the
+// permissions DB) and getReadThroughCacheKey (real one hashes + probes
+// ip_access). Stub both so the service-cache tests stay hermetic:
+// permissionsCachable defaults to cachable and the key is fixed for assertions.
 vi.mock('../utils/permissions-cachable.js', () => {
 	return {
 		permissionsCachable: vi.fn(async () => true),
@@ -1081,7 +1082,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			env['CACHE_VALUE_MAX_SIZE'] = false;
 			env['CACHE_TTL'] = '5m';
 			vi.mocked(permissionsCachable).mockResolvedValue(true);
-			// Default every read to a miss; the hit test overrides with a one-shot value.
+			// Default every read to a miss; the hit test sets a one-shot value.
 			vi.mocked(getCacheValue).mockResolvedValue(undefined);
 		});
 

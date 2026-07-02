@@ -8,8 +8,9 @@ import { getGraphqlQueryAndVariables } from './get-graphql-query-and-variables.j
 import { version } from 'directus/version';
 import { ipInNetworks } from './ip-in-networks.js';
 
-// The request IP only belongs in a cache key when a matching policy `ip_access` filter makes the
-// result IP-dependent — otherwise it would fragment the cache per-client for no reason.
+// The request IP only belongs in a cache key when a matching policy `ip_access`
+// filter makes the result IP-dependent — otherwise it would fragment the cache
+// per-client for no reason.
 async function ipAffectsResult(accountability: Accountability | null): Promise<boolean> {
 	if (!accountability?.ip) {
 		return false;
@@ -42,11 +43,12 @@ export async function getCacheKey(req: Request) {
 }
 
 /**
- * Cache key for the service-level read-through in `ItemsService.readByQuery`, built from the same
- * signals as the HTTP key (`getCacheKey`) minus the request URL: a programmatic caller has no
- * `path`, so the collection stands in for it. Deliberately its OWN namespace — a service-cached
- * read and the HTTP response cache hold different shapes (raw items vs shaped response), so they
- * must not collide on one key.
+ * Cache key for the service-level read-through in `ItemsService.readByQuery`,
+ * built from the same signals as the HTTP key (`getCacheKey`) minus the request
+ * URL: a programmatic caller has no `path`, so the collection stands in for it.
+ * Deliberately its OWN namespace — a service-cached read and the HTTP response
+ * cache hold different shapes (raw items vs shaped response), so they must not
+ * collide on one key.
  */
 export async function getReadThroughCacheKey(
 	collection: string,
