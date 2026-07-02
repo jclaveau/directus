@@ -9,6 +9,7 @@ import { ExportService } from '../services/import-export.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import { isCacheTypeEnabled } from '../utils/is-cache-type-enabled.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -38,6 +39,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
 		env['CACHE_ENABLED'] === true &&
+		isCacheTypeEnabled('api') &&
 		cache &&
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false &&
