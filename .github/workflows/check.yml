@@ -74,6 +74,9 @@ jobs:
   style-changes:
     name: Style (changes)
     runs-on: ubuntu-latest
+    # PR-only by design: the gate diffs added lines against the PR base, so a direct push to a base
+    # branch (no PR context, no base to diff) is intentionally NOT gated. Style on base branches
+    # rides in through the PRs that merged them.
     if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository

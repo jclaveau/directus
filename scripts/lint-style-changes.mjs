@@ -99,9 +99,22 @@ try {
 	raw = error.stdout;
 }
 
+// A non-zero exit is normal (eslint found violations) AND abnormal (config load / crash). The two
+// differ by stdout: a report is a JSON array, a crash leaves stdout empty and the reason on stderr.
+// Without this the JSON.parse below throws an opaque SyntaxError and the gate dies mid-parse instead
+// of surfacing the real failure.
+let parsed;
+try {
+	parsed = JSON.parse(raw);
+} catch {
+	console.error('✗ eslint produced no JSON — it likely failed to run (bad config, crash):');
+	console.error(raw || '(no output)');
+	process.exit(1);
+}
+
 const violations = [];
 
-for (const result of JSON.parse(raw)) {
+for (const result of parsed) {
 	const rel = relative(process.cwd(), result.filePath);
 	const added = addedByFile.get(rel);
 	if (!added) continue;
