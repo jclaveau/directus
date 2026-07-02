@@ -130,7 +130,7 @@ implements AbstractService<Item> {
 			this.collection,
 			scopedCacheFields,
 			rows,
-			true,
+			'coarse',
 			this.collectionScopedCacheFieldTypes,
 		);
 	}

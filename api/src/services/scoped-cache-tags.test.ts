@@ -76,7 +76,7 @@ describe('scope-tag type propagation', () => {
 			'slots',
 			['active'],
 			[{ active: 1 }],
-			true,
+			'coarse',
 			{ active: 'boolean' },
 		);
 
@@ -102,7 +102,7 @@ describe('scope-tag type propagation', () => {
 });
 
 // Pure scope-tag derivation behind update-payload / create tagging
-// (requireAll toggles fatal-on-missing).
+// (onUnresolvable picks coarse-fallback vs skip on a missing field).
 describe('scopedCacheTagsFromRows', () => {
 	test('one tag per distinct value per field', () => {
 		const rows = [
@@ -111,7 +111,9 @@ describe('scopedCacheTagsFromRows', () => {
 			{ student: 'A', course: 'art' },
 		];
 
-		expect(scopedCacheTagsFromRows('slots', ['student', 'course'], rows, true)).toEqual([
+		expect(
+			scopedCacheTagsFromRows('slots', ['student', 'course'], rows, 'coarse'),
+		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 			{ collection: 'slots', field: 'student', value: 'B' },
 			{ collection: 'slots', field: 'course', value: 'math' },
@@ -122,28 +124,28 @@ describe('scopedCacheTagsFromRows', () => {
 	test('null and numeric values are kept distinct', () => {
 		const rows = [{ student: null }, { student: 0 }, { student: null }];
 
-		expect(scopedCacheTagsFromRows('slots', ['student'], rows, true)).toEqual([
+		expect(scopedCacheTagsFromRows('slots', ['student'], rows, 'coarse')).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 			{ collection: 'slots', field: 'student', value: 0 },
 		]);
 	});
 
 	test(oneLine`
-		requireAll returns null when a field is not present on a row (unprojected read /
+		'coarse' returns null when a field is not present on a row (unprojected read /
 		omitted create)
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(scopedCacheTagsFromRows('slots', ['student'], rows, true)).toBeNull();
+		expect(scopedCacheTagsFromRows('slots', ['student'], rows, 'coarse')).toBeNull();
 	});
 
 	test(oneLine`
-		without requireAll a missing field is skipped, not fatal (update payload that leaves
-		it unchanged)
+		'skip' skips a missing field instead of failing (update payload that leaves it
+		unchanged)
 	`, () => {
 		const rows = [{ student: 'A' }, { course: 'math' }];
 
-		expect(scopedCacheTagsFromRows('slots', ['student'], rows, false)).toEqual([
+		expect(scopedCacheTagsFromRows('slots', ['student'], rows, 'skip')).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
 	});
@@ -152,7 +154,7 @@ describe('scopedCacheTagsFromRows', () => {
 		a field present but holding null is resolvable (distinct from being absent)
 	`, () => {
 		expect(
-			scopedCacheTagsFromRows('slots', ['student'], [{ student: null }], true),
+			scopedCacheTagsFromRows('slots', ['student'], [{ student: null }], 'coarse'),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: null },
 		]);
@@ -162,11 +164,13 @@ describe('scopedCacheTagsFromRows', () => {
 		empty rows resolve to an empty tag list, not null (caller falls back to a
 		collection-level tag)
 	`, () => {
-		expect(scopedCacheTagsFromRows('slots', ['student'], [], true)).toEqual([]);
+		expect(scopedCacheTagsFromRows('slots', ['student'], [], 'coarse')).toEqual([]);
 	});
 
 	test('no configured fields yields no scoped cache tags', () => {
-		expect(scopedCacheTagsFromRows('slots', [], [{ student: 'A' }], true)).toEqual([]);
+		expect(
+			scopedCacheTagsFromRows('slots', [], [{ student: 'A' }], 'coarse'),
+		).toEqual([]);
 	});
 });
 
