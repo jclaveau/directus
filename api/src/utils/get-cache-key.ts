@@ -1,3 +1,4 @@
+import type { Accountability, Query } from '@directus/types';
 import type { Request } from 'express';
 import hash from 'object-hash';
 import url from 'url';
@@ -7,27 +8,58 @@ import { getGraphqlQueryAndVariables } from './get-graphql-query-and-variables.j
 import { version } from 'directus/version';
 import { ipInNetworks } from './ip-in-networks.js';
 
+// The request IP only belongs in a cache key when a matching policy `ip_access` filter makes the
+// result IP-dependent — otherwise it would fragment the cache per-client for no reason.
+async function ipAffectsResult(accountability: Accountability | null): Promise<boolean> {
+	if (!accountability?.ip) {
+		return false;
+	}
+
+	const ipFilters = await fetchPoliciesIpAccess(accountability, getDatabase());
+
+	return (
+		ipFilters.length > 0 &&
+		ipFilters.some((networks) => ipInNetworks(accountability.ip!, networks))
+	);
+}
+
 export async function getCacheKey(req: Request) {
 	const path = url.parse(req.originalUrl).pathname;
 	const isGraphQl = path?.startsWith('/graphql');
-
-	let includeIp = false;
-
-	if (req.accountability && req.accountability.ip) {
-		// Check if the IP influences the result of the request, that can be the case if some policies have an ip_access
-		// filter and the request IP matches any of those filters
-		const ipFilters = await fetchPoliciesIpAccess(req.accountability, getDatabase());
-		includeIp = ipFilters.length > 0 && ipFilters.some((networks) => ipInNetworks(req.accountability!.ip!, networks));
-	}
 
 	const info = {
 		version,
 		user: req.accountability?.user || null,
 		path,
 		query: isGraphQl ? getGraphqlQueryAndVariables(req) : req.sanitizedQuery,
-		...(includeIp && { ip: req.accountability!.ip }),
+		...((await ipAffectsResult(req.accountability ?? null)) && {
+			ip: req.accountability!.ip,
+		}),
 	};
 
 	const key = hash(info);
 	return key;
+}
+
+/**
+ * Cache key for the service-level read-through in `ItemsService.readByQuery`, built from the same
+ * signals as the HTTP key (`getCacheKey`) minus the request URL: a programmatic caller has no
+ * `path`, so the collection stands in for it. Deliberately its OWN namespace — a service-cached
+ * read and the HTTP response cache hold different shapes (raw items vs shaped response), so they
+ * must not collide on one key.
+ */
+export async function getReadThroughCacheKey(
+	collection: string,
+	query: Query,
+	accountability: Accountability | null,
+): Promise<string> {
+	const info = {
+		version,
+		user: accountability?.user || null,
+		collection,
+		query,
+		...((await ipAffectsResult(accountability)) && { ip: accountability!.ip }),
+	};
+
+	return hash(info);
 }
