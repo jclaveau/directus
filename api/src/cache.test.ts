@@ -48,8 +48,12 @@ vi.mock('./redis/index.js', () => {
 
 const { getRedisConnection } = await import('./cache.js');
 
-const { assertScopedCacheRedisSupported, purgeScopedCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
-	await import('./scoped-cache.js');
+const {
+	assertScopedCacheRedisSupported,
+	purgeScopedCache,
+	scopedCachePurgeEnabled,
+	tagScopedCacheKeys,
+} = await import('./scoped-cache.js');
 
 function setEnv(values: Record<string, unknown>) {
 	for (const key of Object.keys(mockEnv.current)) {
