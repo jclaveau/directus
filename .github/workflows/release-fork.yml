@@ -33,6 +33,26 @@ jobs:
         with:
           registry: https://registry.npmjs.org
 
+      - name: Pack and extract dist folders
+        run: |
+          # `pnpm pack` resolves catalog:/workspace: specs to concrete versions;
+          # extracting the packed package.json back de-catalogs the tree so
+          # external `github:` consumers can resolve deps (they can't read our catalog).
+          pnpm -r --include-workspace-root exec sh -c '
+            tarball=$(pnpm pack --pack-destination . 2>/dev/null | tail -1)
+            if [ -f "$tarball" ]; then
+              tar xf "$tarball" --strip-components=1 "package/package.json"
+              echo "Extracted package.json from $tarball in $(pwd)"
+              if tar tf "$tarball" | grep -q "^package/dist/"; then
+                rm -rf dist
+                tar xf "$tarball" --strip-components=1 "package/dist/"
+                echo "Extracted dist from $tarball in $(pwd)"
+              fi
+              rm "$tarball"
+            fi
+          '
+        shell: bash
+
       - name: Add and commit dist folder
         run: |
           # remove dist/ from gitignore
@@ -41,6 +61,7 @@ jobs:
           # cat .gitignore
 
           git add '**/dist/**'
+          git add '**/package.json'
 
           git commit -m "Add dist folders content"
           git push origin HEAD
