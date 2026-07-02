@@ -24,12 +24,14 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
-import { getCache } from '../cache.js';
+import { parse as parseBytesConfiguration } from 'bytes';
+import { getCache, getCacheValue, setCacheValue } from '../cache.js';
 import {
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
+	tagScopedCacheKeys,
 } from '../scoped-cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
@@ -42,6 +44,10 @@ import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { collectionsInFieldMap } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { getReadThroughCacheKey } from '../utils/get-cache-key.js';
+import { getMilliseconds } from '../utils/get-milliseconds.js';
+import { stringByteSize } from '../utils/get-string-byte-size.js';
+import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
@@ -707,6 +713,48 @@ implements AbstractService<Item> {
 				)
 				: query;
 
+		// Service-level read-through cache. Every caller reaches this — a controller, a custom
+		// endpoint, a hook — not only requests routed through the HTTP cache middleware. It rides its
+		// own key namespace, separate from the HTTP response cache (`getCacheKey`): the two hold
+		// different shapes (raw service items here vs a shaped response there) so they must not share
+		// a key. Cheap guards run first; the async `permissionsCachable` probe only when they pass.
+		// Skipped for in-transaction reads (uncommitted), system collections (served via the system
+		// cache), and `$NOW`-dynamic permissions. A caller wanting a guaranteed-fresh read opts out
+		// with `{ cache: false }`.
+		const cacheable =
+			opts?.cache !== false &&
+			env['CACHE_ENABLED'] === true &&
+			this.cache !== null &&
+			!this.knex.isTransaction &&
+			!isSystemCollection(this.collection);
+
+		const cacheKey =
+			cacheable &&
+			(await permissionsCachable(
+				this.collection,
+				{ knex: this.knex, schema: this.schema },
+				this.accountability ?? undefined,
+			))
+				? await getReadThroughCacheKey(this.collection, updatedQuery, this.accountability)
+				: null;
+
+		if (cacheKey) {
+			let cached;
+
+			try {
+				cached = await getCacheValue(this.cache!, cacheKey);
+			}
+			catch {
+				// A cache-store read failure must never fail the query — fall through to a live read.
+			}
+
+			if (cached) {
+				// Already indexed under its scope tags at set-time, so a later mutation still purges
+				// it — no need to recompute or re-attach tags on a hit.
+				return withMeta(cached as Item[], { scopedCacheTags: [] });
+			}
+		}
+
 		let ast = await getAstFromQuery(
 			{
 				collection: this.collection,
@@ -835,6 +883,33 @@ implements AbstractService<Item> {
 					accountability: this.accountability,
 				},
 			);
+		}
+
+		// Populate the read-through cache on a miss, then index it under the scope tags computed
+		// above so a later mutation purges exactly this slice (or a full/collection flush outside
+		// scoped mode). Best-effort: a store failure or an over-max-size payload just skips caching.
+		if (cacheKey) {
+			const maxSize = env['CACHE_VALUE_MAX_SIZE'] === false
+				? null
+				: parseBytesConfiguration(env['CACHE_VALUE_MAX_SIZE'] as string);
+
+			const withinMaxSize = maxSize === null
+				|| stringByteSize(JSON.stringify(filteredRecords)) <= maxSize;
+
+			if (withinMaxSize) {
+				try {
+					await setCacheValue(this.cache!, cacheKey, filteredRecords, getMilliseconds(env['CACHE_TTL']));
+
+					await setCacheValue(this.cache!, `${cacheKey}__expires_at`, {
+						exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0),
+					});
+
+					await tagScopedCacheKeys(cacheKey, scopedCacheTags);
+				}
+				catch {
+					// Caching is best-effort; a store write failure must not fail the read.
+				}
+			}
 		}
 
 		return withMeta(filteredRecords as Item[], { scopedCacheTags });
