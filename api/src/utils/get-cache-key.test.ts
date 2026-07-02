@@ -4,7 +4,7 @@ import type { Knex } from 'knex';
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi, type MockInstance } from 'vitest';
 import { fetchPoliciesIpAccess } from '../permissions/modules/fetch-policies-ip-access/fetch-policies-ip-access.js';
 import { getDatabase } from '../database/index.js';
-import { getCacheKey } from './get-cache-key.js';
+import { getCacheKey, getReadThroughCacheKey } from './get-cache-key.js';
 import * as getGraphqlQueryUtil from './get-graphql-query-and-variables.js';
 
 vi.mock('../database/index.js');
@@ -150,5 +150,38 @@ describe('get cache key', async () => {
 
 		expect(await getCacheKey(reqWithMatchingIp)).not.toEqual(await getCacheKey(reqWithoutIp));
 		expect(await getCacheKey(reqWithNotMatchingIp)).toEqual(await getCacheKey(reqWithoutIp));
+	});
+});
+
+describe('getReadThroughCacheKey', () => {
+	const acc = { user: '00000000-0000-0000-0000-000000000000' } as any;
+	const key = getReadThroughCacheKey;
+
+	test('is deterministic for the same collection, query and accountability', async () => {
+		const a = await key('articles', { fields: ['id'] }, acc);
+		const b = await key('articles', { fields: ['id'] }, acc);
+
+		expect(typeof a).toBe('string');
+		expect(a).toEqual(b);
+	});
+
+	test('varies by collection, query and user', async () => {
+		const base = await key('articles', {}, acc);
+
+		expect(await key('authors', {}, acc)).not.toEqual(base);
+		expect(await key('articles', { fields: ['id'] }, acc)).not.toEqual(base);
+		expect(await key('articles', {}, { user: 'other' } as any)).not.toEqual(base);
+		expect(await key('articles', {}, null)).not.toEqual(base);
+	});
+
+	test('includes the ip only when it matches a policy ip_access filter', async () => {
+		vi.mocked(fetchPoliciesIpAccess).mockResolvedValue([['127.0.0.1']]);
+
+		const noIp = await key('articles', {}, { ...acc });
+		const matchingIp = await key('articles', {}, { ...acc, ip: '127.0.0.1' });
+		const otherIp = await key('articles', {}, { ...acc, ip: '127.0.0.2' });
+
+		expect(matchingIp).not.toEqual(noIp);
+		expect(otherIp).toEqual(noIp);
 	});
 });
