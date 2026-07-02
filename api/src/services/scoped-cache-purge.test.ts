@@ -121,8 +121,8 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'student', value: 'A' },
-				{ collection: 'test', field: 'student', value: 'B' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 			],
 			expect.anything(),
 		);
@@ -140,7 +140,9 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
+			expect.arrayContaining([
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			]),
 			expect.anything(),
 		);
 	});
@@ -182,8 +184,8 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
-				{ collection: 'test', field: 'student', value: 'A' },
-				{ collection: 'test', field: 'student', value: 'B' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 			],
 			expect.anything(),
 		);
@@ -201,7 +203,9 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
+			expect.arrayContaining([
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			]),
 			expect.anything(),
 		);
 	});
@@ -220,7 +224,9 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
+			expect.arrayContaining([
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			]),
 			expect.anything(),
 		);
 
@@ -244,7 +250,9 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			expect.arrayContaining([{ collection: 'test', field: 'student', value: 'A' }]),
+			expect.arrayContaining([
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			]),
 			expect.anything(),
 		);
 	});
@@ -286,7 +294,7 @@ describe(oneLine`
 			expect(purgeScopedCache).toHaveBeenCalledWith(
 				expect.anything(),
 				'test',
-				[{ collection: 'test', field: 'student', value: 'B' }],
+				[{ collection: 'test', field: 'student', value: 'B', type: 'string' }],
 				expect.anything(),
 			);
 		}
@@ -309,7 +317,7 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			[{ collection: 'test', field: 'student', value: 'default-owner' }],
+			[{ collection: 'test', field: 'student', value: 'default-owner', type: 'string' }],
 			expect.anything(),
 		);
 	});
@@ -356,8 +364,8 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
-					{ collection: 'test', field: 'student', value: 'A' },
-					{ collection: 'test', field: 'student', value: 'C' },
+					{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+					{ collection: 'test', field: 'student', value: 'C', type: 'string' },
 				],
 				expect.anything(),
 			);
@@ -391,7 +399,7 @@ describe(oneLine`
 		const result = await service().readByQuery({ filter: { student: { _eq: 'A' } } });
 
 		expect(readMeta(result)?.scopedCacheTags).toEqual([
-			{ collection: 'test', field: 'student', value: 'A' },
+			{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 		]);
 	});
 
@@ -454,6 +462,8 @@ describe(oneLine`
 				{ id: 2, student: 'B' },
 			]);
 
+			// The `cache.scope` listener adds these tags itself (no schema type on hand), so
+			// they stay untyped — an extension owns both sides of its own tags.
 			expect(readMeta(result)?.scopedCacheTags).toEqual([
 				{ collection: 'test' },
 				{ collection: 'test', field: 'student', value: 'A' },

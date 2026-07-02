@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import type { EventContext, Filter, ScopedCacheTag } from '@directus/types';
+import type { EventContext, Filter, ScopedCacheTag, Type } from '@directus/types';
 import type Keyv from 'keyv';
 import emitter from './emitter.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -36,21 +36,58 @@ export function assertScopedCacheRedisSupported(): void {
 	}
 }
 
-// `String(value)` collapses types (number 7 vs string "7") — intentional and load-bearing:
-// a scope column has a stable type, but a REST string filter and the numeric DB value must
-// resolve the same slice. NULL gets a null-byte sentinel rather than String(null)='null', so
-// it can never collide with a literal "null" string value the column might hold.
-function serializeScopedCacheTagValue(value: unknown): string {
-	return value === null || value === undefined
-		? '\x00null'
-		: String(value);
+// Canonicalize a scope value to a driver-stable token so a REST/GraphQL filter value and the
+// native DB row value resolve the SAME slice. `String()` alone collapses the common case (number
+// 7 vs string "7"), but diverges for non-string scalars — a boolean is `true` from a parsed filter
+// but `1`/`0` (mysql/sqlite) or `'t'` (pg) from a stored row; a datetime is an ISO string from a
+// filter but a `Date` from the driver; a decimal is `1.5` vs `'1.50'`. NULL gets a null-byte
+// sentinel rather than String(null)='null', so it can't collide with a literal "null" value.
+export function canonicalScopedCacheValue(
+	value: unknown,
+	type: Type | undefined,
+): string {
+	if (value === null || value === undefined) {
+		return '\x00null';
+	}
+
+	if (type === 'boolean') {
+		const truthy = value === true || value === 1 || value === '1'
+			|| value === 't' || value === 'true';
+
+		return truthy
+			? 'true'
+			: 'false';
+	}
+
+	// `time` has no date component, so it stays a plain string (both sides give `HH:MM:SS`).
+	if (type === 'date' || type === 'dateTime' || type === 'timestamp') {
+		const ms = value instanceof Date
+			? value.getTime()
+			: Date.parse(String(value));
+
+		return Number.isNaN(ms)
+			? String(value)
+			: String(ms);
+	}
+
+	// integer/bigInteger keep `String` to preserve precision past MAX_SAFE_INTEGER; they
+	// already collapse (`7` and `'7'` → `'7'`). Only fixed-scale types need the numeric pass.
+	if (type === 'decimal' || type === 'float') {
+		const num = Number(value);
+
+		return Number.isFinite(num)
+			? String(num)
+			: String(value);
+	}
+
+	return String(value);
 }
 
 function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
 	return tag.field === undefined
 		? base
-		: `${base}:${tag.field}=${serializeScopedCacheTagValue(tag.value)}`;
+		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
 }
 
 /**
@@ -196,13 +233,15 @@ export async function purgeScopedCache(
  * unresolvable (returns `null`), so the caller falls back to a coarse purge rather than
  * leaving a slice stale (a create whose payload omitted the field). Without it, missing
  * fields are skipped — for update payloads where an absent field just means "unchanged"
- * and the pre-update capture covers the old value.
+ * and the pre-update capture covers the old value. `fieldTypes` carries each field's schema
+ * type so the tag's value canonicalizes the same way the read side's filter value does.
  */
 export function scopedCacheTagsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
 	requireAll: boolean,
+	fieldTypes: Record<string, Type | undefined> = {},
 ): ScopedCacheTag[] | null {
 	const tags: ScopedCacheTag[] = [];
 
@@ -225,7 +264,7 @@ export function scopedCacheTagsFromRows(
 			}
 
 			seen.add(value);
-			tags.push({ collection, field, value });
+			tags.push({ collection, field, value, type: fieldTypes[field] });
 		}
 	}
 
@@ -241,12 +280,14 @@ export function scopedCacheTagsFromRows(
  * field, reached through the root or an `_and` (an `_or` branch doesn't bound — a row
  * matching the other branch still belongs). No pinned field → returns `[]`, and the
  * caller falls back to the bare collection tag so every write to the collection
- * invalidates the read.
+ * invalidates the read. `fieldTypes` carries each field's schema type so the pinned
+ * filter value canonicalizes the same way the purge side's stored row value does.
  */
 export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
 	fields: string[],
 	filter: Filter | null | undefined,
+	fieldTypes: Record<string, Type | undefined> = {},
 ): ScopedCacheTag[] {
 	if (!filter || fields.length === 0) {
 		return [];
@@ -302,7 +343,7 @@ export function pinnedScopedCacheTagsFromFilter(
 
 	for (const [field, values] of pinned) {
 		for (const value of values) {
-			tags.push({ collection, field, value });
+			tags.push({ collection, field, value, type: fieldTypes[field] });
 		}
 	}
 
