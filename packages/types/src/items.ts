@@ -28,6 +28,13 @@ export type QueryOptions = {
 	stripNonRequested?: boolean;
 	permissionsAction?: PermissionsAction;
 	emitEvents?: boolean;
+	/**
+	 * Opt a `readByQuery` out of the service-level read-through cache. Caching is on by default,
+	 * but only actually happens when it's safe (data cache enabled, not inside a transaction, not a
+	 * system collection, permissions are cachable). Set `false` for a read that must always be
+	 * fresh; ignored when caching wouldn't happen anyway.
+	 */
+	cache?: boolean;
 };
 
 export type MutationOptions = {

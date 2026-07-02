@@ -5,8 +5,12 @@ import { oneLine } from '@directus/utils';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
+import { getCacheValue, setCacheValue } from '../cache.js';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
+import { tagScopedCacheKeys } from '../scoped-cache.js';
+import { getReadThroughCacheKey } from '../utils/get-cache-key.js';
+import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { readMeta } from '../utils/read-meta.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
@@ -44,6 +48,8 @@ vi.mock('../cache.js', () => {
 		getCache: () => {
 			return { cache: { clear: vi.fn(), delete: vi.fn() } };
 		},
+		getCacheValue: vi.fn(),
+		setCacheValue: vi.fn(),
 	};
 });
 
@@ -51,9 +57,25 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('../scoped-cache.js')>()),
 		purgeScopedCache: vi.fn(),
+		tagScopedCacheKeys: vi.fn(),
 		scopedCachePurgeEnabled: () => {
 			return true;
 		},
+	};
+});
+
+// The read-through cache guard calls permissionsCachable (real one hits the permissions DB) and
+// getReadThroughCacheKey (real one hashes + probes ip_access). Stub both so the service-cache tests
+// stay hermetic; permissionsCachable defaults to cachable and the key is fixed for assertions.
+vi.mock('../utils/permissions-cachable.js', () => {
+	return {
+		permissionsCachable: vi.fn(async () => true),
+	};
+});
+
+vi.mock('../utils/get-cache-key.js', () => {
+	return {
+		getReadThroughCacheKey: vi.fn(async () => 'read-through-key'),
 	};
 });
 
@@ -1049,6 +1071,120 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const result = await service.readByQuery({}, { stripNonRequested: false });
 
 			expect(result).toEqual([{ id: 1, name: 'a' }]);
+		});
+	});
+
+	describe('service-level read-through cache', () => {
+		beforeEach(() => {
+			env['CACHE_ENABLED'] = true;
+			env['CACHE_VALUE_MAX_SIZE'] = false;
+			env['CACHE_TTL'] = '5m';
+			vi.mocked(permissionsCachable).mockResolvedValue(true);
+			// Default every read to a miss; the hit test overrides with a one-shot value.
+			vi.mocked(getCacheValue).mockResolvedValue(undefined);
+		});
+
+		afterEach(() => {
+			delete env['CACHE_ENABLED'];
+			delete env['CACHE_VALUE_MAX_SIZE'];
+			delete env['CACHE_TTL'];
+		});
+
+		it('serves a cache hit without querying the database or re-caching', async () => {
+			// No tracker.select handler: a hit must return before any DB read.
+			vi.mocked(getCacheValue).mockResolvedValueOnce([{ id: 7, name: 'cached' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			const result = await service.readByQuery({ filter: { name: { _eq: 'x' } } });
+
+			expect(result).toEqual([{ id: 7, name: 'cached' }]);
+			expect(getCacheValue).toHaveBeenCalledWith(expect.anything(), 'read-through-key');
+			expect(setCacheValue).not.toHaveBeenCalled();
+			expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		});
+
+		it('caches payload + expiry and tags them on a miss', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'fresh' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			const result = await service.readByQuery({});
+
+			expect(result).toEqual([{ id: 1, name: 'fresh' }]);
+
+			expect(getReadThroughCacheKey).toHaveBeenCalledWith(
+				'test',
+				expect.any(Object),
+				null,
+			);
+
+			expect(setCacheValue).toHaveBeenCalledWith(
+				expect.anything(),
+				'read-through-key',
+				[{ id: 1, name: 'fresh' }],
+				expect.anything(),
+			);
+
+			expect(setCacheValue).toHaveBeenCalledWith(
+				expect.anything(),
+				'read-through-key__expires_at',
+				expect.objectContaining({ exp: expect.any(Number) }),
+			);
+
+			expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+				'read-through-key',
+				expect.any(Array),
+			);
+		});
+
+		it('skips the cache entirely when opts.cache is false', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'fresh' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			await service.readByQuery({}, { cache: false });
+
+			expect(getCacheValue).not.toHaveBeenCalled();
+			expect(setCacheValue).not.toHaveBeenCalled();
+		});
+
+		it('never caches a system collection read', async () => {
+			tracker.on.select('directus_users').response([{ id: 1, name: 'admin' }]);
+
+			const service = new ItemsService('directus_users', {
+				knex: db,
+				schema: shapesSchema,
+			});
+
+			await service.readByQuery({});
+
+			expect(getCacheValue).not.toHaveBeenCalled();
+			expect(setCacheValue).not.toHaveBeenCalled();
+		});
+
+		it('skips the cache for an in-transaction (uncommitted) read', async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'fresh' }]);
+			(db as any).isTransaction = true;
+
+			try {
+				const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+				await service.readByQuery({});
+
+				expect(getCacheValue).not.toHaveBeenCalled();
+				expect(setCacheValue).not.toHaveBeenCalled();
+			}
+			finally {
+				delete (db as any).isTransaction;
+			}
+		});
+
+		it('skips the cache when permissions are not cachable (dynamic $NOW)', async () => {
+			vi.mocked(permissionsCachable).mockResolvedValue(false);
+			tracker.on.select('test').response([{ id: 1, name: 'fresh' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			await service.readByQuery({});
+
+			expect(getCacheValue).not.toHaveBeenCalled();
+			expect(setCacheValue).not.toHaveBeenCalled();
 		});
 	});
 });
