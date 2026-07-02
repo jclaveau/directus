@@ -19,12 +19,13 @@ export function scopedCachePurgeEnabled(): boolean {
 	);
 }
 
-// `String(value)` collapses types (number 7 vs string "7", null vs "null"). Safe
-// because a given scope column has a stable type — tag and purge always resolve the
-// value from the same column.
+// `String(value)` collapses types (number 7 vs string "7") — intentional and load-bearing:
+// a scope column has a stable type, but a REST string filter and the numeric DB value must
+// resolve the same slice. NULL gets a null-byte sentinel rather than String(null)='null', so
+// it can never collide with a literal "null" string value the column might hold.
 function serializeScopedCacheTagValue(value: unknown): string {
 	return value === null || value === undefined
-		? 'null'
+		? '\x00null'
 		: String(value);
 }
 
