@@ -17,6 +17,7 @@ import type {
 	QueryOptions,
 	SchemaOverview,
 	ScopedCacheTag,
+	Type,
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -125,7 +126,13 @@ implements AbstractService<Item> {
 			.from(this.collection)
 			.whereIn(primaryKeyField, keys);
 
-		return scopedCacheTagsFromRows(this.collection, scopedCacheFields, rows, true);
+		return scopedCacheTagsFromRows(
+			this.collection,
+			scopedCacheFields,
+			rows,
+			true,
+			this.collectionScopedCacheFieldTypes,
+		);
 	}
 
 	/**
@@ -151,6 +158,14 @@ implements AbstractService<Item> {
 
 	private get collectionScopedCacheFields(): string[] {
 		return this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+	}
+
+	private get collectionScopedCacheFieldTypes(): Record<string, Type | undefined> {
+		const fields = this.schema.collections[this.collection]?.fields ?? {};
+
+		return Object.fromEntries(
+			this.collectionScopedCacheFields.map((field) => [field, fields[field]?.type]),
+		);
 	}
 
 	/**
@@ -781,6 +796,7 @@ implements AbstractService<Item> {
 					this.collection,
 					scopedCacheFields,
 					updatedQuery.filter,
+					this.collectionScopedCacheFieldTypes,
 				);
 
 			for (const collection of collectionsInFieldMap(fieldMap)) {

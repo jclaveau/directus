@@ -1,9 +1,105 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
 import {
+	canonicalScopedCacheValue,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheTagsFromRows,
 } from '../scoped-cache.js';
+
+// The read side derives a scope value from a (string-ish) query filter, the purge side from a
+// native DB row. Both feed the same cache key, so a filter value and its stored counterpart must
+// canonicalize identically — otherwise a write leaves the read's slice stale.
+describe('canonicalScopedCacheValue', () => {
+	test(oneLine`
+		null and undefined share the null-byte sentinel, distinct from the literal "null"
+	`, () => {
+		expect(canonicalScopedCacheValue(null, 'string')).toBe('\x00null');
+		expect(canonicalScopedCacheValue(undefined, 'string')).toBe('\x00null');
+		expect(canonicalScopedCacheValue('null', 'string')).toBe('null');
+	});
+
+	test(oneLine`
+		boolean: filter \`true\`/\`false\` and driver \`1\`/\`0\`/\`t\` collapse to one token
+	`, () => {
+		for (const truthy of [true, 1, '1', 't', 'true']) {
+			expect(canonicalScopedCacheValue(truthy, 'boolean')).toBe('true');
+		}
+
+		for (const falsy of [false, 0, '0', 'f', 'false']) {
+			expect(canonicalScopedCacheValue(falsy, 'boolean')).toBe('false');
+		}
+	});
+
+	test(oneLine`
+		datetime: an ISO string and a \`Date\` for the same instant collapse to epoch ms
+	`, () => {
+		const iso = '2026-01-02T03:04:05.000Z';
+
+		for (const type of ['date', 'dateTime', 'timestamp'] as const) {
+			expect(canonicalScopedCacheValue(iso, type))
+				.toBe(canonicalScopedCacheValue(new Date(iso), type));
+		}
+
+		// Unparseable value falls back to its string form rather than NaN.
+		expect(canonicalScopedCacheValue('not-a-date', 'dateTime')).toBe('not-a-date');
+	});
+
+	test('decimal/float: fixed-scale `"1.50"` and numeric `1.5` collapse', () => {
+		expect(canonicalScopedCacheValue('1.50', 'decimal'))
+			.toBe(canonicalScopedCacheValue(1.5, 'decimal'));
+
+		expect(canonicalScopedCacheValue('2.0', 'float'))
+			.toBe(canonicalScopedCacheValue(2, 'float'));
+	});
+
+	test(oneLine`
+		integer/bigInteger keep \`String\` — \`7\` and \`"7"\` collapse, precision preserved
+	`, () => {
+		expect(canonicalScopedCacheValue(7, 'integer')).toBe('7');
+		expect(canonicalScopedCacheValue('7', 'integer')).toBe('7');
+
+		// Beyond Number.MAX_SAFE_INTEGER a numeric pass would corrupt; String keeps it exact.
+		expect(canonicalScopedCacheValue('9007199254740993', 'bigInteger'))
+			.toBe('9007199254740993');
+	});
+
+	test('unknown/undefined type falls back to `String` (owner-id/uuid path)', () => {
+		expect(canonicalScopedCacheValue(42, undefined)).toBe('42');
+		expect(canonicalScopedCacheValue('7c9e-uuid', 'uuid')).toBe('7c9e-uuid');
+	});
+});
+
+// The field type must ride onto derived tags so key canonicalization sees it on both sides.
+describe('scope-tag type propagation', () => {
+	test('scopedCacheTagsFromRows stamps each tag with its field type', () => {
+		const tags = scopedCacheTagsFromRows(
+			'slots',
+			['active'],
+			[{ active: 1 }],
+			true,
+			{ active: 'boolean' },
+		);
+
+		expect(tags).toEqual([
+			{ collection: 'slots', field: 'active', value: 1, type: 'boolean' },
+		]);
+	});
+
+	test(oneLine`
+		pinnedScopedCacheTagsFromFilter stamps the pinned tag with its field type
+	`, () => {
+		const tags = pinnedScopedCacheTagsFromFilter(
+			'slots',
+			['active'],
+			{ active: { _eq: true } },
+			{ active: 'boolean' },
+		);
+
+		expect(tags).toEqual([
+			{ collection: 'slots', field: 'active', value: true, type: 'boolean' },
+		]);
+	});
+});
 
 // Pure scope-tag derivation behind update-payload / create tagging
 // (requireAll toggles fatal-on-missing).
