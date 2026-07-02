@@ -24,14 +24,12 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
-import { parse as parseBytesConfiguration } from 'bytes';
-import { getCache, getCacheValue, setCacheValue } from '../cache.js';
+import { getCache } from '../cache.js';
 import {
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
-	tagScopedCacheKeys,
 } from '../scoped-cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
@@ -44,17 +42,17 @@ import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { collectionsInFieldMap } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
-import { getReadThroughCacheKey } from '../utils/get-cache-key.js';
-import { getMilliseconds } from '../utils/get-milliseconds.js';
-import { isCacheTypeEnabled } from '../utils/is-cache-type-enabled.js';
-import { stringByteSize } from '../utils/get-string-byte-size.js';
-import { permissionsCachable } from '../utils/permissions-cachable.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { PayloadService } from './payload.js';
+import {
+	readServiceCache,
+	resolveServiceCacheKey,
+	writeServiceCache,
+} from './service-cache.js';
 
 const env = useEnv();
 
@@ -714,43 +712,21 @@ implements AbstractService<Item> {
 				)
 				: query;
 
-		// Service-level read-through cache. Every caller reaches this — a
-		// controller, a custom endpoint, a hook — not only requests that pass
-		// through the HTTP cache middleware. Own key namespace, separate from the
-		// HTTP response cache (`getCacheKey`): the two hold different shapes (raw
-		// service items here vs a shaped response there), so they must not share a
-		// key. Cheap guards run first; the async `permissionsCachable` probe only
-		// when they pass. Skipped for in-transaction reads (uncommitted), system
-		// collections (served via the system cache), and `$NOW`-dynamic
-		// permissions. Opt out per call with `{ cache: false }`.
-		const cacheable =
-			opts?.cache !== false &&
-			env['CACHE_ENABLED'] === true &&
-			isCacheTypeEnabled('service') &&
-			this.cache !== null &&
-			!this.knex.isTransaction &&
-			!isSystemCollection(this.collection);
-
-		const cacheKey =
-			cacheable &&
-			(await permissionsCachable(
-				this.collection,
-				{ knex: this.knex, schema: this.schema },
-				this.accountability ?? undefined,
-			))
-				? await getReadThroughCacheKey(this.collection, updatedQuery, this.accountability)
-				: null;
+		// Service-level read-through cache: every caller reaches this, not only
+		// requests routed through the HTTP cache middleware. See `service-cache.ts`
+		// for the guards and the separate key namespace.
+		const cacheKey = await resolveServiceCacheKey({
+			knex: this.knex,
+			collection: this.collection,
+			accountability: this.accountability,
+			schema: this.schema,
+			query: updatedQuery,
+			cache: this.cache,
+			optOut: opts?.cache === false,
+		});
 
 		if (cacheKey) {
-			let cached;
-
-			try {
-				cached = await getCacheValue(this.cache!, cacheKey);
-			}
-			catch {
-				// A cache read failure must never fail the query — fall back to a
-				// live read.
-			}
+			const cached = await readServiceCache(this.cache!, cacheKey);
 
 			if (cached) {
 				// Already indexed under its scope tags at set time, so a later
@@ -889,38 +865,15 @@ implements AbstractService<Item> {
 			);
 		}
 
-		// Populate the read-through cache on a miss, then index it under the scope
-		// tags computed above so a later mutation purges exactly this slice (or a
-		// full/collection flush outside scoped mode). Best-effort: a store failure
-		// or an over-max-size payload just skips caching.
+		// Populate the read-through cache on a miss, indexed under the scope tags so
+		// a later mutation purges exactly this slice.
 		if (cacheKey) {
-			const maxSize = env['CACHE_VALUE_MAX_SIZE'] === false
-				? null
-				: parseBytesConfiguration(env['CACHE_VALUE_MAX_SIZE'] as string);
-
-			const withinMaxSize = maxSize === null
-				|| stringByteSize(JSON.stringify(filteredRecords)) <= maxSize;
-
-			if (withinMaxSize) {
-				try {
-					await setCacheValue(
-						this.cache!,
-						cacheKey,
-						filteredRecords,
-						getMilliseconds(env['CACHE_TTL']),
-					);
-
-					await setCacheValue(this.cache!, `${cacheKey}__expires_at`, {
-						exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0),
-					});
-
-					await tagScopedCacheKeys(cacheKey, scopedCacheTags);
-				}
-				catch {
-					// Caching is best-effort; a store write failure must not fail
-					// the read.
-				}
-			}
+			await writeServiceCache(
+				this.cache!,
+				cacheKey,
+				filteredRecords as Item[],
+				scopedCacheTags,
+			);
 		}
 
 		return withMeta(filteredRecords as Item[], { scopedCacheTags });
