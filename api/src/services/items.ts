@@ -1394,7 +1394,10 @@ implements AbstractService<Item> {
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// Re-snapshot the committed rows for their new scope values (covers both the
 			// inserts and the moved updates). Reading by returned key also captures a row a
-			// create hook took over — whatever's stored is what gets purged.
+			// create hook took over — whatever's stored is what gets purged. No
+			// `someRowTakenOver` row-count guard is needed here (unlike createMany): upsertMany
+			// resolves values off `primaryKeys` returned by upsertOne, so every committed row is
+			// already re-read rather than trusted from the input payload count.
 			const newScopedCacheTags = await this.snapshotScopedCacheTags(
 				primaryKeys.filter((key): key is PrimaryKey => key !== null && key !== undefined),
 			);
