@@ -1186,5 +1186,38 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(getCacheValue).not.toHaveBeenCalled();
 			expect(setCacheValue).not.toHaveBeenCalled();
 		});
+
+		it('falls back to a live read when the cache read throws', async () => {
+			vi.mocked(getCacheValue).mockRejectedValueOnce(new Error('store down'));
+			tracker.on.select('test').response([{ id: 2, name: 'live' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			const result = await service.readByQuery({});
+
+			// The read error is swallowed → treated as a miss → live read, then cached.
+			expect(result).toEqual([{ id: 2, name: 'live' }]);
+			expect(setCacheValue).toHaveBeenCalled();
+		});
+
+		it('skips caching a payload larger than CACHE_VALUE_MAX_SIZE', async () => {
+			env['CACHE_VALUE_MAX_SIZE'] = '1';
+			tracker.on.select('test').response([{ id: 1, name: 'fresh' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			await service.readByQuery({});
+
+			expect(setCacheValue).not.toHaveBeenCalled();
+			expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+		});
+
+		it('does not fail the read when the cache write throws', async () => {
+			vi.mocked(setCacheValue).mockRejectedValue(new Error('store down'));
+			tracker.on.select('test').response([{ id: 3, name: 'live' }]);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+			const result = await service.readByQuery({});
+
+			expect(result).toEqual([{ id: 3, name: 'live' }]);
+		});
 	});
 });
