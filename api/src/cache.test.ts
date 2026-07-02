@@ -15,6 +15,7 @@ const redis = vi.hoisted(() => {
 	pipeline.expire.mockReturnValue(pipeline);
 
 	return {
+		isCluster: false,
 		smembers: vi.fn(),
 		del: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
@@ -47,7 +48,7 @@ vi.mock('./redis/index.js', () => {
 
 const { getRedisConnection } = await import('./cache.js');
 
-const { purgeScopedCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
+const { assertScopedCacheRedisSupported, purgeScopedCache, scopedCachePurgeEnabled, tagScopedCacheKeys } =
 	await import('./scoped-cache.js');
 
 function setEnv(values: Record<string, unknown>) {
@@ -123,6 +124,31 @@ describe('scoped cache purging', () => {
 		test('false when store is memory even if mode=scoped', () => {
 			env['CACHE_STORE'] = 'memory';
 			expect(scopedCachePurgeEnabled()).toBe(false);
+		});
+	});
+
+	describe('assertScopedCacheRedisSupported', () => {
+		afterEach(() => {
+			redis.isCluster = false;
+		});
+
+		test(oneLine`
+			throws at startup when scoped mode runs against a Redis cluster client
+			(SCAN/DEL are single-node)
+		`, () => {
+			redis.isCluster = true;
+			expect(() => assertScopedCacheRedisSupported()).toThrow(/cluster/i);
+		});
+
+		test('no-op on a standalone client', () => {
+			redis.isCluster = false;
+			expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+		});
+
+		test('no-op in full mode even against a cluster client', () => {
+			redis.isCluster = true;
+			env['CACHE_AUTO_PURGE_MODE'] = 'full';
+			expect(() => assertScopedCacheRedisSupported()).not.toThrow();
 		});
 	});
 
