@@ -414,6 +414,65 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		Scoped purge invalidates a pure-aggregate (count) read of the mutated collection —
+		an empty field map still yields the bare collection tag
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url)
+				.post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm the aggregate reads. A `count(*)` names no field, so the read's field map has
+			// only the root collection (no value slice to pin) — it must fall back to the bare
+			// collection tag, or a later write leaves a stale HIT.
+			await request(url)
+				.get(`/items/${collectionFirst}`)
+				.query({ 'aggregate[count]': '*' })
+				.set('Authorization', auth);
+
+			await request(url)
+				.get(`/items/${collectionIgnored}`)
+				.query({ 'aggregate[count]': '*' })
+				.set('Authorization', auth);
+
+			// Non-vacuity: the aggregate response is genuinely cached, so a re-read HITs.
+			const warm = await request(url)
+				.get(`/items/${collectionFirst}`)
+				.query({ 'aggregate[count]': '*' })
+				.set('Authorization', auth);
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Mutate the aggregated collection.
+			await request(url)
+				.post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			// The bare collection tag must have been applied → the write drops the aggregate.
+			const invalidated = await request(url)
+				.get(`/items/${collectionFirst}`)
+				.query({ 'aggregate[count]': '*' })
+				.set('Authorization', auth);
+
+			// Witness: an untouched collection's aggregate survives (scoped, not a global flush).
+			const witness = await request(url)
+				.get(`/items/${collectionIgnored}`)
+				.query({ 'aggregate[count]': '*' })
+				.set('Authorization', auth);
+
+			expect(invalidated.statusCode).toBe(200);
+			expect(invalidated.headers[cacheStatusHeader]).toBe('MISS');
+			expect(witness.statusCode).toBe(200);
+			expect(witness.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
 		Scoped purge invalidates a read joining a related (m2o) collection when that related
 		row is mutated
 	`, () => {
