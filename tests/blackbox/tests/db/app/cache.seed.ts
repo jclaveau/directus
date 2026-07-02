@@ -28,6 +28,13 @@ export const collectionBlock = 'test_app_cache_block';
 export const collectionGrandRelated = 'test_app_cache_grand_related';
 export const collectionGrandChild = 'test_app_cache_grand_child';
 
+// A value-scoped collection: `scoped_cache_fields = [owner_field]` partitions its cache by
+// owner, and a self-referential `parent` m2o lets a read reach the same collection through
+// an unbounded path (exercises the self-reference guard). Two baseline owners are seeded.
+export const collectionScoped = 'test_app_cache_scoped';
+export const scopedOwnerA = 'owner-a';
+export const scopedOwnerB = 'owner-b';
+
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
 
@@ -51,6 +58,7 @@ export const seedDBStructure = () => {
 				// tag/block all point at grandRelated, so grandRelated goes last.
 				await DeleteCollection(vendor, { collection: junctionTag });
 				await DeleteCollection(vendor, { collection: junctionBlock });
+				await DeleteCollection(vendor, { collection: collectionScoped });
 				await DeleteCollection(vendor, { collection: collectionIgnored });
 				await DeleteCollection(vendor, { collection: collectionGrandChild });
 				await DeleteCollection(vendor, { collection: collectionChild });
@@ -178,6 +186,32 @@ export const seedDBStructure = () => {
 					type: 'string',
 				});
 
+				// Value-scoped collection: partition the cache by `owner_field`.
+				await CreateCollection(vendor, {
+					collection: collectionScoped,
+					meta: { scoped_cache_fields: ['owner_field'] },
+				});
+
+				await CreateField(vendor, {
+					collection: collectionScoped,
+					field: 'string_field',
+					type: 'string',
+				});
+
+				await CreateField(vendor, {
+					collection: collectionScoped,
+					field: 'owner_field',
+					type: 'string',
+				});
+
+				// Self-referential m2o, so a read can reach the same collection through an
+				// unbounded path (`parent.*`) — the self-reference guard's target.
+				await CreateFieldM2O(vendor, {
+					collection: collectionScoped,
+					field: 'parent',
+					otherCollection: collectionScoped,
+				});
+
 				expect(true).toBeTruthy();
 			}
 			catch (error) {
@@ -205,6 +239,17 @@ export const seedDBValues = async () => {
 				item: {
 					string_field: randomUUID(),
 				},
+			});
+
+			// One row per owner slice, so a read can be pinned to a single owner.
+			await CreateItem(vendor, {
+				collection: collectionScoped,
+				item: { string_field: randomUUID(), owner_field: scopedOwnerA },
+			});
+
+			await CreateItem(vendor, {
+				collection: collectionScoped,
+				item: { string_field: randomUUID(), owner_field: scopedOwnerB },
 			});
 		}),
 	)
