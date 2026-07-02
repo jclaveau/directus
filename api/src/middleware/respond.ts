@@ -83,7 +83,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			filename += 'Export';
 		}
 
-		filename += ` ${  getDateFormatted()}`;
+		filename += ` ${getDateFormatted()}`;
 
 		if (req.sanitizedQuery.export === 'json') {
 			res.attachment(`${filename}.json`);

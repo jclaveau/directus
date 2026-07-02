@@ -175,13 +175,14 @@ describe('scoped cache purging', () => {
 			);
 		});
 
-		test('a null scope value serializes to a stable sentinel', async () => {
+		test('a null scope value serializes to a sentinel, not "null"', async () => {
 			await tagScopedCacheKeys('resp-key', [
 				{ collection: 'slots', field: 'student', value: null },
 			]);
 
+			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:slots:student=null',
+				'system-cache:tag:slots:student=\x00null',
 				'resp-key',
 				'resp-key__expires_at',
 			);
