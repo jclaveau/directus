@@ -16,6 +16,11 @@ export default defineConfig({
 		'!src/database/run-ast/lib/apply-query/mock.ts',
 	],
 	unbundle: true,
+	// Keep workspace @directus/* deps (and their transitive externals) out of the bundle.
+	// rolldown 1.1.3 otherwise follows the workspace:* @directus/types into api/dist and
+	// rewrites its `@sinclair/typebox` import to a physical .pnpm store path that isn't
+	// shipped, breaking boot. They're separately installed packages — resolve them at runtime.
+	external: [/^@directus\//, /^@sinclair\/typebox/],
 	tsconfig: 'tsconfig.prod.json',
 	plugins: coverage
 		? [
