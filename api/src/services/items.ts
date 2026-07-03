@@ -26,6 +26,7 @@ import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
 import {
+	pinnedScopedCacheTagsFromCases,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
@@ -811,18 +812,33 @@ implements AbstractService<Item> {
 				}
 			}
 
-			// `updatedQuery.filter` already has dynamic vars resolved — sanitizeQuery
-			// (REST middleware + GraphQL parse-query) runs parseFilter before the service, so
+			// Bound the root either by the API filter or by the permission cases injected into the
+			// AST. `updatedQuery.filter` already has dynamic vars resolved — sanitizeQuery (REST
+			// middleware + GraphQL parse-query) runs parseFilter before the service, so
 			// `$CURRENT_USER` is the concrete user id here, matching what a write's row yields.
+			// `ast.cases` instead carries the raw policy rule (`getCases` pushes it unmodified), so
+			// `pinnedScopedCacheTagsFromCases` resolves its `$CURRENT_USER` itself — this is what
+			// scopes a permission-isolated read (the planner case) whose partition never appears in
+			// the query filter.
 			const rootScopedCacheTags = rootPaths.size > 1
 				? []
-				: pinnedScopedCacheTagsFromFilter(
-					this.collection,
-					scopedCacheFields,
-					updatedQuery.filter,
-					this.collectionScopedCacheFieldTypes,
-					this.collectionScopedCacheFieldRelatedPks,
-				);
+				: [
+					...pinnedScopedCacheTagsFromFilter(
+						this.collection,
+						scopedCacheFields,
+						updatedQuery.filter,
+						this.collectionScopedCacheFieldTypes,
+						this.collectionScopedCacheFieldRelatedPks,
+					),
+					...pinnedScopedCacheTagsFromCases(
+						this.collection,
+						scopedCacheFields,
+						ast.cases,
+						this.accountability,
+						this.collectionScopedCacheFieldTypes,
+						this.collectionScopedCacheFieldRelatedPks,
+					),
+				];
 
 			for (const collection of collectionsInFieldMap(fieldMap)) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
