@@ -1240,6 +1240,110 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		A permission case pins the RESOLVED user id, not the literal $CURRENT_USER token —
+		a write to a row whose owner_field literally holds '$CURRENT_USER' spares the read,
+		a write to the resolved id purges it
+	`, () => {
+		// Regression guard for the resolution the case pin relies on: fetchPermissions →
+		// processPermissions → parseFilter substitutes $CURRENT_USER in the policy rule with
+		// the concrete user id before it becomes ast.cases, so the read pins
+		// owner_field=<me.id>. If that regressed to pinning the literal token, a row with
+		// owner_field='$CURRENT_USER' would share the read's slice and wrongly purge it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-case-token-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-case-token-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScoped,
+					action: 'read',
+					fields: ['*'],
+					permissions: { owner_field: { _eq: '$CURRENT_USER' } },
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-case-token-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-case-token-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, pinned to owner_field=<me.id>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write a row whose owner_field is the LITERAL token string. If the case had
+			// pinned '$CURRENT_USER' unresolved, this would share the slice and purge the
+			// read. It must not — the read is pinned to the resolved <me.id>.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: '$CURRENT_USER' })
+				.set('Authorization', admin);
+
+			const afterLiteral = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterLiteral.statusCode).toBe(200);
+			expect(afterLiteral.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Positive control: a write to the resolved id purges the read.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const afterResolved = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterResolved.statusCode).toBe(200);
+			expect(afterResolved.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Scoped purge pins a slice read filtered by a relation's primary key — a write to
 		one owner's slice leaves another owner's cached read intact (the relational pin)
 	`, () => {
