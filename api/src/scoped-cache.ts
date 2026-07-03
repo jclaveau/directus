@@ -399,36 +399,3 @@ export function pinnedScopedCacheTagsFromFilter(
 
 	return tags;
 }
-
-/**
- * Pin root scope tags off the permission cases injected into the AST — the read side, made
- * permission-aware. Item-read permissions bound the result by `{ _or: cases }`
- * (`joinFilterWithCases`): a SINGLE case is a plain AND predicate that excludes every non-matching
- * row, so it bounds the read exactly like an explicit `_eq`/`_in` filter. Multiple cases are OR'd (a
- * row need match only one) and so don't bound; no case means unrestricted access. We therefore pin
- * only the single-case form. The case is already dynamic-var-resolved by the time it reaches here —
- * `fetchPermissions` runs `processPermissions` (→ `parseFilter`), so `$CURRENT_USER`/`$NOW` are
- * concrete values, exactly like the query filter `sanitizeQuery` resolved. So it feeds the filter
- * pinner directly. This scopes a permission-isolated read (the planner's "a student sees only their
- * own rows") to a value slice instead of the bare collection tag — the partition lives in
- * permissions, not in the API filter that `pinnedScopedCacheTagsFromFilter` sees.
- */
-export function pinnedScopedCacheTagsFromCases(
-	collection: string,
-	fields: string[],
-	cases: Filter[] | undefined,
-	fieldTypes: Record<string, Type | undefined> = {},
-	relatedPrimaryKeys: Record<string, string> = {},
-): ScopedCacheTag[] {
-	if (!cases || cases.length !== 1) {
-		return [];
-	}
-
-	return pinnedScopedCacheTagsFromFilter(
-		collection,
-		fields,
-		cases[0],
-		fieldTypes,
-		relatedPrimaryKeys,
-	);
-}

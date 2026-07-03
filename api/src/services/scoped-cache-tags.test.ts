@@ -2,7 +2,6 @@ import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
 import {
 	canonicalScopedCacheValue,
-	pinnedScopedCacheTagsFromCases,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheTagsFromRows,
 } from '../scoped-cache.js';
@@ -397,84 +396,5 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
-	});
-});
-
-describe('pinnedScopedCacheTagsFromCases', () => {
-	// Cases reach the pinner already dynamic-var-resolved (fetchPermissions →
-	// processPermissions → parseFilter), so a policy's `$CURRENT_USER` is the concrete
-	// user id here — mirrored below by a literal uuid.
-	const userId = '11111111-1111-1111-1111-111111111111';
-
-	test('a single case pins its value like a filter', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['student'],
-				[{ student: { _eq: userId } }],
-			),
-		).toEqual([
-			{ collection: 'slots', field: 'student', value: userId },
-		]);
-	});
-
-	test(oneLine`
-		a relational case ({ user_created: { id: { _eq } } }) pins the fk value — the
-		planner's owner-scoping shape
-	`, () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['user_created'],
-				[{ user_created: { id: { _eq: userId } } }],
-				{},
-				{ user_created: 'id' },
-			),
-		).toEqual([
-			{ collection: 'slots', field: 'user_created', value: userId },
-		]);
-	});
-
-	test('multiple cases are OR-joined, so they do not bound the read (no pin)', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['student'],
-				[{ student: { _eq: userId } }, { student: { _eq: 'shared' } }],
-			),
-		).toEqual([]);
-	});
-
-	test('no cases (unrestricted access) yields no pin', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], []),
-		).toEqual([]);
-
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], undefined),
-		).toEqual([]);
-	});
-
-	test('a non-equality case (_lte, e.g. a resolved $NOW) does not pin', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['starts_at'],
-				[{ starts_at: { _lte: '2026-01-01T00:00:00Z' } }],
-			),
-		).toEqual([]);
-	});
-
-	test(oneLine`
-		a date-ish case field is still skipped (inherits the filter pinner guard)
-	`, () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['starts_at'],
-				[{ starts_at: { _eq: '2026-01-01T00:00:00Z' } }],
-				{ starts_at: 'dateTime' },
-			),
-		).toEqual([]);
 	});
 });
