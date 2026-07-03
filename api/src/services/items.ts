@@ -168,6 +168,29 @@ implements AbstractService<Item> {
 		);
 	}
 
+	// A relation scope field's related primary key, so the read side can unwrap the
+	// `{ fk: { <pk>: { _eq } } }` filter shape that queries and permissions use.
+	private get collectionScopedCacheFieldRelatedPks(): Record<string, string> {
+		const map: Record<string, string> = {};
+
+		for (const field of this.collectionScopedCacheFields) {
+			const relation = this.schema.relations.find(
+				(candidate) => candidate.collection === this.collection && candidate.field === field,
+			);
+
+			const relatedCollection = relation?.related_collection;
+			const primaryKey = relatedCollection
+				? this.schema.collections[relatedCollection]?.primary
+				: undefined;
+
+			if (primaryKey) {
+				map[field] = primaryKey;
+			}
+		}
+
+		return map;
+	}
+
 	/**
 	 * Create a fork of the current service, allowing instantiation with different options.
 	 */
@@ -797,6 +820,7 @@ implements AbstractService<Item> {
 					scopedCacheFields,
 					updatedQuery.filter,
 					this.collectionScopedCacheFieldTypes,
+					this.collectionScopedCacheFieldRelatedPks,
 				);
 
 			for (const collection of collectionsInFieldMap(fieldMap)) {
