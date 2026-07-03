@@ -406,7 +406,12 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 
 	test('a single case with a concrete value pins it like a filter', () => {
 		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], [{ student: { _eq: 'A' } }], acc),
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['student'],
+				[{ student: { _eq: 'A' } }],
+				acc,
+			),
 		).toEqual([
 			{ collection: 'slots', field: 'student', value: 'A' },
 		]);
@@ -438,7 +443,9 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 		]);
 	});
 
-	test('$CURRENT_USER resolves to null under a null accountability (pins the null slice)', () => {
+	test(oneLine`
+		$CURRENT_USER resolves to null under a null accountability (pins the null slice)
+	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromCases(
 				'slots',
@@ -452,8 +459,8 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 	});
 
 	test(oneLine`
-		a relational case ({ user_created: { id: { _eq: $CURRENT_USER } } }) pins the resolved fk
-		value — the planner's owner-scoping shape
+		a relational case ({ user_created: { id: { _eq: $CURRENT_USER } } }) pins the
+		resolved fk value — the planner's owner-scoping shape
 	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromCases(
@@ -470,8 +477,8 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 	});
 
 	test(oneLine`
-		an unresolvable dynamic var ($CURRENT_USER.field, $CURRENT_ROLES, $NOW) drops the field so
-		the read falls back to the bare collection tag
+		an unresolvable dynamic var ($CURRENT_USER.field, $CURRENT_ROLES, $NOW) drops the
+		field so the read falls back to the bare collection tag
 	`, () => {
 		for (const dynamic of ['$CURRENT_USER.email', '$CURRENT_ROLES', '$NOW']) {
 			expect(
@@ -485,7 +492,9 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 		}
 	});
 
-	test('an _in mixing a concrete value with an unresolvable var skips the whole field', () => {
+	test(oneLine`
+		an _in mixing a concrete value with an unresolvable var skips the whole field
+	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromCases(
 				'slots',
@@ -508,11 +517,18 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 	});
 
 	test('no cases (unrestricted access) yields no pin', () => {
-		expect(pinnedScopedCacheTagsFromCases('slots', ['student'], [], acc)).toEqual([]);
-		expect(pinnedScopedCacheTagsFromCases('slots', ['student'], undefined, acc)).toEqual([]);
+		expect(
+			pinnedScopedCacheTagsFromCases('slots', ['student'], [], acc),
+		).toEqual([]);
+
+		expect(
+			pinnedScopedCacheTagsFromCases('slots', ['student'], undefined, acc),
+		).toEqual([]);
 	});
 
-	test('a date-ish case field is still skipped (inherits the filter pinner guard)', () => {
+	test(oneLine`
+		a date-ish case field is still skipped (inherits the filter pinner guard)
+	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromCases(
 				'slots',
