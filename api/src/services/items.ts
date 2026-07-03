@@ -174,11 +174,12 @@ implements AbstractService<Item> {
 		const map: Record<string, string> = {};
 
 		for (const field of this.collectionScopedCacheFields) {
-			const relation = this.schema.relations.find(
-				(candidate) => candidate.collection === this.collection && candidate.field === field,
-			);
+			const relation = this.schema.relations.find((rel) => {
+				return rel.collection === this.collection && rel.field === field;
+			});
 
 			const relatedCollection = relation?.related_collection;
+
 			const primaryKey = relatedCollection
 				? this.schema.collections[relatedCollection]?.primary
 				: undefined;
