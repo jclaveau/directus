@@ -151,4 +151,61 @@ describe('get cache key', async () => {
 		expect(await getCacheKey(reqWithMatchingIp)).not.toEqual(await getCacheKey(reqWithoutIp));
 		expect(await getCacheKey(reqWithNotMatchingIp)).toEqual(await getCacheKey(reqWithoutIp));
 	});
+
+	describe('CACHE_KEY_HASH_ENABLED=false (readable dev key)', () => {
+		beforeEach(() => {
+			vi.mocked(useEnv).mockReturnValue({ CACHE_KEY_HASH_ENABLED: false });
+		});
+
+		test('returns the readable request descriptor instead of a hash', async () => {
+			const key = await getCacheKey({
+				method,
+				originalUrl: restUrl,
+				accountability,
+				sanitizedQuery: { fields: ['id', 'name'] },
+			} as unknown as Request);
+
+			expect(key).toContain('"path":"/items/example"');
+			expect(key).toContain(`"user":"${accountability.user}"`);
+			expect(key).toContain('"fields":["id","name"]');
+			expect(key).toContain('"version":"1.2.3"');
+		});
+
+		test('canonical key order → equivalent queries share one key', async () => {
+			const filter = { _and: [{ a: { _eq: 1 } }, { b: { _eq: 2 } }] };
+
+			const filterFirst: any = {
+				method,
+				originalUrl: restUrl,
+				sanitizedQuery: { filter, fields: ['id'] },
+			};
+
+			const fieldsFirst: any = {
+				method,
+				originalUrl: restUrl,
+				sanitizedQuery: { fields: ['id'], filter },
+			};
+
+			const filterFirstKey = await getCacheKey(filterFirst);
+			const fieldsFirstKey = await getCacheKey(fieldsFirst);
+
+			expect(filterFirstKey).toEqual(fieldsFirstKey);
+		});
+
+		test('still keys per user — no cross-user collision', async () => {
+			const asUserA: any = {
+				method,
+				originalUrl: restUrl,
+				accountability: { user: 'aaaaaaaa-0000-0000-0000-000000000000' },
+			};
+
+			const asUserB: any = {
+				method,
+				originalUrl: restUrl,
+				accountability: { user: 'bbbbbbbb-0000-0000-0000-000000000000' },
+			};
+
+			expect(await getCacheKey(asUserA)).not.toEqual(await getCacheKey(asUserB));
+		});
+	});
 });

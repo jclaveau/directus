@@ -309,6 +309,7 @@ export function pinnedScopedCacheTagsFromFilter(
 	fields: string[],
 	filter: Filter | null | undefined,
 	fieldTypes: Record<string, Type | undefined> = {},
+	relatedPrimaryKeys: Record<string, string> = {},
 ): ScopedCacheTag[] {
 	if (!filter || fields.length === 0) {
 		return [];
@@ -357,6 +358,31 @@ export function pinnedScopedCacheTagsFromFilter(
 			}
 			else if ('_in' in ops && Array.isArray(ops['_in'])) {
 				pin(key, ops['_in']);
+			}
+			// Relational form: a filter on a related scope field reaches its value through the
+			// related collection's primary key — `{ fk: { <pk>: { _eq | _in } } }`. Filtering a
+			// relation by its PK bounds the exact same value the write side stores in the fk
+			// column, so it pins identically to the flat form (covers queries and permission
+			// rules alike, e.g. `{ user_created: { id: { _eq: $CURRENT_USER } } }`). Only the
+			// related PK is sound — a non-PK attribute (`{ fk: { email: … } }`) wouldn't
+			// determine the fk value, so it's left to fall back to the bare collection tag.
+			else {
+				const relatedPrimaryKey = relatedPrimaryKeys[key];
+
+				const inner = relatedPrimaryKey === undefined
+					? undefined
+					: ops[relatedPrimaryKey];
+
+				if (inner !== null && typeof inner === 'object') {
+					const innerOps = inner as Record<string, unknown>;
+
+					if ('_eq' in innerOps) {
+						pin(key, [innerOps['_eq']]);
+					}
+					else if ('_in' in innerOps && Array.isArray(innerOps['_in'])) {
+						pin(key, innerOps['_in']);
+					}
+				}
 			}
 		}
 	}
