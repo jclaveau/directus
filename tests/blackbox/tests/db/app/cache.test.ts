@@ -1344,6 +1344,103 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		Two permission cases (OR-joined) do NOT bound the read — it falls back to the bare
+		collection tag, so a write to ANY owner's slice purges it
+	`, () => {
+		// The single-case soundness gate: joinFilterWithCases applies cases as { _or: cases },
+		// so 2 rules mean a row need match only one — the read is not bounded to owner=me and
+		// must be bare. If the gate regressed to pinning cases[0] (owner=me), a write to
+		// another owner would wrongly spare this read. Two policies on the role = two cases.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-multicase-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			// Two policies, each a read permission on collectionScoped with a DISTINCT rule, so
+			// getCases yields two cases (OR-joined) rather than one bounding predicate.
+			for (const rule of [
+				{ owner_field: { _eq: '$CURRENT_USER' } },
+				{ string_field: { _nnull: true } },
+			]) {
+				const policy = (
+					await request(url).post('/policies')
+						.send({
+							name: `cache-multicase-${suffix}-${randomUUID()}`,
+							app_access: true,
+							admin_access: false,
+							roles: [{ role: role.id }],
+						})
+						.set('Authorization', admin)
+				).body.data;
+
+				await request(url).post('/permissions')
+					.send({
+						policy: policy.id,
+						collection: collectionScoped,
+						action: 'read',
+						fields: ['*'],
+						permissions: rule,
+					})
+					.set('Authorization', admin);
+			}
+
+			const token = `cache-multicase-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-multicase-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, bare (two OR'd cases)
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write in ANOTHER owner's slice. A bare-tagged read MISSes here; a wrongly
+			// owner=me-pinned read would survive.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
+				.set('Authorization', admin);
+
+			const after = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Scoped purge pins a slice read filtered by a relation's primary key — a write to
 		one owner's slice leaves another owner's cached read intact (the relational pin)
 	`, () => {

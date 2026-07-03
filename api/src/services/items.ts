@@ -10,6 +10,7 @@ import type {
 	Alterations,
 	Item as AnyItem,
 	EventContext,
+	Filter,
 	MutationTracker,
 	MutationOptions,
 	PrimaryKey,
@@ -26,7 +27,6 @@ import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
 import {
-	pinnedScopedCacheTagsFromCases,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
@@ -818,6 +818,17 @@ implements AbstractService<Item> {
 			// `$CURRENT_USER` is the concrete user id in each, matching what a write's row yields.
 			// The cases are what scope a permission-isolated read (the planner case) whose partition
 			// never appears in the query filter.
+			//
+			// `joinFilterWithCases` applies cases as `{ _or: cases }`: a SINGLE case AND-bounds the
+			// read like an `_eq`/`_in`, so it pins; 2+ cases are OR'd (a row need match only one) and
+			// don't bound, so they fall back to the bare collection tag. `null` → the pinner returns
+			// `[]`, same as an unpinnable filter.
+			let caseFilter: Filter | null = null;
+
+			if (ast.cases?.length === 1) {
+				caseFilter = ast.cases[0]!;
+			}
+
 			const rootScopedCacheTags = rootPaths.size > 1
 				? []
 				: [
@@ -828,10 +839,10 @@ implements AbstractService<Item> {
 						this.collectionScopedCacheFieldTypes,
 						this.collectionScopedCacheFieldRelatedPks,
 					),
-					...pinnedScopedCacheTagsFromCases(
+					...pinnedScopedCacheTagsFromFilter(
 						this.collection,
 						scopedCacheFields,
-						ast.cases,
+						caseFilter,
 						this.collectionScopedCacheFieldTypes,
 						this.collectionScopedCacheFieldRelatedPks,
 					),
