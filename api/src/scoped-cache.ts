@@ -1,5 +1,11 @@
 import { useEnv } from '@directus/env';
-import type { Accountability, EventContext, Filter, ScopedCacheTag, Type } from '@directus/types';
+import type {
+	Accountability,
+	EventContext,
+	Filter,
+	ScopedCacheTag,
+	Type,
+} from '@directus/types';
 import type Keyv from 'keyv';
 import emitter from './emitter.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -310,10 +316,11 @@ export function pinnedScopedCacheTagsFromFilter(
 	filter: Filter | null | undefined,
 	fieldTypes: Record<string, Type | undefined> = {},
 	relatedPrimaryKeys: Record<string, string> = {},
-	resolveValue: (raw: unknown) => { resolved: boolean; value: unknown } = (raw) => ({
-		resolved: true,
-		value: raw,
-	}),
+	resolveValue: (raw: unknown) => { resolved: boolean; value: unknown } = (
+		raw,
+	) => {
+		return { resolved: true, value: raw };
+	},
 ): ScopedCacheTag[] {
 	if (!filter || fields.length === 0) {
 		return [];
