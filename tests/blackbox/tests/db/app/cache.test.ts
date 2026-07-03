@@ -1130,6 +1130,115 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		A permission-scoped read (partition in the policy, NOT the API filter) is value-scoped
+		off the injected case: a write to the user's own slice drops their read, a write to
+		another slice spares it
+	`, () => {
+		// The planner case: a student lists /items/slots with no filter, but a policy restricts
+		// them to `owner_field = $CURRENT_USER`. That predicate lives in the permission rule,
+		// injected as `ast.cases`, not in the query — so `pinnedScopedCacheTagsFromCases` is what
+		// scopes the read. Without it the read falls back to the bare collection tag and any other
+		// user's write purges it (the over-purge this fixes). The "spared" witness below is the
+		// proof it's value-scoped and not bare.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			// A policy that scopes reads of collectionScoped to the caller's own rows, plus a role
+			// carrying it and a static-token user to read as. Unique names per run avoid collisions.
+			const suffix = randomUUID();
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-case-scope-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-case-scope-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScoped,
+					action: 'read',
+					fields: ['*'],
+					permissions: { owner_field: { _eq: '$CURRENT_USER' } },
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-case-scope-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-case-scope-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			// One row in the user's own slice (owner_field=<me.id>) so the read has data + a scope
+			// value; the other-slice write later targets a value the user is NOT pinned to.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			// No filter — the owner_field bound comes only from the policy case.
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, case-pinned to owner_field=<me.id>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in ANOTHER owner's slice. A bare-tagged read would MISS here; a case-pinned
+			// read to <me.id> is spared.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
+				.set('Authorization', admin);
+
+			const afterOther = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in the user's OWN slice (owner_field=<me.id>) — the value the case resolved
+			// to. It must purge the read.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const afterMine = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Scoped purge pins a slice read filtered by a relation's primary key — a write to
 		one owner's slice leaves another owner's cached read intact (the relational pin)
 	`, () => {
