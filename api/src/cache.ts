@@ -196,8 +196,18 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 export function getRedisConnection(): string | Record<string, unknown> {
 	const url = env['REDIS'];
 
+	// node-redis defaults its socket `keepAlive` to 5000ms → a TCP keepalive probe every 5s on the
+	// persistent cache connection. That outbound traffic blocks Railway App-Sleeping on an otherwise-idle
+	// preview. `REDIS_KEEP_ALIVE=false` disables the probe; a large ms value spaces it past the sleep
+	// window. Unset → node-redis's 5000ms default is preserved untouched (prod is unaffected).
+	const keepAlive = env['REDIS_KEEP_ALIVE'] as number | boolean | undefined;
+
 	if (url) {
-		return url as string;
+		if (keepAlive === undefined) {
+			return url as string;
+		}
+
+		return { url, socket: { keepAlive } };
 	}
 
 	const { host, port, username, password, db, tls } = getConfigFromEnv('REDIS') as Record<string, any>;
@@ -207,6 +217,7 @@ export function getRedisConnection(): string | Record<string, unknown> {
 			host,
 			...(port !== undefined && { port: Number(port) }),
 			...(tls && { tls: true }),
+			...(keepAlive !== undefined && { keepAlive }),
 		},
 		...(username !== undefined && { username }),
 		...(password !== undefined && { password }),
