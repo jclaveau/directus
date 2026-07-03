@@ -1,7 +1,9 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
+import type { Accountability } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
+	pinnedScopedCacheTagsFromCases,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheTagsFromRows,
 } from '../scoped-cache.js';
@@ -396,5 +398,129 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
+	});
+});
+
+describe('pinnedScopedCacheTagsFromCases', () => {
+	const acc = { user: 'user-1', role: 'role-1' } as unknown as Accountability;
+
+	test('a single case with a concrete value pins it like a filter', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases('slots', ['student'], [{ student: { _eq: 'A' } }], acc),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test('$CURRENT_USER in a case resolves to accountability.user', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['student'],
+				[{ student: { _eq: '$CURRENT_USER' } }],
+				acc,
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'user-1' },
+		]);
+	});
+
+	test('$CURRENT_ROLE in a case resolves to accountability.role', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['owner_role'],
+				[{ owner_role: { _eq: '$CURRENT_ROLE' } }],
+				acc,
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'owner_role', value: 'role-1' },
+		]);
+	});
+
+	test('$CURRENT_USER resolves to null under a null accountability (pins the null slice)', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['student'],
+				[{ student: { _eq: '$CURRENT_USER' } }],
+				null,
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: null },
+		]);
+	});
+
+	test(oneLine`
+		a relational case ({ user_created: { id: { _eq: $CURRENT_USER } } }) pins the resolved fk
+		value — the planner's owner-scoping shape
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['user_created'],
+				[{ user_created: { id: { _eq: '$CURRENT_USER' } } }],
+				acc,
+				{},
+				{ user_created: 'id' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'user_created', value: 'user-1' },
+		]);
+	});
+
+	test(oneLine`
+		an unresolvable dynamic var ($CURRENT_USER.field, $CURRENT_ROLES, $NOW) drops the field so
+		the read falls back to the bare collection tag
+	`, () => {
+		for (const dynamic of ['$CURRENT_USER.email', '$CURRENT_ROLES', '$NOW']) {
+			expect(
+				pinnedScopedCacheTagsFromCases(
+					'slots',
+					['student'],
+					[{ student: { _eq: dynamic } }],
+					acc,
+				),
+			).toEqual([]);
+		}
+	});
+
+	test('an _in mixing a concrete value with an unresolvable var skips the whole field', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['student'],
+				[{ student: { _in: ['A', '$CURRENT_ROLES'] } }],
+				acc,
+			),
+		).toEqual([]);
+	});
+
+	test('multiple cases are OR-joined, so they do not bound the read (no pin)', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['student'],
+				[{ student: { _eq: '$CURRENT_USER' } }, { student: { _eq: 'shared' } }],
+				acc,
+			),
+		).toEqual([]);
+	});
+
+	test('no cases (unrestricted access) yields no pin', () => {
+		expect(pinnedScopedCacheTagsFromCases('slots', ['student'], [], acc)).toEqual([]);
+		expect(pinnedScopedCacheTagsFromCases('slots', ['student'], undefined, acc)).toEqual([]);
+	});
+
+	test('a date-ish case field is still skipped (inherits the filter pinner guard)', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['starts_at'],
+				[{ starts_at: { _eq: '2026-01-01T00:00:00Z' } }],
+				acc,
+				{ starts_at: 'dateTime' },
+			),
+		).toEqual([]);
 	});
 });
