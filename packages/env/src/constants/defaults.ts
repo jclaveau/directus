@@ -69,6 +69,7 @@ export const DEFAULTS = {
 
 	CACHE_ENABLED: false,
 	CACHE_COMPRESSION_ENABLED: true,
+	CACHE_KEY_HASH_ENABLED: true,
 	CACHE_STORE: 'memory',
 	CACHE_TTL: '5m',
 	CACHE_NAMESPACE: 'system-cache',
