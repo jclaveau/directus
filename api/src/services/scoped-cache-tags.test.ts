@@ -282,6 +282,74 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		).toEqual([]);
 	});
 
+	test(oneLine`
+		a relation filtered by its related primary key pins the fk value — the relational form
+		queries and permission rules use, e.g. { user_created: { id: { _eq: $CURRENT_USER } } }
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { id: { _eq: 'A' } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test('a relational _in on the related primary key pins every value', () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { id: { _in: ['A', 'B'] } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test('a relational pin is reached through _and (permission-rule form)', () => {
+		const filter = { _and: [{ student: { id: { _eq: 'A' } } }] };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], filter, {}, { student: 'id' }),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test(oneLine`
+		a relation filtered by a non-primary-key attribute does not pin — the fk value is
+		undetermined, so the read falls back to the bare collection tag
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { email: { _eq: 'a@b.c' } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		without a related-primary-key entry (a scalar, non-relation scope field), a relational
+		filter shape does not pin
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], {
+				student: { id: { _eq: 'A' } },
+			}),
+		).toEqual([]);
+	});
+
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
