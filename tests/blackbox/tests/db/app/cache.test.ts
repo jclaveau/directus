@@ -1547,6 +1547,124 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		Two cases that both bind the owner field pin the UNION of their slices — a write to
+		either owner purges the read, a write to an owner outside the union spares it
+	`, () => {
+		// The multi-policy planner case: a student sees their own rows AND a shared bucket, via
+		// two read policies both scoping owner_field. Each case binds owner_field, so the read
+		// is soundly pinned to { <me.id>, 'shared-bucket' } rather than falling back to bare —
+		// more precise than a collection-wide flush. An unrelated owner's write must spare it.
+		const sharedBucket = 'shared-bucket';
+
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-union-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			// Two policies, each binding owner_field: one to the caller, one to a shared bucket.
+			for (const rule of [
+				{ owner_field: { _eq: '$CURRENT_USER' } },
+				{ owner_field: { _eq: sharedBucket } },
+			]) {
+				const policy = (
+					await request(url).post('/policies')
+						.send({
+							name: `cache-union-${suffix}-${randomUUID()}`,
+							app_access: true,
+							admin_access: false,
+							roles: [{ role: role.id }],
+						})
+						.set('Authorization', admin)
+				).body.data;
+
+				await request(url).post('/permissions')
+					.send({
+						policy: policy.id,
+						collection: collectionScoped,
+						action: 'read',
+						fields: ['*'],
+						permissions: rule,
+					})
+					.set('Authorization', admin);
+			}
+
+			const token = `cache-union-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-union-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			// A row in each union slice, so the read has data on both sides.
+			for (const owner of [me.id, sharedBucket]) {
+				await request(url).post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: owner })
+					.set('Authorization', admin);
+			}
+
+			const read = `/items/${collectionScoped}`;
+
+			const warmUp = async () => {
+				await request(url).post(`/utils/cache/clear`)
+					.set('Authorization', admin);
+
+				await request(url).get(read)
+					.set('Authorization', auth); // cold → cached, pinned to the union
+
+				const warm = await request(url).get(read)
+					.set('Authorization', auth);
+
+				expect(warm.statusCode).toBe(200);
+				expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+			};
+
+			const writeOwner = async (owner: string) => {
+				await request(url).post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: owner })
+					.set('Authorization', admin);
+
+				return request(url).get(read)
+					.set('Authorization', auth);
+			};
+
+			// A write outside the union (owner-b) spares the read — the union pin, not bare.
+			await warmUp();
+			const afterOutside = await writeOwner(scopedOwnerB);
+			expect(afterOutside.statusCode).toBe(200);
+			expect(afterOutside.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write to the caller's own slice (a union member) purges it.
+			await warmUp();
+			const afterMine = await writeOwner(me.id);
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+
+			// A write to the shared bucket (the other union member) also purges it.
+			await warmUp();
+			const afterShared = await writeOwner(sharedBucket);
+			expect(afterShared.statusCode).toBe(200);
+			expect(afterShared.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Scoped purge pins a slice read filtered by a relation's primary key — a write to
 		one owner's slice leaves another owner's cached read intact (the relational pin)
 	`, () => {
