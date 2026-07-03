@@ -1148,6 +1148,7 @@ describe('App Caching Tests', () => {
 			// A policy that scopes reads of collectionScoped to the caller's own rows, plus a role
 			// carrying it and a static-token user to read as. Unique names per run avoid collisions.
 			const suffix = randomUUID();
+
 			const role = (
 				await request(url).post('/roles')
 					.send({ name: `cache-case-scope-${suffix}` })
