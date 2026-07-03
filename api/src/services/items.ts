@@ -813,13 +813,11 @@ implements AbstractService<Item> {
 			}
 
 			// Bound the root either by the API filter or by the permission cases injected into the
-			// AST. `updatedQuery.filter` already has dynamic vars resolved — sanitizeQuery (REST
-			// middleware + GraphQL parse-query) runs parseFilter before the service, so
-			// `$CURRENT_USER` is the concrete user id here, matching what a write's row yields.
-			// `ast.cases` instead carries the raw policy rule (`getCases` pushes it unmodified), so
-			// `pinnedScopedCacheTagsFromCases` resolves its `$CURRENT_USER` itself — this is what
-			// scopes a permission-isolated read (the planner case) whose partition never appears in
-			// the query filter.
+			// AST. Both are already dynamic-var-resolved before the service runs — the query filter
+			// by sanitizeQuery, the cases by fetchPermissions → processPermissions → parseFilter — so
+			// `$CURRENT_USER` is the concrete user id in each, matching what a write's row yields.
+			// The cases are what scope a permission-isolated read (the planner case) whose partition
+			// never appears in the query filter.
 			const rootScopedCacheTags = rootPaths.size > 1
 				? []
 				: [
@@ -834,7 +832,6 @@ implements AbstractService<Item> {
 						this.collection,
 						scopedCacheFields,
 						ast.cases,
-						this.accountability,
 						this.collectionScopedCacheFieldTypes,
 						this.collectionScopedCacheFieldRelatedPks,
 					),
