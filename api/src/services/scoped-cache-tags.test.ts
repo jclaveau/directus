@@ -1,6 +1,5 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
-import type { Accountability } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
 	pinnedScopedCacheTagsFromCases,
@@ -402,107 +401,38 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 });
 
 describe('pinnedScopedCacheTagsFromCases', () => {
-	const acc = { user: 'user-1', role: 'role-1' } as unknown as Accountability;
+	// Cases reach the pinner already dynamic-var-resolved (fetchPermissions →
+	// processPermissions → parseFilter), so a policy's `$CURRENT_USER` is the concrete
+	// user id here — mirrored below by a literal uuid.
+	const userId = '11111111-1111-1111-1111-111111111111';
 
-	test('a single case with a concrete value pins it like a filter', () => {
+	test('a single case pins its value like a filter', () => {
 		expect(
 			pinnedScopedCacheTagsFromCases(
 				'slots',
 				['student'],
-				[{ student: { _eq: 'A' } }],
-				acc,
+				[{ student: { _eq: userId } }],
 			),
 		).toEqual([
-			{ collection: 'slots', field: 'student', value: 'A' },
-		]);
-	});
-
-	test('$CURRENT_USER in a case resolves to accountability.user', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['student'],
-				[{ student: { _eq: '$CURRENT_USER' } }],
-				acc,
-			),
-		).toEqual([
-			{ collection: 'slots', field: 'student', value: 'user-1' },
-		]);
-	});
-
-	test('$CURRENT_ROLE in a case resolves to accountability.role', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['owner_role'],
-				[{ owner_role: { _eq: '$CURRENT_ROLE' } }],
-				acc,
-			),
-		).toEqual([
-			{ collection: 'slots', field: 'owner_role', value: 'role-1' },
+			{ collection: 'slots', field: 'student', value: userId },
 		]);
 	});
 
 	test(oneLine`
-		$CURRENT_USER resolves to null under a null accountability (pins the null slice)
-	`, () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['student'],
-				[{ student: { _eq: '$CURRENT_USER' } }],
-				null,
-			),
-		).toEqual([
-			{ collection: 'slots', field: 'student', value: null },
-		]);
-	});
-
-	test(oneLine`
-		a relational case ({ user_created: { id: { _eq: $CURRENT_USER } } }) pins the
-		resolved fk value — the planner's owner-scoping shape
+		a relational case ({ user_created: { id: { _eq } } }) pins the fk value — the
+		planner's owner-scoping shape
 	`, () => {
 		expect(
 			pinnedScopedCacheTagsFromCases(
 				'slots',
 				['user_created'],
-				[{ user_created: { id: { _eq: '$CURRENT_USER' } } }],
-				acc,
+				[{ user_created: { id: { _eq: userId } } }],
 				{},
 				{ user_created: 'id' },
 			),
 		).toEqual([
-			{ collection: 'slots', field: 'user_created', value: 'user-1' },
+			{ collection: 'slots', field: 'user_created', value: userId },
 		]);
-	});
-
-	test(oneLine`
-		an unresolvable dynamic var ($CURRENT_USER.field, $CURRENT_ROLES, $NOW) drops the
-		field so the read falls back to the bare collection tag
-	`, () => {
-		for (const dynamic of ['$CURRENT_USER.email', '$CURRENT_ROLES', '$NOW']) {
-			expect(
-				pinnedScopedCacheTagsFromCases(
-					'slots',
-					['student'],
-					[{ student: { _eq: dynamic } }],
-					acc,
-				),
-			).toEqual([]);
-		}
-	});
-
-	test(oneLine`
-		an _in mixing a concrete value with an unresolvable var skips the whole field
-	`, () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['student'],
-				[{ student: { _in: ['A', '$CURRENT_ROLES'] } }],
-				acc,
-			),
-		).toEqual([]);
 	});
 
 	test('multiple cases are OR-joined, so they do not bound the read (no pin)', () => {
@@ -510,19 +440,28 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 			pinnedScopedCacheTagsFromCases(
 				'slots',
 				['student'],
-				[{ student: { _eq: '$CURRENT_USER' } }, { student: { _eq: 'shared' } }],
-				acc,
+				[{ student: { _eq: userId } }, { student: { _eq: 'shared' } }],
 			),
 		).toEqual([]);
 	});
 
 	test('no cases (unrestricted access) yields no pin', () => {
 		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], [], acc),
+			pinnedScopedCacheTagsFromCases('slots', ['student'], []),
 		).toEqual([]);
 
 		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], undefined, acc),
+			pinnedScopedCacheTagsFromCases('slots', ['student'], undefined),
+		).toEqual([]);
+	});
+
+	test('a non-equality case (_lte, e.g. a resolved $NOW) does not pin', () => {
+		expect(
+			pinnedScopedCacheTagsFromCases(
+				'slots',
+				['starts_at'],
+				[{ starts_at: { _lte: '2026-01-01T00:00:00Z' } }],
+			),
 		).toEqual([]);
 	});
 
@@ -534,7 +473,6 @@ describe('pinnedScopedCacheTagsFromCases', () => {
 				'slots',
 				['starts_at'],
 				[{ starts_at: { _eq: '2026-01-01T00:00:00Z' } }],
-				acc,
 				{ starts_at: 'dateTime' },
 			),
 		).toEqual([]);

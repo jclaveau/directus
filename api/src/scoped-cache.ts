@@ -1,11 +1,5 @@
 import { useEnv } from '@directus/env';
-import type {
-	Accountability,
-	EventContext,
-	Filter,
-	ScopedCacheTag,
-	Type,
-} from '@directus/types';
+import type { EventContext, Filter, ScopedCacheTag, Type } from '@directus/types';
 import type Keyv from 'keyv';
 import emitter from './emitter.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -316,11 +310,6 @@ export function pinnedScopedCacheTagsFromFilter(
 	filter: Filter | null | undefined,
 	fieldTypes: Record<string, Type | undefined> = {},
 	relatedPrimaryKeys: Record<string, string> = {},
-	resolveValue: (raw: unknown) => { resolved: boolean; value: unknown } = (
-		raw,
-	) => {
-		return { resolved: true, value: raw };
-	},
 ): ScopedCacheTag[] {
 	if (!filter || fields.length === 0) {
 		return [];
@@ -333,15 +322,7 @@ export function pinnedScopedCacheTagsFromFilter(
 		const seen = pinned.get(field) ?? new Set<unknown>();
 
 		for (const value of values) {
-			const resolved = resolveValue(value);
-
-			// An unresolvable bound (e.g. a permission case's `$CURRENT_USER.field`) can't be
-			// soundly pinned — skip the whole field so the read keeps the bare collection tag.
-			if (!resolved.resolved) {
-				return;
-			}
-
-			seen.add(resolved.value);
+			seen.add(value);
 		}
 
 		pinned.set(field, seen);
@@ -420,48 +401,22 @@ export function pinnedScopedCacheTagsFromFilter(
 }
 
 /**
- * Resolve the trivial dynamic variables a permission case pins on a scope field, matching the query
- * layer's `parseDynamicVariable` for the bare forms (`$CURRENT_USER` → `accountability.user`,
- * `$CURRENT_ROLE` → `accountability.role`). Anything richer (`$CURRENT_USER.field`, the
- * `$CURRENT_ROLES`/`$CURRENT_POLICIES` arrays, `$NOW`) needs the fetched dynamic-variable context, so
- * it's reported unresolved and the field falls back to the bare collection tag rather than pin a
- * wrong value.
- */
-function resolveScopeCaseValue(
-	raw: unknown,
-	accountability: Accountability | null,
-): { resolved: boolean; value: unknown } {
-	if (typeof raw !== 'string' || !raw.startsWith('$')) {
-		return { resolved: true, value: raw };
-	}
-
-	if (raw === '$CURRENT_USER') {
-		return { resolved: true, value: accountability?.user ?? null };
-	}
-
-	if (raw === '$CURRENT_ROLE') {
-		return { resolved: true, value: accountability?.role ?? null };
-	}
-
-	return { resolved: false, value: undefined };
-}
-
-/**
  * Pin root scope tags off the permission cases injected into the AST — the read side, made
  * permission-aware. Item-read permissions bound the result by `{ _or: cases }`
  * (`joinFilterWithCases`): a SINGLE case is a plain AND predicate that excludes every non-matching
  * row, so it bounds the read exactly like an explicit `_eq`/`_in` filter. Multiple cases are OR'd (a
  * row need match only one) and so don't bound; no case means unrestricted access. We therefore pin
- * only the single-case form, resolving its trivial dynamic variables the way the query layer does.
- * This scopes a permission-isolated read (e.g. the planner's "a student sees only their own rows") to
- * a value slice instead of the bare collection tag — the partition lives in permissions, not in the
- * API filter that `pinnedScopedCacheTagsFromFilter` sees.
+ * only the single-case form. The case is already dynamic-var-resolved by the time it reaches here —
+ * `fetchPermissions` runs `processPermissions` (→ `parseFilter`), so `$CURRENT_USER`/`$NOW` are
+ * concrete values, exactly like the query filter `sanitizeQuery` resolved. So it feeds the filter
+ * pinner directly. This scopes a permission-isolated read (the planner's "a student sees only their
+ * own rows") to a value slice instead of the bare collection tag — the partition lives in
+ * permissions, not in the API filter that `pinnedScopedCacheTagsFromFilter` sees.
  */
 export function pinnedScopedCacheTagsFromCases(
 	collection: string,
 	fields: string[],
 	cases: Filter[] | undefined,
-	accountability: Accountability | null,
 	fieldTypes: Record<string, Type | undefined> = {},
 	relatedPrimaryKeys: Record<string, string> = {},
 ): ScopedCacheTag[] {
@@ -475,6 +430,5 @@ export function pinnedScopedCacheTagsFromCases(
 		cases[0],
 		fieldTypes,
 		relatedPrimaryKeys,
-		(raw) => resolveScopeCaseValue(raw, accountability),
 	);
 }
