@@ -399,3 +399,71 @@ export function pinnedScopedCacheTagsFromFilter(
 
 	return tags;
 }
+
+/**
+ * Pin root scope tags off the permission cases injected into the AST — the read side.
+ * `joinFilterWithCases` applies cases as `{ _or: cases }`, so a returned row matches AT LEAST one
+ * case. A scoped field can therefore be pinned only if EVERY case bounds it — otherwise a row
+ * matching an unbounding case carries an unpinned value and a write to that value would leave the
+ * read stale. When every case does bound it, the read is scoped to the UNION of their values (a
+ * write to any one purges it). One case is the common form (its own values); zero cases, or any
+ * case that leaves a field unbounded, → no pin for that field, and the caller falls back to the
+ * bare collection tag. Cases arrive already dynamic-var-resolved (fetchPermissions →
+ * processPermissions → parseFilter), exactly like the query filter `sanitizeQuery` resolved.
+ */
+export function pinnedScopedCacheTagsFromCases(
+	collection: string,
+	fields: string[],
+	cases: Filter[] | undefined,
+	fieldTypes: Record<string, Type | undefined> = {},
+	relatedPrimaryKeys: Record<string, string> = {},
+): ScopedCacheTag[] {
+	if (!cases || cases.length === 0) {
+		return [];
+	}
+
+	const perCaseTags = cases.map((caseFilter) => {
+		return pinnedScopedCacheTagsFromFilter(
+			collection,
+			fields,
+			caseFilter,
+			fieldTypes,
+			relatedPrimaryKeys,
+		);
+	});
+
+	const tags: ScopedCacheTag[] = [];
+
+	for (const field of fields) {
+		// Sound only when every case bounds this field; else a row matching an unbounding case
+		// carries a value outside the union.
+		const boundedByEveryCase = perCaseTags.every((caseTags) => {
+			return caseTags.some((tag) => tag.field === field);
+		});
+
+		if (!boundedByEveryCase) {
+			continue;
+		}
+
+		// Union the field's values across cases, deduped on the canonical token (two cases may
+		// pin the same value).
+		const seen = new Set<string>();
+
+		for (const tag of perCaseTags.flat()) {
+			if (tag.field !== field) {
+				continue;
+			}
+
+			const token = canonicalScopedCacheValue(tag.value, tag.type);
+
+			if (seen.has(token)) {
+				continue;
+			}
+
+			seen.add(token);
+			tags.push(tag);
+		}
+	}
+
+	return tags;
+}
