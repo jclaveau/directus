@@ -2,7 +2,6 @@ import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
 import {
 	canonicalScopedCacheValue,
-	pinnedScopedCacheTagsFromCases,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheTagsFromRows,
 } from '../scoped-cache.js';
@@ -234,9 +233,64 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		]);
 	});
 
-	test('an _or branch does not bound the read, so nothing under it pins', () => {
+	test(oneLine`
+		an _or whose every branch binds the field pins the UNION of their values — a row
+		matches one branch, so its value is in the union
+	`, () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
+
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		an _or branch that leaves the field unbound drops the pin — a row matching that
+		branch carries a value outside the union
+	`, () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([]);
+	});
+
+	test('an _or unions the fk value for a relational branch', () => {
+		const filter = {
+			_or: [
+				{ owner: { id: { _eq: 'A' } } },
+				{ owner: { id: { _in: ['B', 'C'] } } },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['owner'], filter, {}, { owner: 'id' }),
+		).toEqual([
+			{ collection: 'slots', field: 'owner', value: 'A' },
+			{ collection: 'slots', field: 'owner', value: 'B' },
+			{ collection: 'slots', field: 'owner', value: 'C' },
+		]);
+	});
+
+	test('a field bound by an outer _and AND every _or branch pins both sources', () => {
+		const filter = {
+			_and: [
+				{ course: { _eq: 'math' } },
+				{ _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			{ collection: 'slots', field: 'course', value: 'math' },
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test('an empty _or pins nothing', () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { _or: [] }),
+		).toEqual([]);
 	});
 
 	test(oneLine`
@@ -397,105 +451,5 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
-	});
-});
-
-describe('pinnedScopedCacheTagsFromCases', () => {
-	// Cases arrive already dynamic-var-resolved, so a policy's `$CURRENT_USER` is a concrete
-	// value here — mirrored below by plain literals.
-	test('a single case pins its values', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], [
-				{ student: { _in: ['A', 'B'] } },
-			]),
-		).toEqual([
-			{ collection: 'slots', field: 'student', value: 'A' },
-			{ collection: 'slots', field: 'student', value: 'B' },
-		]);
-	});
-
-	test(oneLine`
-		two cases both binding the same field pin the UNION of their values — a write to
-		either slice purges the read
-	`, () => {
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], [
-				{ student: { _eq: 'A' } },
-				{ student: { _eq: 'B' } },
-			]),
-		).toEqual([
-			{ collection: 'slots', field: 'student', value: 'A' },
-			{ collection: 'slots', field: 'student', value: 'B' },
-		]);
-	});
-
-	test('the union dedups a value pinned by more than one case', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], [
-				{ student: { _eq: 'A' } },
-				{ student: { _in: ['A', 'C'] } },
-			]),
-		).toEqual([
-			{ collection: 'slots', field: 'student', value: 'A' },
-			{ collection: 'slots', field: 'student', value: 'C' },
-		]);
-	});
-
-	test(oneLine`
-		a field left unbounded by ANY case is not pinned — a row matching that case carries a
-		value outside the union
-	`, () => {
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student'], [
-				{ student: { _eq: 'A' } },
-				{ course: { _eq: 'math' } },
-			]),
-		).toEqual([]);
-	});
-
-	test(oneLine`
-		cases binding DIFFERENT fields pin neither (each leaves the other unbound)
-	`, () => {
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student', 'course'], [
-				{ student: { _eq: 'A' } },
-				{ course: { _eq: 'math' } },
-			]),
-		).toEqual([]);
-	});
-
-	test('a field bounded by every case pins even when other fields differ', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases('slots', ['student', 'course'], [
-				{ _and: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] },
-				{ student: { _eq: 'B' } },
-			]),
-		).toEqual([
-			{ collection: 'slots', field: 'student', value: 'A' },
-			{ collection: 'slots', field: 'student', value: 'B' },
-		]);
-	});
-
-	test('no cases yields no pin', () => {
-		expect(pinnedScopedCacheTagsFromCases('slots', ['student'], [])).toEqual([]);
-		expect(pinnedScopedCacheTagsFromCases('slots', ['student'], undefined)).toEqual([]);
-	});
-
-	test('relational cases union on the fk value', () => {
-		expect(
-			pinnedScopedCacheTagsFromCases(
-				'slots',
-				['user_created'],
-				[
-					{ user_created: { id: { _eq: 'A' } } },
-					{ user_created: { id: { _eq: 'B' } } },
-				],
-				{},
-				{ user_created: 'id' },
-			),
-		).toEqual([
-			{ collection: 'slots', field: 'user_created', value: 'A' },
-			{ collection: 'slots', field: 'user_created', value: 'B' },
-		]);
 	});
 });

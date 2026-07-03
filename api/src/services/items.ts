@@ -26,7 +26,6 @@ import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
 import {
-	pinnedScopedCacheTagsFromCases,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
@@ -36,6 +35,9 @@ import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase from '../database/index.js';
+import {
+	joinFilterWithCases,
+} from '../database/run-ast/lib/apply-query/join-filter-with-cases.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
 import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
@@ -812,31 +814,22 @@ implements AbstractService<Item> {
 				}
 			}
 
-			// Bound the root either by the API filter or by the permission cases injected into the
-			// AST. Both are already dynamic-var-resolved before the service runs — the query filter
-			// by sanitizeQuery, the cases by fetchPermissions → processPermissions → parseFilter — so
-			// `$CURRENT_USER` is the concrete user id in each, matching what a write's row yields.
-			// The cases are what scope a permission-isolated read (the planner case) whose partition
-			// never appears in the query filter (see `pinnedScopedCacheTagsFromCases` for the
-			// OR-of-cases union rule).
+			// Scope off the read's EFFECTIVE bound = the API filter AND the permission cases,
+			// combined by the same `joinFilterWithCases` the SQL WHERE uses (`{ _and: [filter,
+			// { _or: cases }] }`) so the pin can't diverge from what the query actually returns. Both
+			// are already dynamic-var-resolved before the service runs — the filter by sanitizeQuery,
+			// the cases by fetchPermissions → processPermissions → parseFilter — so `$CURRENT_USER` is
+			// the concrete user id, matching what a write's row yields. The pinner unions an `_or`'s
+			// slices when every branch binds a field (the multi-policy case), else falls back to bare.
 			const rootScopedCacheTags = rootPaths.size > 1
 				? []
-				: [
-					...pinnedScopedCacheTagsFromFilter(
-						this.collection,
-						scopedCacheFields,
-						updatedQuery.filter,
-						this.collectionScopedCacheFieldTypes,
-						this.collectionScopedCacheFieldRelatedPks,
-					),
-					...pinnedScopedCacheTagsFromCases(
-						this.collection,
-						scopedCacheFields,
-						ast.cases,
-						this.collectionScopedCacheFieldTypes,
-						this.collectionScopedCacheFieldRelatedPks,
-					),
-				];
+				: pinnedScopedCacheTagsFromFilter(
+					this.collection,
+					scopedCacheFields,
+					joinFilterWithCases(updatedQuery.filter, ast.cases),
+					this.collectionScopedCacheFieldTypes,
+					this.collectionScopedCacheFieldRelatedPks,
+				);
 
 			for (const collection of collectionsInFieldMap(fieldMap)) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {

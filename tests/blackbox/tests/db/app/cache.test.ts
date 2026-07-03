@@ -791,6 +791,58 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		An _or query filter binding the owner in every branch pins the UNION of the slices —
+		a write to either owner purges the read, an owner outside the union spares it
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const read = `/items/${collectionScoped}`
+				+ `?filter[_or][0][owner_field][_eq]=${scopedOwnerA}`
+				+ `&filter[_or][1][owner_field][_eq]=${scopedOwnerB}`;
+
+			const outsideOwner = randomUUID(); // a third owner, outside { A, B }
+
+			const warmUp = async () => {
+				await request(url).post(`/utils/cache/clear`)
+					.set('Authorization', auth);
+
+				await request(url).get(read)
+					.set('Authorization', auth); // cold → cached, pinned to { A, B }
+
+				const warm = await request(url).get(read)
+					.set('Authorization', auth);
+
+				expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+			};
+
+			const writeOwner = async (owner: string) => {
+				await request(url).post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: owner })
+					.set('Authorization', auth);
+
+				return request(url).get(read)
+					.set('Authorization', auth);
+			};
+
+			// An owner outside the union spares the read — the union pin, not bare.
+			await warmUp();
+			const afterOutside = await writeOwner(outsideOwner);
+			expect(afterOutside.statusCode).toBe(200);
+			expect(afterOutside.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Each union member purges it.
+			await warmUp();
+			expect((await writeOwner(scopedOwnerA)).headers[cacheStatusHeader]).toBe('MISS');
+
+			await warmUp();
+			expect((await writeOwner(scopedOwnerB)).headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Value-scoped self-referential read is not owner-pinned — a write to another
 		owner still invalidates it (the nested same-collection rows are unbounded)
 	`, () => {
