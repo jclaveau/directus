@@ -101,6 +101,26 @@ describe('getRedisConnection', () => {
 			database: 3,
 		});
 	});
+
+	test(oneLine`
+		REDIS_KEEP_ALIVE overrides the URL form into an object carrying socket.keepAlive
+		(disables the 5s probe so an idle preview can App-Sleep)
+	`, () => {
+		setEnv({ REDIS: 'redis://localhost:6379/2', REDIS_KEEP_ALIVE: false });
+
+		expect(getRedisConnection()).toEqual({
+			url: 'redis://localhost:6379/2',
+			socket: { keepAlive: false },
+		});
+	});
+
+	test('REDIS_KEEP_ALIVE threads into the host/port socket options', () => {
+		setEnv({ REDIS_HOST: 'h', REDIS_PORT: '6379', REDIS_KEEP_ALIVE: 600_000 });
+
+		expect(getRedisConnection()).toEqual({
+			socket: { host: 'h', port: 6379, keepAlive: 600_000 },
+		});
+	});
 });
 
 describe('scoped cache purging', () => {
