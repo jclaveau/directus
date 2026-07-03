@@ -1441,6 +1441,112 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		A multilevel permission rule (_and of an owner bound + another condition) still
+		value-scopes the read — the pinner descends the _and, pins the bounding branch,
+		ignores the rest
+	`, () => {
+		// The rule nests: `{ _and: [ { owner_field: _eq $CURRENT_USER }, { string_field:
+		// _nnull } ] }`. A single case AND-bounds, so it pins; the walker descends `_and`,
+		// pins owner_field=<me.id> (the _nnull branch doesn't bound and is skipped). Isolation
+		// must hold exactly like the flat rule: other-owner write spares, own write purges.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-nested-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-nested-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScoped,
+					action: 'read',
+					fields: ['*'],
+					permissions: {
+						_and: [
+							{ owner_field: { _eq: '$CURRENT_USER' } },
+							{ string_field: { _nnull: true } },
+						],
+					},
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-nested-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-nested-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, pinned to owner_field=<me.id>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Other-owner write: an owner=me-pinned read is spared.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
+				.set('Authorization', admin);
+
+			const afterOther = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Own-slice write: purges the pinned read.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const afterMine = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Scoped purge pins a slice read filtered by a relation's primary key — a write to
 		one owner's slice leaves another owner's cached read intact (the relational pin)
 	`, () => {
