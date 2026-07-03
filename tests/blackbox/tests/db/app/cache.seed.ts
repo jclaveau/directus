@@ -35,6 +35,12 @@ export const collectionScoped = 'test_app_cache_scoped';
 export const scopedOwnerA = 'owner-a';
 export const scopedOwnerB = 'owner-b';
 
+// A collection scoped by a *relation* field: scoped_cache_fields = ['owner_ref'], an
+// m2o to grandRelated. Exercises the relational pin — a read filtered by the related pk
+// ({ owner_ref: { id: { _eq } } }) must bound the slice, so a write to another owner's
+// slice leaves this read cached. Owners + items are seeded per-test (ids needed).
+export const collectionScopedRel = 'test_app_cache_scoped_rel';
+
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
 
@@ -58,6 +64,7 @@ export const seedDBStructure = () => {
 				// tag/block all point at grandRelated, so grandRelated goes last.
 				await DeleteCollection(vendor, { collection: junctionTag });
 				await DeleteCollection(vendor, { collection: junctionBlock });
+				await DeleteCollection(vendor, { collection: collectionScopedRel });
 				await DeleteCollection(vendor, { collection: collectionScoped });
 				await DeleteCollection(vendor, { collection: collectionIgnored });
 				await DeleteCollection(vendor, { collection: collectionGrandChild });
@@ -210,6 +217,25 @@ export const seedDBStructure = () => {
 					collection: collectionScoped,
 					field: 'parent',
 					otherCollection: collectionScoped,
+				});
+
+				// Relation-scoped collection: partition the cache by the m2o `owner_ref`. (The
+				// field is added after — scoped_cache_fields is just meta, resolved at read time.)
+				await CreateCollection(vendor, {
+					collection: collectionScopedRel,
+					meta: { scoped_cache_fields: ['owner_ref'] },
+				});
+
+				await CreateField(vendor, {
+					collection: collectionScopedRel,
+					field: 'string_field',
+					type: 'string',
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionScopedRel,
+					field: 'owner_ref',
+					otherCollection: collectionGrandRelated,
 				});
 
 				expect(true).toBeTruthy();

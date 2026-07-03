@@ -20,6 +20,7 @@ import {
 	collectionIgnored,
 	collectionRelated,
 	collectionScoped,
+	collectionScopedRel,
 	collectionTag,
 	scopedOwnerA,
 	scopedOwnerB,
@@ -1125,6 +1126,75 @@ describe('App Caching Tests', () => {
 			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
 			expect(afterCtl.statusCode).toBe(200);
 			expect(afterCtl.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
+		Scoped purge pins a slice read filtered by a relation's primary key — a write to
+		one owner's slice leaves another owner's cached read intact (the relational pin)
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const createOwner = async () => {
+				const response = await request(url)
+					.post(`/items/${collectionGrandRelated}`)
+					.send({ string_field: randomUUID() })
+					.set('Authorization', auth);
+
+				return response.body.data.id;
+			};
+
+			const addItem = async (owner: number) => {
+				await request(url)
+					.post(`/items/${collectionScopedRel}`)
+					.send({ string_field: randomUUID(), owner_ref: owner })
+					.set('Authorization', auth);
+			};
+
+			// Two owners, an item in each owner's slice.
+			const ownerA = await createOwner();
+			const ownerB = await createOwner();
+			await addItem(ownerA);
+			await addItem(ownerB);
+
+			// Read each slice through the related pk — the relational form my fix unwraps.
+			const base = `/items/${collectionScopedRel}?filter[owner_ref][id][_eq]=`;
+			const readA = `${base}${ownerA}`;
+			const readB = `${base}${ownerB}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm both slices. Non-vacuity: a re-read HITs, so each slice is genuinely cached.
+			await read(readA);
+			await read(readB);
+			const warmA = await read(readA);
+			const warmB = await read(readB);
+
+			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmB.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write into owner B's slice only.
+			await addItem(ownerB);
+
+			const afterA = await read(readA);
+			const afterB = await read(readB);
+
+			// The relational-pk filter pinned owner_ref=<ownerA>, so B's write dropped only B
+			// (MISS) and left A cached (HIT). Without the relational unwrap the read would pin
+			// nothing → bare collection tag → B's write would leave A a MISS too.
+			expect(afterA.statusCode).toBe(200);
+			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(afterB.statusCode).toBe(200);
+			expect(afterB.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });

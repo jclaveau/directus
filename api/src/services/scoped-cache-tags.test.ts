@@ -282,6 +282,117 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		).toEqual([]);
 	});
 
+	test(oneLine`
+		a relation filtered by its related primary key pins the fk value — the relational
+		form queries and permission rules use, e.g. { user_created: { id: { _eq } } }
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { id: { _eq: 'A' } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test('a relational _in on the related primary key pins every value', () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { id: { _in: ['A', 'B'] } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test('a relational pin is reached through _and (permission-rule form)', () => {
+		const filter = { _and: [{ student: { id: { _eq: 'A' } } }] };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], filter, {}, {
+				student: 'id',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test(oneLine`
+		a relation filtered by a non-primary-key attribute does not pin — the fk value is
+		undetermined, so the read falls back to the bare collection tag
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { email: { _eq: 'a@b.c' } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		without a related-primary-key entry (a scalar scope field), a relational filter
+		shape does not pin
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], {
+				student: { id: { _eq: 'A' } },
+			}),
+		).toEqual([]);
+	});
+
+	test('a relational pin nested through several _and levels still pins', () => {
+		const filter = { _and: [{ _and: [{ student: { id: { _eq: 'A' } } }] }] };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], filter, {}, {
+				student: 'id',
+			}),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
+	test(oneLine`
+		a two-hop relation path ({ fk: { rel: { pk: { _eq } } } }) does not pin — it
+		bounds the hop, not the fk value, so the read falls back to the bare tag
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { school: { id: { _eq: 'A' } } } },
+				{},
+				{ student: 'id' },
+			),
+		).toEqual([]);
+	});
+
+	test('a non-id related primary key is unwrapped by the passed key', () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				{ student: { code: { _eq: 'A' } } },
+				{},
+				{ student: 'code' },
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+		]);
+	});
+
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
