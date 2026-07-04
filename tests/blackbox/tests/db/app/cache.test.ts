@@ -1788,9 +1788,9 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		A permission case whose rule is RELATIONAL (owner_ref.id _eq, the partition on a related
-		pk, not a scalar) still value-scopes the read: a write to the pinned owner's slice purges
-		it, a write to another owner's slice spares it
+		A permission case whose rule is RELATIONAL (owner_ref.id _eq — the
+		partition on a related pk, not a scalar) still value-scopes the read:
+		a write to the pinned owner's slice purges it, another owner's spares it
 	`, () => {
 		// The `{ user_created: { id: { _eq: $CURRENT_USER } } }` shape — the dominant
 		// real pattern — routed through a policy, not the query. The case reaches the
@@ -1906,9 +1906,10 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		A permission case set binding DIFFERENT scope fields (field_a in one policy, field_b in
-		another) union-pins BOTH — a write to either field's slice purges the read, a write to
-		neither spares it (the multi-field _or lift, not the bare floor)
+		A permission case set binding DIFFERENT scope fields (field_a in one
+		policy, field_b in another) union-pins BOTH — a write to either field's
+		slice purges the read, a write to neither spares it (the multi-field _or
+		lift, not the bare floor)
 	`, () => {
 		// Two read policies OR-join as { _or: [ {field_a:_eq A}, {field_b:_eq B} ] }.
 		// Every branch binds a pinnable field, so the read pins BOTH slices, not bare.
@@ -2000,7 +2001,10 @@ describe('App Caching Tests', () => {
 
 			// A write touching NEITHER slice spares the read — the union pin, not bare.
 			await warmUp();
-			const afterNeither = await writeRow({ field_a: randomUUID(), field_b: randomUUID() });
+			const afterNeither = await writeRow({
+				field_a: randomUUID(),
+				field_b: randomUUID(),
+			});
 			expect(afterNeither.statusCode).toBe(200);
 			expect(afterNeither.headers[cacheStatusHeader]).toBe('HIT');
 
