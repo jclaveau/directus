@@ -20,6 +20,7 @@ import {
 	collectionIgnored,
 	collectionRelated,
 	collectionScoped,
+	collectionScopedMulti,
 	collectionScopedRel,
 	collectionTag,
 	scopedOwnerA,
@@ -791,6 +792,58 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		An _or query filter binding the owner in every branch pins the UNION of the slices —
+		a write to either owner purges the read, an owner outside the union spares it
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const read = `/items/${collectionScoped}`
+				+ `?filter[_or][0][owner_field][_eq]=${scopedOwnerA}`
+				+ `&filter[_or][1][owner_field][_eq]=${scopedOwnerB}`;
+
+			const outsideOwner = randomUUID(); // a third owner, outside { A, B }
+
+			const warmUp = async () => {
+				await request(url).post(`/utils/cache/clear`)
+					.set('Authorization', auth);
+
+				await request(url).get(read)
+					.set('Authorization', auth); // cold → cached, pinned to { A, B }
+
+				const warm = await request(url).get(read)
+					.set('Authorization', auth);
+
+				expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+			};
+
+			const writeOwner = async (owner: string) => {
+				await request(url).post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: owner })
+					.set('Authorization', auth);
+
+				return request(url).get(read)
+					.set('Authorization', auth);
+			};
+
+			// An owner outside the union spares the read — the union pin, not bare.
+			await warmUp();
+			const afterOutside = await writeOwner(outsideOwner);
+			expect(afterOutside.statusCode).toBe(200);
+			expect(afterOutside.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Each union member purges it.
+			await warmUp();
+			expect((await writeOwner(scopedOwnerA)).headers[cacheStatusHeader]).toBe('MISS');
+
+			await warmUp();
+			expect((await writeOwner(scopedOwnerB)).headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Value-scoped self-referential read is not owner-pinned — a write to another
 		owner still invalidates it (the nested same-collection rows are unbounded)
 	`, () => {
@@ -1130,6 +1183,542 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		A permission-scoped read (partition in the policy, NOT the API filter) is value-scoped
+		off the injected case: a write to the user's own slice drops their read, a write to
+		another slice spares it
+	`, () => {
+		// The planner case: a student lists /items/slots with no filter, but a policy restricts
+		// them to `owner_field = $CURRENT_USER`. That predicate lives in the permission rule,
+		// injected as `ast.cases`, not in the query — so the pin off
+		// `joinFilterWithCases(filter, cases)` (its `{ _or: cases }`) scopes the read.
+		// Without it the read falls back to the bare collection tag and any other user's
+		// write purges it (the over-purge this fixes). The "spared" witness below is the
+		// proof it's value-scoped and not bare.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			// A policy that scopes reads of collectionScoped to the caller's own rows, plus a role
+			// carrying it and a static-token user to read as. Unique names per run avoid collisions.
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-case-scope-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-case-scope-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScoped,
+					action: 'read',
+					fields: ['*'],
+					permissions: { owner_field: { _eq: '$CURRENT_USER' } },
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-case-scope-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-case-scope-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			// One row in the user's own slice (owner_field=<me.id>) so the read has data + a scope
+			// value; the other-slice write later targets a value the user is NOT pinned to.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			// No filter — the owner_field bound comes only from the policy case.
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, case-pinned to owner_field=<me.id>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in ANOTHER owner's slice. A bare-tagged read would MISS here; a case-pinned
+			// read to <me.id> is spared.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
+				.set('Authorization', admin);
+
+			const afterOther = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in the user's OWN slice (owner_field=<me.id>) — the value the case resolved
+			// to. It must purge the read.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const afterMine = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A permission case pins the RESOLVED user id, not the literal $CURRENT_USER token —
+		a write to a row whose owner_field literally holds '$CURRENT_USER' spares the read,
+		a write to the resolved id purges it
+	`, () => {
+		// Regression guard for the resolution the case pin relies on: fetchPermissions →
+		// processPermissions → parseFilter substitutes $CURRENT_USER in the policy rule with
+		// the concrete user id before it becomes ast.cases, so the read pins
+		// owner_field=<me.id>. If that regressed to pinning the literal token, a row with
+		// owner_field='$CURRENT_USER' would share the read's slice and wrongly purge it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-case-token-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-case-token-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScoped,
+					action: 'read',
+					fields: ['*'],
+					permissions: { owner_field: { _eq: '$CURRENT_USER' } },
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-case-token-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-case-token-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, pinned to owner_field=<me.id>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write a row whose owner_field is the LITERAL token string. If the case had
+			// pinned '$CURRENT_USER' unresolved, this would share the slice and purge the
+			// read. It must not — the read is pinned to the resolved <me.id>.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: '$CURRENT_USER' })
+				.set('Authorization', admin);
+
+			const afterLiteral = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterLiteral.statusCode).toBe(200);
+			expect(afterLiteral.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Positive control: a write to the resolved id purges the read.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const afterResolved = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterResolved.statusCode).toBe(200);
+			expect(afterResolved.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		Two permission cases (OR-joined) do NOT bound the read — it falls back to the bare
+		collection tag, so a write to ANY owner's slice purges it
+	`, () => {
+		// The single-case soundness gate: joinFilterWithCases applies cases as { _or: cases },
+		// so 2 rules mean a row need match only one — the read is not bounded to owner=me and
+		// must be bare. If the gate regressed to pinning cases[0] (owner=me), a write to
+		// another owner would wrongly spare this read. Two policies on the role = two cases.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-multicase-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			// Two policies, each a read permission on collectionScoped with a DISTINCT rule, so
+			// getCases yields two cases (OR-joined) rather than one bounding predicate.
+			for (const rule of [
+				{ owner_field: { _eq: '$CURRENT_USER' } },
+				{ string_field: { _nnull: true } },
+			]) {
+				const policy = (
+					await request(url).post('/policies')
+						.send({
+							name: `cache-multicase-${suffix}-${randomUUID()}`,
+							app_access: true,
+							admin_access: false,
+							roles: [{ role: role.id }],
+						})
+						.set('Authorization', admin)
+				).body.data;
+
+				await request(url).post('/permissions')
+					.send({
+						policy: policy.id,
+						collection: collectionScoped,
+						action: 'read',
+						fields: ['*'],
+						permissions: rule,
+					})
+					.set('Authorization', admin);
+			}
+
+			const token = `cache-multicase-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-multicase-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, bare (two OR'd cases)
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write in ANOTHER owner's slice. A bare-tagged read MISSes here; a wrongly
+			// owner=me-pinned read would survive.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
+				.set('Authorization', admin);
+
+			const after = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A multilevel permission rule (_and of an owner bound + another condition) still
+		value-scopes the read — the pinner descends the _and, pins the bounding branch,
+		ignores the rest
+	`, () => {
+		// The rule nests: `{ _and: [ { owner_field: _eq $CURRENT_USER }, { string_field:
+		// _nnull } ] }`. A single case AND-bounds, so it pins; the walker descends `_and`,
+		// pins owner_field=<me.id> (the _nnull branch doesn't bound and is skipped). Isolation
+		// must hold exactly like the flat rule: other-owner write spares, own write purges.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-nested-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-nested-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScoped,
+					action: 'read',
+					fields: ['*'],
+					permissions: {
+						_and: [
+							{ owner_field: { _eq: '$CURRENT_USER' } },
+							{ string_field: { _nnull: true } },
+						],
+					},
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-nested-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-nested-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const read = `/items/${collectionScoped}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, pinned to owner_field=<me.id>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Other-owner write: an owner=me-pinned read is spared.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerB })
+				.set('Authorization', admin);
+
+			const afterOther = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Own-slice write: purges the pinned read.
+			await request(url).post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: me.id })
+				.set('Authorization', admin);
+
+			const afterMine = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		Two cases that both bind the owner field pin the UNION of their slices — a write to
+		either owner purges the read, a write to an owner outside the union spares it
+	`, () => {
+		// The multi-policy planner case: a student sees their own rows AND a shared bucket, via
+		// two read policies both scoping owner_field. Each case binds owner_field, so the read
+		// is soundly pinned to { <me.id>, 'shared-bucket' } rather than falling back to bare —
+		// more precise than a collection-wide flush. An unrelated owner's write must spare it.
+		const sharedBucket = 'shared-bucket';
+
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-union-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			// Two policies, each binding owner_field: one to the caller, one to a shared bucket.
+			for (const rule of [
+				{ owner_field: { _eq: '$CURRENT_USER' } },
+				{ owner_field: { _eq: sharedBucket } },
+			]) {
+				const policy = (
+					await request(url).post('/policies')
+						.send({
+							name: `cache-union-${suffix}-${randomUUID()}`,
+							app_access: true,
+							admin_access: false,
+							roles: [{ role: role.id }],
+						})
+						.set('Authorization', admin)
+				).body.data;
+
+				await request(url).post('/permissions')
+					.send({
+						policy: policy.id,
+						collection: collectionScoped,
+						action: 'read',
+						fields: ['*'],
+						permissions: rule,
+					})
+					.set('Authorization', admin);
+			}
+
+			const token = `cache-union-${suffix}`;
+
+			const me = (
+				await request(url).post('/users')
+					.send({
+						email: `cache-union-${suffix}@example.com`,
+						password: randomUUID(),
+						role: role.id,
+						token,
+						status: 'active',
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			const auth = `Bearer ${token}`;
+
+			// A row in each union slice, so the read has data on both sides.
+			for (const owner of [me.id, sharedBucket]) {
+				await request(url).post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: owner })
+					.set('Authorization', admin);
+			}
+
+			const read = `/items/${collectionScoped}`;
+
+			const warmUp = async () => {
+				await request(url).post(`/utils/cache/clear`)
+					.set('Authorization', admin);
+
+				await request(url).get(read)
+					.set('Authorization', auth); // cold → cached, pinned to the union
+
+				const warm = await request(url).get(read)
+					.set('Authorization', auth);
+
+				expect(warm.statusCode).toBe(200);
+				expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+			};
+
+			const writeOwner = async (owner: string) => {
+				await request(url).post(`/items/${collectionScoped}`)
+					.send({ string_field: randomUUID(), owner_field: owner })
+					.set('Authorization', admin);
+
+				return request(url).get(read)
+					.set('Authorization', auth);
+			};
+
+			// A write outside the union (owner-b) spares the read — the union pin, not bare.
+			await warmUp();
+			const afterOutside = await writeOwner(scopedOwnerB);
+			expect(afterOutside.statusCode).toBe(200);
+			expect(afterOutside.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write to the caller's own slice (a union member) purges it.
+			await warmUp();
+			const afterMine = await writeOwner(me.id);
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+
+			// A write to the shared bucket (the other union member) also purges it.
+			await warmUp();
+			const afterShared = await writeOwner(sharedBucket);
+			expect(afterShared.statusCode).toBe(200);
+			expect(afterShared.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
 		Scoped purge pins a slice read filtered by a relation's primary key — a write to
 		one owner's slice leaves another owner's cached read intact (the relational pin)
 	`, () => {
@@ -1195,6 +1784,239 @@ describe('App Caching Tests', () => {
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterB.statusCode).toBe(200);
 			expect(afterB.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A permission case whose rule is RELATIONAL (owner_ref.id _eq — the
+		partition on a related pk, not a scalar) still value-scopes the read:
+		a write to the pinned owner's slice purges it, another owner's spares it
+	`, () => {
+		// The `{ user_created: { id: { _eq: $CURRENT_USER } } }` shape — the dominant
+		// real pattern — routed through a policy, not the query. The case reaches the
+		// fk value through the related pk, so the pinner's relational unwrap has to fire
+		// on a case (an `_or` branch via joinFilterWithCases), not just on a query
+		// filter. The query-side relational pin is proven above; this proves the same
+		// unwrap through ast.cases. A concrete related pk (not $CURRENT_USER — its
+		// resolution is a separate guard) keeps this focused on the relational case path.
+		// Without the unwrap the read would pin nothing → bare → the spare witness fails.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const createOwner = async () => {
+				return (
+					await request(url).post(`/items/${collectionGrandRelated}`)
+						.send({ string_field: randomUUID() })
+						.set('Authorization', admin)
+				).body.data.id;
+			};
+
+			const addItem = async (owner: number) => {
+				await request(url).post(`/items/${collectionScopedRel}`)
+					.send({ string_field: randomUUID(), owner_ref: owner })
+					.set('Authorization', admin);
+			};
+
+			// Two related owners; the policy pins the read to ownerA's slice.
+			const ownerA = await createOwner();
+			const ownerB = await createOwner();
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-case-rel-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-case-rel-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScopedRel,
+					action: 'read',
+					fields: ['*'],
+					permissions: { owner_ref: { id: { _eq: ownerA } } },
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-case-rel-${suffix}`;
+
+			await request(url).post('/users')
+				.send({
+					email: `cache-case-rel-${suffix}@example.com`,
+					password: randomUUID(),
+					role: role.id,
+					token,
+					status: 'active',
+				})
+				.set('Authorization', admin);
+
+			const auth = `Bearer ${token}`;
+
+			// A row in the pinned slice so the read has data + a scope value.
+			await addItem(ownerA);
+
+			// No filter — the owner_ref bound comes only from the relational policy case.
+			const read = `/items/${collectionScopedRel}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, pinned to owner_ref=<ownerA>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in ANOTHER owner's slice. A bare-tagged read would MISS; the
+			// relational case pin to <ownerA> spares it.
+			await addItem(ownerB);
+
+			const afterOther = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in the pinned slice (owner_ref=<ownerA>) purges the read.
+			await addItem(ownerA);
+
+			const afterMine = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A permission case set binding DIFFERENT scope fields (field_a in one
+		policy, field_b in another) union-pins BOTH — a write to either field's
+		slice purges the read, a write to neither spares it (the multi-field _or
+		lift, not the bare floor)
+	`, () => {
+		// Two read policies OR-join as { _or: [ {field_a:_eq A}, {field_b:_eq B} ] }.
+		// Every branch binds a pinnable field, so the read pins BOTH slices, not bare.
+		// The spare witness (a write touching neither slice) proves it's value-scoped
+		// across the two fields; the two purge witnesses prove either slice drops it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+			const valA = randomUUID(); // the field_a slice the read is pinned to
+			const valB = randomUUID(); // the field_b slice the read is pinned to
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-multifield-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			// One policy per field, each read-permitting a DISTINCT scope field, so
+			// getCases yields two cases both bounding — the multi-field union.
+			for (const rule of [{ field_a: { _eq: valA } }, { field_b: { _eq: valB } }]) {
+				const policy = (
+					await request(url).post('/policies')
+						.send({
+							name: `cache-multifield-${suffix}-${randomUUID()}`,
+							app_access: true,
+							admin_access: false,
+							roles: [{ role: role.id }],
+						})
+						.set('Authorization', admin)
+				).body.data;
+
+				await request(url).post('/permissions')
+					.send({
+						policy: policy.id,
+						collection: collectionScopedMulti,
+						action: 'read',
+						fields: ['*'],
+						permissions: rule,
+					})
+					.set('Authorization', admin);
+			}
+
+			const token = `cache-multifield-${suffix}`;
+
+			await request(url).post('/users')
+				.send({
+					email: `cache-multifield-${suffix}@example.com`,
+					password: randomUUID(),
+					role: role.id,
+					token,
+					status: 'active',
+				})
+				.set('Authorization', admin);
+
+			const auth = `Bearer ${token}`;
+
+			// A row in field_a's pinned slice so the read has data.
+			await request(url).post(`/items/${collectionScopedMulti}`)
+				.send({ field_a: valA })
+				.set('Authorization', admin);
+
+			// No filter — the field_a/field_b bounds come only from the two policy cases.
+			const read = `/items/${collectionScopedMulti}`;
+
+			const warmUp = async () => {
+				await request(url).post(`/utils/cache/clear`)
+					.set('Authorization', admin);
+
+				await request(url).get(read)
+					.set('Authorization', auth); // cold → cached, pinned to A + B slices
+
+				const warm = await request(url).get(read)
+					.set('Authorization', auth);
+
+				expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+			};
+
+			const writeRow = async (item: { field_a?: string; field_b?: string }) => {
+				await request(url).post(`/items/${collectionScopedMulti}`)
+					.send(item)
+					.set('Authorization', admin);
+
+				return request(url).get(read)
+					.set('Authorization', auth);
+			};
+
+			// A write touching NEITHER slice spares the read — the union pin, not bare.
+			await warmUp();
+
+			const afterNeither = await writeRow({
+				field_a: randomUUID(),
+				field_b: randomUUID(),
+			});
+
+			expect(afterNeither.statusCode).toBe(200);
+			expect(afterNeither.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write to the field_a slice purges it.
+			await warmUp();
+			expect((await writeRow({ field_a: valA })).headers[cacheStatusHeader]).toBe('MISS');
+
+			// A write to the field_b slice purges it too.
+			await warmUp();
+			expect((await writeRow({ field_b: valB })).headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });

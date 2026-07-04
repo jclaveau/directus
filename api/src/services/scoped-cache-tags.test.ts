@@ -233,9 +233,127 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		]);
 	});
 
-	test('an _or branch does not bound the read, so nothing under it pins', () => {
+	test(oneLine`
+		an _or whose every branch binds the field pins the UNION of their values — a row
+		matches one branch, so its value is in the union
+	`, () => {
 		const filter = { _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
+
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		an _or branch that leaves the field unbound drops the pin — a row matching that
+		branch carries a value outside the union
+	`, () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([]);
+	});
+
+	test('an _or unions the fk value for a relational branch', () => {
+		const filter = {
+			_or: [
+				{ owner: { id: { _eq: 'A' } } },
+				{ owner: { id: { _in: ['B', 'C'] } } },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['owner'], filter, {}, { owner: 'id' }),
+		).toEqual([
+			{ collection: 'slots', field: 'owner', value: 'A' },
+			{ collection: 'slots', field: 'owner', value: 'B' },
+			{ collection: 'slots', field: 'owner', value: 'C' },
+		]);
+	});
+
+	test('a field bound by an outer _and AND every _or branch pins both sources', () => {
+		const filter = {
+			_and: [
+				{ course: { _eq: 'math' } },
+				{ _or: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			{ collection: 'slots', field: 'course', value: 'math' },
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test('an empty _or pins nothing', () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { _or: [] }),
+		).toEqual([]);
+	});
+
+	test('an _or dedups a value bound by more than one branch', () => {
+		const filter = {
+			_or: [{ student: { _eq: 'A' } }, { student: { _in: ['A', 'B'] } }],
+		};
+
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		_and binding the same field twice unions both values — the over-approximation of the
+		intersection (student=A AND student=B is empty, but a union over-purges, never stale)
+	`, () => {
+		const filter = { _and: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
+
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		an empty _in bounds the field to no value, so nothing pins — the read stays bare (a
+		later insert of any value is caught by the bare collection tag)
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _in: [] } }),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		an _or whose branches bind DIFFERENT scope fields pins each — the read is purged if a
+		write touches either, since every branch covers its own rows
+	`, () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'course', value: 'math' },
+		]);
+	});
+
+	test(oneLine`
+		an _or with one branch binding no pinnable field is bare even when the others bind
+		different scope fields — that branch's rows carry no pinned tag
+	`, () => {
+		const filter = {
+			_or: [
+				{ student: { _eq: 'A' } },
+				{ course: { _eq: 'math' } },
+				{ note: { _contains: 'x' } },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([]);
 	});
 
 	test(oneLine`
