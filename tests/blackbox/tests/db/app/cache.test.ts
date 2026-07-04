@@ -1188,9 +1188,10 @@ describe('App Caching Tests', () => {
 	`, () => {
 		// The planner case: a student lists /items/slots with no filter, but a policy restricts
 		// them to `owner_field = $CURRENT_USER`. That predicate lives in the permission rule,
-		// injected as `ast.cases`, not in the query — so `pinnedScopedCacheTagsFromCases` is what
-		// scopes the read. Without it the read falls back to the bare collection tag and any other
-		// user's write purges it (the over-purge this fixes). The "spared" witness below is the
+		// injected as `ast.cases`, not in the query — so the pin off
+		// `joinFilterWithCases(filter, cases)` (its `{ _or: cases }`) scopes the read.
+		// Without it the read falls back to the bare collection tag and any other user's
+		// write purges it (the over-purge this fixes). The "spared" witness below is the
 		// proof it's value-scoped and not bare.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
@@ -1782,6 +1783,124 @@ describe('App Caching Tests', () => {
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterB.statusCode).toBe(200);
 			expect(afterB.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A permission case whose rule is RELATIONAL (owner_ref.id _eq, the partition on a related
+		pk, not a scalar) still value-scopes the read: a write to the pinned owner's slice purges
+		it, a write to another owner's slice spares it
+	`, () => {
+		// The `{ user_created: { id: { _eq: $CURRENT_USER } } }` shape — the dominant
+		// real pattern — routed through a policy, not the query. The case reaches the
+		// fk value through the related pk, so the pinner's relational unwrap has to fire
+		// on a case (an `_or` branch via joinFilterWithCases), not just on a query
+		// filter. The query-side relational pin is proven above; this proves the same
+		// unwrap through ast.cases. A concrete related pk (not $CURRENT_USER — its
+		// resolution is a separate guard) keeps this focused on the relational case path.
+		// Without the unwrap the read would pin nothing → bare → the spare witness fails.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const createOwner = async () => {
+				return (
+					await request(url).post(`/items/${collectionGrandRelated}`)
+						.send({ string_field: randomUUID() })
+						.set('Authorization', admin)
+				).body.data.id;
+			};
+
+			const addItem = async (owner: number) => {
+				await request(url).post(`/items/${collectionScopedRel}`)
+					.send({ string_field: randomUUID(), owner_ref: owner })
+					.set('Authorization', admin);
+			};
+
+			// Two related owners; the policy pins the read to ownerA's slice.
+			const ownerA = await createOwner();
+			const ownerB = await createOwner();
+
+			const suffix = randomUUID();
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-case-rel-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			const policy = (
+				await request(url).post('/policies')
+					.send({
+						name: `cache-case-rel-${suffix}`,
+						app_access: true,
+						admin_access: false,
+						roles: [{ role: role.id }],
+					})
+					.set('Authorization', admin)
+			).body.data;
+
+			await request(url).post('/permissions')
+				.send({
+					policy: policy.id,
+					collection: collectionScopedRel,
+					action: 'read',
+					fields: ['*'],
+					permissions: { owner_ref: { id: { _eq: ownerA } } },
+				})
+				.set('Authorization', admin);
+
+			const token = `cache-case-rel-${suffix}`;
+
+			await request(url).post('/users')
+				.send({
+					email: `cache-case-rel-${suffix}@example.com`,
+					password: randomUUID(),
+					role: role.id,
+					token,
+					status: 'active',
+				})
+				.set('Authorization', admin);
+
+			const auth = `Bearer ${token}`;
+
+			// A row in the pinned slice so the read has data + a scope value.
+			await addItem(ownerA);
+
+			// No filter — the owner_ref bound comes only from the relational policy case.
+			const read = `/items/${collectionScopedRel}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', admin);
+
+			await request(url).get(read)
+				.set('Authorization', auth); // cold → cached, pinned to owner_ref=<ownerA>
+
+			const warm = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in ANOTHER owner's slice. A bare-tagged read would MISS; the
+			// relational case pin to <ownerA> spares it.
+			await addItem(ownerB);
+
+			const afterOther = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterOther.statusCode).toBe(200);
+			expect(afterOther.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write in the pinned slice (owner_ref=<ownerA>) purges the read.
+			await addItem(ownerA);
+
+			const afterMine = await request(url).get(read)
+				.set('Authorization', auth);
+
+			expect(afterMine.statusCode).toBe(200);
+			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });
