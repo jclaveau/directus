@@ -20,6 +20,7 @@ import {
 	collectionIgnored,
 	collectionRelated,
 	collectionScoped,
+	collectionScopedMulti,
 	collectionScopedRel,
 	collectionTag,
 	scopedOwnerA,
@@ -1901,6 +1902,115 @@ describe('App Caching Tests', () => {
 
 			expect(afterMine.statusCode).toBe(200);
 			expect(afterMine.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A permission case set binding DIFFERENT scope fields (field_a in one policy, field_b in
+		another) union-pins BOTH — a write to either field's slice purges the read, a write to
+		neither spares it (the multi-field _or lift, not the bare floor)
+	`, () => {
+		// Two read policies OR-join as { _or: [ {field_a:_eq A}, {field_b:_eq B} ] }.
+		// Every branch binds a pinnable field, so the read pins BOTH slices, not bare.
+		// The spare witness (a write touching neither slice) proves it's value-scoped
+		// across the two fields; the two purge witnesses prove either slice drops it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const admin = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const suffix = randomUUID();
+			const valA = randomUUID(); // the field_a slice the read is pinned to
+			const valB = randomUUID(); // the field_b slice the read is pinned to
+
+			const role = (
+				await request(url).post('/roles')
+					.send({ name: `cache-multifield-${suffix}` })
+					.set('Authorization', admin)
+			).body.data;
+
+			// One policy per field, each read-permitting a DISTINCT scope field, so
+			// getCases yields two cases both bounding — the multi-field union.
+			for (const rule of [{ field_a: { _eq: valA } }, { field_b: { _eq: valB } }]) {
+				const policy = (
+					await request(url).post('/policies')
+						.send({
+							name: `cache-multifield-${suffix}-${randomUUID()}`,
+							app_access: true,
+							admin_access: false,
+							roles: [{ role: role.id }],
+						})
+						.set('Authorization', admin)
+				).body.data;
+
+				await request(url).post('/permissions')
+					.send({
+						policy: policy.id,
+						collection: collectionScopedMulti,
+						action: 'read',
+						fields: ['*'],
+						permissions: rule,
+					})
+					.set('Authorization', admin);
+			}
+
+			const token = `cache-multifield-${suffix}`;
+
+			await request(url).post('/users')
+				.send({
+					email: `cache-multifield-${suffix}@example.com`,
+					password: randomUUID(),
+					role: role.id,
+					token,
+					status: 'active',
+				})
+				.set('Authorization', admin);
+
+			const auth = `Bearer ${token}`;
+
+			// A row in field_a's pinned slice so the read has data.
+			await request(url).post(`/items/${collectionScopedMulti}`)
+				.send({ field_a: valA })
+				.set('Authorization', admin);
+
+			// No filter — the field_a/field_b bounds come only from the two policy cases.
+			const read = `/items/${collectionScopedMulti}`;
+
+			const warmUp = async () => {
+				await request(url).post(`/utils/cache/clear`)
+					.set('Authorization', admin);
+
+				await request(url).get(read)
+					.set('Authorization', auth); // cold → cached, pinned to A + B slices
+
+				const warm = await request(url).get(read)
+					.set('Authorization', auth);
+
+				expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+			};
+
+			const writeRow = async (item: { field_a?: string; field_b?: string }) => {
+				await request(url).post(`/items/${collectionScopedMulti}`)
+					.send(item)
+					.set('Authorization', admin);
+
+				return request(url).get(read)
+					.set('Authorization', auth);
+			};
+
+			// A write touching NEITHER slice spares the read — the union pin, not bare.
+			await warmUp();
+			const afterNeither = await writeRow({ field_a: randomUUID(), field_b: randomUUID() });
+			expect(afterNeither.statusCode).toBe(200);
+			expect(afterNeither.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A write to the field_a slice purges it.
+			await warmUp();
+			expect((await writeRow({ field_a: valA })).headers[cacheStatusHeader]).toBe('MISS');
+
+			// A write to the field_b slice purges it too.
+			await warmUp();
+			expect((await writeRow({ field_b: valB })).headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });
