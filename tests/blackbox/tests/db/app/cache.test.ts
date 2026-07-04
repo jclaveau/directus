@@ -2001,10 +2001,12 @@ describe('App Caching Tests', () => {
 
 			// A write touching NEITHER slice spares the read — the union pin, not bare.
 			await warmUp();
+
 			const afterNeither = await writeRow({
 				field_a: randomUUID(),
 				field_b: randomUUID(),
 			});
+
 			expect(afterNeither.statusCode).toBe(200);
 			expect(afterNeither.headers[cacheStatusHeader]).toBe('HIT');
 
