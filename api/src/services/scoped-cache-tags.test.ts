@@ -326,6 +326,37 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	});
 
 	test(oneLine`
+		an _or whose branches bind DIFFERENT scope fields pins each — the read is purged if a
+		write touches either, since every branch covers its own rows
+	`, () => {
+		const filter = { _or: [{ student: { _eq: 'A' } }, { course: { _eq: 'math' } }] };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'course', value: 'math' },
+		]);
+	});
+
+	test(oneLine`
+		an _or with one branch binding no pinnable field is bare even when the others bind
+		different scope fields — that branch's rows carry no pinned tag
+	`, () => {
+		const filter = {
+			_or: [
+				{ student: { _eq: 'A' } },
+				{ course: { _eq: 'math' } },
+				{ note: { _contains: 'x' } },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student', 'course'], filter),
+		).toEqual([]);
+	});
+
+	test(oneLine`
 		a date-ish scope field is not pin-safe (filter↔row canonical can diverge), so an _eq
 		on it yields no pin — the read falls back to the bare collection tag
 	`, () => {
