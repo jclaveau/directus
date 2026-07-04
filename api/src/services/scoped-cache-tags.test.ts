@@ -293,6 +293,38 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		).toEqual([]);
 	});
 
+	test('an _or dedups a value bound by more than one branch', () => {
+		const filter = {
+			_or: [{ student: { _eq: 'A' } }, { student: { _in: ['A', 'B'] } }],
+		};
+
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		_and binding the same field twice unions both values — the over-approximation of the
+		intersection (student=A AND student=B is empty, but a union over-purges, never stale)
+	`, () => {
+		const filter = { _and: [{ student: { _eq: 'A' } }, { student: { _eq: 'B' } }] };
+
+		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], filter)).toEqual([
+			{ collection: 'slots', field: 'student', value: 'A' },
+			{ collection: 'slots', field: 'student', value: 'B' },
+		]);
+	});
+
+	test(oneLine`
+		an empty _in bounds the field to no value, so nothing pins — the read stays bare (a
+		later insert of any value is caught by the bare collection tag)
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', ['student'], { student: { _in: [] } }),
+		).toEqual([]);
+	});
+
 	test(oneLine`
 		a date-ish scope field is not pin-safe (filter↔row canonical can diverge), so an _eq
 		on it yields no pin — the read falls back to the bare collection tag
