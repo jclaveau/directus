@@ -820,7 +820,8 @@ implements AbstractService<Item> {
 			// are already dynamic-var-resolved before the service runs — the filter by sanitizeQuery,
 			// the cases by fetchPermissions → processPermissions → parseFilter — so `$CURRENT_USER` is
 			// the concrete user id, matching what a write's row yields. The pinner unions an `_or`'s
-			// slices when every branch binds a field (the multi-policy case), else falls back to bare.
+			// slices when every branch binds a pinnable field — same field or different ones (the
+			// multi-policy case) — else falls back to bare.
 			const rootScopedCacheTags = rootPaths.size > 1
 				? []
 				: pinnedScopedCacheTagsFromFilter(
