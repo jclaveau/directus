@@ -292,17 +292,22 @@ export function scopedCacheTagsFromRows(
 }
 
 /**
- * Scope a read's root cache tags off the query filter — the read side. A read is
- * soundly scoped to a value slice only when the filter *bounds* it to that value: a
- * future insert with a new scope value must be excluded by the same filter, or the
- * read would silently miss it (a write to the new value purges only its own slice,
- * never this read). So scope tags come from `_eq`/`_in` constraints on a scoped cache
- * field, reached through the root or an `_and` (an `_or` branch doesn't bound — a row
- * matching the other branch still belongs). No pinned field → returns `[]`, and the
- * caller falls back to the bare collection tag so every write to the collection
- * invalidates the read. `fieldTypes` carries each field's schema type so the pinned
- * filter value canonicalizes the same way the purge side's stored row value does — and
- * so date-ish types (not pin-safe, see `PIN_UNSAFE_SCOPE_TYPES`) are skipped.
+ * Scope a read's root cache tags off a filter — the read side. A read is soundly scoped to a value
+ * slice only when the filter *bounds* it to that value: a future insert with a new scope value must
+ * be excluded by the same filter, or the read would silently miss it. Tags come from `_eq`/`_in` on
+ * a scoped field (flat or relational `{ fk: { <pk>: … } }`). Each node reports its tags plus whether
+ * it *covers* every row it matches (i.e. binds a pinnable field on that row), combined by operator:
+ *   - `_and`/root union a field's values and are covered if ANY conjunct is (a row satisfies every
+ *     conjunct); the value union over-approximates the intersection — over-purges, never stale.
+ *   - `_or` is sound only when EVERY branch is covered (else a row matching an uncovered branch
+ *     carries no pinned tag → stale); then its tags are the union across branches — a matching row
+ *     satisfies one branch, whose covering tag lies in that union. This holds across *different*
+ *     fields too: `{ _or: [{ owner }, { dept }] }` pins both, purged if a write touches either.
+ * This is what scopes a permission-isolated read: the caller passes
+ * `joinFilterWithCases(query.filter, ast.cases)`, whose `{ _or: cases }` is unioned by that rule
+ * (one case = its own values; a case that leaves ALL fields unbound → bare). No pinned field → `[]`,
+ * and the caller falls back to the bare collection tag. `fieldTypes` canonicalizes a value the way
+ * the purge side does and skips date-ish types (not pin-safe, `PIN_UNSAFE_SCOPE_TYPES`).
  */
 export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
@@ -316,82 +321,121 @@ export function pinnedScopedCacheTagsFromFilter(
 	}
 
 	const fieldSet = new Set(fields);
-	const pinned = new Map<string, Set<unknown>>();
 
-	function pin(field: string, values: unknown[]): void {
-		const seen = pinned.get(field) ?? new Set<unknown>();
+	// A node's pinned tags plus whether it *covers* every row it matches — a leaf that bound a
+	// pinnable field covers its rows; an uncovered node's rows carry no pinned tag (would be stale).
+	type Eval = { tags: Map<string, Set<unknown>>; covered: boolean };
 
-		for (const value of values) {
-			seen.add(value);
+	// Union `source`'s values into `target` in place (shared by AND and OR).
+	function unionTags(
+		target: Map<string, Set<unknown>>,
+		source: Map<string, Set<unknown>>,
+	): void {
+		for (const [field, values] of source) {
+			const seen = target.get(field) ?? new Set<unknown>();
+
+			for (const value of values) {
+				seen.add(value);
+			}
+
+			target.set(field, seen);
 		}
-
-		pinned.set(field, seen);
 	}
 
-	function walk(node: Filter): void {
+	// A single `_eq`/`_in` (or relational `{ fk: { <pk>: { _eq | _in } } }`) leaf → its value set.
+	// Covered iff it bound a pinnable scope field; a non-scope/date/non-`_eq`/`_in` key covers nothing.
+	function evalLeaf(field: string, value: unknown): Eval {
+		const tags = new Map<string, Set<unknown>>();
+
+		if (
+			!fieldSet.has(field) ||
+			!isPinnableScopeType(fieldTypes[field]) ||
+			value === null ||
+			typeof value !== 'object'
+		) {
+			return { tags, covered: false };
+		}
+
+		const ops = value as Record<string, unknown>;
+
+		if ('_eq' in ops) {
+			tags.set(field, new Set([ops['_eq']]));
+		}
+		else if ('_in' in ops && Array.isArray(ops['_in'])) {
+			tags.set(field, new Set(ops['_in']));
+		}
+		else {
+			// Relational: a filter on the related PK bounds the fk to the value the write side
+			// stores. Only the related PK is sound — a non-PK attribute wouldn't determine it.
+			const relatedPrimaryKey = relatedPrimaryKeys[field];
+
+			const inner = relatedPrimaryKey === undefined
+				? undefined
+				: ops[relatedPrimaryKey];
+
+			if (inner !== null && typeof inner === 'object') {
+				const innerOps = inner as Record<string, unknown>;
+
+				if ('_eq' in innerOps) {
+					tags.set(field, new Set([innerOps['_eq']]));
+				}
+				else if ('_in' in innerOps && Array.isArray(innerOps['_in'])) {
+					tags.set(field, new Set(innerOps['_in']));
+				}
+			}
+		}
+
+		return { tags, covered: tags.size > 0 };
+	}
+
+	// OR: a row matches at least one branch. Sound to pin only when EVERY branch covers its own rows
+	// (else a row matching an uncovered branch carries no pinned tag → stale); then the tags are the
+	// union across branches — a matching row's covering tag lies in it, across different fields too.
+	function evalOr(branches: Eval[]): Eval {
+		if (branches.length === 0 || !branches.every((branch) => branch.covered)) {
+			return { tags: new Map<string, Set<unknown>>(), covered: false };
+		}
+
+		const tags = new Map<string, Set<unknown>>();
+
+		for (const branch of branches) {
+			unionTags(tags, branch.tags);
+		}
+
+		return { tags, covered: true };
+	}
+
+	// Every key at an object level is AND-combined (the root and `_and` share this): a row satisfies
+	// every conjunct, so tags union and the node is covered if ANY conjunct covers the row.
+	function evalNode(node: Filter): Eval {
+		const result: Eval = { tags: new Map<string, Set<unknown>>(), covered: false };
+
+		function andIn(part: Eval): void {
+			unionTags(result.tags, part.tags);
+			result.covered = result.covered || part.covered;
+		}
+
 		for (const [key, value] of Object.entries(node)) {
 			if (key === '_and' && Array.isArray(value)) {
 				for (const sub of value) {
-					walk(sub as Filter);
+					andIn(evalNode(sub as Filter));
 				}
-
-				continue;
 			}
-
-			// `_or` doesn't bound the read; nothing under it can pin a scope. A date-ish field
-			// isn't pin-safe (filter↔row canonical can diverge), so it's skipped too — the read
-			// falls back to the bare collection tag.
-			if (
-				key === '_or' ||
-				!fieldSet.has(key) ||
-				!isPinnableScopeType(fieldTypes[key]) ||
-				value === null ||
-				typeof value !== 'object'
-			) {
-				continue;
+			else if (key === '_or' && Array.isArray(value)) {
+				andIn(evalOr(value.map((sub) => evalNode(sub as Filter))));
 			}
-
-			const ops = value as Record<string, unknown>;
-
-			if ('_eq' in ops) {
-				pin(key, [ops['_eq']]);
-			}
-			else if ('_in' in ops && Array.isArray(ops['_in'])) {
-				pin(key, ops['_in']);
-			}
-			// Relational form: a filter on a related scope field reaches its value through the
-			// related collection's primary key — `{ fk: { <pk>: { _eq | _in } } }`. Filtering a
-			// relation by its PK bounds the exact same value the write side stores in the fk
-			// column, so it pins identically to the flat form (covers queries and permission
-			// rules alike, e.g. `{ user_created: { id: { _eq: $CURRENT_USER } } }`). Only the
-			// related PK is sound — a non-PK attribute (`{ fk: { email: … } }`) wouldn't
-			// determine the fk value, so it's left to fall back to the bare collection tag.
 			else {
-				const relatedPrimaryKey = relatedPrimaryKeys[key];
-
-				const inner = relatedPrimaryKey === undefined
-					? undefined
-					: ops[relatedPrimaryKey];
-
-				if (inner !== null && typeof inner === 'object') {
-					const innerOps = inner as Record<string, unknown>;
-
-					if ('_eq' in innerOps) {
-						pin(key, [innerOps['_eq']]);
-					}
-					else if ('_in' in innerOps && Array.isArray(innerOps['_in'])) {
-						pin(key, innerOps['_in']);
-					}
-				}
+				andIn(evalLeaf(key, value));
 			}
 		}
+
+		return result;
 	}
 
-	walk(filter);
-
+	const pinned = evalNode(filter);
 	const tags: ScopedCacheTag[] = [];
 
-	for (const [field, values] of pinned) {
+	for (const [field, values] of pinned.tags) {
 		for (const value of values) {
 			tags.push({ collection, field, value, type: fieldTypes[field] });
 		}

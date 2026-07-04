@@ -32,3 +32,5 @@
 - [api vitest typecheck blocked by pre-existing debt](reference_api_typecheck_blocked.md) — \*.test-d.ts never run;
   enabling typecheck surfaces ~203 src type errors (and emitter graph pulls in untyped pino-http-print) → needs a
   dedicated cleanup PR
+- [Service-level read-through cache + CACHE_TYPES](project_directus_service_cache.md) — readByQuery caches via service-cache.ts (dual-write, own key namespace, HTTP fast-path intact); CACHE_TYPES array selects api/service consumers; settled decisions (system-collection excluded for security, TTL shared, gql out-of-scope) so review doesn't re-litigate; PR #207
+- [Permission-case scoped cache (PR #212)](project_directus_permission_case_cache.md) — pin scoped-cache read tags off ast.cases (permission policy), not just the API filter; generalized `_or` in the filter pinner (union iff all branches bind); reuse joinFilterWithCases; settled: cases pre-resolved so no resolver, DNF rejected, no `_not`, root-cases-only

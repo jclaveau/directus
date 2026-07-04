@@ -41,6 +41,12 @@ export const scopedOwnerB = 'owner-b';
 // slice leaves this read cached. Owners + items are seeded per-test (ids needed).
 export const collectionScopedRel = 'test_app_cache_scoped_rel';
 
+// A collection scoped by TWO scalar fields: scoped_cache_fields = ['field_a', 'field_b'].
+// Exercises the multi-field `_or` union — a case set (or query `_or`) whose branches bind
+// DIFFERENT scope fields pins each, so a write touching either field's slice purges the read
+// while a write touching neither spares it. Rows are created per-test.
+export const collectionScopedMulti = 'test_app_cache_scoped_multi';
+
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
 
@@ -65,6 +71,7 @@ export const seedDBStructure = () => {
 				await DeleteCollection(vendor, { collection: junctionTag });
 				await DeleteCollection(vendor, { collection: junctionBlock });
 				await DeleteCollection(vendor, { collection: collectionScopedRel });
+				await DeleteCollection(vendor, { collection: collectionScopedMulti });
 				await DeleteCollection(vendor, { collection: collectionScoped });
 				await DeleteCollection(vendor, { collection: collectionIgnored });
 				await DeleteCollection(vendor, { collection: collectionGrandChild });
@@ -236,6 +243,24 @@ export const seedDBStructure = () => {
 					collection: collectionScopedRel,
 					field: 'owner_ref',
 					otherCollection: collectionGrandRelated,
+				});
+
+				// Two-scope-field collection: partition by both `field_a` and `field_b`.
+				await CreateCollection(vendor, {
+					collection: collectionScopedMulti,
+					meta: { scoped_cache_fields: ['field_a', 'field_b'] },
+				});
+
+				await CreateField(vendor, {
+					collection: collectionScopedMulti,
+					field: 'field_a',
+					type: 'string',
+				});
+
+				await CreateField(vendor, {
+					collection: collectionScopedMulti,
+					field: 'field_b',
+					type: 'string',
 				});
 
 				expect(true).toBeTruthy();
