@@ -303,14 +303,20 @@ export function getDatabaseForAccountability(
 		}
 	}
 
+	// The default is always a candidate, so the array is never empty; reduce keeps `best` defined.
 	const best = [...candidateNames]
 		.map((name) => ({ name, priority: getConnectionPriority(name) }))
-		.sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name))[0];
+		.reduce((winner, candidate) => {
+			const samePriority = candidate.priority === winner.priority;
 
-	if (!best || best.name === defaultName) {
-		return getDatabase();
-	}
+			const winsByName = samePriority && candidate.name.localeCompare(winner.name) < 0;
 
+			return candidate.priority > winner.priority || winsByName
+				? candidate
+				: winner;
+		});
+
+	// Dispatch handles the default name (→ base pool); named pools build lazily
 	return getNamedDatabase(best.name);
 }
 
