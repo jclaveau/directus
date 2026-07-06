@@ -32,6 +32,14 @@ describe('DB connection priority routing', () => {
 		}
 	});
 
+	// When the active vendor set has no pg-family member (e.g. a sqlite3-only run) there is nothing
+	// to probe; register a skipped test so the file is never an empty suite (which vitest fails on).
+	if (PROBE_VENDORS.length === 0) {
+		it.skip('no pg-family vendor in this run', () => {
+			// nothing to probe
+		});
+	}
+
 	it.each(PROBE_VENDORS)(
 		'%s respects connection priority across several grants',
 		async (vendor) => {
