@@ -70,6 +70,8 @@ test('Routes to the highest-priority granted connection', async () => {
 	const db = getDatabaseForAccountability(acc);
 
 	expect(connectedDatabaseOf(db)).toBe('directus_premium');
+	// second call returns the cached instance, not a freshly built one
+	expect(getDatabaseForAccountability(acc)).toBe(db);
 });
 
 test('Picks the higher priority regardless of grant order', async () => {
