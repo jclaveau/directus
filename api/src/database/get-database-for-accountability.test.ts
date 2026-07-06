@@ -74,6 +74,19 @@ test('Routes to the highest-priority granted connection', async () => {
 	expect(getDatabaseForAccountability(acc)).toBe(db);
 });
 
+test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async () => {
+	mockEnv['DB_CONNECTIONS'] = 'premium_pool, replica_a';
+	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
+	mockEnv['DB_CONNECTION_REPLICA_A_PRIORITY'] = 10;
+
+	const { getDatabaseForAccountability } = await import('./index.js');
+
+	const acc = { dbConnections: ['replica_a', 'premium_pool'] } as Accountability;
+	const db = getDatabaseForAccountability(acc);
+
+	expect(connectedDatabaseOf(db)).toBe('directus_premium');
+});
+
 test('Picks the higher priority regardless of grant order', async () => {
 	mockEnv['DB_CONNECTIONS'] = ['premium_pool', 'replica_a'];
 	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
