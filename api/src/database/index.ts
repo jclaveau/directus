@@ -80,6 +80,19 @@ function getConnectionPriority(name: string): number {
 	return Number(priority ?? 0) || 0;
 }
 
+/** Connection names must be unique across the default pool and `DB_CONNECTIONS`; boot fails otherwise. */
+function assertConnectionNamesAreUnique(): void {
+	const seen = new Set([getDefaultConnectionName()]);
+
+	for (const name of getExtraConnectionNames()) {
+		if (seen.has(name)) {
+			throw new Error(`Duplicate DB connection name "${name}" — names must be unique`);
+		}
+
+		seen.add(name);
+	}
+}
+
 export function getDatabase(): Knex {
 	if (database) {
 		return database;
@@ -134,6 +147,7 @@ export function getDatabase(): Knex {
 	}
 
 	validateEnv(requiredEnvVars);
+	assertConnectionNamesAreUnique();
 
 	database = constructDatabase(config);
 	return database;

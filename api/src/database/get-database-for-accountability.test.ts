@@ -74,6 +74,23 @@ test('Routes to the highest-priority granted connection', async () => {
 	expect(getDatabaseForAccountability(acc)).toBe(db);
 });
 
+test('Refuses to build when a connection name is duplicated', async () => {
+	mockEnv['DB_CONNECTIONS'] = ['dupe', 'dupe'];
+
+	const { default: getDatabase } = await import('./index.js');
+
+	expect(() => getDatabase()).toThrow(/Duplicate DB connection name/);
+});
+
+test('Refuses to build when a connection name equals the default name', async () => {
+	mockEnv['DB_DEFAULT_CONNECTION_NAME'] = 'shared';
+	mockEnv['DB_CONNECTIONS'] = ['shared'];
+
+	const { default: getDatabase } = await import('./index.js');
+
+	expect(() => getDatabase()).toThrow(/Duplicate DB connection name/);
+});
+
 test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async () => {
 	mockEnv['DB_CONNECTIONS'] = 'premium_pool, replica_a';
 	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
