@@ -2,7 +2,7 @@ import { useEnv } from '@directus/env';
 import type { SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
 import { isObject } from '@directus/utils';
-import type { DatabaseClient } from '@directus/types';
+import type { Accountability, DatabaseClient } from '@directus/types';
 import fse from 'fs-extra';
 import type { Knex } from 'knex';
 import knex from 'knex';
@@ -26,11 +26,45 @@ type QueryInfo = Partial<Knex.Sql> & {
 };
 
 let database: Knex | null = null;
+const namedDatabases = new Map<string, Knex>();
 let inspector: SchemaInspector | null = null;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default getDatabase;
+
+/** Names of the extra DB connections declared via `DB_CONNECTIONS` (the default pool is implicit). */
+function getConfiguredConnectionNames(): string[] {
+	const value = useEnv()['DB_CONNECTIONS'];
+
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	return value.map(String).filter(Boolean);
+}
+
+/** Base `DB_*` config, with every named-connection namespace stripped so it stays the default pool. */
+function getBaseDbConfig(): Record<string, any> {
+	const connectionPrefixes = getConfiguredConnectionNames().map(
+		(name) => `DB_CONNECTION_${name.toUpperCase()}_`,
+	);
+
+	return getConfigFromEnv('DB_', {
+		omitPrefix: ['DB_EXCLUDE_TABLES', ...connectionPrefixes],
+		omitKey: [
+			'DB_BATCH_INSERT_CHUNK_SIZE',
+			'DB_MSSQL_TRUST_BATCH_RETURNING',
+			'DB_CONNECTIONS',
+		],
+	});
+}
+
+/** Priority of a named connection (`DB_CONNECTION_<NAME>_PRIORITY`); higher wins, default pool is 0. */
+function getConnectionPriority(name: string): number {
+	const { priority } = getConfigFromEnv(`DB_CONNECTION_${name.toUpperCase()}_`);
+	return Number(priority ?? 0) || 0;
+}
 
 export function getDatabase(): Knex {
 	if (database) {
@@ -38,20 +72,9 @@ export function getDatabase(): Knex {
 	}
 
 	const env = useEnv();
-	const logger = useLogger();
-	const metrics = useMetrics();
 
-	const {
-		client,
-		version,
-		searchPath,
-		connectionString,
-		pool: poolConfig = {},
-		...connectionConfig
-	} = getConfigFromEnv('DB_', {
-		omitPrefix: 'DB_EXCLUDE_TABLES',
-		omitKey: ['DB_BATCH_INSERT_CHUNK_SIZE', 'DB_MSSQL_TRUST_BATCH_RETURNING'],
-	});
+	const config = getBaseDbConfig();
+	const { client, connectionString } = config;
 
 	const requiredEnvVars = ['DB_CLIENT'];
 
@@ -97,6 +120,27 @@ export function getDatabase(): Knex {
 	}
 
 	validateEnv(requiredEnvVars);
+
+	database = constructDatabase(config);
+	return database;
+}
+
+/**
+ * Build a knex instance from a resolved DB config. Shared by the default pool and named
+ * connections so both get the same client-specific pool hooks and query instrumentation.
+ */
+function constructDatabase(config: Record<string, any>): Knex {
+	const logger = useLogger();
+	const metrics = useMetrics();
+
+	const {
+		client,
+		version,
+		searchPath,
+		connectionString,
+		pool: poolConfig = {},
+		...connectionConfig
+	} = config;
 
 	const knexConfig: Knex.Config = {
 		client,
@@ -172,12 +216,12 @@ export function getDatabase(): Knex {
 		merge(knexConfig, { connection: { options: { useUTC: false } } });
 	}
 
-	database = knex.default(knexConfig);
-	validateDatabaseCharset(database);
+	const dbInstance = knex.default(knexConfig);
+	validateDatabaseCharset(dbInstance);
 
 	const times = new Map<string, number>();
 
-	database
+	dbInstance
 		.on('query', ({ __knexUid }: QueryInfo) => {
 			times.set(__knexUid, performance.now());
 		})
@@ -205,7 +249,56 @@ export function getDatabase(): Knex {
 			times.delete(queryInfo.__knexUid);
 		});
 
-	return database;
+	return dbInstance;
+}
+
+/** Lazily build (and cache) a named connection from the base config plus its overrides. */
+function getNamedDatabase(name: string): Knex {
+	const existing = namedDatabases.get(name);
+
+	if (existing) {
+		return existing;
+	}
+
+	const { priority: _priority, ...override } = getConfigFromEnv(
+		`DB_CONNECTION_${name.toUpperCase()}_`,
+	);
+
+	const db = constructDatabase(merge({}, getBaseDbConfig(), override));
+
+	namedDatabases.set(name, db);
+	return db;
+}
+
+/**
+ * Pick the DB connection a request should use: the highest-priority connection the user's
+ * policies grant (via `accountability.dbConnections`) that is actually configured. Falls back
+ * to the default pool when nothing is granted, the grants aren't configured, or none outrank it.
+ */
+export function getDatabaseForAccountability(
+	accountability?: Accountability | null,
+): Knex {
+	const granted = accountability?.dbConnections;
+
+	if (!granted || granted.length === 0) {
+		return getDatabase();
+	}
+
+	const configured = getConfiguredConnectionNames();
+
+	const candidates = granted
+		.filter((name) => configured.includes(name))
+		.map((name) => ({ name, priority: getConnectionPriority(name) }))
+		// Highest priority first; ties break by name so the pick is deterministic
+		.sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name));
+
+	const best = candidates[0];
+
+	if (!best || best.priority <= 0) {
+		return getDatabase();
+	}
+
+	return getNamedDatabase(best.name);
 }
 
 export function getSchemaInspector(database?: Knex): SchemaInspector {

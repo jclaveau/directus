@@ -14,4 +14,6 @@ export type Accountability = {
 	userAgent?: string;
 	origin?: string;
 	session?: string;
+	/** Names of the DB connections the user's policies grant; routing picks the highest-priority one. */
+	dbConnections?: string[];
 };

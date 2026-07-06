@@ -34,7 +34,7 @@ import {
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
-import getDatabase from '../database/index.js';
+import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
 import {
 	joinFilterWithCases,
 } from '../database/run-ast/lib/apply-query/join-filter-with-cases.js';
@@ -90,7 +90,7 @@ implements AbstractService<Item> {
 
 	constructor(collection: Collection, options: AbstractServiceOptions) {
 		this.collection = collection;
-		this.knex = options.knex || getDatabase();
+		this.knex = options.knex || getDatabaseForAccountability(options.accountability);
 		this.accountability = options.accountability || null;
 
 		this.eventScope = isSystemCollection(this.collection)

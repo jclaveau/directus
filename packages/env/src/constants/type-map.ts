@@ -18,6 +18,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	DB_BATCH_INSERT_CHUNK_SIZE: 'number',
 	DB_MSSQL_TRUST_BATCH_RETURNING: 'boolean',
 
+	DB_CONNECTIONS: 'array',
+	'DB_CONNECTION_.+_PRIORITY': 'number',
+
 	CACHE_SKIP_ALLOWED: 'boolean',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_SCHEMA_MAX_ITERATIONS: 'number',

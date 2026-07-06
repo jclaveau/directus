@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 
 test('Returns result from access for roles when no user is passed', async () => {
-	const mockRolesAccess = { app: true, admin: true };
+	const mockRolesAccess = { app: true, admin: true, dbConnections: ['premium_pool'] };
 	vi.mocked(fetchGlobalAccessForRoles).mockResolvedValue(mockRolesAccess);
 
 	const res = await fetchGlobalAccess({} as Accountability, knex);
@@ -26,23 +26,27 @@ test('Returns result from access for roles when no user is passed', async () => 
 });
 
 test('Returns highest result if user is passed', async () => {
-	const mockRolesAccess = { app: true, admin: true };
-	const mockUserAccess = { app: false, admin: false };
+	const mockRolesAccess = { app: true, admin: true, dbConnections: ['premium_pool'] };
+	const mockUserAccess = { app: false, admin: false, dbConnections: [] };
 	vi.mocked(fetchGlobalAccessForRoles).mockResolvedValue(mockRolesAccess);
 	vi.mocked(fetchGlobalAccessForUser).mockResolvedValue(mockUserAccess);
 
 	const res = await fetchGlobalAccess({ user: 'user', roles: [], ip: '' }, knex);
 
-	expect(res).toEqual({ app: true, admin: true });
+	expect(res).toEqual({ app: true, admin: true, dbConnections: ['premium_pool'] });
 });
 
 test('Combines result of role and user', async () => {
-	const mockRolesAccess = { app: false, admin: true };
-	const mockUserAccess = { app: true, admin: false };
+	const mockRolesAccess = { app: false, admin: true, dbConnections: ['role_pool'] };
+	const mockUserAccess = { app: true, admin: false, dbConnections: ['user_pool'] };
 	vi.mocked(fetchGlobalAccessForRoles).mockResolvedValue(mockRolesAccess);
 	vi.mocked(fetchGlobalAccessForUser).mockResolvedValue(mockUserAccess);
 
 	const res = await fetchGlobalAccess({ user: 'user', roles: [], ip: '' }, knex);
 
-	expect(res).toEqual({ app: true, admin: true });
+	expect(res).toEqual({
+		app: true,
+		admin: true,
+		dbConnections: ['role_pool', 'user_pool'],
+	});
 });
