@@ -123,6 +123,15 @@ PUBLIC_URL="/"
 # DB_USER="root"
 # DB_PASSWORD="secret"
 
+## Prioritized connections
+# Extra DB connections a policy can grant to prioritize some users' DB access (e.g. two pgbouncer
+# pools over one Postgres). Each connection inherits the base DB_* config; set only what differs.
+# A request routes to the highest-priority connection its user's policies grant (default pool = 0).
+# DB_CONNECTIONS="premium_pool"
+# DB_CONNECTION_PREMIUM_POOL_DATABASE="directus_premium"   # e.g. the pgbouncer pool db name
+# DB_CONNECTION_PREMIUM_POOL_POOL__MAX=40
+# DB_CONNECTION_PREMIUM_POOL_PRIORITY=100
+
 ####################################################################################################
 ### Rate Limiting
 

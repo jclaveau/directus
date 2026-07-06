@@ -21,6 +21,7 @@ test('Returns false by default if no access is found', async () => {
 	expect(res).toEqual({
 		app: false,
 		admin: false,
+		dbConnections: [],
 	});
 });
 
@@ -33,7 +34,7 @@ test('Sets app true if one or more access rows have app access set as true', asy
 
 	const res = await fetchGlobalAccessForQuery(qb, {} as Accountability);
 
-	expect(res).toEqual({ admin: false, app: true });
+	expect(res).toEqual({ admin: false, app: true, dbConnections: [] });
 });
 
 test('Sets admin & app true if one or more access rows have app admin set as true', async () => {
@@ -45,7 +46,7 @@ test('Sets admin & app true if one or more access rows have app admin set as tru
 
 	const res = await fetchGlobalAccessForQuery(qb, {} as Accountability);
 
-	expect(res).toEqual({ admin: true, app: true });
+	expect(res).toEqual({ admin: true, app: true, dbConnections: [] });
 });
 
 test('Sets app true if one or more access rows have app access set as 1', async () => {
@@ -57,7 +58,7 @@ test('Sets app true if one or more access rows have app access set as 1', async 
 
 	const res = await fetchGlobalAccessForQuery(qb, {} as Accountability);
 
-	expect(res).toEqual({ admin: false, app: true });
+	expect(res).toEqual({ admin: false, app: true, dbConnections: [] });
 });
 
 test('Sets admin & app true if one or more access rows have app admin set as true', async () => {
@@ -69,7 +70,7 @@ test('Sets admin & app true if one or more access rows have app admin set as tru
 
 	const res = await fetchGlobalAccessForQuery(qb, {} as Accountability);
 
-	expect(res).toEqual({ admin: true, app: true });
+	expect(res).toEqual({ admin: true, app: true, dbConnections: [] });
 });
 
 test('Includes policies that have an ip access restriction that does matches the accountability ip', async () => {
@@ -80,7 +81,7 @@ test('Includes policies that have an ip access restriction that does matches the
 
 	const res = await fetchGlobalAccessForQuery(qb, { ip: '127.0.0.5' } as Accountability);
 
-	expect(res).toEqual({ admin: false, app: true });
+	expect(res).toEqual({ admin: false, app: true, dbConnections: [] });
 });
 
 test('Ignores policies that have an ip access restriction that does not match the accountability ip', async () => {
@@ -92,5 +93,37 @@ test('Ignores policies that have an ip access restriction that does not match th
 
 	const res = await fetchGlobalAccessForQuery(qb, { ip: '1.1.1.1' } as Accountability);
 
-	expect(res).toEqual({ admin: false, app: false });
+	expect(res).toEqual({ admin: false, app: false, dbConnections: [] });
+});
+
+test('Unions db_connections across policies, splitting CSV and deduping', async () => {
+	vi.mocked(qb.leftJoin).mockResolvedValue([
+		{ admin_access: false, app_access: false, db_connections: 'premium_pool' },
+		{ admin_access: false, app_access: false, db_connections: 'premium_pool,replica_a' },
+		{ admin_access: false, app_access: false, db_connections: null },
+	]);
+
+	const res = await fetchGlobalAccessForQuery(qb, {} as Accountability);
+
+	expect(res).toEqual({
+		admin: false,
+		app: false,
+		dbConnections: ['premium_pool', 'replica_a'],
+	});
+});
+
+test('Ignores db_connections from policies filtered out by ip access', async () => {
+	vi.mocked(qb.leftJoin).mockResolvedValue([
+		{ admin_access: false, app_access: false, db_connections: 'allowed_pool' },
+		{
+			admin_access: false,
+			app_access: false,
+			db_connections: 'blocked_pool',
+			ip_access: '128.0.0.1',
+		},
+	]);
+
+	const res = await fetchGlobalAccessForQuery(qb, { ip: '1.1.1.1' } as Accountability);
+
+	expect(res).toEqual({ admin: false, app: false, dbConnections: ['allowed_pool'] });
 });

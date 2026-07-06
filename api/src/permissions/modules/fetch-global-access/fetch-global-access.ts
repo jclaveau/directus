@@ -28,6 +28,13 @@ export async function _fetchGlobalAccess(
 		// If app/admin is already true, keep it true
 		access.app ||= userAccess.app;
 		access.admin ||= userAccess.admin;
+
+		// Union the DB connections granted by the user's own policies with the roles' ones
+		for (const name of userAccess.dbConnections) {
+			if (!access.dbConnections.includes(name)) {
+				access.dbConnections.push(name);
+			}
+		}
 	}
 
 	return access;

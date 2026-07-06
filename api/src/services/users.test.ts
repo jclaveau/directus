@@ -12,6 +12,7 @@ import { SettingsService } from './settings.js';
 
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
+	getDatabaseForAccountability: vi.fn(),
 	getDatabaseClient: vi.fn().mockReturnValue('postgres'),
 }));
 
