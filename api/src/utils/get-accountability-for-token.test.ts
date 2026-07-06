@@ -76,6 +76,7 @@ describe('getAccountabilityForToken', async () => {
 		);
 
 		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: true,
 			admin: true,
