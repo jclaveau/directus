@@ -33,8 +33,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default getDatabase;
 
-/** Names of the extra DB connections declared via `DB_CONNECTIONS` (the default pool is implicit). */
-function getConfiguredConnectionNames(): string[] {
+/** Name the default (base `DB_*`) pool answers to (`DB_DEFAULT_CONNECTION_NAME`); policies can grant it. */
+function getDefaultConnectionName(): string {
+	return String(useEnv()['DB_DEFAULT_CONNECTION_NAME'] ?? 'default');
+}
+
+/** Names of the extra DB connections declared via `DB_CONNECTIONS` (the default pool is separate). */
+function getExtraConnectionNames(): string[] {
 	const value = useEnv()['DB_CONNECTIONS'];
 
 	if (!Array.isArray(value)) {
@@ -46,12 +51,12 @@ function getConfiguredConnectionNames(): string[] {
 
 /** Base `DB_*` config, with every named-connection namespace stripped so it stays the default pool. */
 function getBaseDbConfig(): Record<string, any> {
-	const connectionPrefixes = getConfiguredConnectionNames().map(
+	const connectionPrefixes = getExtraConnectionNames().map(
 		(name) => `DB_CONNECTION_${name.toUpperCase()}_`,
 	);
 
 	return getConfigFromEnv('DB_', {
-		omitPrefix: ['DB_EXCLUDE_TABLES', ...connectionPrefixes],
+		omitPrefix: ['DB_EXCLUDE_TABLES', 'DB_DEFAULT_CONNECTION', ...connectionPrefixes],
 		omitKey: [
 			'DB_BATCH_INSERT_CHUNK_SIZE',
 			'DB_MSSQL_TRUST_BATCH_RETURNING',
@@ -60,8 +65,12 @@ function getBaseDbConfig(): Record<string, any> {
 	});
 }
 
-/** Priority of a named connection (`DB_CONNECTION_<NAME>_PRIORITY`); higher wins, default pool is 0. */
+/** Priority of a connection (`_PRIORITY` env); higher wins. The default pool has its own knob. */
 function getConnectionPriority(name: string): number {
+	if (name === getDefaultConnectionName()) {
+		return Number(useEnv()['DB_DEFAULT_CONNECTION_PRIORITY'] ?? 0) || 0;
+	}
+
 	const { priority } = getConfigFromEnv(`DB_CONNECTION_${name.toUpperCase()}_`);
 	return Number(priority ?? 0) || 0;
 }
@@ -252,8 +261,12 @@ function constructDatabase(config: Record<string, any>): Knex {
 	return dbInstance;
 }
 
-/** Lazily build (and cache) a named connection from the base config plus its overrides. */
+/** Lazily build (and cache) a named connection; the default name resolves to the base pool. */
 function getNamedDatabase(name: string): Knex {
+	if (name === getDefaultConnectionName()) {
+		return getDatabase();
+	}
+
 	const existing = namedDatabases.get(name);
 
 	if (existing) {
@@ -271,30 +284,30 @@ function getNamedDatabase(name: string): Knex {
 }
 
 /**
- * Pick the DB connection a request should use: the highest-priority connection the user's
- * policies grant (via `accountability.dbConnections`) that is actually configured. Falls back
- * to the default pool when nothing is granted, the grants aren't configured, or none outrank it.
+ * Pick the DB connection a request should use: the highest-priority connection among the default
+ * pool (always a candidate) and the ones the user's policies grant that are actually configured.
+ * Ties break by name, so a pool meant to win must outrank `DB_DEFAULT_CONNECTION_PRIORITY`.
  */
 export function getDatabaseForAccountability(
 	accountability?: Accountability | null,
 ): Knex {
-	const granted = accountability?.dbConnections;
+	const defaultName = getDefaultConnectionName();
+	const extra = getExtraConnectionNames();
 
-	if (!granted || granted.length === 0) {
-		return getDatabase();
+	// The default pool always competes; add every granted connection that is configured
+	const candidateNames = new Set<string>([defaultName]);
+
+	for (const name of accountability?.dbConnections ?? []) {
+		if (name === defaultName || extra.includes(name)) {
+			candidateNames.add(name);
+		}
 	}
 
-	const configured = getConfiguredConnectionNames();
-
-	const candidates = granted
-		.filter((name) => configured.includes(name))
+	const best = [...candidateNames]
 		.map((name) => ({ name, priority: getConnectionPriority(name) }))
-		// Highest priority first; ties break by name so the pick is deterministic
-		.sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name));
+		.sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name))[0];
 
-	const best = candidates[0];
-
-	if (!best || best.priority <= 0) {
+	if (!best || best.name === defaultName) {
 		return getDatabase();
 	}
 

@@ -89,8 +89,8 @@ test('Picks the higher priority regardless of grant order', async () => {
 test('Falls back to the default pool when nothing is granted', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	const empty = getDatabaseForAccountability({ dbConnections: [] } as Accountability);
-	expect(connectedDatabaseOf(empty)).toBe('directus');
+	const acc = { dbConnections: [] as string[] } as Accountability;
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 	expect(connectedDatabaseOf(getDatabaseForAccountability(null))).toBe('directus');
 });
 
@@ -109,6 +109,31 @@ test('Falls back when no granted connection outranks the default', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = { dbConnections: ['premium_pool'] } as Accountability;
+	const db = getDatabaseForAccountability(acc);
+
+	expect(connectedDatabaseOf(db)).toBe('directus');
+});
+
+test('Lets a policy grant the default pool by its configured name', async () => {
+	mockEnv['DB_DEFAULT_CONNECTION_NAME'] = 'primary';
+
+	const { getDatabaseForAccountability } = await import('./index.js');
+
+	const acc = { dbConnections: ['primary'] } as Accountability;
+	const db = getDatabaseForAccountability(acc);
+
+	expect(connectedDatabaseOf(db)).toBe('directus');
+});
+
+test('Default priority can outrank a lower-priority granted pool', async () => {
+	mockEnv['DB_DEFAULT_CONNECTION_PRIORITY'] = 50;
+	mockEnv['DB_CONNECTIONS'] = ['replica_a'];
+	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
+	mockEnv['DB_CONNECTION_REPLICA_A_PRIORITY'] = 10;
+
+	const { getDatabaseForAccountability } = await import('./index.js');
+
+	const acc = { dbConnections: ['replica_a'] } as Accountability;
 	const db = getDatabaseForAccountability(acc);
 
 	expect(connectedDatabaseOf(db)).toBe('directus');
