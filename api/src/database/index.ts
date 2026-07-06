@@ -38,15 +38,20 @@ function getDefaultConnectionName(): string {
 	return String(useEnv()['DB_DEFAULT_CONNECTION_NAME'] ?? 'default');
 }
 
-/** Names of the extra DB connections declared via `DB_CONNECTIONS` (the default pool is separate). */
+/** Names of the extra DB connections from `DB_CONNECTIONS` (array when cast, CSV when set at runtime). */
 function getExtraConnectionNames(): string[] {
 	const value = useEnv()['DB_CONNECTIONS'];
 
-	if (!Array.isArray(value)) {
-		return [];
+	if (Array.isArray(value)) {
+		return value.map(String).filter(Boolean);
 	}
 
-	return value.map(String).filter(Boolean);
+	if (typeof value === 'string') {
+		const names = value.split(',').map((name) => name.trim());
+		return names.filter(Boolean);
+	}
+
+	return [];
 }
 
 /** Base `DB_*` config, with every named-connection namespace stripped so it stays the default pool. */
