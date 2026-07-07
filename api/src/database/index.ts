@@ -33,12 +33,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default getDatabase;
 
-/** Name the default (base `DB_*`) pool answers to (`DB_DEFAULT_CONNECTION_NAME`); policies can grant it. */
+/** Name of the default pool (`DB_DEFAULT_CONNECTION_NAME`); policies may grant it too. */
 function getDefaultConnectionName(): string {
 	return String(useEnv()['DB_DEFAULT_CONNECTION_NAME'] ?? 'default');
 }
 
-/** Names of the extra DB connections from `DB_CONNECTIONS` (array when cast, CSV when set at runtime). */
+/** Names of the extra connections from `DB_CONNECTIONS` (array when cast, CSV at runtime). */
 function getExtraConnectionNames(): string[] {
 	const value = useEnv()['DB_CONNECTIONS'];
 
@@ -54,7 +54,7 @@ function getExtraConnectionNames(): string[] {
 	return [];
 }
 
-/** Base `DB_*` config, with every named-connection namespace stripped so it stays the default pool. */
+/** Base `DB_*` config, with every named-connection namespace stripped off. */
 function getBaseDbConfig(): Record<string, any> {
 	const connectionPrefixes = getExtraConnectionNames().map(
 		(name) => `DB_CONNECTION_${name.toUpperCase()}_`,
@@ -70,7 +70,7 @@ function getBaseDbConfig(): Record<string, any> {
 	});
 }
 
-/** Priority of a connection (`_PRIORITY` env); higher wins. The default pool has its own knob. */
+/** Priority of a connection (`_PRIORITY` env); higher wins. Default pool has its own knob. */
 function getConnectionPriority(name: string): number {
 	if (name === getDefaultConnectionName()) {
 		return Number(useEnv()['DB_DEFAULT_CONNECTION_PRIORITY'] ?? 0) || 0;
@@ -80,7 +80,7 @@ function getConnectionPriority(name: string): number {
 	return Number(priority ?? 0) || 0;
 }
 
-/** Connection names must be unique across the default pool and `DB_CONNECTIONS`; boot fails otherwise. */
+/** Connection names must be unique (default + `DB_CONNECTIONS`); else boot fails. */
 function assertConnectionNamesAreUnique(): void {
 	const seen = new Set([getDefaultConnectionName()]);
 
@@ -170,7 +170,7 @@ function constructDatabase(config: Record<string, any>): Knex {
 		...connectionConfig
 	} = config;
 
-	// Pool sizes/timeouts arrive as strings when set at runtime (env-inject) or unmapped in env;
+	// Pool sizes/timeouts arrive as strings at runtime (env-inject) or unmapped in env;
 	// tarn wants numbers, so coerce the numeric knobs before knex sees them.
 	const numericPoolKeys = [
 		'min',
@@ -296,7 +296,7 @@ function constructDatabase(config: Record<string, any>): Knex {
 	return dbInstance;
 }
 
-/** Lazily build (and cache) a named connection; the default name resolves to the base pool. */
+/** Lazily build (and cache) a named connection; the default name → base pool. */
 function getNamedDatabase(name: string): Knex {
 	if (name === getDefaultConnectionName()) {
 		return getDatabase();
@@ -319,9 +319,9 @@ function getNamedDatabase(name: string): Knex {
 }
 
 /**
- * Resolve the connection name a request should use: the highest-priority connection among the
- * default pool (always a candidate) and the ones the user's policies grant that are configured.
- * Ties break by name, so a pool meant to win must outrank `DB_DEFAULT_CONNECTION_PRIORITY`.
+ * Resolve the connection name a request should use: the highest-priority among the
+ * default pool (always a candidate) and the configured connections the user's policies
+ * grant. Ties break by name, so a winner must outrank `DB_DEFAULT_CONNECTION_PRIORITY`.
  */
 function resolveConnectionName(accountability?: Accountability | null): string {
 	const defaultName = getDefaultConnectionName();
@@ -336,7 +336,7 @@ function resolveConnectionName(accountability?: Accountability | null): string {
 		}
 	}
 
-	// The default is always a candidate, so the array is never empty; reduce keeps `best` defined.
+	// Default is always a candidate → array never empty; reduce keeps `best` set.
 	const best = [...candidateNames]
 		.map((name) => ({ name, priority: getConnectionPriority(name) }))
 		.reduce((winner, candidate) => {
@@ -352,14 +352,14 @@ function resolveConnectionName(accountability?: Accountability | null): string {
 	return best.name;
 }
 
-/** The knex instance a request routes to (default name → base pool; named pools build lazily). */
+/** The knex a request routes to (default name → base pool; named pools build lazily). */
 export function getDatabaseForAccountability(
 	accountability?: Accountability | null,
 ): Knex {
 	return getNamedDatabase(resolveConnectionName(accountability));
 }
 
-/** The name of the connection a request routes to — for tagging pool-exhaustion errors with the tier. */
+/** Name of the connection a request routes to (tags pool errors with the tier). */
 export function getConnectionNameForAccountability(
 	accountability?: Accountability | null,
 ): string {

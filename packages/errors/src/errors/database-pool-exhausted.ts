@@ -1,8 +1,8 @@
 import { createError, ErrorCode } from '../index.js';
 
 /**
- * Why the database connection pool could not serve the request. Lets a client tell a transient
- * "pool is full, back off and retry" apart from a harder "the database is out of connections".
+ * Why the pool could not serve the request. Lets a client tell a transient
+ * "pool full, back off and retry" from a harder "database out of connections".
  */
 export type DatabasePoolExhaustedReason =
 	| 'client_pool_timeout' // knex/tarn pool.max reached; acquiring a connection timed out

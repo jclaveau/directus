@@ -124,9 +124,8 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 }
 
 /**
- * Classify a raw pg/pgbouncer/tarn error as a pool-exhaustion reason, or null. pgbouncer fronts
- * only postgres, so this lives in the postgres dialect; the tarn/pgbouncer cases carry no SQLSTATE
- * and are matched on their message.
+ * Classify a raw pg/pgbouncer/tarn error as a pool-exhaustion reason, or null.
+ * The tarn/pgbouncer cases carry no SQLSTATE, so they're matched on the message.
  */
 export function getPoolExhaustedReason(
 	error: unknown,

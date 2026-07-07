@@ -26,7 +26,7 @@ type ApiError = {
 
 const FALLBACK_ERROR = new InternalServerError();
 
-// How long a client should wait before retrying after the DB pool was exhausted (transient).
+// Seconds a client should wait before retrying after pool exhaustion (transient).
 const POOL_EXHAUSTED_RETRY_AFTER_SECONDS = 1;
 
 export const errorHandler = asyncErrorHandler(async (err, req, res) => {
@@ -40,8 +40,8 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 		? err
 		: [err];
 
-	// Translate raw pool-exhaustion errors (tarn/pgbouncer/postgres) into the dedicated Directus
-	// error so clients can react by reason. Detection is dialect-scoped (pgbouncer is pg-only).
+	// Translate raw pool-exhaustion errors into the dedicated Directus error so
+	// clients can react by reason. Detection is dialect-scoped (pgbouncer is pg-only).
 	const client = getDatabaseClient();
 
 	const receivedErrors: unknown[] = rawErrors.map((error) => {
