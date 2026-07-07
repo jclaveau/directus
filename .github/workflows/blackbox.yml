@@ -117,6 +117,12 @@ jobs:
         if: matrix.vendor != 'sqlite3'
         run: docker compose -f tests/blackbox/docker-compose.yml up ${{ matrix.vendor }} -d --quiet-pull --wait
 
+      # pgbouncer fronts the postgres service; the pool-exhaustion test routes a
+      # named connection through it to reach the real query_wait_timeout error.
+      - name: Start pgbouncer
+        if: matrix.vendor == 'postgres'
+        run: docker compose -f tests/blackbox/docker-compose.yml up pgbouncer -d --quiet-pull --wait
+
       - name: MSSQL Set Compatibility Level
         if: matrix.vendor == 'mssql'
         run: |
