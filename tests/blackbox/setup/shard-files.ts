@@ -32,18 +32,24 @@ function fileWeight(file: string): number {
 }
 
 /**
- * Pack `files` into `count` balanced buckets (heaviest-first → least-loaded bucket).
+ * Pack `files` into `count` balanced buckets (heaviest-first → least-loaded bucket). `lastHandicap`
+ * pre-loads the last bucket so it gets less parallel work to offset the after-chain it also runs.
  */
 function packIntoBuckets(
 	files: string[],
 	count: number,
+	lastHandicap: number,
 ): string[][] {
 	const weighted = files
 		.map((file) => ({ file, weight: fileWeight(file) }))
 		.sort((a, b) => b.weight - a.weight || a.file.localeCompare(b.file));
 
-	const buckets = Array.from({ length: count }, () => {
-		return { files: [] as string[], total: 0 };
+	const buckets = Array.from({ length: count }, (_, i) => {
+		const total = i === count - 1
+			? lastHandicap
+			: 0;
+
+		return { files: [] as string[], total };
 	});
 
 	for (const { file, weight } of weighted) {
@@ -63,11 +69,9 @@ function packIntoBuckets(
 }
 
 /**
- * Files this shard (1-based `index` of `count`) should run.
- *  - Every shard runs all `before` files (the shard-local ordering barrier needs them).
- *  - The parallel middle AND the `after` files are size-balanced together across shards, so each
- *    shard carries its own after-chain and runs it last (see the sequencer's `waitFor`).
- * Deterministic, so the sequencer and the seeder agree.
+ * Files this shard (1-based `index` of `count`) should run. Every shard runs all `before` files
+ * (the ordering barrier needs them); `after` files run only in the last shard; the parallel middle
+ * is size-balanced across shards. Deterministic, so the sequencer and the seeder agree.
  */
 export function filesForShard(
 	files: string[],
@@ -78,11 +82,19 @@ export function filesForShard(
 	const list = sequentialTestsList[project];
 
 	const isBefore = (file: string) => list.before.some((entry) => file.endsWith(entry));
+	const isAfter = (file: string) => list.after.some((entry) => file.endsWith(entry));
 
 	const before = files.filter(isBefore);
-	const distributable = files.filter((file) => !isBefore(file));
+	const after = files.filter(isAfter);
+	const parallel = files.filter((file) => !isBefore(file) && !isAfter(file));
 
-	const mine = packIntoBuckets(distributable, count)[index - 1] ?? [];
+	const afterWeight = after.reduce((sum, file) => sum + fileWeight(file), 0);
 
-	return [...before, ...mine];
+	const mine = packIntoBuckets(parallel, count, afterWeight)[index - 1] ?? [];
+
+	const tail = index === count
+		? after
+		: [];
+
+	return [...before, ...mine, ...tail];
 }
