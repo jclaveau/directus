@@ -59,7 +59,8 @@ export default class CustomSequencer extends BaseSequencer {
 						if (test) {
 							files.unshift(test);
 						}
-					} else if (!this.ctx.config.shard) {
+					}
+					else if (!this.ctx.config.shard) {
 						// A sharded run legitimately lacks some sequential files; guard full runs only
 						throw new Error(`Non-existent test file "${sequentialTest}" in "before" list`);
 					}
@@ -76,7 +77,8 @@ export default class CustomSequencer extends BaseSequencer {
 						if (test) {
 							files.push(test);
 						}
-					} else if (!this.ctx.config.shard) {
+					}
+					else if (!this.ctx.config.shard) {
 						// A sharded run legitimately lacks some sequential files; guard full runs only
 						throw new Error(`Non-existent test file "${sequentialTest}" in "after" list`);
 					}
