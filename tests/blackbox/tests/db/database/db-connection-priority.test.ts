@@ -5,24 +5,27 @@ import { setDirectusEnv } from '@utils/set-directus-env';
 import request from 'supertest';
 import { afterAll, describe, expect, it } from 'vitest';
 
-// Routing is DB-client-agnostic, so probe on the pg family only: their knex
+// Routing is DB-client-agnostic, so check it on the pg family only: their knex
 // connection config exposes `.database` (sqlite uses a filename), and they never
 // run validateDatabaseCharset's MySQL collation query — so a connection pointing
 // at a fake database is safe to build.
-const PG_FAMILY = ['postgres', 'postgres10', 'cockroachdb'];
+const PG_FAMILY_NAMES = ['postgres', 'postgres10', 'cockroachdb'];
 
-const PROBE_VENDORS = vendors.filter((vendor) => PG_FAMILY.includes(vendor));
+const ROUTING_VENDORS = vendors.filter((vendor) => PG_FAMILY_NAMES.includes(vendor));
 
 // The exhaustion tests drive a real slow query (`pg_sleep`), which cockroachdb lacks.
-const PG_SLEEP_VENDORS = ['postgres', 'postgres10'];
+const PG_SLEEP_NAMES = ['postgres', 'postgres10'];
 
-const EXHAUST_VENDORS = vendors.filter((vendor) => PG_SLEEP_VENDORS.includes(vendor));
+const EXHAUST_VENDORS = vendors.filter((vendor) => PG_SLEEP_NAMES.includes(vendor));
 
 // pgbouncer (docker-compose) only fronts the `postgres` service, so the real
 // pgbouncer queue-timeout case runs there alone.
 const PGBOUNCER_VENDORS = vendors.filter((vendor) => vendor === 'postgres');
 
-async function probe(vendor: Vendor, dbConnections: string[]): Promise<string> {
+async function routedDatabaseForGrants(
+	vendor: Vendor,
+	dbConnections: string[],
+): Promise<string> {
 	const response = await request(getUrl(vendor))
 		.post('/db-connection-probe/route')
 		.send({ dbConnections })
@@ -36,24 +39,24 @@ async function probe(vendor: Vendor, dbConnections: string[]): Promise<string> {
 describe('DB connection priority routing', () => {
 	afterAll(async () => {
 		// Reset the shared instance so later test files see plain default routing
-		for (const vendor of PROBE_VENDORS) {
+		for (const vendor of ROUTING_VENDORS) {
 			await setDirectusEnv(vendor, 'DB_CONNECTIONS', '');
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '0');
 		}
 	});
 
-	// No pg-family vendor active (e.g. sqlite3-only run) → nothing to probe.
+	// No pg-family vendor active (e.g. sqlite3-only run) → nothing to route.
 	// Register a skipped test so the file isn't an empty suite (vitest fails).
-	if (PROBE_VENDORS.length === 0) {
+	if (ROUTING_VENDORS.length === 0) {
 		it.skip('no pg-family vendor in this run', () => {
-			// nothing to probe
+			// nothing to route
 		});
 	}
 
-	it.each(PROBE_VENDORS)(
+	it.each(ROUTING_VENDORS)(
 		'%s respects connection priority across several grants',
 		async (vendor) => {
-			const defaultDatabase = await probe(vendor, []);
+			const defaultDatabase = await routedDatabaseForGrants(vendor, []);
 
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bb_lo,bb_mid,bb_hi'),
@@ -66,23 +69,27 @@ describe('DB connection priority routing', () => {
 			]);
 
 			// Highest priority wins regardless of the order the grants are listed in
-			expect(await probe(vendor, ['bb_lo', 'bb_hi', 'bb_mid'])).toBe('bb_db_hi');
+			expect(
+				await routedDatabaseForGrants(vendor, ['bb_lo', 'bb_hi', 'bb_mid']),
+			).toBe('bb_db_hi');
 
 			// A single grant routes to exactly that connection
-			expect(await probe(vendor, ['bb_lo'])).toBe('bb_db_lo');
+			expect(await routedDatabaseForGrants(vendor, ['bb_lo'])).toBe('bb_db_lo');
 
 			// Among several grants the highest priority still wins
-			expect(await probe(vendor, ['bb_mid', 'bb_lo'])).toBe('bb_db_mid');
+			expect(
+				await routedDatabaseForGrants(vendor, ['bb_mid', 'bb_lo']),
+			).toBe('bb_db_mid');
 
 			// No grants → the default pool
-			expect(await probe(vendor, [])).toBe(defaultDatabase);
+			expect(await routedDatabaseForGrants(vendor, [])).toBe(defaultDatabase);
 
 			// An unconfigured grant is skipped → the default pool
-			expect(await probe(vendor, ['ghost'])).toBe(defaultDatabase);
+			expect(await routedDatabaseForGrants(vendor, ['ghost'])).toBe(defaultDatabase);
 
 			// The default pool competes: raise it above every grant and it wins
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '999');
-			expect(await probe(vendor, ['bb_hi'])).toBe(defaultDatabase);
+			expect(await routedDatabaseForGrants(vendor, ['bb_hi'])).toBe(defaultDatabase);
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '0');
 		},
 		300_000,
