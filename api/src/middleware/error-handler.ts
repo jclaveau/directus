@@ -1,9 +1,15 @@
-import { ErrorCode, InternalServerError, isDirectusError } from '@directus/errors';
+import {
+	DatabasePoolExhaustedError,
+	ErrorCode,
+	InternalServerError,
+	isDirectusError,
+} from '@directus/errors';
 import type { DeepPartial } from '@directus/types';
 import { isObject } from '@directus/utils';
 import { getNodeEnv } from '@directus/utils/node';
 import type { ErrorRequestHandler } from 'express';
-import getDatabase from '../database/index.js';
+import getDatabase, { getConnectionNameForAccountability } from '../database/index.js';
+import { getDatabasePoolExhaustedReason } from '../database/errors/pool-exhausted.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 
@@ -17,6 +23,9 @@ type ApiError = {
 
 const FALLBACK_ERROR = new InternalServerError();
 
+// How long a client should wait before retrying after the DB pool was exhausted (transient).
+const POOL_EXHAUSTED_RETRY_AFTER_SECONDS = 1;
+
 export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 	const logger = useLogger();
 
@@ -24,7 +33,28 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 	let status: number | null = null;
 
 	// It can be assumed that at least one error is given
-	const receivedErrors: unknown[] = Array.isArray(err) ? err : [err];
+	const rawErrors: unknown[] = Array.isArray(err)
+		? err
+		: [err];
+
+	// Translate raw pool-exhaustion errors (tarn/pgbouncer/postgres) into the dedicated Directus
+	// error so clients can react by reason.
+	const receivedErrors: unknown[] = rawErrors.map((error) => {
+		if (isDirectusError(error)) {
+			return error;
+		}
+
+		const reason = getDatabasePoolExhaustedReason(error);
+
+		if (reason === null) {
+			return error;
+		}
+
+		return new DatabasePoolExhaustedError({
+			reason,
+			connection: getConnectionNameForAccountability(req.accountability),
+		});
+	});
 
 	for (const error of receivedErrors) {
 		// In dev mode, if available, expose stack trace under error's extensions data
@@ -55,6 +85,10 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 
 			if (isDirectusError(error, ErrorCode.MethodNotAllowed)) {
 				res.header('Allow', error.extensions.allowed.join(', '));
+			}
+
+			if (isDirectusError(error, ErrorCode.DatabasePoolExhausted)) {
+				res.header('Retry-After', String(POOL_EXHAUSTED_RETRY_AFTER_SECONDS));
 			}
 		} else {
 			logger.error(error);

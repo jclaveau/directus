@@ -1,6 +1,7 @@
 export enum ErrorCode {
 	ContainsNullValues = 'CONTAINS_NULL_VALUES',
 	ContentTooLarge = 'CONTENT_TOO_LARGE',
+	DatabasePoolExhausted = 'DATABASE_POOL_EXHAUSTED',
 	Forbidden = 'FORBIDDEN',
 	IllegalAssetTransformation = 'ILLEGAL_ASSET_TRANSFORMATION',
 	Internal = 'INTERNAL_SERVER_ERROR',
