@@ -8,7 +8,10 @@ import type { DeepPartial } from '@directus/types';
 import { isObject } from '@directus/utils';
 import { getNodeEnv } from '@directus/utils/node';
 import type { ErrorRequestHandler } from 'express';
-import getDatabase, { getConnectionNameForAccountability } from '../database/index.js';
+import getDatabase, {
+	getConnectionNameForAccountability,
+	getDatabaseClient,
+} from '../database/index.js';
 import { getDatabasePoolExhaustedReason } from '../database/errors/pool-exhausted.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
@@ -38,13 +41,15 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 		: [err];
 
 	// Translate raw pool-exhaustion errors (tarn/pgbouncer/postgres) into the dedicated Directus
-	// error so clients can react by reason.
+	// error so clients can react by reason. Detection is dialect-scoped (pgbouncer is pg-only).
+	const client = getDatabaseClient();
+
 	const receivedErrors: unknown[] = rawErrors.map((error) => {
 		if (isDirectusError(error)) {
 			return error;
 		}
 
-		const reason = getDatabasePoolExhaustedReason(error);
+		const reason = getDatabasePoolExhaustedReason(error, client);
 
 		if (reason === null) {
 			return error;

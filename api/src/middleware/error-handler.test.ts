@@ -7,7 +7,10 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Logger } from 'pino';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { getConnectionNameForAccountability } from '../database/index.js';
+import {
+	getConnectionNameForAccountability,
+	getDatabaseClient,
+} from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import * as errorHandlerMod from './error-handler.js';
 
@@ -191,6 +194,7 @@ describe('DirectusError', () => {
 
 describe('Database pool exhaustion', () => {
 	test('Translates a pool-acquire timeout to a 429 error', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 		vi.mocked(getConnectionNameForAccountability).mockReturnValue('premium');
 
 		const error = new Error('Timeout acquiring a connection');
