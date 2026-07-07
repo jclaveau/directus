@@ -2,7 +2,7 @@ import axios from 'axios';
 import fs from 'node:fs/promises';
 import type { Environment } from 'vitest';
 import { USER } from '../common/variables';
-import { getReversedTestIndex } from './sequential-tests';
+import { sequentialTestsList } from './sequential-tests';
 import { sleep } from '../utils/sleep';
 
 export default <Environment>{
@@ -10,17 +10,19 @@ export default <Environment>{
 	transformMode: 'ssr',
 
 	async setup(global) {
-		const { totalTestsCount } = JSON.parse(await fs.readFile('sequencer-data.json', 'utf8'));
+		const { waitFor } = JSON.parse(await fs.readFile('sequencer-data.json', 'utf8'));
 		const testFilePath = global.__vitest_worker__.ctx.files[0].split('blackbox')[1];
 		const serverUrl = process.env['serverUrl'];
 
-		if (!serverUrl || isNaN(totalTestsCount)) {
+		if (!serverUrl || !waitFor) {
 			throw 'Missing flow env variables';
 		}
 
-		const testIndex = getReversedTestIndex(testFilePath, global.__vitest_worker__.ctx.config.name);
+		const project = global.__vitest_worker__.ctx.config.name as 'db' | 'common';
+		// No entry shouldn't happen; fall back to "middle" (after the before-chain) to avoid a hang.
+		const threshold = waitFor[testFilePath] ?? sequentialTestsList[project].before.length;
 
-		while (testIndex !== 0) {
+		while (threshold > 0) {
 			try {
 				const response = await axios.get(`${serverUrl}/items/tests_flow_completed`, {
 					params: {
@@ -33,12 +35,11 @@ export default <Environment>{
 
 				const completedCount = Number(response.data.data[0].count.id);
 
-				if (testIndex >= 0) {
-					if (completedCount >= testIndex) break;
-				} else if (totalTestsCount + testIndex === completedCount) {
+				if (completedCount >= threshold) {
 					break;
 				}
-			} catch {
+			}
+			catch {
 				continue;
 			}
 
