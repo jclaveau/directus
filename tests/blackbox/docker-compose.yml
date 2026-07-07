@@ -39,6 +39,29 @@ services:
     ports:
       - 6100:5432
 
+  # pgbouncer fronting the `postgres` service with a one-connection server pool
+  # and a 1s queue timeout, so a named connection routed through it surfaces the
+  # real pgbouncer `query_wait_timeout` under load. Digest-pinned to 1.25.2.
+  pgbouncer:
+    image: edoburu/pgbouncer@sha256:4c1ca296ef525f108f5d3552cc337c0c09587cf8dae7f0067fd93349e47dc1cd
+    depends_on:
+      - postgres
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: secret
+      DB_NAME: directus
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 100
+      DEFAULT_POOL_SIZE: 1
+      QUERY_WAIT_TIMEOUT: 1
+      AUTH_TYPE: trust
+      ADMIN_USERS: postgres
+      LISTEN_PORT: 6432
+    ports:
+      - 6109:6432
+
   postgres10:
     image: postgis/postgis:10-3.2-alpine
     environment:

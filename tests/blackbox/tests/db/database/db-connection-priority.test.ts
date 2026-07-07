@@ -13,10 +13,14 @@ const PG_FAMILY = ['postgres', 'postgres10', 'cockroachdb'];
 
 const PROBE_VENDORS = vendors.filter((vendor) => PG_FAMILY.includes(vendor));
 
-// The exhaustion test drives a real slow query (`pg_sleep`), which cockroachdb lacks.
+// The exhaustion tests drive a real slow query (`pg_sleep`), which cockroachdb lacks.
 const PG_SLEEP_VENDORS = ['postgres', 'postgres10'];
 
 const EXHAUST_VENDORS = vendors.filter((vendor) => PG_SLEEP_VENDORS.includes(vendor));
+
+// pgbouncer (docker-compose) only fronts the `postgres` service, so the real
+// pgbouncer queue-timeout case runs there alone.
+const PGBOUNCER_VENDORS = vendors.filter((vendor) => vendor === 'postgres');
 
 async function probe(vendor: Vendor, dbConnections: string[]): Promise<string> {
 	const response = await request(getUrl(vendor))
@@ -100,10 +104,11 @@ describe('DB pool exhaustion error', () => {
 	}
 
 	it.each(EXHAUST_VENDORS)(
-		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when a tier pool is saturated',
+		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when the client-side pool is saturated',
 		async (vendor) => {
-			// A tier that inherits the base db but caps its pool at one connection with a tight
-			// acquire timeout — concurrent queries can't all get a connection and time out.
+			// A tier that inherits the base db but caps its OWN knex/tarn pool at one connection
+			// with a tight acquire timeout — concurrent queries can't all get a connection and time
+			// out client-side (no pgbouncer involved). This is the client_pool_timeout reason.
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'tiny'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_PRIORITY', '100'),
@@ -120,6 +125,33 @@ describe('DB pool exhaustion error', () => {
 			expect(response.statusCode).toBe(429);
 			expect(response.body.errors[0].extensions.code).toBe('DATABASE_POOL_EXHAUSTED');
 			expect(response.body.errors[0].extensions.reason).toBe('client_pool_timeout');
+			expect(response.headers['retry-after']).toBe('1');
+		},
+		300_000,
+	);
+
+	it.each(PGBOUNCER_VENDORS)(
+		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when the pgbouncer queue times out',
+		async (vendor) => {
+			// A tier routed through pgbouncer (docker-compose: transaction pool_mode,
+			// default_pool_size=1, query_wait_timeout=1s). knex's own pool is left wide, so the
+			// concurrent queries all reach pgbouncer, queue on its single server connection, and
+			// pgbouncer itself raises `query_wait_timeout` — the real pool_queue_timeout reason.
+			await Promise.all([
+				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bouncer'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PRIORITY', '100'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PORT', '6109'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_POOL__MAX', '5'),
+			]);
+
+			const response = await request(getUrl(vendor))
+				.post('/db-connection-probe/exhaust')
+				.send({ dbConnections: ['bouncer'], concurrency: 3, sleep: 2 })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(429);
+			expect(response.body.errors[0].extensions.code).toBe('DATABASE_POOL_EXHAUSTED');
+			expect(response.body.errors[0].extensions.reason).toBe('pool_queue_timeout');
 			expect(response.headers['retry-after']).toBe('1');
 		},
 		300_000,
