@@ -8,7 +8,7 @@ import {
 	ValueTooLongError,
 } from '@directus/errors';
 import { describe, expect, it } from 'vitest';
-import { extractError, getPoolExhaustedReason } from './postgres.js';
+import { extractError, getPoolExhaustedError } from './postgres.js';
 import type { PostgresError } from './types.js';
 
 function pgError(overrides: Partial<PostgresError>): PostgresError {
@@ -203,33 +203,35 @@ describe('pool exhaustion (folded into extractError)', () => {
 	});
 });
 
-describe('getPoolExhaustedReason', () => {
+describe('getPoolExhaustedError', () => {
 	it('classifies pg 53300 -> too_many_connections', () => {
-		const reason = getPoolExhaustedReason(pgError({ code: '53300' }));
+		const result = getPoolExhaustedError(pgError({ code: '53300' }));
 
-		expect(reason).toBe('too_many_connections');
+		expect(result?.extensions.reason).toBe('too_many_connections');
 	});
 
 	it('classifies a tarn acquire timeout -> client_pool_timeout', () => {
 		const error = pgError({ message: 'Timeout acquiring a connection' });
+		const result = getPoolExhaustedError(error);
 
-		expect(getPoolExhaustedReason(error)).toBe('client_pool_timeout');
+		expect(result?.extensions.reason).toBe('client_pool_timeout');
 	});
 
 	it('classifies pgbouncer query_wait_timeout -> pool_queue_timeout', () => {
-		const reason = getPoolExhaustedReason(pgError({ message: 'query_wait_timeout' }));
+		const result = getPoolExhaustedError(pgError({ message: 'query_wait_timeout' }));
 
-		expect(reason).toBe('pool_queue_timeout');
+		expect(result?.extensions.reason).toBe('pool_queue_timeout');
 	});
 
 	it('classifies pgbouncer max_client_conn -> max_client_connections', () => {
 		const error = pgError({ message: 'no more connections allowed' });
+		const result = getPoolExhaustedError(error);
 
-		expect(getPoolExhaustedReason(error)).toBe('max_client_connections');
+		expect(result?.extensions.reason).toBe('max_client_connections');
 	});
 
 	it('returns null for a non-pool error or non-object', () => {
-		expect(getPoolExhaustedReason(pgError({ code: '23505' }))).toBeNull();
-		expect(getPoolExhaustedReason(null)).toBeNull();
+		expect(getPoolExhaustedError(pgError({ code: '23505' }))).toBeNull();
+		expect(getPoolExhaustedError(null)).toBeNull();
 	});
 });

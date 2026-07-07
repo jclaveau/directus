@@ -22,10 +22,10 @@ enum PostgresErrorCodes {
 
 export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
 	// pgbouncer/tarn/postgres pool exhaustion (the connection tier is tagged on by the caller)
-	const poolReason = getPoolExhaustedReason(error);
+	const poolError = getPoolExhaustedError(error);
 
-	if (poolReason) {
-		return new DatabasePoolExhaustedError({ reason: poolReason, connection: null });
+	if (poolError) {
+		return poolError;
 	}
 
 	switch (error.code) {
@@ -132,12 +132,11 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 }
 
 /**
- * Classify a raw pg/pgbouncer/tarn error as a pool-exhaustion reason, or null.
- * The tarn/pgbouncer cases carry no SQLSTATE, so they're matched on the message.
+ * Turn a raw pg/pgbouncer/tarn error into a DatabasePoolExhaustedError, or null if it isn't one.
+ * The tarn/pgbouncer cases carry no SQLSTATE, so they're matched on the message. The connection
+ * tier is left null here for the caller (the request) to tag on.
  */
-export function getPoolExhaustedReason(
-	error: unknown,
-): DatabasePoolExhaustedReason | null {
+export function getPoolExhaustedError(error: unknown): DatabasePoolExhaustedError | null {
 	if (!isObject(error)) {
 		return null;
 	}
@@ -152,29 +151,28 @@ export function getPoolExhaustedReason(
 
 	const message = rawMessage.toLowerCase();
 
-	// Postgres: no backend connection slots left
-	if (code === '53300') {
-		return 'too_many_connections';
-	}
-
-	// pgbouncer: global client-socket cap hit while establishing the connection
-	if (message.includes('no more connections allowed')) {
-		return 'max_client_connections';
-	}
-
-	// pgbouncer: waited in the queue past query_wait_timeout for a server connection
-	if (message.includes('query_wait_timeout')) {
-		return 'pool_queue_timeout';
-	}
-
-	// knex/tarn: client-side pool.max reached, acquiring a connection timed out
 	const isAcquireTimeout =
 		message.includes('timeout acquiring a connection') ||
 		message.includes('pool is probably full');
 
-	if (isAcquireTimeout) {
-		return 'client_pool_timeout';
+	let reason: DatabasePoolExhaustedReason | null = null;
+
+	if (code === '53300') {
+		reason = 'too_many_connections'; // postgres: no backend connection slots left
+	}
+	else if (message.includes('no more connections allowed')) {
+		reason = 'max_client_connections'; // pgbouncer: global client-socket cap
+	}
+	else if (message.includes('query_wait_timeout')) {
+		reason = 'pool_queue_timeout'; // pgbouncer: server-connection queue timeout
+	}
+	else if (isAcquireTimeout) {
+		reason = 'client_pool_timeout'; // knex/tarn: pool.max acquire timeout
 	}
 
-	return null;
+	if (reason === null) {
+		return null;
+	}
+
+	return new DatabasePoolExhaustedError({ reason, connection: null });
 }
