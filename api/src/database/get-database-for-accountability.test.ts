@@ -99,9 +99,8 @@ test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async ()
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = { dbConnections: ['replica_a', 'premium_pool'] } as Accountability;
-	const db = getDatabaseForAccountability(acc);
 
-	expect(connectedDatabaseOf(db)).toBe('directus_premium');
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus_premium');
 });
 
 test('Picks the higher priority regardless of grant order', async () => {
@@ -113,9 +112,8 @@ test('Picks the higher priority regardless of grant order', async () => {
 
 	// replica_a (10) listed first is a decoy for the higher premium_pool (100)
 	const acc = { dbConnections: ['replica_a', 'premium_pool'] } as Accountability;
-	const db = getDatabaseForAccountability(acc);
 
-	expect(connectedDatabaseOf(db)).toBe('directus_premium');
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus_premium');
 });
 
 test('Falls back to the default pool when nothing is granted', async () => {
@@ -130,9 +128,8 @@ test('Falls back when the granted connection is not configured', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = { dbConnections: ['ghost_pool'] } as Accountability;
-	const db = getDatabaseForAccountability(acc);
 
-	expect(connectedDatabaseOf(db)).toBe('directus');
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 });
 
 test('Falls back when no granted connection outranks the default', async () => {
@@ -141,9 +138,8 @@ test('Falls back when no granted connection outranks the default', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = { dbConnections: ['premium_pool'] } as Accountability;
-	const db = getDatabaseForAccountability(acc);
 
-	expect(connectedDatabaseOf(db)).toBe('directus');
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 });
 
 test('Lets a policy grant the default pool by its configured name', async () => {
@@ -152,9 +148,8 @@ test('Lets a policy grant the default pool by its configured name', async () => 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = { dbConnections: ['primary'] } as Accountability;
-	const db = getDatabaseForAccountability(acc);
 
-	expect(connectedDatabaseOf(db)).toBe('directus');
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 });
 
 test('Default priority can outrank a lower-priority granted pool', async () => {
@@ -166,7 +161,6 @@ test('Default priority can outrank a lower-priority granted pool', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = { dbConnections: ['replica_a'] } as Accountability;
-	const db = getDatabaseForAccountability(acc);
 
-	expect(connectedDatabaseOf(db)).toBe('directus');
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 });
