@@ -1,12 +1,13 @@
 import {
 	ContainsNullValuesError,
+	DatabasePoolExhaustedError,
 	NotNullViolationError,
 	RecordNotUniqueError,
 } from '@directus/errors';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getDatabaseClient } from '../index.js';
 import emitter from '../../emitter.js';
-import { translateDatabaseError } from './translate.js';
+import { extractDatabaseError, translateDatabaseError } from './translate.js';
 import type { SQLError } from './dialects/types.js';
 
 vi.mock('../index.js', () => {
@@ -108,12 +109,39 @@ describe('client dispatch', () => {
 		expect(result).toBeInstanceOf(NotNullViolationError);
 	});
 
-	it('leaves the default error undefined for an unmatched client', async () => {
+	it('returns the raw error for an unmatched client', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('unknown' as any);
+		const raw = asSqlError({ code: 'whatever' });
 
-		const result = await translateDatabaseError(asSqlError({ code: 'whatever' }), {});
+		const result = await translateDatabaseError(raw, {});
 
-		expect(result).toBeUndefined();
+		expect(result).toBe(raw);
+	});
+});
+
+describe('extractDatabaseError (pure, no hook)', () => {
+	it('maps a postgres pool error to DatabasePoolExhaustedError', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		const error = asSqlError({ code: '53300', message: 'too many clients' });
+
+		const result = await extractDatabaseError(error, {});
+
+		expect(result).toBeInstanceOf(DatabasePoolExhaustedError);
+	});
+
+	it('does not fire the database.error hook', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+		await extractDatabaseError(asSqlError(uniqueError), { email: 'x' });
+
+		expect(emitter.emitFilter).not.toHaveBeenCalled();
+	});
+
+	it('returns the raw error for an unmatched client', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('unknown' as any);
+		const raw = asSqlError({ code: 'whatever' });
+
+		expect(await extractDatabaseError(raw, {})).toBe(raw);
 	});
 });
 

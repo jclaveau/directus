@@ -1,5 +1,6 @@
 import {
 	ContainsNullValuesError,
+	DatabasePoolExhaustedError,
 	InvalidForeignKeyError,
 	NotNullViolationError,
 	RecordNotUniqueError,
@@ -20,6 +21,13 @@ enum PostgresErrorCodes {
 }
 
 export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
+	// pgbouncer/tarn/postgres pool exhaustion (the connection tier is tagged on by the caller)
+	const poolReason = getPoolExhaustedReason(error);
+
+	if (poolReason) {
+		return new DatabasePoolExhaustedError({ reason: poolReason, connection: null });
+	}
+
 	switch (error.code) {
 		case PostgresErrorCodes.UNIQUE_VIOLATION:
 			return uniqueViolation();

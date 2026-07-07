@@ -1,5 +1,6 @@
 import {
 	ContainsNullValuesError,
+	DatabasePoolExhaustedError,
 	InvalidForeignKeyError,
 	NotNullViolationError,
 	RecordNotUniqueError,
@@ -7,7 +8,7 @@ import {
 	ValueTooLongError,
 } from '@directus/errors';
 import { describe, expect, it } from 'vitest';
-import { extractError } from './postgres.js';
+import { extractError, getPoolExhaustedReason } from './postgres.js';
 import type { PostgresError } from './types.js';
 
 function pgError(overrides: Partial<PostgresError>): PostgresError {
@@ -185,5 +186,50 @@ describe('unhandled code', () => {
 		const error = pgError({ code: '99999', message: 'something else' });
 
 		expect(extractError(error, {})).toBe(error);
+	});
+});
+
+describe('pool exhaustion (folded into extractError)', () => {
+	it('maps SQLSTATE 53300 to DatabasePoolExhaustedError', () => {
+		const error = pgError({ code: '53300', message: 'too many clients' });
+
+		expect(extractError(error, {})).toBeInstanceOf(DatabasePoolExhaustedError);
+	});
+
+	it('maps a tarn acquire timeout (no SQLSTATE) to DatabasePoolExhaustedError', () => {
+		const error = pgError({ message: 'Timeout acquiring a connection' });
+
+		expect(extractError(error, {})).toBeInstanceOf(DatabasePoolExhaustedError);
+	});
+});
+
+describe('getPoolExhaustedReason', () => {
+	it('classifies pg 53300 -> too_many_connections', () => {
+		const reason = getPoolExhaustedReason(pgError({ code: '53300' }));
+
+		expect(reason).toBe('too_many_connections');
+	});
+
+	it('classifies a tarn acquire timeout -> client_pool_timeout', () => {
+		const error = pgError({ message: 'Timeout acquiring a connection' });
+
+		expect(getPoolExhaustedReason(error)).toBe('client_pool_timeout');
+	});
+
+	it('classifies pgbouncer query_wait_timeout -> pool_queue_timeout', () => {
+		const reason = getPoolExhaustedReason(pgError({ message: 'query_wait_timeout' }));
+
+		expect(reason).toBe('pool_queue_timeout');
+	});
+
+	it('classifies pgbouncer max_client_conn -> max_client_connections', () => {
+		const error = pgError({ message: 'no more connections allowed' });
+
+		expect(getPoolExhaustedReason(error)).toBe('max_client_connections');
+	});
+
+	it('returns null for a non-pool error or non-object', () => {
+		expect(getPoolExhaustedReason(pgError({ code: '23505' }))).toBeNull();
+		expect(getPoolExhaustedReason(null)).toBeNull();
 	});
 });
