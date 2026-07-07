@@ -214,14 +214,12 @@ export async function CreateCollections(
 	vendor: Vendor,
 	options: OptionsCreateCollections,
 ) {
-	const payloads = options.collections.map(
-		(collection) => buildCollectionPayload(collection),
-	);
-
 	const response = await request(getUrl(vendor, options.env))
 		.post(`/collections`)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
-		.send(payloads);
+		.send(
+			options.collections.map((collection) => buildCollectionPayload(collection)),
+		);
 
 	return response.body.data;
 }

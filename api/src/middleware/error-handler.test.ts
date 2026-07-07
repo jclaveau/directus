@@ -199,9 +199,12 @@ describe('Database pool exhaustion', () => {
 
 		vi.mocked(getConnectionNameForAccountability).mockReturnValue('premium');
 
-		const error = new Error('Timeout acquiring a connection');
-
-		await errorHandlerMod.errorHandler(error, mockRequest, mockResponse, nextFunction);
+		await errorHandlerMod.errorHandler(
+			new Error('Timeout acquiring a connection'),
+			mockRequest,
+			mockResponse,
+			nextFunction,
+		);
 
 		expect(mockResponse.status).toHaveBeenCalledWith(429);
 		expect(mockResponse.header).toHaveBeenCalledWith('Retry-After', '1');

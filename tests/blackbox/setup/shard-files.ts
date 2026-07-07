@@ -45,11 +45,12 @@ function packIntoBuckets(
 		.sort((a, b) => b.weight - a.weight || a.file.localeCompare(b.file));
 
 	const buckets = Array.from({ length: count }, (_, i) => {
-		const total = i === count - 1
-			? lastHandicap
-			: 0;
-
-		return { files: [] as string[], total };
+		return {
+			files: [] as string[],
+			total: i === count - 1
+				? lastHandicap
+				: 0,
+		};
 	});
 
 	for (const { file, weight } of weighted) {

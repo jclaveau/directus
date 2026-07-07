@@ -48,8 +48,8 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 			}
 
 			if (isDirectusError(translated, ErrorCode.DatabasePoolExhausted)) {
-				const extensions = translated.extensions as { connection: string | null };
-				extensions.connection = getConnectionNameForAccountability(req.accountability);
+				(translated.extensions as { connection: string | null }).connection =
+					getConnectionNameForAccountability(req.accountability);
 			}
 
 			return translated;
