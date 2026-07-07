@@ -134,19 +134,19 @@ describe('DB pool exhaustion error', () => {
 		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when the pgbouncer queue times out',
 		async (vendor) => {
 			// A tier routed through pgbouncer (docker-compose: transaction pool_mode,
-			// default_pool_size=1, query_wait_timeout=1s). knex's own pool is left wide, so the
-			// concurrent queries all reach pgbouncer, queue on its single server connection, and
-			// pgbouncer itself raises `query_wait_timeout` — the real pool_queue_timeout reason.
+			// default_pool_size=1, query_wait_timeout=1s, max_client_conn=2). Two concurrent
+			// queries both connect (at the client cap), one queues on the single server
+			// connection, and pgbouncer raises `query_wait_timeout` — the pool_queue_timeout reason.
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bouncer'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PRIORITY', '100'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PORT', '6109'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_POOL__MAX', '5'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_POOL__MAX', '8'),
 			]);
 
 			const response = await request(getUrl(vendor))
 				.post('/db-connection-probe/exhaust')
-				.send({ dbConnections: ['bouncer'], concurrency: 3, sleep: 2 })
+				.send({ dbConnections: ['bouncer'], concurrency: 2, sleep: 2 })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(429);
@@ -156,4 +156,35 @@ describe('DB pool exhaustion error', () => {
 		},
 		300_000,
 	);
+
+	it.each(PGBOUNCER_VENDORS)(
+		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when pgbouncer refuses new clients',
+		async (vendor) => {
+			// Same pgbouncer tier, but push more concurrent connections than its
+			// max_client_conn (2): pgbouncer rejects the surplus at connect time with
+			// `no more connections allowed` — the real max_client_connections reason. The
+			// reject is immediate, so it wins the race against the 1s queue timeout.
+			await Promise.all([
+				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bouncer'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PRIORITY', '100'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PORT', '6109'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_POOL__MAX', '8'),
+			]);
+
+			const response = await request(getUrl(vendor))
+				.post('/db-connection-probe/exhaust')
+				.send({ dbConnections: ['bouncer'], concurrency: 5, sleep: 2 })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(429);
+			expect(response.body.errors[0].extensions.code).toBe('DATABASE_POOL_EXHAUSTED');
+			expect(response.body.errors[0].extensions.reason).toBe('max_client_connections');
+			expect(response.headers['retry-after']).toBe('1');
+		},
+		300_000,
+	);
+
+	// The fourth reason, `too_many_connections` (postgres SQLSTATE 53300), stays
+	// unit-only: reaching it means exhausting the shared postgres backend's
+	// max_connections, which would break every other test on that instance.
 });
