@@ -23,16 +23,6 @@ vi.mock('../../emitter.js', () => {
 	};
 });
 
-function asSqlError(error: Partial<SQLError>): SQLError {
-	return error as SQLError;
-}
-
-const uniqueError = {
-	code: '23505',
-	table: 'articles',
-	detail: 'Key (email)=(x) already exists.',
-};
-
 afterEach(() => {
 	vi.clearAllMocks();
 });
@@ -42,10 +32,10 @@ describe('client dispatch', () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('mysql');
 
 		const result = await translateDatabaseError(
-			asSqlError({
+			{
 				code: 'ER_DUP_ENTRY',
 				sqlMessage: `Duplicate entry 'x' for key 'articles_email_unique'`,
-			}),
+			} as SQLError,
 			{ email: 'x' },
 		);
 
@@ -56,7 +46,11 @@ describe('client dispatch', () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 		const result = await translateDatabaseError(
-			asSqlError(uniqueError),
+			{
+				code: '23505',
+				table: 'articles',
+				detail: 'Key (email)=(x) already exists.',
+			} as SQLError,
 			{ email: 'x' },
 		);
 
@@ -67,7 +61,11 @@ describe('client dispatch', () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('cockroachdb');
 
 		const result = await translateDatabaseError(
-			asSqlError(uniqueError),
+			{
+				code: '23505',
+				table: 'articles',
+				detail: 'Key (email)=(x) already exists.',
+			} as SQLError,
 			{ email: 'x' },
 		);
 
@@ -78,9 +76,9 @@ describe('client dispatch', () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('sqlite');
 
 		const result = await translateDatabaseError(
-			asSqlError({
+			{
 				message: 'SQLITE_CONSTRAINT: NOT NULL constraint failed: articles.title',
-			}),
+			} as SQLError,
 			{},
 		);
 
@@ -91,10 +89,10 @@ describe('client dispatch', () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('oracle');
 
 		const result = await translateDatabaseError(
-			asSqlError({
+			{
 				errorNum: 2296,
 				message: 'ORA-02296: cannot enable ("ARTICLES"."TITLE") - null values',
-			}),
+			} as SQLError,
 			{},
 		);
 
@@ -105,10 +103,10 @@ describe('client dispatch', () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('mssql');
 
 		const result = await translateDatabaseError(
-			asSqlError({
+			{
 				number: 515,
 				message: `Column 'title' does not allow nulls in [articles].`,
-			}),
+			} as SQLError,
 			{},
 		);
 
@@ -117,7 +115,7 @@ describe('client dispatch', () => {
 
 	it('returns the raw error for an unmatched client', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('unknown' as any);
-		const raw = asSqlError({ code: 'whatever' });
+		const raw = { code: 'whatever' } as SQLError;
 
 		const result = await translateDatabaseError(raw, {});
 
@@ -128,7 +126,7 @@ describe('client dispatch', () => {
 describe('extractDatabaseError (pure, no hook)', () => {
 	it('maps a postgres pool error to DatabasePoolExhaustedError', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
-		const error = asSqlError({ code: '53300', message: 'too many clients' });
+		const error = { code: '53300', message: 'too many clients' } as SQLError;
 
 		const result = await extractDatabaseError(error, {});
 
@@ -138,14 +136,21 @@ describe('extractDatabaseError (pure, no hook)', () => {
 	it('does not fire the database.error hook', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
-		await extractDatabaseError(asSqlError(uniqueError), { email: 'x' });
+		await extractDatabaseError(
+			{
+				code: '23505',
+				table: 'articles',
+				detail: 'Key (email)=(x) already exists.',
+			} as SQLError,
+			{ email: 'x' },
+		);
 
 		expect(emitter.emitFilter).not.toHaveBeenCalled();
 	});
 
 	it('returns the raw error for an unmatched client', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('unknown' as any);
-		const raw = asSqlError({ code: 'whatever' });
+		const raw = { code: 'whatever' } as SQLError;
 
 		expect(await extractDatabaseError(raw, {})).toBe(raw);
 	});
@@ -156,7 +161,11 @@ describe('database.error filter hook', () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 		const result = await translateDatabaseError(
-			asSqlError(uniqueError),
+			{
+				code: '23505',
+				table: 'articles',
+				detail: 'Key (email)=(x) already exists.',
+			} as SQLError,
 			{ email: 'x' },
 		);
 
@@ -175,7 +184,7 @@ describe('database.error filter hook', () => {
 		const overridden = new Error('replaced by a hook');
 		vi.mocked(emitter.emitFilter).mockResolvedValueOnce(overridden);
 
-		const result = await translateDatabaseError(asSqlError({ code: '99999' }), {});
+		const result = await translateDatabaseError({ code: '99999' } as SQLError, {});
 
 		expect(result).toBe(overridden);
 	});
