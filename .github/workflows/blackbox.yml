@@ -21,7 +21,7 @@ on:
       shards:
         description: 'Number of parallel shards to split each vendor db test run across'
         type: number
-        default: 3
+        default: 5
 
 permissions:
   contents: read
