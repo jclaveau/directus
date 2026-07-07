@@ -19,9 +19,6 @@ type ApiError = {
 
 const FALLBACK_ERROR = new InternalServerError();
 
-// Seconds a client should wait before retrying after pool exhaustion (transient).
-const POOL_EXHAUSTED_RETRY_AFTER_SECONDS = 1;
-
 export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 	const logger = useLogger();
 
@@ -91,7 +88,7 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 			}
 
 			if (isDirectusError(error, ErrorCode.DatabasePoolExhausted)) {
-				res.header('Retry-After', String(POOL_EXHAUSTED_RETRY_AFTER_SECONDS));
+				res.header('Retry-After', '1'); // seconds; pool exhaustion is transient
 			}
 		} else {
 			logger.error(error);
