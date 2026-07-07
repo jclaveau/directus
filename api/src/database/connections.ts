@@ -67,34 +67,14 @@ export function assertConnectionNamesAreUnique(): void {
 	}
 }
 
-/** Lazily build (and cache) a named connection; the default name → base pool. */
-function getNamedDatabase(name: string): Knex {
-	if (name === getDefaultConnectionName()) {
-		return getDatabase();
-	}
-
-	const existing = namedDatabases.get(name);
-
-	if (existing) {
-		return existing;
-	}
-
-	const { priority: _priority, ...override } = getConfigFromEnv(
-		`DB_CONNECTION_${name.toUpperCase()}_`,
-	);
-
-	const db = constructDatabase(merge({}, getBaseDbConfig(), override));
-
-	namedDatabases.set(name, db);
-	return db;
-}
-
 /**
  * Resolve the connection name a request should use: the highest-priority among the
  * default pool (always a candidate) and the configured connections the user's policies
  * grant. Ties break by name, so a winner must outrank `DB_DEFAULT_CONNECTION_PRIORITY`.
  */
-function resolveConnectionName(accountability?: Accountability | null): string {
+export function getConnectionNameForAccountability(
+	accountability?: Accountability | null,
+): string {
 	const defaultName = getDefaultConnectionName();
 	const extra = getExtraConnectionNames();
 
@@ -127,12 +107,24 @@ function resolveConnectionName(accountability?: Accountability | null): string {
 export function getDatabaseForAccountability(
 	accountability?: Accountability | null,
 ): Knex {
-	return getNamedDatabase(resolveConnectionName(accountability));
-}
+	const name = getConnectionNameForAccountability(accountability);
 
-/** Name of the connection a request routes to (tags pool errors with the tier). */
-export function getConnectionNameForAccountability(
-	accountability?: Accountability | null,
-): string {
-	return resolveConnectionName(accountability);
+	if (name === getDefaultConnectionName()) {
+		return getDatabase();
+	}
+
+	const existing = namedDatabases.get(name);
+
+	if (existing) {
+		return existing;
+	}
+
+	const { priority: _priority, ...override } = getConfigFromEnv(
+		`DB_CONNECTION_${name.toUpperCase()}_`,
+	);
+
+	const db = constructDatabase(merge({}, getBaseDbConfig(), override));
+
+	namedDatabases.set(name, db);
+	return db;
 }
