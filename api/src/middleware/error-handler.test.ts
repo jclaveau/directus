@@ -7,6 +7,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Logger } from 'pino';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { getConnectionNameForAccountability } from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import * as errorHandlerMod from './error-handler.js';
 
@@ -24,6 +25,7 @@ beforeEach(() => {
 	mockResponse = {
 		status: vi.fn(),
 		json: vi.fn(),
+		header: vi.fn(),
 	} as unknown as Response;
 
 	mockLogger = {
@@ -184,6 +186,32 @@ describe('DirectusError', () => {
 		await errorHandlerMod.errorHandler([error1, error2], mockRequest, mockResponse, nextFunction);
 
 		expect(mockResponse.status).toHaveBeenCalledWith(FALLBACK_STATUS);
+	});
+});
+
+describe('Database pool exhaustion', () => {
+	test('Translates a pool-acquire timeout to a 429 error', async () => {
+		vi.mocked(getConnectionNameForAccountability).mockReturnValue('premium');
+
+		const error = new Error('Timeout acquiring a connection');
+
+		await errorHandlerMod.errorHandler(error, mockRequest, mockResponse, nextFunction);
+
+		expect(mockResponse.status).toHaveBeenCalledWith(429);
+		expect(mockResponse.header).toHaveBeenCalledWith('Retry-After', '1');
+
+		expect(mockResponse.json).toHaveBeenCalledWith({
+			errors: [
+				{
+					message: expect.stringContaining('Database connection pool exhausted'),
+					extensions: {
+						code: 'DATABASE_POOL_EXHAUSTED',
+						reason: 'client_pool_timeout',
+						connection: 'premium',
+					},
+				},
+			],
+		});
 	});
 });
 

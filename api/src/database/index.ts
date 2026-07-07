@@ -170,6 +170,22 @@ function constructDatabase(config: Record<string, any>): Knex {
 		...connectionConfig
 	} = config;
 
+	// Pool sizes/timeouts arrive as strings when set at runtime (env-inject) or unmapped in env;
+	// tarn wants numbers, so coerce the numeric knobs before knex sees them.
+	const numericPoolKeys = [
+		'min',
+		'max',
+		'acquireTimeoutMillis',
+		'createTimeoutMillis',
+		'idleTimeoutMillis',
+	];
+
+	for (const key of numericPoolKeys) {
+		if (poolConfig[key] !== undefined) {
+			poolConfig[key] = Number(poolConfig[key]);
+		}
+	}
+
 	const knexConfig: Knex.Config = {
 		client,
 		version,
@@ -303,13 +319,11 @@ function getNamedDatabase(name: string): Knex {
 }
 
 /**
- * Pick the DB connection a request should use: the highest-priority connection among the default
- * pool (always a candidate) and the ones the user's policies grant that are actually configured.
+ * Resolve the connection name a request should use: the highest-priority connection among the
+ * default pool (always a candidate) and the ones the user's policies grant that are configured.
  * Ties break by name, so a pool meant to win must outrank `DB_DEFAULT_CONNECTION_PRIORITY`.
  */
-export function getDatabaseForAccountability(
-	accountability?: Accountability | null,
-): Knex {
+function resolveConnectionName(accountability?: Accountability | null): string {
 	const defaultName = getDefaultConnectionName();
 	const extra = getExtraConnectionNames();
 
@@ -335,8 +349,21 @@ export function getDatabaseForAccountability(
 				: winner;
 		});
 
-	// Dispatch handles the default name (→ base pool); named pools build lazily
-	return getNamedDatabase(best.name);
+	return best.name;
+}
+
+/** The knex instance a request routes to (default name → base pool; named pools build lazily). */
+export function getDatabaseForAccountability(
+	accountability?: Accountability | null,
+): Knex {
+	return getNamedDatabase(resolveConnectionName(accountability));
+}
+
+/** The name of the connection a request routes to — for tagging pool-exhaustion errors with the tier. */
+export function getConnectionNameForAccountability(
+	accountability?: Accountability | null,
+): string {
+	return resolveConnectionName(accountability);
 }
 
 export function getSchemaInspector(database?: Knex): SchemaInspector {

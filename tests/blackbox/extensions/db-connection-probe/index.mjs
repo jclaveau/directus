@@ -1,16 +1,10 @@
-// Reports which DB connection `getDatabaseForAccountability` routes a given set of policy grants to.
-// An ItemsService built with a synthetic accountability runs the real routing; we read the resolved
-// knex's target database without issuing a query, so the extra connections can point at fake dbs.
+// Probes DB connection routing. `/route` reports which connection a set of policy grants resolves
+// to (reads the resolved knex's target db, no query). `/exhaust` actually saturates a min-sized
+// pool so the real pool-exhaustion error surfaces through Directus (→ 429 DATABASE_POOL_EXHAUSTED).
 export default (router, { services, getSchema }) => {
 	const { ItemsService } = services;
 
-	router.post('/route', async (req, res) => {
-		if (!req.accountability?.admin) {
-			return res.status(403).json({ errors: [{ message: 'admin only' }] });
-		}
-
-		const grants = req.body?.dbConnections;
-
+	async function routedKnex(grants) {
 		const dbConnections = Array.isArray(grants)
 			? grants
 			: [];
@@ -28,7 +22,16 @@ export default (router, { services, getSchema }) => {
 		const schema = await getSchema();
 		const service = new ItemsService('directus_users', { schema, accountability });
 
-		const connection = service.knex.client?.config?.connection;
+		return service.knex;
+	}
+
+	router.post('/route', async (req, res) => {
+		if (!req.accountability?.admin) {
+			return res.status(403).json({ errors: [{ message: 'admin only' }] });
+		}
+
+		const knex = await routedKnex(req.body?.dbConnections);
+		const connection = knex.client?.config?.connection;
 
 		let database = connection;
 
@@ -37,5 +40,30 @@ export default (router, { services, getSchema }) => {
 		}
 
 		return res.json({ data: { database } });
+	});
+
+	router.post('/exhaust', async (req, res, next) => {
+		if (!req.accountability?.admin) {
+			return res.status(403).json({ errors: [{ message: 'admin only' }] });
+		}
+
+		const concurrency = Number(req.body?.concurrency) || 3;
+		const sleepSeconds = Number(req.body?.sleep) || 0.5;
+
+		const knex = await routedKnex(req.body?.dbConnections);
+
+		try {
+			const queries = Array.from({ length: concurrency }, () => {
+				return knex.raw('SELECT pg_sleep(?)', [sleepSeconds]);
+			});
+
+			await Promise.all(queries);
+
+			return res.json({ data: { exhausted: false } });
+		}
+		catch (error) {
+			// Let the global error handler translate the pool error → 429 DATABASE_POOL_EXHAUSTED
+			return next(error);
+		}
 	});
 };

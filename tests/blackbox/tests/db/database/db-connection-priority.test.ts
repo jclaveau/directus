@@ -12,6 +12,11 @@ const PG_FAMILY = ['postgres', 'postgres10', 'cockroachdb'];
 
 const PROBE_VENDORS = vendors.filter((vendor) => PG_FAMILY.includes(vendor));
 
+// The exhaustion test drives a real slow query (`pg_sleep`), which cockroachdb lacks.
+const PG_SLEEP_VENDORS = ['postgres', 'postgres10'];
+
+const EXHAUST_VENDORS = vendors.filter((vendor) => PG_SLEEP_VENDORS.includes(vendor));
+
 async function probe(vendor: Vendor, dbConnections: string[]): Promise<string> {
 	const response = await request(getUrl(vendor))
 		.post('/db-connection-probe/route')
@@ -74,6 +79,40 @@ describe('DB connection priority routing', () => {
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '999');
 			expect(await probe(vendor, ['bb_hi'])).toBe(defaultDatabase);
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '0');
+		},
+		300_000,
+	);
+});
+
+describe('DB pool exhaustion error', () => {
+	afterAll(async () => {
+		for (const vendor of EXHAUST_VENDORS) {
+			await setDirectusEnv(vendor, 'DB_CONNECTIONS', '');
+		}
+	});
+
+	it.each(EXHAUST_VENDORS)(
+		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when a tier pool is saturated',
+		async (vendor) => {
+			// A tier that inherits the base db but caps its pool at one connection with a tight
+			// acquire timeout — concurrent queries can't all get a connection and time out.
+			await Promise.all([
+				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'tiny'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_PRIORITY', '100'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_POOL__MIN', '0'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_POOL__MAX', '1'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_POOL__ACQUIRE_TIMEOUT_MILLIS', '150'),
+			]);
+
+			const response = await request(getUrl(vendor))
+				.post('/db-connection-probe/exhaust')
+				.send({ dbConnections: ['tiny'], concurrency: 5, sleep: 1 })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(429);
+			expect(response.body.errors[0].extensions.code).toBe('DATABASE_POOL_EXHAUSTED');
+			expect(response.body.errors[0].extensions.reason).toBe('client_pool_timeout');
+			expect(response.headers['retry-after']).toBe('1');
 		},
 		300_000,
 	);
