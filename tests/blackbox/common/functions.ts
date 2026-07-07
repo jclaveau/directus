@@ -128,7 +128,10 @@ export type OptionsCreateCollection = {
 	primaryKeyType?: PrimaryKeyType;
 };
 
-/** Fill in the collection defaults and prepend the primary-key field, ready to POST. */
+/**
+ * Fill in the collection defaults and prepend the primary-key field, ready to
+ * POST.
+ */
 function buildCollectionPayload(
 	options: Partial<OptionsCreateCollection>,
 ): Partial<OptionsCreateCollection> {

@@ -6,6 +6,7 @@ import {
 	ValueOutOfRangeError,
 	ValueTooLongError,
 } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import { describe, expect, it, vi } from 'vitest';
 import { extractError } from './mssql.js';
 import type { MSSQLError } from './types.js';
@@ -165,7 +166,9 @@ describe('not null violation (515)', () => {
 		});
 	});
 
-	it('maps to ContainsNullValuesError when inserting NULL into a column', async () => {
+	it(oneLine`
+		maps to ContainsNullValuesError when inserting NULL into a column
+	`, async () => {
 		const error = mssqlError({
 			number: 515,
 			message: `Cannot insert the value NULL into column 'title', table [articles].`,

@@ -194,7 +194,10 @@ describe('DirectusError', () => {
 describe('Database pool exhaustion', () => {
 	test('Translates a pool-acquire timeout to a 429 error', async () => {
 		vi.mocked(extractDatabaseError).mockResolvedValueOnce(
-			new DatabasePoolExhaustedError({ reason: 'client_pool_timeout', connection: null }),
+			new DatabasePoolExhaustedError({
+				reason: 'client_pool_timeout',
+				connection: null,
+			}),
 		);
 
 		vi.mocked(getConnectionNameForAccountability).mockReturnValue('premium');

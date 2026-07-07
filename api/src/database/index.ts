@@ -98,8 +98,9 @@ export function getDatabase(): Knex {
 }
 
 /**
- * Build a knex instance from a resolved DB config. Shared by the default pool and named
- * connections so both get the same client-specific pool hooks and query instrumentation.
+ * Build a knex instance from a resolved DB config. Shared by the default pool
+ * and named connections so both get the same client-specific pool hooks and
+ * query instrumentation.
  */
 export function constructDatabase(config: Record<string, any>): Knex {
 	const logger = useLogger();
@@ -114,8 +115,9 @@ export function constructDatabase(config: Record<string, any>): Knex {
 		...connectionConfig
 	} = config;
 
-	// Pool sizes/timeouts arrive as strings at runtime (env-inject) or unmapped in env;
-	// tarn wants numbers, so coerce the numeric knobs before knex sees them.
+	// Pool sizes/timeouts arrive as strings at runtime (env-inject) or unmapped
+	// in env; tarn wants numbers, so coerce the numeric knobs before knex sees
+	// them.
 	const numericPoolKeys = [
 		'min',
 		'max',

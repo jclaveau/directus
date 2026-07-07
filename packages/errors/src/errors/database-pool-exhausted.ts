@@ -16,18 +16,22 @@ export interface DatabasePoolExhaustedExtensions {
 }
 
 const REASON_MESSAGES: Record<DatabasePoolExhaustedReason, string> = {
-	client_pool_timeout: 'the connection pool is full (acquiring a connection timed out)',
+	client_pool_timeout:
+		'the connection pool is full (acquiring a connection timed out)',
 	pool_queue_timeout: 'the connection pool queue timed out',
 	max_client_connections: 'the maximum number of client connections was reached',
 	too_many_connections: 'the database has too many open connections',
 };
 
 export const messageConstructor = (extensions: DatabasePoolExhaustedExtensions) => {
-	return `Database connection pool exhausted: ${REASON_MESSAGES[extensions.reason]}.`;
+	return `Database connection pool exhausted: ${
+		REASON_MESSAGES[extensions.reason]
+	}.`;
 };
 
-export const DatabasePoolExhaustedError = createError<DatabasePoolExhaustedExtensions>(
-	ErrorCode.DatabasePoolExhausted,
-	messageConstructor,
-	429,
-);
+export const DatabasePoolExhaustedError =
+	createError<DatabasePoolExhaustedExtensions>(
+		ErrorCode.DatabasePoolExhausted,
+		messageConstructor,
+		429,
+	);

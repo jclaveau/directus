@@ -3,9 +3,10 @@ import { sequentialTestsList } from './sequential-tests';
 
 type Project = 'db' | 'common';
 
-// Rough per-file wall-clock (ms, from an observed postgres run) for the files whose runtime dwarfs
-// their byte size; everything else falls back to source size. Only used to BALANCE shards, so exact
-// values and cross-vendor drift don't matter — just the relative ordering.
+// Rough per-file wall-clock (ms, from an observed postgres run) for the files
+// whose runtime dwarfs their byte size; everything else falls back to source
+// size. Only used to BALANCE shards, so exact values and cross-vendor drift
+// don't matter — just the relative ordering.
 const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/m2m.test.ts': 360_000,
 	'/tests/db/routes/items/no-relation.test.ts': 212_000,
@@ -32,8 +33,9 @@ function fileWeight(file: string): number {
 }
 
 /**
- * Pack `files` into `count` balanced buckets (heaviest-first → least-loaded bucket). `lastHandicap`
- * pre-loads the last bucket so it gets less parallel work to offset the after-chain it also runs.
+ * Pack `files` into `count` balanced buckets (heaviest-first → least-loaded
+ * bucket). `lastHandicap` pre-loads the last bucket so it gets less parallel
+ * work to offset the after-chain it also runs.
  */
 function packIntoBuckets(
 	files: string[],
@@ -70,9 +72,10 @@ function packIntoBuckets(
 }
 
 /**
- * Files this shard (1-based `index` of `count`) should run. Every shard runs all `before` files
- * (the ordering barrier needs them); `after` files run only in the last shard; the parallel middle
- * is size-balanced across shards. Deterministic, so the sequencer and the seeder agree.
+ * Files this shard (1-based `index` of `count`) should run. Every shard runs
+ * all `before` files (the ordering barrier needs them); `after` files run only
+ * in the last shard; the parallel middle is size-balanced across shards.
+ * Deterministic, so the sequencer and the seeder agree.
  */
 export function filesForShard(
 	files: string[],
@@ -82,7 +85,9 @@ export function filesForShard(
 ): string[] {
 	const list = sequentialTestsList[project];
 
-	const isBefore = (file: string) => list.before.some((entry) => file.endsWith(entry));
+	const isBefore = (file: string) =>
+		list.before.some((entry) => file.endsWith(entry));
+
 	const isAfter = (file: string) => list.after.some((entry) => file.endsWith(entry));
 
 	const before = files.filter(isBefore);

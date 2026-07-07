@@ -9,12 +9,14 @@ import type { SQLError } from './dialects/types.js';
 import type { Item } from '@directus/types';
 
 /**
- * Dispatch a raw driver error to its dialect translator → a pre-defined Directus error, or the raw
- * error untouched if unrecognized. Translates: Invalid Foreign Key, Not Null Violation, Record Not
- * Unique, Value Out of Range, Value Too Long, and (postgres) DB pool exhaustion.
+ * Dispatch a raw driver error to its dialect translator → a pre-defined
+ * Directus error, or the raw error untouched if unrecognized. Translates:
+ * Invalid Foreign Key, Not Null Violation, Record Not Unique, Value Out of
+ * Range, Value Too Long, and (postgres) DB pool exhaustion.
  *
- * PURE — no `database.error` hook — so the error handler can run it on ANY unknown error to catch
- * DB/pool errors on reads too, without firing the hook for non-DB errors.
+ * PURE — no `database.error` hook — so the error handler can run it on ANY
+ * unknown error to catch DB/pool errors on reads too, without firing the hook
+ * for non-DB errors.
  */
 export async function extractDatabaseError(
 	error: SQLError,
@@ -39,7 +41,10 @@ export async function extractDatabaseError(
 	}
 }
 
-/** Dialect translation plus the `database.error` filter hook. Used at the write call-sites. */
+/**
+ * Dialect translation plus the `database.error` filter hook. Used at the write
+ * call-sites.
+ */
 export async function translateDatabaseError(
 	error: SQLError,
 	data: Partial<Item>,

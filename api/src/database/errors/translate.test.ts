@@ -55,7 +55,10 @@ describe('client dispatch', () => {
 	it('routes postgres errors through the postgres extractor', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
-		const result = await translateDatabaseError(asSqlError(uniqueError), { email: 'x' });
+		const result = await translateDatabaseError(
+			asSqlError(uniqueError),
+			{ email: 'x' },
+		);
 
 		expect(result).toBeInstanceOf(RecordNotUniqueError);
 	});
@@ -63,7 +66,10 @@ describe('client dispatch', () => {
 	it('routes cockroachdb errors through the postgres extractor', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('cockroachdb');
 
-		const result = await translateDatabaseError(asSqlError(uniqueError), { email: 'x' });
+		const result = await translateDatabaseError(
+			asSqlError(uniqueError),
+			{ email: 'x' },
+		);
 
 		expect(result).toBeInstanceOf(RecordNotUniqueError);
 	});
@@ -149,7 +155,10 @@ describe('database.error filter hook', () => {
 	it('passes the translated error through emitFilter', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
-		const result = await translateDatabaseError(asSqlError(uniqueError), { email: 'x' });
+		const result = await translateDatabaseError(
+			asSqlError(uniqueError),
+			{ email: 'x' },
+		);
 
 		expect(emitter.emitFilter).toHaveBeenCalledWith(
 			'database.error',
