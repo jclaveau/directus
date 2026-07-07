@@ -44,13 +44,12 @@ export async function translateDatabaseError(
 	error: SQLError,
 	data: Partial<Item>,
 ): Promise<any> {
-	const client = getDatabaseClient();
 	const defaultError = await extractDatabaseError(error, data);
 
 	const hookError = await emitter.emitFilter(
 		'database.error',
 		defaultError,
-		{ client },
+		{ client: getDatabaseClient() },
 		{
 			database: getDatabase(),
 			schema: null,

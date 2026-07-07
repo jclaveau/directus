@@ -145,11 +145,10 @@ export function getPoolExhaustedError(error: unknown): DatabasePoolExhaustedErro
 		? error['code']
 		: '';
 
-	const rawMessage = typeof error['message'] === 'string'
+	const message = (typeof error['message'] === 'string'
 		? error['message']
-		: '';
-
-	const message = rawMessage.toLowerCase();
+		: ''
+	).toLowerCase();
 
 	const isAcquireTimeout =
 		message.includes('timeout acquiring a connection') ||

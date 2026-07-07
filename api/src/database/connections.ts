@@ -21,8 +21,10 @@ export function getExtraConnectionNames(): string[] {
 	}
 
 	if (typeof value === 'string') {
-		const names = value.split(',').map((name) => name.trim());
-		return names.filter(Boolean);
+		return value
+			.split(',')
+			.map((name) => name.trim())
+			.filter(Boolean);
 	}
 
 	return [];
@@ -91,9 +93,9 @@ export function getConnectionNameForAccountability(
 	const best = [...candidateNames]
 		.map((name) => ({ name, priority: getConnectionPriority(name) }))
 		.reduce((winner, candidate) => {
-			const samePriority = candidate.priority === winner.priority;
-
-			const winsByName = samePriority && candidate.name.localeCompare(winner.name) < 0;
+			const winsByName =
+				candidate.priority === winner.priority &&
+				candidate.name.localeCompare(winner.name) < 0;
 
 			return candidate.priority > winner.priority || winsByName
 				? candidate

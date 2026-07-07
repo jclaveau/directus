@@ -5,10 +5,6 @@ export default (router, { services, getSchema }) => {
 	const { ItemsService } = services;
 
 	async function routedKnex(grants) {
-		const dbConnections = Array.isArray(grants)
-			? grants
-			: [];
-
 		const accountability = {
 			role: null,
 			roles: [],
@@ -16,13 +12,14 @@ export default (router, { services, getSchema }) => {
 			admin: false,
 			app: false,
 			ip: null,
-			dbConnections,
+			dbConnections: Array.isArray(grants)
+				? grants
+				: [],
 		};
 
 		const schema = await getSchema();
-		const service = new ItemsService('directus_users', { schema, accountability });
 
-		return service.knex;
+		return new ItemsService('directus_users', { schema, accountability }).knex;
 	}
 
 	router.post('/route', async (req, res) => {
@@ -53,11 +50,11 @@ export default (router, { services, getSchema }) => {
 		const knex = await routedKnex(req.body?.dbConnections);
 
 		try {
-			const queries = Array.from({ length: concurrency }, () => {
-				return knex.raw('SELECT pg_sleep(?)', [sleepSeconds]);
-			});
-
-			await Promise.all(queries);
+			await Promise.all(
+				Array.from({ length: concurrency }, () => {
+					return knex.raw('SELECT pg_sleep(?)', [sleepSeconds]);
+				}),
+			);
 
 			return res.json({ data: { exhausted: false } });
 		}

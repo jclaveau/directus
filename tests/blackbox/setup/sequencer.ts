@@ -16,8 +16,10 @@ export default class CustomSequencer extends BaseSequencer {
 		}
 
 		const project = files[0]![0].config.name as 'db' | 'common';
-		const paths = files.map(([, path]) => path);
-		const mine = new Set(filesForShard(paths, project, shard.index, shard.count));
+
+		const mine = new Set(
+			filesForShard(files.map(([, path]) => path), project, shard.index, shard.count),
+		);
 
 		return files.filter(([, path]) => mine.has(path));
 	}
