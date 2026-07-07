@@ -1,4 +1,4 @@
-import { createError } from '@directus/errors';
+import { createError, DatabasePoolExhaustedError } from '@directus/errors';
 import type { Accountability } from '@directus/types';
 import axios, { AxiosError } from 'axios';
 import type { Request, RequestHandler, Response } from 'express';
@@ -7,14 +7,13 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Logger } from 'pino';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import {
-	getConnectionNameForAccountability,
-	getDatabaseClient,
-} from '../database/index.js';
+import { getConnectionNameForAccountability } from '../database/index.js';
+import { extractDatabaseError } from '../database/errors/translate.js';
 import { useLogger } from '../logger/index.js';
 import * as errorHandlerMod from './error-handler.js';
 
 vi.mock('../database/index');
+vi.mock('../database/errors/translate.js');
 vi.mock('../logger/index');
 
 let mockRequest: Request;
@@ -194,7 +193,10 @@ describe('DirectusError', () => {
 
 describe('Database pool exhaustion', () => {
 	test('Translates a pool-acquire timeout to a 429 error', async () => {
-		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+		vi.mocked(extractDatabaseError).mockResolvedValueOnce(
+			new DatabasePoolExhaustedError({ reason: 'client_pool_timeout', connection: null }),
+		);
+
 		vi.mocked(getConnectionNameForAccountability).mockReturnValue('premium');
 
 		const error = new Error('Timeout acquiring a connection');

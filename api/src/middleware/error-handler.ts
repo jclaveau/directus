@@ -1,18 +1,11 @@
-import {
-	DatabasePoolExhaustedError,
-	ErrorCode,
-	InternalServerError,
-	isDirectusError,
-} from '@directus/errors';
+import { ErrorCode, InternalServerError, isDirectusError } from '@directus/errors';
 import type { DeepPartial } from '@directus/types';
 import { isObject } from '@directus/utils';
 import { getNodeEnv } from '@directus/utils/node';
 import type { ErrorRequestHandler } from 'express';
-import getDatabase, {
-	getConnectionNameForAccountability,
-	getDatabaseClient,
-} from '../database/index.js';
-import { getDatabasePoolExhaustedReason } from '../database/errors/pool-exhausted.js';
+import getDatabase, { getConnectionNameForAccountability } from '../database/index.js';
+import { extractDatabaseError } from '../database/errors/translate.js';
+import type { SQLError } from '../database/errors/dialects/types.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 
@@ -40,26 +33,31 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 		? err
 		: [err];
 
-	// Translate raw pool-exhaustion errors into the dedicated Directus error so
-	// clients can react by reason. Detection is dialect-scoped (pgbouncer is pg-only).
-	const client = getDatabaseClient();
+	// Route every unknown error through the DB dialect translator: it turns a raw driver error
+	// (constraint OR pool exhaustion, on reads or writes) into the dedicated Directus error, and
+	// returns non-DB errors untouched — so nothing is missed and the `database.error` hook (write
+	// path only) never fires here. Pool errors get the routed connection tier tagged on — only the
+	// request knows it.
+	const receivedErrors: unknown[] = await Promise.all(
+		rawErrors.map(async (error) => {
+			if (isDirectusError(error)) {
+				return error;
+			}
 
-	const receivedErrors: unknown[] = rawErrors.map((error) => {
-		if (isDirectusError(error)) {
-			return error;
-		}
+			const translated = await extractDatabaseError(error as SQLError, {});
 
-		const reason = getDatabasePoolExhaustedReason(error, client);
+			if (!isDirectusError(translated)) {
+				return error;
+			}
 
-		if (reason === null) {
-			return error;
-		}
+			if (isDirectusError(translated, ErrorCode.DatabasePoolExhausted)) {
+				const extensions = translated.extensions as { connection: string | null };
+				extensions.connection = getConnectionNameForAccountability(req.accountability);
+			}
 
-		return new DatabasePoolExhaustedError({
-			reason,
-			connection: getConnectionNameForAccountability(req.accountability),
-		});
-	});
+			return translated;
+		}),
+	);
 
 	for (const error of receivedErrors) {
 		// In dev mode, if available, expose stack trace under error's extensions data
