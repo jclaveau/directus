@@ -21,7 +21,8 @@ enum PostgresErrorCodes {
 }
 
 export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
-	// pgbouncer/tarn/postgres pool exhaustion (the connection tier is tagged on by the caller)
+	// pgbouncer/tarn/postgres pool exhaustion (the connection tier is tagged
+	// on by the caller)
 	const poolError = getPoolExhaustedError(error);
 
 	if (poolError) {
@@ -132,11 +133,14 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 }
 
 /**
- * Turn a raw pg/pgbouncer/tarn error into a DatabasePoolExhaustedError, or null if it isn't one.
- * The tarn/pgbouncer cases carry no SQLSTATE, so they're matched on the message. The connection
- * tier is left null here for the caller (the request) to tag on.
+ * Turn a raw pg/pgbouncer/tarn error into a DatabasePoolExhaustedError, or
+ * null if it isn't one. The tarn/pgbouncer cases carry no SQLSTATE, so they're
+ * matched on the message. The connection tier is left null here for the caller
+ * (the request) to tag on.
  */
-export function getPoolExhaustedError(error: unknown): DatabasePoolExhaustedError | null {
+export function getPoolExhaustedError(
+	error: unknown,
+): DatabasePoolExhaustedError | null {
 	if (!isObject(error)) {
 		return null;
 	}

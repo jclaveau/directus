@@ -1,4 +1,5 @@
 import type { Accountability } from '@directus/types';
+import { oneLine } from '@directus/utils';
 import type { Knex } from 'knex';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { fetchGlobalAccessForQuery } from './fetch-global-access-for-query.js';
@@ -96,10 +97,16 @@ test('Ignores policies that have an ip access restriction that does not match th
 	expect(res).toEqual({ admin: false, app: false, dbConnections: [] });
 });
 
-test('Unions db_connections across policies, splitting CSV and deduping', async () => {
+test(oneLine`
+	Unions db_connections across policies, splitting CSV and deduping
+`, async () => {
 	vi.mocked(qb.leftJoin).mockResolvedValue([
 		{ admin_access: false, app_access: false, db_connections: 'premium_pool' },
-		{ admin_access: false, app_access: false, db_connections: 'premium_pool,replica_a' },
+		{
+			admin_access: false,
+			app_access: false,
+			db_connections: 'premium_pool,replica_a',
+		},
 		{ admin_access: false, app_access: false, db_connections: null },
 	]);
 
@@ -123,7 +130,9 @@ test('Ignores db_connections from policies filtered out by ip access', async () 
 		},
 	]);
 
-	const res = await fetchGlobalAccessForQuery(qb, { ip: '1.1.1.1' } as Accountability);
+	const res = await fetchGlobalAccessForQuery(qb, {
+		ip: '1.1.1.1',
+	} as Accountability);
 
 	expect(res).toEqual({ admin: false, app: false, dbConnections: ['allowed_pool'] });
 });

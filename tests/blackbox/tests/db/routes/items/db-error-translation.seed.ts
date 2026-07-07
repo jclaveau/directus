@@ -22,11 +22,12 @@ export const seedDBStructure = () => {
 				await DeleteCollection(vendor, { collection: collectionUnique });
 				await DeleteCollection(vendor, { collection: collectionContainsNull });
 
-				// One batch POST creates all four collections, each with its fields folded in:
-				// - unique: a db-level unique field, no app validation, so a duplicate insert
-				//   reaches the database and surfaces as RECORD_NOT_UNIQUE.
-				// - contains_null: a nullable field the test later alters to NOT NULL while a
-				//   row holds null, surfacing CONTAINS_NULL_VALUES from the schema alter.
+				// One batch POST creates all four collections, each with its fields
+				// folded in:
+				// - unique: a db-level unique field, no app validation, so a duplicate
+				//   insert reaches the database and surfaces as RECORD_NOT_UNIQUE.
+				// - contains_null: a nullable field the test later alters to NOT NULL while
+				//   a row holds null, surfacing CONTAINS_NULL_VALUES from the schema alter.
 				// - fk_parent/fk_child: the child gets an M2O below, so pointing it at a
 				//   missing parent id surfaces INVALID_FOREIGN_KEY.
 				await CreateCollections(vendor, {

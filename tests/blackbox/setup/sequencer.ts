@@ -5,9 +5,10 @@ import { filesForShard } from './shard-files';
 import { sequentialTestsList } from './sequential-tests';
 
 export default class CustomSequencer extends BaseSequencer {
-	// Split files across `--shard=i/n` jobs, but keep every `before` file in each shard (the
-	// ordering barrier needs them) and the `after` chain in the last shard only. `sort()` then
-	// orders whatever this shard runs and writes the per-shard totalTestsCount.
+	// Split files across `--shard=i/n` jobs, but keep every `before` file in each
+	// shard (the ordering barrier needs them) and the `after` chain in the last
+	// shard only. `sort()` then orders whatever this shard runs and writes the
+	// per-shard totalTestsCount.
 	override async shard(files: WorkspaceSpec[]) {
 		const shard = this.ctx.config.shard;
 
@@ -18,7 +19,12 @@ export default class CustomSequencer extends BaseSequencer {
 		const project = files[0]![0].config.name as 'db' | 'common';
 
 		const mine = new Set(
-			filesForShard(files.map(([, path]) => path), project, shard.index, shard.count),
+			filesForShard(
+				files.map(([, path]) => path),
+				project,
+				shard.index,
+				shard.count,
+			),
 		);
 
 		return files.filter(([, path]) => mine.has(path));
@@ -63,7 +69,8 @@ export default class CustomSequencer extends BaseSequencer {
 						}
 					}
 					else if (!this.ctx.config.shard) {
-						// A sharded run legitimately lacks some sequential files; guard full runs only
+						// A sharded run legitimately lacks some sequential files;
+						// guard full runs only
 						throw new Error(`Non-existent test file "${sequentialTest}" in "before" list`);
 					}
 				}
@@ -81,7 +88,8 @@ export default class CustomSequencer extends BaseSequencer {
 						}
 					}
 					else if (!this.ctx.config.shard) {
-						// A sharded run legitimately lacks some sequential files; guard full runs only
+						// A sharded run legitimately lacks some sequential files;
+						// guard full runs only
 						throw new Error(`Non-existent test file "${sequentialTest}" in "after" list`);
 					}
 				}

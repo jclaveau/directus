@@ -59,7 +59,8 @@ export default (router, { services, getSchema }) => {
 			return res.json({ data: { exhausted: false } });
 		}
 		catch (error) {
-			// Let the global error handler translate the pool error → 429 DATABASE_POOL_EXHAUSTED
+			// Let the global error handler translate the pool error → 429
+			// DATABASE_POOL_EXHAUSTED
 			return next(error);
 		}
 	});

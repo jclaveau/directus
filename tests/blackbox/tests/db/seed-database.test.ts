@@ -31,11 +31,15 @@ describe('Seed Database Structure', async () => {
 	const shardCount = Number(process.env['SHARD_COUNT']);
 
 	if (Number.isInteger(shardIndex) && shardCount > 1) {
-		// Seed only the collections this shard's test files need (before/after seeds always kept).
-		const testFiles = await globby(['tests/db/**/*.test.ts', 'common/common.test.ts'], {
-			cwd: paths.cwd,
-			absolute: true,
-		});
+		// Seed only the collections this shard's test files need (before/after
+		// seeds always kept).
+		const testFiles = await globby(
+			['tests/db/**/*.test.ts', 'common/common.test.ts'],
+			{
+				cwd: paths.cwd,
+				absolute: true,
+			},
+		);
 
 		const known = new Set(testFiles);
 		const inShard = new Set(filesForShard(testFiles, 'db', shardIndex, shardCount));

@@ -13,7 +13,8 @@ const PG_FAMILY_NAMES = ['postgres', 'postgres10', 'cockroachdb'];
 
 const ROUTING_VENDORS = vendors.filter((vendor) => PG_FAMILY_NAMES.includes(vendor));
 
-// The exhaustion tests drive a real slow query (`pg_sleep`), which cockroachdb lacks.
+// The exhaustion tests drive a real slow query (`pg_sleep`), which cockroachdb
+// lacks.
 const PG_SLEEP_NAMES = ['postgres', 'postgres10'];
 
 const EXHAUST_VENDORS = vendors.filter((vendor) => PG_SLEEP_NAMES.includes(vendor));
@@ -113,15 +114,20 @@ describe('DB pool exhaustion error', () => {
 	it.each(EXHAUST_VENDORS)(
 		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when the client-side pool is saturated',
 		async (vendor) => {
-			// A tier that inherits the base db but caps its OWN knex/tarn pool at one connection
-			// with a tight acquire timeout — concurrent queries can't all get a connection and time
-			// out client-side (no pgbouncer involved). This is the client_pool_timeout reason.
+			// A tier that inherits the base db but caps its OWN knex/tarn pool at one
+			// connection with a tight acquire timeout — concurrent queries can't all get
+			// a connection and time out client-side (no pgbouncer involved). This is the
+			// client_pool_timeout reason.
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'tiny'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_PRIORITY', '100'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_POOL__MIN', '0'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_POOL__MAX', '1'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_POOL__ACQUIRE_TIMEOUT_MILLIS', '150'),
+				setDirectusEnv(
+					vendor,
+					'DB_CONNECTION_TINY_POOL__ACQUIRE_TIMEOUT_MILLIS',
+					'150',
+				),
 			]);
 
 			const response = await request(getUrl(vendor))
@@ -130,7 +136,11 @@ describe('DB pool exhaustion error', () => {
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(429);
-			expect(response.body.errors[0].extensions.code).toBe('DATABASE_POOL_EXHAUSTED');
+
+			expect(response.body.errors[0].extensions.code).toBe(
+				'DATABASE_POOL_EXHAUSTED',
+			);
+
 			expect(response.body.errors[0].extensions.reason).toBe('client_pool_timeout');
 			expect(response.headers['retry-after']).toBe('1');
 		},
@@ -141,9 +151,10 @@ describe('DB pool exhaustion error', () => {
 		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when the pgbouncer queue times out',
 		async (vendor) => {
 			// A tier routed through pgbouncer (docker-compose: transaction pool_mode,
-			// default_pool_size=1, query_wait_timeout=1s, max_client_conn=2). Two concurrent
-			// queries both connect (at the client cap), one queues on the single server
-			// connection, and pgbouncer raises `query_wait_timeout` — the pool_queue_timeout reason.
+			// default_pool_size=1, query_wait_timeout=1s, max_client_conn=2). Two
+			// concurrent queries both connect (at the client cap), one queues on the
+			// single server connection, and pgbouncer raises `query_wait_timeout` — the
+			// pool_queue_timeout reason.
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bouncer'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PRIORITY', '100'),
@@ -157,7 +168,11 @@ describe('DB pool exhaustion error', () => {
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(429);
-			expect(response.body.errors[0].extensions.code).toBe('DATABASE_POOL_EXHAUSTED');
+
+			expect(response.body.errors[0].extensions.code).toBe(
+				'DATABASE_POOL_EXHAUSTED',
+			);
+
 			expect(response.body.errors[0].extensions.reason).toBe('pool_queue_timeout');
 			expect(response.headers['retry-after']).toBe('1');
 		},
@@ -184,8 +199,15 @@ describe('DB pool exhaustion error', () => {
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(429);
-			expect(response.body.errors[0].extensions.code).toBe('DATABASE_POOL_EXHAUSTED');
-			expect(response.body.errors[0].extensions.reason).toBe('max_client_connections');
+
+			expect(response.body.errors[0].extensions.code).toBe(
+				'DATABASE_POOL_EXHAUSTED',
+			);
+
+			expect(response.body.errors[0].extensions.reason).toBe(
+				'max_client_connections',
+			);
+
 			expect(response.headers['retry-after']).toBe('1');
 		},
 		300_000,

@@ -3,7 +3,9 @@ import type { DeepPartial } from '@directus/types';
 import { isObject } from '@directus/utils';
 import { getNodeEnv } from '@directus/utils/node';
 import type { ErrorRequestHandler } from 'express';
-import getDatabase, { getConnectionNameForAccountability } from '../database/index.js';
+import getDatabase, {
+	getConnectionNameForAccountability,
+} from '../database/index.js';
 import { extractDatabaseError } from '../database/errors/translate.js';
 import type { SQLError } from '../database/errors/dialects/types.js';
 import emitter from '../emitter.js';
@@ -30,11 +32,12 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 		? err
 		: [err];
 
-	// Route every unknown error through the DB dialect translator: it turns a raw driver error
-	// (constraint OR pool exhaustion, on reads or writes) into the dedicated Directus error, and
-	// returns non-DB errors untouched — so nothing is missed and the `database.error` hook (write
-	// path only) never fires here. Pool errors get the routed connection tier tagged on — only the
-	// request knows it.
+	// Route every unknown error through the DB dialect translator: it turns a
+	// raw driver error (constraint OR pool exhaustion, on reads or writes) into
+	// the dedicated Directus error, and returns non-DB errors untouched — so
+	// nothing is missed and the `database.error` hook (write path only) never
+	// fires here. Pool errors get the routed connection tier tagged on — only
+	// the request knows it.
 	const receivedErrors: unknown[] = await Promise.all(
 		rawErrors.map(async (error) => {
 			if (isDirectusError(error)) {

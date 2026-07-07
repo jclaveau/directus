@@ -7,6 +7,7 @@ import {
 	ValueOutOfRangeError,
 	ValueTooLongError,
 } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import { describe, expect, it } from 'vitest';
 import { extractError, getPoolExhaustedError } from './postgres.js';
 import type { PostgresError } from './types.js';
@@ -196,7 +197,9 @@ describe('pool exhaustion (folded into extractError)', () => {
 		expect(extractError(error, {})).toBeInstanceOf(DatabasePoolExhaustedError);
 	});
 
-	it('maps a tarn acquire timeout (no SQLSTATE) to DatabasePoolExhaustedError', () => {
+	it(oneLine`
+		maps a tarn acquire timeout (no SQLSTATE) to DatabasePoolExhaustedError
+	`, () => {
 		const error = pgError({ message: 'Timeout acquiring a connection' });
 
 		expect(extractError(error, {})).toBeInstanceOf(DatabasePoolExhaustedError);

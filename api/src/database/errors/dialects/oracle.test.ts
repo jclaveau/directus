@@ -25,7 +25,10 @@ describe('contains null values (ORA-02296)', () => {
 	});
 
 	it('returns the raw error when the message has no quoted identifiers', () => {
-		const error = oracleError({ errorNum: 2296, message: 'ORA-02296: cannot enable' });
+		const error = oracleError({
+			errorNum: 2296,
+			message: 'ORA-02296: cannot enable',
+		});
 
 		expect(extractError(error)).toBe(error);
 	});
@@ -33,7 +36,10 @@ describe('contains null values (ORA-02296)', () => {
 
 describe('unhandled code', () => {
 	it('returns the raw error for an unknown Oracle error number', () => {
-		const error = oracleError({ errorNum: 1, message: 'ORA-00001: unique constraint' });
+		const error = oracleError({
+			errorNum: 1,
+			message: 'ORA-00001: unique constraint',
+		});
 
 		expect(extractError(error)).toBe(error);
 	});

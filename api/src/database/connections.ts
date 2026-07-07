@@ -7,12 +7,18 @@ import getDatabase, { constructDatabase } from './index.js';
 
 const namedDatabases = new Map<string, Knex>();
 
-/** Name of the default pool (`DB_DEFAULT_CONNECTION_NAME`); policies may grant it too. */
+/**
+ * Name of the default pool (`DB_DEFAULT_CONNECTION_NAME`); policies may grant
+ * it too.
+ */
 export function getDefaultConnectionName(): string {
 	return String(useEnv()['DB_DEFAULT_CONNECTION_NAME'] ?? 'default');
 }
 
-/** Names of the extra connections from `DB_CONNECTIONS` (array when cast, CSV at runtime). */
+/**
+ * Names of the extra connections from `DB_CONNECTIONS` (array when cast, CSV
+ * at runtime).
+ */
 export function getExtraConnectionNames(): string[] {
 	const value = useEnv()['DB_CONNECTIONS'];
 
@@ -37,7 +43,11 @@ export function getBaseDbConfig(): Record<string, any> {
 	);
 
 	return getConfigFromEnv('DB_', {
-		omitPrefix: ['DB_EXCLUDE_TABLES', 'DB_DEFAULT_CONNECTION', ...connectionPrefixes],
+		omitPrefix: [
+			'DB_EXCLUDE_TABLES',
+			'DB_DEFAULT_CONNECTION',
+			...connectionPrefixes,
+		],
 		omitKey: [
 			'DB_BATCH_INSERT_CHUNK_SIZE',
 			'DB_MSSQL_TRUST_BATCH_RETURNING',
@@ -46,7 +56,10 @@ export function getBaseDbConfig(): Record<string, any> {
 	});
 }
 
-/** Priority of a connection (`_PRIORITY` env); higher wins. Default pool has its own knob. */
+/**
+ * Priority of a connection (`_PRIORITY` env); higher wins. Default pool has
+ * its own knob.
+ */
 export function getConnectionPriority(name: string): number {
 	if (name === getDefaultConnectionName()) {
 		return Number(useEnv()['DB_DEFAULT_CONNECTION_PRIORITY'] ?? 0) || 0;
@@ -62,7 +75,9 @@ export function assertConnectionNamesAreUnique(): void {
 
 	for (const name of getExtraConnectionNames()) {
 		if (seen.has(name)) {
-			throw new Error(`Duplicate DB connection name "${name}" — names must be unique`);
+			throw new Error(
+				`Duplicate DB connection name "${name}" — names must be unique`,
+			);
 		}
 
 		seen.add(name);
@@ -70,9 +85,10 @@ export function assertConnectionNamesAreUnique(): void {
 }
 
 /**
- * Resolve the connection name a request should use: the highest-priority among the
- * default pool (always a candidate) and the configured connections the user's policies
- * grant. Ties break by name, so a winner must outrank `DB_DEFAULT_CONNECTION_PRIORITY`.
+ * Resolve the connection name a request should use: the highest-priority
+ * among the default pool (always a candidate) and the configured connections
+ * the user's policies grant. Ties break by name, so a winner must outrank
+ * `DB_DEFAULT_CONNECTION_PRIORITY`.
  */
 export function getConnectionNameForAccountability(
 	accountability?: Accountability | null,
@@ -80,7 +96,8 @@ export function getConnectionNameForAccountability(
 	const defaultName = getDefaultConnectionName();
 	const extra = getExtraConnectionNames();
 
-	// The default pool always competes; add every granted connection that is configured
+	// The default pool always competes; add every granted connection that
+	// is configured
 	const candidateNames = new Set<string>([defaultName]);
 
 	for (const name of accountability?.dbConnections ?? []) {
@@ -105,7 +122,10 @@ export function getConnectionNameForAccountability(
 	return best.name;
 }
 
-/** The knex a request routes to (default name → base pool; named pools build lazily). */
+/**
+ * The knex a request routes to (default name → base pool; named pools build
+ * lazily).
+ */
 export function getDatabaseForAccountability(
 	accountability?: Accountability | null,
 ): Knex {
