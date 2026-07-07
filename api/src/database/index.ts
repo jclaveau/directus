@@ -2,7 +2,7 @@ import { useEnv } from '@directus/env';
 import type { SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
 import { isObject } from '@directus/utils';
-import type { Accountability, DatabaseClient } from '@directus/types';
+import type { DatabaseClient } from '@directus/types';
 import fse from 'fs-extra';
 import type { Knex } from 'knex';
 import knex from 'knex';
@@ -14,9 +14,14 @@ import { performance } from 'perf_hooks';
 import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
-import { getConfigFromEnv } from '../utils/get-config-from-env.js';
 import { validateEnv } from '../utils/validate-env.js';
+import { assertConnectionNamesAreUnique, getBaseDbConfig } from './connections.js';
 import { getHelpers } from './helpers/index.js';
+
+export {
+	getConnectionNameForAccountability,
+	getDatabaseForAccountability,
+} from './connections.js';
 
 type QueryInfo = Partial<Knex.Sql> & {
 	sql: Knex.Sql['sql'];
@@ -26,72 +31,11 @@ type QueryInfo = Partial<Knex.Sql> & {
 };
 
 let database: Knex | null = null;
-const namedDatabases = new Map<string, Knex>();
 let inspector: SchemaInspector | null = null;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default getDatabase;
-
-/** Name of the default pool (`DB_DEFAULT_CONNECTION_NAME`); policies may grant it too. */
-function getDefaultConnectionName(): string {
-	return String(useEnv()['DB_DEFAULT_CONNECTION_NAME'] ?? 'default');
-}
-
-/** Names of the extra connections from `DB_CONNECTIONS` (array when cast, CSV at runtime). */
-function getExtraConnectionNames(): string[] {
-	const value = useEnv()['DB_CONNECTIONS'];
-
-	if (Array.isArray(value)) {
-		return value.map(String).filter(Boolean);
-	}
-
-	if (typeof value === 'string') {
-		const names = value.split(',').map((name) => name.trim());
-		return names.filter(Boolean);
-	}
-
-	return [];
-}
-
-/** Base `DB_*` config, with every named-connection namespace stripped off. */
-function getBaseDbConfig(): Record<string, any> {
-	const connectionPrefixes = getExtraConnectionNames().map(
-		(name) => `DB_CONNECTION_${name.toUpperCase()}_`,
-	);
-
-	return getConfigFromEnv('DB_', {
-		omitPrefix: ['DB_EXCLUDE_TABLES', 'DB_DEFAULT_CONNECTION', ...connectionPrefixes],
-		omitKey: [
-			'DB_BATCH_INSERT_CHUNK_SIZE',
-			'DB_MSSQL_TRUST_BATCH_RETURNING',
-			'DB_CONNECTIONS',
-		],
-	});
-}
-
-/** Priority of a connection (`_PRIORITY` env); higher wins. Default pool has its own knob. */
-function getConnectionPriority(name: string): number {
-	if (name === getDefaultConnectionName()) {
-		return Number(useEnv()['DB_DEFAULT_CONNECTION_PRIORITY'] ?? 0) || 0;
-	}
-
-	const { priority } = getConfigFromEnv(`DB_CONNECTION_${name.toUpperCase()}_`);
-	return Number(priority ?? 0) || 0;
-}
-
-/** Connection names must be unique (default + `DB_CONNECTIONS`); else boot fails. */
-function assertConnectionNamesAreUnique(): void {
-	const seen = new Set([getDefaultConnectionName()]);
-
-	for (const name of getExtraConnectionNames()) {
-		if (seen.has(name)) {
-			throw new Error(`Duplicate DB connection name "${name}" — names must be unique`);
-		}
-
-		seen.add(name);
-	}
-}
 
 export function getDatabase(): Knex {
 	if (database) {
@@ -157,7 +101,7 @@ export function getDatabase(): Knex {
  * Build a knex instance from a resolved DB config. Shared by the default pool and named
  * connections so both get the same client-specific pool hooks and query instrumentation.
  */
-function constructDatabase(config: Record<string, any>): Knex {
+export function constructDatabase(config: Record<string, any>): Knex {
 	const logger = useLogger();
 	const metrics = useMetrics();
 
@@ -294,76 +238,6 @@ function constructDatabase(config: Record<string, any>): Knex {
 		});
 
 	return dbInstance;
-}
-
-/** Lazily build (and cache) a named connection; the default name → base pool. */
-function getNamedDatabase(name: string): Knex {
-	if (name === getDefaultConnectionName()) {
-		return getDatabase();
-	}
-
-	const existing = namedDatabases.get(name);
-
-	if (existing) {
-		return existing;
-	}
-
-	const { priority: _priority, ...override } = getConfigFromEnv(
-		`DB_CONNECTION_${name.toUpperCase()}_`,
-	);
-
-	const db = constructDatabase(merge({}, getBaseDbConfig(), override));
-
-	namedDatabases.set(name, db);
-	return db;
-}
-
-/**
- * Resolve the connection name a request should use: the highest-priority among the
- * default pool (always a candidate) and the configured connections the user's policies
- * grant. Ties break by name, so a winner must outrank `DB_DEFAULT_CONNECTION_PRIORITY`.
- */
-function resolveConnectionName(accountability?: Accountability | null): string {
-	const defaultName = getDefaultConnectionName();
-	const extra = getExtraConnectionNames();
-
-	// The default pool always competes; add every granted connection that is configured
-	const candidateNames = new Set<string>([defaultName]);
-
-	for (const name of accountability?.dbConnections ?? []) {
-		if (name === defaultName || extra.includes(name)) {
-			candidateNames.add(name);
-		}
-	}
-
-	// Default is always a candidate → array never empty; reduce keeps `best` set.
-	const best = [...candidateNames]
-		.map((name) => ({ name, priority: getConnectionPriority(name) }))
-		.reduce((winner, candidate) => {
-			const samePriority = candidate.priority === winner.priority;
-
-			const winsByName = samePriority && candidate.name.localeCompare(winner.name) < 0;
-
-			return candidate.priority > winner.priority || winsByName
-				? candidate
-				: winner;
-		});
-
-	return best.name;
-}
-
-/** The knex a request routes to (default name → base pool; named pools build lazily). */
-export function getDatabaseForAccountability(
-	accountability?: Accountability | null,
-): Knex {
-	return getNamedDatabase(resolveConnectionName(accountability));
-}
-
-/** Name of the connection a request routes to (tags pool errors with the tier). */
-export function getConnectionNameForAccountability(
-	accountability?: Accountability | null,
-): string {
-	return resolveConnectionName(accountability);
 }
 
 export function getSchemaInspector(database?: Knex): SchemaInspector {
