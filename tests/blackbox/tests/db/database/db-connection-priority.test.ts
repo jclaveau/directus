@@ -5,9 +5,10 @@ import { setDirectusEnv } from '@utils/set-directus-env';
 import request from 'supertest';
 import { afterAll, describe, expect, it } from 'vitest';
 
-// Routing is DB-client-agnostic, so probe on the pg family only: their knex connection config
-// exposes `.database` (sqlite uses a filename), and they never run validateDatabaseCharset's MySQL
-// collation query, so a connection that points at a fake database is safe to build.
+// Routing is DB-client-agnostic, so probe on the pg family only: their knex
+// connection config exposes `.database` (sqlite uses a filename), and they never
+// run validateDatabaseCharset's MySQL collation query — so a connection pointing
+// at a fake database is safe to build.
 const PG_FAMILY = ['postgres', 'postgres10', 'cockroachdb'];
 
 const PROBE_VENDORS = vendors.filter((vendor) => PG_FAMILY.includes(vendor));
@@ -37,8 +38,8 @@ describe('DB connection priority routing', () => {
 		}
 	});
 
-	// When the active vendor set has no pg-family member (e.g. a sqlite3-only run) there is nothing
-	// to probe; register a skipped test so the file is never an empty suite (which vitest fails on).
+	// No pg-family vendor active (e.g. sqlite3-only run) → nothing to probe.
+	// Register a skipped test so the file isn't an empty suite (vitest fails).
 	if (PROBE_VENDORS.length === 0) {
 		it.skip('no pg-family vendor in this run', () => {
 			// nothing to probe
@@ -91,7 +92,7 @@ describe('DB pool exhaustion error', () => {
 		}
 	});
 
-	// Keep the suite non-empty when no pg vendor (with pg_sleep) is active — vitest fails on it.
+	// Keep the suite non-empty when no pg vendor is active (vitest fails on empty).
 	if (EXHAUST_VENDORS.length === 0) {
 		it.skip('no pg vendor for pg_sleep in this run', () => {
 			// nothing to exhaust

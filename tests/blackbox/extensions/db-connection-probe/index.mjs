@@ -1,6 +1,6 @@
-// Probes DB connection routing. `/route` reports which connection a set of policy grants resolves
-// to (reads the resolved knex's target db, no query). `/exhaust` actually saturates a min-sized
-// pool so the real pool-exhaustion error surfaces through Directus (→ 429 DATABASE_POOL_EXHAUSTED).
+// Probes DB connection routing. `/route` reports which connection a set of grants
+// resolves to (reads the knex's target db, no query). `/exhaust` saturates a
+// one-connection pool so the real pool-exhaustion error surfaces (→ 429).
 export default (router, { services, getSchema }) => {
 	const { ItemsService } = services;
 
