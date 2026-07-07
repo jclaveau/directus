@@ -91,6 +91,13 @@ describe('DB pool exhaustion error', () => {
 		}
 	});
 
+	// Keep the suite non-empty when no pg vendor (with pg_sleep) is active — vitest fails on it.
+	if (EXHAUST_VENDORS.length === 0) {
+		it.skip('no pg vendor for pg_sleep in this run', () => {
+			// nothing to exhaust
+		});
+	}
+
 	it.each(EXHAUST_VENDORS)(
 		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when a tier pool is saturated',
 		async (vendor) => {
