@@ -1,6 +1,5 @@
 import {
-	CreateCollection,
-	CreateField,
+	CreateCollections,
 	CreateFieldM2O,
 	DeleteCollection,
 } from '@common/functions';
@@ -23,50 +22,40 @@ export const seedDBStructure = () => {
 				await DeleteCollection(vendor, { collection: collectionUnique });
 				await DeleteCollection(vendor, { collection: collectionContainsNull });
 
-				// A db-level unique field, without app-level validation, so a duplicate
-				// insert reaches the database and surfaces as RECORD_NOT_UNIQUE.
-				await CreateCollection(vendor, {
-					collection: collectionUnique,
-					meta: {},
-					schema: {},
-				});
-
-				await CreateField(vendor, {
-					collection: collectionUnique,
-					field: 'code',
-					type: 'string',
-					meta: {},
-					schema: { is_unique: true },
-				});
-
-				// A nullable field the test later alters to NOT NULL while a row holds a
-				// null, which surfaces as CONTAINS_NULL_VALUES from the schema alter.
-				await CreateCollection(vendor, {
-					collection: collectionContainsNull,
-					meta: {},
-					schema: {},
-				});
-
-				await CreateField(vendor, {
-					collection: collectionContainsNull,
-					field: 'label',
-					type: 'string',
-					meta: {},
-					schema: { is_nullable: true },
-				});
-
-				// A child with an M2O to a parent, so pointing it at a missing parent id
-				// reaches the database and surfaces as INVALID_FOREIGN_KEY.
-				await CreateCollection(vendor, {
-					collection: collectionFkParent,
-					meta: {},
-					schema: {},
-				});
-
-				await CreateCollection(vendor, {
-					collection: collectionFkChild,
-					meta: {},
-					schema: {},
+				// One batch POST creates all four collections, each with its fields folded in:
+				// - unique: a db-level unique field, no app validation, so a duplicate insert
+				//   reaches the database and surfaces as RECORD_NOT_UNIQUE.
+				// - contains_null: a nullable field the test later alters to NOT NULL while a
+				//   row holds null, surfacing CONTAINS_NULL_VALUES from the schema alter.
+				// - fk_parent/fk_child: the child gets an M2O below, so pointing it at a
+				//   missing parent id surfaces INVALID_FOREIGN_KEY.
+				await CreateCollections(vendor, {
+					collections: [
+						{
+							collection: collectionUnique,
+							fields: [
+								{
+									field: 'code',
+									type: 'string',
+									meta: {},
+									schema: { is_unique: true },
+								},
+							],
+						},
+						{
+							collection: collectionContainsNull,
+							fields: [
+								{
+									field: 'label',
+									type: 'string',
+									meta: {},
+									schema: { is_nullable: true },
+								},
+							],
+						},
+						{ collection: collectionFkParent },
+						{ collection: collectionFkChild },
+					],
 				});
 
 				await CreateFieldM2O(vendor, {
