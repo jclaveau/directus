@@ -1,5 +1,11 @@
 import { useEnv } from '@directus/env';
-import type { EventContext, Filter, ScopedCacheTag, Type } from '@directus/types';
+import type {
+	EventContext,
+	Filter,
+	ScopedCachePath,
+	ScopedCacheTag,
+	Type,
+} from '@directus/types';
 import type Keyv from 'keyv';
 import emitter from './emitter.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -315,7 +321,7 @@ export function pinnedScopedCacheTagsFromFilter(
 	filter: Filter | null | undefined,
 	fieldTypes: Record<string, Type | undefined> = {},
 	relatedPrimaryKeys: Record<string, string> = {},
-	scopedCachePaths: { field: string; segments: string[] }[] = [],
+	scopedCachePaths: ScopedCachePath[] = [],
 ): ScopedCacheTag[] {
 	if (!filter || (fields.length === 0 && scopedCachePaths.length === 0)) {
 		return [];
@@ -326,7 +332,7 @@ export function pinnedScopedCacheTagsFromFilter(
 	// A relational-path scope field (`enrollment.student.user`) is pinned by walking
 	// the nested filter down its segments to the terminal `_eq`/`_in` (`evalPathsAt`).
 	// Grouped by head segment so a filter key can look up the paths it starts.
-	const pathsByHead = new Map<string, { field: string; segments: string[] }[]>();
+	const pathsByHead = new Map<string, ScopedCachePath[]>();
 
 	for (const path of scopedCachePaths) {
 		const head = path.segments[0];

@@ -16,6 +16,7 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
+	ScopedCachePath,
 	ScopedCacheTag,
 	Type,
 	WithMeta,
@@ -246,8 +247,8 @@ implements AbstractService<Item> {
 	// Path scope fields (`enrollment.student.user`) resolving to an all-M2O chain,
 	// with the segments the read pinner walks. An unresolvable path (a to-many hop
 	// or unknown field) is dropped → it degrades to the bare tag on both sides.
-	private get collectionScopedCachePaths(): { field: string; segments: string[] }[] {
-		const paths: { field: string; segments: string[] }[] = [];
+	private get collectionScopedCachePaths(): ScopedCachePath[] {
+		const paths: ScopedCachePath[] = [];
 
 		for (const field of this.collectionScopedCacheFields) {
 			if (!field.includes('.')) {
