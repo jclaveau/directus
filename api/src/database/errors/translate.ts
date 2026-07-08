@@ -5,6 +5,7 @@ import { extractError as mysql } from './dialects/mysql.js';
 import { extractError as oracle } from './dialects/oracle.js';
 import { extractError as postgres } from './dialects/postgres.js';
 import { extractError as sqlite } from './dialects/sqlite.js';
+import type { Knex } from 'knex';
 import type { SQLError } from './dialects/types.js';
 import type { Item } from '@directus/types';
 
@@ -21,8 +22,11 @@ import type { Item } from '@directus/types';
 export async function extractDatabaseError(
 	error: SQLError,
 	data: Partial<Item>,
+	database?: Knex,
 ): Promise<any> {
-	const client = getDatabaseClient();
+	// Dispatch on the connection the query actually ran on — a granted named
+	// connection may be a different client than the default pool.
+	const client = getDatabaseClient(database);
 
 	switch (client) {
 		case 'mysql':
@@ -48,15 +52,16 @@ export async function extractDatabaseError(
 export async function translateDatabaseError(
 	error: SQLError,
 	data: Partial<Item>,
+	database?: Knex,
 ): Promise<any> {
-	const defaultError = await extractDatabaseError(error, data);
+	const defaultError = await extractDatabaseError(error, data, database);
 
 	const hookError = await emitter.emitFilter(
 		'database.error',
 		defaultError,
-		{ client: getDatabaseClient() },
+		{ client: getDatabaseClient(database) },
 		{
-			database: getDatabase(),
+			database: database ?? getDatabase(),
 			schema: null,
 			accountability: null,
 		},

@@ -533,7 +533,7 @@ implements AbstractService<Item> {
 				}
 			}
 			catch (err: any) {
-				const dbError = await translateDatabaseError(err, data);
+				const dbError = await translateDatabaseError(err, data, this.knex);
 
 				if (isDirectusError(dbError, ErrorCode.RecordNotUnique) && dbError.extensions.primaryKey) {
 					// This is a MySQL specific thing we need to handle here, since MySQL does not return the field name
@@ -1214,7 +1214,7 @@ implements AbstractService<Item> {
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
-					throw await translateDatabaseError(err, data);
+					throw await translateDatabaseError(err, data, this.knex);
 				}
 			}
 
