@@ -80,7 +80,7 @@ describe('getAccountabilityForToken', async () => {
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: true,
 			admin: true,
-			dbConnections: ['premium_pool'],
+			dbConnections: ['premium'],
 		});
 
 		const result = await getAccountabilityForToken(token);
@@ -93,7 +93,7 @@ describe('getAccountabilityForToken', async () => {
 			roles: [],
 			ip: null,
 			share: 'share-id',
-			dbConnections: ['premium_pool'],
+			dbConnections: ['premium'],
 		});
 	});
 

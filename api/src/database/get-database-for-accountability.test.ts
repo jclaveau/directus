@@ -56,16 +56,16 @@ beforeEach(() => {
 		DB_DATABASE: 'directus',
 		DB_USER: 'u',
 		DB_PASSWORD: 'p',
-		DB_CONNECTIONS: ['premium_pool'],
-		DB_CONNECTION_PREMIUM_POOL_DATABASE: 'directus_premium',
-		DB_CONNECTION_PREMIUM_POOL_PRIORITY: 100,
+		DB_CONNECTIONS: ['premium'],
+		DB_CONNECTION_PREMIUM_DATABASE: 'directus_premium',
+		DB_CONNECTION_PREMIUM_PRIORITY: 100,
 	});
 });
 
 test('Routes to the highest-priority granted connection', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	const acc = { dbConnections: ['premium_pool'] } as Accountability;
+	const acc = { dbConnections: ['premium'] } as Accountability;
 	const db = getDatabaseForAccountability(acc);
 
 	expect(connectedDatabaseOf(db)).toBe('directus_premium');
@@ -91,7 +91,7 @@ test('Refuses to build when a connection name equals the default name', async ()
 });
 
 test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async () => {
-	mockEnv['DB_CONNECTIONS'] = 'premium_pool, replica_a';
+	mockEnv['DB_CONNECTIONS'] = 'premium, replica_a';
 	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
 	mockEnv['DB_CONNECTION_REPLICA_A_PRIORITY'] = 10;
 
@@ -100,24 +100,24 @@ test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async ()
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['replica_a', 'premium_pool'] } as Accountability,
+				{ dbConnections: ['replica_a', 'premium'] } as Accountability,
 			),
 		),
 	).toBe('directus_premium');
 });
 
 test('Picks the higher priority regardless of grant order', async () => {
-	mockEnv['DB_CONNECTIONS'] = ['premium_pool', 'replica_a'];
+	mockEnv['DB_CONNECTIONS'] = ['premium', 'replica_a'];
 	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
 	mockEnv['DB_CONNECTION_REPLICA_A_PRIORITY'] = 10;
 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	// replica_a (10) listed first is a decoy for the higher premium_pool (100)
+	// replica_a (10) listed first is a decoy for the higher premium (100)
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['replica_a', 'premium_pool'] } as Accountability,
+				{ dbConnections: ['replica_a', 'premium'] } as Accountability,
 			),
 		),
 	).toBe('directus_premium');
@@ -144,14 +144,14 @@ test('Falls back when the granted connection is not configured', async () => {
 });
 
 test('Falls back when no granted connection outranks the default', async () => {
-	mockEnv['DB_CONNECTION_PREMIUM_POOL_PRIORITY'] = 0;
+	mockEnv['DB_CONNECTION_PREMIUM_PRIORITY'] = 0;
 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['premium_pool'] } as Accountability,
+				{ dbConnections: ['premium'] } as Accountability,
 			),
 		),
 	).toBe('directus');
