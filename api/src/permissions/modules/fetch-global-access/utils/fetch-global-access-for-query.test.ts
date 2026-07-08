@@ -139,3 +139,39 @@ test('Ignores db_connections from policies filtered out by ip access', async () 
 		grantedDbConnections: ['allowed_pool'],
 	});
 });
+
+test(oneLine`
+	Collects db_connections from policies after the admin policy, despite the
+	admin short-circuit
+`, async () => {
+	vi.mocked(qb.leftJoin).mockResolvedValue([
+		{ admin_access: true, app_access: false, db_connections: null },
+		{ admin_access: false, app_access: false, db_connections: 'premium' },
+	]);
+
+	const res = await fetchGlobalAccessForQuery(qb, { ip: null });
+
+	expect(res).toEqual({
+		admin: true,
+		app: true,
+		grantedDbConnections: ['premium'],
+	});
+});
+
+test('Trims whitespace around CSV db_connections names', async () => {
+	vi.mocked(qb.leftJoin).mockResolvedValue([
+		{
+			admin_access: false,
+			app_access: false,
+			db_connections: 'premium, replica_a',
+		},
+	]);
+
+	const res = await fetchGlobalAccessForQuery(qb, { ip: null });
+
+	expect(res).toEqual({
+		admin: false,
+		app: false,
+		grantedDbConnections: ['premium', 'replica_a'],
+	});
+});
