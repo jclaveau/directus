@@ -146,6 +146,23 @@ test('A share token (no granted connections) uses the default pool', async () =>
 	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 });
 
+test('A public share routes to the configured share pool', async () => {
+	mockEnv['DB_PUBLIC_SHARE_CONNECTION_NAME'] = 'premium';
+
+	const { getDatabaseForAccountability } = await import('./index.js');
+
+	// A share lands on the dedicated share pool, off the base pool …
+	const share = createDefaultAccountability({ share: 'a-share-id' });
+
+	expect(connectedDatabaseOf(getDatabaseForAccountability(share))).toBe(
+		'directus_premium',
+	);
+
+	// … while a non-share request is unaffected (the override is share-gated).
+	const authed = createDefaultAccountability({});
+	expect(connectedDatabaseOf(getDatabaseForAccountability(authed))).toBe('directus');
+});
+
 test('Falls back when the granted connection is not configured', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 

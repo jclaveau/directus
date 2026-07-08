@@ -131,10 +131,16 @@ PUBLIC_URL="/"
 # default (base DB_*) pool always competes, under the name below.
 # DB_DEFAULT_CONNECTION_NAME="default"  # name to grant the base DB_* pool
 # DB_DEFAULT_CONNECTION_PRIORITY=0  # raise so the base pool can outrank grants
-# DB_CONNECTIONS="premium"
+# DB_CONNECTIONS="premium,shares"
 # DB_CONNECTION_PREMIUM_DATABASE="directus_premium"  # the pgbouncer pool db
 # DB_CONNECTION_PREMIUM_POOL__MAX=40  # knex client pool cap (per process), not pgbouncer's
 # DB_CONNECTION_PREMIUM_PRIORITY=100
+# DB_CONNECTION_SHARES_DATABASE="directus_shares"  # a small, capped pgbouncer pool
+# DB_CONNECTION_SHARES_POOL__MAX=5
+# Route anonymous public-share traffic to its own connection so it can't starve
+# the base pool. Must name a configured connection (or the default); a small,
+# dedicated pool — never the premium one.
+# DB_PUBLIC_SHARE_CONNECTION_NAME="shares"
 
 ####################################################################################################
 ### Rate Limiting

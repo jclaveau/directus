@@ -26,10 +26,11 @@ const PGBOUNCER_VENDORS = vendors.filter((vendor) => vendor === 'postgres');
 async function grantedDatabase(
 	vendor: Vendor,
 	grants: string[],
+	share?: string,
 ): Promise<string> {
 	const response = await request(getUrl(vendor))
 		.post('/db-connection-probe/granted')
-		.send({ grantedDbConnections: grants })
+		.send({ grantedDbConnections: grants, share })
 		.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 	expect(response.statusCode).toBe(200);
@@ -300,6 +301,41 @@ describe('DB connection pool isolation', () => {
 
 			// … while premium is genuinely saturated (non-vacuity control)
 			expect(results.premium.ok).toBe(false);
+		},
+		300_000,
+	);
+});
+
+describe('DB public share connection', () => {
+	afterAll(async () => {
+		for (const vendor of GRANT_VENDORS) {
+			await setDirectusEnv(vendor, 'DB_CONNECTIONS', '');
+			await setDirectusEnv(vendor, 'DB_PUBLIC_SHARE_CONNECTION_NAME', '');
+		}
+	});
+
+	if (GRANT_VENDORS.length === 0) {
+		it.skip('no pg-family vendor in this run', () => {
+			// nothing to route
+		});
+	}
+
+	it.each(GRANT_VENDORS)(
+		'%s routes a public share to the configured share pool',
+		async (vendor) => {
+			const defaultDatabase = await grantedDatabase(vendor, []);
+
+			await Promise.all([
+				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bb_shares'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_BB_SHARES_DATABASE', 'bb_db_shares'),
+				setDirectusEnv(vendor, 'DB_PUBLIC_SHARE_CONNECTION_NAME', 'bb_shares'),
+			]);
+
+			// A public share lands on the dedicated share pool …
+			expect(await grantedDatabase(vendor, [], 'a-share')).toBe('bb_db_shares');
+
+			// … a non-share request is unaffected (still the default pool).
+			expect(await grantedDatabase(vendor, [])).toBe(defaultDatabase);
 		},
 		300_000,
 	);

@@ -108,6 +108,20 @@ export function getConnectionNameForAccountability(
 	const defaultName = getDefaultConnectionName();
 	const extra = getExtraConnectionNames();
 
+	// A public share is anonymous; when a dedicated share pool is configured,
+	// route it there so its traffic can't compete with the base pool. Ignored if
+	// the name is unset or not a configured connection.
+	if (accountability?.share) {
+		const shareName = useEnv()['DB_PUBLIC_SHARE_CONNECTION_NAME'];
+
+		if (
+			typeof shareName === 'string' &&
+			(shareName === defaultName || extra.includes(shareName))
+		) {
+			return shareName;
+		}
+	}
+
 	const candidateNames = new Set<string>([defaultName]);
 
 	for (const name of accountability?.grantedDbConnections ?? []) {
