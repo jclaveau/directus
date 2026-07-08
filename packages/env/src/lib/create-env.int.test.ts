@@ -68,7 +68,7 @@ test('Defaults that have a type set is casted', () => {
 	});
 });
 
-test('Named-connection credentials keep the base DB_* typing (string), not guessType', () => {
+test('Named-connection USER/PASSWORD stay string, not guessType', () => {
 	vi.mocked(readConfigurationFromProcess).mockReturnValue({
 		// secrets must stay strings — guessType would coerce "12345" → 12345 and
 		// "true" → boolean, breaking auth; PORT is the number control.
