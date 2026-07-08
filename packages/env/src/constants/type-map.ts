@@ -22,6 +22,10 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	DB_DEFAULT_CONNECTION_NAME: 'string',
 	DB_DEFAULT_CONNECTION_PRIORITY: 'number',
 	'DB_CONNECTION_.+_PRIORITY': 'number',
+	'DB_CONNECTION_.+_PORT': 'number',
+	'DB_CONNECTION_.+_DATABASE': 'string',
+	'DB_(CONNECTION_.+_)?POOL__(MIN|MAX)': 'number',
+	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
 
 	CACHE_SKIP_ALLOWED: 'boolean',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
