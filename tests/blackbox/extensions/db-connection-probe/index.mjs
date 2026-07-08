@@ -64,4 +64,52 @@ export default (router, { services, getSchema }) => {
 			return next(error);
 		}
 	});
+
+	// Holds one or more pools saturated (fire sleeping queries, don't await),
+	// then probes other pools with a quick query — proving a saturated tier
+	// doesn't starve the others. Returns each probe's ok/error so a test can also
+	// assert the saturated pool itself failed (the non-vacuity control).
+	router.post('/isolation', async (req, res) => {
+		if (!req.accountability?.admin) {
+			return res.status(403).json({ errors: [{ message: 'admin only' }] });
+		}
+
+		const saturate = Array.isArray(req.body?.saturate)
+			? req.body.saturate
+			: [];
+
+		const probes = Array.isArray(req.body?.probes)
+			? req.body.probes
+			: [];
+
+		const sleepSeconds = Number(req.body?.sleep) || 3;
+
+		for (const { connection, concurrency } of saturate) {
+			const knex = await routedKnex([connection]);
+
+			for (let i = 0; i < (Number(concurrency) || 1); i++) {
+				knex.raw('SELECT pg_sleep(?)', [sleepSeconds]).catch(() => {});
+			}
+		}
+
+		// Give the sleeping queries a moment to occupy every server connection.
+		await new Promise((resolve) => setTimeout(resolve, 400));
+
+		const results = {};
+
+		for (const name of probes) {
+			const knex = await routedKnex([name]);
+			const startedAt = Date.now();
+
+			try {
+				await knex.raw('SELECT 1');
+				results[name] = { ok: true, ms: Date.now() - startedAt };
+			}
+			catch (error) {
+				results[name] = { ok: false, error: error.message };
+			}
+		}
+
+		return res.json({ data: { results } });
+	});
 };
