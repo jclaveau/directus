@@ -561,7 +561,7 @@ export class FieldsService {
 							}
 						});
 					} catch (err: any) {
-						throw await translateDatabaseError(err, field);
+						throw await translateDatabaseError(err, field, this.knex);
 					}
 				}
 			}

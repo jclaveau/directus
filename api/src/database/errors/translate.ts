@@ -5,47 +5,63 @@ import { extractError as mysql } from './dialects/mysql.js';
 import { extractError as oracle } from './dialects/oracle.js';
 import { extractError as postgres } from './dialects/postgres.js';
 import { extractError as sqlite } from './dialects/sqlite.js';
+import type { Knex } from 'knex';
 import type { SQLError } from './dialects/types.js';
 import type { Item } from '@directus/types';
 
 /**
- * Translates an error thrown by any of the databases into a pre-defined Exception. Currently
- * supports:
- * - Invalid Foreign Key
- * - Not Null Violation
- * - Record Not Unique
- * - Value Out of Range
- * - Value Too Long
+ * Dispatch a raw driver error to its dialect translator → a pre-defined
+ * Directus error, or the raw error untouched if unrecognized. Translates:
+ * Invalid Foreign Key, Not Null Violation, Record Not Unique, Value Out of
+ * Range, Value Too Long, and (postgres) DB pool exhaustion.
+ *
+ * PURE — no `database.error` hook — so the error handler can run it on ANY
+ * unknown error to catch DB/pool errors on reads too, without firing the hook
+ * for non-DB errors.
  */
-export async function translateDatabaseError(error: SQLError, data: Partial<Item>): Promise<any> {
-	const client = getDatabaseClient();
-	let defaultError: any;
+export async function extractDatabaseError(
+	error: SQLError,
+	data: Partial<Item>,
+	database?: Knex,
+): Promise<any> {
+	// Dispatch on the connection the query actually ran on — a granted named
+	// connection may be a different client than the default pool.
+	const client = getDatabaseClient(database);
 
 	switch (client) {
 		case 'mysql':
-			defaultError = mysql(error, data);
-			break;
+			return mysql(error, data);
 		case 'cockroachdb':
 		case 'postgres':
-			defaultError = postgres(error, data);
-			break;
+			return postgres(error, data);
 		case 'sqlite':
-			defaultError = sqlite(error, data);
-			break;
+			return sqlite(error, data);
 		case 'oracle':
-			defaultError = oracle(error);
-			break;
+			return oracle(error);
 		case 'mssql':
-			defaultError = await mssql(error, data);
-			break;
+			return await mssql(error, data);
+		default:
+			return error;
 	}
+}
+
+/**
+ * Dialect translation plus the `database.error` filter hook. Used at the write
+ * call-sites.
+ */
+export async function translateDatabaseError(
+	error: SQLError,
+	data: Partial<Item>,
+	database?: Knex,
+): Promise<any> {
+	const defaultError = await extractDatabaseError(error, data, database);
 
 	const hookError = await emitter.emitFilter(
 		'database.error',
 		defaultError,
-		{ client },
+		{ client: getDatabaseClient(database) },
 		{
-			database: getDatabase(),
+			database: database ?? getDatabase(),
 			schema: null,
 			accountability: null,
 		},

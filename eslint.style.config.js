@@ -100,14 +100,14 @@ export const eslintBaseConfig = defineConfig([
       // 'semi': [`error`, `never`],                                   // https://eslint.org/docs/latest/rules/semi#options
       'prefer-template': `error`,
       "max-len": [`error`, {                                        // https://eslint.org/docs/latest/rules/max-len
-        code: 90,
+        code: 85,
         tabWidth: 2,
-        comments: 110,
+        comments: 85,
         ignoreUrls: true,
         ignoreTrailingComments: true,
         ignoreRegExpLiterals: true,
         // Both string exemptions are OFF for scalabus (planner keeps them on for ts/js): a string
-        // literal — plain or template — must not exempt its line from the 90-col cap, or long
+        // literal — plain or template — must not exempt its line from the 85-col cap, or long
         // strings (assertions, URLs, error text) hide behind it and soft-wrap in the review pane.
         // ignoreStrings: true,
         // ignoreTemplateLiterals: true,
@@ -148,7 +148,8 @@ export const eslintBaseConfig = defineConfig([
         pairCommandArgs: true,                                      // pair spawn/exec flag+value (off → plain consistent)
       }],
       'local/arrow-multiline-block': `error`,                       // concise arrow body only for one-liners; else block + return
-      'local/string-literals-max-len': [`error`, {                  // wrap+word-wrap an over-90-col test title in oneLine`…`
+      'local/string-literals-max-len': [`error`, {                  // wrap+word-wrap an over-85-col test title in oneLine`…`
+        code: 85,
         importModule: `@directus/utils`,                            // oneLine lives in packages/utils (api + blackbox both dep on it)
       }],
       'function-call-argument-newline': [`error`, `consistent`],    // https://eslint.org/docs/latest/rules/function-call-argument-newline
@@ -191,8 +192,8 @@ export const eslintBaseConfig = defineConfig([
     rules: {
       "max-len": `off`,
       "vue/max-len": [`error`, {                                    // https://eslint.vuejs.org/rules/max-len.html
-        code: 90,
-        comments: 110,
+        code: 85,
+        comments: 85,
         // "template": 9000,
         // ignoreTemplateLiterals off everywhere: a template literal must not exempt its line.
         // "ignoreTemplateLiterals": true,

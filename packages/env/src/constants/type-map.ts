@@ -18,6 +18,18 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	DB_BATCH_INSERT_CHUNK_SIZE: 'number',
 	DB_MSSQL_TRUST_BATCH_RETURNING: 'boolean',
 
+	DB_CONNECTIONS: 'array',
+	DB_BASE_CONNECTION_NAME: 'string',
+	DB_BASE_CONNECTION_PRIORITY: 'number',
+	DB_PUBLIC_SHARE_CONNECTION_NAME: 'string',
+	'DB_CONNECTION_.+_PRIORITY': 'number',
+	'DB_CONNECTION_.+_PORT': 'number',
+	'DB_CONNECTION_.+_DATABASE': 'string',
+	'DB_CONNECTION_.+_USER': 'string',
+	'DB_CONNECTION_.+_PASSWORD': 'string',
+	'DB_(CONNECTION_.+_)?POOL__(MIN|MAX)': 'number',
+	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
+
 	CACHE_SKIP_ALLOWED: 'boolean',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_SCHEMA_MAX_ITERATIONS: 'number',
