@@ -16,11 +16,16 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
-				// Clean up any previous run (child before parent for the FK pair)
-				await DeleteCollection(vendor, { collection: collectionFkChild });
-				await DeleteCollection(vendor, { collection: collectionFkParent });
-				await DeleteCollection(vendor, { collection: collectionUnique });
-				await DeleteCollection(vendor, { collection: collectionContainsNull });
+				// Clean up any previous run. Independent collections drop in
+				// parallel; the FK pair stays chained child-before-parent (dropping
+				// the parent table while the child's FK references it would error).
+				await Promise.allSettled([
+					DeleteCollection(vendor, { collection: collectionFkChild }).then(
+						() => DeleteCollection(vendor, { collection: collectionFkParent }),
+					),
+					DeleteCollection(vendor, { collection: collectionUnique }),
+					DeleteCollection(vendor, { collection: collectionContainsNull }),
+				]);
 
 				// One batch POST creates all four collections, each with its fields
 				// folded in:
