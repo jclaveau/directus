@@ -10,7 +10,16 @@ name: Check
 on:
   pull_request:
 
+  # Skip push on feature branches — they always have a PR, so `pull_request`
+  # already runs the full gate (and it alone carries the diff-scoped Style gate).
+  # push stays on the integration branches, which get direct commits and need the
+  # coverage upload codecov tracks. Covers both `feat/x` and `v11.10.1-feat/x`.
   push:
+    branches-ignore:
+      - feat/**
+      - fix/**
+      - '*-feat/**'
+      - '*-fix/**'
 
 permissions:
   contents: read
