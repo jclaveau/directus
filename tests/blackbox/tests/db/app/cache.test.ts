@@ -1803,20 +1803,12 @@ describe('App Caching Tests', () => {
 			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
-			const createOwner = async () => {
+			const createMany = async (collection: string, items: object[]) => {
 				return (
-					await request(url).post(`/items/${collectionGrandRelated}`)
-						.send({ string_field: randomUUID() })
+					await request(url).post(`/items/${collection}?fields=id`)
+						.send(items)
 						.set('Authorization', auth)
-				).body.data.id;
-			};
-
-			const createMid = async (owner: number) => {
-				return (
-					await request(url).post(`/items/${collectionScopedPathMid}`)
-						.send({ owner_ref: owner })
-						.set('Authorization', auth)
-				).body.data.id;
+				).body.data;
 			};
 
 			const addRoot = async (mid: number) => {
@@ -1825,18 +1817,27 @@ describe('App Caching Tests', () => {
 					.set('Authorization', auth);
 			};
 
-			// Two owners, a mid pointing at each, a root pointing at each mid.
-			const ownerA = await createOwner();
-			const ownerB = await createOwner();
-			const midA = await createMid(ownerA);
-			const midB = await createMid(ownerB);
-			await addRoot(midA);
-			await addRoot(midB);
+			// Two owners, a mid pointing at each, a root pointing at each mid —
+			// one createMany array POST per tier.
+			const [ownerA, ownerB] = await createMany(collectionGrandRelated, [
+				{ string_field: randomUUID() },
+				{ string_field: randomUUID() },
+			]);
+
+			const [midA, midB] = await createMany(collectionScopedPathMid, [
+				{ owner_ref: ownerA.id },
+				{ owner_ref: ownerB.id },
+			]);
+
+			await createMany(collectionScopedPath, [
+				{ string_field: randomUUID(), mid: midA.id },
+				{ string_field: randomUUID(), mid: midB.id },
+			]);
 
 			// Read each slice through the terminal related pk (`mid.owner_ref.id`).
 			const base = `/items/${collectionScopedPath}?filter[mid][owner_ref][id][_eq]=`;
-			const readA = `${base}${ownerA}`;
-			const readB = `${base}${ownerB}`;
+			const readA = `${base}${ownerA.id}`;
+			const readB = `${base}${ownerB.id}`;
 
 			const read = (path: string) => {
 				return request(url).get(path)
@@ -1856,7 +1857,7 @@ describe('App Caching Tests', () => {
 			expect(warmB.headers[cacheStatusHeader]).toBe('HIT');
 
 			// Write a root row into owner B's chain only.
-			await addRoot(midB);
+			await addRoot(midB.id);
 
 			const afterA = await read(readA);
 			const afterB = await read(readB);
