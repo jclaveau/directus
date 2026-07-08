@@ -96,8 +96,6 @@ export function getConnectionNameForAccountability(
 	const defaultName = getDefaultConnectionName();
 	const extra = getExtraConnectionNames();
 
-	// The default pool always competes; add every granted connection that
-	// is configured
 	const candidateNames = new Set<string>([defaultName]);
 
 	for (const name of accountability?.dbConnections ?? []) {

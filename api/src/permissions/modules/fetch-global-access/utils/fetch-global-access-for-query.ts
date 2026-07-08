@@ -40,8 +40,7 @@ export async function fetchGlobalAccessForQuery(
 			if (!ipInNetworks(accountability.ip, networks)) continue;
 		}
 
-		// Union the DB connections this policy grants (stored CSV, so `toArray`
-		// splits it)
+		// db_connections is stored as CSV, so `toArray` splits it
 		if (db_connections) {
 			for (const name of toArray(db_connections)) {
 				if (name && !globalAccess.dbConnections.includes(name)) {

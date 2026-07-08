@@ -74,15 +74,12 @@ describe('DB connection priority routing', () => {
 				await routedDatabaseForGrants(vendor, ['bb_lo', 'bb_hi', 'bb_mid']),
 			).toBe('bb_db_hi');
 
-			// A single grant routes to exactly that connection
 			expect(await routedDatabaseForGrants(vendor, ['bb_lo'])).toBe('bb_db_lo');
 
-			// Among several grants the highest priority still wins
 			expect(
 				await routedDatabaseForGrants(vendor, ['bb_mid', 'bb_lo']),
 			).toBe('bb_db_mid');
 
-			// No grants → the default pool
 			expect(await routedDatabaseForGrants(vendor, [])).toBe(defaultDatabase);
 
 			// An unconfigured grant is skipped → the default pool

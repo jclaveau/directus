@@ -21,8 +21,6 @@ enum PostgresErrorCodes {
 }
 
 export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
-	// pgbouncer/tarn/postgres pool exhaustion (the connection tier is tagged
-	// on by the caller)
 	const poolError = getPoolExhaustedError(error);
 
 	if (poolError) {

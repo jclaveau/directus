@@ -37,7 +37,6 @@ vi.mock('../logger/index.js', () => {
 
 vi.mock('../metrics/index.js', () => ({ useMetrics: () => undefined }));
 
-/** DB name the returned (mocked) knex instance was built for. */
 function connectedDatabaseOf(db: any): string {
 	return db.__knexConfig.connection.database;
 }
