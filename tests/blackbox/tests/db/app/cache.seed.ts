@@ -47,6 +47,12 @@ export const collectionScopedRel = 'test_app_cache_scoped_rel';
 // while a write touching neither spares it. Rows are created per-test.
 export const collectionScopedMulti = 'test_app_cache_scoped_multi';
 
+// A collection scoped by a MULTI-HOP path: scoped_cache_fields = ['mid.owner_ref'].
+// The partition value lives two hops away (root → mid → owner_ref); the write side
+// must join through `mid` to recover it. Proves #214 — paths, not one-hop fk.
+export const collectionScopedPath = 'test_app_cache_scoped_path';
+export const collectionScopedPathMid = 'test_app_cache_scoped_path_mid';
+
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
 
@@ -70,6 +76,8 @@ export const seedDBStructure = () => {
 				// tag/block all point at grandRelated, so grandRelated goes last.
 				await DeleteCollection(vendor, { collection: junctionTag });
 				await DeleteCollection(vendor, { collection: junctionBlock });
+				await DeleteCollection(vendor, { collection: collectionScopedPath });
+				await DeleteCollection(vendor, { collection: collectionScopedPathMid });
 				await DeleteCollection(vendor, { collection: collectionScopedRel });
 				await DeleteCollection(vendor, { collection: collectionScopedMulti });
 				await DeleteCollection(vendor, { collection: collectionScoped });
@@ -261,6 +269,36 @@ export const seedDBStructure = () => {
 					collection: collectionScopedMulti,
 					field: 'field_b',
 					type: 'string',
+				});
+
+				// Multi-hop path-scoped collection: partition by `mid.owner_ref`, two hops
+				// from the root. The mid collection carries the M2O to the owner; the root
+				// reaches it only through `mid`, so the write side joins to get the slice.
+				await CreateCollection(vendor, {
+					collection: collectionScopedPathMid,
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionScopedPathMid,
+					field: 'owner_ref',
+					otherCollection: collectionGrandRelated,
+				});
+
+				await CreateCollection(vendor, {
+					collection: collectionScopedPath,
+					meta: { scoped_cache_fields: ['mid.owner_ref'] },
+				});
+
+				await CreateField(vendor, {
+					collection: collectionScopedPath,
+					field: 'string_field',
+					type: 'string',
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionScopedPath,
+					field: 'mid',
+					otherCollection: collectionScopedPathMid,
 				});
 
 				expect(true).toBeTruthy();

@@ -21,6 +21,8 @@ import {
 	collectionRelated,
 	collectionScoped,
 	collectionScopedMulti,
+	collectionScopedPath,
+	collectionScopedPathMid,
 	collectionScopedRel,
 	collectionTag,
 	scopedOwnerA,
@@ -1780,6 +1782,87 @@ describe('App Caching Tests', () => {
 			// The relational-pk filter pinned owner_ref=<ownerA>, so B's write dropped only B
 			// (MISS) and left A cached (HIT). Without the relational unwrap the read would pin
 			// nothing → bare collection tag → B's write would leave A a MISS too.
+			expect(afterA.statusCode).toBe(200);
+			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(afterB.statusCode).toBe(200);
+			expect(afterB.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A multi-hop relational path (mid.owner_ref) value-scopes the read: the
+		partition value is two hops away, so the write side joins through mid to
+		purge only the mutated owner's slice and spare another owner's
+	`, () => {
+		// scoped_cache_fields = ['mid.owner_ref'] on the root: the owner is root → mid
+		// → owner_ref, so the mutated root row only carries `mid` — the write must
+		// join through mid to recover the terminal owner. Without path resolution the
+		// read pins nothing → bare tag → B's write leaves A a MISS too, witness fails.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const createOwner = async () => {
+				return (
+					await request(url).post(`/items/${collectionGrandRelated}`)
+						.send({ string_field: randomUUID() })
+						.set('Authorization', auth)
+				).body.data.id;
+			};
+
+			const createMid = async (owner: number) => {
+				return (
+					await request(url).post(`/items/${collectionScopedPathMid}`)
+						.send({ owner_ref: owner })
+						.set('Authorization', auth)
+				).body.data.id;
+			};
+
+			const addRoot = async (mid: number) => {
+				await request(url).post(`/items/${collectionScopedPath}`)
+					.send({ string_field: randomUUID(), mid })
+					.set('Authorization', auth);
+			};
+
+			// Two owners, a mid pointing at each, a root pointing at each mid.
+			const ownerA = await createOwner();
+			const ownerB = await createOwner();
+			const midA = await createMid(ownerA);
+			const midB = await createMid(ownerB);
+			await addRoot(midA);
+			await addRoot(midB);
+
+			// Read each slice through the terminal related pk (`mid.owner_ref.id`).
+			const base = `/items/${collectionScopedPath}?filter[mid][owner_ref][id][_eq]=`;
+			const readA = `${base}${ownerA}`;
+			const readB = `${base}${ownerB}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm both slices. Non-vacuity: a re-read HITs, so each slice is cached.
+			await read(readA);
+			await read(readB);
+			const warmA = await read(readA);
+			const warmB = await read(readB);
+
+			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmB.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write a root row into owner B's chain only.
+			await addRoot(midB);
+
+			const afterA = await read(readA);
+			const afterB = await read(readB);
+
+			// The write joined root→mid to resolve owner_ref=<ownerB>, so B's write
+			// dropped only B (MISS) and left A cached (HIT).
 			expect(afterA.statusCode).toBe(200);
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterB.statusCode).toBe(200);
