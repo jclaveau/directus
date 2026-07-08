@@ -15,6 +15,13 @@ const GRANT_VENDORS = vendors.filter((vendor) => PG_FAMILY_NAMES.includes(vendor
 
 // The exhaustion tests drive a real slow query (`pg_sleep`), which cockroachdb
 // lacks.
+// TODO(pool-exhaustion non-pg): only postgres emits DatabasePoolExhaustedError
+// today. The knex/tarn acquire timeout (`client_pool_timeout`) is client-agnostic
+// — mysql/oracle/mssql/sqlite hit their own POOL__MAX too — but detection lives
+// only in the postgres dialect, so those vendors 500 instead of 429. When that's
+// hoisted dialect-agnostic, widen these vendors and add the server-side pooler
+// analogs (mysql/ProxySQL 9001 + 1040; oracle/DRCP ORA-24418 + ORA-00018/00020).
+// Focusing on postgres/pgbouncer for now.
 const PG_SLEEP_NAMES = ['postgres', 'postgres10'];
 
 const EXHAUST_VENDORS = vendors.filter((vendor) => PG_SLEEP_NAMES.includes(vendor));

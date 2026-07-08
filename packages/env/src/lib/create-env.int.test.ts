@@ -67,3 +67,24 @@ test('Defaults that have a type set is casted', () => {
 		DEFAULT_ARRAY: 'one,two,three',
 	});
 });
+
+test('Named-connection credentials keep the base DB_* typing (string), not guessType', () => {
+	vi.mocked(readConfigurationFromProcess).mockReturnValue({
+		// secrets must stay strings — guessType would coerce "12345" → 12345 and
+		// "true" → boolean, breaking auth; PORT is the number control.
+		DB_CONNECTION_PREMIUM_PASSWORD: '12345',
+		DB_CONNECTION_PREMIUM_USER: 'true',
+		DB_CONNECTION_PREMIUM_PORT: '5432',
+	});
+
+	vi.mocked(readConfigurationFromFile).mockReturnValue({});
+	vi.mocked(isDirectusVariable).mockReturnValue(true);
+
+	expect(createEnv()).toEqual({
+		DB_CONNECTION_PREMIUM_PASSWORD: '12345',
+		DB_CONNECTION_PREMIUM_USER: 'true',
+		DB_CONNECTION_PREMIUM_PORT: 5432,
+		DEFAULT: 'test-default',
+		DEFAULT_ARRAY: 'one,two,three',
+	});
+});
