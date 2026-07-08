@@ -31,9 +31,9 @@ export async function _fetchGlobalAccess(
 
 		// Union the DB connections granted by the user's own policies with the
 		// roles' ones
-		for (const name of userAccess.dbConnections) {
-			if (!access.dbConnections.includes(name)) {
-				access.dbConnections.push(name);
+		for (const name of userAccess.grantedDbConnections) {
+			if (!access.grantedDbConnections.includes(name)) {
+				access.grantedDbConnections.push(name);
 			}
 		}
 	}

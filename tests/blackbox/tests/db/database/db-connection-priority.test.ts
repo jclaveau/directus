@@ -5,13 +5,13 @@ import { setDirectusEnv } from '@utils/set-directus-env';
 import request from 'supertest';
 import { afterAll, describe, expect, it } from 'vitest';
 
-// Routing is DB-client-agnostic, so check it on the pg family only: their knex
+// Grant resolution is DB-client-agnostic, checked on the pg family only: their knex
 // connection config exposes `.database` (sqlite uses a filename), and they never
 // run validateDatabaseCharset's MySQL collation query — so a connection pointing
 // at a fake database is safe to build.
 const PG_FAMILY_NAMES = ['postgres', 'postgres10', 'cockroachdb'];
 
-const ROUTING_VENDORS = vendors.filter((vendor) => PG_FAMILY_NAMES.includes(vendor));
+const GRANT_VENDORS = vendors.filter((vendor) => PG_FAMILY_NAMES.includes(vendor));
 
 // The exhaustion tests drive a real slow query (`pg_sleep`), which cockroachdb
 // lacks.
@@ -23,13 +23,13 @@ const EXHAUST_VENDORS = vendors.filter((vendor) => PG_SLEEP_NAMES.includes(vendo
 // pgbouncer queue-timeout case runs there alone.
 const PGBOUNCER_VENDORS = vendors.filter((vendor) => vendor === 'postgres');
 
-async function routedDatabaseForGrants(
+async function grantedDatabase(
 	vendor: Vendor,
-	dbConnections: string[],
+	grants: string[],
 ): Promise<string> {
 	const response = await request(getUrl(vendor))
-		.post('/db-connection-probe/route')
-		.send({ dbConnections })
+		.post('/db-connection-probe/granted')
+		.send({ grantedDbConnections: grants })
 		.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 	expect(response.statusCode).toBe(200);
@@ -37,27 +37,27 @@ async function routedDatabaseForGrants(
 	return response.body.data.database;
 }
 
-describe('DB connection priority routing', () => {
+describe('DB connection priority', () => {
 	afterAll(async () => {
-		// Reset the shared instance so later test files see plain default routing
-		for (const vendor of ROUTING_VENDORS) {
+		// Reset the shared instance so later test files see the plain default connection
+		for (const vendor of GRANT_VENDORS) {
 			await setDirectusEnv(vendor, 'DB_CONNECTIONS', '');
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '0');
 		}
 	});
 
-	// No pg-family vendor active (e.g. sqlite3-only run) → nothing to route.
+	// No pg-family vendor active (e.g. sqlite3-only run) → nothing to grant.
 	// Register a skipped test so the file isn't an empty suite (vitest fails).
-	if (ROUTING_VENDORS.length === 0) {
+	if (GRANT_VENDORS.length === 0) {
 		it.skip('no pg-family vendor in this run', () => {
-			// nothing to route
+			// nothing to grant
 		});
 	}
 
-	it.each(ROUTING_VENDORS)(
+	it.each(GRANT_VENDORS)(
 		'%s respects connection priority across several grants',
 		async (vendor) => {
-			const defaultDatabase = await routedDatabaseForGrants(vendor, []);
+			const defaultDatabase = await grantedDatabase(vendor, []);
 
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bb_lo,bb_mid,bb_hi'),
@@ -71,23 +71,23 @@ describe('DB connection priority routing', () => {
 
 			// Highest priority wins regardless of the order the grants are listed in
 			expect(
-				await routedDatabaseForGrants(vendor, ['bb_lo', 'bb_hi', 'bb_mid']),
+				await grantedDatabase(vendor, ['bb_lo', 'bb_hi', 'bb_mid']),
 			).toBe('bb_db_hi');
 
-			expect(await routedDatabaseForGrants(vendor, ['bb_lo'])).toBe('bb_db_lo');
+			expect(await grantedDatabase(vendor, ['bb_lo'])).toBe('bb_db_lo');
 
 			expect(
-				await routedDatabaseForGrants(vendor, ['bb_mid', 'bb_lo']),
+				await grantedDatabase(vendor, ['bb_mid', 'bb_lo']),
 			).toBe('bb_db_mid');
 
-			expect(await routedDatabaseForGrants(vendor, [])).toBe(defaultDatabase);
+			expect(await grantedDatabase(vendor, [])).toBe(defaultDatabase);
 
 			// An unconfigured grant is skipped → the default pool
-			expect(await routedDatabaseForGrants(vendor, ['ghost'])).toBe(defaultDatabase);
+			expect(await grantedDatabase(vendor, ['ghost'])).toBe(defaultDatabase);
 
 			// The default pool competes: raise it above every grant and it wins
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '999');
-			expect(await routedDatabaseForGrants(vendor, ['bb_hi'])).toBe(defaultDatabase);
+			expect(await grantedDatabase(vendor, ['bb_hi'])).toBe(defaultDatabase);
 			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '0');
 		},
 		300_000,
@@ -128,7 +128,7 @@ describe('DB pool exhaustion error', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/pool')
+				.post('/db-connection-probe/pools-under-load')
 				.send({
 					saturate: [{ connection: 'tiny', concurrency: 2 }],
 					probe: ['tiny'],
@@ -152,7 +152,7 @@ describe('DB pool exhaustion error', () => {
 	it.each(PGBOUNCER_VENDORS)(
 		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when a pgbouncer pool queue times out',
 		async (vendor) => {
-			// Route a tier through pgbouncer's tiny `free` pool (pool_size=1,
+			// Grant a tier through pgbouncer's tiny `free` pool (pool_size=1,
 			// query_wait_timeout=1s), saturate it, then probe it: the probe queues
 			// past the timeout and pgbouncer raises `query_wait_timeout`, which
 			// propagates as the pool_queue_timeout 429.
@@ -165,7 +165,7 @@ describe('DB pool exhaustion error', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/pool')
+				.post('/db-connection-probe/pools-under-load')
 				.send({
 					saturate: [{ connection: 'free', concurrency: 2 }],
 					probe: ['free'],
@@ -236,7 +236,7 @@ describe('DB connection pool isolation', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/pool')
+				.post('/db-connection-probe/pools-under-load')
 				.send({
 					saturate: [{ connection: 'free', concurrency: 2 }],
 					probe: ['premium', 'free'],
@@ -271,7 +271,7 @@ describe('DB connection pool isolation', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/pool')
+				.post('/db-connection-probe/pools-under-load')
 				.send({
 					saturate: [
 						{ connection: 'free', concurrency: 2 },

@@ -43,7 +43,7 @@ services:
   # (config in ./pgbouncer/pgbouncer.ini): free (pool_size=1), premium (4) and
   # default (50). A saturated small pool queues past query_wait_timeout=1s and
   # surfaces the real `query_wait_timeout` error, while larger pools keep serving
-  # — the tier-isolation the routing feature exists for. The entrypoint is
+  # — the tier-isolation the granted-connection feature exists for. The entrypoint is
   # overridden to run the mounted config (the image otherwise regenerates one
   # from env). Digest-pinned to 1.25.2.
   pgbouncer:

@@ -62,10 +62,10 @@ beforeEach(() => {
 	});
 });
 
-test('Routes to the highest-priority granted connection', async () => {
+test('Uses the highest-priority granted connection', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	const acc = { dbConnections: ['premium'] } as Accountability;
+	const acc = { grantedDbConnections: ['premium'] } as Accountability;
 	const db = getDatabaseForAccountability(acc);
 
 	expect(connectedDatabaseOf(db)).toBe('directus_premium');
@@ -100,7 +100,7 @@ test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async ()
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['replica_a', 'premium'] } as Accountability,
+				{ grantedDbConnections: ['replica_a', 'premium'] } as Accountability,
 			),
 		),
 	).toBe('directus_premium');
@@ -117,7 +117,7 @@ test('Picks the higher priority regardless of grant order', async () => {
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['replica_a', 'premium'] } as Accountability,
+				{ grantedDbConnections: ['replica_a', 'premium'] } as Accountability,
 			),
 		),
 	).toBe('directus_premium');
@@ -126,7 +126,7 @@ test('Picks the higher priority regardless of grant order', async () => {
 test('Falls back to the default pool when nothing is granted', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	const acc = { dbConnections: [] as string[] } as Accountability;
+	const acc = { grantedDbConnections: [] as string[] } as Accountability;
 	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 	expect(connectedDatabaseOf(getDatabaseForAccountability(null))).toBe('directus');
 });
@@ -137,7 +137,7 @@ test('Falls back when the granted connection is not configured', async () => {
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['ghost_pool'] } as Accountability,
+				{ grantedDbConnections: ['ghost_pool'] } as Accountability,
 			),
 		),
 	).toBe('directus');
@@ -151,7 +151,7 @@ test('Falls back when no granted connection outranks the default', async () => {
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['premium'] } as Accountability,
+				{ grantedDbConnections: ['premium'] } as Accountability,
 			),
 		),
 	).toBe('directus');
@@ -164,7 +164,9 @@ test('Lets a policy grant the default pool by its configured name', async () => 
 
 	expect(
 		connectedDatabaseOf(
-			getDatabaseForAccountability({ dbConnections: ['primary'] } as Accountability),
+			getDatabaseForAccountability({
+				grantedDbConnections: ['primary'],
+			} as Accountability),
 		),
 	).toBe('directus');
 });
@@ -180,7 +182,7 @@ test('Default priority can outrank a lower-priority granted pool', async () => {
 	expect(
 		connectedDatabaseOf(
 			getDatabaseForAccountability(
-				{ dbConnections: ['replica_a'] } as Accountability,
+				{ grantedDbConnections: ['replica_a'] } as Accountability,
 			),
 		),
 	).toBe('directus');
