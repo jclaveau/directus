@@ -10,6 +10,22 @@ metadata:
 
 The fork `jclaveau/directus` runs a soft-fork integration setup (built 2026-06-10).
 
+## ⛔ NEVER merge a `v11.10.1-feat/*` PR (2026-06-23)
+
+The `v11.10.1-feat/*` PRs are kept **permanently open** — they exist for **comparison +
+re-deriving against upstream**, not merging. Do NOT merge them even when green. They are
+composed into the integration branch by **recomposing** the whole tree (re-merge all
+feats), not by merging PRs individually. New feature work = a **new
+`v11.10.1-feat/<name>` branch stacked at the right point in the compose tree**, opened as
+its own (open, unmerged) PR; the compose branch is rebuilt later. (Contrast: `chore(deps)`
+renovate PRs and CI/config PRs DO get merged into `v11.10.1-prepare`.)
+
+**Every `v11.10.1-feat` MUST be on the `Fresh v11.10.1` milestone** (2026-06-25, user). The
+milestone's open-PR query is the canonical roster of all feats:
+`https://github.com/jclaveau/directus/pulls?q=is%3Aopen+is%3Apr+milestone%3A%22Fresh+v11.10.1%22`.
+When opening a new feat PR, assign the milestone — a feat absent from this list is lost from
+the re-derive/compose roster. See [[directus-linear-chain-leaf-pr]] (hhh-dev = prepare tip).
+
 ## CURRENT topology (2026-06-16) — supersedes the "Branch model" block below
 
 The original "main = upstream + overlay" model was replaced by a **dedicated default branch** once the overlay outgrew
@@ -68,6 +84,13 @@ upstream form:
   2026-06-11. **On sync:** if upstream rewrites that step, resolve the one conflict hunk **keep-ours** (don't drop the
   token/`if: always()`). Low odds — it's 3 isolated lines in a stable step. Same workflow-file class as
   [[feedback_gh_pr_merge_workflow_scope]]; push over SSH.
+- **`check.yml` fires on BOTH `push` + `pull_request`** (both unfiltered) → a commit to a PR-head branch **double-runs**
+  Unit/Lint (the concurrency group keys on `github.ref`, which differs between the events, so `cancel-in-progress` can't
+  dedupe them). Style (changes) is `pull_request`-only; coverage uploads on both. **PR #217** (into `v11.10.1-hhh-dev`)
+  adds `push: branches-ignore: [feat/**, fix/**, '*-feat/**', '*-fix/**']` so feature branches skip the push run (the PR
+  covers them); push stays on integration branches for coverage. Mechanics + glob semantics in
+  [[reference_gha_push_pr_double_run]]. (v11.10.1-hhh-dev = the last-license-free-v11 work base; separate line from the
+  `pr-controle`/`main` compose topology above.)
 
 ## compose-hhh-main.yml
 

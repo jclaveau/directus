@@ -1,5 +1,6 @@
 import {
 	CreateCollection,
+	CreateCollections,
 	CreateField,
 	CreateFieldM2A,
 	CreateFieldM2M,
@@ -47,6 +48,13 @@ export const collectionScopedRel = 'test_app_cache_scoped_rel';
 // while a write touching neither spares it. Rows are created per-test.
 export const collectionScopedMulti = 'test_app_cache_scoped_multi';
 
+// A collection scoped by a MULTI-HOP path: scoped_cache_fields =
+// ['owned_item.owner_ref']. The owner is two hops away (owned_sub_item →
+// owned_item → owner_ref); the write side joins through `owned_item` to recover
+// it. Proves #214 — paths, not one-hop fk.
+export const collectionOwnedSubItem = 'test_app_cache_owned_sub_item';
+export const collectionOwnedItem = 'test_app_cache_owned_item';
+
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
 
@@ -70,6 +78,8 @@ export const seedDBStructure = () => {
 				// tag/block all point at grandRelated, so grandRelated goes last.
 				await DeleteCollection(vendor, { collection: junctionTag });
 				await DeleteCollection(vendor, { collection: junctionBlock });
+				await DeleteCollection(vendor, { collection: collectionOwnedSubItem });
+				await DeleteCollection(vendor, { collection: collectionOwnedItem });
 				await DeleteCollection(vendor, { collection: collectionScopedRel });
 				await DeleteCollection(vendor, { collection: collectionScopedMulti });
 				await DeleteCollection(vendor, { collection: collectionScoped });
@@ -261,6 +271,34 @@ export const seedDBStructure = () => {
 					collection: collectionScopedMulti,
 					field: 'field_b',
 					type: 'string',
+				});
+
+				// Multi-hop path-scoped collection: partition by `owned_item.owner_ref`,
+				// two hops away. owned_item carries the M2O to the owner; owned_sub_item
+				// reaches it only through owned_item, so the write side joins for the slice.
+				// Batch the two collections (scalar field + meta fold in); the M2O relations
+				// can't fold, so they follow.
+				await CreateCollections(vendor, {
+					collections: [
+						{ collection: collectionOwnedItem },
+						{
+							collection: collectionOwnedSubItem,
+							meta: { scoped_cache_fields: ['owned_item.owner_ref'] },
+							fields: [{ field: 'string_field', type: 'string' }],
+						},
+					],
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionOwnedItem,
+					field: 'owner_ref',
+					otherCollection: collectionGrandRelated,
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionOwnedSubItem,
+					field: 'owned_item',
+					otherCollection: collectionOwnedItem,
 				});
 
 				expect(true).toBeTruthy();
