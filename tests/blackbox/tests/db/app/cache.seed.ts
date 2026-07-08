@@ -1,5 +1,6 @@
 import {
 	CreateCollection,
+	CreateCollections,
 	CreateField,
 	CreateFieldM2A,
 	CreateFieldM2M,
@@ -274,25 +275,23 @@ export const seedDBStructure = () => {
 				// Multi-hop path-scoped collection: partition by `mid.owner_ref`, two hops
 				// from the root. The mid collection carries the M2O to the owner; the root
 				// reaches it only through `mid`, so the write side joins to get the slice.
-				await CreateCollection(vendor, {
-					collection: collectionScopedPathMid,
+				// Batch the two collections (scalar field + meta fold in); the M2O relations
+				// can't fold, so they follow.
+				await CreateCollections(vendor, {
+					collections: [
+						{ collection: collectionScopedPathMid },
+						{
+							collection: collectionScopedPath,
+							meta: { scoped_cache_fields: ['mid.owner_ref'] },
+							fields: [{ field: 'string_field', type: 'string' }],
+						},
+					],
 				});
 
 				await CreateFieldM2O(vendor, {
 					collection: collectionScopedPathMid,
 					field: 'owner_ref',
 					otherCollection: collectionGrandRelated,
-				});
-
-				await CreateCollection(vendor, {
-					collection: collectionScopedPath,
-					meta: { scoped_cache_fields: ['mid.owner_ref'] },
-				});
-
-				await CreateField(vendor, {
-					collection: collectionScopedPath,
-					field: 'string_field',
-					type: 'string',
 				});
 
 				await CreateFieldM2O(vendor, {
