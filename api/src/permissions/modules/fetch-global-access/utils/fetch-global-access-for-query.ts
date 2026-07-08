@@ -8,15 +8,17 @@ type AccessRow = {
 	admin_access: Policy['admin_access'] | null;
 	app_access: Policy['app_access'] | null;
 	ip_access: Policy['ip_access'] | string | null;
+	db_connections: Policy['db_connections'] | string | null;
 };
 
 export async function fetchGlobalAccessForQuery(
 	query: Knex.QueryBuilder<any, any[]>,
 	accountability: Pick<Accountability, 'ip'>,
 ): Promise<GlobalAccess> {
-	const globalAccess = {
+	const globalAccess: GlobalAccess = {
 		app: false,
 		admin: false,
+		grantedDbConnections: [],
 	};
 
 	const accessRows = await query
@@ -24,22 +26,56 @@ export async function fetchGlobalAccessForQuery(
 			'directus_policies.admin_access',
 			'directus_policies.app_access',
 			'directus_policies.ip_access',
+			'directus_policies.db_connections',
 		)
 		.from('directus_access')
 		// @NOTE: `where` clause comes from the caller
 		.leftJoin('directus_policies', 'directus_policies.id', 'directus_access.policy');
+
+	// db_connections is additive across every granted policy, so collect it in a
+	// dedicated pass — the access loop below short-circuits on the first admin
+	// policy and would drop grants from later rows. Same ip filter: an ip-blocked
+	// policy grants nothing. Stored as CSV, so `toArray` splits it; trim so a
+	// UI-entered "a, b" matches the trimmed names in the connection registry.
+	for (const { ip_access, db_connections } of accessRows) {
+		if (accountability.ip && ip_access) {
+			const networks = toArray(ip_access);
+
+			if (!ipInNetworks(accountability.ip, networks)) {
+				continue;
+			}
+		}
+
+		if (!db_connections) {
+			continue;
+		}
+
+		for (const raw of toArray(db_connections)) {
+			const name = raw.trim();
+
+			if (name && !globalAccess.grantedDbConnections.includes(name)) {
+				globalAccess.grantedDbConnections.push(name);
+			}
+		}
+	}
 
 	// Additively merge access permissions
 	for (const { admin_access, app_access, ip_access } of accessRows) {
 		if (accountability.ip && ip_access) {
 			// Skip row if IP is not in the allowed networks
 			const networks = toArray(ip_access);
-			if (!ipInNetworks(accountability.ip, networks)) continue;
+
+			if (!ipInNetworks(accountability.ip, networks)) {
+				continue;
+			}
 		}
 
 		globalAccess.admin ||= toBoolean(admin_access);
 		globalAccess.app ||= globalAccess.admin || toBoolean(app_access);
-		if (globalAccess.admin) break;
+
+		if (globalAccess.admin) {
+			break;
+		}
 	}
 
 	return globalAccess;

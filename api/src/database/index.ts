@@ -14,9 +14,20 @@ import { performance } from 'perf_hooks';
 import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
-import { getConfigFromEnv } from '../utils/get-config-from-env.js';
 import { validateEnv } from '../utils/validate-env.js';
+import {
+	assertConnectionNamesAreUnique,
+	assertNamedConnectionsAreComplete,
+	connectionFieldEnvKey,
+	getBaseDbConfig,
+	requiredConnectionFields,
+} from './connections.js';
 import { getHelpers } from './helpers/index.js';
+
+export {
+	getConnectionNameForAccountability,
+	getDatabaseForAccountability,
+} from './connections.js';
 
 type QueryInfo = Partial<Knex.Sql> & {
 	sql: Knex.Sql['sql'];
@@ -37,7 +48,26 @@ export function getDatabase(): Knex {
 		return database;
 	}
 
-	const env = useEnv();
+	const config = getBaseDbConfig();
+
+	const requiredEnvVars = requiredConnectionFields(config).map(
+		(field) => connectionFieldEnvKey('DB_', field),
+	);
+
+	validateEnv(requiredEnvVars);
+	assertConnectionNamesAreUnique();
+	assertNamedConnectionsAreComplete();
+
+	database = constructDatabase(config);
+	return database;
+}
+
+/**
+ * Build a knex instance from a resolved DB config. Shared by the default pool
+ * and named connections so both get the same client-specific pool hooks and
+ * query instrumentation.
+ */
+export function constructDatabase(config: Record<string, any>): Knex {
 	const logger = useLogger();
 	const metrics = useMetrics();
 
@@ -48,55 +78,7 @@ export function getDatabase(): Knex {
 		connectionString,
 		pool: poolConfig = {},
 		...connectionConfig
-	} = getConfigFromEnv('DB_', {
-		omitPrefix: 'DB_EXCLUDE_TABLES',
-		omitKey: ['DB_BATCH_INSERT_CHUNK_SIZE', 'DB_MSSQL_TRUST_BATCH_RETURNING'],
-	});
-
-	const requiredEnvVars = ['DB_CLIENT'];
-
-	switch (client) {
-		case 'sqlite3':
-			requiredEnvVars.push('DB_FILENAME');
-			break;
-
-		case 'oracledb':
-			if (!env['DB_CONNECT_STRING']) {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-			} else {
-				requiredEnvVars.push('DB_USER', 'DB_PASSWORD', 'DB_CONNECT_STRING');
-			}
-
-			break;
-
-		case 'cockroachdb':
-		case 'pg':
-			if (!connectionString) {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER');
-			} else {
-				requiredEnvVars.push('DB_CONNECTION_STRING');
-			}
-
-			break;
-		case 'mysql':
-			if (!env['DB_SOCKET_PATH']) {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-			} else {
-				requiredEnvVars.push('DB_DATABASE', 'DB_USER', 'DB_PASSWORD', 'DB_SOCKET_PATH');
-			}
-
-			break;
-		case 'mssql':
-			if (!env['DB_TYPE'] || env['DB_TYPE'] === 'default') {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-			}
-
-			break;
-		default:
-			requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-	}
-
-	validateEnv(requiredEnvVars);
+	} = config;
 
 	const knexConfig: Knex.Config = {
 		client,
@@ -172,12 +154,12 @@ export function getDatabase(): Knex {
 		merge(knexConfig, { connection: { options: { useUTC: false } } });
 	}
 
-	database = knex.default(knexConfig);
-	validateDatabaseCharset(database);
+	const dbInstance = knex.default(knexConfig);
+	validateDatabaseCharset(dbInstance);
 
 	const times = new Map<string, number>();
 
-	database
+	dbInstance
 		.on('query', ({ __knexUid }: QueryInfo) => {
 			times.set(__knexUid, performance.now());
 		})
@@ -205,7 +187,7 @@ export function getDatabase(): Knex {
 			times.delete(queryInfo.__knexUid);
 		});
 
-	return database;
+	return dbInstance;
 }
 
 export function getSchemaInspector(database?: Knex): SchemaInspector {

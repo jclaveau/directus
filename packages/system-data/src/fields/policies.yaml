@@ -52,6 +52,12 @@ fields:
       - cast-csv
     width: full
 
+  - field: db_connections
+    interface: tags
+    special:
+      - cast-csv
+    width: full
+
   - field: enforce_tfa
     note: $t:field_options.directus_policies.enforce_tfa
     interface: boolean

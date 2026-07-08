@@ -2979,6 +2979,9 @@ importers:
 
   tests/blackbox:
     devDependencies:
+      '@directus/env':
+        specifier: workspace:*
+        version: link:../../packages/env
       '@directus/tsconfig':
         specifier: 'catalog:'
         version: 4.0.0

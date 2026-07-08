@@ -128,13 +128,17 @@ export type OptionsCreateCollection = {
 	primaryKeyType?: PrimaryKeyType;
 };
 
-export async function CreateCollection(vendor: Vendor, options: Partial<OptionsCreateCollection>) {
-	// Validate options
+/**
+ * Fill in the collection defaults and prepend the primary-key field, ready to
+ * POST.
+ */
+function buildCollectionPayload(
+	options: Partial<OptionsCreateCollection>,
+): Partial<OptionsCreateCollection> {
 	if (!options.collection) {
 		throw new Error('Missing required field: collection');
 	}
 
-	// Parse options
 	const defaultOptions = {
 		meta: {},
 		schema: {},
@@ -142,11 +146,11 @@ export async function CreateCollection(vendor: Vendor, options: Partial<OptionsC
 		primaryKeyType: 'integer',
 	};
 
-	options = Object.assign({}, defaultOptions, options);
+	const payload = Object.assign({}, defaultOptions, options);
 
-	switch (options.primaryKeyType) {
+	switch (payload.primaryKeyType) {
 		case 'uuid':
-			options.fields.push({
+			payload.fields.push({
 				field: 'id',
 				type: 'uuid',
 				meta: { hidden: true, readonly: true, interface: 'input', special: ['uuid'] },
@@ -155,7 +159,7 @@ export async function CreateCollection(vendor: Vendor, options: Partial<OptionsC
 
 			break;
 		case 'string':
-			options.fields.push({
+			payload.fields.push({
 				field: 'id',
 				type: 'string',
 				meta: { hidden: false, readonly: false, interface: 'input' },
@@ -165,7 +169,7 @@ export async function CreateCollection(vendor: Vendor, options: Partial<OptionsC
 			break;
 		case 'integer':
 		default:
-			options.fields.push({
+			payload.fields.push({
 				field: 'id',
 				type: 'integer',
 				meta: { hidden: true, interface: 'input', readonly: true },
@@ -175,13 +179,20 @@ export async function CreateCollection(vendor: Vendor, options: Partial<OptionsC
 			break;
 	}
 
-	if (options.primaryKeyType) {
-		delete options.primaryKeyType;
-	}
+	delete payload.primaryKeyType;
+
+	return payload;
+}
+
+export async function CreateCollection(
+	vendor: Vendor,
+	options: Partial<OptionsCreateCollection>,
+) {
+	const payload = buildCollectionPayload(options);
 
 	// Action
 	const collectionResponse = await request(getUrl(vendor, options.env))
-		.get(`/collections/${options.collection}`)
+		.get(`/collections/${payload.collection}`)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
 
 	if (collectionResponse.body.data) {
@@ -191,7 +202,27 @@ export async function CreateCollection(vendor: Vendor, options: Partial<OptionsC
 	const response = await request(getUrl(vendor, options.env))
 		.post(`/collections`)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
-		.send(options);
+		.send(payload);
+
+	return response.body.data;
+}
+
+export type OptionsCreateCollections = {
+	collections: Partial<OptionsCreateCollection>[];
+	env?: Env;
+};
+
+/** Create several collections (each with its fields folded in) in one batch POST. */
+export async function CreateCollections(
+	vendor: Vendor,
+	options: OptionsCreateCollections,
+) {
+	const response = await request(getUrl(vendor, options.env))
+		.post(`/collections`)
+		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
+		.send(
+			options.collections.map((collection) => buildCollectionPayload(collection)),
+		);
 
 	return response.body.data;
 }

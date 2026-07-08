@@ -1,11 +1,14 @@
 import {
 	ContainsNullValuesError,
+	DatabasePoolExhaustedError,
 	InvalidForeignKeyError,
 	NotNullViolationError,
 	RecordNotUniqueError,
 	ValueOutOfRangeError,
 	ValueTooLongError,
+	type DatabasePoolExhaustedReason,
 } from '@directus/errors';
+import { isObject } from '@directus/utils';
 import type { PostgresError } from './types.js';
 import type { Item } from '@directus/types';
 
@@ -18,6 +21,10 @@ enum PostgresErrorCodes {
 }
 
 export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
+	// Recognized constraint/data codes are handled first, so a real violation
+	// whose message happens to contain a pool phrase (a stored value like "pool
+	// is probably full") can never be misread as exhaustion. Only errors with no
+	// matching SQLSTATE fall through to the message-based pool detection.
 	switch (error.code) {
 		case PostgresErrorCodes.UNIQUE_VIOLATION:
 			return uniqueViolation();
@@ -30,7 +37,7 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 		case PostgresErrorCodes.FOREIGN_KEY_VIOLATION:
 			return foreignKeyViolation();
 		default:
-			return error;
+			return getPoolExhaustedError(error) ?? error;
 	}
 
 	function uniqueViolation() {
@@ -119,4 +126,52 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 			value: field ? data[field] : null,
 		});
 	}
+}
+
+/**
+ * Turn a raw pg/pgbouncer/tarn error into a DatabasePoolExhaustedError, or
+ * null if it isn't one. The tarn/pgbouncer cases carry no SQLSTATE, so they're
+ * matched on the message. The connection tier is left null here for the caller
+ * (the request) to tag on.
+ */
+export function getPoolExhaustedError(
+	error: unknown,
+): DatabasePoolExhaustedError | null {
+	if (!isObject(error)) {
+		return null;
+	}
+
+	const code = typeof error['code'] === 'string'
+		? error['code']
+		: '';
+
+	const message = (typeof error['message'] === 'string'
+		? error['message']
+		: ''
+	).toLowerCase();
+
+	const isAcquireTimeout =
+		message.includes('timeout acquiring a connection') ||
+		message.includes('pool is probably full');
+
+	let reason: DatabasePoolExhaustedReason | null = null;
+
+	if (code === '53300') {
+		reason = 'too_many_connections'; // postgres: no backend connection slots left
+	}
+	else if (message.includes('no more connections allowed')) {
+		reason = 'max_client_connections'; // pgbouncer: global client-socket cap
+	}
+	else if (message.includes('query_wait_timeout')) {
+		reason = 'pool_queue_timeout'; // pgbouncer: server-connection queue timeout
+	}
+	else if (isAcquireTimeout) {
+		reason = 'client_pool_timeout'; // knex/tarn: pool.max acquire timeout
+	}
+
+	if (reason === null) {
+		return null;
+	}
+
+	return new DatabasePoolExhaustedError({ reason, connection: null });
 }

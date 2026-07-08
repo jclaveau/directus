@@ -1,3 +1,5 @@
+import { cast } from '@directus/env';
+
 export default (router, { env }) => {
 	router.post('/set', (req, res) => {
 		if (!env) {
@@ -10,7 +12,9 @@ export default (router, { env }) => {
 			return res.status(400).json({ errors: [{ message: 'missing string "key"' }] });
 		}
 
-		env[key] = value;
-		res.json({ data: { key, value } });
+		// Cast exactly as @directus/env would on a real env var (type-map + guess),
+		// so an injected value is typed the same as one loaded from the environment.
+		env[key] = cast(value, key);
+		res.json({ data: { key, value: env[key] } });
 	});
 };

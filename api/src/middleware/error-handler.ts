@@ -3,7 +3,13 @@ import type { DeepPartial } from '@directus/types';
 import { isObject } from '@directus/utils';
 import { getNodeEnv } from '@directus/utils/node';
 import type { ErrorRequestHandler } from 'express';
-import getDatabase from '../database/index.js';
+import type { Knex } from 'knex';
+import getDatabase, {
+	getConnectionNameForAccountability,
+	getDatabaseForAccountability,
+} from '../database/index.js';
+import { extractDatabaseError } from '../database/errors/translate.js';
+import type { SQLError } from '../database/errors/dialects/types.js';
 import emitter from '../emitter.js';
 import { useLogger } from '../logger/index.js';
 
@@ -24,7 +30,56 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 	let status: number | null = null;
 
 	// It can be assumed that at least one error is given
-	const receivedErrors: unknown[] = Array.isArray(err) ? err : [err];
+	const rawErrors: unknown[] = Array.isArray(err)
+		? err
+		: [err];
+
+	// Run every unknown error through the DB dialect translator: it turns a
+	// raw driver error (constraint OR pool exhaustion, on reads or writes) into
+	// the dedicated Directus error, and returns non-DB errors untouched — so
+	// nothing is missed and the `database.error` hook (write path only) never
+	// fires here. Pool errors get the granted connection tier tagged on — only
+	// the request knows it.
+	const receivedErrors: unknown[] = await Promise.all(
+		rawErrors.map(async (error) => {
+			let resolved: unknown = error;
+
+			if (!isDirectusError(error)) {
+				// Dispatch on the connection the query ran on. If building the routed
+				// pool fails (a misconfigured named connection), fall back to the base
+				// pool — a build error here would otherwise mask the original error,
+				// and a wrong dialect at worst leaves it untranslated.
+				let dialectKnex: Knex;
+
+				try {
+					dialectKnex = getDatabaseForAccountability(req.accountability);
+				}
+				catch {
+					dialectKnex = getDatabase();
+				}
+
+				const translated = await extractDatabaseError(
+					error as SQLError,
+					{},
+					dialectKnex,
+				);
+
+				if (isDirectusError(translated)) {
+					resolved = translated;
+				}
+			}
+
+			// Attach the granted connection name to a pool-exhaustion error. Write-path
+			// errors arrive already-translated (connection null) and skip the extract
+			// above, so both paths get it here — only the request knows the tier.
+			if (isDirectusError(resolved, ErrorCode.DatabasePoolExhausted)) {
+				resolved.extensions.connection ??=
+					getConnectionNameForAccountability(req.accountability);
+			}
+
+			return resolved;
+		}),
+	);
 
 	for (const error of receivedErrors) {
 		// In dev mode, if available, expose stack trace under error's extensions data
@@ -55,6 +110,10 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 
 			if (isDirectusError(error, ErrorCode.MethodNotAllowed)) {
 				res.header('Allow', error.extensions.allowed.join(', '));
+			}
+
+			if (isDirectusError(error, ErrorCode.DatabasePoolExhausted)) {
+				res.header('Retry-After', '1'); // seconds; pool exhaustion is transient
 			}
 		} else {
 			logger.error(error);

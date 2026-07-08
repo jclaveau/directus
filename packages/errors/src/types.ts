@@ -1,5 +1,8 @@
 import { ErrorCode } from './codes.js';
 import type { ContainsNullValuesErrorExtensions } from './errors/contains-null-values.js';
+import type {
+	DatabasePoolExhaustedExtensions,
+} from './errors/database-pool-exhausted.js';
 import type { HitRateLimitErrorExtensions } from './errors/hit-rate-limit.js';
 import type { IllegalAssetTransformationErrorExtensions } from './errors/illegal-asset-transformation.js';
 import type { InvalidForeignKeyErrorExtensions } from './errors/invalid-foreign-key.js';
@@ -19,6 +22,7 @@ import type { ValueTooLongErrorExtensions } from './errors/value-too-long.js';
 
 type Map = {
 	[ErrorCode.ContainsNullValues]: ContainsNullValuesErrorExtensions;
+	[ErrorCode.DatabasePoolExhausted]: DatabasePoolExhaustedExtensions;
 	[ErrorCode.IllegalAssetTransformation]: IllegalAssetTransformationErrorExtensions;
 	[ErrorCode.InvalidForeignKey]: InvalidForeignKeyErrorExtensions;
 	[ErrorCode.InvalidPayload]: InvalidPayloadErrorExtensions;

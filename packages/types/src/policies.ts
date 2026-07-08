@@ -7,6 +7,7 @@ export interface Policy {
 	ip_access: string[] | null;
 	app_access: boolean;
 	admin_access: boolean;
+	db_connections: string[] | null;
 }
 
 export interface Globals {

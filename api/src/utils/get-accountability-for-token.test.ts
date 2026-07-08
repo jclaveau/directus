@@ -35,13 +35,26 @@ describe('getAccountabilityForToken', async () => {
 		const db = getDatabase();
 
 		vi.mocked(fetchRolesTree).mockResolvedValue([]);
-		vi.mocked(fetchGlobalAccess).mockResolvedValue({ app: false, admin: false });
+
+		vi.mocked(fetchGlobalAccess).mockResolvedValue({
+			app: false,
+			admin: false,
+			grantedDbConnections: [],
+		});
 
 		const token = jwt.sign({ role: '123-456-789', app_access: false, admin_access: false }, 'super-secure-secret', {
 			issuer: 'directus',
 		});
 
-		const expectedAccountability = { admin: false, app: false, role: '123-456-789', roles: [], ip: null, user: null };
+		const expectedAccountability = {
+			admin: false,
+			app: false,
+			role: '123-456-789',
+			roles: [],
+			ip: null,
+			user: null,
+			grantedDbConnections: [],
+		};
 
 		const result = await getAccountabilityForToken(token);
 		expect(result).toStrictEqual(expectedAccountability);
@@ -63,7 +76,12 @@ describe('getAccountabilityForToken', async () => {
 		);
 
 		vi.mocked(fetchRolesTree).mockResolvedValue([]);
-		vi.mocked(fetchGlobalAccess).mockResolvedValue({ app: true, admin: true });
+
+		vi.mocked(fetchGlobalAccess).mockResolvedValue({
+			app: true,
+			admin: true,
+			grantedDbConnections: ['premium'],
+		});
 
 		const result = await getAccountabilityForToken(token);
 
@@ -75,6 +93,7 @@ describe('getAccountabilityForToken', async () => {
 			roles: [],
 			ip: null,
 			share: 'share-id',
+			grantedDbConnections: ['premium'],
 		});
 	});
 
@@ -97,7 +116,12 @@ describe('getAccountabilityForToken', async () => {
 		} as any);
 
 		vi.mocked(fetchRolesTree).mockResolvedValue([]);
-		vi.mocked(fetchGlobalAccess).mockResolvedValue({ app: true, admin: false });
+
+		vi.mocked(fetchGlobalAccess).mockResolvedValue({
+			app: true,
+			admin: false,
+			grantedDbConnections: [],
+		});
 
 		const token = jwt.sign({ role: '123-456-789' }, 'bad-secret');
 
@@ -108,6 +132,7 @@ describe('getAccountabilityForToken', async () => {
 			admin: false,
 			app: true,
 			ip: null,
+			grantedDbConnections: [],
 		};
 
 		const result = await getAccountabilityForToken(token);

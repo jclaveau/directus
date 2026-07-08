@@ -52,7 +52,12 @@ describe('getAccountabilityForRole', async () => {
 	test('get role and role tree from database', async () => {
 		const roles = ['123-456', '234-567'];
 		vi.mocked(fetchRolesTree).mockResolvedValue(roles);
-		vi.mocked(fetchGlobalAccess).mockResolvedValue({ admin: false, app: true });
+
+		vi.mocked(fetchGlobalAccess).mockResolvedValue({
+			admin: false,
+			app: true,
+			grantedDbConnections: [],
+		});
 
 		const result = await getAccountabilityForRole('123-456', {
 			accountability: null,
@@ -67,6 +72,7 @@ describe('getAccountabilityForRole', async () => {
 			role: '123-456',
 			user: null,
 			ip: null,
+			grantedDbConnections: [],
 		});
 
 		expect(fetchRolesTree).toHaveBeenCalledWith('123-456', {});
@@ -75,7 +81,12 @@ describe('getAccountabilityForRole', async () => {
 
 	test('invalid role throws error', async () => {
 		vi.mocked(fetchRolesTree).mockResolvedValue([]);
-		vi.mocked(fetchGlobalAccess).mockResolvedValue({ admin: false, app: false });
+
+		vi.mocked(fetchGlobalAccess).mockResolvedValue({
+			admin: false,
+			app: false,
+			grantedDbConnections: [],
+		});
 
 		await expect(
 			getAccountabilityForRole('456-789', {
