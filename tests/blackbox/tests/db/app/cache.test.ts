@@ -21,8 +21,8 @@ import {
 	collectionRelated,
 	collectionScoped,
 	collectionScopedMulti,
-	collectionScopedPath,
-	collectionScopedPathMid,
+	collectionOwnedSubItem,
+	collectionOwnedItem,
 	collectionScopedRel,
 	collectionTag,
 	scopedOwnerA,
@@ -1790,14 +1790,14 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		A multi-hop relational path (mid.owner_ref) value-scopes the read: the
-		partition value is two hops away, so the write side joins through mid to
-		purge only the mutated owner's slice and spare another owner's
+		A multi-hop relational path (owned_item.owner_ref) value-scopes the read: the
+		owner is two hops away, so the write side joins through owned_item to purge
+		only the mutated owner's slice and spare another owner's
 	`, () => {
-		// scoped_cache_fields = ['mid.owner_ref'] on the root: the owner is root → mid
-		// → owner_ref, so the mutated root row only carries `mid` — the write must
-		// join through mid to recover the terminal owner. Without path resolution the
-		// read pins nothing → bare tag → B's write leaves A a MISS too, witness fails.
+		// scoped_cache_fields = ['owned_item.owner_ref'] on owned_sub_item: the owner is
+		// owned_sub_item → owned_item → owner_ref, so the mutated row only carries
+		// `owned_item` — the write must join through it to recover the owner. Without
+		// path resolution the read pins nothing → bare tag → B's write leaves A a MISS.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -1811,31 +1811,33 @@ describe('App Caching Tests', () => {
 				).body.data;
 			};
 
-			const addRoot = async (mid: number) => {
-				await request(url).post(`/items/${collectionScopedPath}`)
-					.send({ string_field: randomUUID(), mid })
+			const addSubItem = async (ownedItem: number) => {
+				await request(url).post(`/items/${collectionOwnedSubItem}`)
+					.send({ string_field: randomUUID(), owned_item: ownedItem })
 					.set('Authorization', auth);
 			};
 
-			// Two owners, a mid pointing at each, a root pointing at each mid —
-			// one createMany array POST per tier.
+			// Two owners, an owned_item under each, an owned_sub_item under each
+			// owned_item — one createMany array POST per tier.
 			const [ownerA, ownerB] = await createMany(collectionGrandRelated, [
 				{ string_field: randomUUID() },
 				{ string_field: randomUUID() },
 			]);
 
-			const [midA, midB] = await createMany(collectionScopedPathMid, [
+			const [itemA, itemB] = await createMany(collectionOwnedItem, [
 				{ owner_ref: ownerA.id },
 				{ owner_ref: ownerB.id },
 			]);
 
-			await createMany(collectionScopedPath, [
-				{ string_field: randomUUID(), mid: midA.id },
-				{ string_field: randomUUID(), mid: midB.id },
+			await createMany(collectionOwnedSubItem, [
+				{ string_field: randomUUID(), owned_item: itemA.id },
+				{ string_field: randomUUID(), owned_item: itemB.id },
 			]);
 
-			// Read each slice through the terminal related pk (`mid.owner_ref.id`).
-			const base = `/items/${collectionScopedPath}?filter[mid][owner_ref][id][_eq]=`;
+			// Read each slice through the terminal related pk (`owned_item.owner_ref.id`).
+			const base =
+				`/items/${collectionOwnedSubItem}?filter[owned_item][owner_ref][id][_eq]=`;
+
 			const readA = `${base}${ownerA.id}`;
 			const readB = `${base}${ownerB.id}`;
 
@@ -1856,14 +1858,14 @@ describe('App Caching Tests', () => {
 			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(warmB.headers[cacheStatusHeader]).toBe('HIT');
 
-			// Write a root row into owner B's chain only.
-			await addRoot(midB.id);
+			// Write an owned_sub_item into owner B's chain only.
+			await addSubItem(itemB.id);
 
 			const afterA = await read(readA);
 			const afterB = await read(readB);
 
-			// The write joined root→mid to resolve owner_ref=<ownerB>, so B's write
-			// dropped only B (MISS) and left A cached (HIT).
+			// The write joined owned_sub_item→owned_item to resolve owner_ref=<ownerB>,
+			// so B's write dropped only B (MISS) and left A cached (HIT).
 			expect(afterA.statusCode).toBe(200);
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterB.statusCode).toBe(200);
