@@ -76,36 +76,45 @@ export default (router, { services, getSchema }) => {
 			? 'propagate'
 			: 'report';
 
-		for (const { connection, concurrency } of saturate) {
-			const knex = await grantedKnex([connection]);
+		// Wrap the whole body: building a misconfigured connection throws, and a
+		// bare extension route has no async-error wrapper — an unhandled rejection
+		// would exit the shared test server. `propagate` still reaches the global
+		// handler via next() (which returns, not throws). Mirrors `/granted`.
+		try {
+			for (const { connection, concurrency } of saturate) {
+				const knex = await grantedKnex([connection]);
 
-			for (let i = 0; i < (Number(concurrency) || 1); i++) {
-				knex.raw('SELECT pg_sleep(?)', [sleepSeconds]).catch(() => {});
-			}
-		}
-
-		// Give the sleeping queries a moment to occupy every server connection.
-		await new Promise((resolve) => setTimeout(resolve, 400));
-
-		const results = {};
-
-		for (const name of probes) {
-			const knex = await grantedKnex([name]);
-			const startedAt = Date.now();
-
-			try {
-				await knex.raw('SELECT 1');
-				results[name] = { ok: true, ms: Date.now() - startedAt };
-			}
-			catch (error) {
-				if (onProbeError === 'propagate') {
-					return next(error);
+				for (let i = 0; i < (Number(concurrency) || 1); i++) {
+					knex.raw('SELECT pg_sleep(?)', [sleepSeconds]).catch(() => {});
 				}
-
-				results[name] = { ok: false, error: error.message };
 			}
-		}
 
-		return res.json({ data: { results } });
+			// Give the sleeping queries a moment to occupy every server connection.
+			await new Promise((resolve) => setTimeout(resolve, 400));
+
+			const results = {};
+
+			for (const name of probes) {
+				const knex = await grantedKnex([name]);
+				const startedAt = Date.now();
+
+				try {
+					await knex.raw('SELECT 1');
+					results[name] = { ok: true, ms: Date.now() - startedAt };
+				}
+				catch (error) {
+					if (onProbeError === 'propagate') {
+						return next(error);
+					}
+
+					results[name] = { ok: false, error: error.message };
+				}
+			}
+
+			return res.json({ data: { results } });
+		}
+		catch (error) {
+			return res.status(500).json({ errors: [{ message: error.message }] });
+		}
 	});
 };

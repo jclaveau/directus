@@ -21,12 +21,10 @@ enum PostgresErrorCodes {
 }
 
 export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
-	const poolError = getPoolExhaustedError(error);
-
-	if (poolError) {
-		return poolError;
-	}
-
+	// Recognized constraint/data codes are handled first, so a real violation
+	// whose message happens to contain a pool phrase (a stored value like "pool
+	// is probably full") can never be misread as exhaustion. Only errors with no
+	// matching SQLSTATE fall through to the message-based pool detection.
 	switch (error.code) {
 		case PostgresErrorCodes.UNIQUE_VIOLATION:
 			return uniqueViolation();
@@ -39,7 +37,7 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 		case PostgresErrorCodes.FOREIGN_KEY_VIOLATION:
 			return foreignKeyViolation();
 		default:
-			return error;
+			return getPoolExhaustedError(error) ?? error;
 	}
 
 	function uniqueViolation() {
