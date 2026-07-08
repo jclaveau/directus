@@ -5,6 +5,7 @@ import {
 	RecordNotUniqueError,
 } from '@directus/errors';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Knex } from 'knex';
 import { getDatabaseClient } from '../index.js';
 import emitter from '../../emitter.js';
 import { extractDatabaseError, translateDatabaseError } from './translate.js';
@@ -120,6 +121,37 @@ describe('client dispatch', () => {
 		const result = await translateDatabaseError(raw, {});
 
 		expect(result).toBe(raw);
+	});
+
+	it('dispatches on the passed connection, not the default client', async () => {
+		// A routed named connection may run a different client than the default
+		// pool. getDatabaseClient reflects whichever knex it is given, so the same
+		// raw error must be parsed by that connection's dialect.
+		const mysqlConnection = { tag: 'mysql' } as unknown as Knex;
+		const pgConnection = { tag: 'pg' } as unknown as Knex;
+
+		vi.mocked(getDatabaseClient).mockImplementation((db) => {
+			if (db === mysqlConnection) {
+				return 'mysql';
+			}
+
+			return 'postgres';
+		});
+
+		const mysqlError = {
+			code: 'ER_DUP_ENTRY',
+			sqlMessage: `Duplicate entry 'x' for key 'articles_email_unique'`,
+		} as SQLError;
+
+		// Routed to the mysql connection → mysql dialect recognises it.
+		expect(
+			await extractDatabaseError(mysqlError, { email: 'x' }, mysqlConnection),
+		).toBeInstanceOf(RecordNotUniqueError);
+
+		// Same error on a pg connection → the pg dialect doesn't match it → raw.
+		expect(
+			await extractDatabaseError(mysqlError, { email: 'x' }, pgConnection),
+		).toBe(mysqlError);
 	});
 });
 
