@@ -137,6 +137,15 @@ test('Falls back to the default pool when nothing is granted', async () => {
 	expect(connectedDatabaseOf(getDatabaseForAccountability(null))).toBe('directus');
 });
 
+test('A share token (no granted connections) uses the default pool', async () => {
+	const { getDatabaseForAccountability } = await import('./index.js');
+
+	// A share-token accountability never runs global-access, so grantedDbConnections
+	// is undefined — it must resolve to the default pool, not throw or misroute.
+	const acc = createDefaultAccountability({ share: 'a-share-id' });
+	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
+});
+
 test('Falls back when the granted connection is not configured', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
