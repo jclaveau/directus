@@ -315,12 +315,30 @@ export function pinnedScopedCacheTagsFromFilter(
 	filter: Filter | null | undefined,
 	fieldTypes: Record<string, Type | undefined> = {},
 	relatedPrimaryKeys: Record<string, string> = {},
+	scopedCachePaths: { field: string; segments: string[] }[] = [],
 ): ScopedCacheTag[] {
-	if (!filter || fields.length === 0) {
+	if (!filter || (fields.length === 0 && scopedCachePaths.length === 0)) {
 		return [];
 	}
 
 	const fieldSet = new Set(fields);
+
+	// A relational-path scope field (`enrollment.student.user`) is pinned by walking
+	// the nested filter down its segments to the terminal `_eq`/`_in` (`evalPathsAt`).
+	// Grouped by head segment so a filter key can look up the paths it starts.
+	const pathsByHead = new Map<string, { field: string; segments: string[] }[]>();
+
+	for (const path of scopedCachePaths) {
+		const head = path.segments[0];
+
+		if (head === undefined) {
+			continue;
+		}
+
+		const group = pathsByHead.get(head) ?? [];
+		group.push(path);
+		pathsByHead.set(head, group);
+	}
 
 	// A node's pinned tags plus whether it *covers* every row it matches — a leaf that bound a
 	// pinnable field covers its rows; an uncovered node's rows carry no pinned tag (would be stale).
@@ -388,6 +406,83 @@ export function pinnedScopedCacheTagsFromFilter(
 		return { tags, covered: tags.size > 0 };
 	}
 
+	// Follow a declared path's segments down the nested filter to the terminal ops
+	// and read its `_eq`/`_in` — or `{ <terminalRelatedPk>: { _eq | _in } }` when the
+	// terminal is an M2O written PK-unwrapped. Returns the value set, or null when the
+	// filter doesn't bind the full path to a concrete value.
+	function pathTerminalValues(
+		segments: string[],
+		value: unknown,
+		terminalRelatedPk: string | undefined,
+	): Set<unknown> | null {
+		let node: unknown = value;
+
+		for (let i = 1; i < segments.length; i++) {
+			if (node === null || typeof node !== 'object') {
+				return null;
+			}
+
+			node = (node as Record<string, unknown>)[segments[i]!];
+		}
+
+		if (node === null || typeof node !== 'object') {
+			return null;
+		}
+
+		const ops = node as Record<string, unknown>;
+
+		if ('_eq' in ops) {
+			return new Set([ops['_eq']]);
+		}
+
+		if ('_in' in ops && Array.isArray(ops['_in'])) {
+			return new Set(ops['_in']);
+		}
+
+		const inner = terminalRelatedPk === undefined
+			? undefined
+			: ops[terminalRelatedPk];
+
+		if (inner !== null && typeof inner === 'object') {
+			const innerOps = inner as Record<string, unknown>;
+
+			if ('_eq' in innerOps) {
+				return new Set([innerOps['_eq']]);
+			}
+
+			if ('_in' in innerOps && Array.isArray(innerOps['_in'])) {
+				return new Set(innerOps['_in']);
+			}
+		}
+
+		return null;
+	}
+
+	// Every declared path whose head segment is this filter key → its terminal values.
+	// Covered iff a path bound (terminal `_eq`/`_in` present, type pin-safe).
+	function evalPathsAt(headField: string, value: unknown): Eval {
+		const tags = new Map<string, Set<unknown>>();
+		const paths = pathsByHead.get(headField);
+
+		if (!paths || value === null || typeof value !== 'object') {
+			return { tags, covered: false };
+		}
+
+		for (const { field, segments } of paths) {
+			if (!isPinnableScopeType(fieldTypes[field])) {
+				continue;
+			}
+
+			const values = pathTerminalValues(segments, value, relatedPrimaryKeys[field]);
+
+			if (values !== null && values.size > 0) {
+				tags.set(field, values);
+			}
+		}
+
+		return { tags, covered: tags.size > 0 };
+	}
+
 	// OR: a row matches at least one branch. Sound to pin only when EVERY branch covers its own rows
 	// (else a row matching an uncovered branch carries no pinned tag → stale); then the tags are the
 	// union across branches — a matching row's covering tag lies in it, across different fields too.
@@ -426,6 +521,7 @@ export function pinnedScopedCacheTagsFromFilter(
 			}
 			else {
 				andIn(evalLeaf(key, value));
+				andIn(evalPathsAt(key, value));
 			}
 		}
 

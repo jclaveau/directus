@@ -516,3 +516,139 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
 	});
 });
+
+describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () => {
+	const enrollmentPath = [
+		{
+			field: 'enrollment.student.user',
+			segments: ['enrollment', 'student', 'user'],
+		},
+	];
+
+	test('pins the terminal _eq of a two-hop path (was bare before)', () => {
+		const filter = { enrollment: { student: { _eq: 'S1' } } };
+
+		const paths = [
+			{ field: 'enrollment.student', segments: ['enrollment', 'student'] },
+		];
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, paths),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student', value: 'S1' },
+		]);
+	});
+
+	test('pins the terminal _eq of a three-hop path', () => {
+		const filter = { enrollment: { student: { user: { _eq: 'U1' } } } };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+		]);
+	});
+
+	test('pins the terminal _in of a path', () => {
+		const filter = { enrollment: { student: { user: { _in: ['U1', 'U2'] } } } };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U2' },
+		]);
+	});
+
+	test('unwraps a PK-nested terminal (`user: { id: { _eq } }`)', () => {
+		const filter = { enrollment: { student: { user: { id: { _eq: 'U1' } } } } };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'disc',
+				[],
+				filter,
+				{},
+				{ 'enrollment.student.user': 'id' },
+				enrollmentPath,
+			),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+		]);
+	});
+
+	test('a filter that stops short of the terminal does not pin (bare)', () => {
+		const filter = { enrollment: { student: { _eq: 'S1' } } };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([]);
+	});
+
+	test('a non-eq terminal op (`_gt`) does not bound the path', () => {
+		const filter = { enrollment: { student: { user: { _gt: 'U1' } } } };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([]);
+	});
+
+	test('a pin-unsafe terminal type (dateTime) falls back to bare', () => {
+		const filter = { enrollment: { student: { joined_at: { _eq: '2026-01-01' } } } };
+
+		const paths = [
+			{
+				field: 'enrollment.student.joined_at',
+				segments: ['enrollment', 'student', 'joined_at'],
+			},
+		];
+
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'disc',
+				[],
+				filter,
+				{ 'enrollment.student.joined_at': 'dateTime' },
+				{},
+				paths,
+			),
+		).toEqual([]);
+	});
+
+	test('a path inside an _or pins when the branch binds it, unioned', () => {
+		const filter = {
+			_or: [
+				{ enrollment: { student: { user: { _eq: 'U1' } } } },
+				{ enrollment: { student: { user: { _eq: 'U2' } } } },
+			],
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter('disc', [], filter, {}, {}, enrollmentPath),
+		).toEqual([
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U2' },
+		]);
+	});
+
+	test('a path and a flat field both pin from one filter', () => {
+		const filter = {
+			term: { _eq: 'fall' },
+			enrollment: { student: { user: { _eq: 'U1' } } },
+		};
+
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'disc',
+				['term'],
+				filter,
+				{},
+				{},
+				enrollmentPath,
+			),
+		).toEqual([
+			{ collection: 'disc', field: 'term', value: 'fall' },
+			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
+		]);
+	});
+});
