@@ -6,8 +6,12 @@ import express from 'express';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Logger } from 'pino';
+import type { Knex } from 'knex';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { getConnectionNameForAccountability } from '../database/index.js';
+import getDatabase, {
+	getConnectionNameForAccountability,
+	getDatabaseForAccountability,
+} from '../database/index.js';
 import { extractDatabaseError } from '../database/errors/translate.js';
 import { useLogger } from '../logger/index.js';
 import * as errorHandlerMod from './error-handler.js';
@@ -285,6 +289,44 @@ describe('Database pool exhaustion', () => {
 				},
 			],
 		});
+	});
+
+	test('Falls back to base pool if the routed build throws', async () => {
+		// A misconfigured named connection makes getDatabaseForAccountability throw
+		// during error handling; the handler must fall back to the base pool and
+		// still translate, not mask the original error behind a generic 500.
+		const baseKnex = { client: {} } as unknown as Knex;
+
+		vi.mocked(getDatabaseForAccountability).mockImplementationOnce(() => {
+			throw new Error('bad DB_CONNECTION_PREMIUM_* config');
+		});
+
+		vi.mocked(getDatabase).mockReturnValue(baseKnex);
+
+		vi.mocked(extractDatabaseError).mockResolvedValueOnce(
+			new DatabasePoolExhaustedError({
+				reason: 'too_many_connections',
+				connection: null,
+			}),
+		);
+
+		vi.mocked(getConnectionNameForAccountability).mockReturnValue('premium');
+
+		await errorHandlerMod.errorHandler(
+			new Error('too many connections'),
+			mockRequest,
+			mockResponse,
+			nextFunction,
+		);
+
+		// Translated on the fallback pool → 429, not a masked 500.
+		expect(extractDatabaseError).toHaveBeenCalledWith(
+			expect.any(Error),
+			{},
+			baseKnex,
+		);
+
+		expect(mockResponse.status).toHaveBeenCalledWith(429);
 	});
 });
 
