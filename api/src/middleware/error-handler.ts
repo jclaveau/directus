@@ -3,6 +3,7 @@ import type { DeepPartial } from '@directus/types';
 import { isObject } from '@directus/utils';
 import { getNodeEnv } from '@directus/utils/node';
 import type { ErrorRequestHandler } from 'express';
+import type { Knex } from 'knex';
 import getDatabase, {
 	getConnectionNameForAccountability,
 	getDatabaseForAccountability,
@@ -44,12 +45,23 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 			let resolved: unknown = error;
 
 			if (!isDirectusError(error)) {
-				const grantedKnex = getDatabaseForAccountability(req.accountability);
+				// Dispatch on the connection the query ran on. If building the routed
+				// pool fails (a misconfigured named connection), fall back to the base
+				// pool — a build error here would otherwise mask the original error,
+				// and a wrong dialect at worst leaves it untranslated.
+				let dialectKnex: Knex;
+
+				try {
+					dialectKnex = getDatabaseForAccountability(req.accountability);
+				}
+				catch {
+					dialectKnex = getDatabase();
+				}
 
 				const translated = await extractDatabaseError(
 					error as SQLError,
 					{},
-					grantedKnex,
+					dialectKnex,
 				);
 
 				if (isDirectusError(translated)) {
