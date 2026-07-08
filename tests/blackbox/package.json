@@ -9,6 +9,7 @@
 		"merge-coverage": "node merge-coverage.mjs"
 	},
 	"devDependencies": {
+		"@directus/env": "workspace:*",
 		"@directus/tsconfig": "catalog:",
 		"@directus/types": "workspace:*",
 		"@directus/utils": "workspace:*",
