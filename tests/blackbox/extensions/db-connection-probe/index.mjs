@@ -6,7 +6,7 @@
 export default (router, { services, getSchema }) => {
 	const { ItemsService } = services;
 
-	async function grantedKnex(grants) {
+	async function grantedKnex(grants, share) {
 		const accountability = {
 			role: null,
 			roles: [],
@@ -17,6 +17,7 @@ export default (router, { services, getSchema }) => {
 			grantedDbConnections: Array.isArray(grants)
 				? grants
 				: [],
+			share: share || null,
 		};
 
 		const schema = await getSchema();
@@ -29,7 +30,7 @@ export default (router, { services, getSchema }) => {
 			return res.status(403).json({ errors: [{ message: 'admin only' }] });
 		}
 
-		const knex = await grantedKnex(req.body?.grantedDbConnections);
+		const knex = await grantedKnex(req.body?.grantedDbConnections, req.body?.share);
 		const connection = knex.client?.config?.connection;
 
 		let database = connection;
