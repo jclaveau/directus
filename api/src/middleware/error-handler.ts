@@ -61,9 +61,7 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 			// errors arrive already-translated (connection null) and skip the extract
 			// above, so both paths get it here — only the request knows the tier.
 			if (isDirectusError(resolved, ErrorCode.DatabasePoolExhausted)) {
-				const extensions = resolved.extensions as { connection: string | null };
-
-				extensions.connection ??=
+				resolved.extensions.connection ??=
 					getConnectionNameForAccountability(req.accountability);
 			}
 
