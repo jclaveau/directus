@@ -101,11 +101,11 @@ test(oneLine`
 	Unions db_connections across policies, splitting CSV and deduping
 `, async () => {
 	vi.mocked(qb.leftJoin).mockResolvedValue([
-		{ admin_access: false, app_access: false, db_connections: 'premium_pool' },
+		{ admin_access: false, app_access: false, db_connections: 'premium' },
 		{
 			admin_access: false,
 			app_access: false,
-			db_connections: 'premium_pool,replica_a',
+			db_connections: 'premium,replica_a',
 		},
 		{ admin_access: false, app_access: false, db_connections: null },
 	]);
@@ -115,7 +115,7 @@ test(oneLine`
 	expect(res).toEqual({
 		admin: false,
 		app: false,
-		dbConnections: ['premium_pool', 'replica_a'],
+		dbConnections: ['premium', 'replica_a'],
 	});
 });
 
