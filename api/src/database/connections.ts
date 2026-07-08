@@ -96,6 +96,141 @@ export function assertConnectionNamesAreUnique(): void {
 	}
 }
 
+// Config property → its env-var suffix, so one dialect switch can serve both
+// the base pool (validateEnv on `DB_<SUFFIX>`) and a named connection
+// (`DB_CONNECTION_<NAME>_<SUFFIX>` / inherited).
+const CONNECTION_FIELD_ENV_SUFFIX: Record<string, string> = {
+	client: 'CLIENT',
+	filename: 'FILENAME',
+	host: 'HOST',
+	port: 'PORT',
+	database: 'DATABASE',
+	user: 'USER',
+	password: 'PASSWORD',
+	connectString: 'CONNECT_STRING',
+	connectionString: 'CONNECTION_STRING',
+	socketPath: 'SOCKET_PATH',
+};
+
+/**
+ * The env key of a connection field under a prefix, e.g.
+ * (`DB_`, 'connectString') → `DB_CONNECT_STRING`.
+ */
+export function connectionFieldEnvKey(prefix: string, field: string): string {
+	return `${prefix}${CONNECTION_FIELD_ENV_SUFFIX[field]}`;
+}
+
+/**
+ * The config properties a resolved knex config must carry for its client — the
+ * single source of truth for both the base pool's boot validation and a named
+ * connection's completeness check. Reads only from the config, so an inherited
+ * base field counts the same as an own override.
+ */
+export function requiredConnectionFields(config: Record<string, any>): string[] {
+	const fields = ['client'];
+
+	const {
+		client,
+		connectionString,
+		connectString,
+		socketPath,
+		type,
+	} = config;
+
+	switch (client) {
+		case 'sqlite3':
+			fields.push('filename');
+			break;
+
+		case 'oracledb':
+			if (connectString) {
+				fields.push('user', 'password', 'connectString');
+			}
+			else {
+				fields.push('host', 'port', 'database', 'user', 'password');
+			}
+
+			break;
+
+		case 'cockroachdb':
+		case 'pg':
+			if (connectionString) {
+				fields.push('connectionString');
+			}
+			else {
+				fields.push('host', 'port', 'database', 'user');
+			}
+
+			break;
+
+		case 'mysql':
+			if (socketPath) {
+				fields.push('database', 'user', 'password', 'socketPath');
+			}
+			else {
+				fields.push('host', 'port', 'database', 'user', 'password');
+			}
+
+			break;
+
+		case 'mssql':
+			if (!type || type === 'default') {
+				fields.push('host', 'port', 'database', 'user', 'password');
+			}
+
+			break;
+
+		default:
+			fields.push('host', 'port', 'database', 'user', 'password');
+	}
+
+	return fields;
+}
+
+/**
+ * A named connection's knex config: its `DB_CONNECTION_<NAME>_*` overrides
+ * merged over the base `DB_*` config (priority stripped).
+ */
+function resolveNamedConnectionConfig(name: string): Record<string, any> {
+	const { priority: _priority, ...override } = getConfigFromEnv(
+		`DB_CONNECTION_${name.toUpperCase()}_`,
+	);
+
+	return merge({}, getBaseDbConfig(), override);
+}
+
+/**
+ * A named connection's merged config must carry every field its client needs —
+ * an inherited base field counts. Throws a pointed error (which env var to set)
+ * instead of letting knex fail lazily with a cryptic driver error.
+ */
+export function assertConnectionConfigComplete(
+	name: string,
+	config: Record<string, any>,
+): void {
+	const prefix = `DB_CONNECTION_${name.toUpperCase()}_`;
+
+	for (const field of requiredConnectionFields(config)) {
+		if (config[field] === undefined || config[field] === '') {
+			throw new Error(
+				`DB connection "${name}" is missing "${field}" (client `
+				+ `"${config['client']}") — set `
+				+ `${connectionFieldEnvKey(prefix, field)} or inherit it from DB_*`,
+			);
+		}
+	}
+}
+
+/**
+ * Every configured named connection must resolve to a complete config once
+ * merged over the base — fail boot, not lazily on the first routed query.
+ */
+export function assertNamedConnectionsAreComplete(): void {
+	for (const name of getExtraConnectionNames()) {
+		assertConnectionConfigComplete(name, resolveNamedConnectionConfig(name));
+	}
+}
+
 /**
  * Resolve the connection name a request should use: the highest-priority among
  * the base pool (always a candidate) and the configured connections the user's
@@ -181,11 +316,13 @@ export function getDatabaseForAccountability(
 		return existing;
 	}
 
-	const { priority: _priority, ...override } = getConfigFromEnv(
-		`DB_CONNECTION_${name.toUpperCase()}_`,
-	);
+	const config = resolveNamedConnectionConfig(name);
 
-	const db = constructDatabase(merge({}, getBaseDbConfig(), override));
+	// Boot already validated every configured name; this guards a name whose
+	// config drifted incomplete after boot (e.g. a live env reload).
+	assertConnectionConfigComplete(name, config);
+
+	const db = constructDatabase(config);
 
 	namedDatabases.set(name, db);
 	return db;

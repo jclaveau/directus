@@ -92,6 +92,25 @@ test('Refuses to build when a connection name equals the base name', async () =>
 	expect(() => getDatabase()).toThrow(/Duplicate DB connection name/);
 });
 
+test('Refuses to build a named connection missing a field', async () => {
+	// analytics overrides the client to sqlite3 but sets no filename; the base
+	// pg host/port/database it inherits are meaningless for sqlite → fail boot.
+	mockEnv['DB_CONNECTIONS'] = ['analytics'];
+	mockEnv['DB_CONNECTION_ANALYTICS_CLIENT'] = 'sqlite3';
+
+	const { default: getDatabase } = await import('./index.js');
+
+	expect(() => getDatabase()).toThrow(/missing "filename"/);
+});
+
+test('Builds when a named connection only overrides the database', async () => {
+	// premium (from beforeEach) inherits the base pg client/host/port/user and
+	// overrides only the database → a complete config, so boot does not throw.
+	const { default: getDatabase } = await import('./index.js');
+
+	expect(() => getDatabase()).not.toThrow();
+});
+
 test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async () => {
 	mockEnv['DB_CONNECTIONS'] = 'premium, replica_a';
 	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';

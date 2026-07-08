@@ -15,7 +15,13 @@ import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import { validateEnv } from '../utils/validate-env.js';
-import { assertConnectionNamesAreUnique, getBaseDbConfig } from './connections.js';
+import {
+	assertConnectionNamesAreUnique,
+	assertNamedConnectionsAreComplete,
+	connectionFieldEnvKey,
+	getBaseDbConfig,
+	requiredConnectionFields,
+} from './connections.js';
 import { getHelpers } from './helpers/index.js';
 
 export {
@@ -42,56 +48,15 @@ export function getDatabase(): Knex {
 		return database;
 	}
 
-	const env = useEnv();
-
 	const config = getBaseDbConfig();
-	const { client, connectionString } = config;
 
-	const requiredEnvVars = ['DB_CLIENT'];
-
-	switch (client) {
-		case 'sqlite3':
-			requiredEnvVars.push('DB_FILENAME');
-			break;
-
-		case 'oracledb':
-			if (!env['DB_CONNECT_STRING']) {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-			} else {
-				requiredEnvVars.push('DB_USER', 'DB_PASSWORD', 'DB_CONNECT_STRING');
-			}
-
-			break;
-
-		case 'cockroachdb':
-		case 'pg':
-			if (!connectionString) {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER');
-			} else {
-				requiredEnvVars.push('DB_CONNECTION_STRING');
-			}
-
-			break;
-		case 'mysql':
-			if (!env['DB_SOCKET_PATH']) {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-			} else {
-				requiredEnvVars.push('DB_DATABASE', 'DB_USER', 'DB_PASSWORD', 'DB_SOCKET_PATH');
-			}
-
-			break;
-		case 'mssql':
-			if (!env['DB_TYPE'] || env['DB_TYPE'] === 'default') {
-				requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-			}
-
-			break;
-		default:
-			requiredEnvVars.push('DB_HOST', 'DB_PORT', 'DB_DATABASE', 'DB_USER', 'DB_PASSWORD');
-	}
+	const requiredEnvVars = requiredConnectionFields(config).map(
+		(field) => connectionFieldEnvKey('DB_', field),
+	);
 
 	validateEnv(requiredEnvVars);
 	assertConnectionNamesAreUnique();
+	assertNamedConnectionsAreComplete();
 
 	database = constructDatabase(config);
 	return database;

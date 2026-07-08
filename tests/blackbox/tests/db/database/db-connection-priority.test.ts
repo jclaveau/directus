@@ -340,3 +340,37 @@ describe('DB public share connection', () => {
 		300_000,
 	);
 });
+
+describe('DB connection config validation', () => {
+	afterAll(async () => {
+		for (const vendor of GRANT_VENDORS) {
+			await setDirectusEnv(vendor, 'DB_CONNECTIONS', '');
+		}
+	});
+
+	if (GRANT_VENDORS.length === 0) {
+		it.skip('no pg-family vendor in this run', () => {
+			// nothing to route
+		});
+	}
+
+	it.each(GRANT_VENDORS)(
+		'%s refuses to route to a named connection with an incomplete config',
+		async (vendor) => {
+			// bb_broken switches the client to sqlite3 but sets no filename; the
+			// inherited pg host/database are meaningless for sqlite → incomplete,
+			// so the route seam must throw a pointed error, not build a bad pool.
+			await setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bb_broken');
+			await setDirectusEnv(vendor, 'DB_CONNECTION_BB_BROKEN_CLIENT', 'sqlite3');
+
+			const response = await request(getUrl(vendor))
+				.post('/db-connection-probe/granted')
+				.send({ grantedDbConnections: ['bb_broken'] })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(500);
+			expect(response.body.errors[0].message).toContain('filename');
+		},
+		60_000,
+	);
+});
