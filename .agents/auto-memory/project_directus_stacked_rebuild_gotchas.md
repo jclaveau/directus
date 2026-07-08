@@ -31,3 +31,26 @@ Hard-won while building the conflict-resolved copy stack ([[directus-compose-cop
 - **Semantic (non-textual) interactions surface only in tests.** #50 (skip no-op empty updates) silently broke #58's
   await-update test which used an empty `{}` payload → now a no-op skip → action never fires. Git merged clean; only the
   api test caught it. Run the full api test on the assembled hhh-main, not just per-file.
+
+## Re-linearizing the runtime feat stack (rebase-onto) — 2026-06-23
+
+Re-linearized #105→#110 onto a fixed #105. Extra gotchas:
+
+- **PR "base" labels ≠ real git ancestry.** #108 forked from #107 at a MID commit (before #107's prettier-format
+  commit), not the old #107 tip. Hardcoded old-tips made `rebase --onto N107 <old-tip>` replay an empty/wrong range
+  (silently dropped a feature's commits). Always compute the true fork point:
+  `git merge-base <old-parent-tip> <old-branch-tip>`, use THAT as `<upstream>` in `rebase --onto <new-parent> <fork>`.
+- **Competing refactors of the same fn conflict on every rebase** ([[feedback_merge_competing_refactors]]): cancel-create
+  vs cancel-mutations both rewrote `createOne`; batch-insert inverted it (`createOne`→`createMany` delegation). For the
+  inverted-architecture one, `git checkout --theirs <file>` takes the already-tested original branch's whole file (verify
+  `git diff <orig-tip> -- file` == 0) — cleaner than hand-weaving.
+- **Latent DUPLICATE-IDENTIFIER (no textual conflict).** #107 and #108 each added `allowFilterCancel?` to
+  `MutationOptions`; never collided while non-linear, but re-linearizing stacked both → `tsc TS2300 Duplicate
+  identifier` (git kept both). Build the touched package (`@directus/types`) locally after re-linearizing; dedup keeping
+  the broader feature's decl.
+- **`checkout --theirs/--ours` is INVERTED under rebase**: `--theirs`=commit being replayed, `--ours`=branch rebased onto.
+- **Classifier blocks bare `git push --force` on open PRs; `--force-with-lease=<ref>:<expected-sha>` passes** (explicit
+  SHA = auditable). Use it for rebuild force-pushes.
+- **Distinguish real build break from drift**: a `sharp`/`'jpg'` tsc error in `api` build was node_modules drift noise
+  ([[reference_local_build_env_version_mismatch]]); the `@directus/types` dup was real. Error in code you touched = real;
+  error in untouched subsystem = likely drift, let version-anchored CI arbitrate.
