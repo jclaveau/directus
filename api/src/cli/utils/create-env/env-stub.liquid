@@ -127,10 +127,11 @@ PUBLIC_URL="/"
 # Extra DB connections a policy can grant to prioritize some users' DB access
 # (e.g. two pgbouncer pools over one Postgres). Each connection inherits the base
 # DB_* config; set only what differs. A request routes to the highest-priority
-# connection among the default pool and the ones its user's policies grant. The
-# default (base DB_*) pool always competes, under the name below.
-# DB_DEFAULT_CONNECTION_NAME="default"  # name to grant the base DB_* pool
-# DB_DEFAULT_CONNECTION_PRIORITY=0  # raise so the base pool can outrank grants
+# connection among the base pool and the ones its user's policies grant. The base
+# (DB_*) pool is the floor: at equal priority any granted connection outranks it,
+# so raise its priority below to make it win.
+# DB_BASE_CONNECTION_NAME="base"  # name a policy uses to grant the base DB_* pool
+# DB_BASE_CONNECTION_PRIORITY=0  # raise so the base pool can outrank grants
 # DB_CONNECTIONS="premium,shares"
 # DB_CONNECTION_PREMIUM_DATABASE="directus_premium"  # the pgbouncer pool db
 # DB_CONNECTION_PREMIUM_POOL__MAX=40  # knex client pool cap (per process), not pgbouncer's
@@ -138,7 +139,7 @@ PUBLIC_URL="/"
 # DB_CONNECTION_SHARES_DATABASE="directus_shares"  # a small, capped pgbouncer pool
 # DB_CONNECTION_SHARES_POOL__MAX=5
 # Route anonymous public-share traffic to its own connection so it can't starve
-# the base pool. Must name a configured connection (or the default); a small,
+# the base pool. Must name a configured connection (or the base pool); a small,
 # dedicated pool — never the premium one.
 # DB_PUBLIC_SHARE_CONNECTION_NAME="shares"
 

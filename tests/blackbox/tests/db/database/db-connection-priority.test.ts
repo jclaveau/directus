@@ -40,10 +40,10 @@ async function grantedDatabase(
 
 describe('DB connection priority', () => {
 	afterAll(async () => {
-		// Reset the shared instance so later test files see the plain default connection
+		// Reset the shared instance so later test files see the plain base connection
 		for (const vendor of GRANT_VENDORS) {
 			await setDirectusEnv(vendor, 'DB_CONNECTIONS', '');
-			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '0');
+			await setDirectusEnv(vendor, 'DB_BASE_CONNECTION_PRIORITY', '0');
 		}
 	});
 
@@ -58,7 +58,7 @@ describe('DB connection priority', () => {
 	it.each(GRANT_VENDORS)(
 		'%s respects connection priority across several grants',
 		async (vendor) => {
-			const defaultDatabase = await grantedDatabase(vendor, []);
+			const baseDatabase = await grantedDatabase(vendor, []);
 
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bb_lo,bb_mid,bb_hi'),
@@ -81,15 +81,15 @@ describe('DB connection priority', () => {
 				await grantedDatabase(vendor, ['bb_mid', 'bb_lo']),
 			).toBe('bb_db_mid');
 
-			expect(await grantedDatabase(vendor, [])).toBe(defaultDatabase);
+			expect(await grantedDatabase(vendor, [])).toBe(baseDatabase);
 
-			// An unconfigured grant is skipped → the default pool
-			expect(await grantedDatabase(vendor, ['ghost'])).toBe(defaultDatabase);
+			// An unconfigured grant is skipped → the base pool
+			expect(await grantedDatabase(vendor, ['ghost'])).toBe(baseDatabase);
 
-			// The default pool competes: raise it above every grant and it wins
-			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '999');
-			expect(await grantedDatabase(vendor, ['bb_hi'])).toBe(defaultDatabase);
-			await setDirectusEnv(vendor, 'DB_DEFAULT_CONNECTION_PRIORITY', '0');
+			// The base pool competes: raise it above every grant and it wins
+			await setDirectusEnv(vendor, 'DB_BASE_CONNECTION_PRIORITY', '999');
+			expect(await grantedDatabase(vendor, ['bb_hi'])).toBe(baseDatabase);
+			await setDirectusEnv(vendor, 'DB_BASE_CONNECTION_PRIORITY', '0');
 		},
 		300_000,
 	);
@@ -146,9 +146,9 @@ describe('DB pool exhaustion error', () => {
 
 			expect(response.body.errors[0].extensions.reason).toBe('client_pool_timeout');
 
-			// The tier tag reflects the REQUEST's own routing (admin → default pool),
+			// The tier tag reflects the REQUEST's own routing (admin → base pool),
 			// not the saturated pool the probe ran on.
-			expect(response.body.errors[0].extensions.connection).toBe('default');
+			expect(response.body.errors[0].extensions.connection).toBe('base');
 			expect(response.headers['retry-after']).toBe('1');
 		},
 		300_000,
@@ -187,9 +187,9 @@ describe('DB pool exhaustion error', () => {
 
 			expect(response.body.errors[0].extensions.reason).toBe('pool_queue_timeout');
 
-			// The tier tag reflects the REQUEST's own routing (admin → default pool),
+			// The tier tag reflects the REQUEST's own routing (admin → base pool),
 			// not the saturated pool the probe ran on.
-			expect(response.body.errors[0].extensions.connection).toBe('default');
+			expect(response.body.errors[0].extensions.connection).toBe('base');
 			expect(response.headers['retry-after']).toBe('1');
 		},
 		300_000,
@@ -208,7 +208,7 @@ const POOL_TIERS = {
 };
 
 // Point a named connection at one of pgbouncer's pools (same host, dbname per
-// tier), granted at a priority that outranks the base default.
+// tier), granted at a priority that outranks the base pool.
 function configureTier(vendor: Vendor, name: keyof typeof POOL_TIERS) {
 	const prefix = `DB_CONNECTION_${name.toUpperCase()}`;
 
@@ -268,9 +268,9 @@ describe('DB connection pool isolation', () => {
 	);
 
 	it.each(PGBOUNCER_VENDORS)(
-		'%s keeps the large default pool serving while free + premium are saturated',
+		'%s keeps the large base pool serving while free + premium are saturated',
 		async (vendor) => {
-			// Saturating both small pools must not starve the large `default` pool
+			// Saturating both small pools must not starve the large base pool
 			// (pool_size=50) — the always-available tier the control plane rides.
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'free,premium,shared'),
@@ -296,7 +296,7 @@ describe('DB connection pool isolation', () => {
 
 			const { results } = response.body.data;
 
-			// the large default pool keeps serving …
+			// the large base pool keeps serving …
 			expect(results.shared.ok).toBe(true);
 
 			// … while premium is genuinely saturated (non-vacuity control)
@@ -323,7 +323,7 @@ describe('DB public share connection', () => {
 	it.each(GRANT_VENDORS)(
 		'%s routes a public share to the configured share pool',
 		async (vendor) => {
-			const defaultDatabase = await grantedDatabase(vendor, []);
+			const baseDatabase = await grantedDatabase(vendor, []);
 
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bb_shares'),
@@ -334,8 +334,8 @@ describe('DB public share connection', () => {
 			// A public share lands on the dedicated share pool …
 			expect(await grantedDatabase(vendor, [], 'a-share')).toBe('bb_db_shares');
 
-			// … a non-share request is unaffected (still the default pool).
-			expect(await grantedDatabase(vendor, [])).toBe(defaultDatabase);
+			// … a non-share request is unaffected (still the base pool).
+			expect(await grantedDatabase(vendor, [])).toBe(baseDatabase);
 		},
 		300_000,
 	);
