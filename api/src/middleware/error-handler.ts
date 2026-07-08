@@ -5,6 +5,7 @@ import { getNodeEnv } from '@directus/utils/node';
 import type { ErrorRequestHandler } from 'express';
 import getDatabase, {
 	getConnectionNameForAccountability,
+	getDatabaseForAccountability,
 } from '../database/index.js';
 import { extractDatabaseError } from '../database/errors/translate.js';
 import type { SQLError } from '../database/errors/dialects/types.js';
@@ -32,11 +33,11 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 		? err
 		: [err];
 
-	// Route every unknown error through the DB dialect translator: it turns a
+	// Run every unknown error through the DB dialect translator: it turns a
 	// raw driver error (constraint OR pool exhaustion, on reads or writes) into
 	// the dedicated Directus error, and returns non-DB errors untouched — so
 	// nothing is missed and the `database.error` hook (write path only) never
-	// fires here. Pool errors get the routed connection tier tagged on — only
+	// fires here. Pool errors get the granted connection tier tagged on — only
 	// the request knows it.
 	const receivedErrors: unknown[] = await Promise.all(
 		rawErrors.map(async (error) => {
@@ -44,7 +45,13 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 				return error;
 			}
 
-			const translated = await extractDatabaseError(error as SQLError, {});
+			const grantedKnex = getDatabaseForAccountability(req.accountability);
+
+			const translated = await extractDatabaseError(
+				error as SQLError,
+				{},
+				grantedKnex,
+			);
 
 			if (!isDirectusError(translated)) {
 				return error;
