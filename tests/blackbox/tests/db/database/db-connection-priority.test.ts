@@ -128,8 +128,13 @@ describe('DB pool exhaustion error', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/exhaust')
-				.send({ dbConnections: ['tiny'], concurrency: 5, sleep: 1 })
+				.post('/db-connection-probe/pool')
+				.send({
+					saturate: [{ connection: 'tiny', concurrency: 2 }],
+					probe: ['tiny'],
+					sleep: 1,
+					onProbeError: 'propagate',
+				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(429);
@@ -148,9 +153,9 @@ describe('DB pool exhaustion error', () => {
 		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when a pgbouncer pool queue times out',
 		async (vendor) => {
 			// Route a tier through pgbouncer's tiny `free` pool (pool_size=1,
-			// query_wait_timeout=1s). Two concurrent queries: one takes the single
-			// server connection, the other queues past the timeout, and pgbouncer
-			// raises `query_wait_timeout` — the pool_queue_timeout reason.
+			// query_wait_timeout=1s), saturate it, then probe it: the probe queues
+			// past the timeout and pgbouncer raises `query_wait_timeout`, which
+			// propagates as the pool_queue_timeout 429.
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'free'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_FREE_PRIORITY', '100'),
@@ -160,8 +165,13 @@ describe('DB pool exhaustion error', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/exhaust')
-				.send({ dbConnections: ['free'], concurrency: 2, sleep: 2 })
+				.post('/db-connection-probe/pool')
+				.send({
+					saturate: [{ connection: 'free', concurrency: 2 }],
+					probe: ['free'],
+					sleep: 2,
+					onProbeError: 'propagate',
+				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(429);
@@ -226,11 +236,12 @@ describe('DB connection pool isolation', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/isolation')
+				.post('/db-connection-probe/pool')
 				.send({
 					saturate: [{ connection: 'free', concurrency: 2 }],
-					probes: ['premium', 'free'],
+					probe: ['premium', 'free'],
 					sleep: 3,
+					onProbeError: 'report',
 				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
@@ -260,14 +271,15 @@ describe('DB connection pool isolation', () => {
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/isolation')
+				.post('/db-connection-probe/pool')
 				.send({
 					saturate: [
 						{ connection: 'free', concurrency: 2 },
 						{ connection: 'premium', concurrency: 5 },
 					],
-					probes: ['shared', 'premium'],
+					probe: ['shared', 'premium'],
 					sleep: 3,
+					onProbeError: 'report',
 				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 

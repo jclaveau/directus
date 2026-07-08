@@ -1,6 +1,7 @@
-// Probes DB connection routing. `/route` reports which connection a set of grants
-// resolves to (reads the knex's target db, no query). `/exhaust` saturates a
-// one-connection pool so the real pool-exhaustion error surfaces (→ 429).
+// Probes DB connection routing/pooling. `/route` reports which connection a set
+// of grants resolves to (no query). `/pool` saturates pools then probes pools:
+// `onProbeError: 'report'` records per-pool ok/fail (isolation), `'propagate'`
+// rethrows so a saturated pool surfaces as 429 DATABASE_POOL_EXHAUSTED.
 export default (router, { services, getSchema }) => {
 	const { ItemsService } = services;
 
@@ -39,37 +40,12 @@ export default (router, { services, getSchema }) => {
 		return res.json({ data: { database } });
 	});
 
-	router.post('/exhaust', async (req, res, next) => {
-		if (!req.accountability?.admin) {
-			return res.status(403).json({ errors: [{ message: 'admin only' }] });
-		}
-
-		const concurrency = Number(req.body?.concurrency) || 3;
-		const sleepSeconds = Number(req.body?.sleep) || 0.5;
-
-		const knex = await routedKnex(req.body?.dbConnections);
-
-		try {
-			await Promise.all(
-				Array.from({ length: concurrency }, () => {
-					return knex.raw('SELECT pg_sleep(?)', [sleepSeconds]);
-				}),
-			);
-
-			return res.json({ data: { exhausted: false } });
-		}
-		catch (error) {
-			// Let the global error handler translate the pool error → 429
-			// DATABASE_POOL_EXHAUSTED
-			return next(error);
-		}
-	});
-
-	// Holds one or more pools saturated (fire sleeping queries, don't await),
-	// then probes other pools with a quick query — proving a saturated tier
-	// doesn't starve the others. Returns each probe's ok/error so a test can also
-	// assert the saturated pool itself failed (the non-vacuity control).
-	router.post('/isolation', async (req, res) => {
+	// Saturate the given pools (fire sleeping queries, don't await — hold them),
+	// then probe the given pools with a quick query. `onProbeError` decides what a
+	// failing probe does: `report` records ok/error per pool (200) — the saturated
+	// pool's own failure is the non-vacuity control; `propagate` rethrows it so the
+	// global error handler translates the pool error → 429 DATABASE_POOL_EXHAUSTED.
+	router.post('/pool', async (req, res, next) => {
 		if (!req.accountability?.admin) {
 			return res.status(403).json({ errors: [{ message: 'admin only' }] });
 		}
@@ -78,11 +54,15 @@ export default (router, { services, getSchema }) => {
 			? req.body.saturate
 			: [];
 
-		const probes = Array.isArray(req.body?.probes)
-			? req.body.probes
+		const probes = Array.isArray(req.body?.probe)
+			? req.body.probe
 			: [];
 
 		const sleepSeconds = Number(req.body?.sleep) || 3;
+
+		const onProbeError = req.body?.onProbeError === 'propagate'
+			? 'propagate'
+			: 'report';
 
 		for (const { connection, concurrency } of saturate) {
 			const knex = await routedKnex([connection]);
@@ -106,6 +86,10 @@ export default (router, { services, getSchema }) => {
 				results[name] = { ok: true, ms: Date.now() - startedAt };
 			}
 			catch (error) {
+				if (onProbeError === 'propagate') {
+					return next(error);
+				}
+
 				results[name] = { ok: false, error: error.message };
 			}
 		}
