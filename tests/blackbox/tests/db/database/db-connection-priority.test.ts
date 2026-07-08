@@ -148,23 +148,23 @@ describe('DB pool exhaustion error', () => {
 	);
 
 	it.each(PGBOUNCER_VENDORS)(
-		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when the pgbouncer queue times out',
+		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when a pgbouncer pool queue times out',
 		async (vendor) => {
-			// A tier routed through pgbouncer (docker-compose: transaction pool_mode,
-			// default_pool_size=1, query_wait_timeout=1s, max_client_conn=2). Two
-			// concurrent queries both connect (at the client cap), one queues on the
-			// single server connection, and pgbouncer raises `query_wait_timeout` — the
-			// pool_queue_timeout reason.
+			// Route a tier through pgbouncer's tiny `free` pool (pool_size=1,
+			// query_wait_timeout=1s). Two concurrent queries: one takes the single
+			// server connection, the other queues past the timeout, and pgbouncer
+			// raises `query_wait_timeout` — the pool_queue_timeout reason.
 			await Promise.all([
-				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bouncer'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PRIORITY', '100'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PORT', '6109'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_POOL__MAX', '8'),
+				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'free'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_FREE_PRIORITY', '100'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_FREE_PORT', '6109'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_FREE_DATABASE', 'directus_free'),
+				setDirectusEnv(vendor, 'DB_CONNECTION_FREE_POOL__MAX', '8'),
 			]);
 
 			const response = await request(getUrl(vendor))
 				.post('/db-connection-probe/exhaust')
-				.send({ dbConnections: ['bouncer'], concurrency: 2, sleep: 2 })
+				.send({ dbConnections: ['free'], concurrency: 2, sleep: 2 })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(429);
@@ -179,41 +179,111 @@ describe('DB pool exhaustion error', () => {
 		300_000,
 	);
 
+	// `too_many_connections` (pg 53300) and `max_client_connections` stay
+	// unit-only (dialects/postgres.test.ts): the former needs exhausting the
+	// shared postgres backend, the latter a low global max_client_conn that would
+	// break the isolation tests below (which need many concurrent clients).
+});
+
+const POOL_TIERS = {
+	free: 'directus_free',
+	premium: 'directus_premium',
+	shared: 'directus_default',
+};
+
+// Point a named connection at one of pgbouncer's pools (same host, dbname per
+// tier), granted at a priority that outranks the base default.
+function configureTier(vendor: Vendor, name: keyof typeof POOL_TIERS) {
+	const prefix = `DB_CONNECTION_${name.toUpperCase()}`;
+
+	return [
+		setDirectusEnv(vendor, `${prefix}_PRIORITY`, '100'),
+		setDirectusEnv(vendor, `${prefix}_PORT`, '6109'),
+		setDirectusEnv(vendor, `${prefix}_DATABASE`, POOL_TIERS[name]),
+		setDirectusEnv(vendor, `${prefix}_POOL__MAX`, '8'),
+	];
+}
+
+describe('DB connection pool isolation', () => {
+	afterAll(async () => {
+		for (const vendor of PGBOUNCER_VENDORS) {
+			await setDirectusEnv(vendor, 'DB_CONNECTIONS', '');
+		}
+	});
+
+	if (PGBOUNCER_VENDORS.length === 0) {
+		it.skip('no pgbouncer vendor in this run', () => {
+			// nothing to isolate
+		});
+	}
+
 	it.each(PGBOUNCER_VENDORS)(
-		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when pgbouncer refuses new clients',
+		'%s keeps the premium pool serving while the free pool is saturated',
 		async (vendor) => {
-			// Same pgbouncer tier, but push more concurrent connections than its
-			// max_client_conn (2): pgbouncer rejects the surplus at connect time with
-			// `no more connections allowed` — the real max_client_connections reason. The
-			// reject is immediate, so it wins the race against the 1s queue timeout.
+			// free (pool_size=1) and premium (pool_size=4) are separate pgbouncer
+			// pools over the same db; saturating free must not starve premium.
 			await Promise.all([
-				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'bouncer'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PRIORITY', '100'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_PORT', '6109'),
-				setDirectusEnv(vendor, 'DB_CONNECTION_BOUNCER_POOL__MAX', '8'),
+				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'free,premium'),
+				...configureTier(vendor, 'free'),
+				...configureTier(vendor, 'premium'),
 			]);
 
 			const response = await request(getUrl(vendor))
-				.post('/db-connection-probe/exhaust')
-				.send({ dbConnections: ['bouncer'], concurrency: 5, sleep: 2 })
+				.post('/db-connection-probe/isolation')
+				.send({
+					saturate: [{ connection: 'free', concurrency: 2 }],
+					probes: ['premium', 'free'],
+					sleep: 3,
+				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			expect(response.statusCode).toBe(429);
+			expect(response.statusCode).toBe(200);
 
-			expect(response.body.errors[0].extensions.code).toBe(
-				'DATABASE_POOL_EXHAUSTED',
-			);
+			const { results } = response.body.data;
 
-			expect(response.body.errors[0].extensions.reason).toBe(
-				'max_client_connections',
-			);
+			// premium keeps serving …
+			expect(results.premium.ok).toBe(true);
 
-			expect(response.headers['retry-after']).toBe('1');
+			// … while free is genuinely saturated (non-vacuity control)
+			expect(results.free.ok).toBe(false);
 		},
 		300_000,
 	);
 
-	// The fourth reason, `too_many_connections` (postgres SQLSTATE 53300), stays
-	// unit-only: reaching it means exhausting the shared postgres backend's
-	// max_connections, which would break every other test on that instance.
+	it.each(PGBOUNCER_VENDORS)(
+		'%s keeps the large default pool serving while free + premium are saturated',
+		async (vendor) => {
+			// Saturating both small pools must not starve the large `default` pool
+			// (pool_size=50) — the always-available tier the control plane rides.
+			await Promise.all([
+				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'free,premium,shared'),
+				...configureTier(vendor, 'free'),
+				...configureTier(vendor, 'premium'),
+				...configureTier(vendor, 'shared'),
+			]);
+
+			const response = await request(getUrl(vendor))
+				.post('/db-connection-probe/isolation')
+				.send({
+					saturate: [
+						{ connection: 'free', concurrency: 2 },
+						{ connection: 'premium', concurrency: 5 },
+					],
+					probes: ['shared', 'premium'],
+					sleep: 3,
+				})
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(200);
+
+			const { results } = response.body.data;
+
+			// the large default pool keeps serving …
+			expect(results.shared.ok).toBe(true);
+
+			// … while premium is genuinely saturated (non-vacuity control)
+			expect(results.premium.ok).toBe(false);
+		},
+		300_000,
+	);
 });
