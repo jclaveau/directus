@@ -55,6 +55,13 @@ export const collectionScopedMulti = 'test_app_cache_scoped_multi';
 export const collectionOwnedSubItem = 'test_app_cache_owned_sub_item';
 export const collectionOwnedItem = 'test_app_cache_owned_item';
 
+// A DERIVED multi-hop chain: each collection declares only its OWN scope field —
+// `team` by ['owner_ref'], `member` by ['team'] — and the grand-owner path
+// `team.owner_ref` auto-composes (no config names another collection's relation).
+// Proves #220.
+export const collectionMember = 'test_app_cache_member';
+export const collectionTeam = 'test_app_cache_team';
+
 const junctionTag = 'test_app_cache_first_tag';
 const junctionBlock = 'test_app_cache_first_block';
 
@@ -78,6 +85,8 @@ export const seedDBStructure = () => {
 				// tag/block all point at grandRelated, so grandRelated goes last.
 				await DeleteCollection(vendor, { collection: junctionTag });
 				await DeleteCollection(vendor, { collection: junctionBlock });
+				await DeleteCollection(vendor, { collection: collectionMember });
+				await DeleteCollection(vendor, { collection: collectionTeam });
 				await DeleteCollection(vendor, { collection: collectionOwnedSubItem });
 				await DeleteCollection(vendor, { collection: collectionOwnedItem });
 				await DeleteCollection(vendor, { collection: collectionScopedRel });
@@ -299,6 +308,33 @@ export const seedDBStructure = () => {
 					collection: collectionOwnedSubItem,
 					field: 'owned_item',
 					otherCollection: collectionOwnedItem,
+				});
+
+				// Derived chain: team scopes by its own `owner_ref`, member by its own
+				// `team`. member never names owner_ref — `team.owner_ref` composes itself.
+				await CreateCollections(vendor, {
+					collections: [
+						{
+							collection: collectionTeam,
+							meta: { scoped_cache_fields: ['owner_ref'] },
+						},
+						{
+							collection: collectionMember,
+							meta: { scoped_cache_fields: ['team'] },
+						},
+					],
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionTeam,
+					field: 'owner_ref',
+					otherCollection: collectionGrandRelated,
+				});
+
+				await CreateFieldM2O(vendor, {
+					collection: collectionMember,
+					field: 'team',
+					otherCollection: collectionTeam,
 				});
 
 				expect(true).toBeTruthy();
