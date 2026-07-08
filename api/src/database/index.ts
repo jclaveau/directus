@@ -115,23 +115,6 @@ export function constructDatabase(config: Record<string, any>): Knex {
 		...connectionConfig
 	} = config;
 
-	// Pool sizes/timeouts arrive as strings at runtime (env-inject) or unmapped
-	// in env; tarn wants numbers, so coerce the numeric knobs before knex sees
-	// them.
-	const numericPoolKeys = [
-		'min',
-		'max',
-		'acquireTimeoutMillis',
-		'createTimeoutMillis',
-		'idleTimeoutMillis',
-	];
-
-	for (const key of numericPoolKeys) {
-		if (poolConfig[key] !== undefined) {
-			poolConfig[key] = Number(poolConfig[key]);
-		}
-	}
-
 	const knexConfig: Knex.Config = {
 		client,
 		version,
