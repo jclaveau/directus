@@ -1,0 +1,18 @@
+---
+name: project_scoped_cache_planner_adoption
+description: Long-term goal — enable PR#205 scoped cache in the planner, scope field = student (user_created as interim), later multi-owner (sharing/teachers)
+metadata:
+  type: project
+---
+
+Jean's long-term goal (stated 2026-07-02): turn ON `CACHE_AUTO_PURGE_MODE=scoped` for the planner and set each per-student collection's `cache_scope_fields` to **`student`** — using **`user_created`** as the interim scope field for now, moving later to "all users able to access an item" once **planning-sharing + teacher access** are implemented (neither exists yet).
+
+**Feasibility gaps found auditing `~/dev/Hippocast/dev/planner` against PR#205 (must clear before it helps):**
+- Planner has **no `cache_scope_fields` configured** anywhere → scoped mode is dormant; today = full bare-collection behavior.
+- **Reads don't pin a root scalar.** All 35 `readItems` filter via RELATIONAL paths (`course_part.id._eq`, `...student.user.id._eq`, `course.id._eq`), never a root scalar `_eq`/`_in`. `pinnedScopedCacheTagsFromFilter` pins only a root scalar → these fall to the bare tag → NOT value-scoped. To benefit, reads must be reshaped to `filter: { user_created: { _eq } }` (or `{ student: { _eq } }`) at ROOT. Note `course_part:{id:{_eq}}` still won't pin the FK — only `course_part:{_eq}` would.
+- **`$CURRENT_USER` pin — VERIFIED SAFE (2026-07-02), not a bug.** Traced it: `sanitizeQuery` (`api/src/utils/sanitize-query.ts:195` → `sanitizeFilter`→`parseFilter(filters, accountability)`) resolves `$CURRENT_USER`→concrete uuid at the REST boundary (`req.sanitizedQuery`) AND on the GraphQL path (`api/src/services/graphql/schema/parse-query.ts:22`), BEFORE the service runs. So `readByQuery` gets the resolved query; the pin at `items.ts:780` tags `user_created=<uuid>`, matching the purge side. `getAstFromQuery` only clones (no resolve), but it doesn't need to — the token is already gone by then. Only theoretical risk = an internal caller passing a literal `$CURRENT_USER` straight to `readByQuery` (bypassing sanitizeQuery) — but that would also break the SQL filter (returns nothing), so it's self-evident, not a silent stale.
+- **Multi-owner future ≠ scalar.** "All users with access" (sharing/teachers) is N owners per item — a single scalar `cache_scope_fields` can't express it. That case needs the `cache.scope`/`cache.purge` filter pair (multi-value tags in userland), not a scalar field.
+
+**Relation over-invalidation (m2o/depth-2 join-reads) — PARKED (decided 2026-07-02).** A join-read tags the joined collection BARE, so a write to it drops every read joining it — and this re-coarsens root value-scoping on join-reads (which are the planner norm, ~15 of 54 reads; written collections = the joined ones: teaching_unit/discipline/course/student_time_slot/student_course_part/enrollment). Decision: DON'T fix in core (invasive per-relation owner resolution; #205's `cache.scope`/`cache.purge` filter pair already covers it in userland). Don't build the userland filter-pair yet either. Measure-first ordering: (1) reshape a few high-churn reads to pin a root scalar + enable scoped mode; (2) MEASURE cache-hit + p95 read latency — prod PG is ~100% RAM-resident so a bare-purge may just force a cheap in-RAM re-read = whole effort may not move a real metric ([[project_directus_sql_query_cache_parked]], diagnose-bottleneck-first); (3) only if data shows join-reads thrash AND it hurts → add the filter pair for the hottest relation (student_time_slot) with a test asserting scope==purge (mismatch = silent stale HIT, worst failure mode).
+
+See [[project_student_time_slot_scaling]] for the original per-student cache motivation. PR#205 = `v11.10.1-feat/scoped-cache-value-tags` on jclaveau/directus.
