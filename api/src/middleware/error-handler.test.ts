@@ -225,6 +225,67 @@ describe('Database pool exhaustion', () => {
 			],
 		});
 	});
+
+	test('Attaches the connection name to a write-path pool error', async () => {
+		// Write sites throw the DatabasePoolExhaustedError directly (already a
+		// DirectusError, connection null), so it skips extractDatabaseError — the
+		// handler must still tag the tier, same as the read path above.
+		vi.mocked(getConnectionNameForAccountability).mockReturnValue('premium');
+
+		await errorHandlerMod.errorHandler(
+			new DatabasePoolExhaustedError({
+				reason: 'pool_queue_timeout',
+				connection: null,
+			}),
+			mockRequest,
+			mockResponse,
+			nextFunction,
+		);
+
+		expect(mockResponse.status).toHaveBeenCalledWith(429);
+
+		expect(mockResponse.json).toHaveBeenCalledWith({
+			errors: [
+				{
+					message: expect.stringContaining('Database connection pool exhausted'),
+					extensions: {
+						code: 'DATABASE_POOL_EXHAUSTED',
+						reason: 'pool_queue_timeout',
+						connection: 'premium',
+					},
+				},
+			],
+		});
+	});
+
+	test('Keeps a connection tier already set on the error', async () => {
+		// A pre-tagged pool error is left as-is — the resolver never overwrites it
+		// (decoy return value proves the guard, not a coincidence).
+		vi.mocked(getConnectionNameForAccountability).mockReturnValue('default');
+
+		await errorHandlerMod.errorHandler(
+			new DatabasePoolExhaustedError({
+				reason: 'too_many_connections',
+				connection: 'free',
+			}),
+			mockRequest,
+			mockResponse,
+			nextFunction,
+		);
+
+		expect(mockResponse.json).toHaveBeenCalledWith({
+			errors: [
+				{
+					message: expect.stringContaining('Database connection pool exhausted'),
+					extensions: {
+						code: 'DATABASE_POOL_EXHAUSTED',
+						reason: 'too_many_connections',
+						connection: 'free',
+					},
+				},
+			],
+		});
+	});
 });
 
 describe('Unknown errors', () => {

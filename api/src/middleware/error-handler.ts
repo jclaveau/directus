@@ -41,28 +41,33 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 	// the request knows it.
 	const receivedErrors: unknown[] = await Promise.all(
 		rawErrors.map(async (error) => {
-			if (isDirectusError(error)) {
-				return error;
+			let resolved: unknown = error;
+
+			if (!isDirectusError(error)) {
+				const grantedKnex = getDatabaseForAccountability(req.accountability);
+
+				const translated = await extractDatabaseError(
+					error as SQLError,
+					{},
+					grantedKnex,
+				);
+
+				if (isDirectusError(translated)) {
+					resolved = translated;
+				}
 			}
 
-			const grantedKnex = getDatabaseForAccountability(req.accountability);
+			// Attach the granted connection name to a pool-exhaustion error. Write-path
+			// errors arrive already-translated (connection null) and skip the extract
+			// above, so both paths get it here — only the request knows the tier.
+			if (isDirectusError(resolved, ErrorCode.DatabasePoolExhausted)) {
+				const extensions = resolved.extensions as { connection: string | null };
 
-			const translated = await extractDatabaseError(
-				error as SQLError,
-				{},
-				grantedKnex,
-			);
-
-			if (!isDirectusError(translated)) {
-				return error;
-			}
-
-			if (isDirectusError(translated, ErrorCode.DatabasePoolExhausted)) {
-				(translated.extensions as { connection: string | null }).connection =
+				extensions.connection ??=
 					getConnectionNameForAccountability(req.accountability);
 			}
 
-			return translated;
+			return resolved;
 		}),
 	);
 
