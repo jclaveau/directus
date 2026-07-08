@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-PR **#212** `feat(cache): pin scoped-cache read tags off permission cases`. Branch `v11.10.1-feat/scoped-cache-permission-cases`, base `v11.10.1-hhh-dev` (carries #205 scoped-cache + #210 relational pin). Supersedes #206. Green pg+sqlite.
+PR **#212** `feat(cache): pin scoped-cache read tags off permission cases`. Branch `v11.10.1-feat/scoped-cache-permission-cases`, base `v11.10.1-hhh-dev` (carries #205 scoped-cache + #210 relational pin). Supersedes #206. **MERGED** (green pg+sqlite+lint at tip `550a639f30`).
 
 **Problem:** planner reads get the BARE collection tag (one user's write purges everyone's slice) because the partition predicate (`owner_field = $CURRENT_USER`) lives in a **permission policy** → injected as `ast.cases`, not in the query filter. `pinnedScopedCacheTagsFromFilter` only read the filter.
 
@@ -23,5 +23,7 @@ PR **#212** `feat(cache): pin scoped-cache read tags off permission cases`. Bran
 - **`_and` uses value-UNION over-approx** (not intersection) — intentional, over-purges/never-stale.
 - **Root `ast.cases` only** — nested `child.cases` are per-relation, out of scope (scope fields live on the root collection).
 - **`covered` gate is the whole soundness argument** — union-all-branches would be UNSOUND without it (an uncovered branch's rows carry no tag → stale). Unit-tested in isolation.
+- **Admin / no-accountability path is NOT a crash.** `processAst` early-returns before `injectCases`, but `getAstFromQuery` inits `cases: []` (non-optional `Filter[]`), so `joinFilterWithCases(filter, [])` returns the filter — no `undefined.length`. Don't "fix" a missing null-guard here.
+- **Two minors jean reviewed and DECLINED (2026-07-04) — leave both:** (1) memoizing the `collectionScopedCacheFieldRelatedPks` getter — it's called once/read and the sibling getters (`collectionScopedCacheFieldTypes`/`Fields`) recompute the same way, so fixing just one is inconsistent; (2) making the added `toEqual` assertions order-independent — output is deterministic, sorting would only add noise (and weakening `toEqual`→`arrayContaining` violates [[feedback_dont_weaken_test_assertions]]). A fresh review WILL want to re-flag both; don't.
 
 Proof: `scoped-cache-tags.test.ts` (`_or` union / unbounding-branch / relational-in-`_or` / `_and`-over-`_or` / empty-`_or` / `_or` dedup / `_and` same-field union / empty-`_in`→bare / **multi-field `_or` pins both** / multi-field-with-unbounding-branch→bare) + blackbox in `cache.test.ts` (per-user isolation, resolved-token guard, multi-case→bare, multilevel `_and`, two-policy same-field union, query-`_or` union, **relational permission-case** `{owner_ref:{id:{_eq}}}`, **two-scope-field multi-field union** via dedicated `test_app_cache_scoped_multi` collection — spare-on-neither witness). Commits: 309b6de95e (lift) + 87be9b35de (bb witness) + 39b3ee89ab (90-col style). Related: [[project_directus_service_cache]].
