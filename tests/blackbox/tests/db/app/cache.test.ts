@@ -21,6 +21,8 @@ import {
 	collectionRelated,
 	collectionScoped,
 	collectionScopedMulti,
+	collectionOwnedSubItem,
+	collectionOwnedItem,
 	collectionScopedRel,
 	collectionTag,
 	scopedOwnerA,
@@ -1780,6 +1782,90 @@ describe('App Caching Tests', () => {
 			// The relational-pk filter pinned owner_ref=<ownerA>, so B's write dropped only B
 			// (MISS) and left A cached (HIT). Without the relational unwrap the read would pin
 			// nothing → bare collection tag → B's write would leave A a MISS too.
+			expect(afterA.statusCode).toBe(200);
+			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(afterB.statusCode).toBe(200);
+			expect(afterB.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A multi-hop relational path (owned_item.owner_ref) value-scopes the read: the
+		owner is two hops away, so the write side joins through owned_item to purge
+		only the mutated owner's slice and spare another owner's
+	`, () => {
+		// scoped_cache_fields = ['owned_item.owner_ref'] on owned_sub_item: the owner is
+		// owned_sub_item → owned_item → owner_ref, so the mutated row only carries
+		// `owned_item` — the write must join through it to recover the owner. Without
+		// path resolution the read pins nothing → bare tag → B's write leaves A a MISS.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const createMany = async (collection: string, items: object[]) => {
+				return (
+					await request(url).post(`/items/${collection}?fields=id`)
+						.send(items)
+						.set('Authorization', auth)
+				).body.data;
+			};
+
+			const addSubItem = async (ownedItem: number) => {
+				await request(url).post(`/items/${collectionOwnedSubItem}`)
+					.send({ string_field: randomUUID(), owned_item: ownedItem })
+					.set('Authorization', auth);
+			};
+
+			// Two owners, an owned_item under each, an owned_sub_item under each
+			// owned_item — one createMany array POST per tier.
+			const [ownerA, ownerB] = await createMany(collectionGrandRelated, [
+				{ string_field: randomUUID() },
+				{ string_field: randomUUID() },
+			]);
+
+			const [itemA, itemB] = await createMany(collectionOwnedItem, [
+				{ owner_ref: ownerA.id },
+				{ owner_ref: ownerB.id },
+			]);
+
+			await createMany(collectionOwnedSubItem, [
+				{ string_field: randomUUID(), owned_item: itemA.id },
+				{ string_field: randomUUID(), owned_item: itemB.id },
+			]);
+
+			// Read each slice through the terminal related pk (`owned_item.owner_ref.id`).
+			const base =
+				`/items/${collectionOwnedSubItem}?filter[owned_item][owner_ref][id][_eq]=`;
+
+			const readA = `${base}${ownerA.id}`;
+			const readB = `${base}${ownerB.id}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm both slices. Non-vacuity: a re-read HITs, so each slice is cached.
+			await read(readA);
+			await read(readB);
+			const warmA = await read(readA);
+			const warmB = await read(readB);
+
+			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmB.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write an owned_sub_item into owner B's chain only.
+			await addSubItem(itemB.id);
+
+			const afterA = await read(readA);
+			const afterB = await read(readB);
+
+			// The write joined owned_sub_item→owned_item to resolve owner_ref=<ownerB>,
+			// so B's write dropped only B (MISS) and left A cached (HIT).
 			expect(afterA.statusCode).toBe(200);
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
 			expect(afterB.statusCode).toBe(200);

@@ -15,6 +15,15 @@ export interface ScopedCacheTag {
 }
 
 /**
+ * A relational-path scope field (`enrollment.student.user`): its dotted `field`
+ * and the pre-split `segments` the pinner walks down a filter to the terminal value.
+ */
+export interface ScopedCachePath {
+	field: string;
+	segments: string[];
+}
+
+/**
  * Metadata about a read operation, carried alongside its result (see `WithMeta`). Bounded to the
  * single read that produced it — never an accumulating service-level field.
  */

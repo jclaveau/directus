@@ -16,6 +16,7 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
+	ScopedCachePath,
 	ScopedCacheTag,
 	Type,
 	WithMeta,
@@ -111,30 +112,104 @@ implements AbstractService<Item> {
 	 * must drop both). Returns an empty list when the collection has no scoped cache
 	 * fields or there are no keys (a collection-level purge then suffices).
 	 */
-	private async snapshotScopedCacheTags(keys: PrimaryKey[]) {
+	private async snapshotScopedCacheTags(
+		keys: PrimaryKey[],
+	): Promise<ScopedCacheTag[] | null> {
 		if (!scopedCachePurgeEnabled()) {
 			return [];
 		}
 
-		const scopedCacheFields = this.collectionScopedCacheFields;
+		const flatFields = this.collectionScopedCacheFlatFields;
+		const paths = this.collectionScopedCachePaths;
 
-		if (scopedCacheFields.length === 0 || keys.length === 0) {
+		if ((flatFields.length === 0 && paths.length === 0) || keys.length === 0) {
+			return [];
+		}
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const fieldTypes = this.collectionScopedCacheFieldTypes;
+		const tags: ScopedCacheTag[] = [];
+
+		if (flatFields.length > 0) {
+			const rows = await this.knex
+				.select(primaryKeyField, ...flatFields)
+				.from(this.collection)
+				.whereIn(primaryKeyField, keys);
+
+			const flatTags = scopedCacheTagsFromRows(
+				this.collection,
+				flatFields,
+				rows,
+				'coarse',
+				fieldTypes,
+			);
+
+			// A flat field is always projected, so 'coarse' only nulls on a caller
+			// feeding unprojected rows — never here; propagate it regardless.
+			if (flatTags === null) {
+				return null;
+			}
+
+			tags.push(...flatTags);
+		}
+
+		for (const { field } of paths) {
+			const pathTags = await this.snapshotScopedCachePathTags(
+				field,
+				keys,
+				fieldTypes[field],
+			);
+
+			tags.push(...pathTags);
+		}
+
+		return tags;
+	}
+
+	/**
+	 * Resolve a path scope field to its terminal value per mutated row via its M2O
+	 * join chain, then reuse the row-tag builder for canonicalization + dedup. The
+	 * mutated row carries only the first-hop fk, so the ancestor join recovers the
+	 * SAME terminal the read side pinned — the identical `field=<path>` slice.
+	 */
+	private async snapshotScopedCachePathTags(
+		path: string,
+		keys: PrimaryKey[],
+		terminalType: Type | undefined,
+	): Promise<ScopedCacheTag[]> {
+		const resolved = this.resolveScopedCachePath(path);
+
+		if (!resolved) {
 			return [];
 		}
 
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
-		const rows = await this.knex
-			.select(primaryKeyField, ...scopedCacheFields)
-			.from(this.collection)
-			.whereIn(primaryKeyField, keys);
+		let query = this.knex.from({ root: this.collection });
+		let prevAlias = 'root';
+
+		resolved.joins.forEach((hop, index) => {
+			const alias = `p${index}`;
+
+			query = query.leftJoin(
+				{ [alias]: hop.relatedCollection },
+				`${alias}.${hop.relatedPk}`,
+				`${prevAlias}.${hop.field}`,
+			);
+
+			prevAlias = alias;
+		});
+
+		const rows = await query
+			.select(this.knex.ref(`${prevAlias}.${resolved.terminalField}`).as('value'))
+			.whereIn(`root.${primaryKeyField}`, keys);
 
 		return scopedCacheTagsFromRows(
 			this.collection,
-			scopedCacheFields,
-			rows,
-			'coarse',
-			this.collectionScopedCacheFieldTypes,
+			[path],
+			rows.map((row) => ({ [path]: row.value })),
+			'skip',
+			{ [path]: terminalType },
 		);
 	}
 
@@ -163,22 +238,129 @@ implements AbstractService<Item> {
 		return this.schema.collections[this.collection]?.scopedCacheFields ?? [];
 	}
 
-	private get collectionScopedCacheFieldTypes(): Record<string, Type | undefined> {
-		const fields = this.schema.collections[this.collection]?.fields ?? {};
-
-		return Object.fromEntries(
-			this.collectionScopedCacheFields.map((field) => [field, fields[field]?.type]),
-		);
+	// Direct-column scope fields (no dot): they project into the snapshot SELECT and
+	// feed the pinner's flat + one-hop logic. Dotted paths are handled separately.
+	private get collectionScopedCacheFlatFields(): string[] {
+		return this.collectionScopedCacheFields.filter((field) => !field.includes('.'));
 	}
 
-	// A relation scope field's related primary key, so the read side can unwrap the
-	// `{ fk: { <pk>: { _eq } } }` filter shape that queries and permissions use.
+	// Path scope fields (`enrollment.student.user`) resolving to an all-M2O chain,
+	// with the segments the read pinner walks. An unresolvable path (a to-many hop
+	// or unknown field) is dropped → it degrades to the bare tag on both sides.
+	private get collectionScopedCachePaths(): ScopedCachePath[] {
+		const paths: ScopedCachePath[] = [];
+
+		for (const field of this.collectionScopedCacheFields) {
+			if (!field.includes('.')) {
+				continue;
+			}
+
+			const resolved = this.resolveScopedCachePath(field);
+
+			if (resolved) {
+				paths.push({ field, segments: resolved.segments });
+			}
+		}
+
+		return paths;
+	}
+
+	// Resolve a dotted scope field into the M2O join chain reaching its terminal.
+	// Every INTERMEDIATE segment must be M2O (a row maps to exactly one parent); a
+	// to-many hop or unknown field returns null → the caller degrades to the bare
+	// tag. The terminal is a plain column on the last collection (scalar or fk).
+	private resolveScopedCachePath(path: string): {
+		segments: string[];
+		joins: { field: string; relatedCollection: string; relatedPk: string }[];
+		terminalCollection: string;
+		terminalField: string;
+	} | null {
+		const segments = path.split('.');
+
+		if (segments.length < 2) {
+			return null;
+		}
+
+		const joins: {
+			field: string;
+			relatedCollection: string;
+			relatedPk: string;
+		}[] = [];
+
+		let collection = this.collection;
+
+		for (let index = 0; index < segments.length - 1; index++) {
+			const field = segments[index]!;
+
+			const relation = this.schema.relations.find((rel) => {
+				return rel.collection === collection && rel.field === field;
+			});
+
+			const relatedCollection = relation?.related_collection;
+
+			const relatedPk = relatedCollection
+				? this.schema.collections[relatedCollection]?.primary
+				: undefined;
+
+			if (!relatedCollection || !relatedPk) {
+				return null;
+			}
+
+			joins.push({ field, relatedCollection, relatedPk });
+			collection = relatedCollection;
+		}
+
+		return {
+			segments,
+			joins,
+			terminalCollection: collection,
+			terminalField: segments[segments.length - 1]!,
+		};
+	}
+
+	private get collectionScopedCacheFieldTypes(): Record<string, Type | undefined> {
+		const rootFields = this.schema.collections[this.collection]?.fields ?? {};
+		const types: Record<string, Type | undefined> = {};
+
+		for (const field of this.collectionScopedCacheFields) {
+			if (!field.includes('.')) {
+				types[field] = rootFields[field]?.type;
+				continue;
+			}
+
+			const resolved = this.resolveScopedCachePath(field);
+
+			if (!resolved) {
+				continue;
+			}
+
+			const terminal = this.schema.collections[resolved.terminalCollection];
+			types[field] = terminal?.fields[resolved.terminalField]?.type;
+		}
+
+		return types;
+	}
+
+	// A scope field's related primary key, so the read side can unwrap the
+	// `{ fk: { <pk>: { _eq } } }` shape queries/permissions use — for a flat one-hop
+	// relation, and for a path whose terminal is itself an M2O (`{ user: { id } }`).
 	private get collectionScopedCacheFieldRelatedPks(): Record<string, string> {
 		const map: Record<string, string> = {};
 
 		for (const field of this.collectionScopedCacheFields) {
+			const resolved = field.includes('.')
+				? this.resolveScopedCachePath(field)
+				: null;
+
+			if (field.includes('.') && !resolved) {
+				continue;
+			}
+
+			const fromCollection = resolved?.terminalCollection ?? this.collection;
+			const fromField = resolved?.terminalField ?? field;
+
 			const relation = this.schema.relations.find((rel) => {
-				return rel.collection === this.collection && rel.field === field;
+				return rel.collection === fromCollection && rel.field === fromField;
 			});
 
 			const relatedCollection = relation?.related_collection;
@@ -797,7 +979,6 @@ implements AbstractService<Item> {
 		let scopedCacheTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
-			const scopedCacheFields = this.collectionScopedCacheFields;
 			const fieldMap = fieldMapFromAst(ast, this.schema);
 
 			// Self-reference guard: pinning the root to a value slice is sound only while the
@@ -826,10 +1007,11 @@ implements AbstractService<Item> {
 				? []
 				: pinnedScopedCacheTagsFromFilter(
 					this.collection,
-					scopedCacheFields,
+					this.collectionScopedCacheFlatFields,
 					joinFilterWithCases(updatedQuery.filter, ast.cases),
 					this.collectionScopedCacheFieldTypes,
 					this.collectionScopedCacheFieldRelatedPks,
+					this.collectionScopedCachePaths,
 				);
 
 			for (const collection of collectionsInFieldMap(fieldMap)) {
