@@ -39,7 +39,7 @@ describe('getAccountabilityForToken', async () => {
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: false,
 			admin: false,
-			dbConnections: [],
+			grantedDbConnections: [],
 		});
 
 		const token = jwt.sign({ role: '123-456-789', app_access: false, admin_access: false }, 'super-secure-secret', {
@@ -53,7 +53,7 @@ describe('getAccountabilityForToken', async () => {
 			roles: [],
 			ip: null,
 			user: null,
-			dbConnections: [],
+			grantedDbConnections: [],
 		};
 
 		const result = await getAccountabilityForToken(token);
@@ -80,7 +80,7 @@ describe('getAccountabilityForToken', async () => {
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: true,
 			admin: true,
-			dbConnections: ['premium'],
+			grantedDbConnections: ['premium'],
 		});
 
 		const result = await getAccountabilityForToken(token);
@@ -93,7 +93,7 @@ describe('getAccountabilityForToken', async () => {
 			roles: [],
 			ip: null,
 			share: 'share-id',
-			dbConnections: ['premium'],
+			grantedDbConnections: ['premium'],
 		});
 	});
 
@@ -120,7 +120,7 @@ describe('getAccountabilityForToken', async () => {
 		vi.mocked(fetchGlobalAccess).mockResolvedValue({
 			app: true,
 			admin: false,
-			dbConnections: [],
+			grantedDbConnections: [],
 		});
 
 		const token = jwt.sign({ role: '123-456-789' }, 'bad-secret');
@@ -132,7 +132,7 @@ describe('getAccountabilityForToken', async () => {
 			admin: false,
 			app: true,
 			ip: null,
-			dbConnections: [],
+			grantedDbConnections: [],
 		};
 
 		const result = await getAccountabilityForToken(token);

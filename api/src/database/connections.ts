@@ -98,7 +98,7 @@ export function getConnectionNameForAccountability(
 
 	const candidateNames = new Set<string>([defaultName]);
 
-	for (const name of accountability?.dbConnections ?? []) {
+	for (const name of accountability?.grantedDbConnections ?? []) {
 		if (name === defaultName || extra.includes(name)) {
 			candidateNames.add(name);
 		}
@@ -121,7 +121,7 @@ export function getConnectionNameForAccountability(
 }
 
 /**
- * The knex a request routes to (default name → base pool; named pools build
+ * The knex a request uses (default name → base pool; named pools build
  * lazily).
  */
 export function getDatabaseForAccountability(

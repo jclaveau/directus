@@ -18,7 +18,7 @@ export async function fetchGlobalAccessForQuery(
 	const globalAccess: GlobalAccess = {
 		app: false,
 		admin: false,
-		dbConnections: [],
+		grantedDbConnections: [],
 	};
 
 	const accessRows = await query
@@ -43,8 +43,8 @@ export async function fetchGlobalAccessForQuery(
 		// db_connections is stored as CSV, so `toArray` splits it
 		if (db_connections) {
 			for (const name of toArray(db_connections)) {
-				if (name && !globalAccess.dbConnections.includes(name)) {
-					globalAccess.dbConnections.push(name);
+				if (name && !globalAccess.grantedDbConnections.includes(name)) {
+					globalAccess.grantedDbConnections.push(name);
 				}
 			}
 		}

@@ -1,11 +1,12 @@
-// Probes DB connection routing/pooling. `/route` reports which connection a set
-// of grants resolves to (no query). `/pool` saturates pools then probes pools:
-// `onProbeError: 'report'` records per-pool ok/fail (isolation), `'propagate'`
-// rethrows so a saturated pool surfaces as 429 DATABASE_POOL_EXHAUSTED.
+// Probes DB connection granting/pooling. `/granted` reports which connection a
+// set of grants resolves to (no query). `/pools-under-load` saturates pools,
+// then probes pools: `onProbeError: 'report'` records per-pool ok/fail
+// (isolation), `'propagate'` rethrows so a saturated pool surfaces as 429
+// DATABASE_POOL_EXHAUSTED.
 export default (router, { services, getSchema }) => {
 	const { ItemsService } = services;
 
-	async function routedKnex(grants) {
+	async function grantedKnex(grants) {
 		const accountability = {
 			role: null,
 			roles: [],
@@ -13,7 +14,7 @@ export default (router, { services, getSchema }) => {
 			admin: false,
 			app: false,
 			ip: null,
-			dbConnections: Array.isArray(grants)
+			grantedDbConnections: Array.isArray(grants)
 				? grants
 				: [],
 		};
@@ -23,12 +24,12 @@ export default (router, { services, getSchema }) => {
 		return new ItemsService('directus_users', { schema, accountability }).knex;
 	}
 
-	router.post('/route', async (req, res) => {
+	router.post('/granted', async (req, res) => {
 		if (!req.accountability?.admin) {
 			return res.status(403).json({ errors: [{ message: 'admin only' }] });
 		}
 
-		const knex = await routedKnex(req.body?.dbConnections);
+		const knex = await grantedKnex(req.body?.grantedDbConnections);
 		const connection = knex.client?.config?.connection;
 
 		let database = connection;
@@ -45,7 +46,7 @@ export default (router, { services, getSchema }) => {
 	// failing probe does: `report` records ok/error per pool (200) — the saturated
 	// pool's own failure is the non-vacuity control; `propagate` rethrows it so the
 	// global error handler translates the pool error → 429 DATABASE_POOL_EXHAUSTED.
-	router.post('/pool', async (req, res, next) => {
+	router.post('/pools-under-load', async (req, res, next) => {
 		if (!req.accountability?.admin) {
 			return res.status(403).json({ errors: [{ message: 'admin only' }] });
 		}
@@ -65,7 +66,7 @@ export default (router, { services, getSchema }) => {
 			: 'report';
 
 		for (const { connection, concurrency } of saturate) {
-			const knex = await routedKnex([connection]);
+			const knex = await grantedKnex([connection]);
 
 			for (let i = 0; i < (Number(concurrency) || 1); i++) {
 				knex.raw('SELECT pg_sleep(?)', [sleepSeconds]).catch(() => {});
@@ -78,7 +79,7 @@ export default (router, { services, getSchema }) => {
 		const results = {};
 
 		for (const name of probes) {
-			const knex = await routedKnex([name]);
+			const knex = await grantedKnex([name]);
 			const startedAt = Date.now();
 
 			try {
