@@ -144,6 +144,10 @@ describe('DB pool exhaustion error', () => {
 			);
 
 			expect(response.body.errors[0].extensions.reason).toBe('client_pool_timeout');
+
+			// The tier tag reflects the REQUEST's own routing (admin → default pool),
+			// not the saturated pool the probe ran on.
+			expect(response.body.errors[0].extensions.connection).toBe('default');
 			expect(response.headers['retry-after']).toBe('1');
 		},
 		300_000,
@@ -181,6 +185,10 @@ describe('DB pool exhaustion error', () => {
 			);
 
 			expect(response.body.errors[0].extensions.reason).toBe('pool_queue_timeout');
+
+			// The tier tag reflects the REQUEST's own routing (admin → default pool),
+			// not the saturated pool the probe ran on.
+			expect(response.body.errors[0].extensions.connection).toBe('default');
 			expect(response.headers['retry-after']).toBe('1');
 		},
 		300_000,
