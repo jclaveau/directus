@@ -30,16 +30,26 @@ export default (router, { services, getSchema }) => {
 			return res.status(403).json({ errors: [{ message: 'admin only' }] });
 		}
 
-		const knex = await grantedKnex(req.body?.grantedDbConnections, req.body?.share);
-		const connection = knex.client?.config?.connection;
+		const { grantedDbConnections, share } = req.body ?? {};
 
-		let database = connection;
+		try {
+			const knex = await grantedKnex(grantedDbConnections, share);
+			const connection = knex.client?.config?.connection;
 
-		if (connection && typeof connection === 'object') {
-			database = connection.database;
+			let database = connection;
+
+			if (connection && typeof connection === 'object') {
+				database = connection.database;
+			}
+
+			return res.json({ data: { database } });
 		}
-
-		return res.json({ data: { database } });
+		catch (error) {
+			// Resolving a misconfigured named connection throws; surface it as a 500
+			// so the shared test server survives — a bare extension route has no
+			// async-error wrapper, unlike a real Directus controller.
+			return res.status(500).json({ errors: [{ message: error.message }] });
+		}
 	});
 
 	// Saturate the given pools (fire sleeping queries, don't await — hold them),
