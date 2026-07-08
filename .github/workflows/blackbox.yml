@@ -52,7 +52,9 @@ jobs:
         id: matrix
         run: |
           if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.full }}" = "true" ]; then
-            echo 'vendors=["sqlite3","postgres","mysql","maria","mssql","oracle"]' >> "$GITHUB_OUTPUT"
+            # mysql, mssql, oracle dropped — not supported/maintained on this fork.
+            # Re-add to the array to support: "mysql","mssql","oracle".
+            echo 'vendors=["sqlite3","postgres","maria"]' >> "$GITHUB_OUTPUT"
           else
             echo 'vendors=["sqlite3","postgres"]' >> "$GITHUB_OUTPUT"
           fi
