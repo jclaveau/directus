@@ -32,26 +32,50 @@ export async function fetchGlobalAccessForQuery(
 		// @NOTE: `where` clause comes from the caller
 		.leftJoin('directus_policies', 'directus_policies.id', 'directus_access.policy');
 
+	// db_connections is additive across every granted policy, so collect it in a
+	// dedicated pass — the access loop below short-circuits on the first admin
+	// policy and would drop grants from later rows. Same ip filter: an ip-blocked
+	// policy grants nothing. Stored as CSV, so `toArray` splits it; trim so a
+	// UI-entered "a, b" matches the trimmed names in the connection registry.
+	for (const { ip_access, db_connections } of accessRows) {
+		if (accountability.ip && ip_access) {
+			const networks = toArray(ip_access);
+
+			if (!ipInNetworks(accountability.ip, networks)) {
+				continue;
+			}
+		}
+
+		if (!db_connections) {
+			continue;
+		}
+
+		for (const raw of toArray(db_connections)) {
+			const name = raw.trim();
+
+			if (name && !globalAccess.grantedDbConnections.includes(name)) {
+				globalAccess.grantedDbConnections.push(name);
+			}
+		}
+	}
+
 	// Additively merge access permissions
-	for (const { admin_access, app_access, ip_access, db_connections } of accessRows) {
+	for (const { admin_access, app_access, ip_access } of accessRows) {
 		if (accountability.ip && ip_access) {
 			// Skip row if IP is not in the allowed networks
 			const networks = toArray(ip_access);
-			if (!ipInNetworks(accountability.ip, networks)) continue;
-		}
 
-		// db_connections is stored as CSV, so `toArray` splits it
-		if (db_connections) {
-			for (const name of toArray(db_connections)) {
-				if (name && !globalAccess.grantedDbConnections.includes(name)) {
-					globalAccess.grantedDbConnections.push(name);
-				}
+			if (!ipInNetworks(accountability.ip, networks)) {
+				continue;
 			}
 		}
 
 		globalAccess.admin ||= toBoolean(admin_access);
 		globalAccess.app ||= globalAccess.admin || toBoolean(app_access);
-		if (globalAccess.admin) break;
+
+		if (globalAccess.admin) {
+			break;
+		}
 	}
 
 	return globalAccess;
