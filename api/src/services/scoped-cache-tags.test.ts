@@ -1,7 +1,9 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
+import type { SchemaOverview } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
+	composeScopedCachePaths,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheTagsFromRows,
 	serializeScopedCacheTags,
@@ -700,5 +702,109 @@ describe('serializeScopedCacheTags', () => {
 		an empty tag list renders as an empty string
 	`, () => {
 		expect(serializeScopedCacheTags([])).toBe('');
+	});
+});
+
+describe('composeScopedCachePaths — auto-derived multi-hop paths', () => {
+	// Minimal schema: each collection's local scope fields + the M2O relations.
+	function schemaOf(
+		scoped: Record<string, string[]>,
+		relations: { collection: string; field: string; related_collection: string }[],
+	): Pick<SchemaOverview, 'collections' | 'relations'> {
+		const collections = Object.fromEntries(
+			Object.entries(scoped).map(([name, scopedCacheFields]) => {
+				return [name, { scopedCacheFields }];
+			}),
+		);
+
+		return { collections, relations } as unknown as Pick<
+			SchemaOverview,
+			'collections' | 'relations'
+		>;
+	}
+
+	test('composes a 2-hop grand-owner path from two local declarations', () => {
+		const schema = schemaOf(
+			{ sub: ['item'], item: ['owner_ref'] },
+			[
+				{ collection: 'sub', field: 'item', related_collection: 'item' },
+				{ collection: 'item', field: 'owner_ref', related_collection: 'owner' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'sub')).toEqual([
+			{ field: 'item.owner_ref', segments: ['item', 'owner_ref'] },
+		]);
+	});
+
+	test('composes every level of a 3-hop chain', () => {
+		const schema = schemaOf(
+			{ a: ['b'], b: ['c'], c: ['owner_ref'] },
+			[
+				{ collection: 'a', field: 'b', related_collection: 'b' },
+				{ collection: 'b', field: 'c', related_collection: 'c' },
+				{ collection: 'c', field: 'owner_ref', related_collection: 'owner' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([
+			{ field: 'b.c', segments: ['b', 'c'] },
+			{ field: 'b.c.owner_ref', segments: ['b', 'c', 'owner_ref'] },
+		]);
+	});
+
+	test('composes both arms of a diamond to the same owner', () => {
+		const schema = schemaOf(
+			{ a: ['x', 'y'], x_col: ['owner_ref'], y_col: ['owner_ref'] },
+			[
+				{ collection: 'a', field: 'x', related_collection: 'x_col' },
+				{ collection: 'a', field: 'y', related_collection: 'y_col' },
+				{ collection: 'x_col', field: 'owner_ref', related_collection: 'owner' },
+				{ collection: 'y_col', field: 'owner_ref', related_collection: 'owner' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([
+			{ field: 'x.owner_ref', segments: ['x', 'owner_ref'] },
+			{ field: 'y.owner_ref', segments: ['y', 'owner_ref'] },
+		]);
+	});
+
+	test('terminates on a self/mutual reference cycle', () => {
+		const schema = schemaOf(
+			{ a: ['b'], b: ['a'] },
+			[
+				{ collection: 'a', field: 'b', related_collection: 'b' },
+				{ collection: 'b', field: 'a', related_collection: 'a' },
+			],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([
+			{ field: 'b.a', segments: ['b', 'a'] },
+			{ field: 'b.a.b', segments: ['b', 'a', 'b'] },
+		]);
+	});
+
+	test('a scalar scope field composes nothing (no relation to follow)', () => {
+		const schema = schemaOf({ a: ['name'] }, []);
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([]);
+	});
+
+	test('a target with no scope fields composes nothing', () => {
+		const schema = schemaOf(
+			{ a: ['owner_ref'] },
+			[{ collection: 'a', field: 'owner_ref', related_collection: 'owner' }],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([]);
+	});
+
+	test('an explicit dotted local field is not used as a compose head', () => {
+		const schema = schemaOf(
+			{ a: ['owned_item.owner_ref'] },
+			[{ collection: 'a', field: 'owned_item', related_collection: 'owned_item' }],
+		);
+
+		expect(composeScopedCachePaths(schema, 'a')).toEqual([]);
 	});
 });
