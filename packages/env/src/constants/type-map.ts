@@ -25,6 +25,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	'DB_CONNECTION_.+_PRIORITY': 'number',
 	'DB_CONNECTION_.+_PORT': 'number',
 	'DB_CONNECTION_.+_DATABASE': 'string',
+	'DB_CONNECTION_.+_USER': 'string',
+	'DB_CONNECTION_.+_PASSWORD': 'string',
 	'DB_(CONNECTION_.+_)?POOL__(MIN|MAX)': 'number',
 	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
 
