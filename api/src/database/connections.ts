@@ -5,6 +5,10 @@ import { merge } from 'lodash-es';
 import { getConfigFromEnv } from '../utils/get-config-from-env.js';
 import getDatabase, { constructDatabase } from './index.js';
 
+// One knex per named connection, built lazily and memoized for the process
+// lifetime — like getDatabase() memoizes the default pool. Keyed by name, not
+// config: a name maps to one config per run (env is immutable in prod; bb tests
+// must not reuse a name with a different config).
 const namedDatabases = new Map<string, Knex>();
 
 /**
@@ -12,7 +16,11 @@ const namedDatabases = new Map<string, Knex>();
  * it too.
  */
 export function getDefaultConnectionName(): string {
-	return String(useEnv()['DB_DEFAULT_CONNECTION_NAME'] ?? 'default');
+	const name = useEnv()['DB_DEFAULT_CONNECTION_NAME'];
+
+	return typeof name === 'string'
+		? name
+		: 'default';
 }
 
 /**
@@ -61,12 +69,16 @@ export function getBaseDbConfig(): Record<string, any> {
  * its own knob.
  */
 export function getConnectionPriority(name: string): number {
-	if (name === getDefaultConnectionName()) {
-		return Number(useEnv()['DB_DEFAULT_CONNECTION_PRIORITY'] ?? 0) || 0;
-	}
+	const key =
+		name === getDefaultConnectionName()
+			? 'DB_DEFAULT_CONNECTION_PRIORITY'
+			: `DB_CONNECTION_${name.toUpperCase()}_PRIORITY`;
 
-	const { priority } = getConfigFromEnv(`DB_CONNECTION_${name.toUpperCase()}_`);
-	return Number(priority ?? 0) || 0;
+	const priority = useEnv()[key];
+
+	return typeof priority === 'number'
+		? priority
+		: 0;
 }
 
 /** Connection names must be unique (default + `DB_CONNECTIONS`); else boot fails. */
