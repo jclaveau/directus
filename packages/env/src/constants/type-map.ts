@@ -19,8 +19,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	DB_MSSQL_TRUST_BATCH_RETURNING: 'boolean',
 
 	DB_CONNECTIONS: 'array',
-	DB_DEFAULT_CONNECTION_NAME: 'string',
-	DB_DEFAULT_CONNECTION_PRIORITY: 'number',
+	DB_BASE_CONNECTION_NAME: 'string',
+	DB_BASE_CONNECTION_PRIORITY: 'number',
 	DB_PUBLIC_SHARE_CONNECTION_NAME: 'string',
 	'DB_CONNECTION_.+_PRIORITY': 'number',
 	'DB_CONNECTION_.+_PORT': 'number',

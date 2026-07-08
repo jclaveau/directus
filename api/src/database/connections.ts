@@ -6,21 +6,20 @@ import { getConfigFromEnv } from '../utils/get-config-from-env.js';
 import getDatabase, { constructDatabase } from './index.js';
 
 // One knex per named connection, built lazily and memoized for the process
-// lifetime — like getDatabase() memoizes the default pool. Keyed by name, not
+// lifetime — like getDatabase() memoizes the base pool. Keyed by name, not
 // config: a name maps to one config per run (env is immutable in prod; bb tests
 // must not reuse a name with a different config).
 const namedDatabases = new Map<string, Knex>();
 
 /**
- * Name of the default pool (`DB_DEFAULT_CONNECTION_NAME`); policies may grant
- * it too.
+ * Name of the base pool (`DB_BASE_CONNECTION_NAME`); policies may grant it too.
  */
-export function getDefaultConnectionName(): string {
-	const name = useEnv()['DB_DEFAULT_CONNECTION_NAME'];
+export function getBaseConnectionName(): string {
+	const name = useEnv()['DB_BASE_CONNECTION_NAME'];
 
 	return typeof name === 'string'
 		? name
-		: 'default';
+		: 'base';
 }
 
 /**
@@ -53,25 +52,26 @@ export function getBaseDbConfig(): Record<string, any> {
 	return getConfigFromEnv('DB_', {
 		omitPrefix: [
 			'DB_EXCLUDE_TABLES',
-			'DB_DEFAULT_CONNECTION',
+			'DB_BASE_CONNECTION',
 			...connectionPrefixes,
 		],
 		omitKey: [
 			'DB_BATCH_INSERT_CHUNK_SIZE',
 			'DB_MSSQL_TRUST_BATCH_RETURNING',
 			'DB_CONNECTIONS',
+			'DB_PUBLIC_SHARE_CONNECTION_NAME',
 		],
 	});
 }
 
 /**
- * Priority of a connection (`_PRIORITY` env); higher wins. Default pool has
- * its own knob.
+ * Priority of a connection (`_PRIORITY` env); higher wins. Base pool has its
+ * own knob.
  */
 export function getConnectionPriority(name: string): number {
 	const key =
-		name === getDefaultConnectionName()
-			? 'DB_DEFAULT_CONNECTION_PRIORITY'
+		name === getBaseConnectionName()
+			? 'DB_BASE_CONNECTION_PRIORITY'
 			: `DB_CONNECTION_${name.toUpperCase()}_PRIORITY`;
 
 	const priority = useEnv()[key];
@@ -81,9 +81,9 @@ export function getConnectionPriority(name: string): number {
 		: 0;
 }
 
-/** Connection names must be unique (default + `DB_CONNECTIONS`); else boot fails. */
+/** Connection names must be unique (base + `DB_CONNECTIONS`); else boot fails. */
 export function assertConnectionNamesAreUnique(): void {
-	const seen = new Set([getDefaultConnectionName()]);
+	const seen = new Set([getBaseConnectionName()]);
 
 	for (const name of getExtraConnectionNames()) {
 		if (seen.has(name)) {
@@ -97,15 +97,16 @@ export function assertConnectionNamesAreUnique(): void {
 }
 
 /**
- * Resolve the connection name a request should use: the highest-priority
- * among the default pool (always a candidate) and the configured connections
- * the user's policies grant. Ties break by name, so a winner must outrank
- * `DB_DEFAULT_CONNECTION_PRIORITY`.
+ * Resolve the connection name a request should use: the highest-priority among
+ * the base pool (always a candidate) and the configured connections the user's
+ * policies grant. The base pool is the floor — at equal priority any granted
+ * connection outranks it, so base is used only when it strictly outranks every
+ * grant or is the sole candidate. Ties among grants break by name.
  */
 export function getConnectionNameForAccountability(
 	accountability?: Accountability | null,
 ): string {
-	const defaultName = getDefaultConnectionName();
+	const baseName = getBaseConnectionName();
 	const extra = getExtraConnectionNames();
 
 	// A public share is anonymous; when a dedicated share pool is configured,
@@ -116,29 +117,45 @@ export function getConnectionNameForAccountability(
 
 		if (
 			typeof shareName === 'string' &&
-			(shareName === defaultName || extra.includes(shareName))
+			(shareName === baseName || extra.includes(shareName))
 		) {
 			return shareName;
 		}
 	}
 
-	const candidateNames = new Set<string>([defaultName]);
+	const candidateNames = new Set<string>([baseName]);
 
 	for (const name of accountability?.grantedDbConnections ?? []) {
-		if (name === defaultName || extra.includes(name)) {
+		if (name === baseName || extra.includes(name)) {
 			candidateNames.add(name);
 		}
 	}
 
-	// Default is always a candidate → array never empty; reduce keeps `best` set.
+	// Base is always a candidate → array never empty; reduce keeps `best` set.
 	const best = [...candidateNames]
-		.map((name) => ({ name, priority: getConnectionPriority(name) }))
+		.map((name) => {
+			return {
+				name,
+				priority: getConnectionPriority(name),
+				isBase: name === baseName,
+			};
+		})
 		.reduce((winner, candidate) => {
-			const winsByName =
-				candidate.priority === winner.priority &&
-				candidate.name.localeCompare(winner.name) < 0;
+			if (candidate.priority !== winner.priority) {
+				return candidate.priority > winner.priority
+					? candidate
+					: winner;
+			}
 
-			return candidate.priority > winner.priority || winsByName
+			// Equal priority: the base pool is the floor, so any grant outranks it.
+			if (candidate.isBase !== winner.isBase) {
+				return winner.isBase
+					? candidate
+					: winner;
+			}
+
+			// Two grants tie: break by name, deterministically.
+			return candidate.name.localeCompare(winner.name) < 0
 				? candidate
 				: winner;
 		});
@@ -147,15 +164,14 @@ export function getConnectionNameForAccountability(
 }
 
 /**
- * The knex a request uses (default name → base pool; named pools build
- * lazily).
+ * The knex a request uses (base name → base pool; named pools build lazily).
  */
 export function getDatabaseForAccountability(
 	accountability?: Accountability | null,
 ): Knex {
 	const name = getConnectionNameForAccountability(accountability);
 
-	if (name === getDefaultConnectionName()) {
+	if (name === getBaseConnectionName()) {
 		return getDatabase();
 	}
 

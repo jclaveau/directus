@@ -83,8 +83,8 @@ test('Refuses to build when a connection name is duplicated', async () => {
 	expect(() => getDatabase()).toThrow(/Duplicate DB connection name/);
 });
 
-test('Refuses to build when a connection name equals the default name', async () => {
-	mockEnv['DB_DEFAULT_CONNECTION_NAME'] = 'shared';
+test('Refuses to build when a connection name equals the base name', async () => {
+	mockEnv['DB_BASE_CONNECTION_NAME'] = 'shared';
 	mockEnv['DB_CONNECTIONS'] = ['shared'];
 
 	const { default: getDatabase } = await import('./index.js');
@@ -129,7 +129,7 @@ test('Picks the higher priority regardless of grant order', async () => {
 	).toBe('directus_premium');
 });
 
-test('Falls back to the default pool when nothing is granted', async () => {
+test('Falls back to the base pool when nothing is granted', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = createDefaultAccountability({ grantedDbConnections: [] });
@@ -137,11 +137,11 @@ test('Falls back to the default pool when nothing is granted', async () => {
 	expect(connectedDatabaseOf(getDatabaseForAccountability(null))).toBe('directus');
 });
 
-test('A share token (no granted connections) uses the default pool', async () => {
+test('A share token (no granted connections) uses the base pool', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	// A share-token accountability never runs global-access, so grantedDbConnections
-	// is undefined — it must resolve to the default pool, not throw or misroute.
+	// is undefined — it must resolve to the base pool, not throw or misroute.
 	const acc = createDefaultAccountability({ share: 'a-share-id' });
 	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
 });
@@ -175,7 +175,9 @@ test('Falls back when the granted connection is not configured', async () => {
 	).toBe('directus');
 });
 
-test('Falls back when no granted connection outranks the default', async () => {
+test('A granted connection at equal priority outranks the base pool', async () => {
+	// premium (0) ties the base pool (0); the base pool is the floor, so the
+	// grant wins the tie rather than falling back.
 	mockEnv['DB_CONNECTION_PREMIUM_PRIORITY'] = 0;
 
 	const { getDatabaseForAccountability } = await import('./index.js');
@@ -186,11 +188,32 @@ test('Falls back when no granted connection outranks the default', async () => {
 				createDefaultAccountability({ grantedDbConnections: ['premium'] }),
 			),
 		),
-	).toBe('directus');
+	).toBe('directus_premium');
 });
 
-test('Lets a policy grant the default pool by its configured name', async () => {
-	mockEnv['DB_DEFAULT_CONNECTION_NAME'] = 'primary';
+test('Two grants tied at base priority break by name, base excluded', async () => {
+	mockEnv['DB_CONNECTIONS'] = ['premium', 'replica_a'];
+	mockEnv['DB_CONNECTION_PREMIUM_PRIORITY'] = 0;
+	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
+	mockEnv['DB_CONNECTION_REPLICA_A_PRIORITY'] = 0;
+
+	const { getDatabaseForAccountability } = await import('./index.js');
+
+	// premium, replica_a and the base pool all tie at 0; base is the floor, and
+	// premium < replica_a by name, so premium wins.
+	expect(
+		connectedDatabaseOf(
+			getDatabaseForAccountability(
+				createDefaultAccountability({
+					grantedDbConnections: ['replica_a', 'premium'],
+				}),
+			),
+		),
+	).toBe('directus_premium');
+});
+
+test('Lets a policy grant the base pool by its configured name', async () => {
+	mockEnv['DB_BASE_CONNECTION_NAME'] = 'primary';
 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
@@ -203,8 +226,8 @@ test('Lets a policy grant the default pool by its configured name', async () => 
 	).toBe('directus');
 });
 
-test('Default priority can outrank a lower-priority granted pool', async () => {
-	mockEnv['DB_DEFAULT_CONNECTION_PRIORITY'] = 50;
+test('Base priority can outrank a lower-priority granted pool', async () => {
+	mockEnv['DB_BASE_CONNECTION_PRIORITY'] = 50;
 	mockEnv['DB_CONNECTIONS'] = ['replica_a'];
 	mockEnv['DB_CONNECTION_REPLICA_A_DATABASE'] = 'directus_replica';
 	mockEnv['DB_CONNECTION_REPLICA_A_PRIORITY'] = 10;
