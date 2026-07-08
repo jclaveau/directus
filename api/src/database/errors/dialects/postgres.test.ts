@@ -48,6 +48,25 @@ describe('unique violation (23505)', () => {
 
 		expect(extractError(error, {})).toBe(error);
 	});
+
+	it(oneLine`
+		stays a RecordNotUniqueError when the stored value contains a pool phrase,
+		not a false DatabasePoolExhaustedError
+	`, () => {
+		const error = pgError({
+			code: '23505',
+			table: 'articles',
+			detail: 'Key (note)=(pool is probably full) already exists.',
+			message:
+				'duplicate key value violates unique constraint — '
+				+ 'Key (note)=(pool is probably full) already exists.',
+		});
+
+		const result = extractError(error, { note: 'pool is probably full' });
+
+		expect(result).toBeInstanceOf(RecordNotUniqueError);
+		expect(result).not.toBeInstanceOf(DatabasePoolExhaustedError);
+	});
 });
 
 describe('numeric value out of range (22003)', () => {
