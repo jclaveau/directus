@@ -37,6 +37,7 @@ import getDefaultValue from '../utils/get-default-value.js';
 import { getSystemFieldRowsWithAuthProviders } from '../utils/get-field-system-rows.js';
 import getLocalType from '../utils/get-local-type.js';
 import { getSchema } from '../utils/get-schema.js';
+import { withMeta } from '../utils/read-meta.js';
 import { sanitizeColumn } from '../utils/sanitize-schema.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
@@ -263,7 +264,10 @@ export class FieldsService {
 			field.type = this.helpers.schema.processFieldType(field);
 		}
 
-		return result;
+		// TODO scope by the related collection's scoped_cache_fields
+		return withMeta(result, {
+			scopedCacheTags: [{ collection: 'directus_fields' }],
+		});
 	}
 
 	async readOne(collection: string, field: string): Promise<Record<string, any>> {
@@ -346,7 +350,10 @@ export class FieldsService {
 			schema: type === 'alias' ? null : columnWithCastDefaultValue,
 		};
 
-		return data;
+		// TODO scope by the related collection's scoped_cache_fields
+		return withMeta(data, {
+			scopedCacheTags: [{ collection: 'directus_fields' }],
+		});
 	}
 
 	async createField(

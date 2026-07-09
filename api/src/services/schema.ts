@@ -13,6 +13,7 @@ import { applyDiff } from '../utils/apply-diff.js';
 import { getSnapshotDiff } from '../utils/get-snapshot-diff.js';
 import { getSnapshot } from '../utils/get-snapshot.js';
 import { getVersionedHash } from '../utils/get-versioned-hash.js';
+import { withMeta } from '../utils/read-meta.js';
 import { validateApplyDiff } from '../utils/validate-diff.js';
 import { validateSnapshot } from '../utils/validate-snapshot.js';
 
@@ -31,7 +32,15 @@ export class SchemaService {
 
 		const currentSnapshot = await getSnapshot({ database: this.knex });
 
-		return currentSnapshot;
+		// A snapshot is the whole SCHEMA. Tag by the system collections it derives from,
+		// so a schema mutation purges the response, not a business-row write.
+		return withMeta(currentSnapshot, {
+			scopedCacheTags: [
+				{ collection: 'directus_collections' },
+				{ collection: 'directus_fields' },
+				{ collection: 'directus_relations' },
+			],
+		});
 	}
 
 	async apply(payload: SnapshotDiffWithHash): Promise<void> {

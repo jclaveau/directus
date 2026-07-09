@@ -7,6 +7,7 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 import { RelationsService } from './relations.js';
 
@@ -88,7 +89,55 @@ describe('Services / Relations', () => {
 		});
 	});
 
+	describe('readAll', () => {
+		it('tags the result with directus_relations', async () => {
+			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
+			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
+
+			const service = new RelationsService({ knex: db, schema });
+			const result = await service.readAll();
+
+			expect(readMeta(result)?.scopedCacheTags).toEqual([
+				{ collection: 'directus_relations' },
+			]);
+		});
+	});
+
 	describe('readOne', () => {
+		it('tags a found relation with directus_relations', async () => {
+			vi.mocked(validateAccess).mockResolvedValue(undefined);
+			vi.mocked(fetchAllowedFields).mockResolvedValue(['related']);
+
+			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([
+				{
+					many_collection: 'test',
+					many_field: 'related',
+					one_collection: 'related',
+				},
+			]);
+
+			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([
+				{
+					table: 'test',
+					column: 'related',
+					foreign_key_table: 'related',
+					foreign_key_column: 'id',
+				} as any,
+			]);
+
+			const service = new RelationsService({
+				knex: db,
+				schema,
+				accountability: admin,
+			});
+
+			const result = await service.readOne('test', 'related');
+
+			expect(readMeta(result)?.scopedCacheTags).toEqual([
+				{ collection: 'directus_relations' },
+			]);
+		});
+
 		it('should throw ForbiddenError when non-admin lacks field read permission', async () => {
 			vi.mocked(validateAccess).mockResolvedValue(undefined);
 			vi.mocked(fetchAllowedFields).mockResolvedValue(['id']);

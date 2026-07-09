@@ -2152,4 +2152,240 @@ describe('App Caching Tests', () => {
 			expect((await writeRow({ field_b: valB })).headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
+
+	describe(oneLine`
+		A cached custom-controller read (/settings) is purged when its collection is
+		mutated: the bare-collection-tag fallback keeps it from orphaning in scoped mode
+	`, () => {
+		// The /settings controller sets res.locals.payload but no scopedCacheTags. Its
+		// cached response would be tagged [] and no scoped purge could drop it (a stale
+		// HIT after a settings PATCH: the license reask). respond.ts adds the bare
+		// `directus_settings` tag, so the PATCH's scoped purge reaches it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readSettings = () => {
+				return request(url).get('/settings')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm. Non-vacuity: a re-read HITs, so /settings is genuinely cached.
+			await readSettings();
+			const warm = await readSettings();
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A settings PATCH scope-purges directus_settings.
+			await request(url).patch('/settings')
+				.send({ project_name: `preview-${randomUUID()}` })
+				.set('Authorization', auth);
+
+			const after = await readSettings();
+
+			// Purged (MISS). Without the fallback it was orphaned → stale HIT.
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A collection-less read (/server/info) is not cached in scoped mode: nothing
+		could purge it, so respond.ts skips it rather than orphan a stale entry
+	`, () => {
+		// /server/info runs respond without useCollection → no scopedCacheTags and no
+		// req.collection. In scoped mode nothing could ever purge it, so it isn't cached
+		// (MISS every read) — unlike an item read, which HITs in the same env.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readInfo = () => {
+				return request(url).get('/server/info')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			const first = await readInfo();
+			const second = await readInfo();
+
+			// Never cached in scoped mode — both reads MISS.
+			expect(first.statusCode).toBe(200);
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(second.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A schema endpoint (/collections) is cached against its system collection, not
+		data: a business-row write leaves it cached; a schema mutation purges it
+	`, () => {
+		// /collections describes the SCHEMA. useCollection('directus_collections') + the
+		// respond.ts fallback tag its cached response with directus_collections, so it
+		// survives item writes (schema, not data); only a schema mutation drops it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readCollections = () => {
+				return request(url).get('/collections')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm. Non-vacuity: cached now (was orphaned/uncached before the tag).
+			await readCollections();
+			const warm = await readCollections();
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A business-row insert must NOT flush it — its content is schema, not data.
+			await request(url).post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			const afterData = await readCollections();
+
+			expect(afterData.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A schema mutation (a directus_collections write) purges it.
+			await request(url).patch(`/collections/${collectionFirst}`)
+				.send({ meta: { note: `n-${randomUUID()}` } })
+				.set('Authorization', auth);
+
+			const afterSchema = await readCollections();
+
+			expect(afterSchema.statusCode).toBe(200);
+			expect(afterSchema.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		/fields, /relations and /schema/snapshot are tagged by their system collections:
+		a business write leaves them cached; a field mutation purges all
+	`, () => {
+		// The param reads (/fields/:c, /relations/:c) set an explicit directus_fields /
+		// directus_relations tag — validateCollection had reset req.collection to the
+		// data collection. /schema/snapshot tags {collections,fields,relations}. So an
+		// item write spares them, a field create/delete drops all three.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			const readFields = () => read(`/fields/${collectionFirst}`);
+			const readRelations = () => read(`/relations/${collectionFirst}`);
+			const readSnapshot = () => read('/schema/snapshot');
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm all three. Non-vacuity: a re-read HITs.
+			await readFields();
+			await readRelations();
+			await readSnapshot();
+
+			expect((await readFields()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readRelations()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('HIT');
+
+			// A business-row insert leaves all cached (schema, not data).
+			await request(url).post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			expect((await readFields()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readRelations()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('HIT');
+
+			// A field mutation (directus_fields write) purges all.
+			const field = `tmp_${randomUUID().replace(/-/g, '')}`;
+
+			await request(url).post(`/fields/${collectionFirst}`)
+				.send({ field, type: 'string' })
+				.set('Authorization', auth);
+
+			expect((await readFields()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readRelations()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('MISS');
+
+			// Clean up the temp field.
+			await request(url).delete(`/fields/${collectionFirst}/${field}`)
+				.set('Authorization', auth);
+		});
+
+		// Bare-list and single-item variants cache like the filtered ones; read twice.
+		// directus_users.role is a relation present on every install.
+		it.each(vendors)('%s — sibling field/relation routes cache', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			const readFieldsAll = () => read('/fields');
+			const readOneField = () => read(`/fields/${collectionFirst}/string_field`);
+			const readRelationsAll = () => read('/relations');
+			const readOneRelation = () => read('/relations/directus_users/role');
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await readFieldsAll();
+			await readOneField();
+			await readRelationsAll();
+			await readOneRelation();
+
+			expect((await readFieldsAll()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readOneField()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readRelationsAll()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readOneRelation()).headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
+		A collection-less read (/server/info) IS cached in full-purge mode — the skip is
+		scoped-mode-only, since full mode's cache.clear() can't orphan
+	`, () => {
+		// The mirror of the scoped-mode skip above: in full mode the same tagless,
+		// collection-less response is cached (a mutation clears the whole cache, so it
+		// can't go stale). Proves the behavior split is intentional, not a blanket skip.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readInfo = () => {
+				return request(url).get('/server/info')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await readInfo();
+			const warm = await readInfo();
+
+			// Cached in full mode (unlike the scoped-mode MISS asserted above).
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
 });

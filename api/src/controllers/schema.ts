@@ -10,6 +10,7 @@ import { respond } from '../middleware/respond.js';
 import { SchemaService } from '../services/schema.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getVersionedHash } from '../utils/get-versioned-hash.js';
+import { readMeta } from '../utils/read-meta.js';
 
 const router = express.Router();
 
@@ -19,6 +20,8 @@ router.get(
 		const service = new SchemaService({ accountability: req.accountability });
 		const currentSnapshot = await service.snapshot();
 		res.locals['payload'] = { data: currentSnapshot };
+		res.locals['scopedCacheTags'] = readMeta(currentSnapshot)?.scopedCacheTags;
+
 		return next();
 	}),
 	respond,
