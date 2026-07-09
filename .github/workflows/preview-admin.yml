@@ -2,8 +2,8 @@ name: Preview Admin
 
 # Manual only. Boots this ref's Directus (postgres + redis, scoped cache on) on a GitHub
 # runner and exposes its admin UI through an OUTBOUND cloudflared quick tunnel (runners take
-# no ingress). A tiny request-stamping proxy sits in front so the job auto-shuts-down after
-# `idle_minutes` with no requests. Seeds `items` → `sub_items` (both with a `user_created`)
+# no ingress). The job auto-shuts-down after `idle_minutes` with no activity (Directus log
+# stops growing). Seeds `items` → `sub_items` (both with a `user_created`)
 # so the scoped-cache field can be tried on real collections. The tunnel is PUBLIC while the
 # job runs — a random admin password is printed to the run summary (repo members only).
 # Ephemeral: the URL dies with the job.
@@ -62,7 +62,9 @@ jobs:
       CACHE_AUTO_PURGE: 'true'
       CACHE_AUTO_PURGE_MODE: scoped
       ADMIN_EMAIL: admin@example.com
-      # Off so the app never opens a WebSocket the front proxy would have to carry.
+      # info so each request logs a line — the idle watcher keys off log growth.
+      LOG_LEVEL: info
+      # Off — no realtime needed to browse a preview.
       WEBSOCKETS_ENABLED: 'false'
       PORT: '8055'
     steps:
@@ -79,8 +81,10 @@ jobs:
           curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
             -o /tmp/cf
           chmod +x /tmp/cf
-          # Tunnel to the front proxy (8056); it 502s until Directus is up a step later.
-          /tmp/cf tunnel --no-autoupdate --url http://localhost:8056 > /tmp/cf.log 2>&1 &
+          # Straight to Directus (8055); it 502s until Directus is up a step later. No
+          # hand-rolled proxy in front — a real HTTP server avoids the tunnel 530s a
+          # fragile proxy caused.
+          /tmp/cf tunnel --no-autoupdate --url http://localhost:8055 > /tmp/cf.log 2>&1 &
 
           for _ in $(seq 1 30); do
             URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1)
@@ -165,28 +169,10 @@ jobs:
           JS
           node /tmp/seed.mjs
 
-      - name: Front proxy + idle shutdown
+      - name: Publish URL + idle shutdown
         env:
           IDLE_MINUTES: ${{ inputs.idle_minutes }}
         run: |
-          cat > /tmp/proxy.cjs <<'JS'
-          const http = require('http');
-          const fs = require('fs');
-          const STAMP = '/tmp/lasthit';
-          const stamp = () => fs.writeFileSync(STAMP, '');
-          const server = http.createServer((req, res) => {
-            stamp();
-            const up = http.request(
-              { host: '127.0.0.1', port: 8055, path: req.url, method: req.method, headers: req.headers },
-              (r) => { res.writeHead(r.statusCode || 502, r.headers); r.pipe(res); },
-            );
-            up.on('error', () => { res.writeHead(502); res.end('upstream error'); });
-            req.pipe(up);
-          });
-          server.listen(8056, stamp);
-          JS
-          node /tmp/proxy.cjs &
-
           {
             echo "### Preview admin"
             echo ""
@@ -194,18 +180,26 @@ jobs:
             echo "- **URL:** ${URL}/admin"
             echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded collections: \`items\` → \`sub_items\` (both with \`user_created\`)."
-            echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no requests."
+            echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no activity."
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "::notice title=Preview admin::${URL}/admin"
 
+          # Idle = Directus log stops growing (each request logs a line at info level).
           IDLE=$(( IDLE_MINUTES * 60 ))
+          idle=0
+          prev=$(stat -c %s /tmp/directus.log 2>/dev/null || echo 0)
 
           while true; do
             sleep 30
-            LAST=$(stat -c %Y /tmp/lasthit 2>/dev/null || echo 0)
-            if [ $(( $(date +%s) - LAST )) -ge "$IDLE" ]; then
-              echo "No requests for ${IDLE}s — shutting down."
-              exit 0
+            cur=$(stat -c %s /tmp/directus.log 2>/dev/null || echo 0)
+            if [ "$cur" != "$prev" ]; then
+              prev=$cur; idle=0
+            else
+              idle=$(( idle + 30 ))
+              if [ "$idle" -ge "$IDLE" ]; then
+                echo "No activity for ${IDLE}s — shutting down."
+                exit 0
+              fi
             fi
           done
