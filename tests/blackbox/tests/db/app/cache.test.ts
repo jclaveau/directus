@@ -2105,4 +2105,83 @@ describe('App Caching Tests', () => {
 			expect((await writeRow({ field_b: valB })).headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
+
+	describe(oneLine`
+		A cached custom-controller read (/settings) is purged when its collection is
+		mutated: the bare-collection-tag fallback keeps it from orphaning in scoped mode
+	`, () => {
+		// The /settings controller sets res.locals.payload but no scopedCacheTags, so
+		// the cached response would be tagged [] and no scoped purge could drop it — a
+		// stale HIT after a settings PATCH (the license reask). respond.ts now falls
+		// back to the bare `directus_settings` tag, so the PATCH's purge reaches it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readSettings = () => {
+				return request(url).get('/settings')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm. Non-vacuity: a re-read HITs, so /settings is genuinely cached.
+			await readSettings();
+			const warm = await readSettings();
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A settings PATCH scope-purges directus_settings.
+			await request(url).patch('/settings')
+				.send({ project_name: `preview-${randomUUID()}` })
+				.set('Authorization', auth);
+
+			const after = await readSettings();
+
+			// Purged (MISS). Without the fallback it was orphaned → stale HIT.
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A cached read with NO collection (/server/info) is flushed by ANY mutation via
+		the global bucket — no collection tag could otherwise reach it
+	`, () => {
+		// /server/info runs respond without useCollection → req.collection undefined, so
+		// no per-collection tag can match it. respond.ts puts it in a global bucket that
+		// every purge flushes — a write to an unrelated collection still drops it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readInfo = () => {
+				return request(url).get('/server/info')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm. Non-vacuity: a re-read HITs, so /server/info is genuinely cached.
+			await readInfo();
+			const warm = await readInfo();
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Mutate an UNRELATED collection — its tag can't match /server/info.
+			await request(url).post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			const after = await readInfo();
+
+			// Only the global-bucket flush reaches it. Without it: orphaned → stale HIT.
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
 });
