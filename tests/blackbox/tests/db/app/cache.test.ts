@@ -48,6 +48,8 @@ describe('App Caching Tests', () => {
 	const envs = {} as Record<Vendor, EnvTypes>;
 	const cacheNamespacePrefix = 'directus-app-cache';
 	const cacheStatusHeader = 'x-cache-status';
+	const tagsHeader = 'x-scoped-cache-tags';
+	const purgedTagsHeader = 'x-scoped-cache-purged-tags';
 	const publicURL = 'http://example.com';
 
 	beforeAll(async () => {
@@ -86,6 +88,10 @@ describe('App Caching Tests', () => {
 			const envRedisScopedPurge = cloneDeep(envRedisPurge);
 			envRedisScopedPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
 			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_scoped`;
+
+			const scopedEnv = envRedisScopedPurge[vendor];
+			scopedEnv['CACHE_TAGS_HEADER'] = tagsHeader;
+			scopedEnv['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 
 			const newServerPortMem = await getPort();
 			const newServerPortMemPurge = await getPort();
@@ -790,6 +796,47 @@ describe('App Caching Tests', () => {
 			expect(afterA.headers[cacheStatusHeader]).toBe('MISS');
 			expect(afterB.statusCode).toBe(200);
 			expect(afterB.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
+		Dev headers expose scope tags: a scoped read emits the slice on MISS+HIT, a
+		scoped write emits the purged slice
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readA = `/items/${collectionScoped}`
+				+ `?filter[owner_field][_eq]=${scopedOwnerA}`;
+
+			const slice = `${collectionScoped}:owner_field=${scopedOwnerA}`;
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// A MISS read pins the owner slice into the header.
+			const miss = await request(url).get(readA)
+				.set('Authorization', auth);
+
+			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
+			expect(miss.headers[tagsHeader]).toContain(slice);
+
+			// A HIT re-emits it from the `__tags` sibling (the read is skipped).
+			const hit = await request(url).get(readA)
+				.set('Authorization', auth);
+
+			expect(hit.headers[cacheStatusHeader]).toBe('HIT');
+			expect(hit.headers[tagsHeader]).toContain(slice);
+
+			// A write to owner A emits the purged slice.
+			const write = await request(url)
+				.post(`/items/${collectionScoped}`)
+				.send({ string_field: randomUUID(), owner_field: scopedOwnerA })
+				.set('Authorization', auth);
+
+			expect(write.headers[purgedTagsHeader]).toContain(slice);
 		});
 	});
 
