@@ -2271,12 +2271,13 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		/fields and /schema/snapshot are tagged by their system collections: a business
-		write leaves them cached; a field mutation purges both
+		/fields, /relations and /schema/snapshot are tagged by their system collections:
+		a business write leaves them cached; a field mutation purges all
 	`, () => {
-		// /fields carries useCollection('directus_fields'); /schema/snapshot sets
-		// explicit {collections,fields,relations} tags. So an item write spares them,
-		// a field create/delete drops both.
+		// The param reads (/fields/:c, /relations/:c) set an explicit directus_fields /
+		// directus_relations tag — validateCollection had reset req.collection to the
+		// data collection. /schema/snapshot tags {collections,fields,relations}. So an
+		// item write spares them, a field create/delete drops all three.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisScopedPurge;
 			const url = getUrl(vendor, env);
@@ -2288,27 +2289,31 @@ describe('App Caching Tests', () => {
 			};
 
 			const readFields = () => read(`/fields/${collectionFirst}`);
+			const readRelations = () => read(`/relations/${collectionFirst}`);
 			const readSnapshot = () => read('/schema/snapshot');
 
 			await request(url).post(`/utils/cache/clear`)
 				.set('Authorization', auth);
 
-			// Warm both. Non-vacuity: a re-read HITs.
+			// Warm all three. Non-vacuity: a re-read HITs.
 			await readFields();
+			await readRelations();
 			await readSnapshot();
 
 			expect((await readFields()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readRelations()).headers[cacheStatusHeader]).toBe('HIT');
 			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('HIT');
 
-			// A business-row insert leaves both cached (schema, not data).
+			// A business-row insert leaves all cached (schema, not data).
 			await request(url).post(`/items/${collectionFirst}`)
 				.send({ string_field: randomUUID() })
 				.set('Authorization', auth);
 
 			expect((await readFields()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readRelations()).headers[cacheStatusHeader]).toBe('HIT');
 			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('HIT');
 
-			// A field mutation (directus_fields write) purges both.
+			// A field mutation (directus_fields write) purges all.
 			const field = `tmp_${randomUUID().replace(/-/g, '')}`;
 
 			await request(url).post(`/fields/${collectionFirst}`)
@@ -2316,6 +2321,7 @@ describe('App Caching Tests', () => {
 				.set('Authorization', auth);
 
 			expect((await readFields()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readRelations()).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('MISS');
 
 			// Clean up the temp field.
