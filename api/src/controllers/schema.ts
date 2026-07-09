@@ -10,6 +10,7 @@ import { respond } from '../middleware/respond.js';
 import { SchemaService } from '../services/schema.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getVersionedHash } from '../utils/get-versioned-hash.js';
+import { readMeta } from '../utils/read-meta.js';
 
 const router = express.Router();
 
@@ -19,14 +20,7 @@ router.get(
 		const service = new SchemaService({ accountability: req.accountability });
 		const currentSnapshot = await service.snapshot();
 		res.locals['payload'] = { data: currentSnapshot };
-
-		// A snapshot is the whole SCHEMA. Tag it by the system collections it derives
-		// from, so a schema mutation purges the response, not a business-row write.
-		res.locals['scopedCacheTags'] = [
-			{ collection: 'directus_collections' },
-			{ collection: 'directus_fields' },
-			{ collection: 'directus_relations' },
-		];
+		res.locals['scopedCacheTags'] = readMeta(currentSnapshot)?.scopedCacheTags;
 
 		return next();
 	}),

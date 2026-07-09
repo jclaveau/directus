@@ -10,6 +10,7 @@ import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { FieldsService } from '../services/fields.js';
 import asyncHandler from '../utils/async-handler.js';
+import { readMeta } from '../utils/read-meta.js';
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.get(
 		const fields = await service.readAll();
 
 		res.locals['payload'] = { data: fields || null };
+		res.locals['scopedCacheTags'] = readMeta(fields)?.scopedCacheTags;
 		return next();
 	}),
 	respond,
@@ -43,10 +45,7 @@ router.get(
 		const fields = await service.readAll(req.params['collection']);
 
 		res.locals['payload'] = { data: fields || null };
-
-		// validateCollection reset req.collection to the data collection; re-tag by
-		// directus_fields so a business-row write there can't flush these field defs.
-		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }]; // TODO scoped_cache_fields support for the related collection
+		res.locals['scopedCacheTags'] = readMeta(fields)?.scopedCacheTags;
 
 		return next();
 	}),
@@ -65,7 +64,7 @@ router.get(
 		const field = await service.readOne(req.params['collection']!, req.params['field']!);
 
 		res.locals['payload'] = { data: field || null };
-		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }]; // TODO scoped_cache_fields support for the related collection
+		res.locals['scopedCacheTags'] = readMeta(field)?.scopedCacheTags;
 		return next();
 	}),
 	respond,

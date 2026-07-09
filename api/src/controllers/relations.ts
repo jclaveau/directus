@@ -7,6 +7,7 @@ import { respond } from '../middleware/respond.js';
 import useCollection from '../middleware/use-collection.js';
 import { RelationsService } from '../services/relations.js';
 import asyncHandler from '../utils/async-handler.js';
+import { readMeta } from '../utils/read-meta.js';
 
 const router = express.Router();
 
@@ -22,6 +23,7 @@ router.get(
 
 		const relations = await service.readAll();
 		res.locals['payload'] = { data: relations || null };
+		res.locals['scopedCacheTags'] = readMeta(relations)?.scopedCacheTags;
 		return next();
 	}),
 	respond,
@@ -39,10 +41,7 @@ router.get(
 		const relations = await service.readAll(req.params['collection']);
 
 		res.locals['payload'] = { data: relations || null };
-
-		// validateCollection reset req.collection to the data collection; re-tag by
-		// directus_relations so a business-row write there can't flush these.
-		res.locals['scopedCacheTags'] = [{ collection: 'directus_relations' }]; // TODO scoped_cache_fields support for the related collection
+		res.locals['scopedCacheTags'] = readMeta(relations)?.scopedCacheTags;
 
 		return next();
 	}),
@@ -61,7 +60,7 @@ router.get(
 		const relation = await service.readOne(req.params['collection']!, req.params['field']!);
 
 		res.locals['payload'] = { data: relation || null };
-		res.locals['scopedCacheTags'] = [{ collection: 'directus_relations' }]; // TODO scoped_cache_fields support for the related collection
+		res.locals['scopedCacheTags'] = readMeta(relation)?.scopedCacheTags;
 		return next();
 	}),
 	respond,
