@@ -107,14 +107,16 @@ function scopedCacheTagKey(tag: ScopedCacheTag): string {
 		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
 }
 
-// Cached responses with no collection to pin (a controller running `respond` without
-// `useCollection`: /server, /schema, GraphQL) land in one global bucket under this
-// reserved sentinel (null byte, never a real collection). Every mutation drops it,
-// so these can't orphan; coarse, but only a few endpoints land here.
-export const GLOBAL_SCOPE_COLLECTION = '\x00global';
-
-function globalScopeTagKey(): string {
-	return scopedCacheTagKey({ collection: GLOBAL_SCOPE_COLLECTION });
+// Human-readable rendering of scope tags for the dev-only `X-Scoped-Cache-*` debug headers: each
+// tag as its key suffix without the `<namespace>:tag:` prefix — `collection` for a bare tag,
+// `collection:field=value` for a pinned slice (same canonical value the Redis key uses, so the
+// header and the key agree). Comma-joined.
+export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
+	return tags
+		.map((tag) => (tag.field === undefined
+			? tag.collection
+			: `${tag.collection}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`))
+		.join(', ');
 }
 
 /**
@@ -214,7 +216,7 @@ export async function purgeCollectionScopedCache(
 	// sibling (`articles` vs `articles_archive`) out of the scan.
 	const sliceKeys = await scanScopedCacheTagKeys(`${bareKey}:*`);
 
-	await purgeScopedCacheTagKeys(cache, [bareKey, ...sliceKeys, globalScopeTagKey()]);
+	await purgeScopedCacheTagKeys(cache, [bareKey, ...sliceKeys]);
 }
 
 /**
@@ -231,15 +233,18 @@ export async function purgeScopedCache(
 	collection: string,
 	scopedCacheTags: ScopedCacheTag[] | null = [],
 	context: EventContext | null = null,
-): Promise<void> {
+): Promise<ScopedCacheTag[] | null> {
+	// Returns the tags that were purged, so a caller can surface them (dev-only debug header).
+	// `null` = the whole namespace was flushed (non-scoped mode); a bare `[{ collection }]` = a
+	// collection-wide purge (unresolvable slice values); otherwise the resolved slice tags.
 	if (!scopedCachePurgeEnabled()) {
 		await cache.clear();
-		return;
+		return null;
 	}
 
 	if (scopedCacheTags === null) {
 		await purgeCollectionScopedCache(cache, collection);
-		return;
+		return [{ collection }];
 	}
 
 	const resolvedScopedCacheTags = (await emitter.emitFilter(
@@ -251,11 +256,10 @@ export async function purgeScopedCache(
 
 	await purgeScopedCacheTagKeys(
 		cache,
-		[
-			...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey)),
-			globalScopeTagKey(),
-		],
+		[...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))],
 	);
+
+	return resolvedScopedCacheTags;
 }
 
 /**

@@ -1,10 +1,11 @@
 import { useEnv } from '@directus/env';
+import type { ScopedCacheTag } from '@directus/types';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
-import { GLOBAL_SCOPE_COLLECTION, tagScopedCacheKeys } from '../scoped-cache.js';
+import { scopedCachePurgeEnabled, serializeScopedCacheTags, tagScopedCacheKeys } from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
@@ -20,6 +21,26 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const { cache } = getCache();
 
+	// Dev-only: expose the scoped-cache tags this request pinned (reads) / purged (mutations) as
+	// response headers, so a smoke test can assert the right per-user slice without a redis client.
+	// Gated hard — the tags carry owner ids, so never emit in prod. Raw pins are emitted (not the
+	// bare-collection fallback below), so a regression that pins nothing shows a bare/absent header
+	// instead of being masked. A cache HIT is served from middleware/cache.ts before respond runs,
+	// so a HIT read carries no tags header.
+	if (env['CACHE_TAGS_HEADER_ENABLED'] === true) {
+		const pinnedTags = res.locals['scopedCacheTags'] as ScopedCacheTag[] | undefined;
+
+		if (pinnedTags?.length) {
+			res.setHeader('X-Scoped-Cache-Tags', serializeScopedCacheTags(pinnedTags));
+		}
+
+		const purgedTags = res.locals['scopedCachePurged'] as ScopedCacheTag[] | null | undefined;
+
+		if (purgedTags?.length) {
+			res.setHeader('X-Scoped-Cache-Purged', serializeScopedCacheTags(purgedTags));
+		}
+	}
+
 	let exceedsMaxSize = false;
 
 	if (env['CACHE_VALUE_MAX_SIZE'] !== false) {
@@ -34,6 +55,24 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 	}
 
+	// A custom read controller (e.g. /settings) may set `payload` with no `scopedCacheTags` —
+	// the ItemsService read path sets them, a hand-written one often doesn't. Fall back to the
+	// bare collection tag so a mutation there still purges it (the /settings license reask).
+	const collectionFallbackTags = req.collection
+		? [{ collection: req.collection }]
+		: [];
+
+	const controllerTags = res.locals['scopedCacheTags'];
+
+	const scopedCacheTags = controllerTags?.length
+		? controllerTags
+		: collectionFallbackTags;
+
+	// With no tags AND no collection (/server, /schema, a GraphQL query touching nothing) a
+	// scoped purge can never target it, so caching would orphan a stale entry — don't cache it.
+	// Full mode's cache.clear() can't orphan, so it still caches.
+	const orphansInScopedMode = scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
+
 	if (
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
@@ -42,6 +81,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false &&
 		exceedsMaxSize === false &&
+		orphansInScopedMode === false &&
 		(await permissionsCachable(
 			req.collection,
 			{
@@ -56,17 +96,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		try {
 			await setCacheValue(cache, key, res.locals['payload'], getMilliseconds(env['CACHE_TTL']));
 			await setCacheValue(cache, `${key}__expires_at`, { exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0) });
-
-			// A custom read controller (e.g. /settings) may set `payload` without any
-			// `scopedCacheTags` — the ItemsService read path sets them, a hand-written one
-			// often doesn't. Tag by its collection so a mutation there still purges it;
-			// with no collection at all (/server, /schema) fall back to the global
-			// bucket that every mutation flushes. Either way nothing orphans.
-			await tagScopedCacheKeys(
-				key,
-				res.locals['scopedCacheTags']
-					?? [{ collection: req.collection ?? GLOBAL_SCOPE_COLLECTION }],
-			);
+			await tagScopedCacheKeys(key, scopedCacheTags);
 		}
 		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
