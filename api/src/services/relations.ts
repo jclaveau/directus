@@ -18,6 +18,7 @@ import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
+import { withMeta } from '../utils/read-meta.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getSchemaInspector } from '../database/index.js';
@@ -128,7 +129,11 @@ export class RelationsService {
 		}
 
 		const results = this.stitchRelations(metaRows, schemaRows);
-		return await this.filterForbidden(results);
+
+		// A relation read describes directus_relations, not the queried collection's data —
+		// tag it so a schema mutation purges the response, a business-row write doesn't.
+		const allowed = await this.filterForbidden(results);
+		return withMeta(allowed, { scopedCacheTags: [{ collection: 'directus_relations' }] }); // TODO scoped_cache_fields support for the related collection
 	}
 
 	async readOne(collection: string, field: string): Promise<Relation> {
@@ -187,7 +192,7 @@ export class RelationsService {
 			});
 		}
 
-		return results[0]!;
+		return withMeta(results[0]!, { scopedCacheTags: [{ collection: 'directus_relations' }] }); // TODO scoped_cache_fields support for the related collection
 	}
 
 	/**
