@@ -4,7 +4,11 @@ import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
-import { serializeScopedCacheTags, tagScopedCacheKeys } from '../scoped-cache.js';
+import {
+	scopedCachePurgeEnabled,
+	serializeScopedCacheTags,
+	tagScopedCacheKeys,
+} from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
@@ -62,6 +66,25 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 	}
 
+	// A custom read controller (e.g. /settings) may set `payload` with no tags
+	// (ItemsService reads set them; a hand-written one often does not). Fall back to
+	// the bare collection tag so a mutation there still purges it (settings reask).
+	const collectionFallbackTags = req.collection
+		? [{ collection: req.collection }]
+		: [];
+
+	const controllerTags = res.locals['scopedCacheTags'];
+
+	const scopedCacheTags = controllerTags?.length
+		? controllerTags
+		: collectionFallbackTags;
+
+	// No tags AND no collection (/server, /schema, a GraphQL query hitting nothing): a
+	// scoped purge can never target it; caching would orphan a stale entry. Skip it.
+	// Full mode's cache.clear() can't orphan, so it still caches.
+	const orphansInScopedMode =
+		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
+
 	if (
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
@@ -70,6 +93,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false &&
 		exceedsMaxSize === false &&
+		orphansInScopedMode === false &&
 		(await permissionsCachable(
 			req.collection,
 			{
@@ -87,7 +111,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 			await tagScopedCacheKeys(
 				key,
-				res.locals['scopedCacheTags'] ?? [],
+				scopedCacheTags,
 				env['CACHE_TAGS_HEADER']
 					? [`${key}__tags`]
 					: [],

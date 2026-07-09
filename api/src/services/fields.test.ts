@@ -6,7 +6,9 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Knex } from 'knex';
 import type { Tracker } from 'knex-mock-client';
+import { readMeta } from '../utils/read-meta.js';
 import { FieldsService } from './fields.js';
+import { ItemsService } from './items.js';
 
 vi.mock('../../src/database/index', () => ({
 	default: vi.fn(),
@@ -89,6 +91,23 @@ describe('Services / Fields', () => {
 			await expect(service.readOne('test', 'nonexistent')).rejects.toThrowError(
 				"Can't retrieve the schema info for the column 'nonexistent' of 'test'",
 			);
+		});
+	});
+
+	// Last, since the spies below survive clearAllMocks and would otherwise leak the
+	// stubbed columnInfo into readOne (which needs the real one to throw).
+	describe('readAll', () => {
+		it('tags the result with directus_fields', async () => {
+			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
+			tracker.on.select('directus_fields').response([]);
+
+			const service = new FieldsService({ knex: db, schema });
+			const result = await service.readAll();
+
+			expect(readMeta(result)?.scopedCacheTags).toEqual([
+				{ collection: 'directus_fields' },
+			]);
 		});
 	});
 });
