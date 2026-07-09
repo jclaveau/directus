@@ -67,8 +67,9 @@ jobs:
           WEBSOCKETS_ENABLED: 'false'
           PORT: '8055'
         run: |
+          # Not masked on purpose: it must show in the run summary so you can log in.
+          # The summary is repo-members-only and this sqlite instance is throwaway.
           PW=$(openssl rand -hex 12)
-          echo "::add-mask::$PW"
           echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
 
           ADMIN_PASSWORD="$PW" node directus/cli.js bootstrap
