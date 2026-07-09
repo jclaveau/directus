@@ -174,6 +174,18 @@ describe('respond middleware', () => {
 		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
 	});
 
+	test('caches a collection-less response in full-purge mode', async () => {
+		// scopedCachePurgeEnabled defaults to false → full mode. The same tagless,
+		// collection-less response IS cached (a mutation clears the whole cache).
+		const res = makeRes({ data: {} });
+		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
+	});
+
 	test('caching failure is caught and logged, not thrown', async () => {
 		vi.mocked(setCacheValue).mockRejectedValueOnce(new Error('boom'));
 		const res = makeRes({ data: [] });
