@@ -89,6 +89,12 @@ implements AbstractService<Item> {
 	cache: Keyv<any> | null;
 	nested: string[];
 
+	// Tags purged by the latest mutation on this (per-request) service, surfaced by
+	// the controllers as the CACHE_PURGED_TAGS_HEADER response header. Mutation
+	// methods return bare primary keys — no object for a `withMeta` rider (as reads
+	// use) — so the purged set rides the instance. `null` until a mutation purges.
+	scopedCachePurged: ScopedCacheTag[] | null = null;
+
 	constructor(collection: Collection, options: AbstractServiceOptions) {
 		this.collection = collection;
 		this.knex = options.knex || getDatabaseForAccountability(options.accountability);
@@ -226,7 +232,7 @@ implements AbstractService<Item> {
 	}
 
 	private async purgeScopedCache(tags: ScopedCacheTag[] | null): Promise<void> {
-		await purgeScopedCache(
+		this.scopedCachePurged = await purgeScopedCache(
 			this.cache,
 			this.collection,
 			tags,

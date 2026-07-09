@@ -107,6 +107,23 @@ function scopedCacheTagKey(tag: ScopedCacheTag): string {
 		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
 }
 
+// Render scope tags for the dev-only `X-Scoped-Cache-*` headers: each tag as its
+// key suffix (no `<namespace>:tag:` prefix) — `collection`, or `collection:field=
+// value` for a pinned slice (same canonical value as the Redis key). Comma-joined.
+export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
+	return tags
+		.map((tag) => {
+			if (tag.field === undefined) {
+				return tag.collection;
+			}
+
+			const value = canonicalScopedCacheValue(tag.value, tag.type);
+
+			return `${tag.collection}:${tag.field}=${value}`;
+		})
+		.join(', ');
+}
+
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the
@@ -118,6 +135,7 @@ function scopedCacheTagKey(tag: ScopedCacheTag): string {
 export async function tagScopedCacheKeys(
 	key: string,
 	scopedCacheTags: Iterable<ScopedCacheTag>,
+	extraSiblings: string[] = [],
 ): Promise<void> {
 	if (!scopedCachePurgeEnabled()) {
 		return;
@@ -134,7 +152,9 @@ export async function tagScopedCacheKeys(
 	const pipeline = redis.pipeline();
 
 	for (const tagKey of tagKeys) {
-		pipeline.sadd(tagKey, key, `${key}__expires_at`);
+		// `extraSiblings` = other keys written with the entry a purge must also drop
+		// — e.g. the dev-only `${key}__tags` sibling (respond.ts). Empty by default.
+		pipeline.sadd(tagKey, key, `${key}__expires_at`, ...extraSiblings);
 
 		if (ttlSeconds > 0) {
 			pipeline.expire(tagKey, ttlSeconds);
@@ -221,15 +241,18 @@ export async function purgeScopedCache(
 	collection: string,
 	scopedCacheTags: ScopedCacheTag[] | null = [],
 	context: EventContext | null = null,
-): Promise<void> {
+): Promise<ScopedCacheTag[] | null> {
+	// Returns the purged tags so a caller can surface them (dev-only debug header):
+	// `null` = whole namespace flushed (non-scoped mode); bare `[{ collection }]` =
+	// a collection-wide purge; otherwise the resolved slice tags.
 	if (!scopedCachePurgeEnabled()) {
 		await cache.clear();
-		return;
+		return null;
 	}
 
 	if (scopedCacheTags === null) {
 		await purgeCollectionScopedCache(cache, collection);
-		return;
+		return [{ collection }];
 	}
 
 	const resolvedScopedCacheTags = (await emitter.emitFilter(
@@ -243,6 +266,8 @@ export async function purgeScopedCache(
 		cache,
 		[...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))],
 	);
+
+	return resolvedScopedCacheTags;
 }
 
 /**

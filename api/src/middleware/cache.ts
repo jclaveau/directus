@@ -50,6 +50,21 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		res.setHeader('Vary', 'Origin, Cache-Control');
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'HIT');
 
+		if (env['CACHE_TAGS_HEADER']) {
+			// Dev-only: pins were persisted to a `${key}__tags` sibling at write
+			// time (respond.ts); the read that builds them is skipped on a HIT.
+			try {
+				const stored = await getCacheValue(cache, `${key}__tags`);
+
+				if (stored?.tags) {
+					res.setHeader(`${env['CACHE_TAGS_HEADER']}`, stored.tags);
+				}
+			}
+			catch (err: any) {
+				logger.warn(err, `[cache] __tags read failed: ${err.message}`);
+			}
+		}
+
 		return res.json(cachedData);
 	} else {
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');

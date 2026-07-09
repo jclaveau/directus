@@ -4,7 +4,7 @@ import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
-import { tagScopedCacheKeys } from '../scoped-cache.js';
+import { serializeScopedCacheTags, tagScopedCacheKeys } from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
@@ -19,6 +19,34 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const logger = useLogger();
 
 	const { cache } = getCache();
+
+	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
+	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
+	// smoke test can assert per-user scoping with no redis client. Never set in prod
+	// — tags carry owner ids. Raw pins are emitted, so a regression pinning nothing
+	// shows an absent header, not a masked one. A cache HIT skips this middleware —
+	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
+	if (env['CACHE_TAGS_HEADER']) {
+		const pins = res.locals['scopedCacheTags'];
+
+		if (Array.isArray(pins) && pins.length) {
+			res.setHeader(
+				`${env['CACHE_TAGS_HEADER']}`,
+				serializeScopedCacheTags(pins),
+			);
+		}
+	}
+
+	if (env['CACHE_PURGED_TAGS_HEADER']) {
+		const purged = res.locals['scopedCachePurged'];
+
+		if (Array.isArray(purged) && purged.length) {
+			res.setHeader(
+				`${env['CACHE_PURGED_TAGS_HEADER']}`,
+				serializeScopedCacheTags(purged),
+			);
+		}
+	}
 
 	let exceedsMaxSize = false;
 
@@ -56,7 +84,31 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		try {
 			await setCacheValue(cache, key, res.locals['payload'], getMilliseconds(env['CACHE_TTL']));
 			await setCacheValue(cache, `${key}__expires_at`, { exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0) });
-			await tagScopedCacheKeys(key, res.locals['scopedCacheTags'] ?? []);
+
+			await tagScopedCacheKeys(
+				key,
+				res.locals['scopedCacheTags'] ?? [],
+				env['CACHE_TAGS_HEADER']
+					? [`${key}__tags`]
+					: [],
+			);
+
+			// Dev-only: persist pins next to the entry so a cache HIT (which skips
+			// the read that builds them) can still emit them, via cache.ts.
+			if (env['CACHE_TAGS_HEADER']) {
+				const pins = res.locals['scopedCacheTags'];
+
+				if (Array.isArray(pins) && pins.length) {
+					// Object, not a bare string: setCacheValue's compress expects
+					// a CacheValue (object) — a raw string won't round-trip.
+					await setCacheValue(
+						cache,
+						`${key}__tags`,
+						{ tags: serializeScopedCacheTags(pins) },
+						getMilliseconds(env['CACHE_TTL']),
+					);
+				}
+			}
 		}
 		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 	return {
 		mockCache: { get: vi.fn(), set: vi.fn() },
 		tagScopedCacheKeys: vi.fn(),
+		serializeScopedCacheTags: vi.fn(() => 'SERIALIZED'),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
@@ -32,7 +33,12 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', () => ({ tagScopedCacheKeys: mocks.tagScopedCacheKeys }));
+vi.mock('../scoped-cache.js', () => {
+	return {
+		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
+		serializeScopedCacheTags: mocks.serializeScopedCacheTags,
+	};
+});
 
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
 
@@ -93,6 +99,8 @@ function makeReq(overrides: Partial<Request> = {}) {
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	env['CACHE_VALUE_MAX_SIZE'] = false;
+	delete env['CACHE_TAGS_HEADER'];
+	delete env['CACHE_PURGED_TAGS_HEADER'];
 	permissionsCachable.mockResolvedValue(true);
 });
 
@@ -130,7 +138,7 @@ describe('respond middleware', () => {
 		// #205 scoped-cache tagging fires with the request's tags
 		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [
 			{ collection: 'articles' },
-		]);
+		], []);
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
@@ -142,7 +150,7 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', []);
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
 	});
 
 	test('caching failure is caught and logged, not thrown', async () => {
@@ -200,7 +208,7 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		// falsy payload → size 0, under the limit, so caching still proceeds and 204 flushes
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', []);
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
 		expect(res.status).toHaveBeenCalledWith(204);
 	});
 
@@ -251,5 +259,76 @@ describe('respond middleware', () => {
 
 		expect(res.attachment).toHaveBeenCalledWith('Export 2020-01-01.xml');
 		expect(transform).toHaveBeenCalledWith([{ id: 1 }], 'xml');
+	});
+
+	test(oneLine`
+		CACHE_TAGS_HEADER MISS: emits the pins header, tags the __tags sibling
+	`, async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'owner', value: 'U1' },
+				],
+			},
+		);
+
+		await respond(makeReq(), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'X-Scoped-Cache-Tags',
+			'SERIALIZED',
+		);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
+			mockCache,
+			'cache-key__tags',
+			{ tags: 'SERIALIZED' },
+			expect.any(Number),
+		);
+
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles', field: 'owner', value: 'U1' }],
+			['cache-key__tags'],
+		);
+	});
+
+	test('CACHE_PURGED_TAGS_HEADER emits purged tags on a mutation', async () => {
+		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
+
+		const res = makeRes(
+			{ data: { id: 1 } },
+			{
+				scopedCachePurged: [
+					{ collection: 'articles', field: 'owner', value: 'U2' },
+				],
+			},
+		);
+
+		await respond(makeReq({ method: 'PATCH' }), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'X-Scoped-Cache-Purged-Tags',
+			'SERIALIZED',
+		);
+	});
+
+	test('tag headers stay absent when their envs are unset', async () => {
+		const res = makeRes(
+			{ data: [] },
+			{
+				scopedCacheTags: [{ collection: 'articles' }],
+				scopedCachePurged: [{ collection: 'articles' }],
+			},
+		);
+
+		await respond(makeReq(), res, next);
+
+		const names = vi.mocked(res.setHeader).mock.calls.map((call) => call[0]);
+		expect(names).not.toContain('X-Scoped-Cache-Tags');
+		expect(names).not.toContain('X-Scoped-Cache-Purged-Tags');
 	});
 });
