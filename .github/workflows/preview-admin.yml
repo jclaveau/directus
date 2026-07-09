@@ -1,0 +1,118 @@
+name: Preview Admin
+
+# Manual only. Boots this ref's Directus (sqlite) on a GitHub runner and exposes its
+# admin UI through an OUTBOUND cloudflared quick tunnel (runners take no ingress). A tiny
+# request-stamping proxy sits in front so the job auto-shuts-down after `idle_minutes`
+# with no requests. The tunnel is PUBLIC while the job runs — a random admin password is
+# generated and printed to the run summary (visible to repo members). Ephemeral: the URL
+# dies with the job.
+on:
+  workflow_dispatch:
+    inputs:
+      idle_minutes:
+        description: Auto-shutdown after this many minutes with no requests
+        type: number
+        default: 15
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: preview
+    runs-on: ubuntu-latest
+    # Hard backstop; the idle watcher normally ends the job long before this.
+    timeout-minutes: 180
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Start tunnel
+        run: |
+          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/cf
+          chmod +x /tmp/cf
+          # Tunnel to the front proxy (8056); it 502s until Directus is up a step later.
+          /tmp/cf tunnel --no-autoupdate --url http://localhost:8056 > /tmp/cf.log 2>&1 &
+
+          for _ in $(seq 1 30); do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
+
+          if [ -z "${URL:-}" ]; then
+            echo "cloudflared did not produce a URL"; cat /tmp/cf.log; exit 1
+          fi
+
+          echo "URL=$URL" >> "$GITHUB_ENV"
+
+      - name: Bootstrap + start Directus
+        env:
+          DB_CLIENT: sqlite3
+          DB_FILENAME: /tmp/preview.db
+          KEY: preview
+          SECRET: preview
+          ADMIN_EMAIL: admin@example.com
+          # Off so the app never opens a WebSocket the front proxy would have to carry.
+          WEBSOCKETS_ENABLED: 'false'
+          PORT: '8055'
+        run: |
+          PW=$(openssl rand -hex 12)
+          echo "::add-mask::$PW"
+          echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
+
+          ADMIN_PASSWORD="$PW" node directus/cli.js bootstrap
+          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" node directus/cli.js start \
+            > /tmp/directus.log 2>&1 &
+
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+      - name: Front proxy + idle shutdown
+        env:
+          IDLE_MINUTES: ${{ inputs.idle_minutes }}
+        run: |
+          cat > /tmp/proxy.cjs <<'JS'
+          const http = require('http');
+          const fs = require('fs');
+          const STAMP = '/tmp/lasthit';
+          const stamp = () => fs.writeFileSync(STAMP, '');
+          const server = http.createServer((req, res) => {
+            stamp();
+            const up = http.request(
+              { host: '127.0.0.1', port: 8055, path: req.url, method: req.method, headers: req.headers },
+              (r) => { res.writeHead(r.statusCode || 502, r.headers); r.pipe(res); },
+            );
+            up.on('error', () => { res.writeHead(502); res.end('upstream error'); });
+            req.pipe(up);
+          });
+          server.listen(8056, stamp);
+          JS
+          node /tmp/proxy.cjs &
+
+          {
+            echo "### Preview admin"
+            echo ""
+            echo "- **URL:** ${URL}/admin"
+            echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no requests."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::notice title=Preview admin::${URL}/admin"
+
+          IDLE=$(( IDLE_MINUTES * 60 ))
+
+          while true; do
+            sleep 30
+            LAST=$(stat -c %Y /tmp/lasthit 2>/dev/null || echo 0)
+            if [ $(( $(date +%s) - LAST )) -ge "$IDLE" ]; then
+              echo "No requests for ${IDLE}s — shutting down."
+              exit 0
+            fi
+          done
