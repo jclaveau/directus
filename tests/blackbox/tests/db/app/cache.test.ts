@@ -2222,4 +2222,51 @@ describe('App Caching Tests', () => {
 			expect(second.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
+
+	describe(oneLine`
+		A schema endpoint (/collections) is cached against its system collection, not
+		data: a business-row write leaves it cached; a schema mutation purges it
+	`, () => {
+		// /collections describes the SCHEMA. useCollection('directus_collections') + the
+		// respond.ts fallback tag its cached response with directus_collections, so it
+		// survives item writes (schema, not data); only a schema mutation drops it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readCollections = () => {
+				return request(url).get('/collections')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm. Non-vacuity: cached now (was orphaned/uncached before the tag).
+			await readCollections();
+			const warm = await readCollections();
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A business-row insert must NOT flush it — its content is schema, not data.
+			await request(url).post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			const afterData = await readCollections();
+
+			expect(afterData.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A schema mutation (a directus_collections write) purges it.
+			await request(url).patch(`/collections/${collectionFirst}`)
+				.send({ meta: { note: `n-${randomUUID()}` } })
+				.set('Authorization', auth);
+
+			const afterSchema = await readCollections();
+
+			expect(afterSchema.statusCode).toBe(200);
+			expect(afterSchema.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
 });
