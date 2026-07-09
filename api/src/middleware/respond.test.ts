@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 	return {
 		mockCache: { get: vi.fn(), set: vi.fn() },
 		tagScopedCacheKeys: vi.fn(),
+		scopedCachePurgeEnabled: vi.fn(() => false),
 		serializeScopedCacheTags: vi.fn(() => 'SERIALIZED'),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('../cache.js', () => {
 vi.mock('../scoped-cache.js', () => {
 	return {
 		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
+		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
 		serializeScopedCacheTags: mocks.serializeScopedCacheTags,
 	};
 });
@@ -144,13 +146,32 @@ describe('respond middleware', () => {
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
 	});
 
-	test('tags with an empty list when res.locals.scopedCacheTags is absent', async () => {
+	test('falls back to the bare collection tag when tags are absent', async () => {
 		const res = makeRes({ data: [] });
 		const req = makeReq();
 
 		await respond(req, res, next);
 
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
+		// A controller that set no tags → the bare `{ collection }` tag, so a mutation
+		// on that collection still purges the cached response (the settings fix).
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles' }],
+			[],
+		);
+	});
+
+	test('skips caching a collection-less response in scoped mode', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+		const res = makeRes({ data: {} });
+		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
+
+		await respond(req, res, next);
+
+		// No tags AND no collection under scoped purge → nothing could target it, so
+		// it is not cached (rather than orphan a stale entry no purge can drop).
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
 	});
 
 	test('caching failure is caught and logged, not thrown', async () => {
@@ -208,7 +229,12 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		// falsy payload → size 0, under the limit, so caching still proceeds and 204 flushes
-		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles' }],
+			[],
+		);
+
 		expect(res.status).toHaveBeenCalledWith(204);
 	});
 
