@@ -2269,4 +2269,86 @@ describe('App Caching Tests', () => {
 			expect(afterSchema.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
+
+	describe(oneLine`
+		/fields and /schema/snapshot are tagged by their system collections: a business
+		write leaves them cached; a field mutation purges both
+	`, () => {
+		// /fields carries useCollection('directus_fields'); /schema/snapshot sets
+		// explicit {collections,fields,relations} tags. So an item write spares them,
+		// a field create/delete drops both.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			const readFields = () => read(`/fields/${collectionFirst}`);
+			const readSnapshot = () => read('/schema/snapshot');
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm both. Non-vacuity: a re-read HITs.
+			await readFields();
+			await readSnapshot();
+
+			expect((await readFields()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('HIT');
+
+			// A business-row insert leaves both cached (schema, not data).
+			await request(url).post(`/items/${collectionFirst}`)
+				.send({ string_field: randomUUID() })
+				.set('Authorization', auth);
+
+			expect((await readFields()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('HIT');
+
+			// A field mutation (directus_fields write) purges both.
+			const field = `tmp_${randomUUID().replace(/-/g, '')}`;
+
+			await request(url).post(`/fields/${collectionFirst}`)
+				.send({ field, type: 'string' })
+				.set('Authorization', auth);
+
+			expect((await readFields()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readSnapshot()).headers[cacheStatusHeader]).toBe('MISS');
+
+			// Clean up the temp field.
+			await request(url).delete(`/fields/${collectionFirst}/${field}`)
+				.set('Authorization', auth);
+		});
+	});
+
+	describe(oneLine`
+		A collection-less read (/server/info) IS cached in full-purge mode — the skip is
+		scoped-mode-only, since full mode's cache.clear() can't orphan
+	`, () => {
+		// The mirror of the scoped-mode skip above: in full mode the same tagless,
+		// collection-less response is cached (a mutation clears the whole cache, so it
+		// can't go stale). Proves the behavior split is intentional, not a blanket skip.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readInfo = () => {
+				return request(url).get('/server/info')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await readInfo();
+			const warm = await readInfo();
+
+			// Cached in full mode (unlike the scoped-mode MISS asserted above).
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
 });
