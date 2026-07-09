@@ -46,7 +46,7 @@ router.get(
 
 		// validateCollection reset req.collection to the data collection; re-tag by
 		// directus_fields so a business-row write there can't flush these field defs.
-		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }];
+		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }]; // TODO scoped_cache_fields support for the related collection
 
 		return next();
 	}),
@@ -65,7 +65,7 @@ router.get(
 		const field = await service.readOne(req.params['collection']!, req.params['field']!);
 
 		res.locals['payload'] = { data: field || null };
-		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }];
+		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }]; // TODO scoped_cache_fields support for the related collection
 		return next();
 	}),
 	respond,
