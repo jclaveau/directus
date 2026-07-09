@@ -43,6 +43,11 @@ router.get(
 		const fields = await service.readAll(req.params['collection']);
 
 		res.locals['payload'] = { data: fields || null };
+
+		// validateCollection reset req.collection to the data collection; re-tag by
+		// directus_fields so a business-row write there can't flush these field defs.
+		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }];
+
 		return next();
 	}),
 	respond,
@@ -60,6 +65,7 @@ router.get(
 		const field = await service.readOne(req.params['collection']!, req.params['field']!);
 
 		res.locals['payload'] = { data: field || null };
+		res.locals['scopedCacheTags'] = [{ collection: 'directus_fields' }];
 		return next();
 	}),
 	respond,
