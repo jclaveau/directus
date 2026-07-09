@@ -31,6 +31,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
 
 	CACHE_SKIP_ALLOWED: 'boolean',
+	CACHE_STATUS_HEADER: 'string',
+	CACHE_TAGS_HEADER: 'string',
+	CACHE_PURGED_TAGS_HEADER: 'string',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_SCHEMA_MAX_ITERATIONS: 'number',
 	CACHE_SCHEMA_SYNC_TIMEOUT: 'number',

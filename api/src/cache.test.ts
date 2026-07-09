@@ -277,6 +277,19 @@ describe('scoped cache purging', () => {
 			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }]);
 			expect(redis.pipeline).not.toHaveBeenCalled();
 		});
+
+		test('tags the extra siblings alongside the key', async () => {
+			await tagScopedCacheKeys('resp-key', [{ collection: 'articles' }], [
+				'resp-key__tags',
+			]);
+
+			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+				'system-cache:tag:articles',
+				'resp-key',
+				'resp-key__expires_at',
+				'resp-key__tags',
+			);
+		});
 	});
 
 	describe('purgeScopedCache', () => {
@@ -489,6 +502,37 @@ describe('scoped cache purging', () => {
 				'system-cache:tag:slots',
 				'system-cache:tag:slots:owner=B',
 			);
+		});
+
+		test('returns null when scoped purge is off', async () => {
+			env['CACHE_AUTO_PURGE_MODE'] = 'full';
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			expect(await purgeScopedCache(cache, 'slots', [])).toBeNull();
+			expect(cache.clear).toHaveBeenCalledOnce();
+		});
+
+		test('returns the bare collection tag for a coarse purge', async () => {
+			redis.smembers.mockResolvedValue([]);
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			expect(await purgeScopedCache(cache, 'articles', null)).toEqual([
+				{ collection: 'articles' },
+			]);
+		});
+
+		test('returns the resolved slice tags it purged', async () => {
+			redis.smembers.mockResolvedValue([]);
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			const purged = await purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
+
+			expect(purged).toEqual([
+				{ collection: 'slots' },
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
 		});
 	});
 });

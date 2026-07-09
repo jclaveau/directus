@@ -4,6 +4,7 @@ import {
 	canonicalScopedCacheValue,
 	pinnedScopedCacheTagsFromFilter,
 	scopedCacheTagsFromRows,
+	serializeScopedCacheTags,
 } from '../scoped-cache.js';
 
 // The read side derives a scope value from a (string-ish) query filter, the purge side from a
@@ -650,5 +651,54 @@ describe('pinnedScopedCacheTagsFromFilter — relational paths (multi-hop)', () 
 			{ collection: 'disc', field: 'term', value: 'fall' },
 			{ collection: 'disc', field: 'enrollment.student.user', value: 'U1' },
 		]);
+	});
+});
+
+// The dev-only `X-Scoped-Cache-*` headers render tags as their key suffix (no
+// namespace prefix), via canonicalScopedCacheValue so it matches the tag key.
+describe('serializeScopedCacheTags', () => {
+	test(oneLine`
+		a bare tag (no field) renders as just the collection
+	`, () => {
+		expect(
+			serializeScopedCacheTags([{ collection: 'article' }]),
+		).toBe('article');
+	});
+
+	test(oneLine`
+		a pinned slice renders as collection:field=value
+	`, () => {
+		expect(
+			serializeScopedCacheTags([
+				{ collection: 'article', field: 'author', value: 'U1' },
+			]),
+		).toBe('article:author=U1');
+	});
+
+	test(oneLine`
+		the value is canonicalized like the tag key (boolean 1 collapses to true)
+	`, () => {
+		expect(
+			serializeScopedCacheTags([
+				{ collection: 'a', field: 'live', value: 1, type: 'boolean' },
+			]),
+		).toBe('a:live=true');
+	});
+
+	test(oneLine`
+		multiple tags join with ", " and mix bare + sliced
+	`, () => {
+		expect(
+			serializeScopedCacheTags([
+				{ collection: 'article', field: 'author', value: 'U1' },
+				{ collection: 'banner' },
+			]),
+		).toBe('article:author=U1, banner');
+	});
+
+	test(oneLine`
+		an empty tag list renders as an empty string
+	`, () => {
+		expect(serializeScopedCacheTags([])).toBe('');
 	});
 });
