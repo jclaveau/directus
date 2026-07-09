@@ -264,9 +264,10 @@ export class FieldsService {
 			field.type = this.helpers.schema.processFieldType(field);
 		}
 
-		// A field read describes directus_fields, not the queried collection's data —
-		// tag it so a schema mutation purges the response, a business-row write doesn't.
-		return withMeta(result, { scopedCacheTags: [{ collection: 'directus_fields' }] }); // TODO scoped_cache_fields support for the related collection
+		// TODO scope by the related collection's scoped_cache_fields
+		return withMeta(result, {
+			scopedCacheTags: [{ collection: 'directus_fields' }],
+		});
 	}
 
 	async readOne(collection: string, field: string): Promise<Record<string, any>> {
@@ -349,7 +350,10 @@ export class FieldsService {
 			schema: type === 'alias' ? null : columnWithCastDefaultValue,
 		};
 
-		return withMeta(data, { scopedCacheTags: [{ collection: 'directus_fields' }] }); // TODO scoped_cache_fields support for the related collection
+		// TODO scope by the related collection's scoped_cache_fields
+		return withMeta(data, {
+			scopedCacheTags: [{ collection: 'directus_fields' }],
+		});
 	}
 
 	async createField(

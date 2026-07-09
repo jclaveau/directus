@@ -130,10 +130,12 @@ export class RelationsService {
 
 		const results = this.stitchRelations(metaRows, schemaRows);
 
-		// A relation read describes directus_relations, not the queried collection's data —
-		// tag it so a schema mutation purges the response, a business-row write doesn't.
 		const allowed = await this.filterForbidden(results);
-		return withMeta(allowed, { scopedCacheTags: [{ collection: 'directus_relations' }] }); // TODO scoped_cache_fields support for the related collection
+
+		// TODO scope by the related collection's scoped_cache_fields
+		return withMeta(allowed, {
+			scopedCacheTags: [{ collection: 'directus_relations' }],
+		});
 	}
 
 	async readOne(collection: string, field: string): Promise<Relation> {
@@ -192,7 +194,10 @@ export class RelationsService {
 			});
 		}
 
-		return withMeta(results[0]!, { scopedCacheTags: [{ collection: 'directus_relations' }] }); // TODO scoped_cache_fields support for the related collection
+		// TODO scope by the related collection's scoped_cache_fields
+		return withMeta(results[0]!, {
+			scopedCacheTags: [{ collection: 'directus_relations' }],
+		});
 	}
 
 	/**
