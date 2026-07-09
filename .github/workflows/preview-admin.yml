@@ -9,6 +9,10 @@ name: Preview Admin
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: Branch/tag/SHA to boot (the code whose admin you want to see)
+        type: string
+        default: v11.10.1-hhh-dev
       idle_minutes:
         description: Auto-shutdown after this many minutes with no requests
         type: number
@@ -24,8 +28,10 @@ jobs:
     # Hard backstop; the idle watcher normally ends the job long before this.
     timeout-minutes: 180
     steps:
-      - name: Checkout repository
+      - name: Checkout the ref to preview
         uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Prepare
         uses: ./.github/actions/prepare
@@ -99,6 +105,7 @@ jobs:
           {
             echo "### Preview admin"
             echo ""
+            echo "- **Ref:** ${{ inputs.ref }}"
             echo "- **URL:** ${URL}/admin"
             echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no requests."
