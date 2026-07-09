@@ -2328,6 +2328,37 @@ describe('App Caching Tests', () => {
 			await request(url).delete(`/fields/${collectionFirst}/${field}`)
 				.set('Authorization', auth);
 		});
+
+		// Bare-list and single-item variants cache like the filtered ones; read twice.
+		// directus_users.role is a relation present on every install.
+		it.each(vendors)('%s — sibling field/relation routes cache', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			const readFieldsAll = () => read('/fields');
+			const readOneField = () => read(`/fields/${collectionFirst}/string_field`);
+			const readRelationsAll = () => read('/relations');
+			const readOneRelation = () => read('/relations/directus_users/role');
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await readFieldsAll();
+			await readOneField();
+			await readRelationsAll();
+			await readOneRelation();
+
+			expect((await readFieldsAll()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readOneField()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readRelationsAll()).headers[cacheStatusHeader]).toBe('HIT');
+			expect((await readOneRelation()).headers[cacheStatusHeader]).toBe('HIT');
+		});
 	});
 
 	describe(oneLine`
