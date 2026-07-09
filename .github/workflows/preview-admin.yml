@@ -1,11 +1,12 @@
 name: Preview Admin
 
-# Manual only. Boots this ref's Directus (sqlite) on a GitHub runner and exposes its
-# admin UI through an OUTBOUND cloudflared quick tunnel (runners take no ingress). A tiny
-# request-stamping proxy sits in front so the job auto-shuts-down after `idle_minutes`
-# with no requests. The tunnel is PUBLIC while the job runs — a random admin password is
-# generated and printed to the run summary (visible to repo members). Ephemeral: the URL
-# dies with the job.
+# Manual only. Boots this ref's Directus (postgres + redis, scoped cache on) on a GitHub
+# runner and exposes its admin UI through an OUTBOUND cloudflared quick tunnel (runners take
+# no ingress). A tiny request-stamping proxy sits in front so the job auto-shuts-down after
+# `idle_minutes` with no requests. Seeds `items` → `sub_items` (both with a `user_created`)
+# so the scoped-cache field can be tried on real collections. The tunnel is PUBLIC while the
+# job runs — a random admin password is printed to the run summary (repo members only).
+# Ephemeral: the URL dies with the job.
 on:
   workflow_dispatch:
     inputs:
@@ -27,6 +28,43 @@ jobs:
     runs-on: ubuntu-latest
     # Hard backstop; the idle watcher normally ends the job long before this.
     timeout-minutes: 180
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: directus
+          POSTGRES_PASSWORD: directus
+          POSTGRES_DB: directus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U directus"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_CLIENT: pg
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_DATABASE: directus
+      DB_USER: directus
+      DB_PASSWORD: directus
+      KEY: preview
+      SECRET: preview
+      CACHE_ENABLED: 'true'
+      CACHE_STORE: redis
+      REDIS: redis://localhost:6379
+      CACHE_AUTO_PURGE: 'true'
+      CACHE_AUTO_PURGE_MODE: scoped
+      ADMIN_EMAIL: admin@example.com
+      # Off so the app never opens a WebSocket the front proxy would have to carry.
+      WEBSOCKETS_ENABLED: 'false'
+      PORT: '8055'
     steps:
       - name: Checkout the ref to preview
         uses: actions/checkout@v7
@@ -57,18 +95,9 @@ jobs:
           echo "URL=$URL" >> "$GITHUB_ENV"
 
       - name: Bootstrap + start Directus
-        env:
-          DB_CLIENT: sqlite3
-          DB_FILENAME: /tmp/preview.db
-          KEY: preview
-          SECRET: preview
-          ADMIN_EMAIL: admin@example.com
-          # Off so the app never opens a WebSocket the front proxy would have to carry.
-          WEBSOCKETS_ENABLED: 'false'
-          PORT: '8055'
         run: |
           # Not masked on purpose: it must show in the run summary so you can log in.
-          # The summary is repo-members-only and this sqlite instance is throwaway.
+          # The summary is repo-members-only and this is a throwaway instance.
           PW=$(openssl rand -hex 12)
           echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
 
@@ -80,6 +109,61 @@ jobs:
             curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
             sleep 2
           done
+
+      - name: Seed items → sub_items
+        run: |
+          cat > /tmp/seed.mjs <<'JS'
+          const BASE = 'http://localhost:8055';
+
+          const login = await fetch(`${BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: 'admin@example.com', password: process.env.ADMIN_PASSWORD }),
+          });
+
+          const token = (await login.json()).data.access_token;
+          const H = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
+          const post = (p, b) => fetch(`${BASE}${p}`, { method: 'POST', headers: H, body: JSON.stringify(b) });
+
+          const idField = {
+            field: 'id',
+            type: 'integer',
+            meta: { hidden: true, interface: 'input', readonly: true },
+            schema: { is_primary_key: true, has_auto_increment: true },
+          };
+
+          const userCreated = (collection) => [
+            post(`/fields/${collection}`, {
+              field: 'user_created',
+              type: 'uuid',
+              meta: { special: ['user-created'], interface: 'select-dropdown-m2o' },
+              schema: {},
+            }),
+            post('/relations', {
+              collection,
+              field: 'user_created',
+              related_collection: 'directus_users',
+            }),
+          ];
+
+          await post('/collections', { collection: 'items', schema: {}, meta: {}, fields: [idField] });
+          for (const r of userCreated('items')) await r;
+
+          await post('/collections', { collection: 'sub_items', schema: {}, meta: {}, fields: [idField] });
+
+          await post('/fields/sub_items', {
+            field: 'item',
+            type: 'integer',
+            meta: { special: ['m2o'], interface: 'select-dropdown-m2o' },
+            schema: {},
+          });
+
+          await post('/relations', { collection: 'sub_items', field: 'item', related_collection: 'items' });
+          for (const r of userCreated('sub_items')) await r;
+
+          console.log('seeded items + sub_items');
+          JS
+          node /tmp/seed.mjs
 
       - name: Front proxy + idle shutdown
         env:
@@ -109,6 +193,7 @@ jobs:
             echo "- **Ref:** ${{ inputs.ref }}"
             echo "- **URL:** ${URL}/admin"
             echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- Seeded collections: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no requests."
           } >> "$GITHUB_STEP_SUMMARY"
 
