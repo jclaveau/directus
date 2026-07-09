@@ -2152,4 +2152,74 @@ describe('App Caching Tests', () => {
 			expect((await writeRow({ field_b: valB })).headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
+
+	describe(oneLine`
+		A cached custom-controller read (/settings) is purged when its collection is
+		mutated: the bare-collection-tag fallback keeps it from orphaning in scoped mode
+	`, () => {
+		// The /settings controller sets res.locals.payload but no scopedCacheTags. Its
+		// cached response would be tagged [] and no scoped purge could drop it (a stale
+		// HIT after a settings PATCH: the license reask). respond.ts adds the bare
+		// `directus_settings` tag, so the PATCH's scoped purge reaches it.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readSettings = () => {
+				return request(url).get('/settings')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			// Warm. Non-vacuity: a re-read HITs, so /settings is genuinely cached.
+			await readSettings();
+			const warm = await readSettings();
+
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+
+			// A settings PATCH scope-purges directus_settings.
+			await request(url).patch('/settings')
+				.send({ project_name: `preview-${randomUUID()}` })
+				.set('Authorization', auth);
+
+			const after = await readSettings();
+
+			// Purged (MISS). Without the fallback it was orphaned → stale HIT.
+			expect(after.statusCode).toBe(200);
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A collection-less read (/server/info) is not cached in scoped mode: nothing
+		could purge it, so respond.ts skips it rather than orphan a stale entry
+	`, () => {
+		// /server/info runs respond without useCollection → no scopedCacheTags and no
+		// req.collection. In scoped mode nothing could ever purge it, so it isn't cached
+		// (MISS every read) — unlike an item read, which HITs in the same env.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const readInfo = () => {
+				return request(url).get('/server/info')
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			const first = await readInfo();
+			const second = await readInfo();
+
+			// Never cached in scoped mode — both reads MISS.
+			expect(first.statusCode).toBe(200);
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(second.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
 });
