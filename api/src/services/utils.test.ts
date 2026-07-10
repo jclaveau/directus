@@ -9,8 +9,11 @@ import { getCache } from '../cache.js';
 import {
 	evictCacheEntriesForPath,
 	evictCacheEntry as registryEvictCacheEntry,
+	getCacheStatsState,
 	listCacheEntries,
-} from '../cache-registry.js';
+	setCacheStatsEnabled,
+	truncateCacheEvents,
+} from '../cache-events.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { UtilsService } from './utils.js';
@@ -23,7 +26,7 @@ vi.mock('../../src/database/index', () => ({
 vi.mock('../permissions/modules/validate-access/validate-access.js');
 vi.mock('../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js');
 vi.mock('../cache.js');
-vi.mock('../cache-registry.js');
+vi.mock('../cache-events.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -160,6 +163,60 @@ describe('Services / Utils', () => {
 			).resolves.toBe(0);
 
 			expect(evictCacheEntriesForPath).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('cache stats', () => {
+		const admin = { user: 'admin-user', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		it('getCacheStatsState rejects a non-admin user', async () => {
+			await expect(service(nonAdmin).getCacheStatsState()).rejects.toThrowError(
+				ForbiddenError,
+			);
+		});
+
+		it('getCacheStatsState returns the state for an admin', async () => {
+			const state = {
+				configured: true,
+				enabled: true,
+				killedReason: null,
+				bufferLength: 0,
+			};
+
+			vi.mocked(getCacheStatsState).mockResolvedValue(state);
+
+			await expect(service(admin).getCacheStatsState()).resolves.toBe(state);
+		});
+
+		it('setCacheStatsEnabled rejects a non-admin user', async () => {
+			await expect(
+				service(nonAdmin).setCacheStatsEnabled(false),
+			).rejects.toThrowError(ForbiddenError);
+
+			expect(setCacheStatsEnabled).not.toHaveBeenCalled();
+		});
+
+		it('setCacheStatsEnabled delegates for an admin', async () => {
+			await service(admin).setCacheStatsEnabled(false);
+			expect(setCacheStatsEnabled).toHaveBeenCalledWith(false);
+		});
+
+		it('truncateCacheStats rejects a non-admin user', async () => {
+			await expect(service(nonAdmin).truncateCacheStats()).rejects.toThrowError(
+				ForbiddenError,
+			);
+
+			expect(truncateCacheEvents).not.toHaveBeenCalled();
+		});
+
+		it('truncateCacheStats delegates for an admin', async () => {
+			await service(admin).truncateCacheStats();
+			expect(truncateCacheEvents).toHaveBeenCalled();
 		});
 	});
 });

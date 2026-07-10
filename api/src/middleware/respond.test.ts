@@ -134,7 +134,11 @@ describe('respond middleware', () => {
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
 			'cache-key__expires_at',
-			{ exp: expect.any(Number) },
+			{
+				exp: expect.any(Number),
+				createdAt: expect.any(Number),
+				ttlMs: expect.any(Number),
+			},
 		);
 
 		// #205 scoped-cache tagging fires with the request's tags

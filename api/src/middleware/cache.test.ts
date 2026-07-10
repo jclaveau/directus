@@ -39,6 +39,18 @@ vi.mock('../utils/should-skip-cache.js', () => {
 	return { shouldSkipCache: mocks.shouldSkipCache };
 });
 
+// Factory-stub the telemetry collaborator (no real import) so its `getDatabase`
+// chain doesn't eagerly load `register-locations`, which calls the env mock before
+// this file's `env` is initialised. cacheStatsActive→false skips all capture here.
+vi.mock('../cache-events.js', () => {
+	return {
+		cacheStatsActive: () => false,
+		captureCacheHit: vi.fn(),
+		captureCacheMiss: vi.fn(),
+		readCacheMissGap: vi.fn(),
+	};
+});
+
 import checkCacheMiddleware from './cache.js';
 
 const next = vi.fn();

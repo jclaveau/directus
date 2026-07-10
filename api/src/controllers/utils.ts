@@ -234,4 +234,56 @@ router.delete(
 	}),
 );
 
+router.get(
+	'/cache/stats',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheStatsState() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/stats',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const enabled = req.body?.enabled;
+
+		if (typeof enabled !== 'boolean') {
+			throw new InvalidPayloadError({
+				reason: 'An `enabled` boolean is required to toggle cache stats',
+			});
+		}
+
+		await service.setCacheStatsEnabled(enabled);
+		res.status(200).json({ data: { enabled } });
+		return;
+	}),
+);
+
+router.post(
+	'/cache/stats/truncate',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		await service.truncateCacheStats();
+		res.status(200).json({ data: { truncated: true } });
+		return;
+	}),
+);
+
 export default router;

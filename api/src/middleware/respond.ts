@@ -2,7 +2,7 @@ import { useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
-import { registerCacheEntry } from '../cache-registry.js';
+import { captureCacheDescriptor, writeCacheTombstone } from '../cache-events.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
@@ -110,8 +110,25 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		const key = await getCacheKey(req);
 
 		try {
-			await setCacheValue(cache, key, res.locals['payload'], getMilliseconds(env['CACHE_TTL']));
-			await setCacheValue(cache, `${key}__expires_at`, { exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0) });
+			const now = Date.now();
+			const ttlMs = getMilliseconds(env['CACHE_TTL']);
+			const expiresAt = now + getMilliseconds(env['CACHE_TTL'], 0);
+
+			const size = res.locals['payload']
+				? stringByteSize(JSON.stringify(res.locals['payload']))
+				: 0;
+
+			await setCacheValue(cache, key, res.locals['payload'], ttlMs);
+
+			// Enriched so a HIT reads age/TTL off this sibling — no extra read.
+			await setCacheValue(cache, `${key}__expires_at`, {
+				exp: expiresAt,
+				createdAt: now,
+				ttlMs: ttlMs ?? null,
+			});
+
+			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
+			void writeCacheTombstone(key, expiresAt).catch(() => {});
 
 			await tagScopedCacheKeys(
 				key,
@@ -138,15 +155,17 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				}
 			}
 
-			const ttlMs = getMilliseconds(env['CACHE_TTL']);
-
 			const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
 
-			await registerCacheEntry({
-				key,
-				path: req.originalUrl.split('?')[0]!,
+			// The per-key descriptor — captured here (fill) where query/collection/
+			// user are fully populated, unlike the early cache middleware. Buffered
+			// like the events; the flusher upserts the descriptors dimension.
+			void captureCacheDescriptor({
+				cacheKey: key,
 				method: req.method,
-				user: req.accountability?.user ?? null,
+				path: req.originalUrl.split('?')[0]!,
+				collection: req.collection ?? null,
+				userId: req.accountability?.user ?? null,
 				query: isGraphQlRequest
 					? JSON.stringify(getGraphqlQueryAndVariables(req))
 					: JSON.stringify(req.sanitizedQuery ?? {}),
@@ -154,14 +173,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				url: isGraphQlRequest
 					? ''
 					: req.originalUrl,
-				createdAt: Date.now(),
-				expiresAt: ttlMs === undefined
-					? null
-					: Date.now() + ttlMs,
-				size: res.locals['payload']
-					? stringByteSize(JSON.stringify(res.locals['payload']))
-					: 0,
-			});
+				bytes: size,
+			}).catch(() => {});
 		}
 		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
