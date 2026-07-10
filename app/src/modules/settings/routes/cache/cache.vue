@@ -24,6 +24,32 @@ interface EndpointGroup {
 	totalSize: number;
 }
 
+// Directus system surface: the dedicated system routes + reads of a `directus_*`
+// collection (and the system GraphQL schema). Everything else is app data.
+const SYSTEM_SEGMENTS = new Set(
+	(
+		'server schema auth users roles permissions policies files folders '
+		+ 'fields collections relations activity revisions presets settings flows '
+		+ 'operations extensions utils translations dashboards panels notifications '
+		+ 'shares comments versions metrics assets'
+	).split(' '),
+);
+
+function isSystemPath(path: string): boolean {
+	const segments = path.split('/').filter(Boolean);
+	const head = segments[0] ?? '';
+
+	if (head === 'items') {
+		return (segments[1] ?? '').startsWith('directus_');
+	}
+
+	if (head === 'graphql') {
+		return path.startsWith('/graphql/system');
+	}
+
+	return SYSTEM_SEGMENTS.has(head);
+}
+
 defineOptions({ name: 'SettingsCache' });
 
 const { t } = useI18n();
@@ -55,6 +81,21 @@ const groups = computed<EndpointGroup[]>(() => {
 	}
 
 	return result.sort((a, b) => b.totalHits - a.totalHits);
+});
+
+const sections = computed(() => {
+	return [
+		{
+			key: 'app',
+			label: t('app_label', 'App'),
+			groups: groups.value.filter((group) => !isSystemPath(group.path)),
+		},
+		{
+			key: 'system',
+			label: t('system_label', 'System'),
+			groups: groups.value.filter((group) => isSystemPath(group.path)),
+		},
+	].filter((section) => section.groups.length > 0);
 });
 
 const totalEntries = computed(() => entries.value.length);
@@ -238,70 +279,74 @@ onMounted(load);
 			</v-info>
 
 			<div v-else class="endpoints">
-				<div v-for="group in groups" :key="group.path" class="endpoint">
-					<div class="endpoint-header" @click="toggle(group.path)">
-						<v-icon
-							:name="expanded[group.path] ? 'expand_more' : 'chevron_right'"
-							small
-						/>
-						<span class="path">{{ group.path }}</span>
-						<span class="stat">
-							{{ group.entries.length }} {{ t('entries', 'entries') }}
-						</span>
-						<span class="stat hits">
-							{{ group.totalHits }} {{ t('hits', 'hits') }}
-						</span>
-						<span class="stat">{{ formatSize(group.totalSize) }}</span>
-						<v-button
-							v-tooltip.bottom="t('evict_endpoint', 'Evict this endpoint')"
-							x-small
-							kind="danger"
-							secondary
-							@click.stop="evictPath(group.path)"
-						>
-							<v-icon name="delete" x-small />
-						</v-button>
-					</div>
+				<div v-for="section in sections" :key="section.key" class="section">
+					<h2 class="section-title">{{ section.label }}</h2>
 
-					<div v-if="expanded[group.path]" class="entries-scroll">
-						<table class="entries">
-							<thead>
-								<tr>
-									<th>{{ t('query', 'Query') }}</th>
-									<th>{{ t('user_label', 'User') }}</th>
-									<th class="num">{{ t('hits', 'Hits') }}</th>
-									<th class="num">{{ t('age', 'Age') }}</th>
-									<th class="num">{{ t('last_hit', 'Last hit') }}</th>
-									<th class="num">{{ t('expires_in', 'Expires in') }}</th>
-									<th class="num">{{ t('size', 'Size') }}</th>
-									<th class="key">{{ t('key', 'Key') }}</th>
-									<th></th>
-								</tr>
-							</thead>
-							<tbody>
-								<tr v-for="entry in group.entries" :key="entry.key">
-									<td class="query" :title="entry.query">
-										{{ formatQuery(entry.query) }}
-									</td>
-									<td>{{ formatUser(entry.user) }}</td>
-									<td class="num">{{ entry.hits }}</td>
-									<td class="num">{{ formatAgo(entry.createdAt) }}</td>
-									<td class="num">{{ formatLastHit(entry.lastHitAt) }}</td>
-									<td class="num">{{ formatExpiry(entry.expiresAt) }}</td>
-									<td class="num">{{ formatSize(entry.size) }}</td>
-									<td class="key" :title="entry.key">{{ shortKey(entry.key) }}</td>
-									<td class="num">
-										<v-icon
-											v-tooltip.bottom="t('evict_entry', 'Evict this entry')"
-											name="delete"
-											small
-											clickable
-											@click="evictEntry(entry)"
-										/>
-									</td>
-								</tr>
-							</tbody>
-						</table>
+					<div v-for="group in section.groups" :key="group.path" class="endpoint">
+						<div class="endpoint-header" @click="toggle(group.path)">
+							<v-icon
+								:name="expanded[group.path] ? 'expand_more' : 'chevron_right'"
+								small
+							/>
+							<span class="path">{{ group.path }}</span>
+							<span class="stat">
+								{{ group.entries.length }} {{ t('entries', 'entries') }}
+							</span>
+							<span class="stat hits">
+								{{ group.totalHits }} {{ t('hits', 'hits') }}
+							</span>
+							<span class="stat">{{ formatSize(group.totalSize) }}</span>
+							<v-button
+								v-tooltip.bottom="t('evict_endpoint', 'Evict this endpoint')"
+								x-small
+								kind="danger"
+								secondary
+								@click.stop="evictPath(group.path)"
+							>
+								<v-icon name="delete" x-small />
+							</v-button>
+						</div>
+
+						<div v-if="expanded[group.path]" class="entries-scroll">
+							<table class="entries">
+								<thead>
+									<tr>
+										<th>{{ t('query', 'Query') }}</th>
+										<th>{{ t('user_label', 'User') }}</th>
+										<th class="num">{{ t('hits', 'Hits') }}</th>
+										<th class="num">{{ t('age', 'Age') }}</th>
+										<th class="num">{{ t('last_hit', 'Last hit') }}</th>
+										<th class="num">{{ t('expires_in', 'Expires in') }}</th>
+										<th class="num">{{ t('size', 'Size') }}</th>
+										<th class="key">{{ t('key', 'Key') }}</th>
+										<th></th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr v-for="entry in group.entries" :key="entry.key">
+										<td class="query" :title="entry.query">
+											{{ formatQuery(entry.query) }}
+										</td>
+										<td>{{ formatUser(entry.user) }}</td>
+										<td class="num">{{ entry.hits }}</td>
+										<td class="num">{{ formatAgo(entry.createdAt) }}</td>
+										<td class="num">{{ formatLastHit(entry.lastHitAt) }}</td>
+										<td class="num">{{ formatExpiry(entry.expiresAt) }}</td>
+										<td class="num">{{ formatSize(entry.size) }}</td>
+										<td class="key" :title="entry.key">{{ shortKey(entry.key) }}</td>
+										<td class="num">
+											<v-icon
+												v-tooltip.bottom="t('evict_entry', 'Evict this entry')"
+												name="delete"
+												small
+												clickable
+												@click="evictEntry(entry)"
+											/>
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -335,6 +380,18 @@ onMounted(load);
 .metric .label {
 	color: var(--theme--foreground-subdued);
 	font-size: 14px;
+}
+
+.section {
+	margin-block-end: 24px;
+}
+
+.section-title {
+	color: var(--theme--foreground-subdued);
+	font-size: 16px;
+	font-weight: 700;
+	margin-block-end: 8px;
+	text-transform: uppercase;
 }
 
 .endpoint {
