@@ -1052,4 +1052,42 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(result).toEqual([{ id: 1, name: 'a' }]);
 		});
 	});
+
+	describe('auto-derived scoped-cache paths', () => {
+		const pathSchema = new SchemaBuilder()
+			.collection('sub', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('item').m2o('item');
+			})
+			.collection('item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+			})
+			.build();
+
+		// SchemaBuilder can't set scoped_cache_fields, so inject them. `item` is an M2O
+		// whose target scopes `owner`, so a 2-hop `item.owner` path auto-composes; the
+		// explicit `item.owner` dedups against it; `name.foo` has a scalar head so it
+		// resolves to null and drops to the bare tag.
+		pathSchema.collections['sub']!.scopedCacheFields = [
+			'item',
+			'item.owner',
+			'name.foo',
+		];
+
+		pathSchema.collections['item']!.scopedCacheFields = ['owner'];
+
+		it('readByQuery resolves M2O paths, drops scalar heads', async () => {
+			tracker.on.select('sub').response([{ id: 1, name: 'a', item: 10 }]);
+
+			const service = new ItemsService('sub', { knex: db, schema: pathSchema });
+			const result = await service.readByQuery({ fields: ['*'] });
+
+			expect(readMeta(result)?.scopedCacheTags).toBeDefined();
+		});
+	});
 });

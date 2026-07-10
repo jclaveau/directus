@@ -21,8 +21,10 @@ import {
 	collectionRelated,
 	collectionScoped,
 	collectionScopedMulti,
+	collectionMember,
 	collectionOwnedSubItem,
 	collectionOwnedItem,
+	collectionTeam,
 	collectionScopedRel,
 	collectionTag,
 	scopedOwnerA,
@@ -1912,6 +1914,85 @@ describe('App Caching Tests', () => {
 			const afterB = await read(readB);
 
 			// The write joined owned_sub_item→owned_item to resolve owner_ref=<ownerB>,
+			// so B's write dropped only B (MISS) and left A cached (HIT).
+			expect(afterA.statusCode).toBe(200);
+			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(afterB.statusCode).toBe(200);
+			expect(afterB.headers[cacheStatusHeader]).toBe('MISS');
+		});
+	});
+
+	describe(oneLine`
+		A DERIVED path (member scoped by its own team, team by its own owner_ref)
+		value-scopes member reads by owner with no config naming another collection's
+		relation: the team.owner_ref path composes itself
+	`, () => {
+		// member.scoped_cache_fields = ['team']; team's = ['owner_ref']. Neither names
+		// `team.owner_ref` — it auto-derives. Reads/writes slice member by the owner
+		// like the explicit-path case, proving composition feeds the same machinery.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const createMany = async (collection: string, items: object[]) => {
+				return (
+					await request(url).post(`/items/${collection}?fields=id`)
+						.send(items)
+						.set('Authorization', auth)
+				).body.data;
+			};
+
+			const addMember = async (team: number) => {
+				await request(url).post(`/items/${collectionMember}`)
+					.send({ team })
+					.set('Authorization', auth);
+			};
+
+			const [ownerA, ownerB] = await createMany(collectionGrandRelated, [
+				{ string_field: randomUUID() },
+				{ string_field: randomUUID() },
+			]);
+
+			const [teamA, teamB] = await createMany(collectionTeam, [
+				{ owner_ref: ownerA.id },
+				{ owner_ref: ownerB.id },
+			]);
+
+			await createMany(collectionMember, [
+				{ team: teamA.id },
+				{ team: teamB.id },
+			]);
+
+			const base =
+				`/items/${collectionMember}?filter[team][owner_ref][id][_eq]=`;
+
+			const readA = `${base}${ownerA.id}`;
+			const readB = `${base}${ownerB.id}`;
+
+			const read = (path: string) => {
+				return request(url).get(path)
+					.set('Authorization', auth);
+			};
+
+			await request(url).post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			await read(readA);
+			await read(readB);
+			const warmA = await read(readA);
+			const warmB = await read(readB);
+
+			expect(warmA.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmB.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Write a member into owner B's team only.
+			await addMember(teamB.id);
+
+			const afterA = await read(readA);
+			const afterB = await read(readB);
+
+			// The derived team.owner_ref path resolved owner_ref=<ownerB> on both sides,
 			// so B's write dropped only B (MISS) and left A cached (HIT).
 			expect(afterA.statusCode).toBe(200);
 			expect(afterA.headers[cacheStatusHeader]).toBe('HIT');
