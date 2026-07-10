@@ -3,6 +3,12 @@ import { systemCollectionRows } from '@directus/system-data';
 import type { AbstractServiceOptions, Accountability, PrimaryKey, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache } from '../cache.js';
+import {
+	type CacheEntryRecord,
+	evictCacheEntriesForPath,
+	evictCacheEntry,
+	listCacheEntries,
+} from '../cache-registry.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
@@ -172,5 +178,43 @@ export class UtilsService {
 		}
 
 		return cache?.clear();
+	}
+
+	private assertCacheAdmin(action: string): void {
+		if (this.accountability?.admin !== true) {
+			const reason =
+				`'${this.accountability?.user}' does not have permission `
+				+ `to ${action} as not being an admin`;
+
+			throw new ForbiddenError({ reason });
+		}
+	}
+
+	async getCacheEntries(): Promise<CacheEntryRecord[]> {
+		this.assertCacheAdmin('inspect the cache');
+
+		return listCacheEntries();
+	}
+
+	async evictCacheEntry(key: string): Promise<void> {
+		this.assertCacheAdmin('evict a cache entry');
+
+		const { cache } = getCache();
+
+		if (cache) {
+			await evictCacheEntry(cache, key);
+		}
+	}
+
+	async evictCacheEntriesForPath(path: string): Promise<number> {
+		this.assertCacheAdmin('evict cache entries');
+
+		const { cache } = getCache();
+
+		if (!cache) {
+			return 0;
+		}
+
+		return evictCacheEntriesForPath(cache, path);
 	}
 }

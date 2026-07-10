@@ -188,4 +188,50 @@ router.post(
 	}),
 );
 
+router.get(
+	'/cache',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		// Never cache the cache listing itself — it must reflect live state.
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheEntries() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.delete(
+	'/cache',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const key = req.query['key'];
+		const path = req.query['path'];
+
+		if (typeof key === 'string') {
+			await service.evictCacheEntry(key);
+			res.status(200).json({ data: { evicted: 1 } });
+			return;
+		}
+
+		if (typeof path === 'string') {
+			const evicted = await service.evictCacheEntriesForPath(path);
+			res.status(200).json({ data: { evicted } });
+			return;
+		}
+
+		throw new InvalidPayloadError({
+			reason: 'A `key` or `path` query parameter is required to evict cache entries',
+		});
+	}),
+);
+
 export default router;
