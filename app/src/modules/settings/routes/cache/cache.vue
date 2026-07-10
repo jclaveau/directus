@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import api from '@/api';
+import { getRootPath } from '@/utils/get-root-path';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
@@ -10,6 +11,7 @@ interface CacheEntry {
 	method: string;
 	user: string | null;
 	query: string;
+	url: string;
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
@@ -213,6 +215,12 @@ function formatQuery(query: string): string {
 	return query;
 }
 
+// The stored `url` is the raw request path — resolve it against the API root so the
+// link opens the exact endpoint in a new tab (the session cookie authenticates it).
+function entryHref(entry: CacheEntry): string {
+	return `${getRootPath().replace(/\/$/, '')}${entry.url}`;
+}
+
 onMounted(load);
 </script>
 
@@ -324,8 +332,18 @@ onMounted(load);
 								</thead>
 								<tbody>
 									<tr v-for="entry in group.entries" :key="entry.key">
-										<td class="query" :title="entry.query">
-											{{ formatQuery(entry.query) }}
+										<td class="query" :title="entry.url || entry.query">
+											<a
+												v-if="entry.url"
+												:href="entryHref(entry)"
+												target="_blank"
+												rel="noopener noreferrer"
+											>
+												{{ formatQuery(entry.query) }}
+											</a>
+											<template v-else>
+												{{ formatQuery(entry.query) }}
+											</template>
 										</td>
 										<td>{{ formatUser(entry.user) }}</td>
 										<td class="num">{{ entry.hits }}</td>

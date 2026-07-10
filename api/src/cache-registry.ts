@@ -22,6 +22,7 @@ export interface CacheEntryRecord {
 	method: string;
 	user: string | null;
 	query: string;
+	url: string;
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
@@ -35,6 +36,7 @@ export interface CacheEntryDescriptor {
 	method: string;
 	user: string | null;
 	query: string;
+	url: string;
 	createdAt: number;
 	expiresAt: number | null;
 	size: number;
@@ -91,6 +93,7 @@ export async function registerCacheEntry(
 		method: entry.method,
 		user: entry.user ?? '',
 		query: entry.query,
+		url: entry.url,
 		createdAt: String(entry.createdAt),
 		expiresAt: entry.expiresAt === null
 			? ''
@@ -175,6 +178,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 				? fields['user']
 				: null,
 			query: fields['query'] ?? '',
+			url: fields['url'] ?? '',
 			createdAt: Number(fields['createdAt'] ?? 0),
 			expiresAt: fields['expiresAt']
 				? Number(fields['expiresAt'])
