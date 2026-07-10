@@ -199,6 +199,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           IDLE_MINUTES: ${{ inputs.idle_minutes || 15 }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # Backticks are escaped (\`) so they stay literal markdown, not shell
           # command substitution; $URL/$ADMIN_PASSWORD/$SHA still expand.
@@ -209,6 +210,7 @@ jobs:
             echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Ephemeral: auto-shuts-down after ${IDLE_MINUTES} min idle; the link dies with the run."
+            echo "- **Re-run:** [🔄 boot a fresh preview](${RUN_URL}) — then \"Re-run all jobs\"."
           } > /tmp/preview-comment.md
 
           gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file /tmp/preview-comment.md
