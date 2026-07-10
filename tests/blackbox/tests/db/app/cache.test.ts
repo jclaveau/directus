@@ -2469,4 +2469,77 @@ describe('App Caching Tests', () => {
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
+
+	describe('The cache registry lists and evicts cached entries', () => {
+		// Redis-only: the registry sidecar lives in Redis. Asserts by find-by-path
+		// (the namespace is shared across vendors) rather than on an empty listing.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// Populate a cached read and record a hit on it.
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionRelated}`)
+				.set('Authorization', auth);
+
+			// The registry lists the read with a hit + query recorded.
+			const listed = await request(url).get('/utils/cache')
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+
+			const first = listed.body.data.find((entry: any) => {
+				return entry.path === `/items/${collectionFirst}`;
+			});
+
+			expect(first).toBeDefined();
+			expect(first.hits).toBeGreaterThanOrEqual(1);
+			expect(typeof first.query).toBe('string');
+
+			// Evict one entry by key (its own branch)…
+			const byKey = await request(url).delete('/utils/cache')
+				.query({ key: first.key })
+				.set('Authorization', auth);
+
+			expect(byKey.statusCode).toBe(200);
+			expect(byKey.body.data.evicted).toBe(1);
+
+			// …then clear both collections by path.
+			await request(url).delete('/utils/cache')
+				.query({ path: `/items/${collectionFirst}` })
+				.set('Authorization', auth);
+
+			const byPath = await request(url).delete('/utils/cache')
+				.query({ path: `/items/${collectionRelated}` })
+				.set('Authorization', auth);
+
+			expect(byPath.statusCode).toBe(200);
+			expect(byPath.body.data.evicted).toBeGreaterThanOrEqual(1);
+
+			const after = await request(url).get('/utils/cache')
+				.set('Authorization', auth);
+
+			const stillThere = after.body.data.some((entry: any) => {
+				return entry.path === `/items/${collectionFirst}`
+					|| entry.path === `/items/${collectionRelated}`;
+			});
+
+			expect(stillThere).toBe(false);
+
+			// Neither key nor path → 400.
+			const bad = await request(url).delete('/utils/cache')
+				.set('Authorization', auth);
+
+			expect(bad.statusCode).toBe(400);
+		});
+	});
 });
