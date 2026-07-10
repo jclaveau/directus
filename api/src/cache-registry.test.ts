@@ -218,6 +218,13 @@ describe('listCacheEntries', () => {
 		expect(await listCacheEntries()).toEqual([]);
 		expect(mockRedis.scan).not.toHaveBeenCalled();
 	});
+
+	it('returns an empty array and skips the pipeline when nothing is cached', async () => {
+		mockRedis.scan.mockResolvedValueOnce(['0', []]);
+
+		expect(await listCacheEntries()).toEqual([]);
+		expect(mockRedis.pipeline).not.toHaveBeenCalled();
+	});
 });
 
 describe('evictCacheEntry', () => {
