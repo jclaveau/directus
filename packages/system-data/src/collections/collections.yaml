@@ -114,3 +114,7 @@ data:
 
   - collection: directus_extensions
     note: $t:directus_collection.directus_extensions
+
+  - collection: directus_cache_descriptors
+    icon: memory
+    note: $t:directus_collection.directus_cache_descriptors

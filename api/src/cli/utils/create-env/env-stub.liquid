@@ -188,6 +188,15 @@ CACHE_STORE=memory
 # Track per-entry hit counts + metadata in Redis (CACHE_STORE=redis) to power the admin cache page. [true]
 # CACHE_STATS_ENABLED=true
 
+# Auto-disable stats collection when the directus_cache_events table grows past this size. [no limit]
+# CACHE_STATS_MAX_BYTES="5gb"
+
+# Auto-disable stats collection when the Redis event buffer exceeds this many entries. [no limit]
+# CACHE_STATS_MAX_BUFFER=100000
+
+# How long a miss can still be attributed to a just-expired entry (gap-since-expiry lookback). ["1h"]
+# CACHE_STATS_GAP_LOOKBACK="1h"
+
 # How long assets will be cached for in the browser. Sets the max-age value of the Cache-Control header ["30d"]
 ASSETS_CACHE_TTL="30d"
 

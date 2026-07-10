@@ -3,7 +3,25 @@ import api from '@/api';
 import { getRootPath } from '@/utils/get-root-path';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import type { Filter } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
+import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
+import SearchInput from '@/views/private/components/search-input.vue';
+import { matchesFilter } from './filter-entry';
+
+// The filter builder is keyed by the descriptor collection's field names; map
+// them back to this page's row shape so its conditions can run client-side.
+const FILTER_FIELD_MAP: Record<string, keyof CacheEntry> = {
+	cache_key: 'key',
+	method: 'method',
+	path: 'path',
+	collection: 'collection',
+	user_id: 'user',
+	query: 'query',
+	url: 'url',
+	bytes: 'size',
+	last_filled: 'createdAt',
+};
 
 interface CacheEntry {
 	key: string;
@@ -61,11 +79,35 @@ const error = ref<string | null>(null);
 const entries = ref<CacheEntry[]>([]);
 const expanded = ref<Record<string, boolean>>({});
 const now = ref(Date.now());
+const refreshInterval = ref<number | null>(null);
+const search = ref('');
+const filter = ref<Filter | null>(null);
+
+// Narrow the loaded list by the filter conditions, then the free-text search.
+const searchedEntries = computed(() => {
+	const query = search.value.trim().toLowerCase();
+
+	return entries.value.filter((entry) => {
+		const row = entry as unknown as Record<string, unknown>;
+
+		if (!matchesFilter(row, filter.value, FILTER_FIELD_MAP)) {
+			return false;
+		}
+
+		if (!query) {
+			return true;
+		}
+
+		return [entry.path, entry.query, entry.user, entry.key, entry.method].some(
+			(field) => field?.toLowerCase().includes(query),
+		);
+	});
+});
 
 const groups = computed<EndpointGroup[]>(() => {
 	const byPath = new Map<string, CacheEntry[]>();
 
-	for (const entry of entries.value) {
+	for (const entry of searchedEntries.value) {
 		const bucket = byPath.get(entry.path) ?? [];
 		bucket.push(entry);
 		byPath.set(entry.path, bucket);
@@ -237,6 +279,12 @@ onMounted(load);
 		</template>
 
 		<template #actions>
+			<search-input
+				v-model="search"
+				v-model:filter="filter"
+				collection="directus_cache_descriptors"
+			/>
+
 			<v-button
 				v-tooltip.bottom="t('refresh')"
 				rounded
@@ -251,6 +299,10 @@ onMounted(load);
 
 		<template #navigation>
 			<settings-navigation />
+		</template>
+
+		<template #sidebar>
+			<auto-refresh v-model="refreshInterval" @refresh="load" />
 		</template>
 
 		<div class="cache-page">

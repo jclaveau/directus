@@ -2,6 +2,7 @@ import defaults from './_defaults.yaml';
 
 import accessFields from './access.yaml';
 import activityFields from './activity.yaml';
+import cacheDescriptorFields from './cache-descriptors.yaml';
 import collectionFields from './collections.yaml';
 import commentsFields from './comments.yaml';
 import dashboardFields from './dashboards.yaml';
@@ -34,6 +35,7 @@ export const systemFieldRows: FieldMeta[] = [];
 
 processFields(accessFields);
 processFields(activityFields);
+processFields(cacheDescriptorFields);
 processFields(collectionFields);
 processFields(commentsFields);
 processFields(dashboardFields);

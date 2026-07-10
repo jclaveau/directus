@@ -32,10 +32,22 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgis/postgis:13-3.4-alpine
+    # timescaledb-ha bundles timescaledb (+ toolkit) AND postgis, so the
+    # directus_cache_events hypertable path is exercised while the geometry
+    # suite keeps postgis. init.sql creates both extensions on first boot.
+    image: timescale/timescaledb-ha:pg17
     environment:
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: directus
+    volumes:
+      - ./postgres-init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # tsdb-ha inits slower than the alpine image (postgis + extension creation);
+    # gate `compose up --wait` on real readiness so migrations don't race the boot.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d directus']
+      interval: 5s
+      timeout: 5s
+      retries: 30
     ports:
       - 6100:5432
 

@@ -1,10 +1,16 @@
 import { useEnv } from '@directus/env';
 import type { RequestHandler } from 'express';
 import { getCache, getCacheValue } from '../cache.js';
-import { recordCacheHit } from '../cache-registry.js';
+import {
+	cacheStatsActive,
+	captureCacheHit,
+	captureCacheMiss,
+	readCacheMissGap,
+} from '../cache-events.js';
 import { useLogger } from '../logger/index.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
+import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { shouldSkipCache } from '../utils/should-skip-cache.js';
 
@@ -36,9 +42,11 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 	if (cachedData) {
 		let cacheExpiryDate;
+		let expiresMeta;
 
 		try {
-			cacheExpiryDate = (await getCacheValue(cache, `${key}__expires_at`))?.exp;
+			expiresMeta = await getCacheValue(cache, `${key}__expires_at`);
+			cacheExpiryDate = expiresMeta?.exp;
 		} catch (err: any) {
 			logger.warn(err, `[cache] Couldn't read key ${`${key}__expires_at`}. ${err.message}`);
 			if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
@@ -51,10 +59,19 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		res.setHeader('Vary', 'Origin, Cache-Control');
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'HIT');
 
-		// Fire-and-forget: a stats counter must never delay or break a cached hit.
-		void recordCacheHit(key).catch((err) => {
-			logger.warn(err, `[cache] Couldn't record hit for ${key}. ${err.message}`);
-		});
+		// Fire-and-forget hit telemetry for TTL tuning — age/TTL come off the
+		// sibling just read above, so no extra round-trip. Keyed by the cache key;
+		// the descriptor is written on fill (respond.ts). Skipped for pre-
+		// enrichment entries (no createdAt), killable at runtime, never blocks.
+		const createdAt = Number(expiresMeta?.createdAt ?? 0);
+
+		if (cacheStatsActive() && createdAt > 0) {
+			void captureCacheHit({
+				cacheKey: key,
+				ageMs: Math.max(Date.now() - createdAt, 0),
+				ttlMs: expiresMeta?.ttlMs ?? null,
+			}).catch(() => {});
+		}
 
 		if (env['CACHE_TAGS_HEADER']) {
 			// Dev-only: pins were persisted to a `${key}__tags` sibling at write
@@ -74,6 +91,23 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		return res.json(cachedData);
 	} else {
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
+
+		// A cacheable request that wasn't cached = real demand. The tombstone (if
+		// any) turns it into a gap-since-expiry — the signal for lengthening TTL.
+		if (cacheStatsActive()) {
+			const missAt = Date.now();
+
+			void readCacheMissGap(key, missAt)
+				.then((gapMs) => {
+					return captureCacheMiss({
+						cacheKey: key,
+						gapMs,
+						ttlMs: getMilliseconds(env['CACHE_TTL']) ?? null,
+					});
+				})
+				.catch(() => {});
+		}
+
 		return next();
 	}
 });

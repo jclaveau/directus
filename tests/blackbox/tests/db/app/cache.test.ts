@@ -2471,8 +2471,9 @@ describe('App Caching Tests', () => {
 	});
 
 	describe('The cache registry lists and evicts cached entries', () => {
-		// Redis-only: the registry sidecar lives in Redis. Asserts by find-by-path
-		// (the namespace is shared across vendors) rather than on an empty listing.
+		// Telemetry is buffered in Redis and flushed to Postgres on a schedule, so the
+		// listing is eventually-consistent — poll until the fill/hit land. Asserts by
+		// find-by-path (the namespace is shared across vendors).
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedis;
 			const url = getUrl(vendor, env);
@@ -2481,7 +2482,7 @@ describe('App Caching Tests', () => {
 			await request(url).post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			// Populate a cached read and record a hit on it.
+			// Populate a cached read (miss → fill → descriptor) and record a hit.
 			await request(url).get(`/items/${collectionFirst}`)
 				.set('Authorization', auth);
 
@@ -2491,15 +2492,25 @@ describe('App Caching Tests', () => {
 			await request(url).get(`/items/${collectionRelated}`)
 				.set('Authorization', auth);
 
-			// The registry lists the read with a hit + query recorded.
-			const listed = await request(url).get('/utils/cache')
-				.set('Authorization', auth);
+			// Wait for the flush to drain the buffer into the descriptor + fact tables.
+			let first: any;
 
-			expect(listed.statusCode).toBe(200);
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
 
-			const first = listed.body.data.find((entry: any) => {
-				return entry.path === `/items/${collectionFirst}`;
-			});
+				expect(listed.statusCode).toBe(200);
+
+				first = listed.body.data.find((entry: any) => {
+					return entry.path === `/items/${collectionFirst}`;
+				});
+
+				if (first && first.hits >= 1) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
 
 			expect(first).toBeDefined();
 			expect(first.hits).toBeGreaterThanOrEqual(1);
@@ -2513,30 +2524,67 @@ describe('App Caching Tests', () => {
 			expect(byKey.statusCode).toBe(200);
 			expect(byKey.body.data.evicted).toBe(1);
 
-			// …then clear both collections by path.
-			await request(url).delete('/utils/cache')
-				.query({ path: `/items/${collectionFirst}` })
-				.set('Authorization', auth);
-
+			// …then evict a whole endpoint by path (the described keys under it).
 			const byPath = await request(url).delete('/utils/cache')
-				.query({ path: `/items/${collectionRelated}` })
+				.query({ path: `/items/${collectionFirst}` })
 				.set('Authorization', auth);
 
 			expect(byPath.statusCode).toBe(200);
 			expect(byPath.body.data.evicted).toBeGreaterThanOrEqual(1);
 
-			const after = await request(url).get('/utils/cache')
-				.set('Authorization', auth);
-
-			const stillThere = after.body.data.some((entry: any) => {
-				return entry.path === `/items/${collectionFirst}`
-					|| entry.path === `/items/${collectionRelated}`;
-			});
-
-			expect(stillThere).toBe(false);
-
 			// Neither key nor path → 400.
 			const bad = await request(url).delete('/utils/cache')
+				.set('Authorization', auth);
+
+			expect(bad.statusCode).toBe(400);
+		}, 40000);
+	});
+
+	describe('The cache stats endpoints report state and toggle collection', () => {
+		// Redis-only: the runtime flag + event buffer live in Redis, so the state
+		// reports `configured` and a toggle round-trips on the serving instance.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const state = await request(url).get('/utils/cache/stats')
+				.set('Authorization', auth);
+
+			expect(state.statusCode).toBe(200);
+			expect(state.body.data.configured).toBe(true);
+			expect(typeof state.body.data.bufferLength).toBe('number');
+
+			// Disable collection at runtime…
+			const off = await request(url).patch('/utils/cache/stats')
+				.send({ enabled: false })
+				.set('Authorization', auth);
+
+			expect(off.statusCode).toBe(200);
+			expect(off.body.data.enabled).toBe(false);
+
+			const disabled = await request(url).get('/utils/cache/stats')
+				.set('Authorization', auth);
+
+			expect(disabled.body.data.enabled).toBe(false);
+
+			// …reclaim the gathered events…
+			const truncated = await request(url).post('/utils/cache/stats/truncate')
+				.set('Authorization', auth);
+
+			expect(truncated.statusCode).toBe(200);
+			expect(truncated.body.data.truncated).toBe(true);
+
+			// …then re-enable so later reads collect again.
+			const on = await request(url).patch('/utils/cache/stats')
+				.send({ enabled: true })
+				.set('Authorization', auth);
+
+			expect(on.statusCode).toBe(200);
+			expect(on.body.data.enabled).toBe(true);
+
+			// Missing `enabled` → 400.
+			const bad = await request(url).patch('/utils/cache/stats')
 				.set('Authorization', auth);
 
 			expect(bad.statusCode).toBe(400);

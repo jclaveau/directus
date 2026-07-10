@@ -5,10 +5,14 @@ import type { Knex } from 'knex';
 import { clearSystemCache, getCache } from '../cache.js';
 import {
 	type CacheEntryRecord,
+	type CacheStatsState,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
+	getCacheStatsState,
 	listCacheEntries,
-} from '../cache-registry.js';
+	setCacheStatsEnabled,
+	truncateCacheEvents,
+} from '../cache-events.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
@@ -216,5 +220,23 @@ export class UtilsService {
 		}
 
 		return evictCacheEntriesForPath(cache, path);
+	}
+
+	async getCacheStatsState(): Promise<CacheStatsState> {
+		this.assertCacheAdmin('inspect cache stats');
+
+		return getCacheStatsState();
+	}
+
+	async setCacheStatsEnabled(enabled: boolean): Promise<void> {
+		this.assertCacheAdmin('toggle cache stats');
+
+		await setCacheStatsEnabled(enabled);
+	}
+
+	async truncateCacheStats(): Promise<void> {
+		this.assertCacheAdmin('truncate cache stats');
+
+		await truncateCacheEvents();
 	}
 }
