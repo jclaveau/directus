@@ -30,6 +30,11 @@ const links = computed<Link[][]>(() => [
 			name: t('settings_flows'),
 			to: `/settings/flows`,
 		},
+		{
+			icon: 'memory',
+			name: t('cache', 'Cache'),
+			to: `/settings/cache`,
+		},
 	],
 	[
 		{
