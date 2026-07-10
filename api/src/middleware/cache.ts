@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { RequestHandler } from 'express';
 import { getCache, getCacheValue } from '../cache.js';
+import { recordCacheHit } from '../cache-registry.js';
 import { useLogger } from '../logger/index.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
@@ -49,6 +50,11 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		res.setHeader('Cache-Control', getCacheControlHeader(req, cacheTTL, true, true));
 		res.setHeader('Vary', 'Origin, Cache-Control');
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'HIT');
+
+		// Fire-and-forget: a stats counter must never delay or break a cached hit.
+		void recordCacheHit(key).catch((err) => {
+			logger.warn(err, `[cache] Couldn't record hit for ${key}. ${err.message}`);
+		});
 
 		if (env['CACHE_TAGS_HEADER']) {
 			// Dev-only: pins were persisted to a `${key}__tags` sibling at write

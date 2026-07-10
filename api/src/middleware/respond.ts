@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
+import { registerCacheEntry } from '../cache-registry.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
@@ -133,6 +134,22 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					);
 				}
 			}
+
+			const ttlMs = getMilliseconds(env['CACHE_TTL']);
+
+			await registerCacheEntry({
+				key,
+				path: req.originalUrl.split('?')[0]!,
+				method: req.method,
+				user: req.accountability?.user ?? null,
+				createdAt: Date.now(),
+				expiresAt: ttlMs === undefined
+					? null
+					: Date.now() + ttlMs,
+				size: res.locals['payload']
+					? stringByteSize(JSON.stringify(res.locals['payload']))
+					: 0,
+			});
 		}
 		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
