@@ -72,7 +72,7 @@ export const DEFAULTS = {
 	CACHE_KEY_HASH_ENABLED: true,
 	CACHE_STORE: 'memory',
 	CACHE_TTL: '5m',
-	CACHE_NAMESPACE: 'system-cache',
+	CACHE_NAMESPACE: 'scalabus',
 	CACHE_AUTO_PURGE: false,
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
