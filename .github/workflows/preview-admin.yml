@@ -1,12 +1,13 @@
 name: Preview Admin
 
-# Manual only. Boots this ref's Directus (postgres + redis, scoped cache on) on a GitHub
-# runner and exposes its admin UI through an OUTBOUND cloudflared quick tunnel (runners take
-# no ingress). The job auto-shuts-down after `idle_minutes` with no activity (Directus log
-# stops growing). Seeds `items` → `sub_items` (both with a `user_created`)
-# so the scoped-cache field can be tried on real collections. The tunnel is PUBLIC while the
-# job runs — a random admin password is printed to the run summary (repo members only).
-# Ephemeral: the URL dies with the job.
+# Boots a ref's Directus (postgres + redis, scoped cache on) on a GitHub runner and exposes
+# its admin UI through an OUTBOUND cloudflared quick tunnel (runners take no ingress). Runs
+# manually (workflow_dispatch on any ref) OR automatically on every push to a PR carrying the
+# `Preview` label. The job auto-shuts-down after `idle_minutes` with no activity (Directus log
+# stops growing). Seeds `items` → `sub_items` (both with a `user_created`) so the scoped-cache
+# field can be tried on real collections. The tunnel is PUBLIC while the job runs — a random
+# admin password is printed to the run summary (repo members only). Ephemeral: the URL dies
+# with the job.
 on:
   workflow_dispatch:
     inputs:
@@ -18,6 +19,16 @@ on:
         description: Auto-shutdown after this many minutes with no requests
         type: number
         default: 15
+  # Auto-boot on every push to a PR that carries the `Preview` label (and when the
+  # label is first added). pull_request_target resolves this file from the PR's BASE
+  # branch, so the workflow must also live on the branches PRs target.
+  pull_request_target:
+    types: [labeled, synchronize]
+
+# One live preview per PR: a new push cancels the PR's still-running preview.
+concurrency:
+  group: preview-admin-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -26,6 +37,12 @@ jobs:
   preview:
     name: preview
     runs-on: ubuntu-latest
+    # Manual runs always; PR runs only while the `Preview` label is present.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'Preview') ||
+      (github.event.action == 'synchronize' &&
+        contains(github.event.pull_request.labels.*.name, 'Preview'))
     # Hard backstop; the idle watcher normally ends the job long before this.
     timeout-minutes: 180
     services:
@@ -71,7 +88,8 @@ jobs:
       - name: Checkout the ref to preview
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref }}
+          # Dispatch → the chosen ref; PR event → the PR head commit (the code to preview).
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.pull_request.head.sha }}
 
       - name: Prepare
         uses: ./.github/actions/prepare
@@ -171,7 +189,8 @@ jobs:
 
       - name: Stream logs + publish URL + idle shutdown
         env:
-          IDLE_MINUTES: ${{ inputs.idle_minutes }}
+          # No dispatch input on a PR event → fall back to the dispatch default.
+          IDLE_MINUTES: ${{ inputs.idle_minutes || 15 }}
         run: |
           # Live-stream everything to the run log for the job's lifetime (this step
           # stays alive, so its stdout keeps flowing in the Actions UI).
@@ -193,7 +212,7 @@ jobs:
           {
             echo "### Preview admin"
             echo ""
-            echo "- **Ref:** ${{ inputs.ref }}"
+            echo "- **Ref:** ${{ github.event.pull_request.head.ref || inputs.ref }}"
             echo "- **URL:** ${URL}/admin"
             echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded collections: \`items\` → \`sub_items\` (both with \`user_created\`)."
