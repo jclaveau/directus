@@ -1,4 +1,5 @@
 import { ForbiddenError } from '@directus/errors';
+import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
@@ -70,6 +71,41 @@ describe('Services / Utils', () => {
 
 			await expect(service.clearCache({ system: false })).rejects.toThrowError(
 				`'test-user' does not have permission to clear the cache as not being an admin`,
+			);
+		});
+	});
+
+	describe('cache inspection', () => {
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function nonAdminService() {
+			return new UtilsService({ knex: db, schema, accountability: nonAdmin });
+		}
+
+		it('getCacheEntries throws ForbiddenError for non-admin user', async () => {
+			const service = nonAdminService();
+
+			await expect(service.getCacheEntries()).rejects.toThrowError(ForbiddenError);
+
+			await expect(service.getCacheEntries()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect the cache
+				as not being an admin`,
+			);
+		});
+
+		it('evictCacheEntry throws ForbiddenError for non-admin user', async () => {
+			await expect(nonAdminService().evictCacheEntry('k1')).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to evict a cache entry
+				as not being an admin`,
+			);
+		});
+
+		it('evictCacheEntriesForPath rejects a non-admin user', async () => {
+			await expect(
+				nonAdminService().evictCacheEntriesForPath('/items/articles'),
+			).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to evict cache entries
+				as not being an admin`,
 			);
 		});
 	});
