@@ -5,6 +5,12 @@ import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { getCache } from '../cache.js';
+import {
+	evictCacheEntriesForPath,
+	evictCacheEntry as registryEvictCacheEntry,
+	listCacheEntries,
+} from '../cache-registry.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { UtilsService } from './utils.js';
@@ -16,6 +22,8 @@ vi.mock('../../src/database/index', () => ({
 
 vi.mock('../permissions/modules/validate-access/validate-access.js');
 vi.mock('../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js');
+vi.mock('../cache.js');
+vi.mock('../cache-registry.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -107,6 +115,51 @@ describe('Services / Utils', () => {
 				oneLine`'test-user' does not have permission to evict cache entries
 				as not being an admin`,
 			);
+		});
+	});
+
+	describe('cache inspection (admin)', () => {
+		const admin = { user: 'admin-user', admin: true } as Accountability;
+		const mockCache = { delete: vi.fn(), clear: vi.fn() };
+
+		function adminService() {
+			return new UtilsService({ knex: db, schema, accountability: admin });
+		}
+
+		it('getCacheEntries returns the registry entries', async () => {
+			const rows = [{ key: 'k1', path: '/items/a', hits: 3 }];
+			vi.mocked(listCacheEntries).mockResolvedValue(rows as any);
+
+			await expect(adminService().getCacheEntries()).resolves.toBe(rows);
+		});
+
+		it('evictCacheEntry evicts through the active cache', async () => {
+			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
+
+			await adminService().evictCacheEntry('k1');
+
+			expect(registryEvictCacheEntry).toHaveBeenCalledWith(mockCache, 'k1');
+		});
+
+		it('evictCacheEntriesForPath returns the evicted count', async () => {
+			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
+			vi.mocked(evictCacheEntriesForPath).mockResolvedValue(2);
+
+			await expect(
+				adminService().evictCacheEntriesForPath('/items/a'),
+			).resolves.toBe(2);
+
+			expect(evictCacheEntriesForPath).toHaveBeenCalledWith(mockCache, '/items/a');
+		});
+
+		it('evictCacheEntriesForPath returns 0 when no cache is configured', async () => {
+			vi.mocked(getCache).mockReturnValue({ cache: null } as any);
+
+			await expect(
+				adminService().evictCacheEntriesForPath('/items/a'),
+			).resolves.toBe(0);
+
+			expect(evictCacheEntriesForPath).not.toHaveBeenCalled();
 		});
 	});
 });
