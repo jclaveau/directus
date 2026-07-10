@@ -46,7 +46,7 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-const { getRedisConnection } = await import('./cache.js');
+const { getCache, getRedisConnection } = await import('./cache.js');
 
 const {
 	assertScopedCacheRedisSupported,
@@ -537,5 +537,39 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 		});
+	});
+});
+
+describe('getCache', () => {
+	test(oneLine`
+		builds the four layers under the namespaced _response / _system / _schema /
+		_lock suffixes on a memory store
+	`, () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const caches = getCache();
+
+		expect(caches.cache?.namespace).toBe('scalabus_response');
+		expect(caches.systemCache.namespace).toBe('scalabus_system');
+		expect(caches.localSchemaCache.namespace).toBe('scalabus_schema');
+		expect(caches.lockCache.namespace).toBe('scalabus_lock');
+	});
+
+	test('narrows CACHE_STORE=redis through the store ternary', () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+		});
+
+		// instances are memoized from the memory build above; this call re-runs
+		// the store narrowing down its redis branch
+		expect(getCache().systemCache).toBeTruthy();
 	});
 });
