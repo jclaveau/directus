@@ -88,6 +88,7 @@ describe('registerCacheEntry', () => {
 			path: '/items/articles',
 			method: 'GET',
 			user: 'user-1',
+			query: '{"limit":5}',
 			createdAt: 1000,
 			expiresAt: 301000,
 			size: 42,
@@ -97,6 +98,7 @@ describe('registerCacheEntry', () => {
 			path: '/items/articles',
 			method: 'GET',
 			user: 'user-1',
+			query: '{"limit":5}',
 			createdAt: '1000',
 			expiresAt: '301000',
 			size: '42',
@@ -112,6 +114,7 @@ describe('registerCacheEntry', () => {
 			path: '/server/info',
 			method: 'GET',
 			user: null,
+			query: '{}',
 			createdAt: 1000,
 			expiresAt: null,
 			size: 0,
@@ -131,6 +134,7 @@ describe('registerCacheEntry', () => {
 			path: '/x',
 			method: 'GET',
 			user: null,
+			query: '{}',
 			createdAt: 1,
 			expiresAt: null,
 			size: 0,
@@ -148,6 +152,7 @@ describe('recordCacheHit', () => {
 			expect.stringContaining('HINCRBY'),
 			1,
 			'scalabus:entry:k1',
+			expect.any(String),
 		);
 	});
 
@@ -171,8 +176,10 @@ describe('listCacheEntries', () => {
 				path: '/items/a',
 				method: 'GET',
 				user: 'u1',
+				query: '{"limit":5}',
 				createdAt: '100',
 				expiresAt: '400',
+				lastHitAt: '350',
 				size: '10',
 				hits: '3',
 			}],
@@ -180,6 +187,7 @@ describe('listCacheEntries', () => {
 				path: '/items/a',
 				method: 'GET',
 				user: '',
+				query: '{}',
 				createdAt: '200',
 				expiresAt: '',
 				size: '20',
@@ -194,12 +202,14 @@ describe('listCacheEntries', () => {
 		expect(mockRedis.scan).toHaveBeenCalledTimes(2);
 		expect(entries).toHaveLength(2);
 
-		// Newest createdAt first.
+		// Newest createdAt first; a never-hit entry has a null lastHitAt.
 		expect(entries[0]).toMatchObject({
 			key: 'new',
 			createdAt: 200,
 			user: null,
+			query: '{}',
 			expiresAt: null,
+			lastHitAt: null,
 			hits: 7,
 		});
 
@@ -207,7 +217,9 @@ describe('listCacheEntries', () => {
 			key: 'old',
 			createdAt: 100,
 			user: 'u1',
+			query: '{"limit":5}',
 			expiresAt: 400,
+			lastHitAt: 350,
 			hits: 3,
 		});
 	});
@@ -219,7 +231,7 @@ describe('listCacheEntries', () => {
 		expect(mockRedis.scan).not.toHaveBeenCalled();
 	});
 
-	it('returns an empty array and skips the pipeline when nothing is cached', async () => {
+	it('returns an empty array and skips the pipeline when empty', async () => {
 		mockRedis.scan.mockResolvedValueOnce(['0', []]);
 
 		expect(await listCacheEntries()).toEqual([]);

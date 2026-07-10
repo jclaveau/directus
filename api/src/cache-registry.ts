@@ -21,8 +21,10 @@ export interface CacheEntryRecord {
 	path: string;
 	method: string;
 	user: string | null;
+	query: string;
 	createdAt: number;
 	expiresAt: number | null;
+	lastHitAt: number | null;
 	size: number;
 	hits: number;
 }
@@ -32,15 +34,18 @@ export interface CacheEntryDescriptor {
 	path: string;
 	method: string;
 	user: string | null;
+	query: string;
 	createdAt: number;
 	expiresAt: number | null;
 	size: number;
 }
 
-// Only increment when the hash still exists, so a HIT on an entry whose sidecar
-// already expired can't resurrect a hits-only orphan (no meta, no TTL).
+// Only touch the hash when it still exists, so a HIT on an entry whose sidecar
+// already expired can't resurrect a hits-only orphan (no meta, no TTL). ARGV[1]
+// is the hit's wall-clock (passed from the caller) recorded as `lastHitAt`.
 const HIT_INCREMENT_SCRIPT = `
 if redis.call('EXISTS', KEYS[1]) == 1 then
+	redis.call('HSET', KEYS[1], 'lastHitAt', ARGV[1])
 	return redis.call('HINCRBY', KEYS[1], 'hits', 1)
 end
 return 0
@@ -85,6 +90,7 @@ export async function registerCacheEntry(
 		path: entry.path,
 		method: entry.method,
 		user: entry.user ?? '',
+		query: entry.query,
 		createdAt: String(entry.createdAt),
 		expiresAt: entry.expiresAt === null
 			? ''
@@ -104,7 +110,12 @@ export async function recordCacheHit(key: string): Promise<void> {
 		return;
 	}
 
-	await useRedis().eval(HIT_INCREMENT_SCRIPT, 1, registryKey(key));
+	await useRedis().eval(
+		HIT_INCREMENT_SCRIPT,
+		1,
+		registryKey(key),
+		String(Date.now()),
+	);
 }
 
 /**
@@ -163,9 +174,13 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			user: fields['user']
 				? fields['user']
 				: null,
+			query: fields['query'] ?? '',
 			createdAt: Number(fields['createdAt'] ?? 0),
 			expiresAt: fields['expiresAt']
 				? Number(fields['expiresAt'])
+				: null,
+			lastHitAt: fields['lastHitAt']
+				? Number(fields['lastHitAt'])
 				: null,
 			size: Number(fields['size'] ?? 0),
 			hits: Number(fields['hits'] ?? 0),
