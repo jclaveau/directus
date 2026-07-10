@@ -4,6 +4,7 @@ import type {
 	Filter,
 	ScopedCachePath,
 	ScopedCacheTag,
+	SchemaOverview,
 	Type,
 } from '@directus/types';
 import type Keyv from 'keyv';
@@ -569,4 +570,60 @@ export function pinnedScopedCacheTagsFromFilter(
 	}
 
 	return tags;
+}
+
+/**
+ * Auto-derive multi-hop scope paths from LOCAL scope fields, so each collection
+ * declares only its own column and the grand-owner path composes itself. A scope
+ * field on `collection` that is an M2O to a collection which itself declares scope
+ * fields contributes `<field>.<targetScope>` for each of the target's scopes — its
+ * own and, transitively, its derived. So `team` scoped by `owner_ref` + `member`
+ * scoped by `team` yields `team.owner_ref`, no config naming another collection's
+ * relation. Cycle-guarded (`visited`); the caller re-resolves each path (a to-many
+ * hop drops to the bare tag).
+ */
+export function composeScopedCachePaths(
+	schema: Pick<SchemaOverview, 'collections' | 'relations'>,
+	collection: string,
+	visited: Set<string> = new Set(),
+): ScopedCachePath[] {
+	if (visited.has(collection)) {
+		return [];
+	}
+
+	const seen = new Set(visited).add(collection);
+	const localFields = schema.collections[collection]?.scopedCacheFields ?? [];
+	const composed: ScopedCachePath[] = [];
+
+	for (const field of localFields) {
+		if (field.includes('.')) {
+			continue;
+		}
+
+		const relation = schema.relations.find((rel) => {
+			return rel.collection === collection && rel.field === field;
+		});
+
+		const target = relation?.related_collection;
+
+		if (!target) {
+			continue;
+		}
+
+		for (const targetField of schema.collections[target]?.scopedCacheFields ?? []) {
+			composed.push({
+				field: `${field}.${targetField}`,
+				segments: [field, ...targetField.split('.')],
+			});
+		}
+
+		for (const deeper of composeScopedCachePaths(schema, target, seen)) {
+			composed.push({
+				field: `${field}.${deeper.field}`,
+				segments: [field, ...deeper.segments],
+			});
+		}
+	}
+
+	return composed;
 }

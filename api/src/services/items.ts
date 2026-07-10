@@ -27,6 +27,7 @@ import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
 import { getCache } from '../cache.js';
 import {
+	composeScopedCachePaths,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
@@ -250,25 +251,35 @@ implements AbstractService<Item> {
 		return this.collectionScopedCacheFields.filter((field) => !field.includes('.'));
 	}
 
-	// Path scope fields (`enrollment.student.user`) resolving to an all-M2O chain,
-	// with the segments the read pinner walks. An unresolvable path (a to-many hop
-	// or unknown field) is dropped → it degrades to the bare tag on both sides.
+	// The multi-hop paths this collection pins by: explicit dotted entries PLUS paths
+	// auto-derived from local scope fields (see `composeScopedCachePaths`). Each is
+	// re-resolved so a to-many/unknown hop drops it → bare tag both sides. Deduped.
 	private get collectionScopedCachePaths(): ScopedCachePath[] {
-		const paths: ScopedCachePath[] = [];
+		const byField = new Map<string, ScopedCachePath>();
 
-		for (const field of this.collectionScopedCacheFields) {
-			if (!field.includes('.')) {
-				continue;
+		const addPath = (field: string) => {
+			if (byField.has(field)) {
+				return;
 			}
 
 			const resolved = this.resolveScopedCachePath(field);
 
 			if (resolved) {
-				paths.push({ field, segments: resolved.segments });
+				byField.set(field, { field, segments: resolved.segments });
+			}
+		};
+
+		for (const field of this.collectionScopedCacheFields) {
+			if (field.includes('.')) {
+				addPath(field);
 			}
 		}
 
-		return paths;
+		for (const { field } of composeScopedCachePaths(this.schema, this.collection)) {
+			addPath(field);
+		}
+
+		return [...byField.values()];
 	}
 
 	// Resolve a dotted scope field into the M2O join chain reaching its terminal.
@@ -328,12 +339,11 @@ implements AbstractService<Item> {
 		const rootFields = this.schema.collections[this.collection]?.fields ?? {};
 		const types: Record<string, Type | undefined> = {};
 
-		for (const field of this.collectionScopedCacheFields) {
-			if (!field.includes('.')) {
-				types[field] = rootFields[field]?.type;
-				continue;
-			}
+		for (const field of this.collectionScopedCacheFlatFields) {
+			types[field] = rootFields[field]?.type;
+		}
 
+		for (const { field } of this.collectionScopedCachePaths) {
 			const resolved = this.resolveScopedCachePath(field);
 
 			if (!resolved) {
@@ -353,18 +363,11 @@ implements AbstractService<Item> {
 	private get collectionScopedCacheFieldRelatedPks(): Record<string, string> {
 		const map: Record<string, string> = {};
 
-		for (const field of this.collectionScopedCacheFields) {
-			const resolved = field.includes('.')
-				? this.resolveScopedCachePath(field)
-				: null;
-
-			if (field.includes('.') && !resolved) {
-				continue;
-			}
-
-			const fromCollection = resolved?.terminalCollection ?? this.collection;
-			const fromField = resolved?.terminalField ?? field;
-
+		const addRelatedPk = (
+			field: string,
+			fromCollection: string,
+			fromField: string,
+		) => {
 			const relation = this.schema.relations.find((rel) => {
 				return rel.collection === fromCollection && rel.field === fromField;
 			});
@@ -377,6 +380,18 @@ implements AbstractService<Item> {
 
 			if (primaryKey) {
 				map[field] = primaryKey;
+			}
+		};
+
+		for (const field of this.collectionScopedCacheFlatFields) {
+			addRelatedPk(field, this.collection, field);
+		}
+
+		for (const { field } of this.collectionScopedCachePaths) {
+			const resolved = this.resolveScopedCachePath(field);
+
+			if (resolved) {
+				addRelatedPk(field, resolved.terminalCollection, resolved.terminalField);
 			}
 		}
 
