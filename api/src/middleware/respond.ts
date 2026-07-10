@@ -14,6 +14,9 @@ import { ExportService } from '../services/import-export.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import {
+	getGraphqlQueryAndVariables,
+} from '../utils/get-graphql-query-and-variables.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -137,11 +140,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 			const ttlMs = getMilliseconds(env['CACHE_TTL']);
 
+			const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
+
 			await registerCacheEntry({
 				key,
 				path: req.originalUrl.split('?')[0]!,
 				method: req.method,
 				user: req.accountability?.user ?? null,
+				query: isGraphQlRequest
+					? JSON.stringify(getGraphqlQueryAndVariables(req))
+					: JSON.stringify(req.sanitizedQuery ?? {}),
 				createdAt: Date.now(),
 				expiresAt: ttlMs === undefined
 					? null

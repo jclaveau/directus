@@ -9,8 +9,10 @@ interface CacheEntry {
 	path: string;
 	method: string;
 	user: string | null;
+	query: string;
 	createdAt: number;
 	expiresAt: number | null;
+	lastHitAt: number | null;
 	size: number;
 	hits: number;
 }
@@ -130,6 +132,46 @@ function formatUser(user: string | null): string {
 	return user ?? t('public_label', 'public');
 }
 
+function formatAgo(timestamp: number): string {
+	const seconds = Math.round((now.value - timestamp) / 1000);
+
+	if (seconds < 60) {
+		return `${Math.max(seconds, 0)}s`;
+	}
+
+	if (seconds < 3600) {
+		return `${Math.round(seconds / 60)}m`;
+	}
+
+	if (seconds < 86400) {
+		return `${Math.round(seconds / 3600)}h`;
+	}
+
+	return `${Math.round(seconds / 86400)}d`;
+}
+
+function formatLastHit(lastHitAt: number | null): string {
+	if (lastHitAt === null) {
+		return t('never', 'never');
+	}
+
+	return formatAgo(lastHitAt);
+}
+
+function shortKey(key: string): string {
+	return key.length > 12
+		? `${key.slice(0, 12)}…`
+		: key;
+}
+
+function formatQuery(query: string): string {
+	if (!query || query === '{}') {
+		return '—';
+	}
+
+	return query;
+}
+
 onMounted(load);
 </script>
 
@@ -221,34 +263,46 @@ onMounted(load);
 						</v-button>
 					</div>
 
-					<table v-if="expanded[group.path]" class="entries">
-						<thead>
-							<tr>
-								<th>{{ t('user_label', 'User') }}</th>
-								<th class="num">{{ t('hits', 'Hits') }}</th>
-								<th class="num">{{ t('expires_in', 'Expires in') }}</th>
-								<th class="num">{{ t('size', 'Size') }}</th>
-								<th></th>
-							</tr>
-						</thead>
-						<tbody>
-							<tr v-for="entry in group.entries" :key="entry.key">
-								<td>{{ formatUser(entry.user) }}</td>
-								<td class="num">{{ entry.hits }}</td>
-								<td class="num">{{ formatExpiry(entry.expiresAt) }}</td>
-								<td class="num">{{ formatSize(entry.size) }}</td>
-								<td class="num">
-									<v-icon
-										v-tooltip.bottom="t('evict_entry', 'Evict this entry')"
-										name="delete"
-										small
-										clickable
-										@click="evictEntry(entry)"
-									/>
-								</td>
-							</tr>
-						</tbody>
-					</table>
+					<div v-if="expanded[group.path]" class="entries-scroll">
+						<table class="entries">
+							<thead>
+								<tr>
+									<th>{{ t('query', 'Query') }}</th>
+									<th>{{ t('user_label', 'User') }}</th>
+									<th class="num">{{ t('hits', 'Hits') }}</th>
+									<th class="num">{{ t('age', 'Age') }}</th>
+									<th class="num">{{ t('last_hit', 'Last hit') }}</th>
+									<th class="num">{{ t('expires_in', 'Expires in') }}</th>
+									<th class="num">{{ t('size', 'Size') }}</th>
+									<th class="key">{{ t('key', 'Key') }}</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr v-for="entry in group.entries" :key="entry.key">
+									<td class="query" :title="entry.query">
+										{{ formatQuery(entry.query) }}
+									</td>
+									<td>{{ formatUser(entry.user) }}</td>
+									<td class="num">{{ entry.hits }}</td>
+									<td class="num">{{ formatAgo(entry.createdAt) }}</td>
+									<td class="num">{{ formatLastHit(entry.lastHitAt) }}</td>
+									<td class="num">{{ formatExpiry(entry.expiresAt) }}</td>
+									<td class="num">{{ formatSize(entry.size) }}</td>
+									<td class="key" :title="entry.key">{{ shortKey(entry.key) }}</td>
+									<td class="num">
+										<v-icon
+											v-tooltip.bottom="t('evict_entry', 'Evict this entry')"
+											name="delete"
+											small
+											clickable
+											@click="evictEntry(entry)"
+										/>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
 				</div>
 			</div>
 		</div>
@@ -319,11 +373,28 @@ onMounted(load);
 	color: var(--theme--primary);
 }
 
+.entries-scroll {
+	overflow-x: auto;
+	border-block-start: var(--theme--border-width) solid var(--theme--border-color-subdued);
+}
+
 table.entries {
 	inline-size: 100%;
 	border-collapse: collapse;
-	border-block-start: var(--theme--border-width) solid var(--theme--border-color-subdued);
 	font-size: 13px;
+}
+
+table.entries .query {
+	font-family: var(--theme--fonts--monospace--font-family);
+	max-inline-size: 320px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+table.entries .key {
+	font-family: var(--theme--fonts--monospace--font-family);
+	color: var(--theme--foreground-subdued);
 }
 
 table.entries th,

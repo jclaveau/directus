@@ -152,7 +152,7 @@ describe('Services / Utils', () => {
 			expect(evictCacheEntriesForPath).toHaveBeenCalledWith(mockCache, '/items/a');
 		});
 
-		it('evictCacheEntriesForPath returns 0 when no cache is configured', async () => {
+		it('evictCacheEntriesForPath returns 0 without a cache', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: null } as any);
 
 			await expect(
