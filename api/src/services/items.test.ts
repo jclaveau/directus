@@ -22,7 +22,7 @@ const env = vi.hoisted<Record<string, any>>(() => {
 	return {
 		CACHE_AUTO_PURGE: true,
 		CACHE_AUTO_PURGE_IGNORE_LIST: [],
-		CACHE_NAMESPACE: 'system-cache',
+		CACHE_NAMESPACE: 'scalabus',
 		MAX_BATCH_MUTATION: 100000,
 		// The Integration Tests' nested-relation path dynamically loads notifications -> mail, which
 		// resolves this at import time.

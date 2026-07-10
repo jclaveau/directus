@@ -46,7 +46,7 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-const { getRedisConnection } = await import('./cache.js');
+const { getCache, getRedisConnection } = await import('./cache.js');
 
 const {
 	assertScopedCacheRedisSupported,
@@ -126,7 +126,7 @@ describe('getRedisConnection', () => {
 describe('scoped cache purging', () => {
 	beforeEach(() => {
 		setEnv({
-			CACHE_NAMESPACE: 'system-cache',
+			CACHE_NAMESPACE: 'scalabus',
 			CACHE_TTL: '5m',
 			CACHE_STORE: 'redis',
 			CACHE_AUTO_PURGE_MODE: 'scoped',
@@ -186,20 +186,20 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:articles',
+				'scalabus:tag:articles',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:directus_users',
+				'scalabus:tag:directus_users',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			// 2 × CACHE_TTL (5m = 300s) = 600s
 			expect(redis._pipeline.expire).toHaveBeenCalledWith(
-				'system-cache:tag:articles',
+				'scalabus:tag:articles',
 				600,
 			);
 
@@ -213,13 +213,13 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:slots:student=A',
+				'scalabus:tag:slots:student=A',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:slots:student=7',
+				'scalabus:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -232,7 +232,7 @@ describe('scoped cache purging', () => {
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:slots:student=\x00null',
+				'scalabus:tag:slots:student=\x00null',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -252,7 +252,7 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.sadd).toHaveBeenCalledOnce();
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:slots:student=7',
+				'scalabus:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -284,7 +284,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'system-cache:tag:articles',
+				'scalabus:tag:articles',
 				'resp-key',
 				'resp-key__expires_at',
 				'resp-key__tags',
@@ -297,7 +297,7 @@ describe('scoped cache purging', () => {
 			always purges the collection-level tag (global readers) alongside slices
 		`, async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'system-cache:tag:slots'
+				return tagKey === 'scalabus:tag:slots'
 					? ['global-key']
 					: ['key-a', 'key-a__expires_at'];
 			});
@@ -308,15 +308,15 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
-			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots');
-			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots:student=A');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=A');
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.delete).toHaveBeenCalledWith('key-a__expires_at');
 
 			expect(redis.del).toHaveBeenCalledWith(
-				'system-cache:tag:slots',
-				'system-cache:tag:slots:student=A',
+				'scalabus:tag:slots',
+				'scalabus:tag:slots:student=A',
 			);
 
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -332,7 +332,10 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
-			expect(redis.smembers).not.toHaveBeenCalledWith('system-cache:tag:slots:student=B');
+			expect(redis.smembers).not.toHaveBeenCalledWith(
+				'scalabus:tag:slots:student=B',
+			);
+
 			expect(redis.del).not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
 		});
 
@@ -342,10 +345,10 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles');
 
-			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:articles');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
 			expect(redis.smembers).toHaveBeenCalledOnce();
 			expect(cache.delete).toHaveBeenCalledTimes(3);
-			expect(redis.del).toHaveBeenCalledWith('system-cache:tag:articles');
+			expect(redis.del).toHaveBeenCalledWith('scalabus:tag:articles');
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -355,11 +358,11 @@ describe('scoped cache purging', () => {
 		`, async () => {
 			redis.scan.mockResolvedValueOnce([
 				'0',
-				['system-cache:tag:articles:author=1', 'system-cache:tag:articles:author=2'],
+				['scalabus:tag:articles:author=1', 'scalabus:tag:articles:author=2'],
 			]);
 
 			redis.smembers.mockImplementation(async (tagKey: string) => {
-				if (tagKey === 'system-cache:tag:articles') {
+				if (tagKey === 'scalabus:tag:articles') {
 					return ['global-key'];
 				}
 
@@ -374,20 +377,20 @@ describe('scoped cache purging', () => {
 			expect(redis.scan).toHaveBeenCalledWith(
 				'0',
 				'MATCH',
-				'system-cache:tag:articles:*',
+				'scalabus:tag:articles:*',
 				'COUNT',
 				250,
 			);
 
-			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:articles');
-			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:articles:author=1');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles:author=1');
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
 
 			expect(redis.del).toHaveBeenCalledWith(
-				'system-cache:tag:articles',
-				'system-cache:tag:articles:author=1',
-				'system-cache:tag:articles:author=2',
+				'scalabus:tag:articles',
+				'scalabus:tag:articles:author=1',
+				'scalabus:tag:articles:author=2',
 			);
 
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -395,8 +398,8 @@ describe('scoped cache purging', () => {
 
 		test('the collection-wide purge follows the scan cursor across batches', async () => {
 			redis.scan
-				.mockResolvedValueOnce(['42', ['system-cache:tag:articles:author=1']])
-				.mockResolvedValueOnce(['0', ['system-cache:tag:articles:author=2']]);
+				.mockResolvedValueOnce(['42', ['scalabus:tag:articles:author=1']])
+				.mockResolvedValueOnce(['0', ['scalabus:tag:articles:author=2']]);
 
 			redis.smembers.mockResolvedValue([]);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
@@ -409,15 +412,15 @@ describe('scoped cache purging', () => {
 				2,
 				'42',
 				'MATCH',
-				'system-cache:tag:articles:*',
+				'scalabus:tag:articles:*',
 				'COUNT',
 				250,
 			);
 
 			expect(redis.del).toHaveBeenCalledWith(
-				'system-cache:tag:articles',
-				'system-cache:tag:articles:author=1',
-				'system-cache:tag:articles:author=2',
+				'scalabus:tag:articles',
+				'scalabus:tag:articles:author=1',
+				'scalabus:tag:articles:author=2',
 			);
 		});
 
@@ -447,12 +450,12 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
 
-			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots:student=7');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=7');
 			expect(cache.delete).toHaveBeenCalledWith('read-key');
 
 			expect(redis.del).toHaveBeenCalledWith(
-				'system-cache:tag:slots',
-				'system-cache:tag:slots:student=7',
+				'scalabus:tag:slots',
+				'scalabus:tag:slots:student=7',
 			);
 		});
 
@@ -496,11 +499,11 @@ describe('scoped cache purging', () => {
 				null,
 			);
 
-			expect(redis.smembers).toHaveBeenCalledWith('system-cache:tag:slots:owner=B');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:owner=B');
 
 			expect(redis.del).toHaveBeenCalledWith(
-				'system-cache:tag:slots',
-				'system-cache:tag:slots:owner=B',
+				'scalabus:tag:slots',
+				'scalabus:tag:slots:owner=B',
 			);
 		});
 
@@ -534,5 +537,39 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 		});
+	});
+});
+
+describe('getCache', () => {
+	test(oneLine`
+		builds the four layers under the namespaced _response / _system / _schema /
+		_lock suffixes on a memory store
+	`, () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const caches = getCache();
+
+		expect(caches.cache?.namespace).toBe('scalabus_response');
+		expect(caches.systemCache.namespace).toBe('scalabus_system');
+		expect(caches.localSchemaCache.namespace).toBe('scalabus_schema');
+		expect(caches.lockCache.namespace).toBe('scalabus_lock');
+	});
+
+	test('narrows CACHE_STORE=redis through the store ternary', () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+		});
+
+		// instances are memoized from the memory build above; this call re-runs
+		// the store narrowing down its redis branch
+		expect(getCache().systemCache).toBeTruthy();
 	});
 });

@@ -57,14 +57,29 @@ export function getCache(): {
 	localSchemaCache: Keyv;
 	lockCache: Keyv;
 } {
+	const store: Store = env['CACHE_STORE'] === 'redis'
+		? 'redis'
+		: 'memory';
+
 	if (env['CACHE_ENABLED'] === true && cache === null) {
 		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
-		cache = getKeyvInstance(env['CACHE_STORE'] as Store, getMilliseconds(env['CACHE_TTL']));
-		cache.on('error', (err) => logger.warn(err, `[cache] ${err}`));
+
+		cache = getKeyvInstance(
+			store,
+			getMilliseconds(env['CACHE_TTL']),
+			'_response',
+		);
+
+		cache.on('error', (err) => logger.warn(err, `[response-cache] ${err}`));
 	}
 
 	if (systemCache === null) {
-		systemCache = getKeyvInstance(env['CACHE_STORE'] as Store, getMilliseconds(env['CACHE_SYSTEM_TTL']), '_system');
+		systemCache = getKeyvInstance(
+			store,
+			getMilliseconds(env['CACHE_SYSTEM_TTL']),
+			'_system',
+		);
+
 		systemCache.on('error', (err) => logger.warn(err, `[system-cache] ${err}`));
 	}
 
@@ -74,7 +89,7 @@ export function getCache(): {
 	}
 
 	if (lockCache === null) {
-		lockCache = getKeyvInstance(env['CACHE_STORE'] as Store, undefined, '_lock');
+		lockCache = getKeyvInstance(store, undefined, '_lock');
 		lockCache.on('error', (err) => logger.warn(err, `[lock-cache] ${err}`));
 	}
 
@@ -164,7 +179,11 @@ export async function getCacheValue(cache: Keyv, key: string): Promise<any> {
 	return decompressed;
 }
 
-function getKeyvInstance(store: Store, ttl: number | undefined, namespaceSuffix?: string): Keyv {
+function getKeyvInstance(
+	store: Store,
+	ttl: number | undefined,
+	namespaceSuffix?: string,
+): Keyv {
 	switch (store) {
 		case 'redis':
 			return new Keyv(getConfig('redis', ttl, namespaceSuffix));
