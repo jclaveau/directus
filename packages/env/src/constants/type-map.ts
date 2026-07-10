@@ -30,6 +30,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	'DB_(CONNECTION_.+_)?POOL__(MIN|MAX)': 'number',
 	'DB_(CONNECTION_.+_)?POOL__.+_MILLIS': 'number',
 
+	CACHE_STORE: 'string',
 	CACHE_SKIP_ALLOWED: 'boolean',
 	CACHE_STATUS_HEADER: 'string',
 	CACHE_TAGS_HEADER: 'string',
