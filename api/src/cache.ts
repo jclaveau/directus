@@ -59,8 +59,14 @@ export function getCache(): {
 } {
 	if (env['CACHE_ENABLED'] === true && cache === null) {
 		validateEnv(['CACHE_NAMESPACE', 'CACHE_TTL', 'CACHE_STORE']);
-		cache = getKeyvInstance(env['CACHE_STORE'] as Store, getMilliseconds(env['CACHE_TTL']));
-		cache.on('error', (err) => logger.warn(err, `[cache] ${err}`));
+
+		cache = getKeyvInstance(
+			env['CACHE_STORE'] as Store,
+			getMilliseconds(env['CACHE_TTL']),
+			'_response',
+		);
+
+		cache.on('error', (err) => logger.warn(err, `[response-cache] ${err}`));
 	}
 
 	if (systemCache === null) {

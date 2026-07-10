@@ -17,7 +17,7 @@ import {
 const env: Record<string, any> = {
 	CACHE_AUTO_PURGE: true,
 	CACHE_AUTO_PURGE_IGNORE_LIST: [],
-	CACHE_NAMESPACE: 'system-cache',
+	CACHE_NAMESPACE: 'scalabus',
 	MAX_BATCH_MUTATION: 100000,
 };
 
