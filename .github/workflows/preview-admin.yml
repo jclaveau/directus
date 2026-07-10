@@ -32,6 +32,8 @@ concurrency:
 
 permissions:
   contents: read
+  # Post the preview link + throwaway credentials as a PR comment (pull_request_target runs).
+  pull-requests: write
 
 jobs:
   preview:
@@ -186,6 +188,30 @@ jobs:
           console.log('seeded items + sub_items');
           JS
           node /tmp/seed.mjs
+
+      - name: Comment the preview link on the PR
+        # PR events only — a workflow_dispatch run has no PR to comment on (URL +
+        # password still land on the run summary). URL/ADMIN_PASSWORD come from
+        # $GITHUB_ENV of the earlier steps. Throwaway instance, dies with the run.
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          IDLE_MINUTES: ${{ inputs.idle_minutes || 15 }}
+        run: |
+          # Backticks are escaped (\`) so they stay literal markdown, not shell
+          # command substitution; $URL/$ADMIN_PASSWORD/$SHA still expand.
+          {
+            echo "### 🔎 Preview admin — \`${SHA}\`"
+            echo ""
+            echo "- **URL:** ${URL}/admin"
+            echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
+            echo "- Ephemeral: auto-shuts-down after ${IDLE_MINUTES} min idle; the link dies with the run."
+          } > /tmp/preview-comment.md
+
+          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file /tmp/preview-comment.md
 
       - name: Stream logs + publish URL + idle shutdown
         env:
