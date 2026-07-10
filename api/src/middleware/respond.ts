@@ -150,6 +150,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				query: isGraphQlRequest
 					? JSON.stringify(getGraphqlQueryAndVariables(req))
 					: JSON.stringify(req.sanitizedQuery ?? {}),
+				// A GraphQL read is a POST — not a GET URL, so leave it blank.
+				url: isGraphQlRequest
+					? ''
+					: req.originalUrl,
 				createdAt: Date.now(),
 				expiresAt: ttlMs === undefined
 					? null
