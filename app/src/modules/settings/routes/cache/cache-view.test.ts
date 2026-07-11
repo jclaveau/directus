@@ -11,6 +11,7 @@ import {
 	isSystemPath,
 	shortKey,
 	splitSections,
+	ttlVerdict,
 	type CacheEntry,
 } from './cache-view';
 
@@ -29,6 +30,8 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		hits: 0,
 		fillMs: null,
 		hitMs: null,
+		ttlMs: null,
+		recommendedTtlMs: null,
 		...over,
 	};
 }
@@ -144,11 +147,28 @@ describe('splitSections', () => {
 	});
 });
 
+describe('ttlVerdict', () => {
+	it('recommends lengthen / shorten / ok, null when unknown', () => {
+		expect(ttlVerdict(400, 300)).toBe('lengthen'); // >125%
+		expect(ttlVerdict(200, 300)).toBe('shorten'); // <75%
+		expect(ttlVerdict(310, 300)).toBe('ok'); // within band
+		expect(ttlVerdict(null, 300)).toBe(null);
+		expect(ttlVerdict(400, null)).toBe(null);
+		expect(ttlVerdict(400, 0)).toBe(null);
+	});
+});
+
 describe('buildGroups', () => {
 	it('buckets by path, totals hits/size, orders by hits', () => {
 		const groups = buildGroups([
-			entry({ path: '/items/a', hits: 2, size: 10 }),
-			entry({ path: '/items/a', hits: 3, size: 20 }),
+			entry({ path: '/items/a', hits: 2, ttlMs: 300, recommendedTtlMs: 100 }),
+			entry({
+				path: '/items/a',
+				hits: 3,
+				size: 30,
+				ttlMs: 300,
+				recommendedTtlMs: 200,
+			}),
 			entry({ path: '/items/b', hits: 10, size: 5 }),
 		]);
 
@@ -162,6 +182,9 @@ describe('buildGroups', () => {
 		// same method+query → one subgroup holding both entries
 		expect(groups[1]!.queries).toHaveLength(1);
 		expect(groups[1]!.queries[0]!.entries).toHaveLength(2);
+		// group TTL aggregates take the max across siblings
+		expect(groups[1]!.queries[0]!.ttlMs).toBe(300);
+		expect(groups[1]!.queries[0]!.recommendedTtlMs).toBe(200);
 	});
 
 	it('splits a path into method+query subgroups, hottest first', () => {
