@@ -206,7 +206,7 @@ router.get(
 );
 
 router.get(
-	'/cache/value',
+	'/cache/entry',
 	asyncHandler(async (req, res) => {
 		const service = new UtilsService({
 			accountability: req.accountability,
@@ -221,7 +221,7 @@ router.get(
 			});
 		}
 
-		res.json({ data: await service.readCacheValue(key) });
+		res.json({ data: await service.readCacheEntry(key) });
 	}),
 );
 

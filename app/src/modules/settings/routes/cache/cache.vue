@@ -58,6 +58,12 @@ const entryPage = ref<Record<string, number>>({});
 const selectedEntry = ref<CacheEntry | null>(null);
 const cachedValue = ref<unknown>(null);
 const cachedValueExists = ref(false);
+const cachedTags = ref<string[] | null>(null);
+
+const cachedExpiry = ref<
+	{ exp: number; createdAt: number; ttlMs: number | null } | null
+>(null);
+
 const valueLoading = ref(false);
 
 // Descriptor columns (from Postgres) shown as readonly rows in the detail drawer.
@@ -91,6 +97,17 @@ const prettyValue = computed(() => {
 	catch {
 		return String(cachedValue.value);
 	}
+});
+
+// Configured TTL off the live Redis __expires_at sidecar (null = no sidecar).
+const ttlLabel = computed(() => {
+	if (!cachedExpiry.value) {
+		return null;
+	}
+
+	return cachedExpiry.value.ttlMs === null
+		? '∞'
+		: `${Math.round(cachedExpiry.value.ttlMs / 1000)}s`;
 });
 
 const searchedEntries = computed(() => {
@@ -211,15 +228,20 @@ async function openEntry(entry: CacheEntry) {
 	selectedEntry.value = entry;
 	cachedValue.value = null;
 	cachedValueExists.value = false;
+	cachedTags.value = null;
+	cachedExpiry.value = null;
 	valueLoading.value = true;
 
 	try {
-		const response = await api.get('/utils/cache/value', {
+		const response = await api.get('/utils/cache/entry', {
 			params: { key: entry.key },
 		});
 
-		cachedValueExists.value = response.data.data.exists;
-		cachedValue.value = response.data.data.value;
+		const data = response.data.data;
+		cachedValueExists.value = data.exists;
+		cachedValue.value = data.value;
+		cachedTags.value = data.tags;
+		cachedExpiry.value = data.expiry;
 	}
 	catch {
 		cachedValueExists.value = false;
@@ -459,6 +481,23 @@ onMounted(load);
 					</div>
 				</div>
 
+				<div class="redis-block">
+					<div class="value-head">
+						{{ t('scoped_cache_tags', 'Scoped cache tags') }}
+					</div>
+					<div v-if="cachedTags && cachedTags.length" class="tags">
+						<span v-for="tag in cachedTags" :key="tag" class="tag">
+							{{ tag }}
+						</span>
+					</div>
+					<div v-else class="value-note">
+						{{ t('no_scoped_cache_tags', 'None (needs CACHE_TAGS_HEADER)') }}
+					</div>
+					<div v-if="ttlLabel" class="ttl-line">
+						{{ t('ttl', 'TTL') }}: {{ ttlLabel }}
+					</div>
+				</div>
+
 				<div class="value-block">
 					<div class="value-head">
 						{{ t('cached_value', 'Cached value') }}
@@ -677,6 +716,30 @@ table.entries .entry-row {
 .value-note {
 	color: var(--theme--foreground-subdued);
 	font-style: italic;
+}
+
+.redis-block {
+	margin-block-end: 24px;
+}
+
+.tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.tag {
+	padding: 2px 8px;
+	background-color: var(--theme--background-subdued);
+	border-radius: var(--theme--border-radius);
+	font-family: var(--theme--fonts--monospace--font-family);
+	font-size: 12px;
+}
+
+.ttl-line {
+	margin-block-start: 12px;
+	color: var(--theme--foreground-subdued);
+	font-size: 13px;
 }
 
 .value {
