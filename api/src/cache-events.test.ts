@@ -612,6 +612,7 @@ describe('listCacheEntries', () => {
 				ttl_ms: '300000',
 				fill_ms: '240',
 				hit_ms: '8.4',
+				recommended_ttl_ms: '320000.4',
 			},
 			{
 				cache_key: 'k2',
@@ -628,6 +629,7 @@ describe('listCacheEntries', () => {
 				ttl_ms: null,
 				fill_ms: null,
 				hit_ms: null,
+				recommended_ttl_ms: null,
 			},
 		];
 
@@ -648,6 +650,8 @@ describe('listCacheEntries', () => {
 				hits: 3,
 				fillMs: 240,
 				hitMs: 8,
+				ttlMs: 300000,
+				recommendedTtlMs: 320000,
 				createdAt: 1000,
 				expiresAt: 301000,
 				lastHitAt: 2000,
@@ -664,6 +668,8 @@ describe('listCacheEntries', () => {
 				hits: 0,
 				fillMs: null,
 				hitMs: null,
+				ttlMs: null,
+				recommendedTtlMs: null,
 				createdAt: 500,
 				expiresAt: null,
 				lastHitAt: null,

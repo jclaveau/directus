@@ -30,6 +30,8 @@ const ENTRIES = [
 		hits: 7,
 		fillMs: 240,
 		hitMs: 2,
+		ttlMs: 60000,
+		recommendedTtlMs: 90000,
 		createdAt: Date.now() - 5000,
 		expiresAt: Date.now() + 60000,
 		lastHitAt: Date.now() - 1000,
@@ -46,6 +48,8 @@ const ENTRIES = [
 		hits: 3,
 		fillMs: 90,
 		hitMs: 1,
+		ttlMs: 30000,
+		recommendedTtlMs: 10000,
 		createdAt: Date.now() - 8000,
 		expiresAt: Date.now() + 30000,
 		lastHitAt: Date.now() - 2000,
@@ -62,6 +66,8 @@ const ENTRIES = [
 		hits: 0,
 		fillMs: null,
 		hitMs: null,
+		ttlMs: null,
+		recommendedTtlMs: null,
 		createdAt: Date.now(),
 		expiresAt: null,
 		lastHitAt: null,
@@ -218,6 +224,7 @@ describe('CachePage', () => {
 		expect(text).toContain('(12)'); // tag member count
 		expect(text).toContain('512 B / 2.0 KB raw (25%)'); // compressed vs raw
 		expect(text).toContain('240 ms'); // miss compute cost
+		expect(text).toContain('90s (lengthen)'); // recommended TTL + verdict
 		expect(text).toContain('Key varies on');
 		expect(text).toContain('"hello": "world"');
 	});
@@ -236,6 +243,8 @@ describe('CachePage', () => {
 				hits: 1,
 				fillMs: 5,
 				hitMs: 1,
+				ttlMs: null,
+				recommendedTtlMs: null,
 				createdAt: Date.now(),
 				expiresAt: null,
 				lastHitAt: null,

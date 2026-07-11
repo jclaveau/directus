@@ -19,6 +19,7 @@ import {
 	formatUser,
 	shortKey,
 	splitSections,
+	ttlVerdict,
 	type CacheEntry,
 	type EndpointGroup,
 	type QueryGroup,
@@ -91,6 +92,7 @@ const detailFields = computed(() => {
 		{ label: t('hits', 'Hits'), value: String(entry.hits) },
 		{ label: t('compute_miss', 'Compute (miss)'), value: msLabel(entry.fillMs) },
 		{ label: t('serve_hit', 'Serve (hit avg)'), value: msLabel(entry.hitMs) },
+		{ label: t('recommended_ttl', 'Recommended TTL'), value: recTtlLabel(entry) },
 		{ label: t('age', 'Age'), value: ageOf(entry.createdAt) },
 		{ label: t('last_hit', 'Last hit'), value: lastHitOf(entry.lastHitAt) },
 		{ label: t('expires_in', 'Expires in'), value: expiryOf(entry.expiresAt) },
@@ -266,6 +268,24 @@ function msLabel(ms: number | null): string {
 	return ms === null
 		? '—'
 		: `${ms} ms`;
+}
+
+function secLabel(ms: number): string {
+	return `${Math.round(ms / 1000)}s`;
+}
+
+// The data-driven TTL plus its shorten/lengthen verdict against the TTL in force.
+function recTtlLabel(entry: CacheEntry): string {
+	if (entry.recommendedTtlMs === null) {
+		return '—';
+	}
+
+	const verdict = ttlVerdict(entry.recommendedTtlMs, entry.ttlMs);
+	const base = secLabel(entry.recommendedTtlMs);
+
+	return verdict && verdict !== 'ok'
+		? `${base} (${verdict})`
+		: base;
 }
 
 // The stored `url` is the raw request path — resolve it against the API root so the
@@ -453,6 +473,14 @@ onMounted(load);
 										{{ q.totalHits }} {{ t('hits', 'hits') }}
 									</span>
 									<span class="stat">{{ formatSize(q.totalSize) }}</span>
+									<span
+										v-if="q.recommendedTtlMs !== null"
+										class="stat rec"
+										:class="ttlVerdict(q.recommendedTtlMs, q.ttlMs)"
+										:title="t('recommended_ttl', 'Recommended TTL')"
+									>
+										rec {{ secLabel(q.recommendedTtlMs) }}
+									</span>
 									<v-icon
 										v-if="q.url"
 										v-tooltip.bottom="t('open_in_new_tab', 'Open in new tab')"
@@ -720,6 +748,22 @@ onMounted(load);
 
 .query-header .stat.hits {
 	color: var(--theme--primary);
+}
+
+.query-header .stat.rec {
+	font-weight: 600;
+}
+
+.query-header .stat.rec.lengthen {
+	color: var(--theme--warning);
+}
+
+.query-header .stat.rec.shorten {
+	color: var(--theme--success);
+}
+
+.query-header .stat.rec.ok {
+	color: var(--theme--foreground-subdued);
 }
 
 .entries-scroll {

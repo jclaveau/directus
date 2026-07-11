@@ -60,6 +60,8 @@ export interface CacheEntryRecord {
 	hits: number;
 	fillMs: number | null;
 	hitMs: number | null;
+	ttlMs: number | null;
+	recommendedTtlMs: number | null;
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
@@ -401,6 +403,38 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 	const db = getDatabase();
 	const since = new Date(Date.now() - LISTING_WINDOW);
 
+	const selects: (string | Knex.Raw)[] = [
+		'd.cache_key',
+		'd.method',
+		'd.path',
+		'd.collection',
+		'd.user_id',
+		'u.email as user_email',
+		'd.query',
+		'd.url',
+		'd.bytes',
+		'd.fill_ms',
+		'd.last_filled',
+		db.raw('SUM(CASE WHEN e.kind = 0 THEN 1 ELSE 0 END) AS hits'),
+		db.raw('MAX(CASE WHEN e.kind = 0 THEN e.time END) AS last_hit_at'),
+		db.raw('MAX(e.ttl_ms) AS ttl_ms'),
+		db.raw('AVG(CASE WHEN e.kind = 0 THEN e.duration_ms END) AS hit_ms'),
+	];
+
+	if (db.client.config.client === 'pg') {
+		// Recommended TTL = p95 of the re-request age distribution: hit ages plus
+		// near-expiry miss ages (ttl + gap). An ordered-set aggregate, so Postgres
+		// only — plain-DB installs get null (the telemetry targets Timescale).
+		selects.push(
+			db.raw(
+				'percentile_cont(0.95) WITHIN GROUP (ORDER BY '
+				+ 'CASE WHEN e.kind = 0 THEN e.age_ms ELSE e.ttl_ms + e.gap_ms END) '
+				+ 'FILTER (WHERE e.kind = 0 OR e.gap_ms IS NOT NULL) '
+				+ 'AS recommended_ttl_ms',
+			),
+		);
+	}
+
 	const rows = await db('directus_cache_descriptors as d')
 		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
 		.leftJoin('directus_users as u', 'u.id', 'd.user_id')
@@ -420,23 +454,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		)
 		.orderBy('hits', 'desc')
 		.limit(LISTING_LIMIT)
-		.select(
-			'd.cache_key',
-			'd.method',
-			'd.path',
-			'd.collection',
-			'd.user_id',
-			'u.email as user_email',
-			'd.query',
-			'd.url',
-			'd.bytes',
-			'd.fill_ms',
-			'd.last_filled',
-			db.raw('SUM(CASE WHEN e.kind = 0 THEN 1 ELSE 0 END) AS hits'),
-			db.raw('MAX(CASE WHEN e.kind = 0 THEN e.time END) AS last_hit_at'),
-			db.raw('MAX(e.ttl_ms) AS ttl_ms'),
-			db.raw('AVG(CASE WHEN e.kind = 0 THEN e.duration_ms END) AS hit_ms'),
-		);
+		.select(selects);
 
 	return rows.map((row: Record<string, unknown>) => {
 		const createdAt = new Date(row['last_filled'] as string).getTime();
@@ -466,6 +484,10 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			hitMs: row['hit_ms'] === null || row['hit_ms'] === undefined
 				? null
 				: Math.round(Number(row['hit_ms'])),
+			ttlMs,
+			recommendedTtlMs: row['recommended_ttl_ms'] == null
+				? null
+				: Math.round(Number(row['recommended_ttl_ms'])),
 			createdAt,
 			expiresAt: ttlMs === null
 				? null
