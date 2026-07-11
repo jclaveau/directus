@@ -7,17 +7,17 @@ import type { Filter } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
-import { matchesFilter } from './filter-entry';
 import {
 	buildGroups,
+	filterEntries,
 	formatAge,
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
 	formatSize,
 	formatUser,
-	isSystemPath,
 	shortKey,
+	splitSections,
 	type CacheEntry,
 	type EndpointGroup,
 } from './cache-view';
@@ -49,48 +49,18 @@ const refreshInterval = ref<number | null>(null);
 const search = ref('');
 const filter = ref<Filter | null>(null);
 
-// Narrow the loaded list by the filter conditions, then the free-text search.
 const searchedEntries = computed(() => {
-	const query = search.value.trim().toLowerCase();
-
-	return entries.value.filter((entry) => {
-		const row = entry as unknown as Record<string, unknown>;
-
-		if (!matchesFilter(row, filter.value, FILTER_FIELD_MAP)) {
-			return false;
-		}
-
-		if (!query) {
-			return true;
-		}
-
-		const haystack = [
-			entry.path,
-			entry.query,
-			entry.user?.email,
-			entry.key,
-			entry.method,
-		];
-
-		return haystack.some((field) => field?.toLowerCase().includes(query));
-	});
+	return filterEntries(entries.value, filter.value, search.value, FILTER_FIELD_MAP);
 });
 
 const groups = computed<EndpointGroup[]>(() => buildGroups(searchedEntries.value));
 
 const sections = computed(() => {
-	return [
-		{
-			key: 'app',
-			label: t('app_label', 'App'),
-			groups: groups.value.filter((group) => !isSystemPath(group.path)),
-		},
-		{
-			key: 'system',
-			label: t('system_label', 'System'),
-			groups: groups.value.filter((group) => isSystemPath(group.path)),
-		},
-	].filter((section) => section.groups.length > 0);
+	return splitSections(
+		groups.value,
+		t('app_label', 'App'),
+		t('system_label', 'System'),
+	);
 });
 
 const totalEntries = computed(() => entries.value.length);
