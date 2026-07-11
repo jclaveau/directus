@@ -109,8 +109,10 @@ describe('CachePage', () => {
 		expect(wrapper.text()).toContain('/items/articles');
 		expect(wrapper.text()).toContain('/server/info');
 
-		// Expand the first endpoint so the row cells (and their formatters) render.
+		// Expand the endpoint, then its method+query subgroup, so the row cells
+		// (and their formatters) render.
 		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
 		expect(wrapper.text()).toContain('ann@corp.io');
 
 		// Evict the whole endpoint, then a single entry.
@@ -127,7 +129,7 @@ describe('CachePage', () => {
 		});
 	});
 
-	it('narrows the list by a user_id.email filter from the search-input', async () => {
+	it('filters by the user_id.email m2o from the search-input', async () => {
 		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
 
 		const wrapper = mount(CachePage, { global });
@@ -150,7 +152,7 @@ describe('CachePage', () => {
 		expect(wrapper.text()).not.toContain('/server/info'); // null user dropped
 	});
 
-	it('narrows the list by the free-text search from the search-input', async () => {
+	it('filters by the free-text search from the search-input', async () => {
 		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
 
 		const wrapper = mount(CachePage, { global });
