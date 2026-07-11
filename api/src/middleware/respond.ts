@@ -174,6 +174,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					? ''
 					: req.originalUrl,
 				bytes: size,
+				// Compute cost of this miss: request entry (cache mw) → response ready.
+				fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
 			}).catch(() => {});
 		}
 		catch (err: any) {

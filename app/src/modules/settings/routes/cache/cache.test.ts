@@ -28,6 +28,8 @@ const ENTRIES = [
 		url: '/items/articles?limit=5',
 		size: 2048,
 		hits: 7,
+		fillMs: 240,
+		hitMs: 2,
 		createdAt: Date.now() - 5000,
 		expiresAt: Date.now() + 60000,
 		lastHitAt: Date.now() - 1000,
@@ -42,6 +44,8 @@ const ENTRIES = [
 		url: '/items/comments',
 		size: 512,
 		hits: 3,
+		fillMs: 90,
+		hitMs: 1,
 		createdAt: Date.now() - 8000,
 		expiresAt: Date.now() + 30000,
 		lastHitAt: Date.now() - 2000,
@@ -56,6 +60,8 @@ const ENTRIES = [
 		url: '',
 		size: 100,
 		hits: 0,
+		fillMs: null,
+		hitMs: null,
 		createdAt: Date.now(),
 		expiresAt: null,
 		lastHitAt: null,
@@ -211,6 +217,7 @@ describe('CachePage', () => {
 		expect(text).toContain('articles:id=5');
 		expect(text).toContain('(12)'); // tag member count
 		expect(text).toContain('512 B / 2.0 KB raw (25%)'); // compressed vs raw
+		expect(text).toContain('240 ms'); // miss compute cost
 		expect(text).toContain('Key varies on');
 		expect(text).toContain('"hello": "world"');
 	});
@@ -227,6 +234,8 @@ describe('CachePage', () => {
 				url: '/items/articles',
 				size: 10,
 				hits: 1,
+				fillMs: 5,
+				hitMs: 1,
 				createdAt: Date.now(),
 				expiresAt: null,
 				lastHitAt: null,

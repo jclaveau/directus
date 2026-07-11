@@ -27,6 +27,8 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		lastHitAt: null,
 		size: 0,
 		hits: 0,
+		fillMs: null,
+		hitMs: null,
 		...over,
 	};
 }

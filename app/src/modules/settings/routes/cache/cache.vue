@@ -89,6 +89,8 @@ const detailFields = computed(() => {
 		{ label: t('url', 'URL'), value: entry.url || '—' },
 		{ label: t('size', 'Size'), value: formatSize(entry.size) },
 		{ label: t('hits', 'Hits'), value: String(entry.hits) },
+		{ label: t('compute_miss', 'Compute (miss)'), value: msLabel(entry.fillMs) },
+		{ label: t('serve_hit', 'Serve (hit avg)'), value: msLabel(entry.hitMs) },
 		{ label: t('age', 'Age'), value: ageOf(entry.createdAt) },
 		{ label: t('last_hit', 'Last hit'), value: lastHitOf(entry.lastHitAt) },
 		{ label: t('expires_in', 'Expires in'), value: expiryOf(entry.expiresAt) },
@@ -258,6 +260,12 @@ function expiryOf(expiresAt: number | null): string {
 
 function userOf(user: CacheEntry['user']): string {
 	return formatUser(user, t('public_label', 'public'));
+}
+
+function msLabel(ms: number | null): string {
+	return ms === null
+		? '—'
+		: `${ms} ms`;
 }
 
 // The stored `url` is the raw request path — resolve it against the API root so the

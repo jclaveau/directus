@@ -24,6 +24,7 @@ export async function up(knex: Knex): Promise<void> {
 		table.bigInteger('age_ms').nullable(); // hit: age-at-hit
 		table.bigInteger('gap_ms').nullable(); // miss: time past expiry (null = cold)
 		table.bigInteger('ttl_ms').nullable(); // effective TTL in force
+		table.bigInteger('duration_ms').nullable(); // hit: cache-serve latency
 	});
 
 	await knex.schema.createTable('directus_cache_descriptors', (table) => {
@@ -35,6 +36,7 @@ export async function up(knex: Knex): Promise<void> {
 		table.text('query').nullable();
 		table.text('url').nullable();
 		table.bigInteger('bytes').nullable();
+		table.bigInteger('fill_ms').nullable(); // miss: time to compute the response
 		table.timestamp('last_filled').notNullable();
 	});
 
