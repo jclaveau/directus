@@ -156,5 +156,29 @@ describe('buildGroups', () => {
 		expect(groups[1]!.path).toBe('/items/a');
 		expect(groups[1]!.totalHits).toBe(5);
 		expect(groups[1]!.totalSize).toBe(30);
+		expect(groups[1]!.entryCount).toBe(2);
+		// same method+query → one subgroup holding both entries
+		expect(groups[1]!.queries).toHaveLength(1);
+		expect(groups[1]!.queries[0]!.entries).toHaveLength(2);
+	});
+
+	it('splits a path into method+query subgroups, hottest first', () => {
+		const groups = buildGroups([
+			entry({ path: '/items/a', query: '{"limit":5}', hits: 1 }),
+			entry({ path: '/items/a', query: '{"limit":5}', hits: 2 }),
+			entry({ path: '/items/a', query: '{"limit":9}', hits: 10 }),
+			entry({ path: '/items/a', method: 'HEAD', query: '{"limit":5}', hits: 4 }),
+		]);
+
+		const queries = groups[0]!.queries;
+		expect(queries).toHaveLength(3);
+		expect(queries[0]!.query).toBe('{"limit":9}'); // hottest first
+		expect(queries[0]!.entries).toHaveLength(1);
+		// method is part of the key: GET vs HEAD on the same query don't merge
+		expect(queries[1]!.method).toBe('HEAD');
+		expect(queries[2]!.method).toBe('GET');
+		expect(queries[2]!.query).toBe('{"limit":5}');
+		expect(queries[2]!.entries).toHaveLength(2);
+		expect(queries[2]!.totalHits).toBe(3);
 	});
 });
