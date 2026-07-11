@@ -6,8 +6,8 @@ import type { Knex } from 'knex';
  *   - `directus_cache_events` — the lean fact: one row per served hit/miss,
  *     keyed by the opaque cache key, carrying only the tuning numbers
  *     (age-at-hit, gap-since-expiry, effective TTL). High volume → a Timescale
- *     hypertable with compression + 90d retention where the extension exists,
- *     a plain table elsewhere.
+ *     hypertable with compression + 90d retention where the extension exists;
+ *     on a plain table the app-level reap (CACHE_STATS_RETENTION) bounds growth.
  *   - `directus_cache_descriptors` — the dimension: one row per cache key with
  *     its request descriptor (method/path/collection/user/query/url/size),
  *     upserted on each fill. Low volume, no retention, so a descriptor survives
@@ -25,6 +25,10 @@ export async function up(knex: Knex): Promise<void> {
 		table.bigInteger('gap_ms').nullable(); // miss: time past expiry (null = cold)
 		table.bigInteger('ttl_ms').nullable(); // effective TTL in force
 		table.bigInteger('duration_ms').nullable(); // hit: cache-serve latency
+		// The listing joins + reap scan by cache_key; the retention reap scans by
+		// time. Secondary (non-unique) indexes are safe on a Timescale hypertable.
+		table.index('cache_key');
+		table.index('time');
 	});
 
 	await knex.schema.createTable('directus_cache_descriptors', (table) => {
@@ -38,6 +42,8 @@ export async function up(knex: Knex): Promise<void> {
 		table.bigInteger('bytes').nullable();
 		table.bigInteger('fill_ms').nullable(); // miss: time to compute the response
 		table.timestamp('last_filled').notNullable();
+		// No index on `path`: it's TEXT (MySQL can't index it without a prefix
+		// length) and the dimension is low-volume — evict-by-path scans it cheaply.
 	});
 
 	if (knex.client.config.client !== 'pg') {

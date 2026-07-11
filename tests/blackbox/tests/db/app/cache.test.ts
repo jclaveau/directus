@@ -78,6 +78,8 @@ describe('App Caching Tests', () => {
 			envRedis[vendor]['REDIS_HOST'] = 'localhost';
 			envRedis[vendor]['REDIS_PORT'] = '6108';
 			envRedis[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis`;
+			// Stats are opt-in — enable so the registry/stats endpoints are live.
+			envRedis[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
 			const envRedisPurge = cloneDeep(envRedis);
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';

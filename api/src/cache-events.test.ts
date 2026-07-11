@@ -13,6 +13,7 @@ import {
 	listCacheEntries,
 	readCacheMissGap,
 	reapCacheDescriptors,
+	reapCacheEvents,
 	refreshCacheStatsFlag,
 	setCacheStatsEnabled,
 	truncateCacheEvents,
@@ -291,9 +292,10 @@ describe('captureCacheDescriptor', () => {
 });
 
 describe('tombstone', () => {
-	it('writes expiry with the lookback TTL when active', async () => {
+	it('keeps only the lookback TTL once the entry has already expired', async () => {
 		await armFlag(null);
 
+		// expiredAt in the past → no remaining life, so PX is just the lookback.
 		await writeCacheTombstone('k1', 301000);
 
 		expect(mockRedis.set).toHaveBeenCalledWith(
@@ -302,6 +304,29 @@ describe('tombstone', () => {
 			'PX',
 			3600000,
 		);
+	});
+
+	it('lives for the entry remaining life PLUS the lookback', async () => {
+		await armFlag(null);
+
+		const now = 1_000_000;
+		// mockRestore below: clearAllMocks doesn't restore impls, so a frozen
+		// Date.now would leak into later tests.
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+		const expiredAt = now + 600_000; // 10m of life left
+
+		await writeCacheTombstone('k1', expiredAt);
+
+		// 600_000 remaining life + 3_600_000 lookback → the tombstone outlives the
+		// entry, so a post-expiry miss can still read the gap.
+		expect(mockRedis.set).toHaveBeenCalledWith(
+			'scalabus:stats:tomb:k1',
+			String(expiredAt),
+			'PX',
+			4_200_000,
+		);
+
+		nowSpy.mockRestore();
 	});
 
 	it('does not write when capture is disabled', async () => {
@@ -733,5 +758,23 @@ describe('reapCacheDescriptors', () => {
 	it('returns 0 when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		expect(await reapCacheDescriptors()).toBe(0);
+	});
+});
+
+describe('reapCacheEvents', () => {
+	it('prunes fact rows past the retention window', async () => {
+		deleteCount = 7;
+
+		const reaped = await reapCacheEvents();
+
+		expect(reaped).toBe(7);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_events');
+		expect(builder.where).toHaveBeenCalledWith('time', '<', expect.any(Date));
+		expect(builder.delete).toHaveBeenCalled();
+	});
+
+	it('returns 0 when not configured', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		expect(await reapCacheEvents()).toBe(0);
 	});
 });

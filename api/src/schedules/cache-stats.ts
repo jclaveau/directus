@@ -3,6 +3,7 @@ import {
 	enforceCacheStatsBudget,
 	flushCacheEvents,
 	reapCacheDescriptors,
+	reapCacheEvents,
 	refreshCacheStatsFlag,
 } from '../cache-events.js';
 import { useLogger } from '../logger/index.js';
@@ -11,7 +12,8 @@ import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 // Every 10s: low enough staleness for tuning, cheap for one node to flush a batch.
 const FLUSH_CRON = '*/10 * * * * *';
 
-// Daily: prune orphaned descriptors (the dimension has no retention of its own).
+// Daily: prune fact rows past CACHE_STATS_RETENTION (cross-dialect bound) and the
+// orphaned descriptors left behind (the dimension has no retention of its own).
 const REAP_CRON = '0 3 * * *';
 
 // Per-instance flag re-read cadence — a live toggle/autokill propagates within this.
@@ -55,10 +57,11 @@ export default async function schedule(): Promise<boolean> {
 	if (validateCron(REAP_CRON)) {
 		scheduleSynchronizedJob('cache-stats-reap', REAP_CRON, async () => {
 			try {
+				await reapCacheEvents();
 				await reapCacheDescriptors();
 			}
 			catch (err: any) {
-				logger.warn(err, `[cache-stats] descriptor reap failed. ${err.message}`);
+				logger.warn(err, `[cache-stats] reap failed. ${err.message}`);
 			}
 		});
 	}

@@ -72,6 +72,15 @@ describe('matchesFilter', () => {
 		expect(matchesFilter({ user: null }, contains, MAP)).toBe(false);
 	});
 
+	it('compares an m2o by its primary key (the filter UI emits user_id._eq)', () => {
+		const withUser = { user: { id: 'u1', email: 'alice@corp.io' } };
+
+		expect(matchesFilter(withUser, { user_id: { _eq: 'u1' } }, MAP)).toBe(true);
+		expect(matchesFilter(withUser, { user_id: { _eq: 'u2' } }, MAP)).toBe(false);
+		expect(matchesFilter(withUser, { user_id: { _in: ['u1'] } }, MAP)).toBe(true);
+		expect(matchesFilter(withUser, { user_id: { _nin: ['u1'] } }, MAP)).toBe(false);
+	});
+
 	it('matches a scalar (non-operator) condition by equality', () => {
 		expect(matchesFilter(row, { method: 'GET' })).toBe(true);
 		expect(matchesFilter(row, { method: 'POST' })).toBe(false);
