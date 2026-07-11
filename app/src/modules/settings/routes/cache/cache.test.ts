@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { i18n } from '@/lang';
 
 vi.mock('@/api', () => {
-	return { default: { get: vi.fn(), delete: vi.fn() } };
+	return { default: { get: vi.fn(), delete: vi.fn(), patch: vi.fn() } };
 });
 
 vi.mock('@/utils/get-root-path', () => {
@@ -121,6 +121,8 @@ describe('CachePage', () => {
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
 		vi.mocked(api.delete).mockResolvedValue({} as never);
+		vi.mocked(api.patch).mockReset();
+		vi.mocked(api.patch).mockResolvedValue({} as never);
 	});
 
 	it('loads, groups and renders entries; evicts a path and an entry', async () => {
@@ -321,5 +323,63 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(wrapper.text()).toContain('boom');
+	});
+
+	it('toggles cache stats collection at runtime', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/stats') {
+				return Promise.resolve({
+					data: {
+						data: {
+							configured: true,
+							enabled: true,
+							killedReason: null,
+							bufferLength: 0,
+						},
+					},
+				} as never);
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } } as never);
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// The toggle only renders once the env opted in (configured).
+		const toggle = wrapper.find('.stats-toggle');
+		expect(toggle.exists()).toBe(true);
+
+		await toggle.trigger('click');
+		await flushPromises();
+
+		// Enabled → PATCH flips it off, then the state is re-read.
+		expect(api.patch).toHaveBeenCalledWith('/utils/cache/stats', {
+			enabled: false,
+		});
+	});
+
+	it('hides the stats toggle when collection is not configured', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/stats') {
+				return Promise.resolve({
+					data: {
+						data: {
+							configured: false,
+							enabled: false,
+							killedReason: null,
+							bufferLength: 0,
+						},
+					},
+				} as never);
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } } as never);
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		expect(wrapper.find('.stats-toggle').exists()).toBe(false);
 	});
 });
