@@ -8,6 +8,19 @@ import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import { matchesFilter } from './filter-entry';
+import {
+	buildGroups,
+	formatAge,
+	formatExpiry,
+	formatLastHit,
+	formatQuery,
+	formatSize,
+	formatUser,
+	isSystemPath,
+	shortKey,
+	type CacheEntry,
+	type EndpointGroup,
+} from './cache-view';
 
 // The filter builder is keyed by the descriptor collection's field names; map
 // them back to this page's row shape so its conditions can run client-side.
@@ -22,53 +35,6 @@ const FILTER_FIELD_MAP: Record<string, keyof CacheEntry> = {
 	bytes: 'size',
 	last_filled: 'createdAt',
 };
-
-interface CacheEntry {
-	key: string;
-	path: string;
-	method: string;
-	user: string | null;
-	query: string;
-	url: string;
-	createdAt: number;
-	expiresAt: number | null;
-	lastHitAt: number | null;
-	size: number;
-	hits: number;
-}
-
-interface EndpointGroup {
-	path: string;
-	entries: CacheEntry[];
-	totalHits: number;
-	totalSize: number;
-}
-
-// Directus system surface: the dedicated system routes + reads of a `directus_*`
-// collection (and the system GraphQL schema). Everything else is app data.
-const SYSTEM_SEGMENTS = new Set(
-	(
-		'server schema auth users roles permissions policies files folders '
-		+ 'fields collections relations activity revisions presets settings flows '
-		+ 'operations extensions utils translations dashboards panels notifications '
-		+ 'shares comments versions metrics assets'
-	).split(' '),
-);
-
-function isSystemPath(path: string): boolean {
-	const segments = path.split('/').filter(Boolean);
-	const head = segments[0] ?? '';
-
-	if (head === 'items') {
-		return (segments[1] ?? '').startsWith('directus_');
-	}
-
-	if (head === 'graphql') {
-		return path.startsWith('/graphql/system');
-	}
-
-	return SYSTEM_SEGMENTS.has(head);
-}
 
 defineOptions({ name: 'SettingsCache' });
 
@@ -104,28 +70,7 @@ const searchedEntries = computed(() => {
 	});
 });
 
-const groups = computed<EndpointGroup[]>(() => {
-	const byPath = new Map<string, CacheEntry[]>();
-
-	for (const entry of searchedEntries.value) {
-		const bucket = byPath.get(entry.path) ?? [];
-		bucket.push(entry);
-		byPath.set(entry.path, bucket);
-	}
-
-	const result: EndpointGroup[] = [];
-
-	for (const [path, groupEntries] of byPath) {
-		result.push({
-			path,
-			entries: groupEntries,
-			totalHits: groupEntries.reduce((sum, entry) => sum + entry.hits, 0),
-			totalSize: groupEntries.reduce((sum, entry) => sum + entry.size, 0),
-		});
-	}
-
-	return result.sort((a, b) => b.totalHits - a.totalHits);
-});
+const groups = computed<EndpointGroup[]>(() => buildGroups(searchedEntries.value));
 
 const sections = computed(() => {
 	return [
@@ -179,82 +124,22 @@ function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
 }
 
-function formatSize(bytes: number): string {
-	if (bytes < 1024) {
-		return `${bytes} B`;
-	}
-
-	if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)} KB`;
-	}
-
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+// Thin template adapters: bind the reactive clock + i18n labels so the deeply
+// nested table cells stay one short call; the formatting logic lives in cache-view.
+function ageOf(timestamp: number): string {
+	return formatAge(now.value, timestamp);
 }
 
-function formatExpiry(expiresAt: number | null): string {
-	if (expiresAt === null) {
-		return '∞';
-	}
-
-	const seconds = Math.round((expiresAt - now.value) / 1000);
-
-	if (seconds <= 0) {
-		return t('expired', 'expired');
-	}
-
-	if (seconds < 60) {
-		return `${seconds}s`;
-	}
-
-	if (seconds < 3600) {
-		return `${Math.round(seconds / 60)}m`;
-	}
-
-	return `${Math.round(seconds / 3600)}h`;
+function lastHitOf(lastHitAt: number | null): string {
+	return formatLastHit(now.value, lastHitAt, t('never', 'never'));
 }
 
-function formatUser(user: string | null): string {
-	return user ?? t('public_label', 'public');
+function expiryOf(expiresAt: number | null): string {
+	return formatExpiry(now.value, expiresAt, t('expired', 'expired'));
 }
 
-function formatAgo(timestamp: number): string {
-	const seconds = Math.round((now.value - timestamp) / 1000);
-
-	if (seconds < 60) {
-		return `${Math.max(seconds, 0)}s`;
-	}
-
-	if (seconds < 3600) {
-		return `${Math.round(seconds / 60)}m`;
-	}
-
-	if (seconds < 86400) {
-		return `${Math.round(seconds / 3600)}h`;
-	}
-
-	return `${Math.round(seconds / 86400)}d`;
-}
-
-function formatLastHit(lastHitAt: number | null): string {
-	if (lastHitAt === null) {
-		return t('never', 'never');
-	}
-
-	return formatAgo(lastHitAt);
-}
-
-function shortKey(key: string): string {
-	return key.length > 12
-		? `${key.slice(0, 12)}…`
-		: key;
-}
-
-function formatQuery(query: string): string {
-	if (!query || query === '{}') {
-		return '—';
-	}
-
-	return query;
+function userOf(user: string | null): string {
+	return formatUser(user, t('public_label', 'public'));
 }
 
 // The stored `url` is the raw request path — resolve it against the API root so the
@@ -397,11 +282,11 @@ onMounted(load);
 												{{ formatQuery(entry.query) }}
 											</template>
 										</td>
-										<td>{{ formatUser(entry.user) }}</td>
+										<td>{{ userOf(entry.user) }}</td>
 										<td class="num">{{ entry.hits }}</td>
-										<td class="num">{{ formatAgo(entry.createdAt) }}</td>
-										<td class="num">{{ formatLastHit(entry.lastHitAt) }}</td>
-										<td class="num">{{ formatExpiry(entry.expiresAt) }}</td>
+										<td class="num">{{ ageOf(entry.createdAt) }}</td>
+										<td class="num">{{ lastHitOf(entry.lastHitAt) }}</td>
+										<td class="num">{{ expiryOf(entry.expiresAt) }}</td>
 										<td class="num">{{ formatSize(entry.size) }}</td>
 										<td class="key" :title="entry.key">{{ shortKey(entry.key) }}</td>
 										<td class="num">
