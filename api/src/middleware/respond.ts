@@ -2,7 +2,7 @@ import { useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
-import { captureCacheDescriptor, writeCacheTombstone } from '../cache-events.js';
+import { cacheStatsActive, captureCacheDescriptor, writeCacheTombstone } from '../cache-events.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
@@ -114,10 +114,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			const ttlMs = getMilliseconds(env['CACHE_TTL']);
 			const expiresAt = now + getMilliseconds(env['CACHE_TTL'], 0);
 
-			const size = res.locals['payload']
-				? stringByteSize(JSON.stringify(res.locals['payload']))
-				: 0;
-
 			await setCacheValue(cache, key, res.locals['payload'], ttlMs);
 
 			// Enriched so a HIT reads age/TTL off this sibling — no extra read.
@@ -155,28 +151,37 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				}
 			}
 
-			const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
+			// Gated at the call site (not just inside the buffer write): the default
+			// config has stats off, and building these args re-serializes the payload
+			// (size) and the query — a cost the hot fill path shouldn't pay when off.
+			if (cacheStatsActive()) {
+				const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
 
-			// The per-key descriptor — captured here (fill) where query/collection/
-			// user are fully populated, unlike the early cache middleware. Buffered
-			// like the events; the flusher upserts the descriptors dimension.
-			void captureCacheDescriptor({
-				cacheKey: key,
-				method: req.method,
-				path: req.originalUrl.split('?')[0]!,
-				collection: req.collection ?? null,
-				userId: req.accountability?.user ?? null,
-				query: isGraphQlRequest
-					? JSON.stringify(getGraphqlQueryAndVariables(req))
-					: JSON.stringify(req.sanitizedQuery ?? {}),
-				// A GraphQL read is a POST — not a GET URL, so leave it blank.
-				url: isGraphQlRequest
-					? ''
-					: req.originalUrl,
-				bytes: size,
-				// Compute cost of this miss: request entry (cache mw) → response ready.
-				fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
-			}).catch(() => {});
+				const size = res.locals['payload']
+					? stringByteSize(JSON.stringify(res.locals['payload']))
+					: 0;
+
+				// The per-key descriptor — captured here (fill) where query/collection/
+				// user are fully populated, unlike the early cache middleware. Buffered
+				// like the events; the flusher upserts the descriptors dimension.
+				void captureCacheDescriptor({
+					cacheKey: key,
+					method: req.method,
+					path: req.originalUrl.split('?')[0]!,
+					collection: req.collection ?? null,
+					userId: req.accountability?.user ?? null,
+					query: isGraphQlRequest
+						? JSON.stringify(getGraphqlQueryAndVariables(req))
+						: JSON.stringify(req.sanitizedQuery ?? {}),
+					// A GraphQL read is a POST — not a GET URL, so leave it blank.
+					url: isGraphQlRequest
+						? ''
+						: req.originalUrl,
+					bytes: size,
+					// Compute cost of this miss: request entry (cache mw) → response ready.
+					fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
+				}).catch(() => {});
+			}
 		}
 		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
