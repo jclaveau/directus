@@ -77,6 +77,17 @@ export interface CacheStatsState {
 }
 
 const STREAM_HARD_CAP = 1_000_000;
+
+// The stats-table cache_key is varchar(255). The default hashed key is ~40 hex, but
+// a readable key (CACHE_KEY_HASH_ENABLED=false) can exceed it and would throw on
+// insert — wedging the flush. Skip an untrackable key rather than truncate it (a
+// truncated key would collide in the descriptor primary key).
+const MAX_CACHE_KEY_LENGTH = 255;
+
+function isKeyTrackable(key: string): boolean {
+	return key.length <= MAX_CACHE_KEY_LENGTH;
+}
+
 const FLUSH_BATCH = 500;
 const DEFAULT_GAP_LOOKBACK = getMilliseconds('1h', 3_600_000);
 
@@ -165,7 +176,7 @@ async function xadd(fields: Record<string, string>): Promise<void> {
 }
 
 export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
-	if (!cacheStatsActiveFlag) {
+	if (!cacheStatsActiveFlag || !isKeyTrackable(hit.cacheKey)) {
 		return;
 	}
 
@@ -184,7 +195,7 @@ export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
 }
 
 export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
-	if (!cacheStatsActiveFlag) {
+	if (!cacheStatsActiveFlag || !isKeyTrackable(miss.cacheKey)) {
 		return;
 	}
 
@@ -203,7 +214,7 @@ export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
 
 // The per-key descriptor, emitted on a fill where every field is populated.
 export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<void> {
-	if (!cacheStatsActiveFlag) {
+	if (!cacheStatsActiveFlag || !isKeyTrackable(entry.cacheKey)) {
 		return;
 	}
 
@@ -235,7 +246,7 @@ export async function writeCacheTombstone(
 	key: string,
 	expiredAt: number,
 ): Promise<void> {
-	if (!cacheStatsActiveFlag) {
+	if (!cacheStatsActiveFlag || !isKeyTrackable(key)) {
 		return;
 	}
 

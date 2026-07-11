@@ -227,6 +227,47 @@ describe('captureCacheHit', () => {
 	});
 });
 
+describe('untrackable long keys (> varchar(255))', () => {
+	const longKey = 'x'.repeat(256);
+
+	it('skips a hit whose key would overflow the stats table', async () => {
+		await armFlag(null);
+		mockRedis.call.mockClear();
+
+		await captureCacheHit({ cacheKey: longKey, ageMs: 1, ttlMs: null, durationMs: null });
+
+		expect(mockRedis.call).not.toHaveBeenCalled();
+	});
+
+	it('skips the descriptor for a long key', async () => {
+		await armFlag(null);
+		mockRedis.call.mockClear();
+
+		await captureCacheDescriptor({
+			cacheKey: longKey,
+			method: 'GET',
+			path: '/x',
+			collection: null,
+			userId: null,
+			query: '{}',
+			url: '/x',
+			bytes: 0,
+			fillMs: 0,
+		});
+
+		expect(mockRedis.call).not.toHaveBeenCalled();
+	});
+
+	it('skips the tombstone for a long key', async () => {
+		await armFlag(null);
+		mockRedis.set.mockClear();
+
+		await writeCacheTombstone(longKey, 9_999_999_999_999);
+
+		expect(mockRedis.set).not.toHaveBeenCalled();
+	});
+});
+
 describe('captureCacheMiss', () => {
 	it('appends a miss with a real gap', async () => {
 		await armFlag(null);
