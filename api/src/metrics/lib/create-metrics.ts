@@ -176,6 +176,29 @@ export function createMetrics() {
 		return metric;
 	}
 
+	// Response-cache effectiveness on the endpoint ops already scrape: one labeled
+	// counter (result=hit|miss) so hit-ratio is a PromQL rate() away, independent of
+	// the CACHE_STATS opt-in (that's the durable drill-down; this is the live gauge).
+	function getCacheResponseMetric(): Counter | null {
+		if (services.includes('cache') === false || env['CACHE_ENABLED'] !== true) {
+			return null;
+		}
+
+		let metric = register.getSingleMetric('directus_cache_response_total') as
+			| Counter
+			| undefined;
+
+		if (!metric) {
+			metric = new Counter({
+				name: 'directus_cache_response_total',
+				help: 'Response-cache lookups by result (hit/miss)',
+				labelNames: ['result'],
+			});
+		}
+
+		return metric;
+	}
+
 	function getRedisErrorMetric(): Counter | null {
 		if (services.includes('redis') === false || redisConfigAvailable() !== true) {
 			return null;
@@ -302,6 +325,7 @@ export function createMetrics() {
 		getDatabaseErrorMetric,
 		getDatabaseResponseMetric,
 		getCacheErrorMetric,
+		getCacheResponseMetric,
 		getRedisErrorMetric,
 		getStorageErrorMetric,
 		aggregate,

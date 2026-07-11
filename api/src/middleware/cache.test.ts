@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
 		warn: vi.fn(),
 		shouldSkipCache: vi.fn(),
 		getCacheKey: vi.fn(),
+		responseMetricInc: vi.fn(),
 	};
 });
 
@@ -28,6 +29,18 @@ vi.mock('../cache.js', () => {
 });
 
 vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }));
+
+vi.mock('../metrics/index.js', () => {
+	return {
+		useMetrics: () => {
+			return {
+				getCacheResponseMetric: () => {
+					return { inc: mocks.responseMetricInc };
+				},
+			};
+		},
+	};
+});
 
 vi.mock('../utils/get-cache-headers.js', () => {
 	return { getCacheControlHeader: () => 'max-age=300' };
@@ -275,5 +288,21 @@ describe('checkCacheMiddleware', () => {
 		expect(captureCacheMiss).not.toHaveBeenCalled();
 		expect(res.setHeader).toHaveBeenCalledWith('x-cache-status', 'MISS');
 		expect(next).toHaveBeenCalled();
+	});
+
+	test('a HIT increments the response metric with result=hit', async () => {
+		primeHit(undefined);
+
+		await checkCacheMiddleware(makeReq(), makeRes(), next);
+
+		expect(mocks.responseMetricInc).toHaveBeenCalledWith({ result: 'hit' });
+	});
+
+	test('a MISS increments the response metric with result=miss', async () => {
+		getCacheValue.mockResolvedValue(undefined);
+
+		await checkCacheMiddleware(makeReq(), makeRes(), next);
+
+		expect(mocks.responseMetricInc).toHaveBeenCalledWith({ result: 'miss' });
 	});
 });
