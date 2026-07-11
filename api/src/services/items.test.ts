@@ -261,7 +261,7 @@ describe('Integration Tests', () => {
 				}
 			});
 
-			it('does not await action handlers by default (fire-and-forget)', async () => {
+			it('awaits action handlers by default', async () => {
 				let actionCompleted = false;
 
 				const handler = () =>
@@ -276,9 +276,32 @@ describe('Integration Tests', () => {
 
 				try {
 					await service.createOne({ name: 'Test' });
-					// Without awaitActionHooks, createOne resolves without waiting for the macrotask handler.
-					expect(actionCompleted).toBe(false);
+					// This fork awaits action hooks by default.
+					expect(actionCompleted).toBe(true);
 				} finally {
+					emitter.offAction('test.items.create', handler);
+				}
+			});
+
+			it('skips awaiting when awaitActionHooks is false', async () => {
+				let actionCompleted = false;
+
+				const handler = () => {
+					return new Promise<void>((resolve) => {
+						setTimeout(() => {
+							actionCompleted = true;
+							resolve();
+						}, 0);
+					});
+				};
+
+				emitter.onAction('test.items.create', handler);
+
+				try {
+					await service.createOne({ name: 'Test' }, { awaitActionHooks: false });
+					expect(actionCompleted).toBe(false);
+				}
+				finally {
 					emitter.offAction('test.items.create', handler);
 				}
 			});
