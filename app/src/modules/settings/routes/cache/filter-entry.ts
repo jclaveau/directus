@@ -5,6 +5,11 @@ import type { Filter } from '@directus/types';
  * page's field-filter (built from the descriptor collection) can narrow the
  * already-loaded list without a round-trip. `fieldMap` translates collection
  * field names to the row's own keys; unknown operators pass (never exclude).
+ *
+ * Deliberately NOT delegated to `@directus/utils` `generateJoi`: that builds a
+ * validation schema, not a filter matcher — an absent field passes validation
+ * (so `{user:null}` wrongly matches `user_id.email._contains`) and `_null:false`
+ * polarity diverges. Both are covered by the filter-entry tests as regressions.
  */
 export function matchesFilter(
 	entry: Record<string, unknown>,
