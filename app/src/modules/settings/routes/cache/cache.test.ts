@@ -174,10 +174,16 @@ describe('CachePage', () => {
 		open.mockRestore();
 	});
 
-	it('opens a detail drawer with the live cached value on row click', async () => {
+	it('opens a detail drawer with the live Redis state on row click', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
-			if (url === '/utils/cache/value') {
-				const data = { exists: true, value: { hello: 'world' } };
+			if (url === '/utils/cache/entry') {
+				const data = {
+					exists: true,
+					value: { hello: 'world' },
+					tags: ['articles', 'articles:id=5'],
+					expiry: { exp: 0, createdAt: 0, ttlMs: 300000 },
+				};
+
 				return Promise.resolve({ data: { data } }) as never;
 			}
 
@@ -192,12 +198,14 @@ describe('CachePage', () => {
 		await wrapper.find('.entry-row').trigger('click');
 		await flushPromises();
 
-		expect(api.get).toHaveBeenCalledWith('/utils/cache/value', {
+		expect(api.get).toHaveBeenCalledWith('/utils/cache/entry', {
 			params: { key: 'app-key-000000000000' },
 		});
 
-		// descriptor rows + the pretty-printed cached value both render
+		// descriptor rows, scoped-cache tags, TTL and the cached value all render
 		expect(wrapper.text()).toContain('ann@corp.io');
+		expect(wrapper.text()).toContain('articles:id=5');
+		expect(wrapper.text()).toContain('300s');
 		expect(wrapper.text()).toContain('"hello": "world"');
 	});
 

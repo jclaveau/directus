@@ -200,20 +200,34 @@ export class UtilsService {
 		return listCacheEntries();
 	}
 
-	// The live cached response for a single key, if it hasn't been evicted/expired
-	// out of the store — the descriptor in Postgres outlives the value in Redis.
-	async readCacheValue(key: string): Promise<{ exists: boolean; value: unknown }> {
+	// The live Redis state for a single key — the cached response plus its
+	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
+	// descriptor holds. All may be gone: the descriptor outlives the value.
+	async readCacheEntry(key: string): Promise<{
+		exists: boolean;
+		value: unknown;
+		tags: string[] | null;
+		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
+	}> {
 		this.assertCacheAdmin('inspect a cache entry');
 
 		const { cache } = getCache();
 
 		if (!cache) {
-			return { exists: false, value: null };
+			return { exists: false, value: null, tags: null, expiry: null };
 		}
 
 		const value = await getCacheValue(cache, key);
+		const expiry = (await getCacheValue(cache, `${key}__expires_at`)) ?? null;
+		const tagged = await getCacheValue(cache, `${key}__tags`);
 
-		return { exists: value !== undefined, value: value ?? null };
+		// `__tags` stores the comma-joined scoped-cache tags (only when the
+		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).
+		const tags = typeof tagged?.tags === 'string'
+			? tagged.tags.split(', ').filter(Boolean)
+			: null;
+
+		return { exists: value !== undefined, value: value ?? null, tags, expiry };
 	}
 
 	async evictCacheEntry(key: string): Promise<void> {

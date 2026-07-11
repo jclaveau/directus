@@ -120,8 +120,8 @@ describe('Services / Utils', () => {
 			);
 		});
 
-		it('readCacheValue rejects a non-admin user', async () => {
-			await expect(nonAdminService().readCacheValue('k1')).rejects.toThrowError(
+		it('readCacheEntry rejects a non-admin user', async () => {
+			await expect(nonAdminService().readCacheEntry('k1')).rejects.toThrowError(
 				oneLine`'test-user' does not have permission to inspect a cache entry
 				as not being an admin`,
 			);
@@ -172,34 +172,55 @@ describe('Services / Utils', () => {
 			expect(evictCacheEntriesForPath).not.toHaveBeenCalled();
 		});
 
-		it('readCacheValue returns the live value when present', async () => {
+		it('readCacheEntry returns the value + tags + expiry when present', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
-			vi.mocked(getCacheValue).mockResolvedValue({ data: [1, 2] });
 
-			await expect(adminService().readCacheValue('k1')).resolves.toEqual({
+			vi.mocked(getCacheValue).mockImplementation((_cache, key) => {
+				if (key === 'k1') {
+					return Promise.resolve({ data: [1, 2] });
+				}
+
+				if (key === 'k1__expires_at') {
+					return Promise.resolve({ exp: 5, createdAt: 1, ttlMs: 1000 });
+				}
+
+				if (key === 'k1__tags') {
+					return Promise.resolve({ tags: 'articles, articles:id=5' });
+				}
+
+				return Promise.resolve(undefined);
+			});
+
+			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: true,
 				value: { data: [1, 2] },
+				tags: ['articles', 'articles:id=5'],
+				expiry: { exp: 5, createdAt: 1, ttlMs: 1000 },
 			});
 
 			expect(getCacheValue).toHaveBeenCalledWith(mockCache, 'k1');
 		});
 
-		it('readCacheValue reports an absent value', async () => {
+		it('readCacheEntry reports an absent value with null sidecars', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
 			vi.mocked(getCacheValue).mockResolvedValue(undefined);
 
-			await expect(adminService().readCacheValue('k1')).resolves.toEqual({
+			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
+				tags: null,
+				expiry: null,
 			});
 		});
 
-		it('readCacheValue returns absent without a cache', async () => {
+		it('readCacheEntry returns absent without a cache', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: null } as any);
 
-			await expect(adminService().readCacheValue('k1')).resolves.toEqual({
+			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
+				tags: null,
+				expiry: null,
 			});
 
 			expect(getCacheValue).not.toHaveBeenCalled();
