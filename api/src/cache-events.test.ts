@@ -494,6 +494,22 @@ describe('flushCacheEvents', () => {
 		expect(mockRedis.call).not.toHaveBeenCalled();
 		expect(mockDb.batchInsert).not.toHaveBeenCalled();
 	});
+
+	it('drops a poison batch (still XDELs) instead of wedging when the insert fails', async () => {
+		mockDb.batchInsert.mockRejectedValueOnce(new Error('value too long'));
+
+		xrangeBatch = [
+			streamEntry('1-0', { kind: 'h', cacheKey: 'k', ageMs: '1', ttlMs: '1', ts: '1' }),
+		];
+
+		// A deterministically-unpersistable batch must not reject the flush...
+		await expect(flushCacheEvents()).resolves.toBe(1);
+
+		// ...and it's still XDEL'd, so it can't be re-read from the stream head every
+		// subsequent tick (the wedge this guards against).
+		expect(mockDb.batchInsert).toHaveBeenCalledTimes(1);
+		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0');
+	});
 });
 
 describe('enforceCacheStatsBudget', () => {
