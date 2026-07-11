@@ -8,6 +8,7 @@ import {
 	readCacheMissGap,
 } from '../cache-events.js';
 import { useLogger } from '../logger/index.js';
+import { useMetrics } from '../metrics/index.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -63,6 +64,11 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		res.setHeader('Vary', 'Origin, Cache-Control');
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'HIT');
 
+		// Aggregate hit-ratio on the /metrics endpoint (in-memory counter, no opt-in).
+		useMetrics()
+			?.getCacheResponseMetric()
+			?.inc({ result: 'hit' });
+
 		// Fire-and-forget hit telemetry for TTL tuning — age/TTL come off the
 		// sibling just read above, so no extra round-trip. Keyed by the cache key;
 		// the descriptor is written on fill (respond.ts). Skipped for pre-
@@ -96,6 +102,10 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		return res.json(cachedData);
 	} else {
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
+
+		useMetrics()
+			?.getCacheResponseMetric()
+			?.inc({ result: 'miss' });
 
 		// A cacheable request that wasn't cached = real demand. The tombstone (if
 		// any) turns it into a gap-since-expiry — the signal for lengthening TTL.
