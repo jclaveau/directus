@@ -59,9 +59,15 @@ const selectedEntry = ref<CacheEntry | null>(null);
 const cachedValue = ref<unknown>(null);
 const cachedValueExists = ref(false);
 const cachedTags = ref<string[] | null>(null);
+const cachedTagCounts = ref<Record<string, number>>({});
+const cachedTombstone = ref<number | null>(null);
 
 const cachedExpiry = ref<
 	{ exp: number; createdAt: number; ttlMs: number | null } | null
+>(null);
+
+const cachedSizes = ref<
+	{ uncompressed: number; compressed: number } | null
 >(null);
 
 const valueLoading = ref(false);
@@ -108,6 +114,62 @@ const ttlLabel = computed(() => {
 	return cachedExpiry.value.ttlMs === null
 		? '∞'
 		: `${Math.round(cachedExpiry.value.ttlMs / 1000)}s`;
+});
+
+function formatTime(ms: number): string {
+	return new Date(ms).toLocaleString();
+}
+
+// Live Redis metadata rows for the drawer (footprint, precise timestamps, the
+// tombstone, and which dimensions the opaque cache key varies on).
+const redisFields = computed(() => {
+	const rows: { label: string; value: string }[] = [];
+	const sizes = cachedSizes.value;
+	const expiry = cachedExpiry.value;
+
+	if (sizes) {
+		const ratio = sizes.uncompressed > 0
+			? Math.round((sizes.compressed / sizes.uncompressed) * 100)
+			: 0;
+
+		const packed = formatSize(sizes.compressed);
+		const raw = formatSize(sizes.uncompressed);
+
+		rows.push({
+			label: t('size', 'Size'),
+			value: `${packed} / ${raw} raw (${ratio}%)`,
+		});
+	}
+
+	if (expiry) {
+		rows.push({
+			label: t('filled_at', 'Filled at'),
+			value: formatTime(expiry.createdAt),
+		});
+
+		rows.push({
+			label: t('expires_at', 'Expires at'),
+			value: formatTime(expiry.exp),
+		});
+	}
+
+	if (ttlLabel.value) {
+		rows.push({ label: t('ttl', 'TTL'), value: ttlLabel.value });
+	}
+
+	if (cachedTombstone.value) {
+		rows.push({
+			label: t('last_expired', 'Last expired'),
+			value: formatTime(cachedTombstone.value),
+		});
+	}
+
+	rows.push({
+		label: t('key_varies_on', 'Key varies on'),
+		value: 'version · user · path · query · ip',
+	});
+
+	return rows;
 });
 
 const searchedEntries = computed(() => {
@@ -229,7 +291,10 @@ async function openEntry(entry: CacheEntry) {
 	cachedValue.value = null;
 	cachedValueExists.value = false;
 	cachedTags.value = null;
+	cachedTagCounts.value = {};
 	cachedExpiry.value = null;
+	cachedSizes.value = null;
+	cachedTombstone.value = null;
 	valueLoading.value = true;
 
 	try {
@@ -241,7 +306,10 @@ async function openEntry(entry: CacheEntry) {
 		cachedValueExists.value = data.exists;
 		cachedValue.value = data.value;
 		cachedTags.value = data.tags;
+		cachedTagCounts.value = data.tagCounts ?? {};
 		cachedExpiry.value = data.expiry;
+		cachedSizes.value = data.sizes;
+		cachedTombstone.value = data.tombstone;
 	}
 	catch {
 		cachedValueExists.value = false;
@@ -482,19 +550,30 @@ onMounted(load);
 				</div>
 
 				<div class="redis-block">
-					<div class="value-head">
+					<div class="fields">
+						<div
+							v-for="field in redisFields"
+							:key="field.label"
+							class="field"
+						>
+							<span class="field-label">{{ field.label }}</span>
+							<span class="field-value">{{ field.value }}</span>
+						</div>
+					</div>
+
+					<div class="value-head tags-head">
 						{{ t('scoped_cache_tags', 'Scoped cache tags') }}
 					</div>
 					<div v-if="cachedTags && cachedTags.length" class="tags">
 						<span v-for="tag in cachedTags" :key="tag" class="tag">
 							{{ tag }}
+							<template v-if="cachedTagCounts[tag]">
+								({{ cachedTagCounts[tag] }})
+							</template>
 						</span>
 					</div>
 					<div v-else class="value-note">
 						{{ t('no_scoped_cache_tags', 'None (needs CACHE_TAGS_HEADER)') }}
-					</div>
-					<div v-if="ttlLabel" class="ttl-line">
-						{{ t('ttl', 'TTL') }}: {{ ttlLabel }}
 					</div>
 				</div>
 
@@ -736,10 +815,8 @@ table.entries .entry-row {
 	font-size: 12px;
 }
 
-.ttl-line {
-	margin-block-start: 12px;
-	color: var(--theme--foreground-subdued);
-	font-size: 13px;
+.tags-head {
+	margin-block-start: 16px;
 }
 
 .value {
