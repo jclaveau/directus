@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import api from '@/api';
+import { useClipboard } from '@/composables/use-clipboard';
 import { getRootPath } from '@/utils/get-root-path';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -20,6 +21,7 @@ import {
 	splitSections,
 	type CacheEntry,
 	type EndpointGroup,
+	type QueryGroup,
 } from './cache-view';
 
 // The filter builder is keyed by the descriptor collection's field names; map
@@ -39,6 +41,7 @@ const FILTER_FIELD_MAP: Record<string, keyof CacheEntry> = {
 defineOptions({ name: 'SettingsCache' });
 
 const { t } = useI18n();
+const { copyToClipboard } = useClipboard();
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -122,6 +125,24 @@ function userOf(user: CacheEntry['user']): string {
 // link opens the exact endpoint in a new tab (the session cookie authenticates it).
 function hrefFor(item: { url: string }): string {
 	return `${getRootPath().replace(/\/$/, '')}${item.url}`;
+}
+
+function openQuery(query: QueryGroup) {
+	window.open(hrefFor(query), '_blank', 'noopener');
+}
+
+function copyQuery(query: QueryGroup) {
+	let json = query.query;
+
+	try {
+		// Pretty-print the stored query so the clipboard gets readable JSON.
+		json = JSON.stringify(JSON.parse(query.query), null, 2);
+	}
+	catch {
+		// Leave the raw stored value if it isn't valid JSON.
+	}
+
+	copyToClipboard(json, { success: t('copy_query_success', 'Query copied') });
 }
 
 onMounted(load);
@@ -236,18 +257,7 @@ onMounted(load);
 										small
 									/>
 									<span class="method">{{ q.method }}</span>
-									<a
-										v-if="q.url"
-										class="query"
-										:href="hrefFor(q)"
-										:title="q.url"
-										target="_blank"
-										rel="noopener noreferrer"
-										@click.stop
-									>
-										{{ formatQuery(q.query) }}
-									</a>
-									<span v-else class="query" :title="q.query">
+									<span class="query" :title="q.query">
 										{{ formatQuery(q.query) }}
 									</span>
 									<span class="stat">
@@ -257,6 +267,21 @@ onMounted(load);
 										{{ q.totalHits }} {{ t('hits', 'hits') }}
 									</span>
 									<span class="stat">{{ formatSize(q.totalSize) }}</span>
+									<v-icon
+										v-if="q.url"
+										v-tooltip.bottom="t('open_in_new_tab', 'Open in new tab')"
+										name="open_in_new"
+										small
+										clickable
+										@click.stop="openQuery(q)"
+									/>
+									<v-icon
+										v-tooltip.bottom="t('copy_query', 'Copy query as JSON')"
+										name="content_copy"
+										small
+										clickable
+										@click.stop="copyQuery(q)"
+									/>
 								</div>
 
 								<div v-if="expanded[q.key]" class="entries-scroll">

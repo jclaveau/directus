@@ -10,6 +10,10 @@ vi.mock('@/utils/get-root-path', () => {
 	return { getRootPath: () => '/admin/' };
 });
 
+vi.mock('@/utils/notify', () => {
+	return { notify: vi.fn() };
+});
+
 import api from '@/api';
 import CachePage from './cache.vue';
 
@@ -127,6 +131,38 @@ describe('CachePage', () => {
 		expect(api.delete).toHaveBeenCalledWith('/utils/cache', {
 			params: { key: 'app-key-000000000000' },
 		});
+	});
+
+	it('opens the query url and copies the query as pretty JSON', async () => {
+		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+		const open = vi.spyOn(window, 'open').mockReturnValue(null);
+		const writeText = vi.fn().mockResolvedValue(undefined);
+
+		Object.defineProperty(navigator, 'clipboard', {
+			value: { writeText },
+			configurable: true,
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// Expand the endpoint so the method+query header (with the actions) renders.
+		await wrapper.find('.endpoint-header').trigger('click');
+
+		await wrapper.find('.query-header v-icon[name="open_in_new"]').trigger('click');
+
+		expect(open).toHaveBeenCalledWith(
+			expect.stringContaining('/items/articles?limit=5'),
+			'_blank',
+			'noopener',
+		);
+
+		await wrapper.find('.query-header v-icon[name="content_copy"]').trigger('click');
+		await flushPromises();
+
+		expect(writeText).toHaveBeenCalledWith('{\n  "limit": 5\n}');
+
+		open.mockRestore();
 	});
 
 	it('filters by the user_id.email m2o from the search-input', async () => {
