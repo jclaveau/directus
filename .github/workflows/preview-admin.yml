@@ -18,7 +18,7 @@ on:
       idle_minutes:
         description: Auto-shutdown after this many minutes with no requests
         type: number
-        default: 15
+        default: 30
   # Auto-boot on every push to a PR that carries the `Preview` label (and when the
   # label is first added). pull_request_target resolves this file from the PR's BASE
   # branch, so the workflow must also live on the branches PRs target.
@@ -198,7 +198,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
-          IDLE_MINUTES: ${{ inputs.idle_minutes || 15 }}
+          IDLE_MINUTES: ${{ inputs.idle_minutes || 30 }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           # Backticks are escaped (\`) so they stay literal markdown, not shell
@@ -218,7 +218,7 @@ jobs:
       - name: Stream logs + publish URL + idle shutdown
         env:
           # No dispatch input on a PR event → fall back to the dispatch default.
-          IDLE_MINUTES: ${{ inputs.idle_minutes || 15 }}
+          IDLE_MINUTES: ${{ inputs.idle_minutes || 30 }}
         run: |
           # Live-stream everything to the run log for the job's lifetime (this step
           # stays alive, so its stdout keeps flowing in the Actions UI).
