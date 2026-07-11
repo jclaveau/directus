@@ -78,6 +78,14 @@ const PrivateView = {
 	template: '<div><slot /><slot name="actions" /><slot name="sidebar" /></div>',
 };
 
+// Real stub so a test can emit a page change and assert the rows re-slice.
+const VPagination = {
+	name: 'VPagination',
+	props: ['modelValue', 'length', 'totalVisible'],
+	emits: ['update:modelValue'],
+	template: '<div class="v-pagination-stub" />',
+};
+
 // Hyphenated Directus components (private-view, v-*, …) aren't registered here;
 // treat them as custom elements so Vue renders their default slot — the
 // `.cache-page` body and its table — without stubbing each one. search-input is
@@ -85,11 +93,12 @@ const PrivateView = {
 const global = {
 	plugins: [i18n],
 	directives: { tooltip: {} },
-	components: { SearchInput, PrivateView },
+	components: { SearchInput, PrivateView, VPagination },
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
-				return tag.includes('-') && tag !== 'search-input' && tag !== 'private-view';
+				const stubbed = ['search-input', 'private-view', 'v-pagination'];
+				return tag.includes('-') && !stubbed.includes(tag);
 			},
 		},
 	},
@@ -190,6 +199,40 @@ describe('CachePage', () => {
 		// descriptor rows + the pretty-printed cached value both render
 		expect(wrapper.text()).toContain('ann@corp.io');
 		expect(wrapper.text()).toContain('"hello": "world"');
+	});
+
+	it('paginates the item rows within a group at 25 per page', async () => {
+		const many = Array.from({ length: 30 }, (_unused, index) => {
+			return {
+				key: `k-${String(index).padStart(3, '0')}`,
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				user: null,
+				query: '{}',
+				url: '/items/articles',
+				size: 10,
+				hits: 1,
+				createdAt: Date.now(),
+				expiresAt: null,
+				lastHitAt: null,
+			};
+		});
+
+		vi.mocked(api.get).mockResolvedValue({ data: { data: many } } as never);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+
+		expect(wrapper.findAll('tbody tr')).toHaveLength(25);
+
+		wrapper.findComponent(VPagination).vm.$emit('update:modelValue', 2);
+		await flushPromises();
+
+		expect(wrapper.findAll('tbody tr')).toHaveLength(5);
 	});
 
 	it('filters by the user_id.email m2o from the search-input', async () => {

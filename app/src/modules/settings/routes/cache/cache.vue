@@ -38,6 +38,8 @@ const FILTER_FIELD_MAP: Record<string, keyof CacheEntry> = {
 	last_filled: 'createdAt',
 };
 
+const PAGE_SIZE = 25;
+
 defineOptions({ name: 'SettingsCache' });
 
 const { t } = useI18n();
@@ -51,6 +53,7 @@ const now = ref(Date.now());
 const refreshInterval = ref<number | null>(null);
 const search = ref('');
 const filter = ref<Filter | null>(null);
+const entryPage = ref<Record<string, number>>({});
 
 const selectedEntry = ref<CacheEntry | null>(null);
 const cachedValue = ref<unknown>(null);
@@ -139,6 +142,25 @@ async function evictPath(path: string) {
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
+}
+
+function pageCount(query: QueryGroup): number {
+	return Math.ceil(query.entries.length / PAGE_SIZE);
+}
+
+// Clamp to the available pages so a shrinking group (after a filter/search)
+// never lands on an empty page.
+function currentPage(query: QueryGroup): number {
+	return Math.min(entryPage.value[query.key] ?? 1, Math.max(pageCount(query), 1));
+}
+
+function pagedEntries(query: QueryGroup): CacheEntry[] {
+	const start = (currentPage(query) - 1) * PAGE_SIZE;
+	return query.entries.slice(start, start + PAGE_SIZE);
+}
+
+function setEntryPage(query: QueryGroup, page: number) {
+	entryPage.value[query.key] = page;
 }
 
 // Thin template adapters: bind the reactive clock + i18n labels so the deeply
@@ -368,7 +390,7 @@ onMounted(load);
 										</thead>
 										<tbody>
 											<tr
-												v-for="entry in q.entries"
+												v-for="entry in pagedEntries(q)"
 												:key="entry.key"
 												class="entry-row"
 												@click="openEntry(entry)"
@@ -401,6 +423,15 @@ onMounted(load);
 										</tbody>
 									</table>
 								</div>
+
+								<v-pagination
+									v-if="expanded[q.key] && pageCount(q) > 1"
+									class="pagination"
+									:length="pageCount(q)"
+									:model-value="currentPage(q)"
+									:total-visible="7"
+									@update:model-value="setEntryPage(q, $event)"
+								/>
 							</div>
 						</div>
 					</div>
@@ -603,6 +634,10 @@ table.entries tbody tr:hover {
 
 table.entries .entry-row {
 	cursor: pointer;
+}
+
+.pagination {
+	margin: 12px;
 }
 
 .entry-detail {
