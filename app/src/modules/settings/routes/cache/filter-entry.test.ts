@@ -72,6 +72,38 @@ describe('matchesFilter', () => {
 		expect(matchesFilter({ user: null }, contains, MAP)).toBe(false);
 	});
 
+	it('matches a scalar (non-operator) condition by equality', () => {
+		expect(matchesFilter(row, { method: 'GET' })).toBe(true);
+		expect(matchesFilter(row, { method: 'POST' })).toBe(false);
+	});
+
+	it('applies the string operators', () => {
+		expect(matchesFilter(row, { path: { _neq: 'z' } })).toBe(true);
+		expect(matchesFilter(row, { path: { _neq: '/items/articles' } })).toBe(false);
+		expect(matchesFilter(row, { path: { _icontains: 'ARTICLES' } })).toBe(true);
+		expect(matchesFilter(row, { path: { _ncontains: 'zzz' } })).toBe(true);
+		expect(matchesFilter(row, { path: { _ncontains: 'articles' } })).toBe(false);
+		expect(matchesFilter(row, { path: { _starts_with: '/items' } })).toBe(true);
+		expect(matchesFilter(row, { path: { _ends_with: 'articles' } })).toBe(true);
+	});
+
+	it('applies the numeric operators', () => {
+		expect(matchesFilter(row, { bytes: { _gte: 100 } }, MAP)).toBe(true);
+		expect(matchesFilter(row, { bytes: { _gte: 200 } }, MAP)).toBe(false);
+		expect(matchesFilter(row, { bytes: { _lt: 200 } }, MAP)).toBe(true);
+		expect(matchesFilter(row, { bytes: { _lt: 50 } }, MAP)).toBe(false);
+	});
+
+	it('applies the null / empty operators on both operand polarities', () => {
+		expect(matchesFilter(row, { user: { _null: false } })).toBe(true);
+		expect(matchesFilter({ user: null }, { user: { _null: false } })).toBe(false);
+		expect(matchesFilter(row, { user: { _nnull: false } })).toBe(false);
+		expect(matchesFilter(row, { user: { _empty: false } })).toBe(true);
+		expect(matchesFilter({ user: '' }, { user: { _empty: true } })).toBe(true);
+		expect(matchesFilter(row, { user: { _nempty: true } })).toBe(true);
+		expect(matchesFilter({ user: '' }, { user: { _nempty: false } })).toBe(true);
+	});
+
 	it('unknown operators never exclude', () => {
 		expect(matchesFilter(row, { path: { _weird: 'x' } }, MAP)).toBe(true);
 	});
