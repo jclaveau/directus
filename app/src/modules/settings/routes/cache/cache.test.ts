@@ -165,6 +165,33 @@ describe('CachePage', () => {
 		open.mockRestore();
 	});
 
+	it('opens a detail drawer with the live cached value on row click', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/value') {
+				const data = { exists: true, value: { hello: 'world' } };
+				return Promise.resolve({ data: { data } }) as never;
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } }) as never;
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+		await wrapper.find('.entry-row').trigger('click');
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache/value', {
+			params: { key: 'app-key-000000000000' },
+		});
+
+		// descriptor rows + the pretty-printed cached value both render
+		expect(wrapper.text()).toContain('ann@corp.io');
+		expect(wrapper.text()).toContain('"hello": "world"');
+	});
+
 	it('filters by the user_id.email m2o from the search-input', async () => {
 		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
 

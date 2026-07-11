@@ -52,6 +52,44 @@ const refreshInterval = ref<number | null>(null);
 const search = ref('');
 const filter = ref<Filter | null>(null);
 
+const selectedEntry = ref<CacheEntry | null>(null);
+const cachedValue = ref<unknown>(null);
+const cachedValueExists = ref(false);
+const valueLoading = ref(false);
+
+// Descriptor columns (from Postgres) shown as readonly rows in the detail drawer.
+const detailFields = computed(() => {
+	const entry = selectedEntry.value;
+
+	if (!entry) {
+		return [];
+	}
+
+	return [
+		{ label: t('method', 'Method'), value: entry.method },
+		{ label: t('path', 'Path'), value: entry.path },
+		{ label: t('collection', 'Collection'), value: entry.collection ?? '—' },
+		{ label: t('user_label', 'User'), value: userOf(entry.user) },
+		{ label: t('query', 'Query'), value: formatQuery(entry.query) },
+		{ label: t('url', 'URL'), value: entry.url || '—' },
+		{ label: t('size', 'Size'), value: formatSize(entry.size) },
+		{ label: t('hits', 'Hits'), value: String(entry.hits) },
+		{ label: t('age', 'Age'), value: ageOf(entry.createdAt) },
+		{ label: t('last_hit', 'Last hit'), value: lastHitOf(entry.lastHitAt) },
+		{ label: t('expires_in', 'Expires in'), value: expiryOf(entry.expiresAt) },
+		{ label: t('key', 'Key'), value: entry.key },
+	];
+});
+
+const prettyValue = computed(() => {
+	try {
+		return JSON.stringify(cachedValue.value, null, 2);
+	}
+	catch {
+		return String(cachedValue.value);
+	}
+});
+
 const searchedEntries = computed(() => {
 	return filterEntries(entries.value, filter.value, search.value, FILTER_FIELD_MAP);
 });
@@ -143,6 +181,34 @@ function copyQuery(query: QueryGroup) {
 	}
 
 	copyToClipboard(json, { success: t('copy_query_success', 'Query copied') });
+}
+
+// Open the detail drawer for a row and fetch its live cached value from Redis
+// (the descriptor outlives the value, so it may already be gone).
+async function openEntry(entry: CacheEntry) {
+	selectedEntry.value = entry;
+	cachedValue.value = null;
+	cachedValueExists.value = false;
+	valueLoading.value = true;
+
+	try {
+		const response = await api.get('/utils/cache/value', {
+			params: { key: entry.key },
+		});
+
+		cachedValueExists.value = response.data.data.exists;
+		cachedValue.value = response.data.data.value;
+	}
+	catch {
+		cachedValueExists.value = false;
+	}
+	finally {
+		valueLoading.value = false;
+	}
+}
+
+function closeEntry() {
+	selectedEntry.value = null;
 }
 
 onMounted(load);
@@ -301,7 +367,12 @@ onMounted(load);
 											</tr>
 										</thead>
 										<tbody>
-											<tr v-for="entry in q.entries" :key="entry.key">
+											<tr
+												v-for="entry in q.entries"
+												:key="entry.key"
+												class="entry-row"
+												@click="openEntry(entry)"
+											>
 												<td>{{ userOf(entry.user) }}</td>
 												<td class="num">{{ entry.hits }}</td>
 												<td class="num">{{ ageOf(entry.createdAt) }}</td>
@@ -323,7 +394,7 @@ onMounted(load);
 														name="delete"
 														small
 														clickable
-														@click="evictEntry(entry)"
+														@click.stop="evictEntry(entry)"
 													/>
 												</td>
 											</tr>
@@ -336,6 +407,41 @@ onMounted(load);
 				</div>
 			</div>
 		</div>
+
+		<v-drawer
+			:model-value="!!selectedEntry"
+			:title="selectedEntry ? selectedEntry.path : ''"
+			:subtitle="selectedEntry ? selectedEntry.method : ''"
+			icon="database"
+			@cancel="closeEntry"
+			@update:model-value="closeEntry"
+		>
+			<div v-if="selectedEntry" class="entry-detail">
+				<div class="fields">
+					<div
+						v-for="field in detailFields"
+						:key="field.label"
+						class="field"
+					>
+						<span class="field-label">{{ field.label }}</span>
+						<span class="field-value">{{ field.value }}</span>
+					</div>
+				</div>
+
+				<div class="value-block">
+					<div class="value-head">
+						{{ t('cached_value', 'Cached value') }}
+					</div>
+					<div v-if="valueLoading" class="value-note">
+						{{ t('loading', 'Loading…') }}
+					</div>
+					<div v-else-if="!cachedValueExists" class="value-note">
+						{{ t('cache_value_absent', 'Not in the cache (evicted or expired)') }}
+					</div>
+					<pre v-else class="value">{{ prettyValue }}</pre>
+				</div>
+			</div>
+		</v-drawer>
 	</private-view>
 </template>
 
@@ -493,5 +599,59 @@ table.entries .num {
 
 table.entries tbody tr:hover {
 	background-color: var(--theme--background-subdued);
+}
+
+table.entries .entry-row {
+	cursor: pointer;
+}
+
+.entry-detail {
+	padding: var(--content-padding);
+}
+
+.fields {
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 8px 24px;
+	margin-block-end: 32px;
+}
+
+.field {
+	display: contents;
+}
+
+.field-label {
+	color: var(--theme--foreground-subdued);
+	font-size: 14px;
+}
+
+.field-value {
+	font-family: var(--theme--fonts--monospace--font-family);
+	font-size: 13px;
+	overflow-wrap: anywhere;
+}
+
+.value-head {
+	color: var(--theme--foreground-subdued);
+	font-size: 16px;
+	font-weight: 700;
+	margin-block-end: 8px;
+	text-transform: uppercase;
+}
+
+.value-note {
+	color: var(--theme--foreground-subdued);
+	font-style: italic;
+}
+
+.value {
+	max-block-size: 60vh;
+	padding: 12px;
+	background-color: var(--theme--background-subdued);
+	border-radius: var(--theme--border-radius);
+	font-family: var(--theme--fonts--monospace--font-family);
+	font-size: 13px;
+	white-space: pre;
+	overflow: auto;
 }
 </style>
