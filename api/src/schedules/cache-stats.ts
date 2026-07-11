@@ -5,6 +5,7 @@ import {
 	reapCacheDescriptors,
 	reapCacheEvents,
 	refreshCacheStatsFlag,
+	subscribeCacheStatsToggle,
 } from '../cache-events.js';
 import { useLogger } from '../logger/index.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
@@ -16,13 +17,10 @@ const FLUSH_CRON = '*/10 * * * * *';
 // orphaned descriptors left behind (the dimension has no retention of its own).
 const REAP_CRON = '0 3 * * *';
 
-// Per-instance flag re-read cadence — a live toggle/autokill propagates within this.
-const FLAG_REFRESH_MS = 5_000;
-
 /**
  * Boot the cache-stats pipeline. The flush + budget watchdog run on a single node
- * (SynchronizedClock picks one per tick); the flag refresh runs on every node so a
- * runtime toggle reaches each instance's hot-path gate.
+ * (SynchronizedClock picks one per tick); each node primes its gate from the Redis
+ * key then subscribes to the bus so a runtime toggle/autokill flips it at once.
  */
 export default async function schedule(): Promise<boolean> {
 	if (!cacheStatsConfigured()) {
@@ -35,14 +33,10 @@ export default async function schedule(): Promise<boolean> {
 
 	const logger = useLogger();
 
-	// Prime the gate before the first request, then keep it fresh per instance.
+	// Prime the gate from the durable key, then take live updates off the bus
+	// (event-driven — no per-node poll). Boot-read covers a missed publish.
 	await refreshCacheStatsFlag();
-
-	setInterval(() => {
-		void refreshCacheStatsFlag().catch((err) => {
-			logger.warn(err, `[cache-stats] flag refresh failed. ${err.message}`);
-		});
-	}, FLAG_REFRESH_MS).unref();
+	subscribeCacheStatsToggle();
 
 	scheduleSynchronizedJob('cache-stats', FLUSH_CRON, async () => {
 		try {

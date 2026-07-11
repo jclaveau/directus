@@ -16,6 +16,7 @@ import {
 	reapCacheEvents,
 	refreshCacheStatsFlag,
 	setCacheStatsEnabled,
+	subscribeCacheStatsToggle,
 	truncateCacheEvents,
 	writeCacheTombstone,
 } from './cache-events.js';
@@ -34,6 +35,9 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
+
+const mockBus = { publish: vi.fn(), subscribe: vi.fn() };
+vi.mock('./bus/index.js', () => ({ useBus: () => mockBus }));
 
 const STREAM = 'scalabus:stats:events';
 
@@ -567,6 +571,43 @@ describe('setCacheStatsEnabled', () => {
 		expect(mockRedis.set).toHaveBeenCalledWith('scalabus:stats:enabled', '1');
 		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:killed_reason');
 		expect(cacheStatsActive()).toBe(true);
+	});
+
+	it('publishes the toggle on the bus so other nodes flip at once', async () => {
+		await setCacheStatsEnabled(true);
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheStatsToggled', {
+			enabled: true,
+		});
+
+		await setCacheStatsEnabled(false, 'autokill: x');
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheStatsToggled', {
+			enabled: false,
+		});
+	});
+});
+
+describe('subscribeCacheStatsToggle', () => {
+	it('re-reads the flag when a toggle lands on the bus', async () => {
+		subscribeCacheStatsToggle();
+
+		expect(mockBus.subscribe).toHaveBeenCalledWith(
+			'cacheStatsToggled',
+			expect.any(Function),
+		);
+
+		// The handler re-reads the durable key (enable → active).
+		mockRedis.get.mockResolvedValueOnce('1');
+		const handler = mockBus.subscribe.mock.calls[0]![1];
+		await handler({ enabled: true });
+		expect(cacheStatsActive()).toBe(true);
+	});
+
+	it('does not subscribe without redis', () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		subscribeCacheStatsToggle();
+		expect(mockBus.subscribe).not.toHaveBeenCalled();
 	});
 });
 

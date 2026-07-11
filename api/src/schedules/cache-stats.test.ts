@@ -6,6 +6,7 @@ import {
 	reapCacheDescriptors,
 	reapCacheEvents,
 	refreshCacheStatsFlag,
+	subscribeCacheStatsToggle,
 } from '../cache-events.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import cacheStatsSchedule from './cache-stats.js';
@@ -43,20 +44,13 @@ describe('cache-stats schedule', () => {
 		expect(scheduleSynchronizedJob).not.toHaveBeenCalled();
 	});
 
-	it('refreshes the flag on each interval tick', async () => {
+	it('primes from the key then subscribes to the bus for live toggles', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
-		const timer = { unref: vi.fn() };
-		const spy = vi.spyOn(global, 'setInterval').mockReturnValue(timer as any);
 
 		await cacheStatsSchedule();
-		vi.mocked(refreshCacheStatsFlag).mockClear();
 
-		const tick = spy.mock.calls[0]![0] as () => void;
-		tick();
-		await Promise.resolve();
-
-		expect(refreshCacheStatsFlag).toHaveBeenCalled();
-		spy.mockRestore();
+		expect(refreshCacheStatsFlag).toHaveBeenCalled(); // durable boot read
+		expect(subscribeCacheStatsToggle).toHaveBeenCalled(); // event-driven, no poll
 	});
 
 	it('swallows a flush error inside the scheduled job', async () => {
