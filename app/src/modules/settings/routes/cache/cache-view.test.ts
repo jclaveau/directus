@@ -135,7 +135,8 @@ describe('splitSections', () => {
 	});
 
 	it('drops a section with no groups', () => {
-		const sections = splitSections(buildGroups([entry({ path: '/items/a' })]), 'App', 'System');
+		const groups = buildGroups([entry({ path: '/items/a' })]);
+		const sections = splitSections(groups, 'App', 'System');
 		expect(sections).toHaveLength(1);
 		expect(sections[0]!.key).toBe('app');
 	});
