@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildGroups,
+	filterEntries,
 	formatAge,
 	formatExpiry,
 	formatLastHit,
@@ -9,6 +10,7 @@ import {
 	formatUser,
 	isSystemPath,
 	shortKey,
+	splitSections,
 	type CacheEntry,
 } from './cache-view';
 
@@ -94,6 +96,48 @@ describe('formatQuery', () => {
 		expect(formatQuery('')).toBe('—');
 		expect(formatQuery('{}')).toBe('—');
 		expect(formatQuery('{"limit":5}')).toBe('{"limit":5}');
+	});
+});
+
+describe('filterEntries', () => {
+	const rows = [
+		entry({ key: 'a', path: '/items/x', user: { id: 'u', email: 'ann@co' } }),
+		entry({ key: 'b', path: '/items/y', user: null }),
+	];
+
+	const map = { user_id: 'user' };
+
+	it('applies the m2o email filter', () => {
+		const filter = { user_id: { email: { _contains: 'ann' } } };
+		expect(filterEntries(rows, filter, '', map)).toEqual([rows[0]]);
+	});
+
+	it('applies the free-text search over path/email', () => {
+		expect(filterEntries(rows, null, 'items/y', map)).toEqual([rows[1]]);
+		expect(filterEntries(rows, null, 'ann@co', map)).toEqual([rows[0]]);
+	});
+
+	it('returns all rows with no filter and no search', () => {
+		expect(filterEntries(rows, null, '', map)).toHaveLength(2);
+	});
+});
+
+describe('splitSections', () => {
+	it('splits app vs system groups, ordered app-first', () => {
+		const groups = buildGroups([
+			entry({ path: '/items/articles' }),
+			entry({ path: '/server/info' }),
+		]);
+
+		const sections = splitSections(groups, 'App', 'System');
+		expect(sections.map((section) => section.key)).toEqual(['app', 'system']);
+		expect(sections[0]!.groups[0]!.path).toBe('/items/articles');
+	});
+
+	it('drops a section with no groups', () => {
+		const sections = splitSections(buildGroups([entry({ path: '/items/a' })]), 'App', 'System');
+		expect(sections).toHaveLength(1);
+		expect(sections[0]!.key).toBe('app');
 	});
 });
 

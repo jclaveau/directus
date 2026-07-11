@@ -1,3 +1,6 @@
+import type { Filter } from '@directus/types';
+import { matchesFilter } from './filter-entry';
+
 export interface CacheEntry {
 	key: string;
 	path: string;
@@ -127,6 +130,64 @@ export function formatQuery(query: string): string {
 	}
 
 	return query;
+}
+
+export interface EndpointSection {
+	key: string;
+	label: string;
+	groups: EndpointGroup[];
+}
+
+// Narrow the loaded list by the filter conditions, then the free-text search.
+export function filterEntries(
+	entries: CacheEntry[],
+	filter: Filter | null,
+	search: string,
+	fieldMap: Record<string, string>,
+): CacheEntry[] {
+	const query = search.trim().toLowerCase();
+
+	return entries.filter((entry) => {
+		const row = entry as unknown as Record<string, unknown>;
+
+		if (!matchesFilter(row, filter, fieldMap)) {
+			return false;
+		}
+
+		if (!query) {
+			return true;
+		}
+
+		const haystack = [
+			entry.path,
+			entry.query,
+			entry.user?.email,
+			entry.key,
+			entry.method,
+		];
+
+		return haystack.some((field) => field?.toLowerCase().includes(query));
+	});
+}
+
+// Split endpoint groups into the App / System sections, dropping empties.
+export function splitSections(
+	groups: EndpointGroup[],
+	appLabel: string,
+	systemLabel: string,
+): EndpointSection[] {
+	return [
+		{
+			key: 'app',
+			label: appLabel,
+			groups: groups.filter((group) => !isSystemPath(group.path)),
+		},
+		{
+			key: 'system',
+			label: systemLabel,
+			groups: groups.filter((group) => isSystemPath(group.path)),
+		},
+	].filter((section) => section.groups.length > 0);
 }
 
 // Bucket entries by endpoint path, newest-hottest first.
