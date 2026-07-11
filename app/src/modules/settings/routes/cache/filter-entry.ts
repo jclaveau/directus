@@ -41,6 +41,16 @@ function matchesCondition(value: unknown, condition: unknown): boolean {
 	const entries = Object.entries(condition as Record<string, unknown>);
 
 	return entries.every(([op, operand]) => {
+		// Relational drill-in (e.g. the `user_id.email` m2o): a non-operator key
+		// steps into the nested object rather than comparing the value itself.
+		if (!op.startsWith('_')) {
+			const nested = value && typeof value === 'object'
+				? (value as Record<string, unknown>)[op]
+				: undefined;
+
+			return matchesCondition(nested, operand);
+		}
+
 		const text = String(value ?? '').toLowerCase();
 		const needle = String(operand ?? '').toLowerCase();
 

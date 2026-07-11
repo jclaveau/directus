@@ -2,7 +2,7 @@ export interface CacheEntry {
 	key: string;
 	path: string;
 	method: string;
-	user: string | null;
+	user: { id: string; email: string | null } | null;
 	query: string;
 	url: string;
 	createdAt: number;
@@ -108,8 +108,11 @@ export function formatLastHit(
 	return formatAge(now, lastHitAt);
 }
 
-export function formatUser(user: string | null, publicLabel: string): string {
-	return user ?? publicLabel;
+export function formatUser(
+	user: { email: string | null } | null,
+	publicLabel: string,
+): string {
+	return user?.email ?? publicLabel;
 }
 
 export function shortKey(key: string): string {
