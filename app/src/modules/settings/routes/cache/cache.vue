@@ -56,6 +56,29 @@ const search = ref('');
 const filter = ref<Filter | null>(null);
 const entryPage = ref<Record<string, number>>({});
 
+// Runtime collection state (Redis-backed). `configured` is the env opt-in: when
+// false the toggle is hidden, since the flag can only narrow, never widen it.
+const statsState = ref<{
+	configured: boolean;
+	enabled: boolean;
+	killedReason: string | null;
+	bufferLength: number;
+} | null>(null);
+
+const statsToggling = ref(false);
+
+const statsTooltip = computed(() => {
+	if (statsState.value?.killedReason) {
+		return t('cache_stats_killed', 'Cache stats auto-disabled: {reason}', {
+			reason: statsState.value.killedReason,
+		});
+	}
+
+	return statsState.value?.enabled
+		? t('cache_stats_disable', 'Disable cache stats collection')
+		: t('cache_stats_enable', 'Enable cache stats collection');
+});
+
 const selectedEntry = ref<CacheEntry | null>(null);
 const cachedValue = ref<unknown>(null);
 const cachedValueExists = ref(false);
@@ -213,6 +236,40 @@ async function load() {
 	}
 }
 
+async function loadStatsState() {
+	try {
+		const response = await api.get('/utils/cache/stats');
+		statsState.value = response.data.data;
+	}
+	catch {
+		statsState.value = null;
+	}
+}
+
+// Flip collection at runtime (Redis flag; every node picks it up within a poll
+// tick). Re-enabling also clears an autokill reason server-side.
+async function toggleStats() {
+	if (!statsState.value || statsToggling.value) {
+		return;
+	}
+
+	statsToggling.value = true;
+
+	try {
+		await api.patch('/utils/cache/stats', {
+			enabled: !statsState.value.enabled,
+		});
+
+		await loadStatsState();
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
+	finally {
+		statsToggling.value = false;
+	}
+}
+
 async function evictEntry(entry: CacheEntry) {
 	await api.delete('/utils/cache', { params: { key: entry.key } });
 	await load();
@@ -351,7 +408,10 @@ function closeEntry() {
 	selectedEntry.value = null;
 }
 
-onMounted(load);
+onMounted(() => {
+	void load();
+	void loadStatsState();
+});
 </script>
 
 <template>
@@ -372,6 +432,20 @@ onMounted(load);
 				v-model:filter="filter"
 				collection="directus_cache_descriptors"
 			/>
+
+			<v-button
+				v-if="statsState?.configured"
+				v-tooltip.bottom="statsTooltip"
+				class="stats-toggle"
+				rounded
+				icon
+				:secondary="!statsState.enabled"
+				:kind="statsState.killedReason ? 'warning' : undefined"
+				:loading="statsToggling"
+				@click="toggleStats"
+			>
+				<v-icon :name="statsState.enabled ? 'toggle_on' : 'toggle_off'" />
+			</v-button>
 
 			<v-button
 				v-tooltip.bottom="t('refresh')"
