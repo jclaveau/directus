@@ -62,6 +62,16 @@ describe('matchesFilter', () => {
 		expect(matchesFilter({ user: 'x' }, { user: { _nnull: true } })).toBe(true);
 	});
 
+	it('drills into an m2o relation (user_id.email)', () => {
+		const withUser = { user: { id: 'u1', email: 'alice@corp.io' } };
+		const contains = { user_id: { email: { _contains: 'alice' } } };
+		const miss = { user_id: { email: { _contains: 'bob' } } };
+
+		expect(matchesFilter(withUser, contains, MAP)).toBe(true);
+		expect(matchesFilter(withUser, miss, MAP)).toBe(false);
+		expect(matchesFilter({ user: null }, contains, MAP)).toBe(false);
+	});
+
 	it('unknown operators never exclude', () => {
 		expect(matchesFilter(row, { path: { _weird: 'x' } }, MAP)).toBe(true);
 	});

@@ -51,7 +51,7 @@ export interface CacheEntryRecord {
 	method: string;
 	path: string;
 	collection: string | null;
-	user: string | null;
+	user: { id: string; email: string | null } | null;
 	query: string;
 	url: string;
 	size: number;
@@ -377,6 +377,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 
 	const rows = await db('directus_cache_descriptors as d')
 		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
+		.leftJoin('directus_users as u', 'u.id', 'd.user_id')
 		.where('e.time', '>', since)
 		.groupBy(
 			'd.cache_key',
@@ -384,6 +385,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			'd.path',
 			'd.collection',
 			'd.user_id',
+			'u.email',
 			'd.query',
 			'd.url',
 			'd.bytes',
@@ -397,6 +399,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			'd.path',
 			'd.collection',
 			'd.user_id',
+			'u.email as user_email',
 			'd.query',
 			'd.url',
 			'd.bytes',
@@ -414,13 +417,16 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			: Number(row['ttl_ms']);
 
 		const lastHit = row['last_hit_at'] as string | null;
+		const userId = (row['user_id'] as string | null) || null;
 
 		return {
 			key: row['cache_key'] as string,
 			method: row['method'] as string,
 			path: row['path'] as string,
 			collection: (row['collection'] as string | null) || null,
-			user: (row['user_id'] as string | null) || null,
+			user: userId === null
+				? null
+				: { id: userId, email: (row['user_email'] as string | null) ?? null },
 			query: (row['query'] as string) ?? '',
 			url: (row['url'] as string) ?? '',
 			size: Number(row['bytes'] ?? 0),

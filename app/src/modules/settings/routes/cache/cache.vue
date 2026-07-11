@@ -64,9 +64,15 @@ const searchedEntries = computed(() => {
 			return true;
 		}
 
-		return [entry.path, entry.query, entry.user, entry.key, entry.method].some(
-			(field) => field?.toLowerCase().includes(query),
-		);
+		const haystack = [
+			entry.path,
+			entry.query,
+			entry.user?.email,
+			entry.key,
+			entry.method,
+		];
+
+		return haystack.some((field) => field?.toLowerCase().includes(query));
 	});
 });
 

@@ -75,8 +75,9 @@ describe('formatLastHit', () => {
 });
 
 describe('formatUser', () => {
-	it('falls back to the public label', () => {
-		expect(formatUser('u1', 'public')).toBe('u1');
+	it('shows the email, else the public label', () => {
+		expect(formatUser({ id: 'x', email: 'a@b.com' }, 'public')).toBe('a@b.com');
+		expect(formatUser({ id: 'x', email: null }, 'public')).toBe('public');
 		expect(formatUser(null, 'public')).toBe('public');
 	});
 });
