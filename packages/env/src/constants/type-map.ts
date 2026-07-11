@@ -33,6 +33,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_STORE: 'string',
 	CACHE_SKIP_ALLOWED: 'boolean',
 	CACHE_STATS_ENABLED: 'boolean',
+	CACHE_STATS_RETENTION: 'string',
 	CACHE_STATS_MAX_BYTES: 'string',
 	CACHE_STATS_MAX_BUFFER: 'number',
 	CACHE_STATS_GAP_LOOKBACK: 'string',

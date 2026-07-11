@@ -54,11 +54,18 @@ function matchesCondition(value: unknown, condition: unknown): boolean {
 		const text = String(value ?? '').toLowerCase();
 		const needle = String(operand ?? '').toLowerCase();
 
+		// Identity comparisons against an m2o resolve to its primary key: the
+		// filter UI emits `{ user_id: { _eq: '<pk>' } }`, but the row holds the
+		// related object (`{ id, email }`), so compare on its `id`.
+		const scalar = value !== null && typeof value === 'object' && 'id' in value
+			? (value as { id: unknown }).id
+			: value;
+
 		switch (op) {
 			case '_eq':
-				return value === operand;
+				return scalar === operand;
 			case '_neq':
-				return value !== operand;
+				return scalar !== operand;
 			case '_contains':
 			case '_icontains':
 				return text.includes(needle);
@@ -77,9 +84,9 @@ function matchesCondition(value: unknown, condition: unknown): boolean {
 			case '_lte':
 				return Number(value) <= Number(operand);
 			case '_in':
-				return Array.isArray(operand) && operand.includes(value);
+				return Array.isArray(operand) && operand.includes(scalar);
 			case '_nin':
-				return Array.isArray(operand) && !operand.includes(value);
+				return Array.isArray(operand) && !operand.includes(scalar);
 			case '_null':
 				return operand
 					? value == null

@@ -20,6 +20,7 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		key: 'k',
 		path: '/items/x',
 		method: 'GET',
+		collection: null,
 		user: null,
 		query: '{}',
 		url: '',

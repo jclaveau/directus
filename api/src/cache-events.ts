@@ -13,7 +13,8 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
  *
  *   - `directus_cache_events` — lean fact, one row per hit/miss: cache key +
  *     age-at-hit (shorten signal), gap-since-expiry (lengthen signal, from a
- *     tombstone), effective TTL. Timescale hypertable + retention where present.
+ *     tombstone), effective TTL. Timescale hypertable + retention where present;
+ *     a daily app-level reap (CACHE_STATS_RETENTION) bounds it on every dialect.
  *   - `directus_cache_descriptors` — dimension, one row per key: the request
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
  *
@@ -86,6 +87,9 @@ const LISTING_LIMIT = 200;
 // a Directus upgrade, or a query combo that stopped being requested).
 const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
 
+// Fallback event-retention window if CACHE_STATS_RETENTION is unset/unparsable.
+const DEFAULT_RETENTION = getMilliseconds('30d', 2_592_000_000);
+
 // Refreshed from Redis so a live toggle/autokill flips capture without a
 // restart. Seeded false; the schedule primes it before the first request.
 let cacheStatsActiveFlag = false;
@@ -101,11 +105,11 @@ const reasonKey = () => `${statsNamespace()}:killed_reason`;
 const tombstoneKey = (key: string) => `${statsNamespace()}:tomb:${key}`;
 
 /**
- * Master switch: Redis must be reachable (buffer + flag live there) and stats
- * not turned off at boot. The runtime flag can only narrow this, never widen.
+ * Master switch: opt-in (CACHE_STATS_ENABLED, default off) AND Redis reachable
+ * (buffer + flag live there). The runtime flag can only narrow this, never widen.
  */
 export function cacheStatsConfigured(): boolean {
-	return useEnv()['CACHE_STATS_ENABLED'] !== false && redisConfigAvailable();
+	return useEnv()['CACHE_STATS_ENABLED'] === true && redisConfigAvailable();
 }
 
 // Hot-path gate — a plain module read, no Redis round-trip per request.
@@ -116,6 +120,10 @@ export function cacheStatsActive(): boolean {
 function gapLookbackMs(): number {
 	const configured = useEnv()['CACHE_STATS_GAP_LOOKBACK'];
 	return getMilliseconds(configured, DEFAULT_GAP_LOOKBACK);
+}
+
+function retentionMs(): number {
+	return getMilliseconds(useEnv()['CACHE_STATS_RETENTION'], DEFAULT_RETENTION);
 }
 
 /**
@@ -216,6 +224,11 @@ export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<vo
 /**
  * Drop a tombstone that outlives the cached entry: a re-request arriving after
  * the value expired can still read `expiredAt` and see how far past it came.
+ *
+ * TTL = the entry's remaining life + the gap lookback, so the tombstone lives
+ * until `expiry + lookback`. Keying only off the lookback (measured from fill)
+ * would kill it before a long-TTL entry even expires — losing the lengthen
+ * signal for exactly the entries the recommendation targets.
  */
 export async function writeCacheTombstone(
 	key: string,
@@ -225,7 +238,14 @@ export async function writeCacheTombstone(
 		return;
 	}
 
-	await useRedis().set(tombstoneKey(key), String(expiredAt), 'PX', gapLookbackMs());
+	const remainingLifeMs = Math.max(expiredAt - Date.now(), 0);
+
+	await useRedis().set(
+		tombstoneKey(key),
+		String(expiredAt),
+		'PX',
+		remainingLifeMs + gapLookbackMs(),
+	);
 }
 
 // Gap since the entry expired, or null for a cold miss (no tombstone).
@@ -297,9 +317,12 @@ function num(value: string | undefined): number | null {
 
 /**
  * Drain the buffered stream, demuxing each entry into the fact table (hits/misses)
- * or upserting the dimension (descriptors), then deleting the batch. A crash
- * between insert and delete re-runs a batch — at-least-once, tolerated (dupe fact
- * rows don't move an aggregate; descriptor upserts are idempotent). One node.
+ * or upserting the dimension (descriptors), then deleting the batch. One node.
+ *
+ * At-least-once: a crash between the insert and the XDEL re-runs a batch. Descriptor
+ * upserts are idempotent, but duplicate fact rows DO inflate the hit COUNT for that
+ * one batch — a bounded, telemetry-only skew we accept over the at-most-once
+ * alternative (XDEL-before-insert would silently drop a batch on the same crash).
  */
 export async function flushCacheEvents(): Promise<number> {
 	if (!cacheStatsConfigured()) {
@@ -547,6 +570,24 @@ export async function reapCacheDescriptors(): Promise<number> {
 		.delete();
 }
 
+/**
+ * Prune fact rows past the retention window. The cross-dialect bound on
+ * `directus_cache_events` growth: Timescale's own retention policy only covers the
+ * hypertable path, so plain PG / MySQL / SQLite rely on this daily sweep (and it's
+ * a harmless belt on Timescale, where chunk-drop already reclaims older rows).
+ */
+export async function reapCacheEvents(): Promise<number> {
+	if (!cacheStatsConfigured()) {
+		return 0;
+	}
+
+	const cutoff = new Date(Date.now() - retentionMs());
+
+	return getDatabase()('directus_cache_events')
+		.where('time', '<', cutoff)
+		.delete();
+}
+
 async function isTimescale(db: Knex): Promise<boolean> {
 	if (isTimescaleCache !== null) {
 		return isTimescaleCache;
@@ -566,6 +607,8 @@ async function isTimescale(db: Knex): Promise<boolean> {
 }
 
 async function eventsTableBytes(db: Knex): Promise<number> {
+	// Postgres-only cheap per-table size. Other dialects return 0 → the MAX_BYTES
+	// autokill is a no-op there and growth is bounded by the retention reap instead.
 	if (db.client.config.client !== 'pg') {
 		return 0;
 	}
