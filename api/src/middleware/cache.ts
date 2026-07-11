@@ -23,6 +23,10 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 	if (env['CACHE_ENABLED'] !== true) return next();
 	if (!cache) return next();
 
+	// Reference point for the request→response duration telemetry: cache-serve
+	// latency on a HIT, response compute time (read by respond.ts) on a MISS.
+	res.locals['requestStart'] = Date.now();
+
 	if (shouldSkipCache(req)) {
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
 		return next();
@@ -70,6 +74,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 				cacheKey: key,
 				ageMs: Math.max(Date.now() - createdAt, 0),
 				ttlMs: expiresMeta?.ttlMs ?? null,
+				durationMs: Math.max(Date.now() - Number(res.locals['requestStart']), 0),
 			}).catch(() => {});
 		}
 

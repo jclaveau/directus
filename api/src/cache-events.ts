@@ -27,6 +27,7 @@ export interface CacheHitCapture {
 	cacheKey: string;
 	ageMs: number;
 	ttlMs: number | null;
+	durationMs: number | null;
 }
 
 export interface CacheMissCapture {
@@ -44,6 +45,7 @@ export interface CacheDescriptor {
 	query: string;
 	url: string;
 	bytes: number;
+	fillMs: number;
 }
 
 export interface CacheEntryRecord {
@@ -56,6 +58,8 @@ export interface CacheEntryRecord {
 	url: string;
 	size: number;
 	hits: number;
+	fillMs: number | null;
+	hitMs: number | null;
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
@@ -161,6 +165,9 @@ export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
 		ttlMs: hit.ttlMs === null
 			? ''
 			: String(hit.ttlMs),
+		durationMs: hit.durationMs === null
+			? ''
+			: String(hit.durationMs),
 		ts: String(Date.now()),
 	});
 }
@@ -199,6 +206,7 @@ export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<vo
 		query: entry.query,
 		url: entry.url,
 		bytes: String(entry.bytes),
+		fillMs: String(entry.fillMs),
 		ts: String(Date.now()),
 	});
 }
@@ -253,6 +261,7 @@ interface CacheEventRow {
 	age_ms: number | null;
 	gap_ms: number | null;
 	ttl_ms: number | null;
+	duration_ms: number | null;
 }
 
 interface CacheDescriptorRow {
@@ -264,6 +273,7 @@ interface CacheDescriptorRow {
 	query: string;
 	url: string;
 	bytes: number;
+	fill_ms: number;
 	last_filled: Date;
 }
 
@@ -335,6 +345,7 @@ export async function flushCacheEvents(): Promise<number> {
 					query: f['query'] ?? '',
 					url: f['url'] ?? '',
 					bytes: Number(f['bytes'] ?? 0),
+					fill_ms: Number(f['fillMs'] ?? 0),
 					last_filled: at,
 				});
 
@@ -350,6 +361,7 @@ export async function flushCacheEvents(): Promise<number> {
 				age_ms: num(f['ageMs']),
 				gap_ms: num(f['gapMs']),
 				ttl_ms: num(f['ttlMs']),
+				duration_ms: num(f['durationMs']),
 			});
 		}
 
@@ -403,6 +415,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			'd.query',
 			'd.url',
 			'd.bytes',
+			'd.fill_ms',
 			'd.last_filled',
 		)
 		.orderBy('hits', 'desc')
@@ -417,10 +430,12 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			'd.query',
 			'd.url',
 			'd.bytes',
+			'd.fill_ms',
 			'd.last_filled',
 			db.raw('SUM(CASE WHEN e.kind = 0 THEN 1 ELSE 0 END) AS hits'),
 			db.raw('MAX(CASE WHEN e.kind = 0 THEN e.time END) AS last_hit_at'),
 			db.raw('MAX(e.ttl_ms) AS ttl_ms'),
+			db.raw('AVG(CASE WHEN e.kind = 0 THEN e.duration_ms END) AS hit_ms'),
 		);
 
 	return rows.map((row: Record<string, unknown>) => {
@@ -445,6 +460,12 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			url: (row['url'] as string) ?? '',
 			size: Number(row['bytes'] ?? 0),
 			hits: Number(row['hits'] ?? 0),
+			fillMs: row['fill_ms'] === null
+				? null
+				: Number(row['fill_ms']),
+			hitMs: row['hit_ms'] === null || row['hit_ms'] === undefined
+				? null
+				: Math.round(Number(row['hit_ms'])),
 			createdAt,
 			expiresAt: ttlMs === null
 				? null

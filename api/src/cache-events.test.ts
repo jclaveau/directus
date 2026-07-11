@@ -177,7 +177,12 @@ describe('captureCacheHit', () => {
 	it('appends a hit keyed by the cache key', async () => {
 		await armFlag(null);
 
-		await captureCacheHit({ cacheKey: 'k1', ageMs: 5000, ttlMs: 300000 });
+		await captureCacheHit({
+			cacheKey: 'k1',
+			ageMs: 5000,
+			ttlMs: 300000,
+			durationMs: 12,
+		});
 
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(call[0]).toBe('XADD');
@@ -186,12 +191,18 @@ describe('captureCacheHit', () => {
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
 		expect(fieldAfter(call, 'ageMs')).toBe('5000');
 		expect(fieldAfter(call, 'ttlMs')).toBe('300000');
+		expect(fieldAfter(call, 'durationMs')).toBe('12');
 	});
 
 	it('serialises a null TTL as an empty string', async () => {
 		await armFlag(null);
 
-		await captureCacheHit({ cacheKey: 'k1', ageMs: 1, ttlMs: null });
+		await captureCacheHit({
+			cacheKey: 'k1',
+			ageMs: 1,
+			ttlMs: null,
+			durationMs: null,
+		});
 
 		expect(fieldAfter(mockRedis.call.mock.calls[0]!, 'ttlMs')).toBe('');
 	});
@@ -200,7 +211,12 @@ describe('captureCacheHit', () => {
 		await setCacheStatsEnabled(false);
 		mockRedis.call.mockClear();
 
-		await captureCacheHit({ cacheKey: 'k1', ageMs: 1, ttlMs: null });
+		await captureCacheHit({
+			cacheKey: 'k1',
+			ageMs: 1,
+			ttlMs: null,
+			durationMs: null,
+		});
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
@@ -242,6 +258,7 @@ describe('captureCacheDescriptor', () => {
 			query: '{"limit":5}',
 			url: '/items/articles?limit=5',
 			bytes: 42,
+			fillMs: 240,
 		});
 
 		const call = mockRedis.call.mock.calls[0]!;
@@ -264,6 +281,7 @@ describe('captureCacheDescriptor', () => {
 			query: '{}',
 			url: '',
 			bytes: 0,
+			fillMs: 0,
 		});
 
 		const call = mockRedis.call.mock.calls[0]!;
@@ -310,7 +328,8 @@ describe('flushCacheEvents', () => {
 	it('demuxes hits/misses to events and descriptors to the dimension', async () => {
 		xrangeBatch = [
 			streamEntry('1-0', {
-				kind: 'h', cacheKey: 'k1', ageMs: '5000', ttlMs: '300000', ts: '1000',
+				kind: 'h', cacheKey: 'k1', ageMs: '5000', ttlMs: '300000',
+				durationMs: '12', ts: '1000',
 			}),
 			streamEntry('2-0', {
 				kind: 'm', cacheKey: 'k2', gapMs: '2000', ttlMs: '300000', ts: '2000',
@@ -318,7 +337,7 @@ describe('flushCacheEvents', () => {
 			streamEntry('3-0', {
 				kind: 'd', cacheKey: 'k1', method: 'GET', path: '/items/a',
 				collection: 'a', userId: 'u1', query: '{}', url: '/items/a', bytes: '42',
-				ts: '3000',
+				fillMs: '240', ts: '3000',
 			}),
 		];
 
@@ -336,6 +355,7 @@ describe('flushCacheEvents', () => {
 					age_ms: 5000,
 					gap_ms: null,
 					ttl_ms: 300000,
+					duration_ms: 12,
 				},
 				{
 					time: new Date(2000),
@@ -344,6 +364,7 @@ describe('flushCacheEvents', () => {
 					age_ms: null,
 					gap_ms: 2000,
 					ttl_ms: 300000,
+					duration_ms: null,
 				},
 			],
 			500,
@@ -361,6 +382,7 @@ describe('flushCacheEvents', () => {
 				query: '{}',
 				url: '/items/a',
 				bytes: 42,
+				fill_ms: 240,
 				last_filled: new Date(3000),
 			},
 		]);
@@ -564,6 +586,7 @@ describe('capture is gated by the runtime flag', () => {
 			query: '{}',
 			url: '',
 			bytes: 0,
+			fillMs: 0,
 		});
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
@@ -587,6 +610,8 @@ describe('listCacheEntries', () => {
 				hits: '3',
 				last_hit_at: new Date(2000).toISOString(),
 				ttl_ms: '300000',
+				fill_ms: '240',
+				hit_ms: '8.4',
 			},
 			{
 				cache_key: 'k2',
@@ -601,6 +626,8 @@ describe('listCacheEntries', () => {
 				hits: '0',
 				last_hit_at: null,
 				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
 			},
 		];
 
@@ -619,6 +646,8 @@ describe('listCacheEntries', () => {
 				url: '/items/a?limit=5',
 				size: 42,
 				hits: 3,
+				fillMs: 240,
+				hitMs: 8,
 				createdAt: 1000,
 				expiresAt: 301000,
 				lastHitAt: 2000,
@@ -633,6 +662,8 @@ describe('listCacheEntries', () => {
 				url: '',
 				size: 0,
 				hits: 0,
+				fillMs: null,
+				hitMs: null,
 				createdAt: 500,
 				expiresAt: null,
 				lastHitAt: null,

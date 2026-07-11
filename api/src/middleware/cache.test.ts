@@ -57,6 +57,7 @@ const next = vi.fn();
 
 function makeRes() {
 	return {
+		locals: {},
 		setHeader: vi.fn(),
 		json: vi.fn().mockReturnThis(),
 	} as unknown as Response;

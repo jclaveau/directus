@@ -26,6 +26,9 @@ fields:
     readonly: true
     display: filesize
     width: half
+  - field: fill_ms
+    readonly: true
+    width: half
   - field: last_filled
     readonly: true
     display: datetime
