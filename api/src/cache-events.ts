@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import { parse as parseBytes } from 'bytes';
 import type { Knex } from 'knex';
 import type Keyv from 'keyv';
+import { useBus } from './bus/index.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -684,10 +685,33 @@ export async function enforceCacheStatsBudget(): Promise<void> {
 	}
 }
 
+// Bus channel that announces a flag change so every node flips at once (the
+// Redis key stays the durable source of truth for a booting/missed node).
+const TOGGLE_CHANNEL = 'cacheStatsToggled';
+
+interface CacheStatsToggle {
+	enabled: boolean;
+}
+
 /**
- * Flip the runtime override for every node (via the flag poll) and this node
- * now. Enabling clears any autokill reason; if still over budget the watchdog
- * re-kills.
+ * Re-apply the flag on every node the instant it changes — event-driven via the
+ * shared bus (same pattern as cache.ts `schemaChanged`), replacing a per-node
+ * poll. Boot still primes from the Redis key, so a node down for the publish
+ * catches up on its next start.
+ */
+export function subscribeCacheStatsToggle(): void {
+	if (!redisConfigAvailable()) {
+		return;
+	}
+
+	useBus().subscribe<CacheStatsToggle>(TOGGLE_CHANNEL, () => {
+		void refreshCacheStatsFlag();
+	});
+}
+
+/**
+ * Flip the runtime override for every node (bus publish) and this node now.
+ * Enabling clears any autokill reason; if still over budget the watchdog re-kills.
  */
 export async function setCacheStatsEnabled(
 	enabled: boolean,
@@ -699,16 +723,19 @@ export async function setCacheStatsEnabled(
 		await redis.set(flagKey(), '1');
 		await redis.del(reasonKey());
 		cacheStatsActiveFlag = cacheStatsConfigured();
-		return;
+	}
+	else {
+		await redis.set(flagKey(), '0');
+
+		if (reason) {
+			await redis.set(reasonKey(), reason);
+		}
+
+		cacheStatsActiveFlag = false;
 	}
 
-	await redis.set(flagKey(), '0');
-
-	if (reason) {
-		await redis.set(reasonKey(), reason);
-	}
-
-	cacheStatsActiveFlag = false;
+	// Announce so the other nodes re-read the key immediately, not on a poll.
+	useBus().publish<CacheStatsToggle>(TOGGLE_CHANNEL, { enabled });
 }
 
 export async function getCacheStatsState(): Promise<CacheStatsState> {
