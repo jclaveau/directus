@@ -324,6 +324,16 @@ function num(value: string | undefined): number | null {
  * one batch — a bounded, telemetry-only skew we accept over the at-most-once
  * alternative (XDEL-before-insert would silently drop a batch on the same crash).
  */
+// Real queries waiting on a pool connection = the DB is the bottleneck. The
+// flush draws from the same shared pool, so when callers are queued it backs off
+// and leaves the batch buffered in the Redis stream (MAXLEN absorbs it) rather
+// than stealing a connection from a live request. Not the event-loop pressure
+// limiter (@directus/pressure) — that's the wrong signal for pool draw.
+function dbPoolSaturated(db: Knex): boolean {
+	const pool = db.client.pool;
+	return (pool?.numPendingAcquires?.() ?? 0) > 0;
+}
+
 export async function flushCacheEvents(): Promise<number> {
 	if (!cacheStatsConfigured()) {
 		return 0;
@@ -334,6 +344,12 @@ export async function flushCacheEvents(): Promise<number> {
 	let drained = 0;
 
 	for (;;) {
+		// Yield to live traffic: with queued acquirers, stop draining and leave the
+		// rest buffered for the next tick rather than contending for a connection.
+		if (dbPoolSaturated(db)) {
+			break;
+		}
+
 		const batch = (await redis.call(
 			'XRANGE',
 			streamKey(),

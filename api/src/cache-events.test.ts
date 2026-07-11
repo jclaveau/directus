@@ -474,6 +474,22 @@ describe('flushCacheEvents', () => {
 			expect.objectContaining({ collection: null, user_id: null }),
 		]);
 	});
+
+	it('yields the flush while the pool has queued acquirers', async () => {
+		mockDb.client = {
+			config: { client: 'pg' },
+			pool: { numPendingAcquires: () => 3 },
+		};
+
+		xrangeBatch = [
+			streamEntry('1-0', { kind: 'h', cacheKey: 'k', ageMs: '1', ts: '1' }),
+		];
+
+		// Saturated pool → skip this tick, leave the batch buffered (no DB/read).
+		expect(await flushCacheEvents()).toBe(0);
+		expect(mockRedis.call).not.toHaveBeenCalled();
+		expect(mockDb.batchInsert).not.toHaveBeenCalled();
+	});
 });
 
 describe('enforceCacheStatsBudget', () => {
