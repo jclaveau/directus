@@ -10,6 +10,7 @@ import {
 	evictCacheEntry,
 	getCacheStatsState,
 	listCacheEntries,
+	readCacheTombstone,
 	setCacheStatsEnabled,
 	truncateCacheEvents,
 } from '../cache-events.js';
@@ -17,6 +18,9 @@ import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { compress } from '../utils/compress.js';
+import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 
 export class UtilsService {
@@ -207,14 +211,25 @@ export class UtilsService {
 		exists: boolean;
 		value: unknown;
 		tags: string[] | null;
+		tagCounts: Record<string, number>;
 		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
+		sizes: { uncompressed: number; compressed: number } | null;
+		tombstone: number | null;
 	}> {
 		this.assertCacheAdmin('inspect a cache entry');
 
 		const { cache } = getCache();
 
 		if (!cache) {
-			return { exists: false, value: null, tags: null, expiry: null };
+			return {
+				exists: false,
+				value: null,
+				tags: null,
+				tagCounts: {},
+				expiry: null,
+				sizes: null,
+				tombstone: null,
+			};
 		}
 
 		const value = await getCacheValue(cache, key);
@@ -227,7 +242,33 @@ export class UtilsService {
 			? tagged.tags.split(', ').filter(Boolean)
 			: null;
 
-		return { exists: value !== undefined, value: value ?? null, tags, expiry };
+		// Re-compress the payload to size its Redis footprint against the raw response.
+		let sizes: { uncompressed: number; compressed: number } | null = null;
+
+		if (value !== undefined) {
+			const packed = await compress(value);
+
+			sizes = {
+				uncompressed: stringByteSize(JSON.stringify(value)),
+				compressed: Buffer.isBuffer(packed)
+					? packed.byteLength
+					: stringByteSize(JSON.stringify(packed)),
+			};
+		}
+
+		return {
+			exists: value !== undefined,
+			value: value ?? null,
+			tags,
+			// Blast radius: how many entries each tag would purge.
+			tagCounts: tags
+				? await countScopedCacheTagMembers(tags)
+				: {},
+			expiry,
+			sizes,
+			// When this key last expired, if a miss-gap tombstone still lives.
+			tombstone: await readCacheTombstone(key),
+		};
 	}
 
 	async evictCacheEntry(key: string): Promise<void> {

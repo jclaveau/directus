@@ -181,7 +181,10 @@ describe('CachePage', () => {
 					exists: true,
 					value: { hello: 'world' },
 					tags: ['articles', 'articles:id=5'],
+					tagCounts: { 'articles': 4, 'articles:id=5': 12 },
 					expiry: { exp: 0, createdAt: 0, ttlMs: 300000 },
+					sizes: { uncompressed: 2048, compressed: 512 },
+					tombstone: null,
 				};
 
 				return Promise.resolve({ data: { data } }) as never;
@@ -202,11 +205,14 @@ describe('CachePage', () => {
 			params: { key: 'app-key-000000000000' },
 		});
 
-		// descriptor rows, scoped-cache tags, TTL and the cached value all render
-		expect(wrapper.text()).toContain('ann@corp.io');
-		expect(wrapper.text()).toContain('articles:id=5');
-		expect(wrapper.text()).toContain('300s');
-		expect(wrapper.text()).toContain('"hello": "world"');
+		const text = wrapper.text();
+		// descriptor rows + Redis metadata + tags (with blast-radius) + value
+		expect(text).toContain('ann@corp.io');
+		expect(text).toContain('articles:id=5');
+		expect(text).toContain('(12)'); // tag member count
+		expect(text).toContain('512 B / 2.0 KB raw (25%)'); // compressed vs raw
+		expect(text).toContain('Key varies on');
+		expect(text).toContain('"hello": "world"');
 	});
 
 	it('paginates the item rows within a group at 25 per page', async () => {

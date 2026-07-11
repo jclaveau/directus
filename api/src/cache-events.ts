@@ -232,6 +232,20 @@ export async function readCacheMissGap(
 	return Math.max(now - Number(stored), 0);
 }
 
+// The expiry timestamp a live tombstone holds (when the key last expired), or
+// null if none — for the admin drawer's per-key inspection.
+export async function readCacheTombstone(key: string): Promise<number | null> {
+	if (!redisConfigAvailable()) {
+		return null;
+	}
+
+	const stored = await useRedis().get(tombstoneKey(key));
+
+	return stored === null
+		? null
+		: Number(stored);
+}
+
 interface CacheEventRow {
 	time: Date;
 	cache_key: string;

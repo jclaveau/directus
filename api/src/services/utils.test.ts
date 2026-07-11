@@ -11,11 +11,14 @@ import {
 	evictCacheEntry as registryEvictCacheEntry,
 	getCacheStatsState,
 	listCacheEntries,
+	readCacheTombstone,
 	setCacheStatsEnabled,
 	truncateCacheEvents,
 } from '../cache-events.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { compress } from '../utils/compress.js';
 import { UtilsService } from './utils.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -27,6 +30,8 @@ vi.mock('../permissions/modules/validate-access/validate-access.js');
 vi.mock('../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js');
 vi.mock('../cache.js');
 vi.mock('../cache-events.js');
+vi.mock('../scoped-cache.js');
+vi.mock('../utils/compress.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -172,7 +177,7 @@ describe('Services / Utils', () => {
 			expect(evictCacheEntriesForPath).not.toHaveBeenCalled();
 		});
 
-		it('readCacheEntry returns the value + tags + expiry when present', async () => {
+		it('readCacheEntry returns value + tags + sizes + tombstone', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
 
 			vi.mocked(getCacheValue).mockImplementation((_cache, key) => {
@@ -191,25 +196,44 @@ describe('Services / Utils', () => {
 				return Promise.resolve(undefined);
 			});
 
+			vi.mocked(compress).mockResolvedValue(Buffer.from('abc'));
+			vi.mocked(readCacheTombstone).mockResolvedValue(999);
+
+			vi.mocked(countScopedCacheTagMembers).mockResolvedValue({
+				'articles': 3,
+				'articles:id=5': 7,
+			});
+
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: true,
 				value: { data: [1, 2] },
 				tags: ['articles', 'articles:id=5'],
+				tagCounts: { 'articles': 3, 'articles:id=5': 7 },
 				expiry: { exp: 5, createdAt: 1, ttlMs: 1000 },
+				// '{"data":[1,2]}' = 14 bytes raw; the mocked compress = 3.
+				sizes: { uncompressed: 14, compressed: 3 },
+				tombstone: 999,
 			});
 
-			expect(getCacheValue).toHaveBeenCalledWith(mockCache, 'k1');
+			expect(countScopedCacheTagMembers).toHaveBeenCalledWith([
+				'articles',
+				'articles:id=5',
+			]);
 		});
 
 		it('readCacheEntry reports an absent value with null sidecars', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
 			vi.mocked(getCacheValue).mockResolvedValue(undefined);
+			vi.mocked(readCacheTombstone).mockResolvedValue(null);
 
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
 				tags: null,
+				tagCounts: {},
 				expiry: null,
+				sizes: null,
+				tombstone: null,
 			});
 		});
 
@@ -220,7 +244,10 @@ describe('Services / Utils', () => {
 				exists: false,
 				value: null,
 				tags: null,
+				tagCounts: {},
 				expiry: null,
+				sizes: null,
+				tombstone: null,
 			});
 
 			expect(getCacheValue).not.toHaveBeenCalled();
