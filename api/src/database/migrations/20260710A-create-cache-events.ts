@@ -1,4 +1,6 @@
+import { useEnv } from '@directus/env';
 import type { Knex } from 'knex';
+import { getMilliseconds } from '../../utils/get-milliseconds.js';
 
 /**
  * Cache telemetry, split star-schema style:
@@ -6,8 +8,9 @@ import type { Knex } from 'knex';
  *   - `directus_cache_events` — the lean fact: one row per served hit/miss,
  *     keyed by the opaque cache key, carrying only the tuning numbers
  *     (age-at-hit, gap-since-expiry, effective TTL). High volume → a Timescale
- *     hypertable with compression + 90d retention where the extension exists;
- *     on a plain table the app-level reap (CACHE_STATS_RETENTION) bounds growth.
+ *     hypertable with compression + a CACHE_STATS_RETENTION-driven retention
+ *     policy where the extension exists; on a plain table the same env drives the
+ *     app-level reap that bounds growth.
  *   - `directus_cache_descriptors` — the dimension: one row per cache key with
  *     its request descriptor (method/path/collection/user/query/url/size),
  *     upserted on each fill. Low volume, no retention, so a descriptor survives
@@ -58,6 +61,8 @@ export async function up(knex: Knex): Promise<void> {
 		return;
 	}
 
+	const env = useEnv();
+
 	await knex.raw(`SELECT create_hypertable('directus_cache_events', 'time')`);
 
 	// Lean fact: no wide dimension left to segment by, so segment on `kind`
@@ -74,8 +79,13 @@ export async function up(knex: Knex): Promise<void> {
 		`SELECT add_compression_policy('directus_cache_events', INTERVAL '2 days')`,
 	);
 
+	// Retention interval mirrors the app-level reap (CACHE_STATS_RETENTION, default
+	// 30d) so Timescale's chunk-drop and the cross-dialect reap agree — a hardcoded
+	// window here would silently cap a larger configured retention.
+	const retentionMs = getMilliseconds(env['CACHE_STATS_RETENTION'], 2_592_000_000);
+
 	await knex.raw(
-		`SELECT add_retention_policy('directus_cache_events', INTERVAL '90 days')`,
+		`SELECT add_retention_policy('directus_cache_events', INTERVAL '${retentionMs} milliseconds')`,
 	);
 }
 
