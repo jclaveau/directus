@@ -29,6 +29,20 @@ const ENTRIES = [
 		lastHitAt: Date.now() - 1000,
 	},
 	{
+		key: 'bob-key-000000000000',
+		method: 'GET',
+		path: '/items/comments',
+		collection: 'comments',
+		user: { id: 'u2', email: 'bob@corp.io' },
+		query: '{}',
+		url: '/items/comments',
+		size: 512,
+		hits: 3,
+		createdAt: Date.now() - 8000,
+		expiresAt: Date.now() + 30000,
+		lastHitAt: Date.now() - 2000,
+	},
+	{
 		key: 'sys-key-000000000000',
 		method: 'GET',
 		path: '/server/info',
@@ -44,15 +58,35 @@ const ENTRIES = [
 	},
 ];
 
-// Hyphenated Directus components (private-view, v-*, search-input, …) aren't
-// registered here; treat them as custom elements so Vue renders their default
-// slot — the `.cache-page` body and its table — without stubbing each one.
+// Minimal stand-in for the real search-input: exposes the two v-models
+// (free-text + filter) so a test can emit them and assert the list re-renders.
+const SearchInput = {
+	name: 'SearchInput',
+	props: ['modelValue', 'filter', 'collection'],
+	emits: ['update:modelValue', 'update:filter'],
+	template: '<div class="search-input-stub" />',
+};
+
+// private-view is a custom element here, which wouldn't render its named slots;
+// stub it so the `#actions` (search-input) and body slots mount.
+const PrivateView = {
+	name: 'PrivateView',
+	template: '<div><slot /><slot name="actions" /><slot name="sidebar" /></div>',
+};
+
+// Hyphenated Directus components (private-view, v-*, …) aren't registered here;
+// treat them as custom elements so Vue renders their default slot — the
+// `.cache-page` body and its table — without stubbing each one. search-input is
+// the exception: it's a real stub so a test can drive its filter/search models.
 const global = {
 	plugins: [i18n],
 	directives: { tooltip: {} },
+	components: { SearchInput, PrivateView },
 	config: {
 		compilerOptions: {
-			isCustomElement: (tag: string) => tag.includes('-'),
+			isCustomElement: (tag: string) => {
+				return tag.includes('-') && tag !== 'search-input' && tag !== 'private-view';
+			},
 		},
 	},
 };
@@ -91,6 +125,42 @@ describe('CachePage', () => {
 		expect(api.delete).toHaveBeenCalledWith('/utils/cache', {
 			params: { key: 'app-key-000000000000' },
 		});
+	});
+
+	it('narrows the list by a user_id.email filter from the search-input', async () => {
+		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// All three endpoints show before filtering.
+		expect(wrapper.text()).toContain('/items/articles');
+		expect(wrapper.text()).toContain('/items/comments');
+		expect(wrapper.text()).toContain('/server/info');
+
+		// The m2o drill-in the field-builder emits for "User → Email → Contains".
+		wrapper.findComponent(SearchInput).vm.$emit('update:filter', {
+			user_id: { email: { _contains: 'ann' } },
+		});
+
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('/items/articles'); // ann kept
+		expect(wrapper.text()).not.toContain('/items/comments'); // bob dropped
+		expect(wrapper.text()).not.toContain('/server/info'); // null user dropped
+	});
+
+	it('narrows the list by the free-text search from the search-input', async () => {
+		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		wrapper.findComponent(SearchInput).vm.$emit('update:modelValue', 'bob@corp.io');
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('/items/comments'); // bob matches on email
+		expect(wrapper.text()).not.toContain('/items/articles');
 	});
 
 	it('shows the empty state when nothing is cached', async () => {
