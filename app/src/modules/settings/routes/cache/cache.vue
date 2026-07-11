@@ -434,6 +434,17 @@ onMounted(() => {
 			/>
 
 			<v-button
+				v-tooltip.bottom="t('refresh')"
+				rounded
+				icon
+				secondary
+				:loading="loading"
+				@click="load"
+			>
+				<v-icon name="refresh" />
+			</v-button>
+
+			<v-button
 				v-if="statsState?.configured"
 				v-tooltip.bottom="statsTooltip"
 				class="stats-toggle"
@@ -445,17 +456,6 @@ onMounted(() => {
 				@click="toggleStats"
 			>
 				<v-icon :name="statsState.enabled ? 'toggle_on' : 'toggle_off'" />
-			</v-button>
-
-			<v-button
-				v-tooltip.bottom="t('refresh')"
-				rounded
-				icon
-				secondary
-				:loading="loading"
-				@click="load"
-			>
-				<v-icon name="refresh" />
 			</v-button>
 		</template>
 
