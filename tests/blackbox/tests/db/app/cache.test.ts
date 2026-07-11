@@ -2516,6 +2516,21 @@ describe('App Caching Tests', () => {
 			expect(first.hits).toBeGreaterThanOrEqual(1);
 			expect(typeof first.query).toBe('string');
 
+			// The live cached value is still in Redis for the freshly-filled key.
+			const value = await request(url).get('/utils/cache/value')
+				.query({ key: first.key })
+				.set('Authorization', auth);
+
+			expect(value.statusCode).toBe(200);
+			expect(value.body.data.exists).toBe(true);
+			expect(value.body.data.value).toBeDefined();
+
+			// Missing key → 400.
+			const noKey = await request(url).get('/utils/cache/value')
+				.set('Authorization', auth);
+
+			expect(noKey.statusCode).toBe(400);
+
 			// Evict one entry by key (its own branch)…
 			const byKey = await request(url).delete('/utils/cache')
 				.query({ key: first.key })
