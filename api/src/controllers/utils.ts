@@ -205,6 +205,26 @@ router.get(
 	respond,
 );
 
+router.get(
+	'/cache/value',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const key = req.query['key'];
+
+		if (typeof key !== 'string') {
+			throw new InvalidPayloadError({
+				reason: 'A `key` query parameter is required',
+			});
+		}
+
+		res.json({ data: await service.readCacheValue(key) });
+	}),
+);
+
 router.delete(
 	'/cache',
 	asyncHandler(async (req, res) => {

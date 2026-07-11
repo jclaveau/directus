@@ -5,7 +5,7 @@ import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { getCache } from '../cache.js';
+import { getCache, getCacheValue } from '../cache.js';
 import {
 	evictCacheEntriesForPath,
 	evictCacheEntry as registryEvictCacheEntry,
@@ -119,6 +119,13 @@ describe('Services / Utils', () => {
 				as not being an admin`,
 			);
 		});
+
+		it('readCacheValue rejects a non-admin user', async () => {
+			await expect(nonAdminService().readCacheValue('k1')).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect a cache entry
+				as not being an admin`,
+			);
+		});
 	});
 
 	describe('cache inspection (admin)', () => {
@@ -163,6 +170,39 @@ describe('Services / Utils', () => {
 			).resolves.toBe(0);
 
 			expect(evictCacheEntriesForPath).not.toHaveBeenCalled();
+		});
+
+		it('readCacheValue returns the live value when present', async () => {
+			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
+			vi.mocked(getCacheValue).mockResolvedValue({ data: [1, 2] });
+
+			await expect(adminService().readCacheValue('k1')).resolves.toEqual({
+				exists: true,
+				value: { data: [1, 2] },
+			});
+
+			expect(getCacheValue).toHaveBeenCalledWith(mockCache, 'k1');
+		});
+
+		it('readCacheValue reports an absent value', async () => {
+			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
+			vi.mocked(getCacheValue).mockResolvedValue(undefined);
+
+			await expect(adminService().readCacheValue('k1')).resolves.toEqual({
+				exists: false,
+				value: null,
+			});
+		});
+
+		it('readCacheValue returns absent without a cache', async () => {
+			vi.mocked(getCache).mockReturnValue({ cache: null } as any);
+
+			await expect(adminService().readCacheValue('k1')).resolves.toEqual({
+				exists: false,
+				value: null,
+			});
+
+			expect(getCacheValue).not.toHaveBeenCalled();
 		});
 	});
 

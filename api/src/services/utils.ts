@@ -2,7 +2,7 @@ import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { systemCollectionRows } from '@directus/system-data';
 import type { AbstractServiceOptions, Accountability, PrimaryKey, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { clearSystemCache, getCache } from '../cache.js';
+import { clearSystemCache, getCache, getCacheValue } from '../cache.js';
 import {
 	type CacheEntryRecord,
 	type CacheStatsState,
@@ -198,6 +198,22 @@ export class UtilsService {
 		this.assertCacheAdmin('inspect the cache');
 
 		return listCacheEntries();
+	}
+
+	// The live cached response for a single key, if it hasn't been evicted/expired
+	// out of the store — the descriptor in Postgres outlives the value in Redis.
+	async readCacheValue(key: string): Promise<{ exists: boolean; value: unknown }> {
+		this.assertCacheAdmin('inspect a cache entry');
+
+		const { cache } = getCache();
+
+		if (!cache) {
+			return { exists: false, value: null };
+		}
+
+		const value = await getCacheValue(cache, key);
+
+		return { exists: value !== undefined, value: value ?? null };
 	}
 
 	async evictCacheEntry(key: string): Promise<void> {
