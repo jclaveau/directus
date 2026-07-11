@@ -324,6 +324,10 @@ function num(value: string | undefined): number | null {
  * upserts are idempotent, but duplicate fact rows DO inflate the hit COUNT for that
  * one batch — a bounded, telemetry-only skew we accept over the at-most-once
  * alternative (XDEL-before-insert would silently drop a batch on the same crash).
+ *
+ * A deterministically-unpersistable batch is the one exception: it's dropped (XDEL
+ * after a logged warning) rather than retried, so one poison batch can't wedge the
+ * whole drain.
  */
 // Real queries waiting on a pool connection = the DB is the bottleneck. The
 // flush draws from the same shared pool, so when callers are queued it backs off
@@ -407,17 +411,31 @@ export async function flushCacheEvents(): Promise<number> {
 			});
 		}
 
-		if (events.length > 0) {
-			await db.batchInsert('directus_cache_events', events, FLUSH_BATCH);
+		try {
+			if (events.length > 0) {
+				await db.batchInsert('directus_cache_events', events, FLUSH_BATCH);
+			}
+
+			if (descriptors.size > 0) {
+				await db('directus_cache_descriptors')
+					.insert([...descriptors.values()])
+					.onConflict('cache_key')
+					.merge();
+			}
+		}
+		catch (err: any) {
+			// A batch that deterministically fails to persist (bad row, constraint,
+			// dialect quirk) must not wedge the drain: without the XDEL below it would
+			// be re-read from the stream head every tick forever, re-inserting any rows
+			// that DID land. Drop it to a warning — telemetry is lossy by design.
+			useLogger().warn(
+				err,
+				`[cache-stats] dropped ${batch.length} unpersistable events. ${err.message}`,
+			);
 		}
 
-		if (descriptors.size > 0) {
-			await db('directus_cache_descriptors')
-				.insert([...descriptors.values()])
-				.onConflict('cache_key')
-				.merge();
-		}
-
+		// Outside the try so a handled failure still advances the stream head. On
+		// success this preserves the at-least-once insert→XDEL ordering.
 		await redis.call('XDEL', streamKey(), ...ids);
 
 		drained += batch.length;
