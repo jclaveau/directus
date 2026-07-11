@@ -57,10 +57,9 @@ import { PayloadService } from './payload.js';
 const env = useEnv();
 
 /**
- * Emit a mutation's action events (the item's own event plus any queued nested ones) in parallel.
- * They run together, so a slow handler on one event doesn't serialize the rest. By default the
- * mutation does not wait for them (Directus' historical fire-and-forget behaviour); pass
- * `awaitActionHooks` to block until every handler has settled.
+ * Emit a mutation's action events in parallel. This fork awaits them by default so a
+ * mutation read-back sees rows its action hooks create (e.g. the notifying fan-out).
+ * Pass `awaitActionHooks: false` for the historical fire-and-forget behaviour.
  */
 async function emitActionEvents(actionEvents: ActionEventParams[], opts: MutationOptions): Promise<void> {
 	const emitting = Promise.all(
@@ -70,7 +69,7 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 				: emitter.emitAction(actionEvent.event, actionEvent.meta, actionEvent.context),),
 	);
 
-	if (opts.awaitActionHooks) {
+	if (opts.awaitActionHooks !== false) {
 		await emitting;
 	}
 	else {
