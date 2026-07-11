@@ -359,6 +359,95 @@ describe('CachePage', () => {
 		});
 	});
 
+	it('renders ∞ / tombstone / dash branches for a bare entry', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/entry') {
+				const data = {
+					exists: true,
+					value: { x: 1 },
+					tags: null,
+					tagCounts: {},
+					// ttlMs null → ∞; uncompressed 0 → 0% ratio; tombstone set.
+					expiry: { exp: 111, createdAt: 222, ttlMs: null },
+					sizes: { uncompressed: 0, compressed: 0 },
+					tombstone: 1_700_000_000_000,
+				};
+
+				return Promise.resolve({ data: { data } }) as never;
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } }) as never;
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// The /server/info group is the system section's only endpoint.
+		const headers = wrapper.findAll('.endpoint-header');
+		await headers[headers.length - 1]!.trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+		await wrapper.find('.entry-row').trigger('click');
+		await flushPromises();
+
+		const text = wrapper.text();
+		expect(text).toContain('∞'); // ttlMs null
+		expect(text).toContain('Last expired'); // tombstone row
+		expect(text).toContain('(0%)'); // zero-size ratio guard
+		expect(text).toContain('—'); // null collection / url / recommended TTL
+	});
+
+	it('swallows a detail-fetch error and marks the value absent', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/entry') {
+				return Promise.reject(new Error('boom')) as never;
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } }) as never;
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+		await wrapper.find('.entry-row').trigger('click');
+		await flushPromises();
+
+		// The drawer still opens (selectedEntry set); no unhandled rejection.
+		expect(wrapper.find('.entry-detail').exists()).toBe(true);
+	});
+
+	it('surfaces a stats-toggle error', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/stats') {
+				return Promise.resolve({
+					data: {
+						data: {
+							configured: true,
+							enabled: true,
+							killedReason: null,
+							bufferLength: 0,
+						},
+					},
+				} as never);
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } } as never);
+		});
+
+		vi.mocked(api.patch).mockRejectedValue({
+			response: { data: { errors: [{ message: 'nope' }] } },
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.stats-toggle').trigger('click');
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('nope');
+	});
+
 	it('hides the stats toggle when collection is not configured', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			if (url === '/utils/cache/stats') {
