@@ -80,6 +80,9 @@ jobs:
       REDIS: redis://localhost:6379
       CACHE_AUTO_PURGE: 'true'
       CACHE_AUTO_PURGE_MODE: scoped
+      # Opt-in telemetry (default off) — on here so the Settings → Cache page has
+      # live data + the enable/disable toggle to demo in the preview.
+      CACHE_STATS_ENABLED: 'true'
       ADMIN_EMAIL: admin@example.com
       # info so each request logs a line — the idle watcher keys off log growth.
       LOG_LEVEL: info
