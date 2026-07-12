@@ -262,9 +262,9 @@ async function loadAnomalies() {
 
 function anomalyLabel(reason: CacheAnomalyReason): string {
 	const labels: Record<CacheAnomalyReason, string> = {
-		key_too_long: t('cache_anomaly_key_too_long', 'Key too long · cached but untracked'),
+		key_too_long: t('cache_anomaly_key_too_long', 'Key too long · untracked'),
 		scoped_orphan: t('cache_anomaly_scoped_orphan', 'Not cached · scoped orphan'),
-		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · value too large'),
+		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
 		coarse_scope: t('cache_anomaly_coarse_scope', 'Coarse purge scope'),
 	};
@@ -559,7 +559,11 @@ onMounted(() => {
 						{{ a.maxKeyLength }} {{ t('chars', 'chars') }}
 					</span>
 					<span class="stat count">×{{ a.count }}</span>
-					<span v-if="a.sample" class="sample" :title="a.sample">{{ a.sample }}</span>
+					<span
+						v-if="a.sample"
+						class="sample"
+						:title="a.sample"
+					>{{ a.sample }}</span>
 				</div>
 			</div>
 
@@ -860,7 +864,7 @@ onMounted(() => {
 	font-family: var(--theme--fonts--monospace--font-family);
 	font-size: 12px;
 	margin-inline-start: auto;
-	max-width: 40%;
+	max-inline-size: 40%;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
