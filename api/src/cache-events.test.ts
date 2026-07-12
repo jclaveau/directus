@@ -620,6 +620,11 @@ describe('enforceCacheStatsBudget', () => {
 			'scalabus:stats:killed_reason',
 			expect.stringContaining('table 5000B'),
 		);
+
+		// Timescale present → size comes from hypertable_size (sums the chunks), not the
+		// parent-only pg_total_relation_size.
+		expect(mockDb.raw).toHaveBeenNthCalledWith(1, expect.stringContaining('pg_extension'));
+		expect(mockDb.raw).toHaveBeenNthCalledWith(2, expect.stringContaining('hypertable_size'));
 	});
 
 	it('skips the size check on a non-postgres client', async () => {
