@@ -107,6 +107,9 @@ const DEFAULT_RETENTION = getMilliseconds('30d', 2_592_000_000);
 let cacheStatsActiveFlag = false;
 let isTimescaleCache: boolean | null = null;
 
+// Single-flight latch for the drain (see flushCacheEvents).
+let flushInProgress = false;
+
 function statsNamespace(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:stats`;
 }
@@ -350,11 +353,29 @@ function dbPoolSaturated(db: Knex): boolean {
 	return (pool?.numPendingAcquires?.() ?? 0) > 0;
 }
 
+/**
+ * Guarded entrypoint for the drain. node-schedule fires the flush every 10s with no
+ * overlap guard, so a drain that outruns its interval would run concurrently with the
+ * next tick — both XRANGE the same head batch and double-count it. This process-local
+ * latch (JS is single-threaded) turns an overlapping tick into a no-op; the multi-node
+ * case is already handled by scheduleSynchronizedJob picking one node.
+ */
 export async function flushCacheEvents(): Promise<number> {
-	if (!cacheStatsConfigured()) {
+	if (!cacheStatsConfigured() || flushInProgress) {
 		return 0;
 	}
 
+	flushInProgress = true;
+
+	try {
+		return await drainCacheEvents();
+	}
+	finally {
+		flushInProgress = false;
+	}
+}
+
+async function drainCacheEvents(): Promise<number> {
 	const redis = useRedis();
 	const db = getDatabase();
 	let drained = 0;
