@@ -116,6 +116,25 @@ const global = {
 	},
 };
 
+// api.get is URL-multiplexed (entries/stats/anomalies fetched on mount); default
+// anomalies + stats to empty so an entries-only test doesn't leak them elsewhere.
+function mockCacheGet(
+	entries: unknown,
+	extra: { anomalies?: unknown; stats?: unknown } = {},
+) {
+	vi.mocked(api.get).mockImplementation(((url: string) => {
+		if (url === '/utils/cache/anomalies') {
+			return Promise.resolve({ data: { data: extra.anomalies ?? [] } });
+		}
+
+		if (url === '/utils/cache/stats') {
+			return Promise.resolve({ data: { data: extra.stats ?? null } });
+		}
+
+		return Promise.resolve({ data: { data: entries } });
+	}) as never);
+}
+
 describe('CachePage', () => {
 	beforeEach(() => {
 		vi.mocked(api.get).mockReset();
@@ -126,7 +145,7 @@ describe('CachePage', () => {
 	});
 
 	it('loads, groups and renders entries; evicts a path and an entry', async () => {
-		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+		mockCacheGet(ENTRIES);
 
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
@@ -157,7 +176,7 @@ describe('CachePage', () => {
 	});
 
 	it('opens the query url and copies the query as pretty JSON', async () => {
-		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+		mockCacheGet(ENTRIES);
 		const open = vi.spyOn(window, 'open').mockReturnValue(null);
 		const writeText = vi.fn().mockResolvedValue(undefined);
 
@@ -253,7 +272,7 @@ describe('CachePage', () => {
 			};
 		});
 
-		vi.mocked(api.get).mockResolvedValue({ data: { data: many } } as never);
+		mockCacheGet(many);
 
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
@@ -270,7 +289,7 @@ describe('CachePage', () => {
 	});
 
 	it('filters by the user_id.email m2o from the search-input', async () => {
-		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+		mockCacheGet(ENTRIES);
 
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
@@ -293,7 +312,7 @@ describe('CachePage', () => {
 	});
 
 	it('filters by the free-text search from the search-input', async () => {
-		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+		mockCacheGet(ENTRIES);
 
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
@@ -312,7 +331,7 @@ describe('CachePage', () => {
 	});
 
 	it('shows the empty state when nothing is cached', async () => {
-		vi.mocked(api.get).mockResolvedValue({ data: { data: [] } } as never);
+		mockCacheGet([]);
 
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
@@ -504,7 +523,7 @@ describe('CachePage', () => {
 	});
 
 	it('surfaces an evict error instead of an unhandled rejection', async () => {
-		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+		mockCacheGet(ENTRIES);
 
 		vi.mocked(api.delete).mockRejectedValue({
 			response: { data: { errors: [{ message: 'evict failed' }] } },
