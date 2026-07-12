@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import {
 	cacheStatsActive,
 	cacheStatsConfigured,
+	captureCacheAnomaly,
 	captureCacheDescriptor,
 	captureCacheHit,
 	captureCacheMiss,
@@ -10,8 +11,10 @@ import {
 	evictCacheEntry,
 	flushCacheEvents,
 	getCacheStatsState,
+	listCacheAnomalies,
 	listCacheEntries,
 	readCacheMissGap,
+	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
 	refreshCacheStatsFlag,
@@ -244,9 +247,10 @@ describe('untrackable long keys (> varchar(255))', () => {
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 
-	it('skips the descriptor for a long key', async () => {
+	it('emits a key_too_long anomaly instead of the descriptor', async () => {
 		await armFlag(null);
 		mockRedis.call.mockClear();
+		mockRedis.set.mockResolvedValueOnce('OK');
 
 		await captureCacheDescriptor({
 			cacheKey: longKey,
@@ -260,7 +264,12 @@ describe('untrackable long keys (> varchar(255))', () => {
 			fillMs: 0,
 		});
 
-		expect(mockRedis.call).not.toHaveBeenCalled();
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(call[0]).toBe('XADD');
+		expect(fieldAfter(call, 'kind')).toBe('a');
+		expect(fieldAfter(call, 'reason')).toBe('key_too_long');
+		expect(fieldAfter(call, 'path')).toBe('/x');
+		expect(fieldAfter(call, 'keyLength')).toBe('256');
 	});
 
 	it('skips the tombstone for a long key', async () => {
@@ -293,6 +302,58 @@ describe('captureCacheMiss', () => {
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'gapMs')).toBe('');
 		expect(fieldAfter(call, 'ttlMs')).toBe('');
+	});
+});
+
+describe('captureCacheAnomaly', () => {
+	it('emits a throttled anomaly sample keyed by reason', async () => {
+		await armFlag(null);
+		mockRedis.set.mockResolvedValueOnce('OK');
+
+		await captureCacheAnomaly({
+			reason: 'scoped_orphan',
+			path: '/graphql',
+			collection: null,
+			method: 'POST',
+		});
+
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(call[0]).toBe('XADD');
+		expect(fieldAfter(call, 'kind')).toBe('a');
+		expect(fieldAfter(call, 'reason')).toBe('scoped_orphan');
+		expect(fieldAfter(call, 'path')).toBe('/graphql');
+	});
+
+	it('claims the throttle slot with SET NX + expiry', async () => {
+		await armFlag(null);
+		mockRedis.set.mockResolvedValueOnce('OK');
+
+		await captureCacheAnomaly({ reason: 'redis_error', path: '/items/x' });
+
+		const setCall = mockRedis.set.mock.calls[0]!;
+		expect(setCall[0]).toBe('scalabus:stats:anom:redis_error:/items/x');
+		expect(setCall).toContain('NX');
+		expect(setCall).toContain('PX');
+	});
+
+	it('no-ops when the throttle slot is already claimed', async () => {
+		await armFlag(null);
+		mockRedis.set.mockResolvedValueOnce(null);
+
+		await captureCacheAnomaly({ reason: 'coarse_scope', path: '/items/x' });
+
+		expect(mockRedis.call).not.toHaveBeenCalled();
+	});
+
+	it('does nothing when capture is disabled', async () => {
+		await setCacheStatsEnabled(false);
+		mockRedis.set.mockClear();
+		mockRedis.call.mockClear();
+
+		await captureCacheAnomaly({ reason: 'key_too_long', path: '/x' });
+
+		expect(mockRedis.set).not.toHaveBeenCalled();
+		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 });
 
@@ -465,6 +526,35 @@ describe('flushCacheEvents', () => {
 		expect(builder.onConflict).toHaveBeenCalledWith('cache_key');
 		expect(builder.merge).toHaveBeenCalled();
 		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0', '2-0', '3-0');
+	});
+
+	it('inserts anomaly entries into the anomalies table', async () => {
+		xrangeBatch = [
+			streamEntry('1-0', {
+				kind: 'a', reason: 'key_too_long', path: '/items/big', collection: 'big',
+				method: 'GET', keyLength: '512', detail: 'abc', ts: '4000',
+			}),
+		];
+
+		const drained = await flushCacheEvents();
+
+		expect(drained).toBe(1);
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_anomalies',
+			[
+				{
+					time: new Date(4000),
+					reason: 'key_too_long',
+					path: '/items/big',
+					collection: 'big',
+					method: 'GET',
+					key_length: 512,
+					detail: 'abc',
+				},
+			],
+			500,
+		);
 	});
 
 	it('returns 0 without draining when not configured', async () => {
@@ -749,12 +839,13 @@ describe('getCacheStatsState', () => {
 });
 
 describe('truncateCacheEvents', () => {
-	it('truncates both the fact and the dimension tables', async () => {
+	it('truncates the fact, dimension, and anomaly tables', async () => {
 		await truncateCacheEvents();
 
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_events');
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
-		expect(builder.truncate).toHaveBeenCalledTimes(2);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
+		expect(builder.truncate).toHaveBeenCalledTimes(3);
 	});
 });
 
@@ -910,6 +1001,62 @@ describe('evictCacheEntriesForPath', () => {
 
 		expect(await evictCacheEntriesForPath(cache as any, '/x')).toBe(0);
 		expect(cache.delete).not.toHaveBeenCalled();
+	});
+});
+
+describe('listCacheAnomalies', () => {
+	it('maps grouped anomaly rows to records', async () => {
+		queryRows = [
+			{
+				reason: 'key_too_long',
+				path: '/items/big',
+				collection: 'big',
+				method: 'GET',
+				count: '4',
+				max_key_length: '512',
+				sample: 'abc',
+				last_seen: new Date(2000).toISOString(),
+			},
+		];
+
+		const rows = await listCacheAnomalies();
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
+
+		expect(builder.groupBy).toHaveBeenCalledWith(
+			'reason',
+			'path',
+			'collection',
+			'method',
+		);
+
+		expect(rows).toEqual([
+			{
+				reason: 'key_too_long',
+				path: '/items/big',
+				collection: 'big',
+				method: 'GET',
+				count: 4,
+				maxKeyLength: 512,
+				sample: 'abc',
+				lastSeen: 2000,
+			},
+		]);
+	});
+
+	it('returns an empty list when not configured', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		expect(await listCacheAnomalies()).toEqual([]);
+	});
+});
+
+describe('reapCacheAnomalies', () => {
+	it('deletes anomaly rows past the retention window', async () => {
+		deleteCount = 5;
+
+		expect(await reapCacheAnomalies()).toBe(5);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
+		expect(builder.delete).toHaveBeenCalled();
 	});
 });
 

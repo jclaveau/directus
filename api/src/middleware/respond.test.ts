@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => {
 		permissionsCachable: vi.fn(),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
 		captureCacheDescriptor: vi.fn().mockResolvedValue(undefined),
+		captureCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
 	};
 });
@@ -49,6 +50,7 @@ vi.mock('../cache-events.js', () => {
 	return {
 		cacheStatsActive: () => true,
 		captureCacheDescriptor: mocks.captureCacheDescriptor,
+		captureCacheAnomaly: mocks.captureCacheAnomaly,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 	};
 });

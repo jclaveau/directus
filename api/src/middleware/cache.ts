@@ -3,6 +3,7 @@ import type { RequestHandler } from 'express';
 import { getCache, getCacheValue } from '../cache.js';
 import {
 	cacheStatsActive,
+	captureCacheAnomaly,
 	captureCacheHit,
 	captureCacheMiss,
 	readCacheMissGap,
@@ -41,6 +42,17 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		cachedData = await getCacheValue(cache, key);
 	} catch (err: any) {
 		logger.warn(err, `[cache] Couldn't read key ${key}. ${err.message}`);
+
+		if (cacheStatsActive()) {
+			void captureCacheAnomaly({
+				reason: 'redis_error',
+				path: req.originalUrl.split('?')[0]!,
+				collection: req.collection ?? null,
+				method: req.method,
+				detail: err?.message ?? String(err),
+			}).catch(() => {});
+		}
+
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
 		return next();
 	}
