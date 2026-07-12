@@ -60,6 +60,12 @@ describe('App Caching Tests', () => {
 		for (const vendor of vendors) {
 			databases.set(vendor, knex(config.knexConfig[vendor]!));
 
+			// The Redis instance (localhost:6108) is shared across vendors, so the cache
+			// namespace — and thus the stats stream/flag/tables keyed off it — must carry
+			// the vendor, or one vendor's flush drains another's events and a stats toggle
+			// on one disables capture on the others.
+			const vendorPrefix = `${cacheNamespacePrefix}-${vendor}`;
+
 			const envMem = cloneDeep(config.envs);
 			envMem[vendor]['PUBLIC_URL'] = publicURL;
 			envMem[vendor]['CACHE_ENABLED'] = 'true';
@@ -67,17 +73,17 @@ describe('App Caching Tests', () => {
 			envMem[vendor]['CACHE_AUTO_PURGE'] = 'false';
 			envMem[vendor]['CACHE_AUTO_PURGE_IGNORE_LIST'] = `directus_activity,directus_presets,${collectionIgnored}`;
 			envMem[vendor]['CACHE_STORE'] = 'memory';
-			envMem[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_mem`;
+			envMem[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_mem`;
 
 			const envMemPurge = cloneDeep(envMem);
 			envMemPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
-			envMemPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_mem_purge`;
+			envMemPurge[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_mem_purge`;
 
 			const envRedis = cloneDeep(envMem);
 			envRedis[vendor]['CACHE_STORE'] = 'redis';
 			envRedis[vendor]['REDIS_HOST'] = 'localhost';
 			envRedis[vendor]['REDIS_PORT'] = '6108';
-			envRedis[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis`;
+			envRedis[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_redis`;
 			// Stats are opt-in — enable so the registry/stats endpoints are live.
 			envRedis[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
@@ -85,13 +91,13 @@ describe('App Caching Tests', () => {
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
 			// scoped is the default now, so pin full explicitly to keep covering whole-namespace purge.
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'full';
-			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_purge`;
+			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_redis_purge`;
 
 			// Auto-purge with scoped (tag-based) invalidation: a mutation drops only the cache entries
 			// that read the mutated collection, leaving other collections warm.
 			const envRedisScopedPurge = cloneDeep(envRedisPurge);
 			envRedisScopedPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
-			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_scoped`;
+			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_redis_scoped`;
 
 			const scopedEnv = envRedisScopedPurge[vendor];
 			scopedEnv['CACHE_TAGS_HEADER'] = tagsHeader;
@@ -2474,14 +2480,18 @@ describe('App Caching Tests', () => {
 
 	describe('The cache registry lists and evicts cached entries', () => {
 		// Telemetry is buffered in Redis and flushed to Postgres on a schedule, so the
-		// listing is eventually-consistent — poll until the fill/hit land. Asserts by
-		// find-by-path (the namespace is shared across vendors).
+		// listing is eventually-consistent — poll until the fill/hit land.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedis;
 			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// Truncate the fact/dimension tables so a prior run's rows for this path can't
+			// satisfy the hits assertion below — the listing must reflect THIS run's fill.
+			await request(url).post('/utils/cache/stats/truncate')
 				.set('Authorization', auth);
 
 			// Populate a cached read (miss → fill → descriptor) and record a hit.
@@ -2554,6 +2564,87 @@ describe('App Caching Tests', () => {
 				.set('Authorization', auth);
 
 			expect(bad.statusCode).toBe(400);
+		}, 40000);
+	});
+
+	describe('Recommends a TTL from the re-request age p95 (Postgres only)', () => {
+		// Seed the fact/dimension tables directly so the percentile_cont math is asserted
+		// on known inputs — the capture path can't produce controlled ages/gaps. On a
+		// non-pg dialect the ordered-set aggregate is skipped, so recommendedTtlMs is null.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+			const db = databases.get(vendor)!;
+			const isPg = db.client.config.client === 'pg';
+
+			const key = `ttl-probe-${vendor}`;
+			const path = `/items/ttl_probe_${vendor}`;
+			const now = new Date();
+
+			await db('directus_cache_events').where({ cache_key: key }).delete();
+			await db('directus_cache_descriptors').where({ cache_key: key }).delete();
+
+			await db('directus_cache_descriptors').insert({
+				cache_key: key,
+				method: 'GET',
+				path,
+				collection: null,
+				user_id: null,
+				query: '{}',
+				url: path,
+				bytes: 0,
+				fill_ms: 0,
+				last_filled: now,
+			});
+
+			// Ten hits at age 1000ms and ten near-expiry misses at ttl+gap = 2000ms. The p95
+			// over {ten 1000s, ten 2000s} is 2000; a wrong CASE branch (age_ms for a miss,
+			// which is null) would drop the misses and collapse the answer to 1000.
+			const events = [];
+
+			for (let i = 0; i < 10; i++) {
+				events.push({
+					time: now,
+					cache_key: key,
+					kind: 0,
+					age_ms: 1000,
+					gap_ms: null,
+					ttl_ms: 300000,
+					duration_ms: 5,
+				});
+
+				events.push({
+					time: now,
+					cache_key: key,
+					kind: 1,
+					age_ms: null,
+					gap_ms: 500,
+					ttl_ms: 1500,
+					duration_ms: null,
+				});
+			}
+
+			await db('directus_cache_events').insert(events);
+
+			const listed = await request(url).get('/utils/cache')
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+
+			const row = listed.body.data.find((entry: any) => entry.path === path);
+
+			expect(row).toBeDefined();
+
+			if (isPg) {
+				expect(row.recommendedTtlMs).toBe(2000);
+			}
+			else {
+				expect(row.recommendedTtlMs).toBeNull();
+			}
+
+			await db('directus_cache_events').where({ cache_key: key }).delete();
+			await db('directus_cache_descriptors').where({ cache_key: key }).delete();
 		}, 40000);
 	});
 
