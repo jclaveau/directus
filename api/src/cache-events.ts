@@ -254,7 +254,9 @@ export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
 
 // Emit a throttled anomaly sample. One row per reason+path per window (SET NX):
 // the first occurrence claims the slot; the rest no-op until it expires.
-export async function captureCacheAnomaly(entry: CacheAnomalyCapture): Promise<void> {
+export async function captureCacheAnomaly(
+	entry: CacheAnomalyCapture,
+): Promise<void> {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
@@ -803,18 +805,20 @@ export async function listCacheAnomalies(): Promise<CacheAnomalyRecord[]> {
 		.orderBy('count', 'desc')
 		.limit(LISTING_LIMIT);
 
-	return rows.map((row: Record<string, unknown>) => ({
-		reason: row['reason'] as CacheAnomalyReason,
-		path: row['path'] as string,
-		collection: (row['collection'] as string | null) || null,
-		method: (row['method'] as string | null) || null,
-		count: Number(row['count'] ?? 0),
-		maxKeyLength: row['max_key_length'] == null
-			? null
-			: Number(row['max_key_length']),
-		sample: (row['sample'] as string | null) || null,
-		lastSeen: new Date(row['last_seen'] as string).getTime(),
-	}));
+	return rows.map((row: Record<string, unknown>) => {
+		return {
+			reason: row['reason'] as CacheAnomalyReason,
+			path: row['path'] as string,
+			collection: (row['collection'] as string | null) || null,
+			method: (row['method'] as string | null) || null,
+			count: Number(row['count'] ?? 0),
+			maxKeyLength: row['max_key_length'] == null
+				? null
+				: Number(row['max_key_length']),
+			sample: (row['sample'] as string | null) || null,
+			lastSeen: new Date(row['last_seen'] as string).getTime(),
+		};
+	});
 }
 
 // Prune anomaly rows past the retention window, like the events reap.
