@@ -50,6 +50,36 @@ export interface CacheDescriptor {
 	fillMs: number;
 }
 
+// A silent cache anomaly (not cached, cached-but-untracked, degraded scope, or a
+// Redis error) surfaced on the dashboard rather than dropped.
+export type CacheAnomalyReason =
+	| 'key_too_long'
+	| 'scoped_orphan'
+	| 'value_too_large'
+	| 'redis_error'
+	| 'coarse_scope';
+
+export interface CacheAnomalyCapture {
+	reason: CacheAnomalyReason;
+	path: string;
+	collection?: string | null;
+	method?: string | null;
+	keyLength?: number | null; // key_too_long: the untrackable key's length
+	detail?: string | null; // key preview / byte size / error message
+}
+
+// One grouped anomaly row for the admin page: reason+path with an occurrence count.
+export interface CacheAnomalyRecord {
+	reason: CacheAnomalyReason;
+	path: string;
+	collection: string | null;
+	method: string | null;
+	count: number;
+	maxKeyLength: number | null;
+	sample: string | null;
+	lastSeen: number;
+}
+
 export interface CacheEntryRecord {
 	key: string;
 	method: string;
@@ -102,6 +132,10 @@ const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
 // Fallback event-retention window if CACHE_STATS_RETENTION is unset/unparsable.
 const DEFAULT_RETENTION = getMilliseconds('30d', 2_592_000_000);
 
+// A hot uncached path emits an anomaly per request; throttle to one sample per
+// reason+path per minute so anomalies can't crowd out hit/miss telemetry.
+const ANOMALY_THROTTLE_MS = getMilliseconds('1m', 60_000);
+
 // Refreshed from Redis so a live toggle/autokill flips capture without a
 // restart. Seeded false; the schedule primes it before the first request.
 let cacheStatsActiveFlag = false;
@@ -118,6 +152,9 @@ const streamKey = () => `${statsNamespace()}:events`;
 const flagKey = () => `${statsNamespace()}:enabled`;
 const reasonKey = () => `${statsNamespace()}:killed_reason`;
 const tombstoneKey = (key: string) => `${statsNamespace()}:tomb:${key}`;
+
+const anomalyThrottleKey = (reason: string, path: string) =>
+	`${statsNamespace()}:anom:${reason}:${path}`;
 
 /**
  * Master switch: opt-in (CACHE_STATS_ENABLED, default off) AND Redis reachable
@@ -215,9 +252,57 @@ export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
 	});
 }
 
+// Emit a throttled anomaly sample. One row per reason+path per window (SET NX):
+// the first occurrence claims the slot; the rest no-op until it expires.
+export async function captureCacheAnomaly(entry: CacheAnomalyCapture): Promise<void> {
+	if (!cacheStatsActiveFlag) {
+		return;
+	}
+
+	const claimed = await useRedis().set(
+		anomalyThrottleKey(entry.reason, entry.path),
+		'1',
+		'PX',
+		ANOMALY_THROTTLE_MS,
+		'NX',
+	);
+
+	if (claimed === null) {
+		return;
+	}
+
+	await xadd({
+		kind: 'a',
+		reason: entry.reason,
+		path: entry.path,
+		collection: entry.collection ?? '',
+		method: entry.method ?? '',
+		keyLength: entry.keyLength == null
+			? ''
+			: String(entry.keyLength),
+		detail: entry.detail ?? '',
+		ts: String(Date.now()),
+	});
+}
+
 // The per-key descriptor, emitted on a fill where every field is populated.
 export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(entry.cacheKey)) {
+	if (!cacheStatsActiveFlag) {
+		return;
+	}
+
+	// A key past the 255-char column can't be a descriptor, but the response WAS
+	// cached (the SET has no cap) — record the lost visibility, don't drop it.
+	if (!isKeyTrackable(entry.cacheKey)) {
+		await captureCacheAnomaly({
+			reason: 'key_too_long',
+			path: entry.path,
+			collection: entry.collection,
+			method: entry.method,
+			keyLength: entry.cacheKey.length,
+			detail: entry.cacheKey.slice(0, 255),
+		});
+
 		return;
 	}
 
@@ -314,6 +399,16 @@ interface CacheDescriptorRow {
 	last_filled: Date;
 }
 
+interface CacheAnomalyRow {
+	time: Date;
+	reason: string;
+	path: string;
+	collection: string | null;
+	method: string | null;
+	key_length: number | null;
+	detail: string;
+}
+
 function parseFields(flat: string[]): Record<string, string> {
 	const fields: Record<string, string> = {};
 
@@ -403,10 +498,31 @@ async function drainCacheEvents(): Promise<number> {
 		const ids = batch.map(([id]) => id);
 		const events: CacheEventRow[] = [];
 		const descriptors = new Map<string, CacheDescriptorRow>();
+		const anomalies: CacheAnomalyRow[] = [];
 
 		for (const [, flat] of batch) {
 			const f = parseFields(flat);
 			const at = new Date(Number(f['ts']));
+
+			if (f['kind'] === 'a') {
+				anomalies.push({
+					time: at,
+					reason: f['reason'] ?? '',
+					path: f['path'] ?? '',
+					collection: f['collection']
+						? f['collection']
+						: null,
+					method: f['method']
+						? f['method']
+						: null,
+					key_length: f['keyLength']
+						? Number(f['keyLength'])
+						: null,
+					detail: f['detail'] ?? '',
+				});
+
+				continue;
+			}
 
 			if (f['kind'] === 'd') {
 				// Last write in the batch wins — a re-conflicting insert would throw.
@@ -453,6 +569,10 @@ async function drainCacheEvents(): Promise<number> {
 					.insert([...descriptors.values()])
 					.onConflict('cache_key')
 					.merge();
+			}
+
+			if (anomalies.length > 0) {
+				await db.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
 			}
 		}
 		catch (err: any) {
@@ -655,6 +775,61 @@ export async function reapCacheEvents(): Promise<number> {
 		.delete();
 }
 
+/**
+ * Recent cache anomalies for the admin page, grouped by reason+path with an
+ * occurrence count. Windowed like the entries listing; older rows are reaped.
+ */
+export async function listCacheAnomalies(): Promise<CacheAnomalyRecord[]> {
+	if (!cacheStatsConfigured()) {
+		return [];
+	}
+
+	const db = getDatabase();
+	const since = new Date(Date.now() - LISTING_WINDOW);
+
+	const rows = await db('directus_cache_anomalies')
+		.where('time', '>', since)
+		.groupBy('reason', 'path', 'collection', 'method')
+		.select(
+			'reason',
+			'path',
+			'collection',
+			'method',
+			db.raw('COUNT(*) AS count'),
+			db.raw('MAX(key_length) AS max_key_length'),
+			db.raw('MAX(detail) AS sample'),
+			db.raw('MAX(time) AS last_seen'),
+		)
+		.orderBy('count', 'desc')
+		.limit(LISTING_LIMIT);
+
+	return rows.map((row: Record<string, unknown>) => ({
+		reason: row['reason'] as CacheAnomalyReason,
+		path: row['path'] as string,
+		collection: (row['collection'] as string | null) || null,
+		method: (row['method'] as string | null) || null,
+		count: Number(row['count'] ?? 0),
+		maxKeyLength: row['max_key_length'] == null
+			? null
+			: Number(row['max_key_length']),
+		sample: (row['sample'] as string | null) || null,
+		lastSeen: new Date(row['last_seen'] as string).getTime(),
+	}));
+}
+
+// Prune anomaly rows past the retention window, like the events reap.
+export async function reapCacheAnomalies(): Promise<number> {
+	if (!cacheStatsConfigured()) {
+		return 0;
+	}
+
+	const cutoff = new Date(Date.now() - retentionMs());
+
+	return getDatabase()('directus_cache_anomalies')
+		.where('time', '<', cutoff)
+		.delete();
+}
+
 async function isTimescale(db: Knex): Promise<boolean> {
 	if (isTimescaleCache !== null) {
 		return isTimescaleCache;
@@ -813,4 +988,5 @@ export async function truncateCacheEvents(): Promise<void> {
 	const db = getDatabase();
 	await db('directus_cache_events').truncate();
 	await db('directus_cache_descriptors').truncate();
+	await db('directus_cache_anomalies').truncate();
 }

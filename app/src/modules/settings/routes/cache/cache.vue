@@ -20,6 +20,8 @@ import {
 	shortKey,
 	splitSections,
 	ttlVerdict,
+	type CacheAnomaly,
+	type CacheAnomalyReason,
 	type CacheEntry,
 	type EndpointGroup,
 	type QueryGroup,
@@ -49,6 +51,7 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(false);
 const error = ref<string | null>(null);
 const entries = ref<CacheEntry[]>([]);
+const anomalies = ref<CacheAnomaly[]>([]);
 const expanded = ref<Record<string, boolean>>({});
 const now = ref(Date.now());
 const refreshInterval = ref<number | null>(null);
@@ -237,6 +240,7 @@ async function load() {
 		const response = await api.get('/utils/cache');
 		entries.value = response.data.data;
 		now.value = Date.now();
+		void loadAnomalies();
 	}
 	catch (err: any) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
@@ -244,6 +248,28 @@ async function load() {
 	finally {
 		loading.value = false;
 	}
+}
+
+async function loadAnomalies() {
+	try {
+		const response = await api.get('/utils/cache/anomalies');
+		anomalies.value = response.data.data;
+	}
+	catch {
+		anomalies.value = [];
+	}
+}
+
+function anomalyLabel(reason: CacheAnomalyReason): string {
+	const labels: Record<CacheAnomalyReason, string> = {
+		key_too_long: t('cache_anomaly_key_too_long', 'Key too long · cached but untracked'),
+		scoped_orphan: t('cache_anomaly_scoped_orphan', 'Not cached · scoped orphan'),
+		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · value too large'),
+		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
+		coarse_scope: t('cache_anomaly_coarse_scope', 'Coarse purge scope'),
+	};
+
+	return labels[reason] ?? reason;
 }
 
 async function loadStatsState() {
@@ -445,6 +471,7 @@ function closeEntry() {
 onMounted(() => {
 	void load();
 	void loadStatsState();
+	void loadAnomalies();
 });
 </script>
 
@@ -516,6 +543,23 @@ onMounted(() => {
 				<div class="metric">
 					<span class="value">{{ groups.length }}</span>
 					<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+				</div>
+			</div>
+
+			<div v-if="anomalies.length" class="anomalies">
+				<h2 class="section-title anomaly-title">
+					<v-icon name="warning" small />
+					{{ t('cache_anomalies', 'Anomalies') }}
+				</h2>
+
+				<div v-for="(a, i) in anomalies" :key="i" class="anomaly">
+					<span class="reason" :class="a.reason">{{ anomalyLabel(a.reason) }}</span>
+					<span class="path">{{ a.path }}</span>
+					<span v-if="a.maxKeyLength" class="stat">
+						{{ a.maxKeyLength }} {{ t('chars', 'chars') }}
+					</span>
+					<span class="stat count">×{{ a.count }}</span>
+					<span v-if="a.sample" class="sample" :title="a.sample">{{ a.sample }}</span>
 				</div>
 			</div>
 
@@ -764,6 +808,62 @@ onMounted(() => {
 .metric .label {
 	color: var(--theme--foreground-subdued);
 	font-size: 14px;
+}
+
+.anomalies {
+	margin-block-end: 24px;
+}
+
+.anomaly-title {
+	align-items: center;
+	color: var(--theme--warning);
+	display: flex;
+	gap: 6px;
+}
+
+.anomaly {
+	align-items: center;
+	border: var(--theme--border-width) solid var(--theme--border-color-subdued);
+	border-radius: var(--theme--border-radius);
+	display: flex;
+	gap: 12px;
+	margin-block-end: 6px;
+	padding: 8px 12px;
+}
+
+.anomaly .reason {
+	color: var(--theme--warning);
+	flex-shrink: 0;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.anomaly .path {
+	font-family: var(--theme--fonts--monospace--font-family);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.anomaly .stat {
+	color: var(--theme--foreground-subdued);
+	flex-shrink: 0;
+	font-size: 13px;
+}
+
+.anomaly .count {
+	font-variant-numeric: tabular-nums;
+}
+
+.anomaly .sample {
+	color: var(--theme--foreground-subdued);
+	font-family: var(--theme--fonts--monospace--font-family);
+	font-size: 12px;
+	margin-inline-start: auto;
+	max-width: 40%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .section {

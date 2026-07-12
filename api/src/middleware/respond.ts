@@ -4,6 +4,7 @@ import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import {
 	cacheStatsActive,
+	captureCacheAnomaly,
 	captureCacheDescriptor,
 	writeCacheTombstone,
 } from '../cache-events.js';
@@ -61,9 +62,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	}
 
 	let exceedsMaxSize = false;
+	let valueSize = 0;
 
 	if (env['CACHE_VALUE_MAX_SIZE'] !== false) {
-		const valueSize = res.locals['payload']
+		valueSize = res.locals['payload']
 			? stringByteSize(JSON.stringify(res.locals['payload']))
 			: 0;
 
@@ -93,13 +95,21 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
-	if (
+	// The request-level preconditions for caching, minus the payload/scope/permission
+	// gates below — reused to attribute a not-cached anomaly to the right reason.
+	const cacheableRequest =
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
 		env['CACHE_ENABLED'] === true &&
-		cache &&
+		!!cache &&
 		!req.sanitizedQuery.export &&
-		res.locals['cache'] !== false &&
+		res.locals['cache'] !== false;
+
+	const anomalyPath = req.originalUrl.split('?')[0]!;
+
+	if (
+		cacheableRequest &&
+		cache &&
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
 		(await permissionsCachable(
@@ -155,6 +165,22 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				}
 			}
 
+			// Scoped mode wanted per-owner pins but the deriver returned null (an
+			// unpinnable relational filter) — the entry falls back to a coarse tag.
+			if (
+				cacheStatsActive() &&
+				scopedCachePurgeEnabled() &&
+				controllerTags === null &&
+				req.collection
+			) {
+				void captureCacheAnomaly({
+					reason: 'coarse_scope',
+					path: anomalyPath,
+					collection: req.collection,
+					method: req.method,
+				}).catch(() => {});
+			}
+
 			// Gated at the call site (not just inside the buffer write): the default
 			// config has stats off, and building these args re-serializes the payload
 			// (size) and the query — a cost the hot fill path shouldn't pay when off.
@@ -189,6 +215,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
+
+			if (cacheStatsActive()) {
+				void captureCacheAnomaly({
+					reason: 'redis_error',
+					path: anomalyPath,
+					collection: req.collection ?? null,
+					method: req.method,
+					detail: err?.message ?? String(err),
+				}).catch(() => {});
+			}
 		}
 
 		res.setHeader('Cache-Control', getCacheControlHeader(req, getMilliseconds(env['CACHE_TTL']), true, true));
@@ -198,6 +234,27 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		// Don't cache anything by default
 		res.setHeader('Cache-Control', 'no-cache');
 		res.setHeader('Vary', 'Origin, Cache-Control');
+	}
+
+	// Surface the two silent "cacheable but skipped" reasons on the dashboard.
+	if (cacheStatsActive() && cacheableRequest) {
+		if (exceedsMaxSize) {
+			void captureCacheAnomaly({
+				reason: 'value_too_large',
+				path: anomalyPath,
+				collection: req.collection ?? null,
+				method: req.method,
+				detail: `${valueSize}B`,
+			}).catch(() => {});
+		}
+		else if (orphansInScopedMode) {
+			void captureCacheAnomaly({
+				reason: 'scoped_orphan',
+				path: anomalyPath,
+				collection: req.collection ?? null,
+				method: req.method,
+			}).catch(() => {});
+		}
 	}
 
 	if (req.sanitizedQuery.export) {

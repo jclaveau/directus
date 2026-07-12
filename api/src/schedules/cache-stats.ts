@@ -2,6 +2,7 @@ import {
 	cacheStatsConfigured,
 	enforceCacheStatsBudget,
 	flushCacheEvents,
+	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
 	refreshCacheStatsFlag,
@@ -53,6 +54,7 @@ export default async function schedule(): Promise<boolean> {
 			try {
 				await reapCacheEvents();
 				await reapCacheDescriptors();
+				await reapCacheAnomalies();
 			}
 			catch (err: any) {
 				logger.warn(err, `[cache-stats] reap failed. ${err.message}`);

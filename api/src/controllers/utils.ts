@@ -206,6 +206,22 @@ router.get(
 );
 
 router.get(
+	'/cache/anomalies',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAnomalies() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
 	'/cache/entry',
 	asyncHandler(async (req, res) => {
 		const service = new UtilsService({
