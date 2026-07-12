@@ -271,13 +271,27 @@ async function toggleStats() {
 }
 
 async function evictEntry(entry: CacheEntry) {
-	await api.delete('/utils/cache', { params: { key: entry.key } });
-	await load();
+	error.value = null;
+
+	try {
+		await api.delete('/utils/cache', { params: { key: entry.key } });
+		await load();
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
 }
 
 async function evictPath(path: string) {
-	await api.delete('/utils/cache', { params: { path } });
-	await load();
+	error.value = null;
+
+	try {
+		await api.delete('/utils/cache', { params: { path } });
+		await load();
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
 }
 
 function toggle(path: string) {
@@ -387,6 +401,12 @@ async function openEntry(entry: CacheEntry) {
 			params: { key: entry.key },
 		});
 
+		// A quick second row click supersedes this fetch; ignore a late response for a
+		// no-longer-selected entry so it can't overwrite the currently-open one.
+		if (selectedEntry.value?.key !== entry.key) {
+			return;
+		}
+
 		const data = response.data.data;
 		cachedValueExists.value = data.exists;
 		cachedValue.value = data.value;
@@ -397,10 +417,14 @@ async function openEntry(entry: CacheEntry) {
 		cachedTombstone.value = data.tombstone;
 	}
 	catch {
-		cachedValueExists.value = false;
+		if (selectedEntry.value?.key === entry.key) {
+			cachedValueExists.value = false;
+		}
 	}
 	finally {
-		valueLoading.value = false;
+		if (selectedEntry.value?.key === entry.key) {
+			valueLoading.value = false;
+		}
 	}
 }
 
