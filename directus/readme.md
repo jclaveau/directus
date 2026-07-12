@@ -1,5 +1,9 @@
 <p align="center"><img alt="Directus Logo" src="https://user-images.githubusercontent.com/522079/158864859-0fbeae62-9d7a-4619-b35e-f8fa5f68e0c8.png"></p>
 
+<p align="center">
+  <a href="https://codecov.io/gh/jclaveau/directus/tree/v11.10.1-hhh-dev"><img alt="Coverage" src="https://codecov.io/gh/jclaveau/directus/branch/v11.10.1-hhh-dev/graph/badge.svg"></a>
+</p>
+
 ---
 
 ## 🐰 Introduction
