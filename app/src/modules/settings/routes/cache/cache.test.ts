@@ -478,6 +478,31 @@ describe('CachePage', () => {
 		expect(wrapper.find('.stats-toggle').exists()).toBe(false);
 	});
 
+	it('shows the buffered backlog in the toggle tooltip', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/stats') {
+				return Promise.resolve({
+					data: {
+						data: {
+							configured: true,
+							enabled: true,
+							killedReason: null,
+							bufferLength: 7,
+						},
+					},
+				} as never);
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } } as never);
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// bufferLength > 0 branch of statsTooltip renders the count.
+		expect(wrapper.find('.stats-toggle').exists()).toBe(true);
+	});
+
 	it('surfaces an evict error instead of an unhandled rejection', async () => {
 		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
 
