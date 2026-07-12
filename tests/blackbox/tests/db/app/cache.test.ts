@@ -64,7 +64,7 @@ describe('App Caching Tests', () => {
 			// namespace — and thus the stats stream/flag/tables keyed off it — must carry
 			// the vendor, or one vendor's flush drains another's events and a stats toggle
 			// on one disables capture on the others.
-			const vendorPrefix = `${cacheNamespacePrefix}-${vendor}`;
+			const nsPrefix = `${cacheNamespacePrefix}-${vendor}`;
 
 			const envMem = cloneDeep(config.envs);
 			envMem[vendor]['PUBLIC_URL'] = publicURL;
@@ -73,17 +73,17 @@ describe('App Caching Tests', () => {
 			envMem[vendor]['CACHE_AUTO_PURGE'] = 'false';
 			envMem[vendor]['CACHE_AUTO_PURGE_IGNORE_LIST'] = `directus_activity,directus_presets,${collectionIgnored}`;
 			envMem[vendor]['CACHE_STORE'] = 'memory';
-			envMem[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_mem`;
+			envMem[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_mem`;
 
 			const envMemPurge = cloneDeep(envMem);
 			envMemPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
-			envMemPurge[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_mem_purge`;
+			envMemPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_mem_purge`;
 
 			const envRedis = cloneDeep(envMem);
 			envRedis[vendor]['CACHE_STORE'] = 'redis';
 			envRedis[vendor]['REDIS_HOST'] = 'localhost';
 			envRedis[vendor]['REDIS_PORT'] = '6108';
-			envRedis[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_redis`;
+			envRedis[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis`;
 			// Stats are opt-in — enable so the registry/stats endpoints are live.
 			envRedis[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
@@ -91,13 +91,13 @@ describe('App Caching Tests', () => {
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
 			// scoped is the default now, so pin full explicitly to keep covering whole-namespace purge.
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'full';
-			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_redis_purge`;
+			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_purge`;
 
 			// Auto-purge with scoped (tag-based) invalidation: a mutation drops only the cache entries
 			// that read the mutated collection, leaving other collections warm.
 			const envRedisScopedPurge = cloneDeep(envRedisPurge);
 			envRedisScopedPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
-			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${vendorPrefix}_redis_scoped`;
+			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_scoped`;
 
 			const scopedEnv = envRedisScopedPurge[vendor];
 			scopedEnv['CACHE_TAGS_HEADER'] = tagsHeader;
@@ -2568,9 +2568,9 @@ describe('App Caching Tests', () => {
 	});
 
 	describe('Recommends a TTL from the re-request age p95 (Postgres only)', () => {
-		// Seed the fact/dimension tables directly so the percentile_cont math is asserted
-		// on known inputs — the capture path can't produce controlled ages/gaps. On a
-		// non-pg dialect the ordered-set aggregate is skipped, so recommendedTtlMs is null.
+		// Seed the tables directly so percentile_cont is asserted on known inputs — the
+		// capture path can't produce controlled ages/gaps. Non-pg skips the ordered-set
+		// aggregate, so recommendedTtlMs is null there.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedis;
 			const url = getUrl(vendor, env);
@@ -2582,8 +2582,13 @@ describe('App Caching Tests', () => {
 			const path = `/items/ttl_probe_${vendor}`;
 			const now = new Date();
 
-			await db('directus_cache_events').where({ cache_key: key }).delete();
-			await db('directus_cache_descriptors').where({ cache_key: key }).delete();
+			await db('directus_cache_events')
+				.where({ cache_key: key })
+				.delete();
+
+			await db('directus_cache_descriptors')
+				.where({ cache_key: key })
+				.delete();
 
 			await db('directus_cache_descriptors').insert({
 				cache_key: key,
@@ -2598,9 +2603,9 @@ describe('App Caching Tests', () => {
 				last_filled: now,
 			});
 
-			// Ten hits at age 1000ms and ten near-expiry misses at ttl+gap = 2000ms. The p95
-			// over {ten 1000s, ten 2000s} is 2000; a wrong CASE branch (age_ms for a miss,
-			// which is null) would drop the misses and collapse the answer to 1000.
+			// Ten hits at age 1000ms and ten near-expiry misses at ttl+gap = 2000ms. The
+			// p95 over {ten 1000s, ten 2000s} is 2000; a wrong CASE branch (age_ms for a
+			// miss, which is null) would drop the misses and collapse it to 1000.
 			const events = [];
 
 			for (let i = 0; i < 10; i++) {
@@ -2643,8 +2648,13 @@ describe('App Caching Tests', () => {
 				expect(row.recommendedTtlMs).toBeNull();
 			}
 
-			await db('directus_cache_events').where({ cache_key: key }).delete();
-			await db('directus_cache_descriptors').where({ cache_key: key }).delete();
+			await db('directus_cache_events')
+				.where({ cache_key: key })
+				.delete();
+
+			await db('directus_cache_descriptors')
+				.where({ cache_key: key })
+				.delete();
 		}, 40000);
 	});
 

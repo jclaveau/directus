@@ -85,7 +85,8 @@ export async function up(knex: Knex): Promise<void> {
 	const retentionMs = getMilliseconds(env['CACHE_STATS_RETENTION'], 2_592_000_000);
 
 	await knex.raw(
-		`SELECT add_retention_policy('directus_cache_events', INTERVAL '${retentionMs} milliseconds')`,
+		`SELECT add_retention_policy('directus_cache_events', `
+		+ `INTERVAL '${retentionMs} milliseconds')`,
 	);
 }
 

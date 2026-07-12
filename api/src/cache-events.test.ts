@@ -234,7 +234,12 @@ describe('untrackable long keys (> varchar(255))', () => {
 		await armFlag(null);
 		mockRedis.call.mockClear();
 
-		await captureCacheHit({ cacheKey: longKey, ageMs: 1, ttlMs: null, durationMs: null });
+		await captureCacheHit({
+			cacheKey: longKey,
+			ageMs: 1,
+			ttlMs: null,
+			durationMs: null,
+		});
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
@@ -536,11 +541,17 @@ describe('flushCacheEvents', () => {
 		expect(mockDb.batchInsert).not.toHaveBeenCalled();
 	});
 
-	it('drops a poison batch (still XDELs) instead of wedging when the insert fails', async () => {
+	it('drops a poison batch instead of wedging on a failed insert', async () => {
 		mockDb.batchInsert.mockRejectedValueOnce(new Error('value too long'));
 
 		xrangeBatch = [
-			streamEntry('1-0', { kind: 'h', cacheKey: 'k', ageMs: '1', ttlMs: '1', ts: '1' }),
+			streamEntry('1-0', {
+				kind: 'h',
+				cacheKey: 'k',
+				ageMs: '1',
+				ttlMs: '1',
+				ts: '1',
+			}),
 		];
 
 		// A deterministically-unpersistable batch must not reject the flush...
@@ -552,7 +563,7 @@ describe('flushCacheEvents', () => {
 		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0');
 	});
 
-	it('is single-flight: an overlapping call is a no-op while a drain is running', async () => {
+	it('is single-flight: an overlapping call no-ops during a drain', async () => {
 		await armFlag(null);
 
 		let releaseXrange: () => void = () => {};
@@ -576,7 +587,7 @@ describe('flushCacheEvents', () => {
 		const first = flushCacheEvents();
 		const second = await flushCacheEvents();
 
-		// The second call saw the in-flight latch and bailed without touching the stream.
+		// The second call saw the latch and bailed without touching the stream.
 		expect(second).toBe(0);
 
 		releaseXrange();
@@ -623,8 +634,15 @@ describe('enforceCacheStatsBudget', () => {
 
 		// Timescale present → size comes from hypertable_size (sums the chunks), not the
 		// parent-only pg_total_relation_size.
-		expect(mockDb.raw).toHaveBeenNthCalledWith(1, expect.stringContaining('pg_extension'));
-		expect(mockDb.raw).toHaveBeenNthCalledWith(2, expect.stringContaining('hypertable_size'));
+		expect(mockDb.raw).toHaveBeenNthCalledWith(
+			1,
+			expect.stringContaining('pg_extension'),
+		);
+
+		expect(mockDb.raw).toHaveBeenNthCalledWith(
+			2,
+			expect.stringContaining('hypertable_size'),
+		);
 	});
 
 	it('skips the size check on a non-postgres client', async () => {
@@ -896,7 +914,7 @@ describe('evictCacheEntriesForPath', () => {
 });
 
 describe('reapCacheDescriptors', () => {
-	it('deletes descriptors past the reap window with no live event, returns the count', async () => {
+	it('deletes orphaned descriptors past the reap window', async () => {
 		const now = 1_700_000_000_000;
 		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
 		deleteCount = 3;
@@ -905,8 +923,14 @@ describe('reapCacheDescriptors', () => {
 
 		expect(reaped).toBe(3);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
-		// DESCRIPTOR_REAP_AFTER = 90d; cutoff is now - 90d (a sign flip would delete live rows).
-		expect(builder.where).toHaveBeenCalledWith('last_filled', '<', new Date(now - 7_776_000_000));
+
+		// DESCRIPTOR_REAP_AFTER = 90d; cutoff is now - 90d (a sign flip hits live rows).
+		expect(builder.where).toHaveBeenCalledWith(
+			'last_filled',
+			'<',
+			new Date(now - 7_776_000_000),
+		);
+
 		// ...AND only keys with no event still on file.
 		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
 		expect(builder.delete).toHaveBeenCalled();
@@ -930,8 +954,14 @@ describe('reapCacheEvents', () => {
 
 		expect(reaped).toBe(7);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_events');
+
 		// default CACHE_STATS_RETENTION = 30d; cutoff is now - 30d, not now + 30d.
-		expect(builder.where).toHaveBeenCalledWith('time', '<', new Date(now - 2_592_000_000));
+		expect(builder.where).toHaveBeenCalledWith(
+			'time',
+			'<',
+			new Date(now - 2_592_000_000),
+		);
+
 		expect(builder.delete).toHaveBeenCalled();
 
 		nowSpy.mockRestore();
