@@ -471,4 +471,20 @@ describe('CachePage', () => {
 
 		expect(wrapper.find('.stats-toggle').exists()).toBe(false);
 	});
+
+	it('surfaces an evict error instead of an unhandled rejection', async () => {
+		vi.mocked(api.get).mockResolvedValue({ data: { data: ENTRIES } } as never);
+
+		vi.mocked(api.delete).mockRejectedValue({
+			response: { data: { errors: [{ message: 'evict failed' }] } },
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header v-button').trigger('click');
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('evict failed');
+	});
 });
