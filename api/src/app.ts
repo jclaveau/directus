@@ -65,6 +65,7 @@ import rateLimiterGlobal from './middleware/rate-limiter-global.js';
 import rateLimiter from './middleware/rate-limiter-ip.js';
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
+import cacheStatsSchedule from './schedules/cache-stats.js';
 import metricsSchedule from './schedules/metrics.js';
 import retentionSchedule from './schedules/retention.js';
 import telemetrySchedule from './schedules/telemetry.js';
@@ -337,6 +338,7 @@ export default async function createApp(): Promise<express.Application> {
 	await telemetrySchedule();
 	await tusSchedule();
 	await metricsSchedule();
+	await cacheStatsSchedule();
 
 	await emitter.emitInit('app.after', { app });
 

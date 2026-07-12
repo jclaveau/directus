@@ -1,0 +1,35 @@
+# directus_cache_descriptors — the per-key cache-entry dimension (telemetry).
+# Read-only: rows are written by the cache-stats flusher, not through the app.
+table: directus_cache_descriptors
+
+fields:
+  - field: cache_key
+    readonly: true
+    width: half
+  - field: method
+    readonly: true
+    width: half
+  - field: path
+    readonly: true
+  - field: collection
+    readonly: true
+    width: half
+  - field: user_id
+    readonly: true
+    display: user
+    width: half
+  - field: query
+    readonly: true
+  - field: url
+    readonly: true
+  - field: bytes
+    readonly: true
+    display: filesize
+    width: half
+  - field: fill_ms
+    readonly: true
+    width: half
+  - field: last_filled
+    readonly: true
+    display: datetime
+    width: half
