@@ -60,6 +60,12 @@ describe('App Caching Tests', () => {
 		for (const vendor of vendors) {
 			databases.set(vendor, knex(config.knexConfig[vendor]!));
 
+			// The Redis instance (localhost:6108) is shared across vendors, so the cache
+			// namespace — and thus the stats stream/flag/tables keyed off it — must carry
+			// the vendor, or one vendor's flush drains another's events and a stats toggle
+			// on one disables capture on the others.
+			const nsPrefix = `${cacheNamespacePrefix}-${vendor}`;
+
 			const envMem = cloneDeep(config.envs);
 			envMem[vendor]['PUBLIC_URL'] = publicURL;
 			envMem[vendor]['CACHE_ENABLED'] = 'true';
@@ -67,29 +73,31 @@ describe('App Caching Tests', () => {
 			envMem[vendor]['CACHE_AUTO_PURGE'] = 'false';
 			envMem[vendor]['CACHE_AUTO_PURGE_IGNORE_LIST'] = `directus_activity,directus_presets,${collectionIgnored}`;
 			envMem[vendor]['CACHE_STORE'] = 'memory';
-			envMem[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_mem`;
+			envMem[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_mem`;
 
 			const envMemPurge = cloneDeep(envMem);
 			envMemPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
-			envMemPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_mem_purge`;
+			envMemPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_mem_purge`;
 
 			const envRedis = cloneDeep(envMem);
 			envRedis[vendor]['CACHE_STORE'] = 'redis';
 			envRedis[vendor]['REDIS_HOST'] = 'localhost';
 			envRedis[vendor]['REDIS_PORT'] = '6108';
-			envRedis[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis`;
+			envRedis[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis`;
+			// Stats are opt-in — enable so the registry/stats endpoints are live.
+			envRedis[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
 			const envRedisPurge = cloneDeep(envRedis);
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE'] = 'true';
 			// scoped is the default now, so pin full explicitly to keep covering whole-namespace purge.
 			envRedisPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'full';
-			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_purge`;
+			envRedisPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_purge`;
 
 			// Auto-purge with scoped (tag-based) invalidation: a mutation drops only the cache entries
 			// that read the mutated collection, leaving other collections warm.
 			const envRedisScopedPurge = cloneDeep(envRedisPurge);
 			envRedisScopedPurge[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
-			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${cacheNamespacePrefix}_redis_scoped`;
+			envRedisScopedPurge[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_scoped`;
 
 			const scopedEnv = envRedisScopedPurge[vendor];
 			scopedEnv['CACHE_TAGS_HEADER'] = tagsHeader;
@@ -2467,6 +2475,237 @@ describe('App Caching Tests', () => {
 
 			// Cached in full mode (unlike the scoped-mode MISS asserted above).
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe('The cache registry lists and evicts cached entries', () => {
+		// Telemetry is buffered in Redis and flushed to Postgres on a schedule, so the
+		// listing is eventually-consistent — poll until the fill/hit land.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// Truncate the fact/dimension tables so a prior run's rows for this path can't
+			// satisfy the hits assertion below — the listing must reflect THIS run's fill.
+			await request(url).post('/utils/cache/stats/truncate')
+				.set('Authorization', auth);
+
+			// Populate a cached read (miss → fill → descriptor) and record a hit.
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionRelated}`)
+				.set('Authorization', auth);
+
+			// Wait for the flush to drain the buffer into the descriptor + fact tables.
+			let first: any;
+
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				first = listed.body.data.find((entry: any) => {
+					return entry.path === `/items/${collectionFirst}`;
+				});
+
+				if (first && first.hits >= 1) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			expect(first).toBeDefined();
+			expect(first.hits).toBeGreaterThanOrEqual(1);
+			expect(typeof first.query).toBe('string');
+
+			// The live Redis state is still there for the freshly-filled key.
+			const entry = await request(url).get('/utils/cache/entry')
+				.query({ key: first.key })
+				.set('Authorization', auth);
+
+			expect(entry.statusCode).toBe(200);
+			expect(entry.body.data.exists).toBe(true);
+			expect(entry.body.data.value).toBeDefined();
+
+			// Missing key → 400.
+			const noKey = await request(url).get('/utils/cache/entry')
+				.set('Authorization', auth);
+
+			expect(noKey.statusCode).toBe(400);
+
+			// Evict one entry by key (its own branch)…
+			const byKey = await request(url).delete('/utils/cache')
+				.query({ key: first.key })
+				.set('Authorization', auth);
+
+			expect(byKey.statusCode).toBe(200);
+			expect(byKey.body.data.evicted).toBe(1);
+
+			// …then evict a whole endpoint by path (the described keys under it).
+			const byPath = await request(url).delete('/utils/cache')
+				.query({ path: `/items/${collectionFirst}` })
+				.set('Authorization', auth);
+
+			expect(byPath.statusCode).toBe(200);
+			expect(byPath.body.data.evicted).toBeGreaterThanOrEqual(1);
+
+			// Neither key nor path → 400.
+			const bad = await request(url).delete('/utils/cache')
+				.set('Authorization', auth);
+
+			expect(bad.statusCode).toBe(400);
+		}, 40000);
+	});
+
+	describe('Recommends a TTL from the re-request age p95 (Postgres only)', () => {
+		// Seed the tables directly so percentile_cont is asserted on known inputs — the
+		// capture path can't produce controlled ages/gaps. Non-pg skips the ordered-set
+		// aggregate, so recommendedTtlMs is null there.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+			const db = databases.get(vendor)!;
+			const isPg = db.client.config.client === 'pg';
+
+			const key = `ttl-probe-${vendor}`;
+			const path = `/items/ttl_probe_${vendor}`;
+			const now = new Date();
+
+			await db('directus_cache_events')
+				.where({ cache_key: key })
+				.delete();
+
+			await db('directus_cache_descriptors')
+				.where({ cache_key: key })
+				.delete();
+
+			await db('directus_cache_descriptors').insert({
+				cache_key: key,
+				method: 'GET',
+				path,
+				collection: null,
+				user_id: null,
+				query: '{}',
+				url: path,
+				bytes: 0,
+				fill_ms: 0,
+				last_filled: now,
+			});
+
+			// Ten hits at age 1000ms and ten near-expiry misses at ttl+gap = 2000ms. The
+			// p95 over {ten 1000s, ten 2000s} is 2000; a wrong CASE branch (age_ms for a
+			// miss, which is null) would drop the misses and collapse it to 1000.
+			const events = [];
+
+			for (let i = 0; i < 10; i++) {
+				events.push({
+					time: now,
+					cache_key: key,
+					kind: 0,
+					age_ms: 1000,
+					gap_ms: null,
+					ttl_ms: 300000,
+					duration_ms: 5,
+				});
+
+				events.push({
+					time: now,
+					cache_key: key,
+					kind: 1,
+					age_ms: null,
+					gap_ms: 500,
+					ttl_ms: 1500,
+					duration_ms: null,
+				});
+			}
+
+			await db('directus_cache_events').insert(events);
+
+			const listed = await request(url).get('/utils/cache')
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+
+			const row = listed.body.data.find((entry: any) => entry.path === path);
+
+			expect(row).toBeDefined();
+
+			if (isPg) {
+				expect(row.recommendedTtlMs).toBe(2000);
+			}
+			else {
+				expect(row.recommendedTtlMs).toBeNull();
+			}
+
+			await db('directus_cache_events')
+				.where({ cache_key: key })
+				.delete();
+
+			await db('directus_cache_descriptors')
+				.where({ cache_key: key })
+				.delete();
+		}, 40000);
+	});
+
+	describe('The cache stats endpoints report state and toggle collection', () => {
+		// Redis-only: the runtime flag + event buffer live in Redis, so the state
+		// reports `configured` and a toggle round-trips on the serving instance.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const state = await request(url).get('/utils/cache/stats')
+				.set('Authorization', auth);
+
+			expect(state.statusCode).toBe(200);
+			expect(state.body.data.configured).toBe(true);
+			expect(typeof state.body.data.bufferLength).toBe('number');
+
+			// Disable collection at runtime…
+			const off = await request(url).patch('/utils/cache/stats')
+				.send({ enabled: false })
+				.set('Authorization', auth);
+
+			expect(off.statusCode).toBe(200);
+			expect(off.body.data.enabled).toBe(false);
+
+			const disabled = await request(url).get('/utils/cache/stats')
+				.set('Authorization', auth);
+
+			expect(disabled.body.data.enabled).toBe(false);
+
+			// …reclaim the gathered events…
+			const truncated = await request(url).post('/utils/cache/stats/truncate')
+				.set('Authorization', auth);
+
+			expect(truncated.statusCode).toBe(200);
+			expect(truncated.body.data.truncated).toBe(true);
+
+			// …then re-enable so later reads collect again.
+			const on = await request(url).patch('/utils/cache/stats')
+				.send({ enabled: true })
+				.set('Authorization', auth);
+
+			expect(on.statusCode).toBe(200);
+			expect(on.body.data.enabled).toBe(true);
+
+			// Missing `enabled` → 400.
+			const bad = await request(url).patch('/utils/cache/stats')
+				.set('Authorization', auth);
+
+			expect(bad.statusCode).toBe(400);
 		});
 	});
 });

@@ -256,3 +256,8 @@ data:
   - many_collection: directus_webhooks
     many_field: migrated_flow
     one_collection: directus_flows
+
+  ### Cache
+  - many_collection: directus_cache_descriptors
+    many_field: user_id
+    one_collection: directus_users

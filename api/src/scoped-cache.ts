@@ -166,6 +166,35 @@ export async function tagScopedCacheKeys(
 }
 
 /**
+ * How many cache entries each scoped tag currently indexes — the blast radius of
+ * purging that tag. Keyed by the tag's display string (`collection` or
+ * `collection:field=value`, which maps 1:1 to the `<namespace>:tag:<…>` set key).
+ */
+export async function countScopedCacheTagMembers(
+	displayTags: readonly string[],
+): Promise<Record<string, number>> {
+	if (!scopedCachePurgeEnabled() || displayTags.length === 0) {
+		return {};
+	}
+
+	const redis = useRedis();
+	const pipeline = redis.pipeline();
+
+	for (const tag of displayTags) {
+		pipeline.scard(`${env['CACHE_NAMESPACE']}:tag:${tag}`);
+	}
+
+	const results = await pipeline.exec();
+	const counts: Record<string, number> = {};
+
+	displayTags.forEach((tag, index) => {
+		counts[tag] = Number(results?.[index]?.[1] ?? 0);
+	});
+
+	return counts;
+}
+
+/**
  * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
  * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
  */

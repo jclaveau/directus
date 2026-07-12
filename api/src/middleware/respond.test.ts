@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => {
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
+		captureCacheDescriptor: vi.fn().mockResolvedValue(undefined),
+		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
 	};
 });
 
@@ -42,6 +44,15 @@ vi.mock('../scoped-cache.js', () => {
 	};
 });
 
+// Stats active so the descriptor/tombstone capture on a fill is exercised.
+vi.mock('../cache-events.js', () => {
+	return {
+		cacheStatsActive: () => true,
+		captureCacheDescriptor: mocks.captureCacheDescriptor,
+		writeCacheTombstone: mocks.writeCacheTombstone,
+	};
+});
+
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
 
 vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }));
@@ -52,6 +63,10 @@ vi.mock('../utils/permissions-cachable.js', () => {
 
 vi.mock('../utils/get-cache-key.js', () => {
 	return { getCacheKey: vi.fn().mockResolvedValue('cache-key') };
+});
+
+vi.mock('../utils/get-graphql-query-and-variables.js', () => {
+	return { getGraphqlQueryAndVariables: () => ({ query: '{ me }', variables: {} }) };
 });
 
 vi.mock('../utils/get-cache-headers.js', () => {
@@ -134,7 +149,11 @@ describe('respond middleware', () => {
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
 			'cache-key__expires_at',
-			{ exp: expect.any(Number) },
+			{
+				exp: expect.any(Number),
+				createdAt: expect.any(Number),
+				ttlMs: expect.any(Number),
+			},
 		);
 
 		// #205 scoped-cache tagging fires with the request's tags
@@ -144,6 +163,49 @@ describe('respond middleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
+	});
+
+	test('a fill with stats active captures the descriptor + tombstone', async () => {
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [{ collection: 'articles' }],
+				requestStart: Date.now() - 10,
+			},
+		);
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cacheKey: 'cache-key',
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				url: '/items/articles',
+			}),
+		);
+
+		expect(mocks.writeCacheTombstone).toHaveBeenCalledWith(
+			'cache-key',
+			expect.any(Number),
+		);
+	});
+
+	test('a graphql fill captures a blank url and the graphql query', async () => {
+		const res = makeRes(
+			{ data: { me: 1 } },
+			{ scopedCacheTags: [{ collection: 'articles' }] },
+		);
+
+		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
+
+		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({
+				url: '',
+				query: JSON.stringify({ query: '{ me }', variables: {} }),
+			}),
+		);
 	});
 
 	test('falls back to the bare collection tag when tags are absent', async () => {

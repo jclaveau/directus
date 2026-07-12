@@ -2,11 +2,25 @@ import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { systemCollectionRows } from '@directus/system-data';
 import type { AbstractServiceOptions, Accountability, PrimaryKey, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { clearSystemCache, getCache } from '../cache.js';
+import { clearSystemCache, getCache, getCacheValue } from '../cache.js';
+import {
+	type CacheEntryRecord,
+	type CacheStatsState,
+	evictCacheEntriesForPath,
+	evictCacheEntry,
+	getCacheStatsState,
+	listCacheEntries,
+	readCacheTombstone,
+	setCacheStatsEnabled,
+	truncateCacheEvents,
+} from '../cache-events.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { compress } from '../utils/compress.js';
+import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 
 export class UtilsService {
@@ -172,5 +186,128 @@ export class UtilsService {
 		}
 
 		return cache?.clear();
+	}
+
+	private assertCacheAdmin(action: string): void {
+		if (this.accountability?.admin !== true) {
+			const reason =
+				`'${this.accountability?.user}' does not have permission `
+				+ `to ${action} as not being an admin`;
+
+			throw new ForbiddenError({ reason });
+		}
+	}
+
+	async getCacheEntries(): Promise<CacheEntryRecord[]> {
+		this.assertCacheAdmin('inspect the cache');
+
+		return listCacheEntries();
+	}
+
+	// The live Redis state for a single key — the cached response plus its
+	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
+	// descriptor holds. All may be gone: the descriptor outlives the value.
+	async readCacheEntry(key: string): Promise<{
+		exists: boolean;
+		value: unknown;
+		tags: string[] | null;
+		tagCounts: Record<string, number>;
+		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
+		sizes: { uncompressed: number; compressed: number } | null;
+		tombstone: number | null;
+	}> {
+		this.assertCacheAdmin('inspect a cache entry');
+
+		const { cache } = getCache();
+
+		if (!cache) {
+			return {
+				exists: false,
+				value: null,
+				tags: null,
+				tagCounts: {},
+				expiry: null,
+				sizes: null,
+				tombstone: null,
+			};
+		}
+
+		const value = await getCacheValue(cache, key);
+		const expiry = (await getCacheValue(cache, `${key}__expires_at`)) ?? null;
+		const tagged = await getCacheValue(cache, `${key}__tags`);
+
+		// `__tags` stores the comma-joined scoped-cache tags (only when the
+		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).
+		const tags = typeof tagged?.tags === 'string'
+			? tagged.tags.split(', ').filter(Boolean)
+			: null;
+
+		// Re-compress the payload to size its Redis footprint against the raw response.
+		let sizes: { uncompressed: number; compressed: number } | null = null;
+
+		if (value !== undefined) {
+			const packed = await compress(value);
+
+			sizes = {
+				uncompressed: stringByteSize(JSON.stringify(value)),
+				compressed: Buffer.isBuffer(packed)
+					? packed.byteLength
+					: stringByteSize(JSON.stringify(packed)),
+			};
+		}
+
+		return {
+			exists: value !== undefined,
+			value: value ?? null,
+			tags,
+			// Blast radius: how many entries each tag would purge.
+			tagCounts: tags
+				? await countScopedCacheTagMembers(tags)
+				: {},
+			expiry,
+			sizes,
+			// When this key last expired, if a miss-gap tombstone still lives.
+			tombstone: await readCacheTombstone(key),
+		};
+	}
+
+	async evictCacheEntry(key: string): Promise<void> {
+		this.assertCacheAdmin('evict a cache entry');
+
+		const { cache } = getCache();
+
+		if (cache) {
+			await evictCacheEntry(cache, key);
+		}
+	}
+
+	async evictCacheEntriesForPath(path: string): Promise<number> {
+		this.assertCacheAdmin('evict cache entries');
+
+		const { cache } = getCache();
+
+		if (!cache) {
+			return 0;
+		}
+
+		return evictCacheEntriesForPath(cache, path);
+	}
+
+	async getCacheStatsState(): Promise<CacheStatsState> {
+		this.assertCacheAdmin('inspect cache stats');
+
+		return getCacheStatsState();
+	}
+
+	async setCacheStatsEnabled(enabled: boolean): Promise<void> {
+		this.assertCacheAdmin('toggle cache stats');
+
+		await setCacheStatsEnabled(enabled);
+	}
+
+	async truncateCacheStats(): Promise<void> {
+		this.assertCacheAdmin('truncate cache stats');
+
+		await truncateCacheEvents();
 	}
 }

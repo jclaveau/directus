@@ -188,4 +188,122 @@ router.post(
 	}),
 );
 
+router.get(
+	'/cache',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		// Never cache the cache listing itself — it must reflect live state.
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheEntries() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/entry',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const key = req.query['key'];
+
+		if (typeof key !== 'string') {
+			throw new InvalidPayloadError({
+				reason: 'A `key` query parameter is required',
+			});
+		}
+
+		res.json({ data: await service.readCacheEntry(key) });
+	}),
+);
+
+router.delete(
+	'/cache',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const key = req.query['key'];
+		const path = req.query['path'];
+
+		if (typeof key === 'string') {
+			await service.evictCacheEntry(key);
+			res.status(200).json({ data: { evicted: 1 } });
+			return;
+		}
+
+		if (typeof path === 'string') {
+			const evicted = await service.evictCacheEntriesForPath(path);
+			res.status(200).json({ data: { evicted } });
+			return;
+		}
+
+		throw new InvalidPayloadError({
+			reason: 'A `key` or `path` query parameter is required to evict cache entries',
+		});
+	}),
+);
+
+router.get(
+	'/cache/stats',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheStatsState() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/stats',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const enabled = req.body?.enabled;
+
+		if (typeof enabled !== 'boolean') {
+			throw new InvalidPayloadError({
+				reason: 'An `enabled` boolean is required to toggle cache stats',
+			});
+		}
+
+		await service.setCacheStatsEnabled(enabled);
+		res.status(200).json({ data: { enabled } });
+		return;
+	}),
+);
+
+router.post(
+	'/cache/stats/truncate',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		await service.truncateCacheStats();
+		res.status(200).json({ data: { truncated: true } });
+		return;
+	}),
+);
+
 export default router;

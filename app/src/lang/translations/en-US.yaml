@@ -1276,6 +1276,7 @@ system_fields_locked: System fields are locked and can't be edited
 directus_collection:
   directus_access: Policy attachments
   directus_activity: Accountability logs for all events
+  directus_cache_descriptors: Per-key cache-entry descriptors (telemetry)
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module

@@ -83,6 +83,15 @@ export const DEFAULTS = {
 	CACHE_SCHEMA_FREEZE_ENABLED: false,
 	CACHE_VALUE_MAX_SIZE: false,
 	CACHE_SKIP_ALLOWED: false,
+	// Opt-in: the cache page + its telemetry writes are off unless explicitly
+	// enabled (and only work with CACHE_STORE=redis). When on, growth is bounded
+	// by `RETENTION` (cross-dialect daily reap), `MAX_BYTES` (pg-only hard stop)
+	// and `MAX_BUFFER` (Redis-buffer stall guard).
+	CACHE_STATS_ENABLED: false,
+	CACHE_STATS_RETENTION: '30d',
+	CACHE_STATS_MAX_BYTES: '2gb',
+	CACHE_STATS_MAX_BUFFER: 100_000,
+	CACHE_STATS_GAP_LOOKBACK: '1h',
 
 	AUTH_PROVIDERS: '',
 	AUTH_DISABLE_DEFAULT: false,
