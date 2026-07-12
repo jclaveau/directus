@@ -74,9 +74,18 @@ const statsTooltip = computed(() => {
 		});
 	}
 
-	return statsState.value?.enabled
-		? t('cache_stats_disable', 'Disable cache stats collection')
-		: t('cache_stats_enable', 'Enable cache stats collection');
+	if (statsState.value?.enabled) {
+		const base = t('cache_stats_disable', 'Disable cache stats collection');
+
+		// Surface the un-flushed Redis buffer so a backlog (watchdog territory) is visible.
+		return statsState.value.bufferLength > 0
+			? `${base} · ${t('cache_stats_buffered', '{count} buffered', {
+				count: statsState.value.bufferLength,
+			})}`
+			: base;
+	}
+
+	return t('cache_stats_enable', 'Enable cache stats collection');
 });
 
 const selectedEntry = ref<CacheEntry | null>(null);
@@ -213,10 +222,11 @@ const sections = computed(() => {
 	);
 });
 
-const totalEntries = computed(() => entries.value.length);
+// Track the filtered list so entries/hits agree with the endpoint count under a filter.
+const totalEntries = computed(() => searchedEntries.value.length);
 
 const totalHits = computed(() => {
-	return entries.value.reduce((sum, entry) => sum + entry.hits, 0);
+	return searchedEntries.value.reduce((sum, entry) => sum + entry.hits, 0);
 });
 
 async function load() {

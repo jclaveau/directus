@@ -298,11 +298,17 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
+		const entriesTotalBefore = Number(wrapper.findAll('.summary .value')[0]!.text());
+
 		wrapper.findComponent(SearchInput).vm.$emit('update:modelValue', 'bob@corp.io');
 		await flushPromises();
 
 		expect(wrapper.text()).toContain('/items/comments'); // bob matches on email
 		expect(wrapper.text()).not.toContain('/items/articles');
+
+		// The summary totals track the filtered list, not the full set.
+		const entriesTotalAfter = Number(wrapper.findAll('.summary .value')[0]!.text());
+		expect(entriesTotalAfter).toBeLessThan(entriesTotalBefore);
 	});
 
 	it('shows the empty state when nothing is cached', async () => {
