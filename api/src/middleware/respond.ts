@@ -2,7 +2,11 @@ import { useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
-import { cacheStatsActive, captureCacheDescriptor, writeCacheTombstone } from '../cache-events.js';
+import {
+	cacheStatsActive,
+	captureCacheDescriptor,
+	writeCacheTombstone,
+} from '../cache-events.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {

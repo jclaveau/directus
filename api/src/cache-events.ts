@@ -354,11 +354,11 @@ function dbPoolSaturated(db: Knex): boolean {
 }
 
 /**
- * Guarded entrypoint for the drain. node-schedule fires the flush every 10s with no
- * overlap guard, so a drain that outruns its interval would run concurrently with the
- * next tick — both XRANGE the same head batch and double-count it. This process-local
- * latch (JS is single-threaded) turns an overlapping tick into a no-op; the multi-node
- * case is already handled by scheduleSynchronizedJob picking one node.
+ * Guarded entrypoint for the drain. node-schedule fires the flush every 10s with
+ * no overlap guard, so a drain that outruns its interval would run concurrently
+ * with the next tick — both XRANGE the same head batch and double-count it. A
+ * process-local latch (JS is single-threaded) makes an overlapping tick a no-op;
+ * the multi-node case is handled by scheduleSynchronizedJob picking one node.
  */
 export async function flushCacheEvents(): Promise<number> {
 	if (!cacheStatsConfigured() || flushInProgress) {

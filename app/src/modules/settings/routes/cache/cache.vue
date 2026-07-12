@@ -77,7 +77,7 @@ const statsTooltip = computed(() => {
 	if (statsState.value?.enabled) {
 		const base = t('cache_stats_disable', 'Disable cache stats collection');
 
-		// Surface the un-flushed Redis buffer so a backlog (watchdog territory) is visible.
+		// Surface the un-flushed Redis buffer backlog (watchdog territory).
 		return statsState.value.bufferLength > 0
 			? `${base} · ${t('cache_stats_buffered', '{count} buffered', {
 				count: statsState.value.bufferLength,
@@ -222,7 +222,7 @@ const sections = computed(() => {
 	);
 });
 
-// Track the filtered list so entries/hits agree with the endpoint count under a filter.
+// Totals track the filtered list, matching the endpoint count under a filter.
 const totalEntries = computed(() => searchedEntries.value.length);
 
 const totalHits = computed(() => {
