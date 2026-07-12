@@ -551,6 +551,39 @@ describe('flushCacheEvents', () => {
 		expect(mockDb.batchInsert).toHaveBeenCalledTimes(1);
 		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0');
 	});
+
+	it('is single-flight: an overlapping call is a no-op while a drain is running', async () => {
+		await armFlag(null);
+
+		let releaseXrange: () => void = () => {};
+
+		let xrangeCalls = 0;
+
+		const gate = new Promise<void>((resolve) => {
+			releaseXrange = resolve;
+		});
+
+		mockRedis.call.mockImplementation(async (command: string) => {
+			if (command === 'XRANGE') {
+				xrangeCalls += 1;
+				await gate; // hold the first drain open so the second call overlaps it
+				return [];
+			}
+
+			return null;
+		});
+
+		const first = flushCacheEvents();
+		const second = await flushCacheEvents();
+
+		// The second call saw the in-flight latch and bailed without touching the stream.
+		expect(second).toBe(0);
+
+		releaseXrange();
+		await first;
+
+		expect(xrangeCalls).toBe(1);
+	});
 });
 
 describe('enforceCacheStatsBudget', () => {
@@ -858,15 +891,22 @@ describe('evictCacheEntriesForPath', () => {
 });
 
 describe('reapCacheDescriptors', () => {
-	it('deletes orphaned descriptors and returns the count', async () => {
+	it('deletes descriptors past the reap window with no live event, returns the count', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
 		deleteCount = 3;
 
 		const reaped = await reapCacheDescriptors();
 
 		expect(reaped).toBe(3);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
-		expect(builder.whereNotIn).toHaveBeenCalled();
+		// DESCRIPTOR_REAP_AFTER = 90d; cutoff is now - 90d (a sign flip would delete live rows).
+		expect(builder.where).toHaveBeenCalledWith('last_filled', '<', new Date(now - 7_776_000_000));
+		// ...AND only keys with no event still on file.
+		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
 		expect(builder.delete).toHaveBeenCalled();
+
+		nowSpy.mockRestore();
 	});
 
 	it('returns 0 when not configured', async () => {
@@ -876,15 +916,20 @@ describe('reapCacheDescriptors', () => {
 });
 
 describe('reapCacheEvents', () => {
-	it('prunes fact rows past the retention window', async () => {
+	it('prunes fact rows strictly older than the retention cutoff', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
 		deleteCount = 7;
 
 		const reaped = await reapCacheEvents();
 
 		expect(reaped).toBe(7);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_events');
-		expect(builder.where).toHaveBeenCalledWith('time', '<', expect.any(Date));
+		// default CACHE_STATS_RETENTION = 30d; cutoff is now - 30d, not now + 30d.
+		expect(builder.where).toHaveBeenCalledWith('time', '<', new Date(now - 2_592_000_000));
 		expect(builder.delete).toHaveBeenCalled();
+
+		nowSpy.mockRestore();
 	});
 
 	it('returns 0 when not configured', async () => {
