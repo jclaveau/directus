@@ -175,6 +175,44 @@ describe('CachePage', () => {
 		});
 	});
 
+	it('renders the anomalies section from the anomalies endpoint', async () => {
+		const anomalies = [
+			{
+				reason: 'key_too_long',
+				path: '/items/articles',
+				collection: 'articles',
+				method: 'GET',
+				count: 4,
+				maxKeyLength: 512,
+				sample: 'app-key-way-too-long',
+				lastSeen: Date.now(),
+			},
+			{
+				reason: 'redis_error',
+				path: '/items/comments',
+				collection: null,
+				method: 'GET',
+				count: 2,
+				maxKeyLength: null,
+				sample: 'ECONNREFUSED',
+				lastSeen: Date.now(),
+			},
+		];
+
+		mockCacheGet(ENTRIES, { anomalies });
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache/anomalies');
+
+		const text = wrapper.find('.anomalies').text();
+		expect(text).toContain('Key too long'); // anomalyLabel for key_too_long
+		expect(text).toContain('/items/articles');
+		expect(text).toContain('512'); // maxKeyLength
+		expect(text).toContain('ECONNREFUSED'); // the redis_error sample
+	});
+
 	it('opens the query url and copies the query as pretty JSON', async () => {
 		mockCacheGet(ENTRIES);
 		const open = vi.spyOn(window, 'open').mockReturnValue(null);

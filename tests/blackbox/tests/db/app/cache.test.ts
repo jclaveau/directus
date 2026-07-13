@@ -2708,4 +2708,20 @@ describe('App Caching Tests', () => {
 			expect(bad.statusCode).toBe(400);
 		});
 	});
+
+	describe('The cache anomalies endpoint lists silent cache anomalies', () => {
+		// Exercises the route + service + listing query; with no anomalies staged
+		// the shape (200 + array) is asserted, not specific rows.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			const response = await request(url).get('/utils/cache/anomalies')
+				.set('Authorization', auth);
+
+			expect(response.statusCode).toBe(200);
+			expect(Array.isArray(response.body.data)).toBe(true);
+		});
+	});
 });

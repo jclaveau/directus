@@ -10,6 +10,7 @@ import {
 	evictCacheEntriesForPath,
 	evictCacheEntry as registryEvictCacheEntry,
 	getCacheStatsState,
+	listCacheAnomalies,
 	listCacheEntries,
 	readCacheTombstone,
 	setCacheStatsEnabled,
@@ -131,6 +132,13 @@ describe('Services / Utils', () => {
 				as not being an admin`,
 			);
 		});
+
+		it('getCacheAnomalies rejects a non-admin user', async () => {
+			await expect(nonAdminService().getCacheAnomalies()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect cache anomalies
+				as not being an admin`,
+			);
+		});
 	});
 
 	describe('cache inspection (admin)', () => {
@@ -146,6 +154,13 @@ describe('Services / Utils', () => {
 			vi.mocked(listCacheEntries).mockResolvedValue(rows as any);
 
 			await expect(adminService().getCacheEntries()).resolves.toBe(rows);
+		});
+
+		it('getCacheAnomalies returns the grouped anomaly rows', async () => {
+			const rows = [{ reason: 'key_too_long', path: '/items/a', count: 3 }];
+			vi.mocked(listCacheAnomalies).mockResolvedValue(rows as any);
+
+			await expect(adminService().getCacheAnomalies()).resolves.toBe(rows);
 		});
 
 		it('evictCacheEntry evicts through the active cache', async () => {

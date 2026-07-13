@@ -260,6 +260,67 @@ describe('respond middleware', () => {
 		expect(warn).toHaveBeenCalled();
 		// tagging is skipped once the set throws, but the response still flushes
 		expect(res.json).toHaveBeenCalled();
+
+		// the failed write also surfaces as a redis_error anomaly on the dashboard
+		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
+			expect.objectContaining({
+				reason: 'redis_error',
+				path: '/items/articles',
+			}),
+		);
+	});
+
+	test('an oversized payload is not cached and flags value_too_large', async () => {
+		env['CACHE_VALUE_MAX_SIZE'] = '1b';
+		const res = makeRes({ data: [{ id: 1, blob: 'x'.repeat(100) }] });
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
+			expect.objectContaining({
+				reason: 'value_too_large',
+				path: '/items/articles',
+			}),
+		);
+	});
+
+	test('a scoped-mode collection-less response flags scoped_orphan', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+		const res = makeRes({ data: {} });
+		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
+			expect.objectContaining({
+				reason: 'scoped_orphan',
+				path: '/server/info',
+			}),
+		);
+	});
+
+	test('an unpinnable relational filter (null tags) flags coarse_scope', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// A deriver that couldn't resolve pins sets scopedCacheTags to null; the entry
+		// still caches under the coarse collection tag.
+		const res = makeRes({ data: [{ id: 1 }] }, { scopedCacheTags: null });
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+
+		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
+			expect.objectContaining({
+				reason: 'coarse_scope',
+				path: '/items/articles',
+				collection: 'articles',
+			}),
+		);
 	});
 
 	test('res.locals.cache === false skips caching (no-cache branch)', async () => {
