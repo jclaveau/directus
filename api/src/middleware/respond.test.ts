@@ -303,7 +303,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	test('an unpinnable relational filter (null tags) flags coarse_scope', async () => {
+	test('an unpinnable null-tags fill flags coarse_scope', async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
 		// A deriver that couldn't resolve pins sets scopedCacheTags to null; the entry
