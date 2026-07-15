@@ -207,7 +207,7 @@ describe('CachePage', () => {
 		expect(wrapper.text()).toContain('/graphql');
 	});
 
-	it('renders an anomaly row + coarse-scope badge inside an expanded node', async () => {
+	it('renders an in-tree anomaly row + coarse badge', async () => {
 		const anomalies = [
 			{
 				cacheKey: 'app-key-000000000000', // matches ENTRIES[0]
