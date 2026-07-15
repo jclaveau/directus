@@ -207,6 +207,56 @@ describe('CachePage', () => {
 		expect(wrapper.text()).toContain('/graphql');
 	});
 
+	it('renders an anomaly row + coarse-scope badge inside an expanded node', async () => {
+		const anomalies = [
+			{
+				cacheKey: 'app-key-000000000000', // matches ENTRIES[0]
+				reason: 'coarse_scope',
+				path: '/items/articles',
+				method: 'GET',
+				query: '{"limit":5}',
+				url: '/items/articles?limit=5',
+				count: 1,
+				maxKeyLength: null,
+				sample: null,
+				lastSeen: Date.now(),
+			},
+			{
+				cacheKey: 'orphan-000000000000',
+				reason: 'scoped_orphan',
+				path: '/items/articles',
+				method: 'GET',
+				query: '{"limit":5}',
+				url: '/items/articles?limit=5',
+				count: 2,
+				maxKeyLength: null,
+				sample: 'no collection',
+				lastSeen: Date.now(),
+			},
+		];
+
+		mockCacheGet(ENTRIES, { anomalies });
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// /items/articles is hottest → the first endpoint header.
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+
+		// coarse_scope annotates the cached entry with an inline reason badge.
+		const badge = wrapper.find('.entry-row .reason.inline');
+		expect(badge.exists()).toBe(true);
+		expect(badge.text()).toContain('Coarse');
+
+		// scoped_orphan stands as its own anomaly row under the same node.
+		const anomalyRow = wrapper.find('.anomaly-row');
+		expect(anomalyRow.exists()).toBe(true);
+		expect(anomalyRow.text()).toContain('Not cached'); // scoped_orphan label
+		expect(anomalyRow.text()).toContain('×2');
+		expect(anomalyRow.text()).toContain('no collection'); // the sample
+	});
+
 	it('opens the query url and copies the query as pretty JSON', async () => {
 		mockCacheGet(ENTRIES);
 		const open = vi.spyOn(window, 'open').mockReturnValue(null);
