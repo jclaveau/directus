@@ -633,8 +633,8 @@ onMounted(() => {
 										{{ q.totalHits }} {{ t('hits', 'hits') }}
 									</span>
 									<span class="stat">{{ formatSize(q.totalSize) }}</span>
-									<span v-if="q.anomalies.length" class="stat anomaly-count">
-										{{ q.anomalies.length }} {{ t('anomalies_short', 'anomalies') }}
+									<span v-if="q.anomalyCount" class="stat anomaly-count">
+										{{ q.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
 									</span>
 									<span
 										v-if="q.recommendedTtlMs !== null"
