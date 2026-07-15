@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildGroups,
+	filterAnomalies,
 	filterEntries,
 	formatAge,
 	formatExpiry,
@@ -11,7 +12,9 @@ import {
 	isSystemPath,
 	shortKey,
 	splitSections,
+	summariseAnomalies,
 	ttlVerdict,
+	type CacheAnomaly,
 	type CacheEntry,
 } from './cache-view';
 
@@ -33,6 +36,22 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		hitMs: null,
 		ttlMs: null,
 		recommendedTtlMs: null,
+		...over,
+	};
+}
+
+function anomaly(over: Partial<CacheAnomaly>): CacheAnomaly {
+	return {
+		cacheKey: 'ak',
+		reason: 'scoped_orphan',
+		path: '/items/x',
+		method: 'GET',
+		query: '{}',
+		url: '',
+		count: 1,
+		maxKeyLength: null,
+		sample: null,
+		lastSeen: 0,
 		...over,
 	};
 }
@@ -206,5 +225,81 @@ describe('buildGroups', () => {
 		expect(queries[2]!.query).toBe('{"limit":5}');
 		expect(queries[2]!.entries).toHaveLength(2);
 		expect(queries[2]!.totalHits).toBe(3);
+	});
+});
+
+describe('buildGroups with anomalies', () => {
+	it('weaves not-cached anomalies into the tree with occurrence counts', () => {
+		const groups = buildGroups(
+			[entry({ key: 'c1', path: '/items/a', hits: 5 })],
+			[anomaly({
+				cacheKey: 'o1',
+				path: '/items/a',
+				reason: 'scoped_orphan',
+				count: 3,
+			})],
+		);
+
+		const group = groups.find((candidate) => candidate.path === '/items/a')!;
+		expect(group.entryCount).toBe(1);
+		expect(group.anomalyCount).toBe(3); // occurrences, not rows
+		expect(group.queries[0]!.anomalies).toHaveLength(1);
+	});
+
+	it('gives a not-cached-only path its own anomaly node', () => {
+		const groups = buildGroups(
+			[],
+			[anomaly({ path: '/server/info', reason: 'scoped_orphan', count: 2 })],
+		);
+
+		expect(groups).toHaveLength(1);
+		expect(groups[0]!.path).toBe('/server/info');
+		expect(groups[0]!.entryCount).toBe(0);
+		expect(groups[0]!.anomalyCount).toBe(2);
+	});
+
+	it('annotates a cached entry when a coarse_scope anomaly shares its key', () => {
+		const groups = buildGroups(
+			[entry({ key: 'shared', path: '/items/a', query: '{}' })],
+			[anomaly({
+				cacheKey: 'shared',
+				path: '/items/a',
+				query: '{}',
+				reason: 'coarse_scope',
+				count: 2,
+			})],
+		);
+
+		const query = groups[0]!.queries[0]!;
+		// folded onto the entry, not a standalone row
+		expect(query.anomalies).toHaveLength(0);
+		expect(query.entries[0]!.anomaly?.reason).toBe('coarse_scope');
+		expect(query.anomalyCount).toBe(2); // still counted, via the annotation
+	});
+});
+
+describe('summariseAnomalies + filterAnomalies', () => {
+	it('sums occurrences per reason, hottest first', () => {
+		const summary = summariseAnomalies([
+			anomaly({ reason: 'scoped_orphan', count: 2 }),
+			anomaly({ reason: 'redis_error', count: 5 }),
+			anomaly({ reason: 'scoped_orphan', count: 1 }),
+		]);
+
+		expect(summary).toEqual([
+			{ reason: 'redis_error', count: 5 },
+			{ reason: 'scoped_orphan', count: 3 },
+		]);
+	});
+
+	it('narrows by path / query / reason, all when blank', () => {
+		const list = [
+			anomaly({ path: '/items/a', reason: 'scoped_orphan' }),
+			anomaly({ path: '/items/b', reason: 'redis_error' }),
+		];
+
+		expect(filterAnomalies(list, 'redis')).toHaveLength(1);
+		expect(filterAnomalies(list, '/items/b')).toHaveLength(1);
+		expect(filterAnomalies(list, '')).toHaveLength(2);
 	});
 });

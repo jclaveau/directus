@@ -65,9 +65,9 @@ vi.mock('../cache-events.js', () => {
 	};
 });
 
-vi.mock('../utils/record-uncached-anomaly.js', () => ({
-	recordUncachedAnomaly: vi.fn(() => Promise.resolve()),
-}));
+vi.mock('../utils/record-uncached-anomaly.js', () => {
+	return { recordUncachedAnomaly: vi.fn(() => Promise.resolve()) };
+});
 
 import checkCacheMiddleware from './cache.js';
 import {
