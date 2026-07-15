@@ -30,6 +30,7 @@ export interface QueryGroup {
 	url: string;
 	entries: CacheEntry[];
 	anomalies: CacheAnomaly[];
+	anomalyCount: number; // total occurrences (anomaly rows + coarse_scope annotations)
 	totalHits: number;
 	totalSize: number;
 	ttlMs: number | null;
@@ -281,6 +282,17 @@ function maxOrNull(
 		: null;
 }
 
+// Total anomaly occurrences at a node: the not-cached rows plus coarse_scope
+// annotations folded onto cached entries.
+function countAnomalies(entries: CacheEntry[], anomalies: CacheAnomaly[]): number {
+	const rows = anomalies.reduce((sum, anomaly) => sum + anomaly.count, 0);
+	const annotated = entries.reduce(
+		(sum, entry) => sum + (entry.anomaly?.count ?? 0),
+		0,
+	);
+	return rows + annotated;
+}
+
 // Group by method+query within an endpoint. Cached entries and anomalies sharing a
 // method+query share a bucket; a coarse_scope anomaly annotates its cached entry.
 function buildQueryGroups(
@@ -337,6 +349,7 @@ function buildQueryGroups(
 			url: bucket.url,
 			entries: bucket.entries,
 			anomalies: bucket.anomalies,
+			anomalyCount: countAnomalies(bucket.entries, bucket.anomalies),
 			totalHits: sumHits(bucket.entries),
 			totalSize: sumSize(bucket.entries),
 			ttlMs: maxOrNull(bucket.entries, (entry) => entry.ttlMs),
@@ -375,14 +388,13 @@ export function buildGroups(
 		const pathAnomalies = anomaliesByPath.get(path) ?? [];
 		const queries = buildQueryGroups(path, pathEntries, pathAnomalies);
 
-		// coarse_scope anomalies fold into their cached entry, so count the rows left.
-		const anomalyRows = queries.reduce((sum, group) => sum + group.anomalies.length, 0);
+		const anomalyCount = queries.reduce((sum, group) => sum + group.anomalyCount, 0);
 
 		result.push({
 			path,
 			queries,
 			entryCount: pathEntries.length,
-			anomalyCount: anomalyRows,
+			anomalyCount,
 			totalHits: sumHits(pathEntries),
 			totalSize: sumSize(pathEntries),
 		});
