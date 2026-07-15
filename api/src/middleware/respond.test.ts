@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
 		transform: vi.fn().mockReturnValue('EXPORTED'),
 		captureCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		captureCacheAnomaly: vi.fn().mockResolvedValue(undefined),
+		recordUncachedAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
 	};
 });
@@ -53,6 +54,10 @@ vi.mock('../cache-events.js', () => {
 		captureCacheAnomaly: mocks.captureCacheAnomaly,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 	};
+});
+
+vi.mock('../utils/record-uncached-anomaly.js', () => {
+	return { recordUncachedAnomaly: mocks.recordUncachedAnomaly };
 });
 
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
@@ -262,11 +267,10 @@ describe('respond middleware', () => {
 		expect(res.json).toHaveBeenCalled();
 
 		// the failed write also surfaces as a redis_error anomaly on the dashboard
-		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
-			expect.objectContaining({
-				reason: 'redis_error',
-				path: '/items/articles',
-			}),
+		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'redis_error',
+			expect.any(String),
 		);
 	});
 
@@ -278,11 +282,10 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 
-		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
-			expect.objectContaining({
-				reason: 'value_too_large',
-				path: '/items/articles',
-			}),
+		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'value_too_large',
+			expect.any(String),
 		);
 	});
 
@@ -295,11 +298,9 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 
-		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
-			expect.objectContaining({
-				reason: 'scoped_orphan',
-				path: '/server/info',
-			}),
+		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'scoped_orphan',
 		);
 	});
 
@@ -307,20 +308,17 @@ describe('respond middleware', () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
 		// A deriver that couldn't resolve pins sets scopedCacheTags to null; the entry
-		// still caches under the coarse collection tag.
+		// still caches under the coarse collection tag, keyed by the same cache key.
 		const res = makeRes({ data: [{ id: 1 }] }, { scopedCacheTags: null });
 
 		await respond(makeReq(), res, next);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
 
-		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith(
-			expect.objectContaining({
-				reason: 'coarse_scope',
-				path: '/items/articles',
-				collection: 'articles',
-			}),
-		);
+		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
+			cacheKey: 'cache-key',
+			reason: 'coarse_scope',
+		});
 	});
 
 	test('res.locals.cache === false skips caching (no-cache branch)', async () => {

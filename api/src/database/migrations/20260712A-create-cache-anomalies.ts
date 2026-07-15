@@ -1,33 +1,26 @@
 import type { Knex } from 'knex';
 
 /**
- * `directus_cache_anomalies` — the third cache-telemetry table, for what the
- * hit/miss fact and the descriptor dimension can't record: a request silently
- * NOT cached (scoped orphan, oversized value), one cached but untrackable (key
- * past the descriptor's 255-char column), a degraded purge scope (coarse
- * fallback), or a Redis read/write error. One row per sampled occurrence — the
- * emitter throttles per reason+path, so this stays low volume.
- *
- * Insert-only fact with a surrogate key: unlike the descriptor it can't be keyed
- * by the cache key (a `key_too_long` anomaly is BORN of a key the 255-char column
- * can't hold), and unlike the events fact it carries the wide request context the
- * admin page groups by. Low volume → a plain table bounded by the daily retention
- * reap, no hypertable.
+ * `directus_cache_anomalies` — silent cache decisions the fact/dimension can't show:
+ * a request not cached (scoped orphan, oversized value), a coarse purge-scope
+ * fallback, or a Redis error. One row per sampled occurrence (throttled per
+ * reason+key). Normalised: it references the request's `directus_cache_descriptors`
+ * row for path/method/query, so the admin cache tree can render an anomaly at the
+ * same path → method+query node as a cached item. A not-cached request still gets a
+ * descriptor written at the anomaly site purely so this ref resolves in the tree.
  */
 export async function up(knex: Knex): Promise<void> {
 	await knex.schema.createTable('directus_cache_anomalies', (table) => {
 		table.increments('id');
 		table.timestamp('time').notNullable();
-		// key_too_long | scoped_orphan | value_too_large | redis_error | coarse_scope
+		table.string('cache_key').notNullable(); // → descriptors.cache_key (no FK)
+		// scoped_orphan | value_too_large | redis_error | coarse_scope | key_too_long
 		table.string('reason', 32).notNullable();
-		table.text('path').notNullable();
-		table.string('collection').nullable();
-		table.string('method', 16).nullable();
-		table.integer('key_length').nullable(); // key_too_long: the untrackable key's length
-		table.text('detail').nullable(); // key preview / byte size / error message
-		// The retention reap scans by time; the listing windows + groups by both.
+		table.integer('key_length').nullable();
+		table.text('detail').nullable();
 		table.index('time');
 		table.index('reason');
+		table.index('cache_key');
 	});
 }
 

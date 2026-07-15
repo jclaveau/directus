@@ -133,7 +133,7 @@ describe('splitSections', () => {
 		const groups = buildGroups([
 			entry({ path: '/items/articles' }),
 			entry({ path: '/server/info' }),
-		]);
+		], []);
 
 		const sections = splitSections(groups, 'App', 'System');
 		expect(sections.map((section) => section.key)).toEqual(['app', 'system']);
@@ -141,7 +141,7 @@ describe('splitSections', () => {
 	});
 
 	it('drops a section with no groups', () => {
-		const groups = buildGroups([entry({ path: '/items/a' })]);
+		const groups = buildGroups([entry({ path: '/items/a' })], []);
 		const sections = splitSections(groups, 'App', 'System');
 		expect(sections).toHaveLength(1);
 		expect(sections[0]!.key).toBe('app');
@@ -171,7 +171,7 @@ describe('buildGroups', () => {
 				recommendedTtlMs: 200,
 			}),
 			entry({ path: '/items/b', hits: 10, size: 5 }),
-		]);
+		], []);
 
 		expect(groups).toHaveLength(2);
 		expect(groups[0]!.path).toBe('/items/b');
@@ -194,7 +194,7 @@ describe('buildGroups', () => {
 			entry({ path: '/items/a', query: '{"limit":5}', hits: 2 }),
 			entry({ path: '/items/a', query: '{"limit":9}', hits: 10 }),
 			entry({ path: '/items/a', method: 'HEAD', query: '{"limit":5}', hits: 4 }),
-		]);
+		], []);
 
 		const queries = groups[0]!.queries;
 		expect(queries).toHaveLength(3);

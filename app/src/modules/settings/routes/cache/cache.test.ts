@@ -175,26 +175,18 @@ describe('CachePage', () => {
 		});
 	});
 
-	it('renders the anomalies section from the anomalies endpoint', async () => {
+	it('renders the anomaly summary + an anomaly node in the tree', async () => {
 		const anomalies = [
 			{
-				reason: 'key_too_long',
-				path: '/items/articles',
-				collection: 'articles',
-				method: 'GET',
-				count: 4,
-				maxKeyLength: 512,
-				sample: 'app-key-way-too-long',
-				lastSeen: Date.now(),
-			},
-			{
-				reason: 'redis_error',
-				path: '/items/comments',
-				collection: null,
-				method: 'GET',
-				count: 2,
+				cacheKey: 'anom-key-000000000000',
+				reason: 'scoped_orphan',
+				path: '/graphql',
+				method: 'POST',
+				query: '{"query":"{ me }"}',
+				url: '',
+				count: 3,
 				maxKeyLength: null,
-				sample: 'ECONNREFUSED',
+				sample: null,
 				lastSeen: Date.now(),
 			},
 		];
@@ -206,11 +198,13 @@ describe('CachePage', () => {
 
 		expect(api.get).toHaveBeenCalledWith('/utils/cache/anomalies');
 
-		const text = wrapper.find('.anomalies').text();
-		expect(text).toContain('Key too long'); // anomalyLabel for key_too_long
-		expect(text).toContain('/items/articles');
-		expect(text).toContain('512'); // maxKeyLength
-		expect(text).toContain('ECONNREFUSED'); // the redis_error sample
+		// Summary strip above the tree (reason label + occurrence count).
+		const summary = wrapper.find('.anomaly-summary').text();
+		expect(summary).toContain('Not cached'); // anomalyLabel for scoped_orphan
+		expect(summary).toContain('×3');
+
+		// The anomaly forms its own endpoint node in the tree (no cached entry there).
+		expect(wrapper.text()).toContain('/graphql');
 	});
 
 	it('opens the query url and copies the query as pretty JSON', async () => {

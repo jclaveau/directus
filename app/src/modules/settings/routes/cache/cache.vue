@@ -10,6 +10,7 @@ import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
 	buildGroups,
+	filterAnomalies,
 	filterEntries,
 	formatAge,
 	formatExpiry,
@@ -19,6 +20,7 @@ import {
 	formatUser,
 	shortKey,
 	splitSections,
+	summariseAnomalies,
 	ttlVerdict,
 	type CacheAnomaly,
 	type CacheAnomalyReason,
@@ -215,7 +217,15 @@ const searchedEntries = computed(() => {
 	return filterEntries(entries.value, filter.value, search.value, FILTER_FIELD_MAP);
 });
 
-const groups = computed<EndpointGroup[]>(() => buildGroups(searchedEntries.value));
+const searchedAnomalies = computed(() => {
+	return filterAnomalies(anomalies.value, search.value);
+});
+
+const anomalySummary = computed(() => summariseAnomalies(searchedAnomalies.value));
+
+const groups = computed<EndpointGroup[]>(() => {
+	return buildGroups(searchedEntries.value, searchedAnomalies.value);
+});
 
 const sections = computed(() => {
 	return splitSections(
@@ -546,25 +556,15 @@ onMounted(() => {
 				</div>
 			</div>
 
-			<div v-if="anomalies.length" class="anomalies">
-				<h2 class="section-title anomaly-title">
-					<v-icon name="warning" small />
-					{{ t('cache_anomalies', 'Anomalies') }}
-				</h2>
-
-				<div v-for="(a, i) in anomalies" :key="i" class="anomaly">
-					<span class="reason" :class="a.reason">{{ anomalyLabel(a.reason) }}</span>
-					<span class="path">{{ a.path }}</span>
-					<span v-if="a.maxKeyLength" class="stat">
-						{{ a.maxKeyLength }} {{ t('chars', 'chars') }}
-					</span>
-					<span class="stat count">×{{ a.count }}</span>
-					<span
-						v-if="a.sample"
-						class="sample"
-						:title="a.sample"
-					>{{ a.sample }}</span>
-				</div>
+			<div v-if="anomalySummary.length" class="anomaly-summary">
+				<v-icon name="warning" small />
+				<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
+				<span
+					v-for="item in anomalySummary"
+					:key="item.reason"
+					class="reason"
+					:class="item.reason"
+				>{{ anomalyLabel(item.reason) }} ×{{ item.count }}</span>
 			</div>
 
 			<v-info
@@ -600,11 +600,15 @@ onMounted(() => {
 								{{ group.totalHits }} {{ t('hits', 'hits') }}
 							</span>
 							<span class="stat">{{ formatSize(group.totalSize) }}</span>
+							<span v-if="group.anomalyCount" class="stat anomaly-count">
+								{{ group.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
+							</span>
 							<v-button
 								v-tooltip.bottom="t('evict_endpoint', 'Evict this endpoint')"
 								x-small
 								kind="danger"
 								secondary
+								:disabled="group.entryCount === 0"
 								@click.stop="evictPath(group.path)"
 							>
 								<v-icon name="delete" x-small />
@@ -629,6 +633,9 @@ onMounted(() => {
 										{{ q.totalHits }} {{ t('hits', 'hits') }}
 									</span>
 									<span class="stat">{{ formatSize(q.totalSize) }}</span>
+									<span v-if="q.anomalies.length" class="stat anomaly-count">
+										{{ q.anomalies.length }} {{ t('anomalies_short', 'anomalies') }}
+									</span>
 									<span
 										v-if="q.recommendedTtlMs !== null"
 										class="stat rec"
@@ -654,7 +661,10 @@ onMounted(() => {
 									/>
 								</div>
 
-								<div v-if="expanded[q.key]" class="entries-scroll">
+								<div
+									v-if="expanded[q.key] && q.entries.length"
+									class="entries-scroll"
+								>
 									<table class="entries">
 										<thead>
 											<tr>
@@ -689,6 +699,11 @@ onMounted(() => {
 												<td class="num">{{ formatSize(entry.size) }}</td>
 												<td class="key" :title="entry.key">
 													{{ shortKey(entry.key) }}
+													<span
+														v-if="entry.anomaly"
+														class="reason inline"
+														:class="entry.anomaly.reason"
+													>{{ anomalyLabel(entry.anomaly.reason) }}</span>
 												</td>
 												<td class="num">
 													<v-icon
@@ -704,6 +719,31 @@ onMounted(() => {
 											</tr>
 										</tbody>
 									</table>
+								</div>
+
+								<div
+									v-if="expanded[q.key] && q.anomalies.length"
+									class="anomaly-rows"
+								>
+									<div
+										v-for="anomaly in q.anomalies"
+										:key="anomaly.cacheKey + anomaly.reason"
+										class="anomaly-row"
+									>
+										<span class="reason" :class="anomaly.reason">
+											{{ anomalyLabel(anomaly.reason) }}
+										</span>
+										<span class="stat count">×{{ anomaly.count }}</span>
+										<span
+											v-if="anomaly.maxKeyLength"
+											class="stat"
+										>{{ anomaly.maxKeyLength }} {{ t('chars', 'chars') }}</span>
+										<span
+											v-if="anomaly.sample"
+											class="sample"
+											:title="anomaly.sample"
+										>{{ anomaly.sample }}</span>
+									</div>
 								</div>
 
 								<v-pagination
@@ -814,52 +854,56 @@ onMounted(() => {
 	font-size: 14px;
 }
 
-.anomalies {
+.anomaly-summary {
+	align-items: center;
+	color: var(--theme--warning);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
 	margin-block-end: 24px;
 }
 
-.anomaly-title {
-	align-items: center;
-	color: var(--theme--warning);
-	display: flex;
-	gap: 6px;
+.anomaly-summary .label {
+	font-weight: 700;
+	text-transform: uppercase;
 }
 
-.anomaly {
-	align-items: center;
-	border: var(--theme--border-width) solid var(--theme--border-color-subdued);
-	border-radius: var(--theme--border-radius);
-	display: flex;
-	gap: 12px;
-	margin-block-end: 6px;
-	padding: 8px 12px;
-}
-
-.anomaly .reason {
+.reason {
 	color: var(--theme--warning);
-	flex-shrink: 0;
 	font-weight: 600;
 	white-space: nowrap;
 }
 
-.anomaly .path {
-	font-family: var(--theme--fonts--monospace--font-family);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+.reason.inline {
+	font-size: 11px;
+	margin-inline-start: 8px;
 }
 
-.anomaly .stat {
+.anomaly-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 4px 12px 8px;
+}
+
+.anomaly-row {
+	align-items: center;
+	color: var(--theme--warning);
+	display: flex;
+	gap: 12px;
+}
+
+.anomaly-row .stat {
 	color: var(--theme--foreground-subdued);
 	flex-shrink: 0;
 	font-size: 13px;
 }
 
-.anomaly .count {
+.anomaly-row .count {
 	font-variant-numeric: tabular-nums;
 }
 
-.anomaly .sample {
+.anomaly-row .sample {
 	color: var(--theme--foreground-subdued);
 	font-family: var(--theme--fonts--monospace--font-family);
 	font-size: 12px;
@@ -868,6 +912,10 @@ onMounted(() => {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+.anomaly-count {
+	color: var(--theme--warning);
 }
 
 .section {
