@@ -286,10 +286,12 @@ function maxOrNull(
 // annotations folded onto cached entries.
 function countAnomalies(entries: CacheEntry[], anomalies: CacheAnomaly[]): number {
 	const rows = anomalies.reduce((sum, anomaly) => sum + anomaly.count, 0);
+
 	const annotated = entries.reduce(
 		(sum, entry) => sum + (entry.anomaly?.count ?? 0),
 		0,
 	);
+
 	return rows + annotated;
 }
 
