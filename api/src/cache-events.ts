@@ -60,20 +60,21 @@ export type CacheAnomalyReason =
 	| 'coarse_scope';
 
 export interface CacheAnomalyCapture {
+	cacheKey: string;
 	reason: CacheAnomalyReason;
-	path: string;
-	collection?: string | null;
-	method?: string | null;
 	keyLength?: number | null; // key_too_long: the untrackable key's length
-	detail?: string | null; // key preview / byte size / error message
+	detail?: string | null; // byte size / error message
 }
 
-// One grouped anomaly row for the admin page: reason+path with an occurrence count.
+// One grouped anomaly for the admin cache tree: a (cache_key, reason) pair joined to
+// its descriptor for path/method/query, with an occurrence count.
 export interface CacheAnomalyRecord {
+	cacheKey: string;
 	reason: CacheAnomalyReason;
 	path: string;
-	collection: string | null;
-	method: string | null;
+	method: string;
+	query: string;
+	url: string;
 	count: number;
 	maxKeyLength: number | null;
 	sample: string | null;
@@ -153,8 +154,8 @@ const flagKey = () => `${statsNamespace()}:enabled`;
 const reasonKey = () => `${statsNamespace()}:killed_reason`;
 const tombstoneKey = (key: string) => `${statsNamespace()}:tomb:${key}`;
 
-const anomalyThrottleKey = (reason: string, path: string) =>
-	`${statsNamespace()}:anom:${reason}:${path}`;
+const anomalyThrottleKey = (reason: string, cacheKey: string) =>
+	`${statsNamespace()}:anom:${reason}:${cacheKey}`;
 
 /**
  * Master switch: opt-in (CACHE_STATS_ENABLED, default off) AND Redis reachable
@@ -252,8 +253,8 @@ export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
 	});
 }
 
-// Emit a throttled anomaly sample. One row per reason+path per window (SET NX):
-// the first occurrence claims the slot; the rest no-op until it expires.
+// Emit a throttled anomaly sample keyed by the request's cache key (the descriptor
+// ref). One row per reason+key per window (SET NX): the first claims the slot.
 export async function captureCacheAnomaly(
 	entry: CacheAnomalyCapture,
 ): Promise<void> {
@@ -262,7 +263,7 @@ export async function captureCacheAnomaly(
 	}
 
 	const claimed = await useRedis().set(
-		anomalyThrottleKey(entry.reason, entry.path),
+		anomalyThrottleKey(entry.reason, entry.cacheKey),
 		'1',
 		'PX',
 		ANOMALY_THROTTLE_MS,
@@ -275,10 +276,8 @@ export async function captureCacheAnomaly(
 
 	await xadd({
 		kind: 'a',
+		cacheKey: entry.cacheKey,
 		reason: entry.reason,
-		path: entry.path,
-		collection: entry.collection ?? '',
-		method: entry.method ?? '',
 		keyLength: entry.keyLength == null
 			? ''
 			: String(entry.keyLength),
@@ -289,22 +288,9 @@ export async function captureCacheAnomaly(
 
 // The per-key descriptor, emitted on a fill where every field is populated.
 export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<void> {
-	if (!cacheStatsActiveFlag) {
-		return;
-	}
-
-	// A key past the 255-char column can't be a descriptor, but the response WAS
-	// cached (the SET has no cap) — record the lost visibility, don't drop it.
-	if (!isKeyTrackable(entry.cacheKey)) {
-		await captureCacheAnomaly({
-			reason: 'key_too_long',
-			path: entry.path,
-			collection: entry.collection,
-			method: entry.method,
-			keyLength: entry.cacheKey.length,
-			detail: entry.cacheKey.slice(0, 255),
-		});
-
+	if (!cacheStatsActiveFlag || !isKeyTrackable(entry.cacheKey)) {
+		// TODO(key_too_long): a key past the 255-char column is skipped here; the
+		// hashed-descriptor path that re-surfaces it lands in a follow-up.
 		return;
 	}
 
@@ -403,10 +389,8 @@ interface CacheDescriptorRow {
 
 interface CacheAnomalyRow {
 	time: Date;
+	cache_key: string;
 	reason: string;
-	path: string;
-	collection: string | null;
-	method: string | null;
 	key_length: number | null;
 	detail: string;
 }
@@ -509,14 +493,8 @@ async function drainCacheEvents(): Promise<number> {
 			if (f['kind'] === 'a') {
 				anomalies.push({
 					time: at,
+					cache_key: f['cacheKey']!,
 					reason: f['reason'] ?? '',
-					path: f['path'] ?? '',
-					collection: f['collection']
-						? f['collection']
-						: null,
-					method: f['method']
-						? f['method']
-						: null,
 					key_length: f['keyLength']
 						? Number(f['keyLength'])
 						: null,
@@ -789,28 +767,35 @@ export async function listCacheAnomalies(): Promise<CacheAnomalyRecord[]> {
 	const db = getDatabase();
 	const since = new Date(Date.now() - LISTING_WINDOW);
 
-	const rows = await db('directus_cache_anomalies')
-		.where('time', '>', since)
-		.groupBy('reason', 'path', 'collection', 'method')
+	// Join the descriptor for path/method/query (reaped at 90d, so an inner join never
+	// hides a live 24h-window anomaly) — a (cache_key, reason) pair lands at its node.
+	const rows = await db('directus_cache_anomalies as a')
+		.join('directus_cache_descriptors as d', 'd.cache_key', 'a.cache_key')
+		.where('a.time', '>', since)
+		.groupBy('a.cache_key', 'a.reason', 'd.path', 'd.method', 'd.query', 'd.url')
 		.select(
-			'reason',
-			'path',
-			'collection',
-			'method',
+			'a.cache_key',
+			'a.reason',
+			'd.path',
+			'd.method',
+			'd.query',
+			'd.url',
 			db.raw('COUNT(*) AS count'),
-			db.raw('MAX(key_length) AS max_key_length'),
-			db.raw('MAX(detail) AS sample'),
-			db.raw('MAX(time) AS last_seen'),
+			db.raw('MAX(a.key_length) AS max_key_length'),
+			db.raw('MAX(a.detail) AS sample'),
+			db.raw('MAX(a.time) AS last_seen'),
 		)
 		.orderBy('count', 'desc')
 		.limit(LISTING_LIMIT);
 
 	return rows.map((row: Record<string, unknown>) => {
 		return {
+			cacheKey: row['cache_key'] as string,
 			reason: row['reason'] as CacheAnomalyReason,
 			path: row['path'] as string,
-			collection: (row['collection'] as string | null) || null,
-			method: (row['method'] as string | null) || null,
+			method: row['method'] as string,
+			query: (row['query'] as string) ?? '',
+			url: (row['url'] as string) ?? '',
 			count: Number(row['count'] ?? 0),
 			maxKeyLength: row['max_key_length'] == null
 				? null

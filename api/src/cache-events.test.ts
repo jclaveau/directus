@@ -247,10 +247,9 @@ describe('untrackable long keys (> varchar(255))', () => {
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 
-	it('emits a key_too_long anomaly instead of the descriptor', async () => {
+	it('skips the descriptor for a long key', async () => {
 		await armFlag(null);
 		mockRedis.call.mockClear();
-		mockRedis.set.mockResolvedValueOnce('OK');
 
 		await captureCacheDescriptor({
 			cacheKey: longKey,
@@ -264,12 +263,7 @@ describe('untrackable long keys (> varchar(255))', () => {
 			fillMs: 0,
 		});
 
-		const call = mockRedis.call.mock.calls[0]!;
-		expect(call[0]).toBe('XADD');
-		expect(fieldAfter(call, 'kind')).toBe('a');
-		expect(fieldAfter(call, 'reason')).toBe('key_too_long');
-		expect(fieldAfter(call, 'path')).toBe('/x');
-		expect(fieldAfter(call, 'keyLength')).toBe('256');
+		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 
 	it('skips the tombstone for a long key', async () => {
@@ -306,32 +300,27 @@ describe('captureCacheMiss', () => {
 });
 
 describe('captureCacheAnomaly', () => {
-	it('emits a throttled anomaly sample keyed by reason', async () => {
+	it('emits a throttled anomaly sample keyed by the cache key', async () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce('OK');
 
-		await captureCacheAnomaly({
-			reason: 'scoped_orphan',
-			path: '/graphql',
-			collection: null,
-			method: 'POST',
-		});
+		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'scoped_orphan' });
 
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(call[0]).toBe('XADD');
 		expect(fieldAfter(call, 'kind')).toBe('a');
+		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
 		expect(fieldAfter(call, 'reason')).toBe('scoped_orphan');
-		expect(fieldAfter(call, 'path')).toBe('/graphql');
 	});
 
 	it('claims the throttle slot with SET NX + expiry', async () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce('OK');
 
-		await captureCacheAnomaly({ reason: 'redis_error', path: '/items/x' });
+		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'redis_error' });
 
 		const setCall = mockRedis.set.mock.calls[0]!;
-		expect(setCall[0]).toBe('scalabus:stats:anom:redis_error:/items/x');
+		expect(setCall[0]).toBe('scalabus:stats:anom:redis_error:k1');
 		expect(setCall).toContain('NX');
 		expect(setCall).toContain('PX');
 	});
@@ -340,7 +329,7 @@ describe('captureCacheAnomaly', () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce(null);
 
-		await captureCacheAnomaly({ reason: 'coarse_scope', path: '/items/x' });
+		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'coarse_scope' });
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
@@ -350,7 +339,7 @@ describe('captureCacheAnomaly', () => {
 		mockRedis.set.mockClear();
 		mockRedis.call.mockClear();
 
-		await captureCacheAnomaly({ reason: 'key_too_long', path: '/x' });
+		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'value_too_large' });
 
 		expect(mockRedis.set).not.toHaveBeenCalled();
 		expect(mockRedis.call).not.toHaveBeenCalled();
@@ -531,8 +520,8 @@ describe('flushCacheEvents', () => {
 	it('inserts anomaly entries into the anomalies table', async () => {
 		xrangeBatch = [
 			streamEntry('1-0', {
-				kind: 'a', reason: 'key_too_long', path: '/items/big', collection: 'big',
-				method: 'GET', keyLength: '512', detail: 'abc', ts: '4000',
+				kind: 'a', cacheKey: 'k9', reason: 'value_too_large',
+				keyLength: '512', detail: '2048B', ts: '4000',
 			}),
 		];
 
@@ -545,12 +534,10 @@ describe('flushCacheEvents', () => {
 			[
 				{
 					time: new Date(4000),
-					reason: 'key_too_long',
-					path: '/items/big',
-					collection: 'big',
-					method: 'GET',
+					cache_key: 'k9',
+					reason: 'value_too_large',
 					key_length: 512,
-					detail: 'abc',
+					detail: '2048B',
 				},
 			],
 			500,
@@ -1005,40 +992,43 @@ describe('evictCacheEntriesForPath', () => {
 });
 
 describe('listCacheAnomalies', () => {
-	it('maps grouped anomaly rows to records', async () => {
+	it('maps grouped anomaly rows joined to their descriptor', async () => {
 		queryRows = [
 			{
-				reason: 'key_too_long',
+				cache_key: 'k9',
+				reason: 'value_too_large',
 				path: '/items/big',
-				collection: 'big',
 				method: 'GET',
+				query: '{"limit":5}',
+				url: '/items/big?limit=5',
 				count: '4',
 				max_key_length: '512',
-				sample: 'abc',
+				sample: '2048B',
 				last_seen: new Date(2000).toISOString(),
 			},
 		];
 
 		const rows = await listCacheAnomalies();
 
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies as a');
 
-		expect(builder.groupBy).toHaveBeenCalledWith(
-			'reason',
-			'path',
-			'collection',
-			'method',
+		expect(builder.join).toHaveBeenCalledWith(
+			'directus_cache_descriptors as d',
+			'd.cache_key',
+			'a.cache_key',
 		);
 
 		expect(rows).toEqual([
 			{
-				reason: 'key_too_long',
+				cacheKey: 'k9',
+				reason: 'value_too_large',
 				path: '/items/big',
-				collection: 'big',
 				method: 'GET',
+				query: '{"limit":5}',
+				url: '/items/big?limit=5',
 				count: 4,
 				maxKeyLength: 512,
-				sample: 'abc',
+				sample: '2048B',
 				lastSeen: 2000,
 			},
 		]);

@@ -22,6 +22,7 @@ import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
 } from '../utils/get-graphql-query-and-variables.js';
+import { recordUncachedAnomaly } from '../utils/record-uncached-anomaly.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -105,8 +106,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
 
-	const anomalyPath = req.originalUrl.split('?')[0]!;
-
 	if (
 		cacheableRequest &&
 		cache &&
@@ -174,10 +173,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				req.collection
 			) {
 				void captureCacheAnomaly({
+					cacheKey: key,
 					reason: 'coarse_scope',
-					path: anomalyPath,
-					collection: req.collection,
-					method: req.method,
 				}).catch(() => {});
 			}
 
@@ -217,13 +214,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
 
 			if (cacheStatsActive()) {
-				void captureCacheAnomaly({
-					reason: 'redis_error',
-					path: anomalyPath,
-					collection: req.collection ?? null,
-					method: req.method,
-					detail: err?.message ?? String(err),
-				}).catch(() => {});
+				void recordUncachedAnomaly(
+					req,
+					'redis_error',
+					err?.message ?? String(err),
+				).catch(() => {});
 			}
 		}
 
@@ -239,21 +234,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// Surface the two silent "cacheable but skipped" reasons on the dashboard.
 	if (cacheStatsActive() && cacheableRequest) {
 		if (exceedsMaxSize) {
-			void captureCacheAnomaly({
-				reason: 'value_too_large',
-				path: anomalyPath,
-				collection: req.collection ?? null,
-				method: req.method,
-				detail: `${valueSize}B`,
-			}).catch(() => {});
+			void recordUncachedAnomaly(
+				req,
+				'value_too_large',
+				`${valueSize}B`,
+			).catch(() => {});
 		}
 		else if (orphansInScopedMode) {
-			void captureCacheAnomaly({
-				reason: 'scoped_orphan',
-				path: anomalyPath,
-				collection: req.collection ?? null,
-				method: req.method,
-			}).catch(() => {});
+			void recordUncachedAnomaly(req, 'scoped_orphan').catch(() => {});
 		}
 	}
 

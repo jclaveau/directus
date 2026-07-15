@@ -61,19 +61,22 @@ vi.mock('../cache-events.js', () => {
 		cacheStatsActive: vi.fn(() => false),
 		captureCacheHit: vi.fn(() => Promise.resolve()),
 		captureCacheMiss: vi.fn(() => Promise.resolve()),
-		captureCacheAnomaly: vi.fn(() => Promise.resolve()),
 		readCacheMissGap: vi.fn(() => Promise.resolve(null)),
 	};
 });
 
+vi.mock('../utils/record-uncached-anomaly.js', () => ({
+	recordUncachedAnomaly: vi.fn(() => Promise.resolve()),
+}));
+
 import checkCacheMiddleware from './cache.js';
 import {
 	cacheStatsActive,
-	captureCacheAnomaly,
 	captureCacheHit,
 	captureCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
+import { recordUncachedAnomaly } from '../utils/record-uncached-anomaly.js';
 
 const next = vi.fn();
 
@@ -231,11 +234,10 @@ describe('checkCacheMiddleware', () => {
 		const res = makeRes();
 		await checkCacheMiddleware(makeReq(), res, next);
 
-		expect(captureCacheAnomaly).toHaveBeenCalledWith(
-			expect.objectContaining({
-				reason: 'redis_error',
-				path: '/items/articles',
-			}),
+		expect(recordUncachedAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'redis_error',
+			expect.any(String),
 		);
 
 		expect(res.setHeader).toHaveBeenCalledWith('x-cache-status', 'MISS');
