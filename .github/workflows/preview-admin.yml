@@ -83,6 +83,8 @@ jobs:
       # Opt-in telemetry (default off) — on here so the Settings → Cache page has
       # live data + the enable/disable toggle to demo in the preview.
       CACHE_STATS_ENABLED: 'true'
+      # Small cap so a big_items read trips value_too_large; normal reads still cache.
+      CACHE_VALUE_MAX_SIZE: 4kb
       ADMIN_EMAIL: admin@example.com
       # info so each request logs a line — the idle watcher keys off log growth.
       LOG_LEVEL: info
@@ -188,9 +190,67 @@ jobs:
           await post('/relations', { collection: 'sub_items', field: 'item', related_collection: 'items' });
           for (const r of userCreated('sub_items')) await r;
 
-          console.log('seeded items + sub_items');
+          // Rows so reads return data.
+          const itemIds = [];
+          for (let i = 0; i < 3; i++) {
+            const created = await (await post('/items/items', {})).json();
+            itemIds.push(created.data.id);
+          }
+          for (let i = 0; i < 5; i++) {
+            await post('/items/sub_items', { item: itemIds[i % itemIds.length] });
+          }
+
+          // big_items → value_too_large (a GET over CACHE_VALUE_MAX_SIZE).
+          await post('/collections', { collection: 'big_items', schema: {}, meta: {}, fields: [idField] });
+          await post('/fields/big_items', { field: 'blob', type: 'text', meta: {}, schema: {} });
+          for (let i = 0; i < 5; i++) await post('/items/big_items', { blob: 'x'.repeat(2000) });
+
+          // scoped_cache_fields on sub_items → coarse_scope on an unpinnable relational filter.
+          await fetch(`${BASE}/collections/sub_items`, {
+            method: 'PATCH', headers: H,
+            body: JSON.stringify({ meta: { scoped_cache_fields: ['user_created'] } }),
+          });
+
+          console.log('seeded items + sub_items + big_items + rows');
           JS
           node /tmp/seed.mjs
+
+      - name: Provoke + verify cache anomalies
+        run: |
+          cat > /tmp/verify.mjs <<'JS'
+          const BASE = 'http://localhost:8055';
+
+          const login = await fetch(`${BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: 'admin@example.com', password: process.env.ADMIN_PASSWORD }),
+          });
+
+          const token = (await login.json()).data.access_token;
+          const H = { authorization: `Bearer ${token}` };
+          const get = (p) => fetch(`${BASE}${p}`, { headers: H });
+
+          await get('/server/info');                             // scoped_orphan
+          await get('/items/big_items');                         // value_too_large
+          await get('/items/sub_items?filter[item][id][_eq]=1'); // coarse_scope
+
+          // The stats flush cron drains the stream every 10s — wait for it.
+          await new Promise((r) => setTimeout(r, 15000));
+
+          const anomalies = (await (await get('/utils/cache/anomalies')).json()).data ?? [];
+
+          const lines = anomalies.length
+            ? anomalies.map((a) => `- ${a.reason} x${a.count} — ${a.path}`).join('\n')
+            : '- (none surfaced yet — see the caveats)';
+
+          console.log(lines);
+          JS
+
+          {
+            echo "### Cache anomalies provoked"
+            echo ""
+            node /tmp/verify.mjs
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment the preview link on the PR
         # PR events only — a workflow_dispatch run has no PR to comment on (URL +
