@@ -196,24 +196,65 @@ export async function refreshCacheStatsFlag(): Promise<void> {
 		: override === '1';
 }
 
-async function xadd(fields: Record<string, string>): Promise<void> {
+// Per-tick XADD batching: captures buffer here; one pipelined flush per event-loop
+// tick collapses N round-trips into one. A crash loses ≤1 tick (telemetry is lossy).
+const XADD_BUFFER_CAP = 1000;
+
+let xaddBuffer: string[][] = [];
+let xaddFlushScheduled = false;
+
+// Buffer one entry's field/value pairs; flush now if full, else at the tick boundary.
+function xadd(fields: Record<string, string>): void {
 	const flat: string[] = [];
 
 	for (const [field, value] of Object.entries(fields)) {
 		flat.push(field, value);
 	}
 
-	// MAXLEN ~ is a hard backstop on Redis memory even before the soft autokill.
-	// .call() over typed xadd() — the field spread trips its overloads.
-	await useRedis().call(
-		'XADD',
-		streamKey(),
-		'MAXLEN',
-		'~',
-		String(STREAM_HARD_CAP),
-		'*',
-		...flat,
-	);
+	xaddBuffer.push(flat);
+
+	if (xaddBuffer.length >= XADD_BUFFER_CAP) {
+		void flushXaddBuffer();
+	}
+	else if (!xaddFlushScheduled) {
+		xaddFlushScheduled = true;
+		setImmediate(() => void flushXaddBuffer());
+	}
+}
+
+// Flush the buffered XADDs in one pipelined round-trip. Errors are swallowed + the
+// buffer cleared either way, so a failing Redis can't wedge it (telemetry is lossy).
+export async function flushXaddBuffer(): Promise<void> {
+	xaddFlushScheduled = false;
+
+	if (xaddBuffer.length === 0) {
+		return;
+	}
+
+	const batch = xaddBuffer;
+	xaddBuffer = [];
+
+	const pipe = useRedis().pipeline();
+
+	for (const flat of batch) {
+		// MAXLEN ~ caps stream memory; .call() over typed xadd() (spread trips overloads).
+		pipe.call(
+			'XADD',
+			streamKey(),
+			'MAXLEN',
+			'~',
+			String(STREAM_HARD_CAP),
+			'*',
+			...flat,
+		);
+	}
+
+	try {
+		await pipe.exec();
+	}
+	catch (err: any) {
+		useLogger().warn(err, `[cache-stats] XADD flush failed. ${err.message}`);
+	}
 }
 
 export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
@@ -221,7 +262,7 @@ export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
 		return;
 	}
 
-	await xadd({
+	xadd({
 		kind: 'h',
 		cacheKey: hit.cacheKey,
 		ageMs: String(hit.ageMs),
@@ -240,7 +281,7 @@ export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
 		return;
 	}
 
-	await xadd({
+	xadd({
 		kind: 'm',
 		cacheKey: miss.cacheKey,
 		gapMs: miss.gapMs === null
@@ -274,7 +315,7 @@ export async function captureCacheAnomaly(
 		return;
 	}
 
-	await xadd({
+	xadd({
 		kind: 'a',
 		cacheKey: entry.cacheKey,
 		reason: entry.reason,
@@ -294,7 +335,7 @@ export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<vo
 		return;
 	}
 
-	await xadd({
+	xadd({
 		kind: 'd',
 		cacheKey: entry.cacheKey,
 		method: entry.method,

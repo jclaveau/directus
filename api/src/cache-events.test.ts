@@ -10,6 +10,7 @@ import {
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	flushCacheEvents,
+	flushXaddBuffer,
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
@@ -52,6 +53,7 @@ let mockRedis: {
 	get: Mock;
 	set: Mock;
 	del: Mock;
+	pipeline: Mock;
 };
 
 let builder: any;
@@ -80,7 +82,19 @@ beforeEach(() => {
 		get: vi.fn().mockResolvedValue(null),
 		set: vi.fn(),
 		del: vi.fn(),
+		pipeline: vi.fn(),
 	};
+
+	// Pipelined XADDs delegate to .call() so the same assertions see them after a flush.
+	const pipeStub: any = {
+		call: (...args: unknown[]) => {
+			(mockRedis.call as any)(...args);
+			return pipeStub;
+		},
+		exec: () => Promise.resolve([]),
+	};
+
+	mockRedis.pipeline.mockReturnValue(pipeStub);
 
 	// Chainable knex stub: chain methods return the builder; terminals resolve the
 	// staged result. Thenable so `await db(t).….select(…)` resolves queryRows.
@@ -119,7 +133,8 @@ beforeEach(() => {
 	vi.mocked(getDatabase).mockReturnValue(mockDb);
 });
 
-afterEach(() => {
+afterEach(async () => {
+	await flushXaddBuffer(); // drain any buffered captures so they can't leak forward
 	vi.clearAllMocks();
 });
 
@@ -192,6 +207,7 @@ describe('captureCacheHit', () => {
 			durationMs: 12,
 		});
 
+		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(call[0]).toBe('XADD');
 		expect(call[1]).toBe(STREAM);
@@ -212,6 +228,7 @@ describe('captureCacheHit', () => {
 			durationMs: null,
 		});
 
+		await flushXaddBuffer();
 		expect(fieldAfter(mockRedis.call.mock.calls[0]!, 'ttlMs')).toBe('');
 	});
 
@@ -282,6 +299,7 @@ describe('captureCacheMiss', () => {
 
 		await captureCacheMiss({ cacheKey: 'k1', gapMs: 2000, ttlMs: 300000 });
 
+		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'kind')).toBe('m');
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
@@ -293,6 +311,7 @@ describe('captureCacheMiss', () => {
 
 		await captureCacheMiss({ cacheKey: 'k1', gapMs: null, ttlMs: null });
 
+		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'gapMs')).toBe('');
 		expect(fieldAfter(call, 'ttlMs')).toBe('');
@@ -306,6 +325,7 @@ describe('captureCacheAnomaly', () => {
 
 		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'scoped_orphan' });
 
+		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(call[0]).toBe('XADD');
 		expect(fieldAfter(call, 'kind')).toBe('a');
@@ -362,6 +382,7 @@ describe('captureCacheDescriptor', () => {
 			fillMs: 240,
 		});
 
+		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'kind')).toBe('d');
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
@@ -385,6 +406,7 @@ describe('captureCacheDescriptor', () => {
 			fillMs: 0,
 		});
 
+		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'collection')).toBe('');
 		expect(fieldAfter(call, 'userId')).toBe('');
@@ -446,6 +468,39 @@ describe('tombstone', () => {
 	it('returns null for a cold miss (no tombstone)', async () => {
 		mockRedis.get.mockResolvedValueOnce(null);
 		expect(await readCacheMissGap('k1', 305000)).toBe(null);
+	});
+});
+
+describe('XADD batching', () => {
+	it('buffers captures and flushes them in a single pipeline', async () => {
+		await armFlag(null);
+
+		await captureCacheHit({ cacheKey: 'a', ageMs: 1, ttlMs: null, durationMs: null });
+		await captureCacheMiss({ cacheKey: 'b', gapMs: null, ttlMs: null });
+
+		// Nothing reaches Redis until the flush.
+		expect(mockRedis.pipeline).not.toHaveBeenCalled();
+
+		await flushXaddBuffer();
+
+		// One pipeline carrying both XADDs, in order.
+		expect(mockRedis.pipeline).toHaveBeenCalledTimes(1);
+
+		const kinds = mockRedis.call.mock.calls
+			.filter((call) => call[0] === 'XADD')
+			.map((call) => fieldAfter(call, 'kind'));
+
+		expect(kinds).toEqual(['h', 'm']);
+	});
+
+	it('force-flushes when the buffer hits its cap', async () => {
+		await armFlag(null);
+
+		for (let i = 0; i < 1000; i++) {
+			await captureCacheMiss({ cacheKey: `k${i}`, gapMs: null, ttlMs: null });
+		}
+
+		expect(mockRedis.pipeline).toHaveBeenCalled();
 	});
 });
 
