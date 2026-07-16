@@ -251,11 +251,12 @@ jobs:
             );
           }
 
-          await probe('graphql', '/graphql', {
-            method: 'POST', headers: Hj, body: JSON.stringify({ query: '{ items { id } }' }),
-          });
+          // scoped_orphan — a collection-less cacheable read (no purge handle).
+          await probe('server_info', '/server/info');
+          // value_too_large — over CACHE_VALUE_MAX_SIZE.
           await probe('big_items', '/items/big_items');
-          await probe('sub_items', '/items/sub_items?filter[item][id][_eq]=1');
+          // coarse_scope — a non-flat filter ON the scoped field can't be pinned.
+          await probe('sub_nnull', '/items/sub_items?filter[user_created][_nnull]=true');
 
           // The stats flush cron drains the stream every 10s — wait for it.
           await new Promise((r) => setTimeout(r, 15000));
