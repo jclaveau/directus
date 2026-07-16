@@ -250,7 +250,7 @@ jobs:
             echo "### Cache anomalies provoked"
             echo ""
             node /tmp/verify.mjs
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Comment the preview link on the PR
         # PR events only — a workflow_dispatch run has no PR to comment on (URL +
