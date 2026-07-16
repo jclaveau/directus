@@ -269,11 +269,11 @@ describe('respond middleware', () => {
 		// tagging is skipped once the set throws, but the response still flushes
 		expect(res.json).toHaveBeenCalled();
 
-		// the failed write also surfaces as a redis_error anomaly on the dashboard
+		// the failed write also surfaces as a redis_error anomaly carrying the message
 		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'redis_error',
-			expect.any(String),
+			'boom',
 		);
 	});
 
@@ -288,7 +288,7 @@ describe('respond middleware', () => {
 		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'value_too_large',
-			expect.any(String),
+			expect.stringMatching(/^\d+B$/),
 		);
 	});
 
@@ -322,6 +322,58 @@ describe('respond middleware', () => {
 			cacheKey: 'cache-hash',
 			reason: 'coarse_scope',
 		});
+	});
+
+	test('a normally-pinned scoped fill does NOT flag coarse_scope', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// Witness for the `=== null` guard: real per-owner pins (a non-null array) are a
+		// precise scope, not a coarse fallback — the anomaly must stay silent.
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{ scopedCacheTags: [{ collection: 'articles', owner_field: 'u1' }] },
+		);
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+		expect(mocks.captureCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		an empty tag array does NOT flag coarse_scope (only null does)
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// [] means "no scoped fields → the bare collection tag is precise", the common
+		// case; only a null deriver (scoped fields present but unpinnable) is coarse.
+		const res = makeRes({ data: [{ id: 1 }] }, { scopedCacheTags: [] });
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.captureCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		an oversized collection-less scoped response flags only value_too_large
+	`, async () => {
+		env['CACHE_VALUE_MAX_SIZE'] = '1b';
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// Both preconditions hold (oversized AND orphan) — the else-if must pick the
+		// size reason, never emit both for one request.
+		const res = makeRes({ data: { blob: 'x'.repeat(100) } });
+		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
+
+		await respond(req, res, next);
+
+		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledTimes(1);
+
+		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'value_too_large',
+			expect.stringMatching(/^\d+B$/),
+		);
 	});
 
 	test('res.locals.cache === false skips caching (no-cache branch)', async () => {
