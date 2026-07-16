@@ -85,6 +85,11 @@ jobs:
       CACHE_STATS_ENABLED: 'true'
       # Small cap so a big_items read trips value_too_large; normal reads still cache.
       CACHE_VALUE_MAX_SIZE: 4kb
+      # Dev-only response headers exposing HIT/MISS + the scope tags per request, so
+      # the verify step can see why each anomaly does or doesn't fire.
+      CACHE_STATUS_HEADER: X-Cache-Status
+      CACHE_TAGS_HEADER: X-Scoped-Cache-Tags
+      CACHE_PURGED_TAGS_HEADER: X-Scoped-Cache-Purged-Tags
       ADMIN_EMAIL: admin@example.com
       # info so each request logs a line — the idle watcher keys off log growth.
       LOG_LEVEL: info
@@ -235,14 +240,22 @@ jobs:
           await fetch(`${BASE}/utils/cache/clear?system`, { method: 'POST', headers: H });
           await new Promise((r) => setTimeout(r, 2000));
 
-          // scoped_orphan — a graphql read resolves no collection under scoped mode.
-          await fetch(`${BASE}/graphql`, {
+          async function probe(label, path, opts) {
+            const res = await fetch(`${BASE}${path}`, opts ?? { headers: H });
+            const body = await res.text();
+            const errs = body.includes('"errors"') ? ' HAS-ERRORS' : '';
+            console.log(
+              `probe ${label}: http=${res.status}`
+              + ` cache=${res.headers.get('x-cache-status')}`
+              + ` tags=${res.headers.get('x-scoped-cache-tags') || '-'}${errs}`,
+            );
+          }
+
+          await probe('graphql', '/graphql', {
             method: 'POST', headers: Hj, body: JSON.stringify({ query: '{ items { id } }' }),
           });
-          // value_too_large — big_items response exceeds CACHE_VALUE_MAX_SIZE.
-          await get('/items/big_items');
-          // coarse_scope — a relational filter on a scoped collection can't be flat-pinned.
-          await get('/items/sub_items?filter[item][id][_eq]=1');
+          await probe('big_items', '/items/big_items');
+          await probe('sub_items', '/items/sub_items?filter[item][id][_eq]=1');
 
           // The stats flush cron drains the stream every 10s — wait for it.
           await new Promise((r) => setTimeout(r, 15000));
