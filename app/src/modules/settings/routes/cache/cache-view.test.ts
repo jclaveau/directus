@@ -294,12 +294,13 @@ describe('summariseAnomalies + filterAnomalies', () => {
 
 	it('narrows by path / query / reason, all when blank', () => {
 		const list = [
-			anomaly({ path: '/items/a', reason: 'scoped_orphan' }),
-			anomaly({ path: '/items/b', reason: 'redis_error' }),
+			anomaly({ path: '/items/a', query: '{"limit":5}', reason: 'scoped_orphan' }),
+			anomaly({ path: '/items/b', query: '{}', reason: 'redis_error' }),
 		];
 
 		expect(filterAnomalies(list, 'redis')).toHaveLength(1);
 		expect(filterAnomalies(list, '/items/b')).toHaveLength(1);
+		expect(filterAnomalies(list, 'limit')).toHaveLength(1);
 		expect(filterAnomalies(list, '')).toHaveLength(2);
 	});
 });

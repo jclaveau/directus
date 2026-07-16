@@ -53,6 +53,7 @@ let mockRedis: {
 	get: Mock;
 	set: Mock;
 	del: Mock;
+	keys: Mock;
 	pipeline: Mock;
 };
 
@@ -82,6 +83,7 @@ beforeEach(() => {
 		get: vi.fn().mockResolvedValue(null),
 		set: vi.fn(),
 		del: vi.fn(),
+		keys: vi.fn().mockResolvedValue([]),
 		pipeline: vi.fn(),
 	};
 
@@ -900,6 +902,37 @@ describe('truncateCacheEvents', () => {
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
 		expect(builder.truncate).toHaveBeenCalledTimes(3);
+	});
+
+	it('also clears the stream buffer and the throttle/tombstone keys', async () => {
+		mockRedis.keys.mockImplementation((pattern: string) => {
+			// A held anomaly-throttle slot would otherwise suppress the next sample for
+			// its whole window, so a truncate + re-provoke sees an empty table.
+			return Promise.resolve(
+				pattern.includes(':anom:')
+					? ['scalabus:stats:anom:scoped_orphan:h1']
+					: [],
+			);
+		});
+
+		await truncateCacheEvents();
+
+		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:events');
+		expect(mockRedis.keys).toHaveBeenCalledWith('scalabus:stats:anom:*');
+		expect(mockRedis.keys).toHaveBeenCalledWith('scalabus:stats:tomb:*');
+		expect(mockRedis.del).toHaveBeenCalledWith(
+			'scalabus:stats:anom:scoped_orphan:h1',
+		);
+	});
+
+	it('skips the Redis reset when Redis is not configured', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		mockRedis.del.mockClear();
+
+		await truncateCacheEvents();
+
+		expect(builder.truncate).toHaveBeenCalledTimes(3);
+		expect(mockRedis.del).not.toHaveBeenCalled();
 	});
 });
 

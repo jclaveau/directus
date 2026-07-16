@@ -995,10 +995,34 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 	};
 }
 
+// Delete every stats key matching a glob (throttle slots, tombstones). Admin-only
+// over the instance's own namespace, so a KEYS scan is fine.
+async function deleteStatsKeysByPattern(
+	redis: ReturnType<typeof useRedis>,
+	pattern: string,
+): Promise<void> {
+	const keys = await redis.keys(pattern);
+
+	if (keys.length > 0) {
+		await redis.del(...keys);
+	}
+}
+
 // Drop all gathered telemetry — the fast way to reclaim space after autokill.
 export async function truncateCacheEvents(): Promise<void> {
 	const db = getDatabase();
 	await db('directus_cache_events').truncate();
 	await db('directus_cache_descriptors').truncate();
 	await db('directus_cache_anomalies').truncate();
+
+	// Full reset: also drop the Redis transients tied to those rows — else buffered
+	// events drain back in and a held throttle slot suppresses the next sample.
+	if (!redisConfigAvailable()) {
+		return;
+	}
+
+	const redis = useRedis();
+	await redis.del(streamKey());
+	await deleteStatsKeysByPattern(redis, `${statsNamespace()}:anom:*`);
+	await deleteStatsKeysByPattern(redis, `${statsNamespace()}:tomb:*`);
 }
