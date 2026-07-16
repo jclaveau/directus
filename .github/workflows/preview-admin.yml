@@ -85,11 +85,6 @@ jobs:
       CACHE_STATS_ENABLED: 'true'
       # Small cap so a big_items read trips value_too_large; normal reads still cache.
       CACHE_VALUE_MAX_SIZE: 4kb
-      # Dev-only response headers exposing HIT/MISS + the scope tags per request, so
-      # the verify step can see why each anomaly does or doesn't fire.
-      CACHE_STATUS_HEADER: X-Cache-Status
-      CACHE_TAGS_HEADER: X-Scoped-Cache-Tags
-      CACHE_PURGED_TAGS_HEADER: X-Scoped-Cache-Purged-Tags
       ADMIN_EMAIL: admin@example.com
       # info so each request logs a line — the idle watcher keys off log growth.
       LOG_LEVEL: info
@@ -233,30 +228,16 @@ jobs:
 
           const token = (await login.json()).data.access_token;
           const H = { authorization: `Bearer ${token}` };
-          const Hj = { ...H, 'content-type': 'application/json' };
           const get = (p) => fetch(`${BASE}${p}`, { headers: H });
 
           // Clear the system cache so the SQL-set scoped_cache_fields enters the schema.
           await fetch(`${BASE}/utils/cache/clear?system`, { method: 'POST', headers: H });
           await new Promise((r) => setTimeout(r, 2000));
 
-          async function probe(label, path, opts) {
-            const res = await fetch(`${BASE}${path}`, opts ?? { headers: H });
-            const body = await res.text();
-            const errs = body.includes('"errors"') ? ' HAS-ERRORS' : '';
-            console.log(
-              `probe ${label}: http=${res.status}`
-              + ` cache=${res.headers.get('x-cache-status')}`
-              + ` tags=${res.headers.get('x-scoped-cache-tags') || '-'}${errs}`,
-            );
-          }
-
           // scoped_orphan — a collection-less cacheable read (no purge handle).
-          await probe('server_info', '/server/info');
-          // value_too_large — over CACHE_VALUE_MAX_SIZE.
-          await probe('big_items', '/items/big_items');
-          // coarse_scope — an aggregate has no rows to read the scoped field from → null tags.
-          await probe('sub_agg', '/items/sub_items?aggregate[count]=*');
+          await get('/server/info');
+          // value_too_large — big_items response exceeds CACHE_VALUE_MAX_SIZE.
+          await get('/items/big_items');
 
           // The stats flush cron drains the stream every 10s — wait for it.
           await new Promise((r) => setTimeout(r, 15000));
@@ -274,6 +255,8 @@ jobs:
             echo "### Cache anomalies provoked"
             echo ""
             node /tmp/verify.mjs
+            echo ""
+            echo "_coarse_scope needs a non-admin user whose read permission scopes by user_created (set on sub_items); redis_error needs a real Redis fault; key_too_long is deferred._"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Comment the preview link on the PR
