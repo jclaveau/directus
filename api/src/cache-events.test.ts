@@ -85,7 +85,7 @@ beforeEach(() => {
 		pipeline: vi.fn(),
 	};
 
-	// Pipelined XADDs delegate to .call() so the same assertions see them after a flush.
+	// Pipelined XADDs delegate to .call(); assertions see them after a flush.
 	const pipeStub: any = {
 		call: (...args: unknown[]) => {
 			(mockRedis.call as any)(...args);
@@ -247,29 +247,31 @@ describe('captureCacheHit', () => {
 	});
 });
 
-describe('untrackable long keys (> varchar(255))', () => {
-	const longKey = 'x'.repeat(256);
+describe('long redis keys (hash-identity, no length gate)', () => {
+	const longRedisKey = 'x'.repeat(256);
 
-	it('skips a hit whose key would overflow the stats table', async () => {
+	it('still tracks a hit — the stats key is the fixed-length hash', async () => {
 		await armFlag(null);
 		mockRedis.call.mockClear();
 
 		await captureCacheHit({
-			cacheKey: longKey,
+			cacheKey: 'shorthash',
 			ageMs: 1,
 			ttlMs: null,
 			durationMs: null,
 		});
 
-		expect(mockRedis.call).not.toHaveBeenCalled();
+		await flushXaddBuffer();
+		expect(mockRedis.call).toHaveBeenCalled();
 	});
 
-	it('skips the descriptor for a long key', async () => {
+	it('carries the long redis key on the descriptor', async () => {
 		await armFlag(null);
 		mockRedis.call.mockClear();
 
 		await captureCacheDescriptor({
-			cacheKey: longKey,
+			cacheKey: 'shorthash',
+			redisKey: longRedisKey,
 			method: 'GET',
 			path: '/x',
 			collection: null,
@@ -280,16 +282,17 @@ describe('untrackable long keys (> varchar(255))', () => {
 			fillMs: 0,
 		});
 
-		expect(mockRedis.call).not.toHaveBeenCalled();
+		await flushXaddBuffer();
+		expect(fieldAfter(mockRedis.call.mock.calls[0]!, 'redisKey')).toBe(longRedisKey);
 	});
 
-	it('skips the tombstone for a long key', async () => {
+	it('always writes the tombstone (keyed by the redis key)', async () => {
 		await armFlag(null);
 		mockRedis.set.mockClear();
 
-		await writeCacheTombstone(longKey, 9_999_999_999_999);
+		await writeCacheTombstone(longRedisKey, 9_999_999_999_999);
 
-		expect(mockRedis.set).not.toHaveBeenCalled();
+		expect(mockRedis.set).toHaveBeenCalled();
 	});
 });
 
@@ -372,6 +375,7 @@ describe('captureCacheDescriptor', () => {
 
 		await captureCacheDescriptor({
 			cacheKey: 'k1',
+			redisKey: '/items/articles?limit=5:user-1',
 			method: 'GET',
 			path: '/items/articles',
 			collection: 'articles',
@@ -386,6 +390,7 @@ describe('captureCacheDescriptor', () => {
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'kind')).toBe('d');
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
+		expect(fieldAfter(call, 'redisKey')).toBe('/items/articles?limit=5:user-1');
 		expect(fieldAfter(call, 'path')).toBe('/items/articles');
 		expect(fieldAfter(call, 'userId')).toBe('user-1');
 		expect(fieldAfter(call, 'bytes')).toBe('42');
@@ -396,6 +401,7 @@ describe('captureCacheDescriptor', () => {
 
 		await captureCacheDescriptor({
 			cacheKey: 'k2',
+			redisKey: '',
 			method: 'GET',
 			path: '/server/info',
 			collection: null,
@@ -475,7 +481,13 @@ describe('XADD batching', () => {
 	it('buffers captures and flushes them in a single pipeline', async () => {
 		await armFlag(null);
 
-		await captureCacheHit({ cacheKey: 'a', ageMs: 1, ttlMs: null, durationMs: null });
+		await captureCacheHit({
+			cacheKey: 'a',
+			ageMs: 1,
+			ttlMs: null,
+			durationMs: null,
+		});
+
 		await captureCacheMiss({ cacheKey: 'b', gapMs: null, ttlMs: null });
 
 		// Nothing reaches Redis until the flush.
@@ -515,9 +527,9 @@ describe('flushCacheEvents', () => {
 				kind: 'm', cacheKey: 'k2', gapMs: '2000', ttlMs: '300000', ts: '2000',
 			}),
 			streamEntry('3-0', {
-				kind: 'd', cacheKey: 'k1', method: 'GET', path: '/items/a',
-				collection: 'a', userId: 'u1', query: '{}', url: '/items/a', bytes: '42',
-				fillMs: '240', ts: '3000',
+				kind: 'd', cacheKey: 'k1', redisKey: '/items/a:u1', method: 'GET',
+				path: '/items/a', collection: 'a', userId: 'u1', query: '{}',
+				url: '/items/a', bytes: '42', fillMs: '240', ts: '3000',
 			}),
 		];
 
@@ -555,6 +567,7 @@ describe('flushCacheEvents', () => {
 		expect(builder.insert).toHaveBeenCalledWith([
 			{
 				cache_key: 'k1',
+				redis_key: '/items/a:u1',
 				method: 'GET',
 				path: '/items/a',
 				collection: 'a',
@@ -576,7 +589,7 @@ describe('flushCacheEvents', () => {
 		xrangeBatch = [
 			streamEntry('1-0', {
 				kind: 'a', cacheKey: 'k9', reason: 'value_too_large',
-				keyLength: '512', detail: '2048B', ts: '4000',
+				detail: '2048B', ts: '4000',
 			}),
 		];
 
@@ -591,7 +604,6 @@ describe('flushCacheEvents', () => {
 					time: new Date(4000),
 					cache_key: 'k9',
 					reason: 'value_too_large',
-					key_length: 512,
 					detail: '2048B',
 				},
 			],
@@ -926,6 +938,7 @@ describe('listCacheEntries', () => {
 		queryRows = [
 			{
 				cache_key: 'k1',
+				redis_key: '/items/a?limit=5:u1',
 				method: 'GET',
 				path: '/items/a',
 				collection: 'a',
@@ -944,6 +957,7 @@ describe('listCacheEntries', () => {
 			},
 			{
 				cache_key: 'k2',
+				redis_key: '',
 				method: 'GET',
 				path: '/items/b',
 				collection: null,
@@ -968,6 +982,7 @@ describe('listCacheEntries', () => {
 		expect(entries).toEqual([
 			{
 				key: 'k1',
+				redisKey: '/items/a?limit=5:u1',
 				method: 'GET',
 				path: '/items/a',
 				collection: 'a',
@@ -986,6 +1001,7 @@ describe('listCacheEntries', () => {
 			},
 			{
 				key: 'k2',
+				redisKey: '',
 				method: 'GET',
 				path: '/items/b',
 				collection: null,
@@ -1032,7 +1048,7 @@ describe('evictCacheEntriesForPath', () => {
 
 		expect(count).toBe(2);
 		expect(builder.where).toHaveBeenCalledWith({ path: '/items/a' });
-		expect(builder.pluck).toHaveBeenCalledWith('cache_key');
+		expect(builder.pluck).toHaveBeenCalledWith('redis_key');
 		expect(cache.delete).toHaveBeenCalledWith('k1');
 		expect(cache.delete).toHaveBeenCalledWith('k2');
 	});
@@ -1057,7 +1073,6 @@ describe('listCacheAnomalies', () => {
 				query: '{"limit":5}',
 				url: '/items/big?limit=5',
 				count: '4',
-				max_key_length: '512',
 				sample: '2048B',
 				last_seen: new Date(2000).toISOString(),
 			},
@@ -1082,7 +1097,6 @@ describe('listCacheAnomalies', () => {
 				query: '{"limit":5}',
 				url: '/items/big?limit=5',
 				count: 4,
-				maxKeyLength: 512,
 				sample: '2048B',
 				lastSeen: 2000,
 			},

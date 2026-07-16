@@ -133,7 +133,7 @@ const detailFields = computed(() => {
 		{ label: t('age', 'Age'), value: ageOf(entry.createdAt) },
 		{ label: t('last_hit', 'Last hit'), value: lastHitOf(entry.lastHitAt) },
 		{ label: t('expires_in', 'Expires in'), value: expiryOf(entry.expiresAt) },
-		{ label: t('key', 'Key'), value: entry.key },
+		{ label: t('key', 'Key'), value: entry.redisKey },
 	];
 });
 
@@ -272,7 +272,6 @@ async function loadAnomalies() {
 
 function anomalyLabel(reason: CacheAnomalyReason): string {
 	const labels: Record<CacheAnomalyReason, string> = {
-		key_too_long: t('cache_anomaly_key_too_long', 'Key too long · untracked'),
 		scoped_orphan: t('cache_anomaly_scoped_orphan', 'Not cached · scoped orphan'),
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
@@ -320,7 +319,7 @@ async function evictEntry(entry: CacheEntry) {
 	error.value = null;
 
 	try {
-		await api.delete('/utils/cache', { params: { key: entry.key } });
+		await api.delete('/utils/cache', { params: { key: entry.redisKey } });
 		await load();
 	}
 	catch (err: any) {
@@ -444,7 +443,7 @@ async function openEntry(entry: CacheEntry) {
 
 	try {
 		const response = await api.get('/utils/cache/entry', {
-			params: { key: entry.key },
+			params: { key: entry.redisKey },
 		});
 
 		// A quick second row click supersedes this fetch; ignore a late response for a
@@ -697,8 +696,8 @@ onMounted(() => {
 													{{ expiryOf(entry.expiresAt) }}
 												</td>
 												<td class="num">{{ formatSize(entry.size) }}</td>
-												<td class="key" :title="entry.key">
-													{{ shortKey(entry.key) }}
+												<td class="key" :title="entry.redisKey">
+													{{ shortKey(entry.redisKey) }}
 													<span
 														v-if="entry.anomaly"
 														class="reason inline"
@@ -734,10 +733,6 @@ onMounted(() => {
 											{{ anomalyLabel(anomaly.reason) }}
 										</span>
 										<span class="stat count">×{{ anomaly.count }}</span>
-										<span
-											v-if="anomaly.maxKeyLength"
-											class="stat"
-										>{{ anomaly.maxKeyLength }} {{ t('chars', 'chars') }}</span>
 										<span
 											v-if="anomaly.sample"
 											class="sample"

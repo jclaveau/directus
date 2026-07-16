@@ -46,7 +46,9 @@ describe('App Caching Tests', () => {
 	const databases = new Map<string, Knex>();
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
 	const envKeys = ['envMem', 'envMemPurge', 'envRedis', 'envRedisPurge', 'envRedisScopedPurge'] as const;
-	type EnvTypes = Record<(typeof envKeys)[number], Env>;
+	// envRedisAnomaly is spawned but kept out of envKeys: its tiny value cap would
+	// fail the purge matrix's HITs. Only the anomaly-provocation test uses it.
+	type EnvTypes = Record<(typeof envKeys)[number], Env> & { envRedisAnomaly: Env };
 	const envs = {} as Record<Vendor, EnvTypes>;
 	const cacheNamespacePrefix = 'directus-app-cache';
 	const cacheStatusHeader = 'x-cache-status';
@@ -103,17 +105,25 @@ describe('App Caching Tests', () => {
 			scopedEnv['CACHE_TAGS_HEADER'] = tagsHeader;
 			scopedEnv['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 
+			// Scoped purge (so /server/info orphans) + a tiny value cap (so a big read is
+			// oversized) provoke both cacheable-but-skipped reasons on one instance.
+			const envRedisAnomaly = cloneDeep(envRedisScopedPurge);
+			envRedisAnomaly[vendor]['CACHE_VALUE_MAX_SIZE'] = '32kb';
+			envRedisAnomaly[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_anomaly`;
+
 			const newServerPortMem = await getPort();
 			const newServerPortMemPurge = await getPort();
 			const newServerPortRedis = await getPort();
 			const newServerPortRedisPurge = await getPort();
 			const newServerPortRedisScopedPurge = await getPort();
+			const newServerPortRedisAnomaly = await getPort();
 
 			envMem[vendor].PORT = String(newServerPortMem);
 			envMemPurge[vendor].PORT = String(newServerPortMemPurge);
 			envRedis[vendor].PORT = String(newServerPortRedis);
 			envRedisPurge[vendor].PORT = String(newServerPortRedisPurge);
 			envRedisScopedPurge[vendor].PORT = String(newServerPortRedisScopedPurge);
+			envRedisAnomaly[vendor].PORT = String(newServerPortRedisAnomaly);
 
 			const serverMem = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envMem[vendor] });
 			const serverMemPurge = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envMemPurge[vendor] });
@@ -125,8 +135,28 @@ describe('App Caching Tests', () => {
 				env: envRedisScopedPurge[vendor],
 			});
 
-			directusInstances[vendor] = [serverMem, serverMemPurge, serverRedis, serverRedisPurge, serverRedisScopedPurge];
-			envs[vendor] = { envMem, envMemPurge, envRedis, envRedisPurge, envRedisScopedPurge };
+			const serverRedisAnomaly = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: envRedisAnomaly[vendor],
+			});
+
+			directusInstances[vendor] = [
+				serverMem,
+				serverMemPurge,
+				serverRedis,
+				serverRedisPurge,
+				serverRedisScopedPurge,
+				serverRedisAnomaly,
+			];
+
+			envs[vendor] = {
+				envMem,
+				envMemPurge,
+				envRedis,
+				envRedisPurge,
+				envRedisScopedPurge,
+				envRedisAnomaly,
+			};
 
 			promises.push(
 				awaitDirectusConnection(newServerPortMem),
@@ -134,6 +164,7 @@ describe('App Caching Tests', () => {
 				awaitDirectusConnection(newServerPortRedis),
 				awaitDirectusConnection(newServerPortRedisPurge),
 				awaitDirectusConnection(newServerPortRedisScopedPurge),
+				awaitDirectusConnection(newServerPortRedisAnomaly),
 			);
 		}
 
@@ -2527,10 +2558,11 @@ describe('App Caching Tests', () => {
 			expect(first).toBeDefined();
 			expect(first.hits).toBeGreaterThanOrEqual(1);
 			expect(typeof first.query).toBe('string');
+			expect(typeof first.redisKey).toBe('string');
 
-			// The live Redis state is still there for the freshly-filled key.
+			// Inspect + evict by the actual Redis key (redisKey), not the stats hash.
 			const entry = await request(url).get('/utils/cache/entry')
-				.query({ key: first.key })
+				.query({ key: first.redisKey })
 				.set('Authorization', auth);
 
 			expect(entry.statusCode).toBe(200);
@@ -2545,7 +2577,7 @@ describe('App Caching Tests', () => {
 
 			// Evict one entry by key (its own branch)…
 			const byKey = await request(url).delete('/utils/cache')
-				.query({ key: first.key })
+				.query({ key: first.redisKey })
 				.set('Authorization', auth);
 
 			expect(byKey.statusCode).toBe(200);
@@ -2709,9 +2741,9 @@ describe('App Caching Tests', () => {
 		});
 	});
 
-	describe('The cache anomalies endpoint lists silent cache anomalies', () => {
-		// Exercises the route + service + listing query; with no anomalies staged
-		// the shape (200 + array) is asserted, not specific rows.
+	describe(oneLine`
+		The cache anomalies endpoint reports its shape when none are staged
+	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedis;
 			const url = getUrl(vendor, env);
@@ -2723,5 +2755,67 @@ describe('App Caching Tests', () => {
 			expect(response.statusCode).toBe(200);
 			expect(Array.isArray(response.body.data)).toBe(true);
 		});
+	});
+
+	describe(oneLine`
+		Provokes and lists both cacheable-but-skipped anomalies — a scoped orphan
+		(/server/info) and an oversized value — joined to their descriptor
+	`, () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisAnomaly;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			await request(url).post('/utils/cache/stats/truncate')
+				.set('Authorization', auth);
+
+			// scoped_orphan: /server/info has no collection + no scope tags under scoped
+			// purge, so caching it would orphan a stale entry — it's skipped and flagged.
+			await request(url).get('/server/info')
+				.set('Authorization', auth);
+
+			// value_too_large: seed a row whose string_field dwarfs the 32kb cap, then
+			// read it back — the response exceeds the cap, so it's skipped + flagged.
+			await request(url).post(`/items/${collectionFirst}`)
+				.send({ string_field: 'x'.repeat(128 * 1024) })
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			// The capture path buffers to Redis and drains to Postgres on a schedule, so
+			// the listing is eventually-consistent — poll until both reasons land.
+			let anomalies: any[] = [];
+			let byReason = new Map<string, any>();
+
+			for (let attempt = 0; attempt < 25; attempt++) {
+				const listed = await request(url).get('/utils/cache/anomalies')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+				anomalies = listed.body.data;
+				byReason = new Map(anomalies.map((row: any) => [row.reason, row]));
+
+				if (byReason.has('scoped_orphan') && byReason.has('value_too_large')) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			const orphan = byReason.get('scoped_orphan');
+			expect(orphan).toBeDefined();
+			// The anomaly resolves through its descriptor to the causing request.
+			expect(orphan.path).toBe('/server/info');
+			expect(orphan.count).toBeGreaterThanOrEqual(1);
+
+			const oversized = byReason.get('value_too_large');
+			expect(oversized).toBeDefined();
+			expect(oversized.path).toBe(`/items/${collectionFirst}`);
+			expect(oversized.count).toBeGreaterThanOrEqual(1);
+		}, 60000);
 	});
 });

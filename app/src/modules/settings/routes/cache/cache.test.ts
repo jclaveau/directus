@@ -20,6 +20,7 @@ import CachePage from './cache.vue';
 const ENTRIES = [
 	{
 		key: 'app-key-000000000000',
+		redisKey: 'app-redis-key',
 		method: 'GET',
 		path: '/items/articles',
 		collection: 'articles',
@@ -38,6 +39,7 @@ const ENTRIES = [
 	},
 	{
 		key: 'bob-key-000000000000',
+		redisKey: 'bob-redis-key',
 		method: 'GET',
 		path: '/items/comments',
 		collection: 'comments',
@@ -56,6 +58,7 @@ const ENTRIES = [
 	},
 	{
 		key: 'sys-key-000000000000',
+		redisKey: 'sys-redis-key',
 		method: 'GET',
 		path: '/server/info',
 		collection: null,
@@ -171,7 +174,7 @@ describe('CachePage', () => {
 		await wrapper.find('tbody v-icon').trigger('click');
 
 		expect(api.delete).toHaveBeenCalledWith('/utils/cache', {
-			params: { key: 'app-key-000000000000' },
+			params: { key: 'app-redis-key' },
 		});
 	});
 
@@ -185,7 +188,6 @@ describe('CachePage', () => {
 				query: '{"query":"{ me }"}',
 				url: '',
 				count: 3,
-				maxKeyLength: null,
 				sample: null,
 				lastSeen: Date.now(),
 			},
@@ -217,7 +219,6 @@ describe('CachePage', () => {
 				query: '{"limit":5}',
 				url: '/items/articles?limit=5',
 				count: 1,
-				maxKeyLength: null,
 				sample: null,
 				lastSeen: Date.now(),
 			},
@@ -229,7 +230,6 @@ describe('CachePage', () => {
 				query: '{"limit":5}',
 				url: '/items/articles?limit=5',
 				count: 2,
-				maxKeyLength: null,
 				sample: 'no collection',
 				lastSeen: Date.now(),
 			},
@@ -317,7 +317,7 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(api.get).toHaveBeenCalledWith('/utils/cache/entry', {
-			params: { key: 'app-key-000000000000' },
+			params: { key: 'app-redis-key' },
 		});
 
 		const text = wrapper.text();
@@ -336,6 +336,7 @@ describe('CachePage', () => {
 		const many = Array.from({ length: 30 }, (_unused, index) => {
 			return {
 				key: `k-${String(index).padStart(3, '0')}`,
+				redisKey: `rk-${String(index).padStart(3, '0')}`,
 				method: 'GET',
 				path: '/items/articles',
 				collection: 'articles',

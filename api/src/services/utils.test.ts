@@ -157,7 +157,7 @@ describe('Services / Utils', () => {
 		});
 
 		it('getCacheAnomalies returns the grouped anomaly rows', async () => {
-			const rows = [{ reason: 'key_too_long', path: '/items/a', count: 3 }];
+			const rows = [{ reason: 'value_too_large', path: '/items/a', count: 3 }];
 			vi.mocked(listCacheAnomalies).mockResolvedValue(rows as any);
 
 			await expect(adminService().getCacheAnomalies()).resolves.toBe(rows);

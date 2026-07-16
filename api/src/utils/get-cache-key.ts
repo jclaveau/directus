@@ -19,7 +19,15 @@ function sortNestedKeys(_key: string, value: unknown): unknown {
 	return value;
 }
 
-export async function getCacheKey(req: Request) {
+export interface CacheKey {
+	// Redis key: readable descriptor (CACHE_KEY_HASH_ENABLED=false), else the hash.
+	key: string;
+	// Fixed-length stats identity (object-hash of the info): stats tables key by
+	// this, so a readable Redis key can't overflow their 255-char column.
+	hash: string;
+}
+
+export async function getCacheKey(req: Request): Promise<CacheKey> {
 	const path = url.parse(req.originalUrl).pathname;
 	const isGraphQl = path?.startsWith('/graphql');
 
@@ -40,13 +48,13 @@ export async function getCacheKey(req: Request) {
 		...(includeIp && { ip: req.accountability!.ip }),
 	};
 
-	// `CACHE_KEY_HASH_ENABLED=false` returns the readable request descriptor instead of its hash,
-	// so a dev can tell which request a cache entry (and its scoped-cache tag members) belongs to.
-	// Keeps every correctness input (user/version/ip) — dropping them would bleed one user's cache
-	// to another. On by default → prod stays a fixed-length hash. Pairs with CACHE_COMPRESSION_ENABLED.
-	if (useEnv()['CACHE_KEY_HASH_ENABLED'] === false) {
-		return JSON.stringify(info, sortNestedKeys);
-	}
+	const digest = hash(info);
 
-	return hash(info);
+	// CACHE_KEY_HASH_ENABLED=false makes the Redis key the readable descriptor (a dev
+	// sees which request an entry is); the stats identity stays the fixed digest.
+	const key = useEnv()['CACHE_KEY_HASH_ENABLED'] === false
+		? JSON.stringify(info, sortNestedKeys)
+		: digest;
+
+	return { key, hash: digest };
 }

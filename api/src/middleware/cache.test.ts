@@ -143,7 +143,7 @@ beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	delete env['CACHE_TAGS_HEADER'];
 	shouldSkipCache.mockReturnValue(false);
-	getCacheKey.mockResolvedValue('cache-key');
+	getCacheKey.mockResolvedValue({ key: 'cache-key', hash: 'cache-hash' });
 	vi.mocked(cacheStatsActive).mockReturnValue(false);
 	vi.mocked(readCacheMissGap).mockResolvedValue(null);
 });
@@ -268,7 +268,7 @@ describe('checkCacheMiddleware', () => {
 		await checkCacheMiddleware(makeReq(), res, next);
 
 		expect(captureCacheHit).toHaveBeenCalledWith(
-			expect.objectContaining({ cacheKey: 'cache-key', ttlMs: 1000 }),
+			expect.objectContaining({ cacheKey: 'cache-hash', ttlMs: 1000 }),
 		);
 
 		expect(res.json).toHaveBeenCalledWith({ data: [1] });
@@ -295,7 +295,7 @@ describe('checkCacheMiddleware', () => {
 		expect(readCacheMissGap).toHaveBeenCalledWith('cache-key', expect.any(Number));
 
 		expect(captureCacheMiss).toHaveBeenCalledWith(
-			expect.objectContaining({ cacheKey: 'cache-key', gapMs: 4000 }),
+			expect.objectContaining({ cacheKey: 'cache-hash', gapMs: 4000 }),
 		);
 
 		expect(next).toHaveBeenCalled();
