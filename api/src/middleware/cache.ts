@@ -34,7 +34,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		return next();
 	}
 
-	const key = await getCacheKey(req);
+	const { key, hash } = await getCacheKey(req);
 
 	let cachedData;
 
@@ -87,7 +87,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 		if (cacheStatsActive() && createdAt > 0) {
 			void captureCacheHit({
-				cacheKey: key,
+				cacheKey: hash,
 				ageMs: Math.max(Date.now() - createdAt, 0),
 				ttlMs: expiresMeta?.ttlMs ?? null,
 				durationMs: Math.max(Date.now() - Number(res.locals['requestStart']), 0),
@@ -125,7 +125,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 			void readCacheMissGap(key, missAt)
 				.then((gapMs) => {
 					return captureCacheMiss({
-						cacheKey: key,
+						cacheKey: hash,
 						gapMs,
 						ttlMs: getMilliseconds(env['CACHE_TTL']) ?? null,
 					});

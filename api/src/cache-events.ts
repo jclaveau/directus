@@ -39,7 +39,8 @@ export interface CacheMissCapture {
 }
 
 export interface CacheDescriptor {
-	cacheKey: string;
+	cacheKey: string; // stats identity (getCacheKey().hash) — always fixed-length
+	redisKey: string; // the actual Redis key, for inspection + eviction
 	method: string;
 	path: string;
 	collection: string | null;
@@ -50,10 +51,9 @@ export interface CacheDescriptor {
 	fillMs: number;
 }
 
-// A silent cache anomaly (not cached, cached-but-untracked, degraded scope, or a
-// Redis error) surfaced on the dashboard rather than dropped.
+// A silent cache anomaly (not cached, degraded scope, or a Redis error) surfaced on
+// the dashboard rather than dropped.
 export type CacheAnomalyReason =
-	| 'key_too_long'
 	| 'scoped_orphan'
 	| 'value_too_large'
 	| 'redis_error'
@@ -62,7 +62,6 @@ export type CacheAnomalyReason =
 export interface CacheAnomalyCapture {
 	cacheKey: string;
 	reason: CacheAnomalyReason;
-	keyLength?: number | null; // key_too_long: the untrackable key's length
 	detail?: string | null; // byte size / error message
 }
 
@@ -76,13 +75,13 @@ export interface CacheAnomalyRecord {
 	query: string;
 	url: string;
 	count: number;
-	maxKeyLength: number | null;
 	sample: string | null;
 	lastSeen: number;
 }
 
 export interface CacheEntryRecord {
-	key: string;
+	key: string; // stats identity (the hash)
+	redisKey: string; // the actual Redis key, for inspect + evict
 	method: string;
 	path: string;
 	collection: string | null;
@@ -108,16 +107,6 @@ export interface CacheStatsState {
 }
 
 const STREAM_HARD_CAP = 1_000_000;
-
-// The stats-table cache_key is varchar(255). The default hashed key is ~40 hex, but
-// a readable key (CACHE_KEY_HASH_ENABLED=false) can exceed it and would throw on
-// insert — wedging the flush. Skip an untrackable key rather than truncate it (a
-// truncated key would collide in the descriptor primary key).
-const MAX_CACHE_KEY_LENGTH = 255;
-
-function isKeyTrackable(key: string): boolean {
-	return key.length <= MAX_CACHE_KEY_LENGTH;
-}
 
 const FLUSH_BATCH = 500;
 const DEFAULT_GAP_LOOKBACK = getMilliseconds('1h', 3_600_000);
@@ -203,7 +192,7 @@ const XADD_BUFFER_CAP = 1000;
 let xaddBuffer: string[][] = [];
 let xaddFlushScheduled = false;
 
-// Buffer one entry's field/value pairs; flush now if full, else at the tick boundary.
+// Buffer one entry's fields; flush now if full, else at the tick boundary.
 function xadd(fields: Record<string, string>): void {
 	const flat: string[] = [];
 
@@ -237,7 +226,7 @@ export async function flushXaddBuffer(): Promise<void> {
 	const pipe = useRedis().pipeline();
 
 	for (const flat of batch) {
-		// MAXLEN ~ caps stream memory; .call() over typed xadd() (spread trips overloads).
+		// MAXLEN ~ caps stream memory; .call() over xadd() (spread trips its overloads).
 		pipe.call(
 			'XADD',
 			streamKey(),
@@ -258,7 +247,7 @@ export async function flushXaddBuffer(): Promise<void> {
 }
 
 export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(hit.cacheKey)) {
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
@@ -277,7 +266,7 @@ export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
 }
 
 export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(miss.cacheKey)) {
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
@@ -319,9 +308,6 @@ export async function captureCacheAnomaly(
 		kind: 'a',
 		cacheKey: entry.cacheKey,
 		reason: entry.reason,
-		keyLength: entry.keyLength == null
-			? ''
-			: String(entry.keyLength),
 		detail: entry.detail ?? '',
 		ts: String(Date.now()),
 	});
@@ -329,15 +315,14 @@ export async function captureCacheAnomaly(
 
 // The per-key descriptor, emitted on a fill where every field is populated.
 export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(entry.cacheKey)) {
-		// TODO(key_too_long): a key past the 255-char column is skipped here; the
-		// hashed-descriptor path that re-surfaces it lands in a follow-up.
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
 	xadd({
 		kind: 'd',
 		cacheKey: entry.cacheKey,
+		redisKey: entry.redisKey,
 		method: entry.method,
 		path: entry.path,
 		collection: entry.collection ?? '',
@@ -363,7 +348,7 @@ export async function writeCacheTombstone(
 	key: string,
 	expiredAt: number,
 ): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(key)) {
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
@@ -417,6 +402,7 @@ interface CacheEventRow {
 
 interface CacheDescriptorRow {
 	cache_key: string;
+	redis_key: string;
 	method: string;
 	path: string;
 	collection: string | null;
@@ -432,7 +418,6 @@ interface CacheAnomalyRow {
 	time: Date;
 	cache_key: string;
 	reason: string;
-	key_length: number | null;
 	detail: string;
 }
 
@@ -536,9 +521,6 @@ async function drainCacheEvents(): Promise<number> {
 					time: at,
 					cache_key: f['cacheKey']!,
 					reason: f['reason'] ?? '',
-					key_length: f['keyLength']
-						? Number(f['keyLength'])
-						: null,
 					detail: f['detail'] ?? '',
 				});
 
@@ -549,6 +531,7 @@ async function drainCacheEvents(): Promise<number> {
 				// Last write in the batch wins — a re-conflicting insert would throw.
 				descriptors.set(f['cacheKey']!, {
 					cache_key: f['cacheKey']!,
+					redis_key: f['redisKey'] ?? '',
 					method: f['method'] ?? '',
 					path: f['path'] ?? '',
 					collection: f['collection']
@@ -636,6 +619,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 
 	const selects: (string | Knex.Raw)[] = [
 		'd.cache_key',
+		'd.redis_key',
 		'd.method',
 		'd.path',
 		'd.collection',
@@ -672,6 +656,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		.where('e.time', '>', since)
 		.groupBy(
 			'd.cache_key',
+			'd.redis_key',
 			'd.method',
 			'd.path',
 			'd.collection',
@@ -699,6 +684,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 
 		return {
 			key: row['cache_key'] as string,
+			redisKey: row['redis_key'] as string,
 			method: row['method'] as string,
 			path: row['path'] as string,
 			collection: (row['collection'] as string | null) || null,
@@ -752,7 +738,7 @@ export async function evictCacheEntriesForPath(
 
 	const keys = await getDatabase()('directus_cache_descriptors')
 		.where({ path })
-		.pluck('cache_key');
+		.pluck('redis_key');
 
 	await Promise.all(keys.map((key: string) => evictCacheEntry(cache, key)));
 
@@ -822,7 +808,6 @@ export async function listCacheAnomalies(): Promise<CacheAnomalyRecord[]> {
 			'd.query',
 			'd.url',
 			db.raw('COUNT(*) AS count'),
-			db.raw('MAX(a.key_length) AS max_key_length'),
 			db.raw('MAX(a.detail) AS sample'),
 			db.raw('MAX(a.time) AS last_seen'),
 		)
@@ -838,9 +823,6 @@ export async function listCacheAnomalies(): Promise<CacheAnomalyRecord[]> {
 			query: (row['query'] as string) ?? '',
 			url: (row['url'] as string) ?? '',
 			count: Number(row['count'] ?? 0),
-			maxKeyLength: row['max_key_length'] == null
-				? null
-				: Number(row['max_key_length']),
 			sample: (row['sample'] as string | null) || null,
 			lastSeen: new Date(row['last_seen'] as string).getTime(),
 		};

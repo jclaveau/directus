@@ -2,7 +2,8 @@ import type { Filter } from '@directus/types';
 import { matchesFilter } from './filter-entry';
 
 export interface CacheEntry {
-	key: string;
+	key: string; // stats identity (the hash)
+	redisKey: string; // the actual Redis key — inspect + evict by this
 	path: string;
 	method: string;
 	collection: string | null;
@@ -38,7 +39,6 @@ export interface QueryGroup {
 }
 
 export type CacheAnomalyReason =
-	| 'key_too_long'
 	| 'scoped_orphan'
 	| 'value_too_large'
 	| 'redis_error'
@@ -54,7 +54,6 @@ export interface CacheAnomaly {
 	query: string;
 	url: string;
 	count: number;
-	maxKeyLength: number | null;
 	sample: string | null;
 	lastSeen: number;
 }
@@ -232,6 +231,7 @@ export function filterEntries(
 			entry.query,
 			entry.user?.email,
 			entry.key,
+			entry.redisKey,
 			entry.method,
 		];
 

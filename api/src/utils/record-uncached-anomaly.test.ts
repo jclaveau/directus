@@ -38,13 +38,14 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 
 describe('recordUncachedAnomaly', () => {
 	it('writes a descriptor then the anomaly, keyed by the cache key', async () => {
-		mocks.getCacheKey.mockResolvedValueOnce('k1');
+		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk1', hash: 'h1' });
 
 		await recordUncachedAnomaly(makeReq(), 'value_too_large', '2048B');
 
 		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
-				cacheKey: 'k1',
+				cacheKey: 'h1',
+				redisKey: 'rk1',
 				method: 'GET',
 				path: '/items/articles',
 				collection: 'articles',
@@ -57,28 +58,29 @@ describe('recordUncachedAnomaly', () => {
 		);
 
 		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
-			cacheKey: 'k1',
+			cacheKey: 'h1',
 			reason: 'value_too_large',
 			detail: '2048B',
 		});
 	});
 
 	it('records a graphql request with a blank url + the graphql query', async () => {
-		mocks.getCacheKey.mockResolvedValueOnce('k2');
+		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk2', hash: 'h2' });
 
 		const req = makeReq({ method: 'POST', originalUrl: '/graphql' });
 		await recordUncachedAnomaly(req, 'scoped_orphan');
 
 		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
-				cacheKey: 'k2',
+				cacheKey: 'h2',
+				redisKey: 'rk2',
 				url: '',
 				query: JSON.stringify({ query: '{ me }', variables: {} }),
 			}),
 		);
 
 		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
-			cacheKey: 'k2',
+			cacheKey: 'h2',
 			reason: 'scoped_orphan',
 			detail: null,
 		});

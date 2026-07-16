@@ -21,6 +21,7 @@ import {
 function entry(over: Partial<CacheEntry>): CacheEntry {
 	return {
 		key: 'k',
+		redisKey: 'rk',
 		path: '/items/x',
 		method: 'GET',
 		collection: null,
@@ -49,7 +50,6 @@ function anomaly(over: Partial<CacheAnomaly>): CacheAnomaly {
 		query: '{}',
 		url: '',
 		count: 1,
-		maxKeyLength: null,
 		sample: null,
 		lastSeen: 0,
 		...over,

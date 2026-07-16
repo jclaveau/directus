@@ -69,7 +69,9 @@ vi.mock('../utils/permissions-cachable.js', () => {
 });
 
 vi.mock('../utils/get-cache-key.js', () => {
-	return { getCacheKey: vi.fn().mockResolvedValue('cache-key') };
+	return {
+		getCacheKey: vi.fn().mockResolvedValue({ key: 'cache-key', hash: 'cache-hash' }),
+	};
 });
 
 vi.mock('../utils/get-graphql-query-and-variables.js', () => {
@@ -185,7 +187,8 @@ describe('respond middleware', () => {
 
 		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
-				cacheKey: 'cache-key',
+				cacheKey: 'cache-hash',
+				redisKey: 'cache-key',
 				method: 'GET',
 				path: '/items/articles',
 				collection: 'articles',
@@ -316,7 +319,7 @@ describe('respond middleware', () => {
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
 
 		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
-			cacheKey: 'cache-key',
+			cacheKey: 'cache-hash',
 			reason: 'coarse_scope',
 		});
 	});

@@ -19,11 +19,12 @@ export async function recordUncachedAnomaly(
 	reason: CacheAnomalyReason,
 	detail?: string | null,
 ): Promise<void> {
-	const key = await getCacheKey(req);
+	const { key, hash } = await getCacheKey(req);
 	const isGraphQl = req.originalUrl?.startsWith('/graphql') === true;
 
 	await captureCacheDescriptor({
-		cacheKey: key,
+		cacheKey: hash,
+		redisKey: key,
 		method: req.method,
 		path: req.originalUrl.split('?')[0]!,
 		collection: req.collection ?? null,
@@ -38,5 +39,5 @@ export async function recordUncachedAnomaly(
 		fillMs: 0,
 	});
 
-	await captureCacheAnomaly({ cacheKey: key, reason, detail: detail ?? null });
+	await captureCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
 }

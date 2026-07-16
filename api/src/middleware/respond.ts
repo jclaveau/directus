@@ -120,7 +120,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			req.accountability,
 		))
 	) {
-		const key = await getCacheKey(req);
+		const { key, hash } = await getCacheKey(req);
 
 		try {
 			const now = Date.now();
@@ -173,7 +173,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				req.collection
 			) {
 				void captureCacheAnomaly({
-					cacheKey: key,
+					cacheKey: hash,
 					reason: 'coarse_scope',
 				}).catch(() => {});
 			}
@@ -192,7 +192,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				// user are fully populated, unlike the early cache middleware. Buffered
 				// like the events; the flusher upserts the descriptors dimension.
 				void captureCacheDescriptor({
-					cacheKey: key,
+					cacheKey: hash,
+					redisKey: key,
 					method: req.method,
 					path: req.originalUrl.split('?')[0]!,
 					collection: req.collection ?? null,
