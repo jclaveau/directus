@@ -216,11 +216,20 @@ jobs:
 
       - name: Provoke + verify cache anomalies
         run: |
-          # coarse_scope needs a scoped field on sub_items — set it in the DB (the API
-          # doesn't whitelist the fork column), then clear the system/schema cache below.
+          # coarse_scope needs a scoped field on sub_items. The API doesn't whitelist the
+          # fork column, so set it in the DB then restart Directus to rebuild the schema.
           PG=$(docker ps --filter ancestor=postgres:16-alpine -q | head -1)
           docker exec "$PG" psql -U directus -d directus -c \
             "UPDATE directus_collections SET scoped_cache_fields='[\"user_created\"]' WHERE collection='sub_items';"
+
+          pkill -f 'cli.js start' || true
+          sleep 2
+          ADMIN_PASSWORD="$ADMIN_PASSWORD" PUBLIC_URL="$URL" node directus/cli.js start \
+            > /tmp/directus.log 2>&1 &
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
+            sleep 2
+          done
 
           cat > /tmp/verify.mjs <<'JS'
           const BASE = 'http://localhost:8055';
@@ -235,10 +244,6 @@ jobs:
           const H = { authorization: `Bearer ${token}` };
           const Hj = { ...H, 'content-type': 'application/json' };
           const get = (p) => fetch(`${BASE}${p}`, { headers: H });
-
-          // Rebuild the schema so the SQL-set scoped_cache_fields takes effect.
-          await fetch(`${BASE}/utils/cache/clear?system`, { method: 'POST', headers: H });
-          await new Promise((r) => setTimeout(r, 2000));
 
           async function probe(label, path, opts) {
             const res = await fetch(`${BASE}${path}`, opts ?? { headers: H });
@@ -255,8 +260,9 @@ jobs:
           await probe('server_info', '/server/info');
           // value_too_large — over CACHE_VALUE_MAX_SIZE.
           await probe('big_items', '/items/big_items');
-          // coarse_scope — a non-flat filter ON the scoped field can't be pinned.
-          await probe('sub_nnull', '/items/sub_items?filter[user_created][_nnull]=true');
+          // coarse_scope — reads that can't yield the scoped field per row → null tags.
+          await probe('sub_agg', '/items/sub_items?aggregate[count]=*');
+          await probe('sub_fields', '/items/sub_items?fields=id');
 
           // The stats flush cron drains the stream every 10s — wait for it.
           await new Promise((r) => setTimeout(r, 15000));
