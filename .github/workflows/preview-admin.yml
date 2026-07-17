@@ -131,6 +131,57 @@ jobs:
           echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
 
           ADMIN_PASSWORD="$PW" node directus/cli.js bootstrap
+
+          # Auto-login endpoint: relays a server-side session /auth/login to the browser,
+          # so opening <url>/auto-login lands in the Data Studio with no password typing.
+          mkdir -p extensions/directus-extension-auto-login
+          cat > extensions/directus-extension-auto-login/package.json <<'PKG'
+          {
+            "name": "directus-extension-auto-login",
+            "version": "1.0.0",
+            "type": "module",
+            "keywords": ["directus-extension", "directus-custom-endpoint"],
+            "directus:extension": {
+              "type": "endpoint",
+              "path": "index.js",
+              "source": "index.js",
+              "host": "^11.0.0"
+            }
+          }
+          PKG
+          cat > extensions/directus-extension-auto-login/index.js <<'IDX'
+          export default {
+            id: 'auto-login',
+            handler: (router, { env, logger }) => {
+              router.get('/', async (req, res) => {
+                try {
+                  const port = env.PORT ?? 8055;
+                  const upstream = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                      email: env.ADMIN_EMAIL ?? 'admin@example.com',
+                      password: env.ADMIN_PASSWORD,
+                      mode: 'session',
+                    }),
+                  });
+                  if (!upstream.ok) {
+                    logger.error(`auto-login: /auth/login returned ${upstream.status}`);
+                    res.status(502).send('auto-login failed');
+                    return;
+                  }
+                  const cookies = upstream.headers.getSetCookie?.() ?? [];
+                  for (const cookie of cookies) res.append('set-cookie', cookie);
+                  res.redirect('/admin/');
+                } catch (err) {
+                  logger.error(err, 'auto-login failed');
+                  res.status(500).send('auto-login failed');
+                }
+              });
+            },
+          };
+          IDX
+
           ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" node directus/cli.js start \
             > /tmp/directus.log 2>&1 &
 
@@ -262,7 +313,18 @@ jobs:
           await new Promise((r) => setTimeout(r, 15000));
 
           const anomalies = (await (await get('/utils/cache/anomalies')).json()).data ?? [];
-          writeFileSync('/tmp/anomalies.json', JSON.stringify(anomalies, null, 2));
+
+          // Self-check the auto-login endpoint server-side: it should 302 to /admin with a
+          // session cookie set (the browser then lands logged in).
+          const al = await fetch(`${BASE}/auto-login`, { redirect: 'manual' });
+
+          const autoLogin = {
+            status: al.status,
+            location: al.headers.get('location'),
+            setCookie: (al.headers.getSetCookie?.() ?? []).some((c) => c.startsWith('directus_session_token=')),
+          };
+
+          writeFileSync('/tmp/anomalies.json', JSON.stringify({ anomalies, autoLogin }, null, 2));
 
           const lines = anomalies.length
             ? anomalies.map((a) => `- ${a.reason} x${a.count} — ${a.path}`).join('\n')
@@ -305,8 +367,8 @@ jobs:
           {
             echo "### 🔎 Preview admin — \`${SHA}\`"
             echo ""
-            echo "- **URL:** ${URL}/admin"
-            echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- **Open (auto-login):** ${URL}/auto-login"
+            echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Ephemeral: auto-shuts-down after ${IDLE_MINUTES} min idle; the link dies with the run."
             echo "- **Re-run:** [🔄 boot a fresh preview](${RUN_URL}) — then \"Re-run all jobs\"."
@@ -340,13 +402,13 @@ jobs:
             echo "### Preview admin"
             echo ""
             echo "- **Ref:** ${{ github.event.pull_request.head.ref || inputs.ref }}"
-            echo "- **URL:** ${URL}/admin"
-            echo "- **Login:** admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- **Open (auto-login):** ${URL}/auto-login"
+            echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded collections: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no activity."
           } >> "$GITHUB_STEP_SUMMARY"
 
-          echo "::notice title=Preview admin::${URL}/admin"
+          echo "::notice title=Preview admin::${URL}/auto-login"
 
           # Idle = Directus log stops growing (each request logs a line at info level).
           IDLE=$(( IDLE_MINUTES * 60 ))
