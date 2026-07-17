@@ -233,6 +233,7 @@ jobs:
             "UPDATE directus_collections SET scoped_cache_fields='[\"user_created\"]' WHERE collection='sub_items';"
 
           cat > /tmp/verify.mjs <<'JS'
+          import { writeFileSync } from 'node:fs';
           const BASE = 'http://localhost:8055';
 
           const login = await fetch(`${BASE}/auth/login`, {
@@ -261,6 +262,7 @@ jobs:
           await new Promise((r) => setTimeout(r, 15000));
 
           const anomalies = (await (await get('/utils/cache/anomalies')).json()).data ?? [];
+          writeFileSync('/tmp/anomalies.json', JSON.stringify(anomalies, null, 2));
 
           const lines = anomalies.length
             ? anomalies.map((a) => `- ${a.reason} x${a.count} — ${a.path}`).join('\n')
@@ -276,6 +278,15 @@ jobs:
             echo ""
             echo "_redis_error needs a real Redis fault, so it isn't auto-provoked; key_too_long no longer exists (the stats identity is a fixed-length hash)._"
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the provoked anomalies (machine-readable)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-anomalies
+          path: /tmp/anomalies.json
+          retention-days: 1
+          if-no-files-found: warn
 
       - name: Comment the preview link on the PR
         # PR events only — a workflow_dispatch run has no PR to comment on (URL +
