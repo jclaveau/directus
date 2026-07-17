@@ -86,6 +86,9 @@ jobs:
       # Small cap so a big_items read trips value_too_large; normal reads still cache.
       CACHE_VALUE_MAX_SIZE: 4kb
       ADMIN_EMAIL: admin@example.com
+      # Lax (not the strict default) so the session cookie survives the cross-site
+      # /auto-login link → /admin redirect; strict withholds it on external arrival.
+      SESSION_COOKIE_SAME_SITE: lax
       # info so each request logs a line — the idle watcher keys off log growth.
       LOG_LEVEL: info
       # Off — no realtime needed to browse a preview.
@@ -317,11 +320,16 @@ jobs:
           // Self-check the auto-login endpoint server-side: it should 302 to /admin with a
           // session cookie set (the browser then lands logged in).
           const al = await fetch(`${BASE}/auto-login`, { redirect: 'manual' });
+          const alCookies = al.headers.getSetCookie?.() ?? [];
+          const sessionCookie = alCookies.find((c) => c.startsWith('directus_session_token='));
 
           const autoLogin = {
             status: al.status,
             location: al.headers.get('location'),
-            setCookie: (al.headers.getSetCookie?.() ?? []).some((c) => c.startsWith('directus_session_token=')),
+            setCookie: Boolean(sessionCookie),
+            // SameSite=Lax is required: Strict withholds the cookie on the cross-site
+            // /auto-login → /admin arrival, so the app can't refresh from it.
+            sameSite: sessionCookie ? (sessionCookie.match(/SameSite=(\w+)/i)?.[1] ?? null) : null,
           };
 
           writeFileSync('/tmp/anomalies.json', JSON.stringify({ anomalies, autoLogin }, null, 2));
