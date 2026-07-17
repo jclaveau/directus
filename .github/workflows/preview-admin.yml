@@ -190,15 +190,30 @@ jobs:
           await post('/relations', { collection: 'sub_items', field: 'item', related_collection: 'items' });
           for (const r of userCreated('sub_items')) await r;
 
+          // Self-relation on sub_items: a `?fields=*,parent.*` read reaches sub_items again
+          // unbounded, so a scoped filter can't pin an owner slice → deriver null → coarse_scope.
+          await post('/fields/sub_items', {
+            field: 'parent',
+            type: 'integer',
+            meta: { special: ['m2o'], interface: 'select-dropdown-m2o' },
+            schema: {},
+          });
+
+          await post('/relations', { collection: 'sub_items', field: 'parent', related_collection: 'sub_items' });
+
           // Rows so reads return data.
           const itemIds = [];
           for (let i = 0; i < 3; i++) {
             const created = await (await post('/items/items', {})).json();
             itemIds.push(created.data.id);
           }
+          const subIds = [];
           for (let i = 0; i < 5; i++) {
-            await post('/items/sub_items', { item: itemIds[i % itemIds.length] });
+            const sub = await (await post('/items/sub_items', { item: itemIds[i % itemIds.length] })).json();
+            subIds.push(sub.data.id);
           }
+          // A child pointing at a parent, so the self-referential read has a row to expand.
+          await post('/items/sub_items', { item: itemIds[0], parent: subIds[0] });
 
           // big_items → value_too_large (a GET over CACHE_VALUE_MAX_SIZE).
           await post('/collections', { collection: 'big_items', schema: {}, meta: {}, fields: [idField] });
@@ -238,6 +253,9 @@ jobs:
           await get('/server/info');
           // value_too_large — big_items response exceeds CACHE_VALUE_MAX_SIZE.
           await get('/items/big_items');
+          // coarse_scope — a self-referential scoped read: parent.* reaches sub_items again
+          // unbounded, so the owner filter can't pin a slice → deriver null → coarse tag.
+          await get('/items/sub_items?fields=*,parent.*&filter[user_created][_eq]=$CURRENT_USER');
 
           // The stats flush cron drains the stream every 10s — wait for it.
           await new Promise((r) => setTimeout(r, 15000));
@@ -256,7 +274,7 @@ jobs:
             echo ""
             node /tmp/verify.mjs
             echo ""
-            echo "_coarse_scope needs a non-admin user whose read permission scopes by user_created (set on sub_items); redis_error needs a real Redis fault; key_too_long is deferred._"
+            echo "_redis_error needs a real Redis fault, so it isn't auto-provoked; key_too_long no longer exists (the stats identity is a fixed-length hash)._"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Comment the preview link on the PR

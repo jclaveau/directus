@@ -909,7 +909,10 @@ onMounted(() => {
 	white-space: nowrap;
 }
 
-.anomaly-count {
+/* Scoped over the header `.stat` grey rules, which are more specific than a bare
+   `.anomaly-count` and would otherwise win. */
+.endpoint-header .stat.anomaly-count,
+.query-header .stat.anomaly-count {
 	color: var(--theme--warning);
 }
 
