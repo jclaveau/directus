@@ -1,0 +1,463 @@
+name: Preview Admin
+
+# Boots a ref's Directus (postgres + redis, scoped cache on) on a GitHub runner and exposes
+# its admin UI through an OUTBOUND cloudflared quick tunnel (runners take no ingress). Runs
+# manually (workflow_dispatch on any ref) OR automatically on every push to a PR carrying the
+# `Preview` label. The job auto-shuts-down after `idle_minutes` with no activity (Directus log
+# stops growing). Seeds `items` → `sub_items` (both with a `user_created`) so the scoped-cache
+# field can be tried on real collections. The tunnel is PUBLIC while the job runs — a random
+# admin password is printed to the run summary (repo members only). Ephemeral: the URL dies
+# with the job.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch/tag/SHA to boot (the code whose admin you want to see)
+        type: string
+        default: v11.10.1-hhh-dev
+      idle_minutes:
+        description: Auto-shutdown after this many minutes with no requests
+        type: number
+        default: 30
+  # Auto-boot on every push to a PR that carries the `Preview` label (and when the
+  # label is first added). pull_request_target resolves this file from the PR's BASE
+  # branch, so the workflow must also live on the branches PRs target.
+  pull_request_target:
+    types: [labeled, synchronize, edited]
+
+# One live preview per PR: a new push cancels the PR's still-running preview.
+concurrency:
+  group: preview-admin-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Post the preview link + throwaway credentials as a PR comment (pull_request_target runs).
+  pull-requests: write
+
+jobs:
+  preview:
+    name: preview
+    runs-on: ubuntu-latest
+    # Manual runs always; PR runs while the `Preview` label is present, or when the
+    # re-run checkbox in the PR description is ticked (edited event).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'Preview') ||
+      (github.event.action == 'synchronize' &&
+        contains(github.event.pull_request.labels.*.name, 'Preview')) ||
+      (github.event.action == 'edited' &&
+        contains(github.event.pull_request.body, '[x] 🔄 Re-run admin preview'))
+    # Hard backstop; the idle watcher normally ends the job long before this.
+    timeout-minutes: 180
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: directus
+          POSTGRES_PASSWORD: directus
+          POSTGRES_DB: directus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U directus"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_CLIENT: pg
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_DATABASE: directus
+      DB_USER: directus
+      DB_PASSWORD: directus
+      KEY: preview
+      SECRET: preview
+      CACHE_ENABLED: 'true'
+      CACHE_STORE: redis
+      REDIS: redis://localhost:6379
+      CACHE_AUTO_PURGE: 'true'
+      CACHE_AUTO_PURGE_MODE: scoped
+      # Opt-in telemetry (default off) — on here so the Settings → Cache page has
+      # live data + the enable/disable toggle to demo in the preview.
+      CACHE_STATS_ENABLED: 'true'
+      # Small cap so a big_items read trips value_too_large; normal reads still cache.
+      CACHE_VALUE_MAX_SIZE: 4kb
+      ADMIN_EMAIL: admin@example.com
+      # Lax (not the strict default) so the session cookie survives the cross-site
+      # /auto-login link → /admin redirect; strict withholds it on external arrival.
+      SESSION_COOKIE_SAME_SITE: lax
+      # info so each request logs a line — the idle watcher keys off log growth.
+      LOG_LEVEL: info
+      # Off — no realtime needed to browse a preview.
+      WEBSOCKETS_ENABLED: 'false'
+      PORT: '8055'
+    steps:
+      - name: Checkout the ref to preview
+        uses: actions/checkout@v7
+        with:
+          # Dispatch → the chosen ref; PR event → the PR head commit (the code to preview).
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.pull_request.head.sha }}
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Start tunnel
+        run: |
+          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /tmp/cf
+          chmod +x /tmp/cf
+          # Straight to Directus (8055); it 502s until Directus is up a step later. No
+          # hand-rolled proxy in front — a real HTTP server avoids the tunnel 530s a
+          # fragile proxy caused.
+          /tmp/cf tunnel --no-autoupdate --url http://localhost:8055 > /tmp/cf.log 2>&1 &
+
+          for _ in $(seq 1 30); do
+            URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
+
+          if [ -z "${URL:-}" ]; then
+            echo "cloudflared did not produce a URL"; cat /tmp/cf.log; exit 1
+          fi
+
+          echo "URL=$URL" >> "$GITHUB_ENV"
+
+      - name: Bootstrap + start Directus
+        run: |
+          # Not masked on purpose: it must show in the run summary so you can log in.
+          # The summary is repo-members-only and this is a throwaway instance.
+          PW=$(openssl rand -hex 12)
+          echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
+
+          ADMIN_PASSWORD="$PW" node directus/cli.js bootstrap
+
+          # Auto-login endpoint: relays a server-side session /auth/login to the browser,
+          # so opening <url>/auto-login lands in the Data Studio with no password typing.
+          mkdir -p extensions/directus-extension-auto-login
+          cat > extensions/directus-extension-auto-login/package.json <<'PKG'
+          {
+            "name": "directus-extension-auto-login",
+            "version": "1.0.0",
+            "type": "module",
+            "keywords": ["directus-extension", "directus-custom-endpoint"],
+            "directus:extension": {
+              "type": "endpoint",
+              "path": "index.js",
+              "source": "index.js",
+              "host": "^11.0.0"
+            }
+          }
+          PKG
+          cat > extensions/directus-extension-auto-login/index.js <<'IDX'
+          export default {
+            id: 'auto-login',
+            handler: (router, { env, logger }) => {
+              router.get('/', async (req, res) => {
+                try {
+                  const port = env.PORT ?? 8055;
+                  const upstream = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                      email: env.ADMIN_EMAIL ?? 'admin@example.com',
+                      password: env.ADMIN_PASSWORD,
+                      mode: 'session',
+                    }),
+                  });
+                  if (!upstream.ok) {
+                    logger.error(`auto-login: /auth/login returned ${upstream.status}`);
+                    res.status(502).send('auto-login failed');
+                    return;
+                  }
+                  const cookies = upstream.headers.getSetCookie?.() ?? [];
+                  for (const cookie of cookies) res.append('set-cookie', cookie);
+                  res.redirect('/admin/');
+                } catch (err) {
+                  logger.error(err, 'auto-login failed');
+                  res.status(500).send('auto-login failed');
+                }
+              });
+            },
+          };
+          IDX
+
+          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" node directus/cli.js start \
+            > /tmp/directus.log 2>&1 &
+
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+      - name: Seed items → sub_items
+        run: |
+          cat > /tmp/seed.mjs <<'JS'
+          const BASE = 'http://localhost:8055';
+
+          const login = await fetch(`${BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: 'admin@example.com', password: process.env.ADMIN_PASSWORD }),
+          });
+
+          const token = (await login.json()).data.access_token;
+          const H = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
+          const post = (p, b) => fetch(`${BASE}${p}`, { method: 'POST', headers: H, body: JSON.stringify(b) });
+
+          const idField = {
+            field: 'id',
+            type: 'integer',
+            meta: { hidden: true, interface: 'input', readonly: true },
+            schema: { is_primary_key: true, has_auto_increment: true },
+          };
+
+          const userCreated = (collection) => [
+            post(`/fields/${collection}`, {
+              field: 'user_created',
+              type: 'uuid',
+              meta: { special: ['user-created'], interface: 'select-dropdown-m2o' },
+              schema: {},
+            }),
+            post('/relations', {
+              collection,
+              field: 'user_created',
+              related_collection: 'directus_users',
+            }),
+          ];
+
+          await post('/collections', { collection: 'items', schema: {}, meta: {}, fields: [idField] });
+          for (const r of userCreated('items')) await r;
+
+          await post('/collections', { collection: 'sub_items', schema: {}, meta: {}, fields: [idField] });
+
+          await post('/fields/sub_items', {
+            field: 'item',
+            type: 'integer',
+            meta: { special: ['m2o'], interface: 'select-dropdown-m2o' },
+            schema: {},
+          });
+
+          await post('/relations', { collection: 'sub_items', field: 'item', related_collection: 'items' });
+          for (const r of userCreated('sub_items')) await r;
+
+          // Self-relation on sub_items: a `?fields=*,parent.*` read reaches sub_items again
+          // unbounded, so a scoped filter can't pin an owner slice → deriver null → coarse_scope.
+          await post('/fields/sub_items', {
+            field: 'parent',
+            type: 'integer',
+            meta: { special: ['m2o'], interface: 'select-dropdown-m2o' },
+            schema: {},
+          });
+
+          await post('/relations', { collection: 'sub_items', field: 'parent', related_collection: 'sub_items' });
+
+          // Rows so reads return data.
+          const itemIds = [];
+          for (let i = 0; i < 3; i++) {
+            const created = await (await post('/items/items', {})).json();
+            itemIds.push(created.data.id);
+          }
+          const subIds = [];
+          for (let i = 0; i < 5; i++) {
+            const sub = await (await post('/items/sub_items', { item: itemIds[i % itemIds.length] })).json();
+            subIds.push(sub.data.id);
+          }
+          // A child pointing at a parent, so the self-referential read has a row to expand.
+          await post('/items/sub_items', { item: itemIds[0], parent: subIds[0] });
+
+          // big_items → value_too_large (a GET over CACHE_VALUE_MAX_SIZE).
+          await post('/collections', { collection: 'big_items', schema: {}, meta: {}, fields: [idField] });
+          await post('/fields/big_items', { field: 'blob', type: 'text', meta: {}, schema: {} });
+          for (let i = 0; i < 5; i++) await post('/items/big_items', { blob: 'x'.repeat(2000) });
+
+          console.log('seeded items + sub_items + big_items + rows');
+          JS
+          node /tmp/seed.mjs
+
+      - name: Provoke + verify cache anomalies
+        run: |
+          # coarse_scope needs a scoped field on sub_items — set it in the DB (the API
+          # doesn't whitelist the fork column); node clears the schema cache below.
+          PG=$(docker ps --filter ancestor=postgres:16-alpine -q | head -1)
+          docker exec "$PG" psql -U directus -d directus -c \
+            "UPDATE directus_collections SET scoped_cache_fields='[\"user_created\"]' WHERE collection='sub_items';"
+
+          cat > /tmp/verify.mjs <<'JS'
+          import { writeFileSync } from 'node:fs';
+          const BASE = 'http://localhost:8055';
+
+          const login = await fetch(`${BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email: 'admin@example.com', password: process.env.ADMIN_PASSWORD }),
+          });
+
+          const token = (await login.json()).data.access_token;
+          const H = { authorization: `Bearer ${token}` };
+          const get = (p) => fetch(`${BASE}${p}`, { headers: H });
+
+          // Clear the system cache so the SQL-set scoped_cache_fields enters the schema.
+          await fetch(`${BASE}/utils/cache/clear?system`, { method: 'POST', headers: H });
+          await new Promise((r) => setTimeout(r, 2000));
+
+          // scoped_orphan — a collection-less cacheable read (no purge handle).
+          await get('/server/info');
+          // value_too_large — big_items response exceeds CACHE_VALUE_MAX_SIZE.
+          await get('/items/big_items');
+          // coarse_scope — a self-referential scoped read: parent.* reaches sub_items again
+          // unbounded, so the owner filter can't pin a slice → deriver null → coarse tag.
+          await get('/items/sub_items?fields=*,parent.*&filter[user_created][_eq]=$CURRENT_USER');
+
+          // The stats flush cron drains the stream every 10s — wait for it.
+          await new Promise((r) => setTimeout(r, 15000));
+
+          const anomalies = (await (await get('/utils/cache/anomalies')).json()).data ?? [];
+
+          // Self-check the auto-login endpoint server-side: it should 302 to /admin with a
+          // session cookie set (the browser then lands logged in).
+          const al = await fetch(`${BASE}/auto-login`, { redirect: 'manual' });
+          const alCookies = al.headers.getSetCookie?.() ?? [];
+          const sessionCookie = alCookies.find((c) => c.startsWith('directus_session_token='));
+
+          const autoLogin = {
+            status: al.status,
+            location: al.headers.get('location'),
+            setCookie: Boolean(sessionCookie),
+            // SameSite=Lax is required: Strict withholds the cookie on the cross-site
+            // /auto-login → /admin arrival, so the app can't refresh from it.
+            sameSite: sessionCookie ? (sessionCookie.match(/SameSite=(\w+)/i)?.[1] ?? null) : null,
+          };
+
+          writeFileSync('/tmp/anomalies.json', JSON.stringify({ anomalies, autoLogin }, null, 2));
+
+          const lines = anomalies.length
+            ? anomalies.map((a) => `- ${a.reason} x${a.count} — ${a.path}`).join('\n')
+            : '- (none surfaced yet — see the caveats)';
+
+          console.log(lines);
+          JS
+
+          {
+            echo "### Cache anomalies provoked"
+            echo ""
+            node /tmp/verify.mjs
+            echo ""
+            echo "_redis_error needs a real Redis fault, so it isn't auto-provoked; key_too_long no longer exists (the stats identity is a fixed-length hash)._"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the provoked anomalies (machine-readable)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-anomalies
+          path: /tmp/anomalies.json
+          retention-days: 1
+          if-no-files-found: warn
+
+      - name: Publish preview to the PR description
+        # PR events only (dispatch has no PR). Markers self-replace the block; ticking
+        # the checkbox fires `edited` → a fresh run.
+        if: github.event_name == 'pull_request_target'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+          IDLE_MINUTES: ${{ inputs.idle_minutes || 30 }}
+        run: |
+          # Backticks escaped (\`) so they stay literal markdown; $URL/$ADMIN_PASSWORD expand.
+          {
+            echo "<!-- admin-preview:start -->"
+            echo "### 🔎 Preview admin — \`${SHA}\`"
+            echo ""
+            echo "- **Open (auto-login):** ${URL}/auto-login"
+            echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
+            echo "- Ephemeral: auto-shuts-down after ${IDLE_MINUTES} min idle; the link dies with the run."
+            echo "- [ ] 🔄 Re-run admin preview"
+            echo "<!-- admin-preview:end -->"
+          } > /tmp/preview-block.md
+
+          cat > /tmp/splice.py <<'PY'
+          import re, sys
+          body = sys.stdin.read()
+          block = open('/tmp/preview-block.md').read().rstrip('\n')
+          pat = re.compile(r'<!-- admin-preview:start -->.*?<!-- admin-preview:end -->', re.S)
+          if pat.search(body):
+              out = pat.sub(lambda _: block, body)
+          else:
+              out = (body.rstrip() + '\n\n' + block) if body.strip() else block
+          sys.stdout.write(out)
+          PY
+
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.body // ""' > /tmp/pr-body.txt
+          python3 /tmp/splice.py < /tmp/pr-body.txt > /tmp/new-body.txt
+
+          # gh pr edit trips this repo's classic-Projects GraphQL bug → PATCH via REST.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$PR" -f body="$(cat /tmp/new-body.txt)" >/dev/null
+
+          # Drop stale standalone preview comments (superseded by the description block).
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | contains("🔎 Preview admin")) | .id' \
+          | while read -r id; do
+              [ -n "$id" ] && gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" >/dev/null || true
+            done
+
+      - name: Stream logs + publish URL + idle shutdown
+        env:
+          # No dispatch input on a PR event → fall back to the dispatch default.
+          IDLE_MINUTES: ${{ inputs.idle_minutes || 30 }}
+        run: |
+          # Live-stream everything to the run log for the job's lifetime (this step
+          # stays alive, so its stdout keeps flowing in the Actions UI).
+          tail -F /tmp/directus.log 2>/dev/null | sed 's/^/[directus] /' &
+
+          REDIS=$(docker ps --filter ancestor=redis:7-alpine -q | head -1)
+          if [ -n "$REDIS" ]; then
+            ( docker exec "$REDIS" redis-cli monitor 2>&1 | sed 's/^/[redis] /' ) &
+          fi
+
+          PG=$(docker ps --filter ancestor=postgres:16-alpine -q | head -1)
+          if [ -n "$PG" ]; then
+            docker exec "$PG" psql -U directus -d directus \
+              -c "ALTER SYSTEM SET log_statement='all';" \
+              -c "SELECT pg_reload_conf();" >/dev/null 2>&1 || true
+            ( docker logs -f "$PG" 2>&1 | sed 's/^/[pg] /' ) &
+          fi
+
+          {
+            echo "### Preview admin"
+            echo ""
+            echo "- **Ref:** ${{ github.event.pull_request.head.ref || inputs.ref }}"
+            echo "- **Open (auto-login):** ${URL}/auto-login"
+            echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- Seeded collections: \`items\` → \`sub_items\` (both with \`user_created\`)."
+            echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no activity."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "::notice title=Preview admin::${URL}/auto-login"
+
+          # Idle = Directus log stops growing (each request logs a line at info level).
+          IDLE=$(( IDLE_MINUTES * 60 ))
+          idle=0
+          prev=$(stat -c %s /tmp/directus.log 2>/dev/null || echo 0)
+
+          while true; do
+            sleep 30
+            cur=$(stat -c %s /tmp/directus.log 2>/dev/null || echo 0)
+            if [ "$cur" != "$prev" ]; then
+              prev=$cur; idle=0
+            else
+              idle=$(( idle + 30 ))
+              if [ "$idle" -ge "$IDLE" ]; then
+                echo "No activity for ${IDLE}s — shutting down."
+                exit 0
+              fi
+            fi
+          done
