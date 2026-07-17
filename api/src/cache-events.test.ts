@@ -920,6 +920,7 @@ describe('truncateCacheEvents', () => {
 		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:events');
 		expect(mockRedis.keys).toHaveBeenCalledWith('scalabus:stats:anom:*');
 		expect(mockRedis.keys).toHaveBeenCalledWith('scalabus:stats:tomb:*');
+
 		expect(mockRedis.del).toHaveBeenCalledWith(
 			'scalabus:stats:anom:scoped_orphan:h1',
 		);
