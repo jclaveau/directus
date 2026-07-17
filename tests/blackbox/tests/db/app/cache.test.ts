@@ -2777,15 +2777,17 @@ describe('App Caching Tests', () => {
 			await request(url).get('/server/info')
 				.set('Authorization', auth);
 
-			// value_too_large: seed a row dwarfing the 32kb cap, then read THAT row by id
-			// (the paginated list could page it out) for a deterministic oversized read.
-			const bigId = (
-				await request(url).post(`/items/${collectionFirst}`)
-					.send({ string_field: 'x'.repeat(128 * 1024) })
-					.set('Authorization', auth)
-			).body.data.id;
+			// value_too_large: string_field is a varchar(255), so bulk-insert rows near
+			// that limit and read them all (limit=-1) — the aggregate clears the 32kb cap.
+			const bulkRows = Array.from({ length: 200 }, () => {
+				return { string_field: 'x'.repeat(255) };
+			});
 
-			await request(url).get(`/items/${collectionFirst}/${bigId}`)
+			await request(url).post(`/items/${collectionFirst}`)
+				.send(bulkRows)
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionFirst}?limit=-1`)
 				.set('Authorization', auth);
 
 			// The capture path buffers to Redis and drains to Postgres on a schedule, so
@@ -2816,7 +2818,7 @@ describe('App Caching Tests', () => {
 
 			const oversized = byReason.get('value_too_large');
 			expect(oversized).toBeDefined();
-			expect(oversized.path).toBe(`/items/${collectionFirst}/${bigId}`);
+			expect(oversized.path).toBe(`/items/${collectionFirst}`);
 			expect(oversized.count).toBeGreaterThanOrEqual(1);
 		}, 60000);
 	});
