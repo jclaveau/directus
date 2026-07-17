@@ -105,10 +105,10 @@ describe('App Caching Tests', () => {
 			scopedEnv['CACHE_TAGS_HEADER'] = tagsHeader;
 			scopedEnv['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 
-			// Scoped purge (so /server/info orphans) + a tiny value cap (so a big read is
-			// oversized) provoke both cacheable-but-skipped reasons on one instance.
+			// Scoped purge (so /server/info orphans) + an 8kb value cap: /server/info
+			// stays under it (orphan), a multi-row read clears it.
 			const envRedisAnomaly = cloneDeep(envRedisScopedPurge);
-			envRedisAnomaly[vendor]['CACHE_VALUE_MAX_SIZE'] = '32kb';
+			envRedisAnomaly[vendor]['CACHE_VALUE_MAX_SIZE'] = '8kb';
 			envRedisAnomaly[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_anomaly`;
 
 			const newServerPortMem = await getPort();
@@ -2777,9 +2777,9 @@ describe('App Caching Tests', () => {
 			await request(url).get('/server/info')
 				.set('Authorization', auth);
 
-			// value_too_large: string_field is a varchar(255), so bulk-insert rows near
-			// that limit and read them all (limit=-1) — the aggregate clears the 32kb cap.
-			const bulkRows = Array.from({ length: 200 }, () => {
+			// value_too_large: string_field is a varchar(255) — bulk-insert 80 near-max
+			// rows and read the newest 80 (sort=-id, not pk-asc paged out); ~20kb > 8kb.
+			const bulkRows = Array.from({ length: 80 }, () => {
 				return { string_field: 'x'.repeat(255) };
 			});
 
@@ -2787,7 +2787,7 @@ describe('App Caching Tests', () => {
 				.send(bulkRows)
 				.set('Authorization', auth);
 
-			await request(url).get(`/items/${collectionFirst}?limit=-1`)
+			await request(url).get(`/items/${collectionFirst}?sort=-id&limit=80`)
 				.set('Authorization', auth);
 
 			// The capture path buffers to Redis and drains to Postgres on a schedule, so
