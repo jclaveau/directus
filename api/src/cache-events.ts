@@ -41,6 +41,7 @@ export interface CacheMissCapture {
 export interface CacheDescriptor {
 	cacheKey: string; // stats identity (getCacheKey().hash) — always fixed-length
 	redisKey: string; // the actual Redis key, for inspection + eviction
+	coarse: boolean; // scoped collection tagged bare (no value slice) — over-purges
 	method: string;
 	path: string;
 	collection: string | null;
@@ -51,13 +52,12 @@ export interface CacheDescriptor {
 	fillMs: number;
 }
 
-// A silent cache anomaly (not cached, degraded scope, or a Redis error) surfaced on
-// the dashboard rather than dropped.
+// A silent cache anomaly (not cached, or a Redis error) surfaced on the dashboard
+// rather than dropped. Coarse scope is a descriptor flag, not an anomaly.
 export type CacheAnomalyReason =
 	| 'scoped_orphan'
 	| 'value_too_large'
-	| 'redis_error'
-	| 'coarse_scope';
+	| 'redis_error';
 
 export interface CacheAnomalyCapture {
 	cacheKey: string;
@@ -82,6 +82,7 @@ export interface CacheAnomalyRecord {
 export interface CacheEntryRecord {
 	key: string; // stats identity (the hash)
 	redisKey: string; // the actual Redis key, for inspect + evict
+	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
 	method: string;
 	path: string;
 	collection: string | null;
@@ -323,6 +324,9 @@ export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<vo
 		kind: 'd',
 		cacheKey: entry.cacheKey,
 		redisKey: entry.redisKey,
+		coarse: entry.coarse
+			? '1'
+			: '0',
 		method: entry.method,
 		path: entry.path,
 		collection: entry.collection ?? '',
@@ -403,6 +407,7 @@ interface CacheEventRow {
 interface CacheDescriptorRow {
 	cache_key: string;
 	redis_key: string;
+	coarse: boolean;
 	method: string;
 	path: string;
 	collection: string | null;
@@ -532,6 +537,7 @@ async function drainCacheEvents(): Promise<number> {
 				descriptors.set(f['cacheKey']!, {
 					cache_key: f['cacheKey']!,
 					redis_key: f['redisKey'] ?? '',
+					coarse: f['coarse'] === '1',
 					method: f['method'] ?? '',
 					path: f['path'] ?? '',
 					collection: f['collection']
@@ -620,6 +626,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 	const selects: (string | Knex.Raw)[] = [
 		'd.cache_key',
 		'd.redis_key',
+		'd.coarse',
 		'd.method',
 		'd.path',
 		'd.collection',
@@ -657,6 +664,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		.groupBy(
 			'd.cache_key',
 			'd.redis_key',
+			'd.coarse',
 			'd.method',
 			'd.path',
 			'd.collection',
@@ -685,6 +693,7 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		return {
 			key: row['cache_key'] as string,
 			redisKey: row['redis_key'] as string,
+			coarse: Boolean(row['coarse']),
 			method: row['method'] as string,
 			path: row['path'] as string,
 			collection: (row['collection'] as string | null) || null,

@@ -21,6 +21,7 @@ const ENTRIES = [
 	{
 		key: 'app-key-000000000000',
 		redisKey: 'app-redis-key',
+		coarse: true,
 		method: 'GET',
 		path: '/items/articles',
 		collection: 'articles',
@@ -40,6 +41,7 @@ const ENTRIES = [
 	{
 		key: 'bob-key-000000000000',
 		redisKey: 'bob-redis-key',
+		coarse: false,
 		method: 'GET',
 		path: '/items/comments',
 		collection: 'comments',
@@ -59,6 +61,7 @@ const ENTRIES = [
 	{
 		key: 'sys-key-000000000000',
 		redisKey: 'sys-redis-key',
+		coarse: false,
 		method: 'GET',
 		path: '/server/info',
 		collection: null,
@@ -212,17 +215,6 @@ describe('CachePage', () => {
 	it('renders an in-tree anomaly row + coarse badge', async () => {
 		const anomalies = [
 			{
-				cacheKey: 'app-key-000000000000', // matches ENTRIES[0]
-				reason: 'coarse_scope',
-				path: '/items/articles',
-				method: 'GET',
-				query: '{"limit":5}',
-				url: '/items/articles?limit=5',
-				count: 1,
-				sample: null,
-				lastSeen: Date.now(),
-			},
-			{
 				cacheKey: 'orphan-000000000000',
 				reason: 'scoped_orphan',
 				path: '/items/articles',
@@ -244,10 +236,10 @@ describe('CachePage', () => {
 		await wrapper.find('.endpoint-header').trigger('click');
 		await wrapper.find('.query-header').trigger('click');
 
-		// coarse_scope annotates the cached entry with an inline reason badge.
-		const badge = wrapper.find('.entry-row .reason.inline');
+		// ENTRIES[0] is coarse → its row carries the inline coarse badge.
+		const badge = wrapper.find('.entry-row .reason.inline.coarse');
 		expect(badge.exists()).toBe(true);
-		expect(badge.text()).toContain('Coarse');
+		expect(badge.text()).toContain('coarse');
 
 		// scoped_orphan stands as its own anomaly row under the same node.
 		const anomalyRow = wrapper.find('.anomaly-row');
@@ -337,6 +329,7 @@ describe('CachePage', () => {
 			return {
 				key: `k-${String(index).padStart(3, '0')}`,
 				redisKey: `rk-${String(index).padStart(3, '0')}`,
+				coarse: false,
 				method: 'GET',
 				path: '/items/articles',
 				collection: 'articles',

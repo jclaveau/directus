@@ -19,7 +19,7 @@ export interface CacheEntry {
 	hitMs: number | null;
 	ttlMs: number | null;
 	recommendedTtlMs: number | null;
-	anomaly?: CacheAnomaly | null; // client-side: a cached entry that also tripped coarse_scope
+	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
 }
 
 // A method+query bucket within an endpoint: cached entries (one per user/version/ip
@@ -31,7 +31,8 @@ export interface QueryGroup {
 	url: string;
 	entries: CacheEntry[];
 	anomalies: CacheAnomaly[];
-	anomalyCount: number; // total occurrences (anomaly rows + coarse_scope annotations)
+	anomalyCount: number; // total not-cached/error anomaly occurrences
+	coarseCount: number; // cached entries here that over-purge (bare-tagged scoped reads)
 	totalHits: number;
 	totalSize: number;
 	ttlMs: number | null;
@@ -41,8 +42,7 @@ export interface QueryGroup {
 export type CacheAnomalyReason =
 	| 'scoped_orphan'
 	| 'value_too_large'
-	| 'redis_error'
-	| 'coarse_scope';
+	| 'redis_error';
 
 // Normalised to its descriptor: path/method/query come from the referenced
 // directus_cache_descriptors row, so it drops into the tree at the same node.
@@ -86,6 +86,7 @@ export interface EndpointGroup {
 	queries: QueryGroup[];
 	entryCount: number;
 	anomalyCount: number;
+	coarseCount: number;
 	totalHits: number;
 	totalSize: number;
 }
@@ -282,21 +283,18 @@ function maxOrNull(
 		: null;
 }
 
-// Total anomaly occurrences at a node: the not-cached rows plus coarse_scope
-// annotations folded onto cached entries.
-function countAnomalies(entries: CacheEntry[], anomalies: CacheAnomaly[]): number {
-	const rows = anomalies.reduce((sum, anomaly) => sum + anomaly.count, 0);
-
-	const annotated = entries.reduce(
-		(sum, entry) => sum + (entry.anomaly?.count ?? 0),
-		0,
-	);
-
-	return rows + annotated;
+// Total not-cached/error anomaly occurrences at a node (coarse is counted separately).
+function countAnomalies(anomalies: CacheAnomaly[]): number {
+	return anomalies.reduce((sum, anomaly) => sum + anomaly.count, 0);
 }
 
-// Group by method+query within an endpoint. Cached entries and anomalies sharing a
-// method+query share a bucket; a coarse_scope anomaly annotates its cached entry.
+// Cached entries here that over-purge — a scoped read that fell back to a bare tag.
+function countCoarse(entries: CacheEntry[]): number {
+	return entries.filter((entry) => entry.coarse).length;
+}
+
+// Group by method+query within an endpoint. Cached entries and anomalies (not-cached
+// requests) sharing a method+query share a bucket.
 function buildQueryGroups(
 	path: string,
 	entries: CacheEntry[],
@@ -330,15 +328,7 @@ function buildQueryGroups(
 	}
 
 	for (const anomaly of anomalies) {
-		const bucket = bucketFor(anomaly.method, anomaly.query, anomaly.url);
-		const cached = bucket.entries.find((entry) => entry.key === anomaly.cacheKey);
-
-		if (cached) {
-			cached.anomaly = anomaly;
-		}
-		else {
-			bucket.anomalies.push(anomaly);
-		}
+		bucketFor(anomaly.method, anomaly.query, anomaly.url).anomalies.push(anomaly);
 	}
 
 	const result: QueryGroup[] = [];
@@ -351,7 +341,8 @@ function buildQueryGroups(
 			url: bucket.url,
 			entries: bucket.entries,
 			anomalies: bucket.anomalies,
-			anomalyCount: countAnomalies(bucket.entries, bucket.anomalies),
+			anomalyCount: countAnomalies(bucket.anomalies),
+			coarseCount: countCoarse(bucket.entries),
 			totalHits: sumHits(bucket.entries),
 			totalSize: sumSize(bucket.entries),
 			ttlMs: maxOrNull(bucket.entries, (entry) => entry.ttlMs),
@@ -391,12 +382,14 @@ export function buildGroups(
 		const queries = buildQueryGroups(path, pathEntries, pathAnomalies);
 
 		const anomalyCount = queries.reduce((sum, group) => sum + group.anomalyCount, 0);
+		const coarseCount = queries.reduce((sum, group) => sum + group.coarseCount, 0);
 
 		result.push({
 			path,
 			queries,
 			entryCount: pathEntries.length,
 			anomalyCount,
+			coarseCount,
 			totalHits: sumHits(pathEntries),
 			totalSize: sumSize(pathEntries),
 		});

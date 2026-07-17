@@ -378,6 +378,7 @@ describe('captureCacheDescriptor', () => {
 		await captureCacheDescriptor({
 			cacheKey: 'k1',
 			redisKey: '/items/articles?limit=5:user-1',
+			coarse: true,
 			method: 'GET',
 			path: '/items/articles',
 			collection: 'articles',
@@ -393,6 +394,7 @@ describe('captureCacheDescriptor', () => {
 		expect(fieldAfter(call, 'kind')).toBe('d');
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
 		expect(fieldAfter(call, 'redisKey')).toBe('/items/articles?limit=5:user-1');
+		expect(fieldAfter(call, 'coarse')).toBe('1');
 		expect(fieldAfter(call, 'path')).toBe('/items/articles');
 		expect(fieldAfter(call, 'userId')).toBe('user-1');
 		expect(fieldAfter(call, 'bytes')).toBe('42');
@@ -404,6 +406,7 @@ describe('captureCacheDescriptor', () => {
 		await captureCacheDescriptor({
 			cacheKey: 'k2',
 			redisKey: '',
+			coarse: false,
 			method: 'GET',
 			path: '/server/info',
 			collection: null,
@@ -529,9 +532,9 @@ describe('flushCacheEvents', () => {
 				kind: 'm', cacheKey: 'k2', gapMs: '2000', ttlMs: '300000', ts: '2000',
 			}),
 			streamEntry('3-0', {
-				kind: 'd', cacheKey: 'k1', redisKey: '/items/a:u1', method: 'GET',
-				path: '/items/a', collection: 'a', userId: 'u1', query: '{}',
-				url: '/items/a', bytes: '42', fillMs: '240', ts: '3000',
+				kind: 'd', cacheKey: 'k1', redisKey: '/items/a:u1', coarse: '1',
+				method: 'GET', path: '/items/a', collection: 'a', userId: 'u1',
+				query: '{}', url: '/items/a', bytes: '42', fillMs: '240', ts: '3000',
 			}),
 		];
 
@@ -570,6 +573,7 @@ describe('flushCacheEvents', () => {
 			{
 				cache_key: 'k1',
 				redis_key: '/items/a:u1',
+				coarse: true,
 				method: 'GET',
 				path: '/items/a',
 				collection: 'a',
@@ -953,6 +957,8 @@ describe('capture is gated by the runtime flag', () => {
 
 		await captureCacheDescriptor({
 			cacheKey: 'k1',
+			redisKey: '',
+			coarse: false,
 			method: 'GET',
 			path: '/x',
 			collection: null,
@@ -973,6 +979,7 @@ describe('listCacheEntries', () => {
 			{
 				cache_key: 'k1',
 				redis_key: '/items/a?limit=5:u1',
+				coarse: true,
 				method: 'GET',
 				path: '/items/a',
 				collection: 'a',
@@ -992,6 +999,7 @@ describe('listCacheEntries', () => {
 			{
 				cache_key: 'k2',
 				redis_key: '',
+				coarse: false,
 				method: 'GET',
 				path: '/items/b',
 				collection: null,
@@ -1017,6 +1025,7 @@ describe('listCacheEntries', () => {
 			{
 				key: 'k1',
 				redisKey: '/items/a?limit=5:u1',
+				coarse: true,
 				method: 'GET',
 				path: '/items/a',
 				collection: 'a',
@@ -1036,6 +1045,7 @@ describe('listCacheEntries', () => {
 			{
 				key: 'k2',
 				redisKey: '',
+				coarse: false,
 				method: 'GET',
 				path: '/items/b',
 				collection: null,
