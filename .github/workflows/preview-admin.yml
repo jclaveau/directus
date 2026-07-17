@@ -23,7 +23,7 @@ on:
   # label is first added). pull_request_target resolves this file from the PR's BASE
   # branch, so the workflow must also live on the branches PRs target.
   pull_request_target:
-    types: [labeled, synchronize]
+    types: [labeled, synchronize, edited]
 
 # One live preview per PR: a new push cancels the PR's still-running preview.
 concurrency:
@@ -39,12 +39,15 @@ jobs:
   preview:
     name: preview
     runs-on: ubuntu-latest
-    # Manual runs always; PR runs only while the `Preview` label is present.
+    # Manual runs always; PR runs while the `Preview` label is present, or when the
+    # re-run checkbox in the PR description is ticked (edited event).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.action == 'labeled' && github.event.label.name == 'Preview') ||
       (github.event.action == 'synchronize' &&
-        contains(github.event.pull_request.labels.*.name, 'Preview'))
+        contains(github.event.pull_request.labels.*.name, 'Preview')) ||
+      (github.event.action == 'edited' &&
+        contains(github.event.pull_request.body, '[x] 🔄 Re-run admin preview'))
     # Hard backstop; the idle watcher normally ends the job long before this.
     timeout-minutes: 180
     services:
@@ -358,31 +361,53 @@ jobs:
           retention-days: 1
           if-no-files-found: warn
 
-      - name: Comment the preview link on the PR
-        # PR events only — a workflow_dispatch run has no PR to comment on (URL +
-        # password still land on the run summary). URL/ADMIN_PASSWORD come from
-        # $GITHUB_ENV of the earlier steps. Throwaway instance, dies with the run.
+      - name: Publish preview to the PR description
+        # PR events only (dispatch has no PR). Markers self-replace the block; ticking
+        # the checkbox fires `edited` → a fresh run.
         if: github.event_name == 'pull_request_target'
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
           IDLE_MINUTES: ${{ inputs.idle_minutes || 30 }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          # Backticks are escaped (\`) so they stay literal markdown, not shell
-          # command substitution; $URL/$ADMIN_PASSWORD/$SHA still expand.
+          # Backticks escaped (\`) so they stay literal markdown; $URL/$ADMIN_PASSWORD expand.
           {
+            echo "<!-- admin-preview:start -->"
             echo "### 🔎 Preview admin — \`${SHA}\`"
             echo ""
             echo "- **Open (auto-login):** ${URL}/auto-login"
             echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Ephemeral: auto-shuts-down after ${IDLE_MINUTES} min idle; the link dies with the run."
-            echo "- **Re-run:** [🔄 boot a fresh preview](${RUN_URL}) — then \"Re-run all jobs\"."
-          } > /tmp/preview-comment.md
+            echo "- [ ] 🔄 Re-run admin preview"
+            echo "<!-- admin-preview:end -->"
+          } > /tmp/preview-block.md
 
-          gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body-file /tmp/preview-comment.md
+          cat > /tmp/splice.py <<'PY'
+          import re, sys
+          body = sys.stdin.read()
+          block = open('/tmp/preview-block.md').read().rstrip('\n')
+          pat = re.compile(r'<!-- admin-preview:start -->.*?<!-- admin-preview:end -->', re.S)
+          if pat.search(body):
+              out = pat.sub(lambda _: block, body)
+          else:
+              out = (body.rstrip() + '\n\n' + block) if body.strip() else block
+          sys.stdout.write(out)
+          PY
+
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.body // ""' > /tmp/pr-body.txt
+          python3 /tmp/splice.py < /tmp/pr-body.txt > /tmp/new-body.txt
+
+          # gh pr edit trips this repo's classic-Projects GraphQL bug → PATCH via REST.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$PR" -f body="$(cat /tmp/new-body.txt)" >/dev/null
+
+          # Drop stale standalone preview comments (superseded by the description block).
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | contains("🔎 Preview admin")) | .id' \
+          | while read -r id; do
+              [ -n "$id" ] && gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" >/dev/null || true
+            done
 
       - name: Stream logs + publish URL + idle shutdown
         env:
