@@ -3,8 +3,8 @@ name: Preview Admin
 # Boots a ref's Directus (postgres + redis, scoped cache on) on a GitHub runner and exposes
 # its admin UI through an OUTBOUND cloudflared quick tunnel (runners take no ingress). Runs
 # manually (workflow_dispatch on any ref) OR automatically on every push to a PR carrying the
-# `Preview` label. The job auto-shuts-down after `idle_minutes` with no activity (Directus log
-# stops growing). Seeds `items` → `sub_items` (both with a `user_created`) so the scoped-cache
+# `Preview` label. The job stays up until its hard timeout (no idle shutdown). Seeds `items`
+# → `sub_items` (both with a `user_created`) so the scoped-cache
 # field can be tried on real collections. The tunnel is PUBLIC while the job runs — a random
 # admin password is printed to the run summary (repo members only). Ephemeral: the URL dies
 # with the job.
@@ -15,10 +15,6 @@ on:
         description: Branch/tag/SHA to boot (the code whose admin you want to see)
         type: string
         default: v11.10.1-hhh-dev
-      idle_minutes:
-        description: Auto-shutdown after this many minutes with no requests
-        type: number
-        default: 30
   # Auto-boot on every push to a PR that carries the `Preview` label (and when the
   # label is first added). pull_request_target resolves this file from the PR's BASE
   # branch, so the workflow must also live on the branches PRs target.
@@ -369,7 +365,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           SHA: ${{ github.event.pull_request.head.sha }}
-          IDLE_MINUTES: ${{ inputs.idle_minutes || 30 }}
         run: |
           # Backticks escaped (\`) so they stay literal markdown; $URL/$ADMIN_PASSWORD expand.
           {
@@ -379,7 +374,7 @@ jobs:
             echo "- **Open (auto-login):** ${URL}/auto-login"
             echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
-            echo "- Ephemeral: auto-shuts-down after ${IDLE_MINUTES} min idle; the link dies with the run."
+            echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
             echo "- [ ] 🔄 Re-run admin preview"
             echo "<!-- admin-preview:end -->"
           } > /tmp/preview-block.md
@@ -409,10 +404,7 @@ jobs:
               [ -n "$id" ] && gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" >/dev/null || true
             done
 
-      - name: Stream logs + publish URL + idle shutdown
-        env:
-          # No dispatch input on a PR event → fall back to the dispatch default.
-          IDLE_MINUTES: ${{ inputs.idle_minutes || 30 }}
+      - name: Stream logs + publish URL
         run: |
           # Live-stream everything to the run log for the job's lifetime (this step
           # stays alive, so its stdout keeps flowing in the Actions UI).
@@ -438,26 +430,11 @@ jobs:
             echo "- **Open (auto-login):** ${URL}/auto-login"
             echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
             echo "- Seeded collections: \`items\` → \`sub_items\` (both with \`user_created\`)."
-            echo "- Auto-shuts-down after ${IDLE_MINUTES} min with no activity."
+            echo "- Stays up until the run's hard timeout; the link dies with the run."
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "::notice title=Preview admin::${URL}/auto-login"
 
-          # Idle = Directus log stops growing (each request logs a line at info level).
-          IDLE=$(( IDLE_MINUTES * 60 ))
-          idle=0
-          prev=$(stat -c %s /tmp/directus.log 2>/dev/null || echo 0)
-
-          while true; do
-            sleep 30
-            cur=$(stat -c %s /tmp/directus.log 2>/dev/null || echo 0)
-            if [ "$cur" != "$prev" ]; then
-              prev=$cur; idle=0
-            else
-              idle=$(( idle + 30 ))
-              if [ "$idle" -ge "$IDLE" ]; then
-                echo "No activity for ${IDLE}s — shutting down."
-                exit 0
-              fi
-            fi
-          done
+          # No idle shutdown — stay up until the job's hard timeout, so a paused tab still
+          # works when you come back (sleep, not wait, survives a dropped log stream).
+          sleep infinity
