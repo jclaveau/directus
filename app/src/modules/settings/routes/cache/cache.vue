@@ -275,11 +275,17 @@ function anomalyLabel(reason: CacheAnomalyReason): string {
 		scoped_orphan: t('cache_anomaly_scoped_orphan', 'Not cached · scoped orphan'),
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
-		coarse_scope: t('cache_anomaly_coarse_scope', 'Coarse purge scope'),
 	};
 
 	return labels[reason] ?? reason;
 }
+
+const coarseHint = computed(() => {
+	return t(
+		'cache_coarse_hint',
+		'Not value-pinned — over-purges; add a filter on the scoped field.',
+	);
+});
 
 async function loadStatsState() {
 	try {
@@ -602,6 +608,9 @@ onMounted(() => {
 							<span v-if="group.anomalyCount" class="stat anomaly-count">
 								{{ group.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
 							</span>
+							<span v-if="group.coarseCount" class="stat coarse-count">
+								{{ group.coarseCount }} {{ t('coarse_short', 'coarse') }}
+							</span>
 							<v-button
 								v-tooltip.bottom="t('evict_endpoint', 'Evict this endpoint')"
 								x-small
@@ -634,6 +643,9 @@ onMounted(() => {
 									<span class="stat">{{ formatSize(q.totalSize) }}</span>
 									<span v-if="q.anomalyCount" class="stat anomaly-count">
 										{{ q.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
+									</span>
+									<span v-if="q.coarseCount" class="stat coarse-count">
+										{{ q.coarseCount }} {{ t('coarse_short', 'coarse') }}
 									</span>
 									<span
 										v-if="q.recommendedTtlMs !== null"
@@ -699,10 +711,10 @@ onMounted(() => {
 												<td class="key" :title="entry.redisKey">
 													{{ shortKey(entry.redisKey) }}
 													<span
-														v-if="entry.anomaly"
-														class="reason inline"
-														:class="entry.anomaly.reason"
-													>{{ anomalyLabel(entry.anomaly.reason) }}</span>
+														v-if="entry.coarse"
+														v-tooltip.bottom="coarseHint"
+														class="reason inline coarse"
+													>{{ t('cache_coarse', 'coarse') }}</span>
 												</td>
 												<td class="num">
 													<v-icon
@@ -874,6 +886,10 @@ onMounted(() => {
 	margin-inline-start: 8px;
 }
 
+.reason.inline.coarse {
+	color: var(--theme--primary);
+}
+
 .anomaly-rows {
 	display: flex;
 	flex-direction: column;
@@ -914,6 +930,13 @@ onMounted(() => {
 .endpoint-header .stat.anomaly-count,
 .query-header .stat.anomaly-count {
 	color: var(--theme--warning);
+}
+
+/* Coarse is a tuning hint, not a problem — primary (not amber) so it reads apart
+   from anomalies. */
+.endpoint-header .stat.coarse-count,
+.query-header .stat.coarse-count {
+	color: var(--theme--primary);
 }
 
 .section {

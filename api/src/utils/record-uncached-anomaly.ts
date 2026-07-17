@@ -25,6 +25,7 @@ export async function recordUncachedAnomaly(
 	await captureCacheDescriptor({
 		cacheKey: hash,
 		redisKey: key,
+		coarse: false,
 		method: req.method,
 		path: req.originalUrl.split('?')[0]!,
 		collection: req.collection ?? null,

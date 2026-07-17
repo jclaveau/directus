@@ -4,7 +4,6 @@ import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import {
 	cacheStatsActive,
-	captureCacheAnomaly,
 	captureCacheDescriptor,
 	writeCacheTombstone,
 } from '../cache-events.js';
@@ -164,20 +163,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				}
 			}
 
-			// Scoped mode wanted per-owner pins but the deriver returned null (an
-			// unpinnable relational filter) — the entry falls back to a coarse tag.
-			if (
-				cacheStatsActive() &&
-				scopedCachePurgeEnabled() &&
-				controllerTags === null &&
-				req.collection
-			) {
-				void captureCacheAnomaly({
-					cacheKey: hash,
-					reason: 'coarse_scope',
-				}).catch(() => {});
-			}
-
 			// Gated at the call site (not just inside the buffer write): the default
 			// config has stats off, and building these args re-serializes the payload
 			// (size) and the query — a cost the hot fill path shouldn't pay when off.
@@ -188,12 +173,26 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					? stringByteSize(JSON.stringify(res.locals['payload']))
 					: 0;
 
+				// Coarse-scope: a scoped collection whose read tagged bare (no value slice)
+				// caches fine but over-purges — a tuning signal, recorded on the descriptor.
+				const scopedFields = req.collection
+					? req.schema?.collections?.[req.collection]?.scopedCacheFields ?? []
+					: [];
+
+				const coarse =
+					scopedCachePurgeEnabled() &&
+					scopedFields.length > 0 &&
+					scopedCacheTags.some(
+						(tag) => tag.collection === req.collection && tag.field === undefined,
+					);
+
 				// The per-key descriptor — captured here (fill) where query/collection/
 				// user are fully populated, unlike the early cache middleware. Buffered
 				// like the events; the flusher upserts the descriptors dimension.
 				void captureCacheDescriptor({
 					cacheKey: hash,
 					redisKey: key,
+					coarse,
 					method: req.method,
 					path: req.originalUrl.split('?')[0]!,
 					collection: req.collection ?? null,

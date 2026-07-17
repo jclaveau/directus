@@ -37,6 +37,7 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		hitMs: null,
 		ttlMs: null,
 		recommendedTtlMs: null,
+		coarse: false,
 		...over,
 	};
 }
@@ -258,23 +259,28 @@ describe('buildGroups with anomalies', () => {
 		expect(groups[0]!.anomalyCount).toBe(2);
 	});
 
-	it('annotates a cached entry when a coarse_scope anomaly shares its key', () => {
+	it('counts coarse entries separately from anomalies', () => {
 		const groups = buildGroups(
-			[entry({ key: 'shared', path: '/items/a', query: '{}' })],
+			[
+				entry({ key: 'coarse1', path: '/items/a', query: '{}', coarse: true }),
+				entry({ key: 'fine1', path: '/items/a', query: '{}', coarse: false }),
+			],
 			[anomaly({
-				cacheKey: 'shared',
+				cacheKey: 'o1',
 				path: '/items/a',
 				query: '{}',
-				reason: 'coarse_scope',
+				reason: 'scoped_orphan',
 				count: 2,
 			})],
 		);
 
-		const query = groups[0]!.queries[0]!;
-		// folded onto the entry, not a standalone row
-		expect(query.anomalies).toHaveLength(0);
-		expect(query.entries[0]!.anomaly?.reason).toBe('coarse_scope');
-		expect(query.anomalyCount).toBe(2); // still counted, via the annotation
+		const group = groups[0]!;
+		const query = group.queries[0]!;
+		// coarse is a per-entry property, not an anomaly row/count
+		expect(query.coarseCount).toBe(1);
+		expect(group.coarseCount).toBe(1);
+		expect(query.anomalyCount).toBe(2); // the scoped_orphan row only
+		expect(query.anomalies).toHaveLength(1);
 	});
 });
 

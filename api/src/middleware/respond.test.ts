@@ -307,51 +307,65 @@ describe('respond middleware', () => {
 		);
 	});
 
-	test('an unpinnable null-tags fill flags coarse_scope', async () => {
+	const scopedSchema = {
+		collections: { articles: { scopedCacheFields: ['owner_field'] } },
+	} as unknown as Request['schema'];
+
+	test(oneLine`
+		a scoped collection tagged bare is marked coarse on the descriptor
+	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// A deriver that couldn't resolve pins sets scopedCacheTags to null; the entry
-		// still caches under the coarse collection tag, keyed by the same cache key.
-		const res = makeRes({ data: [{ id: 1 }] }, { scopedCacheTags: null });
+		// articles has scoped_cache_fields but the read tagged bare (no value slice) →
+		// over-purges → coarse recorded on the descriptor, not raised as an anomaly.
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{ scopedCacheTags: [{ collection: 'articles' }] },
+		);
 
-		await respond(makeReq(), res, next);
+		await respond(makeReq({ schema: scopedSchema }), res, next);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
 
-		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
-			cacheKey: 'cache-hash',
-			reason: 'coarse_scope',
-		});
+		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ coarse: true }),
+		);
 	});
 
-	test('a normally-pinned scoped fill does NOT flag coarse_scope', async () => {
+	test('a value-pinned scoped fill is not coarse', async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 
-		// Witness for the `=== null` guard: real per-owner pins (a non-null array) are a
-		// precise scope, not a coarse fallback — the anomaly must stay silent.
+		// A value slice (field set) is a precise pin — not a coarse fallback.
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{ scopedCacheTags: [{ collection: 'articles', owner_field: 'u1' }] },
+			{
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'owner_field', value: 'u1' },
+				],
+			},
+		);
+
+		await respond(makeReq({ schema: scopedSchema }), res, next);
+
+		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ coarse: false }),
+		);
+	});
+
+	test('a bare tag on a NON-scoped collection is not coarse', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// No scoped_cache_fields → the bare tag is the only correct tag, not a fallback.
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{ scopedCacheTags: [{ collection: 'articles' }] },
 		);
 
 		await respond(makeReq(), res, next);
 
-		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
-		expect(mocks.captureCacheAnomaly).not.toHaveBeenCalled();
-	});
-
-	test(oneLine`
-		an empty tag array does NOT flag coarse_scope (only null does)
-	`, async () => {
-		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
-
-		// [] means "no scoped fields → the bare collection tag is precise", the common
-		// case; only a null deriver (scoped fields present but unpinnable) is coarse.
-		const res = makeRes({ data: [{ id: 1 }] }, { scopedCacheTags: [] });
-
-		await respond(makeReq(), res, next);
-
-		expect(mocks.captureCacheAnomaly).not.toHaveBeenCalled();
+		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ coarse: false }),
+		);
 	});
 
 	test(oneLine`
