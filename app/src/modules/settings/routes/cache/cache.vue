@@ -272,7 +272,7 @@ async function loadAnomalies() {
 
 function anomalyLabel(reason: CacheAnomalyReason): string {
 	const labels: Record<CacheAnomalyReason, string> = {
-		scoped_orphan: t('cache_anomaly_scoped_orphan', 'Not cached · scoped orphan'),
+		missing_scope: t('cache_anomaly_missing_scope', 'Not cached · missing scope'),
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
 	};

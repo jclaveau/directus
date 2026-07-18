@@ -247,7 +247,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			).catch(() => {});
 		}
 		else if (orphansInScopedMode) {
-			void recordUncachedAnomaly(req, 'scoped_orphan').catch(() => {});
+			void recordUncachedAnomaly(req, 'missing_scope').catch(() => {});
 		}
 	}
 

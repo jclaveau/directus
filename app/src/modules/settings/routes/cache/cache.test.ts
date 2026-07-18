@@ -185,7 +185,7 @@ describe('CachePage', () => {
 		const anomalies = [
 			{
 				cacheKey: 'anom-key-000000000000',
-				reason: 'scoped_orphan',
+				reason: 'missing_scope',
 				path: '/graphql',
 				method: 'POST',
 				query: '{"query":"{ me }"}',
@@ -205,7 +205,7 @@ describe('CachePage', () => {
 
 		// Summary strip above the tree (reason label + occurrence count).
 		const summary = wrapper.find('.anomaly-summary').text();
-		expect(summary).toContain('Not cached'); // anomalyLabel for scoped_orphan
+		expect(summary).toContain('Not cached'); // anomalyLabel for missing_scope
 		expect(summary).toContain('×3');
 
 		// The anomaly forms its own endpoint node in the tree (no cached entry there).
@@ -216,7 +216,7 @@ describe('CachePage', () => {
 		const anomalies = [
 			{
 				cacheKey: 'orphan-000000000000',
-				reason: 'scoped_orphan',
+				reason: 'missing_scope',
 				path: '/items/articles',
 				method: 'GET',
 				query: '{"limit":5}',
@@ -241,10 +241,10 @@ describe('CachePage', () => {
 		expect(badge.exists()).toBe(true);
 		expect(badge.text()).toContain('coarse');
 
-		// scoped_orphan stands as its own anomaly row under the same node.
+		// missing_scope stands as its own anomaly row under the same node.
 		const anomalyRow = wrapper.find('.anomaly-row');
 		expect(anomalyRow.exists()).toBe(true);
-		expect(anomalyRow.text()).toContain('Not cached'); // scoped_orphan label
+		expect(anomalyRow.text()).toContain('Not cached'); // missing_scope label
 		expect(anomalyRow.text()).toContain('×2');
 		expect(anomalyRow.text()).toContain('no collection'); // the sample
 	});

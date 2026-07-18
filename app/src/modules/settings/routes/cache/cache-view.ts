@@ -40,7 +40,7 @@ export interface QueryGroup {
 }
 
 export type CacheAnomalyReason =
-	| 'scoped_orphan'
+	| 'missing_scope'
 	| 'value_too_large'
 	| 'redis_error';
 

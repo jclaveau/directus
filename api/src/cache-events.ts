@@ -55,7 +55,7 @@ export interface CacheDescriptor {
 // A silent cache anomaly (not cached, or a Redis error) surfaced on the dashboard
 // rather than dropped. Coarse scope is a descriptor flag, not an anomaly.
 export type CacheAnomalyReason =
-	| 'scoped_orphan'
+	| 'missing_scope'
 	| 'value_too_large'
 	| 'redis_error';
 

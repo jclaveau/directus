@@ -318,7 +318,7 @@ describe('respond middleware', () => {
 		);
 	});
 
-	test('a scoped-mode collection-less response flags scoped_orphan', async () => {
+	test('a scoped-mode collection-less response flags missing_scope', async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 		const res = makeRes({ data: {} });
 		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
@@ -329,7 +329,7 @@ describe('respond middleware', () => {
 
 		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
-			'scoped_orphan',
+			'missing_scope',
 		);
 	});
 

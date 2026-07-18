@@ -303,7 +303,7 @@ jobs:
           await fetch(`${BASE}/utils/cache/clear?system`, { method: 'POST', headers: H });
           await new Promise((r) => setTimeout(r, 2000));
 
-          // scoped_orphan — a collection-less cacheable read (no purge handle).
+          // missing_scope — a collection-less cacheable read (no purge handle).
           await get('/server/info');
           // value_too_large — big_items response exceeds CACHE_VALUE_MAX_SIZE.
           await get('/items/big_items');
