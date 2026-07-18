@@ -510,6 +510,56 @@ describe('XADD batching', () => {
 		expect(kinds).toEqual(['h', 'm']);
 	});
 
+	it('one XADD pipeline in flight at a time under a slow Redis', async () => {
+		await armFlag(null);
+
+		// A slow first exec, held open so its flush stays in flight.
+		let releaseExec: () => void = () => {};
+		let execCalls = 0;
+
+		const slowPipe: any = {
+			call: () => slowPipe,
+			exec: () => {
+				execCalls += 1;
+
+				return execCalls === 1
+					? new Promise<void>((resolve) => {
+						releaseExec = () => resolve();
+					})
+					: Promise.resolve([]);
+			},
+		};
+
+		mockRedis.pipeline.mockReturnValue(slowPipe);
+
+		await captureCacheHit({
+			cacheKey: 'a',
+			ageMs: 1,
+			ttlMs: null,
+			durationMs: null,
+		});
+
+		const first = flushXaddBuffer(); // starts exec #1, awaits the gate (in flight)
+
+		await captureCacheHit({
+			cacheKey: 'b',
+			ageMs: 1,
+			ttlMs: null,
+			durationMs: null,
+		});
+
+		await flushXaddBuffer(); // in-flight guard → NO second concurrent exec
+
+		expect(execCalls).toBe(1);
+
+		releaseExec(); // resolve exec #1 → finally chains a follow-up for the buffered 'b'
+		await first;
+		await new Promise((resolve) => setImmediate(resolve));
+		await new Promise((resolve) => setImmediate(resolve));
+
+		expect(execCalls).toBe(2);
+	});
+
 	it('force-flushes when the buffer hits its cap', async () => {
 		await armFlag(null);
 

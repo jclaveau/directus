@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
 		captureCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		recordUncachedAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
+		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
 });
 
@@ -54,6 +55,10 @@ vi.mock('../cache-events.js', () => {
 		captureCacheAnomaly: mocks.captureCacheAnomaly,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 	};
+});
+
+vi.mock('../utils/get-string-byte-size.js', () => {
+	return { stringByteSize: mocks.stringByteSize };
 });
 
 vi.mock('../utils/record-uncached-anomaly.js', () => {
@@ -199,6 +204,27 @@ describe('respond middleware', () => {
 		expect(mocks.writeCacheTombstone).toHaveBeenCalledWith(
 			'cache-key',
 			expect.any(Number),
+		);
+	});
+
+	test(oneLine`
+		reuses the size-gate serialization for the descriptor bytes (one stringify)
+	`, async () => {
+		env['CACHE_VALUE_MAX_SIZE'] = '1mb';
+		mocks.stringByteSize.mockClear();
+
+		const payload = { data: [{ id: 1, blob: 'x'.repeat(200) }] };
+		const res = makeRes(payload, { scopedCacheTags: [{ collection: 'articles' }] });
+
+		await respond(makeReq(), res, next);
+
+		// The size cap + the descriptor bytes share ONE payload serialization, not two.
+		expect(mocks.stringByteSize).toHaveBeenCalledTimes(1);
+
+		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({
+				bytes: Buffer.byteLength(JSON.stringify(payload), 'utf8'),
+			}),
 		);
 	});
 
