@@ -192,6 +192,7 @@ const XADD_BUFFER_CAP = 1000;
 
 let xaddBuffer: string[][] = [];
 let xaddFlushScheduled = false;
+let xaddFlushInProgress = false;
 
 // Buffer one entry's fields; flush now if full, else at the tick boundary.
 function xadd(fields: Record<string, string>): void {
@@ -215,12 +216,19 @@ function xadd(fields: Record<string, string>): void {
 // Flush the buffered XADDs in one pipelined round-trip. Errors are swallowed + the
 // buffer cleared either way, so a failing Redis can't wedge it (telemetry is lossy).
 export async function flushXaddBuffer(): Promise<void> {
+	// One pipeline in flight at a time: under a slow (not down) Redis, defer instead
+	// of stacking concurrent exec()s + their batches on the heap. Backpressure.
+	if (xaddFlushInProgress) {
+		return;
+	}
+
 	xaddFlushScheduled = false;
 
 	if (xaddBuffer.length === 0) {
 		return;
 	}
 
+	xaddFlushInProgress = true;
 	const batch = xaddBuffer;
 	xaddBuffer = [];
 
@@ -244,6 +252,14 @@ export async function flushXaddBuffer(): Promise<void> {
 	}
 	catch (err: any) {
 		useLogger().warn(err, `[cache-stats] XADD flush failed. ${err.message}`);
+	}
+	finally {
+		xaddFlushInProgress = false;
+
+		// Anything buffered while the pipeline was in flight → chain a follow-up flush.
+		if (xaddBuffer.length > 0) {
+			setImmediate(() => void flushXaddBuffer());
+		}
 	}
 }
 

@@ -169,9 +169,15 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			if (cacheStatsActive()) {
 				const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
 
-				const size = res.locals['payload']
-					? stringByteSize(JSON.stringify(res.locals['payload']))
-					: 0;
+				// Reuse the size the CACHE_VALUE_MAX_SIZE gate already computed (same
+				// payload); only serialize again when that gate is off.
+				let size = valueSize;
+
+				if (env['CACHE_VALUE_MAX_SIZE'] === false) {
+					size = res.locals['payload']
+						? stringByteSize(JSON.stringify(res.locals['payload']))
+						: 0;
+				}
 
 				// Coarse-scope: a scoped collection whose read tagged bare (no value slice)
 				// caches fine but over-purges — a tuning signal, recorded on the descriptor.
