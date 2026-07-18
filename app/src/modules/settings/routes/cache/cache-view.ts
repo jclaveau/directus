@@ -283,7 +283,7 @@ function maxOrNull(
 		: null;
 }
 
-// Total not-cached/error anomaly occurrences at a node (coarse is counted separately).
+// Total not-cached/error anomaly occurrences at a node (coarse counts on its own).
 function countAnomalies(anomalies: CacheAnomaly[]): number {
 	return anomalies.reduce((sum, anomaly) => sum + anomaly.count, 0);
 }
@@ -408,7 +408,10 @@ export function summariseAnomalies(anomalies: CacheAnomaly[]): AnomalySummaryIte
 	const byReason = new Map<CacheAnomalyReason, number>();
 
 	for (const anomaly of anomalies) {
-		byReason.set(anomaly.reason, (byReason.get(anomaly.reason) ?? 0) + anomaly.count);
+		byReason.set(
+			anomaly.reason,
+			(byReason.get(anomaly.reason) ?? 0) + anomaly.count,
+		);
 	}
 
 	return [...byReason.entries()]
