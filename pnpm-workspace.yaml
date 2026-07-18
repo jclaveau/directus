@@ -195,7 +195,7 @@ catalog:
   inquirer: 12.11.1
   ioredis: 5.11.1
   ip-matching: 2.1.2
-  isolated-vm: 5.0.4
+  isolated-vm: 6.1.2
   joi: 17.13.4
   js-yaml: 4.2.0
   js2xmlparser: 5.0.0
