@@ -254,7 +254,7 @@ catalog:
   proxy-addr: 2.0.7
   qrcode: 1.5.4
   qs: 6.15.2
-  rate-limiter-flexible: 7.4.0
+  rate-limiter-flexible: 11.2.0
   rimraf: 6.1.3
   rolldown: 1.0.0-beta.9-commit.d91dfb5
   rollup: 4.62.2
