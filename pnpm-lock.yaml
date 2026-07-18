@@ -847,8 +847,8 @@ catalogs:
       specifier: 1.5.4
       version: 1.5.4
     uuid:
-      specifier: 11.1.1
-      version: 11.1.1
+      specifier: 14.0.1
+      version: 14.0.1
     vite:
       specifier: 6.4.3
       version: 6.4.3
@@ -1297,7 +1297,7 @@ importers:
         version: 4.22.4
       uuid:
         specifier: 'catalog:'
-        version: 11.1.1
+        version: 14.0.1
       wellknown:
         specifier: 'catalog:'
         version: 0.5.0
@@ -13381,12 +13381,12 @@ packages:
   uuid-parse@1.1.0:
     resolution: {integrity: sha512-OdmXxA8rDsQ7YpNVbKSJkNzTw2I+S5WsbMDnCtIWSQaosNAcWtFuI/YK1TjzUI6nbkgiqEyh8gWngfcv8Asd9A==}
 
-  uuid@11.1.1:
-    resolution: {integrity: sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==}
-    hasBin: true
-
   uuid@14.0.0:
     resolution: {integrity: sha512-Qo+uWgilfSmAhXCMav1uYFynlQO7fMFiMVZsQqZRMIXp0O7rR7qjkj+cPvBHLgBqi960QCoo/PH2/6ZtVqKvrg==}
+    hasBin: true
+
+  uuid@14.0.1:
+    resolution: {integrity: sha512-6ZxzVpzDXDa3bJWaHilVayA+BH/1zmxCJoVgvmqJnid/gPoKHxUrS/aC/T6LGQtNHT+XHG9fXPJB4d+IrU30Ew==}
     hasBin: true
 
   uuid@8.3.2:
@@ -25647,9 +25647,9 @@ snapshots:
 
   uuid-parse@1.1.0: {}
 
-  uuid@11.1.1: {}
-
   uuid@14.0.0: {}
+
+  uuid@14.0.1: {}
 
   uuid@8.3.2: {}
 
