@@ -2758,7 +2758,7 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		Provokes and lists both cacheable-but-skipped anomalies — a scoped orphan
+		Provokes and lists both cacheable-but-skipped anomalies — a missing scope
 		(/server/info) and an oversized value — joined to their descriptor
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
@@ -2772,7 +2772,7 @@ describe('App Caching Tests', () => {
 			await request(url).post('/utils/cache/stats/truncate')
 				.set('Authorization', auth);
 
-			// scoped_orphan: /server/info has no collection + no scope tags under scoped
+			// missing_scope: /server/info has no collection + no scope tags under scoped
 			// purge, so caching it would orphan a stale entry — it's skipped and flagged.
 			await request(url).get('/server/info')
 				.set('Authorization', auth);
@@ -2803,14 +2803,14 @@ describe('App Caching Tests', () => {
 				anomalies = listed.body.data;
 				byReason = new Map(anomalies.map((row: any) => [row.reason, row]));
 
-				if (byReason.has('scoped_orphan') && byReason.has('value_too_large')) {
+				if (byReason.has('missing_scope') && byReason.has('value_too_large')) {
 					break;
 				}
 
 				await new Promise((resolve) => setTimeout(resolve, 1000));
 			}
 
-			const orphan = byReason.get('scoped_orphan');
+			const orphan = byReason.get('missing_scope');
 			expect(orphan).toBeDefined();
 			// The anomaly resolves through its descriptor to the causing request.
 			expect(orphan.path).toBe('/server/info');

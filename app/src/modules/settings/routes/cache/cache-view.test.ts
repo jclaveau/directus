@@ -45,7 +45,7 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 function anomaly(over: Partial<CacheAnomaly>): CacheAnomaly {
 	return {
 		cacheKey: 'ak',
-		reason: 'scoped_orphan',
+		reason: 'missing_scope',
 		path: '/items/x',
 		method: 'GET',
 		query: '{}',
@@ -236,7 +236,7 @@ describe('buildGroups with anomalies', () => {
 			[anomaly({
 				cacheKey: 'o1',
 				path: '/items/a',
-				reason: 'scoped_orphan',
+				reason: 'missing_scope',
 				count: 3,
 			})],
 		);
@@ -250,7 +250,7 @@ describe('buildGroups with anomalies', () => {
 	it('gives a not-cached-only path its own anomaly node', () => {
 		const groups = buildGroups(
 			[],
-			[anomaly({ path: '/server/info', reason: 'scoped_orphan', count: 2 })],
+			[anomaly({ path: '/server/info', reason: 'missing_scope', count: 2 })],
 		);
 
 		expect(groups).toHaveLength(1);
@@ -269,7 +269,7 @@ describe('buildGroups with anomalies', () => {
 				cacheKey: 'o1',
 				path: '/items/a',
 				query: '{}',
-				reason: 'scoped_orphan',
+				reason: 'missing_scope',
 				count: 2,
 			})],
 		);
@@ -279,7 +279,7 @@ describe('buildGroups with anomalies', () => {
 		// coarse is a per-entry property, not an anomaly row/count
 		expect(query.coarseCount).toBe(1);
 		expect(group.coarseCount).toBe(1);
-		expect(query.anomalyCount).toBe(2); // the scoped_orphan row only
+		expect(query.anomalyCount).toBe(2); // the missing_scope row only
 		expect(query.anomalies).toHaveLength(1);
 	});
 });
@@ -287,20 +287,20 @@ describe('buildGroups with anomalies', () => {
 describe('summariseAnomalies + filterAnomalies', () => {
 	it('sums occurrences per reason, hottest first', () => {
 		const summary = summariseAnomalies([
-			anomaly({ reason: 'scoped_orphan', count: 2 }),
+			anomaly({ reason: 'missing_scope', count: 2 }),
 			anomaly({ reason: 'redis_error', count: 5 }),
-			anomaly({ reason: 'scoped_orphan', count: 1 }),
+			anomaly({ reason: 'missing_scope', count: 1 }),
 		]);
 
 		expect(summary).toEqual([
 			{ reason: 'redis_error', count: 5 },
-			{ reason: 'scoped_orphan', count: 3 },
+			{ reason: 'missing_scope', count: 3 },
 		]);
 	});
 
 	it('narrows by path / query / reason, all when blank', () => {
 		const list = [
-			anomaly({ path: '/items/a', query: '{"limit":5}', reason: 'scoped_orphan' }),
+			anomaly({ path: '/items/a', query: '{"limit":5}', reason: 'missing_scope' }),
 			anomaly({ path: '/items/b', query: '{}', reason: 'redis_error' }),
 		];
 

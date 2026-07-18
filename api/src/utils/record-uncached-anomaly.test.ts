@@ -68,7 +68,7 @@ describe('recordUncachedAnomaly', () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk2', hash: 'h2' });
 
 		const req = makeReq({ method: 'POST', originalUrl: '/graphql' });
-		await recordUncachedAnomaly(req, 'scoped_orphan');
+		await recordUncachedAnomaly(req, 'missing_scope');
 
 		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -81,7 +81,7 @@ describe('recordUncachedAnomaly', () => {
 
 		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'h2',
-			reason: 'scoped_orphan',
+			reason: 'missing_scope',
 			detail: null,
 		});
 	});

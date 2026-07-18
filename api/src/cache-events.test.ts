@@ -328,14 +328,14 @@ describe('captureCacheAnomaly', () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce('OK');
 
-		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'scoped_orphan' });
+		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'missing_scope' });
 
 		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(call[0]).toBe('XADD');
 		expect(fieldAfter(call, 'kind')).toBe('a');
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
-		expect(fieldAfter(call, 'reason')).toBe('scoped_orphan');
+		expect(fieldAfter(call, 'reason')).toBe('missing_scope');
 	});
 
 	it('claims the throttle slot with SET NX + expiry', async () => {
@@ -964,7 +964,7 @@ describe('truncateCacheEvents', () => {
 			// its whole window, so a truncate + re-provoke sees an empty table.
 			return Promise.resolve(
 				pattern.includes(':anom:')
-					? ['scalabus:stats:anom:scoped_orphan:h1']
+					? ['scalabus:stats:anom:missing_scope:h1']
 					: [],
 			);
 		});
@@ -976,7 +976,7 @@ describe('truncateCacheEvents', () => {
 		expect(mockRedis.keys).toHaveBeenCalledWith('scalabus:stats:tomb:*');
 
 		expect(mockRedis.del).toHaveBeenCalledWith(
-			'scalabus:stats:anom:scoped_orphan:h1',
+			'scalabus:stats:anom:missing_scope:h1',
 		);
 	});
 
