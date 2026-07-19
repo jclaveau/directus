@@ -157,6 +157,32 @@ const prettyValue = computed(() => {
 	}
 });
 
+// Why the live value is gone: expiry is certain (past its TTL); a coarse key gone
+// before its TTL was almost surely over-purged by a sibling collection mutation.
+const absentReason = computed(() => {
+	const entry = selectedEntry.value;
+
+	if (!entry) {
+		return t('cache_value_absent', 'Not in the cache');
+	}
+
+	if (entry.expiresAt !== null && now.value >= entry.expiresAt) {
+		return t('cache_value_expired', 'Not in the cache — expired (TTL elapsed)');
+	}
+
+	if (entry.coarse) {
+		return t(
+			'cache_value_coarse',
+			'Evicted before TTL — likely a coarse-scope purge (a collection mutation)',
+		);
+	}
+
+	return t(
+		'cache_value_evicted',
+		'Evicted before TTL — a scoped purge or memory eviction',
+	);
+});
+
 // Configured TTL off the live Redis __expires_at sidecar (null = no sidecar).
 const ttlLabel = computed(() => {
 	if (!cachedExpiry.value) {
@@ -849,7 +875,7 @@ onMounted(() => {
 						{{ t('loading', 'Loading…') }}
 					</div>
 					<div v-else-if="!cachedValueExists" class="value-note">
-						{{ t('cache_value_absent', 'Not in the cache (evicted or expired)') }}
+						{{ absentReason }}
 					</div>
 					<pre v-else class="value">{{ prettyValue }}</pre>
 				</div>
