@@ -705,9 +705,6 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
 		.leftJoin('directus_users as u', 'u.id', 'd.user_id')
 		.where('e.time', '>', since)
-		// Exclude anomaly locators (bytes 0): the miss event they share with a real
-		// request would otherwise surface them as phantom 0-hit entries.
-		.where('d.bytes', '>', 0)
 		.groupBy(
 			'd.cache_key',
 			'd.redis_key',
