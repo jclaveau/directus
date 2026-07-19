@@ -105,6 +105,7 @@ beforeEach(() => {
 		insert: vi.fn(() => builder),
 		onConflict: vi.fn(() => builder),
 		merge: vi.fn(() => Promise.resolve()),
+		ignore: vi.fn(() => Promise.resolve()),
 		truncate: vi.fn(() => Promise.resolve()),
 		join: vi.fn(() => builder),
 		leftJoin: vi.fn(() => builder),
@@ -645,6 +646,36 @@ describe('flushCacheEvents', () => {
 		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0', '2-0', '3-0');
 	});
 
+	it('routes anomaly locators to an insert-if-absent upsert, not a merge', async () => {
+		xrangeBatch = [
+			streamEntry('1-0', {
+				kind: 'd', cacheKey: 'k1', redisKey: 'rk1', coarse: '0',
+				method: 'GET', path: '/items/a', collection: 'a', userId: '',
+				query: '{}', url: '/items/a', bytes: '42', fillMs: '5', ts: '1000',
+			}),
+			streamEntry('2-0', {
+				kind: 'd', cacheKey: 'k9', redisKey: 'rk9', coarse: '0',
+				method: 'GET', path: '/server/info', collection: '', userId: '',
+				query: '{}', url: '/server/info', bytes: '0', fillMs: '0',
+				locator: '1', ts: '2000',
+			}),
+		];
+
+		await flushCacheEvents();
+
+		// Real fill k1 merges; locator k9 ignores — its zeros never clobber a fill.
+		expect(builder.insert).toHaveBeenCalledWith([
+			expect.objectContaining({ cache_key: 'k1', bytes: 42 }),
+		]);
+
+		expect(builder.insert).toHaveBeenCalledWith([
+			expect.objectContaining({ cache_key: 'k9', bytes: 0 }),
+		]);
+
+		expect(builder.merge).toHaveBeenCalledTimes(1);
+		expect(builder.ignore).toHaveBeenCalledTimes(1);
+	});
+
 	it('inserts anomaly entries into the anomalies table', async () => {
 		xrangeBatch = [
 			streamEntry('1-0', {
@@ -1060,7 +1091,7 @@ describe('listCacheEntries', () => {
 				user_id: null,
 				query: '{}',
 				url: '',
-				bytes: '0',
+				bytes: '7',
 				last_filled: new Date(500).toISOString(),
 				hits: '0',
 				last_hit_at: null,
@@ -1074,6 +1105,8 @@ describe('listCacheEntries', () => {
 		const entries = await listCacheEntries();
 
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors as d');
+		// Anomaly locators (bytes 0) are filtered out of the entries listing.
+		expect(builder.where).toHaveBeenCalledWith('d.bytes', '>', 0);
 
 		expect(entries).toEqual([
 			{
@@ -1106,7 +1139,7 @@ describe('listCacheEntries', () => {
 				user: null,
 				query: '{}',
 				url: '',
-				size: 0,
+				size: 7,
 				hits: 0,
 				fillMs: null,
 				hitMs: null,
