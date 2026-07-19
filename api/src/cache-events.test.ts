@@ -354,7 +354,7 @@ describe('captureCacheAnomaly', () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce(null);
 
-		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'coarse_scope' });
+		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'missing_scope' });
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
