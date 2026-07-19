@@ -354,6 +354,29 @@ describe('CachePage', () => {
 		expect(text).toContain('"hello": "world"');
 	});
 
+	it('names a coarse-scope purge for an evicted coarse entry', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/entry') {
+				return Promise.resolve({
+					data: { data: { exists: false, value: null } },
+				}) as never;
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } }) as never;
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+		await wrapper.find('.entry-row').trigger('click');
+		await flushPromises();
+
+		// ENTRIES[0] is coarse with a future expiry → evicted early, not expired.
+		expect(wrapper.text()).toContain('coarse-scope purge');
+	});
+
 	it('paginates the item rows within a group at 25 per page', async () => {
 		const many = Array.from({ length: 30 }, (_unused, index) => {
 			return {
