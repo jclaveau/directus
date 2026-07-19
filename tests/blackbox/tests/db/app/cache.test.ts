@@ -2822,6 +2822,20 @@ describe('App Caching Tests', () => {
 			expect(oversized).toBeDefined();
 			expect(oversized.path).toBe(`/items/${collectionFirst}`);
 			expect(oversized.count).toBeGreaterThanOrEqual(1);
+
+			// The oversized request never cached, so its locator (last_filled null) must
+			// not surface as a phantom entry — only as the anomaly row above.
+			const entries = await request(url)
+				.get('/utils/cache')
+				.set('Authorization', auth);
+
+			expect(entries.statusCode).toBe(200);
+
+			const phantom = entries.body.data.find((row: any) => {
+				return row.path === oversized.path && row.query === oversized.query;
+			});
+
+			expect(phantom).toBeUndefined();
 		}, 60000);
 	});
 });

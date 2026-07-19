@@ -110,6 +110,7 @@ beforeEach(() => {
 		join: vi.fn(() => builder),
 		leftJoin: vi.fn(() => builder),
 		where: vi.fn(() => builder),
+		whereNotNull: vi.fn(() => builder),
 		whereNotIn: vi.fn(() => builder),
 		groupBy: vi.fn(() => builder),
 		orderBy: vi.fn(() => builder),
@@ -663,13 +664,15 @@ describe('flushCacheEvents', () => {
 
 		await flushCacheEvents();
 
-		// Real fill k1 merges; locator k9 ignores — its zeros never clobber a fill.
+		// Real k1 merges with a fill time; locator k9 ignores with last_filled null.
 		expect(builder.insert).toHaveBeenCalledWith([
-			expect.objectContaining({ cache_key: 'k1', bytes: 42 }),
+			expect.objectContaining({
+				cache_key: 'k1', bytes: 42, last_filled: new Date(1000),
+			}),
 		]);
 
 		expect(builder.insert).toHaveBeenCalledWith([
-			expect.objectContaining({ cache_key: 'k9', bytes: 0 }),
+			expect.objectContaining({ cache_key: 'k9', bytes: 0, last_filled: null }),
 		]);
 
 		expect(builder.merge).toHaveBeenCalledTimes(1);
@@ -1105,6 +1108,8 @@ describe('listCacheEntries', () => {
 		const entries = await listCacheEntries();
 
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors as d');
+		// Never-filled locators are excluded from the entries listing.
+		expect(builder.whereNotNull).toHaveBeenCalledWith('d.last_filled');
 
 		expect(entries).toEqual([
 			{
