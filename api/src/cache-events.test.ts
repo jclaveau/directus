@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import {
 	cacheStatsActive,
 	cacheStatsConfigured,
-	captureCacheAnomaly,
 	captureCacheDescriptor,
+	claimAnomalySlot,
+	emitCacheAnomaly,
 	captureCacheHit,
 	captureCacheMiss,
 	enforceCacheStatsBudget,
@@ -323,12 +324,11 @@ describe('captureCacheMiss', () => {
 	});
 });
 
-describe('captureCacheAnomaly', () => {
-	it('emits a throttled anomaly sample keyed by the cache key', async () => {
+describe('claimAnomalySlot / emitCacheAnomaly', () => {
+	it('emitCacheAnomaly emits an anomaly sample keyed by the cache key', async () => {
 		await armFlag(null);
-		mockRedis.set.mockResolvedValueOnce('OK');
 
-		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'missing_scope' });
+		emitCacheAnomaly({ cacheKey: 'k1', reason: 'missing_scope' });
 
 		await flushXaddBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
@@ -338,34 +338,37 @@ describe('captureCacheAnomaly', () => {
 		expect(fieldAfter(call, 'reason')).toBe('missing_scope');
 	});
 
-	it('claims the throttle slot with SET NX + expiry', async () => {
+	it('claimAnomalySlot claims with SET NX + expiry and returns true', async () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce('OK');
 
-		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'redis_error' });
+		const claimed = await claimAnomalySlot('redis_error', 'k1');
 
+		expect(claimed).toBe(true);
 		const setCall = mockRedis.set.mock.calls[0]!;
 		expect(setCall[0]).toBe('scalabus:stats:anom:redis_error:k1');
 		expect(setCall).toContain('NX');
 		expect(setCall).toContain('PX');
 	});
 
-	it('no-ops when the throttle slot is already claimed', async () => {
+	it('claimAnomalySlot returns false when the slot is already claimed', async () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce(null);
 
-		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'missing_scope' });
+		const claimed = await claimAnomalySlot('missing_scope', 'k1');
 
-		expect(mockRedis.call).not.toHaveBeenCalled();
+		expect(claimed).toBe(false);
 	});
 
-	it('does nothing when capture is disabled', async () => {
+	it('both no-op when capture is disabled', async () => {
 		await setCacheStatsEnabled(false);
 		mockRedis.set.mockClear();
 		mockRedis.call.mockClear();
 
-		await captureCacheAnomaly({ cacheKey: 'k1', reason: 'value_too_large' });
+		const claimed = await claimAnomalySlot('value_too_large', 'k1');
+		emitCacheAnomaly({ cacheKey: 'k1', reason: 'value_too_large' });
 
+		expect(claimed).toBe(false);
 		expect(mockRedis.set).not.toHaveBeenCalled();
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
@@ -515,6 +518,7 @@ describe('XADD batching', () => {
 
 		// A slow first exec, held open so its flush stays in flight.
 		let releaseExec: () => void = () => {};
+
 		let execCalls = 0;
 
 		const slowPipe: any = {

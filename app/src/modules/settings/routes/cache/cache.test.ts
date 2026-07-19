@@ -205,11 +205,36 @@ describe('CachePage', () => {
 
 		// Summary strip above the tree (reason label + occurrence count).
 		const summary = wrapper.find('.anomaly-summary').text();
-		expect(summary).toContain('Not cached'); // anomalyLabel for missing_scope
+		expect(summary).toContain('missing scope'); // anomalyLabel for missing_scope
 		expect(summary).toContain('×3');
 
 		// The anomaly forms its own endpoint node in the tree (no cached entry there).
 		expect(wrapper.text()).toContain('/graphql');
+	});
+
+	it('labels a value_too_large anomaly distinctly from missing_scope', async () => {
+		const anomalies = [
+			{
+				cacheKey: 'oversized-00000000000',
+				reason: 'value_too_large',
+				path: '/graphql',
+				method: 'POST',
+				query: '{"query":"{ big }"}',
+				url: '',
+				count: 1,
+				sample: '2mb',
+				lastSeen: Date.now(),
+			},
+		];
+
+		mockCacheGet(ENTRIES, { anomalies });
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const summary = wrapper.find('.anomaly-summary').text();
+		expect(summary).toContain('too large'); // anomalyLabel for value_too_large
+		expect(summary).not.toContain('missing scope');
 	});
 
 	it('renders an in-tree anomaly row + coarse badge', async () => {
@@ -244,7 +269,7 @@ describe('CachePage', () => {
 		// missing_scope stands as its own anomaly row under the same node.
 		const anomalyRow = wrapper.find('.anomaly-row');
 		expect(anomalyRow.exists()).toBe(true);
-		expect(anomalyRow.text()).toContain('Not cached'); // missing_scope label
+		expect(anomalyRow.text()).toContain('missing scope'); // missing_scope label
 		expect(anomalyRow.text()).toContain('×2');
 		expect(anomalyRow.text()).toContain('no collection'); // the sample
 	});

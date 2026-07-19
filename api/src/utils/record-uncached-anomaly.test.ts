@@ -1,11 +1,12 @@
 import type { Request } from 'express';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
 	return {
 		getCacheKey: vi.fn(),
 		captureCacheDescriptor: vi.fn().mockResolvedValue(undefined),
-		captureCacheAnomaly: vi.fn().mockResolvedValue(undefined),
+		claimAnomalySlot: vi.fn().mockResolvedValue(true),
+		emitCacheAnomaly: vi.fn(),
 		getGraphqlQueryAndVariables: vi.fn(() => ({ query: '{ me }', variables: {} })),
 	};
 });
@@ -13,7 +14,8 @@ const mocks = vi.hoisted(() => {
 vi.mock('../cache-events.js', () => {
 	return {
 		captureCacheDescriptor: mocks.captureCacheDescriptor,
-		captureCacheAnomaly: mocks.captureCacheAnomaly,
+		claimAnomalySlot: mocks.claimAnomalySlot,
+		emitCacheAnomaly: mocks.emitCacheAnomaly,
 	};
 });
 
@@ -37,10 +39,17 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 }
 
 describe('recordUncachedAnomaly', () => {
-	it('writes a descriptor then the anomaly, keyed by the cache key', async () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mocks.claimAnomalySlot.mockResolvedValue(true);
+	});
+
+	it('claims the slot, writes a descriptor then the anomaly, keyed by the cache key', async () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk1', hash: 'h1' });
 
 		await recordUncachedAnomaly(makeReq(), 'value_too_large', '2048B');
+
+		expect(mocks.claimAnomalySlot).toHaveBeenCalledWith('value_too_large', 'h1');
 
 		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -57,7 +66,7 @@ describe('recordUncachedAnomaly', () => {
 			}),
 		);
 
-		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
+		expect(mocks.emitCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'h1',
 			reason: 'value_too_large',
 			detail: '2048B',
@@ -79,10 +88,20 @@ describe('recordUncachedAnomaly', () => {
 			}),
 		);
 
-		expect(mocks.captureCacheAnomaly).toHaveBeenCalledWith({
+		expect(mocks.emitCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'h2',
 			reason: 'missing_scope',
 			detail: null,
 		});
+	});
+
+	it('writes nothing when the throttle slot is already claimed', async () => {
+		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk3', hash: 'h3' });
+		mocks.claimAnomalySlot.mockResolvedValueOnce(false);
+
+		await recordUncachedAnomaly(makeReq(), 'missing_scope');
+
+		expect(mocks.captureCacheDescriptor).not.toHaveBeenCalled();
+		expect(mocks.emitCacheAnomaly).not.toHaveBeenCalled();
 	});
 });

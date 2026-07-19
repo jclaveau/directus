@@ -1,18 +1,20 @@
 import type { Request } from 'express';
 import {
-	captureCacheAnomaly,
 	captureCacheDescriptor,
+	claimAnomalySlot,
+	emitCacheAnomaly,
 	type CacheAnomalyReason,
 } from '../cache-events.js';
 import { getCacheKey } from './get-cache-key.js';
 import { getGraphqlQueryAndVariables } from './get-graphql-query-and-variables.js';
 
 /**
- * Record an anomaly for a request that was NOT cached. Writes a descriptor first so
- * the anomaly's cache_key ref resolves to a path/method/query node in the admin
- * tree, then the anomaly. bytes/fillMs are 0 — the descriptor is a locator, not a
- * cached entry (no events, so it never shows in the entries listing). Best-effort:
- * both writes go to the Redis stream, so a full Redis outage records nothing.
+ * Record an anomaly for a request that was NOT cached. Claims the throttle slot
+ * first so a hot uncached path can't flood the stream with per-request locator
+ * descriptors; on a claim it writes a locator descriptor (so the anomaly's
+ * cache_key ref resolves to a path/method/query node in the admin tree), then the
+ * anomaly. bytes/fillMs are 0 — a locator, not a cached entry. Best-effort: both
+ * writes go to the Redis stream, so a full Redis outage records nothing.
  */
 export async function recordUncachedAnomaly(
 	req: Request,
@@ -20,6 +22,11 @@ export async function recordUncachedAnomaly(
 	detail?: string | null,
 ): Promise<void> {
 	const { key, hash } = await getCacheKey(req);
+
+	if (!(await claimAnomalySlot(reason, hash))) {
+		return;
+	}
+
 	const isGraphQl = req.originalUrl?.startsWith('/graphql') === true;
 
 	await captureCacheDescriptor({
@@ -40,5 +47,5 @@ export async function recordUncachedAnomaly(
 		fillMs: 0,
 	});
 
-	await captureCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
+	emitCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
 }

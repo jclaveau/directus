@@ -264,6 +264,8 @@ describe('buildGroups with anomalies', () => {
 			[
 				entry({ key: 'coarse1', path: '/items/a', query: '{}', coarse: true }),
 				entry({ key: 'fine1', path: '/items/a', query: '{}', coarse: false }),
+				// a second coarse entry in a distinct query bucket → group must sum the two
+				entry({ key: 'coarse2', path: '/items/a', query: '{"limit":5}', coarse: true }),
 			],
 			[anomaly({
 				cacheKey: 'o1',
@@ -275,12 +277,14 @@ describe('buildGroups with anomalies', () => {
 		);
 
 		const group = groups[0]!;
-		const query = group.queries[0]!;
+		const emptyQuery = group.queries.find((candidate) => candidate.query === '{}')!;
+		const limitQuery = group.queries.find((candidate) => candidate.query === '{"limit":5}')!;
 		// coarse is a per-entry property, not an anomaly row/count
-		expect(query.coarseCount).toBe(1);
-		expect(group.coarseCount).toBe(1);
-		expect(query.anomalyCount).toBe(2); // the missing_scope row only
-		expect(query.anomalies).toHaveLength(1);
+		expect(emptyQuery.coarseCount).toBe(1);
+		expect(limitQuery.coarseCount).toBe(1);
+		expect(group.coarseCount).toBe(2); // summed across both query buckets
+		expect(emptyQuery.anomalyCount).toBe(2); // the missing_scope row only
+		expect(emptyQuery.anomalies).toHaveLength(1);
 	});
 });
 

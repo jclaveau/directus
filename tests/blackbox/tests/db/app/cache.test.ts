@@ -2795,7 +2795,9 @@ describe('App Caching Tests', () => {
 			let anomalies: any[] = [];
 			let byReason = new Map<string, any>();
 
-			for (let attempt = 0; attempt < 25; attempt++) {
+			// ~45 × (fast request + 1s) stays under the 60s budget while giving the 10s
+			// drain several cycles to land both reasons under CI contention.
+			for (let attempt = 0; attempt < 45; attempt++) {
 				const listed = await request(url).get('/utils/cache/anomalies')
 					.set('Authorization', auth);
 
