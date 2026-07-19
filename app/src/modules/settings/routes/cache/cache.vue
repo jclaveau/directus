@@ -72,14 +72,6 @@ const windowOptions = [
 
 const selectedWindow = ref('24h');
 
-const windowLabel = computed(() => {
-	const match = windowOptions.find(
-		(option) => option.value === selectedWindow.value,
-	);
-
-	return match?.text ?? selectedWindow.value;
-});
-
 // Runtime collection state (Redis-backed). `configured` is the env opt-in: when
 // false the toggle is hidden, since the flag can only narrow, never widen it.
 const statsState = ref<{
@@ -597,7 +589,6 @@ onMounted(() => {
 			<div v-if="anomalySummary.length" class="anomaly-summary">
 				<v-icon name="warning" small />
 				<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
-				<span class="window">· {{ windowLabel }}</span>
 				<span
 					v-for="item in anomalySummary"
 					:key="item.reason"
@@ -906,11 +897,6 @@ onMounted(() => {
 	gap: 8px;
 	margin-block-end: 24px;
 	padding: 8px 12px;
-}
-
-.anomaly-summary .window {
-	color: var(--theme--foreground-subdued);
-	font-weight: 600;
 }
 
 .anomaly-summary .label {
