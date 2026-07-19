@@ -43,6 +43,7 @@ jobs:
       (github.event.action == 'synchronize' &&
         contains(github.event.pull_request.labels.*.name, 'Preview')) ||
       (github.event.action == 'edited' &&
+        contains(github.event.pull_request.labels.*.name, 'Preview') &&
         contains(github.event.pull_request.body, '[x] 🔄 Re-run admin preview'))
     # Hard backstop; the idle watcher normally ends the job long before this.
     timeout-minutes: 180
@@ -97,6 +98,8 @@ jobs:
       - name: Checkout the ref to preview
         uses: actions/checkout@v7
         with:
+          # Untrusted head code runs here; don't leave the write-scoped token in .git/config.
+          persist-credentials: false
           # Dispatch → the chosen ref; PR event → the PR head commit (the code to preview).
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.event.pull_request.head.sha }}
 
@@ -372,7 +375,7 @@ jobs:
             echo "### 🔎 Preview admin — \`${SHA}\`"
             echo ""
             echo "- **Open (auto-login):** ${URL}/auto-login"
-            echo "- Manual: ${URL}/admin — admin@example.com / \`${ADMIN_PASSWORD}\`"
+            echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary — repo members only)."
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
             echo "- [ ] 🔄 Re-run admin preview"
