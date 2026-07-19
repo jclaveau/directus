@@ -3,6 +3,7 @@ import {
 	cacheStatsActive,
 	cacheStatsConfigured,
 	captureCacheDescriptor,
+	clampListingWindow,
 	claimAnomalySlot,
 	emitCacheAnomaly,
 	captureCacheHit,
@@ -323,6 +324,22 @@ describe('captureCacheMiss', () => {
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'gapMs')).toBe('');
 		expect(fieldAfter(call, 'ttlMs')).toBe('');
+	});
+});
+
+describe('clampListingWindow', () => {
+	it('defaults to 24h when the request is missing or unparseable', () => {
+		expect(clampListingWindow(undefined)).toBe(86_400_000);
+		expect(clampListingWindow(Number.NaN)).toBe(86_400_000);
+	});
+
+	it('floors below 1m and caps at the 30d retention', () => {
+		expect(clampListingWindow(30_000)).toBe(60_000);
+		expect(clampListingWindow(999_999_999_999)).toBe(2_592_000_000);
+	});
+
+	it('passes an in-range window through', () => {
+		expect(clampListingWindow(3_600_000)).toBe(3_600_000);
 	});
 });
 

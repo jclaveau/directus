@@ -156,7 +156,10 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		expect(api.get).toHaveBeenCalledWith('/utils/cache');
+		expect(api.get).toHaveBeenCalledWith('/utils/cache', {
+			params: { window: '24h' },
+		});
+
 		// Both sections render (app + system) with the summary counts.
 		expect(wrapper.text()).toContain('/items/articles');
 		expect(wrapper.text()).toContain('/server/info');
@@ -201,7 +204,9 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		expect(api.get).toHaveBeenCalledWith('/utils/cache/anomalies');
+		expect(api.get).toHaveBeenCalledWith('/utils/cache/anomalies', {
+			params: { window: '24h' },
+		});
 
 		// Summary strip above the tree (reason label + occurrence count).
 		const summary = wrapper.find('.anomaly-summary').text();

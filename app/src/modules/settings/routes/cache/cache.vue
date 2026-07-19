@@ -61,6 +61,25 @@ const search = ref('');
 const filter = ref<Filter | null>(null);
 const entryPage = ref<Record<string, number>>({});
 
+// How far back the listing looks — sent as ?window= to the API, which clamps it.
+const windowOptions = [
+	{ text: t('cache_window_1h', 'Last 1h'), value: '1h' },
+	{ text: t('cache_window_6h', 'Last 6h'), value: '6h' },
+	{ text: t('cache_window_24h', 'Last 24h'), value: '24h' },
+	{ text: t('cache_window_7d', 'Last 7d'), value: '7d' },
+	{ text: t('cache_window_30d', 'Last 30d'), value: '30d' },
+];
+
+const selectedWindow = ref('24h');
+
+const windowLabel = computed(() => {
+	const match = windowOptions.find(
+		(option) => option.value === selectedWindow.value,
+	);
+
+	return match?.text ?? selectedWindow.value;
+});
+
 // Runtime collection state (Redis-backed). `configured` is the env opt-in: when
 // false the toggle is hidden, since the flag can only narrow, never widen it.
 const statsState = ref<{
@@ -247,7 +266,10 @@ async function load() {
 	error.value = null;
 
 	try {
-		const response = await api.get('/utils/cache');
+		const response = await api.get('/utils/cache', {
+			params: { window: selectedWindow.value },
+		});
+
 		entries.value = response.data.data;
 		now.value = Date.now();
 		void loadAnomalies();
@@ -262,7 +284,10 @@ async function load() {
 
 async function loadAnomalies() {
 	try {
-		const response = await api.get('/utils/cache/anomalies');
+		const response = await api.get('/utils/cache/anomalies', {
+			params: { window: selectedWindow.value },
+		});
+
 		anomalies.value = response.data.data;
 	}
 	catch {
@@ -503,6 +528,14 @@ onMounted(() => {
 		</template>
 
 		<template #actions>
+			<v-select
+				v-model="selectedWindow"
+				class="window-select"
+				:items="windowOptions"
+				inline
+				@update:model-value="load"
+			/>
+
 			<search-input
 				v-model="search"
 				v-model:filter="filter"
@@ -564,6 +597,7 @@ onMounted(() => {
 			<div v-if="anomalySummary.length" class="anomaly-summary">
 				<v-icon name="warning" small />
 				<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
+				<span class="window">· {{ windowLabel }}</span>
 				<span
 					v-for="item in anomalySummary"
 					:key="item.reason"
@@ -863,11 +897,20 @@ onMounted(() => {
 
 .anomaly-summary {
 	align-items: center;
+	background-color: color-mix(in srgb, var(--theme--warning) 12%, transparent);
+	border: var(--theme--border-width) solid var(--theme--warning);
+	border-radius: var(--theme--border-radius);
 	color: var(--theme--warning);
 	display: flex;
 	flex-wrap: wrap;
 	gap: 8px;
 	margin-block-end: 24px;
+	padding: 8px 12px;
+}
+
+.anomaly-summary .window {
+	color: var(--theme--foreground-subdued);
+	font-weight: 600;
 }
 
 .anomaly-summary .label {

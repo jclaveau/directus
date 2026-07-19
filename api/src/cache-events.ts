@@ -116,7 +116,8 @@ const FLUSH_BATCH = 500;
 const DEFAULT_GAP_LOOKBACK = getMilliseconds('1h', 3_600_000);
 
 // The admin listing groups recent activity; older keys are reaped, not shown.
-const LISTING_WINDOW = getMilliseconds('24h', 86_400_000);
+const DEFAULT_LISTING_WINDOW = getMilliseconds('24h', 86_400_000);
+const MIN_LISTING_WINDOW = getMilliseconds('1m', 60_000);
 const LISTING_LIMIT = 200;
 
 // A descriptor with no fill in this window AND no live event is an orphan (past
@@ -170,6 +171,19 @@ function gapLookbackMs(): number {
 
 function retentionMs(): number {
 	return getMilliseconds(useEnv()['CACHE_STATS_RETENTION'], DEFAULT_RETENTION);
+}
+
+/**
+ * Clamp a caller-requested listing window (how far back entries + anomalies are
+ * shown) to [1m, retention]: the admin can't ask for less than a minute, nor for
+ * data already reaped past the retention cutoff. Undefined falls back to 24h.
+ */
+export function clampListingWindow(requested: number | undefined): number {
+	if (requested === undefined || !Number.isFinite(requested)) {
+		return DEFAULT_LISTING_WINDOW;
+	}
+
+	return Math.min(Math.max(requested, MIN_LISTING_WINDOW), retentionMs());
 }
 
 /**
@@ -662,13 +676,15 @@ async function drainCacheEvents(): Promise<number> {
  * retention) joined to windowed hits (fact). Not a live view — an entry evicted
  * or expired inside the window still shows until its events age out.
  */
-export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
+export async function listCacheEntries(
+	windowMs?: number,
+): Promise<CacheEntryRecord[]> {
 	if (!cacheStatsConfigured()) {
 		return [];
 	}
 
 	const db = getDatabase();
-	const since = new Date(Date.now() - LISTING_WINDOW);
+	const since = new Date(Date.now() - clampListingWindow(windowMs));
 
 	const selects: (string | Knex.Raw)[] = [
 		'd.cache_key',
@@ -844,13 +860,15 @@ export async function reapCacheEvents(): Promise<number> {
  * Recent cache anomalies for the admin page, grouped by reason+path with an
  * occurrence count. Windowed like the entries listing; older rows are reaped.
  */
-export async function listCacheAnomalies(): Promise<CacheAnomalyRecord[]> {
+export async function listCacheAnomalies(
+	windowMs?: number,
+): Promise<CacheAnomalyRecord[]> {
 	if (!cacheStatsConfigured()) {
 		return [];
 	}
 
 	const db = getDatabase();
-	const since = new Date(Date.now() - LISTING_WINDOW);
+	const since = new Date(Date.now() - clampListingWindow(windowMs));
 
 	// Join the descriptor for path/method/query (reaped at 90d, so an inner join never
 	// hides a live 24h-window anomaly) — a (cache_key, reason) pair lands at its node.
