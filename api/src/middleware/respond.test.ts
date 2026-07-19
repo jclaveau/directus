@@ -198,6 +198,8 @@ describe('respond middleware', () => {
 				path: '/items/articles',
 				collection: 'articles',
 				url: '/items/articles',
+				// cap off (CACHE_VALUE_MAX_SIZE=false): bytes still comes from one serialization
+				bytes: Buffer.byteLength(JSON.stringify({ data: [{ id: 1 }] }), 'utf8'),
 			}),
 		);
 

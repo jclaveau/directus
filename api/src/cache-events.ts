@@ -300,24 +300,31 @@ export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
 	});
 }
 
-// Emit a throttled anomaly sample keyed by the request's cache key (the descriptor
-// ref). One row per reason+key per window (SET NX): the first claims the slot.
-export async function captureCacheAnomaly(
-	entry: CacheAnomalyCapture,
-): Promise<void> {
+// Claim the once-per-window anomaly slot for a reason+key (SET NX): true for the
+// first caller in the window, false when the slot is already taken.
+export async function claimAnomalySlot(
+	reason: CacheAnomalyReason,
+	cacheKey: string,
+): Promise<boolean> {
 	if (!cacheStatsActiveFlag) {
-		return;
+		return false;
 	}
 
 	const claimed = await useRedis().set(
-		anomalyThrottleKey(entry.reason, entry.cacheKey),
+		anomalyThrottleKey(reason, cacheKey),
 		'1',
 		'PX',
 		ANOMALY_THROTTLE_MS,
 		'NX',
 	);
 
-	if (claimed === null) {
+	return claimed !== null;
+}
+
+// Emit an anomaly sample keyed by the request's cache key (the descriptor ref).
+// Caller must have claimed the throttle slot first via claimAnomalySlot.
+export function emitCacheAnomaly(entry: CacheAnomalyCapture): void {
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
