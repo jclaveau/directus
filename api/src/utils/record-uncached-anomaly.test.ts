@@ -44,7 +44,7 @@ describe('recordUncachedAnomaly', () => {
 		mocks.claimAnomalySlot.mockResolvedValue(true);
 	});
 
-	it('claims the slot, writes a descriptor then the anomaly, keyed by the cache key', async () => {
+	it('claims the slot, then writes the descriptor + anomaly', async () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk1', hash: 'h1' });
 
 		await recordUncachedAnomaly(makeReq(), 'value_too_large', '2048B');

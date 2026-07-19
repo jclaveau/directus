@@ -646,7 +646,7 @@ describe('flushCacheEvents', () => {
 		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0', '2-0', '3-0');
 	});
 
-	it('routes anomaly locators to an insert-if-absent upsert, not a merge', async () => {
+	it('routes anomaly locators to insert-if-absent, not merge', async () => {
 		xrangeBatch = [
 			streamEntry('1-0', {
 				kind: 'd', cacheKey: 'k1', redisKey: 'rk1', coarse: '0',
