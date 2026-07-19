@@ -265,7 +265,9 @@ describe('buildGroups with anomalies', () => {
 				entry({ key: 'coarse1', path: '/items/a', query: '{}', coarse: true }),
 				entry({ key: 'fine1', path: '/items/a', query: '{}', coarse: false }),
 				// a second coarse entry in a distinct query bucket → group must sum the two
-				entry({ key: 'coarse2', path: '/items/a', query: '{"limit":5}', coarse: true }),
+				entry({
+					key: 'coarse2', path: '/items/a', query: '{"limit":5}', coarse: true,
+				}),
 			],
 			[anomaly({
 				cacheKey: 'o1',
@@ -278,7 +280,8 @@ describe('buildGroups with anomalies', () => {
 
 		const group = groups[0]!;
 		const emptyQuery = group.queries.find((candidate) => candidate.query === '{}')!;
-		const limitQuery = group.queries.find((candidate) => candidate.query === '{"limit":5}')!;
+		const limitQuery = group.queries
+			.find((candidate) => candidate.query === '{"limit":5}')!;
 		// coarse is a per-entry property, not an anomaly row/count
 		expect(emptyQuery.coarseCount).toBe(1);
 		expect(limitQuery.coarseCount).toBe(1);
