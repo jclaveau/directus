@@ -445,7 +445,7 @@ interface CacheDescriptorRow {
 	url: string;
 	bytes: number;
 	fill_ms: number;
-	last_filled: Date;
+	last_filled: Date | null; // null = anomaly locator, never filled
 }
 
 interface CacheAnomalyRow {
@@ -579,7 +579,10 @@ async function drainCacheEvents(): Promise<number> {
 					url: f['url'] ?? '',
 					bytes: Number(f['bytes'] ?? 0),
 					fill_ms: Number(f['fillMs'] ?? 0),
-					last_filled: at,
+					// A locator was never filled — NULL keeps Age honest + marks it non-entry.
+					last_filled: f['locator'] === '1'
+						? null
+						: at,
 				};
 
 				// Last write in the batch wins — a re-conflicting insert would throw.
@@ -705,6 +708,8 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
 		.leftJoin('directus_users as u', 'u.id', 'd.user_id')
 		.where('e.time', '>', since)
+		// Anomaly locators (never filled) resolve as anomaly rows, not cache entries.
+		.whereNotNull('d.last_filled')
 		.groupBy(
 			'd.cache_key',
 			'd.redis_key',
