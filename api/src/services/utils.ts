@@ -200,16 +200,16 @@ export class UtilsService {
 		}
 	}
 
-	async getCacheEntries(): Promise<CacheEntryRecord[]> {
+	async getCacheEntries(windowMs?: number): Promise<CacheEntryRecord[]> {
 		this.assertCacheAdmin('inspect the cache');
 
-		return listCacheEntries();
+		return listCacheEntries(windowMs);
 	}
 
-	async getCacheAnomalies(): Promise<CacheAnomalyRecord[]> {
+	async getCacheAnomalies(windowMs?: number): Promise<CacheAnomalyRecord[]> {
 		this.assertCacheAdmin('inspect cache anomalies');
 
-		return listCacheAnomalies();
+		return listCacheAnomalies(windowMs);
 	}
 
 	// The live Redis state for a single key — the cached response plus its
