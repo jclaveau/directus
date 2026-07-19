@@ -280,8 +280,10 @@ describe('buildGroups with anomalies', () => {
 
 		const group = groups[0]!;
 		const emptyQuery = group.queries.find((candidate) => candidate.query === '{}')!;
+
 		const limitQuery = group.queries
 			.find((candidate) => candidate.query === '{"limit":5}')!;
+
 		// coarse is a per-entry property, not an anomaly row/count
 		expect(emptyQuery.coarseCount).toBe(1);
 		expect(limitQuery.coarseCount).toBe(1);
