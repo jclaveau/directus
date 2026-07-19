@@ -2828,6 +2828,7 @@ describe('App Caching Tests', () => {
 			const entries = await request(url)
 				.get('/utils/cache')
 				.set('Authorization', auth);
+
 			expect(entries.statusCode).toBe(200);
 			expect(entries.body.data.every((entry: any) => entry.size > 0)).toBe(true);
 		}, 60000);
