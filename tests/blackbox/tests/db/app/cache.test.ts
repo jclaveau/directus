@@ -2822,6 +2822,12 @@ describe('App Caching Tests', () => {
 			expect(oversized).toBeDefined();
 			expect(oversized.path).toBe(`/items/${collectionFirst}`);
 			expect(oversized.count).toBeGreaterThanOrEqual(1);
+
+			// The oversized request's locator descriptor must not surface as a phantom
+			// 0-byte entry in the listing (only anomaly locators carry bytes 0).
+			const entries = await request(url).get('/utils/cache').set('Authorization', auth);
+			expect(entries.statusCode).toBe(200);
+			expect(entries.body.data.every((entry: any) => entry.size > 0)).toBe(true);
 		}, 60000);
 	});
 });

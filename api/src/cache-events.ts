@@ -50,6 +50,9 @@ export interface CacheDescriptor {
 	url: string;
 	bytes: number;
 	fillMs: number;
+	// A locator written alongside an anomaly (bytes/fillMs 0), not a real fill: it
+	// must never overwrite a real descriptor, and is hidden from the entries listing.
+	locator?: boolean;
 }
 
 // A silent cache anomaly (not cached, or a Redis error) surfaced on the dashboard
@@ -358,6 +361,9 @@ export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<vo
 		url: entry.url,
 		bytes: String(entry.bytes),
 		fillMs: String(entry.fillMs),
+		locator: entry.locator
+			? '1'
+			: '0',
 		ts: String(Date.now()),
 	});
 }
@@ -538,6 +544,7 @@ async function drainCacheEvents(): Promise<number> {
 		const ids = batch.map(([id]) => id);
 		const events: CacheEventRow[] = [];
 		const descriptors = new Map<string, CacheDescriptorRow>();
+		const locators = new Map<string, CacheDescriptorRow>();
 		const anomalies: CacheAnomalyRow[] = [];
 
 		for (const [, flat] of batch) {
@@ -556,8 +563,7 @@ async function drainCacheEvents(): Promise<number> {
 			}
 
 			if (f['kind'] === 'd') {
-				// Last write in the batch wins — a re-conflicting insert would throw.
-				descriptors.set(f['cacheKey']!, {
+				const row: CacheDescriptorRow = {
 					cache_key: f['cacheKey']!,
 					redis_key: f['redisKey'] ?? '',
 					coarse: f['coarse'] === '1',
@@ -574,7 +580,13 @@ async function drainCacheEvents(): Promise<number> {
 					bytes: Number(f['bytes'] ?? 0),
 					fill_ms: Number(f['fillMs'] ?? 0),
 					last_filled: at,
-				});
+				};
+
+				// Last write in the batch wins — a re-conflicting insert would throw.
+				// Locators upsert insert-if-absent so they never clobber a real fill.
+				(f['locator'] === '1'
+					? locators
+					: descriptors).set(row.cache_key, row);
 
 				continue;
 			}
@@ -602,6 +614,15 @@ async function drainCacheEvents(): Promise<number> {
 					.insert([...descriptors.values()])
 					.onConflict('cache_key')
 					.merge();
+			}
+
+			// After real fills, so a locator only creates a row when none exists yet;
+			// its zeros must never overwrite a cached entry's bytes/coarse/fill_ms.
+			if (locators.size > 0) {
+				await db('directus_cache_descriptors')
+					.insert([...locators.values()])
+					.onConflict('cache_key')
+					.ignore();
 			}
 
 			if (anomalies.length > 0) {
@@ -684,6 +705,9 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
 		.leftJoin('directus_users as u', 'u.id', 'd.user_id')
 		.where('e.time', '>', since)
+		// Exclude anomaly locators (bytes 0): the miss event they share with a real
+		// request would otherwise surface them as phantom 0-hit entries.
+		.where('d.bytes', '>', 0)
 		.groupBy(
 			'd.cache_key',
 			'd.redis_key',
