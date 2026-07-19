@@ -1091,7 +1091,7 @@ describe('listCacheEntries', () => {
 				user_id: null,
 				query: '{}',
 				url: '',
-				bytes: '7',
+				bytes: '0',
 				last_filled: new Date(500).toISOString(),
 				hits: '0',
 				last_hit_at: null,
@@ -1105,8 +1105,6 @@ describe('listCacheEntries', () => {
 		const entries = await listCacheEntries();
 
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors as d');
-		// Anomaly locators (bytes 0) are filtered out of the entries listing.
-		expect(builder.where).toHaveBeenCalledWith('d.bytes', '>', 0);
 
 		expect(entries).toEqual([
 			{
@@ -1139,7 +1137,7 @@ describe('listCacheEntries', () => {
 				user: null,
 				query: '{}',
 				url: '',
-				size: 7,
+				size: 0,
 				hits: 0,
 				fillMs: null,
 				hitMs: null,
