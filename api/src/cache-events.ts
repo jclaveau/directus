@@ -319,7 +319,7 @@ export async function queueCacheMiss(miss: CacheMissCapture): Promise<void> {
 
 // Claim the once-per-window anomaly slot for a reason+key (SET NX): true for the
 // first caller in the window, false when the slot is already taken.
-export async function claimAnomalySlot(
+export async function claimCacheAnomalyThrottleSlot(
 	reason: CacheAnomalyReason,
 	cacheKey: string,
 ): Promise<boolean> {
@@ -339,7 +339,7 @@ export async function claimAnomalySlot(
 }
 
 // Emit an anomaly sample keyed by the request's cache key (the descriptor ref).
-// Caller must have claimed the throttle slot first via claimAnomalySlot.
+// Caller must have claimed the throttle slot first.
 export function queueCacheAnomaly(entry: CacheAnomalyCapture): void {
 	if (!cacheStatsActiveFlag) {
 		return;

@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => {
 	return {
 		getCacheKey: vi.fn(),
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
-		claimAnomalySlot: vi.fn().mockResolvedValue(true),
+		claimCacheAnomalyThrottleSlot: vi.fn().mockResolvedValue(true),
 		queueCacheAnomaly: vi.fn(),
 		getGraphqlQueryAndVariables: vi.fn(() => ({ query: '{ me }', variables: {} })),
 	};
@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => {
 vi.mock('../cache-events.js', () => {
 	return {
 		queueCacheDescriptor: mocks.queueCacheDescriptor,
-		claimAnomalySlot: mocks.claimAnomalySlot,
+		claimCacheAnomalyThrottleSlot: mocks.claimCacheAnomalyThrottleSlot,
 		queueCacheAnomaly: mocks.queueCacheAnomaly,
 	};
 });
@@ -41,7 +41,7 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 describe('recordCacheAnomaly', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
-		mocks.claimAnomalySlot.mockResolvedValue(true);
+		mocks.claimCacheAnomalyThrottleSlot.mockResolvedValue(true);
 	});
 
 	it('claims the slot, then writes the descriptor + anomaly', async () => {
@@ -49,7 +49,8 @@ describe('recordCacheAnomaly', () => {
 
 		await recordCacheAnomaly(makeReq(), 'value_too_large', '2048B');
 
-		expect(mocks.claimAnomalySlot).toHaveBeenCalledWith('value_too_large', 'h1');
+		expect(mocks.claimCacheAnomalyThrottleSlot)
+			.toHaveBeenCalledWith('value_too_large', 'h1');
 
 		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -98,7 +99,7 @@ describe('recordCacheAnomaly', () => {
 
 	it('writes nothing when the throttle slot is already claimed', async () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk3', hash: 'h3' });
-		mocks.claimAnomalySlot.mockResolvedValueOnce(false);
+		mocks.claimCacheAnomalyThrottleSlot.mockResolvedValueOnce(false);
 
 		await recordCacheAnomaly(makeReq(), 'missing_scope');
 

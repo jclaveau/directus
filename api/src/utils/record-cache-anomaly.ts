@@ -1,7 +1,7 @@
 import type { Request } from 'express';
 import {
 	queueCacheDescriptor,
-	claimAnomalySlot,
+	claimCacheAnomalyThrottleSlot,
 	queueCacheAnomaly,
 	type CacheAnomalyReason,
 } from '../cache-events.js';
@@ -23,7 +23,7 @@ export async function recordCacheAnomaly(
 ): Promise<void> {
 	const { key, hash } = await getCacheKey(req);
 
-	if (!(await claimAnomalySlot(reason, hash))) {
+	if (!(await claimCacheAnomalyThrottleSlot(reason, hash))) {
 		return;
 	}
 
