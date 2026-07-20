@@ -2544,11 +2544,24 @@ describe('App Caching Tests', () => {
 
 				expect(listed.statusCode).toBe(200);
 
-				first = listed.body.data.find((entry: any) => {
-					return entry.path === `/items/${collectionFirst}`;
+				// The registry is a shared cross-namespace table, so several rows can
+				// share this path; pick one whose value is live in THIS env's Redis.
+				const candidates = listed.body.data.filter((entry: any) => {
+					return entry.path === `/items/${collectionFirst}` && entry.hits >= 1;
 				});
 
-				if (first && first.hits >= 1) {
+				for (const candidate of candidates) {
+					const probe = await request(url).get('/utils/cache/entry')
+						.query({ key: candidate.redisKey })
+						.set('Authorization', auth);
+
+					if (probe.body?.data?.exists === true) {
+						first = candidate;
+						break;
+					}
+				}
+
+				if (first) {
 					break;
 				}
 
