@@ -507,6 +507,77 @@ describe('CachePage', () => {
 		expect(wrapper.findAll('tbody tr')).toHaveLength(5);
 	});
 
+	it('resets paging to page 1 when the search changes', async () => {
+		const many = Array.from({ length: 30 }, (_unused, index) => {
+			return {
+				key: `k-${String(index).padStart(3, '0')}`,
+				redisKey: `rk-${String(index).padStart(3, '0')}`,
+				coarse: false,
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				user: null,
+				query: '{}',
+				url: '/items/articles',
+				size: 10,
+				hits: 1,
+				fillMs: 5,
+				hitMs: 1,
+				ttlMs: null,
+				recommendedTtlMs: null,
+				createdAt: Date.now(),
+				expiresAt: null,
+				lastHitAt: null,
+			};
+		});
+
+		mockCacheGet(many);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+
+		wrapper.findComponent(VPagination).vm.$emit('update:modelValue', 2);
+		await flushPromises();
+		expect(wrapper.findAll('tbody tr')).toHaveLength(5); // sitting on page 2
+
+		// A search reshapes the group (all 30 still match 'items'); paging must snap to 1.
+		wrapper.findComponent(SearchInput).vm.$emit('update:modelValue', 'items');
+		await flushPromises();
+
+		expect(wrapper.findAll('tbody tr')).toHaveLength(25); // back to the first page
+	});
+
+	it('closes the detail drawer when the open entry is evicted', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/entry') {
+				return Promise.resolve({
+					data: { data: { exists: false, value: null } },
+				}) as never;
+			}
+
+			return Promise.resolve({ data: { data: ENTRIES } }) as never;
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+		await wrapper.find('.entry-row').trigger('click');
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('coarse-scope purge'); // drawer open on ENTRIES[0]
+
+		await wrapper.find('tbody v-icon').trigger('click'); // evict that entry
+		await flushPromises();
+
+		// Drawer must close, not keep showing the now-gone value as live.
+		expect(wrapper.text()).not.toContain('coarse-scope purge');
+	});
+
 	it('filters by the user_id.email m2o from the search-input', async () => {
 		mockCacheGet(ENTRIES);
 
