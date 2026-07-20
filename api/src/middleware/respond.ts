@@ -4,7 +4,7 @@ import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import {
 	cacheStatsActive,
-	captureCacheDescriptor,
+	queueCacheDescriptor,
 	writeCacheTombstone,
 } from '../cache-events.js';
 import getDatabase from '../database/index.js';
@@ -21,7 +21,7 @@ import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
 } from '../utils/get-graphql-query-and-variables.js';
-import { recordUncachedAnomaly } from '../utils/record-uncached-anomaly.js';
+import { recordCacheAnomaly } from '../utils/record-cache-anomaly.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -195,7 +195,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				// The per-key descriptor — captured here (fill) where query/collection/
 				// user are fully populated, unlike the early cache middleware. Buffered
 				// like the events; the flusher upserts the descriptors dimension.
-				void captureCacheDescriptor({
+				void queueCacheDescriptor({
 					cacheKey: hash,
 					redisKey: key,
 					coarse,
@@ -220,7 +220,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
 
 			if (cacheStatsActive()) {
-				void recordUncachedAnomaly(
+				void recordCacheAnomaly(
 					req,
 					'redis_error',
 					err?.message ?? String(err),
@@ -240,14 +240,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// Surface the two silent "cacheable but skipped" reasons on the dashboard.
 	if (cacheStatsActive() && cacheableRequest) {
 		if (exceedsMaxSize) {
-			void recordUncachedAnomaly(
+			void recordCacheAnomaly(
 				req,
 				'value_too_large',
 				`${valueSize}B`,
 			).catch(() => {});
 		}
 		else if (orphansInScopedMode) {
-			void recordUncachedAnomaly(req, 'missing_scope').catch(() => {});
+			void recordCacheAnomaly(req, 'missing_scope').catch(() => {});
 		}
 	}
 

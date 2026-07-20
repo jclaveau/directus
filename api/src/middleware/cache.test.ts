@@ -57,26 +57,26 @@ vi.mock('../utils/should-skip-cache.js', () => {
 // this file's `env` is initialised. cacheStatsActive→false skips all capture here.
 vi.mock('../cache-events.js', () => {
 	return {
-		// captureCacheHit is `.catch()`ed in the middleware, so it must be thenable.
+		// queueCacheHit is `.catch()`ed in the middleware, so it must be thenable.
 		cacheStatsActive: vi.fn(() => false),
-		captureCacheHit: vi.fn(() => Promise.resolve()),
-		captureCacheMiss: vi.fn(() => Promise.resolve()),
+		queueCacheHit: vi.fn(() => Promise.resolve()),
+		queueCacheMiss: vi.fn(() => Promise.resolve()),
 		readCacheMissGap: vi.fn(() => Promise.resolve(null)),
 	};
 });
 
-vi.mock('../utils/record-uncached-anomaly.js', () => {
-	return { recordUncachedAnomaly: vi.fn(() => Promise.resolve()) };
+vi.mock('../utils/record-cache-anomaly.js', () => {
+	return { recordCacheAnomaly: vi.fn(() => Promise.resolve()) };
 });
 
 import checkCacheMiddleware from './cache.js';
 import {
 	cacheStatsActive,
-	captureCacheHit,
-	captureCacheMiss,
+	queueCacheHit,
+	queueCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
-import { recordUncachedAnomaly } from '../utils/record-uncached-anomaly.js';
+import { recordCacheAnomaly } from '../utils/record-cache-anomaly.js';
 
 const next = vi.fn();
 
@@ -234,7 +234,7 @@ describe('checkCacheMiddleware', () => {
 		const res = makeRes();
 		await checkCacheMiddleware(makeReq(), res, next);
 
-		expect(recordUncachedAnomaly).toHaveBeenCalledWith(
+		expect(recordCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'redis_error',
 			expect.any(String),
@@ -267,7 +267,7 @@ describe('checkCacheMiddleware', () => {
 		const res = makeRes();
 		await checkCacheMiddleware(makeReq(), res, next);
 
-		expect(captureCacheHit).toHaveBeenCalledWith(
+		expect(queueCacheHit).toHaveBeenCalledWith(
 			expect.objectContaining({ cacheKey: 'cache-hash', ttlMs: 1000 }),
 		);
 
@@ -281,7 +281,7 @@ describe('checkCacheMiddleware', () => {
 		const res = makeRes();
 		await checkCacheMiddleware(makeReq(), res, next);
 
-		expect(captureCacheHit).not.toHaveBeenCalled();
+		expect(queueCacheHit).not.toHaveBeenCalled();
 	});
 
 	test('MISS captures telemetry with the tombstone gap', async () => {
@@ -294,7 +294,7 @@ describe('checkCacheMiddleware', () => {
 
 		expect(readCacheMissGap).toHaveBeenCalledWith('cache-key', expect.any(Number));
 
-		expect(captureCacheMiss).toHaveBeenCalledWith(
+		expect(queueCacheMiss).toHaveBeenCalledWith(
 			expect.objectContaining({ cacheKey: 'cache-hash', gapMs: 4000 }),
 		);
 
@@ -307,7 +307,7 @@ describe('checkCacheMiddleware', () => {
 		const res = makeRes();
 		await checkCacheMiddleware(makeReq(), res, next);
 
-		expect(captureCacheMiss).not.toHaveBeenCalled();
+		expect(queueCacheMiss).not.toHaveBeenCalled();
 		expect(res.setHeader).toHaveBeenCalledWith('x-cache-status', 'MISS');
 		expect(next).toHaveBeenCalled();
 	});

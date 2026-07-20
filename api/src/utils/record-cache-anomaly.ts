@@ -1,8 +1,8 @@
 import type { Request } from 'express';
 import {
-	captureCacheDescriptor,
+	queueCacheDescriptor,
 	claimAnomalySlot,
-	emitCacheAnomaly,
+	queueCacheAnomaly,
 	type CacheAnomalyReason,
 } from '../cache-events.js';
 import { getCacheKey } from './get-cache-key.js';
@@ -16,7 +16,7 @@ import { getGraphqlQueryAndVariables } from './get-graphql-query-and-variables.j
  * anomaly. bytes/fillMs are 0 — a locator, not a cached entry. Best-effort: both
  * writes go to the Redis stream, so a full Redis outage records nothing.
  */
-export async function recordUncachedAnomaly(
+export async function recordCacheAnomaly(
 	req: Request,
 	reason: CacheAnomalyReason,
 	detail?: string | null,
@@ -29,7 +29,7 @@ export async function recordUncachedAnomaly(
 
 	const isGraphQl = req.originalUrl?.startsWith('/graphql') === true;
 
-	await captureCacheDescriptor({
+	await queueCacheDescriptor({
 		cacheKey: hash,
 		redisKey: key,
 		coarse: false,
@@ -48,5 +48,5 @@ export async function recordUncachedAnomaly(
 		lastFilled: null,
 	});
 
-	emitCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
+	queueCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
 }
