@@ -11,7 +11,7 @@ import {
 	enforceCacheStatsBudget,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
-	flushCacheEvents,
+	drainCacheEvents,
 	flushCacheEventBuffer,
 	getCacheStatsState,
 	listCacheAnomalies,
@@ -594,7 +594,7 @@ describe('XADD batching', () => {
 	});
 });
 
-describe('flushCacheEvents', () => {
+describe('drainCacheEvents', () => {
 	it('demuxes hits/misses to events and descriptors to the dimension', async () => {
 		xrangeBatch = [
 			streamEntry('1-0', {
@@ -611,7 +611,7 @@ describe('flushCacheEvents', () => {
 			}),
 		];
 
-		const drained = await flushCacheEvents();
+		const drained = await drainCacheEvents();
 
 		expect(drained).toBe(3);
 
@@ -679,7 +679,7 @@ describe('flushCacheEvents', () => {
 			}),
 		];
 
-		await flushCacheEvents();
+		await drainCacheEvents();
 
 		// Real k1 merges with a fill time; locator k9 ignores with last_filled null.
 		expect(builder.insert).toHaveBeenCalledWith([
@@ -704,7 +704,7 @@ describe('flushCacheEvents', () => {
 			}),
 		];
 
-		const drained = await flushCacheEvents();
+		const drained = await drainCacheEvents();
 
 		expect(drained).toBe(1);
 
@@ -725,7 +725,7 @@ describe('flushCacheEvents', () => {
 	it('returns 0 without draining when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 
-		expect(await flushCacheEvents()).toBe(0);
+		expect(await drainCacheEvents()).toBe(0);
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 
@@ -753,7 +753,7 @@ describe('flushCacheEvents', () => {
 			return null;
 		});
 
-		expect(await flushCacheEvents()).toBe(500);
+		expect(await drainCacheEvents()).toBe(500);
 		expect(mockDb.batchInsert).toHaveBeenCalledTimes(1);
 	});
 
@@ -773,7 +773,7 @@ describe('flushCacheEvents', () => {
 			}),
 		];
 
-		await flushCacheEvents();
+		await drainCacheEvents();
 
 		expect(builder.insert).toHaveBeenCalledWith([
 			expect.objectContaining({ collection: null, user_id: null }),
@@ -791,7 +791,7 @@ describe('flushCacheEvents', () => {
 		];
 
 		// Saturated pool → skip this tick, leave the batch buffered (no DB/read).
-		expect(await flushCacheEvents()).toBe(0);
+		expect(await drainCacheEvents()).toBe(0);
 		expect(mockRedis.call).not.toHaveBeenCalled();
 		expect(mockDb.batchInsert).not.toHaveBeenCalled();
 	});
@@ -810,7 +810,7 @@ describe('flushCacheEvents', () => {
 		];
 
 		// A deterministically-unpersistable batch must not reject the flush...
-		await expect(flushCacheEvents()).resolves.toBe(1);
+		await expect(drainCacheEvents()).resolves.toBe(1);
 
 		// ...and it's still XDEL'd, so it can't be re-read from the stream head every
 		// subsequent tick (the wedge this guards against).
@@ -839,8 +839,8 @@ describe('flushCacheEvents', () => {
 			return null;
 		});
 
-		const first = flushCacheEvents();
-		const second = await flushCacheEvents();
+		const first = drainCacheEvents();
+		const second = await drainCacheEvents();
 
 		// The second call saw the latch and bailed without touching the stream.
 		expect(second).toBe(0);

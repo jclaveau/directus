@@ -1,7 +1,7 @@
 import {
 	cacheStatsConfigured,
 	enforceCacheStatsBudget,
-	flushCacheEvents,
+	drainCacheEvents,
 	flushCacheEventBuffer,
 	reapCacheAnomalies,
 	reapCacheDescriptors,
@@ -45,7 +45,7 @@ export default async function schedule(): Promise<boolean> {
 
 	scheduleSynchronizedJob('cache-stats', FLUSH_CRON, async () => {
 		try {
-			await flushCacheEvents();
+			await drainCacheEvents();
 			await enforceCacheStatsBudget();
 		}
 		catch (err: any) {

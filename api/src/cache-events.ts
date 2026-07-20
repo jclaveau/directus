@@ -136,8 +136,8 @@ const ANOMALY_THROTTLE_MS = getMilliseconds('1m', 60_000);
 let cacheStatsActiveFlag = false;
 let isTimescaleCache: boolean | null = null;
 
-// Single-flight latch for the drain (see flushCacheEvents).
-let flushInProgress = false;
+// Single-flight latch for the drain (see drainCacheEvents).
+let drainInProgress = false;
 
 function statsNamespace(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:stats`;
@@ -515,22 +515,22 @@ function dbPoolSaturated(db: Knex): boolean {
  * process-local latch (JS is single-threaded) makes an overlapping tick a no-op;
  * the multi-node case is handled by scheduleSynchronizedJob picking one node.
  */
-export async function flushCacheEvents(): Promise<number> {
-	if (!cacheStatsConfigured() || flushInProgress) {
+export async function drainCacheEvents(): Promise<number> {
+	if (!cacheStatsConfigured() || drainInProgress) {
 		return 0;
 	}
 
-	flushInProgress = true;
+	drainInProgress = true;
 
 	try {
-		return await drainCacheEvents();
+		return await drainCacheEventStream();
 	}
 	finally {
-		flushInProgress = false;
+		drainInProgress = false;
 	}
 }
 
-async function drainCacheEvents(): Promise<number> {
+async function drainCacheEventStream(): Promise<number> {
 	const redis = useRedis();
 	const db = getDatabase();
 	let drained = 0;
