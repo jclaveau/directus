@@ -178,7 +178,7 @@ function retentionMs(): number {
  * shown) to [1m, retention]: the admin can't ask for less than a minute, nor for
  * data already reaped past the retention cutoff. Undefined falls back to 24h.
  */
-export function clampListingWindow(requested: number | undefined): number {
+export function clampCacheStatsWindow(requested: number | undefined): number {
 	if (requested === undefined || !Number.isFinite(requested)) {
 		return DEFAULT_LISTING_WINDOW;
 	}
@@ -222,17 +222,17 @@ function xadd(fields: Record<string, string>): void {
 	xaddBuffer.push(flat);
 
 	if (xaddBuffer.length >= XADD_BUFFER_CAP) {
-		void flushXaddBuffer();
+		void flushCacheEventBuffer();
 	}
 	else if (!xaddFlushScheduled) {
 		xaddFlushScheduled = true;
-		setImmediate(() => void flushXaddBuffer());
+		setImmediate(() => void flushCacheEventBuffer());
 	}
 }
 
 // Flush the buffered XADDs in one pipelined round-trip. Errors are swallowed + the
 // buffer cleared either way, so a failing Redis can't wedge it (telemetry is lossy).
-export async function flushXaddBuffer(): Promise<void> {
+export async function flushCacheEventBuffer(): Promise<void> {
 	// One pipeline in flight at a time: under a slow (not down) Redis, defer instead
 	// of stacking concurrent exec()s + their batches on the heap. Backpressure.
 	if (xaddFlushInProgress) {
@@ -275,12 +275,12 @@ export async function flushXaddBuffer(): Promise<void> {
 
 		// Anything buffered while the pipeline was in flight → chain a follow-up flush.
 		if (xaddBuffer.length > 0) {
-			setImmediate(() => void flushXaddBuffer());
+			setImmediate(() => void flushCacheEventBuffer());
 		}
 	}
 }
 
-export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
+export async function queueCacheHit(hit: CacheHitCapture): Promise<void> {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
@@ -299,7 +299,7 @@ export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
 	});
 }
 
-export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
+export async function queueCacheMiss(miss: CacheMissCapture): Promise<void> {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
@@ -340,7 +340,7 @@ export async function claimAnomalySlot(
 
 // Emit an anomaly sample keyed by the request's cache key (the descriptor ref).
 // Caller must have claimed the throttle slot first via claimAnomalySlot.
-export function emitCacheAnomaly(entry: CacheAnomalyCapture): void {
+export function queueCacheAnomaly(entry: CacheAnomalyCapture): void {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
@@ -355,7 +355,7 @@ export function emitCacheAnomaly(entry: CacheAnomalyCapture): void {
 }
 
 // The per-key descriptor, emitted on a fill where every field is populated.
-export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<void> {
+export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void> {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
@@ -684,7 +684,7 @@ export async function listCacheEntries(
 	}
 
 	const db = getDatabase();
-	const since = new Date(Date.now() - clampListingWindow(windowMs));
+	const since = new Date(Date.now() - clampCacheStatsWindow(windowMs));
 
 	const selects: (string | Knex.Raw)[] = [
 		'd.cache_key',
@@ -868,7 +868,7 @@ export async function listCacheAnomalies(
 	}
 
 	const db = getDatabase();
-	const since = new Date(Date.now() - clampListingWindow(windowMs));
+	const since = new Date(Date.now() - clampCacheStatsWindow(windowMs));
 
 	// Join the descriptor for path/method/query (reaped at 90d, so an inner join never
 	// hides a live 24h-window anomaly) — a (cache_key, reason) pair lands at its node.

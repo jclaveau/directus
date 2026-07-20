@@ -3,11 +3,11 @@ import type { RequestHandler } from 'express';
 import { getCache, getCacheValue } from '../cache.js';
 import {
 	cacheStatsActive,
-	captureCacheHit,
-	captureCacheMiss,
+	queueCacheHit,
+	queueCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
-import { recordUncachedAnomaly } from '../utils/record-uncached-anomaly.js';
+import { recordCacheAnomaly } from '../utils/record-cache-anomaly.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -44,7 +44,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		logger.warn(err, `[cache] Couldn't read key ${key}. ${err.message}`);
 
 		if (cacheStatsActive()) {
-			void recordUncachedAnomaly(
+			void recordCacheAnomaly(
 				req,
 				'redis_error',
 				err?.message ?? String(err),
@@ -86,7 +86,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		const createdAt = Number(expiresMeta?.createdAt ?? 0);
 
 		if (cacheStatsActive() && createdAt > 0) {
-			void captureCacheHit({
+			void queueCacheHit({
 				cacheKey: hash,
 				ageMs: Math.max(Date.now() - createdAt, 0),
 				ttlMs: expiresMeta?.ttlMs ?? null,
@@ -124,7 +124,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 			void readCacheMissGap(key, missAt)
 				.then((gapMs) => {
-					return captureCacheMiss({
+					return queueCacheMiss({
 						cacheKey: hash,
 						gapMs,
 						ttlMs: getMilliseconds(env['CACHE_TTL']) ?? null,

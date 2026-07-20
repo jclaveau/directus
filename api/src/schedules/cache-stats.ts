@@ -2,7 +2,7 @@ import {
 	cacheStatsConfigured,
 	enforceCacheStatsBudget,
 	flushCacheEvents,
-	flushXaddBuffer,
+	flushCacheEventBuffer,
 	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
@@ -41,7 +41,7 @@ export default async function schedule(): Promise<boolean> {
 	subscribeCacheStatsToggle();
 
 	// Flush the in-memory XADD batch on shutdown so the last tick isn't lost.
-	process.once('SIGTERM', () => void flushXaddBuffer());
+	process.once('SIGTERM', () => void flushCacheEventBuffer());
 
 	scheduleSynchronizedJob('cache-stats', FLUSH_CRON, async () => {
 		try {

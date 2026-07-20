@@ -4,18 +4,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => {
 	return {
 		getCacheKey: vi.fn(),
-		captureCacheDescriptor: vi.fn().mockResolvedValue(undefined),
+		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		claimAnomalySlot: vi.fn().mockResolvedValue(true),
-		emitCacheAnomaly: vi.fn(),
+		queueCacheAnomaly: vi.fn(),
 		getGraphqlQueryAndVariables: vi.fn(() => ({ query: '{ me }', variables: {} })),
 	};
 });
 
 vi.mock('../cache-events.js', () => {
 	return {
-		captureCacheDescriptor: mocks.captureCacheDescriptor,
+		queueCacheDescriptor: mocks.queueCacheDescriptor,
 		claimAnomalySlot: mocks.claimAnomalySlot,
-		emitCacheAnomaly: mocks.emitCacheAnomaly,
+		queueCacheAnomaly: mocks.queueCacheAnomaly,
 	};
 });
 
@@ -25,7 +25,7 @@ vi.mock('./get-graphql-query-and-variables.js', () => {
 	return { getGraphqlQueryAndVariables: mocks.getGraphqlQueryAndVariables };
 });
 
-import { recordUncachedAnomaly } from './record-uncached-anomaly.js';
+import { recordCacheAnomaly } from './record-cache-anomaly.js';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
 	return {
@@ -38,7 +38,7 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 	} as unknown as Request;
 }
 
-describe('recordUncachedAnomaly', () => {
+describe('recordCacheAnomaly', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.claimAnomalySlot.mockResolvedValue(true);
@@ -47,11 +47,11 @@ describe('recordUncachedAnomaly', () => {
 	it('claims the slot, then writes the descriptor + anomaly', async () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk1', hash: 'h1' });
 
-		await recordUncachedAnomaly(makeReq(), 'value_too_large', '2048B');
+		await recordCacheAnomaly(makeReq(), 'value_too_large', '2048B');
 
 		expect(mocks.claimAnomalySlot).toHaveBeenCalledWith('value_too_large', 'h1');
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
 				cacheKey: 'h1',
 				redisKey: 'rk1',
@@ -67,7 +67,7 @@ describe('recordUncachedAnomaly', () => {
 			}),
 		);
 
-		expect(mocks.emitCacheAnomaly).toHaveBeenCalledWith({
+		expect(mocks.queueCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'h1',
 			reason: 'value_too_large',
 			detail: '2048B',
@@ -78,9 +78,9 @@ describe('recordUncachedAnomaly', () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk2', hash: 'h2' });
 
 		const req = makeReq({ method: 'POST', originalUrl: '/graphql' });
-		await recordUncachedAnomaly(req, 'missing_scope');
+		await recordCacheAnomaly(req, 'missing_scope');
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
 				cacheKey: 'h2',
 				redisKey: 'rk2',
@@ -89,7 +89,7 @@ describe('recordUncachedAnomaly', () => {
 			}),
 		);
 
-		expect(mocks.emitCacheAnomaly).toHaveBeenCalledWith({
+		expect(mocks.queueCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'h2',
 			reason: 'missing_scope',
 			detail: null,
@@ -100,9 +100,9 @@ describe('recordUncachedAnomaly', () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk3', hash: 'h3' });
 		mocks.claimAnomalySlot.mockResolvedValueOnce(false);
 
-		await recordUncachedAnomaly(makeReq(), 'missing_scope');
+		await recordCacheAnomaly(makeReq(), 'missing_scope');
 
-		expect(mocks.captureCacheDescriptor).not.toHaveBeenCalled();
-		expect(mocks.emitCacheAnomaly).not.toHaveBeenCalled();
+		expect(mocks.queueCacheDescriptor).not.toHaveBeenCalled();
+		expect(mocks.queueCacheAnomaly).not.toHaveBeenCalled();
 	});
 });

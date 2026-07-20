@@ -2,17 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vite
 import {
 	cacheStatsActive,
 	cacheStatsConfigured,
-	captureCacheDescriptor,
-	clampListingWindow,
+	queueCacheDescriptor,
+	clampCacheStatsWindow,
 	claimAnomalySlot,
-	emitCacheAnomaly,
-	captureCacheHit,
-	captureCacheMiss,
+	queueCacheAnomaly,
+	queueCacheHit,
+	queueCacheMiss,
 	enforceCacheStatsBudget,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	flushCacheEvents,
-	flushXaddBuffer,
+	flushCacheEventBuffer,
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
@@ -140,7 +140,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-	await flushXaddBuffer(); // drain any buffered captures so they can't leak forward
+	await flushCacheEventBuffer(); // drain any buffered captures so they can't leak forward
 	vi.clearAllMocks();
 });
 
@@ -202,18 +202,18 @@ describe('refreshCacheStatsFlag', () => {
 	});
 });
 
-describe('captureCacheHit', () => {
+describe('queueCacheHit', () => {
 	it('appends a hit keyed by the cache key', async () => {
 		await armFlag(null);
 
-		await captureCacheHit({
+		await queueCacheHit({
 			cacheKey: 'k1',
 			ageMs: 5000,
 			ttlMs: 300000,
 			durationMs: 12,
 		});
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(call[0]).toBe('XADD');
 		expect(call[1]).toBe(STREAM);
@@ -227,14 +227,14 @@ describe('captureCacheHit', () => {
 	it('serialises a null TTL as an empty string', async () => {
 		await armFlag(null);
 
-		await captureCacheHit({
+		await queueCacheHit({
 			cacheKey: 'k1',
 			ageMs: 1,
 			ttlMs: null,
 			durationMs: null,
 		});
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		expect(fieldAfter(mockRedis.call.mock.calls[0]!, 'ttlMs')).toBe('');
 	});
 
@@ -242,7 +242,7 @@ describe('captureCacheHit', () => {
 		await setCacheStatsEnabled(false);
 		mockRedis.call.mockClear();
 
-		await captureCacheHit({
+		await queueCacheHit({
 			cacheKey: 'k1',
 			ageMs: 1,
 			ttlMs: null,
@@ -260,14 +260,14 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 		await armFlag(null);
 		mockRedis.call.mockClear();
 
-		await captureCacheHit({
+		await queueCacheHit({
 			cacheKey: 'shorthash',
 			ageMs: 1,
 			ttlMs: null,
 			durationMs: null,
 		});
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		expect(mockRedis.call).toHaveBeenCalled();
 	});
 
@@ -275,7 +275,7 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 		await armFlag(null);
 		mockRedis.call.mockClear();
 
-		await captureCacheDescriptor({
+		await queueCacheDescriptor({
 			cacheKey: 'shorthash',
 			redisKey: longRedisKey,
 			method: 'GET',
@@ -288,7 +288,7 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 			fillMs: 0,
 		});
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		expect(fieldAfter(mockRedis.call.mock.calls[0]!, 'redisKey')).toBe(longRedisKey);
 	});
 
@@ -302,13 +302,13 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 	});
 });
 
-describe('captureCacheMiss', () => {
+describe('queueCacheMiss', () => {
 	it('appends a miss with a real gap', async () => {
 		await armFlag(null);
 
-		await captureCacheMiss({ cacheKey: 'k1', gapMs: 2000, ttlMs: 300000 });
+		await queueCacheMiss({ cacheKey: 'k1', gapMs: 2000, ttlMs: 300000 });
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'kind')).toBe('m');
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
@@ -318,38 +318,38 @@ describe('captureCacheMiss', () => {
 	it('serialises a cold miss (null gap) as an empty string', async () => {
 		await armFlag(null);
 
-		await captureCacheMiss({ cacheKey: 'k1', gapMs: null, ttlMs: null });
+		await queueCacheMiss({ cacheKey: 'k1', gapMs: null, ttlMs: null });
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'gapMs')).toBe('');
 		expect(fieldAfter(call, 'ttlMs')).toBe('');
 	});
 });
 
-describe('clampListingWindow', () => {
+describe('clampCacheStatsWindow', () => {
 	it('defaults to 24h when the request is missing or unparseable', () => {
-		expect(clampListingWindow(undefined)).toBe(86_400_000);
-		expect(clampListingWindow(Number.NaN)).toBe(86_400_000);
+		expect(clampCacheStatsWindow(undefined)).toBe(86_400_000);
+		expect(clampCacheStatsWindow(Number.NaN)).toBe(86_400_000);
 	});
 
 	it('floors below 1m and caps at the 30d retention', () => {
-		expect(clampListingWindow(30_000)).toBe(60_000);
-		expect(clampListingWindow(999_999_999_999)).toBe(2_592_000_000);
+		expect(clampCacheStatsWindow(30_000)).toBe(60_000);
+		expect(clampCacheStatsWindow(999_999_999_999)).toBe(2_592_000_000);
 	});
 
 	it('passes an in-range window through', () => {
-		expect(clampListingWindow(3_600_000)).toBe(3_600_000);
+		expect(clampCacheStatsWindow(3_600_000)).toBe(3_600_000);
 	});
 });
 
-describe('claimAnomalySlot / emitCacheAnomaly', () => {
-	it('emitCacheAnomaly emits an anomaly sample keyed by the cache key', async () => {
+describe('claimAnomalySlot / queueCacheAnomaly', () => {
+	it('emits an anomaly sample keyed by the cache key', async () => {
 		await armFlag(null);
 
-		emitCacheAnomaly({ cacheKey: 'k1', reason: 'missing_scope' });
+		queueCacheAnomaly({ cacheKey: 'k1', reason: 'missing_scope' });
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(call[0]).toBe('XADD');
 		expect(fieldAfter(call, 'kind')).toBe('a');
@@ -385,7 +385,7 @@ describe('claimAnomalySlot / emitCacheAnomaly', () => {
 		mockRedis.call.mockClear();
 
 		const claimed = await claimAnomalySlot('value_too_large', 'k1');
-		emitCacheAnomaly({ cacheKey: 'k1', reason: 'value_too_large' });
+		queueCacheAnomaly({ cacheKey: 'k1', reason: 'value_too_large' });
 
 		expect(claimed).toBe(false);
 		expect(mockRedis.set).not.toHaveBeenCalled();
@@ -393,11 +393,11 @@ describe('claimAnomalySlot / emitCacheAnomaly', () => {
 	});
 });
 
-describe('captureCacheDescriptor', () => {
+describe('queueCacheDescriptor', () => {
 	it('appends the full descriptor keyed by the cache key', async () => {
 		await armFlag(null);
 
-		await captureCacheDescriptor({
+		await queueCacheDescriptor({
 			cacheKey: 'k1',
 			redisKey: '/items/articles?limit=5:user-1',
 			coarse: true,
@@ -411,7 +411,7 @@ describe('captureCacheDescriptor', () => {
 			fillMs: 240,
 		});
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'kind')).toBe('d');
 		expect(fieldAfter(call, 'cacheKey')).toBe('k1');
@@ -425,7 +425,7 @@ describe('captureCacheDescriptor', () => {
 	it('serialises a null collection and user as empty strings', async () => {
 		await armFlag(null);
 
-		await captureCacheDescriptor({
+		await queueCacheDescriptor({
 			cacheKey: 'k2',
 			redisKey: '',
 			coarse: false,
@@ -439,7 +439,7 @@ describe('captureCacheDescriptor', () => {
 			fillMs: 0,
 		});
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 		const call = mockRedis.call.mock.calls[0]!;
 		expect(fieldAfter(call, 'collection')).toBe('');
 		expect(fieldAfter(call, 'userId')).toBe('');
@@ -508,19 +508,19 @@ describe('XADD batching', () => {
 	it('buffers captures and flushes them in a single pipeline', async () => {
 		await armFlag(null);
 
-		await captureCacheHit({
+		await queueCacheHit({
 			cacheKey: 'a',
 			ageMs: 1,
 			ttlMs: null,
 			durationMs: null,
 		});
 
-		await captureCacheMiss({ cacheKey: 'b', gapMs: null, ttlMs: null });
+		await queueCacheMiss({ cacheKey: 'b', gapMs: null, ttlMs: null });
 
 		// Nothing reaches Redis until the flush.
 		expect(mockRedis.pipeline).not.toHaveBeenCalled();
 
-		await flushXaddBuffer();
+		await flushCacheEventBuffer();
 
 		// One pipeline carrying both XADDs, in order.
 		expect(mockRedis.pipeline).toHaveBeenCalledTimes(1);
@@ -555,23 +555,23 @@ describe('XADD batching', () => {
 
 		mockRedis.pipeline.mockReturnValue(slowPipe);
 
-		await captureCacheHit({
+		await queueCacheHit({
 			cacheKey: 'a',
 			ageMs: 1,
 			ttlMs: null,
 			durationMs: null,
 		});
 
-		const first = flushXaddBuffer(); // starts exec #1, awaits the gate (in flight)
+		const first = flushCacheEventBuffer(); // starts exec #1, awaits the gate (in flight)
 
-		await captureCacheHit({
+		await queueCacheHit({
 			cacheKey: 'b',
 			ageMs: 1,
 			ttlMs: null,
 			durationMs: null,
 		});
 
-		await flushXaddBuffer(); // in-flight guard → NO second concurrent exec
+		await flushCacheEventBuffer(); // in-flight guard → NO second concurrent exec
 
 		expect(execCalls).toBe(1);
 
@@ -587,7 +587,7 @@ describe('XADD batching', () => {
 		await armFlag(null);
 
 		for (let i = 0; i < 1000; i++) {
-			await captureCacheMiss({ cacheKey: `k${i}`, gapMs: null, ttlMs: null });
+			await queueCacheMiss({ cacheKey: `k${i}`, gapMs: null, ttlMs: null });
 		}
 
 		expect(mockRedis.pipeline).toHaveBeenCalled();
@@ -1047,20 +1047,20 @@ describe('truncateCacheEvents', () => {
 });
 
 describe('capture is gated by the runtime flag', () => {
-	it('captureCacheMiss does nothing when disabled', async () => {
+	it('queueCacheMiss does nothing when disabled', async () => {
 		await setCacheStatsEnabled(false);
 		mockRedis.call.mockClear();
 
-		await captureCacheMiss({ cacheKey: 'k1', gapMs: null, ttlMs: null });
+		await queueCacheMiss({ cacheKey: 'k1', gapMs: null, ttlMs: null });
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 
-	it('captureCacheDescriptor does nothing when disabled', async () => {
+	it('queueCacheDescriptor does nothing when disabled', async () => {
 		await setCacheStatsEnabled(false);
 		mockRedis.call.mockClear();
 
-		await captureCacheDescriptor({
+		await queueCacheDescriptor({
 			cacheKey: 'k1',
 			redisKey: '',
 			coarse: false,

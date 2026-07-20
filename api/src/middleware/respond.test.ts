@@ -22,9 +22,9 @@ const mocks = vi.hoisted(() => {
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
-		captureCacheDescriptor: vi.fn().mockResolvedValue(undefined),
+		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		captureCacheAnomaly: vi.fn().mockResolvedValue(undefined),
-		recordUncachedAnomaly: vi.fn().mockResolvedValue(undefined),
+		recordCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
@@ -51,7 +51,7 @@ vi.mock('../scoped-cache.js', () => {
 vi.mock('../cache-events.js', () => {
 	return {
 		cacheStatsActive: () => true,
-		captureCacheDescriptor: mocks.captureCacheDescriptor,
+		queueCacheDescriptor: mocks.queueCacheDescriptor,
 		captureCacheAnomaly: mocks.captureCacheAnomaly,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 	};
@@ -61,8 +61,8 @@ vi.mock('../utils/get-string-byte-size.js', () => {
 	return { stringByteSize: mocks.stringByteSize };
 });
 
-vi.mock('../utils/record-uncached-anomaly.js', () => {
-	return { recordUncachedAnomaly: mocks.recordUncachedAnomaly };
+vi.mock('../utils/record-cache-anomaly.js', () => {
+	return { recordCacheAnomaly: mocks.recordCacheAnomaly };
 });
 
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
@@ -190,7 +190,7 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), res, next);
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
 				cacheKey: 'cache-hash',
 				redisKey: 'cache-key',
@@ -223,7 +223,7 @@ describe('respond middleware', () => {
 		// The size cap + the descriptor bytes share ONE payload serialization, not two.
 		expect(mocks.stringByteSize).toHaveBeenCalledTimes(1);
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
 				bytes: Buffer.byteLength(JSON.stringify(payload), 'utf8'),
 			}),
@@ -238,7 +238,7 @@ describe('respond middleware', () => {
 
 		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
 				url: '',
 				query: JSON.stringify({ query: '{ me }', variables: {} }),
@@ -298,7 +298,7 @@ describe('respond middleware', () => {
 		expect(res.json).toHaveBeenCalled();
 
 		// the failed write also surfaces as a redis_error anomaly carrying the message
-		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'redis_error',
 			'boom',
@@ -313,7 +313,7 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 
-		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
@@ -329,7 +329,7 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 
-		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'missing_scope',
 		);
@@ -355,7 +355,7 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({ coarse: true }),
 		);
 	});
@@ -375,7 +375,7 @@ describe('respond middleware', () => {
 
 		await respond(makeReq({ schema: scopedSchema }), res, next);
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({ coarse: false }),
 		);
 	});
@@ -391,7 +391,7 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), res, next);
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({ coarse: false }),
 		);
 	});
@@ -409,9 +409,9 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledTimes(1);
+		expect(mocks.recordCacheAnomaly).toHaveBeenCalledTimes(1);
 
-		expect(mocks.recordUncachedAnomaly).toHaveBeenCalledWith(
+		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
