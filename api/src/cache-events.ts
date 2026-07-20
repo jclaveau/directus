@@ -25,14 +25,14 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
  * Redis, killable live by an admin or the size/buffer watchdog.
  */
 
-export interface CacheHitCapture {
+export interface CacheHit {
 	cacheKey: string;
 	ageMs: number;
 	ttlMs: number | null;
 	durationMs: number | null;
 }
 
-export interface CacheMissCapture {
+export interface CacheMiss {
 	cacheKey: string;
 	gapMs: number | null;
 	ttlMs: number | null;
@@ -62,7 +62,7 @@ export type CacheAnomalyReason =
 	| 'value_too_large'
 	| 'redis_error';
 
-export interface CacheAnomalyCapture {
+export interface CacheAnomaly {
 	cacheKey: string;
 	reason: CacheAnomalyReason;
 	detail?: string | null; // byte size / error message
@@ -280,7 +280,7 @@ export async function flushCacheEventBuffer(): Promise<void> {
 	}
 }
 
-export async function queueCacheHit(hit: CacheHitCapture): Promise<void> {
+export async function queueCacheHit(hit: CacheHit): Promise<void> {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
@@ -299,7 +299,7 @@ export async function queueCacheHit(hit: CacheHitCapture): Promise<void> {
 	});
 }
 
-export async function queueCacheMiss(miss: CacheMissCapture): Promise<void> {
+export async function queueCacheMiss(miss: CacheMiss): Promise<void> {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
@@ -340,7 +340,7 @@ export async function claimCacheAnomalyThrottleSlot(
 
 // Emit an anomaly sample keyed by the request's cache key (the descriptor ref).
 // Caller must have claimed the throttle slot first.
-export function queueCacheAnomaly(entry: CacheAnomalyCapture): void {
+export function queueCacheAnomaly(entry: CacheAnomaly): void {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}

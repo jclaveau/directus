@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => {
 		permissionsCachable: vi.fn(),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
-		captureCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		recordCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
@@ -52,7 +51,6 @@ vi.mock('../cache-events.js', () => {
 	return {
 		cacheStatsActive: () => true,
 		queueCacheDescriptor: mocks.queueCacheDescriptor,
-		captureCacheAnomaly: mocks.captureCacheAnomaly,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 	};
 });
