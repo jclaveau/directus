@@ -137,7 +137,7 @@ let cacheStatsActiveFlag = false;
 let isTimescaleCache: boolean | null = null;
 
 // Single-flight latch for the drain (see drainCacheEvents).
-let drainInProgress = false;
+let cacheEventDrainInProgress = false;
 
 function statsNamespace(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:stats`;
@@ -205,11 +205,11 @@ export async function refreshCacheStatsFlag(): Promise<void> {
 
 // Per-tick XADD batching: captures buffer here; one pipelined flush per event-loop
 // tick collapses N round-trips into one. A crash loses ≤1 tick (telemetry is lossy).
-const XADD_BUFFER_CAP = 1000;
+const CACHE_EVENT_BUFFER_CAP = 1000;
 
-let xaddBuffer: string[][] = [];
-let xaddFlushScheduled = false;
-let xaddFlushInProgress = false;
+let cacheEventBuffer: string[][] = [];
+let cacheEventBufferFlushScheduled = false;
+let cacheEventBufferFlushInProgress = false;
 
 // Buffer one entry's fields; flush now if full, else at the tick boundary.
 function xadd(fields: Record<string, string>): void {
@@ -219,13 +219,13 @@ function xadd(fields: Record<string, string>): void {
 		flat.push(field, value);
 	}
 
-	xaddBuffer.push(flat);
+	cacheEventBuffer.push(flat);
 
-	if (xaddBuffer.length >= XADD_BUFFER_CAP) {
+	if (cacheEventBuffer.length >= CACHE_EVENT_BUFFER_CAP) {
 		void flushCacheEventBuffer();
 	}
-	else if (!xaddFlushScheduled) {
-		xaddFlushScheduled = true;
+	else if (!cacheEventBufferFlushScheduled) {
+		cacheEventBufferFlushScheduled = true;
 		setImmediate(() => void flushCacheEventBuffer());
 	}
 }
@@ -235,19 +235,19 @@ function xadd(fields: Record<string, string>): void {
 export async function flushCacheEventBuffer(): Promise<void> {
 	// One pipeline in flight at a time: under a slow (not down) Redis, defer instead
 	// of stacking concurrent exec()s + their batches on the heap. Backpressure.
-	if (xaddFlushInProgress) {
+	if (cacheEventBufferFlushInProgress) {
 		return;
 	}
 
-	xaddFlushScheduled = false;
+	cacheEventBufferFlushScheduled = false;
 
-	if (xaddBuffer.length === 0) {
+	if (cacheEventBuffer.length === 0) {
 		return;
 	}
 
-	xaddFlushInProgress = true;
-	const batch = xaddBuffer;
-	xaddBuffer = [];
+	cacheEventBufferFlushInProgress = true;
+	const batch = cacheEventBuffer;
+	cacheEventBuffer = [];
 
 	const pipe = useRedis().pipeline();
 
@@ -271,10 +271,10 @@ export async function flushCacheEventBuffer(): Promise<void> {
 		useLogger().warn(err, `[cache-stats] XADD flush failed. ${err.message}`);
 	}
 	finally {
-		xaddFlushInProgress = false;
+		cacheEventBufferFlushInProgress = false;
 
 		// Anything buffered while the pipeline was in flight → chain a follow-up flush.
-		if (xaddBuffer.length > 0) {
+		if (cacheEventBuffer.length > 0) {
 			setImmediate(() => void flushCacheEventBuffer());
 		}
 	}
@@ -516,17 +516,17 @@ function dbPoolSaturated(db: Knex): boolean {
  * the multi-node case is handled by scheduleSynchronizedJob picking one node.
  */
 export async function drainCacheEvents(): Promise<number> {
-	if (!cacheStatsConfigured() || drainInProgress) {
+	if (!cacheStatsConfigured() || cacheEventDrainInProgress) {
 		return 0;
 	}
 
-	drainInProgress = true;
+	cacheEventDrainInProgress = true;
 
 	try {
 		return await drainCacheEventStream();
 	}
 	finally {
-		drainInProgress = false;
+		cacheEventDrainInProgress = false;
 	}
 }
 
