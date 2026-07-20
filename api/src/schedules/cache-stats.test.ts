@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	cacheStatsConfigured,
 	enforceCacheStatsBudget,
-	flushCacheEvents,
+	drainCacheEvents,
 	reapCacheDescriptors,
 	reapCacheEvents,
 	refreshCacheStatsFlag,
@@ -18,7 +18,7 @@ vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
 beforeEach(() => {
 	vi.mocked(validateCron).mockReturnValue(true);
 	vi.mocked(refreshCacheStatsFlag).mockResolvedValue();
-	vi.mocked(flushCacheEvents).mockResolvedValue(0);
+	vi.mocked(drainCacheEvents).mockResolvedValue(0);
 	vi.mocked(enforceCacheStatsBudget).mockResolvedValue();
 	vi.mocked(reapCacheDescriptors).mockResolvedValue(0);
 	vi.mocked(reapCacheEvents).mockResolvedValue(0);
@@ -55,7 +55,7 @@ describe('cache-stats schedule', () => {
 
 	it('swallows a flush error inside the scheduled job', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
-		vi.mocked(flushCacheEvents).mockRejectedValue(new Error('boom'));
+		vi.mocked(drainCacheEvents).mockRejectedValue(new Error('boom'));
 
 		await cacheStatsSchedule();
 		const job = vi.mocked(scheduleSynchronizedJob).mock.calls[0]![2];
@@ -85,7 +85,7 @@ describe('cache-stats schedule', () => {
 		const job = vi.mocked(scheduleSynchronizedJob).mock.calls[0]![2];
 		await job(new Date(0));
 
-		expect(flushCacheEvents).toHaveBeenCalled();
+		expect(drainCacheEvents).toHaveBeenCalled();
 		expect(enforceCacheStatsBudget).toHaveBeenCalled();
 	});
 
