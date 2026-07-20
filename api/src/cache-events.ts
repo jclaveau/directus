@@ -50,9 +50,9 @@ export interface CacheDescriptor {
 	url: string;
 	bytes: number;
 	fillMs: number;
-	// A locator written alongside an anomaly (bytes/fillMs 0), not a real fill: it
-	// must never overwrite a real descriptor, and is hidden from the entries listing.
-	locator?: boolean;
+	// null = an anomaly locator, never filled (bytes/fillMs 0). It stamps last_filled
+	// NULL, which alone marks it: never clobbers a real fill, hidden from the listing.
+	lastFilled?: Date | null;
 }
 
 // A silent cache anomaly (not cached, or a Redis error) surfaced on the dashboard
@@ -375,10 +375,10 @@ export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<vo
 		url: entry.url,
 		bytes: String(entry.bytes),
 		fillMs: String(entry.fillMs),
-		locator: entry.locator
-			? '1'
-			: '0',
-		ts: String(Date.now()),
+		// Empty ts = no fill time = a locator; the drain reads last_filled off it.
+		ts: entry.lastFilled === null
+			? ''
+			: String(Date.now()),
 	});
 }
 
@@ -593,15 +593,15 @@ async function drainCacheEvents(): Promise<number> {
 					url: f['url'] ?? '',
 					bytes: Number(f['bytes'] ?? 0),
 					fill_ms: Number(f['fillMs'] ?? 0),
-					// A locator was never filled — NULL keeps Age honest + marks it non-entry.
-					last_filled: f['locator'] === '1'
-						? null
-						: at,
+					// Empty ts = never filled = a locator: NULL keeps Age honest + non-entry.
+					last_filled: f['ts']
+						? at
+						: null,
 				};
 
 				// Last write in the batch wins — a re-conflicting insert would throw.
-				// Locators upsert insert-if-absent so they never clobber a real fill.
-				(f['locator'] === '1'
+				// Locators (last_filled null) insert-if-absent, never clobber a real fill.
+				(row.last_filled === null
 					? locators
 					: descriptors).set(row.cache_key, row);
 

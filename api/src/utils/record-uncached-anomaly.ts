@@ -45,7 +45,7 @@ export async function recordUncachedAnomaly(
 			: req.originalUrl,
 		bytes: 0,
 		fillMs: 0,
-		locator: true,
+		lastFilled: null,
 	});
 
 	emitCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
