@@ -4,7 +4,7 @@ import {
 	cacheStatsConfigured,
 	queueCacheDescriptor,
 	clampCacheStatsWindow,
-	claimAnomalySlot,
+	claimCacheAnomalyThrottleSlot,
 	queueCacheAnomaly,
 	queueCacheHit,
 	queueCacheMiss,
@@ -343,7 +343,7 @@ describe('clampCacheStatsWindow', () => {
 	});
 });
 
-describe('claimAnomalySlot / queueCacheAnomaly', () => {
+describe('claimCacheAnomalyThrottleSlot / queueCacheAnomaly', () => {
 	it('emits an anomaly sample keyed by the cache key', async () => {
 		await armFlag(null);
 
@@ -357,11 +357,11 @@ describe('claimAnomalySlot / queueCacheAnomaly', () => {
 		expect(fieldAfter(call, 'reason')).toBe('missing_scope');
 	});
 
-	it('claimAnomalySlot claims with SET NX + expiry and returns true', async () => {
+	it('claims with SET NX + expiry and returns true', async () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce('OK');
 
-		const claimed = await claimAnomalySlot('redis_error', 'k1');
+		const claimed = await claimCacheAnomalyThrottleSlot('redis_error', 'k1');
 
 		expect(claimed).toBe(true);
 		const setCall = mockRedis.set.mock.calls[0]!;
@@ -370,11 +370,11 @@ describe('claimAnomalySlot / queueCacheAnomaly', () => {
 		expect(setCall).toContain('PX');
 	});
 
-	it('claimAnomalySlot returns false when the slot is already claimed', async () => {
+	it('returns false when the slot is already claimed', async () => {
 		await armFlag(null);
 		mockRedis.set.mockResolvedValueOnce(null);
 
-		const claimed = await claimAnomalySlot('missing_scope', 'k1');
+		const claimed = await claimCacheAnomalyThrottleSlot('missing_scope', 'k1');
 
 		expect(claimed).toBe(false);
 	});
@@ -384,7 +384,7 @@ describe('claimAnomalySlot / queueCacheAnomaly', () => {
 		mockRedis.set.mockClear();
 		mockRedis.call.mockClear();
 
-		const claimed = await claimAnomalySlot('value_too_large', 'k1');
+		const claimed = await claimCacheAnomalyThrottleSlot('value_too_large', 'k1');
 		queueCacheAnomaly({ cacheKey: 'k1', reason: 'value_too_large' });
 
 		expect(claimed).toBe(false);
