@@ -104,6 +104,14 @@ const VPagination = {
 	template: '<div class="v-pagination-stub" />',
 };
 
+// Real stub so a test can emit a window change and assert the refetch.
+const VSelect = {
+	name: 'VSelect',
+	props: ['modelValue', 'items'],
+	emits: ['update:modelValue'],
+	template: '<div class="v-select-stub" />',
+};
+
 // Hyphenated Directus components (private-view, v-*, …) aren't registered here;
 // treat them as custom elements so Vue renders their default slot — the
 // `.cache-page` body and its table — without stubbing each one. search-input is
@@ -111,11 +119,11 @@ const VPagination = {
 const global = {
 	plugins: [i18n],
 	directives: { tooltip: {} },
-	components: { SearchInput, PrivateView, VPagination },
+	components: { SearchInput, PrivateView, VPagination, VSelect },
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
-				const stubbed = ['search-input', 'private-view', 'v-pagination'];
+				const stubbed = ['search-input', 'private-view', 'v-pagination', 'v-select'];
 				return tag.includes('-') && !stubbed.includes(tag);
 			},
 		},
@@ -375,6 +383,88 @@ describe('CachePage', () => {
 
 		// ENTRIES[0] is coarse with a future expiry → evicted early, not expired.
 		expect(wrapper.text()).toContain('coarse-scope purge');
+	});
+
+	it('names an expired entry once its TTL has elapsed', async () => {
+		const expired = [{ ...ENTRIES[1], expiresAt: Date.now() - 1000 }];
+
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/entry') {
+				return Promise.resolve({
+					data: { data: { exists: false, value: null } },
+				}) as never;
+			}
+
+			return Promise.resolve({ data: { data: expired } }) as never;
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+		await wrapper.find('.entry-row').trigger('click');
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('expired (TTL elapsed)');
+	});
+
+	it('names a scoped purge / eviction for a non-coarse entry gone before its TTL', async () => {
+		const evicted = [{ ...ENTRIES[1] }]; // non-coarse, future expiry
+
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/entry') {
+				return Promise.resolve({
+					data: { data: { exists: false, value: null } },
+				}) as never;
+			}
+
+			return Promise.resolve({ data: { data: evicted } }) as never;
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+		await wrapper.find('.entry-row').trigger('click');
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('scoped purge or memory eviction');
+	});
+
+	it('refetches entries and anomalies when the window selector changes', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		vi.mocked(api.get).mockClear();
+
+		wrapper.findComponent(VSelect).vm.$emit('update:modelValue', '7d');
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache', {
+			params: { window: '7d' },
+		});
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache/anomalies', {
+			params: { window: '7d' },
+		});
+	});
+
+	it('fetches anomalies once on mount, not twice', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const anomalyCalls = vi.mocked(api.get).mock.calls.filter(
+			(call) => call[0] === '/utils/cache/anomalies',
+		);
+
+		expect(anomalyCalls).toHaveLength(1);
+		expect(wrapper.exists()).toBe(true);
 	});
 
 	it('paginates the item rows within a group at 25 per page', async () => {

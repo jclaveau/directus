@@ -5,8 +5,9 @@ name: Preview Admin
 # manually (workflow_dispatch on any ref) OR automatically on every push to a PR carrying the
 # `Preview` label. The job stays up until its hard timeout (no idle shutdown). Seeds `items`
 # → `sub_items` (both with a `user_created`) so the scoped-cache
-# field can be tried on real collections. The tunnel is PUBLIC while the job runs — a random
-# admin password is printed to the run summary (repo members only). Ephemeral: the URL dies
+# field can be tried on real collections. The tunnel is PUBLIC while the job runs and, on a
+# public repo, so is the run summary that prints the admin password — treat the whole preview
+# as public (auto-login already grants full access with no password). Ephemeral: the URL dies
 # with the job.
 on:
   workflow_dispatch:
@@ -130,8 +131,9 @@ jobs:
 
       - name: Bootstrap + start Directus
         run: |
-          # Not masked on purpose: it must show in the run summary so you can log in.
-          # The summary is repo-members-only and this is a throwaway instance.
+          # Not masked on purpose: it shows in the run summary for manual login. On a public
+          # repo that summary is world-readable — acceptable here, the instance is a throwaway
+          # public admin (auto-login needs no password anyway).
           PW=$(openssl rand -hex 12)
           echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
 
@@ -375,7 +377,7 @@ jobs:
             echo "### 🔎 Preview admin — \`${SHA}\`"
             echo ""
             echo "- **Open (auto-login):** ${URL}/auto-login"
-            echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary — repo members only)."
+            echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary; on a public repo that summary is world-readable)."
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
             echo "- [ ] 🔄 Re-run admin preview"

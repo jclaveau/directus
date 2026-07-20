@@ -351,6 +351,12 @@ describe('clampCacheStatsWindow', () => {
 	it('passes an in-range window through', () => {
 		expect(clampCacheStatsWindow(3_600_000)).toBe(3_600_000);
 	});
+
+	it('never returns below 1m even when retention is sub-minute', () => {
+		env['CACHE_STATS_RETENTION'] = '30s';
+		expect(clampCacheStatsWindow(3_600_000)).toBe(60_000);
+		delete env['CACHE_STATS_RETENTION'];
+	});
 });
 
 describe('claimCacheAnomalyThrottleSlot / queueCacheAnomaly', () => {
@@ -378,6 +384,7 @@ describe('claimCacheAnomalyThrottleSlot / queueCacheAnomaly', () => {
 		expect(setCall[0]).toBe('scalabus:stats:anom:redis_error:k1');
 		expect(setCall).toContain('NX');
 		expect(setCall).toContain('PX');
+		expect(setCall[setCall.indexOf('PX') + 1]).toBe(60_000);
 	});
 
 	it('returns false when the slot is already claimed', async () => {
@@ -706,6 +713,47 @@ describe('drainCacheEvents', () => {
 		expect(builder.ignore).toHaveBeenCalledTimes(1);
 	});
 
+	it('applies a real fill before a same-key locator in one batch', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'd', cacheKey: 'kx', redisKey: 'rk', coarse: '0', method: 'GET',
+				path: '/p', collection: '', userId: '', query: '{}', url: '/p',
+				bytes: '42', fillMs: '5', ts: '1000',
+			}),
+			streamEntry('2-0', {
+				kind: 'd', cacheKey: 'kx', redisKey: 'rk', coarse: '0', method: 'GET',
+				path: '/p', collection: '', userId: '', query: '{}', url: '/p',
+				bytes: '0', fillMs: '0', ts: '', // same key, locator (never filled)
+			}),
+		];
+
+		const order: string[] = [];
+
+		builder.merge.mockImplementation(() => {
+			order.push('merge');
+			return Promise.resolve();
+		});
+
+		builder.ignore.mockImplementation(() => {
+			order.push('ignore');
+			return Promise.resolve();
+		});
+
+		await drainCacheEvents();
+
+		expect(builder.insert).toHaveBeenCalledWith([
+			expect.objectContaining({ cache_key: 'kx', bytes: 42, last_filled: new Date(1000) }),
+		]);
+
+		expect(builder.insert).toHaveBeenCalledWith([
+			expect.objectContaining({ cache_key: 'kx', bytes: 0, last_filled: null }),
+		]);
+
+		// The real merge must run BEFORE the locator ignore, so a 0-byte locator can never
+		// clobber a same-key fill's bytes/coarse.
+		expect(order).toEqual(['merge', 'ignore']);
+	});
+
 	it('inserts anomaly entries into the anomalies table', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
@@ -977,6 +1025,30 @@ describe('enforceCacheStatsBudget', () => {
 		expect(mockDb.raw).toHaveBeenNthCalledWith(
 			2,
 			expect.stringContaining('hypertable_size'),
+		);
+	});
+
+	it('reads the size from pg_total_relation_size on plain postgres', async () => {
+		// isTimescale caches per module; a fresh import gives a null cache so the
+		// non-Timescale branch runs regardless of the Timescale test above.
+		vi.resetModules();
+		const fresh = await import('./cache-events.js');
+
+		mockRedis.get.mockResolvedValueOnce(null);
+		await fresh.refreshCacheStatsFlag();
+
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		mockRedis.xlen.mockResolvedValue(0);
+
+		mockDb.raw
+			.mockResolvedValueOnce({ rows: [{ has: false }] })
+			.mockResolvedValueOnce({ rows: [{ bytes: 5000 }] });
+
+		await fresh.enforceCacheStatsBudget();
+
+		expect(mockDb.raw).toHaveBeenNthCalledWith(
+			2,
+			expect.stringContaining('pg_total_relation_size'),
 		);
 	});
 

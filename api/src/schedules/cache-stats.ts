@@ -40,7 +40,8 @@ export default async function schedule(): Promise<boolean> {
 	await refreshCacheStatsFlag();
 	subscribeCacheStatsToggle();
 
-	// Flush the in-memory XADD batch on shutdown so the last tick isn't lost.
+	// Best-effort flush of the buffered XADDs on shutdown; if the runtime exits before
+	// the pipeline resolves, the last tick is still lost (telemetry is lossy anyway).
 	process.once('SIGTERM', () => void flushCacheEventBuffer());
 
 	scheduleSynchronizedJob('cache-stats', FLUSH_CRON, async () => {
