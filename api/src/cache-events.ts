@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { useEnv } from '@directus/env';
 import { parse as parseBytes } from 'bytes';
 import type { Knex } from 'knex';
@@ -108,9 +109,22 @@ export interface CacheStatsState {
 	enabled: boolean;
 	killedReason: string | null;
 	bufferLength: number;
+	// Hot-path events dropped because the buffer hit its cap while a flush was still in
+	// flight (slow Redis). Lifetime counter — a non-zero value means telemetry is lossy.
+	droppedEvents: number;
 }
 
 const STREAM_HARD_CAP = 1_000_000;
+
+// One shared consumer group across all nodes: XREADGROUP '>' hands each entry to a
+// single consumer, so overlapping drains on different nodes take disjoint slices and
+// the append-only tables can't be double-inserted. Consumer name = per-process PEL owner.
+const STREAM_GROUP = 'drain';
+const CONSUMER_NAME = randomUUID();
+
+// A consumer that read a batch then died leaves it pending; reclaim + re-drive it once
+// idle this long (at-least-once, matching the pre-group insert→XDEL semantics).
+const PENDING_RECLAIM_AFTER = getMilliseconds('60s', 60_000);
 
 const FLUSH_BATCH = 500;
 const DEFAULT_GAP_LOOKBACK = getMilliseconds('1h', 3_600_000);
@@ -210,9 +224,18 @@ const CACHE_EVENT_BUFFER_CAP = 1000;
 let cacheEventBuffer: string[][] = [];
 let cacheEventBufferFlushScheduled = false;
 let cacheEventBufferFlushInProgress = false;
+let cacheEventBufferDropped = 0;
 
 // Buffer one entry's fields; flush now if full, else at the tick boundary.
 function xadd(fields: Record<string, string>): void {
+	// Full while a flush is still in flight (slow Redis): drop rather than grow the heap
+	// unbounded on the hot path. Lossy by design; the drop count surfaces on the state.
+	if (cacheEventBufferFlushInProgress
+		&& cacheEventBuffer.length >= CACHE_EVENT_BUFFER_CAP) {
+		cacheEventBufferDropped += 1;
+		return;
+	}
+
 	const flat: string[] = [];
 
 	for (const [field, value] of Object.entries(fields)) {
@@ -509,11 +532,9 @@ function dbPoolSaturated(db: Knex): boolean {
 }
 
 /**
- * Guarded entrypoint for the drain. node-schedule fires the flush every 10s with
- * no overlap guard, so a drain that outruns its interval would run concurrently
- * with the next tick — both XRANGE the same head batch and double-count it. A
- * process-local latch (JS is single-threaded) makes an overlapping tick a no-op;
- * the multi-node case is handled by scheduleSynchronizedJob picking one node.
+ * Guarded entrypoint for the drain. A process-local latch makes an overlapping tick on
+ * the same node a no-op; cross-node overlap is safe because the drain reads through a
+ * shared consumer group (each entry delivered to one consumer), not a raw XRANGE.
  */
 export async function drainCacheEvents(): Promise<number> {
 	if (!cacheStatsConfigured() || cacheEventDrainInProgress) {
@@ -531,136 +552,45 @@ export async function drainCacheEvents(): Promise<number> {
 }
 
 async function drainCacheEventStream(): Promise<number> {
-	const redis = useRedis();
 	const db = getDatabase();
-	let drained = 0;
+
+	// Yield entirely to live traffic when the pool is already contended.
+	if (dbPoolSaturated(db)) {
+		return 0;
+	}
+
+	const redis = useRedis();
+	await ensureStreamGroup(redis);
+
+	// Re-drive anything a crashed consumer left pending, then the never-delivered ones.
+	let drained = await reclaimStalePending(redis, db);
 
 	for (;;) {
-		// Yield to live traffic: with queued acquirers, stop draining and leave the
-		// rest buffered for the next tick rather than contending for a connection.
 		if (dbPoolSaturated(db)) {
 			break;
 		}
 
-		const batch = (await redis.call(
-			'XRANGE',
-			streamKey(),
-			'-',
-			'+',
+		// '>' = entries never handed to any consumer, so a concurrent drain on another
+		// node gets a disjoint slice, never this same batch.
+		const response = (await redis.call(
+			'XREADGROUP',
+			'GROUP',
+			STREAM_GROUP,
+			CONSUMER_NAME,
 			'COUNT',
 			String(FLUSH_BATCH),
-		)) as [string, string[]][];
+			'STREAMS',
+			streamKey(),
+			'>',
+		)) as [string, [string, string[]][]][] | null;
+
+		const batch = response?.[0]?.[1] ?? [];
 
 		if (batch.length === 0) {
 			break;
 		}
 
-		const ids = batch.map(([id]) => id);
-		const events: CacheEventRow[] = [];
-		const descriptors = new Map<string, CacheDescriptorRow>();
-		const locators = new Map<string, CacheDescriptorRow>();
-		const anomalies: CacheAnomalyRow[] = [];
-
-		for (const [, flat] of batch) {
-			const f = parseFields(flat);
-			const at = new Date(Number(f['ts']));
-
-			if (f['kind'] === 'a') {
-				anomalies.push({
-					time: at,
-					cache_key: f['cacheKey']!,
-					reason: f['reason'] ?? '',
-					detail: f['detail'] ?? '',
-				});
-
-				continue;
-			}
-
-			if (f['kind'] === 'd') {
-				const row: CacheDescriptorRow = {
-					cache_key: f['cacheKey']!,
-					redis_key: f['redisKey'] ?? '',
-					coarse: f['coarse'] === '1',
-					method: f['method'] ?? '',
-					path: f['path'] ?? '',
-					collection: f['collection']
-						? f['collection']
-						: null,
-					user_id: f['userId']
-						? f['userId']
-						: null,
-					query: f['query'] ?? '',
-					url: f['url'] ?? '',
-					bytes: Number(f['bytes'] ?? 0),
-					fill_ms: Number(f['fillMs'] ?? 0),
-					// Empty ts = never filled = a locator: NULL keeps Age honest + non-entry.
-					last_filled: f['ts']
-						? at
-						: null,
-				};
-
-				// Last write in the batch wins — a re-conflicting insert would throw.
-				// Locators (last_filled null) insert-if-absent, never clobber a real fill.
-				(row.last_filled === null
-					? locators
-					: descriptors).set(row.cache_key, row);
-
-				continue;
-			}
-
-			events.push({
-				time: at,
-				cache_key: f['cacheKey']!,
-				kind: f['kind'] === 'h'
-					? 0
-					: 1,
-				age_ms: num(f['ageMs']),
-				gap_ms: num(f['gapMs']),
-				ttl_ms: num(f['ttlMs']),
-				duration_ms: num(f['durationMs']),
-			});
-		}
-
-		try {
-			if (events.length > 0) {
-				await db.batchInsert('directus_cache_events', events, FLUSH_BATCH);
-			}
-
-			if (descriptors.size > 0) {
-				await db('directus_cache_descriptors')
-					.insert([...descriptors.values()])
-					.onConflict('cache_key')
-					.merge();
-			}
-
-			// After real fills, so a locator only creates a row when none exists yet;
-			// its zeros must never overwrite a cached entry's bytes/coarse/fill_ms.
-			if (locators.size > 0) {
-				await db('directus_cache_descriptors')
-					.insert([...locators.values()])
-					.onConflict('cache_key')
-					.ignore();
-			}
-
-			if (anomalies.length > 0) {
-				await db.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
-			}
-		}
-		catch (err: any) {
-			// A batch that deterministically fails to persist (bad row, constraint,
-			// dialect quirk) must not wedge the drain: without the XDEL below it would
-			// be re-read from the stream head every tick forever, re-inserting any rows
-			// that DID land. Drop it to a warning — telemetry is lossy by design.
-			useLogger().warn(
-				err,
-				`[cache-stats] dropped ${batch.length} unpersistable events. ${err.message}`,
-			);
-		}
-
-		// Outside the try so a handled failure still advances the stream head. On
-		// success this preserves the at-least-once insert→XDEL ordering.
-		await redis.call('XDEL', streamKey(), ...ids);
-
+		await persistStreamBatch(redis, db, batch);
 		drained += batch.length;
 
 		if (batch.length < FLUSH_BATCH) {
@@ -669,6 +599,177 @@ async function drainCacheEventStream(): Promise<number> {
 	}
 
 	return drained;
+}
+
+// Create the shared group idempotently before each drain. '0' + MKSTREAM so it also
+// adopts entries already in the stream and survives a truncate that dropped the stream;
+// BUSYGROUP just means another node (or an earlier tick) got there first.
+async function ensureStreamGroup(redis: ReturnType<typeof useRedis>): Promise<void> {
+	try {
+		await redis.call('XGROUP', 'CREATE', streamKey(), STREAM_GROUP, '0', 'MKSTREAM');
+	}
+	catch (err: any) {
+		if (!String(err?.message).includes('BUSYGROUP')) {
+			throw err;
+		}
+	}
+}
+
+// Reclaim entries a dead consumer left pending past the idle window and re-drive them
+// through the same persist path (at-least-once). XAUTOCLAIM transfers ownership
+// atomically, so two nodes reclaiming at once still take disjoint slices.
+async function reclaimStalePending(
+	redis: ReturnType<typeof useRedis>,
+	db: Knex,
+): Promise<number> {
+	let reclaimed = 0;
+	let cursor = '0-0';
+
+	for (;;) {
+		if (dbPoolSaturated(db)) {
+			break;
+		}
+
+		const [nextCursor, batch] = (await redis.call(
+			'XAUTOCLAIM',
+			streamKey(),
+			STREAM_GROUP,
+			CONSUMER_NAME,
+			String(PENDING_RECLAIM_AFTER),
+			cursor,
+			'COUNT',
+			String(FLUSH_BATCH),
+		)) as [string, [string, string[]][], string[]];
+
+		if (batch.length > 0) {
+			await persistStreamBatch(redis, db, batch);
+			reclaimed += batch.length;
+		}
+
+		// '0-0' = the scan wrapped back to the start; nothing left to reclaim.
+		if (nextCursor === '0-0') {
+			break;
+		}
+
+		cursor = nextCursor;
+	}
+
+	return reclaimed;
+}
+
+// Demux one stream batch into the three tables, then ack + delete its entries. Shared
+// by the new-entry drain and the crashed-consumer reclaim.
+async function persistStreamBatch(
+	redis: ReturnType<typeof useRedis>,
+	db: Knex,
+	batch: [string, string[]][],
+): Promise<void> {
+	const ids = batch.map(([id]) => id);
+	const events: CacheEventRow[] = [];
+	const descriptors = new Map<string, CacheDescriptorRow>();
+	const locators = new Map<string, CacheDescriptorRow>();
+	const anomalies: CacheAnomalyRow[] = [];
+
+	for (const [, flat] of batch) {
+		const f = parseFields(flat);
+		const at = new Date(Number(f['ts']));
+
+		if (f['kind'] === 'a') {
+			anomalies.push({
+				time: at,
+				cache_key: f['cacheKey']!,
+				reason: f['reason'] ?? '',
+				detail: f['detail'] ?? '',
+			});
+
+			continue;
+		}
+
+		if (f['kind'] === 'd') {
+			const row: CacheDescriptorRow = {
+				cache_key: f['cacheKey']!,
+				redis_key: f['redisKey'] ?? '',
+				coarse: f['coarse'] === '1',
+				method: f['method'] ?? '',
+				path: f['path'] ?? '',
+				collection: f['collection']
+					? f['collection']
+					: null,
+				user_id: f['userId']
+					? f['userId']
+					: null,
+				query: f['query'] ?? '',
+				url: f['url'] ?? '',
+				bytes: Number(f['bytes'] ?? 0),
+				fill_ms: Number(f['fillMs'] ?? 0),
+				// Empty ts = never filled = a locator: NULL keeps Age honest + non-entry.
+				last_filled: f['ts']
+					? at
+					: null,
+			};
+
+			// Last write in the batch wins — a re-conflicting insert would throw.
+			// Locators (last_filled null) insert-if-absent, never clobber a real fill.
+			(row.last_filled === null
+				? locators
+				: descriptors).set(row.cache_key, row);
+
+			continue;
+		}
+
+		events.push({
+			time: at,
+			cache_key: f['cacheKey']!,
+			kind: f['kind'] === 'h'
+				? 0
+				: 1,
+			age_ms: num(f['ageMs']),
+			gap_ms: num(f['gapMs']),
+			ttl_ms: num(f['ttlMs']),
+			duration_ms: num(f['durationMs']),
+		});
+	}
+
+	try {
+		if (events.length > 0) {
+			await db.batchInsert('directus_cache_events', events, FLUSH_BATCH);
+		}
+
+		if (descriptors.size > 0) {
+			await db('directus_cache_descriptors')
+				.insert([...descriptors.values()])
+				.onConflict('cache_key')
+				.merge();
+		}
+
+		// After real fills, so a locator only creates a row when none exists yet;
+		// its zeros must never overwrite a cached entry's bytes/coarse/fill_ms.
+		if (locators.size > 0) {
+			await db('directus_cache_descriptors')
+				.insert([...locators.values()])
+				.onConflict('cache_key')
+				.ignore();
+		}
+
+		if (anomalies.length > 0) {
+			await db.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
+		}
+	}
+	catch (err: any) {
+		// A batch that deterministically fails to persist (bad row, constraint, dialect
+		// quirk) must not wedge the drain: without the ack/del below it would be
+		// redelivered every tick forever, re-inserting any rows that DID land. Drop it
+		// to a warning — telemetry is lossy by design.
+		useLogger().warn(
+			err,
+			`[cache-stats] dropped ${batch.length} unpersistable events. ${err.message}`,
+		);
+	}
+
+	// Outside the try so a handled failure still clears the entries. XACK settles the
+	// group's pending record; XDEL reclaims the stream memory.
+	await redis.call('XACK', streamKey(), STREAM_GROUP, ...ids);
+	await redis.call('XDEL', streamKey(), ...ids);
 }
 
 /**
@@ -832,10 +933,22 @@ export async function reapCacheDescriptors(): Promise<number> {
 	const db = getDatabase();
 	const cutoff = new Date(Date.now() - DESCRIPTOR_REAP_AFTER);
 
-	return db('directus_cache_descriptors')
+	// Filled descriptor: an orphan once stale AND no live event references it.
+	const filled = await db('directus_cache_descriptors')
 		.where('last_filled', '<', cutoff)
 		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
 		.delete();
+
+	// Locators (last_filled NULL) never match the cutoff, so reap them on the orphan rule
+	// alone: no event AND no anomaly still references them (both reaped at their own
+	// retention, so nothing left ⇒ no activity within the retention window).
+	const locators = await db('directus_cache_descriptors')
+		.whereNull('last_filled')
+		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
+		.whereNotIn('cache_key', db('directus_cache_anomalies').distinct('cache_key'))
+		.delete();
+
+	return filled + locators;
 }
 
 /**
@@ -1058,6 +1171,7 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 			enabled: false,
 			killedReason: null,
 			bufferLength: 0,
+			droppedEvents: cacheEventBufferDropped,
 		};
 	}
 
@@ -1068,20 +1182,27 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 		enabled: cacheStatsActiveFlag,
 		killedReason: await redis.get(reasonKey()),
 		bufferLength: await redis.xlen(streamKey()),
+		droppedEvents: cacheEventBufferDropped,
 	};
 }
 
-// Delete every stats key matching a glob (throttle slots, tombstones). Admin-only
-// over the instance's own namespace, so a KEYS scan is fine.
+// Delete every stats key matching a glob (throttle slots, tombstones). SCAN (not KEYS)
+// so it never blocks the shared Redis thread on a large keyspace; UNLINK frees the keys
+// off-thread.
 async function deleteStatsKeysByPattern(
 	redis: ReturnType<typeof useRedis>,
 	pattern: string,
 ): Promise<void> {
-	const keys = await redis.keys(pattern);
+	let cursor = '0';
 
-	if (keys.length > 0) {
-		await redis.del(...keys);
-	}
+	do {
+		const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+		cursor = next;
+
+		if (keys.length > 0) {
+			await redis.unlink(...keys);
+		}
+	} while (cursor !== '0');
 }
 
 // Drop all gathered telemetry — the fast way to reclaim space after autokill.
