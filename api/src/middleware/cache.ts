@@ -7,7 +7,7 @@ import {
 	queueCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
-import { recordCacheAnomaly } from '../utils/record-cache-anomaly.js';
+import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -44,7 +44,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		logger.warn(err, `[cache] Couldn't read key ${key}. ${err.message}`);
 
 		if (cacheStatsActive()) {
-			void recordCacheAnomaly(
+			void reportCacheAnomaly(
 				req,
 				'redis_error',
 				err?.message ?? String(err),

@@ -65,8 +65,8 @@ vi.mock('../cache-events.js', () => {
 	};
 });
 
-vi.mock('../utils/record-cache-anomaly.js', () => {
-	return { recordCacheAnomaly: vi.fn(() => Promise.resolve()) };
+vi.mock('../utils/report-cache-anomaly.js', () => {
+	return { reportCacheAnomaly: vi.fn(() => Promise.resolve()) };
 });
 
 import checkCacheMiddleware from './cache.js';
@@ -76,7 +76,7 @@ import {
 	queueCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
-import { recordCacheAnomaly } from '../utils/record-cache-anomaly.js';
+import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 
 const next = vi.fn();
 
@@ -234,7 +234,7 @@ describe('checkCacheMiddleware', () => {
 		const res = makeRes();
 		await checkCacheMiddleware(makeReq(), res, next);
 
-		expect(recordCacheAnomaly).toHaveBeenCalledWith(
+		expect(reportCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'redis_error',
 			expect.any(String),

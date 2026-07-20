@@ -16,7 +16,7 @@ import { getGraphqlQueryAndVariables } from './get-graphql-query-and-variables.j
  * anomaly. bytes/fillMs are 0 — a locator, not a cached entry. Best-effort: both
  * writes go to the Redis stream, so a full Redis outage records nothing.
  */
-export async function recordCacheAnomaly(
+export async function reportCacheAnomaly(
 	req: Request,
 	reason: CacheAnomalyReason,
 	detail?: string | null,
