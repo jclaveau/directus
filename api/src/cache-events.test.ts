@@ -675,7 +675,7 @@ describe('flushCacheEvents', () => {
 				kind: 'd', cacheKey: 'k9', redisKey: 'rk9', coarse: '0',
 				method: 'GET', path: '/server/info', collection: '', userId: '',
 				query: '{}', url: '/server/info', bytes: '0', fillMs: '0',
-				locator: '1', ts: '2000',
+				ts: '', // empty ts = a locator (never filled)
 			}),
 		];
 

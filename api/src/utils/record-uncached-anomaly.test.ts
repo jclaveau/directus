@@ -63,7 +63,7 @@ describe('recordUncachedAnomaly', () => {
 				url: '/items/articles?limit=5',
 				bytes: 0,
 				fillMs: 0,
-				locator: true,
+				lastFilled: null,
 			}),
 		);
 
