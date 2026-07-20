@@ -260,6 +260,30 @@ describe('checkCacheMiddleware', () => {
 		expect(next).toHaveBeenCalled();
 	});
 
+	test('an expiry-sibling read failure flags a redis_error anomaly when stats active', async () => {
+		vi.mocked(cacheStatsActive).mockReturnValueOnce(true);
+
+		getCacheValue.mockImplementation(async (_cache: unknown, key: string) => {
+			if (key === 'cache-key') {
+				return { data: [1] };
+			}
+
+			throw new Error('boom');
+		});
+
+		const res = makeRes();
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		expect(reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'redis_error',
+			expect.any(String),
+		);
+
+		expect(res.setHeader).toHaveBeenCalledWith('x-cache-status', 'MISS');
+		expect(next).toHaveBeenCalled();
+	});
+
 	test('HIT captures hit telemetry when stats are active', async () => {
 		vi.mocked(cacheStatsActive).mockReturnValue(true);
 		primeEnrichedHit();

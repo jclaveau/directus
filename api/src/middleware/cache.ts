@@ -64,6 +64,15 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 			cacheExpiryDate = expiresMeta?.exp;
 		} catch (err: any) {
 			logger.warn(err, `[cache] Couldn't read key ${`${key}__expires_at`}. ${err.message}`);
+
+			if (cacheStatsActive()) {
+				void reportCacheAnomaly(
+					req,
+					'redis_error',
+					err?.message ?? String(err),
+				).catch(() => {});
+			}
+
 			if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
 			return next();
 		}

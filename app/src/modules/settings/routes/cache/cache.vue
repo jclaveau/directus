@@ -72,6 +72,9 @@ const windowOptions = [
 
 const selectedWindow = ref('24h');
 
+// Bumped per load so a slow response for a superseded window can't clobber a newer one.
+let loadToken = 0;
+
 // Runtime collection state (Redis-backed). `configured` is the env opt-in: when
 // false the toggle is hidden, since the flag can only narrow, never widen it.
 const statsState = ref<{
@@ -280,6 +283,7 @@ const totalHits = computed(() => {
 });
 
 async function load() {
+	const token = ++loadToken;
 	loading.value = true;
 	error.value = null;
 
@@ -288,28 +292,44 @@ async function load() {
 			params: { window: selectedWindow.value },
 		});
 
+		if (token !== loadToken) {
+			return;
+		}
+
 		entries.value = response.data.data;
 		now.value = Date.now();
 		void loadAnomalies();
 	}
 	catch (err: any) {
-		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		if (token === loadToken) {
+			error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		}
 	}
 	finally {
-		loading.value = false;
+		if (token === loadToken) {
+			loading.value = false;
+		}
 	}
 }
 
 async function loadAnomalies() {
+	const token = loadToken;
+
 	try {
 		const response = await api.get('/utils/cache/anomalies', {
 			params: { window: selectedWindow.value },
 		});
 
+		if (token !== loadToken) {
+			return;
+		}
+
 		anomalies.value = response.data.data;
 	}
 	catch {
-		anomalies.value = [];
+		if (token === loadToken) {
+			anomalies.value = [];
+		}
 	}
 }
 
@@ -481,6 +501,7 @@ function copyQuery(query: QueryGroup) {
 // (the descriptor outlives the value, so it may already be gone).
 async function openEntry(entry: CacheEntry) {
 	selectedEntry.value = entry;
+	now.value = Date.now(); // fresh clock so absentReason's expired-vs-evicted verdict is current
 	cachedValue.value = null;
 	cachedValueExists.value = false;
 	cachedTags.value = null;
@@ -527,9 +548,8 @@ function closeEntry() {
 }
 
 onMounted(() => {
-	void load();
+	void load(); // load() already triggers loadAnomalies()
 	void loadStatsState();
-	void loadAnomalies();
 });
 </script>
 

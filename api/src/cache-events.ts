@@ -197,7 +197,12 @@ export function clampCacheStatsWindow(requested: number | undefined): number {
 		return DEFAULT_CACHE_STATS_WINDOW;
 	}
 
-	return Math.min(Math.max(requested, MIN_CACHE_STATS_WINDOW), retentionMs());
+	// Keep the ceiling at or above the floor: a sub-1m retention would otherwise invert
+	// the clamp and return a window below MIN.
+	return Math.min(
+		Math.max(requested, MIN_CACHE_STATS_WINDOW),
+		Math.max(retentionMs(), MIN_CACHE_STATS_WINDOW),
+	);
 }
 
 /**
@@ -843,6 +848,7 @@ export async function listCacheEntries(
 			'd.last_filled',
 		)
 		.orderBy('hits', 'desc')
+		.orderBy('d.cache_key', 'asc')
 		.limit(CACHE_STATS_LISTING_LIMIT)
 		.select(selects);
 
@@ -1001,6 +1007,8 @@ export async function listCacheAnomalies(
 			db.raw('MAX(a.time) AS last_seen'),
 		)
 		.orderBy('count', 'desc')
+		.orderBy('a.cache_key', 'asc')
+		.orderBy('a.reason', 'asc')
 		.limit(CACHE_STATS_LISTING_LIMIT);
 
 	return rows.map((row: Record<string, unknown>) => {

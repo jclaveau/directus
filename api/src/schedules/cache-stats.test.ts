@@ -3,6 +3,7 @@ import {
 	cacheStatsConfigured,
 	enforceCacheStatsBudget,
 	drainCacheEvents,
+	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
 	refreshCacheStatsFlag,
@@ -22,6 +23,7 @@ beforeEach(() => {
 	vi.mocked(enforceCacheStatsBudget).mockResolvedValue();
 	vi.mocked(reapCacheDescriptors).mockResolvedValue(0);
 	vi.mocked(reapCacheEvents).mockResolvedValue(0);
+	vi.mocked(reapCacheAnomalies).mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -89,7 +91,7 @@ describe('cache-stats schedule', () => {
 		expect(enforceCacheStatsBudget).toHaveBeenCalled();
 	});
 
-	it('registers a daily reap job that prunes events then descriptors', async () => {
+	it('registers a daily reap job that prunes events, descriptors, and anomalies', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
 
 		await cacheStatsSchedule();
@@ -103,5 +105,6 @@ describe('cache-stats schedule', () => {
 		await reap![2](new Date(0));
 		expect(reapCacheEvents).toHaveBeenCalled();
 		expect(reapCacheDescriptors).toHaveBeenCalled();
+		expect(reapCacheAnomalies).toHaveBeenCalled();
 	});
 });
