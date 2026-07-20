@@ -21,7 +21,7 @@ import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
 } from '../utils/get-graphql-query-and-variables.js';
-import { recordCacheAnomaly } from '../utils/record-cache-anomaly.js';
+import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -220,7 +220,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
 
 			if (cacheStatsActive()) {
-				void recordCacheAnomaly(
+				void reportCacheAnomaly(
 					req,
 					'redis_error',
 					err?.message ?? String(err),
@@ -240,14 +240,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// Surface the two silent "cacheable but skipped" reasons on the dashboard.
 	if (cacheStatsActive() && cacheableRequest) {
 		if (exceedsMaxSize) {
-			void recordCacheAnomaly(
+			void reportCacheAnomaly(
 				req,
 				'value_too_large',
 				`${valueSize}B`,
 			).catch(() => {});
 		}
 		else if (orphansInScopedMode) {
-			void recordCacheAnomaly(req, 'missing_scope').catch(() => {});
+			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
 		}
 	}
 

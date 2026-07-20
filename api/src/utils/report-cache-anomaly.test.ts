@@ -25,7 +25,7 @@ vi.mock('./get-graphql-query-and-variables.js', () => {
 	return { getGraphqlQueryAndVariables: mocks.getGraphqlQueryAndVariables };
 });
 
-import { recordCacheAnomaly } from './record-cache-anomaly.js';
+import { reportCacheAnomaly } from './report-cache-anomaly.js';
 
 function makeReq(overrides: Partial<Request> = {}): Request {
 	return {
@@ -38,7 +38,7 @@ function makeReq(overrides: Partial<Request> = {}): Request {
 	} as unknown as Request;
 }
 
-describe('recordCacheAnomaly', () => {
+describe('reportCacheAnomaly', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mocks.claimCacheAnomalyThrottleSlot.mockResolvedValue(true);
@@ -47,7 +47,7 @@ describe('recordCacheAnomaly', () => {
 	it('claims the slot, then writes the descriptor + anomaly', async () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk1', hash: 'h1' });
 
-		await recordCacheAnomaly(makeReq(), 'value_too_large', '2048B');
+		await reportCacheAnomaly(makeReq(), 'value_too_large', '2048B');
 
 		expect(mocks.claimCacheAnomalyThrottleSlot)
 			.toHaveBeenCalledWith('value_too_large', 'h1');
@@ -79,7 +79,7 @@ describe('recordCacheAnomaly', () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk2', hash: 'h2' });
 
 		const req = makeReq({ method: 'POST', originalUrl: '/graphql' });
-		await recordCacheAnomaly(req, 'missing_scope');
+		await reportCacheAnomaly(req, 'missing_scope');
 
 		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -101,7 +101,7 @@ describe('recordCacheAnomaly', () => {
 		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk3', hash: 'h3' });
 		mocks.claimCacheAnomalyThrottleSlot.mockResolvedValueOnce(false);
 
-		await recordCacheAnomaly(makeReq(), 'missing_scope');
+		await reportCacheAnomaly(makeReq(), 'missing_scope');
 
 		expect(mocks.queueCacheDescriptor).not.toHaveBeenCalled();
 		expect(mocks.queueCacheAnomaly).not.toHaveBeenCalled();

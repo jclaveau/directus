@@ -23,7 +23,7 @@ const mocks = vi.hoisted(() => {
 		permissionsCachable: vi.fn(),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
-		recordCacheAnomaly: vi.fn().mockResolvedValue(undefined),
+		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
@@ -59,8 +59,8 @@ vi.mock('../utils/get-string-byte-size.js', () => {
 	return { stringByteSize: mocks.stringByteSize };
 });
 
-vi.mock('../utils/record-cache-anomaly.js', () => {
-	return { recordCacheAnomaly: mocks.recordCacheAnomaly };
+vi.mock('../utils/report-cache-anomaly.js', () => {
+	return { reportCacheAnomaly: mocks.reportCacheAnomaly };
 });
 
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
@@ -296,7 +296,7 @@ describe('respond middleware', () => {
 		expect(res.json).toHaveBeenCalled();
 
 		// the failed write also surfaces as a redis_error anomaly carrying the message
-		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'redis_error',
 			'boom',
@@ -311,7 +311,7 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 
-		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
@@ -327,7 +327,7 @@ describe('respond middleware', () => {
 
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 
-		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'missing_scope',
 		);
@@ -407,9 +407,9 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
-		expect(mocks.recordCacheAnomaly).toHaveBeenCalledTimes(1);
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledTimes(1);
 
-		expect(mocks.recordCacheAnomaly).toHaveBeenCalledWith(
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
