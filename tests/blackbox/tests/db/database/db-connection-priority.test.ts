@@ -119,10 +119,8 @@ describe('DB pool exhaustion error', () => {
 	it.each(EXHAUST_VENDORS)(
 		'%s surfaces 429 DATABASE_POOL_EXHAUSTED when the client-side pool is saturated',
 		async (vendor) => {
-			// A tier that inherits the base db but caps its OWN knex/tarn pool at one
-			// connection with a tight acquire timeout — concurrent queries can't all get
-			// a connection and time out client-side (no pgbouncer involved). This is the
-			// client_pool_timeout reason.
+			// Acquire timeout sits between a cold connect and the sleep (1s<3s): 2 queries
+			// saturate the 1-conn pool, probe times out first. 150ms flaked on slow CI.
 			await Promise.all([
 				setDirectusEnv(vendor, 'DB_CONNECTIONS', 'tiny'),
 				setDirectusEnv(vendor, 'DB_CONNECTION_TINY_PRIORITY', '100'),
@@ -131,7 +129,7 @@ describe('DB pool exhaustion error', () => {
 				setDirectusEnv(
 					vendor,
 					'DB_CONNECTION_TINY_POOL__ACQUIRE_TIMEOUT_MILLIS',
-					'150',
+					'1000',
 				),
 			]);
 
@@ -140,7 +138,7 @@ describe('DB pool exhaustion error', () => {
 				.send({
 					saturate: [{ connection: 'tiny', concurrency: 2 }],
 					probe: ['tiny'],
-					sleep: 1,
+					sleep: 3,
 					onProbeError: 'propagate',
 				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);

@@ -84,18 +84,6 @@ export default (router, { services, getSchema }) => {
 			for (const { connection, concurrency } of saturate) {
 				const knex = await grantedKnex([connection]);
 
-				// Cold connect can outlast the tight acquire timeout, leaving the pool
-				// unsaturated (probe then hits an idle conn → false 200); warm one first.
-				for (let i = 0; i < 10; i++) {
-					try {
-						await knex.raw('SELECT 1');
-						break;
-					}
-					catch {
-						// still establishing in the background — retry
-					}
-				}
-
 				for (let i = 0; i < (Number(concurrency) || 1); i++) {
 					knex.raw('SELECT pg_sleep(?)', [sleepSeconds]).catch(() => {});
 				}
