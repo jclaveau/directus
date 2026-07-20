@@ -409,7 +409,7 @@ describe('CachePage', () => {
 		expect(wrapper.text()).toContain('expired (TTL elapsed)');
 	});
 
-	it('names a scoped purge / eviction for a non-coarse entry gone before its TTL', async () => {
+	it('names a scoped purge for a non-coarse entry gone early', async () => {
 		const evicted = [{ ...ENTRIES[1] }]; // non-coarse, future expiry
 
 		vi.mocked(api.get).mockImplementation((url: string) => {
@@ -433,7 +433,7 @@ describe('CachePage', () => {
 		expect(wrapper.text()).toContain('scoped purge or memory eviction');
 	});
 
-	it('refetches entries and anomalies when the window selector changes', async () => {
+	it('refetches on a window-selector change', async () => {
 		mockCacheGet(ENTRIES);
 
 		const wrapper = mount(CachePage, { global });
@@ -543,7 +543,7 @@ describe('CachePage', () => {
 		await flushPromises();
 		expect(wrapper.findAll('tbody tr')).toHaveLength(5); // sitting on page 2
 
-		// A search reshapes the group (all 30 still match 'items'); paging must snap to 1.
+		// A search reshapes the group; paging must reset to page 1.
 		wrapper.findComponent(SearchInput).vm.$emit('update:modelValue', 'items');
 		await flushPromises();
 

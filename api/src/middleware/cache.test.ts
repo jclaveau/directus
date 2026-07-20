@@ -260,7 +260,7 @@ describe('checkCacheMiddleware', () => {
 		expect(next).toHaveBeenCalled();
 	});
 
-	test('an expiry-sibling read failure flags a redis_error anomaly when stats active', async () => {
+	test('expiry-sibling read failure flags redis_error when active', async () => {
 		vi.mocked(cacheStatsActive).mockReturnValueOnce(true);
 
 		getCacheValue.mockImplementation(async (_cache: unknown, key: string) => {

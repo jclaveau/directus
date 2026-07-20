@@ -109,21 +109,21 @@ export interface CacheStatsState {
 	enabled: boolean;
 	killedReason: string | null;
 	bufferLength: number;
-	// Hot-path events dropped because the buffer hit its cap while a flush was still in
-	// flight (slow Redis). Lifetime counter — a non-zero value means telemetry is lossy.
+	// Hot-path events dropped when the buffer hit its cap mid-flush (slow Redis).
+	// Lifetime counter — a non-zero value means telemetry went lossy.
 	droppedEvents: number;
 }
 
 const STREAM_HARD_CAP = 1_000_000;
 
-// One shared consumer group across all nodes: XREADGROUP '>' hands each entry to a
-// single consumer, so overlapping drains on different nodes take disjoint slices and
-// the append-only tables can't be double-inserted. Consumer name = per-process PEL owner.
+// One shared consumer group across all nodes: XREADGROUP '>' hands each entry to
+// a single consumer, so overlapping drains on other nodes take disjoint slices —
+// the append-only tables can't double-insert. Consumer name = per-process PEL owner.
 const STREAM_GROUP = 'drain';
 const CONSUMER_NAME = randomUUID();
 
-// A consumer that read a batch then died leaves it pending; reclaim + re-drive it once
-// idle this long (at-least-once, matching the pre-group insert→XDEL semantics).
+// A consumer that read a batch then died leaves it pending; reclaim + re-drive it
+// once idle this long (at-least-once, like the pre-group insert→XDEL semantics).
 const PENDING_RECLAIM_AFTER = getMilliseconds('60s', 60_000);
 
 const FLUSH_BATCH = 500;
@@ -197,7 +197,7 @@ export function clampCacheStatsWindow(requested: number | undefined): number {
 		return DEFAULT_CACHE_STATS_WINDOW;
 	}
 
-	// Keep the ceiling at or above the floor: a sub-1m retention would otherwise invert
+	// Keep the ceiling at/above the floor: a sub-1m retention would otherwise invert
 	// the clamp and return a window below MIN.
 	return Math.min(
 		Math.max(requested, MIN_CACHE_STATS_WINDOW),
@@ -233,8 +233,8 @@ let cacheEventBufferDropped = 0;
 
 // Buffer one entry's fields; flush now if full, else at the tick boundary.
 function xadd(fields: Record<string, string>): void {
-	// Full while a flush is still in flight (slow Redis): drop rather than grow the heap
-	// unbounded on the hot path. Lossy by design; the drop count surfaces on the state.
+	// Full while a flush is in flight (slow Redis): drop rather than grow the heap
+	// unbounded on the hot path. Lossy by design; the drop surfaces on the state.
 	if (cacheEventBufferFlushInProgress
 		&& cacheEventBuffer.length >= CACHE_EVENT_BUFFER_CAP) {
 		cacheEventBufferDropped += 1;
@@ -537,9 +537,9 @@ function dbPoolSaturated(db: Knex): boolean {
 }
 
 /**
- * Guarded entrypoint for the drain. A process-local latch makes an overlapping tick on
- * the same node a no-op; cross-node overlap is safe because the drain reads through a
- * shared consumer group (each entry delivered to one consumer), not a raw XRANGE.
+ * Guarded entrypoint for the drain. A process-local latch makes an overlapping
+ * tick on the same node a no-op; cross-node overlap is safe because the drain
+ * reads through a shared consumer group (each entry to one consumer), not XRANGE.
  */
 export async function drainCacheEvents(): Promise<number> {
 	if (!cacheStatsConfigured() || cacheEventDrainInProgress) {
@@ -567,7 +567,7 @@ async function drainCacheEventStream(): Promise<number> {
 	const redis = useRedis();
 	await ensureStreamGroup(redis);
 
-	// Re-drive anything a crashed consumer left pending, then the never-delivered ones.
+	// Re-drive anything a crashed consumer left pending, then never-delivered ones.
 	let drained = await reclaimStalePending(redis, db);
 
 	for (;;) {
@@ -606,9 +606,9 @@ async function drainCacheEventStream(): Promise<number> {
 	return drained;
 }
 
-// Create the shared group idempotently before each drain. '0' + MKSTREAM so it also
-// adopts entries already in the stream and survives a truncate that dropped the stream;
-// BUSYGROUP just means another node (or an earlier tick) got there first.
+// Create the shared group idempotently before each drain. '0' + MKSTREAM so it
+// also adopts entries already in the stream and survives a truncate that dropped
+// it; BUSYGROUP just means another node (or an earlier tick) got there first.
 async function ensureStreamGroup(redis: ReturnType<typeof useRedis>): Promise<void> {
 	try {
 		await redis.call('XGROUP', 'CREATE', streamKey(), STREAM_GROUP, '0', 'MKSTREAM');
@@ -620,9 +620,9 @@ async function ensureStreamGroup(redis: ReturnType<typeof useRedis>): Promise<vo
 	}
 }
 
-// Reclaim entries a dead consumer left pending past the idle window and re-drive them
-// through the same persist path (at-least-once). XAUTOCLAIM transfers ownership
-// atomically, so two nodes reclaiming at once still take disjoint slices.
+// Reclaim entries a dead consumer left pending past the idle window and re-drive
+// them through the same persist path (at-least-once). XAUTOCLAIM transfers PEL
+// ownership atomically, so two nodes reclaiming at once take disjoint slices.
 async function reclaimStalePending(
 	redis: ReturnType<typeof useRedis>,
 	db: Knex,
@@ -662,8 +662,8 @@ async function reclaimStalePending(
 	return reclaimed;
 }
 
-// Demux one stream batch into the three tables, then ack + delete its entries. Shared
-// by the new-entry drain and the crashed-consumer reclaim.
+// Demux one stream batch into the three tables, then ack + delete its entries.
+// Shared by the new-entry drain and the crashed-consumer reclaim.
 async function persistStreamBatch(
 	redis: ReturnType<typeof useRedis>,
 	db: Knex,
@@ -945,9 +945,9 @@ export async function reapCacheDescriptors(): Promise<number> {
 		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
 		.delete();
 
-	// Locators (last_filled NULL) never match the cutoff, so reap them on the orphan rule
-	// alone: no event AND no anomaly still references them (both reaped at their own
-	// retention, so nothing left ⇒ no activity within the retention window).
+	// Locators (last_filled NULL) never match the cutoff, so reap them on the orphan
+	// rule alone: no event AND no anomaly still references them (both reaped at their
+	// own retention, so nothing left ⇒ no activity within the retention window).
 	const locators = await db('directus_cache_descriptors')
 		.whereNull('last_filled')
 		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
@@ -1194,9 +1194,9 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 	};
 }
 
-// Delete every stats key matching a glob (throttle slots, tombstones). SCAN (not KEYS)
-// so it never blocks the shared Redis thread on a large keyspace; UNLINK frees the keys
-// off-thread.
+// Delete every stats key matching a glob (throttle slots, tombstones). SCAN, not
+// KEYS, so it never blocks the shared Redis thread on a big keyspace; UNLINK frees
+// the keys off-thread.
 async function deleteStatsKeysByPattern(
 	redis: ReturnType<typeof useRedis>,
 	pattern: string,
