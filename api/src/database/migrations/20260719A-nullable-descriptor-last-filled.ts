@@ -18,7 +18,9 @@ export async function up(knex: Knex): Promise<void> {
 export async function down(knex: Knex): Promise<void> {
 	// Locators hold a NULL last_filled and are disposable; drop them first, else
 	// re-tightening to NOT NULL fails on "column contains null values".
-	await knex('directus_cache_descriptors').whereNull('last_filled').delete();
+	await knex('directus_cache_descriptors')
+		.whereNull('last_filled')
+		.delete();
 
 	await knex.schema.alterTable('directus_cache_descriptors', (table) => {
 		table

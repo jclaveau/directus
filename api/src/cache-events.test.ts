@@ -742,14 +742,18 @@ describe('drainCacheEvents', () => {
 		await drainCacheEvents();
 
 		expect(builder.insert).toHaveBeenCalledWith([
-			expect.objectContaining({ cache_key: 'kx', bytes: 42, last_filled: new Date(1000) }),
+			expect.objectContaining({
+				cache_key: 'kx',
+				bytes: 42,
+				last_filled: new Date(1000),
+			}),
 		]);
 
 		expect(builder.insert).toHaveBeenCalledWith([
 			expect.objectContaining({ cache_key: 'kx', bytes: 0, last_filled: null }),
 		]);
 
-		// The real merge must run BEFORE the locator ignore, so a 0-byte locator can never
+		// Real merge must run BEFORE the locator ignore, so a 0-byte locator can't
 		// clobber a same-key fill's bytes/coarse.
 		expect(order).toEqual(['merge', 'ignore']);
 	});
@@ -917,22 +921,34 @@ describe('drainCacheEvents', () => {
 		expect(readCalls).toBe(1);
 	});
 
-	it('reads through the consumer group, then acks + deletes each entry', async () => {
+	it('reads via the consumer group, then acks + deletes entries', async () => {
 		streamBatch = [
-			streamEntry('1-0', { kind: 'h', cacheKey: 'k', ageMs: '1', ttlMs: '1', ts: '1' }),
+			streamEntry('1-0', { kind: 'h', cacheKey: 'k', ts: '1' }),
 		];
 
 		await drainCacheEvents();
 
 		expect(mockRedis.call).toHaveBeenCalledWith(
-			'XGROUP', 'CREATE', STREAM, 'drain', '0', 'MKSTREAM',
+			'XGROUP',
+			'CREATE',
+			STREAM,
+			'drain',
+			'0',
+			'MKSTREAM',
 		);
 
-		// '>' hands out only never-delivered entries, so a peer node's drain can't read
-		// this same batch — the double-insert this replaced a raw XRANGE to prevent.
+		// '>' hands out only never-delivered entries, so a peer node's drain can't
+		// read this same batch — the double-insert a raw XRANGE would allow.
 		expect(mockRedis.call).toHaveBeenCalledWith(
-			'XREADGROUP', 'GROUP', 'drain', expect.any(String),
-			'COUNT', '500', 'STREAMS', STREAM, '>',
+			'XREADGROUP',
+			'GROUP',
+			'drain',
+			expect.any(String),
+			'COUNT',
+			'500',
+			'STREAMS',
+			STREAM,
+			'>',
 		);
 
 		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '1-0');
@@ -955,7 +971,7 @@ describe('drainCacheEvents', () => {
 		await expect(drainCacheEvents()).resolves.toBe(0);
 	});
 
-	it('reclaims stale pending entries and re-drives them through the same path', async () => {
+	it('reclaims stale pending entries and re-drives them', async () => {
 		const pending = streamEntry('7-0', {
 			kind: 'h', cacheKey: 'kp', ageMs: '9', ttlMs: '1', ts: '9',
 		});
@@ -1167,7 +1183,11 @@ describe('truncateCacheEvents', () => {
 	});
 
 	it('also clears the stream buffer and the throttle/tombstone keys', async () => {
-		mockRedis.scan.mockImplementation((_cursor: string, _match: string, pattern: string) => {
+		mockRedis.scan.mockImplementation((
+			_cursor: string,
+			_match: string,
+			pattern: string,
+		) => {
 			// A held anomaly-throttle slot would otherwise suppress the next sample for
 			// its whole window, so a truncate + re-provoke sees an empty table.
 			return Promise.resolve([
@@ -1181,8 +1201,22 @@ describe('truncateCacheEvents', () => {
 		await truncateCacheEvents();
 
 		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:events');
-		expect(mockRedis.scan).toHaveBeenCalledWith('0', 'MATCH', 'scalabus:stats:anom:*', 'COUNT', 100);
-		expect(mockRedis.scan).toHaveBeenCalledWith('0', 'MATCH', 'scalabus:stats:tomb:*', 'COUNT', 100);
+
+		expect(mockRedis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'scalabus:stats:anom:*',
+			'COUNT',
+			100,
+		);
+
+		expect(mockRedis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'scalabus:stats:tomb:*',
+			'COUNT',
+			100,
+		);
 
 		expect(mockRedis.unlink).toHaveBeenCalledWith(
 			'scalabus:stats:anom:missing_scope:h1',
@@ -1432,7 +1466,7 @@ describe('reapCacheDescriptors', () => {
 
 		const reaped = await reapCacheDescriptors();
 
-		// Two deletes — filled orphans + never-filled locators — each returns deleteCount.
+		// Two deletes — filled orphans + locators — each returns deleteCount.
 		expect(reaped).toBe(6);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
 
@@ -1488,7 +1522,7 @@ describe('reapCacheEvents', () => {
 });
 
 describe('buffer cap under a stalled flush', () => {
-	it('drops events past the cap while a flush is in flight and counts them', async () => {
+	it('drops events past the cap during a stalled flush', async () => {
 		await armFlag(null);
 
 		let releaseFlush: () => void = () => {};

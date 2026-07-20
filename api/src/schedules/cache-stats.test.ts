@@ -91,7 +91,7 @@ describe('cache-stats schedule', () => {
 		expect(enforceCacheStatsBudget).toHaveBeenCalled();
 	});
 
-	it('registers a daily reap job that prunes events, descriptors, and anomalies', async () => {
+	it('registers a daily reap for events, descriptors, anomalies', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
 
 		await cacheStatsSchedule();
