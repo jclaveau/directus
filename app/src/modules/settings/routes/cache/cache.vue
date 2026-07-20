@@ -2,7 +2,7 @@
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
 import { getRootPath } from '@/utils/get-root-path';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Filter } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
@@ -61,6 +61,12 @@ const search = ref('');
 const filter = ref<Filter | null>(null);
 const entryPage = ref<Record<string, number>>({});
 
+// A search/filter change reshapes every group, so reset paging to the first page —
+// else the saved deep page strands the user on a tail slice of the filtered set.
+watch([search, filter], () => {
+	entryPage.value = {};
+});
+
 // How far back the listing looks — sent as ?window= to the API, which clamps it.
 const windowOptions = [
 	{ text: t('cache_window_1h', 'Last 1h'), value: '1h' },
@@ -72,8 +78,12 @@ const windowOptions = [
 
 const selectedWindow = ref('24h');
 
-// Bumped per load so a slow response for a superseded window can't clobber a newer one.
+// Bumped per load; a superseded window's late response can't clobber a newer one.
 let loadToken = 0;
+
+// Drawer version of loadToken: a per-open token so a late /entry response (even a
+// same-key reopen) can't overwrite a newer open; a close discards it entirely.
+let entryToken = 0;
 
 // Runtime collection state (Redis-backed). `configured` is the env opt-in: when
 // false the toggle is hidden, since the flag can only narrow, never widen it.
@@ -169,7 +179,12 @@ const absentReason = computed(() => {
 		return t('cache_value_absent', 'Not in the cache');
 	}
 
-	if (entry.expiresAt !== null && now.value >= entry.expiresAt) {
+	// Round to whole seconds like the "Expires in" column so both flip to "expired"
+	// at the same instant, not up to a second apart.
+	if (
+		entry.expiresAt !== null
+		&& Math.round((entry.expiresAt - now.value) / 1000) <= 0
+	) {
 		return t('cache_value_expired', 'Not in the cache — expired (TTL elapsed)');
 	}
 
@@ -288,17 +303,24 @@ async function load() {
 	error.value = null;
 
 	try {
-		const response = await api.get('/utils/cache', {
-			params: { window: selectedWindow.value },
-		});
+		// Fetch both together and assign in one go: entries + anomalies feed one group
+		// tree, so a staggered assign would flash a phantom old-window anomaly node.
+		const [entriesRes, anomaliesRes] = await Promise.all([
+			api.get('/utils/cache', {
+				params: { window: selectedWindow.value },
+			}),
+			api.get('/utils/cache/anomalies', {
+				params: { window: selectedWindow.value },
+			}).catch(() => ({ data: { data: [] } })),
+		]);
 
 		if (token !== loadToken) {
 			return;
 		}
 
-		entries.value = response.data.data;
+		entries.value = entriesRes.data.data;
+		anomalies.value = anomaliesRes.data.data;
 		now.value = Date.now();
-		void loadAnomalies();
 	}
 	catch (err: any) {
 		if (token === loadToken) {
@@ -308,27 +330,6 @@ async function load() {
 	finally {
 		if (token === loadToken) {
 			loading.value = false;
-		}
-	}
-}
-
-async function loadAnomalies() {
-	const token = loadToken;
-
-	try {
-		const response = await api.get('/utils/cache/anomalies', {
-			params: { window: selectedWindow.value },
-		});
-
-		if (token !== loadToken) {
-			return;
-		}
-
-		anomalies.value = response.data.data;
-	}
-	catch {
-		if (token === loadToken) {
-			anomalies.value = [];
 		}
 	}
 }
@@ -386,6 +387,7 @@ async function toggleStats() {
 
 async function evictEntry(entry: CacheEntry) {
 	error.value = null;
+	closeEntry(); // the value is about to be gone; don't leave the drawer showing it as live
 
 	try {
 		await api.delete('/utils/cache', { params: { key: entry.redisKey } });
@@ -398,6 +400,7 @@ async function evictEntry(entry: CacheEntry) {
 
 async function evictPath(path: string) {
 	error.value = null;
+	closeEntry(); // the open entry may belong to this path; don't leave it showing as live
 
 	try {
 		await api.delete('/utils/cache', { params: { path } });
@@ -500,6 +503,7 @@ function copyQuery(query: QueryGroup) {
 // Open the detail drawer for a row and fetch its live cached value from Redis
 // (the descriptor outlives the value, so it may already be gone).
 async function openEntry(entry: CacheEntry) {
+	const token = ++entryToken;
 	selectedEntry.value = entry;
 	now.value = Date.now(); // fresh clock so absentReason's expired-vs-evicted verdict is current
 	cachedValue.value = null;
@@ -516,9 +520,9 @@ async function openEntry(entry: CacheEntry) {
 			params: { key: entry.redisKey },
 		});
 
-		// A quick second row click supersedes this fetch; ignore a late response for a
-		// no-longer-selected entry so it can't overwrite the currently-open one.
-		if (selectedEntry.value?.key !== entry.key) {
+		// A newer open (or a close) supersedes this fetch; ignore a late response so it
+		// can't overwrite the currently-open entry — even a re-open of the same key.
+		if (token !== entryToken) {
 			return;
 		}
 
@@ -532,23 +536,25 @@ async function openEntry(entry: CacheEntry) {
 		cachedTombstone.value = data.tombstone;
 	}
 	catch {
-		if (selectedEntry.value?.key === entry.key) {
+		if (token === entryToken) {
 			cachedValueExists.value = false;
 		}
 	}
 	finally {
-		if (selectedEntry.value?.key === entry.key) {
+		if (token === entryToken) {
 			valueLoading.value = false;
 		}
 	}
 }
 
 function closeEntry() {
+	entryToken += 1; // discard any in-flight /entry fetch
 	selectedEntry.value = null;
+	valueLoading.value = false;
 }
 
 onMounted(() => {
-	void load(); // load() already triggers loadAnomalies()
+	void load(); // load() fetches entries + anomalies together
 	void loadStatsState();
 });
 </script>

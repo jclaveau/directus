@@ -111,7 +111,7 @@ export function isSystemPath(path: string): boolean {
 	}
 
 	if (head === 'graphql') {
-		return path.startsWith('/graphql/system');
+		return (segments[1] ?? '') === 'system';
 	}
 
 	return SYSTEM_SEGMENTS.has(head);
@@ -335,7 +335,7 @@ function buildQueryGroups(
 
 	for (const bucket of byQuery.values()) {
 		result.push({
-			key: `${path} ${bucket.method} ${bucket.query}`,
+			key: `${path}\x00${bucket.method}\x00${bucket.query}`,
 			method: bucket.method,
 			query: bucket.query,
 			url: bucket.url,
