@@ -47,7 +47,7 @@ vi.mock('./bus/index.js', () => ({ useBus: () => mockBus }));
 
 const STREAM = 'scalabus:stats:events';
 
-let xrangeBatch: [string, string[]][];
+let streamBatch: [string, string[]][];
 
 let mockRedis: {
 	call: Mock;
@@ -55,7 +55,8 @@ let mockRedis: {
 	get: Mock;
 	set: Mock;
 	del: Mock;
-	keys: Mock;
+	scan: Mock;
+	unlink: Mock;
 	pipeline: Mock;
 };
 
@@ -67,16 +68,23 @@ let deleteCount: number;
 let mockDb: any;
 
 beforeEach(() => {
-	xrangeBatch = [];
+	streamBatch = [];
 	queryRows = [];
 	pluckResult = [];
 	deleteCount = 0;
 
 	mockRedis = {
-		// Stream ops go through .call(); XRANGE returns the staged batch.
+		// Stream ops go through .call(). XREADGROUP returns the staged batch under the
+		// consumer-group envelope [[stream, entries]]; XAUTOCLAIM finds nothing pending.
 		call: vi.fn(async (command: string) => {
-			if (command === 'XRANGE') {
-				return xrangeBatch;
+			if (command === 'XREADGROUP') {
+				return streamBatch.length > 0
+					? [[STREAM, streamBatch]]
+					: null;
+			}
+
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [], []];
 			}
 
 			return null;
@@ -85,7 +93,8 @@ beforeEach(() => {
 		get: vi.fn().mockResolvedValue(null),
 		set: vi.fn(),
 		del: vi.fn(),
-		keys: vi.fn().mockResolvedValue([]),
+		scan: vi.fn().mockResolvedValue(['0', []]),
+		unlink: vi.fn(),
 		pipeline: vi.fn(),
 	};
 
@@ -111,6 +120,7 @@ beforeEach(() => {
 		join: vi.fn(() => builder),
 		leftJoin: vi.fn(() => builder),
 		where: vi.fn(() => builder),
+		whereNull: vi.fn(() => builder),
 		whereNotNull: vi.fn(() => builder),
 		whereNotIn: vi.fn(() => builder),
 		groupBy: vi.fn(() => builder),
@@ -596,7 +606,7 @@ describe('XADD batching', () => {
 
 describe('drainCacheEvents', () => {
 	it('demuxes hits/misses to events and descriptors to the dimension', async () => {
-		xrangeBatch = [
+		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'h', cacheKey: 'k1', ageMs: '5000', ttlMs: '300000',
 				durationMs: '12', ts: '1000',
@@ -665,7 +675,7 @@ describe('drainCacheEvents', () => {
 	});
 
 	it('routes anomaly locators to insert-if-absent, not merge', async () => {
-		xrangeBatch = [
+		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'd', cacheKey: 'k1', redisKey: 'rk1', coarse: '0',
 				method: 'GET', path: '/items/a', collection: 'a', userId: '',
@@ -697,7 +707,7 @@ describe('drainCacheEvents', () => {
 	});
 
 	it('inserts anomaly entries into the anomalies table', async () => {
-		xrangeBatch = [
+		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'a', cacheKey: 'k9', reason: 'value_too_large',
 				detail: '2048B', ts: '4000',
@@ -743,11 +753,15 @@ describe('drainCacheEvents', () => {
 		let call = 0;
 
 		mockRedis.call.mockImplementation(async (command: string) => {
-			if (command === 'XRANGE') {
+			if (command === 'XREADGROUP') {
 				call += 1;
 				return call === 1
-					? fullBatch
-					: [];
+					? [[STREAM, fullBatch]]
+					: null;
+			}
+
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [], []];
 			}
 
 			return null;
@@ -758,7 +772,7 @@ describe('drainCacheEvents', () => {
 	});
 
 	it('stores a null collection and user on the descriptor', async () => {
-		xrangeBatch = [
+		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'd',
 				cacheKey: 'k1',
@@ -786,7 +800,7 @@ describe('drainCacheEvents', () => {
 			pool: { numPendingAcquires: () => 3 },
 		};
 
-		xrangeBatch = [
+		streamBatch = [
 			streamEntry('1-0', { kind: 'h', cacheKey: 'k', ageMs: '1', ts: '1' }),
 		];
 
@@ -799,7 +813,7 @@ describe('drainCacheEvents', () => {
 	it('drops a poison batch instead of wedging on a failed insert', async () => {
 		mockDb.batchInsert.mockRejectedValueOnce(new Error('value too long'));
 
-		xrangeBatch = [
+		streamBatch = [
 			streamEntry('1-0', {
 				kind: 'h',
 				cacheKey: 'k',
@@ -821,19 +835,23 @@ describe('drainCacheEvents', () => {
 	it('is single-flight: an overlapping call no-ops during a drain', async () => {
 		await armFlag(null);
 
-		let releaseXrange: () => void = () => {};
+		let releaseRead: () => void = () => {};
 
-		let xrangeCalls = 0;
+		let readCalls = 0;
 
 		const gate = new Promise<void>((resolve) => {
-			releaseXrange = resolve;
+			releaseRead = resolve;
 		});
 
 		mockRedis.call.mockImplementation(async (command: string) => {
-			if (command === 'XRANGE') {
-				xrangeCalls += 1;
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [], []];
+			}
+
+			if (command === 'XREADGROUP') {
+				readCalls += 1;
 				await gate; // hold the first drain open so the second call overlaps it
-				return [];
+				return null;
 			}
 
 			return null;
@@ -845,10 +863,72 @@ describe('drainCacheEvents', () => {
 		// The second call saw the latch and bailed without touching the stream.
 		expect(second).toBe(0);
 
-		releaseXrange();
+		releaseRead();
 		await first;
 
-		expect(xrangeCalls).toBe(1);
+		expect(readCalls).toBe(1);
+	});
+
+	it('reads through the consumer group, then acks + deletes each entry', async () => {
+		streamBatch = [
+			streamEntry('1-0', { kind: 'h', cacheKey: 'k', ageMs: '1', ttlMs: '1', ts: '1' }),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockRedis.call).toHaveBeenCalledWith(
+			'XGROUP', 'CREATE', STREAM, 'drain', '0', 'MKSTREAM',
+		);
+
+		// '>' hands out only never-delivered entries, so a peer node's drain can't read
+		// this same batch — the double-insert this replaced a raw XRANGE to prevent.
+		expect(mockRedis.call).toHaveBeenCalledWith(
+			'XREADGROUP', 'GROUP', 'drain', expect.any(String),
+			'COUNT', '500', 'STREAMS', STREAM, '>',
+		);
+
+		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '1-0');
+		expect(mockRedis.call).toHaveBeenCalledWith('XDEL', STREAM, '1-0');
+	});
+
+	it('tolerates an already-created consumer group (BUSYGROUP)', async () => {
+		mockRedis.call.mockImplementation(async (command: string) => {
+			if (command === 'XGROUP') {
+				throw new Error('BUSYGROUP Consumer Group name already exists');
+			}
+
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [], []];
+			}
+
+			return null;
+		});
+
+		await expect(drainCacheEvents()).resolves.toBe(0);
+	});
+
+	it('reclaims stale pending entries and re-drives them through the same path', async () => {
+		const pending = streamEntry('7-0', {
+			kind: 'h', cacheKey: 'kp', ageMs: '9', ttlMs: '1', ts: '9',
+		});
+
+		mockRedis.call.mockImplementation(async (command: string) => {
+			if (command === 'XAUTOCLAIM') {
+				return ['0-0', [pending], []];
+			}
+
+			return null; // XGROUP ok, no never-delivered entries
+		});
+
+		expect(await drainCacheEvents()).toBe(1);
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_events',
+			[expect.objectContaining({ cache_key: 'kp' })],
+			500,
+		);
+
+		expect(mockRedis.call).toHaveBeenCalledWith('XACK', STREAM, 'drain', '7-0');
 	});
 });
 
@@ -999,6 +1079,7 @@ describe('getCacheStatsState', () => {
 			enabled: false,
 			killedReason: null,
 			bufferLength: 0,
+			droppedEvents: 0,
 		});
 	});
 });
@@ -1014,23 +1095,24 @@ describe('truncateCacheEvents', () => {
 	});
 
 	it('also clears the stream buffer and the throttle/tombstone keys', async () => {
-		mockRedis.keys.mockImplementation((pattern: string) => {
+		mockRedis.scan.mockImplementation((_cursor: string, _match: string, pattern: string) => {
 			// A held anomaly-throttle slot would otherwise suppress the next sample for
 			// its whole window, so a truncate + re-provoke sees an empty table.
-			return Promise.resolve(
+			return Promise.resolve([
+				'0',
 				pattern.includes(':anom:')
 					? ['scalabus:stats:anom:missing_scope:h1']
 					: [],
-			);
+			]);
 		});
 
 		await truncateCacheEvents();
 
 		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:events');
-		expect(mockRedis.keys).toHaveBeenCalledWith('scalabus:stats:anom:*');
-		expect(mockRedis.keys).toHaveBeenCalledWith('scalabus:stats:tomb:*');
+		expect(mockRedis.scan).toHaveBeenCalledWith('0', 'MATCH', 'scalabus:stats:anom:*', 'COUNT', 100);
+		expect(mockRedis.scan).toHaveBeenCalledWith('0', 'MATCH', 'scalabus:stats:tomb:*', 'COUNT', 100);
 
-		expect(mockRedis.del).toHaveBeenCalledWith(
+		expect(mockRedis.unlink).toHaveBeenCalledWith(
 			'scalabus:stats:anom:missing_scope:h1',
 		);
 	});
@@ -1278,19 +1360,22 @@ describe('reapCacheDescriptors', () => {
 
 		const reaped = await reapCacheDescriptors();
 
-		expect(reaped).toBe(3);
+		// Two deletes — filled orphans + never-filled locators — each returns deleteCount.
+		expect(reaped).toBe(6);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
 
-		// DESCRIPTOR_REAP_AFTER = 90d; cutoff is now - 90d (a sign flip hits live rows).
+		// Filled: stale past the 90d cutoff (a sign flip would hit live rows)...
 		expect(builder.where).toHaveBeenCalledWith(
 			'last_filled',
 			'<',
 			new Date(now - 7_776_000_000),
 		);
 
-		// ...AND only keys with no event still on file.
+		// ...AND with no event still on file. Locators (NULL last_filled) reap only when
+		// no event AND no anomaly still references them.
+		expect(builder.whereNull).toHaveBeenCalledWith('last_filled');
 		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
-		expect(builder.delete).toHaveBeenCalled();
+		expect(builder.delete).toHaveBeenCalledTimes(2);
 
 		nowSpy.mockRestore();
 	});
@@ -1327,5 +1412,35 @@ describe('reapCacheEvents', () => {
 	it('returns 0 when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		expect(await reapCacheEvents()).toBe(0);
+	});
+});
+
+describe('buffer cap under a stalled flush', () => {
+	it('drops events past the cap while a flush is in flight and counts them', async () => {
+		await armFlag(null);
+
+		let releaseFlush: () => void = () => {};
+
+		const flushGate = new Promise<void>((resolve) => {
+			releaseFlush = resolve;
+		});
+
+		// Hold the pipelined flush open so the buffer stays in flight and can't drain.
+		mockRedis.pipeline.mockReturnValue({
+			call() {
+				return this;
+			},
+			exec: () => flushGate.then(() => []),
+		});
+
+		// Fill past the cap (1000) twice over: the first cap-hit starts the stalled
+		// flush, then every event beyond a full buffer while it's in flight is dropped.
+		for (let i = 0; i < 2100; i += 1) {
+			await queueCacheHit({ cacheKey: 'k', ageMs: 1, ttlMs: 1, durationMs: 1 });
+		}
+
+		expect((await getCacheStatsState()).droppedEvents).toBeGreaterThan(0);
+
+		releaseFlush();
 	});
 });
