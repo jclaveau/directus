@@ -116,9 +116,9 @@ const FLUSH_BATCH = 500;
 const DEFAULT_GAP_LOOKBACK = getMilliseconds('1h', 3_600_000);
 
 // The admin listing groups recent activity; older keys are reaped, not shown.
-const DEFAULT_LISTING_WINDOW = getMilliseconds('24h', 86_400_000);
-const MIN_LISTING_WINDOW = getMilliseconds('1m', 60_000);
-const LISTING_LIMIT = 200;
+const DEFAULT_CACHE_STATS_WINDOW = getMilliseconds('24h', 86_400_000);
+const MIN_CACHE_STATS_WINDOW = getMilliseconds('1m', 60_000);
+const CACHE_STATS_LISTING_LIMIT = 200;
 
 // A descriptor with no fill in this window AND no live event is an orphan (past
 // a Directus upgrade, or a query combo that stopped being requested).
@@ -180,10 +180,10 @@ function retentionMs(): number {
  */
 export function clampCacheStatsWindow(requested: number | undefined): number {
 	if (requested === undefined || !Number.isFinite(requested)) {
-		return DEFAULT_LISTING_WINDOW;
+		return DEFAULT_CACHE_STATS_WINDOW;
 	}
 
-	return Math.min(Math.max(requested, MIN_LISTING_WINDOW), retentionMs());
+	return Math.min(Math.max(requested, MIN_CACHE_STATS_WINDOW), retentionMs());
 }
 
 /**
@@ -742,7 +742,7 @@ export async function listCacheEntries(
 			'd.last_filled',
 		)
 		.orderBy('hits', 'desc')
-		.limit(LISTING_LIMIT)
+		.limit(CACHE_STATS_LISTING_LIMIT)
 		.select(selects);
 
 	return rows.map((row: Record<string, unknown>) => {
@@ -888,7 +888,7 @@ export async function listCacheAnomalies(
 			db.raw('MAX(a.time) AS last_seen'),
 		)
 		.orderBy('count', 'desc')
-		.limit(LISTING_LIMIT);
+		.limit(CACHE_STATS_LISTING_LIMIT);
 
 	return rows.map((row: Record<string, unknown>) => {
 		return {
