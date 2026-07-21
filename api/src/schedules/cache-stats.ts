@@ -15,8 +15,8 @@ import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 // Every 10s: low enough staleness for tuning, cheap for one node to flush a batch.
 const FLUSH_CRON = '*/10 * * * * *';
 
-// Daily: prune fact rows past CACHE_STATS_RETENTION (cross-dialect bound) and the
-// orphaned descriptors left behind (the dimension has no retention of its own).
+// Daily: prune fact + anomaly rows past CACHE_STATS_RETENTION (cross-dialect bound)
+// and the orphaned descriptors left behind (they have no retention of their own).
 const REAP_CRON = '0 3 * * *';
 
 /**

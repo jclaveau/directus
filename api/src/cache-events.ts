@@ -10,7 +10,7 @@ import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
 /**
- * Cache telemetry buffered in a Redis Stream and drained to two PG tables so a
+ * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
  * hit/miss never touches the DB on the hot path:
  *
  *   - `directus_cache_events` — lean fact, one row per hit/miss: cache key +
@@ -19,11 +19,12 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
  *     a daily app-level reap (CACHE_STATS_RETENTION) bounds it on every dialect.
  *   - `directus_cache_descriptors` — dimension, one row per key: the request
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
+ *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
  *
- * Three stream kinds: `h` hit (cache.ts), `m` miss (cache.ts), `d` descriptor
- * (respond.ts fill, where the descriptor is fully populated). The flusher demuxes
- * them into the two tables. Capture is gated by a runtime flag refreshed from
- * Redis, killable live by an admin or the size/buffer watchdog.
+ * Four stream kinds: `h` hit + `m` miss (cache.ts), `d` descriptor (respond.ts on a
+ * fill, or report-cache-anomaly.ts as an unfilled locator), `a` anomaly. The drainer
+ * demuxes them into the three tables. Capture is gated by a runtime flag refreshed
+ * from Redis, killable live by an admin or the size/buffer watchdog.
  */
 
 export interface CacheHit {
@@ -134,15 +135,15 @@ const DEFAULT_CACHE_STATS_WINDOW = getMilliseconds('24h', 86_400_000);
 const MIN_CACHE_STATS_WINDOW = getMilliseconds('1m', 60_000);
 const CACHE_STATS_LISTING_LIMIT = 200;
 
-// A descriptor with no fill in this window AND no live event is an orphan (past
-// a Directus upgrade, or a query combo that stopped being requested).
+// A descriptor with no fill in this window AND no live event or anomaly is an
+// orphan (past a Directus upgrade, or a query combo that stopped being requested).
 const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
 
 // Fallback event-retention window if CACHE_STATS_RETENTION is unset/unparsable.
 const DEFAULT_RETENTION = getMilliseconds('30d', 2_592_000_000);
 
 // A hot uncached path emits an anomaly per request; throttle to one sample per
-// reason+path per minute so anomalies can't crowd out hit/miss telemetry.
+// reason+key per minute so anomalies can't crowd out hit/miss telemetry.
 const ANOMALY_THROTTLE_MS = getMilliseconds('1m', 60_000);
 
 // Refreshed from Redis so a live toggle/autokill flips capture without a
@@ -515,19 +516,6 @@ function num(value: string | undefined): number | null {
 		: Number(value);
 }
 
-/**
- * Drain the buffered stream, demuxing each entry into the fact table (hits/misses)
- * or upserting the dimension (descriptors), then deleting the batch. One node.
- *
- * At-least-once: a crash between the insert and the XDEL re-runs a batch. Descriptor
- * upserts are idempotent, but duplicate fact rows DO inflate the hit COUNT for that
- * one batch — a bounded, telemetry-only skew we accept over the at-most-once
- * alternative (XDEL-before-insert would silently drop a batch on the same crash).
- *
- * A deterministically-unpersistable batch is the one exception: it's dropped (XDEL
- * after a logged warning) rather than retried, so one poison batch can't wedge the
- * whole drain.
- */
 // Real queries waiting on a pool connection = the DB is the bottleneck. The
 // flush draws from the same shared pool, so when callers are queued it backs off
 // and leaves the batch buffered in the Redis stream (MAXLEN absorbs it) rather
@@ -984,8 +972,9 @@ export async function reapCacheEvents(): Promise<number> {
 }
 
 /**
- * Recent cache anomalies for the admin page, grouped by reason+path with an
- * occurrence count. Windowed like the entries listing; older rows are reaped.
+ * Recent cache anomalies for the admin page, grouped by cache_key+reason and shown
+ * under each path/method/query node, with an occurrence count. Windowed like the
+ * entries listing; older rows are reaped.
  */
 export async function listCacheAnomalies(
 	windowMs?: number,
