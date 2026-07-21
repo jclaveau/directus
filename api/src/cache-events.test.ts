@@ -1097,17 +1097,24 @@ describe('enforceCacheStatsBudget', () => {
 		await enforceCacheStatsBudget();
 
 		expect(cacheStatsActive()).toBe(true);
+		expect(mockDb.raw).not.toHaveBeenCalled(); // non-pg → the size query never runs
 	});
 
-	it('treats a table-size query error as zero bytes', async () => {
-		await armFlag(null);
+	it('stays active when a cold table-size probe rejects', async () => {
+		// Fresh module → isTimescaleCache null, so the probe runs (not just the size
+		// query); its rejection is the path under test, masked by the module cache.
+		vi.resetModules();
+		const fresh = await import('./cache-events.js');
+
+		mockRedis.get.mockResolvedValueOnce(null);
+		await fresh.refreshCacheStatsFlag();
+
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
 		mockRedis.xlen.mockResolvedValue(0);
-		mockDb.raw.mockRejectedValue(new Error('boom'));
+		mockDb.raw.mockRejectedValue(new Error('boom')); // rejects the probe AND the size query
 
-		await enforceCacheStatsBudget();
-
-		expect(cacheStatsActive()).toBe(true);
+		await expect(fresh.enforceCacheStatsBudget()).resolves.toBeUndefined();
+		expect(fresh.cacheStatsActive()).toBe(true);
 	});
 
 	it('does nothing when already disabled (one-way latch)', async () => {
@@ -1548,7 +1555,14 @@ describe('reapCacheEvents', () => {
 
 describe('buffer cap under a stalled flush', () => {
 	it('drops events past the cap during a stalled flush', async () => {
-		await armFlag(null);
+		// Fresh module so the dropped counter + flush latch stay isolated: a leaked
+		// latch would silently break a later test's flush, and static droppedEvents
+		// stays 0 regardless of file order.
+		vi.resetModules();
+		const fresh = await import('./cache-events.js');
+
+		mockRedis.get.mockResolvedValueOnce(null);
+		await fresh.refreshCacheStatsFlag();
 
 		let releaseFlush: () => void = () => {};
 
@@ -1566,12 +1580,16 @@ describe('buffer cap under a stalled flush', () => {
 
 		// Fill past the cap (1000) twice over: the first cap-hit starts the stalled
 		// flush, then every event beyond a full buffer while it's in flight is dropped.
+		const hit = { cacheKey: 'k', ageMs: 1, ttlMs: 1, durationMs: 1 };
+
 		for (let i = 0; i < 2100; i += 1) {
-			await queueCacheHit({ cacheKey: 'k', ageMs: 1, ttlMs: 1, durationMs: 1 });
+			await fresh.queueCacheHit(hit);
 		}
 
-		expect((await getCacheStatsState()).droppedEvents).toBeGreaterThan(0);
+		expect((await fresh.getCacheStatsState()).droppedEvents).toBeGreaterThan(0);
 
+		// Drain the held flush so nothing dangles past this test.
 		releaseFlush();
+		await flushGate;
 	});
 });

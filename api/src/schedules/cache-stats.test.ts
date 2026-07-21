@@ -89,6 +89,11 @@ describe('cache-stats schedule', () => {
 
 		expect(drainCacheEvents).toHaveBeenCalled();
 		expect(enforceCacheStatsBudget).toHaveBeenCalled();
+
+		// Flush BEFORE enforce, so the budget check sees the just-drained size.
+		expect(vi.mocked(drainCacheEvents).mock.invocationCallOrder[0]!).toBeLessThan(
+			vi.mocked(enforceCacheStatsBudget).mock.invocationCallOrder[0]!,
+		);
 	});
 
 	it('registers a daily reap for events, descriptors, anomalies', async () => {

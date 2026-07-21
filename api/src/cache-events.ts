@@ -1072,13 +1072,13 @@ async function eventsTableBytes(db: Knex): Promise<number> {
 		return 0;
 	}
 
-	// hypertable_size() sums the chunks; pg_total_relation_size() on the
-	// parent would miss them. Plain PG falls back to the parent size.
-	const query = (await isTimescale(db))
-		? `SELECT hypertable_size('directus_cache_events') AS bytes`
-		: `SELECT pg_total_relation_size('directus_cache_events') AS bytes`;
-
 	try {
+		// hypertable_size() sums the chunks; pg_total_relation_size() misses them on
+		// the parent. A failed timescale probe (in this try) falls back to plain PG.
+		const query = (await isTimescale(db))
+			? `SELECT hypertable_size('directus_cache_events') AS bytes`
+			: `SELECT pg_total_relation_size('directus_cache_events') AS bytes`;
+
 		const { rows } = await db.raw(query);
 		return Number(rows[0].bytes);
 	}
