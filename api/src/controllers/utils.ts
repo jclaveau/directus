@@ -10,6 +10,7 @@ import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
 import { generateHash } from '../utils/generate-hash.js';
+import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = Router();
@@ -17,6 +18,14 @@ const router = Router();
 const randomStringSchema = Joi.object<{ length: number }>({
 	length: Joi.number().integer().min(1).max(500).default(32),
 });
+
+// The cache-listing ?window= range (a duration like 48h) → ms; undefined when
+// absent so the listing falls back to its default. Clamped downstream.
+function requestedWindowMs(raw: unknown): number | undefined {
+	return raw === undefined
+		? undefined
+		: getMilliseconds(String(raw), Number.NaN);
+}
 
 router.get(
 	'/random/string',
@@ -198,7 +207,25 @@ router.get(
 
 		// Never cache the cache listing itself — it must reflect live state.
 		res.locals['cache'] = false;
-		res.locals['payload'] = { data: await service.getCacheEntries() };
+		const windowMs = requestedWindowMs(req.query['window']);
+		res.locals['payload'] = { data: await service.getCacheEntries(windowMs) };
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/anomalies',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		const windowMs = requestedWindowMs(req.query['window']);
+		res.locals['payload'] = { data: await service.getCacheAnomalies(windowMs) };
 
 		return next();
 	}),

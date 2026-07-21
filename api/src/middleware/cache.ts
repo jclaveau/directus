@@ -3,10 +3,11 @@ import type { RequestHandler } from 'express';
 import { getCache, getCacheValue } from '../cache.js';
 import {
 	cacheStatsActive,
-	captureCacheHit,
-	captureCacheMiss,
+	queueCacheHit,
+	queueCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
+import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -33,7 +34,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		return next();
 	}
 
-	const key = await getCacheKey(req);
+	const { key, hash } = await getCacheKey(req);
 
 	let cachedData;
 
@@ -41,6 +42,15 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		cachedData = await getCacheValue(cache, key);
 	} catch (err: any) {
 		logger.warn(err, `[cache] Couldn't read key ${key}. ${err.message}`);
+
+		if (cacheStatsActive()) {
+			void reportCacheAnomaly(
+				req,
+				'redis_error',
+				err?.message ?? String(err),
+			).catch(() => {});
+		}
+
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
 		return next();
 	}
@@ -54,6 +64,15 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 			cacheExpiryDate = expiresMeta?.exp;
 		} catch (err: any) {
 			logger.warn(err, `[cache] Couldn't read key ${`${key}__expires_at`}. ${err.message}`);
+
+			if (cacheStatsActive()) {
+				void reportCacheAnomaly(
+					req,
+					'redis_error',
+					err?.message ?? String(err),
+				).catch(() => {});
+			}
+
 			if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');
 			return next();
 		}
@@ -76,8 +95,8 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		const createdAt = Number(expiresMeta?.createdAt ?? 0);
 
 		if (cacheStatsActive() && createdAt > 0) {
-			void captureCacheHit({
-				cacheKey: key,
+			void queueCacheHit({
+				cacheKey: hash,
 				ageMs: Math.max(Date.now() - createdAt, 0),
 				ttlMs: expiresMeta?.ttlMs ?? null,
 				durationMs: Math.max(Date.now() - Number(res.locals['requestStart']), 0),
@@ -114,8 +133,8 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 			void readCacheMissGap(key, missAt)
 				.then((gapMs) => {
-					return captureCacheMiss({
-						cacheKey: key,
+					return queueCacheMiss({
+						cacheKey: hash,
 						gapMs,
 						ttlMs: getMilliseconds(env['CACHE_TTL']) ?? null,
 					});

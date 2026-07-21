@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildGroups,
+	filterAnomalies,
 	filterEntries,
 	formatAge,
 	formatExpiry,
@@ -11,13 +12,16 @@ import {
 	isSystemPath,
 	shortKey,
 	splitSections,
+	summariseAnomalies,
 	ttlVerdict,
+	type CacheAnomaly,
 	type CacheEntry,
 } from './cache-view';
 
 function entry(over: Partial<CacheEntry>): CacheEntry {
 	return {
 		key: 'k',
+		redisKey: 'rk',
 		path: '/items/x',
 		method: 'GET',
 		collection: null,
@@ -33,6 +37,22 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		hitMs: null,
 		ttlMs: null,
 		recommendedTtlMs: null,
+		coarse: false,
+		...over,
+	};
+}
+
+function anomaly(over: Partial<CacheAnomaly>): CacheAnomaly {
+	return {
+		cacheKey: 'ak',
+		reason: 'missing_scope',
+		path: '/items/x',
+		method: 'GET',
+		query: '{}',
+		url: '',
+		count: 1,
+		sample: null,
+		lastSeen: 0,
 		...over,
 	};
 }
@@ -133,7 +153,7 @@ describe('splitSections', () => {
 		const groups = buildGroups([
 			entry({ path: '/items/articles' }),
 			entry({ path: '/server/info' }),
-		]);
+		], []);
 
 		const sections = splitSections(groups, 'App', 'System');
 		expect(sections.map((section) => section.key)).toEqual(['app', 'system']);
@@ -141,7 +161,7 @@ describe('splitSections', () => {
 	});
 
 	it('drops a section with no groups', () => {
-		const groups = buildGroups([entry({ path: '/items/a' })]);
+		const groups = buildGroups([entry({ path: '/items/a' })], []);
 		const sections = splitSections(groups, 'App', 'System');
 		expect(sections).toHaveLength(1);
 		expect(sections[0]!.key).toBe('app');
@@ -171,7 +191,7 @@ describe('buildGroups', () => {
 				recommendedTtlMs: 200,
 			}),
 			entry({ path: '/items/b', hits: 10, size: 5 }),
-		]);
+		], []);
 
 		expect(groups).toHaveLength(2);
 		expect(groups[0]!.path).toBe('/items/b');
@@ -194,7 +214,7 @@ describe('buildGroups', () => {
 			entry({ path: '/items/a', query: '{"limit":5}', hits: 2 }),
 			entry({ path: '/items/a', query: '{"limit":9}', hits: 10 }),
 			entry({ path: '/items/a', method: 'HEAD', query: '{"limit":5}', hits: 4 }),
-		]);
+		], []);
 
 		const queries = groups[0]!.queries;
 		expect(queries).toHaveLength(3);
@@ -206,5 +226,96 @@ describe('buildGroups', () => {
 		expect(queries[2]!.query).toBe('{"limit":5}');
 		expect(queries[2]!.entries).toHaveLength(2);
 		expect(queries[2]!.totalHits).toBe(3);
+	});
+});
+
+describe('buildGroups with anomalies', () => {
+	it('weaves not-cached anomalies into the tree with occurrence counts', () => {
+		const groups = buildGroups(
+			[entry({ key: 'c1', path: '/items/a', hits: 5 })],
+			[anomaly({
+				cacheKey: 'o1',
+				path: '/items/a',
+				reason: 'missing_scope',
+				count: 3,
+			})],
+		);
+
+		const group = groups.find((candidate) => candidate.path === '/items/a')!;
+		expect(group.entryCount).toBe(1);
+		expect(group.anomalyCount).toBe(3); // occurrences, not rows
+		expect(group.queries[0]!.anomalies).toHaveLength(1);
+	});
+
+	it('gives a not-cached-only path its own anomaly node', () => {
+		const groups = buildGroups(
+			[],
+			[anomaly({ path: '/server/info', reason: 'missing_scope', count: 2 })],
+		);
+
+		expect(groups).toHaveLength(1);
+		expect(groups[0]!.path).toBe('/server/info');
+		expect(groups[0]!.entryCount).toBe(0);
+		expect(groups[0]!.anomalyCount).toBe(2);
+	});
+
+	it('counts coarse entries separately from anomalies', () => {
+		const groups = buildGroups(
+			[
+				entry({ key: 'coarse1', path: '/items/a', query: '{}', coarse: true }),
+				entry({ key: 'fine1', path: '/items/a', query: '{}', coarse: false }),
+				// a second coarse entry in a distinct query bucket → group must sum the two
+				entry({
+					key: 'coarse2', path: '/items/a', query: '{"limit":5}', coarse: true,
+				}),
+			],
+			[anomaly({
+				cacheKey: 'o1',
+				path: '/items/a',
+				query: '{}',
+				reason: 'missing_scope',
+				count: 2,
+			})],
+		);
+
+		const group = groups[0]!;
+		const emptyQuery = group.queries.find((candidate) => candidate.query === '{}')!;
+
+		const limitQuery = group.queries
+			.find((candidate) => candidate.query === '{"limit":5}')!;
+
+		// coarse is a per-entry property, not an anomaly row/count
+		expect(emptyQuery.coarseCount).toBe(1);
+		expect(limitQuery.coarseCount).toBe(1);
+		expect(group.coarseCount).toBe(2); // summed across both query buckets
+		expect(emptyQuery.anomalyCount).toBe(2); // the missing_scope row only
+		expect(emptyQuery.anomalies).toHaveLength(1);
+	});
+});
+
+describe('summariseAnomalies + filterAnomalies', () => {
+	it('sums occurrences per reason, hottest first', () => {
+		const summary = summariseAnomalies([
+			anomaly({ reason: 'missing_scope', count: 2 }),
+			anomaly({ reason: 'redis_error', count: 5 }),
+			anomaly({ reason: 'missing_scope', count: 1 }),
+		]);
+
+		expect(summary).toEqual([
+			{ reason: 'redis_error', count: 5 },
+			{ reason: 'missing_scope', count: 3 },
+		]);
+	});
+
+	it('narrows by path / query / reason, all when blank', () => {
+		const list = [
+			anomaly({ path: '/items/a', query: '{"limit":5}', reason: 'missing_scope' }),
+			anomaly({ path: '/items/b', query: '{}', reason: 'redis_error' }),
+		];
+
+		expect(filterAnomalies(list, 'redis')).toHaveLength(1);
+		expect(filterAnomalies(list, '/items/b')).toHaveLength(1);
+		expect(filterAnomalies(list, 'limit')).toHaveLength(1);
+		expect(filterAnomalies(list, '')).toHaveLength(2);
 	});
 });

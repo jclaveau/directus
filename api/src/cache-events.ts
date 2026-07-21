@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { useEnv } from '@directus/env';
 import { parse as parseBytes } from 'bytes';
 import type { Knex } from 'knex';
@@ -9,7 +10,7 @@ import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
 /**
- * Cache telemetry buffered in a Redis Stream and drained to two PG tables so a
+ * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
  * hit/miss never touches the DB on the hot path:
  *
  *   - `directus_cache_events` — lean fact, one row per hit/miss: cache key +
@@ -18,28 +19,31 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
  *     a daily app-level reap (CACHE_STATS_RETENTION) bounds it on every dialect.
  *   - `directus_cache_descriptors` — dimension, one row per key: the request
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
+ *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
  *
- * Three stream kinds: `h` hit (cache.ts), `m` miss (cache.ts), `d` descriptor
- * (respond.ts fill, where the descriptor is fully populated). The flusher demuxes
- * them into the two tables. Capture is gated by a runtime flag refreshed from
- * Redis, killable live by an admin or the size/buffer watchdog.
+ * Four stream kinds: `h` hit + `m` miss (cache.ts), `d` descriptor (respond.ts on a
+ * fill, or report-cache-anomaly.ts as an unfilled locator), `a` anomaly. The drainer
+ * demuxes them into the three tables. Capture is gated by a runtime flag refreshed
+ * from Redis, killable live by an admin or the size/buffer watchdog.
  */
 
-export interface CacheHitCapture {
+export interface CacheHit {
 	cacheKey: string;
 	ageMs: number;
 	ttlMs: number | null;
 	durationMs: number | null;
 }
 
-export interface CacheMissCapture {
+export interface CacheMiss {
 	cacheKey: string;
 	gapMs: number | null;
 	ttlMs: number | null;
 }
 
 export interface CacheDescriptor {
-	cacheKey: string;
+	cacheKey: string; // stats identity (getCacheKey().hash) — always fixed-length
+	redisKey: string; // the actual Redis key, for inspection + eviction
+	coarse: boolean; // scoped collection tagged bare (no value slice) — over-purges
 	method: string;
 	path: string;
 	collection: string | null;
@@ -48,10 +52,42 @@ export interface CacheDescriptor {
 	url: string;
 	bytes: number;
 	fillMs: number;
+	// null = an anomaly locator, never filled (bytes/fillMs 0). It stamps last_filled
+	// NULL, which alone marks it: never clobbers a real fill, hidden from the listing.
+	lastFilled?: Date | null;
+}
+
+// A silent cache anomaly (not cached, or a Redis error) surfaced on the dashboard
+// rather than dropped. Coarse scope is a descriptor flag, not an anomaly.
+export type CacheAnomalyReason =
+	| 'missing_scope'
+	| 'value_too_large'
+	| 'redis_error';
+
+export interface CacheAnomaly {
+	cacheKey: string;
+	reason: CacheAnomalyReason;
+	detail?: string | null; // byte size / error message
+}
+
+// One grouped anomaly for the admin cache tree: a (cache_key, reason) pair joined to
+// its descriptor for path/method/query, with an occurrence count.
+export interface CacheAnomalyRecord {
+	cacheKey: string;
+	reason: CacheAnomalyReason;
+	path: string;
+	method: string;
+	query: string;
+	url: string;
+	count: number;
+	sample: string | null;
+	lastSeen: number;
 }
 
 export interface CacheEntryRecord {
-	key: string;
+	key: string; // stats identity (the hash)
+	redisKey: string; // the actual Redis key, for inspect + evict
+	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
 	method: string;
 	path: string;
 	collection: string | null;
@@ -74,41 +110,49 @@ export interface CacheStatsState {
 	enabled: boolean;
 	killedReason: string | null;
 	bufferLength: number;
+	// Hot-path events dropped when the buffer hit its cap mid-flush (slow Redis).
+	// Lifetime counter — a non-zero value means telemetry went lossy.
+	droppedEvents: number;
 }
 
 const STREAM_HARD_CAP = 1_000_000;
 
-// The stats-table cache_key is varchar(255). The default hashed key is ~40 hex, but
-// a readable key (CACHE_KEY_HASH_ENABLED=false) can exceed it and would throw on
-// insert — wedging the flush. Skip an untrackable key rather than truncate it (a
-// truncated key would collide in the descriptor primary key).
-const MAX_CACHE_KEY_LENGTH = 255;
+// One shared consumer group across all nodes: XREADGROUP '>' hands each entry to
+// a single consumer, so overlapping drains on other nodes take disjoint slices —
+// the append-only tables can't double-insert. Consumer name = per-process PEL owner.
+const STREAM_GROUP = 'drain';
+const CONSUMER_NAME = randomUUID();
 
-function isKeyTrackable(key: string): boolean {
-	return key.length <= MAX_CACHE_KEY_LENGTH;
-}
+// A consumer that read a batch then died leaves it pending; reclaim + re-drive it
+// once idle this long (at-least-once, like the pre-group insert→XDEL semantics).
+const PENDING_RECLAIM_AFTER = getMilliseconds('60s', 60_000);
 
 const FLUSH_BATCH = 500;
 const DEFAULT_GAP_LOOKBACK = getMilliseconds('1h', 3_600_000);
 
 // The admin listing groups recent activity; older keys are reaped, not shown.
-const LISTING_WINDOW = getMilliseconds('24h', 86_400_000);
-const LISTING_LIMIT = 200;
+const DEFAULT_CACHE_STATS_WINDOW = getMilliseconds('24h', 86_400_000);
+const MIN_CACHE_STATS_WINDOW = getMilliseconds('1m', 60_000);
+const CACHE_STATS_LISTING_LIMIT = 200;
 
-// A descriptor with no fill in this window AND no live event is an orphan (past
-// a Directus upgrade, or a query combo that stopped being requested).
+// A descriptor with no fill in this window AND no live event or anomaly is an
+// orphan (past a Directus upgrade, or a query combo that stopped being requested).
 const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
 
 // Fallback event-retention window if CACHE_STATS_RETENTION is unset/unparsable.
 const DEFAULT_RETENTION = getMilliseconds('30d', 2_592_000_000);
+
+// A hot uncached path emits an anomaly per request; throttle to one sample per
+// reason+key per minute so anomalies can't crowd out hit/miss telemetry.
+const ANOMALY_THROTTLE_MS = getMilliseconds('1m', 60_000);
 
 // Refreshed from Redis so a live toggle/autokill flips capture without a
 // restart. Seeded false; the schedule primes it before the first request.
 let cacheStatsActiveFlag = false;
 let isTimescaleCache: boolean | null = null;
 
-// Single-flight latch for the drain (see flushCacheEvents).
-let flushInProgress = false;
+// Single-flight latch for the drain (see drainCacheEvents).
+let cacheEventDrainInProgress = false;
 
 function statsNamespace(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:stats`;
@@ -118,6 +162,9 @@ const streamKey = () => `${statsNamespace()}:events`;
 const flagKey = () => `${statsNamespace()}:enabled`;
 const reasonKey = () => `${statsNamespace()}:killed_reason`;
 const tombstoneKey = (key: string) => `${statsNamespace()}:tomb:${key}`;
+
+const anomalyThrottleKey = (reason: string, cacheKey: string) =>
+	`${statsNamespace()}:anom:${reason}:${cacheKey}`;
 
 /**
  * Master switch: opt-in (CACHE_STATS_ENABLED, default off) AND Redis reachable
@@ -142,6 +189,24 @@ function retentionMs(): number {
 }
 
 /**
+ * Clamp a caller-requested listing window (how far back entries + anomalies are
+ * shown) to [1m, retention]: the admin can't ask for less than a minute, nor for
+ * data already reaped past the retention cutoff. Undefined falls back to 24h.
+ */
+export function clampCacheStatsWindow(requested: number | undefined): number {
+	if (requested === undefined || !Number.isFinite(requested)) {
+		return DEFAULT_CACHE_STATS_WINDOW;
+	}
+
+	// Keep the ceiling at/above the floor: a sub-1m retention would otherwise invert
+	// the clamp and return a window below MIN.
+	return Math.min(
+		Math.max(requested, MIN_CACHE_STATS_WINDOW),
+		Math.max(retentionMs(), MIN_CACHE_STATS_WINDOW),
+	);
+}
+
+/**
  * Re-read the runtime override into the in-process flag. Called on a short
  * per-instance interval so a toggle/autokill anywhere propagates within a tick.
  */
@@ -158,32 +223,98 @@ export async function refreshCacheStatsFlag(): Promise<void> {
 		: override === '1';
 }
 
-async function xadd(fields: Record<string, string>): Promise<void> {
+// Per-tick XADD batching: captures buffer here; one pipelined flush per event-loop
+// tick collapses N round-trips into one. A crash loses ≤1 tick (telemetry is lossy).
+const CACHE_EVENT_BUFFER_CAP = 1000;
+
+let cacheEventBuffer: string[][] = [];
+let cacheEventBufferFlushScheduled = false;
+let cacheEventBufferFlushInProgress = false;
+let cacheEventBufferDropped = 0;
+
+// Buffer one entry's fields; flush now if full, else at the tick boundary.
+function xadd(fields: Record<string, string>): void {
+	// Full while a flush is in flight (slow Redis): drop rather than grow the heap
+	// unbounded on the hot path. Lossy by design; the drop surfaces on the state.
+	if (cacheEventBufferFlushInProgress
+		&& cacheEventBuffer.length >= CACHE_EVENT_BUFFER_CAP) {
+		cacheEventBufferDropped += 1;
+		return;
+	}
+
 	const flat: string[] = [];
 
 	for (const [field, value] of Object.entries(fields)) {
 		flat.push(field, value);
 	}
 
-	// MAXLEN ~ is a hard backstop on Redis memory even before the soft autokill.
-	// .call() over typed xadd() — the field spread trips its overloads.
-	await useRedis().call(
-		'XADD',
-		streamKey(),
-		'MAXLEN',
-		'~',
-		String(STREAM_HARD_CAP),
-		'*',
-		...flat,
-	);
+	cacheEventBuffer.push(flat);
+
+	if (cacheEventBuffer.length >= CACHE_EVENT_BUFFER_CAP) {
+		void flushCacheEventBuffer();
+	}
+	else if (!cacheEventBufferFlushScheduled) {
+		cacheEventBufferFlushScheduled = true;
+		setImmediate(() => void flushCacheEventBuffer());
+	}
 }
 
-export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(hit.cacheKey)) {
+// Flush the buffered XADDs in one pipelined round-trip. Errors are swallowed + the
+// buffer cleared either way, so a failing Redis can't wedge it (telemetry is lossy).
+export async function flushCacheEventBuffer(): Promise<void> {
+	// One pipeline in flight at a time: under a slow (not down) Redis, defer instead
+	// of stacking concurrent exec()s + their batches on the heap. Backpressure.
+	if (cacheEventBufferFlushInProgress) {
 		return;
 	}
 
-	await xadd({
+	cacheEventBufferFlushScheduled = false;
+
+	if (cacheEventBuffer.length === 0) {
+		return;
+	}
+
+	cacheEventBufferFlushInProgress = true;
+	const batch = cacheEventBuffer;
+	cacheEventBuffer = [];
+
+	const pipe = useRedis().pipeline();
+
+	for (const flat of batch) {
+		// MAXLEN ~ caps stream memory; .call() over xadd() (spread trips its overloads).
+		pipe.call(
+			'XADD',
+			streamKey(),
+			'MAXLEN',
+			'~',
+			String(STREAM_HARD_CAP),
+			'*',
+			...flat,
+		);
+	}
+
+	try {
+		await pipe.exec();
+	}
+	catch (err: any) {
+		useLogger().warn(err, `[cache-stats] XADD flush failed. ${err.message}`);
+	}
+	finally {
+		cacheEventBufferFlushInProgress = false;
+
+		// Anything buffered while the pipeline was in flight → chain a follow-up flush.
+		if (cacheEventBuffer.length > 0) {
+			setImmediate(() => void flushCacheEventBuffer());
+		}
+	}
+}
+
+export async function queueCacheHit(hit: CacheHit): Promise<void> {
+	if (!cacheStatsActiveFlag) {
+		return;
+	}
+
+	xadd({
 		kind: 'h',
 		cacheKey: hit.cacheKey,
 		ageMs: String(hit.ageMs),
@@ -197,12 +328,12 @@ export async function captureCacheHit(hit: CacheHitCapture): Promise<void> {
 	});
 }
 
-export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(miss.cacheKey)) {
+export async function queueCacheMiss(miss: CacheMiss): Promise<void> {
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
-	await xadd({
+	xadd({
 		kind: 'm',
 		cacheKey: miss.cacheKey,
 		gapMs: miss.gapMs === null
@@ -215,15 +346,56 @@ export async function captureCacheMiss(miss: CacheMissCapture): Promise<void> {
 	});
 }
 
-// The per-key descriptor, emitted on a fill where every field is populated.
-export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(entry.cacheKey)) {
+// Claim the once-per-window anomaly slot for a reason+key (SET NX): true for the
+// first caller in the window, false when the slot is already taken.
+export async function claimCacheAnomalyThrottleSlot(
+	reason: CacheAnomalyReason,
+	cacheKey: string,
+): Promise<boolean> {
+	if (!cacheStatsActiveFlag) {
+		return false;
+	}
+
+	const claimed = await useRedis().set(
+		anomalyThrottleKey(reason, cacheKey),
+		'1',
+		'PX',
+		ANOMALY_THROTTLE_MS,
+		'NX',
+	);
+
+	return claimed !== null;
+}
+
+// Emit an anomaly sample keyed by the request's cache key (the descriptor ref).
+// Caller must have claimed the throttle slot first.
+export function queueCacheAnomaly(entry: CacheAnomaly): void {
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
-	await xadd({
+	xadd({
+		kind: 'a',
+		cacheKey: entry.cacheKey,
+		reason: entry.reason,
+		detail: entry.detail ?? '',
+		ts: String(Date.now()),
+	});
+}
+
+// The per-key descriptor, emitted on a fill where every field is populated.
+export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void> {
+	if (!cacheStatsActiveFlag) {
+		return;
+	}
+
+	xadd({
 		kind: 'd',
 		cacheKey: entry.cacheKey,
+		redisKey: entry.redisKey,
+		coarse: entry.coarse
+			? '1'
+			: '0',
 		method: entry.method,
 		path: entry.path,
 		collection: entry.collection ?? '',
@@ -232,7 +404,10 @@ export async function captureCacheDescriptor(entry: CacheDescriptor): Promise<vo
 		url: entry.url,
 		bytes: String(entry.bytes),
 		fillMs: String(entry.fillMs),
-		ts: String(Date.now()),
+		// Empty ts = no fill time = a locator; the drain reads last_filled off it.
+		ts: entry.lastFilled === null
+			? ''
+			: String(Date.now()),
 	});
 }
 
@@ -249,7 +424,7 @@ export async function writeCacheTombstone(
 	key: string,
 	expiredAt: number,
 ): Promise<void> {
-	if (!cacheStatsActiveFlag || !isKeyTrackable(key)) {
+	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
@@ -259,7 +434,9 @@ export async function writeCacheTombstone(
 		tombstoneKey(key),
 		String(expiredAt),
 		'PX',
-		remainingLifeMs + gapLookbackMs(),
+		// Floor at 1ms: an already-expired entry with a zero lookback would otherwise
+		// pass PX 0, which Redis rejects — dropping the gap (lengthen) signal.
+		Math.max(remainingLifeMs + gapLookbackMs(), 1),
 	);
 }
 
@@ -303,6 +480,8 @@ interface CacheEventRow {
 
 interface CacheDescriptorRow {
 	cache_key: string;
+	redis_key: string;
+	coarse: boolean;
 	method: string;
 	path: string;
 	collection: string | null;
@@ -311,7 +490,14 @@ interface CacheDescriptorRow {
 	url: string;
 	bytes: number;
 	fill_ms: number;
-	last_filled: Date;
+	last_filled: Date | null; // null = anomaly locator, never filled
+}
+
+interface CacheAnomalyRow {
+	time: Date;
+	cache_key: string;
+	reason: string;
+	detail: string;
 }
 
 function parseFields(flat: string[]): Record<string, string> {
@@ -330,19 +516,6 @@ function num(value: string | undefined): number | null {
 		: Number(value);
 }
 
-/**
- * Drain the buffered stream, demuxing each entry into the fact table (hits/misses)
- * or upserting the dimension (descriptors), then deleting the batch. One node.
- *
- * At-least-once: a crash between the insert and the XDEL re-runs a batch. Descriptor
- * upserts are idempotent, but duplicate fact rows DO inflate the hit COUNT for that
- * one batch — a bounded, telemetry-only skew we accept over the at-most-once
- * alternative (XDEL-before-insert would silently drop a batch on the same crash).
- *
- * A deterministically-unpersistable batch is the one exception: it's dropped (XDEL
- * after a logged warning) rather than retried, so one poison batch can't wedge the
- * whole drain.
- */
 // Real queries waiting on a pool connection = the DB is the bottleneck. The
 // flush draws from the same shared pool, so when callers are queued it backs off
 // and leaves the batch buffered in the Redis stream (MAXLEN absorbs it) rather
@@ -354,122 +527,65 @@ function dbPoolSaturated(db: Knex): boolean {
 }
 
 /**
- * Guarded entrypoint for the drain. node-schedule fires the flush every 10s with
- * no overlap guard, so a drain that outruns its interval would run concurrently
- * with the next tick — both XRANGE the same head batch and double-count it. A
- * process-local latch (JS is single-threaded) makes an overlapping tick a no-op;
- * the multi-node case is handled by scheduleSynchronizedJob picking one node.
+ * Guarded entrypoint for the drain. A process-local latch makes an overlapping
+ * tick on the same node a no-op; cross-node overlap is safe because the drain
+ * reads through a shared consumer group (each entry to one consumer), not XRANGE.
  */
-export async function flushCacheEvents(): Promise<number> {
-	if (!cacheStatsConfigured() || flushInProgress) {
+export async function drainCacheEvents(): Promise<number> {
+	if (!cacheStatsConfigured() || cacheEventDrainInProgress) {
 		return 0;
 	}
 
-	flushInProgress = true;
+	cacheEventDrainInProgress = true;
 
 	try {
-		return await drainCacheEvents();
+		return await drainCacheEventStream();
 	}
 	finally {
-		flushInProgress = false;
+		cacheEventDrainInProgress = false;
 	}
 }
 
-async function drainCacheEvents(): Promise<number> {
-	const redis = useRedis();
+async function drainCacheEventStream(): Promise<number> {
 	const db = getDatabase();
-	let drained = 0;
+
+	// Yield entirely to live traffic when the pool is already contended.
+	if (dbPoolSaturated(db)) {
+		return 0;
+	}
+
+	const redis = useRedis();
+	await ensureStreamGroup(redis);
+
+	// Re-drive anything a crashed consumer left pending, then never-delivered ones.
+	let drained = await reclaimStalePending(redis, db);
 
 	for (;;) {
-		// Yield to live traffic: with queued acquirers, stop draining and leave the
-		// rest buffered for the next tick rather than contending for a connection.
 		if (dbPoolSaturated(db)) {
 			break;
 		}
 
-		const batch = (await redis.call(
-			'XRANGE',
-			streamKey(),
-			'-',
-			'+',
+		// '>' = entries never handed to any consumer, so a concurrent drain on another
+		// node gets a disjoint slice, never this same batch.
+		const response = (await redis.call(
+			'XREADGROUP',
+			'GROUP',
+			STREAM_GROUP,
+			CONSUMER_NAME,
 			'COUNT',
 			String(FLUSH_BATCH),
-		)) as [string, string[]][];
+			'STREAMS',
+			streamKey(),
+			'>',
+		)) as [string, [string, string[]][]][] | null;
+
+		const batch = response?.[0]?.[1] ?? [];
 
 		if (batch.length === 0) {
 			break;
 		}
 
-		const ids = batch.map(([id]) => id);
-		const events: CacheEventRow[] = [];
-		const descriptors = new Map<string, CacheDescriptorRow>();
-
-		for (const [, flat] of batch) {
-			const f = parseFields(flat);
-			const at = new Date(Number(f['ts']));
-
-			if (f['kind'] === 'd') {
-				// Last write in the batch wins — a re-conflicting insert would throw.
-				descriptors.set(f['cacheKey']!, {
-					cache_key: f['cacheKey']!,
-					method: f['method'] ?? '',
-					path: f['path'] ?? '',
-					collection: f['collection']
-						? f['collection']
-						: null,
-					user_id: f['userId']
-						? f['userId']
-						: null,
-					query: f['query'] ?? '',
-					url: f['url'] ?? '',
-					bytes: Number(f['bytes'] ?? 0),
-					fill_ms: Number(f['fillMs'] ?? 0),
-					last_filled: at,
-				});
-
-				continue;
-			}
-
-			events.push({
-				time: at,
-				cache_key: f['cacheKey']!,
-				kind: f['kind'] === 'h'
-					? 0
-					: 1,
-				age_ms: num(f['ageMs']),
-				gap_ms: num(f['gapMs']),
-				ttl_ms: num(f['ttlMs']),
-				duration_ms: num(f['durationMs']),
-			});
-		}
-
-		try {
-			if (events.length > 0) {
-				await db.batchInsert('directus_cache_events', events, FLUSH_BATCH);
-			}
-
-			if (descriptors.size > 0) {
-				await db('directus_cache_descriptors')
-					.insert([...descriptors.values()])
-					.onConflict('cache_key')
-					.merge();
-			}
-		}
-		catch (err: any) {
-			// A batch that deterministically fails to persist (bad row, constraint,
-			// dialect quirk) must not wedge the drain: without the XDEL below it would
-			// be re-read from the stream head every tick forever, re-inserting any rows
-			// that DID land. Drop it to a warning — telemetry is lossy by design.
-			useLogger().warn(
-				err,
-				`[cache-stats] dropped ${batch.length} unpersistable events. ${err.message}`,
-			);
-		}
-
-		// Outside the try so a handled failure still advances the stream head. On
-		// success this preserves the at-least-once insert→XDEL ordering.
-		await redis.call('XDEL', streamKey(), ...ids);
-
+		await persistStreamBatch(redis, db, batch);
 		drained += batch.length;
 
 		if (batch.length < FLUSH_BATCH) {
@@ -480,21 +596,200 @@ async function drainCacheEvents(): Promise<number> {
 	return drained;
 }
 
+// Create the shared group idempotently before each drain. '0' + MKSTREAM so it
+// also adopts entries already in the stream and survives a truncate that dropped
+// it; BUSYGROUP just means another node (or an earlier tick) got there first.
+async function ensureStreamGroup(redis: ReturnType<typeof useRedis>): Promise<void> {
+	try {
+		await redis.call('XGROUP', 'CREATE', streamKey(), STREAM_GROUP, '0', 'MKSTREAM');
+	}
+	catch (err: any) {
+		if (!String(err?.message).includes('BUSYGROUP')) {
+			throw err;
+		}
+	}
+}
+
+// Reclaim entries a dead consumer left pending past the idle window and re-drive
+// them through the same persist path (at-least-once). XAUTOCLAIM transfers PEL
+// ownership atomically, so two nodes reclaiming at once take disjoint slices.
+async function reclaimStalePending(
+	redis: ReturnType<typeof useRedis>,
+	db: Knex,
+): Promise<number> {
+	let reclaimed = 0;
+	let cursor = '0-0';
+
+	for (;;) {
+		if (dbPoolSaturated(db)) {
+			break;
+		}
+
+		const [nextCursor, batch] = (await redis.call(
+			'XAUTOCLAIM',
+			streamKey(),
+			STREAM_GROUP,
+			CONSUMER_NAME,
+			String(PENDING_RECLAIM_AFTER),
+			cursor,
+			'COUNT',
+			String(FLUSH_BATCH),
+		)) as [string, [string, string[]][], string[]];
+
+		if (batch.length > 0) {
+			await persistStreamBatch(redis, db, batch);
+			reclaimed += batch.length;
+		}
+
+		// '0-0' = the scan wrapped back to the start; nothing left to reclaim.
+		if (nextCursor === '0-0') {
+			break;
+		}
+
+		cursor = nextCursor;
+	}
+
+	return reclaimed;
+}
+
+// Demux one stream batch into the three tables, then ack + delete its entries.
+// Shared by the new-entry drain and the crashed-consumer reclaim.
+async function persistStreamBatch(
+	redis: ReturnType<typeof useRedis>,
+	db: Knex,
+	batch: [string, string[]][],
+): Promise<void> {
+	const ids = batch.map(([id]) => id);
+	const events: CacheEventRow[] = [];
+	const descriptors = new Map<string, CacheDescriptorRow>();
+	const locators = new Map<string, CacheDescriptorRow>();
+	const anomalies: CacheAnomalyRow[] = [];
+
+	for (const [, flat] of batch) {
+		const f = parseFields(flat);
+		const at = new Date(Number(f['ts']));
+
+		if (f['kind'] === 'a') {
+			anomalies.push({
+				time: at,
+				cache_key: f['cacheKey']!,
+				reason: f['reason'] ?? '',
+				detail: f['detail'] ?? '',
+			});
+
+			continue;
+		}
+
+		if (f['kind'] === 'd') {
+			const row: CacheDescriptorRow = {
+				cache_key: f['cacheKey']!,
+				redis_key: f['redisKey'] ?? '',
+				coarse: f['coarse'] === '1',
+				method: f['method'] ?? '',
+				path: f['path'] ?? '',
+				collection: f['collection']
+					? f['collection']
+					: null,
+				user_id: f['userId']
+					? f['userId']
+					: null,
+				query: f['query'] ?? '',
+				url: f['url'] ?? '',
+				bytes: Number(f['bytes'] ?? 0),
+				fill_ms: Number(f['fillMs'] ?? 0),
+				// Empty ts = never filled = a locator: NULL keeps Age honest + non-entry.
+				last_filled: f['ts']
+					? at
+					: null,
+			};
+
+			// Last write in the batch wins — a re-conflicting insert would throw.
+			// Locators (last_filled null) insert-if-absent, never clobber a real fill.
+			(row.last_filled === null
+				? locators
+				: descriptors).set(row.cache_key, row);
+
+			continue;
+		}
+
+		events.push({
+			time: at,
+			cache_key: f['cacheKey']!,
+			kind: f['kind'] === 'h'
+				? 0
+				: 1,
+			age_ms: num(f['ageMs']),
+			gap_ms: num(f['gapMs']),
+			ttl_ms: num(f['ttlMs']),
+			duration_ms: num(f['durationMs']),
+		});
+	}
+
+	try {
+		// One transaction so a mid-batch failure rolls back atomically, never leaving
+		// the fact events persisted while descriptors/anomalies are dropped.
+		await db.transaction(async (trx) => {
+			if (events.length > 0) {
+				await trx.batchInsert('directus_cache_events', events, FLUSH_BATCH);
+			}
+
+			if (descriptors.size > 0) {
+				await trx('directus_cache_descriptors')
+					.insert([...descriptors.values()])
+					.onConflict('cache_key')
+					.merge();
+			}
+
+			// After real fills, so a locator only creates a row when none exists yet;
+			// its zeros must never overwrite a cached entry's bytes/coarse/fill_ms.
+			if (locators.size > 0) {
+				await trx('directus_cache_descriptors')
+					.insert([...locators.values()])
+					.onConflict('cache_key')
+					.ignore();
+			}
+
+			if (anomalies.length > 0) {
+				await trx.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
+			}
+		});
+	}
+	catch (err: any) {
+		// A batch that deterministically fails (bad row, constraint, dialect quirk) must
+		// not wedge the drain: without the ack/del below it is redelivered every tick
+		// forever. The transaction rolled back, so nothing landed — drop it to a warning
+		// (telemetry is lossy by design).
+		useLogger().warn(
+			err,
+			`[cache-stats] dropped ${batch.length} unpersistable events. ${err.message}`,
+		);
+	}
+
+	// Outside the try so a handled failure still clears the entries. XACK settles the
+	// group's pending record; XDEL reclaims the stream memory.
+	await redis.call('XACK', streamKey(), STREAM_GROUP, ...ids);
+	await redis.call('XDEL', streamKey(), ...ids);
+}
+
 /**
  * Recent cache activity for the admin page: descriptor (dimension, survives
  * retention) joined to windowed hits (fact). Not a live view — an entry evicted
  * or expired inside the window still shows until its events age out.
  */
-export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
+export async function listCacheEntries(
+	windowMs?: number,
+): Promise<CacheEntryRecord[]> {
 	if (!cacheStatsConfigured()) {
 		return [];
 	}
 
 	const db = getDatabase();
-	const since = new Date(Date.now() - LISTING_WINDOW);
+	const since = new Date(Date.now() - clampCacheStatsWindow(windowMs));
 
 	const selects: (string | Knex.Raw)[] = [
 		'd.cache_key',
+		'd.redis_key',
+		'd.coarse',
 		'd.method',
 		'd.path',
 		'd.collection',
@@ -529,8 +824,12 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
 		.leftJoin('directus_users as u', 'u.id', 'd.user_id')
 		.where('e.time', '>', since)
+		// Anomaly locators (never filled) resolve as anomaly rows, not cache entries.
+		.whereNotNull('d.last_filled')
 		.groupBy(
 			'd.cache_key',
+			'd.redis_key',
+			'd.coarse',
 			'd.method',
 			'd.path',
 			'd.collection',
@@ -543,7 +842,8 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 			'd.last_filled',
 		)
 		.orderBy('hits', 'desc')
-		.limit(LISTING_LIMIT)
+		.orderBy('d.cache_key', 'asc')
+		.limit(CACHE_STATS_LISTING_LIMIT)
 		.select(selects);
 
 	return rows.map((row: Record<string, unknown>) => {
@@ -558,6 +858,8 @@ export async function listCacheEntries(): Promise<CacheEntryRecord[]> {
 
 		return {
 			key: row['cache_key'] as string,
+			redisKey: row['redis_key'] as string,
+			coarse: Boolean(row['coarse']),
 			method: row['method'] as string,
 			path: row['path'] as string,
 			collection: (row['collection'] as string | null) || null,
@@ -611,7 +913,7 @@ export async function evictCacheEntriesForPath(
 
 	const keys = await getDatabase()('directus_cache_descriptors')
 		.where({ path })
-		.pluck('cache_key');
+		.pluck('redis_key');
 
 	await Promise.all(keys.map((key: string) => evictCacheEntry(cache, key)));
 
@@ -631,10 +933,24 @@ export async function reapCacheDescriptors(): Promise<number> {
 	const db = getDatabase();
 	const cutoff = new Date(Date.now() - DESCRIPTOR_REAP_AFTER);
 
-	return db('directus_cache_descriptors')
+	// Filled descriptor: an orphan once stale AND no event or anomaly references
+	// it — a re-anomalied dormant key keeps its descriptor for the anomaly join.
+	const filled = await db('directus_cache_descriptors')
 		.where('last_filled', '<', cutoff)
 		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
+		.whereNotIn('cache_key', db('directus_cache_anomalies').distinct('cache_key'))
 		.delete();
+
+	// Locators (last_filled NULL) never match the cutoff, so reap them on the orphan
+	// rule alone: no event AND no anomaly still references them (both reaped at their
+	// own retention, so nothing left ⇒ no activity within the retention window).
+	const locators = await db('directus_cache_descriptors')
+		.whereNull('last_filled')
+		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
+		.whereNotIn('cache_key', db('directus_cache_anomalies').distinct('cache_key'))
+		.delete();
+
+	return filled + locators;
 }
 
 /**
@@ -651,6 +967,71 @@ export async function reapCacheEvents(): Promise<number> {
 	const cutoff = new Date(Date.now() - retentionMs());
 
 	return getDatabase()('directus_cache_events')
+		.where('time', '<', cutoff)
+		.delete();
+}
+
+/**
+ * Recent cache anomalies for the admin page, grouped by cache_key+reason and shown
+ * under each path/method/query node, with an occurrence count. Windowed like the
+ * entries listing; older rows are reaped.
+ */
+export async function listCacheAnomalies(
+	windowMs?: number,
+): Promise<CacheAnomalyRecord[]> {
+	if (!cacheStatsConfigured()) {
+		return [];
+	}
+
+	const db = getDatabase();
+	const since = new Date(Date.now() - clampCacheStatsWindow(windowMs));
+
+	// Join the descriptor for path/method/query (reaped at 90d, so an inner join never
+	// hides a live 24h-window anomaly) — a (cache_key, reason) pair lands at its node.
+	const rows = await db('directus_cache_anomalies as a')
+		.join('directus_cache_descriptors as d', 'd.cache_key', 'a.cache_key')
+		.where('a.time', '>', since)
+		.groupBy('a.cache_key', 'a.reason', 'd.path', 'd.method', 'd.query', 'd.url')
+		.select(
+			'a.cache_key',
+			'a.reason',
+			'd.path',
+			'd.method',
+			'd.query',
+			'd.url',
+			db.raw('COUNT(*) AS count'),
+			db.raw('MAX(a.detail) AS sample'),
+			db.raw('MAX(a.time) AS last_seen'),
+		)
+		.orderBy('count', 'desc')
+		.orderBy('a.cache_key', 'asc')
+		.orderBy('a.reason', 'asc')
+		.limit(CACHE_STATS_LISTING_LIMIT);
+
+	return rows.map((row: Record<string, unknown>) => {
+		return {
+			cacheKey: row['cache_key'] as string,
+			reason: row['reason'] as CacheAnomalyReason,
+			path: row['path'] as string,
+			method: row['method'] as string,
+			query: (row['query'] as string) ?? '',
+			url: (row['url'] as string) ?? '',
+			count: Number(row['count'] ?? 0),
+			sample: (row['sample'] as string | null) || null,
+			lastSeen: new Date(row['last_seen'] as string).getTime(),
+		};
+	});
+}
+
+// Prune anomaly rows past the retention window, like the events reap.
+export async function reapCacheAnomalies(): Promise<number> {
+	if (!cacheStatsConfigured()) {
+		return 0;
+	}
+
+	const cutoff = new Date(Date.now() - retentionMs());
+
+	return getDatabase()('directus_cache_anomalies')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -680,13 +1061,13 @@ async function eventsTableBytes(db: Knex): Promise<number> {
 		return 0;
 	}
 
-	// hypertable_size() sums the chunks; pg_total_relation_size() on the
-	// parent would miss them. Plain PG falls back to the parent size.
-	const query = (await isTimescale(db))
-		? `SELECT hypertable_size('directus_cache_events') AS bytes`
-		: `SELECT pg_total_relation_size('directus_cache_events') AS bytes`;
-
 	try {
+		// hypertable_size() sums the chunks; pg_total_relation_size() misses them on
+		// the parent. A failed timescale probe (in this try) falls back to plain PG.
+		const query = (await isTimescale(db))
+			? `SELECT hypertable_size('directus_cache_events') AS bytes`
+			: `SELECT pg_total_relation_size('directus_cache_events') AS bytes`;
+
 		const { rows } = await db.raw(query);
 		return Number(rows[0].bytes);
 	}
@@ -795,6 +1176,7 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 			enabled: false,
 			killedReason: null,
 			bufferLength: 0,
+			droppedEvents: cacheEventBufferDropped,
 		};
 	}
 
@@ -805,7 +1187,27 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 		enabled: cacheStatsActiveFlag,
 		killedReason: await redis.get(reasonKey()),
 		bufferLength: await redis.xlen(streamKey()),
+		droppedEvents: cacheEventBufferDropped,
 	};
+}
+
+// Delete every stats key matching a glob (throttle slots, tombstones). SCAN, not
+// KEYS, so it never blocks the shared Redis thread on a big keyspace; UNLINK frees
+// the keys off-thread.
+async function deleteStatsKeysByPattern(
+	redis: ReturnType<typeof useRedis>,
+	pattern: string,
+): Promise<void> {
+	let cursor = '0';
+
+	do {
+		const [next, keys] = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+		cursor = next;
+
+		if (keys.length > 0) {
+			await redis.unlink(...keys);
+		}
+	} while (cursor !== '0');
 }
 
 // Drop all gathered telemetry — the fast way to reclaim space after autokill.
@@ -813,4 +1215,16 @@ export async function truncateCacheEvents(): Promise<void> {
 	const db = getDatabase();
 	await db('directus_cache_events').truncate();
 	await db('directus_cache_descriptors').truncate();
+	await db('directus_cache_anomalies').truncate();
+
+	// Full reset: also drop the Redis transients tied to those rows — else buffered
+	// events drain back in and a held throttle slot suppresses the next sample.
+	if (!redisConfigAvailable()) {
+		return;
+	}
+
+	const redis = useRedis();
+	await redis.del(streamKey());
+	await deleteStatsKeysByPattern(redis, `${statsNamespace()}:anom:*`);
+	await deleteStatsKeysByPattern(redis, `${statsNamespace()}:tomb:*`);
 }
