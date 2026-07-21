@@ -105,11 +105,20 @@ describe('get cache key', async () => {
 	});
 
 	test.each(cases)('should create a cache key for %s', async (_, params, key) => {
-		expect(await getCacheKey(params as unknown as Request)).toEqual(key);
+		const { key: redisKey, hash } = await getCacheKey(params as unknown as Request);
+		// Hashing on (default): the Redis key and the stats hash are the same digest.
+		expect(hash).toEqual(key);
+		expect(redisKey).toEqual(key);
 	});
 
 	test('should create a unique key for each request', async () => {
-		const keys = cases.map(async ([, params]) => await getCacheKey(params as unknown as Request));
+		const keys = await Promise.all(
+			cases.map(async ([, params]) => {
+				const { hash } = await getCacheKey(params as unknown as Request);
+				return hash;
+			}),
+		);
+
 		const hasDuplicate = keys.some((key) => keys.indexOf(key) !== keys.lastIndexOf(key));
 
 		expect(hasDuplicate).toBeFalsy();
@@ -158,7 +167,7 @@ describe('get cache key', async () => {
 		});
 
 		test('returns the readable request descriptor instead of a hash', async () => {
-			const key = await getCacheKey({
+			const { key, hash } = await getCacheKey({
 				method,
 				originalUrl: restUrl,
 				accountability,
@@ -169,6 +178,8 @@ describe('get cache key', async () => {
 			expect(key).toContain(`"user":"${accountability.user}"`);
 			expect(key).toContain('"fields":["id","name"]');
 			expect(key).toContain('"version":"1.2.3"');
+			// The stats hash stays a fixed-length digest even for a readable Redis key.
+			expect(hash).toMatch(/^[0-9a-f]{40}$/);
 		});
 
 		test('canonical key order → equivalent queries share one key', async () => {

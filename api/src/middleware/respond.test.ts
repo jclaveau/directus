@@ -22,8 +22,10 @@ const mocks = vi.hoisted(() => {
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
-		captureCacheDescriptor: vi.fn().mockResolvedValue(undefined),
+		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
+		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
+		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
 });
 
@@ -48,9 +50,17 @@ vi.mock('../scoped-cache.js', () => {
 vi.mock('../cache-events.js', () => {
 	return {
 		cacheStatsActive: () => true,
-		captureCacheDescriptor: mocks.captureCacheDescriptor,
+		queueCacheDescriptor: mocks.queueCacheDescriptor,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 	};
+});
+
+vi.mock('../utils/get-string-byte-size.js', () => {
+	return { stringByteSize: mocks.stringByteSize };
+});
+
+vi.mock('../utils/report-cache-anomaly.js', () => {
+	return { reportCacheAnomaly: mocks.reportCacheAnomaly };
 });
 
 vi.mock('../database/index.js', () => ({ default: () => ({}) }));
@@ -62,7 +72,9 @@ vi.mock('../utils/permissions-cachable.js', () => {
 });
 
 vi.mock('../utils/get-cache-key.js', () => {
-	return { getCacheKey: vi.fn().mockResolvedValue('cache-key') };
+	return {
+		getCacheKey: vi.fn().mockResolvedValue({ key: 'cache-key', hash: 'cache-hash' }),
+	};
 });
 
 vi.mock('../utils/get-graphql-query-and-variables.js', () => {
@@ -176,19 +188,43 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), res, next);
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
-				cacheKey: 'cache-key',
+				cacheKey: 'cache-hash',
+				redisKey: 'cache-key',
 				method: 'GET',
 				path: '/items/articles',
 				collection: 'articles',
 				url: '/items/articles',
+				// cap off: bytes still comes from one serialization
+				bytes: Buffer.byteLength(JSON.stringify({ data: [{ id: 1 }] }), 'utf8'),
 			}),
 		);
 
 		expect(mocks.writeCacheTombstone).toHaveBeenCalledWith(
 			'cache-key',
 			expect.any(Number),
+		);
+	});
+
+	test(oneLine`
+		reuses the size-gate serialization for the descriptor bytes (one stringify)
+	`, async () => {
+		env['CACHE_VALUE_MAX_SIZE'] = '1mb';
+		mocks.stringByteSize.mockClear();
+
+		const payload = { data: [{ id: 1, blob: 'x'.repeat(200) }] };
+		const res = makeRes(payload, { scopedCacheTags: [{ collection: 'articles' }] });
+
+		await respond(makeReq(), res, next);
+
+		// The size cap + the descriptor bytes share ONE payload serialization, not two.
+		expect(mocks.stringByteSize).toHaveBeenCalledTimes(1);
+
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({
+				bytes: Buffer.byteLength(JSON.stringify(payload), 'utf8'),
+			}),
 		);
 	});
 
@@ -200,7 +236,7 @@ describe('respond middleware', () => {
 
 		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
 
-		expect(mocks.captureCacheDescriptor).toHaveBeenCalledWith(
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
 				url: '',
 				query: JSON.stringify({ query: '{ me }', variables: {} }),
@@ -258,6 +294,126 @@ describe('respond middleware', () => {
 		expect(warn).toHaveBeenCalled();
 		// tagging is skipped once the set throws, but the response still flushes
 		expect(res.json).toHaveBeenCalled();
+
+		// the failed write also surfaces as a redis_error anomaly carrying the message
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'redis_error',
+			'boom',
+		);
+	});
+
+	test('an oversized payload is not cached and flags value_too_large', async () => {
+		env['CACHE_VALUE_MAX_SIZE'] = '1b';
+		const res = makeRes({ data: [{ id: 1, blob: 'x'.repeat(100) }] });
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'value_too_large',
+			expect.stringMatching(/^\d+B$/),
+		);
+	});
+
+	test('a scoped-mode collection-less response flags missing_scope', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+		const res = makeRes({ data: {} });
+		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'missing_scope',
+		);
+	});
+
+	const scopedSchema = {
+		collections: { articles: { scopedCacheFields: ['owner_field'] } },
+	} as unknown as Request['schema'];
+
+	test(oneLine`
+		a scoped collection tagged bare is marked coarse on the descriptor
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// articles has scoped_cache_fields but the read tagged bare (no value slice) →
+		// over-purges → coarse recorded on the descriptor, not raised as an anomaly.
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{ scopedCacheTags: [{ collection: 'articles' }] },
+		);
+
+		await respond(makeReq({ schema: scopedSchema }), res, next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ coarse: true }),
+		);
+	});
+
+	test('a value-pinned scoped fill is not coarse', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// A value slice (field set) is a precise pin — not a coarse fallback.
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'owner_field', value: 'u1' },
+				],
+			},
+		);
+
+		await respond(makeReq({ schema: scopedSchema }), res, next);
+
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ coarse: false }),
+		);
+	});
+
+	test('a bare tag on a NON-scoped collection is not coarse', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// No scoped_cache_fields → the bare tag is the only correct tag, not a fallback.
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{ scopedCacheTags: [{ collection: 'articles' }] },
+		);
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ coarse: false }),
+		);
+	});
+
+	test(oneLine`
+		an oversized collection-less scoped response flags only value_too_large
+	`, async () => {
+		env['CACHE_VALUE_MAX_SIZE'] = '1b';
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// Both preconditions hold (oversized AND orphan) — the else-if must pick the
+		// size reason, never emit both for one request.
+		const res = makeRes({ data: { blob: 'x'.repeat(100) } });
+		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
+
+		await respond(req, res, next);
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledTimes(1);
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'value_too_large',
+			expect.stringMatching(/^\d+B$/),
+		);
 	});
 
 	test('res.locals.cache === false skips caching (no-cache branch)', async () => {

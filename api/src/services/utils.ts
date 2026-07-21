@@ -4,11 +4,13 @@ import type { AbstractServiceOptions, Accountability, PrimaryKey, SchemaOverview
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue } from '../cache.js';
 import {
+	type CacheAnomalyRecord,
 	type CacheEntryRecord,
 	type CacheStatsState,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	getCacheStatsState,
+	listCacheAnomalies,
 	listCacheEntries,
 	readCacheTombstone,
 	setCacheStatsEnabled,
@@ -198,10 +200,16 @@ export class UtilsService {
 		}
 	}
 
-	async getCacheEntries(): Promise<CacheEntryRecord[]> {
+	async getCacheEntries(windowMs?: number): Promise<CacheEntryRecord[]> {
 		this.assertCacheAdmin('inspect the cache');
 
-		return listCacheEntries();
+		return listCacheEntries(windowMs);
+	}
+
+	async getCacheAnomalies(windowMs?: number): Promise<CacheAnomalyRecord[]> {
+		this.assertCacheAdmin('inspect cache anomalies');
+
+		return listCacheAnomalies(windowMs);
 	}
 
 	// The live Redis state for a single key — the cached response plus its

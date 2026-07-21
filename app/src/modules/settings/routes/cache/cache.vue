@@ -2,7 +2,7 @@
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
 import { getRootPath } from '@/utils/get-root-path';
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Filter } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
@@ -10,6 +10,7 @@ import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
 	buildGroups,
+	filterAnomalies,
 	filterEntries,
 	formatAge,
 	formatExpiry,
@@ -19,7 +20,10 @@ import {
 	formatUser,
 	shortKey,
 	splitSections,
+	summariseAnomalies,
 	ttlVerdict,
+	type CacheAnomaly,
+	type CacheAnomalyReason,
 	type CacheEntry,
 	type EndpointGroup,
 	type QueryGroup,
@@ -49,12 +53,37 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(false);
 const error = ref<string | null>(null);
 const entries = ref<CacheEntry[]>([]);
+const anomalies = ref<CacheAnomaly[]>([]);
 const expanded = ref<Record<string, boolean>>({});
 const now = ref(Date.now());
 const refreshInterval = ref<number | null>(null);
 const search = ref('');
 const filter = ref<Filter | null>(null);
 const entryPage = ref<Record<string, number>>({});
+
+// A search/filter change reshapes every group, so reset paging to the first page —
+// else the saved deep page strands the user on a tail slice of the filtered set.
+watch([search, filter], () => {
+	entryPage.value = {};
+});
+
+// How far back the listing looks — sent as ?window= to the API, which clamps it.
+const windowOptions = [
+	{ text: t('cache_window_1h', 'Last 1h'), value: '1h' },
+	{ text: t('cache_window_6h', 'Last 6h'), value: '6h' },
+	{ text: t('cache_window_24h', 'Last 24h'), value: '24h' },
+	{ text: t('cache_window_7d', 'Last 7d'), value: '7d' },
+	{ text: t('cache_window_30d', 'Last 30d'), value: '30d' },
+];
+
+const selectedWindow = ref('24h');
+
+// Bumped per load; a superseded window's late response can't clobber a newer one.
+let loadToken = 0;
+
+// Drawer version of loadToken: a per-open token so a late /entry response (even a
+// same-key reopen) can't overwrite a newer open; a close discards it entirely.
+let entryToken = 0;
 
 // Runtime collection state (Redis-backed). `configured` is the env opt-in: when
 // false the toggle is hidden, since the flag can only narrow, never widen it.
@@ -128,7 +157,7 @@ const detailFields = computed(() => {
 		{ label: t('age', 'Age'), value: ageOf(entry.createdAt) },
 		{ label: t('last_hit', 'Last hit'), value: lastHitOf(entry.lastHitAt) },
 		{ label: t('expires_in', 'Expires in'), value: expiryOf(entry.expiresAt) },
-		{ label: t('key', 'Key'), value: entry.key },
+		{ label: t('key', 'Key'), value: entry.redisKey },
 	];
 });
 
@@ -139,6 +168,37 @@ const prettyValue = computed(() => {
 	catch {
 		return String(cachedValue.value);
 	}
+});
+
+// Why the live value is gone: expiry is certain (past its TTL); a coarse key gone
+// before its TTL was almost surely over-purged by a sibling collection mutation.
+const absentReason = computed(() => {
+	const entry = selectedEntry.value;
+
+	if (!entry) {
+		return t('cache_value_absent', 'Not in the cache');
+	}
+
+	// Round to whole seconds like the "Expires in" column so both flip to "expired"
+	// at the same instant, not up to a second apart.
+	if (
+		entry.expiresAt !== null
+		&& Math.round((entry.expiresAt - now.value) / 1000) <= 0
+	) {
+		return t('cache_value_expired', 'Not in the cache — expired (TTL elapsed)');
+	}
+
+	if (entry.coarse) {
+		return t(
+			'cache_value_coarse',
+			'Evicted before TTL — likely a coarse-scope purge (a collection mutation)',
+		);
+	}
+
+	return t(
+		'cache_value_evicted',
+		'Evicted before TTL — a scoped purge or memory eviction',
+	);
 });
 
 // Configured TTL off the live Redis __expires_at sidecar (null = no sidecar).
@@ -212,7 +272,15 @@ const searchedEntries = computed(() => {
 	return filterEntries(entries.value, filter.value, search.value, FILTER_FIELD_MAP);
 });
 
-const groups = computed<EndpointGroup[]>(() => buildGroups(searchedEntries.value));
+const searchedAnomalies = computed(() => {
+	return filterAnomalies(anomalies.value, search.value);
+});
+
+const anomalySummary = computed(() => summariseAnomalies(searchedAnomalies.value));
+
+const groups = computed<EndpointGroup[]>(() => {
+	return buildGroups(searchedEntries.value, searchedAnomalies.value);
+});
 
 const sections = computed(() => {
 	return splitSections(
@@ -230,21 +298,58 @@ const totalHits = computed(() => {
 });
 
 async function load() {
+	const token = ++loadToken;
 	loading.value = true;
 	error.value = null;
 
 	try {
-		const response = await api.get('/utils/cache');
-		entries.value = response.data.data;
+		// Fetch both together and assign in one go: entries + anomalies feed one group
+		// tree, so a staggered assign would flash a phantom old-window anomaly node.
+		const [entriesRes, anomaliesRes] = await Promise.all([
+			api.get('/utils/cache', {
+				params: { window: selectedWindow.value },
+			}),
+			api.get('/utils/cache/anomalies', {
+				params: { window: selectedWindow.value },
+			}).catch(() => ({ data: { data: [] } })),
+		]);
+
+		if (token !== loadToken) {
+			return;
+		}
+
+		entries.value = entriesRes.data.data;
+		anomalies.value = anomaliesRes.data.data;
 		now.value = Date.now();
 	}
 	catch (err: any) {
-		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		if (token === loadToken) {
+			error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		}
 	}
 	finally {
-		loading.value = false;
+		if (token === loadToken) {
+			loading.value = false;
+		}
 	}
 }
+
+function anomalyLabel(reason: CacheAnomalyReason): string {
+	const labels: Record<CacheAnomalyReason, string> = {
+		missing_scope: t('cache_anomaly_missing_scope', 'Not cached · missing scope'),
+		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
+		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
+	};
+
+	return labels[reason] ?? reason;
+}
+
+const coarseHint = computed(() => {
+	return t(
+		'cache_coarse_hint',
+		'Not value-pinned — over-purges; add a filter on the scoped field.',
+	);
+});
 
 async function loadStatsState() {
 	try {
@@ -256,8 +361,8 @@ async function loadStatsState() {
 	}
 }
 
-// Flip collection at runtime (Redis flag; every node picks it up within a poll
-// tick). Re-enabling also clears an autokill reason server-side.
+// Flip collection at runtime (Redis flag; every node picks it up at once via the
+// bus). Re-enabling also clears an autokill reason server-side.
 async function toggleStats() {
 	if (!statsState.value || statsToggling.value) {
 		return;
@@ -282,9 +387,10 @@ async function toggleStats() {
 
 async function evictEntry(entry: CacheEntry) {
 	error.value = null;
+	closeEntry(); // the value is about to be gone; don't leave the drawer showing it as live
 
 	try {
-		await api.delete('/utils/cache', { params: { key: entry.key } });
+		await api.delete('/utils/cache', { params: { key: entry.redisKey } });
 		await load();
 	}
 	catch (err: any) {
@@ -294,6 +400,7 @@ async function evictEntry(entry: CacheEntry) {
 
 async function evictPath(path: string) {
 	error.value = null;
+	closeEntry(); // the open entry may belong to this path; don't leave it showing as live
 
 	try {
 		await api.delete('/utils/cache', { params: { path } });
@@ -396,7 +503,9 @@ function copyQuery(query: QueryGroup) {
 // Open the detail drawer for a row and fetch its live cached value from Redis
 // (the descriptor outlives the value, so it may already be gone).
 async function openEntry(entry: CacheEntry) {
+	const token = ++entryToken;
 	selectedEntry.value = entry;
+	now.value = Date.now(); // fresh clock so absentReason's expired-vs-evicted verdict is current
 	cachedValue.value = null;
 	cachedValueExists.value = false;
 	cachedTags.value = null;
@@ -408,12 +517,12 @@ async function openEntry(entry: CacheEntry) {
 
 	try {
 		const response = await api.get('/utils/cache/entry', {
-			params: { key: entry.key },
+			params: { key: entry.redisKey },
 		});
 
-		// A quick second row click supersedes this fetch; ignore a late response for a
-		// no-longer-selected entry so it can't overwrite the currently-open one.
-		if (selectedEntry.value?.key !== entry.key) {
+		// A newer open (or a close) supersedes this fetch; ignore a late response so it
+		// can't overwrite the currently-open entry — even a re-open of the same key.
+		if (token !== entryToken) {
 			return;
 		}
 
@@ -427,19 +536,21 @@ async function openEntry(entry: CacheEntry) {
 		cachedTombstone.value = data.tombstone;
 	}
 	catch {
-		if (selectedEntry.value?.key === entry.key) {
+		if (token === entryToken) {
 			cachedValueExists.value = false;
 		}
 	}
 	finally {
-		if (selectedEntry.value?.key === entry.key) {
+		if (token === entryToken) {
 			valueLoading.value = false;
 		}
 	}
 }
 
 function closeEntry() {
+	entryToken += 1; // discard any in-flight /entry fetch
 	selectedEntry.value = null;
+	valueLoading.value = false;
 }
 
 onMounted(() => {
@@ -461,6 +572,14 @@ onMounted(() => {
 		</template>
 
 		<template #actions>
+			<v-select
+				v-model="selectedWindow"
+				class="window-select"
+				:items="windowOptions"
+				inline
+				@update:model-value="load"
+			/>
+
 			<search-input
 				v-model="search"
 				v-model:filter="filter"
@@ -519,6 +638,17 @@ onMounted(() => {
 				</div>
 			</div>
 
+			<div v-if="anomalySummary.length" class="anomaly-summary">
+				<v-icon name="warning" small />
+				<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
+				<span
+					v-for="item in anomalySummary"
+					:key="item.reason"
+					class="reason"
+					:class="item.reason"
+				>{{ anomalyLabel(item.reason) }} ×{{ item.count }}</span>
+			</div>
+
 			<v-info
 				v-if="!loading && groups.length === 0"
 				:title="t('no_cached_entries', 'No cached entries')"
@@ -552,11 +682,18 @@ onMounted(() => {
 								{{ group.totalHits }} {{ t('hits', 'hits') }}
 							</span>
 							<span class="stat">{{ formatSize(group.totalSize) }}</span>
+							<span v-if="group.anomalyCount" class="stat anomaly-count">
+								{{ group.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
+							</span>
+							<span v-if="group.coarseCount" class="stat coarse-count">
+								{{ group.coarseCount }} {{ t('coarse_short', 'coarse') }}
+							</span>
 							<v-button
 								v-tooltip.bottom="t('evict_endpoint', 'Evict this endpoint')"
 								x-small
 								kind="danger"
 								secondary
+								:disabled="group.entryCount === 0"
 								@click.stop="evictPath(group.path)"
 							>
 								<v-icon name="delete" x-small />
@@ -581,6 +718,12 @@ onMounted(() => {
 										{{ q.totalHits }} {{ t('hits', 'hits') }}
 									</span>
 									<span class="stat">{{ formatSize(q.totalSize) }}</span>
+									<span v-if="q.anomalyCount" class="stat anomaly-count">
+										{{ q.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
+									</span>
+									<span v-if="q.coarseCount" class="stat coarse-count">
+										{{ q.coarseCount }} {{ t('coarse_short', 'coarse') }}
+									</span>
 									<span
 										v-if="q.recommendedTtlMs !== null"
 										class="stat rec"
@@ -606,7 +749,10 @@ onMounted(() => {
 									/>
 								</div>
 
-								<div v-if="expanded[q.key]" class="entries-scroll">
+								<div
+									v-if="expanded[q.key] && q.entries.length"
+									class="entries-scroll"
+								>
 									<table class="entries">
 										<thead>
 											<tr>
@@ -639,8 +785,13 @@ onMounted(() => {
 													{{ expiryOf(entry.expiresAt) }}
 												</td>
 												<td class="num">{{ formatSize(entry.size) }}</td>
-												<td class="key" :title="entry.key">
-													{{ shortKey(entry.key) }}
+												<td class="key" :title="entry.redisKey">
+													{{ shortKey(entry.redisKey) }}
+													<span
+														v-if="entry.coarse"
+														v-tooltip.bottom="coarseHint"
+														class="reason inline coarse"
+													>{{ t('cache_coarse', 'coarse') }}</span>
 												</td>
 												<td class="num">
 													<v-icon
@@ -656,6 +807,27 @@ onMounted(() => {
 											</tr>
 										</tbody>
 									</table>
+								</div>
+
+								<div
+									v-if="expanded[q.key] && q.anomalies.length"
+									class="anomaly-rows"
+								>
+									<div
+										v-for="anomaly in q.anomalies"
+										:key="anomaly.cacheKey + anomaly.reason"
+										class="anomaly-row"
+									>
+										<span class="reason" :class="anomaly.reason">
+											{{ anomalyLabel(anomaly.reason) }}
+										</span>
+										<span class="stat count">×{{ anomaly.count }}</span>
+										<span
+											v-if="anomaly.sample"
+											class="sample"
+											:title="anomaly.sample"
+										>{{ anomaly.sample }}</span>
+									</div>
 								</div>
 
 								<v-pagination
@@ -729,7 +901,7 @@ onMounted(() => {
 						{{ t('loading', 'Loading…') }}
 					</div>
 					<div v-else-if="!cachedValueExists" class="value-note">
-						{{ t('cache_value_absent', 'Not in the cache (evicted or expired)') }}
+						{{ absentReason }}
 					</div>
 					<pre v-else class="value">{{ prettyValue }}</pre>
 				</div>
@@ -764,6 +936,88 @@ onMounted(() => {
 .metric .label {
 	color: var(--theme--foreground-subdued);
 	font-size: 14px;
+}
+
+.anomaly-summary {
+	align-items: center;
+	background-color: color-mix(in srgb, var(--theme--warning) 12%, transparent);
+	border: var(--theme--border-width) solid var(--theme--warning);
+	border-radius: var(--theme--border-radius);
+	color: var(--theme--warning);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-block-end: 24px;
+	padding: 8px 12px;
+}
+
+.anomaly-summary .label {
+	font-weight: 700;
+	text-transform: uppercase;
+}
+
+.reason {
+	color: var(--theme--warning);
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+.reason.inline {
+	font-size: 11px;
+	margin-inline-start: 8px;
+}
+
+.reason.inline.coarse {
+	color: var(--theme--primary);
+}
+
+.anomaly-rows {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 4px 12px 8px;
+}
+
+.anomaly-row {
+	align-items: center;
+	color: var(--theme--warning);
+	display: flex;
+	gap: 12px;
+}
+
+.anomaly-row .stat {
+	color: var(--theme--foreground-subdued);
+	flex-shrink: 0;
+	font-size: 13px;
+}
+
+.anomaly-row .count {
+	font-variant-numeric: tabular-nums;
+}
+
+.anomaly-row .sample {
+	color: var(--theme--foreground-subdued);
+	font-family: var(--theme--fonts--monospace--font-family);
+	font-size: 12px;
+	margin-inline-start: auto;
+	max-inline-size: 40%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* Scoped over the header `.stat` grey rules, which are more specific than a bare
+   `.anomaly-count` and would otherwise win. */
+.endpoint-header .stat.anomaly-count,
+.query-header .stat.anomaly-count {
+	color: var(--theme--warning);
+}
+
+/* Coarse is a tuning hint, not a problem — primary (not amber) so it reads apart
+   from anomalies. */
+.endpoint-header .stat.coarse-count,
+.query-header .stat.coarse-count {
+	color: var(--theme--primary);
 }
 
 .section {

@@ -4,7 +4,7 @@ import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import {
 	cacheStatsActive,
-	captureCacheDescriptor,
+	queueCacheDescriptor,
 	writeCacheTombstone,
 } from '../cache-events.js';
 import getDatabase from '../database/index.js';
@@ -21,6 +21,7 @@ import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
 } from '../utils/get-graphql-query-and-variables.js';
+import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -61,9 +62,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	}
 
 	let exceedsMaxSize = false;
+	let valueSize = 0;
 
 	if (env['CACHE_VALUE_MAX_SIZE'] !== false) {
-		const valueSize = res.locals['payload']
+		valueSize = res.locals['payload']
 			? stringByteSize(JSON.stringify(res.locals['payload']))
 			: 0;
 
@@ -93,13 +95,19 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
-	if (
+	// The request-level preconditions for caching, minus the payload/scope/permission
+	// gates below — reused to attribute a not-cached anomaly to the right reason.
+	const cacheableRequest =
 		(req.method.toLowerCase() === 'get' || req.originalUrl?.startsWith('/graphql')) &&
 		req.originalUrl?.startsWith('/auth') === false &&
 		env['CACHE_ENABLED'] === true &&
-		cache &&
+		!!cache &&
 		!req.sanitizedQuery.export &&
-		res.locals['cache'] !== false &&
+		res.locals['cache'] !== false;
+
+	if (
+		cacheableRequest &&
+		cache &&
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
 		(await permissionsCachable(
@@ -111,7 +119,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			req.accountability,
 		))
 	) {
-		const key = await getCacheKey(req);
+		const { key, hash } = await getCacheKey(req);
 
 		try {
 			const now = Date.now();
@@ -159,36 +167,70 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// config has stats off, and building these args re-serializes the payload
 			// (size) and the query — a cost the hot fill path shouldn't pay when off.
 			if (cacheStatsActive()) {
-				const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
+				try {
+					const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
 
-				const size = res.locals['payload']
-					? stringByteSize(JSON.stringify(res.locals['payload']))
-					: 0;
+					// Reuse the size the CACHE_VALUE_MAX_SIZE gate already computed (same
+					// payload); only serialize again when that gate is off.
+					let size = valueSize;
 
-				// The per-key descriptor — captured here (fill) where query/collection/
-				// user are fully populated, unlike the early cache middleware. Buffered
-				// like the events; the flusher upserts the descriptors dimension.
-				void captureCacheDescriptor({
-					cacheKey: key,
-					method: req.method,
-					path: req.originalUrl.split('?')[0]!,
-					collection: req.collection ?? null,
-					userId: req.accountability?.user ?? null,
-					query: isGraphQlRequest
-						? JSON.stringify(getGraphqlQueryAndVariables(req))
-						: JSON.stringify(req.sanitizedQuery ?? {}),
-					// A GraphQL read is a POST — not a GET URL, so leave it blank.
-					url: isGraphQlRequest
-						? ''
-						: req.originalUrl,
-					bytes: size,
-					// Compute cost of this miss: request entry (cache mw) → response ready.
-					fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
-				}).catch(() => {});
+					if (env['CACHE_VALUE_MAX_SIZE'] === false) {
+						size = res.locals['payload']
+							? stringByteSize(JSON.stringify(res.locals['payload']))
+							: 0;
+					}
+
+					// Coarse: a scoped collection read tagged bare (no value slice) caches
+					// fine but over-purges — a tuning signal, on the descriptor.
+					const scopedFields = req.collection
+						? req.schema?.collections?.[req.collection]?.scopedCacheFields ?? []
+						: [];
+
+					const coarse =
+						scopedCachePurgeEnabled() &&
+						scopedFields.length > 0 &&
+						scopedCacheTags.some(
+							(tag) => tag.collection === req.collection && tag.field === undefined,
+						);
+
+					// The per-key descriptor — captured here (fill) where query/collection/
+					// user are fully populated, unlike the early cache middleware. Buffered
+					// like the events; the flusher upserts the descriptors dimension.
+					void queueCacheDescriptor({
+						cacheKey: hash,
+						redisKey: key,
+						coarse,
+						method: req.method,
+						path: req.originalUrl.split('?')[0]!,
+						collection: req.collection ?? null,
+						userId: req.accountability?.user ?? null,
+						query: isGraphQlRequest
+							? JSON.stringify(getGraphqlQueryAndVariables(req))
+							: JSON.stringify(req.sanitizedQuery ?? {}),
+						// A GraphQL read is a POST — not a GET URL, so leave it blank.
+						url: isGraphQlRequest
+							? ''
+							: req.originalUrl,
+						bytes: size,
+						// Compute cost of this miss: request entry (cache mw) → response ready.
+						fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
+					}).catch(() => {});
+				}
+				catch (descriptorErr: any) {
+					logger.warn(descriptorErr, '[cache-stats] descriptor capture failed');
+				}
 			}
 		}
 		catch (err: any) {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
+
+			if (cacheStatsActive()) {
+				void reportCacheAnomaly(
+					req,
+					'redis_error',
+					err?.message ?? String(err),
+				).catch(() => {});
+			}
 		}
 
 		res.setHeader('Cache-Control', getCacheControlHeader(req, getMilliseconds(env['CACHE_TTL']), true, true));
@@ -198,6 +240,20 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		// Don't cache anything by default
 		res.setHeader('Cache-Control', 'no-cache');
 		res.setHeader('Vary', 'Origin, Cache-Control');
+	}
+
+	// Surface the two silent "cacheable but skipped" reasons on the dashboard.
+	if (cacheStatsActive() && cacheableRequest) {
+		if (exceedsMaxSize) {
+			void reportCacheAnomaly(
+				req,
+				'value_too_large',
+				`${valueSize}B`,
+			).catch(() => {});
+		}
+		else if (orphansInScopedMode) {
+			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
+		}
 	}
 
 	if (req.sanitizedQuery.export) {
