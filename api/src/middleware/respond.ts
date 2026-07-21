@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
+import { classifyCacheQueryShape, resolveCacheTtl } from '../cache-ttl-rules.js';
 import { getCache, setCacheValue } from '../cache.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
@@ -14,7 +15,6 @@ import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
-import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
 
@@ -105,9 +105,15 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	) {
 		const key = await getCacheKey(req);
 
+		const ttlMs = await resolveCacheTtl({
+			path: req.originalUrl.split('?')[0]!,
+			method: req.method,
+			queryShape: classifyCacheQueryShape(req.sanitizedQuery),
+		});
+
 		try {
-			await setCacheValue(cache, key, res.locals['payload'], getMilliseconds(env['CACHE_TTL']));
-			await setCacheValue(cache, `${key}__expires_at`, { exp: Date.now() + getMilliseconds(env['CACHE_TTL'], 0) });
+			await setCacheValue(cache, key, res.locals['payload'], ttlMs);
+			await setCacheValue(cache, `${key}__expires_at`, { exp: Date.now() + (ttlMs ?? 0) });
 
 			await tagScopedCacheKeys(
 				key,
@@ -129,7 +135,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 						cache,
 						`${key}__tags`,
 						{ tags: serializeScopedCacheTags(pins) },
-						getMilliseconds(env['CACHE_TTL']),
+						ttlMs,
 					);
 				}
 			}
@@ -138,7 +144,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
 		}
 
-		res.setHeader('Cache-Control', getCacheControlHeader(req, getMilliseconds(env['CACHE_TTL']), true, true));
+		res.setHeader('Cache-Control', getCacheControlHeader(req, ttlMs, true, true));
 		res.setHeader('Vary', 'Origin, Cache-Control');
 	}
 	else {
