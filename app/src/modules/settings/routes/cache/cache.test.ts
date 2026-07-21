@@ -118,7 +118,18 @@ const VSelect = {
 // the exception: it's a real stub so a test can drive its filter/search models.
 const global = {
 	plugins: [i18n],
-	directives: { tooltip: {} },
+	// Record the bound value so a test can assert the tooltip text (the real directive
+	// renders it out-of-tree, invisible to wrapper.text()).
+	directives: {
+		tooltip: {
+			mounted(el: HTMLElement, binding: { value: unknown }) {
+				el.setAttribute('data-tooltip', String(binding.value));
+			},
+			updated(el: HTMLElement, binding: { value: unknown }) {
+				el.setAttribute('data-tooltip', String(binding.value));
+			},
+		},
+	},
 	components: { SearchInput, PrivateView, VPagination, VSelect },
 	config: {
 		compilerOptions: {
@@ -808,8 +819,11 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		// bufferLength > 0 branch of statsTooltip renders the count.
-		expect(wrapper.find('.stats-toggle').exists()).toBe(true);
+		// The bufferLength > 0 branch appends the backlog clause; = 0 is the bare base.
+		// Asserting the clause pins that the branch is actually taken.
+		const tip = wrapper.find('.stats-toggle').attributes('data-tooltip');
+		expect(tip).toContain('buffered');
+		expect(tip).not.toBe('Disable cache stats collection');
 	});
 
 	it('surfaces an evict error instead of an unhandled rejection', async () => {
