@@ -433,7 +433,9 @@ export async function writeCacheTombstone(
 		tombstoneKey(key),
 		String(expiredAt),
 		'PX',
-		remainingLifeMs + gapLookbackMs(),
+		// Floor at 1ms: an already-expired entry with a zero lookback would otherwise
+		// pass PX 0, which Redis rejects — dropping the gap (lengthen) signal.
+		Math.max(remainingLifeMs + gapLookbackMs(), 1),
 	);
 }
 
@@ -736,35 +738,39 @@ async function persistStreamBatch(
 	}
 
 	try {
-		if (events.length > 0) {
-			await db.batchInsert('directus_cache_events', events, FLUSH_BATCH);
-		}
+		// One transaction so a mid-batch failure rolls back atomically, never leaving
+		// the fact events persisted while descriptors/anomalies are dropped.
+		await db.transaction(async (trx) => {
+			if (events.length > 0) {
+				await trx.batchInsert('directus_cache_events', events, FLUSH_BATCH);
+			}
 
-		if (descriptors.size > 0) {
-			await db('directus_cache_descriptors')
-				.insert([...descriptors.values()])
-				.onConflict('cache_key')
-				.merge();
-		}
+			if (descriptors.size > 0) {
+				await trx('directus_cache_descriptors')
+					.insert([...descriptors.values()])
+					.onConflict('cache_key')
+					.merge();
+			}
 
-		// After real fills, so a locator only creates a row when none exists yet;
-		// its zeros must never overwrite a cached entry's bytes/coarse/fill_ms.
-		if (locators.size > 0) {
-			await db('directus_cache_descriptors')
-				.insert([...locators.values()])
-				.onConflict('cache_key')
-				.ignore();
-		}
+			// After real fills, so a locator only creates a row when none exists yet;
+			// its zeros must never overwrite a cached entry's bytes/coarse/fill_ms.
+			if (locators.size > 0) {
+				await trx('directus_cache_descriptors')
+					.insert([...locators.values()])
+					.onConflict('cache_key')
+					.ignore();
+			}
 
-		if (anomalies.length > 0) {
-			await db.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
-		}
+			if (anomalies.length > 0) {
+				await trx.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
+			}
+		});
 	}
 	catch (err: any) {
-		// A batch that deterministically fails to persist (bad row, constraint, dialect
-		// quirk) must not wedge the drain: without the ack/del below it would be
-		// redelivered every tick forever, re-inserting any rows that DID land. Drop it
-		// to a warning — telemetry is lossy by design.
+		// A batch that deterministically fails (bad row, constraint, dialect quirk) must
+		// not wedge the drain: without the ack/del below it is redelivered every tick
+		// forever. The transaction rolled back, so nothing landed — drop it to a warning
+		// (telemetry is lossy by design).
 		useLogger().warn(
 			err,
 			`[cache-stats] dropped ${batch.length} unpersistable events. ${err.message}`,
@@ -939,10 +945,12 @@ export async function reapCacheDescriptors(): Promise<number> {
 	const db = getDatabase();
 	const cutoff = new Date(Date.now() - DESCRIPTOR_REAP_AFTER);
 
-	// Filled descriptor: an orphan once stale AND no live event references it.
+	// Filled descriptor: an orphan once stale AND no event or anomaly references
+	// it — a re-anomalied dormant key keeps its descriptor for the anomaly join.
 	const filled = await db('directus_cache_descriptors')
 		.where('last_filled', '<', cutoff)
 		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
+		.whereNotIn('cache_key', db('directus_cache_anomalies').distinct('cache_key'))
 		.delete();
 
 	// Locators (last_filled NULL) never match the cutoff, so reap them on the orphan

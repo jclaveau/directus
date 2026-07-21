@@ -167,53 +167,58 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// config has stats off, and building these args re-serializes the payload
 			// (size) and the query — a cost the hot fill path shouldn't pay when off.
 			if (cacheStatsActive()) {
-				const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
+				try {
+					const isGraphQlRequest = req.originalUrl?.startsWith('/graphql') === true;
 
-				// Reuse the size the CACHE_VALUE_MAX_SIZE gate already computed (same
-				// payload); only serialize again when that gate is off.
-				let size = valueSize;
+					// Reuse the size the CACHE_VALUE_MAX_SIZE gate already computed (same
+					// payload); only serialize again when that gate is off.
+					let size = valueSize;
 
-				if (env['CACHE_VALUE_MAX_SIZE'] === false) {
-					size = res.locals['payload']
-						? stringByteSize(JSON.stringify(res.locals['payload']))
-						: 0;
+					if (env['CACHE_VALUE_MAX_SIZE'] === false) {
+						size = res.locals['payload']
+							? stringByteSize(JSON.stringify(res.locals['payload']))
+							: 0;
+					}
+
+					// Coarse: a scoped collection read tagged bare (no value slice) caches
+					// fine but over-purges — a tuning signal, on the descriptor.
+					const scopedFields = req.collection
+						? req.schema?.collections?.[req.collection]?.scopedCacheFields ?? []
+						: [];
+
+					const coarse =
+						scopedCachePurgeEnabled() &&
+						scopedFields.length > 0 &&
+						scopedCacheTags.some(
+							(tag) => tag.collection === req.collection && tag.field === undefined,
+						);
+
+					// The per-key descriptor — captured here (fill) where query/collection/
+					// user are fully populated, unlike the early cache middleware. Buffered
+					// like the events; the flusher upserts the descriptors dimension.
+					void queueCacheDescriptor({
+						cacheKey: hash,
+						redisKey: key,
+						coarse,
+						method: req.method,
+						path: req.originalUrl.split('?')[0]!,
+						collection: req.collection ?? null,
+						userId: req.accountability?.user ?? null,
+						query: isGraphQlRequest
+							? JSON.stringify(getGraphqlQueryAndVariables(req))
+							: JSON.stringify(req.sanitizedQuery ?? {}),
+						// A GraphQL read is a POST — not a GET URL, so leave it blank.
+						url: isGraphQlRequest
+							? ''
+							: req.originalUrl,
+						bytes: size,
+						// Compute cost of this miss: request entry (cache mw) → response ready.
+						fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
+					}).catch(() => {});
 				}
-
-				// Coarse-scope: a scoped collection whose read tagged bare (no value slice)
-				// caches fine but over-purges — a tuning signal, recorded on the descriptor.
-				const scopedFields = req.collection
-					? req.schema?.collections?.[req.collection]?.scopedCacheFields ?? []
-					: [];
-
-				const coarse =
-					scopedCachePurgeEnabled() &&
-					scopedFields.length > 0 &&
-					scopedCacheTags.some(
-						(tag) => tag.collection === req.collection && tag.field === undefined,
-					);
-
-				// The per-key descriptor — captured here (fill) where query/collection/
-				// user are fully populated, unlike the early cache middleware. Buffered
-				// like the events; the flusher upserts the descriptors dimension.
-				void queueCacheDescriptor({
-					cacheKey: hash,
-					redisKey: key,
-					coarse,
-					method: req.method,
-					path: req.originalUrl.split('?')[0]!,
-					collection: req.collection ?? null,
-					userId: req.accountability?.user ?? null,
-					query: isGraphQlRequest
-						? JSON.stringify(getGraphqlQueryAndVariables(req))
-						: JSON.stringify(req.sanitizedQuery ?? {}),
-					// A GraphQL read is a POST — not a GET URL, so leave it blank.
-					url: isGraphQlRequest
-						? ''
-						: req.originalUrl,
-					bytes: size,
-					// Compute cost of this miss: request entry (cache mw) → response ready.
-					fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
-				}).catch(() => {});
+				catch (descriptorErr: any) {
+					logger.warn(descriptorErr, '[cache-stats] descriptor capture failed');
+				}
 			}
 		}
 		catch (err: any) {

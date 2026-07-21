@@ -139,6 +139,9 @@ beforeEach(() => {
 	mockDb.batchInsert = vi.fn();
 	mockDb.raw = vi.fn();
 	mockDb.client = { config: { client: 'pg' } };
+	// persistStreamBatch wraps its inserts in a transaction; run the callback with the
+	// same mock so batchInsert/builder assertions still see the calls.
+	mockDb.transaction = (cb: any) => cb(mockDb);
 
 	env['CACHE_STATS_ENABLED'] = true;
 	env['CACHE_STATS_MAX_BYTES'] = false;
@@ -476,6 +479,23 @@ describe('tombstone', () => {
 			'PX',
 			3600000,
 		);
+	});
+
+	it('floors the tombstone PX at 1ms (never PX 0)', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_GAP_LOOKBACK'] = '0';
+
+		// Already expired + zero lookback → raw PX 0 (Redis rejects); floored to 1.
+		await writeCacheTombstone('k1', 301000);
+
+		expect(mockRedis.set).toHaveBeenCalledWith(
+			'scalabus:stats:tomb:k1',
+			'301000',
+			'PX',
+			1,
+		);
+
+		env['CACHE_STATS_GAP_LOOKBACK'] = '1h';
 	});
 
 	it('lives for the entry remaining life PLUS the lookback', async () => {
@@ -1477,11 +1497,16 @@ describe('reapCacheDescriptors', () => {
 			new Date(now - 7_776_000_000),
 		);
 
-		// ...AND with no event still on file. Locators (NULL last_filled) reap only when
-		// no event AND no anomaly still references them.
+		// ...AND with no event still on file. Both branches (filled + NULL-last_filled
+		// locators) reap only when no event AND no anomaly still references the key.
 		expect(builder.whereNull).toHaveBeenCalledWith('last_filled');
 		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
 		expect(builder.delete).toHaveBeenCalledTimes(2);
+
+		// Anomaly guard is built in BOTH deletes, not just the locator.
+		expect(
+			mockDb.mock.calls.filter((call) => call[0] === 'directus_cache_anomalies'),
+		).toHaveLength(2);
 
 		nowSpy.mockRestore();
 	});
