@@ -361,8 +361,8 @@ async function loadStatsState() {
 	}
 }
 
-// Flip collection at runtime (Redis flag; every node picks it up within a poll
-// tick). Re-enabling also clears an autokill reason server-side.
+// Flip collection at runtime (Redis flag; every node picks it up at once via the
+// bus). Re-enabling also clears an autokill reason server-side.
 async function toggleStats() {
 	if (!statsState.value || statsToggling.value) {
 		return;
@@ -554,7 +554,7 @@ function closeEntry() {
 }
 
 onMounted(() => {
-	void load(); // load() fetches entries + anomalies together
+	void load();
 	void loadStatsState();
 });
 </script>
