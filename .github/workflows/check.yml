@@ -104,8 +104,18 @@ jobs:
         run: node scripts/lint-style-changes.mjs "${{ github.event.pull_request.base.sha }}"
 
   unit:
-    name: Unit Tests
+    # Sharded into two parallel runners because the suite ran serially package-by-package
+    # (small pkgs -> @directus/app -> @directus/api), each heavy pkg already saturating the
+    # 2-core runner. @directus/api alone is ~3m of the ~7m "Run Tests" step; splitting it off
+    # from everything else roughly halves the wall-clock. Coverage stays correct: each shard
+    # uploads only the coverage it produced and Codecov merges the per-folder flags on the
+    # shared commit, so no dedicated merge job is needed.
+    name: Unit Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [api, rest]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -119,7 +129,12 @@ jobs:
         uses: ./.github/actions/prepare
 
       - name: Run Tests
-        run: pnpm test:coverage --passWithNoTests
+        run: |
+          if [ "${{ matrix.shard }}" = "api" ]; then
+            pnpm --filter @directus/api test:coverage --passWithNoTests
+          else
+            pnpm --recursive --filter '!tests-blackbox' --filter '!@directus/api' test:coverage --passWithNoTests
+          fi
 
       - name: Upload coverage to Codecov
         if: always()
