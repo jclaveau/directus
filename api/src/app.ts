@@ -52,6 +52,7 @@ import {
 	validateDatabaseExtensions,
 	validateMigrations,
 } from './database/index.js';
+import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -115,6 +116,9 @@ export default async function createApp(): Promise<express.Application> {
 
 	await extensionManager.initialize();
 	await flowManager.initialize();
+
+	// Extensions + core are now loaded; heal a redis cache left stale by a code-only deploy.
+	await flushCachesIfBuildChanged(extensionManager);
 
 	const app = express();
 
