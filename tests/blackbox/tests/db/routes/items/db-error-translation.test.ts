@@ -106,12 +106,25 @@ describe('translateDatabaseError', () => {
 				.delete(`/items/${collectionFkParent}/${parentId}`)
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			// Assert: the translated Directus error, not the raw driver string.
-			// Only the 'Invalid foreign key' prefix is stable across vendors —
-			// sqlite yields it bare, pg appends the field/collection.
+			// The translated message is vendor-specific: sqlite can't extract the
+			// column so it yields the bare prefix, pg names the field/collection.
+			// Pin the full string where we know it; other vendors (Full matrix)
+			// still assert the translated prefix.
+			const exactMessage: Record<string, string> = {
+				postgres: `Invalid foreign key for field "id" in collection "${collectionFkChild}".`,
+				sqlite3: 'Invalid foreign key.',
+			};
+
+			// Assert
 			expect(response.statusCode).toBe(400);
 			expect(response.body.errors[0].extensions.code).toBe('INVALID_FOREIGN_KEY');
-			expect(response.body.errors[0].message).toContain('Invalid foreign key');
+
+			if (exactMessage[vendor]) {
+				expect(response.body.errors[0].message).toBe(exactMessage[vendor]);
+			}
+			else {
+				expect(response.body.errors[0].message).toContain('Invalid foreign key');
+			}
 		});
 	});
 });
