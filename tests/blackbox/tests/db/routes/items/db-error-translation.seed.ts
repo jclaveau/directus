@@ -33,8 +33,9 @@ export const seedDBStructure = () => {
 				//   insert reaches the database and surfaces as RECORD_NOT_UNIQUE.
 				// - contains_null: a nullable field the test later alters to NOT NULL while
 				//   a row holds null, surfacing CONTAINS_NULL_VALUES from the schema alter.
-				// - fk_parent/fk_child: the child gets an M2O below, so pointing it at a
-				//   missing parent id surfaces INVALID_FOREIGN_KEY.
+				// - fk_parent/fk_child: the child gets a NO ACTION M2O below, so pointing
+				//   it at a missing parent id surfaces INVALID_FOREIGN_KEY on insert, and
+				//   deleting a still-referenced parent surfaces it on delete.
 				await CreateCollections(vendor, {
 					collections: [
 						{
@@ -68,7 +69,7 @@ export const seedDBStructure = () => {
 					collection: collectionFkChild,
 					field: 'parent',
 					otherCollection: collectionFkParent,
-					relationSchema: { on_delete: 'SET NULL' },
+					relationSchema: { on_delete: 'NO ACTION' },
 				});
 
 				expect(true).toBeTruthy();
