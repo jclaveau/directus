@@ -182,6 +182,17 @@ CACHE_ENABLED=false
 # List of collections that prevent cache purging when `CACHE_AUTO_PURGE` is enabled. ["directus_activity,directus_presets"]
 # CACHE_AUTO_PURGE_IGNORE_LIST="directus_activity,directus_presets"
 
+# Flush the cache once on boot when the running build changed, so a code-only deploy (an extension or
+# core reshaping change with no migration and no version bump) doesn't keep serving the previous
+# build's response shape until CACHE_TTL expires. Only acts with CACHE_STORE=redis. [true]
+# CACHE_AUTO_FLUSH_ON_DEPLOY=false
+
+# Overrides the core build identity used by `CACHE_AUTO_FLUSH_ON_DEPLOY`. Set it to a per-build value
+# (e.g. the git commit SHA) when directus/version is pinned; unset, it falls back to the commit baked
+# in at build time, then `RAILWAY_GIT_COMMIT_SHA`, then the directus version string. Required for a
+# pinned-version build with no baked commit (a tarball build with no .git) to detect core changes.
+# CACHE_BUILD_ID="<git-commit-sha>"
+
 # memory | redis
 CACHE_STORE=memory
 
