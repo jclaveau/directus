@@ -1,4 +1,8 @@
-import { ForbiddenError, InvalidForeignKeyError, InvalidPayloadError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidForeignKeyError,
+	InvalidPayloadError,
+} from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { oneLine } from '@directus/utils';
@@ -629,10 +633,11 @@ describe('Integration Tests', () => {
 				filterSpy.mockRestore();
 			});
 
-			it('translates a raw DB constraint error from the delete write (parity with create/update)', async () => {
-				const fkError: any = new Error(
-					'update or delete on table "parent" violates foreign key constraint "child_parent_foreign" on table "child"',
-				);
+			it('translates a raw DB error from a direct delete write', async () => {
+				const fkError: any = new Error(oneLine`
+					update or delete on table "parent" violates foreign key
+					constraint "child_parent_foreign" on table "child"
+				`);
 
 				fkError.code = '23503';
 				fkError.table = 'child';
@@ -640,7 +645,9 @@ describe('Integration Tests', () => {
 
 				tracker.on.delete('test').simulateError(fkError);
 
-				await expect(service.deleteMany([1])).rejects.toThrow(InvalidForeignKeyError);
+				await expect(service.deleteMany([1])).rejects.toThrow(
+					InvalidForeignKeyError,
+				);
 			});
 		});
 
