@@ -230,7 +230,7 @@ describe('database.error filter hook', () => {
 });
 
 describe('raw driver message + operated collection', () => {
-	it('keeps the raw message (non-enumerable) and logs it once translated', async () => {
+	it('keeps the raw message non-enumerable and logs it', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 		const raw = {
