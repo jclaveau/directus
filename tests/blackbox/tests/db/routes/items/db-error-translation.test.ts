@@ -120,8 +120,10 @@ describe('translateDatabaseError', () => {
 			// blocked delete on the operated-on parent. sqlite exposes no direction,
 			// so it only names the parent under the default wording.
 			const exactMessage: Record<string, string> = {
+				// pg reads the blocked row's key from the driver detail, so it names
+				// `collection:pk`; sqlite exposes no key or direction.
 				postgres:
-					`Cannot delete collection "${collectionFkParent}": it is still ` +
+					`Cannot delete "${collectionFkParent}:${parentId}": it is still ` +
 					`referenced by collection "${collectionFkChild}".`,
 				sqlite3: `Invalid foreign key in collection "${collectionFkParent}".`,
 			};

@@ -80,7 +80,43 @@ test('Reasons about a still-referenced record naming the referrer', () => {
 	);
 });
 
-test('names a delete that is blocked by a still-referenced child', () => {
+test('names the blocked row as collection:pk on delete', () => {
+	const result = messageConstructor({
+		collection: 'enrollment',
+		field: 'id',
+		value: '5',
+		relatedCollection: 'student_enrollment',
+		reason: 'still_referenced',
+		operation: 'delete',
+	});
+
+	expect(result).toBe(
+		[
+			'Cannot delete "enrollment:5": it is still referenced',
+			'by collection "student_enrollment".',
+		].join(' '),
+	);
+});
+
+test('names the blocked row for an update too', () => {
+	const result = messageConstructor({
+		collection: 'enrollment',
+		field: 'id',
+		value: '5',
+		relatedCollection: 'student_enrollment',
+		reason: 'still_referenced',
+		operation: 'update',
+	});
+
+	expect(result).toBe(
+		[
+			'Cannot update "enrollment:5": it is still referenced',
+			'by collection "student_enrollment".',
+		].join(' '),
+	);
+});
+
+test('falls back to the collection when the pk is unknown (mysql/sqlite)', () => {
 	const result = messageConstructor({
 		collection: 'enrollment',
 		field: 'id',
@@ -93,24 +129,6 @@ test('names a delete that is blocked by a still-referenced child', () => {
 	expect(result).toBe(
 		[
 			'Cannot delete collection "enrollment": it is still',
-			'referenced by collection "student_enrollment".',
-		].join(' '),
-	);
-});
-
-test('names an update that is blocked by a still-referenced child', () => {
-	const result = messageConstructor({
-		collection: 'enrollment',
-		field: 'id',
-		value: null,
-		relatedCollection: 'student_enrollment',
-		reason: 'still_referenced',
-		operation: 'update',
-	});
-
-	expect(result).toBe(
-		[
-			'Cannot update collection "enrollment": it is still',
 			'referenced by collection "student_enrollment".',
 		].join(' '),
 	);
