@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	collectionContainsNull,
 	collectionFkChild,
+	collectionFkParent,
 	collectionUnique,
 } from './db-error-translation.seed';
 
@@ -77,6 +78,32 @@ describe('translateDatabaseError', () => {
 			const response = await request(getUrl(vendor))
 				.post(`/items/${collectionFkChild}`)
 				.send({ parent: 999999 })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			// Assert
+			expect(response.statusCode).toBe(400);
+			expect(response.body.errors[0].extensions.code).toBe('INVALID_FOREIGN_KEY');
+		});
+	});
+
+	describe('delete a still-referenced parent -> INVALID_FOREIGN_KEY', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// Setup: a parent and a child pointing at it
+			const parent = await request(getUrl(vendor))
+				.post(`/items/${collectionFkParent}`)
+				.send({})
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			const parentId = parent.body.data.id;
+
+			await request(getUrl(vendor))
+				.post(`/items/${collectionFkChild}`)
+				.send({ parent: parentId })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			// Action: delete the still-referenced parent
+			const response = await request(getUrl(vendor))
+				.delete(`/items/${collectionFkParent}/${parentId}`)
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			// Assert
