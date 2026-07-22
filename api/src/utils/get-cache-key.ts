@@ -122,11 +122,11 @@ function varyHeaderPattern(pattern: string): RegExp {
 // disable the cache. Families expressed as globs and compiled with the same engine
 // as the user patterns; an exact user name still folds (a deliberate opt-in), and a
 // deployment can extend this via CACHE_VARY_REQUEST_HEADERS_EXCLUDED.
+// Railway's inbound set (x-forwarded-*, x-real-ip, x-railway-*): https://docs.railway.com/networking/edge-networking
 const BASE_EXCLUDED_HEADERS = [
 	'x-forwarded-*', // proxy (for/host/proto/port)
 	'x-real-ip',
-	'x-railway-*', // Railway edge (x-railway-request-id, x-railway-edge)
-	'x-hikari-*', // Railway's hikari proxy (x-hikari-trace)
+	'x-railway-*', // Railway edge: x-railway-request-id, x-railway-edge, -upstream-zone
 	'fly-*', // Fly.io
 	'cf-*', // Cloudflare (cf-ray, cf-connecting-ip, …)
 	'x-amzn-*', // AWS ALB / API Gateway
