@@ -111,7 +111,9 @@ describe('translateDatabaseError', () => {
 			// Pin the full string where we know it; other vendors (Full matrix)
 			// still assert the translated prefix.
 			const exactMessage: Record<string, string> = {
-				postgres: `Invalid foreign key for field "id" in collection "${collectionFkChild}".`,
+				postgres:
+					`Invalid foreign key for field "id" ` +
+					`in collection "${collectionFkChild}".`,
 				sqlite3: 'Invalid foreign key.',
 			};
 
