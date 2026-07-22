@@ -7,7 +7,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Logger } from 'pino';
 import type { Knex } from 'knex';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import getDatabase, {
 	getConnectionNameForAccountability,
 	getDatabaseForAccountability,
@@ -125,6 +125,67 @@ describe('Error handler behaves correctly in express app', () => {
 			}),
 			'Unexpected error in error handler',
 		);
+	});
+
+	describe('raw database error is dev-only', () => {
+		afterEach(() => {
+			vi.unstubAllEnvs();
+		});
+
+		const rawMessage = 'delete from "x" violates foreign key constraint "fk"';
+
+		const FkError = createError(
+			'INVALID_FOREIGN_KEY',
+			'Invalid foreign key.',
+			400,
+		);
+
+		const fkErrorWithRaw = () => {
+			const err = new FkError();
+
+			Object.defineProperty(err, 'rawDatabaseError', {
+				value: rawMessage,
+				enumerable: false,
+			});
+
+			return err;
+		};
+
+		test('exposes the raw driver message in development', async () => {
+			expect.assertions(1);
+			vi.stubEnv('NODE_ENV', 'development');
+			const port = await startApp(() => {
+				throw fkErrorWithRaw();
+			});
+
+			try {
+				await axios(`http://0:${port}`);
+			}
+			catch (axiosError) {
+				expect((axiosError as AxiosError).response?.data).toMatchObject({
+					errors: [{ extensions: { databaseError: rawMessage } }],
+				});
+			}
+		});
+
+		test('omits it outside development', async () => {
+			expect.assertions(1);
+			vi.stubEnv('NODE_ENV', 'production');
+			const port = await startApp(() => {
+				throw fkErrorWithRaw();
+			});
+
+			try {
+				await axios(`http://0:${port}`);
+			}
+			catch (axiosError) {
+				const data = (axiosError as AxiosError).response?.data as {
+					errors: { extensions: Record<string, unknown> }[];
+				};
+
+				expect(data.errors[0]!.extensions['databaseError']).toBeUndefined();
+			}
+		});
 	});
 });
 
