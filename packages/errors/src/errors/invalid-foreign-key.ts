@@ -32,9 +32,13 @@ export const messageConstructor = (extensions: InvalidForeignKeyErrorExtensions)
 		if (operation === 'delete' || operation === 'update') {
 			let message = `Cannot ${operation}`;
 
-			// Name the exact row (`collection:pk`) when the driver gave us its key
-			// (pg does), else fall back to the collection.
-			if (collection && value) {
+			// Name the exact row (`collection:pk`) when the driver gave us a single
+			// key value (pg does). Skip a composite key (comma in the field) since
+			// `collection:1, 2` reads wrong, and fall back to the collection.
+			const hasSingleKey =
+				value != null && !!field && !field.includes(',');
+
+			if (collection && hasSingleKey) {
 				message += ` "${collection}:${value}"`;
 			}
 			else if (collection) {
@@ -67,7 +71,7 @@ export const messageConstructor = (extensions: InvalidForeignKeyErrorExtensions)
 
 	let message = 'Invalid foreign key';
 
-	if (value) {
+	if (value != null && value !== '') {
 		message += ` "${value}"`;
 	}
 

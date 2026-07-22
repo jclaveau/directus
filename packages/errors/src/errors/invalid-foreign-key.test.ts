@@ -133,3 +133,33 @@ test('falls back to the collection when the pk is unknown (mysql/sqlite)', () =>
 		].join(' '),
 	);
 });
+
+test('falls back to the collection for a composite key', () => {
+	const result = messageConstructor({
+		collection: 'enrollment',
+		field: 'a, b',
+		value: '1, 2',
+		relatedCollection: 'student_enrollment',
+		reason: 'still_referenced',
+		operation: 'delete',
+	});
+
+	expect(result).toBe(
+		[
+			'Cannot delete collection "enrollment": it is still',
+			'referenced by collection "student_enrollment".',
+		].join(' '),
+	);
+});
+
+test('keeps a zero foreign key value in the message', () => {
+	const result = messageConstructor({
+		collection: 'articles',
+		field: 'author',
+		value: 0 as unknown as string,
+	});
+
+	expect(result).toBe(
+		'Invalid foreign key "0" for field "author" in collection "articles".',
+	);
+});

@@ -126,10 +126,22 @@ export function extractError(
 		const field = matches[0]!.slice(1, -1);
 		const detailValue = matches[1]?.slice(1, -1) ?? null;
 
-		// pg detail phrasing gives the direction: "is not present in table X" is a
-		// bad parent reference; "is still referenced from table X" is a parent a
-		// child still points at (delete/update under RESTRICT).
-		const stillReferenced = detail.includes('is still referenced');
+		// Drive the direction from the operation where it's unambiguous — a create
+		// can only be a bad parent reference, a delete only a still-referenced parent
+		// — because pg's `detail` is localized by lc_messages and its English phrasing
+		// can't be relied on. An update can be either direction, so there fall back to
+		// the detail text ("is still referenced" vs "is not present").
+		let stillReferenced;
+
+		if (context?.operation === 'delete') {
+			stillReferenced = true;
+		}
+		else if (context?.operation === 'create') {
+			stillReferenced = false;
+		}
+		else {
+			stillReferenced = detail.includes('is still referenced');
+		}
 
 		const reason = stillReferenced
 			? 'still_referenced'
