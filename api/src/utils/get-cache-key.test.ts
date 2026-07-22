@@ -264,6 +264,13 @@ describe('Accept-Language dimension (always on)', () => {
 			expect(variant.hash).toEqual(canonical.hash);
 		}
 	});
+
+	test('trims OWS between the tag and its q-param', async () => {
+		const canonical = await getCacheKey(acceptLanguage('fr'));
+		const spaced = await getCacheKey(acceptLanguage('fr ;q=0.9'));
+
+		expect(spaced.hash).toEqual(canonical.hash);
+	});
 });
 
 describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
@@ -295,6 +302,17 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 		expect(csv.hash).not.toEqual(json.hash);
 		expect(unsupported.hash).not.toEqual(csv.hash);
 		expect(unsupported.hash).not.toEqual(json.hash);
+	});
+
+	test('trims whitespace the env array cast leaves around each type', async () => {
+		vi.mocked(useEnv).mockReturnValue({
+			CACHE_VARY_CONTENT_TYPES: ['json', ' csv '],
+		});
+
+		const accepts = vi.fn().mockReturnValue('csv');
+		await getCacheKey(varyRequest({ accepts }));
+
+		expect(accepts).toHaveBeenCalledWith(['json', 'csv']);
 	});
 });
 
@@ -357,5 +375,15 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 
 		expect(on.hash).not.toEqual(off.hash);
 		expect(withNoise.hash).toEqual(on.hash);
+	});
+
+	test('trims whitespace the env array cast leaves around a name', async () => {
+		varyHeaders([' x-tenant-id ']);
+
+		const a = await getCacheKey(tenant('a'));
+		const b = await getCacheKey(tenant('b'));
+
+		// Without the trim the padded name matches no header → both null → one bucket.
+		expect(a.hash).not.toEqual(b.hash);
 	});
 });
