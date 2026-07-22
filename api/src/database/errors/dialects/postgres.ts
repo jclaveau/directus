@@ -153,10 +153,13 @@ export function extractError(
 
 		const relatedTable = relatedMatch?.[1] ?? null;
 
-		// On delete the driver's `table` is the child (referrer) while the user acted
-		// on the parent — prefer the operated-on collection, falling back to the
-		// driver table on the read path.
-		const collection = context?.collection ?? table;
+		// On a still-referenced parent the driver's `table` is the child (referrer),
+		// so without the operated collection the parent is unknowable — leave it null
+		// rather than mislabel the child as the parent. A bad reference is on the
+		// operated child itself, which is the driver table.
+		const collection = stillReferenced
+			? context?.collection ?? null
+			: context?.collection ?? table;
 
 		const relatedCollection = stillReferenced
 			? table
