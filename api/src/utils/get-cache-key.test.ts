@@ -387,4 +387,40 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 		// Without the trim the padded name matches no header → both null → one bucket.
 		expect(a.hash).not.toEqual(b.hash);
 	});
+
+	test('a glob skips proxy/tracing headers but folds the rest', async () => {
+		varyHeaders(['x-*']);
+
+		const proxyA = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'a', 'x-forwarded-for': '1.1.1.1' } }),
+		);
+
+		const proxyB = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'a', 'x-forwarded-for': '2.2.2.2' } }),
+		);
+
+		// x-forwarded-for changed but is denied → same bucket (cache not disabled)
+		expect(proxyA.hash).toEqual(proxyB.hash);
+
+		// x-tenant-id is matched by the glob and not denied → still splits
+		const tenantB = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'b', 'x-forwarded-for': '1.1.1.1' } }),
+		);
+
+		expect(tenantB.hash).not.toEqual(proxyA.hash);
+	});
+
+	test('an exact proxy-header name overrides the glob denylist', async () => {
+		varyHeaders(['x-forwarded-for']);
+
+		const a = await getCacheKey(
+			varyRequest({ headers: { 'x-forwarded-for': '1.1.1.1' } }),
+		);
+
+		const b = await getCacheKey(
+			varyRequest({ headers: { 'x-forwarded-for': '2.2.2.2' } }),
+		);
+
+		expect(a.hash).not.toEqual(b.hash);
+	});
 });

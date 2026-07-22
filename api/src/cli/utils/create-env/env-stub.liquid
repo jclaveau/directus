@@ -191,9 +191,10 @@ CACHE_ENABLED=false
 #     Do NOT add xml/html: browsers send them high-q in Accept, so this would
 #     split ALL browser traffic into that bucket. ["json,csv,yaml"]
 #   - CACHE_VARY_REQUEST_HEADERS: exact header names or `*` globs a hook
-#     reshapes the body from (tenant/feature-flag). Opt-in (empty). Do NOT
-#     list proxy headers (x-request-id, x-forwarded-for): near-unique per
-#     request, they would disable the cache. ["x-tenant-id,x-feature-*"]
+#     reshapes the body from (tenant/feature-flag). Opt-in (empty). Globs
+#     auto-skip proxy/tracing headers (x-forwarded-*, x-request-id, cf-ray,
+#     …) so a broad `x-*` can't disable the cache; name one exactly to
+#     override. ["x-tenant-id,x-feature-*"]
 # CACHE_VARY_CONTENT_TYPES="json,csv,yaml"
 # CACHE_VARY_REQUEST_HEADERS="x-tenant-id"
 

@@ -106,6 +106,27 @@ function varyHeaderValue(raw: string | string[] | undefined): string | null {
 		: raw;
 }
 
+// Proxy / CDN / tracing headers a glob must never fold: they're per-request or
+// per-client (a distinct value on every hit), so folding them would key a new entry
+// per request and disable the cache. A glob skips these; an exact name still folds
+// (naming one explicitly is a deliberate opt-in). The common set — extend as needed.
+const GLOB_EXCLUDED_HEADERS = new Set([
+	'x-forwarded-for',
+	'x-forwarded-host',
+	'x-forwarded-proto',
+	'x-forwarded-port',
+	'x-real-ip',
+	'x-request-id',
+	'x-correlation-id',
+	'x-amzn-trace-id',
+	'cf-connecting-ip',
+	'cf-ray',
+	'forwarded',
+	'via',
+	'traceparent',
+	'tracestate',
+]);
+
 // Anchor a header glob (`x-tenant-*`) as a regex; consecutive `*` collapsed so the
 // pattern stays linear against attacker-supplied header names.
 function varyHeaderPattern(pattern: string): RegExp {
@@ -119,7 +140,8 @@ function varyHeaderPattern(pattern: string): RegExp {
 
 // undefined when CACHE_VARY_REQUEST_HEADERS is unset (dimension omitted). Exact
 // names fold to their value (or null if absent); glob patterns fold every present
-// header they match. Names lowercased to match Node's header keys.
+// header they match except the proxy/tracing denylist. Names lowercased to match
+// Node's keys.
 function resolveVaryHeaders(
 	req: Request,
 	patterns: string[],
@@ -141,7 +163,7 @@ function resolveVaryHeaders(
 		const regex = varyHeaderPattern(name);
 
 		for (const header of Object.keys(req.headers)) {
-			if (regex.test(header)) {
+			if (regex.test(header) && !GLOB_EXCLUDED_HEADERS.has(header)) {
 				resolved[header] = varyHeaderValue(req.headers[header]);
 			}
 		}
