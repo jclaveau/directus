@@ -1772,8 +1772,15 @@ implements AbstractService<Item> {
 		}
 
 		await transaction(this.knex, async (trx) => {
-			await trx(this.collection).whereIn(primaryKeyField, keys)
-				.delete();
+			try {
+				await trx(this.collection).whereIn(primaryKeyField, keys)
+					.delete();
+			}
+			catch (err: any) {
+				// Parity with createOne/updateMany: a direct delete's FK/constraint
+				// violation must surface as a translated Directus error, not raw knex.
+				throw await translateDatabaseError(err, {}, this.knex);
+			}
 
 			if (opts.userIntegrityCheckFlags) {
 				if (opts.onRequireUserIntegrityCheck) {
