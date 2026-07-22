@@ -230,6 +230,42 @@ describe('foreign key violation (23503)', () => {
 		});
 	});
 
+	it('resolves the direction from the operation, not the localized detail', () => {
+		// A create whose detail text (misleadingly) says "still referenced" must
+		// still resolve to invalid_reference — the operation is authoritative and
+		// locale-independent, unlike pg's lc_messages-localized detail.
+		const error = pgError({
+			code: '23503',
+			table: 'articles',
+			detail: 'Key (author)=(42) is still referenced from table "authors".',
+		});
+
+		const result = extractError(error, { author: 42 }, {
+			collection: 'articles',
+			operation: 'create',
+		});
+
+		expect((result as any).extensions.reason).toBe('invalid_reference');
+	});
+
+	it('classifies a delete as still_referenced on a non-English detail', () => {
+		const error = pgError({
+			code: '23503',
+			table: 'student_enrollment',
+			// French lc_messages; only the (id)=(5) parens are locale-stable.
+			detail: 'La clé (id)=(5) est encore référencée depuis « student_enrollment ».',
+		});
+
+		const result = extractError(error, {}, {
+			collection: 'enrollment',
+			operation: 'delete',
+		});
+
+		expect((result as any).extensions.reason).toBe('still_referenced');
+		expect((result as any).extensions.collection).toBe('enrollment');
+		expect((result as any).extensions.relatedCollection).toBe('student_enrollment');
+	});
+
 	it('falls back to the driver table without an operated collection', () => {
 		const error = pgError({
 			code: '23503',
