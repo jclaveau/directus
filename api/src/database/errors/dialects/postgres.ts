@@ -20,7 +20,11 @@ enum PostgresErrorCodes {
 	VALUE_LIMIT_VIOLATION = '22001',
 }
 
-export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
+export function extractError(
+	error: PostgresError,
+	data: Partial<Item>,
+	operatedCollection?: string,
+): PostgresError | Error {
 	// Recognized constraint/data codes are handled first, so a real violation
 	// whose message happens to contain a pool phrase (a stored value like "pool
 	// is probably full") can never be misread as exhaustion. Only errors with no
@@ -35,7 +39,7 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 		case PostgresErrorCodes.NOT_NULL_VIOLATION:
 			return notNullViolation();
 		case PostgresErrorCodes.FOREIGN_KEY_VIOLATION:
-			return foreignKeyViolation();
+			return foreignKeyViolation(operatedCollection);
 		default:
 			return getPoolExhaustedError(error) ?? error;
 	}
@@ -109,21 +113,55 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 		});
 	}
 
-	function foreignKeyViolation() {
-		const { table, detail } = error;
+	function foreignKeyViolation(operatedCollection?: string) {
+		const { table, detail, constraint } = error;
 
 		const betweenParens = /\(([^)]+)\)/g;
 		const matches = detail.match(betweenParens);
 
-		if (!matches) return error;
+		if (!matches) {
+			return error;
+		}
 
-		const collection = table;
-		const field = matches[0].slice(1, -1);
+		const field = matches[0]!.slice(1, -1);
+		const detailValue = matches[1]?.slice(1, -1) ?? null;
+
+		// pg detail phrasing gives the direction: "is not present in table X" is a
+		// bad parent reference; "is still referenced from table X" is a parent a
+		// child still points at (delete/update under RESTRICT).
+		const stillReferenced = detail.includes('is still referenced');
+
+		const reason = stillReferenced
+			? 'still_referenced'
+			: 'invalid_reference';
+
+		const relatedMatch = detail.match(
+			/(?:present in|referenced from) table "([^"]+)"/,
+		);
+
+		const relatedTable = relatedMatch?.[1] ?? null;
+
+		// On delete the driver's `table` is the child (referrer) while the user acted
+		// on the parent — prefer the operated-on collection, falling back to the
+		// driver table on the read path.
+		const collection = operatedCollection ?? table;
+
+		const relatedCollection = stillReferenced
+			? table
+			: relatedTable;
+
+		const value =
+			field && data[field] !== undefined
+				? data[field]
+				: detailValue;
 
 		return new InvalidForeignKeyError({
 			collection,
 			field,
-			value: field ? data[field] : null,
+			value,
+			constraint: constraint ?? null,
+			relatedCollection,
+			reason,
 		});
 	}
 }

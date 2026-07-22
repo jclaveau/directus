@@ -82,7 +82,16 @@ describe('translateDatabaseError', () => {
 
 			// Assert
 			expect(response.statusCode).toBe(400);
-			expect(response.body.errors[0].extensions.code).toBe('INVALID_FOREIGN_KEY');
+
+			const error = response.body.errors[0];
+			expect(error.extensions.code).toBe('INVALID_FOREIGN_KEY');
+
+			// pg names the invalid_reference direction + the referenced parent.
+			if (vendor === 'postgres') {
+				expect(error.extensions.reason).toBe('invalid_reference');
+				expect(error.extensions.collection).toBe(collectionFkChild);
+				expect(error.extensions.relatedCollection).toBe(collectionFkParent);
+			}
 		});
 	});
 
@@ -106,26 +115,34 @@ describe('translateDatabaseError', () => {
 				.delete(`/items/${collectionFkParent}/${parentId}`)
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			// The translated message is vendor-specific: sqlite can't extract the
-			// column so it yields the bare prefix, pg names the field/collection.
-			// Pin the full string where we know it; other vendors (Full matrix)
-			// still assert the translated prefix.
+			// The translated message is vendor-specific. pg/mysql read the direction
+			// from the driver error, so they name the operated-on parent as still
+			// referenced by the child. sqlite exposes nothing, so it only names the
+			// parent (threaded from the call site) under the default wording.
 			const exactMessage: Record<string, string> = {
 				postgres:
-					`Invalid foreign key for field "id" ` +
-					`in collection "${collectionFkChild}".`,
-				sqlite3: 'Invalid foreign key.',
+					`Record in collection "${collectionFkParent}" is still ` +
+					`referenced by collection "${collectionFkChild}".`,
+				sqlite3: `Invalid foreign key in collection "${collectionFkParent}".`,
 			};
 
 			// Assert
 			expect(response.statusCode).toBe(400);
-			expect(response.body.errors[0].extensions.code).toBe('INVALID_FOREIGN_KEY');
+
+			const error = response.body.errors[0];
+			expect(error.extensions.code).toBe('INVALID_FOREIGN_KEY');
 
 			if (exactMessage[vendor]) {
-				expect(response.body.errors[0].message).toBe(exactMessage[vendor]);
+				expect(error.message).toBe(exactMessage[vendor]);
 			}
-			else {
-				expect(response.body.errors[0].message).toContain('Invalid foreign key');
+
+			// pg carries the full enrichment: the still_referenced direction, the
+			// operated-on parent, and the referring child.
+			if (vendor === 'postgres') {
+				expect(error.extensions.reason).toBe('still_referenced');
+				expect(error.extensions.collection).toBe(collectionFkParent);
+				expect(error.extensions.relatedCollection).toBe(collectionFkChild);
+				expect(error.extensions.constraint).toBeTruthy();
 			}
 		});
 	});
