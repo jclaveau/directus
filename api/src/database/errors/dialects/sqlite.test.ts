@@ -80,11 +80,14 @@ describe('foreign key constraint', () => {
 			collection: null,
 			field: null,
 			value: null,
+			constraint: null,
+			relatedCollection: null,
+			reason: null,
 			operation: null,
 		});
 	});
 
-	it('fills the operated-on collection + operation when threaded', () => {
+	it('derives the still_referenced direction from a threaded delete', () => {
 		const error = sqliteError('SQLITE_CONSTRAINT: FOREIGN KEY constraint failed');
 
 		const result = extractError(error, {}, {
@@ -96,6 +99,9 @@ describe('foreign key constraint', () => {
 			collection: 'enrollment',
 			field: null,
 			value: null,
+			constraint: null,
+			relatedCollection: null,
+			reason: 'still_referenced',
 			operation: 'delete',
 		});
 	});

@@ -266,6 +266,23 @@ describe('foreign key violation (23503)', () => {
 		expect((result as any).extensions.relatedCollection).toBe('student_enrollment');
 	});
 
+	it('names only the referring child on the read path (no context)', () => {
+		// No operated collection → the still-referenced parent is unknowable, so
+		// collection stays null (never the child) and only the referrer is named.
+		const error = pgError({
+			code: '23503',
+			table: 'student_enrollment',
+			detail: 'Key (id)=(5) is still referenced from table "student_enrollment".',
+		});
+
+		const result = extractError(error, {});
+		const ext = (result as any).extensions;
+
+		expect(ext.reason).toBe('still_referenced');
+		expect(ext.collection).toBeNull();
+		expect(ext.relatedCollection).toBe('student_enrollment');
+	});
+
 	it('falls back to the driver table without an operated collection', () => {
 		const error = pgError({
 			code: '23503',

@@ -152,6 +152,20 @@ test('falls back to the collection for a composite key', () => {
 	);
 });
 
+test('names only the referrer when the parent is unknown (read path)', () => {
+	const result = messageConstructor({
+		collection: null,
+		field: 'id',
+		value: '5',
+		relatedCollection: 'student_enrollment',
+		reason: 'still_referenced',
+	});
+
+	expect(result).toBe(
+		'Record is still referenced by collection "student_enrollment".',
+	);
+});
+
 test('keeps a zero foreign key value in the message', () => {
 	const result = messageConstructor({
 		collection: 'articles',

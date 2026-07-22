@@ -34,17 +34,30 @@ export function extractError(
 	}
 
 	if (error.message.includes('SQLITE_CONSTRAINT: FOREIGN KEY')) {
-		/**
-		 * NOTE:
-		 * SQLite's foreign key constraint failed error carries no table/column/value
-		 * and no direction, so the only field we can fill is the operated-on collection
-		 * threaded in from the call site (null on the read path).
-		 */
+		// SQLite's error carries no table/column/value/direction. The operated
+		// collection is threaded from the call site, and the direction can be derived
+		// from the operation (a delete blocks a still-referenced parent, a create is a
+		// bad reference) — an update is left unknown. Constraint/related stay null so
+		// the extensions shape matches the other dialects.
+		const operation = context?.operation ?? null;
+
+		let reason: 'still_referenced' | 'invalid_reference' | null = null;
+
+		if (operation === 'delete') {
+			reason = 'still_referenced';
+		}
+		else if (operation === 'create') {
+			reason = 'invalid_reference';
+		}
+
 		return new InvalidForeignKeyError({
 			collection: context?.collection ?? null,
 			field: null,
 			value: null,
-			operation: context?.operation ?? null,
+			constraint: null,
+			relatedCollection: null,
+			reason,
+			operation,
 		});
 	}
 

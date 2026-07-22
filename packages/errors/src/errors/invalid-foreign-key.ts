@@ -36,7 +36,7 @@ export const messageConstructor = (extensions: InvalidForeignKeyErrorExtensions)
 			// key value (pg does). Skip a composite key (comma in the field) since
 			// `collection:1, 2` reads wrong, and fall back to the collection.
 			const hasSingleKey =
-				value != null && !!field && !field.includes(',');
+				value != null && value !== '' && !!field && !field.includes(',');
 
 			if (collection && hasSingleKey) {
 				message += ` "${collection}:${value}"`;
