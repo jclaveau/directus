@@ -48,3 +48,34 @@ test('Constructs the message without the key', () => {
 	const result = messageConstructor(sample);
 	expect(result).toBe(`Invalid foreign key for field "${sample.field}" in collection "${sample.collection}".`);
 });
+
+test('Appends the referenced collection for an invalid reference', () => {
+	sample.relatedCollection = 'authors';
+	sample.reason = 'invalid_reference';
+
+	const result = messageConstructor(sample);
+
+	expect(result).toBe(
+		[
+			`Invalid foreign key "${sample.value}" for field "${sample.field}"`,
+			`in collection "${sample.collection}" (references "authors").`,
+		].join(' '),
+	);
+});
+
+test('Reasons about a still-referenced record naming the referrer', () => {
+	const result = messageConstructor({
+		collection: 'enrollment',
+		field: 'id',
+		value: null,
+		relatedCollection: 'student_enrollment',
+		reason: 'still_referenced',
+	});
+
+	expect(result).toBe(
+		[
+			'Record in collection "enrollment" is still referenced',
+			'by collection "student_enrollment".',
+		].join(' '),
+	);
+});

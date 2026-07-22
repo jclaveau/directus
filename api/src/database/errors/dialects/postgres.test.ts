@@ -176,10 +176,11 @@ describe('not null violation (23502)', () => {
 });
 
 describe('foreign key violation (23503)', () => {
-	it('maps to InvalidForeignKeyError with the field pulled from detail', () => {
+	it('maps an invalid reference, naming the referenced parent + constraint', () => {
 		const error = pgError({
 			code: '23503',
 			table: 'articles',
+			constraint: 'articles_author_authors_foreign',
 			detail: 'Key (author)=(42) is not present in table "authors".',
 		});
 
@@ -191,7 +192,50 @@ describe('foreign key violation (23503)', () => {
 			collection: 'articles',
 			field: 'author',
 			value: 42,
+			constraint: 'articles_author_authors_foreign',
+			relatedCollection: 'authors',
+			reason: 'invalid_reference',
 		});
+	});
+
+	it(oneLine`
+		maps a still-referenced delete to the operated-on parent, naming the
+		referring child and the still_referenced reason
+	`, () => {
+		const error = pgError({
+			code: '23503',
+			// pg reports the child (referrer) as error.table on a delete-restrict.
+			table: 'student_enrollment',
+			constraint: 'student_enrollment_enrollment_foreign',
+			detail: 'Key (id)=(5) is still referenced from table "student_enrollment".',
+		});
+
+		// The delete ran on the parent `enrollment`; threaded from the call site.
+		const result = extractError(error, {}, 'enrollment');
+
+		expect(result).toBeInstanceOf(InvalidForeignKeyError);
+
+		expect((result as any).extensions).toEqual({
+			collection: 'enrollment',
+			field: 'id',
+			value: '5',
+			constraint: 'student_enrollment_enrollment_foreign',
+			relatedCollection: 'student_enrollment',
+			reason: 'still_referenced',
+		});
+	});
+
+	it('falls back to the driver table without an operated collection', () => {
+		const error = pgError({
+			code: '23503',
+			table: 'articles',
+			detail: 'Key (author)=(42) is not present in table "authors".',
+		});
+
+		const result = extractError(error, { author: 42 });
+
+		expect((result as any).extensions.collection).toBe('articles');
+		expect((result as any).extensions.constraint).toBeNull();
 	});
 
 	it('returns the raw error when detail has no parenthesised group', () => {

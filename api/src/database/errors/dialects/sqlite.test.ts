@@ -82,6 +82,18 @@ describe('foreign key constraint', () => {
 			value: null,
 		});
 	});
+
+	it('fills the operated-on collection when threaded from the call site', () => {
+		const error = sqliteError('SQLITE_CONSTRAINT: FOREIGN KEY constraint failed');
+
+		const result = extractError(error, {}, 'enrollment');
+
+		expect((result as any).extensions).toEqual({
+			collection: 'enrollment',
+			field: null,
+			value: null,
+		});
+	});
 });
 
 describe('unhandled message', () => {

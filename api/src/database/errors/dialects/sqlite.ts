@@ -11,7 +11,11 @@ import type { Item } from '@directus/types';
 // - Sqlite doesn't have varchar with length support, so no ValueTooLongError
 // - Sqlite doesn't have a max range for numbers, so no ValueOutOfRangeError
 
-export function extractError(error: SQLiteError, data: Partial<Item>): SQLiteError | Error {
+export function extractError(
+	error: SQLiteError,
+	data: Partial<Item>,
+	operatedCollection?: string,
+): SQLiteError | Error {
 	if (error.message.includes('SQLITE_CONSTRAINT: NOT NULL')) {
 		return notNullConstraint(error);
 	}
@@ -32,10 +36,15 @@ export function extractError(error: SQLiteError, data: Partial<Item>): SQLiteErr
 	if (error.message.includes('SQLITE_CONSTRAINT: FOREIGN KEY')) {
 		/**
 		 * NOTE:
-		 * SQLite doesn't return any useful information in it's foreign key constraint failed error, so
-		 * we can't extract the table/column/value accurately
+		 * SQLite's foreign key constraint failed error carries no table/column/value
+		 * and no direction, so the only field we can fill is the operated-on collection
+		 * threaded in from the call site (null on the read path).
 		 */
-		return new InvalidForeignKeyError({ collection: null, field: null, value: null });
+		return new InvalidForeignKeyError({
+			collection: operatedCollection ?? null,
+			field: null,
+			value: null,
+		});
 	}
 
 	return error;
