@@ -154,6 +154,7 @@ describe('Error handler behaves correctly in express app', () => {
 		test('exposes the raw driver message in development', async () => {
 			expect.assertions(1);
 			vi.stubEnv('NODE_ENV', 'development');
+
 			const port = await startApp(() => {
 				throw fkErrorWithRaw();
 			});
@@ -171,6 +172,7 @@ describe('Error handler behaves correctly in express app', () => {
 		test('omits it outside development', async () => {
 			expect.assertions(1);
 			vi.stubEnv('NODE_ENV', 'production');
+
 			const port = await startApp(() => {
 				throw fkErrorWithRaw();
 			});
