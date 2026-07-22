@@ -43,7 +43,8 @@ function normalizePrimaryLanguage(req: Request): string | null {
 	let bestQuality = 0;
 
 	for (const entry of header.split(',')) {
-		const [tag, ...params] = entry.trim().split(';');
+		const [rawTag, ...params] = entry.trim().split(';');
+		const tag = rawTag?.trim();
 
 		if (!tag || tag === '*') {
 			continue;
@@ -168,11 +169,15 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 		info['language'] = language;
 	}
 
-	// Opt-in: a custom endpoint that content-negotiates (csv vs json by Accept)
-	// varies its body; without the served type in the key the first caller's format
-	// is served to all. The list is what collapses the many raw Accept strings into
-	// json|csv|null — omitted from the key entirely when unconfigured.
-	const contentTypes = (env['CACHE_VARY_CONTENT_TYPES'] ?? []) as string[];
+	// A custom endpoint that content-negotiates (csv vs json by Accept) varies its
+	// body; without the served type in the key the first caller's format is served to
+	// all. The list (default json,csv,yaml) is what collapses the many raw Accept
+	// strings into a small bucket set. Trimmed because the env array cast keeps the
+	// whitespace around comma-separated values (`json, csv` → `[' csv']`).
+	const contentTypes = ((env['CACHE_VARY_CONTENT_TYPES'] ?? []) as string[])
+		.map((type) => type.trim())
+		.filter(Boolean);
+
 	const contentType = negotiateContentType(req, contentTypes);
 
 	if (contentType !== undefined) {
@@ -183,7 +188,10 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 	// from. Arbitrary headers can't be always-folded — proxy-injected ones like
 	// x-request-id are unique per request and would disable the cache — so the admin
 	// names exactly the headers (or globs) their hooks read.
-	const headerPatterns = (env['CACHE_VARY_REQUEST_HEADERS'] ?? []) as string[];
+	const headerPatterns = ((env['CACHE_VARY_REQUEST_HEADERS'] ?? []) as string[])
+		.map((pattern) => pattern.trim())
+		.filter(Boolean);
+
 	const varyHeaders = resolveVaryHeaders(req, headerPatterns);
 
 	if (varyHeaders !== undefined) {
