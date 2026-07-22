@@ -182,6 +182,17 @@ CACHE_ENABLED=false
 # List of collections that prevent cache purging when `CACHE_AUTO_PURGE` is enabled. ["directus_activity,directus_presets"]
 # CACHE_AUTO_PURGE_IGNORE_LIST="directus_activity,directus_presets"
 
+# Request dimensions folded into the cache key so a header-varying response isn't served across callers.
+# The response language (Accept-Language, normalized primary tag) is ALWAYS keyed — no config needed.
+# These two are opt-in, for endpoints/hooks that vary the body on more than language:
+#   - CACHE_VARY_CONTENT_TYPES: formats a custom endpoint content-negotiates on; the key folds
+#     req.accepts(<list>), collapsing raw Accept strings into exactly these buckets. ["json,csv"]
+#   - CACHE_VARY_REQUEST_HEADERS: exact header names or `*` globs a hook reshapes the body from
+#     (tenant/feature-flag). Do NOT list proxy headers (x-request-id, x-forwarded-for) — they're
+#     near-unique per request and would disable the cache. ["x-tenant-id,x-feature-*"]
+# CACHE_VARY_CONTENT_TYPES="json,csv"
+# CACHE_VARY_REQUEST_HEADERS="x-tenant-id"
+
 # Flush the cache once on boot when the running build changed, so a code-only deploy (an extension or
 # core reshaping change with no migration and no version bump) doesn't keep serving the previous
 # build's response shape until CACHE_TTL expires. Only acts with CACHE_STORE=redis. [true]
