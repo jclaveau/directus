@@ -106,27 +106,6 @@ function varyHeaderValue(raw: string | string[] | undefined): string | null {
 		: raw;
 }
 
-// Proxy / CDN / tracing headers a glob must never fold: they're per-request or
-// per-client (a distinct value on every hit), so folding them would key a new entry
-// per request and disable the cache. A glob skips these; an exact name still folds
-// (naming one explicitly is a deliberate opt-in). The common set — extend as needed.
-const GLOB_EXCLUDED_HEADERS = new Set([
-	'x-forwarded-for',
-	'x-forwarded-host',
-	'x-forwarded-proto',
-	'x-forwarded-port',
-	'x-real-ip',
-	'x-request-id',
-	'x-correlation-id',
-	'x-amzn-trace-id',
-	'cf-connecting-ip',
-	'cf-ray',
-	'forwarded',
-	'via',
-	'traceparent',
-	'tracestate',
-]);
-
 // Anchor a header glob (`x-tenant-*`) as a regex; consecutive `*` collapsed so the
 // pattern stays linear against attacker-supplied header names.
 function varyHeaderPattern(pattern: string): RegExp {
@@ -138,13 +117,37 @@ function varyHeaderPattern(pattern: string): RegExp {
 	return new RegExp(`^${escaped}$`);
 }
 
+// Proxy / CDN / tracing headers a glob must never fold: per-request or per-client (a
+// new value every hit), so folding them would key a fresh entry per request and
+// disable the cache. Families expressed as globs and compiled with the same engine
+// as the user patterns; an exact user name still folds (a deliberate opt-in), and a
+// deployment can extend this via CACHE_VARY_REQUEST_HEADERS_EXCLUDED.
+const BASE_EXCLUDED_HEADERS = [
+	'x-forwarded-*', // proxy (for/host/proto/port)
+	'x-real-ip',
+	'x-envoy-*', // Railway/Envoy edge
+	'x-railway-*',
+	'fly-*', // Fly.io
+	'cf-*', // Cloudflare (cf-ray, cf-connecting-ip, …)
+	'x-amzn-*', // AWS ALB / API Gateway
+	'x-amz-cf-*', // CloudFront
+	'x-b3-*', // B3 / Zipkin tracing
+	'x-request-id',
+	'x-correlation-id',
+	'forwarded',
+	'via',
+	'traceparent',
+	'tracestate',
+].map(varyHeaderPattern);
+
 // undefined when CACHE_VARY_REQUEST_HEADERS is unset (dimension omitted). Exact
 // names fold to their value (or null if absent); glob patterns fold every present
-// header they match except the proxy/tracing denylist. Names lowercased to match
-// Node's keys.
+// header they match except those on `excluded` (the proxy/tracing denylist). Names
+// lowercased to match Node's keys.
 function resolveVaryHeaders(
 	req: Request,
 	patterns: string[],
+	excluded: RegExp[],
 ): Record<string, string | null> | undefined {
 	if (patterns.length === 0) {
 		return undefined;
@@ -163,9 +166,15 @@ function resolveVaryHeaders(
 		const regex = varyHeaderPattern(name);
 
 		for (const header of Object.keys(req.headers)) {
-			if (regex.test(header) && !GLOB_EXCLUDED_HEADERS.has(header)) {
-				resolved[header] = varyHeaderValue(req.headers[header]);
+			if (!regex.test(header)) {
+				continue;
 			}
+
+			if (excluded.some((denied) => denied.test(header))) {
+				continue;
+			}
+
+			resolved[header] = varyHeaderValue(req.headers[header]);
 		}
 	}
 
@@ -220,10 +229,17 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 	// Opt-in: custom/tenant/feature-flag request headers a hook reshapes the body
 	// from. Arbitrary headers can't be always-folded — proxy-injected ones like
 	// x-request-id are unique per request and would disable the cache — so the admin
-	// names exactly the headers (or globs) their hooks read.
+	// names exactly the headers (or globs) their hooks read. Globs skip the built-in
+	// proxy/tracing denylist plus any CACHE_VARY_REQUEST_HEADERS_EXCLUDED extras.
+	const excludedHeaders = [
+		...BASE_EXCLUDED_HEADERS,
+		...varyList(env['CACHE_VARY_REQUEST_HEADERS_EXCLUDED']).map(varyHeaderPattern),
+	];
+
 	const varyHeaders = resolveVaryHeaders(
 		req,
 		varyList(env['CACHE_VARY_REQUEST_HEADERS']),
+		excludedHeaders,
 	);
 
 	if (varyHeaders !== undefined) {

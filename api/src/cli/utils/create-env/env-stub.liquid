@@ -195,6 +195,9 @@ CACHE_ENABLED=false
 #     auto-skip proxy/tracing headers (x-forwarded-*, x-request-id, cf-ray,
 #     …) so a broad `x-*` can't disable the cache; name one exactly to
 #     override. ["x-tenant-id,x-feature-*"]
+#   - CACHE_VARY_REQUEST_HEADERS_EXCLUDED: extra headers (names or globs) to
+#     add to that built-in glob denylist, for platform per-request headers
+#     it doesn't already cover. ["x-my-lb-*"]
 # CACHE_VARY_CONTENT_TYPES="json,csv,yaml"
 # CACHE_VARY_REQUEST_HEADERS="x-tenant-id"
 
