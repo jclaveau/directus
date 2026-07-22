@@ -125,12 +125,13 @@ function varyHeaderPattern(pattern: string): RegExp {
 const BASE_EXCLUDED_HEADERS = [
 	'x-forwarded-*', // proxy (for/host/proto/port)
 	'x-real-ip',
-	'x-envoy-*', // Railway/Envoy edge
-	'x-railway-*',
+	'x-railway-*', // Railway edge (x-railway-request-id, x-railway-edge)
+	'x-hikari-*', // Railway's hikari proxy (x-hikari-trace)
 	'fly-*', // Fly.io
 	'cf-*', // Cloudflare (cf-ray, cf-connecting-ip, …)
 	'x-amzn-*', // AWS ALB / API Gateway
 	'x-amz-cf-*', // CloudFront
+	'x-envoy-*', // Envoy-based ingress (Istio, …)
 	'x-b3-*', // B3 / Zipkin tracing
 	'x-request-id',
 	'x-correlation-id',
