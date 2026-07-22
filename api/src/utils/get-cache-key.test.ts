@@ -423,4 +423,23 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 
 		expect(a.hash).not.toEqual(b.hash);
 	});
+
+	test('CACHE_VARY_REQUEST_HEADERS_EXCLUDED extends the glob denylist', async () => {
+		vi.mocked(useEnv).mockReturnValue({
+			CACHE_VARY_REQUEST_HEADERS: ['x-*'],
+			CACHE_VARY_REQUEST_HEADERS_EXCLUDED: ['x-tenant-id'],
+		});
+
+		// x-tenant-id is matched by x-* but now excluded → no longer splits
+		const a = await getCacheKey(tenant('a'));
+		const b = await getCacheKey(tenant('b'));
+
+		expect(a.hash).toEqual(b.hash);
+
+		// a sibling the exclusion doesn't name still splits
+		const featureOn = await getCacheKey(feature('1'));
+		const featureOff = await getCacheKey(feature('0'));
+
+		expect(featureOn.hash).not.toEqual(featureOff.hash);
+	});
 });

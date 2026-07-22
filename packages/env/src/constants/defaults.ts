@@ -83,6 +83,10 @@ export const DEFAULTS = {
 	// split it from api-client json — fragmenting every install, even non-xml ones.
 	CACHE_VARY_CONTENT_TYPES: 'json,csv,yaml',
 	CACHE_VARY_REQUEST_HEADERS: '',
+	// Extra request headers a glob must never fold, on top of the built-in
+	// proxy/CDN/tracing denylist (x-forwarded-*, cf-*, x-envoy-*, …). Add
+	// platform-specific per-request headers here; globs allowed.
+	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: '',
 	CACHE_AUTO_FLUSH_ON_DEPLOY: true,
 	CACHE_CONTROL_S_MAXAGE: '0',
 	CACHE_SCHEMA: true,
