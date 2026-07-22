@@ -76,6 +76,7 @@ export const DEFAULTS = {
 	CACHE_AUTO_PURGE: false,
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
+	CACHE_AUTO_FLUSH_ON_DEPLOY: true,
 	CACHE_CONTROL_S_MAXAGE: '0',
 	CACHE_SCHEMA: true,
 	CACHE_SCHEMA_MAX_ITERATIONS: 100,
