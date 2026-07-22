@@ -67,6 +67,19 @@ function normalizePrimaryLanguage(req: Request): string | null {
 		: null;
 }
 
+// Normalize a CACHE_VARY_* list off the env. The array cast keeps whitespace around
+// comma-separated values (`json, csv` → `[' csv']`) and can carry blanks/dupes, so
+// trim + drop empties + dedupe. Order is PRESERVED, not sorted: for content types it
+// must mirror the endpoint's own req.accepts() priority (the first type is what a
+// `*/*` caller gets), so sorting would bucket those callers to the wrong format.
+function varyList(value: unknown): string[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+
+	return [...new Set(value.map((entry) => String(entry).trim()).filter(Boolean))];
+}
+
 // undefined when CACHE_VARY_CONTENT_TYPES is unset (dimension omitted from the key
 // entirely); else the negotiated type from the declared set, or null when the
 // caller accepts none of them.
@@ -172,13 +185,11 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 	// A custom endpoint that content-negotiates (csv vs json by Accept) varies its
 	// body; without the served type in the key the first caller's format is served to
 	// all. The list (default json,csv,yaml) is what collapses the many raw Accept
-	// strings into a small bucket set. Trimmed because the env array cast keeps the
-	// whitespace around comma-separated values (`json, csv` → `[' csv']`).
-	const contentTypes = ((env['CACHE_VARY_CONTENT_TYPES'] ?? []) as string[])
-		.map((type) => type.trim())
-		.filter(Boolean);
-
-	const contentType = negotiateContentType(req, contentTypes);
+	// strings into a small bucket set.
+	const contentType = negotiateContentType(
+		req,
+		varyList(env['CACHE_VARY_CONTENT_TYPES']),
+	);
 
 	if (contentType !== undefined) {
 		info['contentType'] = contentType;
@@ -188,11 +199,10 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 	// from. Arbitrary headers can't be always-folded — proxy-injected ones like
 	// x-request-id are unique per request and would disable the cache — so the admin
 	// names exactly the headers (or globs) their hooks read.
-	const headerPatterns = ((env['CACHE_VARY_REQUEST_HEADERS'] ?? []) as string[])
-		.map((pattern) => pattern.trim())
-		.filter(Boolean);
-
-	const varyHeaders = resolveVaryHeaders(req, headerPatterns);
+	const varyHeaders = resolveVaryHeaders(
+		req,
+		varyList(env['CACHE_VARY_REQUEST_HEADERS']),
+	);
 
 	if (varyHeaders !== undefined) {
 		info['headers'] = varyHeaders;
