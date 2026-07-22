@@ -1,28 +1,42 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { computeBuildIdentity, flushCachesIfBuildChanged } from './cache-build-identity.js';
+import {
+	computeBuildIdentity,
+	flushCachesIfBuildChanged,
+} from './cache-build-identity.js';
 import { flushCaches, getCache } from './cache.js';
 
 const env = vi.hoisted(() => ({}) as Record<string, any>);
 const version = vi.hoisted(() => ({ value: '1.0.0' }));
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
-vi.mock('directus/version', () => ({ get version() { return version.value; } }));
+
+vi.mock('directus/version', () => {
+	return {
+		get version() {
+			return version.value;
+		},
+	};
+});
+
 vi.mock('./logger/index.js', () => ({ useLogger: () => ({ info: vi.fn() }) }));
 vi.mock('./cache.js', () => ({ flushCaches: vi.fn(), getCache: vi.fn() }));
 
-// path.resolve(ext.path, entrypoint) → content; readFile returns those bytes so a content edit moves
-// the fingerprint. Unmapped paths read as empty (the extension still contributes name/version/type).
+// path.resolve(ext.path, entrypoint) → content; readFile returns those bytes so a
+// content edit moves the fingerprint. An unmapped path rejects, and the extension
+// still contributes its name/version/type.
 const files = vi.hoisted(() => new Map<string, string>());
 
-vi.mock('node:fs/promises', () => ({
-	readFile: vi.fn((file: string) => {
-		if (files.has(file)) {
-			return Promise.resolve(Buffer.from(files.get(file)!));
-		}
+vi.mock('node:fs/promises', () => {
+	return {
+		readFile: vi.fn((file: string) => {
+			if (files.has(file)) {
+				return Promise.resolve(Buffer.from(files.get(file)!));
+			}
 
-		return Promise.reject(new Error('ENOENT'));
-	}),
-}));
+			return Promise.reject(new Error('ENOENT'));
+		}),
+	};
+});
 
 function makeLockCache() {
 	const store = new Map<string, unknown>();
@@ -50,7 +64,8 @@ function moduleExt(name: string, path: string, entrypoint = 'index.js') {
 }
 
 function operation(name: string, path: string) {
-	return { type: 'operation', name, path, entrypoint: { app: 'app.js', api: 'api.js' }, local: true } as any;
+	const entrypoint = { app: 'app.js', api: 'api.js' };
+	return { type: 'operation', name, path, entrypoint, local: true } as any;
 }
 
 function managerOf(extensions: any[]) {
@@ -58,7 +73,10 @@ function managerOf(extensions: any[]) {
 }
 
 beforeEach(() => {
-	for (const key of Object.keys(env)) delete env[key];
+	for (const key of Object.keys(env)) {
+		delete env[key];
+	}
+
 	env['CACHE_AUTO_FLUSH_ON_DEPLOY'] = true;
 	env['CACHE_ENABLED'] = true;
 	env['CACHE_STORE'] = 'redis';
@@ -74,12 +92,14 @@ afterEach(() => {
 });
 
 describe('computeBuildIdentity', () => {
-	it('is stable for the same core id + extension content, and order-independent', async () => {
+	it('is stable and order-independent for one core id + content', async () => {
 		files.set('/ext/a/index.js', 'hook-a-v1');
 		files.set('/ext/b/index.js', 'hook-b-v1');
 
-		const forward = await computeBuildIdentity(managerOf([hook('a', '/ext/a'), hook('b', '/ext/b')]));
-		const reversed = await computeBuildIdentity(managerOf([hook('b', '/ext/b'), hook('a', '/ext/a')]));
+		const a = hook('a', '/ext/a');
+		const b = hook('b', '/ext/b');
+		const forward = await computeBuildIdentity(managerOf([a, b]));
+		const reversed = await computeBuildIdentity(managerOf([b, a]));
 
 		expect(forward).toBe(reversed);
 	});
@@ -97,15 +117,16 @@ describe('computeBuildIdentity', () => {
 	it('hashes the api side of operation (hybrid) extensions', async () => {
 		files.set('/ext/op/api.js', 'op-v1');
 		files.set('/ext/op/app.js', 'app-only-changes-here');
-		const before = await computeBuildIdentity(managerOf([operation('op', '/ext/op')]));
+		const manager = managerOf([operation('op', '/ext/op')]);
+		const before = await computeBuildIdentity(manager);
 
 		files.set('/ext/op/api.js', 'op-v2');
-		const after = await computeBuildIdentity(managerOf([operation('op', '/ext/op')]));
+		const after = await computeBuildIdentity(manager);
 
 		expect(after).not.toBe(before);
 	});
 
-	it('ignores app-only extensions (they never reshape a read response)', async () => {
+	it('ignores app-only extensions (never reshape a read response)', async () => {
 		files.set('/ext/m/index.js', 'module-v1');
 		const before = await computeBuildIdentity(managerOf([moduleExt('m', '/ext/m')]));
 
@@ -115,7 +136,7 @@ describe('computeBuildIdentity', () => {
 		expect(after).toBe(before);
 	});
 
-	it('resolves the core build id CACHE_BUILD_ID > baked commit > RAILWAY_GIT_COMMIT_SHA > version', async () => {
+	it('core id precedence: override > baked > railway > version', async () => {
 		const fromVersion = await computeBuildIdentity(managerOf([]));
 
 		version.value = '2.0.0';
@@ -138,7 +159,7 @@ describe('computeBuildIdentity', () => {
 });
 
 describe('flushCachesIfBuildChanged', () => {
-	it('flushes and persists the identity on first boot (no stored fingerprint)', async () => {
+	it('flushes and persists the identity on first boot', async () => {
 		const lockCache = makeLockCache();
 		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
 		files.set('/ext/a/index.js', 'hook-a-v1');
@@ -152,7 +173,7 @@ describe('flushCachesIfBuildChanged', () => {
 		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
 	});
 
-	it('does nothing when the stored identity matches the running build', async () => {
+	it('does nothing when the stored identity matches the build', async () => {
 		const lockCache = makeLockCache();
 		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
 		files.set('/ext/a/index.js', 'hook-a-v1');
@@ -165,7 +186,7 @@ describe('flushCachesIfBuildChanged', () => {
 		expect(flushCaches).not.toHaveBeenCalled();
 	});
 
-	it('does not flush while another instance holds the flush lock', async () => {
+	it('does not flush while another instance holds the lock', async () => {
 		const lockCache = makeLockCache();
 		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
 		lockCache.store.set('build-identity', 'stale');
@@ -180,7 +201,7 @@ describe('flushCachesIfBuildChanged', () => {
 		['disabled switch', { CACHE_AUTO_FLUSH_ON_DEPLOY: false }],
 		['non-redis store', { CACHE_STORE: 'memory' }],
 		['cache disabled', { CACHE_ENABLED: false }],
-	])('skips entirely (%s) — no getCache, no flush', async (_label, overrides) => {
+	])('skips entirely (%s): no getCache, no flush', async (_label, overrides) => {
 		Object.assign(env, overrides);
 
 		await flushCachesIfBuildChanged(managerOf([hook('a', '/ext/a')]));
