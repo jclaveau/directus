@@ -7,7 +7,7 @@ import { extractError as oracle } from './dialects/oracle.js';
 import { extractError as postgres } from './dialects/postgres.js';
 import { extractError as sqlite } from './dialects/sqlite.js';
 import type { Knex } from 'knex';
-import type { SQLError } from './dialects/types.js';
+import type { DatabaseErrorContext, SQLError } from './dialects/types.js';
 import type { Item } from '@directus/types';
 
 /**
@@ -24,7 +24,7 @@ export async function extractDatabaseError(
 	error: SQLError,
 	data: Partial<Item>,
 	database?: Knex,
-	operatedCollection?: string,
+	context?: DatabaseErrorContext,
 ): Promise<any> {
 	// Dispatch on the connection the query actually ran on — a granted named
 	// connection may be a different client than the default pool.
@@ -34,14 +34,14 @@ export async function extractDatabaseError(
 
 	switch (client) {
 		case 'mysql':
-			translated = mysql(error, data, operatedCollection);
+			translated = mysql(error, data, context);
 			break;
 		case 'cockroachdb':
 		case 'postgres':
-			translated = postgres(error, data, operatedCollection);
+			translated = postgres(error, data, context);
 			break;
 		case 'sqlite':
-			translated = sqlite(error, data, operatedCollection);
+			translated = sqlite(error, data, context);
 			break;
 		case 'oracle':
 			translated = oracle(error);
@@ -78,13 +78,13 @@ export async function translateDatabaseError(
 	error: SQLError,
 	data: Partial<Item>,
 	database?: Knex,
-	operatedCollection?: string,
+	context?: DatabaseErrorContext,
 ): Promise<any> {
 	const defaultError = await extractDatabaseError(
 		error,
 		data,
 		database,
-		operatedCollection,
+		context,
 	);
 
 	const hookError = await emitter.emitFilter(

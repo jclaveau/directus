@@ -6,7 +6,7 @@ import {
 	ValueOutOfRangeError,
 	ValueTooLongError,
 } from '@directus/errors';
-import type { MySQLError } from './types.js';
+import type { DatabaseErrorContext, MySQLError } from './types.js';
 import type { Item } from '@directus/types';
 
 enum MySQLErrorCodes {
@@ -25,7 +25,7 @@ enum MySQLErrorCodes {
 export function extractError(
 	error: MySQLError,
 	data: Partial<Item>,
-	operatedCollection?: string,
+	context?: DatabaseErrorContext,
 ): MySQLError | Error {
 	switch (error.code) {
 		case MySQLErrorCodes.UNIQUE_VIOLATION:
@@ -38,7 +38,7 @@ export function extractError(
 			return notNullViolation();
 		case MySQLErrorCodes.FOREIGN_KEY_VIOLATION:
 		case MySQLErrorCodes.FOREIGN_KEY_STILL_REFERENCED:
-			return foreignKeyViolation(operatedCollection);
+			return foreignKeyViolation(context);
 		// Note: MariaDB throws data truncated for null value error
 		case MySQLErrorCodes.ER_INVALID_USE_OF_NULL:
 		case MySQLErrorCodes.WARN_DATA_TRUNCATED:
@@ -148,7 +148,7 @@ export function extractError(
 		});
 	}
 
-	function foreignKeyViolation(operatedCollection?: string) {
+	function foreignKeyViolation(context?: DatabaseErrorContext) {
 		const betweenTicks = /`([^`]+)`/g;
 
 		// The constraint clause is in sqlMessage; error.sql isn't parsed (a delete
@@ -174,7 +174,7 @@ export function extractError(
 			? 'still_referenced'
 			: 'invalid_reference';
 
-		const collection = operatedCollection ?? childTable;
+		const collection = context?.collection ?? childTable;
 
 		const relatedCollection = stillReferenced
 			? childTable
@@ -192,6 +192,7 @@ export function extractError(
 			constraint,
 			relatedCollection,
 			reason,
+			operation: context?.operation ?? null,
 		});
 	}
 

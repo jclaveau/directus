@@ -195,6 +195,7 @@ describe('foreign key violation (23503)', () => {
 			constraint: 'articles_author_authors_foreign',
 			relatedCollection: 'authors',
 			reason: 'invalid_reference',
+			operation: null,
 		});
 	});
 
@@ -211,7 +212,10 @@ describe('foreign key violation (23503)', () => {
 		});
 
 		// The delete ran on the parent `enrollment`; threaded from the call site.
-		const result = extractError(error, {}, 'enrollment');
+		const result = extractError(error, {}, {
+			collection: 'enrollment',
+			operation: 'delete',
+		});
 
 		expect(result).toBeInstanceOf(InvalidForeignKeyError);
 
@@ -222,6 +226,7 @@ describe('foreign key violation (23503)', () => {
 			constraint: 'student_enrollment_enrollment_foreign',
 			relatedCollection: 'student_enrollment',
 			reason: 'still_referenced',
+			operation: 'delete',
 		});
 	});
 

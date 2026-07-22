@@ -4,7 +4,7 @@ import {
 	NotNullViolationError,
 	RecordNotUniqueError,
 } from '@directus/errors';
-import type { SQLiteError } from './types.js';
+import type { DatabaseErrorContext, SQLiteError } from './types.js';
 import type { Item } from '@directus/types';
 
 // NOTE:
@@ -14,7 +14,7 @@ import type { Item } from '@directus/types';
 export function extractError(
 	error: SQLiteError,
 	data: Partial<Item>,
-	operatedCollection?: string,
+	context?: DatabaseErrorContext,
 ): SQLiteError | Error {
 	if (error.message.includes('SQLITE_CONSTRAINT: NOT NULL')) {
 		return notNullConstraint(error);
@@ -41,9 +41,10 @@ export function extractError(
 		 * threaded in from the call site (null on the read path).
 		 */
 		return new InvalidForeignKeyError({
-			collection: operatedCollection ?? null,
+			collection: context?.collection ?? null,
 			field: null,
 			value: null,
+			operation: context?.operation ?? null,
 		});
 	}
 

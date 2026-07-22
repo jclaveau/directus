@@ -249,7 +249,7 @@ describe('raw driver message + operated collection', () => {
 		expect(logger.debug).toHaveBeenCalledWith(raw, expect.any(String));
 	});
 
-	it('forwards the operated collection to the dialect', async () => {
+	it('forwards the operated collection + operation to the dialect', async () => {
 		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
 
 		const result = await extractDatabaseError(
@@ -262,11 +262,12 @@ describe('raw driver message + operated collection', () => {
 			} as SQLError,
 			{},
 			undefined,
-			'enrollment',
+			{ collection: 'enrollment', operation: 'delete' },
 		);
 
 		expect((result as any).extensions.collection).toBe('enrollment');
 		expect((result as any).extensions.reason).toBe('still_referenced');
+		expect((result as any).extensions.operation).toBe('delete');
 	});
 
 	it('attaches no raw message when nothing was translated', async () => {

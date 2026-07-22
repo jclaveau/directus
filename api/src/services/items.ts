@@ -739,7 +739,7 @@ implements AbstractService<Item> {
 					err,
 					data,
 					this.knex,
-					this.collection,
+					{ collection: this.collection, operation: 'create' },
 				);
 
 				if (isDirectusError(dbError, ErrorCode.RecordNotUnique) && dbError.extensions.primaryKey) {
@@ -1421,7 +1421,10 @@ implements AbstractService<Item> {
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
-					throw await translateDatabaseError(err, data, this.knex, this.collection);
+					throw await translateDatabaseError(err, data, this.knex, {
+						collection: this.collection,
+						operation: 'update',
+					});
 				}
 			}
 
@@ -1784,7 +1787,10 @@ implements AbstractService<Item> {
 			catch (err: any) {
 				// Parity with createOne/updateMany: a direct delete's FK/constraint
 				// violation must surface as a translated Directus error, not raw knex.
-				throw await translateDatabaseError(err, {}, this.knex, this.collection);
+				throw await translateDatabaseError(err, {}, this.knex, {
+					collection: this.collection,
+					operation: 'delete',
+				});
 			}
 
 			if (opts.userIntegrityCheckFlags) {

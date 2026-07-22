@@ -80,18 +80,23 @@ describe('foreign key constraint', () => {
 			collection: null,
 			field: null,
 			value: null,
+			operation: null,
 		});
 	});
 
-	it('fills the operated-on collection when threaded from the call site', () => {
+	it('fills the operated-on collection + operation when threaded', () => {
 		const error = sqliteError('SQLITE_CONSTRAINT: FOREIGN KEY constraint failed');
 
-		const result = extractError(error, {}, 'enrollment');
+		const result = extractError(error, {}, {
+			collection: 'enrollment',
+			operation: 'delete',
+		});
 
 		expect((result as any).extensions).toEqual({
 			collection: 'enrollment',
 			field: null,
 			value: null,
+			operation: 'delete',
 		});
 	});
 });
