@@ -117,7 +117,7 @@ export default async function createApp(): Promise<express.Application> {
 	await extensionManager.initialize();
 	await flowManager.initialize();
 
-	// Extensions + core are now loaded; heal a redis cache left stale by a code-only deploy.
+	// Extensions + core loaded; heal a redis cache left stale by a code-only deploy.
 	await flushCachesIfBuildChanged(extensionManager);
 
 	const app = express();
