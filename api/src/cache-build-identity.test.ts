@@ -70,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.unstubAllGlobals();
 });
 
 describe('computeBuildIdentity', () => {
@@ -114,7 +115,7 @@ describe('computeBuildIdentity', () => {
 		expect(after).toBe(before);
 	});
 
-	it('changes when the core build id changes (CACHE_BUILD_ID > RAILWAY_GIT_COMMIT_SHA > version)', async () => {
+	it('resolves the core build id CACHE_BUILD_ID > baked commit > RAILWAY_GIT_COMMIT_SHA > version', async () => {
 		const fromVersion = await computeBuildIdentity(managerOf([]));
 
 		version.value = '2.0.0';
@@ -125,10 +126,14 @@ describe('computeBuildIdentity', () => {
 		const fromGitSha = await computeBuildIdentity(managerOf([]));
 		expect(fromGitSha).not.toBe(fromNewVersion);
 
-		process.env['CACHE_BUILD_ID'] = 'explicit-id';
+		// Baked commit (tsdown define) outranks the platform env.
+		vi.stubGlobal('__DIRECTUS_BUILD_COMMIT__', 'baked-sha');
+		const fromBaked = await computeBuildIdentity(managerOf([]));
+		expect(fromBaked).not.toBe(fromGitSha);
+
 		env['CACHE_BUILD_ID'] = 'explicit-id';
 		const fromExplicit = await computeBuildIdentity(managerOf([]));
-		expect(fromExplicit).not.toBe(fromGitSha);
+		expect(fromExplicit).not.toBe(fromBaked);
 	});
 });
 

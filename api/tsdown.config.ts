@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import istanbul from 'rolldown-plugin-istanbul';
 import { defineConfig } from 'tsdown';
 
@@ -5,7 +6,30 @@ import { defineConfig } from 'tsdown';
 // integration coverage (dumped on shutdown in server.ts). Off by default → prod ships clean.
 const coverage = Boolean(process.env['COVERAGE_DIR']);
 
+// Bake the git commit into the build so CACHE_AUTO_FLUSH_ON_DEPLOY can tell one code-only deploy from
+// the next even when directus/version is pinned on the fork's version line. Prefer a CI/platform-
+// provided commit, else read it from git; empty when neither is available (e.g. a tarball build with
+// no .git), where the runtime fallback chain in cache-build-identity.ts takes over.
+function resolveBuildCommit(): string {
+	const provided =
+		process.env['SOURCE_COMMIT'] ?? process.env['RAILWAY_GIT_COMMIT_SHA'] ?? process.env['GITHUB_SHA'];
+
+	if (provided) {
+		return provided;
+	}
+
+	try {
+		return execSync('git rev-parse HEAD', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+	}
+	catch {
+		return '';
+	}
+}
+
 export default defineConfig({
+	define: {
+		__DIRECTUS_BUILD_COMMIT__: JSON.stringify(resolveBuildCommit()),
+	},
 	entry: [
 		'src/**/*.ts',
 		'!src/**/*.d.ts',

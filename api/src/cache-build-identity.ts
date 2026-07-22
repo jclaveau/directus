@@ -19,15 +19,23 @@ import { useLogger } from './logger/index.js';
 const BUILD_IDENTITY_KEY = 'build-identity';
 const BUILD_IDENTITY_FLUSH_LOCK = 'build-identity-flush-lock';
 
+// The git commit baked into the dist by tsdown's `define` (see api/tsdown.config.ts). A string in a
+// shipped build, undefined in an unbundled dev run where the token is never replaced.
+declare const __DIRECTUS_BUILD_COMMIT__: string | undefined;
+
 // Case B (core/fork logic): directus/version is intentionally pinned on the fork's version line, so it
-// can't detect a core reshaping change on its own. Prefer an explicit build id, then the commit the
-// platform injects at deploy time (Railway sets RAILWAY_GIT_COMMIT_SHA from git), then fall back to
-// the version string so a plain upstream version bump still moves the identity.
+// can't detect a core reshaping change on its own. Resolve, in order: an explicit override, the commit
+// baked into the dist at build time (travels with the build on any platform), the commit the platform
+// injects at deploy time, then the version string so a plain upstream version bump still moves the id.
 function resolveCoreBuildId(): string {
 	const explicit = useEnv()['CACHE_BUILD_ID'];
 
 	if (typeof explicit === 'string' && explicit.length > 0) {
 		return explicit;
+	}
+
+	if (typeof __DIRECTUS_BUILD_COMMIT__ === 'string' && __DIRECTUS_BUILD_COMMIT__.length > 0) {
+		return __DIRECTUS_BUILD_COMMIT__;
 	}
 
 	// A platform-injected git SHA is not part of the directus env schema, so read it off process.env.
