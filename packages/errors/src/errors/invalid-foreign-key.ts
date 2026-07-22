@@ -32,7 +32,12 @@ export const messageConstructor = (extensions: InvalidForeignKeyErrorExtensions)
 		if (operation === 'delete' || operation === 'update') {
 			let message = `Cannot ${operation}`;
 
-			if (collection) {
+			// Name the exact row (`collection:pk`) when the driver gave us its key
+			// (pg does), else fall back to the collection.
+			if (collection && value) {
+				message += ` "${collection}:${value}"`;
+			}
+			else if (collection) {
 				message += ` collection "${collection}"`;
 			}
 
