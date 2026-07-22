@@ -33,7 +33,7 @@ try {
 
 // Map each changed lintable file to the set of line numbers it ADDS (the `+` side, vs the
 // working tree so a local run sees uncommitted edits; in CI the tree equals HEAD).
-const diff = git(['diff', '--unified=0', mergeBase, '--', '*.ts', '*.tsx', '*.vue', '*.js', '*.mjs']);
+const diff = git(['diff', '--unified=0', mergeBase, '--', '*.ts', '*.tsx', '*.vue', '*.js', '*.mjs', '*.liquid']);
 const addedByFile = new Map();
 
 let file = null;
@@ -60,7 +60,7 @@ for (const raw of diff.split('\n')) {
 
 // `git diff` omits UNTRACKED new files, so a brand-new file's lines slip the gate locally and only
 // surface in CI once committed. Treat every line of an untracked lintable file as added.
-const untracked = git(['ls-files', '--others', '--exclude-standard', '--', '*.ts', '*.tsx', '*.vue', '*.js', '*.mjs'])
+const untracked = git(['ls-files', '--others', '--exclude-standard', '--', '*.ts', '*.tsx', '*.vue', '*.js', '*.mjs', '*.liquid'])
 	.split('\n')
 	.filter(Boolean);
 
