@@ -188,8 +188,9 @@ CACHE_ENABLED=false
 # CACHE_AUTO_FLUSH_ON_DEPLOY=false
 
 # Overrides the core build identity used by `CACHE_AUTO_FLUSH_ON_DEPLOY`. Set it to a per-build value
-# (e.g. the git commit SHA) when directus/version is pinned; unset, it falls back to
-# `RAILWAY_GIT_COMMIT_SHA` then the directus version string.
+# (e.g. the git commit SHA) when directus/version is pinned; unset, it falls back to the commit baked
+# in at build time, then `RAILWAY_GIT_COMMIT_SHA`, then the directus version string. Required for a
+# pinned-version build with no baked commit (a tarball build with no .git) to detect core changes.
 # CACHE_BUILD_ID="<git-commit-sha>"
 
 # memory | redis

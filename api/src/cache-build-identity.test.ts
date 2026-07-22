@@ -59,6 +59,10 @@ function hook(name: string, path: string, entrypoint = 'index.js') {
 	return { type: 'hook', name, path, entrypoint, local: true } as any;
 }
 
+function endpoint(name: string, path: string, entrypoint = 'index.js') {
+	return { type: 'endpoint', name, path, entrypoint, local: true } as any;
+}
+
 function moduleExt(name: string, path: string, entrypoint = 'index.js') {
 	return { type: 'module', name, path, entrypoint, local: true } as any;
 }
@@ -66,6 +70,11 @@ function moduleExt(name: string, path: string, entrypoint = 'index.js') {
 function operation(name: string, path: string) {
 	const entrypoint = { app: 'app.js', api: 'api.js' };
 	return { type: 'operation', name, path, entrypoint, local: true } as any;
+}
+
+function bundle(name: string, path: string) {
+	const entrypoint = { app: 'app.js', api: 'api.js' };
+	return { type: 'bundle', name, path, entrypoint, local: true } as any;
 }
 
 function managerOf(extensions: any[]) {
@@ -126,6 +135,31 @@ describe('computeBuildIdentity', () => {
 		expect(after).not.toBe(before);
 	});
 
+	it('changes when an endpoint entrypoint content changes', async () => {
+		files.set('/ext/e/index.js', 'endpoint-v1');
+		const before = await computeBuildIdentity(managerOf([endpoint('e', '/ext/e')]));
+
+		files.set('/ext/e/index.js', 'endpoint-v2');
+		const after = await computeBuildIdentity(managerOf([endpoint('e', '/ext/e')]));
+
+		expect(after).not.toBe(before);
+	});
+
+	it('hashes the api side of a bundle, not its app side', async () => {
+		files.set('/ext/b/api.js', 'bundle-api-v1');
+		files.set('/ext/b/app.js', 'bundle-app-v1');
+		const manager = managerOf([bundle('b', '/ext/b')]);
+		const before = await computeBuildIdentity(manager);
+
+		// The app side moving must not shift the fingerprint...
+		files.set('/ext/b/app.js', 'bundle-app-v2');
+		expect(await computeBuildIdentity(manager)).toBe(before);
+
+		// ...but the api side moving must.
+		files.set('/ext/b/api.js', 'bundle-api-v2');
+		expect(await computeBuildIdentity(manager)).not.toBe(before);
+	});
+
 	it('ignores app-only extensions (never reshape a read response)', async () => {
 		files.set('/ext/m/index.js', 'module-v1');
 		const before = await computeBuildIdentity(managerOf([moduleExt('m', '/ext/m')]));
@@ -184,6 +218,50 @@ describe('flushCachesIfBuildChanged', () => {
 		await flushCachesIfBuildChanged(manager);
 
 		expect(flushCaches).not.toHaveBeenCalled();
+	});
+
+	it('re-reads under the lock and skips flush if the id now matches', async () => {
+		const store = new Map<string, unknown>();
+		files.set('/ext/a/index.js', 'hook-a-v1');
+		const manager = managerOf([hook('a', '/ext/a')]);
+		const identity = await computeBuildIdentity(manager);
+
+		// The stored id only turns to `identity` once we acquire the flush lock —
+		// modelling another instance flushing + storing during our lock wait.
+		let lockAcquired = false;
+
+		const lockCache = {
+			get: vi.fn((key: string) => {
+				if (key === 'build-identity') {
+					return Promise.resolve(
+						lockAcquired
+							? identity
+							: 'stale',
+					);
+				}
+
+				return Promise.resolve(store.get(key));
+			}),
+			set: vi.fn((key: string, value: unknown) => {
+				if (key === 'build-identity-flush-lock') {
+					lockAcquired = true;
+				}
+
+				store.set(key, value);
+				return Promise.resolve(true);
+			}),
+			delete: vi.fn((key: string) => {
+				store.delete(key);
+				return Promise.resolve(true);
+			}),
+		};
+
+		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
+
+		await flushCachesIfBuildChanged(manager);
+
+		expect(flushCaches).not.toHaveBeenCalled();
+		expect(lockCache.delete).toHaveBeenCalledWith('build-identity-flush-lock');
 	});
 
 	it('does not flush while another instance holds the lock', async () => {

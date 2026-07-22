@@ -101,6 +101,9 @@ async function hashApiExtensions(
 			// failure must not silently collapse two builds onto one fingerprint.
 			hash.update('<unreadable>');
 		}
+
+		// Frame the content so its end can't merge with the next entry's name.
+		hash.update('\0');
 	}
 
 	return hash.digest('hex');
@@ -134,32 +137,40 @@ export async function flushCachesIfBuildChanged(
 		return;
 	}
 
-	const { lockCache } = getCache();
-	const identity = await computeBuildIdentity(extensionManager);
+	// Best-effort: createApp() awaits this, so a redis error must never abort boot.
+	try {
+		const { lockCache } = getCache();
+		const identity = await computeBuildIdentity(extensionManager);
 
-	if ((await lockCache.get(BUILD_IDENTITY_KEY)) === identity) {
-		return;
-	}
+		if ((await lockCache.get(BUILD_IDENTITY_KEY)) === identity) {
+			return;
+		}
 
-	// Redis-gate so exactly one instance flushes when several boot together on a
-	// deploy. The lock and the stored fingerprint both live in lockCache, which
-	// flushCaches() leaves untouched.
-	if (await lockCache.get(BUILD_IDENTITY_FLUSH_LOCK)) {
-		return;
-	}
+		// Redis-gate so exactly one instance flushes when several boot together on
+		// a deploy. The lock + stored fingerprint live in lockCache, which
+		// flushCaches() leaves untouched. Non-atomic get-then-set: a loser returns
+		// here trusting the holder to flush, so two deploys inside the 30s lock can
+		// drop the later flush — bounded by CACHE_TTL, accepted.
+		if (await lockCache.get(BUILD_IDENTITY_FLUSH_LOCK)) {
+			return;
+		}
 
-	await lockCache.set(BUILD_IDENTITY_FLUSH_LOCK, true, 30000);
+		await lockCache.set(BUILD_IDENTITY_FLUSH_LOCK, true, 30000);
 
-	// Re-read under the lock: another instance may have flushed and stored the new
-	// id since our check.
-	if ((await lockCache.get(BUILD_IDENTITY_KEY)) === identity) {
+		// Re-read under the lock: another instance may have flushed and stored the
+		// new id since our check.
+		if ((await lockCache.get(BUILD_IDENTITY_KEY)) === identity) {
+			await lockCache.delete(BUILD_IDENTITY_FLUSH_LOCK);
+			return;
+		}
+
+		logger.info('[cache] Build identity changed since last boot, flushing');
+
+		await flushCaches(true);
+		await lockCache.set(BUILD_IDENTITY_KEY, identity);
 		await lockCache.delete(BUILD_IDENTITY_FLUSH_LOCK);
-		return;
 	}
-
-	logger.info('[cache] Build identity changed since last boot, flushing caches');
-
-	await flushCaches(true);
-	await lockCache.set(BUILD_IDENTITY_KEY, identity);
-	await lockCache.delete(BUILD_IDENTITY_FLUSH_LOCK);
+	catch (err) {
+		logger.warn(err, '[cache] build-identity self-heal failed');
+	}
 }
