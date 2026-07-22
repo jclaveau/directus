@@ -48,7 +48,10 @@ describe('App Caching Tests', () => {
 	const envKeys = ['envMem', 'envMemPurge', 'envRedis', 'envRedisPurge', 'envRedisScopedPurge'] as const;
 	// envRedisAnomaly is spawned but kept out of envKeys: its tiny value cap would
 	// fail the purge matrix's HITs. Only the anomaly-provocation test uses it.
-	type EnvTypes = Record<(typeof envKeys)[number], Env> & { envRedisAnomaly: Env };
+	type EnvTypes = Record<(typeof envKeys)[number], Env> & {
+		envRedisAnomaly: Env;
+		envRedisVary: Env;
+	};
 	const envs = {} as Record<Vendor, EnvTypes>;
 	const cacheNamespacePrefix = 'directus-app-cache';
 	const cacheStatusHeader = 'x-cache-status';
@@ -111,12 +114,21 @@ describe('App Caching Tests', () => {
 			envRedisAnomaly[vendor]['CACHE_VALUE_MAX_SIZE'] = '8kb';
 			envRedisAnomaly[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_anomaly`;
 
+			// Opt-in request-header cache dimensions: a content-negotiated format and
+			// tenant/feature-flag headers fold into the key so a header-varying response
+			// isn't served across callers. Language is always on (no config needed).
+			const envRedisVary = cloneDeep(envRedis);
+			envRedisVary[vendor]['CACHE_VARY_CONTENT_TYPES'] = 'json,csv';
+			envRedisVary[vendor]['CACHE_VARY_REQUEST_HEADERS'] = 'x-tenant-id,x-feature-*';
+			envRedisVary[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_vary`;
+
 			const newServerPortMem = await getPort();
 			const newServerPortMemPurge = await getPort();
 			const newServerPortRedis = await getPort();
 			const newServerPortRedisPurge = await getPort();
 			const newServerPortRedisScopedPurge = await getPort();
 			const newServerPortRedisAnomaly = await getPort();
+			const newServerPortRedisVary = await getPort();
 
 			envMem[vendor].PORT = String(newServerPortMem);
 			envMemPurge[vendor].PORT = String(newServerPortMemPurge);
@@ -124,6 +136,7 @@ describe('App Caching Tests', () => {
 			envRedisPurge[vendor].PORT = String(newServerPortRedisPurge);
 			envRedisScopedPurge[vendor].PORT = String(newServerPortRedisScopedPurge);
 			envRedisAnomaly[vendor].PORT = String(newServerPortRedisAnomaly);
+			envRedisVary[vendor].PORT = String(newServerPortRedisVary);
 
 			const serverMem = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envMem[vendor] });
 			const serverMemPurge = spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: envMemPurge[vendor] });
@@ -140,6 +153,11 @@ describe('App Caching Tests', () => {
 				env: envRedisAnomaly[vendor],
 			});
 
+			const serverRedisVary = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: envRedisVary[vendor],
+			});
+
 			directusInstances[vendor] = [
 				serverMem,
 				serverMemPurge,
@@ -147,6 +165,7 @@ describe('App Caching Tests', () => {
 				serverRedisPurge,
 				serverRedisScopedPurge,
 				serverRedisAnomaly,
+				serverRedisVary,
 			];
 
 			envs[vendor] = {
@@ -156,6 +175,7 @@ describe('App Caching Tests', () => {
 				envRedisPurge,
 				envRedisScopedPurge,
 				envRedisAnomaly,
+				envRedisVary,
 			};
 
 			promises.push(
@@ -165,6 +185,7 @@ describe('App Caching Tests', () => {
 				awaitDirectusConnection(newServerPortRedisPurge),
 				awaitDirectusConnection(newServerPortRedisScopedPurge),
 				awaitDirectusConnection(newServerPortRedisAnomaly),
+				awaitDirectusConnection(newServerPortRedisVary),
 			);
 		}
 
@@ -2850,5 +2871,109 @@ describe('App Caching Tests', () => {
 
 			expect(phantom).toBeUndefined();
 		}, 60000);
+	});
+
+	describe('Request-header cache dimensions (#283)', () => {
+		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+		async function clearCache(url: string): Promise<void> {
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+		}
+
+		function cachedItems(url: string) {
+			return request(url)
+				.get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+		}
+
+		describe('Accept-Language (always on)', () => {
+			it.each(vendors)('%s: language splits the key', async (vendor) => {
+				const url = getUrl(vendor, envs[vendor].envRedis);
+				await clearCache(url);
+
+				async function status(lang?: string): Promise<string> {
+					const req = cachedItems(url);
+
+					if (lang) {
+						req.set('Accept-Language', lang);
+					}
+
+					return (await req).headers[cacheStatusHeader];
+				}
+
+				// fr: fresh, then served from its own bucket
+				expect(await status('fr')).toBe('MISS');
+				expect(await status('fr')).toBe('HIT');
+
+				// en must not hit fr's entry — no cross-language poisoning
+				expect(await status('en')).toBe('MISS');
+				expect(await status('en')).toBe('HIT');
+
+				// region + q-weight normalize to the primary tag → fr-CA hits fr
+				expect(await status('fr-CA,fr;q=0.9')).toBe('HIT');
+
+				// a header-less caller keeps its own language-agnostic bucket
+				expect(await status()).toBe('MISS');
+				expect(await status()).toBe('HIT');
+			});
+		});
+
+		describe('CACHE_VARY_CONTENT_TYPES', () => {
+			it.each(vendors)('%s: content type splits the key', async (vendor) => {
+				const url = getUrl(vendor, envs[vendor].envRedisVary);
+				await clearCache(url);
+
+				async function get(accept: string) {
+					return cachedItems(url).set('Accept', accept);
+				}
+
+				const csv = await get('text/csv');
+				expect(csv.statusCode).toBe(200);
+				expect(csv.headers[cacheStatusHeader]).toBe('MISS');
+
+				const csvHit = await get('text/csv');
+				expect(csvHit.headers[cacheStatusHeader]).toBe('HIT');
+
+				// application/json negotiates to a different bucket, not csv's entry
+				const json = await get('application/json');
+				expect(json.headers[cacheStatusHeader]).toBe('MISS');
+
+				const jsonHit = await get('application/json');
+				expect(jsonHit.headers[cacheStatusHeader]).toBe('HIT');
+			});
+		});
+
+		describe('CACHE_VARY_REQUEST_HEADERS', () => {
+			it.each(vendors)('%s: header dims split the key', async (vendor) => {
+				const url = getUrl(vendor, envs[vendor].envRedisVary);
+				await clearCache(url);
+
+				async function status(headers: Record<string, string>): Promise<string> {
+					const req = cachedItems(url);
+
+					for (const [name, value] of Object.entries(headers)) {
+						req.set(name, value);
+					}
+
+					return (await req).headers[cacheStatusHeader];
+				}
+
+				// exact x-tenant-id: each value keeps its own bucket
+				expect(await status({ 'x-tenant-id': 'a' })).toBe('MISS');
+				expect(await status({ 'x-tenant-id': 'a' })).toBe('HIT');
+				expect(await status({ 'x-tenant-id': 'b' })).toBe('MISS');
+
+				// an unlisted proxy header must not split the key — still tenant a
+				const withProxy = { 'x-tenant-id': 'a', 'x-request-id': '9' };
+				expect(await status(withProxy)).toBe('HIT');
+
+				// glob x-feature-*: matched, so a distinct value is a distinct bucket
+				expect(await status({ 'x-feature-beta': '1' })).toBe('MISS');
+				expect(await status({ 'x-feature-beta': '1' })).toBe('HIT');
+				expect(await status({ 'x-feature-beta': '2' })).toBe('MISS');
+			});
+		});
 	});
 });
