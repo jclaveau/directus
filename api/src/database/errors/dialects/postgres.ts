@@ -9,7 +9,7 @@ import {
 	type DatabasePoolExhaustedReason,
 } from '@directus/errors';
 import { isObject } from '@directus/utils';
-import type { PostgresError } from './types.js';
+import type { DatabaseErrorContext, PostgresError } from './types.js';
 import type { Item } from '@directus/types';
 
 enum PostgresErrorCodes {
@@ -23,7 +23,7 @@ enum PostgresErrorCodes {
 export function extractError(
 	error: PostgresError,
 	data: Partial<Item>,
-	operatedCollection?: string,
+	context?: DatabaseErrorContext,
 ): PostgresError | Error {
 	// Recognized constraint/data codes are handled first, so a real violation
 	// whose message happens to contain a pool phrase (a stored value like "pool
@@ -39,7 +39,7 @@ export function extractError(
 		case PostgresErrorCodes.NOT_NULL_VIOLATION:
 			return notNullViolation();
 		case PostgresErrorCodes.FOREIGN_KEY_VIOLATION:
-			return foreignKeyViolation(operatedCollection);
+			return foreignKeyViolation(context);
 		default:
 			return getPoolExhaustedError(error) ?? error;
 	}
@@ -113,7 +113,7 @@ export function extractError(
 		});
 	}
 
-	function foreignKeyViolation(operatedCollection?: string) {
+	function foreignKeyViolation(context?: DatabaseErrorContext) {
 		const { table, detail, constraint } = error;
 
 		const betweenParens = /\(([^)]+)\)/g;
@@ -144,7 +144,7 @@ export function extractError(
 		// On delete the driver's `table` is the child (referrer) while the user acted
 		// on the parent — prefer the operated-on collection, falling back to the
 		// driver table on the read path.
-		const collection = operatedCollection ?? table;
+		const collection = context?.collection ?? table;
 
 		const relatedCollection = stillReferenced
 			? table
@@ -162,6 +162,7 @@ export function extractError(
 			constraint: constraint ?? null,
 			relatedCollection,
 			reason,
+			operation: context?.operation ?? null,
 		});
 	}
 }

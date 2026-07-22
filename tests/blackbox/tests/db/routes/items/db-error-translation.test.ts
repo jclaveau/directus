@@ -116,12 +116,12 @@ describe('translateDatabaseError', () => {
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			// The translated message is vendor-specific. pg/mysql read the direction
-			// from the driver error, so they name the operated-on parent as still
-			// referenced by the child. sqlite exposes nothing, so it only names the
-			// parent (threaded from the call site) under the default wording.
+			// from the driver error, so with the operation threaded they name the
+			// blocked delete on the operated-on parent. sqlite exposes no direction,
+			// so it only names the parent under the default wording.
 			const exactMessage: Record<string, string> = {
 				postgres:
-					`Record in collection "${collectionFkParent}" is still ` +
+					`Cannot delete collection "${collectionFkParent}": it is still ` +
 					`referenced by collection "${collectionFkChild}".`,
 				sqlite3: `Invalid foreign key in collection "${collectionFkParent}".`,
 			};
@@ -137,9 +137,10 @@ describe('translateDatabaseError', () => {
 			}
 
 			// pg carries the full enrichment: the still_referenced direction, the
-			// operated-on parent, and the referring child.
+			// delete operation, the operated-on parent, and the referring child.
 			if (vendor === 'postgres') {
 				expect(error.extensions.reason).toBe('still_referenced');
+				expect(error.extensions.operation).toBe('delete');
 				expect(error.extensions.collection).toBe(collectionFkParent);
 				expect(error.extensions.relatedCollection).toBe(collectionFkChild);
 				expect(error.extensions.constraint).toBeTruthy();
