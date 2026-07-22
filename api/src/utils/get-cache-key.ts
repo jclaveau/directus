@@ -27,6 +27,115 @@ export interface CacheKey {
 	hash: string;
 }
 
+// Highest-q language from Accept-Language, region-stripped and lowercased
+// (`fr-FR,fr;q=0.9,en` → `fr`). null when the header is absent or only `*`, so
+// header-less callers keep the language-agnostic key — no fragmentation, and no key
+// change for the many installs that don't localize. Parsed off the header directly
+// so the key stays a pure function of req (no dependency on express's negotiator).
+function normalizePrimaryLanguage(req: Request): string | null {
+	const header = req.headers?.['accept-language'];
+
+	if (typeof header !== 'string') {
+		return null;
+	}
+
+	let bestTag: string | null = null;
+	let bestQuality = 0;
+
+	for (const entry of header.split(',')) {
+		const [tag, ...params] = entry.trim().split(';');
+
+		if (!tag || tag === '*') {
+			continue;
+		}
+
+		const qParam = params.find((param) => param.trim().startsWith('q='));
+
+		const quality = qParam
+			? Number.parseFloat(qParam.split('=')[1] ?? '')
+			: 1;
+
+		if (!Number.isNaN(quality) && quality > bestQuality) {
+			bestQuality = quality;
+			bestTag = tag;
+		}
+	}
+
+	return bestTag
+		? bestTag.split('-')[0]!.toLowerCase()
+		: null;
+}
+
+// undefined when CACHE_VARY_CONTENT_TYPES is unset (dimension omitted from the key
+// entirely); else the negotiated type from the declared set, or null when the
+// caller accepts none of them.
+function negotiateContentType(
+	req: Request,
+	types: string[],
+): string | null | undefined {
+	if (types.length === 0) {
+		return undefined;
+	}
+
+	return req.accepts(types) || null;
+}
+
+// A configured header's value, arrays (repeated headers) joined; null when absent so
+// presence/absence stays a stable, distinct key dimension.
+function varyHeaderValue(raw: string | string[] | undefined): string | null {
+	if (raw === undefined) {
+		return null;
+	}
+
+	return Array.isArray(raw)
+		? raw.join(',')
+		: raw;
+}
+
+// Anchor a header glob (`x-tenant-*`) as a regex; consecutive `*` collapsed so the
+// pattern stays linear against attacker-supplied header names.
+function varyHeaderPattern(pattern: string): RegExp {
+	const escaped = pattern
+		.replace(/\*+/g, '*')
+		.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+		.replace(/\*/g, '.*');
+
+	return new RegExp(`^${escaped}$`);
+}
+
+// undefined when CACHE_VARY_REQUEST_HEADERS is unset (dimension omitted). Exact
+// names fold to their value (or null if absent); glob patterns fold every present
+// header they match. Names lowercased to match Node's header keys.
+function resolveVaryHeaders(
+	req: Request,
+	patterns: string[],
+): Record<string, string | null> | undefined {
+	if (patterns.length === 0) {
+		return undefined;
+	}
+
+	const resolved: Record<string, string | null> = {};
+
+	for (const pattern of patterns) {
+		const name = pattern.toLowerCase();
+
+		if (!name.includes('*')) {
+			resolved[name] = varyHeaderValue(req.headers[name]);
+			continue;
+		}
+
+		const regex = varyHeaderPattern(name);
+
+		for (const header of Object.keys(req.headers)) {
+			if (regex.test(header)) {
+				resolved[header] = varyHeaderValue(req.headers[header]);
+			}
+		}
+	}
+
+	return resolved;
+}
+
 export async function getCacheKey(req: Request): Promise<CacheKey> {
 	const path = url.parse(req.originalUrl).pathname;
 	const isGraphQl = path?.startsWith('/graphql');
@@ -40,7 +149,9 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 		includeIp = ipFilters.length > 0 && ipFilters.some((networks) => ipInNetworks(req.accountability!.ip!, networks));
 	}
 
-	const info = {
+	const env = useEnv();
+
+	const info: Record<string, unknown> = {
 		version,
 		user: req.accountability?.user || null,
 		path,
@@ -48,11 +159,42 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 		...(includeIp && { ip: req.accountability!.ip }),
 	};
 
+	// A hook that localizes the body by Accept-Language would otherwise serve the
+	// first caller's language to everyone. Fold the normalized primary tag only when
+	// the caller expressed one — header-less requests keep the original key.
+	const language = normalizePrimaryLanguage(req);
+
+	if (language !== null) {
+		info['language'] = language;
+	}
+
+	// Opt-in: a custom endpoint that content-negotiates (csv vs json by Accept)
+	// varies its body; without the served type in the key the first caller's format
+	// is served to all. The list is what collapses the many raw Accept strings into
+	// json|csv|null — omitted from the key entirely when unconfigured.
+	const contentTypes = (env['CACHE_VARY_CONTENT_TYPES'] ?? []) as string[];
+	const contentType = negotiateContentType(req, contentTypes);
+
+	if (contentType !== undefined) {
+		info['contentType'] = contentType;
+	}
+
+	// Opt-in: custom/tenant/feature-flag request headers a hook reshapes the body
+	// from. Arbitrary headers can't be always-folded — proxy-injected ones like
+	// x-request-id are unique per request and would disable the cache — so the admin
+	// names exactly the headers (or globs) their hooks read.
+	const headerPatterns = (env['CACHE_VARY_REQUEST_HEADERS'] ?? []) as string[];
+	const varyHeaders = resolveVaryHeaders(req, headerPatterns);
+
+	if (varyHeaders !== undefined) {
+		info['headers'] = varyHeaders;
+	}
+
 	const digest = hash(info);
 
 	// CACHE_KEY_HASH_ENABLED=false makes the Redis key the readable descriptor (a dev
 	// sees which request an entry is); the stats identity stays the fixed digest.
-	const key = useEnv()['CACHE_KEY_HASH_ENABLED'] === false
+	const key = env['CACHE_KEY_HASH_ENABLED'] === false
 		? JSON.stringify(info, sortNestedKeys)
 		: digest;
 
