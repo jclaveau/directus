@@ -31,6 +31,9 @@ declare const __DIRECTUS_BUILD_COMMIT__: string | undefined;
 // with the build on any platform), the commit the platform injects at deploy time,
 // then the version string so a plain upstream version bump still moves the id.
 function resolveCoreBuildId(): string {
+	// TODO(reviewer): CACHE_BUILD_ID is probably overkill now the commit is baked —
+	// baked → railway → version already self-heals. Kept as a manual force/suppress
+	// escape hatch (bump to flush, pin to freeze); drop if we never reach for it.
 	const explicit = useEnv()['CACHE_BUILD_ID'];
 
 	if (typeof explicit === 'string' && explicit.length > 0) {
