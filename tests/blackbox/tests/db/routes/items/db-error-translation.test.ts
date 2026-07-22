@@ -106,9 +106,12 @@ describe('translateDatabaseError', () => {
 				.delete(`/items/${collectionFkParent}/${parentId}`)
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			// Assert
+			// Assert: the translated Directus error, not the raw driver string.
+			// Only the 'Invalid foreign key' prefix is stable across vendors —
+			// sqlite yields it bare, pg appends the field/collection.
 			expect(response.statusCode).toBe(400);
 			expect(response.body.errors[0].extensions.code).toBe('INVALID_FOREIGN_KEY');
+			expect(response.body.errors[0].message).toContain('Invalid foreign key');
 		});
 	});
 });
