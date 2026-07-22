@@ -82,7 +82,16 @@ describe('translateDatabaseError', () => {
 
 			// Assert
 			expect(response.statusCode).toBe(400);
-			expect(response.body.errors[0].extensions.code).toBe('INVALID_FOREIGN_KEY');
+
+			const error = response.body.errors[0];
+			expect(error.extensions.code).toBe('INVALID_FOREIGN_KEY');
+
+			// pg names the invalid_reference direction + the referenced parent.
+			if (vendor === 'postgres') {
+				expect(error.extensions.reason).toBe('invalid_reference');
+				expect(error.extensions.collection).toBe(collectionFkChild);
+				expect(error.extensions.relatedCollection).toBe(collectionFkParent);
+			}
 		});
 	});
 
@@ -106,26 +115,40 @@ describe('translateDatabaseError', () => {
 				.delete(`/items/${collectionFkParent}/${parentId}`)
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			// The translated message is vendor-specific: sqlite can't extract the
-			// column so it yields the bare prefix, pg names the field/collection.
-			// Pin the full string where we know it; other vendors (Full matrix)
-			// still assert the translated prefix.
+			// The translated message is vendor-specific. pg/mysql read the direction
+			// from the driver error, so with the operation threaded they name the
+			// blocked delete on the operated-on parent. sqlite exposes no direction,
+			// so it only names the parent under the default wording.
 			const exactMessage: Record<string, string> = {
+				// pg reads the blocked row's key from the driver detail, so it names
+				// `collection:pk` + the referring child. sqlite exposes neither, but
+				// the delete operation still gives it the direction.
 				postgres:
-					`Invalid foreign key for field "id" ` +
-					`in collection "${collectionFkChild}".`,
-				sqlite3: 'Invalid foreign key.',
+					`Cannot delete "${collectionFkParent}:${parentId}": it is still ` +
+					`referenced by collection "${collectionFkChild}".`,
+				sqlite3:
+					`Cannot delete collection "${collectionFkParent}": ` +
+					`it is still referenced.`,
 			};
 
 			// Assert
 			expect(response.statusCode).toBe(400);
-			expect(response.body.errors[0].extensions.code).toBe('INVALID_FOREIGN_KEY');
+
+			const error = response.body.errors[0];
+			expect(error.extensions.code).toBe('INVALID_FOREIGN_KEY');
 
 			if (exactMessage[vendor]) {
-				expect(response.body.errors[0].message).toBe(exactMessage[vendor]);
+				expect(error.message).toBe(exactMessage[vendor]);
 			}
-			else {
-				expect(response.body.errors[0].message).toContain('Invalid foreign key');
+
+			// pg carries the full enrichment: the still_referenced direction, the
+			// delete operation, the operated-on parent, and the referring child.
+			if (vendor === 'postgres') {
+				expect(error.extensions.reason).toBe('still_referenced');
+				expect(error.extensions.operation).toBe('delete');
+				expect(error.extensions.collection).toBe(collectionFkParent);
+				expect(error.extensions.relatedCollection).toBe(collectionFkChild);
+				expect(error.extensions.constraint).toBeTruthy();
 			}
 		});
 	});

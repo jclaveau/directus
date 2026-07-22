@@ -1,6 +1,7 @@
 import {
 	ContainsNullValuesError,
 	DatabasePoolExhaustedError,
+	InvalidForeignKeyError,
 	NotNullViolationError,
 	RecordNotUniqueError,
 } from '@directus/errors';
@@ -10,6 +11,8 @@ import { getDatabaseClient } from '../index.js';
 import emitter from '../../emitter.js';
 import { extractDatabaseError, translateDatabaseError } from './translate.js';
 import type { SQLError } from './dialects/types.js';
+
+const logger = vi.hoisted(() => ({ debug: vi.fn() }));
 
 vi.mock('../index.js', () => {
 	return {
@@ -22,6 +25,10 @@ vi.mock('../../emitter.js', () => {
 	return {
 		default: { emitFilter: vi.fn(async (_event, payload) => payload) },
 	};
+});
+
+vi.mock('../../logger/index.js', () => {
+	return { useLogger: () => logger };
 });
 
 afterEach(() => {
@@ -219,5 +226,57 @@ describe('database.error filter hook', () => {
 		const result = await translateDatabaseError({ code: '99999' } as SQLError, {});
 
 		expect(result).toBe(overridden);
+	});
+});
+
+describe('raw driver message + operated collection', () => {
+	it('keeps the raw message non-enumerable and logs it', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+		const raw = {
+			code: '23503',
+			table: 'articles',
+			detail: 'Key (author)=(42) is not present in table "authors".',
+			message: 'insert ... violates foreign key constraint "fk"',
+		} as SQLError;
+
+		const result = await extractDatabaseError(raw, { author: 42 });
+
+		expect(result).toBeInstanceOf(InvalidForeignKeyError);
+		expect((result as any).rawDatabaseError).toBe(raw.message);
+		// Non-enumerable, so it never serializes into the response by accident.
+		expect(Object.keys(result)).not.toContain('rawDatabaseError');
+		expect(logger.debug).toHaveBeenCalledWith(raw, expect.any(String));
+	});
+
+	it('forwards the operated collection + operation to the dialect', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('postgres');
+
+		const result = await extractDatabaseError(
+			{
+				code: '23503',
+				table: 'student_enrollment',
+				detail:
+					'Key (id)=(5) is still referenced ' +
+					'from table "student_enrollment".',
+			} as SQLError,
+			{},
+			undefined,
+			{ collection: 'enrollment', operation: 'delete' },
+		);
+
+		expect((result as any).extensions.collection).toBe('enrollment');
+		expect((result as any).extensions.reason).toBe('still_referenced');
+		expect((result as any).extensions.operation).toBe('delete');
+	});
+
+	it('attaches no raw message when nothing was translated', async () => {
+		vi.mocked(getDatabaseClient).mockReturnValue('unknown' as any);
+		const raw = { code: 'x', message: 'y' } as SQLError;
+
+		const result = await extractDatabaseError(raw, {});
+
+		expect((result as any).rawDatabaseError).toBeUndefined();
+		expect(logger.debug).not.toHaveBeenCalled();
 	});
 });

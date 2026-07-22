@@ -9,7 +9,7 @@ import {
 	type DatabasePoolExhaustedReason,
 } from '@directus/errors';
 import { isObject } from '@directus/utils';
-import type { PostgresError } from './types.js';
+import type { DatabaseErrorContext, PostgresError } from './types.js';
 import type { Item } from '@directus/types';
 
 enum PostgresErrorCodes {
@@ -20,7 +20,11 @@ enum PostgresErrorCodes {
 	VALUE_LIMIT_VIOLATION = '22001',
 }
 
-export function extractError(error: PostgresError, data: Partial<Item>): PostgresError | Error {
+export function extractError(
+	error: PostgresError,
+	data: Partial<Item>,
+	context?: DatabaseErrorContext,
+): PostgresError | Error {
 	// Recognized constraint/data codes are handled first, so a real violation
 	// whose message happens to contain a pool phrase (a stored value like "pool
 	// is probably full") can never be misread as exhaustion. Only errors with no
@@ -35,7 +39,7 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 		case PostgresErrorCodes.NOT_NULL_VIOLATION:
 			return notNullViolation();
 		case PostgresErrorCodes.FOREIGN_KEY_VIOLATION:
-			return foreignKeyViolation();
+			return foreignKeyViolation(context);
 		default:
 			return getPoolExhaustedError(error) ?? error;
 	}
@@ -109,21 +113,71 @@ export function extractError(error: PostgresError, data: Partial<Item>): Postgre
 		});
 	}
 
-	function foreignKeyViolation() {
-		const { table, detail } = error;
+	function foreignKeyViolation(context?: DatabaseErrorContext) {
+		const { table, detail, constraint } = error;
 
 		const betweenParens = /\(([^)]+)\)/g;
 		const matches = detail.match(betweenParens);
 
-		if (!matches) return error;
+		if (!matches) {
+			return error;
+		}
 
-		const collection = table;
-		const field = matches[0].slice(1, -1);
+		const field = matches[0]!.slice(1, -1);
+		const detailValue = matches[1]?.slice(1, -1) ?? null;
+
+		// Drive the direction from the operation where it's unambiguous — a create
+		// can only be a bad parent reference, a delete only a still-referenced parent
+		// — because pg's `detail` is localized by lc_messages and its English phrasing
+		// can't be relied on. An update can be either direction, so there fall back to
+		// the detail text ("is still referenced" vs "is not present").
+		let stillReferenced;
+
+		if (context?.operation === 'delete') {
+			stillReferenced = true;
+		}
+		else if (context?.operation === 'create') {
+			stillReferenced = false;
+		}
+		else {
+			stillReferenced = detail.includes('is still referenced');
+		}
+
+		const reason = stillReferenced
+			? 'still_referenced'
+			: 'invalid_reference';
+
+		const relatedMatch = detail.match(
+			/(?:present in|referenced from) table "([^"]+)"/,
+		);
+
+		const relatedTable = relatedMatch?.[1] ?? null;
+
+		// On a still-referenced parent the driver's `table` is the child (referrer),
+		// so without the operated collection the parent is unknowable — leave it null
+		// rather than mislabel the child as the parent. A bad reference is on the
+		// operated child itself, which is the driver table.
+		const collection = stillReferenced
+			? context?.collection ?? null
+			: context?.collection ?? table;
+
+		const relatedCollection = stillReferenced
+			? table
+			: relatedTable;
+
+		const value =
+			field && data[field] !== undefined
+				? data[field]
+				: detailValue;
 
 		return new InvalidForeignKeyError({
 			collection,
 			field,
-			value: field ? data[field] : null,
+			value,
+			constraint: constraint ?? null,
+			relatedCollection,
+			reason,
+			operation: context?.operation ?? null,
 		});
 	}
 }

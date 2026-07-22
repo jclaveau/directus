@@ -44,3 +44,11 @@ export type SQLiteError = {
 };
 
 export type SQLError = MSSQLError & MySQLError & PostgresError & SQLiteError & OracleError & Error;
+
+// Call-site context a driver error can't carry: the collection the caller operated
+// on (the driver reports the child on a delete/RESTRICT, not the acted-on parent)
+// and which operation it was (to name delete vs update in the message).
+export interface DatabaseErrorContext {
+	collection?: string;
+	operation?: 'create' | 'update' | 'delete';
+}

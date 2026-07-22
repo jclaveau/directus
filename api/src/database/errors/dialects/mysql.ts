@@ -6,7 +6,7 @@ import {
 	ValueOutOfRangeError,
 	ValueTooLongError,
 } from '@directus/errors';
-import type { MySQLError } from './types.js';
+import type { DatabaseErrorContext, MySQLError } from './types.js';
 import type { Item } from '@directus/types';
 
 enum MySQLErrorCodes {
@@ -14,12 +14,19 @@ enum MySQLErrorCodes {
 	NUMERIC_VALUE_OUT_OF_RANGE = 'ER_WARN_DATA_OUT_OF_RANGE',
 	ER_DATA_TOO_LONG = 'ER_DATA_TOO_LONG',
 	NOT_NULL_VIOLATION = 'ER_BAD_NULL_ERROR',
+	// Insert/update a child with a bad parent reference.
 	FOREIGN_KEY_VIOLATION = 'ER_NO_REFERENCED_ROW_2',
+	// Delete/update a parent a child still references (RESTRICT/NO ACTION).
+	FOREIGN_KEY_STILL_REFERENCED = 'ER_ROW_IS_REFERENCED_2',
 	ER_INVALID_USE_OF_NULL = 'ER_INVALID_USE_OF_NULL',
 	WARN_DATA_TRUNCATED = 'WARN_DATA_TRUNCATED',
 }
 
-export function extractError(error: MySQLError, data: Partial<Item>): MySQLError | Error {
+export function extractError(
+	error: MySQLError,
+	data: Partial<Item>,
+	context?: DatabaseErrorContext,
+): MySQLError | Error {
 	switch (error.code) {
 		case MySQLErrorCodes.UNIQUE_VIOLATION:
 			return uniqueViolation();
@@ -30,7 +37,8 @@ export function extractError(error: MySQLError, data: Partial<Item>): MySQLError
 		case MySQLErrorCodes.NOT_NULL_VIOLATION:
 			return notNullViolation();
 		case MySQLErrorCodes.FOREIGN_KEY_VIOLATION:
-			return foreignKeyViolation();
+		case MySQLErrorCodes.FOREIGN_KEY_STILL_REFERENCED:
+			return foreignKeyViolation(context);
 		// Note: MariaDB throws data truncated for null value error
 		case MySQLErrorCodes.ER_INVALID_USE_OF_NULL:
 		case MySQLErrorCodes.WARN_DATA_TRUNCATED:
@@ -140,22 +148,51 @@ export function extractError(error: MySQLError, data: Partial<Item>): MySQLError
 		});
 	}
 
-	function foreignKeyViolation() {
+	function foreignKeyViolation(context?: DatabaseErrorContext) {
 		const betweenTicks = /`([^`]+)`/g;
-		const betweenParens = /\(([^)]+)\)/g;
 
+		// The constraint clause is in sqlMessage; error.sql isn't parsed (a delete
+		// carries no value parens, so requiring them would drop the delete case).
 		const tickMatches = error.sqlMessage.match(betweenTicks);
-		const parenMatches = error.sql.match(betweenParens);
 
-		if (!tickMatches || !parenMatches) return error;
+		if (!tickMatches) {
+			return error;
+		}
 
-		const collection = tickMatches[1]!.slice(1, -1)!;
-		const field = tickMatches[3]!.slice(1, -1)!;
+		// Tick groups in the constraint clause: [1]=child table, [2]=constraint,
+		// [3]=child column, [4]=parent table. On delete the referrer child is [1]
+		// and the user acted on the parent, so prefer the operated-on collection.
+		const childTable = tickMatches[1]!.slice(1, -1);
+		const field = tickMatches[3]!.slice(1, -1);
+		const constraint = tickMatches[2]?.slice(1, -1) ?? null;
+		const parentTable = tickMatches[4]?.slice(1, -1) ?? null;
+
+		const stillReferenced =
+			error.code === MySQLErrorCodes.FOREIGN_KEY_STILL_REFERENCED;
+
+		const reason = stillReferenced
+			? 'still_referenced'
+			: 'invalid_reference';
+
+		const collection = context?.collection ?? childTable;
+
+		const relatedCollection = stillReferenced
+			? childTable
+			: parentTable;
+
+		const value =
+			field && data[field] !== undefined
+				? data[field]
+				: null;
 
 		return new InvalidForeignKeyError({
 			collection,
 			field,
-			value: field ? data[field] : null,
+			value,
+			constraint,
+			relatedCollection,
+			reason,
+			operation: context?.operation ?? null,
 		});
 	}
 

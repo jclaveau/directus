@@ -87,6 +87,16 @@ export const errorHandler = asyncErrorHandler(async (err, req, res) => {
 			((error as DeepPartial<ApiError>).extensions ??= {})['stack'] = error.stack;
 		}
 
+		// In dev mode, surface the raw driver message a DB error was translated from
+		// (carried on the translated error by translate.ts). It holds SQL text +
+		// values, so like `stack` it stays out of the production response.
+		const withRaw = error as { rawDatabaseError?: string };
+
+		if (getNodeEnv() === 'development' && withRaw.rawDatabaseError) {
+			((error as DeepPartial<ApiError>).extensions ??= {})['databaseError'] =
+				withRaw.rawDatabaseError;
+		}
+
 		if (isDirectusError(error)) {
 			logger.debug(error);
 

@@ -4,14 +4,18 @@ import {
 	NotNullViolationError,
 	RecordNotUniqueError,
 } from '@directus/errors';
-import type { SQLiteError } from './types.js';
+import type { DatabaseErrorContext, SQLiteError } from './types.js';
 import type { Item } from '@directus/types';
 
 // NOTE:
 // - Sqlite doesn't have varchar with length support, so no ValueTooLongError
 // - Sqlite doesn't have a max range for numbers, so no ValueOutOfRangeError
 
-export function extractError(error: SQLiteError, data: Partial<Item>): SQLiteError | Error {
+export function extractError(
+	error: SQLiteError,
+	data: Partial<Item>,
+	context?: DatabaseErrorContext,
+): SQLiteError | Error {
 	if (error.message.includes('SQLITE_CONSTRAINT: NOT NULL')) {
 		return notNullConstraint(error);
 	}
@@ -30,12 +34,31 @@ export function extractError(error: SQLiteError, data: Partial<Item>): SQLiteErr
 	}
 
 	if (error.message.includes('SQLITE_CONSTRAINT: FOREIGN KEY')) {
-		/**
-		 * NOTE:
-		 * SQLite doesn't return any useful information in it's foreign key constraint failed error, so
-		 * we can't extract the table/column/value accurately
-		 */
-		return new InvalidForeignKeyError({ collection: null, field: null, value: null });
+		// SQLite's error carries no table/column/value/direction. The operated
+		// collection is threaded from the call site, and the direction can be derived
+		// from the operation (a delete blocks a still-referenced parent, a create is a
+		// bad reference) — an update is left unknown. Constraint/related stay null so
+		// the extensions shape matches the other dialects.
+		const operation = context?.operation ?? null;
+
+		let reason: 'still_referenced' | 'invalid_reference' | null = null;
+
+		if (operation === 'delete') {
+			reason = 'still_referenced';
+		}
+		else if (operation === 'create') {
+			reason = 'invalid_reference';
+		}
+
+		return new InvalidForeignKeyError({
+			collection: context?.collection ?? null,
+			field: null,
+			value: null,
+			constraint: null,
+			relatedCollection: null,
+			reason,
+			operation,
+		});
 	}
 
 	return error;
