@@ -176,10 +176,11 @@ describe('not null violation (23502)', () => {
 });
 
 describe('foreign key violation (23503)', () => {
-	it('maps to InvalidForeignKeyError with the field pulled from detail', () => {
+	it('maps an invalid reference, naming the referenced parent + constraint', () => {
 		const error = pgError({
 			code: '23503',
 			table: 'articles',
+			constraint: 'articles_author_authors_foreign',
 			detail: 'Key (author)=(42) is not present in table "authors".',
 		});
 
@@ -191,7 +192,108 @@ describe('foreign key violation (23503)', () => {
 			collection: 'articles',
 			field: 'author',
 			value: 42,
+			constraint: 'articles_author_authors_foreign',
+			relatedCollection: 'authors',
+			reason: 'invalid_reference',
+			operation: null,
 		});
+	});
+
+	it(oneLine`
+		maps a still-referenced delete to the operated-on parent, naming the
+		referring child and the still_referenced reason
+	`, () => {
+		const error = pgError({
+			code: '23503',
+			// pg reports the child (referrer) as error.table on a delete-restrict.
+			table: 'student_enrollment',
+			constraint: 'student_enrollment_enrollment_foreign',
+			detail: 'Key (id)=(5) is still referenced from table "student_enrollment".',
+		});
+
+		// The delete ran on the parent `enrollment`; threaded from the call site.
+		const result = extractError(error, {}, {
+			collection: 'enrollment',
+			operation: 'delete',
+		});
+
+		expect(result).toBeInstanceOf(InvalidForeignKeyError);
+
+		expect((result as any).extensions).toEqual({
+			collection: 'enrollment',
+			field: 'id',
+			value: '5',
+			constraint: 'student_enrollment_enrollment_foreign',
+			relatedCollection: 'student_enrollment',
+			reason: 'still_referenced',
+			operation: 'delete',
+		});
+	});
+
+	it('resolves the direction from the operation, not the localized detail', () => {
+		// A create whose detail text (misleadingly) says "still referenced" must
+		// still resolve to invalid_reference — the operation is authoritative and
+		// locale-independent, unlike pg's lc_messages-localized detail.
+		const error = pgError({
+			code: '23503',
+			table: 'articles',
+			detail: 'Key (author)=(42) is still referenced from table "authors".',
+		});
+
+		const result = extractError(error, { author: 42 }, {
+			collection: 'articles',
+			operation: 'create',
+		});
+
+		expect((result as any).extensions.reason).toBe('invalid_reference');
+	});
+
+	it('classifies a delete as still_referenced on a non-English detail', () => {
+		const error = pgError({
+			code: '23503',
+			table: 'student_enrollment',
+			// French lc_messages; only the (id)=(5) parens are locale-stable.
+			detail: 'La clé (id)=(5) est encore référencée depuis « student_enrollment ».',
+		});
+
+		const result = extractError(error, {}, {
+			collection: 'enrollment',
+			operation: 'delete',
+		});
+
+		expect((result as any).extensions.reason).toBe('still_referenced');
+		expect((result as any).extensions.collection).toBe('enrollment');
+		expect((result as any).extensions.relatedCollection).toBe('student_enrollment');
+	});
+
+	it('names only the referring child on the read path (no context)', () => {
+		// No operated collection → the still-referenced parent is unknowable, so
+		// collection stays null (never the child) and only the referrer is named.
+		const error = pgError({
+			code: '23503',
+			table: 'student_enrollment',
+			detail: 'Key (id)=(5) is still referenced from table "student_enrollment".',
+		});
+
+		const result = extractError(error, {});
+		const ext = (result as any).extensions;
+
+		expect(ext.reason).toBe('still_referenced');
+		expect(ext.collection).toBeNull();
+		expect(ext.relatedCollection).toBe('student_enrollment');
+	});
+
+	it('falls back to the driver table without an operated collection', () => {
+		const error = pgError({
+			code: '23503',
+			table: 'articles',
+			detail: 'Key (author)=(42) is not present in table "authors".',
+		});
+
+		const result = extractError(error, { author: 42 });
+
+		expect((result as any).extensions.collection).toBe('articles');
+		expect((result as any).extensions.constraint).toBeNull();
 	});
 
 	it('returns the raw error when detail has no parenthesised group', () => {

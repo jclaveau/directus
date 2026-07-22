@@ -182,8 +182,8 @@ describe('not null violation (ER_BAD_NULL_ERROR)', () => {
 	});
 });
 
-describe('foreign key violation (ER_NO_REFERENCED_ROW_2)', () => {
-	it('maps to InvalidForeignKeyError with collection and field', () => {
+describe('foreign key violation', () => {
+	it('maps an invalid reference, naming the parent + constraint', () => {
 		const error = mysqlError({
 			code: 'ER_NO_REFERENCED_ROW_2',
 			sqlMessage:
@@ -200,6 +200,38 @@ describe('foreign key violation (ER_NO_REFERENCED_ROW_2)', () => {
 			collection: 'articles',
 			field: 'author',
 			value: 42,
+			constraint: 'fk',
+			relatedCollection: 'authors',
+			reason: 'invalid_reference',
+			operation: null,
+		});
+	});
+
+	it('maps a still-referenced delete to the operated parent', () => {
+		const error = mysqlError({
+			code: 'ER_ROW_IS_REFERENCED_2',
+			sqlMessage:
+				'Cannot delete or update a parent row: a foreign key constraint ' +
+				'fails (`db`.`student_enrollment`, CONSTRAINT `fk` FOREIGN KEY ' +
+				'(`enrollment`) REFERENCES `enrollment` (`id`))',
+			sql: 'delete from `enrollment` where `id` = ?',
+		});
+
+		const result = extractError(error, {}, {
+			collection: 'enrollment',
+			operation: 'delete',
+		});
+
+		expect(result).toBeInstanceOf(InvalidForeignKeyError);
+
+		expect((result as any).extensions).toEqual({
+			collection: 'enrollment',
+			field: 'enrollment',
+			value: null,
+			constraint: 'fk',
+			relatedCollection: 'student_enrollment',
+			reason: 'still_referenced',
+			operation: 'delete',
 		});
 	});
 

@@ -735,7 +735,12 @@ implements AbstractService<Item> {
 				}
 			}
 			catch (err: any) {
-				const dbError = await translateDatabaseError(err, data, this.knex);
+				const dbError = await translateDatabaseError(
+					err,
+					data,
+					this.knex,
+					{ collection: this.collection, operation: 'create' },
+				);
 
 				if (isDirectusError(dbError, ErrorCode.RecordNotUnique) && dbError.extensions.primaryKey) {
 					// This is a MySQL specific thing we need to handle here, since MySQL does not return the field name
@@ -1416,7 +1421,10 @@ implements AbstractService<Item> {
 						.whereIn(primaryKeyField, keys);
 				}
 				catch (err: any) {
-					throw await translateDatabaseError(err, data, this.knex);
+					throw await translateDatabaseError(err, data, this.knex, {
+						collection: this.collection,
+						operation: 'update',
+					});
 				}
 			}
 
@@ -1779,7 +1787,10 @@ implements AbstractService<Item> {
 			catch (err: any) {
 				// Parity with createOne/updateMany: a direct delete's FK/constraint
 				// violation must surface as a translated Directus error, not raw knex.
-				throw await translateDatabaseError(err, {}, this.knex);
+				throw await translateDatabaseError(err, {}, this.knex, {
+					collection: this.collection,
+					operation: 'delete',
+				});
 			}
 
 			if (opts.userIntegrityCheckFlags) {
