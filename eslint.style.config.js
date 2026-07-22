@@ -21,6 +21,31 @@ export const appGlobals = {
   },
 }
 
+// `.liquid` (env-stub etc.) isn't JS, so espree can't parse it — but `max-len` is
+// line-based and reads `sourceCode.lines` off the raw text, not the AST. This no-op
+// parser returns an empty Program so eslint doesn't choke, letting the 85-col cap run
+// on the template's comment lines like every other source file.
+const rawTextParser = {
+  parseForESLint(code) {
+    const lines = code.split(/\n/)
+
+    return {
+      ast: {
+        type: `Program`,
+        body: [],
+        sourceType: `module`,
+        comments: [],
+        tokens: [],
+        loc: {
+          start: { line: 1, column: 0 },
+          end: { line: lines.length, column: lines[lines.length - 1].length },
+        },
+        range: [0, code.length],
+      },
+    }
+  },
+}
+
 // TODO example to follow
 // https://eslint.vuejs.org/user-guide/#example-configuration-with-typescript-eslint-and-prettier
 export const eslintBaseConfig = defineConfig([
@@ -205,6 +230,20 @@ export const eslintBaseConfig = defineConfig([
       // See for example https://github.com/eslint/eslint/issues/20486
       // or https://github.com/eslint/eslint/issues/20491
       'no-useless-assignment': `off`,
+    },
+  },
+  {
+    files: [`**/*.liquid`],
+    ignores: [`dist`, `node_modules`],
+    languageOptions: { parser: rawTextParser },
+    rules: {
+      // Only the width cap: `.liquid` is a template, not code — no JS style rules apply.
+      "max-len": [`error`, {
+        code: 85,
+        tabWidth: 2,
+        comments: 85,
+        ignoreUrls: true,
+      }],
     },
   },
 ])
