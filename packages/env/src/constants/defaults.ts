@@ -76,7 +76,12 @@ export const DEFAULTS = {
 	CACHE_AUTO_PURGE: false,
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
-	CACHE_VARY_CONTENT_TYPES: '',
+	// Default on for the formats a cached endpoint might content-negotiate. Safe
+	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
+	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in
+	// Accept, so req.accepts would route ALL browser traffic to that bucket and
+	// split it from api-client json — fragmenting every install, even non-xml ones.
+	CACHE_VARY_CONTENT_TYPES: 'json,csv,yaml',
 	CACHE_VARY_REQUEST_HEADERS: '',
 	CACHE_AUTO_FLUSH_ON_DEPLOY: true,
 	CACHE_CONTROL_S_MAXAGE: '0',

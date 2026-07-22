@@ -184,16 +184,17 @@ CACHE_ENABLED=false
 
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,
-# normalized primary tag) is ALWAYS keyed — no config needed. These two are
-# opt-in, for endpoints/hooks that vary the body on more than language:
-#   - CACHE_VARY_CONTENT_TYPES: formats a custom endpoint content-negotiates
-#     on. The key folds req.accepts(<list>), collapsing raw Accept strings
-#     into these buckets. ["json,csv"]
+# normalized primary tag) is ALWAYS keyed — no config needed.
+#   - CACHE_VARY_CONTENT_TYPES: formats a cached endpoint content-negotiates
+#     on, via req.accepts(<list>). Defaults to json,csv,yaml — safe because
+#     browsers/SDKs collapse to json (only an explicit text/csv etc. splits).
+#     Do NOT add xml/html: browsers send them high-q in Accept, so this would
+#     split ALL browser traffic into that bucket. ["json,csv,yaml"]
 #   - CACHE_VARY_REQUEST_HEADERS: exact header names or `*` globs a hook
-#     reshapes the body from (tenant/feature-flag). Do NOT list proxy headers
-#     (x-request-id, x-forwarded-for): near-unique per request, they would
-#     disable the cache. ["x-tenant-id,x-feature-*"]
-# CACHE_VARY_CONTENT_TYPES="json,csv"
+#     reshapes the body from (tenant/feature-flag). Opt-in (empty). Do NOT
+#     list proxy headers (x-request-id, x-forwarded-for): near-unique per
+#     request, they would disable the cache. ["x-tenant-id,x-feature-*"]
+# CACHE_VARY_CONTENT_TYPES="json,csv,yaml"
 # CACHE_VARY_REQUEST_HEADERS="x-tenant-id"
 
 # Flush the cache once on boot when the running build changed, so a code-only deploy (an extension or
