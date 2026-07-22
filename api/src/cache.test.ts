@@ -39,6 +39,9 @@ vi.mock('./logger/index.js', () => {
 
 vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 
+// flushCaches() clears the permission cache too; orthogonal to the cache layers.
+vi.mock('./permissions/cache.js', () => ({ clearCache: vi.fn() }));
+
 vi.mock('./redis/index.js', () => {
 	return {
 		redisConfigAvailable: () => true,
@@ -46,7 +49,7 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-const { getCache, getRedisConnection } = await import('./cache.js');
+const { flushCaches, getCache, getRedisConnection } = await import('./cache.js');
 
 const {
 	assertScopedCacheRedisSupported,
@@ -571,5 +574,33 @@ describe('getCache', () => {
 		// instances are memoized from the memory build above; this call re-runs
 		// the store narrowing down its redis branch
 		expect(getCache().systemCache).toBeTruthy();
+	});
+});
+
+describe('flushCaches', () => {
+	test(oneLine`
+		clears the response + system caches but leaves the lock cache untouched — the
+		build-identity fingerprint stored there must survive the flush it triggers
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_SYSTEM_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const { cache, systemCache, lockCache } = getCache();
+
+		await cache!.set('response-key', 'r');
+		await systemCache.set('system-key', 's');
+		await lockCache.set('build-identity', 'fingerprint');
+
+		await flushCaches(true);
+
+		expect(await cache!.get('response-key')).toBeUndefined();
+		expect(await systemCache.get('system-key')).toBeUndefined();
+		// Else cache-build-identity would re-flush on every boot.
+		expect(await lockCache.get('build-identity')).toBe('fingerprint');
 	});
 });
