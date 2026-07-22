@@ -304,14 +304,15 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 		expect(unsupported.hash).not.toEqual(json.hash);
 	});
 
-	test('trims whitespace the env array cast leaves around each type', async () => {
+	test('trims and dedupes the list, preserving order (not sorted)', async () => {
 		vi.mocked(useEnv).mockReturnValue({
-			CACHE_VARY_CONTENT_TYPES: ['json', ' csv '],
+			CACHE_VARY_CONTENT_TYPES: ['json', ' csv ', 'json'],
 		});
 
 		const accepts = vi.fn().mockReturnValue('csv');
 		await getCacheKey(varyRequest({ accepts }));
 
+		// order preserved so cache negotiation mirrors the endpoint's req.accepts()
 		expect(accepts).toHaveBeenCalledWith(['json', 'csv']);
 	});
 });
