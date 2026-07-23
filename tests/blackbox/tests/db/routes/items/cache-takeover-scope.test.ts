@@ -1,11 +1,10 @@
 import config, { getUrl, paths } from '@common/config';
 import {
-	CreateCollection,
-	CreateField,
+	CreateCollections,
 	CreateItem,
 	DeleteCollection,
 } from '@common/functions';
-import vendors, { type Vendor } from '@common/get-dbs-to-test';
+import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
@@ -17,37 +16,20 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // End-to-end witness for #293: a create hook that takes over a row (returns an
 // existing PK — the M2M-dedup pattern) purges only the taken-over row's OWN scope
-// slice, not the whole collection. Runs on a scoped-purge redis instance (the only
-// mode where this shows) and reads `x-cache-status` HIT/MISS per owner slice:
+// slice, not the whole collection. The fixture is an enrollment (a student in a
+// course), cache-partitioned per student. Runs on a scoped-purge redis instance (the
+// only mode where this shows) and reads `x-cache-status` HIT/MISS per student slice:
 //
-//   - warm owner-A and owner-B slices (a filtered read pins each to its slice tag),
-//   - take-over-create on owner A (the `cache-takeover-dedup` extension returns the
-//     existing A-row PK for a duplicate `dedup_key`),
-//   - assert A = MISS (its slice was purged), B = HIT (its slice survived).
+//   - warm ada's slice and bob's slice (a filtered read pins each to its slice tag),
+//   - re-enroll ada in a course she already takes — the `cache-takeover-dedup` hook
+//     finds the existing (student, course) row and returns its PK (a take-over),
+//   - assert ada = MISS (her slice was purged), bob = HIT (his slice survived).
 //
-// Pre-#293 the take-over coarse-purged the whole collection, so B would MISS too —
-// that B = HIT is the discriminator this test exists to pin.
+// Pre-#293 the take-over coarse-purged the whole collection, so bob would MISS too —
+// that bob = HIT is the discriminator this test exists to pin.
 
-const collection = 'test_items_takeover_scoped';
-const ownerA = 'owner-a';
-const ownerB = 'owner-b';
+const enrollment = 'test_items_enrollment';
 const cacheStatusHeader = 'x-cache-status';
-
-async function seedSchemaAndRows(vendor: Vendor) {
-	// Created via the default instance BEFORE the scoped instance spawns, so that
-	// instance sees the collection (and its `scoped_cache_fields` meta) on boot.
-	await CreateCollection(vendor, {
-		collection,
-		meta: { scoped_cache_fields: ['owner'] },
-	});
-
-	await CreateField(vendor, { collection, field: 'owner', type: 'string' });
-	await CreateField(vendor, { collection, field: 'dedup_key', type: 'integer' });
-
-	// One row per owner slice, distinct `dedup_key` so a seed never trips a take-over.
-	await CreateItem(vendor, { collection, item: { owner: ownerA, dedup_key: 1 } });
-	await CreateItem(vendor, { collection, item: { owner: ownerB, dedup_key: 2 } });
-}
 
 describe(oneLine`
 	create take-over narrows the scoped purge to the taken-over slice (#293)
@@ -61,12 +43,36 @@ describe(oneLine`
 		env[vendor]['CACHE_STORE'] = 'redis';
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
-		env[vendor]['CACHE_NAMESPACE'] = `directus-takeover-scope-${vendor}`;
+		env[vendor]['CACHE_NAMESPACE'] = `directus-enrollment-${vendor}`;
 
 		let instance: ChildProcess;
 
 		beforeAll(async () => {
-			await seedSchemaAndRows(vendor);
+			// Seed on the default instance BEFORE the scoped instance spawns, so it sees
+			// the collection (+ its `scoped_cache_fields` meta) on boot. Fields fold into
+			// one batch POST so the collection + its student scope field land together.
+			await CreateCollections(vendor, {
+				collections: [
+					{
+						collection: enrollment,
+						meta: { scoped_cache_fields: ['student'] },
+						fields: [
+							{ field: 'student', type: 'string' },
+							{ field: 'course', type: 'string' },
+						],
+					},
+				],
+			});
+
+			// One enrollment per student, so a filtered read pins to a single student
+			// slice. Array body → one batched createMany POST.
+			await CreateItem(vendor, {
+				collection: enrollment,
+				item: [
+					{ student: 'ada', course: 'algebra' },
+					{ student: 'bob', course: 'biology' },
+				],
+			});
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -81,11 +87,11 @@ describe(oneLine`
 
 		afterAll(async () => {
 			instance.kill();
-			await DeleteCollection(vendor, { collection });
+			await DeleteCollection(vendor, { collection: enrollment });
 		});
 
 		it(oneLine`
-			purges only the taken-over owner slice, leaving the other warm
+			purges only the taken-over student's slice, leaving the other warm
 		`, async () => {
 			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -94,40 +100,40 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			// Warm both slices — a filtered read pins to its owner slice tag, not bare.
+			// Warm both slices — a filtered read pins to its student slice tag, not bare.
 			await request(url)
-				.get(`/items/${collection}`)
-				.query({ 'filter[owner][_eq]': ownerA })
+				.get(`/items/${enrollment}`)
+				.query({ 'filter[student][_eq]': 'ada' })
 				.set('Authorization', auth);
 
 			await request(url)
-				.get(`/items/${collection}`)
-				.query({ 'filter[owner][_eq]': ownerB })
+				.get(`/items/${enrollment}`)
+				.query({ 'filter[student][_eq]': 'bob' })
 				.set('Authorization', auth);
 
-			// Take-over on owner A: `dedup_key` 1 already exists → the hook returns its
-			// PK, nothing is inserted, and #293 scopes the purge to owner A's slice.
+			// Re-enroll ada in a course she already takes: the (ada, algebra) row exists →
+			// the hook returns its PK, nothing inserted, and #293 scopes the purge to ada.
 			await request(url)
-				.post(`/items/${collection}`)
-				.send({ owner: ownerA, dedup_key: 1 })
+				.post(`/items/${enrollment}`)
+				.send({ student: 'ada', course: 'algebra' })
 				.set('Authorization', auth);
 
-			const sliceA = await request(url)
-				.get(`/items/${collection}`)
-				.query({ 'filter[owner][_eq]': ownerA })
+			const adaSlice = await request(url)
+				.get(`/items/${enrollment}`)
+				.query({ 'filter[student][_eq]': 'ada' })
 				.set('Authorization', auth);
 
-			const sliceB = await request(url)
-				.get(`/items/${collection}`)
-				.query({ 'filter[owner][_eq]': ownerB })
+			const bobSlice = await request(url)
+				.get(`/items/${enrollment}`)
+				.query({ 'filter[student][_eq]': 'bob' })
 				.set('Authorization', auth);
 
-			expect(sliceA.statusCode).toBe(200);
-			expect(sliceB.statusCode).toBe(200);
+			expect(adaSlice.statusCode).toBe(200);
+			expect(bobSlice.statusCode).toBe(200);
 
 			// The taken-over slice is dropped; the other survives (pre-#293 both MISS).
-			expect(sliceA.headers[cacheStatusHeader]).toBe('MISS');
-			expect(sliceB.headers[cacheStatusHeader]).toBe('HIT');
+			expect(adaSlice.headers[cacheStatusHeader]).toBe('MISS');
+			expect(bobSlice.headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });

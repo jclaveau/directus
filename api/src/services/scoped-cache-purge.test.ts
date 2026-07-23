@@ -377,6 +377,40 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		create take-over of an unresolvable PK purges the bare collection tag, not a
+		coarse (null) flush — the re-read finds no row, so no slice, but no over-purge
+	`, async () => {
+		// The hook returns a PK the re-read resolves to no row (fabricated / deleted).
+		// snapshotScopedCacheTags returns [] rather than null, so the purge is the bare
+		// collection tag — never a coarse whole-collection flush, never a stale HIT.
+		tracker.on.select('test').response([]);
+
+		const takeOver = async () => 99;
+		emitter.onFilter('test.items.create', takeOver);
+
+		try {
+			await service().createMany([{ name: 'x', student: 'A' }]);
+
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[],
+				expect.anything(),
+			);
+
+			expect(purgeScopedCache).not.toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				null,
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOver);
+		}
+	});
+
+	it(oneLine`
 		updateMany's new slice reflects a hook-rewritten scope value — it re-reads the
 		committed row, and the hook's payload is what got written
 	`, async () => {
