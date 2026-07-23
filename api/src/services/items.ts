@@ -930,15 +930,27 @@ implements AbstractService<Item> {
 			// Scope off the committed rows' stored values (re-read by returned key), not the
 			// raw input: a create hook can rewrite a scope field, a value left to a DB default
 			// is only knowable after the insert, and a DB trigger/coercion can diverge from the
-			// payload — the row is authoritative, the payload isn't. A row a hook *took over*
-			// (more live keys than payloads) has an unknowable scope value → collection-wide purge.
+			// payload — the row is authoritative, the payload isn't.
+			//
+			// A row a hook *took over* (returned an existing PK) is the unsafe case: it
+			// can be an update-in-disguise — the hook moved that row between slices — and
+			// the create path has no old∪new capture, so the post-commit re-read sees
+			// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
+			// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
+			// its footprint opts back into a precise purge by declaring it via
+			// `scopedCache.addTag` (a read-only dedup declares its one slice; an
+			// upsert-move declares old + new) — then we trust it and narrow to the
+			// snapshot ∪ declared tags.
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
 
 			if (scopedCacheFields.length > 0) {
 				const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
 				const someRowTakenOver = liveKeys.length > actionPayloads.length;
 
-				scopedCacheTags = someRowTakenOver
+				const takeoverUndeclared =
+					someRowTakenOver && scopedCacheCollector.tags.length === 0;
+
+				scopedCacheTags = takeoverUndeclared
 					? null
 					: await this.snapshotScopedCacheTags(liveKeys);
 			}
