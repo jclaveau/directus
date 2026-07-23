@@ -179,5 +179,33 @@ describe(oneLine`
 			expect(ada.body.data).toHaveLength(0);
 			expect(bob.body.data).toHaveLength(1);
 		});
+
+		it(oneLine`
+			deduplicates the (student, course) pivot pair — a duplicate reuses the existing
+			row, a distinct pair creates a new one
+		`, async () => {
+			const url = getUrl(vendor, env);
+			const existingId = (await readStudent(enrollment, 'ada')).body.data[0].id;
+
+			// Duplicate (ada, algebra): the hook finds the pair and returns its PK, so the
+			// response is the existing row and no second row is inserted.
+			const duplicate = await request(url)
+				.post(`/items/${enrollment}`)
+				.send({ student: 'ada', course: 'algebra' })
+				.set('Authorization', auth);
+
+			expect(duplicate.body.data.id).toBe(existingId);
+			expect((await readStudent(enrollment, 'ada')).body.data).toHaveLength(1);
+
+			// Control: a distinct pair (cal, physics) has no match, so it's a real insert
+			// with a fresh PK.
+			const distinct = await request(url)
+				.post(`/items/${enrollment}`)
+				.send({ student: 'cal', course: 'physics' })
+				.set('Authorization', auth);
+
+			expect(distinct.body.data.id).not.toBe(existingId);
+			expect((await readStudent(enrollment, 'cal')).body.data).toHaveLength(1);
+		});
 	});
 });
