@@ -16,22 +16,25 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// End-to-end witness for the take-over cache-scoping contract (#292) on the real M2M
-// flow it exists for: a parent update nests related links (`authors.create`), and
-// Directus turns each into a create on the junction — never a direct pivot write. A
-// create hook that takes over a junction row (returns an existing PK) is scoped
-// COARSE by default: a take-over can be an upsert that MOVES the row between slices,
-// which the create path can't recover, so a narrow guess would leak the old slice. A
-// hook that knows its footprint opts into a precise purge via `scopedCache.purgeBy`.
+// End-to-end witness for what a create-filter hook may do to the scoped cache (#292)
+// on the real M2M flow it exists for: a parent update nests related links
+// (`authors.create`), and Directus turns each into a create on the junction — not a
+// direct pivot write. A hook that takes over a junction row (returns an existing PK)
+// is scoped COARSE by default: a take-over can be an upsert that MOVES a row between
+// slices, which the create path can't recover, so a narrow guess would leak the old
+// slice. A hook that knows its footprint opts into a precise purge via
+// `scopedCache.purgeBy` — and a hook that VETOES a row (returns null) purges nothing
+// unless it declares, since a pure veto changed nothing.
 //
-// Two M2M graphs on a scoped-purge redis instance (the only mode where the diff
-// shows), each junction cache-partitioned by its left FK, read via `x-cache-status`
-// HIT/MISS per slice:
+// On a scoped-purge redis instance (the only mode where the diff shows), each slice
+// read via `x-cache-status` HIT/MISS:
 //
 //   - article —< article_author >— author, a DECLARED read-only dedup hook → narrow:
 //     only the updated article's slice is purged, a sibling article stays warm.
 //   - post —< post_tag >— tag, an UNDECLARED move hook (re-assigns the link to a new
 //     post) → coarse: the moved-from post's slice is purged, so it can't go stale.
+//   - moderated (flat, channel-scoped), a create hook that VETOES a row: a pure veto
+//     purges nothing; a veto that declares its slice via `purgeBy` purges precisely.
 
 const ARTICLE = 'test_items_article';
 const AUTHOR = 'test_items_author';
@@ -45,11 +48,14 @@ const POST_TAG = 'test_items_post_tag';
 const POST_FK = 'test_items_post_id';
 const TAG_FK = 'test_items_tag_id';
 
+const MODERATED = 'test_items_moderated';
+
 const COLLECTIONS = 'directus_collections';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
-	M2M take-over cache scope: coarse by default, narrow when the hook declares (#292)
+	create-hook cache scope: take-over coarse-by-default / narrow-when-declared, veto
+	purges nothing unless declared (#292)
 `, () => {
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
@@ -82,6 +88,14 @@ describe(oneLine`
 					{ collection: AUTHOR, fields: [{ field: 'name', type: 'string' }] },
 					{ collection: POST, fields: [{ field: 'title', type: 'string' }] },
 					{ collection: TAG, fields: [{ field: 'name', type: 'string' }] },
+					{
+						collection: MODERATED,
+						meta: { scoped_cache_fields: ['channel'] },
+						fields: [
+							{ field: 'channel', type: 'string' },
+							{ field: 'body', type: 'string' },
+						],
+					},
 				],
 			});
 
@@ -146,6 +160,13 @@ describe(oneLine`
 					collection: POST,
 					item: [{ title: 'launch' }, { title: 'recap' }],
 				}),
+				CreateItem(vendor, {
+					collection: MODERATED,
+					item: [
+						{ channel: 'general', body: 'hello' },
+						{ channel: 'random', body: 'hi' },
+					],
+				}),
 			]);
 
 			[ada, bob, cal] = authors.map((author: { id: number }) => author.id);
@@ -194,15 +215,16 @@ describe(oneLine`
 				DeleteCollection(vendor, { collection: AUTHOR }),
 				DeleteCollection(vendor, { collection: POST }),
 				DeleteCollection(vendor, { collection: TAG }),
+				DeleteCollection(vendor, { collection: MODERATED }),
 			]);
 		});
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
-		function readSlice(junction: string, fkField: string, value: number) {
+		function readSlice(collection: string, field: string, value: number | string) {
 			return request(getUrl(vendor, env))
-				.get(`/items/${junction}`)
-				.query({ [`filter[${fkField}][_eq]`]: value })
+				.get(`/items/${collection}`)
+				.query({ [`filter[${field}][_eq]`]: value })
 				.set('Authorization', auth);
 		}
 
@@ -296,6 +318,80 @@ describe(oneLine`
 			expect(launchSlice.headers[cacheStatusHeader]).toBe('MISS');
 			expect(launchSlice.body.data).toHaveLength(0);
 			expect(recapSlice.body.data).toHaveLength(1);
+		});
+
+		it(oneLine`
+			a create hook that VETOES a row (returns null) purges nothing — the vetoed
+			row's channel slice stays warm
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// Warm both channel slices (independent reads).
+			await Promise.all([
+				readSlice(MODERATED, 'channel', 'general'),
+				readSlice(MODERATED, 'channel', 'random'),
+			]);
+
+			// Post a 'spam' body into general: the hook vetoes it (returns null) and
+			// declares nothing. A cancelled create changed nothing, so it must purge
+			// nothing — data null proves the veto, 200 that it wasn't an error.
+			const vetoed = await request(url)
+				.post(`/items/${MODERATED}`)
+				.send({ channel: 'general', body: 'spam' })
+				.set('Authorization', auth);
+
+			expect(vetoed.statusCode).toBe(200);
+			expect(vetoed.body.data).toBeNull();
+
+			const [general, random] = await Promise.all([
+				readSlice(MODERATED, 'channel', 'general'),
+				readSlice(MODERATED, 'channel', 'random'),
+			]);
+
+			// Nothing purged: both slices still warm, and the veto persisted no row.
+			expect(general.headers[cacheStatusHeader]).toBe('HIT');
+			expect(random.headers[cacheStatusHeader]).toBe('HIT');
+			expect(general.body.data).toHaveLength(1);
+		});
+
+		it(oneLine`
+			a VETO that declares its slice via purgeBy purges precisely — the declared
+			channel MISSes, a sibling stays warm
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			await Promise.all([
+				readSlice(MODERATED, 'channel', 'general'),
+				readSlice(MODERATED, 'channel', 'random'),
+			]);
+
+			// Post a 'flagged' body: the hook declares general's slice via purgeBy, then
+			// vetoes the row. The veto persists nothing, but the declaration still fires
+			// the precise purge — the escape hatch a side-effecting veto would use.
+			const vetoed = await request(url)
+				.post(`/items/${MODERATED}`)
+				.send({ channel: 'general', body: 'flagged' })
+				.set('Authorization', auth);
+
+			expect(vetoed.body.data).toBeNull();
+
+			const [general, random] = await Promise.all([
+				readSlice(MODERATED, 'channel', 'general'),
+				readSlice(MODERATED, 'channel', 'random'),
+			]);
+
+			// Declared purge dropped general only; random stays warm; still no row added.
+			expect(general.headers[cacheStatusHeader]).toBe('MISS');
+			expect(random.headers[cacheStatusHeader]).toBe('HIT');
+			expect(general.body.data).toHaveLength(1);
 		});
 	});
 });
