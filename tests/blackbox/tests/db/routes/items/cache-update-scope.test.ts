@@ -176,5 +176,37 @@ describe(oneLine`
 			expect(globex.headers[cacheStatusHeader]).toBe('MISS');
 			expect(globex.body.data).toHaveLength(1);
 		});
+
+		it(oneLine`
+			a batch update (array body → updateBatch) still delivers each row's purgeBy:
+			both owners' summaries MISS, so the declaration survives the batch path's
+			child-suppressed, deferred purge
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			await Promise.all([readSummary('acme'), readSummary('globex')]);
+
+			// Array body → updateBatch: each row forks an autoPurgeCache-off child, so a
+			// purgeBy lands only via a shared collector threaded through the batch.
+			await request(url)
+				.patch(`/items/${ORDER}`)
+				.send([
+					{ id: acmeOrder, amount: '58' },
+					{ id: globexOrder, amount: '78' },
+				])
+				.set('Authorization', auth);
+
+			const [acme, globex] = await Promise.all([
+				readSummary('acme'),
+				readSummary('globex'),
+			]);
+
+			expect(acme.headers[cacheStatusHeader]).toBe('MISS');
+			expect(globex.headers[cacheStatusHeader]).toBe('MISS');
+		});
 	});
 });
