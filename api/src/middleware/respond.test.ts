@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
 		serializeScopedCacheTags: vi.fn(() => 'SERIALIZED'),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
-		queryFilterCachable: vi.fn(() => true),
+		queryCachable: vi.fn(() => true),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
@@ -72,8 +72,8 @@ vi.mock('../utils/permissions-cachable.js', () => {
 	return { permissionsCachable: mocks.permissionsCachable };
 });
 
-vi.mock('../utils/query-filter-cachable.js', () => {
-	return { queryFilterCachable: mocks.queryFilterCachable };
+vi.mock('../utils/query-cachable.js', () => {
+	return { queryCachable: mocks.queryCachable };
 });
 
 vi.mock('../utils/get-cache-key.js', () => {
@@ -136,7 +136,7 @@ beforeEach(() => {
 	delete env['CACHE_TAGS_HEADER'];
 	delete env['CACHE_PURGED_TAGS_HEADER'];
 	permissionsCachable.mockResolvedValue(true);
-	mocks.queryFilterCachable.mockReturnValue(true);
+	mocks.queryCachable.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -325,7 +325,7 @@ describe('respond middleware', () => {
 	});
 
 	test('$NOW query filter is not cached', async () => {
-		mocks.queryFilterCachable.mockReturnValue(false);
+		mocks.queryCachable.mockReturnValue(false);
 		const res = makeRes({ data: [{ id: 1 }] });
 
 		const req = makeReq({
