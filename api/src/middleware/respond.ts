@@ -25,7 +25,10 @@ import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
-import { permissionsCachable } from '../utils/permissions-cachable.js';
+import {
+	permissionsCachable,
+	queryFilterCachable,
+} from '../utils/permissions-cachable.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();
@@ -95,6 +98,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
+	// A `$NOW`/time-dynamic var in the query filter resolves to the current time at
+	// read, but the cache key holds the literal `$NOW` string — caching would freeze
+	// the first request's "now" for the whole TTL. `permissionsCachable` gates the
+	// permission-side filter; this gates the user query filter it never scans.
+	const dynamicQueryFilter =
+		queryFilterCachable(req.sanitizedQuery.filter) === false;
+
 	// The request-level preconditions for caching, minus the payload/scope/permission
 	// gates below — reused to attribute a not-cached anomaly to the right reason.
 	const cacheableRequest =
@@ -110,6 +120,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		cache &&
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
+		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,
 			{
@@ -253,6 +264,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 		else if (orphansInScopedMode) {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
+		}
+		else if (dynamicQueryFilter) {
+			void reportCacheAnomaly(req, 'dynamic_query_filter').catch(() => {});
 		}
 	}
 

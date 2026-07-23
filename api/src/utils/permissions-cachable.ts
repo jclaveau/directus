@@ -39,6 +39,21 @@ export async function permissionsCachable(
 	return !has_now;
 }
 
+/**
+ * Whether a read's ad-hoc query filter is safe to cache. `$NOW` (and its
+ * adjusted `$NOW(...)` forms) resolves to the current time at read, but the
+ * cache key keeps the literal `$NOW` string — so the first request's "now"
+ * freezes and is served stale for the whole TTL. Mirrors the permission-side
+ * gate on the user query filter, which `permissionsCachable` never scans.
+ */
+export function queryFilterCachable(filter: Filter | null | undefined): boolean {
+	if (!filter) {
+		return true;
+	}
+
+	return !filter_has_now(filter);
+}
+
 export function filter_has_now(filter: Filter): boolean {
 	return Object.entries(filter).some(([key, value]) => {
 		if (key === '_and' || key === '_or') {

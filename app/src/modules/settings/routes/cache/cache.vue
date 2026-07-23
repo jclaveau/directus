@@ -338,6 +338,10 @@ function anomalyLabel(reason: CacheAnomalyReason): string {
 	const labels: Record<CacheAnomalyReason, string> = {
 		missing_scope: t('cache_anomaly_missing_scope', 'Not cached · missing scope'),
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
+		dynamic_query_filter: t(
+			'cache_anomaly_dynamic_query_filter',
+			'Not cached · dynamic query filter',
+		),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
 	};
 

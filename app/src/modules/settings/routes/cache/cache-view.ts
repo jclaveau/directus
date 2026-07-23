@@ -42,6 +42,7 @@ export interface QueryGroup {
 export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'value_too_large'
+	| 'dynamic_query_filter'
 	| 'redis_error';
 
 // Normalised to its descriptor: path/method/query come from the referenced

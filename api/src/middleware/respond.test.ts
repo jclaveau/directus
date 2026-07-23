@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
 		serializeScopedCacheTags: vi.fn(() => 'SERIALIZED'),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
+		queryFilterCachable: vi.fn(() => true),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
@@ -68,7 +69,10 @@ vi.mock('../database/index.js', () => ({ default: () => ({}) }));
 vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }));
 
 vi.mock('../utils/permissions-cachable.js', () => {
-	return { permissionsCachable: mocks.permissionsCachable };
+	return {
+		permissionsCachable: mocks.permissionsCachable,
+		queryFilterCachable: mocks.queryFilterCachable,
+	};
 });
 
 vi.mock('../utils/get-cache-key.js', () => {
@@ -131,6 +135,7 @@ beforeEach(() => {
 	delete env['CACHE_TAGS_HEADER'];
 	delete env['CACHE_PURGED_TAGS_HEADER'];
 	permissionsCachable.mockResolvedValue(true);
+	mocks.queryFilterCachable.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -315,6 +320,24 @@ describe('respond middleware', () => {
 			expect.any(Object),
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
+		);
+	});
+
+	test('$NOW query filter is not cached', async () => {
+		mocks.queryFilterCachable.mockReturnValue(false);
+		const res = makeRes({ data: [{ id: 1 }] });
+
+		const req = makeReq({
+			sanitizedQuery: { filter: { created_on: { _gt: '$NOW' } } },
+		});
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'dynamic_query_filter',
 		);
 	});
 

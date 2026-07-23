@@ -62,6 +62,7 @@ export interface CacheDescriptor {
 export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'value_too_large'
+	| 'dynamic_query_filter'
 	| 'redis_error';
 
 export interface CacheAnomaly {
