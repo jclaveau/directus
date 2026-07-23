@@ -18,7 +18,9 @@ router.use(
 		});
 
 		res.locals['payload'] = await service.execute(res.locals['graphqlParams']);
-		res.locals['scopedCacheTags'] = readMeta(res.locals['payload'])?.scopedCacheTags;
+		const gqlMeta = readMeta(res.locals['payload']);
+		res.locals['scopedCacheTags'] = gqlMeta?.scopedCacheTags;
+		res.locals['scopedCacheUnautopurgeable'] = gqlMeta?.scopedCacheUnautopurgeable;
 
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;
@@ -40,7 +42,9 @@ router.use(
 		});
 
 		res.locals['payload'] = await service.execute(res.locals['graphqlParams']);
-		res.locals['scopedCacheTags'] = readMeta(res.locals['payload'])?.scopedCacheTags;
+		const gqlMeta = readMeta(res.locals['payload']);
+		res.locals['scopedCacheTags'] = gqlMeta?.scopedCacheTags;
+		res.locals['scopedCacheUnautopurgeable'] = gqlMeta?.scopedCacheUnautopurgeable;
 
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;

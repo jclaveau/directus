@@ -21,9 +21,15 @@ type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
  * Shape of `context.scopedCache` on an `items.read` *filter* hook. Mirrors the
  * `cache.scope` event: scope the cached response TO extra slices it needs, so a
  * later purge of any of them invalidates it. Additive to the framework tags.
+ *
+ * `manuallyPurged`: assert that a value-slice tag on a field the target collection
+ * isn't scoped on is nonetheless reproduced by the author's own `purgeBy`. Without
+ * it, such a tag is unautopurgeable — the framework can't invalidate the read on a
+ * write to that collection — so the response is left uncached (an
+ * `unautopurgeable_scope` anomaly) rather than served stale. True opts out of that.
  */
 export interface ScopedCacheScopeHandle {
-	scopeTo(tags: ScopedCacheTagInput): void;
+	scopeTo(tags: ScopedCacheTagInput, options?: { manuallyPurged?: boolean }): void;
 }
 
 /**
@@ -47,6 +53,8 @@ export interface ScopedCacheCollector {
 	scope: ScopedCacheScopeHandle;
 	purge: ScopedCachePurgeHandle;
 	tags: ScopedCacheTag[];
+	/** Canonical keys of tags a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
+	manuallyPurgedKeys: Set<string>;
 }
 
 /**
@@ -68,6 +76,14 @@ export interface ReadMeta {
 	 * tags); scope invalidation.
 	 */
 	scopedCacheTags: ScopedCacheTag[];
+
+	/**
+	 * A read hook scoped this response TO an unautopurgeable tag (a value slice on a
+	 * field the target collection isn't scoped on) without `manuallyPurged` — no write
+	 * can auto-purge it, so the response must not be cached. Drives the cache-skip and
+	 * the `unautopurgeable_scope` anomaly in respond.ts.
+	 */
+	scopedCacheUnautopurgeable?: boolean;
 }
 
 /**

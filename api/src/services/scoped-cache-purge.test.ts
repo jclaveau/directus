@@ -543,6 +543,82 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			flags a read whose hook scopeTo's a field the collection isn't scoped on as
+			unautopurgeable — no write can auto-purge that slice
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			// `test` is scoped on `student`, not `ghost` — this slice tag is orphaned.
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({ collection: 'test', field: 'ghost', value: 'g' });
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+				expect(readMeta(result)?.scopedCacheUnautopurgeable).toBe(true);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			does NOT flag the same tag when the hook declares manuallyPurged — the author
+			reproduces it via their own purgeBy
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo(
+					{ collection: 'test', field: 'ghost', value: 'g' },
+					{ manuallyPurged: true },
+				);
+
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+				expect(readMeta(result)?.scopedCacheUnautopurgeable).toBe(false);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			does NOT flag a scopeTo on a scoped field — that slice is reproduced by the
+			collection's own auto-purge
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({
+					collection: 'test',
+					field: 'student',
+					value: 'A',
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+				expect(readMeta(result)?.scopedCacheUnautopurgeable).toBe(false);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
 			an items.create hook adds a tag, unioned after the committed-row slice in the
 			purge
 		`, async () => {

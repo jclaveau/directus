@@ -25,8 +25,12 @@ const env = useEnv();
 export function createScopedCacheCollector(): ScopedCacheCollector {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
+	const manuallyPurgedKeys = new Set<string>();
 
-	function add(input: ScopedCacheTag | readonly ScopedCacheTag[]): void {
+	function add(
+		input: ScopedCacheTag | readonly ScopedCacheTag[],
+		manuallyPurged = false,
+	): void {
 		const batch = Array.isArray(input)
 			? input
 			: [input];
@@ -39,6 +43,12 @@ export function createScopedCacheCollector(): ScopedCacheCollector {
 			// duplicate past a raw JSON compare.
 			const key = scopedCacheTagKey(tag);
 
+			// Record the accept regardless of dedup: if ANY scopeTo of this tag marked it
+			// manuallyPurged, it's exempt from the unautopurgeable-scope anomaly.
+			if (manuallyPurged) {
+				manuallyPurgedKeys.add(key);
+			}
+
 			if (seen.has(key)) {
 				continue;
 			}
@@ -50,8 +60,9 @@ export function createScopedCacheCollector(): ScopedCacheCollector {
 
 	return {
 		tags,
-		scope: { scopeTo: add },
-		purge: { purgeBy: add },
+		manuallyPurgedKeys,
+		scope: { scopeTo: (input, options) => add(input, options?.manuallyPurged) },
+		purge: { purgeBy: (input) => add(input) },
 	};
 }
 
@@ -142,7 +153,7 @@ function isPinnableScopeType(type: Type | undefined): boolean {
 	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
 }
 
-function scopedCacheTagKey(tag: ScopedCacheTag): string {
+export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
 	return tag.field === undefined
 		? base
