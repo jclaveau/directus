@@ -32,9 +32,12 @@ export function createScopedCacheCollector(): ScopedCacheCollector {
 			: [input];
 
 		for (const tag of batch) {
-			// Idempotent: a filter that re-emits (delete fires its hook twice) or a hook
-			// looping over rows that resolve the same slice must not inflate the set.
-			const key = JSON.stringify(tag);
+			// Idempotent: a hook looping over rows that resolve the same slice — or a
+			// batch/upsert parent's shared collector fed by many children — must not
+			// inflate the set. Key on the canonical tag key (the same one the purge side
+			// dedups on), so field order and value/type variants (7 vs '7') can't slip a
+			// duplicate past a raw JSON compare.
+			const key = scopedCacheTagKey(tag);
 
 			if (seen.has(key)) {
 				continue;
@@ -303,12 +306,17 @@ export async function purgeCollectionScopedCache(
  * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
  * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
  * risk leaving a slice stale; still narrower than nuking the whole namespace.
+ *
+ * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —
+ * for a cancelled mutation nothing in `collection` changed, so only the hook's own
+ * declared (usually foreign) slices should drop, not this collection's global reads.
  */
 export async function purgeScopedCache(
 	cache: Keyv,
 	collection: string,
 	scopedCacheTags: ScopedCacheTag[] | null = [],
 	context: EventContext | null = null,
+	options: { includeCollectionTag?: boolean } = {},
 ): Promise<ScopedCacheTag[] | null> {
 	// Returns the purged tags so a caller can surface them (dev-only debug header):
 	// `null` = whole namespace flushed (non-scoped mode); bare `[{ collection }]` =
@@ -325,7 +333,9 @@ export async function purgeScopedCache(
 
 	const resolvedScopedCacheTags = (await emitter.emitFilter(
 		'cache.purge',
-		[{ collection }, ...scopedCacheTags],
+		options.includeCollectionTag === false
+			? [...scopedCacheTags]
+			: [{ collection }, ...scopedCacheTags],
 		{ collection },
 		context,
 	)) as ScopedCacheTag[];

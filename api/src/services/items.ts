@@ -253,16 +253,31 @@ implements AbstractService<Item> {
 		// A `null` tag set means this collection's own slices are unresolvable → coarse
 		// whole-collection purge. Tags a hook added via `context.scopedCache` are often
 		// for other collections the coarse pass never reaches, so purge them too.
-		this.scopedCachePurged = await purgeScopedCache(
+		const coarsePurged = await purgeScopedCache(
 			this.cache,
 			this.collection,
 			null,
 			context,
 		);
 
-		if (hookTags.length > 0) {
-			await purgeScopedCache(this.cache, this.collection, hookTags, context);
+		if (hookTags.length === 0) {
+			this.scopedCachePurged = coarsePurged;
+			return;
 		}
+
+		const hookPurged = await purgeScopedCache(
+			this.cache,
+			this.collection,
+			hookTags,
+			context,
+		);
+
+		// Reflect BOTH purges in the dev debug header (coarse ∪ hook); a `null` from
+		// either means the whole namespace was flushed, which already covers everything.
+		this.scopedCachePurged =
+			coarsePurged === null || hookPurged === null
+				? null
+				: [...coarsePurged, ...hookPurged];
 	}
 
 	private get collectionScopedCacheFields(): string[] {
@@ -1367,14 +1382,21 @@ implements AbstractService<Item> {
 			}
 
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op — an
-			// empty collector must not reach purgeScopedCache, which would purge the bare
-			// collection tag (every global read) even though nothing changed.
+			// (parity with create's cancel); a plain validation cancel is a no-op (the
+			// guard keeps an empty collector from reaching the purge). The cancel purges
+			// only the declared tags — `includeCollectionTag: false` leaves this
+			// collection's own bare tag (its global reads) warm, since nothing changed.
 			if (
 				scopedCacheCollector.tags.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
-				await this.purgeScopedCache([], scopedCacheCollector);
+				this.scopedCachePurged = await purgeScopedCache(
+					this.cache,
+					this.collection,
+					scopedCacheCollector.tags,
+					this.scopedCachePurgeContext(),
+					{ includeCollectionTag: false },
+				);
 			}
 
 			// The filter cancelled the update: nothing is written; return a null per key
@@ -1796,6 +1818,11 @@ implements AbstractService<Item> {
 		const scopedCacheCollector =
 			opts.scopedCacheCollector ?? createScopedCacheCollector();
 
+		// NB: this is the sole `items.delete` filter emit and it runs BEFORE
+		// `validateAccess` (below) — deliberately, so a hook can cancel the delete and
+		// snapshot old scope values before the rows go. Upstream emitted it after the
+		// access check; a hook that assumed the keys were already authorized should read
+		// that here (see the PR's disclosure note).
 		const keysAfterHooks =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<PrimaryKey[], null>(
@@ -1823,14 +1850,21 @@ implements AbstractService<Item> {
 			}
 
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op — an
-			// empty collector must not reach purgeScopedCache, which would purge the bare
-			// collection tag (every global read) even though nothing changed.
+			// (parity with create's cancel); a plain validation cancel is a no-op (the
+			// guard keeps an empty collector from reaching the purge). The cancel purges
+			// only the declared tags — `includeCollectionTag: false` leaves this
+			// collection's own bare tag (its global reads) warm, since nothing changed.
 			if (
 				scopedCacheCollector.tags.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
-				await this.purgeScopedCache([], scopedCacheCollector);
+				this.scopedCachePurged = await purgeScopedCache(
+					this.cache,
+					this.collection,
+					scopedCacheCollector.tags,
+					this.scopedCachePurgeContext(),
+					{ includeCollectionTag: false },
+				);
 			}
 
 			// The filter cancelled the deletion: nothing is deleted; return a null per key

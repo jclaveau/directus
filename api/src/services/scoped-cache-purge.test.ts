@@ -680,5 +680,95 @@ describe(oneLine`
 				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
+
+		it(oneLine`
+			a hook that declares a slice then cancels (null) purges only that slice —
+			includeCollectionTag:false keeps the cancelled collection's bare tag warm,
+			since nothing in it changed
+		`, async () => {
+			// updateMany snapshots the pre-update rows before the filter runs (old ∪ new),
+			// even when the filter goes on to cancel — so a row still has to resolve.
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const declareThenCancel = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return null; // cancel the update
+			};
+
+			emitter.onFilter('test.items.update', declareThenCancel);
+
+			try {
+				await service().updateMany(
+					[1],
+					{ student: 'B' },
+					{ allowFilterCancel: true },
+				);
+
+				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[authorsDependency],
+					expect.anything(),
+					{ includeCollectionTag: false },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declareThenCancel);
+			}
+		});
+
+		it(oneLine`
+			a coarse (null) purge carrying hook-declared tags reflects BOTH in the debug
+			header — the hook purge's result is unioned in, not dropped
+		`, async () => {
+			// Re-read missing `student` → snapshot null → coarse purge; the hook also
+			// declares a foreign slice, so purgeScopedCache runs twice (coarse null +
+			// hook tags) and scopedCachePurged must union both.
+			tracker.on.select('test').response([{ id: 1 }]);
+			tracker.on.update('test').response(1);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return payload;
+			};
+
+			purgeScopedCache
+				.mockResolvedValueOnce([{ collection: 'test' }])
+				.mockResolvedValueOnce([authorsDependency]);
+
+			emitter.onFilter('test.items.update', declare);
+
+			try {
+				const svc = service();
+				await svc.updateMany([1], { name: 'x' });
+
+				expect(purgeScopedCache).toHaveBeenNthCalledWith(
+					1,
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+				);
+
+				expect(purgeScopedCache).toHaveBeenNthCalledWith(
+					2,
+					expect.anything(),
+					'test',
+					[authorsDependency],
+					expect.anything(),
+				);
+
+				expect(svc.scopedCachePurged).toEqual([
+					{ collection: 'test' },
+					authorsDependency,
+				]);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declare);
+			}
+		});
 	});
 });
