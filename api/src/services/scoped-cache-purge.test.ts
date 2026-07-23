@@ -351,9 +351,12 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		create falls back to a coarse purge (null) when a hook takes over a row (returns a
-		PK, scope value unknowable)
+		an UNDECLARED take-over falls back to a coarse purge (null) — a take-over can be
+		an update-in-disguise whose OLD slice the create path can't recover
 	`, async () => {
+		// The hook returns a PK but declares nothing. It might have moved that row
+		// between slices (an upsert), and createMany has no old∪new capture → the old
+		// slice would leak. So without a declaration the purge is coarse (null).
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
 
@@ -633,12 +636,15 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a hook that takes over a create (coarse null purge) AND adds a tag purges
-			both — the coarse pass never reaches the hook's other-collection tag
+			a take-over that DECLARES its footprint via addTag narrows to a precise purge —
+			the declaration opts out of the safe coarse fallback
 		`, async () => {
-			// The hook returns a PK (takes over the row → scope value unknowable → null
-			// coarse purge) and declares a dependency on another collection. That pass
-			// only covers `test`, so the hook tag needs its own purge — a second call.
+			// A take-over is coarse BY DEFAULT (old slice unrecoverable in the create
+			// path). Declaring a tag asserts the hook knows its footprint, so we trust it
+			// and narrow: the taken-over row's re-read slice (Z) UNION the declared tag —
+			// never the coarse null flush.
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
 				return 99;
@@ -652,14 +658,17 @@ describe(oneLine`
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					null,
+					[
+						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
+						{ collection: 'other', field: 'id', value: 7 },
+					],
 					expect.anything(),
 				);
 
-				expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect(purgeScopedCache).not.toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[{ collection: 'other', field: 'id', value: 7 }],
+					null,
 					expect.anything(),
 				);
 			}
