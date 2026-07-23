@@ -633,6 +633,22 @@ describe('Integration Tests', () => {
 				filterSpy.mockRestore();
 			});
 
+			it('emits the delete filter exactly once (no double-fire)', async () => {
+				const filterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockImplementation(async (_event: any, payload: any) => payload);
+
+				await service.deleteMany([1]);
+
+				const deleteFilterCalls = filterSpy.mock.calls.filter(([event]) => {
+					return [event].flat().includes('items.delete');
+				});
+
+				expect(deleteFilterCalls).toHaveLength(1);
+
+				filterSpy.mockRestore();
+			});
+
 			it('translates a raw DB error from a direct delete write', async () => {
 				const fkError: any = new Error(oneLine`
 					update or delete on table "parent" violates foreign key
