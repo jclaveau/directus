@@ -14,21 +14,28 @@ export interface ScopedCacheTag {
 	type?: Type;
 }
 
+/** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
+type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
+
 /**
- * Hook-facing channel to add scoped cache tags from a regular CRUD *filter* event
- * (`items.read`/`create`/`update`/`delete`), reached via `context.scopedCache`. On a
- * read the tags declare what the cached response depends on (unioned with
- * `cache.scope`); on a mutation they declare which slices to invalidate (unioned
- * with the purge tags). Additive to the framework-derived tags, never a replacement.
- * A no-op sink when scoped cache purging is off or off the HTTP path.
- *
- * Only the *filter* hook can add a purge tag: on update/delete the purge runs before
- * the action hook, so an action-hook tag would arrive too late.
+ * Shape of `context.scopedCache` on an `items.read` *filter* hook. Mirrors the
+ * `cache.scope` event: scope the cached response TO extra slices it needs, so a
+ * later purge of any of them invalidates it. Additive to the framework tags.
  */
-export interface ScopedCacheHandle {
-	addTag(tag: ScopedCacheTag): void;
-	/** Add several at once, e.g. `addTags(result.getMeta().scopedCacheTags)`. */
-	addTags(tags: readonly ScopedCacheTag[]): void;
+export interface ScopedCacheScopeHandle {
+	scopeTo(tags: ScopedCacheTagInput): void;
+}
+
+/**
+ * Shape of `context.scopedCache` on an `items.create`/`update`/`delete` *filter*
+ * hook. Mirrors the `cache.purge` event: purge cached responses BY extra slices this
+ * mutation touched. Additive to the framework purge tags.
+ *
+ * Only the *filter* hook can purge: on update/delete the purge runs before the
+ * action hook, so an action-hook tag would arrive too late.
+ */
+export interface ScopedCachePurgeHandle {
+	purgeBy(tags: ScopedCacheTagInput): void;
 }
 
 /**

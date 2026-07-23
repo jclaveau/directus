@@ -72,23 +72,23 @@ describe('countScopedCacheTagMembers', () => {
 });
 
 describe('createScopedCacheCollector', () => {
-	it('collects tags, deduplicating structurally-identical ones', () => {
-		const { handle, tags } = createScopedCacheCollector();
+	it('scopeTo and purgeBy feed one idempotent tag set', () => {
+		const { scope, purge, tags } = createScopedCacheCollector();
 		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
 
-		handle.addTag(authorSlice);
-		handle.addTag({ ...authorSlice }); // same slice, different object → deduped
+		scope.scopeTo(authorSlice);
+		purge.purgeBy({ ...authorSlice }); // same slice via the other handle → deduped
 
 		expect(tags).toEqual([authorSlice]);
 	});
 
-	it('addTags adds a batch, deduping within it and against prior tags', () => {
-		const { handle, tags } = createScopedCacheCollector();
+	it('accepts a batch, deduping within it and against prior tags', () => {
+		const { scope, tags } = createScopedCacheCollector();
 		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
 		const authorsTable = { collection: 'authors' };
 
-		handle.addTag(authorSlice);
-		handle.addTags([{ ...authorSlice }, authorsTable, authorsTable]);
+		scope.scopeTo(authorSlice);
+		scope.scopeTo([{ ...authorSlice }, authorsTable, authorsTable]);
 
 		// authorSlice repeats the prior tag, authorsTable appears twice → each once.
 		expect(tags).toEqual([authorSlice, authorsTable]);

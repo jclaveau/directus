@@ -2,7 +2,8 @@ import { useEnv } from '@directus/env';
 import type {
 	EventContext,
 	Filter,
-	ScopedCacheHandle,
+	ScopedCachePurgeHandle,
+	ScopedCacheScopeHandle,
 	ScopedCachePath,
 	ScopedCacheTag,
 	SchemaOverview,
@@ -16,40 +17,43 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
 const env = useEnv();
 
 /**
- * A per-operation collector backing `context.scopedCache`. A CRUD filter hook pushes
- * tags via the `handle`; the service drains `tags` into the read's scope tags or the
- * mutation's purge tags. Safe to hand out with purging off — then `tags` is unread.
+ * A per-operation collector backing the `context.scopedCache` hook handle. The
+ * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
+ * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
+ * the service drains `tags` into the read's scope or the mutation's purge tags. Both
+ * are the same idempotent sink. Safe with purging off (then `tags` is unread).
  */
 export function createScopedCacheCollector(): {
-	handle: ScopedCacheHandle;
+	scope: ScopedCacheScopeHandle;
+	purge: ScopedCachePurgeHandle;
 	tags: ScopedCacheTag[];
 } {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
 
-	function addTag(tag: ScopedCacheTag): void {
-		// Idempotent: a filter that re-emits (delete fires its hook twice) or a hook
-		// looping over rows that resolve the same slice must not inflate the tag set.
-		const key = JSON.stringify(tag);
+	function add(input: ScopedCacheTag | readonly ScopedCacheTag[]): void {
+		const batch = Array.isArray(input)
+			? input
+			: [input];
 
-		if (seen.has(key)) {
-			return;
+		for (const tag of batch) {
+			// Idempotent: a filter that re-emits (delete fires its hook twice) or a hook
+			// looping over rows that resolve the same slice must not inflate the set.
+			const key = JSON.stringify(tag);
+
+			if (seen.has(key)) {
+				continue;
+			}
+
+			seen.add(key);
+			tags.push(tag);
 		}
-
-		seen.add(key);
-		tags.push(tag);
 	}
 
 	return {
 		tags,
-		handle: {
-			addTag,
-			addTags(more) {
-				for (const tag of more) {
-					addTag(tag);
-				}
-			},
-		},
+		scope: { scopeTo: add },
+		purge: { purgeBy: add },
 	};
 }
 
