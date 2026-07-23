@@ -163,7 +163,7 @@ describe(oneLine`
 
 		it(oneLine`
 			an update veto that declares its slice via purgeBy purges precisely — the
-			declared space MISSes, a sibling stays warm, still no write
+			declared space MISSes, a sibling AND the global read stay warm, still no write
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -171,7 +171,11 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			await Promise.all([readSlice(EDITABLE, 'a'), readSlice(EDITABLE, 'b')]);
+			await Promise.all([
+				readSlice(EDITABLE, 'a'),
+				readSlice(EDITABLE, 'b'),
+				readAll(EDITABLE),
+			]);
 
 			// Patch note 'flag': the hook declares space 'a' via purgeBy, then vetoes.
 			await request(url)
@@ -179,13 +183,17 @@ describe(oneLine`
 				.send({ note: 'flag' })
 				.set('Authorization', auth);
 
-			const [a, b] = await Promise.all([
+			const [a, b, all] = await Promise.all([
 				readSlice(EDITABLE, 'a'),
 				readSlice(EDITABLE, 'b'),
+				readAll(EDITABLE),
 			]);
 
 			expect(a.headers[cacheStatusHeader]).toBe('MISS');
 			expect(b.headers[cacheStatusHeader]).toBe('HIT');
+			// Declaring cancel drops ONLY space 'a' — the bare tag (global read) stays
+			// warm, since the collection itself didn't change (#4).
+			expect(all.headers[cacheStatusHeader]).toBe('HIT');
 			expect(a.body.data[0].note).toBe('orig');
 		});
 
@@ -219,7 +227,7 @@ describe(oneLine`
 
 		it(oneLine`
 			a delete veto that declares its slice via purgeBy purges precisely — the
-			declared space MISSes, a sibling stays warm, the row still survives
+			declared space MISSes, a sibling AND the global read stay warm, row survives
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -227,20 +235,28 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			await Promise.all([readSlice(REMOVABLE, 'p'), readSlice(REMOVABLE, 'q')]);
+			await Promise.all([
+				readSlice(REMOVABLE, 'p'),
+				readSlice(REMOVABLE, 'q'),
+				readAll(REMOVABLE),
+			]);
 
 			// Delete the 'flag' row: the hook declares space 'q' via purgeBy, then vetoes.
 			await request(url)
 				.delete(`/items/${REMOVABLE}/${removeFlag}`)
 				.set('Authorization', auth);
 
-			const [p, q] = await Promise.all([
+			const [p, q, all] = await Promise.all([
 				readSlice(REMOVABLE, 'p'),
 				readSlice(REMOVABLE, 'q'),
+				readAll(REMOVABLE),
 			]);
 
 			expect(p.headers[cacheStatusHeader]).toBe('HIT');
 			expect(q.headers[cacheStatusHeader]).toBe('MISS');
+			// Declaring cancel drops ONLY space 'q' — the bare tag (global read) stays
+			// warm, since the collection itself didn't change (#4).
+			expect(all.headers[cacheStatusHeader]).toBe('HIT');
 			expect(q.body.data).toHaveLength(1);
 		});
 

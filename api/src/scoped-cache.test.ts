@@ -93,4 +93,15 @@ describe('createScopedCacheCollector', () => {
 		// authorSlice repeats the prior tag, authorsTable appears twice → each once.
 		expect(tags).toEqual([authorSlice, authorsTable]);
 	});
+
+	it('dedups on the canonical tag key — field order and value type collapse', () => {
+		const { scope, purge, tags } = createScopedCacheCollector();
+
+		scope.scopeTo({ collection: 'articles', field: 'author', value: 7 });
+		// Same slice: keys in a different order AND the value as a string. A raw JSON
+		// compare would keep both; the canonical key collapses them to one.
+		purge.purgeBy({ field: 'author', value: '7', collection: 'articles' });
+
+		expect(tags).toHaveLength(1);
+	});
 });
