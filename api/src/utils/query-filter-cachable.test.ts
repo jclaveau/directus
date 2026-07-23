@@ -23,3 +23,10 @@ test('query filter without $NOW is cachable', () => {
 	expect(queryFilterCachable(null)).toBe(true);
 	expect(queryFilterCachable(undefined)).toBe(true);
 });
+
+// A nested null crashes filter_has_now (Object.entries(null)); the gate must
+// swallow that and treat the filter as cacheable rather than 500 the request.
+test('query filter with a nested null does not throw and is cachable', () => {
+	expect(queryFilterCachable({ field: { _eq: null } })).toBe(true);
+	expect(queryFilterCachable({ _and: [{ field: null }] })).toBe(true);
+});

@@ -96,10 +96,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
-	// A `$NOW`/time-dynamic var in the query filter resolves to the current time at
-	// read, but the cache key holds the literal `$NOW` string — caching would freeze
-	// the first request's "now" for the whole TTL. `permissionsCachable` gates the
-	// permission-side filter; this gates the user query filter it never scans.
+	// A `$NOW` in the query filter resolves to a Date in `sanitizeQuery` *before* the
+	// cache key is built, so each request already keys distinctly — not a staleness
+	// risk. But that also means the key never recurs: caching only writes a never-hit
+	// entry (Redis bloat + a bloated scoped-purge tag set). Skip it. Unlike the
+	// permission-side gate (`permissionsCachable`), which IS staleness — its filter
+	// isn't in the key.
 	const dynamicQueryFilter =
 		queryFilterCachable(req.sanitizedQuery.filter) === false;
 
