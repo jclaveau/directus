@@ -13,7 +13,13 @@ metadata:
   test), different db/count each time; base branch (hhh-dev) runs were all green. So it's environmental
   (runner load / WS handshake timing), not a code regression. Don't attribute it to your diff — a cache /
   schema / unit change has nothing to do with the WS transport.
-- **Fix: rerun the failed shard.** It clears on a fresh runner.
+- **Reruns RELOCATE it, they don't reliably clear it.** PR #289 hit it on 4 consecutive runs —
+  sqlite3 shard 4 (×2 incl. a `--failed` rerun), then postgres shard 4 — a DIFFERENT random shard
+  each run, always the same `m2o` WS test, always 1/4282. So don't chase it with reruns (each just
+  moves it + burns ~12min of CI). **If it's the ONLY red and the real target passed** (here
+  `cache.test.ts` was green on shard 5, both vendors, every run) + unit is green → treat it as
+  **non-blocking and merge** (jean: "merge and close"). Confirm the diff's own test file passed on
+  its shard rather than re-running.
 
 **Rerun mechanics:**
 - `gh run rerun <run-id> --failed -R jclaveau/directus` — reruns only the failed jobs, but ONLY after the
