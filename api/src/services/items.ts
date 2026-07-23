@@ -1358,8 +1358,14 @@ implements AbstractService<Item> {
 				});
 			}
 
-			// The filter cancelled the update: nothing is written; return a null per key so the
-			// result stays index-aligned with the input keys.
+			// A hook that declared a purge via `purgeBy` before cancelling still gets it
+			// (parity with create's cancel); a plain validation cancel is a no-op.
+			if (shouldClearCache(this.cache, opts, this.collection)) {
+				await this.purgeScopedCache([], scopedCacheCollector);
+			}
+
+			// The filter cancelled the update: nothing is written; return a null per key
+			// so the result stays index-aligned with the input keys.
 			return keys.map(() => null);
 		}
 
@@ -1793,8 +1799,14 @@ implements AbstractService<Item> {
 				});
 			}
 
-			// The filter cancelled the deletion: nothing is deleted; return a null per key so the
-			// result stays index-aligned with the input keys.
+			// A hook that declared a purge via `purgeBy` before cancelling still gets it
+			// (parity with create's cancel); a plain validation cancel is a no-op.
+			if (shouldClearCache(this.cache, opts, this.collection)) {
+				await this.purgeScopedCache([], scopedCacheCollector);
+			}
+
+			// The filter cancelled the deletion: nothing is deleted; return a null per key
+			// so the result stays index-aligned with the input keys.
 			return keys.map(() => null);
 		}
 
@@ -1820,24 +1832,6 @@ implements AbstractService<Item> {
 
 		if (opts.preMutationError) {
 			throw opts.preMutationError;
-		}
-
-		if (opts.emitEvents !== false) {
-			await emitter.emitFilter(
-				this.eventScope === 'items'
-					? ['items.delete', `${this.collection}.items.delete`]
-					: `${this.eventScope}.delete`,
-				keys,
-				{
-					collection: this.collection,
-				},
-				{
-					database: this.knex,
-					schema: this.schema,
-					accountability: this.accountability,
-					scopedCache: scopedCacheCollector.purge,
-				},
-			);
 		}
 
 		await transaction(this.knex, async (trx) => {
