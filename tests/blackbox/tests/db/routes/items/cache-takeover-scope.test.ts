@@ -87,7 +87,7 @@ describe(oneLine`
 		it(oneLine`
 			purges only the taken-over owner slice, leaving the other warm
 		`, async () => {
-			const url = getUrl(vendor, env[vendor]);
+			const url = getUrl(vendor, env);
 			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 			await request(url)
