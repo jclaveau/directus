@@ -51,6 +51,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
+const { createScopedCacheCollector } = await import('../scoped-cache.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -753,12 +754,16 @@ describe(oneLine`
 					expect.anything(),
 				);
 
+				// Coarse already flushed this collection's bare tag + every slice, so the
+				// hook purge must NOT re-add it: includeCollectionTag:false (else the bare
+				// tag is purged twice and doubled in the debug header).
 				expect(purgeScopedCache).toHaveBeenNthCalledWith(
 					2,
 					expect.anything(),
 					'test',
 					[authorsDependency],
 					expect.anything(),
+					{ includeCollectionTag: false },
 				);
 
 				expect(svc.scopedCachePurged).toEqual([
@@ -768,6 +773,57 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', declare);
+			}
+		});
+
+		it(oneLine`
+			an UNDECLARED take-over stays coarse (null) even when an injected shared
+			collector already carries a sibling operation's tags — the fallback keys off
+			THIS call's own declarations, not the collector's running total
+		`, async () => {
+			// A batch/upsert parent injects one shared collector across its children. Seed
+			// it as if an earlier child already declared a slice; a later child that takes
+			// over a row but declares nothing ITSELF must still fall back to coarse — else
+			// the pre-seeded tag reads as this row's declaration and its old slice leaks.
+			const shared = createScopedCacheCollector();
+			shared.purge.purgeBy({ collection: 'siblings', field: 'id', value: 1 });
+
+			// Coarse + hook-tags → purgeScopedCache runs twice and unions results; real
+			// module returns arrays, so give the spy an iterable (args are the check).
+			purgeScopedCache.mockResolvedValue([]);
+
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOver = async () => 99; // takes over a row, declares nothing new
+			emitter.onFilter('test.items.create', takeOver);
+
+			try {
+				await service().createMany(
+					[{ name: 'x', student: 'A' }],
+					{ scopedCacheCollector: shared },
+				);
+
+				// Coarse (null) despite the pre-seeded collector.
+				expect(purgeScopedCache).toHaveBeenNthCalledWith(
+					1,
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+				);
+
+				// Never the precise take-over slice (Z) — that would leak the old slice.
+				expect(purgeScopedCache).not.toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					expect.arrayContaining([
+						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
+					]),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
 			}
 		});
 	});

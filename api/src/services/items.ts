@@ -16,6 +16,7 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
+	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
 	Type,
@@ -234,7 +235,7 @@ implements AbstractService<Item> {
 
 	private async purgeScopedCache(
 		tags: ScopedCacheTag[] | null,
-		collector?: { tags: ScopedCacheTag[] },
+		collector?: Pick<ScopedCacheCollector, 'tags'>,
 	): Promise<void> {
 		const context = this.scopedCachePurgeContext();
 		const hookTags = collector?.tags ?? [];
@@ -251,8 +252,11 @@ implements AbstractService<Item> {
 		}
 
 		// A `null` tag set means this collection's own slices are unresolvable → coarse
-		// whole-collection purge. Tags a hook added via `context.scopedCache` are often
-		// for other collections the coarse pass never reaches, so purge them too.
+		// whole-collection purge (bare tag + every slice). Tags a hook added via
+		// `context.scopedCache` are often for OTHER collections the coarse pass never
+		// reaches, so purge them too — but with `includeCollectionTag: false`, since the
+		// coarse pass already owns this collection's bare tag (else it's purged twice
+		// and doubled in the debug header).
 		const coarsePurged = await purgeScopedCache(
 			this.cache,
 			this.collection,
@@ -270,6 +274,7 @@ implements AbstractService<Item> {
 			this.collection,
 			hookTags,
 			context,
+			{ includeCollectionTag: false },
 		);
 
 		// Reflect BOTH purges in the dev debug header (coarse ∪ hook); a `null` from
@@ -548,6 +553,10 @@ implements AbstractService<Item> {
 		// drained into the purge below. Declared outside the transaction to outlive it.
 		const scopedCacheCollector =
 			opts.scopedCacheCollector ?? createScopedCacheCollector();
+
+		// Baseline so the take-over fallback (below) keys off THIS call's own hook
+		// declarations, not tags an injected shared collector already held.
+		const scopedCacheTagsAtStart = scopedCacheCollector.tags.length;
 
 		const { nestedActionEvents, actionPayloads } = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
@@ -964,7 +973,8 @@ implements AbstractService<Item> {
 				const someRowTakenOver = liveKeys.length > actionPayloads.length;
 
 				const takeoverUndeclared =
-					someRowTakenOver && scopedCacheCollector.tags.length === 0;
+					someRowTakenOver &&
+					scopedCacheCollector.tags.length === scopedCacheTagsAtStart;
 
 				scopedCacheTags = takeoverUndeclared
 					? null
