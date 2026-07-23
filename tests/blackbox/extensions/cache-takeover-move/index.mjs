@@ -1,25 +1,27 @@
-// UNDECLARED take-over that MOVES a row between slices — the poison case the coarse
-// fallback exists for (cache-takeover-scope.test.ts). On a create of the transfer
-// collection it finds the existing enrollment for that course and re-assigns it to
-// the new student (an UPDATE, in the mutation transaction), then returns its PK — a
-// take-over that is really an upsert-move.
+// UNDECLARED take-over that MOVES a junction row between slices — the poison the
+// coarse fallback exists for (cache-takeover-scope.test.ts). A parent update nests
+// `tags.create`; on the resulting junction create this hook finds the existing link
+// for that tag and re-assigns it to the new post (an UPDATE in the mutation trx),
+// then returns its PK — a take-over that is really an upsert-move.
 //
-// It declares NOTHING. Its old slice (the previous student) is unrecoverable from
-// the post-commit re-read, so the framework MUST purge coarse; a narrow guess would
-// leave the old student's cached read stale. This proves that coarse fallback holds.
+// It declares NOTHING. Its old slice (the previous post) is unrecoverable from the
+// post-commit re-read, so the framework MUST purge coarse; a narrow guess leaves the
+// old post's cached read stale. This proves the coarse fallback holds.
 
-const TRANSFER = 'test_items_enrollment_transfer';
+const JUNCTION = 'test_items_post_tag';
+const POST_FK = 'test_items_post_id';
+const TAG_FK = 'test_items_tag_id';
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${TRANSFER}.items.create`, async (payload, _meta, context) => {
-		const itemsService = new services.ItemsService(TRANSFER, {
+	filter(`${JUNCTION}.items.create`, async (payload, _meta, context) => {
+		const itemsService = new services.ItemsService(JUNCTION, {
 			schema: context.schema,
 			accountability: context.accountability,
 			knex: context.database,
 		});
 
 		const [existing] = await itemsService.readByQuery(
-			{ filter: { course: { _eq: payload.course } }, fields: ['id'], limit: 1 },
+			{ filter: { [TAG_FK]: { _eq: payload[TAG_FK] } }, fields: ['id'], limit: 1 },
 			{ emitEvents: false },
 		);
 
@@ -27,12 +29,12 @@ export default function registerHooks({ filter }, { services }) {
 			return payload;
 		}
 
-		// Re-assign the existing enrollment to the new student — the row moves slices. A
-		// raw update on the trx knex, so it doesn't recurse through the service purge.
+		// Re-assign the existing link to the new post — the row moves slices. A raw
+		// update on the trx knex, so it doesn't recurse through the service purge.
 		await context
-			.database(TRANSFER)
+			.database(JUNCTION)
 			.where({ id: existing.id })
-			.update({ student: payload.student });
+			.update({ [POST_FK]: payload[POST_FK] });
 
 		return existing.id;
 	});

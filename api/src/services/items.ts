@@ -529,7 +529,7 @@ implements AbstractService<Item> {
 
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
-		// An `items.create` hook can add purge tags via `context.scopedCache.addTag`;
+		// An `items.create` hook can add purge tags via `context.scopedCache.purgeBy`;
 		// drained into the purge below. Declared outside the transaction to outlive it.
 		const scopedCacheCollector = createScopedCacheCollector();
 
@@ -938,7 +938,7 @@ implements AbstractService<Item> {
 			// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
 			// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
 			// its footprint opts back into a precise purge by declaring it via
-			// `scopedCache.addTag` (a read-only dedup declares its one slice; an
+			// `scopedCache.purgeBy` (a read-only dedup declares its one slice; an
 			// upsert-move declares old + new) — then we trust it and narrow to the
 			// snapshot ∪ declared tags.
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
@@ -1013,7 +1013,7 @@ implements AbstractService<Item> {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
 
-		// An `items.read` hook adds scope tags via `context.scopedCache.addTag`, same
+		// An `items.read` hook adds scope tags via `context.scopedCache.scopeTo`, same
 		// channel as `cache.scope`; drained below.
 		const scopedCacheCollector = createScopedCacheCollector();
 
@@ -1104,7 +1104,7 @@ implements AbstractService<Item> {
 				{ database: this.knex, schema: this.schema, accountability: this.accountability },
 			)) as ScopedCacheTag[];
 
-			// Fold in tags an `items.read` hook added via `context.scopedCache.addTag`.
+			// Fold in tags an `items.read` hook added via `context.scopedCache.scopeTo`.
 			scopedCacheTags.push(...scopedCacheCollector.tags);
 		}
 
@@ -1322,7 +1322,7 @@ implements AbstractService<Item> {
 		const payload: Partial<AnyItem> = cloneDeep(data);
 		const nestedActionEvents: ActionEventParams[] = [];
 
-		// An `items.update` hook can add purge tags via `context.scopedCache.addTag`;
+		// An `items.update` hook can add purge tags via `context.scopedCache.purgeBy`;
 		// drained into the purge below.
 		const scopedCacheCollector = createScopedCacheCollector();
 
@@ -1763,7 +1763,7 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
-		// An `items.delete` hook can add purge tags via `context.scopedCache.addTag`;
+		// An `items.delete` hook can add purge tags via `context.scopedCache.purgeBy`;
 		// drained into the purge below.
 		const scopedCacheCollector = createScopedCacheCollector();
 
