@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
 		serializeScopedCacheTags: vi.fn(() => 'SERIALIZED'),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
+		queryCachable: vi.fn(() => true),
 		transform: vi.fn().mockReturnValue('EXPORTED'),
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
@@ -69,6 +70,10 @@ vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }
 
 vi.mock('../utils/permissions-cachable.js', () => {
 	return { permissionsCachable: mocks.permissionsCachable };
+});
+
+vi.mock('../utils/query-cachable.js', () => {
+	return { queryCachable: mocks.queryCachable };
 });
 
 vi.mock('../utils/get-cache-key.js', () => {
@@ -131,6 +136,7 @@ beforeEach(() => {
 	delete env['CACHE_TAGS_HEADER'];
 	delete env['CACHE_PURGED_TAGS_HEADER'];
 	permissionsCachable.mockResolvedValue(true);
+	mocks.queryCachable.mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -316,6 +322,21 @@ describe('respond middleware', () => {
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
 		);
+	});
+
+	test('$NOW query filter is not cached', async () => {
+		mocks.queryCachable.mockReturnValue(false);
+		const res = makeRes({ data: [{ id: 1 }] });
+
+		const req = makeReq({
+			sanitizedQuery: { filter: { created_on: { _gt: '$NOW' } } },
+		});
+
+		await respond(req, res, next);
+
+		// Skipped silently (KISS — no anomaly for an intentional hygiene skip).
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
 	});
 
 	test('a scoped-mode collection-less response flags missing_scope', async () => {

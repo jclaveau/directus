@@ -26,6 +26,7 @@ import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { permissionsCachable } from '../utils/permissions-cachable.js';
+import { queryCachable } from '../utils/query-cachable.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();
@@ -95,6 +96,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
+	// `$NOW` (in filter/deep) resolves to a Date in `sanitizeQuery` before the key is
+	// built, so each request keys distinctly (not a staleness risk). But the key never
+	// recurs: caching only writes a never-hit entry (Redis bloat + a bloated purge
+	// set). Skip it. Unlike the permission gate (`permissionsCachable`), which IS
+	// staleness: its filter isn't keyed.
+	const dynamicQueryFilter =
+		queryCachable(req.sanitizedQuery) === false;
+
 	// The request-level preconditions for caching, minus the payload/scope/permission
 	// gates below — reused to attribute a not-cached anomaly to the right reason.
 	const cacheableRequest =
@@ -110,6 +119,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		cache &&
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
+		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,
 			{
