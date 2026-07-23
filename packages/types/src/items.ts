@@ -2,6 +2,7 @@ import type { EventContext } from './events.js';
 import type { UserIntegrityCheckFlag } from './users.js';
 import type { PermissionsAction } from './permissions.js';
 import type { DirectusError } from './error.js';
+import type { ScopedCacheCollector } from './read-meta.js';
 
 export type Item = Record<string, any>;
 
@@ -84,6 +85,12 @@ export type MutationOptions = {
 	 * resolves to null instead of throwing; otherwise a nulling filter is an InvalidPayloadError.
 	 */
 	allowFilterCancel?: boolean | undefined;
+
+	/**
+	 * A shared scoped-cache tag collector injected by a batch/upsert parent so child
+	 * mutations' `purgeBy` tags survive to the parent's single deferred purge.
+	 */
+	scopedCacheCollector?: ScopedCacheCollector | undefined;
 
 	bypassAutoIncrementSequenceReset?: boolean;
 

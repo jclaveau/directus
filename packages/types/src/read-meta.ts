@@ -39,6 +39,17 @@ export interface ScopedCachePurgeHandle {
 }
 
 /**
+ * A per-operation sink collecting tags from `context.scopedCache`. A batch/upsert
+ * parent injects one via `MutationOptions.scopedCacheCollector` so its children (run
+ * with autoPurgeCache off) accumulate into it and the parent drains it once.
+ */
+export interface ScopedCacheCollector {
+	scope: ScopedCacheScopeHandle;
+	purge: ScopedCachePurgeHandle;
+	tags: ScopedCacheTag[];
+}
+
+/**
  * A relational-path scope field (`enrollment.student.user`): its dotted `field`
  * and the pre-split `segments` the pinner walks down a filter to the terminal value.
  */
