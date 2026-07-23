@@ -182,6 +182,25 @@ CACHE_ENABLED=false
 # List of collections that prevent cache purging when `CACHE_AUTO_PURGE` is enabled. ["directus_activity,directus_presets"]
 # CACHE_AUTO_PURGE_IGNORE_LIST="directus_activity,directus_presets"
 
+# Request dimensions folded into the cache key so a header-varying response
+# isn't served across callers. The response language (Accept-Language,
+# normalized primary tag) is ALWAYS keyed — no config needed.
+#   - CACHE_VARY_CONTENT_TYPES: formats a cached endpoint content-negotiates
+#     on, via req.accepts(<list>). Defaults to json,csv,yaml — safe because
+#     browsers/SDKs collapse to json (only an explicit text/csv etc. splits).
+#     Do NOT add xml/html: browsers send them high-q in Accept, so this would
+#     split ALL browser traffic into that bucket. ["json,csv,yaml"]
+#   - CACHE_VARY_REQUEST_HEADERS: exact header names or `*` globs a hook
+#     reshapes the body from (tenant/feature-flag). Opt-in (empty). Globs
+#     auto-skip proxy/tracing headers (x-forwarded-*, x-request-id, cf-ray,
+#     …) so a broad `x-*` can't disable the cache; name one exactly to
+#     override. ["x-tenant-id,x-feature-*"]
+#   - CACHE_VARY_REQUEST_HEADERS_EXCLUDED: extra headers (names or globs) to
+#     add to that built-in glob denylist, for platform per-request headers
+#     it doesn't already cover. ["x-my-lb-*"]
+# CACHE_VARY_CONTENT_TYPES="json,csv,yaml"
+# CACHE_VARY_REQUEST_HEADERS="x-tenant-id"
+
 # Flush the cache once on boot when the running build changed, so a code-only deploy (an extension or
 # core reshaping change with no migration and no version bump) doesn't keep serving the previous
 # build's response shape until CACHE_TTL expires. Only acts with CACHE_STORE=redis. [true]

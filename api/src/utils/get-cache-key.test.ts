@@ -220,3 +220,226 @@ describe('get cache key', async () => {
 		});
 	});
 });
+
+function varyRequest(overrides: Record<string, any> = {}): Request {
+	return { method, originalUrl: restUrl, ...overrides } as unknown as Request;
+}
+
+function acceptLanguage(value: string): Request {
+	return varyRequest({ headers: { 'accept-language': value } });
+}
+
+describe('Accept-Language dimension (always on)', () => {
+	beforeEach(() => {
+		vi.mocked(useEnv).mockReturnValue({});
+	});
+
+	test('a header-less request keeps the language-agnostic key', async () => {
+		const without = await getCacheKey(varyRequest());
+		const star = await getCacheKey(acceptLanguage('*'));
+
+		expect(star.hash).toEqual(without.hash);
+	});
+
+	test('the primary language is folded in when the caller sends one', async () => {
+		const base = await getCacheKey(varyRequest());
+		const fr = await getCacheKey(acceptLanguage('fr'));
+
+		expect(fr.hash).not.toEqual(base.hash);
+	});
+
+	test('different languages get different keys', async () => {
+		const fr = await getCacheKey(acceptLanguage('fr'));
+		const en = await getCacheKey(acceptLanguage('en'));
+
+		expect(fr.hash).not.toEqual(en.hash);
+	});
+
+	test('region and q-weights collapse to the primary tag', async () => {
+		const canonical = await getCacheKey(acceptLanguage('fr'));
+
+		for (const header of ['fr-FR', 'fr-CA,fr;q=0.9', 'en;q=0.5,fr;q=0.9', 'FR']) {
+			const variant = await getCacheKey(acceptLanguage(header));
+
+			expect(variant.hash).toEqual(canonical.hash);
+		}
+	});
+
+	test('trims OWS between the tag and its q-param', async () => {
+		const canonical = await getCacheKey(acceptLanguage('fr'));
+		const spaced = await getCacheKey(acceptLanguage('fr ;q=0.9'));
+
+		expect(spaced.hash).toEqual(canonical.hash);
+	});
+});
+
+describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
+	test('unset: the negotiated content type does not enter the key', async () => {
+		vi.mocked(useEnv).mockReturnValue({});
+
+		const csv = await getCacheKey(varyRequest({ accepts: () => 'csv' }));
+		const json = await getCacheKey(varyRequest({ accepts: () => 'json' }));
+
+		expect(csv.hash).toEqual(json.hash);
+	});
+
+	test('set: negotiates the request against the declared list', async () => {
+		vi.mocked(useEnv).mockReturnValue({ CACHE_VARY_CONTENT_TYPES: ['json', 'csv'] });
+
+		const accepts = vi.fn().mockReturnValue('csv');
+		await getCacheKey(varyRequest({ accepts }));
+
+		expect(accepts).toHaveBeenCalledWith(['json', 'csv']);
+	});
+
+	test('set: each type and the unsupported bucket get their own key', async () => {
+		vi.mocked(useEnv).mockReturnValue({ CACHE_VARY_CONTENT_TYPES: ['json', 'csv'] });
+
+		const csv = await getCacheKey(varyRequest({ accepts: () => 'csv' }));
+		const json = await getCacheKey(varyRequest({ accepts: () => 'json' }));
+		const unsupported = await getCacheKey(varyRequest({ accepts: () => false }));
+
+		expect(csv.hash).not.toEqual(json.hash);
+		expect(unsupported.hash).not.toEqual(csv.hash);
+		expect(unsupported.hash).not.toEqual(json.hash);
+	});
+
+	test('trims and dedupes the list, preserving order (not sorted)', async () => {
+		vi.mocked(useEnv).mockReturnValue({
+			CACHE_VARY_CONTENT_TYPES: ['json', ' csv ', 'json'],
+		});
+
+		const accepts = vi.fn().mockReturnValue('csv');
+		await getCacheKey(varyRequest({ accepts }));
+
+		// order preserved so cache negotiation mirrors the endpoint's req.accepts()
+		expect(accepts).toHaveBeenCalledWith(['json', 'csv']);
+	});
+});
+
+describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
+	function varyHeaders(patterns: string[]): void {
+		vi.mocked(useEnv).mockReturnValue({ CACHE_VARY_REQUEST_HEADERS: patterns });
+	}
+
+	function tenant(value: string): Request {
+		return varyRequest({ headers: { 'x-tenant-id': value } });
+	}
+
+	function feature(value: string): Request {
+		return varyRequest({ headers: { 'x-feature-beta': value } });
+	}
+
+	test('unset: request headers do not enter the key', async () => {
+		vi.mocked(useEnv).mockReturnValue({});
+
+		const a = await getCacheKey(tenant('a'));
+		const b = await getCacheKey(tenant('b'));
+
+		expect(a.hash).toEqual(b.hash);
+	});
+
+	test('exact name: distinct values split; absence is its own bucket', async () => {
+		varyHeaders(['x-tenant-id']);
+
+		const a = await getCacheKey(tenant('a'));
+		const b = await getCacheKey(tenant('b'));
+		const absent = await getCacheKey(varyRequest({ headers: {} }));
+
+		expect(a.hash).not.toEqual(b.hash);
+		expect(absent.hash).not.toEqual(a.hash);
+	});
+
+	test('unlisted proxy headers are ignored', async () => {
+		varyHeaders(['x-tenant-id']);
+
+		const one = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'a', 'x-request-id': '111' } }),
+		);
+
+		const two = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'a', 'x-request-id': '222' } }),
+		);
+
+		expect(one.hash).toEqual(two.hash);
+	});
+
+	test('glob matches present headers, ignores unlisted ones', async () => {
+		varyHeaders(['x-feature-*']);
+
+		const on = await getCacheKey(feature('1'));
+		const off = await getCacheKey(feature('0'));
+
+		const withNoise = await getCacheKey(
+			varyRequest({ headers: { 'x-feature-beta': '1', 'x-unrelated': 'z' } }),
+		);
+
+		expect(on.hash).not.toEqual(off.hash);
+		expect(withNoise.hash).toEqual(on.hash);
+	});
+
+	test('trims whitespace the env array cast leaves around a name', async () => {
+		varyHeaders([' x-tenant-id ']);
+
+		const a = await getCacheKey(tenant('a'));
+		const b = await getCacheKey(tenant('b'));
+
+		// Without the trim the padded name matches no header → both null → one bucket.
+		expect(a.hash).not.toEqual(b.hash);
+	});
+
+	test('a glob skips proxy/tracing headers but folds the rest', async () => {
+		varyHeaders(['x-*']);
+
+		const proxyA = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'a', 'x-forwarded-for': '1.1.1.1' } }),
+		);
+
+		const proxyB = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'a', 'x-forwarded-for': '2.2.2.2' } }),
+		);
+
+		// x-forwarded-for changed but is denied → same bucket (cache not disabled)
+		expect(proxyA.hash).toEqual(proxyB.hash);
+
+		// x-tenant-id is matched by the glob and not denied → still splits
+		const tenantB = await getCacheKey(
+			varyRequest({ headers: { 'x-tenant-id': 'b', 'x-forwarded-for': '1.1.1.1' } }),
+		);
+
+		expect(tenantB.hash).not.toEqual(proxyA.hash);
+	});
+
+	test('an exact proxy-header name overrides the glob denylist', async () => {
+		varyHeaders(['x-forwarded-for']);
+
+		const a = await getCacheKey(
+			varyRequest({ headers: { 'x-forwarded-for': '1.1.1.1' } }),
+		);
+
+		const b = await getCacheKey(
+			varyRequest({ headers: { 'x-forwarded-for': '2.2.2.2' } }),
+		);
+
+		expect(a.hash).not.toEqual(b.hash);
+	});
+
+	test('CACHE_VARY_REQUEST_HEADERS_EXCLUDED extends the glob denylist', async () => {
+		vi.mocked(useEnv).mockReturnValue({
+			CACHE_VARY_REQUEST_HEADERS: ['x-*'],
+			CACHE_VARY_REQUEST_HEADERS_EXCLUDED: ['x-tenant-id'],
+		});
+
+		// x-tenant-id is matched by x-* but now excluded → no longer splits
+		const a = await getCacheKey(tenant('a'));
+		const b = await getCacheKey(tenant('b'));
+
+		expect(a.hash).toEqual(b.hash);
+
+		// a sibling the exclusion doesn't name still splits
+		const featureOn = await getCacheKey(feature('1'));
+		const featureOff = await getCacheKey(feature('0'));
+
+		expect(featureOn.hash).not.toEqual(featureOff.hash);
+	});
+});
