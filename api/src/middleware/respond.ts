@@ -264,9 +264,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		else if (orphansInScopedMode) {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
 		}
-		else if (dynamicQueryFilter) {
-			void reportCacheAnomaly(req, 'dynamic_query_filter').catch(() => {});
-		}
 	}
 
 	if (req.sanitizedQuery.export) {

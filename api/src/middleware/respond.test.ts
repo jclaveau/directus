@@ -334,12 +334,9 @@ describe('respond middleware', () => {
 
 		await respond(req, res, next);
 
+		// Skipped silently (KISS — no anomaly for an intentional hygiene skip).
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
-
-		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
-			expect.any(Object),
-			'dynamic_query_filter',
-		);
+		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
 	});
 
 	test('a scoped-mode collection-less response flags missing_scope', async () => {
