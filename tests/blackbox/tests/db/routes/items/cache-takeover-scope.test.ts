@@ -10,6 +10,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
+import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -65,6 +66,25 @@ describe(oneLine`
 					};
 				}),
 			});
+
+			// A real M2M pivot carries UNIQUE(left, right); the dedup hook returns the
+			// existing row on a duplicate rather than hit that constraint. Add it via
+			// knex (the Directus fields API has no composite-unique) so a hook-less dup
+			// would raise a DB error the hook is proven to prevent.
+			const db = knex(config.knexConfig[vendor]!);
+
+			try {
+				await Promise.all(
+					[enrollment, transfer].map((collection) => {
+						return db.schema.alterTable(collection, (table) => {
+							table.unique(['student', 'course']);
+						});
+					}),
+				);
+			}
+			finally {
+				await db.destroy();
+			}
 
 			// Independent seeds (distinct collections) → one round-trip.
 			await Promise.all([
@@ -188,12 +208,14 @@ describe(oneLine`
 			const existingId = (await readStudent(enrollment, 'ada')).body.data[0].id;
 
 			// Duplicate (ada, algebra): the hook finds the pair and returns its PK, so the
-			// response is the existing row and no second row is inserted.
+			// response is the existing row and no second row is inserted — a plain insert
+			// would violate UNIQUE(student, course) and 500, so 200 proves the hook ran.
 			const duplicate = await request(url)
 				.post(`/items/${enrollment}`)
 				.send({ student: 'ada', course: 'algebra' })
 				.set('Authorization', auth);
 
+			expect(duplicate.statusCode).toBe(200);
 			expect(duplicate.body.data.id).toBe(existingId);
 			expect((await readStudent(enrollment, 'ada')).body.data).toHaveLength(1);
 
