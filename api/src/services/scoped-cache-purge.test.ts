@@ -351,9 +351,13 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		create falls back to a coarse purge (null) when a hook takes over a row (returns a
-		PK, scope value unknowable)
+		create re-reads a taken-over row's committed slice — a hook returning an existing
+		PK purges that row's slice, not a coarse collection-wide fallback
 	`, async () => {
+		// The hook returns PK 99 (takes over the row). Its PK lands in liveKeys, so the
+		// snapshot re-reads it by key — the slice is knowable (Z), no coarse null.
+		tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
 
@@ -361,11 +365,11 @@ describe(oneLine`
 			await service().createMany([{ name: 'x', student: 'A' }]);
 
 			expect(purgeScopedCache).toHaveBeenCalledWith(
-			expect.anything(),
-			'test',
-			null,
-			expect.anything(),
-		);
+				expect.anything(),
+				'test',
+				[{ collection: 'test', field: 'student', value: 'Z', type: 'string' }],
+				expect.anything(),
+			);
 		}
 		finally {
 			emitter.offFilter('test.items.create', takeOver);

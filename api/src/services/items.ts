@@ -900,17 +900,17 @@ implements AbstractService<Item> {
 			// Scope off the committed rows' stored values (re-read by returned key), not the
 			// raw input: a create hook can rewrite a scope field, a value left to a DB default
 			// is only knowable after the insert, and a DB trigger/coercion can diverge from the
-			// payload — the row is authoritative, the payload isn't. A row a hook *took over*
-			// (more live keys than payloads) has an unknowable scope value → collection-wide purge.
+			// payload — the row is authoritative, the payload isn't. A row a hook
+			// *took over* (returned an existing PK) is re-read too: its PK is in
+			// `liveKeys`, so its slice is knowable — no coarse fallback. A fabricated
+			// PK reads nothing → no tag (safe: no row, no dependent cache). The residual
+			// risk — a takeover's side effects on OTHER slices — is the same one any
+			// create hook carries, already trusted with a precise snapshot, not a flush.
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
 
 			if (scopedCacheFields.length > 0) {
 				const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
-				const someRowTakenOver = liveKeys.length > actionPayloads.length;
-
-				scopedCacheTags = someRowTakenOver
-					? null
-					: await this.snapshotScopedCacheTags(liveKeys);
+				scopedCacheTags = await this.snapshotScopedCacheTags(liveKeys);
 			}
 
 			await this.purgeScopedCache(scopedCacheTags);
