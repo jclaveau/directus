@@ -96,6 +96,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
+	// A read hook scoped this response to an unautopurgeable tag (a value slice on a
+	// field the target collection isn't scoped on) without `manuallyPurged`: no write
+	// can auto-purge it, so caching would serve stale. Skip caching + surface it.
+	const unautopurgeableScope =
+		res.locals['scopedCacheUnautopurgeable'] === true && scopedCachePurgeEnabled();
+
 	// `$NOW` (in filter/deep) resolves to a Date in `sanitizeQuery` before the key is
 	// built, so each request keys distinctly (not a staleness risk). But the key never
 	// recurs: caching only writes a never-hit entry (Redis bloat + a bloated purge
@@ -119,6 +125,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		cache &&
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
+		unautopurgeableScope === false &&
 		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,
@@ -252,7 +259,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		res.setHeader('Vary', 'Origin, Cache-Control');
 	}
 
-	// Surface the two silent "cacheable but skipped" reasons on the dashboard.
+	// Surface the silent "cacheable but skipped" reasons on the dashboard.
 	if (cacheStatsActive() && cacheableRequest) {
 		if (exceedsMaxSize) {
 			void reportCacheAnomaly(
@@ -263,6 +270,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 		else if (orphansInScopedMode) {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
+		}
+		else if (unautopurgeableScope) {
+			void reportCacheAnomaly(req, 'unautopurgeable_scope').catch(() => {});
 		}
 	}
 

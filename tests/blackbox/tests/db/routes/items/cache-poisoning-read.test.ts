@@ -10,24 +10,21 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// READ-side POISONING limits (#292), asserting the STALE HIT. A read hook enriches
-// its response from another collection; the framework can't see that dependency.
-// Without a reproducible `scopeTo`, a write to the dependency leaves the read stale.
-//   - P1: no scopeTo at all.
-//   - P4: scopeTo declared, but on a field the dependency isn't scoped on, so the
-//     purge side never emits that tag (orphaned) — declaring is not enough.
-// Both are author-contract limits, NOT framework bugs; each test proves the write
-// DID land (a direct read of the dependency shows the new value) so the HIT is truly
-// stale. The cache-poisoning-read extension hosts the two hooks.
+// READ-side POISONING limit (#292), asserting the STALE HIT. A read hook enriches
+// its response from another collection with NO scopeTo — the framework can't see the
+// dependency, so a write to it leaves the enriched read stale. An author-contract
+// limit, NOT a framework bug. The test is non-vacuous: it proves the write DID land
+// (a direct read of the dependency shows the new value) so the HIT is truly stale.
+//   - The sibling "declared but UNAUTOPURGEABLE scopeTo" case is HANDLED (uncached,
+//     not poisoned) — it lives in cache-unautopurgeable-scope.test.ts.
+// The cache-poisoning-read extension hosts the hook.
 
-const P1_ARTICLE = 'p_read_article';
-const P1_AUTHOR = 'p_read_author';
-const P4_READ = 'p_read_badread';
-const P4_DEP = 'p_read_baddep';
+const ARTICLE = 'p_read_article';
+const AUTHOR = 'p_read_author';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
-	read hook enrichment poisons the cache without a reproducible scopeTo (#292)
+	read hook enrichment with no scopeTo poisons the cache (#292)
 `, () => {
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
@@ -42,15 +39,14 @@ describe(oneLine`
 
 		let instance: ChildProcess;
 		let authorA: number;
-		let depD: number;
 
 		beforeAll(async () => {
-			// Seed on the default instance BEFORE the scoped instance spawns. Each read
-			// collection is scoped by space; its dependency holds the enriched value.
+			// Seed on the default instance BEFORE the scoped instance spawns. Both scoped
+			// by space; the read hook enriches an article from author[space=a].
 			await CreateCollections(vendor, {
 				collections: [
 					{
-						collection: P1_AUTHOR,
+						collection: AUTHOR,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
 							{ field: 'space', type: 'string' },
@@ -58,23 +54,7 @@ describe(oneLine`
 						],
 					},
 					{
-						collection: P1_ARTICLE,
-						meta: { scoped_cache_fields: ['space'] },
-						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'title', type: 'string' },
-						],
-					},
-					{
-						collection: P4_DEP,
-						meta: { scoped_cache_fields: ['space'] },
-						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'val', type: 'string' },
-						],
-					},
-					{
-						collection: P4_READ,
+						collection: ARTICLE,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
 							{ field: 'space', type: 'string' },
@@ -84,27 +64,18 @@ describe(oneLine`
 				],
 			});
 
-			const [authors, , deps] = await Promise.all([
+			const [authors] = await Promise.all([
 				CreateItem(vendor, {
-					collection: P1_AUTHOR,
+					collection: AUTHOR,
 					item: [{ space: 'a', name: 'orig' }],
 				}),
 				CreateItem(vendor, {
-					collection: P1_ARTICLE,
+					collection: ARTICLE,
 					item: [{ space: 'x', title: 't' }],
-				}),
-				CreateItem(vendor, {
-					collection: P4_DEP,
-					item: [{ space: 'd', val: 'orig' }],
-				}),
-				CreateItem(vendor, {
-					collection: P4_READ,
-					item: [{ space: 'z', title: 't' }],
 				}),
 			]);
 
 			authorA = authors[0].id;
-			depD = deps[0].id;
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -121,10 +92,8 @@ describe(oneLine`
 			instance.kill();
 
 			await Promise.all([
-				DeleteCollection(vendor, { collection: P1_ARTICLE }),
-				DeleteCollection(vendor, { collection: P1_AUTHOR }),
-				DeleteCollection(vendor, { collection: P4_READ }),
-				DeleteCollection(vendor, { collection: P4_DEP }),
+				DeleteCollection(vendor, { collection: ARTICLE }),
+				DeleteCollection(vendor, { collection: AUTHOR }),
 			]);
 		});
 
@@ -138,8 +107,8 @@ describe(oneLine`
 		}
 
 		it(oneLine`
-			P1: a read hook enriches from another collection with NO scopeTo — an author
-			write can't purge the enriched article, which stays a stale HIT
+			a read hook enriches from another collection with NO scopeTo — an author write
+			can't purge the enriched article, which stays a stale HIT
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -148,51 +117,23 @@ describe(oneLine`
 				.set('Authorization', auth);
 
 			// Warm the enriched article read: author_name is pulled from author[space=a].
-			const warm = await readSlice(P1_ARTICLE, 'x');
+			const warm = await readSlice(ARTICLE, 'x');
 			expect(warm.body.data[0].author_name).toBe('orig');
 
 			// Change the author the read depends on.
 			await request(url)
-				.patch(`/items/${P1_AUTHOR}/${authorA}`)
+				.patch(`/items/${AUTHOR}/${authorA}`)
 				.send({ name: 'changed' })
 				.set('Authorization', auth);
 
 			// The write landed and purged the author's OWN cache (non-vacuity).
-			const dep = await readSlice(P1_AUTHOR, 'a');
+			const dep = await readSlice(AUTHOR, 'a');
 			expect(dep.body.data[0].name).toBe('changed');
 
 			// But the article read was never tagged for the author → HIT with stale data.
-			const stale = await readSlice(P1_ARTICLE, 'x');
+			const stale = await readSlice(ARTICLE, 'x');
 			expect(stale.headers[cacheStatusHeader]).toBe('HIT');
 			expect(stale.body.data[0].author_name).toBe('orig');
-		});
-
-		it(oneLine`
-			P4: a read hook declares scopeTo on a field the dependency isn't scoped on —
-			the tag is orphaned, a dep write can't purge it, the read stays a stale HIT
-		`, async () => {
-			const url = getUrl(vendor, env);
-
-			await request(url)
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
-
-			const warm = await readSlice(P4_READ, 'z');
-			expect(warm.body.data[0].dep_val).toBe('orig');
-
-			await request(url)
-				.patch(`/items/${P4_DEP}/${depD}`)
-				.send({ val: 'changed' })
-				.set('Authorization', auth);
-
-			// The dep write landed and purged the dep's own space slice (non-vacuity).
-			const dep = await readSlice(P4_DEP, 'd');
-			expect(dep.body.data[0].val).toBe('changed');
-
-			// The scopeTo tag (ghost=g) is never emitted by a dep write → stale HIT.
-			const stale = await readSlice(P4_READ, 'z');
-			expect(stale.headers[cacheStatusHeader]).toBe('HIT');
-			expect(stale.body.data[0].dep_val).toBe('orig');
 		});
 	});
 });

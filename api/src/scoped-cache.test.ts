@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	countScopedCacheTagMembers,
 	createScopedCacheCollector,
+	scopedCacheTagKey,
 } from './scoped-cache.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 
@@ -103,5 +104,23 @@ describe('createScopedCacheCollector', () => {
 		purge.purgeBy({ field: 'author', value: '7', collection: 'articles' });
 
 		expect(tags).toHaveLength(1);
+	});
+
+	it('records a manuallyPurged scopeTo tag key (anomaly-exempt)', () => {
+		const { scope, manuallyPurgedKeys } = createScopedCacheCollector();
+		const slice = { collection: 'articles', field: 'author', value: 5 };
+
+		scope.scopeTo(slice, { manuallyPurged: true });
+
+		expect(manuallyPurgedKeys.has(scopedCacheTagKey(slice))).toBe(true);
+	});
+
+	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
+		const { scope, purge, manuallyPurgedKeys } = createScopedCacheCollector();
+
+		scope.scopeTo({ collection: 'articles', field: 'author', value: 5 });
+		purge.purgeBy({ collection: 'authors' });
+
+		expect(manuallyPurgedKeys.size).toBe(0);
 	});
 });
