@@ -19,6 +19,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //   - a veto that declares its slice via `purgeBy` purges precisely — pinning the
 //     parity fix that drains the collector on the update/delete cancel path (before
 //     the fix these early-returned and dropped the declaration).
+//   - a pure veto's GLOBAL (unscoped) read stays warm too: the cancel changed
+//     nothing, so not even the bare collection tag is purged (a pure cancel must
+//     not drain the collector, else every rejected write flushes all global reads).
 
 const EDITABLE = 'test_items_editable';
 const REMOVABLE = 'test_items_removable';
@@ -120,6 +123,12 @@ describe(oneLine`
 			return request(getUrl(vendor, env))
 				.get(`/items/${collection}`)
 				.query({ 'filter[space][_eq]': space })
+				.set('Authorization', auth);
+		}
+
+		function readAll(collection: string) {
+			return request(getUrl(vendor, env))
+				.get(`/items/${collection}`)
 				.set('Authorization', auth);
 		}
 
@@ -233,6 +242,52 @@ describe(oneLine`
 			expect(p.headers[cacheStatusHeader]).toBe('HIT');
 			expect(q.headers[cacheStatusHeader]).toBe('MISS');
 			expect(q.body.data).toHaveLength(1);
+		});
+
+		it(oneLine`
+			a pure update veto leaves the collection's GLOBAL (unscoped) read warm — the
+			cancel changed nothing, so the bare collection tag is left untouched
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// Warm an unscoped list read → carried by the bare collection tag.
+			await readAll(EDITABLE);
+
+			// Pure veto: the hook cancels the update without declaring any purge.
+			await request(url)
+				.patch(`/items/${EDITABLE}/${editA}`)
+				.send({ note: 'reject' })
+				.set('Authorization', auth);
+
+			const all = await readAll(EDITABLE);
+
+			expect(all.headers[cacheStatusHeader]).toBe('HIT');
+		});
+
+		it(oneLine`
+			a pure delete veto leaves the collection's GLOBAL (unscoped) read warm — the
+			cancel deleted nothing, so the bare collection tag is left untouched
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			await readAll(REMOVABLE);
+
+			// Pure veto: the hook cancels the deletion without declaring any purge.
+			await request(url)
+				.delete(`/items/${REMOVABLE}/${removeProtect}`)
+				.set('Authorization', auth);
+
+			const all = await readAll(REMOVABLE);
+
+			expect(all.headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });
