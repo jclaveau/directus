@@ -1,7 +1,7 @@
 import type { Knex } from 'knex';
 import type { Accountability } from './accountability.js';
 import type { PromiseCallback } from './misc.js';
-import type { ScopedCacheHandle } from './read-meta.js';
+import type { ScopedCachePurgeHandle, ScopedCacheScopeHandle } from './read-meta.js';
 import type { SchemaOverview } from './schema.js';
 
 export type EventContext = {
@@ -9,10 +9,10 @@ export type EventContext = {
 	schema: SchemaOverview | null;
 	accountability: Accountability | null;
 	/**
-	 * Present on CRUD *filter* hooks (`items.read`/`create`/`update`/`delete`): lets
-	 * the hook add scoped cache tags for this op. See {@link ScopedCacheHandle}.
+	 * Scoped-cache tag channel, carrying ONLY the method for this filter's event:
+	 * `scopeTo` on `items.read`, `purgeBy` on `items.create`/`update`/`delete`.
 	 */
-	scopedCache?: ScopedCacheHandle;
+	scopedCache?: ScopedCacheScopeHandle | ScopedCachePurgeHandle;
 };
 
 export type FilterHandler<TIn = unknown, TOut = TIn> = (

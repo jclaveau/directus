@@ -573,7 +573,7 @@ implements AbstractService<Item> {
 								database: trx,
 								schema: this.schema,
 								accountability: this.accountability,
-								scopedCache: scopedCacheCollector.handle,
+								scopedCache: scopedCacheCollector.purge,
 							},
 						)
 						: payload;
@@ -1032,7 +1032,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
-						scopedCache: scopedCacheCollector.handle,
+						scopedCache: scopedCacheCollector.scope,
 					},
 				)
 				: records;
@@ -1343,7 +1343,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
-						scopedCache: scopedCacheCollector.handle,
+						scopedCache: scopedCacheCollector.purge,
 					},
 				)
 				: payload;
@@ -1781,7 +1781,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
-						scopedCache: scopedCacheCollector.handle,
+						scopedCache: scopedCacheCollector.purge,
 					},
 				)
 				: keys;
@@ -1835,7 +1835,7 @@ implements AbstractService<Item> {
 					database: this.knex,
 					schema: this.schema,
 					accountability: this.accountability,
-					scopedCache: scopedCacheCollector.handle,
+					scopedCache: scopedCacheCollector.purge,
 				},
 			);
 		}

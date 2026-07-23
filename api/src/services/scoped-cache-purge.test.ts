@@ -506,23 +506,23 @@ describe(oneLine`
 		}
 	});
 
-	// The `context.scopedCache.addTag` channel: a regular CRUD *filter* hook adds tags
-	// straight from the event it already uses (read/create/update/delete), not the
-	// internal `cache.scope`/`cache.purge` events. Additive to framework tags — read
-	// tags into the meta rider, mutation tags into the purge.
-	describe('context.scopedCache.addTag from a CRUD filter hook', () => {
-		// A cross-collection dependency a hook declares (a read enriched from an
-		// authors row); shared so the hook's addTag and the assertion can't drift.
+	// `context.scopedCache` carries only the event's method: an `items.read` filter
+	// scopes the response via `scopeTo`; a create/update/delete filter purges via
+	// `purgeBy`. Additive to the framework tags — read tags into the meta rider,
+	// mutation tags into the purge.
+	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
+		// A cross-collection dependency a hook declares (a read enriched from an authors
+		// row); shared so the hook's tag and the assertion can't drift.
 		const authorsDependency = { collection: 'authors', field: 'id', value: 5 };
 
 		it(oneLine`
-			an items.read hook adds a cross-collection tag, unioned with the auto-derived
-			collection tag on the meta rider
+			an items.read hook scopes the response to a cross-collection tag, unioned with
+			the auto-derived collection tag on the meta rider
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag(authorsDependency);
+				ctx.scopedCache.scopeTo(authorsDependency);
 				return payload;
 			};
 
@@ -549,7 +549,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return payload;
 			};
 
@@ -582,7 +582,7 @@ describe(oneLine`
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return payload;
 			};
 
@@ -615,7 +615,7 @@ describe(oneLine`
 			tracker.on.delete('test').response(1);
 
 			const declare = async (keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return keys;
 			};
 
@@ -650,7 +650,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag(authorsDependency);
+				ctx.scopedCache.purgeBy(authorsDependency);
 				return 99;
 			};
 

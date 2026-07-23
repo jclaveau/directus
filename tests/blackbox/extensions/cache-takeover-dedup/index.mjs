@@ -37,13 +37,14 @@ export default function registerHooks({ filter }, { services }) {
 			return payload;
 		}
 
-		// Reuse the read's pinned slice(s) as the take-over's declared footprint. For a
-		// (student: ada, course: algebra) lookup the scope field `student` pins one tag:
+		// Purge by the read's pinned slice(s) — a create is a mutation, so this is the
+		// purge side. For a (student: ada, course: algebra) lookup the scope field
+		// `student` pins one tag, which is exactly what to invalidate:
 		//   [{
 		//     collection: 'test_items_enrollment',
 		//     field: 'student', value: 'ada', type: 'string',
 		//   }]
-		context.scopedCache?.addTags(result.getMeta?.()?.scopedCacheTags ?? []);
+		context.scopedCache?.purgeBy(result.getMeta?.()?.scopedCacheTags ?? []);
 
 		return existing.id;
 	});
