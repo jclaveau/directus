@@ -112,6 +112,14 @@ export const seedDBStructure = () => {
 					type: 'string',
 				});
 
+				// A real datetime column so `filter[event_at][_gte]=$NOW` is a valid
+				// query; `$NOW` vs a varchar errors on strict-typed drivers.
+				await CreateField(vendor, {
+					collection: collectionFirst,
+					field: 'event_at',
+					type: 'dateTime',
+				});
+
 				// A target collection per relation type + the relation field on collectionFirst.
 				for (const target of [
 					collectionRelated,

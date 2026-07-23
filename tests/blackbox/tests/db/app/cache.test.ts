@@ -2335,6 +2335,55 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		A read whose query filter uses $NOW is never cached: the cache key holds the
+		literal $NOW string, so a HIT would freeze the first request's "now"
+	`, () => {
+		// $NOW resolves to the current time per request, but the cache key keeps the
+		// literal $NOW — a HIT would serve the first "now" for the whole TTL. respond.ts
+		// skips such reads (queryFilterCachable). The static-date control below HITs, so
+		// the MISS above is the $NOW gate and not some other skip.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url)
+				.post(`/utils/cache/clear`)
+				.set('Authorization', auth);
+
+			const readNow = () => {
+				return request(url)
+					.get(`/items/${collectionFirst}`)
+					.query({ 'filter[event_at][_gte]': '$NOW' })
+					.set('Authorization', auth);
+			};
+
+			const first = await readNow();
+			const second = await readNow();
+
+			// Never cached — both reads MISS.
+			expect(first.statusCode).toBe(200);
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(second.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Control: the same read with a static date is genuinely cached (HIT on
+			// re-read), so the MISS above is the $NOW gate, not some other skip.
+			const readStatic = () => {
+				return request(url)
+					.get(`/items/${collectionFirst}`)
+					.query({ 'filter[event_at][_gte]': '2000-01-01T00:00:00' })
+					.set('Authorization', auth);
+			};
+
+			await readStatic();
+			const warm = await readStatic();
+
+			expect(warm.statusCode).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+		});
+	});
+
+	describe(oneLine`
 		A collection-less read (/server/info) is not cached in scoped mode: nothing
 		could purge it, so respond.ts skips it rather than orphan a stale entry
 	`, () => {
