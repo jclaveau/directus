@@ -138,6 +138,15 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		function graphqlRead(collection: string, space: string) {
+			return request(getUrl(vendor, env))
+				.post('/graphql')
+				.send({
+					query: `{ ${collection}(filter: { space: { _eq: "${space}" } }) { id } }`,
+				})
+				.set('Authorization', auth);
+		}
+
 		it(oneLine`
 			an unautopurgeable scopeTo with no manuallyPurged leaves the read uncached —
 			two reads with no write between both MISS
@@ -153,6 +162,25 @@ describe(oneLine`
 
 			// Never stored → the second identical read is still a MISS (a normal cacheable
 			// read would be a HIT here), so no stale entry can ever be served.
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(second.headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			the cancel covers the GraphQL path too — a graphql read of the same collection
+			carries the flag through GraphQLService and stays uncached
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const first = await graphqlRead(CANCEL_READ, 'z');
+			const second = await graphqlRead(CANCEL_READ, 'z');
+
+			// GraphQLService must aggregate the unautopurgeable flag across its reads,
+			// else the /graphql entry would cache (HIT on the second) and serve stale.
 			expect(first.headers[cacheStatusHeader]).toBe('MISS');
 			expect(second.headers[cacheStatusHeader]).toBe('MISS');
 		});
