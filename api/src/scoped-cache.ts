@@ -2,8 +2,7 @@ import { useEnv } from '@directus/env';
 import type {
 	EventContext,
 	Filter,
-	ScopedCachePurgeHandle,
-	ScopedCacheScopeHandle,
+	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
 	SchemaOverview,
@@ -23,11 +22,7 @@ const env = useEnv();
  * the service drains `tags` into the read's scope or the mutation's purge tags. Both
  * are the same idempotent sink. Safe with purging off (then `tags` is unread).
  */
-export function createScopedCacheCollector(): {
-	scope: ScopedCacheScopeHandle;
-	purge: ScopedCachePurgeHandle;
-	tags: ScopedCacheTag[];
-} {
+export function createScopedCacheCollector(): ScopedCacheCollector {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
 

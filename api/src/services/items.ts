@@ -531,7 +531,8 @@ implements AbstractService<Item> {
 
 		// An `items.create` hook can add purge tags via `context.scopedCache.purgeBy`;
 		// drained into the purge below. Declared outside the transaction to outlive it.
-		const scopedCacheCollector = createScopedCacheCollector();
+		const scopedCacheCollector =
+			opts.scopedCacheCollector ?? createScopedCacheCollector();
 
 		const { nestedActionEvents, actionPayloads } = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
@@ -1226,6 +1227,11 @@ implements AbstractService<Item> {
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
 
+		// One collector shared across the forked child updates so an `items.update`
+		// hook's `purgeBy` survives to the single deferred purge below (children run
+		// with autoPurgeCache off, so their own drain is suppressed).
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		try {
 			await transaction(this.knex, async (knex) => {
 				const service = this.fork({ knex });
@@ -1244,6 +1250,7 @@ implements AbstractService<Item> {
 					const combinedOpts: MutationOptions = {
 						autoPurgeCache: false,
 						...opts,
+						scopedCacheCollector,
 						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
 					};
 
@@ -1272,7 +1279,7 @@ implements AbstractService<Item> {
 						? null
 						: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-				await this.purgeScopedCache(scopedCacheTags);
+				await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 			}
 		}
 
@@ -1324,7 +1331,8 @@ implements AbstractService<Item> {
 
 		// An `items.update` hook can add purge tags via `context.scopedCache.purgeBy`;
 		// drained into the purge below.
-		const scopedCacheCollector = createScopedCacheCollector();
+		const scopedCacheCollector =
+			opts.scopedCacheCollector ?? createScopedCacheCollector();
 
 		// Run all hooks that are attached to this event so the end user has the chance to augment the
 		// item that is about to be saved
@@ -1359,8 +1367,13 @@ implements AbstractService<Item> {
 			}
 
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op.
-			if (shouldClearCache(this.cache, opts, this.collection)) {
+			// (parity with create's cancel); a plain validation cancel is a no-op — an
+			// empty collector must not reach purgeScopedCache, which would purge the bare
+			// collection tag (every global read) even though nothing changed.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
 				await this.purgeScopedCache([], scopedCacheCollector);
 			}
 
@@ -1682,13 +1695,22 @@ implements AbstractService<Item> {
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(inputKeys);
 
+		// Shared collector: child upserts run with autoPurgeCache off, so a
+		// create/update hook's `purgeBy` reaches the deferred purge only via this sink.
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		const primaryKeys = await transaction(this.knex, async (knex) => {
 			const service = this.fork({ knex });
 
 			const primaryKeys: PrimaryKey[] = [];
 
 			for (const payload of payloads) {
-				const primaryKey = await service.upsertOne(payload, { ...(opts || {}), autoPurgeCache: false });
+				const primaryKey = await service.upsertOne(payload, {
+					...(opts || {}),
+					autoPurgeCache: false,
+					scopedCacheCollector,
+				});
+
 				primaryKeys.push(primaryKey);
 			}
 
@@ -1711,7 +1733,7 @@ implements AbstractService<Item> {
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-			await this.purgeScopedCache(scopedCacheTags);
+			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
 
 		return primaryKeys;
@@ -1771,7 +1793,8 @@ implements AbstractService<Item> {
 
 		// An `items.delete` hook can add purge tags via `context.scopedCache.purgeBy`;
 		// drained into the purge below.
-		const scopedCacheCollector = createScopedCacheCollector();
+		const scopedCacheCollector =
+			opts.scopedCacheCollector ?? createScopedCacheCollector();
 
 		const keysAfterHooks =
 			opts.emitEvents !== false
@@ -1800,8 +1823,13 @@ implements AbstractService<Item> {
 			}
 
 			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op.
-			if (shouldClearCache(this.cache, opts, this.collection)) {
+			// (parity with create's cancel); a plain validation cancel is a no-op — an
+			// empty collector must not reach purgeScopedCache, which would purge the bare
+			// collection tag (every global read) even though nothing changed.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
 				await this.purgeScopedCache([], scopedCacheCollector);
 			}
 
