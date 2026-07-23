@@ -507,10 +507,14 @@ describe(oneLine`
 	});
 
 	// The `context.scopedCache.addTag` channel: a regular CRUD *filter* hook adds tags
-	// straight from the event it already uses (`items.read`/`create`/`delete`), not
-	// the internal `cache.scope`/`cache.purge` events. Additive to framework tags —
-	// read tags into the meta rider, mutation tags into the purge.
+	// straight from the event it already uses (read/create/update/delete), not the
+	// internal `cache.scope`/`cache.purge` events. Additive to framework tags — read
+	// tags into the meta rider, mutation tags into the purge.
 	describe('context.scopedCache.addTag from a CRUD filter hook', () => {
+		// A cross-collection dependency a hook declares (a read enriched from an
+		// authors row); shared so the hook's addTag and the assertion can't drift.
+		const authorsDependency = { collection: 'authors', field: 'id', value: 5 };
+
 		it(oneLine`
 			an items.read hook adds a cross-collection tag, unioned with the auto-derived
 			collection tag on the meta rider
@@ -518,7 +522,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				ctx.scopedCache.addTag(authorsDependency);
 				return payload;
 			};
 
@@ -529,7 +533,7 @@ describe(oneLine`
 
 				expect(readMeta(result)?.scopedCacheTags).toEqual([
 					{ collection: 'test' },
-					{ collection: 'other', field: 'id', value: 7 },
+					authorsDependency,
 				]);
 			}
 			finally {
@@ -545,7 +549,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				ctx.scopedCache.addTag(authorsDependency);
 				return payload;
 			};
 
@@ -559,7 +563,7 @@ describe(oneLine`
 					'test',
 					[
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						{ collection: 'other', field: 'id', value: 7 },
+						authorsDependency,
 					],
 					expect.anything(),
 				);
@@ -578,7 +582,7 @@ describe(oneLine`
 			tracker.on.update('test').response(1);
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				ctx.scopedCache.addTag(authorsDependency);
 				return payload;
 			};
 
@@ -593,7 +597,7 @@ describe(oneLine`
 					[
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 						{ collection: 'test', field: 'student', value: 'B', type: 'string' },
-						{ collection: 'other', field: 'id', value: 7 },
+						authorsDependency,
 					],
 					expect.anything(),
 				);
@@ -611,7 +615,7 @@ describe(oneLine`
 			tracker.on.delete('test').response(1);
 
 			const declare = async (keys: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				ctx.scopedCache.addTag(authorsDependency);
 				return keys;
 			};
 
@@ -625,7 +629,7 @@ describe(oneLine`
 					'test',
 					[
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
-						{ collection: 'other', field: 'id', value: 7 },
+						authorsDependency,
 					],
 					expect.anything(),
 				);
@@ -646,7 +650,7 @@ describe(oneLine`
 			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
 
 			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				ctx.scopedCache.addTag(authorsDependency);
 				return 99;
 			};
 
@@ -660,7 +664,7 @@ describe(oneLine`
 					'test',
 					[
 						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
-						{ collection: 'other', field: 'id', value: 7 },
+						authorsDependency,
 					],
 					expect.anything(),
 				);
