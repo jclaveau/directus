@@ -28,6 +28,7 @@ import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lo
 import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
+	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	scopedCacheTagsFromRows,
@@ -231,13 +232,37 @@ implements AbstractService<Item> {
 		};
 	}
 
-	private async purgeScopedCache(tags: ScopedCacheTag[] | null): Promise<void> {
+	private async purgeScopedCache(
+		tags: ScopedCacheTag[] | null,
+		collector?: { tags: ScopedCacheTag[] },
+	): Promise<void> {
+		const context = this.scopedCachePurgeContext();
+		const hookTags = collector?.tags ?? [];
+
+		if (tags !== null) {
+			this.scopedCachePurged = await purgeScopedCache(
+				this.cache,
+				this.collection,
+				[...tags, ...hookTags],
+				context,
+			);
+
+			return;
+		}
+
+		// A `null` tag set means this collection's own slices are unresolvable → coarse
+		// whole-collection purge. Tags a hook added via `context.scopedCache` are often
+		// for other collections the coarse pass never reaches, so purge them too.
 		this.scopedCachePurged = await purgeScopedCache(
 			this.cache,
 			this.collection,
-			tags,
-			this.scopedCachePurgeContext(),
+			null,
+			context,
 		);
+
+		if (hookTags.length > 0) {
+			await purgeScopedCache(this.cache, this.collection, hookTags, context);
+		}
 	}
 
 	private get collectionScopedCacheFields(): string[] {
@@ -504,6 +529,10 @@ implements AbstractService<Item> {
 
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
+		// An `items.create` hook can add purge tags via `context.scopedCache.addTag`;
+		// drained into the purge below. Declared outside the transaction to outlive it.
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		const { nestedActionEvents, actionPayloads } = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
 			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
@@ -544,6 +573,7 @@ implements AbstractService<Item> {
 								database: trx,
 								schema: this.schema,
 								accountability: this.accountability,
+								scopedCache: scopedCacheCollector.handle,
 							},
 						)
 						: payload;
@@ -913,7 +943,7 @@ implements AbstractService<Item> {
 					: await this.snapshotScopedCacheTags(liveKeys);
 			}
 
-			await this.purgeScopedCache(scopedCacheTags);
+			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
 
 		return results;
@@ -971,6 +1001,10 @@ implements AbstractService<Item> {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
 
+		// An `items.read` hook adds scope tags via `context.scopedCache.addTag`, same
+		// channel as `cache.scope`; drained below.
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		const filteredRecords =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
@@ -986,6 +1020,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
+						scopedCache: scopedCacheCollector.handle,
 					},
 				)
 				: records;
@@ -1056,6 +1091,9 @@ implements AbstractService<Item> {
 				{ collection: this.collection, query: updatedQuery, records: filteredRecords },
 				{ database: this.knex, schema: this.schema, accountability: this.accountability },
 			)) as ScopedCacheTag[];
+
+			// Fold in tags an `items.read` hook added via `context.scopedCache.addTag`.
+			scopedCacheTags.push(...scopedCacheCollector.tags);
 		}
 
 		if (opts?.emitEvents !== false) {
@@ -1272,6 +1310,10 @@ implements AbstractService<Item> {
 		const payload: Partial<AnyItem> = cloneDeep(data);
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		// An `items.update` hook can add purge tags via `context.scopedCache.addTag`;
+		// drained into the purge below.
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		// Run all hooks that are attached to this event so the end user has the chance to augment the
 		// item that is about to be saved
 		const payloadAfterHooks =
@@ -1289,6 +1331,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
+						scopedCache: scopedCacheCollector.handle,
 					},
 				)
 				: payload;
@@ -1543,7 +1586,7 @@ implements AbstractService<Item> {
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-			await this.purgeScopedCache(scopedCacheTags);
+			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1708,6 +1751,10 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
+		// An `items.delete` hook can add purge tags via `context.scopedCache.addTag`;
+		// drained into the purge below.
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		const keysAfterHooks =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<PrimaryKey[], null>(
@@ -1722,6 +1769,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
+						scopedCache: scopedCacheCollector.handle,
 					},
 				)
 				: keys;
@@ -1775,6 +1823,7 @@ implements AbstractService<Item> {
 					database: this.knex,
 					schema: this.schema,
 					accountability: this.accountability,
+					scopedCache: scopedCacheCollector.handle,
 				},
 			);
 		}
@@ -1824,7 +1873,7 @@ implements AbstractService<Item> {
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.purgeScopedCache(oldScopedCacheTags);
+			await this.purgeScopedCache(oldScopedCacheTags, scopedCacheCollector);
 		}
 
 		if (opts.emitEvents !== false) {
