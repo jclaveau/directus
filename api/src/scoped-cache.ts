@@ -27,20 +27,27 @@ export function createScopedCacheCollector(): {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
 
+	function addTag(tag: ScopedCacheTag): void {
+		// Idempotent: a filter that re-emits (delete fires its hook twice) or a hook
+		// looping over rows that resolve the same slice must not inflate the tag set.
+		const key = JSON.stringify(tag);
+
+		if (seen.has(key)) {
+			return;
+		}
+
+		seen.add(key);
+		tags.push(tag);
+	}
+
 	return {
 		tags,
 		handle: {
-			addTag(tag) {
-				// Idempotent: a filter that re-emits (delete fires its hook twice) or a
-				// hook looping over rows that resolve the same slice must not inflate it.
-				const key = JSON.stringify(tag);
-
-				if (seen.has(key)) {
-					return;
+			addTag,
+			addTags(more) {
+				for (const tag of more) {
+					addTag(tag);
 				}
-
-				seen.add(key);
-				tags.push(tag);
 			},
 		},
 	};

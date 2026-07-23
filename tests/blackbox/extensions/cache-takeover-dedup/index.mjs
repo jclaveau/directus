@@ -38,9 +38,7 @@ export default function registerHooks({ filter }, { services }) {
 		}
 
 		// Reuse the read's pinned slice(s) as the take-over's declared footprint.
-		for (const tag of result.getMeta?.()?.scopedCacheTags ?? []) {
-			context.scopedCache?.addTag(tag);
-		}
+		context.scopedCache?.addTags(result.getMeta?.()?.scopedCacheTags ?? []);
 
 		return existing.id;
 	});

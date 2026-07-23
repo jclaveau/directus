@@ -27,6 +27,8 @@ export interface ScopedCacheTag {
  */
 export interface ScopedCacheHandle {
 	addTag(tag: ScopedCacheTag): void;
+	/** Add several at once, e.g. `addTags(result.getMeta().scopedCacheTags)`. */
+	addTags(tags: readonly ScopedCacheTag[]): void;
 }
 
 /**

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { countScopedCacheTagMembers } from './scoped-cache.js';
+import {
+	countScopedCacheTagMembers,
+	createScopedCacheCollector,
+} from './scoped-cache.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 
 // hoisted: scoped-cache.ts reads `const env = useEnv()` at module load, before a
@@ -65,5 +68,29 @@ describe('countScopedCacheTagMembers', () => {
 	it('returns {} for an empty tag list', async () => {
 		expect(await countScopedCacheTagMembers([])).toEqual({});
 		expect(pipeline.scard).not.toHaveBeenCalled();
+	});
+});
+
+describe('createScopedCacheCollector', () => {
+	it('collects tags, deduplicating structurally-identical ones', () => {
+		const { handle, tags } = createScopedCacheCollector();
+		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
+
+		handle.addTag(authorSlice);
+		handle.addTag({ ...authorSlice }); // same slice, different object → deduped
+
+		expect(tags).toEqual([authorSlice]);
+	});
+
+	it('addTags adds a batch, deduping within it and against prior tags', () => {
+		const { handle, tags } = createScopedCacheCollector();
+		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
+		const authorsTable = { collection: 'authors' };
+
+		handle.addTag(authorSlice);
+		handle.addTags([{ ...authorSlice }, authorsTable, authorsTable]);
+
+		// authorSlice repeats the prior tag, authorsTable appears twice → each once.
+		expect(tags).toEqual([authorSlice, authorsTable]);
 	});
 });
