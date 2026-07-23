@@ -66,18 +66,20 @@ describe(oneLine`
 				}),
 			});
 
-			await CreateItem(vendor, {
-				collection: enrollment,
-				item: [
-					{ student: 'ada', course: 'algebra' },
-					{ student: 'bob', course: 'biology' },
-				],
-			});
-
-			await CreateItem(vendor, {
-				collection: transfer,
-				item: [{ student: 'ada', course: 'algebra' }],
-			});
+			// Independent seeds (distinct collections) → one round-trip.
+			await Promise.all([
+				CreateItem(vendor, {
+					collection: enrollment,
+					item: [
+						{ student: 'ada', course: 'algebra' },
+						{ student: 'bob', course: 'biology' },
+					],
+				}),
+				CreateItem(vendor, {
+					collection: transfer,
+					item: [{ student: 'ada', course: 'algebra' }],
+				}),
+			]);
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -92,8 +94,11 @@ describe(oneLine`
 
 		afterAll(async () => {
 			instance.kill();
-			await DeleteCollection(vendor, { collection: enrollment });
-			await DeleteCollection(vendor, { collection: transfer });
+
+			await Promise.all([
+				DeleteCollection(vendor, { collection: enrollment }),
+				DeleteCollection(vendor, { collection: transfer }),
+			]);
 		});
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -115,9 +120,11 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			// Warm both student slices.
-			await readStudent(enrollment, 'ada');
-			await readStudent(enrollment, 'bob');
+			// Warm both student slices (independent reads).
+			await Promise.all([
+				readStudent(enrollment, 'ada'),
+				readStudent(enrollment, 'bob'),
+			]);
 
 			// Re-enroll ada in the course she takes: the dedup hook finds (ada, algebra),
 			// declares ada's slice, returns its PK → a narrow, precise purge of ada only.
@@ -126,13 +133,18 @@ describe(oneLine`
 				.send({ student: 'ada', course: 'algebra' })
 				.set('Authorization', auth);
 
-			const ada = await readStudent(enrollment, 'ada');
-			const bob = await readStudent(enrollment, 'bob');
+			const [ada, bob] = await Promise.all([
+				readStudent(enrollment, 'ada'),
+				readStudent(enrollment, 'bob'),
+			]);
 
-			expect(ada.statusCode).toBe(200);
-			expect(bob.statusCode).toBe(200);
 			expect(ada.headers[cacheStatusHeader]).toBe('MISS');
 			expect(bob.headers[cacheStatusHeader]).toBe('HIT');
+
+			// Non-vacuity: the HIT/MISS is over real, unchanged data — the dedup was a
+			// no-op, so each student still has her one enrollment.
+			expect(ada.body.data).toHaveLength(1);
+			expect(bob.body.data).toHaveLength(1);
 		});
 
 		it(oneLine`
@@ -156,8 +168,10 @@ describe(oneLine`
 				.send({ student: 'bob', course: 'algebra' })
 				.set('Authorization', auth);
 
-			const ada = await readStudent(transfer, 'ada');
-			const bob = await readStudent(transfer, 'bob');
+			const [ada, bob] = await Promise.all([
+				readStudent(transfer, 'ada'),
+				readStudent(transfer, 'bob'),
+			]);
 
 			// Coarse purge dropped ada's slice: a re-read MISSes and returns nothing — the
 			// row moved to bob. A narrow (new-slice-only) purge would leave ada stale.
