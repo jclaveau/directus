@@ -2,11 +2,7 @@ import type { Filter, Permission } from '@directus/types';
 import { expect, test, vi } from 'vitest';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
-import {
-	filter_has_now,
-	permissionsCachable,
-	queryFilterCachable,
-} from './permissions-cachable.js';
+import { filter_has_now, permissionsCachable } from './permissions-cachable.js';
 
 vi.mock('../permissions/lib/fetch-permissions.js');
 vi.mock('../permissions/lib/fetch-policies.js');
@@ -81,29 +77,6 @@ test('filter does not have $NOW', () => {
 	};
 
 	expect(filter_has_now(filter)).toBe(false);
-});
-
-test('query filter with $NOW is not cachable', () => {
-	expect(queryFilterCachable({ created_on: { _gt: '$NOW' } })).toBe(false);
-
-	expect(
-		queryFilterCachable({ _and: [{ created_on: { _gt: '$NOW(-1 year)' } }] }),
-	).toBe(false);
-
-	expect(
-		queryFilterCachable({ _or: [{ nested: { some: { _gt: '$NOW' } } }] }),
-	).toBe(false);
-});
-
-test('query filter without $NOW is cachable', () => {
-	expect(queryFilterCachable({ created_on: { _gt: '2021-01-01' } })).toBe(true);
-
-	expect(
-		queryFilterCachable({ _and: [{ created_on: { _gt: '2021-01-01' } }] }),
-	).toBe(true);
-
-	expect(queryFilterCachable(null)).toBe(true);
-	expect(queryFilterCachable(undefined)).toBe(true);
 });
 
 test('permissions are not cacheable on many policies with $NOW', async () => {

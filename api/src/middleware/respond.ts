@@ -25,10 +25,8 @@ import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { getDateFormatted } from '../utils/get-date-formatted.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
-import {
-	permissionsCachable,
-	queryFilterCachable,
-} from '../utils/permissions-cachable.js';
+import { permissionsCachable } from '../utils/permissions-cachable.js';
+import { queryFilterCachable } from '../utils/query-filter-cachable.js';
 
 export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const env = useEnv();

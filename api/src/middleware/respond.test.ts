@@ -69,10 +69,11 @@ vi.mock('../database/index.js', () => ({ default: () => ({}) }));
 vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: mocks.warn }) }));
 
 vi.mock('../utils/permissions-cachable.js', () => {
-	return {
-		permissionsCachable: mocks.permissionsCachable,
-		queryFilterCachable: mocks.queryFilterCachable,
-	};
+	return { permissionsCachable: mocks.permissionsCachable };
+});
+
+vi.mock('../utils/query-filter-cachable.js', () => {
+	return { queryFilterCachable: mocks.queryFilterCachable };
 });
 
 vi.mock('../utils/get-cache-key.js', () => {
