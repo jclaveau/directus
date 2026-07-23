@@ -93,6 +93,8 @@ export const DEFAULTS = {
 	CACHE_SCHEMA_MAX_ITERATIONS: 100,
 	CACHE_SCHEMA_SYNC_TIMEOUT: 10000,
 	CACHE_SCHEMA_FREEZE_ENABLED: false,
+	// Dual-typed: `false` (disabled) or a size string like `8kb` — respond.ts keys off
+	// `!== false`. No single type-map entry fits, so it stays on per-value guessType.
 	CACHE_VALUE_MAX_SIZE: false,
 	CACHE_SKIP_ALLOWED: false,
 	// Opt-in: the cache page + its telemetry writes are off unless explicitly
