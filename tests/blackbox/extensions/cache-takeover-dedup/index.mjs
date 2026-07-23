@@ -37,7 +37,12 @@ export default function registerHooks({ filter }, { services }) {
 			return payload;
 		}
 
-		// Reuse the read's pinned slice(s) as the take-over's declared footprint.
+		// Reuse the read's pinned slice(s) as the take-over's declared footprint. For a
+		// (student: ada, course: algebra) lookup the scope field `student` pins one tag:
+		//   [{
+		//     collection: 'test_items_enrollment',
+		//     field: 'student', value: 'ada', type: 'string',
+		//   }]
 		context.scopedCache?.addTags(result.getMeta?.()?.scopedCacheTags ?? []);
 
 		return existing.id;
