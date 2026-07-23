@@ -15,6 +15,21 @@ export interface ScopedCacheTag {
 }
 
 /**
+ * Hook-facing channel to add scoped cache tags from a regular CRUD *filter* event
+ * (`items.read`/`create`/`update`/`delete`), reached via `context.scopedCache`. On a
+ * read the tags declare what the cached response depends on (unioned with
+ * `cache.scope`); on a mutation they declare which slices to invalidate (unioned
+ * with the purge tags). Additive to the framework-derived tags, never a replacement.
+ * A no-op sink when scoped cache purging is off or off the HTTP path.
+ *
+ * Only the *filter* hook can add a purge tag: on update/delete the purge runs before
+ * the action hook, so an action-hook tag would arrive too late.
+ */
+export interface ScopedCacheHandle {
+	addTag(tag: ScopedCacheTag): void;
+}
+
+/**
  * A relational-path scope field (`enrollment.student.user`): its dotted `field`
  * and the pre-split `segments` the pinner walks down a filter to the terminal value.
  */

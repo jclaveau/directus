@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import type {
 	EventContext,
 	Filter,
+	ScopedCacheHandle,
 	ScopedCachePath,
 	ScopedCacheTag,
 	SchemaOverview,
@@ -13,6 +14,37 @@ import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
 const env = useEnv();
+
+/**
+ * A per-operation collector backing `context.scopedCache`. A CRUD filter hook pushes
+ * tags via the `handle`; the service drains `tags` into the read's scope tags or the
+ * mutation's purge tags. Safe to hand out with purging off — then `tags` is unread.
+ */
+export function createScopedCacheCollector(): {
+	handle: ScopedCacheHandle;
+	tags: ScopedCacheTag[];
+} {
+	const tags: ScopedCacheTag[] = [];
+	const seen = new Set<string>();
+
+	return {
+		tags,
+		handle: {
+			addTag(tag) {
+				// Idempotent: a filter that re-emits (delete fires its hook twice) or a
+				// hook looping over rows that resolve the same slice must not inflate it.
+				const key = JSON.stringify(tag);
+
+				if (seen.has(key)) {
+					return;
+				}
+
+				seen.add(key);
+				tags.push(tag);
+			},
+		},
+	};
+}
 
 /**
  * Whether scoped (tag-based) cache purging is active. Requires the opt-in mode AND a Redis cache

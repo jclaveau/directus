@@ -502,4 +502,170 @@ describe(oneLine`
 			emitter.offFilter('cache.scope', listener);
 		}
 	});
+
+	// The `context.scopedCache.addTag` channel: a regular CRUD *filter* hook adds tags
+	// straight from the event it already uses (`items.read`/`create`/`delete`), not
+	// the internal `cache.scope`/`cache.purge` events. Additive to framework tags —
+	// read tags into the meta rider, mutation tags into the purge.
+	describe('context.scopedCache.addTag from a CRUD filter hook', () => {
+		it(oneLine`
+			an items.read hook adds a cross-collection tag, unioned with the auto-derived
+			collection tag on the meta rider
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+
+				expect(readMeta(result)?.scopedCacheTags).toEqual([
+					{ collection: 'test' },
+					{ collection: 'other', field: 'id', value: 7 },
+				]);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			an items.create hook adds a tag, unioned after the committed-row slice in the
+			purge
+		`, async () => {
+			tracker.on.insert('test').response([1]);
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				return payload;
+			};
+
+			emitter.onFilter('test.items.create', declare);
+
+			try {
+				await service().createMany([{ name: 'x', student: 'A' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						{ collection: 'other', field: 'id', value: 7 },
+					],
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', declare);
+			}
+		});
+
+		it(oneLine`
+			an items.update hook adds a tag, unioned after the old ∪ new slices in the
+			purge
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'B' }]);
+			tracker.on.update('test').response(1);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				return payload;
+			};
+
+			emitter.onFilter('test.items.update', declare);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+						{ collection: 'other', field: 'id', value: 7 },
+					],
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declare);
+			}
+		});
+
+		it(oneLine`
+			an items.delete hook adds a tag, unioned after the deleted rows' slices in the
+			purge
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.delete('test').response(1);
+
+			const declare = async (keys: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				return keys;
+			};
+
+			emitter.onFilter('test.items.delete', declare);
+
+			try {
+				await service().deleteMany([1]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						{ collection: 'other', field: 'id', value: 7 },
+					],
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.delete', declare);
+			}
+		});
+
+		it(oneLine`
+			a hook that takes over a create (coarse null purge) AND adds a tag purges
+			both — the coarse pass never reaches the hook's other-collection tag
+		`, async () => {
+			// The hook returns a PK (takes over the row → scope value unknowable → null
+			// coarse purge) and declares a dependency on another collection. That pass
+			// only covers `test`, so the hook tag needs its own purge — a second call.
+			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.addTag({ collection: 'other', field: 'id', value: 7 });
+				return 99;
+			};
+
+			emitter.onFilter('test.items.create', takeOver);
+
+			try {
+				await service().createMany([{ name: 'x', student: 'A' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+				);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[{ collection: 'other', field: 'id', value: 7 }],
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
+	});
 });
