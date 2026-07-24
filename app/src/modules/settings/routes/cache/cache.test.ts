@@ -1,9 +1,23 @@
+import { createTestingPinia } from '@pinia/testing';
 import { flushPromises, mount } from '@vue/test-utils';
+import { setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { i18n } from '@/lang';
 
 vi.mock('@/api', () => {
 	return { default: { get: vi.fn(), delete: vi.fn(), patch: vi.fn() } };
+});
+
+// The timeseries chart pulls in apexcharts (SVG jsdom can't drive); stub it so
+// mounting the page doesn't touch a real chart — the chart isn't what these test.
+vi.mock('apexcharts', () => {
+	return {
+		default: class {
+			render() {}
+			updateOptions() {}
+			destroy() {}
+		},
+	};
 });
 
 vi.mock('@/utils/get-root-path', () => {
@@ -156,12 +170,20 @@ function mockCacheGet(
 			return Promise.resolve({ data: { data: extra.stats ?? null } });
 		}
 
+		if (url === '/utils/cache/timeseries') {
+			return Promise.resolve({ data: { data: { buckets: [], markers: [] } } });
+		}
+
 		return Promise.resolve({ data: { data: entries } });
 	}) as never);
 }
 
 describe('CachePage', () => {
 	beforeEach(() => {
+		// The page reads the settings + user stores at setup (TTL field, per-user flush
+		// selection), so an active Pinia must exist before mount.
+		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
+
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
 		vi.mocked(api.delete).mockResolvedValue({} as never);
