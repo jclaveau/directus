@@ -1229,12 +1229,14 @@ onUnmounted(() => {
 	margin-block-end: 24px;
 }
 
-/* Pushed to the right edge of the summary row, opposite the metrics. */
+/* Pushed to the right edge of the summary row, opposite the metrics. Never squeezed —
+   the metrics side yields first, so the TTL placeholder stays fully legible. */
 .cache-controls {
 	display: flex;
 	align-items: center;
 	gap: 20px;
 	margin-inline-start: auto;
+	flex-shrink: 0;
 }
 
 /* The flush select + button read as one control, set apart from the TTL field. */
@@ -1573,8 +1575,11 @@ table.entries .entry-row {
 	margin-block-end: 24px;
 }
 
-.ttl-input {
-	inline-size: 280px;
+/* Scoped under .cache-controls to out-specify v-input's own `inline-size: max-content`
+   (which, with the 20px inner input, otherwise collapses to the icons' width). */
+.cache-controls .ttl-input {
+	inline-size: 340px;
+	flex-shrink: 0;
 }
 
 .flush-select {
