@@ -30,4 +30,6 @@ runtime-coercion only — [[project_directus_env_type_map]]). Narrowed once at t
 `const store: Store = env['CACHE_STORE'] === 'redis' ? 'redis' : 'memory'`; `getKeyvInstance(store: Store)`
 stays typed (no `as`, no `unknown` param — [[feedback_ts_as_cast_smell]]).
 
-Related: [[project_directus_schema_read_cache_tagging]], [[project_directus_scoped_cache_design]].
+**`flushCaches()` leaves `scalabus:tag:*` orphaned** (opposite of scoped-purge's transparency above): a namespace `cache.clear()` scans only `scalabus_response:*`, never the raw-redis tag SET keys (`sadd`, outside Keyv) — they self-expire via `ttl*2`. A clean full-flush must ALSO `SCAN + DEL scalabus:tag:*`. See [[project_directus_issue295_cache_ttl_flush]].
+
+Related: [[project_directus_schema_read_cache_tagging]], [[project_directus_scoped_cache_design]], [[project_directus_issue295_cache_ttl_flush]].

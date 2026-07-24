@@ -2976,4 +2976,189 @@ describe('App Caching Tests', () => {
 			});
 		});
 	});
+
+	describe(oneLine`
+		The timeseries buckets hits, misses, anomalies and ttl by time — the now-edge
+		events land in the LAST bucket, not dropped (Postgres only)
+	`, () => {
+		// Seed directus_cache_events / _anomalies directly at chosen times so the SQL
+		// bucketing is asserted on controlled inputs — the capture path can't stamp a
+		// `time`. The query filters by time only (no cache_key), so clear the window
+		// first, leaving just these rows. Regression guard for the off-by-one that put
+		// the `now` edge one slot past the array: all recent traffic lives in that edge,
+		// so the whole graph read back empty (hits/misses/ttl curve all zero).
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+			const db = databases.get(vendor)!;
+			const isPg = db.client.config.client === 'pg';
+
+			const key = `timeseries-probe-${vendor}`;
+			const windowMs = 3_600_000;
+			const buckets = 60;
+			const bucketSec = Math.max(1, Math.ceil(windowMs / buckets / 1000));
+
+			const now = Date.now();
+			const edgeTime = new Date(now);
+
+			// An old row 29.5 min back — off both window edges (skew-safe, mid-bucket).
+			// Mirror production's elapsed math to locate its slot; the edge folds in last.
+			const oldAgeMs = 1_770_000;
+			const oldTime = new Date(now - oldAgeMs);
+			const oldIndex = Math.floor((windowMs - oldAgeMs) / 1000 / bucketSec);
+			const lastIndex = buckets - 1;
+
+			// A decoy just past the window start — must be excluded from every window.
+			const decoyTime = new Date(now - windowMs - 120_000);
+
+			const edgeHits = 3;
+			const edgeMisses = 2;
+			const oldHits = 4;
+			const decoyHits = 5;
+
+			const hitRow = (time: Date) => {
+				return {
+					time,
+					cache_key: key,
+					kind: 0,
+					age_ms: 1000,
+					gap_ms: null,
+					ttl_ms: 30000,
+					duration_ms: 5,
+				};
+			};
+
+			// Drop any in-window traffic other blocks left so the counts stay exact.
+			const windowStart = new Date(now - windowMs);
+
+			await Promise.all([
+				db('directus_cache_events')
+					.where('time', '>', windowStart)
+					.delete(),
+				db('directus_cache_anomalies')
+					.where('time', '>', windowStart)
+					.delete(),
+			]);
+
+			const events = [];
+
+			for (let i = 0; i < edgeHits; i++) {
+				events.push(hitRow(edgeTime));
+			}
+
+			for (let i = 0; i < edgeMisses; i++) {
+				events.push({
+					time: edgeTime,
+					cache_key: key,
+					kind: 1,
+					age_ms: null,
+					gap_ms: 500,
+					ttl_ms: null,
+					duration_ms: null,
+				});
+			}
+
+			for (let i = 0; i < oldHits; i++) {
+				events.push(hitRow(oldTime));
+			}
+
+			for (let i = 0; i < decoyHits; i++) {
+				events.push(hitRow(decoyTime));
+			}
+
+			await Promise.all([
+				db('directus_cache_events').insert(events),
+				db('directus_cache_anomalies').insert({
+					time: edgeTime,
+					cache_key: key,
+					reason: 'value_too_large',
+					detail: null,
+				}),
+			]);
+
+			// Two passes over the SAME rows: a wide window that includes the old row,
+			// then a narrow one that excludes it — proving the window bound drives both
+			// the buckets (graph) and their sums (numbers), not just in-window placement.
+			const sumOf = (rows: any[], field: string) => {
+				return rows.reduce((n: number, b: any) => n + b[field], 0);
+			};
+
+			// Pass A — wide window (1h): edge + old in, the far-past decoy out.
+			const wide = await request(url)
+				.get('/utils/cache/timeseries')
+				.query({ window: String(windowMs), buckets: String(buckets) })
+				.set('Authorization', auth);
+
+			expect(wide.statusCode).toBe(200);
+
+			const wideSeries = wide.body.data.buckets;
+			expect(wideSeries).toHaveLength(buckets);
+
+			// Pass B — narrow window (25m): old + decoy now fall outside `since`.
+			const narrowMs = 1_500_000;
+			const narrowLast = buckets - 1;
+
+			const narrow = await request(url)
+				.get('/utils/cache/timeseries')
+				.query({ window: String(narrowMs), buckets: String(buckets) })
+				.set('Authorization', auth);
+
+			expect(narrow.statusCode).toBe(200);
+
+			const narrowSeries = narrow.body.data.buckets;
+			expect(narrowSeries).toHaveLength(buckets);
+
+			if (!isPg) {
+				// Non-Postgres skips the ordered bucketing: dense zeros either window.
+				expect(sumOf(wideSeries, 'hits')).toBe(0);
+				expect(sumOf(narrowSeries, 'hits')).toBe(0);
+				expect(Array.isArray(wide.body.data.markers)).toBe(true);
+			}
+			else {
+				// Wide: the now-edge folds into the LAST slot — the exact bucket the old
+				// absolute-grid math dropped (index === buckets, one past the array).
+				expect(wideSeries[lastIndex].hits).toBe(edgeHits);
+				expect(wideSeries[lastIndex].misses).toBe(edgeMisses);
+				expect(wideSeries[lastIndex].anomalies).toBe(1);
+				expect(wideSeries[lastIndex].ttlMs).toBe(30000);
+
+				// The old row sits in its own earlier slot — events spread by time, not
+				// swept into one bucket.
+				expect(oldIndex).toBeGreaterThan(0);
+				expect(oldIndex).toBeLessThan(lastIndex);
+				expect(wideSeries[oldIndex].hits).toBe(oldHits);
+				expect(wideSeries[oldIndex].misses).toBe(0);
+
+				// The far-past decoy is outside the window → excluded. A broken
+				// `time > since` filter would clamp its negative bucket into slot 0.
+				expect(wideSeries[0].hits).toBe(0);
+
+				// Summary numbers = per-bucket sums over the window (decoy excluded).
+				expect(sumOf(wideSeries, 'hits')).toBe(edgeHits + oldHits);
+				expect(sumOf(wideSeries, 'misses')).toBe(edgeMisses);
+				expect(sumOf(wideSeries, 'anomalies')).toBe(1);
+
+				// Narrow: only the edge survives `since` — in the graph (last bucket) AND
+				// the numbers (sums shrink by the old row's 4 hits, from 7 to 3).
+				expect(narrowSeries[narrowLast].hits).toBe(edgeHits);
+				expect(narrowSeries[narrowLast].misses).toBe(edgeMisses);
+				expect(narrowSeries[narrowLast].anomalies).toBe(1);
+
+				expect(sumOf(narrowSeries, 'hits')).toBe(edgeHits);
+				expect(sumOf(narrowSeries, 'misses')).toBe(edgeMisses);
+				expect(sumOf(narrowSeries, 'anomalies')).toBe(1);
+			}
+
+			// Cleanup
+			await Promise.all([
+				db('directus_cache_events')
+					.where({ cache_key: key })
+					.delete(),
+				db('directus_cache_anomalies')
+					.where({ cache_key: key })
+					.delete(),
+			]);
+		}, 60000);
+	});
 });

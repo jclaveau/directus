@@ -1,8 +1,10 @@
 import { useEnv } from '@directus/env';
 import type { Accountability } from '@directus/types';
 import { getSimpleHash } from '@directus/utils';
+import { resolvedCacheTtl } from '../../cache-config.js';
 import { getCache, getCacheValue, setCacheValue } from '../../cache.js';
 import type { Context } from '../types.js';
+import { getMilliseconds } from '../../utils/get-milliseconds.js';
 import { type DynamicVariableContext } from './extract-required-dynamic-variable-context.js';
 
 export interface FetchDynamicVariableContext {
@@ -118,7 +120,11 @@ async function fetchContextData(
 		data = await fetch(fields);
 
 		if (cache && env['CACHE_ENABLED'] !== false) {
-			await setCacheValue(cache, cacheKey, data);
+			// Pass the live TTL so these entries honour a cache-page override, not the
+			// response Keyv's boot-time default (the one other response-cache write that
+			// would otherwise ignore the override).
+			const ttl = getMilliseconds(resolvedCacheTtl());
+			await setCacheValue(cache, cacheKey, data, ttl);
 		}
 	}
 
