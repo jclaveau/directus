@@ -677,6 +677,14 @@ fields:
             options:
               placeholder: $t:value
 
+  - field: cache_ttl
+    interface: input
+    options:
+      iconRight: timer
+      font: monospace
+    width: half
+    hidden: true
+
   - field: project_id
     hidden: true
 

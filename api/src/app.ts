@@ -53,6 +53,7 @@ import {
 	validateMigrations,
 } from './database/index.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
+import { initCacheConfig } from './cache-config.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -343,6 +344,7 @@ export default async function createApp(): Promise<express.Application> {
 	await tusSchedule();
 	await metricsSchedule();
 	await cacheStatsSchedule();
+	await initCacheConfig();
 
 	await emitter.emitInit('app.after', { app });
 

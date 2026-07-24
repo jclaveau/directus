@@ -2,17 +2,25 @@ import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { systemCollectionRows } from '@directus/system-data';
 import type { AbstractServiceOptions, Accountability, PrimaryKey, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { clearSystemCache, getCache, getCacheValue } from '../cache.js';
+import {
+	type CacheFlushTarget,
+	clearCacheTargets,
+	getCache,
+	getCacheValue,
+} from '../cache.js';
 import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
 	type CacheStatsState,
+	type CacheTimeseries,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	readCacheTimeseries,
 	readCacheTombstone,
+	recordCacheConfigEvent,
 	setCacheStatsEnabled,
 	truncateCacheEvents,
 } from '../cache-events.js';
@@ -174,20 +182,17 @@ export class UtilsService {
 		);
 	}
 
-	async clearCache({ system }: { system: boolean }): Promise<void> {
+	async clearCache({ targets }: { targets: CacheFlushTarget[] }): Promise<void> {
 		if (this.accountability?.admin !== true) {
 			throw new ForbiddenError({
 				reason: `'${this.accountability?.user}' does not have permission to clear the cache as not being an admin`,
 			});
 		}
 
-		const { cache } = getCache();
+		await clearCacheTargets(targets);
 
-		if (system) {
-			await clearSystemCache({ forced: true });
-		}
-
-		return cache?.clear();
+		// Best-effort marker for the cache-page timeseries; never fail the flush on it.
+		void recordCacheConfigEvent('flush', targets.join(',')).catch(() => {});
 	}
 
 	private assertCacheAdmin(action: string): void {
@@ -210,6 +215,15 @@ export class UtilsService {
 		this.assertCacheAdmin('inspect cache anomalies');
 
 		return listCacheAnomalies(windowMs);
+	}
+
+	async getCacheTimeseries(
+		windowMs?: number,
+		buckets?: number,
+	): Promise<CacheTimeseries> {
+		this.assertCacheAdmin('inspect the cache timeseries');
+
+		return readCacheTimeseries(windowMs, buckets);
 	}
 
 	// The live Redis state for a single key — the cached response plus its
