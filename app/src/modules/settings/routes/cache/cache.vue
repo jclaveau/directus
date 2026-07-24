@@ -917,49 +917,49 @@ onUnmounted(() => {
 					<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
 					<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 				</div>
+			</div>
 
-				<div class="cache-controls">
-					<v-input
-						v-model="ttlDraft"
-						class="ttl-input"
-						small
-						:placeholder="ttlPlaceholder"
-						@keydown.enter="saveTtl"
-					>
-						<template #append>
-							<v-icon
-								v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
-								name="check"
-								:disabled="!ttlDirty || ttlSaving"
-								clickable
-								@click="saveTtl"
-							/>
-						</template>
-					</v-input>
-
-					<div class="flush-group">
-						<v-select
-							v-model="flushTargets"
-							class="flush-select"
-							:items="flushTargetOptions"
-							:placeholder="t('cache_flush_targets', 'Flush')"
-							multiple
-							inline
+			<div class="cache-toolbar">
+				<v-input
+					v-model="ttlDraft"
+					class="ttl-input"
+					small
+					:placeholder="ttlPlaceholder"
+					@keydown.enter="saveTtl"
+				>
+					<template #append>
+						<v-icon
+							v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
+							name="check"
+							:disabled="!ttlDirty || ttlSaving"
+							clickable
+							@click="saveTtl"
 						/>
+					</template>
+				</v-input>
 
-						<v-button
-							v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
-							rounded
-							icon
-							secondary
-							kind="danger"
-							:loading="flushing"
-							:disabled="flushTargets.length === 0"
-							@click="flush"
-						>
-							<v-icon name="cleaning_services" />
-						</v-button>
-					</div>
+				<div class="flush-group">
+					<v-select
+						v-model="flushTargets"
+						class="flush-select"
+						:items="flushTargetOptions"
+						:placeholder="t('cache_flush_targets', 'Flush')"
+						multiple
+						inline
+					/>
+
+					<v-button
+						v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
+						rounded
+						icon
+						secondary
+						kind="danger"
+						:loading="flushing"
+						:disabled="flushTargets.length === 0"
+						@click="flush"
+					>
+						<v-icon name="cleaning_services" />
+					</v-button>
 				</div>
 			</div>
 
@@ -1249,14 +1249,13 @@ onUnmounted(() => {
 	margin-block-end: 24px;
 }
 
-/* Pushed to the right edge of the summary row, opposite the metrics. Never squeezed —
-   the metrics side yields first, so the TTL placeholder stays fully legible. */
-.cache-controls {
+/* A dedicated row under the metrics, left-aligned — body content pushed to the far
+   right hides behind the auto-refresh sidebar, so keep these on the left. */
+.cache-toolbar {
 	display: flex;
 	align-items: center;
 	gap: 20px;
-	margin-inline-start: auto;
-	flex-shrink: 0;
+	margin-block-end: 24px;
 }
 
 /* The flush select + button read as one control, set apart from the TTL field. */
@@ -1595,9 +1594,9 @@ table.entries .entry-row {
 	margin-block-end: 24px;
 }
 
-/* Scoped under .cache-controls to out-specify v-input's own `inline-size: max-content`
+/* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
    (which, with the 20px inner input, otherwise collapses to the icons' width). */
-.cache-controls .ttl-input {
+.cache-toolbar .ttl-input {
 	inline-size: 340px;
 	flex-shrink: 0;
 }
