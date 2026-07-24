@@ -4,6 +4,7 @@ import { parse as parseBytes } from 'bytes';
 import type { Knex } from 'knex';
 import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
+import { resolvedCacheTtl } from './cache-config.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -128,6 +129,8 @@ export interface CacheConfigEvent {
 export interface CacheTimeseries {
 	buckets: CacheTimeseriesBucket[];
 	markers: CacheConfigEvent[];
+	// The TTL in force (override, else env default) — for the page's TTL input.
+	effectiveTtl: string | null;
 }
 
 export interface CacheStatsState {
@@ -1117,6 +1120,12 @@ export async function readCacheTimeseries(
 		},
 	);
 
+	const effective = resolvedCacheTtl();
+
+	const effectiveTtl = typeof effective === 'string' && effective !== ''
+		? effective
+		: null;
+
 	// Whole-second buckets so the DB's `floor(epoch / bucketSec)` aligns to the dense
 	// array below (both keyed off the same absolute epoch-second grid, not `sinceMs`).
 	const bucketSec = Math.max(1, Math.ceil(windowLen / bucketCount / 1000));
@@ -1136,7 +1145,7 @@ export async function readCacheTimeseries(
 	);
 
 	if (!cacheStatsConfigured() || db.client.config.client !== 'pg') {
-		return { buckets: dense, markers };
+		return { buckets: dense, markers, effectiveTtl };
 	}
 
 	const eventRows = await db('directus_cache_events')
@@ -1178,7 +1187,7 @@ export async function readCacheTimeseries(
 		}
 	}
 
-	return { buckets: dense, markers };
+	return { buckets: dense, markers, effectiveTtl };
 }
 
 // Prune config-event markers past the retention window. Ungated (they are recorded
