@@ -27,6 +27,8 @@ type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
  * it, such a tag is unautopurgeable — the framework can't invalidate the read on a
  * write to that collection — so the response is left uncached (an
  * `unautopurgeable_scope` anomaly) rather than served stale. True opts out of that.
+ * Applies to every tag in the SAME call — pass a reproducible framework tag and a
+ * custom unautopurgeable one in separate calls if only one is manuallyPurged.
  */
 export interface ScopedCacheScopeHandle {
 	scopeTo(tags: ScopedCacheTagInput, options?: { manuallyPurged?: boolean }): void;
@@ -78,12 +80,12 @@ export interface ReadMeta {
 	scopedCacheTags: ScopedCacheTag[];
 
 	/**
-	 * A read hook scoped this response TO an unautopurgeable tag (a value slice on a
-	 * field the target collection isn't scoped on) without `manuallyPurged` — no write
-	 * can auto-purge it, so the response must not be cached. Drives the cache-skip and
-	 * the `unautopurgeable_scope` anomaly in respond.ts.
+	 * Tags a read hook scoped this response TO that are unautopurgeable — a value
+	 * slice on a field the target collection isn't scoped on, not `manuallyPurged`. No
+	 * write can auto-purge them, so respond.ts must not cache the response; it also
+	 * lists them as the `unautopurgeable_scope` anomaly detail. Non-empty ⟺ flagged.
 	 */
-	scopedCacheUnautopurgeable?: boolean;
+	scopedCacheUnautopurgeableTags?: ScopedCacheTag[];
 }
 
 /**
