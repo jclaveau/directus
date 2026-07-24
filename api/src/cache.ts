@@ -67,10 +67,17 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 			return;
 		}
 
-		const { cache, lockCache } = getCache();
+		const { cache, systemCache, lockCache } = getCache();
 
 		if (targets.includes('response')) {
 			await cache?.clear();
+		}
+
+		// `schemaChanged` (from the initiator's clearSystemCache) drops each peer's
+		// localSchemaCache but NOT its `_system` Keyv — so carry that clear here, else a
+		// memory-store peer keeps a stale system cache after a "System cache" flush.
+		if (targets.includes('system')) {
+			await systemCache.clear();
 		}
 
 		if (targets.includes('locks')) {
