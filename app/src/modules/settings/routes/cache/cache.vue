@@ -2,9 +2,14 @@
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
 import { getRootPath } from '@/utils/get-root-path';
-import { computed, onMounted, ref, watch } from 'vue';
+import { useSettingsStore } from '@/stores/settings';
+import { useUserStore } from '@/stores/user';
+import { useLocalStorage } from '@vueuse/core';
+import ApexCharts, { type ApexOptions } from 'apexcharts';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Filter } from '@directus/types';
+import { abbreviateNumber } from '@directus/utils';
+import type { Filter, User } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
@@ -293,14 +298,13 @@ const sections = computed(() => {
 // Totals track the filtered list, matching the endpoint count under a filter.
 const totalEntries = computed(() => searchedEntries.value.length);
 
-const totalHits = computed(() => {
-	return searchedEntries.value.reduce((sum, entry) => sum + entry.hits, 0);
-});
-
 async function load() {
 	const token = ++loadToken;
 	loading.value = true;
 	error.value = null;
+
+	// The chart tracks the same window; fetch it alongside (its own error handling).
+	void loadTimeseries();
 
 	try {
 		// Fetch both together and assign in one go: entries + anomalies feed one group
@@ -410,6 +414,277 @@ async function evictPath(path: string) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
 	}
 }
+
+const settingsStore = useSettingsStore();
+const userStore = useUserStore();
+
+// The persisted global TTL. `ttlDraft` edits the input; saving PATCHes
+// directus_settings.cache_ttl, which the API broadcasts so every node's live
+// override flips at once. Empty = inherit env CACHE_TTL; only new entries take it.
+const ttlDraft = ref('');
+const ttlSaving = ref(false);
+
+watch(
+	() => settingsStore.settings?.cache_ttl,
+	(value) => {
+		ttlDraft.value = value ?? '';
+	},
+	{ immediate: true },
+);
+
+const ttlDirty = computed(() => {
+	return ttlDraft.value !== (settingsStore.settings?.cache_ttl ?? '');
+});
+
+async function saveTtl() {
+	if (!ttlDirty.value || ttlSaving.value) {
+		return;
+	}
+
+	ttlSaving.value = true;
+
+	try {
+		await settingsStore.updateSettings({ cache_ttl: ttlDraft.value.trim() || null });
+		// Surface the new ttl-change marker on the chart without a full reload.
+		await loadTimeseries();
+	}
+	finally {
+		ttlSaving.value = false;
+	}
+}
+
+// The flush target subset is a pure UI preference → per-user localStorage, so
+// chained purges keep the last selection without re-picking it each time.
+type CacheFlushTarget = 'response' | 'system' | 'locks';
+
+const flushTargetOptions = [
+	{ text: t('cache_flush_response', 'Response'), value: 'response' },
+	{ text: t('cache_flush_system', 'System'), value: 'system' },
+	{ text: t('cache_flush_locks', 'Locks'), value: 'locks' },
+];
+
+const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
+
+const flushTargets = useLocalStorage<CacheFlushTarget[]>(
+	`cache-flush-targets-${userId}`,
+	['response'],
+);
+
+const flushing = ref(false);
+
+async function flush() {
+	if (flushing.value || flushTargets.value.length === 0) {
+		return;
+	}
+
+	flushing.value = true;
+	error.value = null;
+
+	try {
+		await api.post('/utils/cache/clear', null, {
+			params: { targets: flushTargets.value },
+		});
+
+		await load();
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
+	finally {
+		flushing.value = false;
+	}
+}
+
+interface TimeseriesBucket {
+	t: number;
+	hits: number;
+	misses: number;
+	anomalies: number;
+	ttlMs: number | null;
+}
+
+interface ConfigMarker {
+	time: number;
+	kind: 'ttl_change' | 'flush';
+	detail: string | null;
+}
+
+interface TimeseriesData {
+	buckets: TimeseriesBucket[];
+	markers: ConfigMarker[];
+	// The TTL in force server-side (override, else env default) — shown as the TTL
+	// input's placeholder so an empty field reveals what it inherits.
+	effectiveTtl: string | null;
+}
+
+const timeseries = ref<TimeseriesData>({
+	buckets: [],
+	markers: [],
+	effectiveTtl: null,
+});
+
+const ttlPlaceholder = computed(() => {
+	// Concatenated, not interpolated: the inline i18n fallback doesn't fill {ttl}.
+	return timeseries.value.effectiveTtl
+		? `${t('cache_ttl_default', 'Default')}: ${timeseries.value.effectiveTtl}`
+		: t('cache_ttl_placeholder', 'TTL e.g. 30m');
+});
+
+// Hits + misses are the window's request outcomes — both summed off the same
+// timeseries the chart plots, so the two metrics stay comparable (the entries
+// listing only carries per-entry hit counts, never misses).
+const totalHits = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.hits, 0);
+});
+
+const totalMisses = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.misses, 0);
+});
+
+const totalAnomalies = computed(() => {
+	return searchedAnomalies.value.reduce((sum, a) => sum + a.count, 0);
+});
+
+const chartEl = ref<HTMLElement | null>(null);
+let chart: ApexCharts | null = null;
+
+// Show the chart once there's anything to plot — sample counts or a config marker —
+// so a stats-off page with no markers doesn't render an empty axis.
+const hasTimeseries = computed(() => {
+	return timeseries.value.markers.length > 0
+		|| timeseries.value.buckets.some((b) => b.hits || b.misses || b.anomalies);
+});
+
+async function loadTimeseries() {
+	try {
+		const response = await api.get('/utils/cache/timeseries', {
+			params: { window: selectedWindow.value, buckets: 60 },
+		});
+
+		// Normalise so buckets/markers are always arrays — the chart's series() and
+		// hasTimeseries read them directly and must never see an undefined.
+		const data = response.data.data;
+
+		timeseries.value = {
+			buckets: Array.isArray(data?.buckets)
+				? data.buckets
+				: [],
+			markers: Array.isArray(data?.markers)
+				? data.markers
+				: [],
+			effectiveTtl: data?.effectiveTtl ?? null,
+		};
+	}
+	catch {
+		timeseries.value = { buckets: [], markers: [], effectiveTtl: null };
+	}
+}
+
+function themeVar(name: string, fallback: string): string {
+	const value = getComputedStyle(document.documentElement)
+		.getPropertyValue(name)
+		.trim();
+
+	return value || fallback;
+}
+
+function chartConfig(): ApexOptions {
+	const buckets = timeseries.value.buckets;
+
+	function series(pick: (b: TimeseriesBucket) => number | null) {
+		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
+	}
+
+	return {
+		chart: {
+			type: 'line',
+			height: 240,
+			toolbar: { show: false },
+			animations: { enabled: false },
+			fontFamily: 'inherit',
+		},
+		colors: [
+			themeVar('--theme--success', '#2ecda7'),
+			themeVar('--theme--warning', '#ffa439'),
+			themeVar('--theme--danger', '#e35169'),
+			themeVar('--theme--primary', '#6644ff'),
+		],
+		stroke: { width: 2, curve: ['smooth', 'smooth', 'smooth', 'stepline'] },
+		legend: { show: true, position: 'top' },
+		dataLabels: { enabled: false },
+		series: [
+			{ name: t('hits', 'Hits'), data: series((b) => b.hits) },
+			{ name: t('cache_misses', 'Misses'), data: series((b) => b.misses) },
+			{ name: t('cache_anomalies', 'Anomalies'), data: series((b) => b.anomalies) },
+			{
+				name: t('ttl', 'TTL'),
+				data: series((b) => {
+					return b.ttlMs === null
+						? null
+						: Math.round(b.ttlMs / 1000);
+				}),
+			},
+		],
+		xaxis: { type: 'datetime' },
+		yaxis: [
+			{
+				// Bind all three count series to this axis; without an explicit
+				// seriesName map apexcharts indexes a missing y-axis per series
+				// (misses/anomalies) and crashes on render.
+				seriesName: [
+					t('hits', 'Hits'),
+					t('cache_misses', 'Misses'),
+					t('cache_anomalies', 'Anomalies'),
+				],
+				title: { text: t('cache_count', 'Count') },
+				labels: { formatter: (v: number) => String(Math.round(v)) },
+			},
+			{
+				opposite: true,
+				seriesName: t('ttl', 'TTL'),
+				title: { text: t('cache_ttl_seconds', 'TTL (s)') },
+				labels: { formatter: (v: number) => `${Math.round(v)}s` },
+			},
+		],
+		annotations: {
+			xaxis: timeseries.value.markers.map((m) => {
+				const flush = m.kind === 'flush';
+
+				return {
+					x: m.time,
+					borderColor: flush
+						? themeVar('--theme--danger', '#e35169')
+						: themeVar('--theme--primary', '#6644ff'),
+					label: {
+						text: flush
+							? `⚑ ${m.detail ?? ''}`
+							: `TTL ${m.detail ?? '∅'}`,
+						style: { fontSize: '10px' },
+					},
+				};
+			}),
+		},
+	};
+}
+
+function renderChart() {
+	if (!chartEl.value) {
+		return;
+	}
+
+	if (chart) {
+		void chart.updateOptions(chartConfig(), true, false);
+		return;
+	}
+
+	chart = new ApexCharts(chartEl.value, chartConfig());
+	void chart.render();
+}
+
+// Depend on chartEl too, not just the data: the chart's v-show container mounts a
+// tick after the route transition settles, so a data-only watcher fires while the
+// ref is still null. Re-firing when chartEl binds is what paints the first load.
+watch([timeseries, chartEl], renderChart, { deep: true, flush: 'post' });
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
@@ -557,6 +832,11 @@ onMounted(() => {
 	void load();
 	void loadStatsState();
 });
+
+onUnmounted(() => {
+	chart?.destroy();
+	chart = null;
+});
 </script>
 
 <template>
@@ -623,18 +903,78 @@ onMounted(() => {
 		<div class="cache-page">
 			<v-notice v-if="error" type="danger">{{ error }}</v-notice>
 
-			<div class="summary">
-				<div class="metric">
-					<span class="value">{{ totalEntries }}</span>
-					<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
+			<div v-show="hasTimeseries" class="timeseries">
+				<div ref="chartEl" class="chart" />
+			</div>
+
+			<div style="display: flex; justify-content:space-between;">
+				<div class="summary">
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(groups.length) }}</span>
+						<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalEntries) }}</span>
+						<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
+						<span class="label">{{ t('cache_misses', 'Misses') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalHits) }}</span>
+						<span class="label">{{ t('cache_hits', 'Hits') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
+						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
+					</div>
 				</div>
-				<div class="metric">
-					<span class="value">{{ totalHits }}</span>
-					<span class="label">{{ t('total_hits', 'Total hits') }}</span>
-				</div>
-				<div class="metric">
-					<span class="value">{{ groups.length }}</span>
-					<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+
+				<div style="display: flex; align-items: center; gap: 16px 32px;">
+					<v-input
+						v-model="ttlDraft"
+						class="ttl-input"
+						small
+						inline
+						:placeholder="ttlPlaceholder"
+						style="width: 100px;"
+						@keydown.enter="saveTtl"
+					>
+						<template #append>
+							<v-icon
+								v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
+								name="check"
+								:disabled="!ttlDirty || ttlSaving"
+								clickable
+								@click="saveTtl"
+							/>
+						</template>
+					</v-input>
+
+					<div class="flush-group">
+						<v-select
+							v-model="flushTargets"
+							class="flush-select"
+							:items="flushTargetOptions"
+							:placeholder="t('cache_flush_targets', 'Flush')"
+							multiple
+							inline
+						/>
+
+						<v-button
+							v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
+							rounded
+							icon
+							secondary
+							kind="danger"
+							:loading="flushing"
+							:disabled="flushTargets.length === 0"
+							@click="flush"
+						>
+							<v-icon name="cleaning_services" />
+						</v-button>
+					</div>
 				</div>
 			</div>
 
@@ -918,8 +1258,29 @@ onMounted(() => {
 
 .summary {
 	display: flex;
-	gap: 32px;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 16px 32px;
 	margin-block-end: 24px;
+}
+
+/* A dedicated row under the metrics, left-aligned — body content pushed to the far
+   right hides behind the auto-refresh sidebar, so keep these on the left. */
+.cache-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 20px;
+	margin-block-end: 24px;
+}
+
+/* The flush select + button read as one control, set apart from the TTL field. */
+.flush-group {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 4px 4px 10px;
+	background-color: var(--theme--background-subdued);
+	border-radius: var(--theme--border-radius);
 }
 
 .metric {
@@ -1242,5 +1603,19 @@ table.entries .entry-row {
 	font-size: 13px;
 	white-space: pre;
 	overflow: auto;
+}
+
+.timeseries {
+	margin-block-end: 24px;
+}
+
+/* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
+   (which, with the 20px inner input, otherwise collapses to the icons' width). */
+.cache-toolbar .ttl-input {
+	inline-size: 240px;
+}
+
+.flush-select {
+	inline-size: 130px;
 }
 </style>

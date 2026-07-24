@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { RequestHandler } from 'express';
 import { getCache, getCacheValue } from '../cache.js';
+import { resolvedCacheTtl } from '../cache-config.js';
 import {
 	cacheStatsActive,
 	queueCacheHit,
@@ -136,7 +137,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 					return queueCacheMiss({
 						cacheKey: hash,
 						gapMs,
-						ttlMs: getMilliseconds(env['CACHE_TTL']) ?? null,
+						ttlMs: getMilliseconds(resolvedCacheTtl()) ?? null,
 					});
 				})
 				.catch(() => {});

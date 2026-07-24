@@ -172,6 +172,9 @@ describe('respond middleware', () => {
 				createdAt: expect.any(Number),
 				ttlMs: expect.any(Number),
 			},
+			// The sibling now carries an explicit ttl so it tracks the live override,
+			// not the response cache's construction-time Keyv default.
+			expect.any(Number),
 		);
 
 		// #205 scoped-cache tagging fires with the request's tags

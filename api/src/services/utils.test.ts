@@ -84,9 +84,13 @@ describe('Services / Utils', () => {
 				accountability: { user: 'test-user', admin: false } as Accountability,
 			});
 
-			await expect(service.clearCache({ system: false })).rejects.toThrowError(ForbiddenError);
+			await expect(
+				service.clearCache({ targets: ['response'] }),
+			).rejects.toThrowError(ForbiddenError);
 
-			await expect(service.clearCache({ system: false })).rejects.toThrowError(
+			await expect(
+				service.clearCache({ targets: ['response'] }),
+			).rejects.toThrowError(
 				`'test-user' does not have permission to clear the cache as not being an admin`,
 			);
 		});
