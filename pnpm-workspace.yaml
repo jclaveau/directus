@@ -119,8 +119,8 @@ catalog:
   '@types/tmp': 0.2.6
   '@types/wellknown': 0.5.8
   '@types/ws': 8.18.1
-  '@unhead/addons': 1.11.20
-  '@unhead/vue': 1.11.20
+  '@unhead/addons': 3.2.3
+  '@unhead/vue': 3.2.3
   '@vitejs/plugin-vue': 6.0.1
   '@vitest/coverage-v8': 3.2.6
   '@vue/test-utils': 2.4.11
