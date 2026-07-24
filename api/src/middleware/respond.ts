@@ -3,6 +3,7 @@ import type { ScopedCacheTag } from '@directus/types';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
+import { resolvedCacheTtl } from '../cache-config.js';
 import {
 	cacheStatsActive,
 	queueCacheDescriptor,
@@ -147,17 +148,19 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 		try {
 			const now = Date.now();
-			const ttlMs = getMilliseconds(env['CACHE_TTL']);
-			const expiresAt = now + getMilliseconds(env['CACHE_TTL'], 0);
+			const ttlMs = getMilliseconds(resolvedCacheTtl());
+			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
 
 			await setCacheValue(cache, key, res.locals['payload'], ttlMs);
 
-			// Enriched so a HIT reads age/TTL off this sibling — no extra read.
+			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
+			// `ttlMs` explicitly so it tracks the live override, not the Keyv default
+			// TTL frozen at the response cache's construction.
 			await setCacheValue(cache, `${key}__expires_at`, {
 				exp: expiresAt,
 				createdAt: now,
 				ttlMs: ttlMs ?? null,
-			});
+			}, ttlMs);
 
 			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
 			void writeCacheTombstone(key, expiresAt).catch(() => {});
@@ -182,7 +185,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 						cache,
 						`${key}__tags`,
 						{ tags: serializeScopedCacheTags(pins) },
-						getMilliseconds(env['CACHE_TTL']),
+						getMilliseconds(resolvedCacheTtl()),
 					);
 				}
 			}
@@ -257,7 +260,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			}
 		}
 
-		res.setHeader('Cache-Control', getCacheControlHeader(req, getMilliseconds(env['CACHE_TTL']), true, true));
+		res.setHeader(
+			'Cache-Control',
+			getCacheControlHeader(req, getMilliseconds(resolvedCacheTtl()), true, true),
+		);
+
 		res.setHeader('Vary', 'Origin, Cache-Control');
 	}
 	else {

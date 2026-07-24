@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { getMilliseconds } from './get-milliseconds.js';
+import { getMilliseconds, isPositiveDuration } from './get-milliseconds.js';
 
 test.each([
 	// accept human readable time format and plain number
@@ -31,4 +31,22 @@ test.each([
 
 test('should return custom fallback on invalid value', () => {
 	expect(getMilliseconds(undefined, 0)).toBe(0);
+});
+
+test.each([
+	// parseable to a positive number of ms
+	['30s', true],
+	['5m', true],
+	['1.5h', true],
+	['1000', true],
+	// unparseable, zero, or negative — all rejected
+	['abc', false],
+	['30x', false],
+	['-5m', false],
+	['0', false],
+	// empty / whitespace-only is guarded (ms throws on '')
+	['', false],
+	['   ', false],
+])('isPositiveDuration("%s") is %s', (input, expected) => {
+	expect(isPositiveDuration(input)).toBe(expected);
 });
