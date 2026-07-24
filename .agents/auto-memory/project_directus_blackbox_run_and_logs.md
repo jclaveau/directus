@@ -27,3 +27,14 @@ which `gh run list --branch <b> --workflow Blackbox` often returns empty for. Se
 **How to apply:** to verify a fix-forward against blackbox, push to the branch + ensure `Run Blackbox` label →
 read results per-job via `gh pr view <n> --json statusCheckRollup`; for the failure detail, read the streamed
 log around ELIFECYCLE, not the REST job-log body. The redis cache-purge + SAML tests are the high-signal ones.
+
+**BEST failure-detail method = the RUN-logs ZIP, not per-job.** The per-JOB endpoint
+(`/actions/jobs/<id>/logs`) returns ONLY the runner's setup/cleanup for a completed bb job — grepping the test
+name finds NOTHING (don't conclude "no failure"). The RUN-logs ZIP has the full per-shard vitest output:
+`curl -sL -H "Authorization: token $(gh auth token)" .../actions/runs/<run-id>/logs -o rl.zip` →
+`unzip -l` → read `Blackbox Tests _ <vendor> (shard N)/8_Run tests.txt` (the vitest summary + `Failed Tests`
+block + the exact test file:name are there). ZIP is empty while the run is in-progress — wait for completion.
+**Triage flake-vs-real by STEP:** `gh api repos/jclaveau/directus/actions/jobs/<job-id> -q '.steps[]|"\(.number)\t\(.conclusion)\t\(.name)"'` — failure in **step 8 "Run tests"** = a real test failure (read its ZIP file);
+failure in an earlier setup step (Start database/services) = infra flake → rerun. bb runs inside the `Check`
+workflow (workflowName=`Check`); find its run id via `gh run list --branch <b> --json databaseId,workflowName,headSha` filtered by head sha; find the failing job id via `gh run view <run-id> --json jobs`.
+push+PR double-run means two `Check` runs per head — the one WITH the bb jobs is the `pull_request` one.

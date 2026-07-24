@@ -41,12 +41,20 @@ export class GraphQLService {
 	 */
 	scopedCacheTags: ScopedCacheTag[];
 
+	/**
+	 * Unautopurgeable scope tags across every read in this request. Non-empty → the
+	 * whole `/graphql` entry can't be safely cached, so respond.ts skips it (and names
+	 * them in the anomaly). Aggregated like `scopedCacheTags` (one entry, many reads).
+	 */
+	scopedCacheUnautopurgeableTags: ScopedCacheTag[];
+
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
 		this.schema = options.schema;
 		this.scope = options.scope;
 		this.scopedCacheTags = [];
+		this.scopedCacheUnautopurgeableTags = [];
 	}
 
 	/**
@@ -96,7 +104,10 @@ export class GraphQLService {
 			formattedResult.extensions = result['extensions'];
 		}
 
-		return withMeta(formattedResult, { scopedCacheTags: this.scopedCacheTags });
+		return withMeta(formattedResult, {
+			scopedCacheTags: this.scopedCacheTags,
+			scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
+		});
 	}
 
 	/**
@@ -123,7 +134,12 @@ export class GraphQLService {
 			? await service.readSingleton(query, { stripNonRequested: false })
 			: await service.readByQuery(query, { stripNonRequested: false });
 
-		this.scopedCacheTags.push(...(readMeta(result)?.scopedCacheTags ?? []));
+		const resultMeta = readMeta(result);
+		this.scopedCacheTags.push(...(resultMeta?.scopedCacheTags ?? []));
+
+		this.scopedCacheUnautopurgeableTags.push(
+			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
+		);
 
 		return result;
 	}

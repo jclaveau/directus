@@ -16,6 +16,7 @@ import type {
 	Query,
 	QueryOptions,
 	SchemaOverview,
+	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
 	Type,
@@ -28,8 +29,10 @@ import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lo
 import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
+	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
+	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
 } from '../scoped-cache.js';
@@ -231,13 +234,56 @@ implements AbstractService<Item> {
 		};
 	}
 
-	private async purgeScopedCache(tags: ScopedCacheTag[] | null): Promise<void> {
-		this.scopedCachePurged = await purgeScopedCache(
+	private async purgeScopedCache(
+		tags: ScopedCacheTag[] | null,
+		collector?: Pick<ScopedCacheCollector, 'tags'>,
+	): Promise<void> {
+		const context = this.scopedCachePurgeContext();
+		const hookTags = collector?.tags ?? [];
+
+		if (tags !== null) {
+			this.scopedCachePurged = await purgeScopedCache(
+				this.cache,
+				this.collection,
+				[...tags, ...hookTags],
+				context,
+			);
+
+			return;
+		}
+
+		// A `null` tag set means this collection's own slices are unresolvable → coarse
+		// whole-collection purge (bare tag + every slice). Tags a hook added via
+		// `context.scopedCache` are often for OTHER collections the coarse pass never
+		// reaches, so purge them too — but with `includeCollectionTag: false`, since the
+		// coarse pass already owns this collection's bare tag (else it's purged twice
+		// and doubled in the debug header).
+		const coarsePurged = await purgeScopedCache(
 			this.cache,
 			this.collection,
-			tags,
-			this.scopedCachePurgeContext(),
+			null,
+			context,
 		);
+
+		if (hookTags.length === 0) {
+			this.scopedCachePurged = coarsePurged;
+			return;
+		}
+
+		const hookPurged = await purgeScopedCache(
+			this.cache,
+			this.collection,
+			hookTags,
+			context,
+			{ includeCollectionTag: false },
+		);
+
+		// Reflect BOTH purges in the dev debug header (coarse ∪ hook); a `null` from
+		// either means the whole namespace was flushed, which already covers everything.
+		this.scopedCachePurged =
+			coarsePurged === null || hookPurged === null
+				? null
+				: [...coarsePurged, ...hookPurged];
 	}
 
 	private get collectionScopedCacheFields(): string[] {
@@ -504,6 +550,15 @@ implements AbstractService<Item> {
 
 		type ActionPayload = { primaryKey: PrimaryKey; actionHookPayload: AnyItem };
 
+		// An `items.create` hook can add purge tags via `context.scopedCache.purgeBy`;
+		// drained into the purge below. Declared outside the transaction to outlive it.
+		const scopedCacheCollector =
+			opts.scopedCacheCollector ?? createScopedCacheCollector();
+
+		// Baseline so the take-over fallback (below) keys off THIS call's own hook
+		// declarations, not tags an injected shared collector already held.
+		const scopedCacheTagsAtStart = scopedCacheCollector.tags.length;
+
 		const { nestedActionEvents, actionPayloads } = await transaction(this.knex, async (trx) => {
 			const nestedActionEvents: ActionEventParams[] = [];
 			let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
@@ -544,6 +599,7 @@ implements AbstractService<Item> {
 								database: trx,
 								schema: this.schema,
 								accountability: this.accountability,
+								scopedCache: scopedCacheCollector.purge,
 							},
 						)
 						: payload;
@@ -900,20 +956,33 @@ implements AbstractService<Item> {
 			// Scope off the committed rows' stored values (re-read by returned key), not the
 			// raw input: a create hook can rewrite a scope field, a value left to a DB default
 			// is only knowable after the insert, and a DB trigger/coercion can diverge from the
-			// payload — the row is authoritative, the payload isn't. A row a hook *took over*
-			// (more live keys than payloads) has an unknowable scope value → collection-wide purge.
+			// payload — the row is authoritative, the payload isn't.
+			//
+			// A row a hook *took over* (returned an existing PK) is the unsafe case: it
+			// can be an update-in-disguise — the hook moved that row between slices — and
+			// the create path has no old∪new capture, so the post-commit re-read sees
+			// only the NEW slice; the OLD slice would leak (stale HIT). So a takeover
+			// falls back to a coarse collection-wide purge BY DEFAULT. A hook that knows
+			// its footprint opts back into a precise purge by declaring it via
+			// `scopedCache.purgeBy` (a read-only dedup declares its one slice; an
+			// upsert-move declares old + new) — then we trust it and narrow to the
+			// snapshot ∪ declared tags.
 			let scopedCacheTags: ScopedCacheTag[] | null = [];
 
 			if (scopedCacheFields.length > 0) {
 				const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
 				const someRowTakenOver = liveKeys.length > actionPayloads.length;
 
-				scopedCacheTags = someRowTakenOver
+				const takeoverUndeclared =
+					someRowTakenOver &&
+					scopedCacheCollector.tags.length === scopedCacheTagsAtStart;
+
+				scopedCacheTags = takeoverUndeclared
 					? null
 					: await this.snapshotScopedCacheTags(liveKeys);
 			}
 
-			await this.purgeScopedCache(scopedCacheTags);
+			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
 
 		return results;
@@ -971,6 +1040,10 @@ implements AbstractService<Item> {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
 
+		// An `items.read` hook adds scope tags via `context.scopedCache.scopeTo`, same
+		// channel as `cache.scope`; drained below.
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		const filteredRecords =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
@@ -986,6 +1059,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
+						scopedCache: scopedCacheCollector.scope,
 					},
 				)
 				: records;
@@ -1002,6 +1076,7 @@ implements AbstractService<Item> {
 		// reproducible on the `cache.purge` side or it leaks. Bounded to this read — it
 		// rides the result via `getMeta()`, not a service-level field.
 		let scopedCacheTags: ScopedCacheTag[] = [];
+		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
 			const fieldMap = fieldMapFromAst(ast, this.schema);
@@ -1056,6 +1131,27 @@ implements AbstractService<Item> {
 				{ collection: this.collection, query: updatedQuery, records: filteredRecords },
 				{ database: this.knex, schema: this.schema, accountability: this.accountability },
 			)) as ScopedCacheTag[];
+
+			// Fold in tags an `items.read` hook added via `context.scopedCache.scopeTo`.
+			scopedCacheTags.push(...scopedCacheCollector.tags);
+
+			// A scopeTo tag on a field its collection isn't scoped on can't be reproduced
+			// by that collection's auto-purge — the read would go stale — unless the hook
+			// marked it `manuallyPurged` (it reproduces the tag via its own purgeBy). List
+			// them so respond.ts leaves the read uncached + names them in the anomaly.
+			scopedCacheUnautopurgeableTags = scopedCacheCollector.tags.filter((tag) => {
+				if (tag.field === undefined) {
+					return false;
+				}
+
+				const collectionScopedFields =
+					this.schema.collections[tag.collection]?.scopedCacheFields;
+
+				return (
+					!collectionScopedFields?.includes(tag.field) &&
+					!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
+				);
+			});
 		}
 
 		if (opts?.emitEvents !== false) {
@@ -1077,7 +1173,10 @@ implements AbstractService<Item> {
 			);
 		}
 
-		return withMeta(filteredRecords as Item[], { scopedCacheTags });
+		return withMeta(filteredRecords as Item[], {
+			scopedCacheTags,
+			scopedCacheUnautopurgeableTags,
+		});
 	}
 
 	/**
@@ -1176,6 +1275,11 @@ implements AbstractService<Item> {
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
 
+		// One collector shared across the forked child updates so an `items.update`
+		// hook's `purgeBy` survives to the single deferred purge below (children run
+		// with autoPurgeCache off, so their own drain is suppressed).
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		try {
 			await transaction(this.knex, async (knex) => {
 				const service = this.fork({ knex });
@@ -1194,6 +1298,7 @@ implements AbstractService<Item> {
 					const combinedOpts: MutationOptions = {
 						autoPurgeCache: false,
 						...opts,
+						scopedCacheCollector,
 						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
 					};
 
@@ -1222,7 +1327,7 @@ implements AbstractService<Item> {
 						? null
 						: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-				await this.purgeScopedCache(scopedCacheTags);
+				await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 			}
 		}
 
@@ -1272,6 +1377,11 @@ implements AbstractService<Item> {
 		const payload: Partial<AnyItem> = cloneDeep(data);
 		const nestedActionEvents: ActionEventParams[] = [];
 
+		// An `items.update` hook can add purge tags via `context.scopedCache.purgeBy`;
+		// drained into the purge below.
+		const scopedCacheCollector =
+			opts.scopedCacheCollector ?? createScopedCacheCollector();
+
 		// Run all hooks that are attached to this event so the end user has the chance to augment the
 		// item that is about to be saved
 		const payloadAfterHooks =
@@ -1289,6 +1399,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
+						scopedCache: scopedCacheCollector.purge,
 					},
 				)
 				: payload;
@@ -1303,8 +1414,26 @@ implements AbstractService<Item> {
 				});
 			}
 
-			// The filter cancelled the update: nothing is written; return a null per key so the
-			// result stays index-aligned with the input keys.
+			// A hook that declared a purge via `purgeBy` before cancelling still gets it
+			// (parity with create's cancel); a plain validation cancel is a no-op (the
+			// guard keeps an empty collector from reaching the purge). The cancel purges
+			// only the declared tags — `includeCollectionTag: false` leaves this
+			// collection's own bare tag (its global reads) warm, since nothing changed.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await purgeScopedCache(
+					this.cache,
+					this.collection,
+					scopedCacheCollector.tags,
+					this.scopedCachePurgeContext(),
+					{ includeCollectionTag: false },
+				);
+			}
+
+			// The filter cancelled the update: nothing is written; return a null per key
+			// so the result stays index-aligned with the input keys.
 			return keys.map(() => null);
 		}
 
@@ -1543,7 +1672,7 @@ implements AbstractService<Item> {
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-			await this.purgeScopedCache(scopedCacheTags);
+			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1621,13 +1750,22 @@ implements AbstractService<Item> {
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(inputKeys);
 
+		// Shared collector: child upserts run with autoPurgeCache off, so a
+		// create/update hook's `purgeBy` reaches the deferred purge only via this sink.
+		const scopedCacheCollector = createScopedCacheCollector();
+
 		const primaryKeys = await transaction(this.knex, async (knex) => {
 			const service = this.fork({ knex });
 
 			const primaryKeys: PrimaryKey[] = [];
 
 			for (const payload of payloads) {
-				const primaryKey = await service.upsertOne(payload, { ...(opts || {}), autoPurgeCache: false });
+				const primaryKey = await service.upsertOne(payload, {
+					...(opts || {}),
+					autoPurgeCache: false,
+					scopedCacheCollector,
+				});
+
 				primaryKeys.push(primaryKey);
 			}
 
@@ -1650,7 +1788,7 @@ implements AbstractService<Item> {
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-			await this.purgeScopedCache(scopedCacheTags);
+			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
 
 		return primaryKeys;
@@ -1708,6 +1846,16 @@ implements AbstractService<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
+		// An `items.delete` hook can add purge tags via `context.scopedCache.purgeBy`;
+		// drained into the purge below.
+		const scopedCacheCollector =
+			opts.scopedCacheCollector ?? createScopedCacheCollector();
+
+		// NB: this is the sole `items.delete` filter emit and it runs BEFORE
+		// `validateAccess` (below) — deliberately, so a hook can cancel the delete and
+		// snapshot old scope values before the rows go. Upstream emitted it after the
+		// access check; a hook that assumed the keys were already authorized should read
+		// that here (see the PR's disclosure note).
 		const keysAfterHooks =
 			opts.emitEvents !== false
 				? await emitter.emitFilter<PrimaryKey[], null>(
@@ -1722,6 +1870,7 @@ implements AbstractService<Item> {
 						database: this.knex,
 						schema: this.schema,
 						accountability: this.accountability,
+						scopedCache: scopedCacheCollector.purge,
 					},
 				)
 				: keys;
@@ -1733,8 +1882,26 @@ implements AbstractService<Item> {
 				});
 			}
 
-			// The filter cancelled the deletion: nothing is deleted; return a null per key so the
-			// result stays index-aligned with the input keys.
+			// A hook that declared a purge via `purgeBy` before cancelling still gets it
+			// (parity with create's cancel); a plain validation cancel is a no-op (the
+			// guard keeps an empty collector from reaching the purge). The cancel purges
+			// only the declared tags — `includeCollectionTag: false` leaves this
+			// collection's own bare tag (its global reads) warm, since nothing changed.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await purgeScopedCache(
+					this.cache,
+					this.collection,
+					scopedCacheCollector.tags,
+					this.scopedCachePurgeContext(),
+					{ includeCollectionTag: false },
+				);
+			}
+
+			// The filter cancelled the deletion: nothing is deleted; return a null per key
+			// so the result stays index-aligned with the input keys.
 			return keys.map(() => null);
 		}
 
@@ -1760,23 +1927,6 @@ implements AbstractService<Item> {
 
 		if (opts.preMutationError) {
 			throw opts.preMutationError;
-		}
-
-		if (opts.emitEvents !== false) {
-			await emitter.emitFilter(
-				this.eventScope === 'items'
-					? ['items.delete', `${this.collection}.items.delete`]
-					: `${this.eventScope}.delete`,
-				keys,
-				{
-					collection: this.collection,
-				},
-				{
-					database: this.knex,
-					schema: this.schema,
-					accountability: this.accountability,
-				},
-			);
 		}
 
 		await transaction(this.knex, async (trx) => {
@@ -1824,7 +1974,7 @@ implements AbstractService<Item> {
 		});
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.purgeScopedCache(oldScopedCacheTags);
+			await this.purgeScopedCache(oldScopedCacheTags, scopedCacheCollector);
 		}
 
 		if (opts.emitEvents !== false) {

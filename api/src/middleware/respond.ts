@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import type { ScopedCacheTag } from '@directus/types';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
@@ -96,6 +97,18 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
+	// A read hook scoped this response to unautopurgeable tags (value slices on fields
+	// the target collection isn't scoped on) without `manuallyPurged`: no write can
+	// auto-purge them, so caching would serve stale. Skip caching + surface them.
+	const unautopurgeableScopeTags = res.locals['scopedCacheUnautopurgeableTags'] as
+		| ScopedCacheTag[]
+		| undefined;
+
+	const unautopurgeableScope =
+		Array.isArray(unautopurgeableScopeTags) &&
+		unautopurgeableScopeTags.length > 0 &&
+		scopedCachePurgeEnabled();
+
 	// `$NOW` (in filter/deep) resolves to a Date in `sanitizeQuery` before the key is
 	// built, so each request keys distinctly (not a staleness risk). But the key never
 	// recurs: caching only writes a never-hit entry (Redis bloat + a bloated purge
@@ -119,6 +132,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		cache &&
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
+		unautopurgeableScope === false &&
 		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,
@@ -252,7 +266,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		res.setHeader('Vary', 'Origin, Cache-Control');
 	}
 
-	// Surface the two silent "cacheable but skipped" reasons on the dashboard.
+	// Surface the silent "cacheable but skipped" reasons on the dashboard.
 	if (cacheStatsActive() && cacheableRequest) {
 		if (exceedsMaxSize) {
 			void reportCacheAnomaly(
@@ -263,6 +277,18 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 		else if (orphansInScopedMode) {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
+		}
+		else if (unautopurgeableScope) {
+			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same tag.
+			const detail = [
+				...new Set(
+					(unautopurgeableScopeTags ?? []).map(
+						(tag) => `${tag.collection}:${tag.field}`,
+					),
+				),
+			].join(', ');
+
+			void reportCacheAnomaly(req, 'unautopurgeable_scope', detail).catch(() => {});
 		}
 	}
 

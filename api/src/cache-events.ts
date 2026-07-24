@@ -59,8 +59,14 @@ export interface CacheDescriptor {
 
 // A silent cache anomaly (not cached, or a Redis error) surfaced on the dashboard
 // rather than dropped. Coarse scope is a descriptor flag, not an anomaly.
+//   - missing_scope: scoped mode, response has no scope tag (can't be purged).
+//   - unautopurgeable_scope: a read hook scoped TO a tag no write auto-purges (a
+//     value slice on a non-scoped field) without `manuallyPurged` — left uncached.
+//   - value_too_large: payload over CACHE_VALUE_MAX_SIZE.
+//   - redis_error: a Redis write failed.
 export type CacheAnomalyReason =
 	| 'missing_scope'
+	| 'unautopurgeable_scope'
 	| 'value_too_large'
 	| 'redis_error';
 

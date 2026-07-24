@@ -14,7 +14,7 @@ export async function up(knex: Knex): Promise<void> {
 		table.increments('id');
 		table.timestamp('time').notNullable();
 		table.string('cache_key').notNullable(); // → descriptors.cache_key (no FK)
-		// missing_scope | value_too_large | redis_error
+		// missing_scope | unautopurgeable_scope | value_too_large | redis_error
 		table.string('reason', 32).notNullable();
 		table.text('detail').nullable();
 		table.index('time');

@@ -14,6 +14,56 @@ export interface ScopedCacheTag {
 	type?: Type;
 }
 
+/** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
+type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
+
+/**
+ * Shape of `context.scopedCache` on an `items.read` *filter* hook. Mirrors the
+ * `cache.scope` event: scope the cached response TO extra slices it needs, so a
+ * later purge of any of them invalidates it. Additive to the framework tags.
+ *
+ * A declared tag only invalidates the read if a write reproduces its EXACT key — the
+ * same field AND the same value canonicalization (pass `type` for a non-string
+ * field); else it won't match. The `manuallyPurged`/anomaly check below only covers
+ * the coarser "field the collection isn't scoped on" case, not value drift.
+ *
+ * `manuallyPurged`: assert that a value-slice tag on a field the target collection
+ * isn't scoped on is nonetheless reproduced by the author's own `purgeBy`. Without
+ * it, such a tag is unautopurgeable — the framework can't invalidate the read on a
+ * write to that collection — so the response is left uncached (an
+ * `unautopurgeable_scope` anomaly) rather than served stale. True opts out of that.
+ * Applies to every tag in the SAME call — pass a reproducible framework tag and a
+ * custom unautopurgeable one in separate calls if only one is manuallyPurged.
+ */
+export interface ScopedCacheScopeHandle {
+	scopeTo(tags: ScopedCacheTagInput, options?: { manuallyPurged?: boolean }): void;
+}
+
+/**
+ * Shape of `context.scopedCache` on an `items.create`/`update`/`delete` *filter*
+ * hook. Mirrors the `cache.purge` event: purge cached responses BY extra slices this
+ * mutation touched. Additive to the framework purge tags.
+ *
+ * Only the *filter* hook can purge: on update/delete the purge runs before the
+ * action hook, so an action-hook tag would arrive too late.
+ */
+export interface ScopedCachePurgeHandle {
+	purgeBy(tags: ScopedCacheTagInput): void;
+}
+
+/**
+ * A per-operation sink collecting tags from `context.scopedCache`. A batch/upsert
+ * parent injects one via `MutationOptions.scopedCacheCollector` so its children (run
+ * with autoPurgeCache off) accumulate into it and the parent drains it once.
+ */
+export interface ScopedCacheCollector {
+	scope: ScopedCacheScopeHandle;
+	purge: ScopedCachePurgeHandle;
+	tags: ScopedCacheTag[];
+	/** Canonical keys of tags a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
+	manuallyPurgedKeys: Set<string>;
+}
+
 /**
  * A relational-path scope field (`enrollment.student.user`): its dotted `field`
  * and the pre-split `segments` the pinner walks down a filter to the terminal value.
@@ -33,6 +83,14 @@ export interface ReadMeta {
 	 * tags); scope invalidation.
 	 */
 	scopedCacheTags: ScopedCacheTag[];
+
+	/**
+	 * Tags a read hook scoped this response TO that are unautopurgeable — a value
+	 * slice on a field the target collection isn't scoped on, not `manuallyPurged`. No
+	 * write can auto-purge them, so respond.ts must not cache the response; it also
+	 * lists them as the `unautopurgeable_scope` anomaly detail. Non-empty ⟺ flagged.
+	 */
+	scopedCacheUnautopurgeableTags?: ScopedCacheTag[];
 }
 
 /**

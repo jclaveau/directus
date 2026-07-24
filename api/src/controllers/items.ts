@@ -114,7 +114,11 @@ const readHandler = asyncHandler(async (req, res, next) => {
 		data: result,
 	};
 
-	res.locals['scopedCacheTags'] = readMeta(result)?.scopedCacheTags;
+	const resultMeta = readMeta(result);
+	res.locals['scopedCacheTags'] = resultMeta?.scopedCacheTags;
+
+	res.locals['scopedCacheUnautopurgeableTags'] =
+		resultMeta?.scopedCacheUnautopurgeableTags;
 
 	return next();
 });
