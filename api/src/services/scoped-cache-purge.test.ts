@@ -558,7 +558,10 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeable).toBe(true);
+
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
+					{ collection: 'test', field: 'ghost', value: 'g' },
+				]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -584,7 +587,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeable).toBe(false);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);
@@ -611,7 +614,7 @@ describe(oneLine`
 
 			try {
 				const result = await service().readByQuery({});
-				expect(readMeta(result)?.scopedCacheUnautopurgeable).toBe(false);
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
 			}
 			finally {
 				emitter.offFilter('test.items.read', declare);

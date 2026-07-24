@@ -42,11 +42,11 @@ export class GraphQLService {
 	scopedCacheTags: ScopedCacheTag[];
 
 	/**
-	 * True when ANY read in this request scoped to an unautopurgeable tag without
-	 * `manuallyPurged` — the whole `/graphql` entry can't be safely cached, so
-	 * respond.ts skips it. Aggregated like `scopedCacheTags` (one entry, many reads).
+	 * Unautopurgeable scope tags across every read in this request. Non-empty → the
+	 * whole `/graphql` entry can't be safely cached, so respond.ts skips it (and names
+	 * them in the anomaly). Aggregated like `scopedCacheTags` (one entry, many reads).
 	 */
-	scopedCacheUnautopurgeable: boolean;
+	scopedCacheUnautopurgeableTags: ScopedCacheTag[];
 
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
@@ -54,7 +54,7 @@ export class GraphQLService {
 		this.schema = options.schema;
 		this.scope = options.scope;
 		this.scopedCacheTags = [];
-		this.scopedCacheUnautopurgeable = false;
+		this.scopedCacheUnautopurgeableTags = [];
 	}
 
 	/**
@@ -106,7 +106,7 @@ export class GraphQLService {
 
 		return withMeta(formattedResult, {
 			scopedCacheTags: this.scopedCacheTags,
-			scopedCacheUnautopurgeable: this.scopedCacheUnautopurgeable,
+			scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
 		});
 	}
 
@@ -137,9 +137,9 @@ export class GraphQLService {
 		const resultMeta = readMeta(result);
 		this.scopedCacheTags.push(...(resultMeta?.scopedCacheTags ?? []));
 
-		if (resultMeta?.scopedCacheUnautopurgeable) {
-			this.scopedCacheUnautopurgeable = true;
-		}
+		this.scopedCacheUnautopurgeableTags.push(
+			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
+		);
 
 		return result;
 	}

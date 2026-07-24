@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import type { ScopedCacheTag } from '@directus/types';
 import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
@@ -96,11 +97,17 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const orphansInScopedMode =
 		scopedCacheTags.length === 0 && scopedCachePurgeEnabled();
 
-	// A read hook scoped this response to an unautopurgeable tag (a value slice on a
-	// field the target collection isn't scoped on) without `manuallyPurged`: no write
-	// can auto-purge it, so caching would serve stale. Skip caching + surface it.
+	// A read hook scoped this response to unautopurgeable tags (value slices on fields
+	// the target collection isn't scoped on) without `manuallyPurged`: no write can
+	// auto-purge them, so caching would serve stale. Skip caching + surface them.
+	const unautopurgeableScopeTags = res.locals['scopedCacheUnautopurgeableTags'] as
+		| ScopedCacheTag[]
+		| undefined;
+
 	const unautopurgeableScope =
-		res.locals['scopedCacheUnautopurgeable'] === true && scopedCachePurgeEnabled();
+		Array.isArray(unautopurgeableScopeTags) &&
+		unautopurgeableScopeTags.length > 0 &&
+		scopedCachePurgeEnabled();
 
 	// `$NOW` (in filter/deep) resolves to a Date in `sanitizeQuery` before the key is
 	// built, so each request keys distinctly (not a staleness risk). But the key never
@@ -272,7 +279,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
 		}
 		else if (unautopurgeableScope) {
-			void reportCacheAnomaly(req, 'unautopurgeable_scope').catch(() => {});
+			void reportCacheAnomaly(
+				req,
+				'unautopurgeable_scope',
+				(unautopurgeableScopeTags ?? [])
+					.map((tag) => `${tag.collection}:${tag.field}`)
+					.join(', '),
+			).catch(() => {});
 		}
 	}
 

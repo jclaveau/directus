@@ -1076,6 +1076,7 @@ implements AbstractService<Item> {
 		// reproducible on the `cache.purge` side or it leaks. Bounded to this read — it
 		// rides the result via `getMeta()`, not a service-level field.
 		let scopedCacheTags: ScopedCacheTag[] = [];
+		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
 			const fieldMap = fieldMapFromAst(ast, this.schema);
@@ -1133,6 +1134,24 @@ implements AbstractService<Item> {
 
 			// Fold in tags an `items.read` hook added via `context.scopedCache.scopeTo`.
 			scopedCacheTags.push(...scopedCacheCollector.tags);
+
+			// A scopeTo tag on a field its collection isn't scoped on can't be reproduced
+			// by that collection's auto-purge — the read would go stale — unless the hook
+			// marked it `manuallyPurged` (it reproduces the tag via its own purgeBy). List
+			// them so respond.ts leaves the read uncached + names them in the anomaly.
+			scopedCacheUnautopurgeableTags = scopedCacheCollector.tags.filter((tag) => {
+				if (tag.field === undefined) {
+					return false;
+				}
+
+				const collectionScopedFields =
+					this.schema.collections[tag.collection]?.scopedCacheFields;
+
+				return (
+					!collectionScopedFields?.includes(tag.field) &&
+					!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
+				);
+			});
 		}
 
 		if (opts?.emitEvents !== false) {
@@ -1154,27 +1173,9 @@ implements AbstractService<Item> {
 			);
 		}
 
-		// A scopeTo tag on a field its collection isn't scoped on can't be reproduced by
-		// that collection's auto-purge — the read would go stale — unless the hook
-		// marked it `manuallyPurged` (it reproduces the tag via its own purgeBy). Flag
-		// the read so respond.ts leaves it uncached + surfaces the anomaly, not poison.
-		const scopedCacheUnautopurgeable = scopedCacheCollector.tags.some((tag) => {
-			if (tag.field === undefined) {
-				return false;
-			}
-
-			const collectionScopedFields =
-				this.schema.collections[tag.collection]?.scopedCacheFields;
-
-			return (
-				!collectionScopedFields?.includes(tag.field) &&
-				!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
-			);
-		});
-
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
-			scopedCacheUnautopurgeable,
+			scopedCacheUnautopurgeableTags,
 		});
 	}
 
