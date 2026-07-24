@@ -628,6 +628,14 @@ function chartConfig(): ApexOptions {
 		xaxis: { type: 'datetime' },
 		yaxis: [
 			{
+				// Bind all three count series to this axis; without an explicit
+				// seriesName map apexcharts indexes a missing y-axis per series
+				// (misses/anomalies) and crashes on render.
+				seriesName: [
+					t('hits', 'Hits'),
+					t('cache_misses', 'Misses'),
+					t('cache_anomalies', 'Anomalies'),
+				],
 				title: { text: t('cache_count', 'Count') },
 				labels: { formatter: (v: number) => String(Math.round(v)) },
 			},
@@ -673,7 +681,10 @@ function renderChart() {
 	void chart.render();
 }
 
-watch(timeseries, renderChart, { deep: true });
+// Depend on chartEl too, not just the data: the chart's v-show container mounts a
+// tick after the route transition settles, so a data-only watcher fires while the
+// ref is still null. Re-firing when chartEl binds is what paints the first load.
+watch([timeseries, chartEl], renderChart, { deep: true, flush: 'post' });
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
@@ -896,70 +907,74 @@ onUnmounted(() => {
 				<div ref="chartEl" class="chart" />
 			</div>
 
-			<div class="summary">
-				<div class="metric">
-					<span class="value">{{ abbreviateNumber(groups.length) }}</span>
-					<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+			<div style="display: flex; justify-content:space-between;">
+				<div class="summary">
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(groups.length) }}</span>
+						<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalEntries) }}</span>
+						<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
+						<span class="label">{{ t('cache_misses', 'Misses') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalHits) }}</span>
+						<span class="label">{{ t('cache_hits', 'Hits') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
+						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
+					</div>
 				</div>
-				<div class="metric">
-					<span class="value">{{ abbreviateNumber(totalEntries) }}</span>
-					<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
-				</div>
-				<div class="metric">
-					<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
-					<span class="label">{{ t('cache_misses', 'Misses') }}</span>
-				</div>
-				<div class="metric">
-					<span class="value">{{ abbreviateNumber(totalHits) }}</span>
-					<span class="label">{{ t('cache_hits', 'Hits') }}</span>
-				</div>
-				<div class="metric">
-					<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
-					<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
-				</div>
-			</div>
 
-			<div class="cache-toolbar">
-				<v-input
-					v-model="ttlDraft"
-					class="ttl-input"
-					small
-					:placeholder="ttlPlaceholder"
-					@keydown.enter="saveTtl"
-				>
-					<template #append>
-						<v-icon
-							v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
-							name="check"
-							:disabled="!ttlDirty || ttlSaving"
-							clickable
-							@click="saveTtl"
-						/>
-					</template>
-				</v-input>
-
-				<div class="flush-group">
-					<v-select
-						v-model="flushTargets"
-						class="flush-select"
-						:items="flushTargetOptions"
-						:placeholder="t('cache_flush_targets', 'Flush')"
-						multiple
+				<div style="display: flex; align-items: center; gap: 16px 32px;">
+					<v-input
+						v-model="ttlDraft"
+						class="ttl-input"
+						small
 						inline
-					/>
-
-					<v-button
-						v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
-						rounded
-						icon
-						secondary
-						kind="danger"
-						:loading="flushing"
-						:disabled="flushTargets.length === 0"
-						@click="flush"
+						:placeholder="ttlPlaceholder"
+						style="width: 100px;"
+						@keydown.enter="saveTtl"
 					>
-						<v-icon name="cleaning_services" />
-					</v-button>
+						<template #append>
+							<v-icon
+								v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
+								name="check"
+								:disabled="!ttlDirty || ttlSaving"
+								clickable
+								@click="saveTtl"
+							/>
+						</template>
+					</v-input>
+
+					<div class="flush-group">
+						<v-select
+							v-model="flushTargets"
+							class="flush-select"
+							:items="flushTargetOptions"
+							:placeholder="t('cache_flush_targets', 'Flush')"
+							multiple
+							inline
+						/>
+
+						<v-button
+							v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
+							rounded
+							icon
+							secondary
+							kind="danger"
+							:loading="flushing"
+							:disabled="flushTargets.length === 0"
+							@click="flush"
+						>
+							<v-icon name="cleaning_services" />
+						</v-button>
+					</div>
 				</div>
 			</div>
 
@@ -1597,8 +1612,7 @@ table.entries .entry-row {
 /* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
    (which, with the 20px inner input, otherwise collapses to the icons' width). */
 .cache-toolbar .ttl-input {
-	inline-size: 340px;
-	flex-shrink: 0;
+	inline-size: 240px;
 }
 
 .flush-select {
