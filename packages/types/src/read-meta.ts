@@ -22,6 +22,11 @@ type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
  * `cache.scope` event: scope the cached response TO extra slices it needs, so a
  * later purge of any of them invalidates it. Additive to the framework tags.
  *
+ * A declared tag only invalidates the read if a write reproduces its EXACT key — the
+ * same field AND the same value canonicalization (pass `type` for a non-string
+ * field); else it won't match. The `manuallyPurged`/anomaly check below only covers
+ * the coarser "field the collection isn't scoped on" case, not value drift.
+ *
  * `manuallyPurged`: assert that a value-slice tag on a field the target collection
  * isn't scoped on is nonetheless reproduced by the author's own `purgeBy`. Without
  * it, such a tag is unautopurgeable — the framework can't invalidate the read on a
