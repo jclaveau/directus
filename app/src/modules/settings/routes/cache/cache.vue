@@ -534,6 +534,16 @@ const ttlPlaceholder = computed(() => {
 		: t('cache_ttl_placeholder', 'TTL e.g. 30m');
 });
 
+// Misses aren't in the entries listing (only fills are) — sum them off the same
+// windowed timeseries the chart uses.
+const totalMisses = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.misses, 0);
+});
+
+const totalAnomalies = computed(() => {
+	return searchedAnomalies.value.reduce((sum, a) => sum + a.count, 0);
+});
+
 const chartEl = ref<HTMLElement | null>(null);
 let chart: ApexCharts | null = null;
 
@@ -887,16 +897,24 @@ onUnmounted(() => {
 
 			<div class="summary">
 				<div class="metric">
+					<span class="value">{{ groups.length }}</span>
+					<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+				</div>
+				<div class="metric">
 					<span class="value">{{ totalEntries }}</span>
 					<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
 				</div>
 				<div class="metric">
-					<span class="value">{{ totalHits }}</span>
-					<span class="label">{{ t('total_hits', 'Total hits') }}</span>
+					<span class="value">{{ totalMisses }}</span>
+					<span class="label">{{ t('cache_misses', 'Misses') }}</span>
 				</div>
 				<div class="metric">
-					<span class="value">{{ groups.length }}</span>
-					<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+					<span class="value">{{ totalHits }}</span>
+					<span class="label">{{ t('cache_hits', 'Hits') }}</span>
+				</div>
+				<div class="metric">
+					<span class="value">{{ totalAnomalies }}</span>
+					<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 				</div>
 
 				<div class="cache-controls">

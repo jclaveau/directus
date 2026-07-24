@@ -641,7 +641,8 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		const entriesTotalBefore = Number(wrapper.findAll('.summary .value')[0]!.text());
+		// Metric order is Endpoints, Cached entries, Misses, Hits, Anomalies → index 1.
+		const entriesTotalBefore = Number(wrapper.findAll('.summary .value')[1]!.text());
 
 		wrapper.findComponent(SearchInput).vm.$emit('update:modelValue', 'bob@corp.io');
 		await flushPromises();
@@ -650,7 +651,7 @@ describe('CachePage', () => {
 		expect(wrapper.text()).not.toContain('/items/articles');
 
 		// The summary totals track the filtered list, not the full set.
-		const entriesTotalAfter = Number(wrapper.findAll('.summary .value')[0]!.text());
+		const entriesTotalAfter = Number(wrapper.findAll('.summary .value')[1]!.text());
 		expect(entriesTotalAfter).toBeLessThan(entriesTotalBefore);
 	});
 
