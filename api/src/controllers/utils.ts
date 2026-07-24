@@ -256,6 +256,30 @@ router.get(
 );
 
 router.get(
+	'/cache/timeseries',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		const windowMs = requestedWindowMs(req.query['window']);
+
+		const buckets = req.query['buckets'] === undefined
+			? undefined
+			: Number(req.query['buckets']);
+
+		res.locals['payload'] = {
+			data: await service.getCacheTimeseries(windowMs, buckets),
+		};
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
 	'/cache/entry',
 	asyncHandler(async (req, res) => {
 		const service = new UtilsService({

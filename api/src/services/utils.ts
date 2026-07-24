@@ -12,12 +12,15 @@ import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
 	type CacheStatsState,
+	type CacheTimeseries,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	readCacheTimeseries,
 	readCacheTombstone,
+	recordCacheConfigEvent,
 	setCacheStatsEnabled,
 	truncateCacheEvents,
 } from '../cache-events.js';
@@ -187,6 +190,9 @@ export class UtilsService {
 		}
 
 		await clearCacheTargets(targets);
+
+		// Best-effort marker for the cache-page timeseries; never fail the flush on it.
+		void recordCacheConfigEvent('flush', targets.join(',')).catch(() => {});
 	}
 
 	private assertCacheAdmin(action: string): void {
@@ -209,6 +215,15 @@ export class UtilsService {
 		this.assertCacheAdmin('inspect cache anomalies');
 
 		return listCacheAnomalies(windowMs);
+	}
+
+	async getCacheTimeseries(
+		windowMs?: number,
+		buckets?: number,
+	): Promise<CacheTimeseries> {
+		this.assertCacheAdmin('inspect the cache timeseries');
+
+		return readCacheTimeseries(windowMs, buckets);
 	}
 
 	// The live Redis state for a single key — the cached response plus its

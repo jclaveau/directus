@@ -111,6 +111,25 @@ export interface CacheEntryRecord {
 	lastHitAt: number | null;
 }
 
+export interface CacheTimeseriesBucket {
+	t: number; // bucket-start epoch ms
+	hits: number;
+	misses: number;
+	anomalies: number;
+	ttlMs: number | null; // effective TTL in force during the bucket
+}
+
+export interface CacheConfigEvent {
+	time: number;
+	kind: 'ttl_change' | 'flush';
+	detail: string | null;
+}
+
+export interface CacheTimeseries {
+	buckets: CacheTimeseriesBucket[];
+	markers: CacheConfigEvent[];
+}
+
 export interface CacheStatsState {
 	configured: boolean;
 	enabled: boolean;
@@ -1038,6 +1057,137 @@ export async function reapCacheAnomalies(): Promise<number> {
 	const cutoff = new Date(Date.now() - retentionMs());
 
 	return getDatabase()('directus_cache_anomalies')
+		.where('time', '<', cutoff)
+		.delete();
+}
+
+const CACHE_TIMESERIES_MAX_BUCKETS = 500;
+
+/**
+ * Append a marker for an admin cache action (a TTL change, a flush) so the cache
+ * page can plot it over the timeseries. Recorded unconditionally — NOT gated on
+ * cache-stats — so a change made while stats were off still shows once they return.
+ * `detail` carries the new TTL value (`ttl_change`) or the joined targets (`flush`).
+ */
+export async function recordCacheConfigEvent(
+	kind: CacheConfigEvent['kind'],
+	detail: string | null,
+): Promise<void> {
+	await getDatabase()('directus_cache_config_events').insert({
+		time: new Date(),
+		kind,
+		detail,
+	});
+}
+
+/**
+ * Bucketed hits / misses / anomalies + the effective TTL curve over `windowMs`, plus
+ * the discrete config-event markers in the same window. The curves come from the
+ * stats tables (only populated when stats are configured) and the bucketing is
+ * Postgres-only, like `recommended_ttl`; markers come from their own always-recorded
+ * table, so they surface even with stats off (over otherwise-empty curves).
+ */
+export async function readCacheTimeseries(
+	windowMs?: number,
+	buckets = 60,
+): Promise<CacheTimeseries> {
+	const db = getDatabase();
+	const windowLen = clampCacheStatsWindow(windowMs);
+	const now = Date.now();
+	const sinceMs = now - windowLen;
+	const since = new Date(sinceMs);
+
+	const bucketCount = Math.min(
+		Math.max(Math.trunc(buckets), 1),
+		CACHE_TIMESERIES_MAX_BUCKETS,
+	);
+
+	const markerRows = await db('directus_cache_config_events')
+		.where('time', '>', since)
+		.orderBy('time', 'asc')
+		.select('time', 'kind', 'detail');
+
+	const markers: CacheConfigEvent[] = markerRows.map(
+		(row: Record<string, unknown>) => {
+			return {
+				time: new Date(row['time'] as string).getTime(),
+				kind: row['kind'] as CacheConfigEvent['kind'],
+				detail: (row['detail'] as string | null) ?? null,
+			};
+		},
+	);
+
+	// Whole-second buckets so the DB's `floor(epoch / bucketSec)` aligns to the dense
+	// array below (both keyed off the same absolute epoch-second grid, not `sinceMs`).
+	const bucketSec = Math.max(1, Math.ceil(windowLen / bucketCount / 1000));
+	const firstBucket = Math.floor(sinceMs / 1000 / bucketSec);
+
+	const dense: CacheTimeseriesBucket[] = Array.from(
+		{ length: bucketCount },
+		(_unused, index) => {
+			return {
+				t: (firstBucket + index) * bucketSec * 1000,
+				hits: 0,
+				misses: 0,
+				anomalies: 0,
+				ttlMs: null,
+			};
+		},
+	);
+
+	if (!cacheStatsConfigured() || db.client.config.client !== 'pg') {
+		return { buckets: dense, markers };
+	}
+
+	const eventRows = await db('directus_cache_events')
+		.where('time', '>', since)
+		.groupByRaw('1')
+		.select(
+			db.raw('floor(extract(epoch from time) / ?) AS bucket', [bucketSec]),
+			db.raw('SUM(CASE WHEN kind = 0 THEN 1 ELSE 0 END) AS hits'),
+			db.raw('SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END) AS misses'),
+			db.raw('MAX(ttl_ms) AS ttl_ms'),
+		);
+
+	const anomalyRows = await db('directus_cache_anomalies')
+		.where('time', '>', since)
+		.groupByRaw('1')
+		.select(
+			db.raw('floor(extract(epoch from time) / ?) AS bucket', [bucketSec]),
+			db.raw('COUNT(*) AS count'),
+		);
+
+	for (const row of eventRows as Record<string, unknown>[]) {
+		const index = Number(row['bucket']) - firstBucket;
+
+		if (index >= 0 && index < bucketCount) {
+			dense[index]!.hits = Number(row['hits'] ?? 0);
+			dense[index]!.misses = Number(row['misses'] ?? 0);
+
+			dense[index]!.ttlMs = row['ttl_ms'] == null
+				? null
+				: Number(row['ttl_ms']);
+		}
+	}
+
+	for (const row of anomalyRows as Record<string, unknown>[]) {
+		const index = Number(row['bucket']) - firstBucket;
+
+		if (index >= 0 && index < bucketCount) {
+			dense[index]!.anomalies = Number(row['count'] ?? 0);
+		}
+	}
+
+	return { buckets: dense, markers };
+}
+
+// Prune config-event markers past the retention window. Ungated (they are recorded
+// unconditionally); wired into the stats reap cycle, so it only runs when stats are
+// on — acceptable given how rarely admin cache actions happen.
+export async function reapCacheConfigEvents(): Promise<number> {
+	const cutoff = new Date(Date.now() - retentionMs());
+
+	return getDatabase()('directus_cache_config_events')
 		.where('time', '<', cutoff)
 		.delete();
 }

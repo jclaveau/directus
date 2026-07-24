@@ -5,6 +5,7 @@ import type {
 	PrimaryKey,
 } from '@directus/types';
 import { publishCacheConfigChanged } from '../cache-config.js';
+import { recordCacheConfigEvent } from '../cache-events.js';
 import { ItemsService } from './items.js';
 
 export class SettingsService extends ItemsService {
@@ -22,7 +23,11 @@ export class SettingsService extends ItemsService {
 		const result = await super.upsertSingleton(data, opts);
 
 		if ('cache_ttl' in data) {
-			publishCacheConfigChanged(data['cache_ttl']);
+			const ttl = data['cache_ttl'] as string | null;
+			publishCacheConfigChanged(ttl);
+
+			// Best-effort marker for the cache-page timeseries; don't fail the save on it.
+			void recordCacheConfigEvent('ttl_change', ttl).catch(() => {});
 		}
 
 		return result;
