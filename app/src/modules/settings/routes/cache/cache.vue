@@ -8,6 +8,7 @@ import { useLocalStorage } from '@vueuse/core';
 import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { abbreviateNumber } from '@directus/utils';
 import type { Filter, User } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
@@ -297,10 +298,6 @@ const sections = computed(() => {
 // Totals track the filtered list, matching the endpoint count under a filter.
 const totalEntries = computed(() => searchedEntries.value.length);
 
-const totalHits = computed(() => {
-	return searchedEntries.value.reduce((sum, entry) => sum + entry.hits, 0);
-});
-
 async function load() {
 	const token = ++loadToken;
 	loading.value = true;
@@ -527,15 +524,19 @@ const timeseries = ref<TimeseriesData>({
 });
 
 const ttlPlaceholder = computed(() => {
+	// Concatenated, not interpolated: the inline i18n fallback doesn't fill {ttl}.
 	return timeseries.value.effectiveTtl
-		? t('cache_ttl_effective', 'Default: {ttl}', {
-			ttl: timeseries.value.effectiveTtl,
-		})
+		? `${t('cache_ttl_default', 'Default')}: ${timeseries.value.effectiveTtl}`
 		: t('cache_ttl_placeholder', 'TTL e.g. 30m');
 });
 
-// Misses aren't in the entries listing (only fills are) — sum them off the same
-// windowed timeseries the chart uses.
+// Hits + misses are the window's request outcomes — both summed off the same
+// timeseries the chart plots, so the two metrics stay comparable (the entries
+// listing only carries per-entry hit counts, never misses).
+const totalHits = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.hits, 0);
+});
+
 const totalMisses = computed(() => {
 	return timeseries.value.buckets.reduce((sum, b) => sum + b.misses, 0);
 });
@@ -897,23 +898,23 @@ onUnmounted(() => {
 
 			<div class="summary">
 				<div class="metric">
-					<span class="value">{{ groups.length }}</span>
+					<span class="value">{{ abbreviateNumber(groups.length) }}</span>
 					<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
 				</div>
 				<div class="metric">
-					<span class="value">{{ totalEntries }}</span>
+					<span class="value">{{ abbreviateNumber(totalEntries) }}</span>
 					<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
 				</div>
 				<div class="metric">
-					<span class="value">{{ totalMisses }}</span>
+					<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
 					<span class="label">{{ t('cache_misses', 'Misses') }}</span>
 				</div>
 				<div class="metric">
-					<span class="value">{{ totalHits }}</span>
+					<span class="value">{{ abbreviateNumber(totalHits) }}</span>
 					<span class="label">{{ t('cache_hits', 'Hits') }}</span>
 				</div>
 				<div class="metric">
-					<span class="value">{{ totalAnomalies }}</span>
+					<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
 					<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 				</div>
 
@@ -1243,7 +1244,8 @@ onUnmounted(() => {
 .summary {
 	display: flex;
 	align-items: center;
-	gap: 32px;
+	flex-wrap: wrap;
+	gap: 16px 32px;
 	margin-block-end: 24px;
 }
 
