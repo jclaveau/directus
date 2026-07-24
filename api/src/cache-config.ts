@@ -69,7 +69,14 @@ export function publishCacheConfigChanged(ttl: unknown): void {
  * still delivers this node's own publishes.
  */
 export async function initCacheConfig(): Promise<void> {
-	await refreshCacheTtlOverride();
+	// Best-effort seed: a not-yet-migrated or unreadable settings table must not crash
+	// boot — the override just stays unset (env `CACHE_TTL`) until the next change.
+	try {
+		await refreshCacheTtlOverride();
+	}
+	catch {
+		// leave cacheTtlOverride at null → resolvedCacheTtl falls back to env
+	}
 
 	useBus().subscribe<CacheConfigChange>(CONFIG_CHANGED_CHANNEL, ({ ttl }) => {
 		cacheTtlOverride = normaliseTtl(ttl);

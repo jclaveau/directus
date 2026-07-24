@@ -533,7 +533,18 @@ async function loadTimeseries() {
 			params: { window: selectedWindow.value, buckets: 60 },
 		});
 
-		timeseries.value = response.data.data;
+		// Normalise so buckets/markers are always arrays — the chart's series() and
+		// hasTimeseries read them directly and must never see an undefined.
+		const data = response.data.data;
+
+		timeseries.value = {
+			buckets: Array.isArray(data?.buckets)
+				? data.buckets
+				: [],
+			markers: Array.isArray(data?.markers)
+				? data.markers
+				: [],
+		};
 	}
 	catch {
 		timeseries.value = { buckets: [], markers: [] };
