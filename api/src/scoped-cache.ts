@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import type {
 	EventContext,
 	Filter,
+	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
 	SchemaOverview,
@@ -13,6 +14,57 @@ import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
 const env = useEnv();
+
+/**
+ * A per-operation collector backing the `context.scopedCache` hook handle. The
+ * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
+ * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
+ * the service drains `tags` into the read's scope or the mutation's purge tags. Both
+ * are the same idempotent sink. Safe with purging off (then `tags` is unread).
+ */
+export function createScopedCacheCollector(): ScopedCacheCollector {
+	const tags: ScopedCacheTag[] = [];
+	const seen = new Set<string>();
+	const manuallyPurgedKeys = new Set<string>();
+
+	function add(
+		input: ScopedCacheTag | readonly ScopedCacheTag[],
+		manuallyPurged = false,
+	): void {
+		const batch = Array.isArray(input)
+			? input
+			: [input];
+
+		for (const tag of batch) {
+			// Idempotent: a hook looping over rows that resolve the same slice — or a
+			// batch/upsert parent's shared collector fed by many children — must not
+			// inflate the set. Key on the canonical tag key (the same one the purge side
+			// dedups on), so field order and value/type variants (7 vs '7') can't slip a
+			// duplicate past a raw JSON compare.
+			const key = scopedCacheTagKey(tag);
+
+			// Record the accept regardless of dedup: if ANY scopeTo of this tag marked it
+			// manuallyPurged, it's exempt from the unautopurgeable-scope anomaly.
+			if (manuallyPurged) {
+				manuallyPurgedKeys.add(key);
+			}
+
+			if (seen.has(key)) {
+				continue;
+			}
+
+			seen.add(key);
+			tags.push(tag);
+		}
+	}
+
+	return {
+		tags,
+		manuallyPurgedKeys,
+		scope: { scopeTo: (input, options) => add(input, options?.manuallyPurged) },
+		purge: { purgeBy: (input) => add(input) },
+	};
+}
 
 /**
  * Whether scoped (tag-based) cache purging is active. Requires the opt-in mode AND a Redis cache
@@ -101,7 +153,7 @@ function isPinnableScopeType(type: Type | undefined): boolean {
 	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
 }
 
-function scopedCacheTagKey(tag: ScopedCacheTag): string {
+export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
 	return tag.field === undefined
 		? base
@@ -265,12 +317,17 @@ export async function purgeCollectionScopedCache(
  * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
  * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
  * risk leaving a slice stale; still narrower than nuking the whole namespace.
+ *
+ * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —
+ * for a cancelled mutation nothing in `collection` changed, so only the hook's own
+ * declared (usually foreign) slices should drop, not this collection's global reads.
  */
 export async function purgeScopedCache(
 	cache: Keyv,
 	collection: string,
 	scopedCacheTags: ScopedCacheTag[] | null = [],
 	context: EventContext | null = null,
+	options: { includeCollectionTag?: boolean } = {},
 ): Promise<ScopedCacheTag[] | null> {
 	// Returns the purged tags so a caller can surface them (dev-only debug header):
 	// `null` = whole namespace flushed (non-scoped mode); bare `[{ collection }]` =
@@ -287,7 +344,9 @@ export async function purgeScopedCache(
 
 	const resolvedScopedCacheTags = (await emitter.emitFilter(
 		'cache.purge',
-		[{ collection }, ...scopedCacheTags],
+		options.includeCollectionTag === false
+			? [...scopedCacheTags]
+			: [{ collection }, ...scopedCacheTags],
 		{ collection },
 		context,
 	)) as ScopedCacheTag[];

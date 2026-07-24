@@ -51,6 +51,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 const { ItemsService } = await import('./items.js');
 const { readMeta } = await import('../utils/read-meta.js');
 const { default: emitter } = await import('../emitter.js');
+const { createScopedCacheCollector } = await import('../scoped-cache.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -351,9 +352,12 @@ describe(oneLine`
 	});
 
 	it(oneLine`
-		create falls back to a coarse purge (null) when a hook takes over a row (returns a
-		PK, scope value unknowable)
+		an UNDECLARED take-over falls back to a coarse purge (null) — a take-over can be
+		an update-in-disguise whose OLD slice the create path can't recover
 	`, async () => {
+		// The hook returns a PK but declares nothing. It might have moved that row
+		// between slices (an upsert), and createMany has no old∪new capture → the old
+		// slice would leak. So without a declaration the purge is coarse (null).
 		const takeOver = async () => 99;
 		emitter.onFilter('test.items.create', takeOver);
 
@@ -501,5 +505,405 @@ describe(oneLine`
 		finally {
 			emitter.offFilter('cache.scope', listener);
 		}
+	});
+
+	// `context.scopedCache` carries only the event's method: an `items.read` filter
+	// scopes the response via `scopeTo`; a create/update/delete filter purges via
+	// `purgeBy`. Additive to the framework tags — read tags into the meta rider,
+	// mutation tags into the purge.
+	describe('context.scopedCache scopeTo / purgeBy hooks', () => {
+		// A cross-collection dependency a hook declares (a read enriched from an authors
+		// row); shared so the hook's tag and the assertion can't drift.
+		const authorsDependency = { collection: 'authors', field: 'id', value: 5 };
+
+		it(oneLine`
+			an items.read hook scopes the response to a cross-collection tag, unioned with
+			the auto-derived collection tag on the meta rider
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo(authorsDependency);
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+
+				expect(readMeta(result)?.scopedCacheTags).toEqual([
+					{ collection: 'test' },
+					authorsDependency,
+				]);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			flags a read whose hook scopeTo's a field the collection isn't scoped on as
+			unautopurgeable — no write can auto-purge that slice
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			// `test` is scoped on `student`, not `ghost` — this slice tag is orphaned.
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({ collection: 'test', field: 'ghost', value: 'g' });
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
+					{ collection: 'test', field: 'ghost', value: 'g' },
+				]);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			does NOT flag the same tag when the hook declares manuallyPurged — the author
+			reproduces it via their own purgeBy
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo(
+					{ collection: 'test', field: 'ghost', value: 'g' },
+					{ manuallyPurged: true },
+				);
+
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			does NOT flag a scopeTo on a scoped field — that slice is reproduced by the
+			collection's own auto-purge
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({
+					collection: 'test',
+					field: 'student',
+					value: 'A',
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			an items.create hook adds a tag, unioned after the committed-row slice in the
+			purge
+		`, async () => {
+			tracker.on.insert('test').response([1]);
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return payload;
+			};
+
+			emitter.onFilter('test.items.create', declare);
+
+			try {
+				await service().createMany([{ name: 'x', student: 'A' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						authorsDependency,
+					],
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', declare);
+			}
+		});
+
+		it(oneLine`
+			an items.update hook adds a tag, unioned after the old ∪ new slices in the
+			purge
+		`, async () => {
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'A' }]);
+			tracker.on.select('test').responseOnce([{ id: 1, student: 'B' }]);
+			tracker.on.update('test').response(1);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return payload;
+			};
+
+			emitter.onFilter('test.items.update', declare);
+
+			try {
+				await service().updateMany([1], { student: 'B' });
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+						authorsDependency,
+					],
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declare);
+			}
+		});
+
+		it(oneLine`
+			an items.delete hook adds a tag, unioned after the deleted rows' slices in the
+			purge
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.delete('test').response(1);
+
+			const declare = async (keys: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return keys;
+			};
+
+			emitter.onFilter('test.items.delete', declare);
+
+			try {
+				await service().deleteMany([1]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						authorsDependency,
+					],
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.delete', declare);
+			}
+		});
+
+		it(oneLine`
+			a take-over that DECLARES its footprint via addTag narrows to a precise purge —
+			the declaration opts out of the safe coarse fallback
+		`, async () => {
+			// A take-over is coarse BY DEFAULT (old slice unrecoverable in the create
+			// path). Declaring a tag asserts the hook knows its footprint, so we trust it
+			// and narrow: the taken-over row's re-read slice (Z) UNION the declared tag —
+			// never the coarse null flush.
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return 99;
+			};
+
+			emitter.onFilter('test.items.create', takeOver);
+
+			try {
+				await service().createMany([{ name: 'x', student: 'A' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[
+						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
+						authorsDependency,
+					],
+					expect.anything(),
+				);
+
+				expect(purgeScopedCache).not.toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
+
+		it(oneLine`
+			a hook that declares a slice then cancels (null) purges only that slice —
+			includeCollectionTag:false keeps the cancelled collection's bare tag warm,
+			since nothing in it changed
+		`, async () => {
+			// updateMany snapshots the pre-update rows before the filter runs (old ∪ new),
+			// even when the filter goes on to cancel — so a row still has to resolve.
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+			const declareThenCancel = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return null; // cancel the update
+			};
+
+			emitter.onFilter('test.items.update', declareThenCancel);
+
+			try {
+				await service().updateMany(
+					[1],
+					{ student: 'B' },
+					{ allowFilterCancel: true },
+				);
+
+				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[authorsDependency],
+					expect.anything(),
+					{ includeCollectionTag: false },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declareThenCancel);
+			}
+		});
+
+		it(oneLine`
+			a coarse (null) purge carrying hook-declared tags reflects BOTH in the debug
+			header — the hook purge's result is unioned in, not dropped
+		`, async () => {
+			// Re-read missing `student` → snapshot null → coarse purge; the hook also
+			// declares a foreign slice, so purgeScopedCache runs twice (coarse null +
+			// hook tags) and scopedCachePurged must union both.
+			tracker.on.select('test').response([{ id: 1 }]);
+			tracker.on.update('test').response(1);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return payload;
+			};
+
+			purgeScopedCache
+				.mockResolvedValueOnce([{ collection: 'test' }])
+				.mockResolvedValueOnce([authorsDependency]);
+
+			emitter.onFilter('test.items.update', declare);
+
+			try {
+				const svc = service();
+				await svc.updateMany([1], { name: 'x' });
+
+				expect(purgeScopedCache).toHaveBeenNthCalledWith(
+					1,
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+				);
+
+				// Coarse already flushed this collection's bare tag + every slice, so the
+				// hook purge must NOT re-add it: includeCollectionTag:false (else the bare
+				// tag is purged twice and doubled in the debug header).
+				expect(purgeScopedCache).toHaveBeenNthCalledWith(
+					2,
+					expect.anything(),
+					'test',
+					[authorsDependency],
+					expect.anything(),
+					{ includeCollectionTag: false },
+				);
+
+				expect(svc.scopedCachePurged).toEqual([
+					{ collection: 'test' },
+					authorsDependency,
+				]);
+			}
+			finally {
+				emitter.offFilter('test.items.update', declare);
+			}
+		});
+
+		it(oneLine`
+			an UNDECLARED take-over stays coarse (null) even when an injected shared
+			collector already carries a sibling operation's tags — the fallback keys off
+			THIS call's own declarations, not the collector's running total
+		`, async () => {
+			// A batch/upsert parent injects one shared collector across its children. Seed
+			// it as if an earlier child already declared a slice; a later child that takes
+			// over a row but declares nothing ITSELF must still fall back to coarse — else
+			// the pre-seeded tag reads as this row's declaration and its old slice leaks.
+			const shared = createScopedCacheCollector();
+			shared.purge.purgeBy({ collection: 'siblings', field: 'id', value: 1 });
+
+			// Coarse + hook-tags → purgeScopedCache runs twice and unions results; real
+			// module returns arrays, so give the spy an iterable (args are the check).
+			purgeScopedCache.mockResolvedValue([]);
+
+			tracker.on.select('test').response([{ id: 99, student: 'Z' }]);
+
+			const takeOver = async () => 99; // takes over a row, declares nothing new
+			emitter.onFilter('test.items.create', takeOver);
+
+			try {
+				await service().createMany(
+					[{ name: 'x', student: 'A' }],
+					{ scopedCacheCollector: shared },
+				);
+
+				// Coarse (null) despite the pre-seeded collector.
+				expect(purgeScopedCache).toHaveBeenNthCalledWith(
+					1,
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+				);
+
+				// Never the precise take-over slice (Z) — that would leak the old slice.
+				expect(purgeScopedCache).not.toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					expect.arrayContaining([
+						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
+					]),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
 	});
 });

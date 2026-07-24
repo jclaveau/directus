@@ -1,0 +1,33 @@
+---
+name: project_directus_pr292_cache_hook_scopedcache
+description: PR #292 (v11.10.1-feat/cache-hook-add-tag) state — the context.scopedCache hook channel bb+unit witness matrix, two source fixes (delete double-emit, cancel-parity), and accepted-deferred points so a fresh review doesn't re-open them
+metadata:
+  type: project
+---
+
+PR **#292**, branch `v11.10.1-feat/cache-hook-add-tag`. Ships the `context.scopedCache` CRUD-filter hook channel (`scopeTo` read / `purgeBy` mutation — see [[reference_directus_scopedcache_api]]) plus its full witness matrix and two fixes found while covering it.
+
+**bb witness matrix** — one test file per subject, each spawns its own scoped-purge instance (redis 6108, `CACHE_AUTO_PURGE_MODE=scoped`, `x-cache-status` HIT/MISS); see [[project_directus_blackbox_m2m_nested_and_cancel]]:
+- `cache-takeover-scope.test.ts` — create `purgeBy`: M2M take-over narrow (declared dedup) / coarse (undeclared upsert-move), + create **veto** (null-cancel: pure→no purge, declared→precise). Also hosts the `moderated` veto collection.
+- `cache-read-scope.test.ts` — read `scopeTo`: a `report` read hook readByQuery's `metric[owner=acme]` and `scopeTo`s its returned tags → a metric write MISSes the report; sibling slice HIT.
+- `cache-update-scope.test.ts` / `cache-delete-scope.test.ts` — update/delete `purgeBy` reaching ANOTHER collection (order→summary, charge→invoice); owner resolved per row from `meta.keys`/`keys` → precise.
+- `cache-cancel-write.test.ts` — update+delete **veto** (pure + declared), mirroring the create veto.
+
+**Four source fixes (items.ts):**
+1. **Delete filter double-emit** — the scoped-cache rewrite added a cancel-capable `items.delete` `emitFilter` BEFORE `validateAccess` (load-bearing: drives cancel + pre-delete snapshot) but left the ORIGINAL upstream emit AFTER `validateAccess` → delete hooks fired TWICE (non-cancel path); only idempotent hooks hid it. Removed the redundant upstream emit → single pre-`validateAccess` emit (parity with updateMany, which emits once). **The tell: sibling-method emit-count asymmetry** (updateMany 1 vs deleteMany 2). Unit pin in `items.test.ts`: "emits the delete filter exactly once".
+2. **Cancel-parity** — update/delete null-cancel early-returned BEFORE the purge → a hook that `purgeBy`'d then cancelled lost its declaration; create differs (drains the collector post-loop). Fixed: both cancel branches now `purgeScopedCache([], collector)` before returning.
+3. **Pure-cancel bare-tag over-purge** (found in the deep review, fix `cee72993d9`) — fix #2 made the cancel drain UNCONDITIONAL. But `purgeScopedCache([], emptyCollector)` still purges the bare `{collection}` tag (the method always prepends it, `scoped-cache.ts:331`), so EVERY pure validation cancel flushed all global/unscoped reads of the collection. The "no-op" comment was false. Guard both drains on `scopedCacheCollector.tags.length > 0 &&` before `shouldClearCache`. bb witness: `cache-cancel-write.test.ts` GLOBAL (unfiltered) read stays HIT after a pure veto — the existing scoped-slice witnesses can't see a bare-tag purge (RED `MISS`→GREEN `HIT`, both vendors).
+4. **`purgeBy` dropped on batch/upsert** (same review, same fix) — `updateBatch`/`upsertMany` fork children with `autoPurgeCache:false` (suppressing each child's drain) then re-purge at the parent WITHOUT a collector → a create/update hook's `purgeBy` was lost on the array-body PATCH + all upsert routes. Only direct `createMany`/`updateMany`/`deleteMany` drained. Fix: `MutationOptions.scopedCacheCollector` (+ `ScopedCacheCollector` type in read-meta.ts) lets a batch/upsert parent inject ONE shared collector; the three `Many` do `opts.scopedCacheCollector ?? createScopedCacheCollector()`; children accumulate into it, parent drains once. bb witness: `cache-update-scope.test.ts` array-body PATCH → both owners' summaries MISS (RED `HIT`→GREEN `MISS`, both vendors). NOTE `readByQuery.opts` is `QueryOptions` (no field) so read must stay plain `createScopedCacheCollector()` — a `replace_all` there type-errors.
+
+**Review-tail fixes (commit `8ca8aafe2a`, all minor, each regression-tested):**
+- **#4 declaring-cancel bare-tag** (was deferred, now FIXED) — `purgeScopedCache` gained `includeCollectionTag`; the update/delete cancel drains call it DIRECTLY with `false` (bypassing `this.purgeScopedCache`'s bare-tag prepend) so a `flag→purgeBy→null` cancel purges only its declared slices, not the cancelled collection's global reads. bb: cache-cancel-write flag tests assert the global read stays HIT. unit: scoped-cache-purge asserts the 5th arg `{includeCollectionTag:false}`. NB kept the direct call (not a wrapper option) so existing 4-arg `toHaveBeenCalledWith` specs don't break on a spurious 5th `undefined`.
+- **#5** stale comment (`delete fires its hook twice`) dropped from the collector.
+- **#6** coarse(null)+hook-declared purge now unions BOTH into `scopedCachePurged` (dev `CACHE_PURGED_TAGS_HEADER`) instead of discarding the hook purge; reachable when a row misses its scope field AND a hook declares. unit-witnessed.
+- **#7** collector dedups on `scopedCacheTagKey` (canonical), not `JSON.stringify` — field order + value/type (7 vs '7') can't slip a dup. unit-witnessed.
+- **#8** disclosure comment: the sole `items.delete` filter emit runs PRE-`validateAccess` deliberately (cancel + snapshot precede delete); flagged in the PR body for hooks assuming authorized keys.
+
+**Accepted / deferred — do NOT re-raise:**
+- **Side-effecting cancel with NO declaration gets no coarse safety net** (unlike a take-over, whose PK return signals a row). Treating pure cancel as a cache no-op is the right default (coarse-gating every cancel taxes validation-skips). DEFERRED follow-up, not gated.
+- **codecov/patch (aggregate) red on the fix is EXPECTED** — `packages/types` additions are pure type declarations (no runtime), uncovered in the aggregate; every per-flag check passes (`patch/api`, `patch/blackbox`). The runtime fix IS bb-covered. Don't chase — [[reference_codecov_patch_coverage]].
+- Full compile-time event→method typing (`scopeTo`/`purgeBy` on a union field) = **issue #294**, out of #292.
+- Cross-collection `scopeTo`/`purgeBy` reuse `result.getMeta().scopedCacheTags` from a lookup rather than hand-building a tag — deliberate (can't drift from the pinned slice), [[feedback_reuse_source_of_truth_combiner]].
