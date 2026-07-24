@@ -474,7 +474,8 @@ describe('CachePage', () => {
 
 		vi.mocked(api.get).mockClear();
 
-		wrapper.findComponent(VSelect).vm.$emit('update:modelValue', '7d');
+		// The window selector, not the flush-target select (both render as v-select).
+		wrapper.findComponent('.window-select').vm.$emit('update:modelValue', '7d');
 		await flushPromises();
 
 		expect(api.get).toHaveBeenCalledWith('/utils/cache', {

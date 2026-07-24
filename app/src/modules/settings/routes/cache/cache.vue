@@ -461,9 +461,9 @@ async function saveTtl() {
 type CacheFlushTarget = 'response' | 'system' | 'locks';
 
 const flushTargetOptions = [
-	{ text: t('cache_flush_response', 'Response cache'), value: 'response' },
-	{ text: t('cache_flush_system', 'System cache'), value: 'system' },
-	{ text: t('cache_flush_locks', 'Locks / build-identity'), value: 'locks' },
+	{ text: t('cache_flush_response', 'Response'), value: 'response' },
+	{ text: t('cache_flush_system', 'System'), value: 'system' },
+	{ text: t('cache_flush_locks', 'Locks'), value: 'locks' },
 ];
 
 const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
@@ -512,9 +512,26 @@ interface ConfigMarker {
 	detail: string | null;
 }
 
-const timeseries = ref<{ buckets: TimeseriesBucket[]; markers: ConfigMarker[] }>({
+interface TimeseriesData {
+	buckets: TimeseriesBucket[];
+	markers: ConfigMarker[];
+	// The TTL in force server-side (override, else env default) — shown as the TTL
+	// input's placeholder so an empty field reveals what it inherits.
+	effectiveTtl: string | null;
+}
+
+const timeseries = ref<TimeseriesData>({
 	buckets: [],
 	markers: [],
+	effectiveTtl: null,
+});
+
+const ttlPlaceholder = computed(() => {
+	return timeseries.value.effectiveTtl
+		? t('cache_ttl_effective', 'Default: {ttl}', {
+			ttl: timeseries.value.effectiveTtl,
+		})
+		: t('cache_ttl_placeholder', 'TTL e.g. 30m');
 });
 
 const chartEl = ref<HTMLElement | null>(null);
@@ -544,10 +561,11 @@ async function loadTimeseries() {
 			markers: Array.isArray(data?.markers)
 				? data.markers
 				: [],
+			effectiveTtl: data?.effectiveTtl ?? null,
 		};
 	}
 	catch {
-		timeseries.value = { buckets: [], markers: [] };
+		timeseries.value = { buckets: [], markers: [], effectiveTtl: null };
 	}
 }
 
@@ -850,46 +868,6 @@ onUnmounted(() => {
 			>
 				<v-icon :name="statsState.enabled ? 'toggle_on' : 'toggle_off'" />
 			</v-button>
-
-			<v-input
-				v-model="ttlDraft"
-				class="ttl-input"
-				small
-				:placeholder="t('cache_ttl_placeholder', 'TTL e.g. 30m — env default')"
-				@keydown.enter="saveTtl"
-			>
-				<template #append>
-					<v-icon
-						v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
-						name="check"
-						:disabled="!ttlDirty || ttlSaving"
-						clickable
-						@click="saveTtl"
-					/>
-				</template>
-			</v-input>
-
-			<v-select
-				v-model="flushTargets"
-				class="flush-select"
-				:items="flushTargetOptions"
-				:placeholder="t('cache_flush_targets', 'Flush targets')"
-				multiple
-				inline
-			/>
-
-			<v-button
-				v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
-				rounded
-				icon
-				secondary
-				kind="danger"
-				:loading="flushing"
-				:disabled="flushTargets.length === 0"
-				@click="flush"
-			>
-				<v-icon name="cleaning_services" />
-			</v-button>
 		</template>
 
 		<template #navigation>
@@ -919,6 +897,50 @@ onUnmounted(() => {
 				<div class="metric">
 					<span class="value">{{ groups.length }}</span>
 					<span class="label">{{ t('endpoints', 'Endpoints') }}</span>
+				</div>
+
+				<div class="cache-controls">
+					<v-input
+						v-model="ttlDraft"
+						class="ttl-input"
+						small
+						:placeholder="ttlPlaceholder"
+						@keydown.enter="saveTtl"
+					>
+						<template #append>
+							<v-icon
+								v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
+								name="check"
+								:disabled="!ttlDirty || ttlSaving"
+								clickable
+								@click="saveTtl"
+							/>
+						</template>
+					</v-input>
+
+					<div class="flush-group">
+						<v-select
+							v-model="flushTargets"
+							class="flush-select"
+							:items="flushTargetOptions"
+							:placeholder="t('cache_flush_targets', 'Flush')"
+							multiple
+							inline
+						/>
+
+						<v-button
+							v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
+							rounded
+							icon
+							secondary
+							kind="danger"
+							:loading="flushing"
+							:disabled="flushTargets.length === 0"
+							@click="flush"
+						>
+							<v-icon name="cleaning_services" />
+						</v-button>
+					</div>
 				</div>
 			</div>
 
@@ -1202,8 +1224,27 @@ onUnmounted(() => {
 
 .summary {
 	display: flex;
+	align-items: center;
 	gap: 32px;
 	margin-block-end: 24px;
+}
+
+/* Pushed to the right edge of the summary row, opposite the metrics. */
+.cache-controls {
+	display: flex;
+	align-items: center;
+	gap: 20px;
+	margin-inline-start: auto;
+}
+
+/* The flush select + button read as one control, set apart from the TTL field. */
+.flush-group {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 4px 4px 4px 10px;
+	background-color: var(--theme--background-subdued);
+	border-radius: var(--theme--border-radius);
 }
 
 .metric {
@@ -1533,10 +1574,10 @@ table.entries .entry-row {
 }
 
 .ttl-input {
-	inline-size: 200px;
+	inline-size: 280px;
 }
 
 .flush-select {
-	max-inline-size: 240px;
+	inline-size: 130px;
 }
 </style>
