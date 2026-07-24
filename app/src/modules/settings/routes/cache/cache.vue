@@ -5,7 +5,8 @@ import { getRootPath } from '@/utils/get-root-path';
 import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
 import { useLocalStorage } from '@vueuse/core';
-import { computed, onMounted, ref, watch } from 'vue';
+import ApexCharts, { type ApexOptions } from 'apexcharts';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import type { Filter, User } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
@@ -305,6 +306,9 @@ async function load() {
 	loading.value = true;
 	error.value = null;
 
+	// The chart tracks the same window; fetch it alongside (its own error handling).
+	void loadTimeseries();
+
 	try {
 		// Fetch both together and assign in one go: entries + anomalies feed one group
 		// tree, so a staggered assign would flash a phantom old-window anomaly node.
@@ -444,6 +448,8 @@ async function saveTtl() {
 
 	try {
 		await settingsStore.updateSettings({ cache_ttl: ttlDraft.value.trim() || null });
+		// Surface the new ttl-change marker on the chart without a full reload.
+		await loadTimeseries();
 	}
 	finally {
 		ttlSaving.value = false;
@@ -491,6 +497,143 @@ async function flush() {
 		flushing.value = false;
 	}
 }
+
+interface TimeseriesBucket {
+	t: number;
+	hits: number;
+	misses: number;
+	anomalies: number;
+	ttlMs: number | null;
+}
+
+interface ConfigMarker {
+	time: number;
+	kind: 'ttl_change' | 'flush';
+	detail: string | null;
+}
+
+const timeseries = ref<{ buckets: TimeseriesBucket[]; markers: ConfigMarker[] }>({
+	buckets: [],
+	markers: [],
+});
+
+const chartEl = ref<HTMLElement | null>(null);
+let chart: ApexCharts | null = null;
+
+// Show the chart once there's anything to plot — sample counts or a config marker —
+// so a stats-off page with no markers doesn't render an empty axis.
+const hasTimeseries = computed(() => {
+	return timeseries.value.markers.length > 0
+		|| timeseries.value.buckets.some((b) => b.hits || b.misses || b.anomalies);
+});
+
+async function loadTimeseries() {
+	try {
+		const response = await api.get('/utils/cache/timeseries', {
+			params: { window: selectedWindow.value, buckets: 60 },
+		});
+
+		timeseries.value = response.data.data;
+	}
+	catch {
+		timeseries.value = { buckets: [], markers: [] };
+	}
+}
+
+function themeVar(name: string, fallback: string): string {
+	const value = getComputedStyle(document.documentElement)
+		.getPropertyValue(name)
+		.trim();
+
+	return value || fallback;
+}
+
+function chartConfig(): ApexOptions {
+	const buckets = timeseries.value.buckets;
+
+	function series(pick: (b: TimeseriesBucket) => number | null) {
+		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
+	}
+
+	return {
+		chart: {
+			type: 'line',
+			height: 240,
+			toolbar: { show: false },
+			animations: { enabled: false },
+			fontFamily: 'inherit',
+		},
+		colors: [
+			themeVar('--theme--success', '#2ecda7'),
+			themeVar('--theme--warning', '#ffa439'),
+			themeVar('--theme--danger', '#e35169'),
+			themeVar('--theme--primary', '#6644ff'),
+		],
+		stroke: { width: 2, curve: ['smooth', 'smooth', 'smooth', 'stepline'] },
+		legend: { show: true, position: 'top' },
+		dataLabels: { enabled: false },
+		series: [
+			{ name: t('hits', 'Hits'), data: series((b) => b.hits) },
+			{ name: t('cache_misses', 'Misses'), data: series((b) => b.misses) },
+			{ name: t('cache_anomalies', 'Anomalies'), data: series((b) => b.anomalies) },
+			{
+				name: t('ttl', 'TTL'),
+				data: series((b) => {
+					return b.ttlMs === null
+						? null
+						: Math.round(b.ttlMs / 1000);
+				}),
+			},
+		],
+		xaxis: { type: 'datetime' },
+		yaxis: [
+			{
+				title: { text: t('cache_count', 'Count') },
+				labels: { formatter: (v: number) => String(Math.round(v)) },
+			},
+			{
+				opposite: true,
+				seriesName: t('ttl', 'TTL'),
+				title: { text: t('cache_ttl_seconds', 'TTL (s)') },
+				labels: { formatter: (v: number) => `${Math.round(v)}s` },
+			},
+		],
+		annotations: {
+			xaxis: timeseries.value.markers.map((m) => {
+				const flush = m.kind === 'flush';
+
+				return {
+					x: m.time,
+					borderColor: flush
+						? themeVar('--theme--danger', '#e35169')
+						: themeVar('--theme--primary', '#6644ff'),
+					label: {
+						text: flush
+							? `⚑ ${m.detail ?? ''}`
+							: `TTL ${m.detail ?? '∅'}`,
+						style: { fontSize: '10px' },
+					},
+				};
+			}),
+		},
+	};
+}
+
+function renderChart() {
+	if (!chartEl.value) {
+		return;
+	}
+
+	if (chart) {
+		void chart.updateOptions(chartConfig(), true, false);
+		return;
+	}
+
+	chart = new ApexCharts(chartEl.value, chartConfig());
+	void chart.render();
+}
+
+watch(timeseries, renderChart, { deep: true });
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
@@ -638,6 +781,11 @@ onMounted(() => {
 	void load();
 	void loadStatsState();
 });
+
+onUnmounted(() => {
+	chart?.destroy();
+	chart = null;
+});
 </script>
 
 <template>
@@ -743,6 +891,10 @@ onMounted(() => {
 
 		<div class="cache-page">
 			<v-notice v-if="error" type="danger">{{ error }}</v-notice>
+
+			<div v-show="hasTimeseries" class="timeseries">
+				<div ref="chartEl" class="chart" />
+			</div>
 
 			<div class="summary">
 				<div class="metric">
@@ -1363,6 +1515,10 @@ table.entries .entry-row {
 	font-size: 13px;
 	white-space: pre;
 	overflow: auto;
+}
+
+.timeseries {
+	margin-block-end: 24px;
 }
 
 .ttl-input {
