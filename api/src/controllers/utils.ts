@@ -3,6 +3,7 @@ import argon2 from 'argon2';
 import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
+import type { CacheFlushTarget } from '../cache.js';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
 import { ExportService, ImportService } from '../services/import-export.js';
@@ -181,6 +182,13 @@ router.post(
 	respond,
 );
 
+const CacheClearSchema = Joi.object<{ targets: CacheFlushTarget[] }>({
+	targets: Joi.array()
+		.items(Joi.string().valid('response', 'system', 'locks'))
+		.single()
+		.default(['response']),
+});
+
 router.post(
 	'/cache/clear',
 	asyncHandler(async (req, res) => {
@@ -189,9 +197,24 @@ router.post(
 			schema: req.schema,
 		});
 
-		const clearSystemCache = 'system' in req.query && (req.query['system'] === '' || Boolean(req.query['system']));
+		const { error, value } = CacheClearSchema.validate(req.query, {
+			allowUnknown: true,
+		});
 
-		await service.clearCache({ system: clearSystemCache });
+		if (error) {
+			throw new InvalidQueryError({ reason: error.message });
+		}
+
+		// Retrocompat: the historical `?system` flag cleared the system cache on top of
+		// the response cache, so map it onto the targets rather than break old callers.
+		const legacySystem = 'system' in req.query
+			&& (req.query['system'] === '' || Boolean(req.query['system']));
+
+		const targets = legacySystem && !value.targets.includes('system')
+			? [...value.targets, 'system' as const]
+			: value.targets;
+
+		await service.clearCache({ targets });
 
 		res.status(200).end();
 	}),

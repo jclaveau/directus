@@ -2,7 +2,12 @@ import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { systemCollectionRows } from '@directus/system-data';
 import type { AbstractServiceOptions, Accountability, PrimaryKey, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { clearSystemCache, getCache, getCacheValue } from '../cache.js';
+import {
+	type CacheFlushTarget,
+	clearCacheTargets,
+	getCache,
+	getCacheValue,
+} from '../cache.js';
 import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
@@ -174,20 +179,14 @@ export class UtilsService {
 		);
 	}
 
-	async clearCache({ system }: { system: boolean }): Promise<void> {
+	async clearCache({ targets }: { targets: CacheFlushTarget[] }): Promise<void> {
 		if (this.accountability?.admin !== true) {
 			throw new ForbiddenError({
 				reason: `'${this.accountability?.user}' does not have permission to clear the cache as not being an admin`,
 			});
 		}
 
-		const { cache } = getCache();
-
-		if (system) {
-			await clearSystemCache({ forced: true });
-		}
-
-		return cache?.clear();
+		await clearCacheTargets(targets);
 	}
 
 	private assertCacheAdmin(action: string): void {
