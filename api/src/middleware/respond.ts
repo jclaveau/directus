@@ -279,13 +279,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
 		}
 		else if (unautopurgeableScope) {
-			void reportCacheAnomaly(
-				req,
-				'unautopurgeable_scope',
-				(unautopurgeableScopeTags ?? [])
-					.map((tag) => `${tag.collection}:${tag.field}`)
-					.join(', '),
-			).catch(() => {});
+			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same tag.
+			const detail = [
+				...new Set(
+					(unautopurgeableScopeTags ?? []).map(
+						(tag) => `${tag.collection}:${tag.field}`,
+					),
+				),
+			].join(', ');
+
+			void reportCacheAnomaly(req, 'unautopurgeable_scope', detail).catch(() => {});
 		}
 	}
 
