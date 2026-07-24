@@ -9,6 +9,7 @@ import type {
 	Type,
 } from '@directus/types';
 import type Keyv from 'keyv';
+import { resolvedCacheTtl } from './cache-config.js';
 import emitter from './emitter.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -201,7 +202,7 @@ export async function tagScopedCacheKeys(
 	}
 
 	const redis = useRedis();
-	const ttlSeconds = Math.ceil(getMilliseconds(env['CACHE_TTL'], 0) / 1000) * 2;
+	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000) * 2;
 	const pipeline = redis.pipeline();
 
 	for (const tagKey of tagKeys) {
@@ -287,6 +288,28 @@ async function scanScopedCacheTagKeys(match: string): Promise<string[]> {
 	while (cursor !== '0');
 
 	return found;
+}
+
+/**
+ * Drop every scoped-tag index SET (`<namespace>:tag:*`). These are written direct
+ * via ioredis `sadd`, outside any Keyv namespace, so a response `cache.clear()`
+ * never reaches them — they would linger as orphan pointers until their `ttl*2`
+ * self-expiry. The `Response cache` flush calls this alongside `cache.clear()` for a
+ * clean wipe. Only the SET keys are dropped; the entries they pointed at are already
+ * gone with the namespace clear.
+ */
+export async function dropScopedCacheTagIndex(): Promise<void> {
+	if (!redisConfigAvailable()) {
+		return;
+	}
+
+	const tagKeys = await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`);
+
+	if (tagKeys.length === 0) {
+		return;
+	}
+
+	await useRedis().del(...tagKeys);
 }
 
 /**

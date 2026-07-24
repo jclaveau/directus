@@ -5,6 +5,7 @@ import { useBus } from './bus/index.js';
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { redisConfigAvailable } from './redis/index.js';
+import { dropScopedCacheTagIndex } from './scoped-cache.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -38,6 +39,15 @@ interface CacheMessage {
 	autoPurgeCache: boolean | undefined;
 }
 
+// The subset a flush drops, chosen per-target on the cache page. `system` rides the
+// existing `schemaChanged` broadcast; `response`/`locks` are per-node memory tiers a
+// dedicated channel has to reach (see `clearCacheTargets`).
+export type CacheFlushTarget = 'response' | 'system' | 'locks';
+
+interface CacheClearMessage {
+	targets: CacheFlushTarget[];
+}
+
 if (redisConfigAvailable() && !messengerSubscribed) {
 	messengerSubscribed = true;
 
@@ -48,6 +58,24 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 
 		await localSchemaCache?.clear();
 		memorySchemaCache = null;
+	});
+
+	messenger.subscribe<CacheClearMessage>('cacheCleared', async ({ targets }) => {
+		// Redis-backed tiers are shared, so the initiator already cleared them globally;
+		// only a per-node memory store leaves each node its own copy to drop here.
+		if (env['CACHE_STORE'] !== 'memory') {
+			return;
+		}
+
+		const { cache, lockCache } = getCache();
+
+		if (targets.includes('response')) {
+			await cache?.clear();
+		}
+
+		if (targets.includes('locks')) {
+			await lockCache.clear();
+		}
 	});
 }
 
@@ -122,6 +150,35 @@ export async function clearSystemCache(opts?: {
 	await clearPermissionCache();
 
 	messenger.publish<CacheMessage>('schemaChanged', { autoPurgeCache: opts?.autoPurgeCache });
+}
+
+/**
+ * Flush a chosen subset of the cache and tell every node to drop the same subset of
+ * its per-node memory tiers. A blanket flush is deliberately not the default:
+ * `system` is auto-invalidated on schema change and costly to rebuild, and `locks`
+ * holds the build-identity fingerprint whose loss forces a full re-flush next boot.
+ */
+export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<void> {
+	const { cache, lockCache } = getCache();
+
+	if (targets.includes('system')) {
+		// forced so it runs even while a lock is held; its `schemaChanged` publish
+		// fans the system + schema + permissions clear out to every node.
+		await clearSystemCache({ forced: true });
+	}
+
+	if (targets.includes('response')) {
+		await cache?.clear();
+		// The scoped-tag index lives in raw Redis outside the Keyv namespace, so the
+		// clear above misses it — drop it too so no orphan tag pointers linger.
+		await dropScopedCacheTagIndex();
+	}
+
+	if (targets.includes('locks')) {
+		await lockCache.clear();
+	}
+
+	messenger.publish<CacheClearMessage>('cacheCleared', { targets });
 }
 
 export async function setSystemCache(key: string, value: any, ttl?: number): Promise<void> {

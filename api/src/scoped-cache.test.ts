@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	countScopedCacheTagMembers,
 	createScopedCacheCollector,
+	dropScopedCacheTagIndex,
 	scopedCacheTagKey,
 } from './scoped-cache.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -122,5 +123,47 @@ describe('createScopedCacheCollector', () => {
 		purge.purgeBy({ collection: 'authors' });
 
 		expect(manuallyPurgedKeys.size).toBe(0);
+	});
+});
+
+describe('dropScopedCacheTagIndex', () => {
+	it('scans the tag namespace and deletes every index set', async () => {
+		const scan = vi.fn()
+			.mockResolvedValueOnce(['4', ['ns:tag:articles', 'ns:tag:authors']])
+			.mockResolvedValueOnce(['0', ['ns:tag:articles:id=1']]);
+
+		const del = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ scan, del } as any);
+
+		await dropScopedCacheTagIndex();
+
+		expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:tag:*', 'COUNT', 250);
+		expect(scan).toHaveBeenCalledWith('4', 'MATCH', 'ns:tag:*', 'COUNT', 250);
+
+		expect(del).toHaveBeenCalledWith(
+			'ns:tag:articles',
+			'ns:tag:authors',
+			'ns:tag:articles:id=1',
+		);
+	});
+
+	it('no-ops (never DELs an empty list) when nothing matches', async () => {
+		const scan = vi.fn().mockResolvedValue(['0', []]);
+		const del = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ scan, del } as any);
+
+		await dropScopedCacheTagIndex();
+
+		expect(del).not.toHaveBeenCalled();
+	});
+
+	it('no-ops when Redis is unavailable', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		const scan = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ scan } as any);
+
+		await dropScopedCacheTagIndex();
+
+		expect(scan).not.toHaveBeenCalled();
 	});
 });

@@ -2,9 +2,12 @@
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
 import { getRootPath } from '@/utils/get-root-path';
+import { useSettingsStore } from '@/stores/settings';
+import { useUserStore } from '@/stores/user';
+import { useLocalStorage } from '@vueuse/core';
 import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import type { Filter } from '@directus/types';
+import type { Filter, User } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
@@ -411,6 +414,84 @@ async function evictPath(path: string) {
 	}
 }
 
+const settingsStore = useSettingsStore();
+const userStore = useUserStore();
+
+// The persisted global TTL. `ttlDraft` edits the input; saving PATCHes
+// directus_settings.cache_ttl, which the API broadcasts so every node's live
+// override flips at once. Empty = inherit env CACHE_TTL; only new entries take it.
+const ttlDraft = ref('');
+const ttlSaving = ref(false);
+
+watch(
+	() => settingsStore.settings?.cache_ttl,
+	(value) => {
+		ttlDraft.value = value ?? '';
+	},
+	{ immediate: true },
+);
+
+const ttlDirty = computed(() => {
+	return ttlDraft.value !== (settingsStore.settings?.cache_ttl ?? '');
+});
+
+async function saveTtl() {
+	if (!ttlDirty.value || ttlSaving.value) {
+		return;
+	}
+
+	ttlSaving.value = true;
+
+	try {
+		await settingsStore.updateSettings({ cache_ttl: ttlDraft.value.trim() || null });
+	}
+	finally {
+		ttlSaving.value = false;
+	}
+}
+
+// The flush target subset is a pure UI preference → per-user localStorage, so
+// chained purges keep the last selection without re-picking it each time.
+type CacheFlushTarget = 'response' | 'system' | 'locks';
+
+const flushTargetOptions = [
+	{ text: t('cache_flush_response', 'Response cache'), value: 'response' },
+	{ text: t('cache_flush_system', 'System cache'), value: 'system' },
+	{ text: t('cache_flush_locks', 'Locks / build-identity'), value: 'locks' },
+];
+
+const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
+
+const flushTargets = useLocalStorage<CacheFlushTarget[]>(
+	`cache-flush-targets-${userId}`,
+	['response'],
+);
+
+const flushing = ref(false);
+
+async function flush() {
+	if (flushing.value || flushTargets.value.length === 0) {
+		return;
+	}
+
+	flushing.value = true;
+	error.value = null;
+
+	try {
+		await api.post('/utils/cache/clear', null, {
+			params: { targets: flushTargets.value },
+		});
+
+		await load();
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
+	finally {
+		flushing.value = false;
+	}
+}
+
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
 }
@@ -609,6 +690,46 @@ onMounted(() => {
 				@click="toggleStats"
 			>
 				<v-icon :name="statsState.enabled ? 'toggle_on' : 'toggle_off'" />
+			</v-button>
+
+			<v-input
+				v-model="ttlDraft"
+				class="ttl-input"
+				small
+				:placeholder="t('cache_ttl_placeholder', 'TTL e.g. 30m — env default')"
+				@keydown.enter="saveTtl"
+			>
+				<template #append>
+					<v-icon
+						v-tooltip.bottom="t('cache_ttl_save', 'Save global TTL')"
+						name="check"
+						:disabled="!ttlDirty || ttlSaving"
+						clickable
+						@click="saveTtl"
+					/>
+				</template>
+			</v-input>
+
+			<v-select
+				v-model="flushTargets"
+				class="flush-select"
+				:items="flushTargetOptions"
+				:placeholder="t('cache_flush_targets', 'Flush targets')"
+				multiple
+				inline
+			/>
+
+			<v-button
+				v-tooltip.bottom="t('cache_flush', 'Flush selected caches')"
+				rounded
+				icon
+				secondary
+				kind="danger"
+				:loading="flushing"
+				:disabled="flushTargets.length === 0"
+				@click="flush"
+			>
+				<v-icon name="cleaning_services" />
 			</v-button>
 		</template>
 
@@ -1242,5 +1363,13 @@ table.entries .entry-row {
 	font-size: 13px;
 	white-space: pre;
 	overflow: auto;
+}
+
+.ttl-input {
+	inline-size: 200px;
+}
+
+.flush-select {
+	max-inline-size: 240px;
 }
 </style>
