@@ -43,6 +43,19 @@ describe('SettingsService.upsertSingleton', () => {
 		expect(recordCacheConfigEvent).toHaveBeenCalledWith('ttl_change', null);
 	});
 
+	it.each(['abc', '30x', '-5m', '0'])(
+		'rejects a malformed cache_ttl (%s) before persisting',
+		async (bad) => {
+			await expect(service().upsertSingleton({ cache_ttl: bad }))
+				.rejects.toThrow(/Invalid cache_ttl/);
+
+			// Gate runs before the write + broadcast, so nothing is persisted.
+			expect(ItemsService.prototype.upsertSingleton).not.toHaveBeenCalled();
+			expect(publishCacheConfigChanged).not.toHaveBeenCalled();
+			expect(recordCacheConfigEvent).not.toHaveBeenCalled();
+		},
+	);
+
 	it('stays silent when the payload does not touch cache_ttl', async () => {
 		await service().upsertSingleton({ project_name: 'Acme' });
 
