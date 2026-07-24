@@ -1126,16 +1126,17 @@ export async function readCacheTimeseries(
 		? effective
 		: null;
 
-	// Whole-second buckets so the DB's `floor(epoch / bucketSec)` aligns to the dense
-	// array below (both keyed off the same absolute epoch-second grid, not `sinceMs`).
+	// Bucket by whole seconds ELAPSED since `since` (an interval difference), so the
+	// index is 0-based (0 = oldest, bucketCount-1 = newest) and immune to the column's
+	// storage timezone. An absolute `floor(epoch/bucketSec)` grid instead pushed the
+	// `now` edge one slot past the array, silently dropping the most recent traffic.
 	const bucketSec = Math.max(1, Math.ceil(windowLen / bucketCount / 1000));
-	const firstBucket = Math.floor(sinceMs / 1000 / bucketSec);
 
 	const dense: CacheTimeseriesBucket[] = Array.from(
 		{ length: bucketCount },
 		(_unused, index) => {
 			return {
-				t: (firstBucket + index) * bucketSec * 1000,
+				t: sinceMs + index * bucketSec * 1000,
 				hits: 0,
 				misses: 0,
 				anomalies: 0,
@@ -1148,11 +1149,13 @@ export async function readCacheTimeseries(
 		return { buckets: dense, markers, effectiveTtl };
 	}
 
+	const bucketExpr = 'floor(extract(epoch from (time - ?::timestamptz)) / ?)';
+
 	const eventRows = await db('directus_cache_events')
 		.where('time', '>', since)
 		.groupByRaw('1')
 		.select(
-			db.raw('floor(extract(epoch from time) / ?) AS bucket', [bucketSec]),
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
 			db.raw('SUM(CASE WHEN kind = 0 THEN 1 ELSE 0 END) AS hits'),
 			db.raw('SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END) AS misses'),
 			db.raw('MAX(ttl_ms) AS ttl_ms'),
@@ -1162,29 +1165,28 @@ export async function readCacheTimeseries(
 		.where('time', '>', since)
 		.groupByRaw('1')
 		.select(
-			db.raw('floor(extract(epoch from time) / ?) AS bucket', [bucketSec]),
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
 			db.raw('COUNT(*) AS count'),
 		);
 
+	// `now` lands one bucket past the last slot — fold it into the last real bucket.
+	// `+=` below because the fold can collapse two DB buckets into one slot.
+	function slotOf(bucket: unknown): number {
+		return Math.min(Math.max(Number(bucket), 0), bucketCount - 1);
+	}
+
 	for (const row of eventRows as Record<string, unknown>[]) {
-		const index = Number(row['bucket']) - firstBucket;
+		const index = slotOf(row['bucket']);
+		dense[index]!.hits += Number(row['hits'] ?? 0);
+		dense[index]!.misses += Number(row['misses'] ?? 0);
 
-		if (index >= 0 && index < bucketCount) {
-			dense[index]!.hits = Number(row['hits'] ?? 0);
-			dense[index]!.misses = Number(row['misses'] ?? 0);
-
-			dense[index]!.ttlMs = row['ttl_ms'] == null
-				? null
-				: Number(row['ttl_ms']);
+		if (row['ttl_ms'] != null) {
+			dense[index]!.ttlMs = Number(row['ttl_ms']);
 		}
 	}
 
 	for (const row of anomalyRows as Record<string, unknown>[]) {
-		const index = Number(row['bucket']) - firstBucket;
-
-		if (index >= 0 && index < bucketCount) {
-			dense[index]!.anomalies = Number(row['count'] ?? 0);
-		}
+		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
 	}
 
 	return { buckets: dense, markers, effectiveTtl };

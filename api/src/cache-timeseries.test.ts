@@ -70,15 +70,17 @@ describe('readCacheTimeseries', () => {
 		const windowMs = 180_000; // 3 minutes
 		const buckets = 3;
 		const bucketSec = 60;
-		const firstBucket = Math.floor((NOW - windowMs) / 1000 / bucketSec);
 
+		// Buckets are 0-based elapsed-since-`since`; the `now`-edge bucket (== buckets)
+		// folds into the last slot, accumulating onto whatever's already there.
 		rowsByTable = {
 			directus_cache_events: [
-				{ bucket: firstBucket, hits: 5, misses: 1, ttl_ms: 30000 },
-				{ bucket: firstBucket + 2, hits: 9, misses: 4, ttl_ms: 60000 },
+				{ bucket: 0, hits: 5, misses: 1, ttl_ms: 30000 },
+				{ bucket: 2, hits: 9, misses: 4, ttl_ms: 60000 },
+				{ bucket: 3, hits: 1, misses: 2, ttl_ms: null },
 			],
 			directus_cache_anomalies: [
-				{ bucket: firstBucket + 2, count: 2 },
+				{ bucket: 2, count: 2 },
 			],
 			directus_cache_config_events: [
 				{ time: new Date(NOW - 1000), kind: 'flush', detail: 'response' },
@@ -89,7 +91,8 @@ describe('readCacheTimeseries', () => {
 
 		expect(result.buckets).toHaveLength(3);
 
-		// First DB bucket → slot 0; the gap at slot 1 stays zero; the +2 row → slot 2.
+		// bucket 0 → slot 0; gap at slot 1; bucket 2 → slot 2; the out-of-range bucket
+		// 3 folds into the last slot too (5+1 hits, 4+2 misses).
 		expect(result.buckets[0]).toMatchObject({
 			hits: 5, misses: 1, anomalies: 0, ttlMs: 30000,
 		});
@@ -99,11 +102,12 @@ describe('readCacheTimeseries', () => {
 		});
 
 		expect(result.buckets[2]).toMatchObject({
-			hits: 9, misses: 4, anomalies: 2, ttlMs: 60000,
+			hits: 10, misses: 6, anomalies: 2, ttlMs: 60000,
 		});
 
-		// Dense timestamps sit on the absolute epoch grid the DB bucketed against.
-		expect(result.buckets[0]!.t).toBe(firstBucket * bucketSec * 1000);
+		// Dense timestamps are anchored at `since`, one bucketSec apart.
+		expect(result.buckets[0]!.t).toBe(NOW - windowMs);
+		expect(result.buckets[1]!.t).toBe(NOW - windowMs + bucketSec * 1000);
 
 		expect(result.markers).toEqual([
 			{ time: NOW - 1000, kind: 'flush', detail: 'response' },
