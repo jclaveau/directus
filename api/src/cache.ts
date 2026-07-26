@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import type { SchemaOverview } from '@directus/types';
+import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
 import { useLogger } from './logger/index.js';
@@ -42,8 +42,6 @@ interface CacheMessage {
 // The subset a flush drops, chosen per-target on the cache page. `system` rides the
 // existing `schemaChanged` broadcast; `response`/`locks` are per-node memory tiers a
 // dedicated channel has to reach (see `clearCacheTargets`).
-export type CacheFlushTarget = 'response' | 'system' | 'locks';
-
 interface CacheClearMessage {
 	targets: CacheFlushTarget[];
 }
