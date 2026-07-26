@@ -5,7 +5,7 @@ import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { getCache, getCacheValue } from '../cache.js';
+import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	evictCacheEntriesForPath,
 	evictCacheEntry as registryEvictCacheEntry,
@@ -13,6 +13,7 @@ import {
 	listCacheAnomalies,
 	listCacheEntries,
 	readCacheTombstone,
+	recordCacheConfigEvent,
 	setCacheStatsEnabled,
 	truncateCacheEvents,
 } from '../cache-events.js';
@@ -93,6 +94,24 @@ describe('Services / Utils', () => {
 			).rejects.toThrowError(
 				`'test-user' does not have permission to clear the cache as not being an admin`,
 			);
+		});
+
+		it('flushes exactly the requested targets for an admin', async () => {
+			const service = new UtilsService({
+				knex: db,
+				schema,
+				accountability: { user: 'admin-user', admin: true } as Accountability,
+			});
+
+			vi.mocked(recordCacheConfigEvent).mockResolvedValue();
+
+			// Pins the runtime `{ targets }` contract that the published type mirrors:
+			// a revert to the pre-11.10.1 `{ system }` shape passes `targets: undefined`
+			// here and crashes on `undefined.includes` (issue #299). `system` is the
+			// decoy — it must NOT leak in when only response/locks were asked for.
+			await service.clearCache({ targets: ['response', 'locks'] });
+
+			expect(clearCacheTargets).toHaveBeenCalledWith(['response', 'locks']);
 		});
 	});
 

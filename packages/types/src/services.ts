@@ -7,6 +7,7 @@ import type { Transporter } from 'nodemailer';
 import type { Accountability } from './accountability.js';
 import type { TransformationSet } from './assets.js';
 import type { LoginResult } from './authentication.js';
+import type { CacheFlushTarget } from './cache.js';
 import type { ApiCollection, RawCollection } from './collection.js';
 import type { ActionHandler } from './events.js';
 import type { ApiOutput, ExtensionManager, ExtensionSettings } from './extensions/index.js';
@@ -448,7 +449,7 @@ interface UsersService {
  */
 interface UtilsService {
 	sort(collection: string, { item, to }: { item: PrimaryKey; to: PrimaryKey }): Promise<void>;
-	clearCache({ system }: { system: boolean }): Promise<void>;
+	clearCache({ targets }: { targets: CacheFlushTarget[] }): Promise<void>;
 }
 
 /**

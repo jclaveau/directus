@@ -1,6 +1,7 @@
 export * from './accountability.js';
 export * from './assets.js';
 export * from './authentication.js';
+export * from './cache.js';
 export * from './collection.js';
 export * from './comments.js';
 export * from './database.js';
