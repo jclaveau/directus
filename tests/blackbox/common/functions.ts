@@ -277,6 +277,21 @@ export async function CreateField(vendor: Vendor, options: OptionsCreateField) {
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(options);
 
+	// Idempotent re-seed: a shared shard can seed the same structure twice. The
+	// server throws "already exists in collection" before creating (fields.ts), so
+	// read the existing field back. Only the rare duplicate pays the extra GET.
+	const alreadyExists =
+		response.status === 400 &&
+		response.body?.errors?.[0]?.message?.includes('already exists in collection');
+
+	if (alreadyExists) {
+		const existing = await request(getUrl(vendor))
+			.get(`/fields/${options.collection}/${options.field}`)
+			.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+
+		return existing.body.data;
+	}
+
 	return response.body.data;
 }
 
