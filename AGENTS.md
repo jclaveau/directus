@@ -58,9 +58,9 @@ pnpm test:blackbox                  # blackbox suite (builds a dist first)
 
 ## Database Support
 
-Supported SQL dialects (via Knex.js): **PostgreSQL, MariaDB, SQLite**. MySQL, MS SQL
-Server, and Oracle support was dropped on this fork — do not add code paths or tests for
-them.
+Supported SQL dialects (via Knex.js): **PostgreSQL, MariaDB, SQLite**. **CockroachDB** is
+a paused target — excluded from CI for now but may return, so keep its code paths intact.
+MySQL, MS SQL Server, and Oracle were dropped — do not add code paths or tests for them.
 
 ## Dependency Management
 
