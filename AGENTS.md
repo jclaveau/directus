@@ -58,8 +58,9 @@ pnpm test:blackbox                  # blackbox suite (builds a dist first)
 
 ## Database Support
 
-Multiple SQL databases via Knex.js: PostgreSQL, MySQL, MariaDB, SQLite, MS SQL Server,
-OracleDB, CockroachDB.
+Supported SQL dialects (via Knex.js): **PostgreSQL, MariaDB, SQLite**. MySQL, MS SQL
+Server, and Oracle support was dropped on this fork — do not add code paths or tests for
+them.
 
 ## Dependency Management
 
