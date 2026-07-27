@@ -5,8 +5,9 @@ metadata:
   type: project
 ---
 
-Two preview mechanisms on the fork, both keyed off the **`Preview`** GitHub label. Default branch = **`pr-controle`**
-(not main/hhh-dev). Active feature PRs base on `v11.10.1-hhh-dev`.
+Two preview mechanisms on the fork, both keyed off the **`Preview`** GitHub label. **Default branch = `v11.10.1-hhh-dev`
+since 2026-07-27** (was `pr-controle`, now retired — [[directus-fork-integration-branches]]); `pull_request_target`
+resolves its workflow from the default, i.e. hhh-dev now.
 
 **Preview Admin** (`.github/workflows/preview-admin.yml`) — runner-hosted, EPHEMERAL.
 - Boot env carries `CACHE_STATS_ENABLED='true'` (added for #227) — cache-stats is opt-in-off by default, so the Settings→Cache page + its runtime toggle only show live data with this set. [[project_directus_cache_admin_page]]
