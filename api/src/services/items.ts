@@ -482,6 +482,13 @@ implements AbstractService<Item> {
 			getCount() {
 				return mutationCount;
 			},
+			snapshot() {
+				const savedCount = mutationCount;
+
+				return () => {
+					mutationCount = savedCount;
+				};
+			},
 		};
 	}
 
@@ -923,7 +930,7 @@ implements AbstractService<Item> {
 					(p): ActionPayload => ({ primaryKey: p.primaryKey, actionHookPayload: p.actionHookPayload }),
 				),
 			};
-		});
+		}, opts.mutationTracker.snapshot());
 
 		if (opts.emitEvents !== false) {
 			const eventName =
@@ -1313,7 +1320,7 @@ implements AbstractService<Item> {
 						await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex });
 					}
 				}
-			});
+			}, opts.mutationTracker.snapshot());
 		}
 		finally {
 			if (shouldClearCache(this.cache, opts, this.collection)) {
@@ -1658,7 +1665,7 @@ implements AbstractService<Item> {
 					}
 				}
 			}
-		});
+		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// Old slices from the pre-update capture, plus the new value re-read from the
@@ -1770,7 +1777,7 @@ implements AbstractService<Item> {
 			}
 
 			return primaryKeys;
-		});
+		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// Re-snapshot the committed rows for their new scope values (covers both the
@@ -1971,7 +1978,7 @@ implements AbstractService<Item> {
 					{ bypassLimits: true },
 				);
 			}
-		});
+		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			await this.purgeScopedCache(oldScopedCacheTags, scopedCacheCollector);

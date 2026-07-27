@@ -23,6 +23,12 @@ export type ActionEventParams = {
 export type MutationTracker = {
 	trackMutations: (count: number) => void;
 	getCount: () => number;
+	/**
+	 * Capture the current count and return a restore function. A retried
+	 * transaction calls it before each re-run so nested mutation counts aren't
+	 * accumulated onto the surviving outer count.
+	 */
+	snapshot: () => () => void;
 };
 
 export type QueryOptions = {
