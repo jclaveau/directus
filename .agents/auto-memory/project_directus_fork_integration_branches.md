@@ -8,6 +8,20 @@ metadata:
   type: project
 ---
 
+## ⚠️ SUPERSEDED 2026-07-27: `pr-controle` retired, `v11.10.1-hhh-dev` is now the default
+
+`pr-controle` was **deleted** and archived as tag **`archive/pr-controle`**; the repo
+**default branch is now `v11.10.1-hhh-dev`**. The two had *unrelated histories* — pr-controle
+was a stale full-tree + CI/automation overlay, hhh-dev is the real 13438-commit code line.
+The useful control-plane was curated-ported onto hhh-dev (PRs #303 + #305): `.claude/` auto-fix
+hooks, `CODEOWNERS` → `* @jclaveau`, README/AGENTS.md/LICENSE.fork/renovate.json/.gitattributes.
+Dropped: prettier (not installed — `eslint.style.config.js` is the authority), copilot-instructions,
+upstream PR-bots. Parked in the archive tag (revive later): compose-hhh-* pipeline + `fork-base.txt`,
+publish/changeset flow (issue #302), claude review + e2e workflows. Everything below describing
+pr-controle as default/trunk is now historical. Consequences: `Closes #N` now fires on hhh-dev
+merges ([[project_directus_issue_autoclose_hhh_dev]]); renovate/README/license/pull_request_target
+all read from hhh-dev now. See [[reference_default_branch_flip_playbook]].
+
 The fork `jclaveau/directus` runs a soft-fork integration setup (built 2026-06-10).
 
 ## ⛔ NEVER merge a `v11.10.1-feat/*` PR (2026-06-23)
