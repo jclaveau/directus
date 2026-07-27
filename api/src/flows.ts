@@ -19,6 +19,7 @@ import { get } from 'micromustache';
 import { useBus } from './bus/index.js';
 import getDatabase from './database/index.js';
 import emitter from './emitter.js';
+import { createScopedCacheExtensionHandle } from './extensions/lib/scoped-cache.js';
 import { useLogger } from './logger/index.js';
 import { fetchPermissions } from './permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from './permissions/lib/fetch-policies.js';
@@ -533,6 +534,7 @@ class FlowManager {
 				database: getDatabase(),
 				logger,
 				getSchema,
+				scopedCache: createScopedCacheExtensionHandle(getSchema),
 				data: keyedData,
 				accountability: null,
 				...context,

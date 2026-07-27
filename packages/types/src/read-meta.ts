@@ -52,6 +52,31 @@ export interface ScopedCachePurgeHandle {
 }
 
 /**
+ * Shape of `context.scopedCache` on the *registration* context of a register-type
+ * hook/endpoint/operation extension (`ApiExtensionContext`) — the escape hatch for a
+ * write done OUTSIDE `ItemsService` (e.g. a raw `knex` bulk update for performance),
+ * which gets no automatic scoped purge. Row-based: pass the rows you wrote and the
+ * host derives touched per-user slices from the collection's `scopedCacheFields`,
+ * then purges this collection's bare tag (global reads) + those slices — sparing
+ * every other collection. Scoped purging off (memory store / CI) → falls back to a
+ * full `cache.clear()`. No admin gate — a cache-maintenance op on trusted server
+ * code, matching `purgeBy`.
+ *
+ * Footgun: a manual purge decouples "what changed" from "what's dropped" — they can
+ * silently drift into a stale read, the exact poison scoped cache prevents. Prefer
+ * `ItemsService` (auto-purge); reach for this ONLY when you deliberately bypass it.
+ *
+ * Sandboxed extensions can't reach the host cache, so this is register-type
+ * extensions only.
+ */
+export interface ScopedCacheExtensionHandle {
+	purgeForMutatedRows(
+		collection: string,
+		mutatedRows: Record<string, unknown>[],
+	): Promise<void>;
+}
+
+/**
  * A per-operation sink collecting tags from `context.scopedCache`. A batch/upsert
  * parent injects one via `MutationOptions.scopedCacheCollector` so its children (run
  * with autoPurgeCache off) accumulate into it and the parent drains it once.
