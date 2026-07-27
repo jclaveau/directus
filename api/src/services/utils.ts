@@ -1,13 +1,14 @@
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { systemCollectionRows } from '@directus/system-data';
-import type { AbstractServiceOptions, Accountability, PrimaryKey, SchemaOverview } from '@directus/types';
+import type {
+	AbstractServiceOptions,
+	Accountability,
+	CacheFlushTarget,
+	PrimaryKey,
+	SchemaOverview,
+} from '@directus/types';
 import type { Knex } from 'knex';
-import {
-	type CacheFlushTarget,
-	clearCacheTargets,
-	getCache,
-	getCacheValue,
-} from '../cache.js';
+import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
