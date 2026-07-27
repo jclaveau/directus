@@ -325,4 +325,18 @@ export function getUrl(vendor: Vendor, overrideEnv?: Env) {
 	return `http://127.0.0.1:${port}`;
 }
 
+// The seed conduit: the CACHE_SCHEMA=false instance setup.ts spawns at PORT + 50. It
+// recomputes the schema from the DB every request, so a collection created moments
+// earlier is always visible — the cache server can serve a stale schema snapshot and
+// 403 a brand-new collection under concurrent seed load.
+export function getNoCacheUrl(vendor: Vendor) {
+	if (process.env['TEST_LOCAL']) {
+		return getUrl(vendor);
+	}
+
+	const port = parseInt(config.envs[vendor].PORT) + 50;
+
+	return `http://127.0.0.1:${port}`;
+}
+
 export default config;
