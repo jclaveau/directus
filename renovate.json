@@ -1,0 +1,95 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": [
+		":semanticPrefixFixDepsChoreOthers",
+		"group:monorepos",
+		"group:recommended",
+		"replacements:all",
+		"workarounds:all"
+	],
+	"labels": [":robot: Dependency", "Run Blackbox"],
+	"dependencyDashboard": true,
+	"forkProcessing": "enabled",
+	"baseBranches": ["v11.10.1-prepare"],
+	"constraints": { "node": "22", "pnpm": ">=10 <11" },
+	"constraintsFiltering": "strict",
+	"enabledManagers": ["npm", "github-actions"],
+	"vulnerabilityAlerts": {
+		"enabled": false
+	},
+	"packageRules": [
+		{
+			"groupName": "all non-major dependencies",
+			"groupSlug": "all-minor-patch",
+			"matchUpdateTypes": ["minor", "patch"]
+		},
+		{
+			"groupName": "all non-major dependencies",
+			"description": "exclude minors with potential breaking changes",
+			"matchPackageNames": ["typescript", "esbuild"],
+			"matchUpdateTypes": ["minor"],
+			"enabled": false
+		},
+		{
+			"groupName": null,
+			"matchPackageNames": ["typescript", "esbuild"],
+			"matchUpdateTypes": ["minor"],
+			"enabled": true
+		},
+		{
+			"description": "peerDependencies: update lockfile or replace ranges",
+			"matchDepTypes": ["peerDependencies"],
+			"rangeStrategy": "update-lockfile"
+		},
+		{
+			"description": "hold - knex >=3.2 double-wraps directus_row_number, 500 on o2m/m2m/m2a sort - https://github.com/knex/knex/issues/6392",
+			"matchPackageNames": ["knex"],
+			"enabled": false
+		},
+		{
+			"description": "hold - v13 rejects <16-byte secrets (locks out v12-enrolled 2FA users) + createGuardrails not ESM-exported - jclaveau/directus#159",
+			"matchPackageNames": ["otplib"],
+			"matchUpdateTypes": ["major"],
+			"enabled": false
+		},
+		{
+			"description": "hold - v6 is a full classes->functions rewrite of the oauth2 + openid drivers (~1067 lines) with no OIDC integration coverage to verify against - jclaveau/directus#156",
+			"matchPackageNames": ["openid-client"],
+			"matchUpdateTypes": ["major"],
+			"enabled": false
+		},
+		{
+			"description": "hold - https://github.com/directus/directus/issues/21995",
+			"matchPackageNames": ["samlify"],
+			"enabled": false
+		},
+		{
+			"description": "hold - https://github.com/directus/directus/issues/16185",
+			"matchPackageNames": ["mapbox-gl", "maplibre-gl"],
+			"matchUpdateTypes": ["major"],
+			"enabled": false
+		},
+		{
+			"description": "hold - https://github.com/prettier/prettier/issues/15783",
+			"matchPackageNames": ["prettier"],
+			"enabled": false
+		},
+		{
+			"description": "hold - https://github.com/directus/directus/pull/24181",
+			"matchPackageNames": ["tinymce"],
+			"matchUpdateTypes": ["major"],
+			"enabled": false
+		},
+		{
+			"description": "hold - contains breaking changes, will be replaced",
+			"matchPackageNames": ["vitepress", "vitepress-plugin-tabs"],
+			"enabled": false
+		},
+		{
+			"description": "@types/node major is handled manually - should match current Node.js version",
+			"matchPackageNames": ["@types/node"],
+			"matchUpdateTypes": ["major"],
+			"enabled": false
+		}
+	]
+}
