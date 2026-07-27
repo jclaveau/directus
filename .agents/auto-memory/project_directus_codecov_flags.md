@@ -89,3 +89,16 @@ curl -s "https://api.codecov.io/api/v2/github/jclaveau/repos/directus/report/?sh
 ```
 Used to prove sharding preserved coverage: `blackbox` flag 43.04% pre-shard vs 43.05% post — the union of sharded
 partial uploads equals the full-run coverage (codecov merges by flag server-side). See [[project_directus_blackbox_sharding]].
+
+**Per-file DIFF-LINE coverage (which added lines are missed) — codecov v2 COMPARE endpoint** (the codecov PR
+comment only prints the % + "N lines missing", never the lines):
+```
+curl -s "https://api.codecov.io/api/v2/github/jclaveau/repos/directus/compare?pullid=<N>" | python3 …
+```
+Returns `files[].lines[]` with `{value, number:{head}, coverage:{head}, added}`. Caveat: `coverage.head` here is
+ONE session's view (a file the api-unit session never loaded shows all-0 even though the MERGED aggregate covers
+it) — a line is HIT if ANY session has >0, so union across sessions; don't read a single field as the merged truth.
+2026-07-27: the 3 real merged-missed lines on #306 were the extension-registration/context-wiring lines
+(`scopedCache: createScopedCacheExtensionHandle(getSchema)` in manager/flows) — integration-only, only the blackbox
+flag covers them, so a flaky/failed blackbox shard dropping its upload reds the blocking aggregate patch even though
+per-flag patches pass. Consider `ignore:` for such inherently-integration-only wiring, like the controllers glue.
