@@ -3,7 +3,7 @@ import { omit } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { getUrl, type Env } from './config';
+import { getNoCacheUrl, getUrl, type Env } from './config';
 import vendors, { type Vendor } from './get-dbs-to-test';
 import type { PrimaryKeyType } from './types';
 import { ROLE, USER } from './variables';
@@ -693,14 +693,30 @@ export type OptionsCreateItem = {
 };
 
 export async function CreateItem(vendor: Vendor, options: OptionsCreateItem) {
-	// Action
-	const response = await request(getUrl(vendor))
+	// Seed on the cache server (fast, cached schema). Right after CreateCollections it
+	// can serve a stale schema snapshot and 403 the brand-new collection under
+	// concurrent seed load (TESTS_FLOW is admin_access, so it's schema lag, not a
+	// permission gap). Fall back to the no-cache instance, which recomputes the schema
+	// from the DB every request, so the just-created collection is always visible.
+	const auth = `Bearer ${options.token ?? USER.TESTS_FLOW.TOKEN}`;
+
+	let response = await request(getUrl(vendor))
 		.post(`/items/${options.collection}`)
-		.set('Authorization', `Bearer ${options.token ?? USER.TESTS_FLOW.TOKEN}`)
+		.set('Authorization', auth)
 		.send(options.item);
 
+	if (response.status === 403) {
+		response = await request(getNoCacheUrl(vendor))
+			.post(`/items/${options.collection}`)
+			.set('Authorization', auth)
+			.send(options.item);
+	}
+
 	if (!response.ok) {
-		throw new Error('Could not create item', response.body);
+		throw new Error(
+			`Could not create item in ${options.collection}: `
+			+ `${response.status} ${JSON.stringify(response.body)}`,
+		);
 	}
 
 	return response.body.data;
