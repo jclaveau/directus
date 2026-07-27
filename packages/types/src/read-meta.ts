@@ -62,6 +62,11 @@ export interface ScopedCachePurgeHandle {
  * full `cache.clear()`. No admin gate — a cache-maintenance op on trusted server
  * code, matching `purgeBy`.
  *
+ * Each row must carry the collection's flat scope fields; a row missing one, or a
+ * collection scoped through a relation (a dotted/M2O field whose terminal a raw row
+ * can't resolve), degrades to a collection-wide purge (this collection's bare tag +
+ * every slice, still sparing others) rather than risk a stale slice.
+ *
  * Footgun: a manual purge decouples "what changed" from "what's dropped" — they can
  * silently drift into a stale read, the exact poison scoped cache prevents. Prefer
  * `ItemsService` (auto-purge); reach for this ONLY when you deliberately bypass it.

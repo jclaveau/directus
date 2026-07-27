@@ -25,8 +25,8 @@ vi.mock('../../cache.js', () => {
 	};
 });
 
-// Keep scopedCacheTagsFromRows real so tag derivation from rows is exercised; only
-// spy the purge sink and pin scoped mode.
+// Keep scopedCacheTagsFromRows + composeScopedCachePaths real so tag derivation and
+// relational-scope detection run; only spy the purge sink and pin scoped mode.
 vi.mock('../../scoped-cache.js', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('../../scoped-cache.js')>();
 
@@ -37,18 +37,23 @@ vi.mock('../../scoped-cache.js', async (importOriginal) => {
 	};
 });
 
-const { createScopedCacheExtensionHandle } = await import('./scoped-cache.js');
+const { createScopedCacheExtensionHandle } =
+	await import('./scoped-cache-handle.js');
 
-const schema = new SchemaBuilder()
-	.collection('articles', (c) => {
-		c.field('id').id();
-		c.field('owner').integer();
-	})
-	.build();
+function schemaScopedBy(fields: string[]) {
+	const schema = new SchemaBuilder()
+		.collection('articles', (c) => {
+			c.field('id').id();
+			c.field('owner').integer();
+		})
+		.build();
 
-schema.collections['articles']!.scopedCacheFields = ['owner'];
+	schema.collections['articles']!.scopedCacheFields = fields;
 
-const getSchema = async () => schema;
+	return async () => schema;
+}
+
+const getSchema = schemaScopedBy(['owner']);
 
 afterEach(() => {
 	vi.clearAllMocks();
@@ -89,6 +94,27 @@ describe('createScopedCacheExtensionHandle', () => {
 		await handle.purgeForMutatedRows('logs', [{ id: 1 }]);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'logs', []);
+	});
+
+	it('row missing a scope field: collection-wide purge, not stale', async () => {
+		const handle = createScopedCacheExtensionHandle(getSchema);
+
+		// One row resolves owner, the other omits it — 'coarse' must degrade the whole
+		// purge to collection-wide (null) rather than drop only the resolvable slice.
+		await handle.purgeForMutatedRows('articles', [{ owner: 7 }, { note: 'x' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it('relational (dotted) scope field: collection-wide purge', async () => {
+		const getRelationalSchema = schemaScopedBy(['account.owner']);
+		const handle = createScopedCacheExtensionHandle(getRelationalSchema);
+
+		await handle.purgeForMutatedRows('articles', [{ account: 42 }]);
+
+		// A raw row carries only the first-hop fk (account=42), not the pinned terminal,
+		// so it must fall back to collection-wide rather than emit a wrong fk tag.
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});
 
 	it('scoped off: full cache.clear(), no scoped purge', async () => {

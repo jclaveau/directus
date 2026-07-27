@@ -57,7 +57,7 @@ import { getInstallationManager } from './lib/installation/index.js';
 import type { InstallationManager } from './lib/installation/manager.js';
 import { generateApiExtensionsSandboxEntrypoint } from './lib/sandbox/generate-api-extensions-sandbox-entrypoint.js';
 import { instantiateSandboxSdk } from './lib/sandbox/sdk/instantiate.js';
-import { createScopedCacheExtensionHandle } from './lib/scoped-cache.js';
+import { createScopedCacheExtensionHandle } from './lib/scoped-cache-handle.js';
 import { syncExtensions } from './lib/sync-extensions.js';
 import { wrapEmbeds } from './lib/wrap-embeds.js';
 import DriverLocal from '@directus/storage-driver-local';
