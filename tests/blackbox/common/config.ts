@@ -218,6 +218,9 @@ const config: Config = {
 		cockroachdb: 'CockroachDB',
 		sqlite3: 'SQLite 3',
 	},
+	// Server ports sit at 201xx (no-cache instance at PORT + 50 -> 202xx), kept below
+	// the Linux ephemeral range (32768-60999) so an outbound socket can't grab one as
+	// its source port and cause EADDRINUSE when a server calls listen (#309).
 	envs: {
 		postgres: {
 			...directusConfig,
@@ -227,7 +230,7 @@ const config: Config = {
 			DB_PASSWORD: 'secret',
 			DB_PORT: '6100',
 			DB_DATABASE: 'directus',
-			PORT: '59152',
+			PORT: '20152',
 		},
 		postgres10: {
 			...directusConfig,
@@ -237,7 +240,7 @@ const config: Config = {
 			DB_PASSWORD: 'secret',
 			DB_PORT: '6101',
 			DB_DATABASE: 'directus',
-			PORT: '59153',
+			PORT: '20153',
 		},
 		mysql: {
 			...directusConfig,
@@ -247,7 +250,7 @@ const config: Config = {
 			DB_USER: 'root',
 			DB_PASSWORD: 'secret',
 			DB_DATABASE: 'directus',
-			PORT: '59154',
+			PORT: '20154',
 		},
 		mysql5: {
 			...directusConfig,
@@ -257,7 +260,7 @@ const config: Config = {
 			DB_USER: 'root',
 			DB_PASSWORD: 'secret',
 			DB_DATABASE: 'directus',
-			PORT: '59155',
+			PORT: '20155',
 		},
 		maria: {
 			...directusConfig,
@@ -267,7 +270,7 @@ const config: Config = {
 			DB_USER: 'root',
 			DB_PASSWORD: 'secret',
 			DB_DATABASE: 'directus',
-			PORT: '59156',
+			PORT: '20156',
 		},
 		mssql: {
 			...directusConfig,
@@ -277,7 +280,7 @@ const config: Config = {
 			DB_USER: 'sa',
 			DB_PASSWORD: 'Test@123',
 			DB_DATABASE: 'model',
-			PORT: '59157',
+			PORT: '20157',
 		},
 		oracle: {
 			...directusConfig,
@@ -285,7 +288,7 @@ const config: Config = {
 			DB_USER: 'secretsysuser',
 			DB_PASSWORD: 'secretpassword',
 			DB_CONNECT_STRING: `127.0.0.1:6106/XE`,
-			PORT: '59158',
+			PORT: '20158',
 		},
 		cockroachdb: {
 			...directusConfig,
@@ -295,13 +298,13 @@ const config: Config = {
 			DB_PASSWORD: '',
 			DB_PORT: '6107',
 			DB_DATABASE: 'defaultdb',
-			PORT: '59159',
+			PORT: '20159',
 		},
 		sqlite3: {
 			...directusConfig,
 			DB_CLIENT: 'sqlite3',
 			DB_FILENAME: './test.db',
-			PORT: '59160',
+			PORT: '20160',
 		},
 	},
 };
