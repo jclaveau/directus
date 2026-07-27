@@ -11,7 +11,11 @@ import type { DatabaseClient } from '@directus/types';
  * Can be used to ensure the handler is run within a transaction,
  * while preventing nested transactions.
  */
-export const transaction = async <T = unknown>(knex: Knex, handler: (knex: Knex) => Promise<T>): Promise<T> => {
+export const transaction = async <T = unknown>(
+	knex: Knex,
+	handler: (knex: Knex) => Promise<T>,
+	onRetry?: () => void,
+): Promise<T> => {
 	if (knex.isTransaction) {
 		return handler(knex);
 	} else {
@@ -20,6 +24,12 @@ export const transaction = async <T = unknown>(knex: Knex, handler: (knex: Knex)
 		} catch (error) {
 			const client = getDatabaseClient(knex);
 
+			// Only sqlite / cockroach reach the retry loop: both hand an aborted
+			// transaction back and require the CLIENT to re-run it (no server-side
+			// recovery). cockroach's optimistic SERIALIZABLE aborts a txn that lost
+			// a write race at commit (40001); sqlite's single writer rejects a
+			// concurrent write with SQLITE_BUSY. postgres blocks on locks instead
+			// of returning a retry code, so it never lands here.
 			if (!shouldRetryTransaction(client, error)) throw error;
 
 			const MAX_ATTEMPTS = 3;
@@ -33,6 +43,10 @@ export const transaction = async <T = unknown>(knex: Knex, handler: (knex: Knex)
 				await new Promise((resolve) => setTimeout(resolve, delay));
 
 				logger.trace(`Restarting failed transaction (attempt ${attempt + 1}/${MAX_ATTEMPTS})`);
+
+				// Roll back caller state (e.g. the mutation counter) so a re-run of the
+				// handler doesn't accumulate its side effects onto the previous attempt.
+				onRetry?.();
 
 				try {
 					return await knex.transaction((trx) => handler(trx));

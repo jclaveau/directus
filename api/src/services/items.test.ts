@@ -12,6 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mocked
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { readMeta } from '../utils/read-meta.js';
+import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
 
@@ -733,6 +734,113 @@ describe('Integration Tests', () => {
 					emitter.offAction('test.items.delete', handler);
 				}
 			});
+		});
+	});
+
+	describe('mutation tracker retry safety (#312)', () => {
+		// #312: transaction() retries the handler on SQLITE_BUSY / cockroach 40001. The
+		// mutation tracker lives outside the retried handler, so without a reset a retry
+		// re-counts the nested M2O mutations onto the outer count -> over-count.
+		// The fake knex below only needs isTransaction + a transaction() that runs the
+		// handler; transaction() passes knex to the mocked getDatabaseClient only.
+		const retryingKnex = {
+			isTransaction: false,
+			transaction: (handler: (trx: Knex) => Promise<unknown>) => {
+				return handler({ isTransaction: true } as unknown as Knex);
+			},
+		} as unknown as Knex;
+
+		function busyOnFirstAttempt(
+			mutationTracker: ReturnType<ItemsService['createMutationTracker']>,
+		) {
+			let attempts = 0;
+
+			return async function handler() {
+				// The nested M2O count added inside the retried handler.
+				mutationTracker.trackMutations(2);
+
+				if (attempts++ === 0) {
+					throw Object.assign(new Error('database is locked'), {
+						code: 'SQLITE_BUSY',
+					});
+				}
+			};
+		}
+
+		it('restores outer count on retry, nested not double-counted', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValueOnce('sqlite');
+			const service = new ItemsService('test', { knex: db, schema });
+			const mutationTracker = service.createMutationTracker();
+
+			// The outer count (e.g. data.length), added once outside the transaction.
+			mutationTracker.trackMutations(3);
+
+			await transaction(
+				retryingKnex,
+				busyOnFirstAttempt(mutationTracker),
+				mutationTracker.snapshot(),
+			);
+
+			// 3 outer + 2 nested, NOT 3 + 2 + 2 (the nested count re-added on retry).
+			expect(mutationTracker.getCount()).toBe(5);
+		});
+
+		it('over-counts without the snapshot restore (control witness)', async () => {
+			vi.mocked(getDatabaseClient).mockReturnValueOnce('sqlite');
+			const service = new ItemsService('test', { knex: db, schema });
+			const mutationTracker = service.createMutationTracker();
+
+			mutationTracker.trackMutations(3);
+
+			// No onRetry restore passed, so the bug reproduces.
+			await transaction(retryingKnex, busyOnFirstAttempt(mutationTracker));
+
+			expect(mutationTracker.getCount()).toBe(7);
+		});
+
+		it('does not wrongly exceed MAX_BATCH_MUTATION after a retry', async () => {
+			const savedMax = env['MAX_BATCH_MUTATION'];
+			// 3 outer + 2 nested = 5 <= 6, but the double-counted 7 would exceed it.
+			env['MAX_BATCH_MUTATION'] = 6;
+
+			try {
+				vi.mocked(getDatabaseClient).mockReturnValueOnce('sqlite');
+				const service = new ItemsService('test', { knex: db, schema });
+				const mutationTracker = service.createMutationTracker();
+
+				mutationTracker.trackMutations(3);
+
+				await expect(
+					transaction(
+						retryingKnex,
+						busyOnFirstAttempt(mutationTracker),
+						mutationTracker.snapshot(),
+					),
+				).resolves.toBeUndefined();
+			}
+			finally {
+				env['MAX_BATCH_MUTATION'] = savedMax;
+			}
+		});
+
+		it('wrongly rejects at the limit without restore (control)', async () => {
+			const savedMax = env['MAX_BATCH_MUTATION'];
+			env['MAX_BATCH_MUTATION'] = 6;
+
+			try {
+				vi.mocked(getDatabaseClient).mockReturnValueOnce('sqlite');
+				const service = new ItemsService('test', { knex: db, schema });
+				const mutationTracker = service.createMutationTracker();
+
+				mutationTracker.trackMutations(3);
+
+				await expect(
+					transaction(retryingKnex, busyOnFirstAttempt(mutationTracker)),
+				).rejects.toThrow('Exceeded max batch mutation limit');
+			}
+			finally {
+				env['MAX_BATCH_MUTATION'] = savedMax;
+			}
 		});
 	});
 });
