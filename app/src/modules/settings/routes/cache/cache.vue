@@ -9,7 +9,7 @@ import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { abbreviateNumber } from '@directus/utils';
-import type { Filter, User } from '@directus/types';
+import type { CacheFlushTarget, Filter, User } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
@@ -453,10 +453,6 @@ async function saveTtl() {
 	}
 }
 
-// The flush target subset is a pure UI preference → per-user localStorage, so
-// chained purges keep the last selection without re-picking it each time.
-type CacheFlushTarget = 'response' | 'system' | 'locks';
-
 const flushTargetOptions = [
 	{ text: t('cache_flush_response', 'Response'), value: 'response' },
 	{ text: t('cache_flush_system', 'System'), value: 'system' },
@@ -465,6 +461,8 @@ const flushTargetOptions = [
 
 const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
 
+// The flush target subset is a pure UI preference → per-user localStorage, so
+// chained purges keep the last selection without re-picking it each time.
 const flushTargets = useLocalStorage<CacheFlushTarget[]>(
 	`cache-flush-targets-${userId}`,
 	['response'],
