@@ -1177,9 +1177,9 @@ export async function readCacheTimeseries(
 			db.raw('COUNT(*) AS count'),
 		);
 
-	// Defensive clamp: a row at/after the next boundary (e.g. clock skew) would land
-	// past the last slot; fold it into the last real bucket rather than drop it. `+=`
-	// in the count loop below because the fold can still collapse two DB buckets into one.
+	// Defensive clamp: a row at/after the next boundary (clock skew) would exceed the
+	// last slot; fold it into the last bucket rather than drop it. `+=` in the count
+	// loop because the fold can still collapse two DB buckets into one.
 	function slotOf(bucket: unknown): number {
 		return Math.min(Math.max(Number(bucket), 0), bucketCount - 1);
 	}
