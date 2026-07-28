@@ -61,7 +61,6 @@ const entries = ref<CacheEntry[]>([]);
 const anomalies = ref<CacheAnomaly[]>([]);
 const expanded = ref<Record<string, boolean>>({});
 const now = ref(Date.now());
-const refreshInterval = ref<number | null>(null);
 const search = ref('');
 const filter = ref<Filter | null>(null);
 const entryPage = ref<Record<string, number>>({});
@@ -84,9 +83,13 @@ const windowOptions = [
 const userStore = useUserStore();
 const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
 
-// Persist the chosen window per-user so a reload restores the same view (like
-// the flush targets below).
+// Persist the window + refresh interval per-user so a reload restores the same
+// view (like the flush targets below).
 const selectedWindow = useLocalStorage(`cache-window-${userId}`, '24h');
+const refreshInterval = useLocalStorage<number | null>(
+	`cache-refresh-${userId}`,
+	null,
+);
 
 // Bumped per load; a superseded window's late response can't clobber a newer one.
 let loadToken = 0;
