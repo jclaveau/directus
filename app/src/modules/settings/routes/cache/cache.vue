@@ -873,6 +873,10 @@ function latencyChartConfig(): ApexOptions {
 		},
 		colors: lines.map((l) => l.color),
 		stroke: { width: 2, curve: 'straight', dashArray: lines.map((l) => l.dash) },
+		// Fills (and so misses) are sparse — one per key — leaving isolated non-null
+		// buckets that draw no line segment. Markers make each sample visible on its
+		// own rather than vanishing between the nulls.
+		markers: { size: 3, strokeWidth: 0 },
 		legend: {
 			show: true,
 			position: 'top',
