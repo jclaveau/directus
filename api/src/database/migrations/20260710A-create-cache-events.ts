@@ -27,7 +27,7 @@ export async function up(knex: Knex): Promise<void> {
 		table.bigInteger('age_ms').nullable(); // hit: age-at-hit
 		table.bigInteger('gap_ms').nullable(); // miss: time past expiry (null = cold)
 		table.bigInteger('ttl_ms').nullable(); // effective TTL in force
-		table.bigInteger('duration_ms').nullable(); // hit: cache-serve latency
+		table.bigInteger('duration_ms').nullable(); // serve or fill latency
 		// The listing joins + reap scan by cache_key; the retention reap scans by
 		// time. Secondary (non-unique) indexes are safe on a Timescale hypertable.
 		table.index('cache_key');
