@@ -7,6 +7,7 @@ import { resolvedCacheTtl } from '../cache-config.js';
 import {
 	cacheStatsActive,
 	queueCacheDescriptor,
+	queueCacheFillLatency,
 	writeCacheTombstone,
 } from '../cache-events.js';
 import getDatabase from '../database/index.js';
@@ -220,6 +221,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							(tag) => tag.collection === req.collection && tag.field === undefined,
 						);
 
+					// Compute cost of this miss: request entry (cache mw) → response ready.
+					const fillMs = Math.max(
+						now - Number(res.locals['requestStart'] ?? now),
+						0,
+					);
+
 					// The per-key descriptor — captured here (fill) where query/collection/
 					// user are fully populated, unlike the early cache middleware. Buffered
 					// like the events; the flusher upserts the descriptors dimension.
@@ -239,9 +246,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							? ''
 							: req.originalUrl,
 						bytes: size,
-						// Compute cost of this miss: request entry (cache mw) → response ready.
-						fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
+						fillMs,
 					}).catch(() => {});
+
+					// The same fill latency as a timestamped event (kind 'f') so the
+					// median-latency chart can plot miss compute time over the window;
+					// the descriptor above keeps only the latest per key.
+					queueCacheFillLatency(hash, fillMs);
 				}
 				catch (descriptorErr: any) {
 					logger.warn(descriptorErr, '[cache-stats] descriptor capture failed');

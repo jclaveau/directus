@@ -13,25 +13,33 @@ vi.mock('@/api', () => {
 // Capture the options the component hands ApexCharts so a test can drive its
 // callbacks (tooltip renderer, axis formatters) without a real SVG chart.
 const chartMock = vi.hoisted(() => {
-	return { config: null as any };
+	return { configs: [] as any[] };
 });
 
+// The page mounts two charts (counts + latency); record every config so a test can
+// pick the one it wants by series name.
 vi.mock('apexcharts', () => {
 	return {
 		default: class {
-			constructor(_el: unknown, config: unknown) {
-				chartMock.config = config;
+			constructor(_el: unknown, config: any) {
+				chartMock.configs.push(config);
 			}
 
 			render() {}
-			updateOptions(config: unknown) {
-				chartMock.config = config;
+			updateOptions(config: any) {
+				chartMock.configs.push(config);
 			}
 
 			destroy() {}
 		},
 	};
 });
+
+function chartConfigWithSeries(firstName: string) {
+	return chartMock.configs.find((config) => {
+		return config?.series?.[0]?.name === firstName;
+	});
+}
 
 vi.mock('@/utils/get-root-path', () => {
 	return { getRootPath: () => '/admin/' };
@@ -197,6 +205,7 @@ describe('CachePage', () => {
 		// The page reads the settings + user stores at setup (TTL field, per-user flush
 		// selection), so an active Pinia must exist before mount.
 		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
+		chartMock.configs = [];
 
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
@@ -941,7 +950,7 @@ describe('CachePage', () => {
 		mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartMock.config;
+		const config = chartConfigWithSeries('Hits');
 		expect(config).toBeTruthy();
 
 		// Tooltip: one tight "name: value" row per metric, TTL humanised.
@@ -959,5 +968,57 @@ describe('CachePage', () => {
 		// Count axis stays integer; TTL axis reads as a duration.
 		expect(config.yaxis[0].labels.formatter(5.4)).toBe('5');
 		expect(config.yaxis[1].labels.formatter(3600)).toBe('1h');
+	});
+
+	it('builds the latency chart with p50/p95 series + ms axis', async () => {
+		mockCacheGet(ENTRIES, {
+			// A bucket with latency samples so hasLatency is true and the chart builds.
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					anomalies: 0,
+					ttlMs: null,
+					hitP50: 2,
+					hitP95: 5,
+					missP50: 40,
+					missP95: 120,
+					bothP50: 3,
+					bothP95: 100,
+				}],
+				markers: [],
+			},
+		});
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Hits p50');
+		expect(config).toBeTruthy();
+
+		// Six series: 3 categories × p50/p95, p95 dashed.
+		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
+			'Hits p50',
+			'Hits p95',
+			'Misses p50',
+			'Misses p95',
+			'Both p50',
+			'Both p95',
+		]);
+
+		expect(config.stroke.dashArray).toEqual([0, 4, 0, 4, 0, 4]);
+
+		// ms axis + a compact ms tooltip.
+		expect(config.yaxis.labels.formatter(40.6)).toBe('41ms');
+
+		const html = config.tooltip.custom({
+			series: [[2], [5], [40], [120], [3], [100]],
+			dataPointIndex: 0,
+			w: { globals: { seriesX: [[1000]] } },
+		});
+
+		expect(html).toContain('Hits p50: 2ms');
+		expect(html).toContain('Misses p95: 120ms');
 	});
 });
