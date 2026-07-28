@@ -81,7 +81,12 @@ const windowOptions = [
 	{ text: t('cache_window_30d', 'Last 30d'), value: '30d' },
 ];
 
-const selectedWindow = ref('24h');
+const userStore = useUserStore();
+const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
+
+// Persist the chosen window per-user so a reload restores the same view (like
+// the flush targets below).
+const selectedWindow = useLocalStorage(`cache-window-${userId}`, '24h');
 
 // Bumped per load; a superseded window's late response can't clobber a newer one.
 let loadToken = 0;
@@ -416,7 +421,6 @@ async function evictPath(path: string) {
 }
 
 const settingsStore = useSettingsStore();
-const userStore = useUserStore();
 
 // The persisted global TTL. `ttlDraft` edits the input; saving PATCHes
 // directus_settings.cache_ttl, which the API broadcasts so every node's live
@@ -458,8 +462,6 @@ const flushTargetOptions = [
 	{ text: t('cache_flush_system', 'System'), value: 'system' },
 	{ text: t('cache_flush_locks', 'Locks'), value: 'locks' },
 ];
-
-const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
 
 // The flush target subset is a pure UI preference → per-user localStorage, so
 // chained purges keep the last selection without re-picking it each time.
@@ -895,7 +897,11 @@ onUnmounted(() => {
 		</template>
 
 		<template #sidebar>
-			<auto-refresh v-model="refreshInterval" @refresh="load" />
+			<auto-refresh
+				v-model="refreshInterval"
+				:intervals="[null, 1, 3, 5, 10, 30, 60, 300]"
+				@refresh="load"
+			/>
 		</template>
 
 		<div class="cache-page">
