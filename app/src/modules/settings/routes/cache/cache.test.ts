@@ -29,6 +29,7 @@ vi.mock('@/utils/notify', () => {
 });
 
 import api from '@/api';
+import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import CachePage from './cache.vue';
 
 const ENTRIES = [
@@ -864,5 +865,54 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(wrapper.text()).toContain('evict failed');
+	});
+
+	it('restores the persisted per-user window on mount', async () => {
+		localStorage.clear();
+		// The window is a plain string, so vueuse stores it raw (no JSON quotes).
+		localStorage.setItem('cache-window-anon', '6h');
+		mockCacheGet(ENTRIES);
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache', {
+			params: { window: '6h' },
+		});
+	});
+
+	it('persists a window change to per-user localStorage', async () => {
+		localStorage.clear();
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// Seeds the default on first mount, then follows the selection.
+		expect(localStorage.getItem('cache-window-anon')).toBe('24h');
+
+		wrapper.findComponent('.window-select').vm.$emit('update:modelValue', '7d');
+		await flushPromises();
+
+		expect(localStorage.getItem('cache-window-anon')).toBe('7d');
+	});
+
+	it('restores and persists the per-user refresh interval', async () => {
+		localStorage.clear();
+		// The interval is number|null, so vueuse uses the JSON serializer.
+		localStorage.setItem('cache-refresh-anon', '30');
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const autoRefresh = wrapper.findComponent(AutoRefresh);
+		// A real number, not the raw string a null-default serializer would yield.
+		expect(autoRefresh.props('modelValue')).toBe(30);
+
+		autoRefresh.vm.$emit('update:modelValue', 5);
+		await flushPromises();
+
+		expect(localStorage.getItem('cache-refresh-anon')).toBe('5');
 	});
 });
