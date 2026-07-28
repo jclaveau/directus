@@ -505,3 +505,36 @@ export function carryForward(points: TimeseriesPoint[]): TimeseriesPoint[] {
 		return [t, value ?? firstKnown];
 	});
 }
+
+// Linearly fill interior null gaps so a sparse series (e.g. miss latency, sampled
+// once per fill) draws a continuous line between its known points. Leading and
+// trailing nulls are left untouched — no extrapolation past the measured range.
+export function interpolate(points: TimeseriesPoint[]): TimeseriesPoint[] {
+	const known: number[] = [];
+
+	points.forEach(([, value], index) => {
+		if (value !== null) {
+			known.push(index);
+		}
+	});
+
+	if (known.length < 2) {
+		return points;
+	}
+
+	const out = points.map(([t, value]): TimeseriesPoint => [t, value]);
+
+	for (let k = 0; k < known.length - 1; k++) {
+		const from = known[k]!;
+		const to = known[k + 1]!;
+		const fromValue = points[from]![1]!;
+		const toValue = points[to]![1]!;
+
+		for (let i = from + 1; i < to; i++) {
+			const ratio = (i - from) / (to - from);
+			out[i] = [points[i]![0], fromValue + (toValue - fromValue) * ratio];
+		}
+	}
+
+	return out;
+}
