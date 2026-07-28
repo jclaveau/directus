@@ -77,6 +77,7 @@ export type CacheAnomalyReason =
 
 export interface CacheAnomaly {
 	cacheKey: string;
+	prefix?: string;
 	reason: CacheAnomalyReason;
 	detail?: string | null; // byte size / error message
 }
@@ -414,6 +415,7 @@ export function queueCacheAnomaly(entry: CacheAnomaly): void {
 	xadd({
 		kind: 'a',
 		cacheKey: entry.cacheKey,
+		prefix: entry.prefix ?? '',
 		reason: entry.reason,
 		detail: entry.detail ?? '',
 		ts: String(Date.now()),
@@ -534,6 +536,7 @@ interface CacheDescriptorRow {
 interface CacheAnomalyRow {
 	time: Date;
 	cache_key: string;
+	prefix: string | null;
 	reason: string;
 	detail: string;
 }
@@ -711,6 +714,9 @@ async function persistStreamBatch(
 			anomalies.push({
 				time: at,
 				cache_key: f['cacheKey']!,
+				prefix: f['prefix']
+					? f['prefix']
+					: null,
 				reason: f['reason'] ?? '',
 				detail: f['detail'] ?? '',
 			});
@@ -1165,22 +1171,33 @@ export async function readCacheTimeseries(
 
 	const bucketExpr = 'floor(extract(epoch from (time - ?::timestamptz)) / ?)';
 
-	// Every prefix in the window — the filter's option list, built unfiltered so a
-	// narrowed selection never hides the other options.
-	const prefixRows = await db('directus_cache_events')
-		.where('time', '>', since)
-		.whereNotNull('prefix')
-		.distinct('prefix')
-		.orderBy('prefix');
+	async function distinctPrefixes(table: string): Promise<string[]> {
+		const rows = await db(table)
+			.where('time', '>', since)
+			.whereNotNull('prefix')
+			.distinct('prefix');
 
-	const availablePrefixes = (prefixRows as Record<string, unknown>[])
-		.map((row) => String(row['prefix']));
+		return (rows as Record<string, unknown>[]).map((row) => String(row['prefix']));
+	}
+
+	// Every prefix in the window across both plotted sources (events + anomalies) —
+	// the filter's option list, built unfiltered so a narrowed selection never hides
+	// the other options.
+	const availablePrefixes = [
+		...new Set([
+			...await distinctPrefixes('directus_cache_events'),
+			...await distinctPrefixes('directus_cache_anomalies'),
+		]),
+	].sort();
 
 	const eventQuery = db('directus_cache_events').where('time', '>', since);
+	const anomalyQuery = db('directus_cache_anomalies').where('time', '>', since);
 
-	// Empty/absent selection means all; a non-empty one narrows to those prefixes.
+	// Empty/absent selection means all; a non-empty one narrows both series to those
+	// prefixes so the whole chart tracks the same endpoint set.
 	if (prefixes && prefixes.length > 0) {
 		void eventQuery.whereIn('prefix', prefixes);
+		void anomalyQuery.whereIn('prefix', prefixes);
 	}
 
 	const eventRows = await eventQuery
@@ -1192,8 +1209,7 @@ export async function readCacheTimeseries(
 			db.raw('MAX(ttl_ms) AS ttl_ms'),
 		);
 
-	const anomalyRows = await db('directus_cache_anomalies')
-		.where('time', '>', since)
+	const anomalyRows = await anomalyQuery
 		.groupByRaw('1')
 		.select(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),

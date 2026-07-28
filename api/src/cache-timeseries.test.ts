@@ -108,12 +108,17 @@ describe('readCacheTimeseries', () => {
 				{ prefix: '/items' },
 				{ prefix: '/utils' },
 			],
+			// A prefix seen only in anomalies still reaches the option list (union).
+			'directus_cache_anomalies:distinct': [
+				{ prefix: '/graphql' },
+				{ prefix: '/utils' },
+			],
 		};
 
 		const result = await readCacheTimeseries(windowMs, buckets);
 
 		expect(result.buckets).toHaveLength(3);
-		expect(result.prefixes).toEqual(['/items', '/utils']);
+		expect(result.prefixes).toEqual(['/graphql', '/items', '/utils']);
 
 		// bucket 0 → slot 0; gap at slot 1; bucket 2 → slot 2; the out-of-range bucket
 		// 3 folds into the last slot too (5+1 hits, 4+2 misses).
@@ -158,11 +163,17 @@ describe('readCacheTimeseries', () => {
 		env['CACHE_STATS_ENABLED'] = true;
 	});
 
-	it('narrows the event query to the selected prefixes', async () => {
+	it('narrows both the event and anomaly queries to the prefixes', async () => {
 		await readCacheTimeseries(180_000, 3, ['/items', '/users']);
 
 		expect(whereInSpy).toHaveBeenCalledWith(
 			'directus_cache_events',
+			'prefix',
+			['/items', '/users'],
+		);
+
+		expect(whereInSpy).toHaveBeenCalledWith(
+			'directus_cache_anomalies',
 			'prefix',
 			['/items', '/users'],
 		);

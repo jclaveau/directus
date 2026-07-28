@@ -70,6 +70,7 @@ describe('reportCacheAnomaly', () => {
 
 		expect(mocks.queueCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'h1',
+			prefix: '/items',
 			reason: 'value_too_large',
 			detail: '2048B',
 		});
@@ -92,6 +93,7 @@ describe('reportCacheAnomaly', () => {
 
 		expect(mocks.queueCacheAnomaly).toHaveBeenCalledWith({
 			cacheKey: 'h2',
+			prefix: '/graphql',
 			reason: 'missing_scope',
 			detail: null,
 		});

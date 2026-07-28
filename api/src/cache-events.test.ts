@@ -784,7 +784,7 @@ describe('drainCacheEvents', () => {
 	it('inserts anomaly entries into the anomalies table', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
-				kind: 'a', cacheKey: 'k9', reason: 'value_too_large',
+				kind: 'a', cacheKey: 'k9', prefix: '/items', reason: 'value_too_large',
 				detail: '2048B', ts: '4000',
 			}),
 		];
@@ -799,6 +799,7 @@ describe('drainCacheEvents', () => {
 				{
 					time: new Date(4000),
 					cache_key: 'k9',
+					prefix: '/items',
 					reason: 'value_too_large',
 					detail: '2048B',
 				},
