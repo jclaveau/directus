@@ -15,6 +15,7 @@ import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
 	buildGroups,
+	carryForward,
 	filterAnomalies,
 	filterEntries,
 	formatAge,
@@ -22,7 +23,9 @@ import {
 	formatLastHit,
 	formatQuery,
 	formatSize,
+	formatTooltipValue,
 	formatUser,
+	humanizeSeconds,
 	shortKey,
 	splitSections,
 	summariseAnomalies,
@@ -620,75 +623,11 @@ function themeVar(name: string, fallback: string): string {
 
 // Seconds → a compact human duration (3600 → "1h", 300 → "5m", 90 → "1m 30s"),
 // so the TTL axis + tooltip read as durations rather than raw seconds.
-function humanizeSeconds(seconds: number): string {
-	const total = Math.round(seconds);
-
-	if (total <= 0) {
-		return '0s';
-	}
-
-	const hours = Math.floor(total / 3600);
-	const minutes = Math.floor((total % 3600) / 60);
-	const secs = total % 60;
-
-	const parts: string[] = [];
-
-	if (hours) {
-		parts.push(`${hours}h`);
-	}
-
-	if (minutes) {
-		parts.push(`${minutes}m`);
-	}
-
-	if (secs) {
-		parts.push(`${secs}s`);
-	}
-
-	return parts.join(' ');
-}
-
-function formatTooltipValue(
-	raw: number | null | undefined,
-	unit: 'count' | 'seconds',
-): string {
-	if (raw == null) {
-		return '—';
-	}
-
-	return unit === 'seconds'
-		? humanizeSeconds(raw)
-		: String(Math.round(raw));
-}
-
 function chartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
 	function series(pick: (b: TimeseriesBucket) => number | null) {
 		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
-	}
-
-	// TTL is a persistent config value: a bucket with no sample (null) hasn't changed
-	// it, so carry the last known value forward (and back-fill the lead) to keep the
-	// curve continuous instead of broken across unsampled buckets.
-	function carryForward(
-		points: [number, number | null][],
-	): [number, number | null][] {
-		let last: number | null = null;
-
-		const forward = points.map(([t, value]): [number, number | null] => {
-			if (value !== null) {
-				last = value;
-			}
-
-			return [t, last];
-		});
-
-		const firstKnown = forward.find(([, value]) => value !== null)?.[1] ?? null;
-
-		return forward.map(([t, value]): [number, number | null] => {
-			return [t, value ?? firstKnown];
-		});
 	}
 
 	// Single source of truth for each plotted metric: name, unit and line style

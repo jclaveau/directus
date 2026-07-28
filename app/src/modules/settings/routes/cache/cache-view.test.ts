@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildGroups,
+	carryForward,
 	filterAnomalies,
 	filterEntries,
 	formatAge,
@@ -8,7 +9,9 @@ import {
 	formatLastHit,
 	formatQuery,
 	formatSize,
+	formatTooltipValue,
 	formatUser,
+	humanizeSeconds,
 	isSystemPath,
 	shortKey,
 	splitSections,
@@ -317,5 +320,84 @@ describe('summariseAnomalies + filterAnomalies', () => {
 		expect(filterAnomalies(list, '/items/b')).toHaveLength(1);
 		expect(filterAnomalies(list, 'limit')).toHaveLength(1);
 		expect(filterAnomalies(list, '')).toHaveLength(2);
+	});
+});
+
+describe('humanizeSeconds', () => {
+	it('renders whole hours and minutes on their own', () => {
+		expect(humanizeSeconds(3600)).toBe('1h');
+		expect(humanizeSeconds(300)).toBe('5m');
+	});
+
+	it('combines the non-zero parts, largest first', () => {
+		expect(humanizeSeconds(90)).toBe('1m 30s');
+		expect(humanizeSeconds(3661)).toBe('1h 1m 1s');
+	});
+
+	it('rounds and floors at zero', () => {
+		expect(humanizeSeconds(0)).toBe('0s');
+		expect(humanizeSeconds(-5)).toBe('0s');
+		expect(humanizeSeconds(59.6)).toBe('1m');
+	});
+});
+
+describe('formatTooltipValue', () => {
+	it('formats a count as a plain rounded integer', () => {
+		expect(formatTooltipValue(42.4, 'count')).toBe('42');
+	});
+
+	it('formats seconds as a human duration', () => {
+		expect(formatTooltipValue(3600, 'seconds')).toBe('1h');
+	});
+
+	it('shows an em dash for a null/undefined value', () => {
+		expect(formatTooltipValue(null, 'count')).toBe('—');
+		expect(formatTooltipValue(undefined, 'seconds')).toBe('—');
+	});
+});
+
+describe('carryForward', () => {
+	it('carries the last known value across null gaps', () => {
+		const points: [number, number | null][] = [
+			[1, 10],
+			[2, null],
+			[3, null],
+			[4, 20],
+			[5, null],
+		];
+
+		expect(carryForward(points)).toEqual([
+			[1, 10],
+			[2, 10],
+			[3, 10],
+			[4, 20],
+			[5, 20],
+		]);
+	});
+
+	it('back-fills leading nulls with the first known value', () => {
+		const points: [number, number | null][] = [
+			[1, null],
+			[2, null],
+			[3, 7],
+		];
+
+		expect(carryForward(points)).toEqual([
+			[1, 7],
+			[2, 7],
+			[3, 7],
+		]);
+	});
+
+	it('leaves an all-null series null', () => {
+		const points: [number, number | null][] = [
+			[1, null],
+			[2, null],
+		];
+
+		expect(carryForward(points)).toEqual([
+			[1, null],
+			[2, null],
+		]);
 	});
 });

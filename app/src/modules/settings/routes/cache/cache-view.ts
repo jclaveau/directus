@@ -436,3 +436,72 @@ export function filterAnomalies(
 		});
 	});
 }
+
+// A plotted point: [epoch ms, value] where value is null for an unsampled bucket.
+export type TimeseriesPoint = [number, number | null];
+
+// Seconds → a compact human duration (3600 → "1h", 300 → "5m", 90 → "1m 30s"),
+// so the TTL axis + tooltip read as durations rather than raw seconds.
+export function humanizeSeconds(seconds: number): string {
+	const total = Math.round(seconds);
+
+	if (total <= 0) {
+		return '0s';
+	}
+
+	const hours = Math.floor(total / 3600);
+	const minutes = Math.floor((total % 3600) / 60);
+	const secs = total % 60;
+
+	const parts: string[] = [];
+
+	if (hours) {
+		parts.push(`${hours}h`);
+	}
+
+	if (minutes) {
+		parts.push(`${minutes}m`);
+	}
+
+	if (secs) {
+		parts.push(`${secs}s`);
+	}
+
+	return parts.join(' ');
+}
+
+// A chart value formatted by its metric's unit: a count as a plain integer, a
+// seconds value as a human duration; null/undefined as an em dash.
+export function formatTooltipValue(
+	raw: number | null | undefined,
+	unit: 'count' | 'seconds',
+): string {
+	if (raw == null) {
+		return '—';
+	}
+
+	return unit === 'seconds'
+		? humanizeSeconds(raw)
+		: String(Math.round(raw));
+}
+
+// TTL is a persistent config value: a bucket with no sample (null) hasn't changed
+// it, so carry the last known value forward (and back-fill the lead) to keep the
+// curve continuous instead of broken across unsampled buckets.
+export function carryForward(points: TimeseriesPoint[]): TimeseriesPoint[] {
+	let last: number | null = null;
+
+	const forward = points.map(([t, value]): TimeseriesPoint => {
+		if (value !== null) {
+			last = value;
+		}
+
+		return [t, last];
+	});
+
+	const firstKnown = forward.find(([, value]) => value !== null)?.[1] ?? null;
+
+	return forward.map(([t, value]): TimeseriesPoint => {
+		return [t, value ?? firstKnown];
+	});
+}
