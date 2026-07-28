@@ -270,8 +270,13 @@ router.get(
 			? undefined
 			: Number(req.query['buckets']);
 
+		// Comma-joined endpoint prefixes to narrow the series to; absent = all.
+		const prefixes = typeof req.query['prefixes'] === 'string'
+			? req.query['prefixes'].split(',').filter(Boolean)
+			: undefined;
+
 		res.locals['payload'] = {
-			data: await service.getCacheTimeseries(windowMs, buckets),
+			data: await service.getCacheTimeseries(windowMs, buckets, prefixes),
 		};
 
 		return next();

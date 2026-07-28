@@ -109,6 +109,10 @@ const refreshInterval = useLocalStorage<number | null>(
 	},
 );
 
+// Which endpoint prefixes to plot on the chart; empty = all. Persisted per-user
+// like the window, so the self-polling /utils noise can stay filtered out.
+const selectedPrefixes = useLocalStorage<string[]>(`cache-prefixes-${userId}`, []);
+
 // Bumped per load; a superseded window's late response can't clobber a newer one.
 let loadToken = 0;
 
@@ -536,12 +540,15 @@ interface TimeseriesData {
 	// The TTL in force server-side (override, else env default) — shown as the TTL
 	// input's placeholder so an empty field reveals what it inherits.
 	effectiveTtl: string | null;
+	// Every endpoint prefix seen in the window — the filter's option list.
+	prefixes: string[];
 }
 
 const timeseries = ref<TimeseriesData>({
 	buckets: [],
 	markers: [],
 	effectiveTtl: null,
+	prefixes: [],
 });
 
 const ttlPlaceholder = computed(() => {
@@ -579,11 +586,18 @@ const hasTimeseries = computed(() => {
 async function loadTimeseries() {
 	try {
 		const response = await api.get('/utils/cache/timeseries', {
-			params: { window: selectedWindow.value, buckets: 60 },
+			params: {
+				window: selectedWindow.value,
+				buckets: 60,
+				// Only send the filter when it's a real subset; empty = all (omit it).
+				...(selectedPrefixes.value.length > 0
+					? { prefixes: selectedPrefixes.value.join(',') }
+					: {}),
+			},
 		});
 
-		// Normalise so buckets/markers are always arrays — the chart's series() and
-		// hasTimeseries read them directly and must never see an undefined.
+		// Normalise so the arrays the chart's series()/hasTimeseries read are never
+		// undefined; keep the prefix option list for the filter.
 		const data = response.data.data;
 
 		timeseries.value = {
@@ -594,12 +608,30 @@ async function loadTimeseries() {
 				? data.markers
 				: [],
 			effectiveTtl: data?.effectiveTtl ?? null,
+			prefixes: Array.isArray(data?.prefixes)
+				? data.prefixes
+				: [],
 		};
 	}
 	catch {
-		timeseries.value = { buckets: [], markers: [], effectiveTtl: null };
+		timeseries.value = {
+			buckets: [],
+			markers: [],
+			effectiveTtl: null,
+			prefixes: [],
+		};
 	}
 }
+
+const prefixOptions = computed(() => {
+	return timeseries.value.prefixes.map((prefix) => {
+		return { text: prefix, value: prefix };
+	});
+});
+
+// Re-plot when the prefix filter changes; only the chart tracks it, so a full load
+// isn't needed (the listing keeps its own search/filter).
+watch(selectedPrefixes, () => void loadTimeseries());
 
 function themeVar(name: string, fallback: string): string {
 	const value = getComputedStyle(document.documentElement)
@@ -927,6 +959,16 @@ onUnmounted(() => {
 				:items="windowOptions"
 				inline
 				@update:model-value="load"
+			/>
+
+			<v-select
+				v-if="prefixOptions.length"
+				v-model="selectedPrefixes"
+				class="prefix-select"
+				:items="prefixOptions"
+				:placeholder="t('cache_prefixes', 'Endpoints')"
+				multiple
+				inline
 			/>
 
 			<search-input

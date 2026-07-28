@@ -319,7 +319,11 @@ describe('checkCacheMiddleware', () => {
 		expect(readCacheMissGap).toHaveBeenCalledWith('cache-key', expect.any(Number));
 
 		expect(queueCacheMiss).toHaveBeenCalledWith(
-			expect.objectContaining({ cacheKey: 'cache-hash', gapMs: 4000 }),
+			expect.objectContaining({
+				cacheKey: 'cache-hash',
+				gapMs: 4000,
+				prefix: '/items',
+			}),
 		);
 
 		expect(next).toHaveBeenCalled();

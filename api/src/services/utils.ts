@@ -221,10 +221,11 @@ export class UtilsService {
 	async getCacheTimeseries(
 		windowMs?: number,
 		buckets?: number,
+		prefixes?: string[],
 	): Promise<CacheTimeseries> {
 		this.assertCacheAdmin('inspect the cache timeseries');
 
-		return readCacheTimeseries(windowMs, buckets);
+		return readCacheTimeseries(windowMs, buckets, prefixes);
 	}
 
 	// The live Redis state for a single key — the cached response plus its

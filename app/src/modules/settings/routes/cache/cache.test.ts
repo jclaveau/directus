@@ -160,7 +160,7 @@ const global = {
 // anomalies + stats to empty so an entries-only test doesn't leak them elsewhere.
 function mockCacheGet(
 	entries: unknown,
-	extra: { anomalies?: unknown; stats?: unknown } = {},
+	extra: { anomalies?: unknown; stats?: unknown; timeseries?: unknown } = {},
 ) {
 	vi.mocked(api.get).mockImplementation(((url: string) => {
 		if (url === '/utils/cache/anomalies') {
@@ -172,7 +172,9 @@ function mockCacheGet(
 		}
 
 		if (url === '/utils/cache/timeseries') {
-			return Promise.resolve({ data: { data: { buckets: [], markers: [] } } });
+			return Promise.resolve({
+				data: { data: extra.timeseries ?? { buckets: [], markers: [] } },
+			});
 		}
 
 		return Promise.resolve({ data: { data: entries } });
@@ -914,5 +916,33 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(localStorage.getItem('cache-refresh-anon')).toBe('5');
+	});
+
+	it('populates the prefix filter and reloads on selection', async () => {
+		localStorage.clear();
+
+		mockCacheGet(ENTRIES, {
+			timeseries: { buckets: [], markers: [], prefixes: ['/items', '/utils'] },
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const prefixSelect = wrapper.findComponent('.prefix-select');
+
+		expect(prefixSelect.props('items')).toEqual([
+			{ text: '/items', value: '/items' },
+			{ text: '/utils', value: '/utils' },
+		]);
+
+		vi.mocked(api.get).mockClear();
+		prefixSelect.vm.$emit('update:modelValue', ['/items']);
+		await flushPromises();
+
+		expect(localStorage.getItem('cache-prefixes-anon')).toBe('["/items"]');
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache/timeseries', {
+			params: { window: '24h', buckets: 60, prefixes: '/items' },
+		});
 	});
 });
