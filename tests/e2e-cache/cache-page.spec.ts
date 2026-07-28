@@ -42,9 +42,15 @@ test('shows a compact custom tooltip on hover', async ({ page }) => {
 	// the tooltip fires wherever the sparse data sits (both charts share the tooltip).
 	const marker = page.locator('.apexcharts-marker').first();
 	await marker.waitFor({ state: 'attached', timeout: 10000 });
+	await marker.scrollIntoViewIfNeeded();
 
 	const markerBox = await marker.boundingBox();
-	const chartBox = await page.locator('.apexcharts-canvas').nth(1).boundingBox();
+
+	const chartBox = await page
+		.locator('.apexcharts-canvas')
+		.nth(1)
+		.boundingBox();
+
 	expect(markerBox).not.toBeNull();
 	expect(chartBox).not.toBeNull();
 

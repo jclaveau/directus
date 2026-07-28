@@ -12,6 +12,9 @@ export default defineConfig({
 	use: {
 		baseURL: process.env['BASE_URL'] ?? 'http://localhost:8055',
 		headless: true,
+		// Tall enough that both stacked charts (counts + latency) are in view — a
+		// short viewport pushes the latency markers below the fold.
+		viewport: { width: 1400, height: 1200 },
 		screenshot: 'only-on-failure',
 		trace: 'retain-on-failure',
 	},
