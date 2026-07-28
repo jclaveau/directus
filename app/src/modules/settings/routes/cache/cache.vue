@@ -609,6 +609,36 @@ function themeVar(name: string, fallback: string): string {
 	return value || fallback;
 }
 
+// Seconds → a compact human duration (3600 → "1h", 300 → "5m", 90 → "1m 30s"),
+// so the TTL axis + tooltip read as durations rather than raw seconds.
+function humanizeSeconds(seconds: number): string {
+	const total = Math.round(seconds);
+
+	if (total <= 0) {
+		return '0s';
+	}
+
+	const hours = Math.floor(total / 3600);
+	const minutes = Math.floor((total % 3600) / 60);
+	const secs = total % 60;
+
+	const parts: string[] = [];
+
+	if (hours) {
+		parts.push(`${hours}h`);
+	}
+
+	if (minutes) {
+		parts.push(`${minutes}m`);
+	}
+
+	if (secs) {
+		parts.push(`${secs}s`);
+	}
+
+	return parts.join(' ');
+}
+
 function formatTooltipValue(
 	raw: number | null | undefined,
 	unit: 'count' | 'seconds',
@@ -617,11 +647,9 @@ function formatTooltipValue(
 		return '—';
 	}
 
-	const value = Math.round(raw);
-
 	return unit === 'seconds'
-		? `${value}s`
-		: String(value);
+		? humanizeSeconds(raw)
+		: String(Math.round(raw));
 }
 
 function chartConfig(): ApexOptions {
@@ -660,28 +688,28 @@ function chartConfig(): ApexOptions {
 	const metrics: {
 		name: string;
 		unit: 'count' | 'seconds';
-		curve: 'smooth' | 'stepline';
+		curve: 'straight' | 'stepline';
 		color: string;
 		pick: (b: TimeseriesBucket) => number | null;
 	}[] = [
 		{
 			name: t('hits', 'Hits'),
 			unit: 'count',
-			curve: 'smooth',
+			curve: 'straight',
 			color: themeVar('--theme--success', '#2ecda7'),
 			pick: (b) => b.hits,
 		},
 		{
 			name: t('cache_misses', 'Misses'),
 			unit: 'count',
-			curve: 'smooth',
+			curve: 'straight',
 			color: themeVar('--theme--warning', '#ffa439'),
 			pick: (b) => b.misses,
 		},
 		{
 			name: t('cache_anomalies', 'Anomalies'),
 			unit: 'count',
-			curve: 'smooth',
+			curve: 'straight',
 			color: themeVar('--theme--danger', '#e35169'),
 			pick: (b) => b.anomalies,
 		},
@@ -744,8 +772,8 @@ function chartConfig(): ApexOptions {
 			{
 				opposite: true,
 				seriesName: secondsNames,
-				title: { text: t('cache_ttl_seconds', 'TTL (s)') },
-				labels: { formatter: (v: number) => `${Math.round(v)}s` },
+				title: { text: t('cache_ttl_label', 'TTL') },
+				labels: { formatter: (v: number) => humanizeSeconds(v) },
 			},
 		],
 		tooltip: {
