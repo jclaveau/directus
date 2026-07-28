@@ -71,8 +71,15 @@ watch([search, filter], () => {
 	entryPage.value = {};
 });
 
-// How far back the listing looks — sent as ?window= to the API, which clamps it.
+// How far back the listing looks — sent as ?window= to the API, which clamps it
+// to [1m, max]. The sub-hour steps pair with a live short refresh interval.
 const windowOptions = [
+	{ text: t('cache_window_1m', 'Last 1m'), value: '1m' },
+	{ text: t('cache_window_3m', 'Last 3m'), value: '3m' },
+	{ text: t('cache_window_5m', 'Last 5m'), value: '5m' },
+	{ text: t('cache_window_10m', 'Last 10m'), value: '10m' },
+	{ text: t('cache_window_15m', 'Last 15m'), value: '15m' },
+	{ text: t('cache_window_30m', 'Last 30m'), value: '30m' },
 	{ text: t('cache_window_1h', 'Last 1h'), value: '1h' },
 	{ text: t('cache_window_6h', 'Last 6h'), value: '6h' },
 	{ text: t('cache_window_24h', 'Last 24h'), value: '24h' },
