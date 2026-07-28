@@ -1,0 +1,129 @@
+name: Cache Page E2E
+
+# Informational browser smoke for the fork's cache page (Settings → Cache): the
+# visual behaviour jsdom can't drive — chart legend layout, tooltip, the latency
+# chart. Boots a seeded Directus that serves the admin, generates cache traffic so
+# the charts have data, then runs the Playwright suite in tests/e2e-cache.
+#
+# Not a required check — browser E2E is slower + flakier than unit tests. Runs only
+# when the cache page or the suite changes (plus manual dispatch).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'app/src/modules/settings/routes/cache/**'
+      - 'app/src/views/private/components/refresh-sidebar-detail.vue'
+      - 'tests/e2e-cache/**'
+      - '.github/workflows/cache-e2e.yml'
+
+concurrency:
+  group: cache-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Cache page smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: directus
+          POSTGRES_PASSWORD: directus
+          POSTGRES_DB: directus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U directus"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DB_CLIENT: pg
+      DB_HOST: localhost
+      DB_PORT: '5432'
+      DB_DATABASE: directus
+      DB_USER: directus
+      DB_PASSWORD: directus
+      KEY: e2e
+      SECRET: e2e
+      CACHE_ENABLED: 'true'
+      CACHE_STORE: redis
+      REDIS: redis://localhost:6379
+      CACHE_AUTO_PURGE: 'true'
+      CACHE_AUTO_PURGE_MODE: scoped
+      CACHE_STATS_ENABLED: 'true'
+      ADMIN_EMAIL: admin@example.com
+      # Throwaway localhost-only instance — a fixed password is fine and lets the
+      # Playwright suite log in without plumbing a generated secret around.
+      ADMIN_PASSWORD: e2e-cache-smoke
+      WEBSOCKETS_ENABLED: 'false'
+      LOG_LEVEL: warn
+      PORT: '8055'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Bootstrap + start Directus
+        run: |
+          node directus/cli.js bootstrap
+          node directus/cli.js start > /tmp/directus.log 2>&1 &
+
+          for _ in $(seq 1 60); do
+            curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -sf http://localhost:8055/server/health >/dev/null || { cat /tmp/directus.log; exit 1; }
+
+      - name: Generate cache traffic (hits + misses + fills)
+        run: |
+          TOKEN=$(curl -s -X POST http://localhost:8055/auth/login \
+            -H 'content-type: application/json' \
+            -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
+            | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).data.access_token))')
+
+          # Fresh query param = a new key = miss + fill; the bare repeat = a hit.
+          for i in $(seq 1 15); do
+            for ep in collections fields roles policies; do
+              curl -s -o /dev/null "http://localhost:8055/$ep?e2e=$RANDOM$i" -H "authorization: Bearer $TOKEN"
+              curl -s -o /dev/null "http://localhost:8055/$ep" -H "authorization: Bearer $TOKEN"
+            done
+          done
+
+          # Wait for the stats buffer + redis-stream drain to land latency in the DB.
+          for _ in $(seq 1 20); do
+            HAS=$(curl -s "http://localhost:8055/utils/cache/timeseries?window=5m&buckets=60" \
+              -H "authorization: Bearer $TOKEN" \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const b=JSON.parse(s).data.buckets;process.stdout.write(String(b.some(x=>x.hitP50!=null&&x.missP50!=null)))})')
+            [ "$HAS" = "true" ] && break
+            sleep 3
+          done
+          echo "latency data present: ${HAS:-unknown}"
+
+      - name: Install Playwright chromium
+        run: pnpm --filter tests-e2e-cache exec playwright install --with-deps chromium
+
+      - name: Run cache-page smoke
+        env:
+          BASE_URL: http://localhost:8055
+        run: pnpm --filter tests-e2e-cache test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cache-e2e-report
+          path: tests/e2e-cache/playwright-report
+          retention-days: 7
