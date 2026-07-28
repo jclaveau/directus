@@ -105,13 +105,32 @@ describe('readCacheTimeseries', () => {
 			hits: 10, misses: 6, anomalies: 2, ttlMs: 60000,
 		});
 
-		// Dense timestamps are anchored at `since`, one bucketSec apart.
-		expect(result.buckets[0]!.t).toBe(NOW - windowMs);
-		expect(result.buckets[1]!.t).toBe(NOW - windowMs + bucketSec * 1000);
+		// The grid is bucket-anchored: newest slot = now's bucket, the rest step back
+		// by bucketSec (NOW is divisible by the 60s bucket, so it sits on a boundary).
+		expect(result.buckets[2]!.t).toBe(NOW);
+		expect(result.buckets[1]!.t).toBe(NOW - bucketSec * 1000);
+		expect(result.buckets[0]!.t).toBe(NOW - 2 * bucketSec * 1000);
 
 		expect(result.markers).toEqual([
 			{ time: NOW - 1000, kind: 'flush', detail: 'response' },
 		]);
+	});
+
+	it('anchors the grid so a sub-bucket refresh does not shift it', async () => {
+		const first = await readCacheTimeseries(180_000, 3); // bucketSec 60
+
+		// Advance now by less than one bucket — the grid must stay put (no crawl).
+		vi.setSystemTime(NOW + 40_000);
+		const within = await readCacheTimeseries(180_000, 3);
+
+		expect(within.buckets.map((b) => b.t)).toEqual(first.buckets.map((b) => b.t));
+
+		// Cross the boundary — the grid steps forward by exactly one bucket.
+		vi.setSystemTime(NOW + 60_000);
+		const crossed = await readCacheTimeseries(180_000, 3);
+
+		expect(crossed.buckets[2]!.t).toBe(NOW + 60_000);
+		expect(crossed.buckets[0]!.t).toBe(first.buckets[0]!.t + 60_000);
 	});
 
 	it('returns markers but empty curves when stats are not configured', async () => {
