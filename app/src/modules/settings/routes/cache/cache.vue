@@ -534,6 +534,13 @@ interface TimeseriesBucket {
 	misses: number;
 	anomalies: number;
 	ttlMs: number | null;
+	// Response-latency percentiles (ms): hit = serve, miss = compute, both = pooled.
+	hitP50: number | null;
+	hitP95: number | null;
+	missP50: number | null;
+	missP95: number | null;
+	bothP50: number | null;
+	bothP95: number | null;
 }
 
 interface ConfigMarker {
@@ -581,11 +588,21 @@ const totalAnomalies = computed(() => {
 const chartEl = ref<HTMLElement | null>(null);
 let chart: ApexCharts | null = null;
 
+const latencyChartEl = ref<HTMLElement | null>(null);
+let latencyChart: ApexCharts | null = null;
+
 // Show the chart once there's anything to plot — sample counts or a config marker —
 // so a stats-off page with no markers doesn't render an empty axis.
 const hasTimeseries = computed(() => {
 	return timeseries.value.markers.length > 0
 		|| timeseries.value.buckets.some((b) => b.hits || b.misses || b.anomalies);
+});
+
+// The latency chart appears only once a bucket carries a percentile sample.
+const hasLatency = computed(() => {
+	return timeseries.value.buckets.some((b) => {
+		return typeof b.hitP50 === 'number' || typeof b.missP50 === 'number';
+	});
 });
 
 async function loadTimeseries() {
@@ -789,10 +806,145 @@ function renderChart() {
 	void chart.render();
 }
 
+function latencyChartConfig(): ApexOptions {
+	const buckets = timeseries.value.buckets;
+
+	function series(pick: (b: TimeseriesBucket) => number | null) {
+		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
+	}
+
+	const hitColor = themeVar('--theme--success', '#2ecda7');
+	const missColor = themeVar('--theme--warning', '#ffa439');
+	const bothColor = themeVar('--theme--primary', '#6644ff');
+
+	// Colour by category (hit serve / miss compute / both pooled); p50 solid, p95
+	// dashed. `dash` feeds stroke.dashArray positionally, like the count curve.
+	const lines: {
+		name: string;
+		color: string;
+		dash: number;
+		pick: (b: TimeseriesBucket) => number | null;
+	}[] = [
+		{
+			name: t('cache_lat_hit_p50', 'Hits p50'),
+			color: hitColor,
+			dash: 0,
+			pick: (b) => b.hitP50,
+		},
+		{
+			name: t('cache_lat_hit_p95', 'Hits p95'),
+			color: hitColor,
+			dash: 4,
+			pick: (b) => b.hitP95,
+		},
+		{
+			name: t('cache_lat_miss_p50', 'Misses p50'),
+			color: missColor,
+			dash: 0,
+			pick: (b) => b.missP50,
+		},
+		{
+			name: t('cache_lat_miss_p95', 'Misses p95'),
+			color: missColor,
+			dash: 4,
+			pick: (b) => b.missP95,
+		},
+		{
+			name: t('cache_lat_both_p50', 'Both p50'),
+			color: bothColor,
+			dash: 0,
+			pick: (b) => b.bothP50,
+		},
+		{
+			name: t('cache_lat_both_p95', 'Both p95'),
+			color: bothColor,
+			dash: 4,
+			pick: (b) => b.bothP95,
+		},
+	];
+
+	return {
+		chart: {
+			type: 'line',
+			height: 240,
+			toolbar: { show: false },
+			animations: { enabled: false },
+			fontFamily: 'inherit',
+		},
+		colors: lines.map((l) => l.color),
+		stroke: { width: 2, curve: 'straight', dashArray: lines.map((l) => l.dash) },
+		legend: {
+			show: true,
+			position: 'top',
+			horizontalAlign: 'left',
+			itemMargin: { horizontal: 12, vertical: 0 },
+		},
+		dataLabels: { enabled: false },
+		series: lines.map((l) => ({ name: l.name, data: series(l.pick) })),
+		xaxis: { type: 'datetime' },
+		yaxis: {
+			min: 0,
+			title: { text: t('cache_lat_axis', 'Response (ms)') },
+			labels: { formatter: (v: number) => `${Math.round(v)}ms` },
+		},
+		tooltip: {
+			custom: ({ series: rowsData, dataPointIndex, w }) => {
+				const ts = w.globals.seriesX[0]?.[dataPointIndex];
+
+				const head = ts
+					? new Date(ts).toLocaleString()
+					: '';
+
+				const rows = lines.map((line, index) => {
+					const raw = rowsData[index]?.[dataPointIndex];
+
+					const shown = raw == null
+						? '—'
+						: `${Math.round(raw)}ms`;
+
+					return [
+						`<div class="cache-tt-row">`,
+						`<span class="cache-tt-dot" style="background:${line.color}"></span>`,
+						`${line.name}: ${shown}`,
+						`</div>`,
+					].join('');
+				}).join('');
+
+				return [
+					`<div class="cache-tt">`,
+					`<div class="cache-tt-head">${head}</div>`,
+					rows,
+					`</div>`,
+				].join('');
+			},
+		},
+	};
+}
+
 // Depend on chartEl too, not just the data: the chart's v-show container mounts a
 // tick after the route transition settles, so a data-only watcher fires while the
 // ref is still null. Re-firing when chartEl binds is what paints the first load.
 watch([timeseries, chartEl], renderChart, { deep: true, flush: 'post' });
+
+function renderLatencyChart() {
+	if (!latencyChartEl.value) {
+		return;
+	}
+
+	if (latencyChart) {
+		void latencyChart.updateOptions(latencyChartConfig(), true, false);
+		return;
+	}
+
+	latencyChart = new ApexCharts(latencyChartEl.value, latencyChartConfig());
+	void latencyChart.render();
+}
+
+watch(
+	[timeseries, latencyChartEl],
+	renderLatencyChart,
+	{ deep: true, flush: 'post' },
+);
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
@@ -944,6 +1096,8 @@ onMounted(() => {
 onUnmounted(() => {
 	chart?.destroy();
 	chart = null;
+	latencyChart?.destroy();
+	latencyChart = null;
 });
 </script>
 
@@ -1017,6 +1171,10 @@ onUnmounted(() => {
 
 			<div v-show="hasTimeseries" class="timeseries">
 				<div ref="chartEl" class="chart" />
+			</div>
+
+			<div v-show="hasLatency" class="timeseries">
+				<div ref="latencyChartEl" class="chart" />
 			</div>
 
 			<div style="display: flex; justify-content:space-between;">

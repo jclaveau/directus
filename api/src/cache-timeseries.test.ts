@@ -26,15 +26,31 @@ let insertSpy: ReturnType<typeof vi.fn>;
 let deleteSpy: ReturnType<typeof vi.fn>;
 
 function makeBuilder(table: string) {
+	// The latency query hits the same events table but filters on duration_ms;
+	// route it to a separate `<table>:latency` reply so it can return percentiles.
+	let latencyQuery = false;
+
 	const builder: any = {
 		where: () => builder,
+		whereIn: () => builder,
+		whereNotNull: (column: string) => {
+			if (column === 'duration_ms') {
+				latencyQuery = true;
+			}
+
+			return builder;
+		},
 		orderBy: () => builder,
 		groupByRaw: () => builder,
 		select: () => builder,
 		insert: (row: unknown) => insertSpy(table, row),
 		delete: () => deleteSpy(table),
 		then: (resolve: any, reject: any) => {
-			return Promise.resolve(rowsByTable[table] ?? []).then(resolve, reject);
+			const key = latencyQuery
+				? `${table}:latency`
+				: table;
+
+			return Promise.resolve(rowsByTable[key] ?? []).then(resolve, reject);
 		},
 	};
 
@@ -114,6 +130,36 @@ describe('readCacheTimeseries', () => {
 		expect(result.markers).toEqual([
 			{ time: NOW - 1000, kind: 'flush', detail: 'response' },
 		]);
+	});
+
+	it('maps latency percentiles into buckets, null when unsampled', async () => {
+		rowsByTable = {
+			'directus_cache_events:latency': [
+				{
+					bucket: 0,
+					hit_p50: 2,
+					hit_p95: 5,
+					miss_p50: 40,
+					miss_p95: 120,
+					both_p50: 3,
+					both_p95: 100,
+				},
+			],
+		};
+
+		const result = await readCacheTimeseries(180_000, 3);
+
+		expect(result.buckets[0]).toMatchObject({
+			hitP50: 2,
+			hitP95: 5,
+			missP50: 40,
+			missP95: 120,
+			bothP50: 3,
+			bothP95: 100,
+		});
+
+		expect(result.buckets[1]!.hitP50).toBeNull();
+		expect(result.buckets[1]!.bothP95).toBeNull();
 	});
 
 	it('anchors the grid so a sub-bucket refresh does not shift it', async () => {

@@ -118,6 +118,14 @@ export interface CacheTimeseriesBucket {
 	misses: number;
 	anomalies: number;
 	ttlMs: number | null; // effective TTL in force during the bucket
+	// Response-latency percentiles (ms): hit = serve-from-cache, miss = compute/fill,
+	// both = the two pooled. null when the bucket had no sample of that kind.
+	hitP50: number | null;
+	hitP95: number | null;
+	missP50: number | null;
+	missP95: number | null;
+	bothP50: number | null;
+	bothP95: number | null;
 }
 
 export interface CacheConfigEvent {
@@ -144,6 +152,10 @@ export interface CacheStatsState {
 }
 
 const STREAM_HARD_CAP = 1_000_000;
+
+// Stream kind → the fact table's integer `kind`: 0 hit, 1 miss, 2 fill (the compute
+// latency of a filled miss). Descriptors ('d') / anomalies ('a') demux elsewhere.
+const EVENT_KIND_CODE: Record<string, number> = { h: 0, m: 1, f: 2 };
 
 // One shared consumer group across all nodes: XREADGROUP '>' hands each entry to
 // a single consumer, so overlapping drains on other nodes take disjoint slices —
@@ -352,6 +364,22 @@ export async function queueCacheHit(hit: CacheHit): Promise<void> {
 		durationMs: hit.durationMs === null
 			? ''
 			: String(hit.durationMs),
+		ts: String(Date.now()),
+	});
+}
+
+// The compute latency of a cache fill (a miss that produced + cached a response),
+// as its own event kind ('f') so it never inflates the miss count. duration_ms
+// carries the fill time; the latency chart reads it beside the hit serve latency.
+export function queueCacheFillLatency(cacheKey: string, durationMs: number): void {
+	if (!cacheStatsActiveFlag) {
+		return;
+	}
+
+	xadd({
+		kind: 'f',
+		cacheKey,
+		durationMs: String(durationMs),
 		ts: String(Date.now()),
 	});
 }
@@ -743,9 +771,7 @@ async function persistStreamBatch(
 		events.push({
 			time: at,
 			cache_key: f['cacheKey']!,
-			kind: f['kind'] === 'h'
-				? 0
-				: 1,
+			kind: EVENT_KIND_CODE[f['kind']!] ?? 1,
 			age_ms: num(f['ageMs']),
 			gap_ms: num(f['gapMs']),
 			ttl_ms: num(f['ttlMs']),
@@ -1149,6 +1175,12 @@ export async function readCacheTimeseries(
 				misses: 0,
 				anomalies: 0,
 				ttlMs: null,
+				hitP50: null,
+				hitP95: null,
+				missP50: null,
+				missP95: null,
+				bothP50: null,
+				bothP95: null,
 			};
 		},
 	);
@@ -1167,6 +1199,32 @@ export async function readCacheTimeseries(
 			db.raw('SUM(CASE WHEN kind = 0 THEN 1 ELSE 0 END) AS hits'),
 			db.raw('SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END) AS misses'),
 			db.raw('MAX(ttl_ms) AS ttl_ms'),
+		);
+
+	// Response-latency percentiles per bucket over duration_ms: kind 0 = hit serve,
+	// kind 2 = miss compute (fill); the unfiltered aggregate pools both. Scoped to
+	// kinds 0/2 so the miss-count kind (1) is ignored here.
+	const pct = (p: number, filter?: string) => {
+		const base = `percentile_cont(${p}) WITHIN GROUP (ORDER BY duration_ms)`;
+
+		return filter
+			? `${base} FILTER (WHERE ${filter})`
+			: base;
+	};
+
+	const latencyRows = await db('directus_cache_events')
+		.where('time', '>', since)
+		.whereIn('kind', [0, 2])
+		.whereNotNull('duration_ms')
+		.groupByRaw('1')
+		.select(
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
+			db.raw(`${pct(0.5, 'kind = 0')} AS hit_p50`),
+			db.raw(`${pct(0.95, 'kind = 0')} AS hit_p95`),
+			db.raw(`${pct(0.5, 'kind = 2')} AS miss_p50`),
+			db.raw(`${pct(0.95, 'kind = 2')} AS miss_p95`),
+			db.raw(`${pct(0.5)} AS both_p50`),
+			db.raw(`${pct(0.95)} AS both_p95`),
 		);
 
 	const anomalyRows = await db('directus_cache_anomalies')
@@ -1196,6 +1254,24 @@ export async function readCacheTimeseries(
 
 	for (const row of anomalyRows as Record<string, unknown>[]) {
 		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
+	}
+
+	// A distinct grid (only kinds 0/2), so a latency bucket can't collide with a
+	// count bucket — assign, don't accumulate. Null percentiles (no sample) stay null.
+	function pctVal(value: unknown): number | null {
+		return value == null
+			? null
+			: Number(value);
+	}
+
+	for (const row of latencyRows as Record<string, unknown>[]) {
+		const slot = dense[slotOf(row['bucket'])]!;
+		slot.hitP50 = pctVal(row['hit_p50']);
+		slot.hitP95 = pctVal(row['hit_p95']);
+		slot.missP50 = pctVal(row['miss_p50']);
+		slot.missP95 = pctVal(row['miss_p95']);
+		slot.bothP50 = pctVal(row['both_p50']);
+		slot.bothP95 = pctVal(row['both_p95']);
 	}
 
 	return { buckets: dense, markers, effectiveTtl };

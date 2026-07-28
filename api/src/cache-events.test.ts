@@ -6,6 +6,7 @@ import {
 	clampCacheStatsWindow,
 	claimCacheAnomalyThrottleSlot,
 	queueCacheAnomaly,
+	queueCacheFillLatency,
 	queueCacheHit,
 	queueCacheMiss,
 	enforceCacheStatsBudget,
@@ -263,6 +264,19 @@ describe('queueCacheHit', () => {
 		});
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
+	});
+
+	it('queues a fill-latency event tagged kind f', async () => {
+		await armFlag(null);
+		mockRedis.call.mockClear();
+
+		queueCacheFillLatency('kf', 42);
+		await flushCacheEventBuffer();
+
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(fieldAfter(call, 'kind')).toBe('f');
+		expect(fieldAfter(call, 'cacheKey')).toBe('kf');
+		expect(fieldAfter(call, 'durationMs')).toBe('42');
 	});
 });
 
@@ -798,6 +812,32 @@ describe('drainCacheEvents', () => {
 					cache_key: 'k9',
 					reason: 'value_too_large',
 					detail: '2048B',
+				},
+			],
+			500,
+		);
+	});
+
+	it('demuxes a fill-latency event to kind 2 with its duration', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'f', cacheKey: 'kf', durationMs: '42', ts: '5000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_events',
+			[
+				{
+					time: new Date(5000),
+					cache_key: 'kf',
+					kind: 2,
+					age_ms: null,
+					gap_ms: null,
+					ttl_ms: null,
+					duration_ms: 42,
 				},
 			],
 			500,
