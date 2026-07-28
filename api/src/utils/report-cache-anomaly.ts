@@ -5,6 +5,7 @@ import {
 	queueCacheAnomaly,
 	type CacheAnomalyReason,
 } from '../cache-events.js';
+import { cacheEventPrefix } from './cache-event-prefix.js';
 import { getCacheKey } from './get-cache-key.js';
 import { getGraphqlQueryAndVariables } from './get-graphql-query-and-variables.js';
 
@@ -48,5 +49,10 @@ export async function reportCacheAnomaly(
 		lastFilled: null,
 	});
 
-	queueCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
+	queueCacheAnomaly({
+		cacheKey: hash,
+		prefix: cacheEventPrefix(req.originalUrl),
+		reason,
+		detail: detail ?? null,
+	});
 }
