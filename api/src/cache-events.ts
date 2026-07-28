@@ -1097,13 +1097,23 @@ export async function readCacheTimeseries(
 	const db = getDatabase();
 	const windowLen = clampCacheStatsWindow(windowMs);
 	const now = Date.now();
-	const sinceMs = now - windowLen;
-	const since = new Date(sinceMs);
 
 	const bucketCount = Math.min(
 		Math.max(Math.trunc(buckets), 1),
 		CACHE_TIMESERIES_MAX_BUCKETS,
 	);
+
+	const bucketSec = Math.max(1, Math.ceil(windowLen / bucketCount / 1000));
+	const bucketMs = bucketSec * 1000;
+
+	// Anchor the grid to a fixed bucketSec boundary so a fast (1s) refresh doesn't
+	// re-quantize every bucket — otherwise the whole curve crawls on each tick. Only
+	// the newest bucket fills as `now` advances; the grid steps by one whole bucket
+	// when `now` crosses a boundary. The last slot is the bucket CONTAINING now, so
+	// the most recent traffic is never dropped off the edge.
+	const anchorMs = Math.floor(now / bucketMs) * bucketMs;
+	const sinceMs = anchorMs - (bucketCount - 1) * bucketMs;
+	const since = new Date(sinceMs);
 
 	const markerRows = await db('directus_cache_config_events')
 		.where('time', '>', since)
@@ -1126,12 +1136,10 @@ export async function readCacheTimeseries(
 		? effective
 		: null;
 
-	// Bucket by whole seconds ELAPSED since `since` (an interval difference), so the
-	// index is 0-based (0 = oldest, bucketCount-1 = newest) and immune to the column's
-	// storage timezone. An absolute `floor(epoch/bucketSec)` grid instead pushed the
-	// `now` edge one slot past the array, silently dropping the most recent traffic.
-	const bucketSec = Math.max(1, Math.ceil(windowLen / bucketCount / 1000));
-
+	// Bucket by whole seconds ELAPSED since the anchored `since` (an interval
+	// difference): index is 0-based (0 = oldest, bucketCount-1 = the bucket holding
+	// now) and immune to the column's storage timezone. `since` itself is bucket-
+	// aligned above so the grid is stable across refreshes.
 	const dense: CacheTimeseriesBucket[] = Array.from(
 		{ length: bucketCount },
 		(_unused, index) => {
