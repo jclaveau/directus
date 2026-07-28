@@ -26,6 +26,7 @@ import {
 	formatTooltipValue,
 	formatUser,
 	humanizeSeconds,
+	interpolate,
 	shortKey,
 	splitSections,
 	summariseAnomalies,
@@ -873,10 +874,9 @@ function latencyChartConfig(): ApexOptions {
 		},
 		colors: lines.map((l) => l.color),
 		stroke: { width: 2, curve: 'straight', dashArray: lines.map((l) => l.dash) },
-		// Fills (and so misses) are sparse — one per key — leaving isolated non-null
-		// buckets that draw no line segment. Markers make each sample visible on its
-		// own rather than vanishing between the nulls.
-		markers: { size: 3, strokeWidth: 0 },
+		// A lone sample still needs a dot (nothing to draw a line to); a marker keeps
+		// it visible without cluttering the interpolated runs.
+		markers: { size: 2, strokeWidth: 0 },
 		legend: {
 			show: true,
 			position: 'top',
@@ -884,7 +884,11 @@ function latencyChartConfig(): ApexOptions {
 			itemMargin: { horizontal: 12, vertical: 0 },
 		},
 		dataLabels: { enabled: false },
-		series: lines.map((l) => ({ name: l.name, data: series(l.pick) })),
+		// Fills are sparse (one per key), so a series is mostly isolated points that
+		// apex won't join. Interpolate the interior gaps to draw a continuous curve.
+		series: lines.map((l) => {
+			return { name: l.name, data: interpolate(series(l.pick)) };
+		}),
 		xaxis: { type: 'datetime' },
 		yaxis: {
 			min: 0,
