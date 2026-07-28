@@ -10,6 +10,13 @@ import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
+// The timeseries wire types live in @directus/types so the app chart shares them.
+export type {
+	CacheConfigEvent,
+	CacheTimeseries,
+	CacheTimeseriesBucket,
+} from '@directus/types';
+
 /**
  * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
  * hit/miss never touches the DB on the hot path:
@@ -111,35 +118,6 @@ export interface CacheEntryRecord {
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
-}
-
-export interface CacheTimeseriesBucket {
-	t: number; // bucket-start epoch ms
-	hits: number;
-	misses: number;
-	anomalies: number;
-	ttlMs: number | null; // effective TTL in force during the bucket
-	// Response-latency percentiles (ms): hit = serve-from-cache, miss = compute/fill,
-	// both = the two pooled. null when the bucket had no sample of that kind.
-	hitP50: number | null;
-	hitP95: number | null;
-	missP50: number | null;
-	missP95: number | null;
-	bothP50: number | null;
-	bothP95: number | null;
-}
-
-export interface CacheConfigEvent {
-	time: number;
-	kind: 'ttl_change' | 'flush';
-	detail: string | null;
-}
-
-export interface CacheTimeseries {
-	buckets: CacheTimeseriesBucket[];
-	markers: CacheConfigEvent[];
-	// The TTL in force (override, else env default) — for the page's TTL input.
-	effectiveTtl: string | null;
 }
 
 export interface CacheStatsState {

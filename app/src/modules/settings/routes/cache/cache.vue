@@ -9,7 +9,13 @@ import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { abbreviateNumber } from '@directus/utils';
-import type { CacheFlushTarget, Filter, User } from '@directus/types';
+import type {
+	CacheFlushTarget,
+	CacheTimeseries,
+	CacheTimeseriesBucket,
+	Filter,
+	User,
+} from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
@@ -529,36 +535,7 @@ async function flush() {
 	}
 }
 
-interface TimeseriesBucket {
-	t: number;
-	hits: number;
-	misses: number;
-	anomalies: number;
-	ttlMs: number | null;
-	// Response-latency percentiles (ms): hit = serve, miss = compute, both = pooled.
-	hitP50: number | null;
-	hitP95: number | null;
-	missP50: number | null;
-	missP95: number | null;
-	bothP50: number | null;
-	bothP95: number | null;
-}
-
-interface ConfigMarker {
-	time: number;
-	kind: 'ttl_change' | 'flush';
-	detail: string | null;
-}
-
-interface TimeseriesData {
-	buckets: TimeseriesBucket[];
-	markers: ConfigMarker[];
-	// The TTL in force server-side (override, else env default) — shown as the TTL
-	// input's placeholder so an empty field reveals what it inherits.
-	effectiveTtl: string | null;
-}
-
-const timeseries = ref<TimeseriesData>({
+const timeseries = ref<CacheTimeseries>({
 	buckets: [],
 	markers: [],
 	effectiveTtl: null,
@@ -642,7 +619,7 @@ function themeVar(name: string, fallback: string): string {
 function chartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
-	function series(pick: (b: TimeseriesBucket) => number | null) {
+	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
 		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
 	}
 
@@ -654,7 +631,7 @@ function chartConfig(): ApexOptions {
 		unit: 'count' | 'seconds';
 		curve: 'straight' | 'stepline';
 		color: string;
-		pick: (b: TimeseriesBucket) => number | null;
+		pick: (b: CacheTimeseriesBucket) => number | null;
 	}[] = [
 		{
 			name: t('hits', 'Hits'),
@@ -810,7 +787,7 @@ function renderChart() {
 function latencyChartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
-	function series(pick: (b: TimeseriesBucket) => number | null) {
+	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
 		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
 	}
 
@@ -824,7 +801,7 @@ function latencyChartConfig(): ApexOptions {
 		name: string;
 		color: string;
 		dash: number;
-		pick: (b: TimeseriesBucket) => number | null;
+		pick: (b: CacheTimeseriesBucket) => number | null;
 	}[] = [
 		{
 			name: t('cache_lat_hit_p50', 'Hits p50'),
