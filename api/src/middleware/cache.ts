@@ -15,6 +15,7 @@ import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import { cacheEventPrefix } from '../utils/cache-event-prefix.js';
 import { shouldSkipCache } from '../utils/should-skip-cache.js';
 
 const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next) => {
@@ -98,6 +99,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		if (cacheStatsActive() && createdAt > 0) {
 			void queueCacheHit({
 				cacheKey: hash,
+				prefix: cacheEventPrefix(req.originalUrl),
 				ageMs: Math.max(Date.now() - createdAt, 0),
 				ttlMs: expiresMeta?.ttlMs ?? null,
 				durationMs: Math.max(Date.now() - Number(res.locals['requestStart']), 0),
@@ -136,6 +138,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 				.then((gapMs) => {
 					return queueCacheMiss({
 						cacheKey: hash,
+						prefix: cacheEventPrefix(req.originalUrl),
 						gapMs,
 						ttlMs: getMilliseconds(resolvedCacheTtl()) ?? null,
 					});

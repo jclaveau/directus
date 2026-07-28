@@ -24,17 +24,35 @@ import {
 let rowsByTable: Record<string, any[]>;
 let insertSpy: ReturnType<typeof vi.fn>;
 let deleteSpy: ReturnType<typeof vi.fn>;
+let whereInSpy: ReturnType<typeof vi.fn>;
 
 function makeBuilder(table: string) {
+	// The distinct-prefix query hits the same table as the event aggregation, so a
+	// `distinct()` call routes to a separate `<table>:distinct` reply.
+	let distinctCalled = false;
+
 	const builder: any = {
 		where: () => builder,
+		whereIn: (...args: unknown[]) => {
+			whereInSpy(table, ...args);
+			return builder;
+		},
+		whereNotNull: () => builder,
+		distinct: () => {
+			distinctCalled = true;
+			return builder;
+		},
 		orderBy: () => builder,
 		groupByRaw: () => builder,
 		select: () => builder,
 		insert: (row: unknown) => insertSpy(table, row),
 		delete: () => deleteSpy(table),
 		then: (resolve: any, reject: any) => {
-			return Promise.resolve(rowsByTable[table] ?? []).then(resolve, reject);
+			const key = distinctCalled
+				? `${table}:distinct`
+				: table;
+
+			return Promise.resolve(rowsByTable[key] ?? []).then(resolve, reject);
 		},
 	};
 
@@ -51,6 +69,7 @@ beforeEach(() => {
 	rowsByTable = {};
 	insertSpy = vi.fn(() => Promise.resolve([1]));
 	deleteSpy = vi.fn(() => Promise.resolve(3));
+	whereInSpy = vi.fn();
 
 	const db: any = vi.fn((table: string) => makeBuilder(table));
 	db.client = { config: { client: 'pg' } };
@@ -85,11 +104,16 @@ describe('readCacheTimeseries', () => {
 			directus_cache_config_events: [
 				{ time: new Date(NOW - 1000), kind: 'flush', detail: 'response' },
 			],
+			'directus_cache_events:distinct': [
+				{ prefix: '/items' },
+				{ prefix: '/utils' },
+			],
 		};
 
 		const result = await readCacheTimeseries(windowMs, buckets);
 
 		expect(result.buckets).toHaveLength(3);
+		expect(result.prefixes).toEqual(['/items', '/utils']);
 
 		// bucket 0 → slot 0; gap at slot 1; bucket 2 → slot 2; the out-of-range bucket
 		// 3 folds into the last slot too (5+1 hits, 4+2 misses).
@@ -132,6 +156,22 @@ describe('readCacheTimeseries', () => {
 		expect(result.buckets.every((b) => b.hits === 0 && b.misses === 0)).toBe(true);
 
 		env['CACHE_STATS_ENABLED'] = true;
+	});
+
+	it('narrows the event query to the selected prefixes', async () => {
+		await readCacheTimeseries(180_000, 3, ['/items', '/users']);
+
+		expect(whereInSpy).toHaveBeenCalledWith(
+			'directus_cache_events',
+			'prefix',
+			['/items', '/users'],
+		);
+	});
+
+	it('does not narrow when no prefixes are selected (all)', async () => {
+		await readCacheTimeseries(180_000, 3, []);
+
+		expect(whereInSpy).not.toHaveBeenCalled();
 	});
 });
 

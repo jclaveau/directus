@@ -635,11 +635,12 @@ describe('drainCacheEvents', () => {
 	it('demuxes hits/misses to events and descriptors to the dimension', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
-				kind: 'h', cacheKey: 'k1', ageMs: '5000', ttlMs: '300000',
-				durationMs: '12', ts: '1000',
+				kind: 'h', cacheKey: 'k1', prefix: '/items', ageMs: '5000',
+				ttlMs: '300000', durationMs: '12', ts: '1000',
 			}),
 			streamEntry('2-0', {
-				kind: 'm', cacheKey: 'k2', gapMs: '2000', ttlMs: '300000', ts: '2000',
+				kind: 'm', cacheKey: 'k2', prefix: '/users', gapMs: '2000',
+				ttlMs: '300000', ts: '2000',
 			}),
 			streamEntry('3-0', {
 				kind: 'd', cacheKey: 'k1', redisKey: '/items/a:u1', coarse: '1',
@@ -658,6 +659,7 @@ describe('drainCacheEvents', () => {
 				{
 					time: new Date(1000),
 					cache_key: 'k1',
+					prefix: '/items',
 					kind: 0,
 					age_ms: 5000,
 					gap_ms: null,
@@ -667,6 +669,7 @@ describe('drainCacheEvents', () => {
 				{
 					time: new Date(2000),
 					cache_key: 'k2',
+					prefix: '/users',
 					kind: 1,
 					age_ms: null,
 					gap_ms: 2000,

@@ -30,6 +30,9 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
 
 export interface CacheHit {
 	cacheKey: string;
+	// The request's endpoint prefix (`/items`, …). Emitted by the cache middleware,
+	// which always sets it; optional so telemetry callers/tests can omit it.
+	prefix?: string;
 	ageMs: number;
 	ttlMs: number | null;
 	durationMs: number | null;
@@ -37,6 +40,7 @@ export interface CacheHit {
 
 export interface CacheMiss {
 	cacheKey: string;
+	prefix?: string;
 	gapMs: number | null;
 	ttlMs: number | null;
 }
@@ -131,6 +135,9 @@ export interface CacheTimeseries {
 	markers: CacheConfigEvent[];
 	// The TTL in force (override, else env default) — for the page's TTL input.
 	effectiveTtl: string | null;
+	// Every endpoint prefix seen in the window — populates the page's prefix filter,
+	// independent of which subset is currently selected so options never vanish.
+	prefixes: string[];
 }
 
 export interface CacheStatsState {
@@ -345,6 +352,7 @@ export async function queueCacheHit(hit: CacheHit): Promise<void> {
 	xadd({
 		kind: 'h',
 		cacheKey: hit.cacheKey,
+		prefix: hit.prefix ?? '',
 		ageMs: String(hit.ageMs),
 		ttlMs: hit.ttlMs === null
 			? ''
@@ -364,6 +372,7 @@ export async function queueCacheMiss(miss: CacheMiss): Promise<void> {
 	xadd({
 		kind: 'm',
 		cacheKey: miss.cacheKey,
+		prefix: miss.prefix ?? '',
 		gapMs: miss.gapMs === null
 			? ''
 			: String(miss.gapMs),
@@ -499,6 +508,7 @@ export async function readCacheTombstone(key: string): Promise<number | null> {
 interface CacheEventRow {
 	time: Date;
 	cache_key: string;
+	prefix: string | null;
 	kind: number;
 	age_ms: number | null;
 	gap_ms: number | null;
@@ -743,6 +753,9 @@ async function persistStreamBatch(
 		events.push({
 			time: at,
 			cache_key: f['cacheKey']!,
+			prefix: f['prefix']
+				? f['prefix']
+				: null,
 			kind: f['kind'] === 'h'
 				? 0
 				: 1,
@@ -1093,6 +1106,7 @@ export async function recordCacheConfigEvent(
 export async function readCacheTimeseries(
 	windowMs?: number,
 	buckets = 60,
+	prefixes?: string[],
 ): Promise<CacheTimeseries> {
 	const db = getDatabase();
 	const windowLen = clampCacheStatsWindow(windowMs);
@@ -1146,13 +1160,30 @@ export async function readCacheTimeseries(
 	);
 
 	if (!cacheStatsConfigured() || db.client.config.client !== 'pg') {
-		return { buckets: dense, markers, effectiveTtl };
+		return { buckets: dense, markers, effectiveTtl, prefixes: [] };
 	}
 
 	const bucketExpr = 'floor(extract(epoch from (time - ?::timestamptz)) / ?)';
 
-	const eventRows = await db('directus_cache_events')
+	// Every prefix in the window — the filter's option list, built unfiltered so a
+	// narrowed selection never hides the other options.
+	const prefixRows = await db('directus_cache_events')
 		.where('time', '>', since)
+		.whereNotNull('prefix')
+		.distinct('prefix')
+		.orderBy('prefix');
+
+	const availablePrefixes = (prefixRows as Record<string, unknown>[])
+		.map((row) => String(row['prefix']));
+
+	const eventQuery = db('directus_cache_events').where('time', '>', since);
+
+	// Empty/absent selection means all; a non-empty one narrows to those prefixes.
+	if (prefixes && prefixes.length > 0) {
+		void eventQuery.whereIn('prefix', prefixes);
+	}
+
+	const eventRows = await eventQuery
 		.groupByRaw('1')
 		.select(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
@@ -1189,7 +1220,7 @@ export async function readCacheTimeseries(
 		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
 	}
 
-	return { buckets: dense, markers, effectiveTtl };
+	return { buckets: dense, markers, effectiveTtl, prefixes: availablePrefixes };
 }
 
 // Prune config-event markers past the retention window. Ungated (they are recorded
