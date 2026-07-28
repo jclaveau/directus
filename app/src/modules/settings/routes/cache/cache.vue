@@ -621,8 +621,6 @@ function themeVar(name: string, fallback: string): string {
 	return value || fallback;
 }
 
-// Seconds → a compact human duration (3600 → "1h", 300 → "5m", 90 → "1m 30s"),
-// so the TTL axis + tooltip read as durations rather than raw seconds.
 function chartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
