@@ -86,9 +86,27 @@ const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
 // Persist the window + refresh interval per-user so a reload restores the same
 // view (like the flush targets below).
 const selectedWindow = useLocalStorage(`cache-window-${userId}`, '24h');
+
+// vueuse's serializer for a null default is identity (stores/returns a raw string),
+// which would break the number|null contract; coerce so the interval round-trips as
+// a real number (empty = off).
 const refreshInterval = useLocalStorage<number | null>(
 	`cache-refresh-${userId}`,
 	null,
+	{
+		serializer: {
+			read: (value) => {
+				return value
+					? Number(value)
+					: null;
+			},
+			write: (value) => {
+				return value === null
+					? ''
+					: String(value);
+			},
+		},
+	},
 );
 
 // Bumped per load; a superseded window's late response can't clobber a newer one.
@@ -598,6 +616,56 @@ function chartConfig(): ApexOptions {
 		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
 	}
 
+	// Single source of truth for each plotted metric: name, unit and line style
+	// travel together so the tooltip, both y-axes and the stroke can't drift out
+	// of series order (apexcharts indexes formatters by positional seriesIndex).
+	const metrics: {
+		name: string;
+		unit: 'count' | 'seconds';
+		curve: 'smooth' | 'stepline';
+		color: string;
+		pick: (b: TimeseriesBucket) => number | null;
+	}[] = [
+		{
+			name: t('hits', 'Hits'),
+			unit: 'count',
+			curve: 'smooth',
+			color: themeVar('--theme--success', '#2ecda7'),
+			pick: (b) => b.hits,
+		},
+		{
+			name: t('cache_misses', 'Misses'),
+			unit: 'count',
+			curve: 'smooth',
+			color: themeVar('--theme--warning', '#ffa439'),
+			pick: (b) => b.misses,
+		},
+		{
+			name: t('cache_anomalies', 'Anomalies'),
+			unit: 'count',
+			curve: 'smooth',
+			color: themeVar('--theme--danger', '#e35169'),
+			pick: (b) => b.anomalies,
+		},
+		{
+			name: t('ttl', 'TTL'),
+			unit: 'seconds',
+			curve: 'stepline',
+			color: themeVar('--theme--primary', '#6644ff'),
+			pick: (b) => {
+				return b.ttlMs === null
+					? null
+					: Math.round(b.ttlMs / 1000);
+			},
+		},
+	];
+
+	const countNames = metrics.filter((m) => m.unit === 'count').map((m) => m.name);
+
+	const secondsNames = metrics
+		.filter((m) => m.unit === 'seconds')
+		.map((m) => m.name);
+
 	return {
 		chart: {
 			type: 'line',
@@ -606,49 +674,47 @@ function chartConfig(): ApexOptions {
 			animations: { enabled: false },
 			fontFamily: 'inherit',
 		},
-		colors: [
-			themeVar('--theme--success', '#2ecda7'),
-			themeVar('--theme--warning', '#ffa439'),
-			themeVar('--theme--danger', '#e35169'),
-			themeVar('--theme--primary', '#6644ff'),
-		],
-		stroke: { width: 2, curve: ['smooth', 'smooth', 'smooth', 'stepline'] },
-		legend: { show: true, position: 'top' },
+		colors: metrics.map((m) => m.color),
+		stroke: { width: 2, curve: metrics.map((m) => m.curve) },
+		legend: {
+			show: true,
+			position: 'top',
+			horizontalAlign: 'left',
+			itemMargin: { horizontal: 12, vertical: 0 },
+		},
 		dataLabels: { enabled: false },
-		series: [
-			{ name: t('hits', 'Hits'), data: series((b) => b.hits) },
-			{ name: t('cache_misses', 'Misses'), data: series((b) => b.misses) },
-			{ name: t('cache_anomalies', 'Anomalies'), data: series((b) => b.anomalies) },
-			{
-				name: t('ttl', 'TTL'),
-				data: series((b) => {
-					return b.ttlMs === null
-						? null
-						: Math.round(b.ttlMs / 1000);
-				}),
-			},
-		],
+		series: metrics.map((m) => ({ name: m.name, data: series(m.pick) })),
 		xaxis: { type: 'datetime' },
 		yaxis: [
 			{
-				// Bind all three count series to this axis; without an explicit
+				// Bind every count series to this axis; without an explicit
 				// seriesName map apexcharts indexes a missing y-axis per series
 				// (misses/anomalies) and crashes on render.
-				seriesName: [
-					t('hits', 'Hits'),
-					t('cache_misses', 'Misses'),
-					t('cache_anomalies', 'Anomalies'),
-				],
+				seriesName: countNames,
 				title: { text: t('cache_count', 'Count') },
 				labels: { formatter: (v: number) => String(Math.round(v)) },
 			},
 			{
 				opposite: true,
-				seriesName: t('ttl', 'TTL'),
+				seriesName: secondsNames,
 				title: { text: t('cache_ttl_seconds', 'TTL (s)') },
 				labels: { formatter: (v: number) => `${Math.round(v)}s` },
 			},
 		],
+		tooltip: {
+			y: {
+				// Format by the metric's own unit, not seriesIndex — otherwise the
+				// tooltip borrows yaxis[seriesIndex]'s formatter and a count series
+				// picks up the TTL axis's `s` suffix (Misses shown as "2s").
+				formatter: (v, { seriesIndex }) => {
+					const value = Math.round(Number(v));
+
+					return metrics[seriesIndex]?.unit === 'seconds'
+						? `${value}s`
+						: String(value);
+				},
+			},
+		},
 		annotations: {
 			xaxis: timeseries.value.markers.map((m) => {
 				const flush = m.kind === 'flush';
@@ -1614,6 +1680,13 @@ table.entries .entry-row {
 
 .timeseries {
 	margin-block-end: 24px;
+}
+
+/* The chart has two y-axes (counts + TTL seconds), so ApexCharts splits the legend
+   into a per-axis group and stacks each one vertically. Override its runtime-built
+   markup (hence :deep) so the four series read as a single horizontal row. */
+.chart :deep(.apexcharts-legend-group-vertical) {
+	flex-direction: row;
 }
 
 /* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
