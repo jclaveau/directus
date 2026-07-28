@@ -38,16 +38,24 @@ test('lays the counts chart legend out on one row', async ({ page }) => {
 });
 
 test('shows a compact custom tooltip on hover', async ({ page }) => {
-	const box = await page
-		.locator('.apexcharts-canvas')
-		.first()
-		.boundingBox();
+	// A rendered latency marker marks a data x; hover the plot there (mid-height) so
+	// the tooltip fires wherever the sparse data sits (both charts share the tooltip).
+	const marker = page.locator('.apexcharts-marker').first();
+	await marker.waitFor({ state: 'attached', timeout: 10000 });
 
-	expect(box).not.toBeNull();
+	const markerBox = await marker.boundingBox();
+	const chartBox = await page.locator('.apexcharts-canvas').nth(1).boundingBox();
+	expect(markerBox).not.toBeNull();
+	expect(chartBox).not.toBeNull();
 
-	await page.mouse.move(box!.x + box!.width * 0.85, box!.y + box!.height * 0.5);
-	await page.waitForTimeout(300);
-	await page.mouse.move(box!.x + box!.width * 0.9, box!.y + box!.height * 0.5);
+	const x = markerBox!.x + markerBox!.width / 2;
+	const y = chartBox!.y + chartBox!.height / 2;
+
+	// Two moves: apex arms its tooltip on a genuine mousemove sequence, not one jump.
+	await page.mouse.move(x - 5, y);
+	await page.waitForTimeout(150);
+	await page.mouse.move(x, y);
+	await page.waitForTimeout(400);
 
 	await expect(page.locator('.cache-tt-row').first()).toBeVisible();
 });
