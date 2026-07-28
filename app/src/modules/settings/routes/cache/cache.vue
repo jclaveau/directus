@@ -631,6 +631,29 @@ function chartConfig(): ApexOptions {
 		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
 	}
 
+	// TTL is a persistent config value: a bucket with no sample (null) hasn't changed
+	// it, so carry the last known value forward (and back-fill the lead) to keep the
+	// curve continuous instead of broken across unsampled buckets.
+	function carryForward(
+		points: [number, number | null][],
+	): [number, number | null][] {
+		let last: number | null = null;
+
+		const forward = points.map(([t, value]): [number, number | null] => {
+			if (value !== null) {
+				last = value;
+			}
+
+			return [t, last];
+		});
+
+		const firstKnown = forward.find(([, value]) => value !== null)?.[1] ?? null;
+
+		return forward.map(([t, value]): [number, number | null] => {
+			return [t, value ?? firstKnown];
+		});
+	}
+
 	// Single source of truth for each plotted metric: name, unit and line style
 	// travel together so the tooltip, both y-axes and the stroke can't drift out
 	// of series order (apexcharts indexes formatters by positional seriesIndex).
@@ -698,7 +721,16 @@ function chartConfig(): ApexOptions {
 			itemMargin: { horizontal: 12, vertical: 0 },
 		},
 		dataLabels: { enabled: false },
-		series: metrics.map((m) => ({ name: m.name, data: series(m.pick) })),
+		series: metrics.map((m) => {
+			const data = series(m.pick);
+
+			return {
+				name: m.name,
+				data: m.unit === 'seconds'
+					? carryForward(data)
+					: data,
+			};
+		}),
 		xaxis: { type: 'datetime' },
 		yaxis: [
 			{
