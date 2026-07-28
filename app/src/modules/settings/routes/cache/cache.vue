@@ -84,6 +84,8 @@ const windowOptions = [
 	{ text: t('cache_window_6h', 'Last 6h'), value: '6h' },
 	{ text: t('cache_window_24h', 'Last 24h'), value: '24h' },
 	{ text: t('cache_window_7d', 'Last 7d'), value: '7d' },
+	{ text: t('cache_window_15d', 'Last 15d'), value: '15d' },
+	{ text: t('cache_window_21d', 'Last 21d'), value: '21d' },
 	{ text: t('cache_window_30d', 'Last 30d'), value: '30d' },
 ];
 
