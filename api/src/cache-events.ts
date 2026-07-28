@@ -22,8 +22,8 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
  *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
  *
- * Five stream kinds: `h` hit + `m` miss (cache.ts), `f` fill-latency (respond.ts, the
- * compute time of a filled miss → events kind 2), `d` descriptor (respond.ts on a
+ * Five stream kinds: `h` hit, `m` miss (cache.ts), `f` fill (respond.ts, the compute
+ * time of a filled miss → events kind 2), `d` descriptor (respond.ts on a
  * fill, or report-cache-anomaly.ts as an unfilled locator), `a` anomaly. The drainer
  * demuxes them into the three tables. Capture is gated by a runtime flag refreshed
  * from Redis, killable live by an admin or the size/buffer watchdog.
