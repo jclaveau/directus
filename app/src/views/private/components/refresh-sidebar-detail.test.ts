@@ -109,3 +109,24 @@ test('switching to off (null) stops the timer', async () => {
 		vi.useRealTimers();
 	}
 });
+
+test('clears the interval on unmount so no timer leaks', () => {
+	vi.useFakeTimers();
+
+	try {
+		const wrapper = mount(RefreshSidebarDetail, {
+			props: { modelValue: 3 },
+			global,
+		});
+
+		const running = vi.getTimerCount();
+		wrapper.unmount();
+
+		// The refresh interval must be cleared on unmount (active count drops),
+		// else it keeps firing forever on a dead component.
+		expect(vi.getTimerCount()).toBeLessThan(running);
+	}
+	finally {
+		vi.useRealTimers();
+	}
+});
