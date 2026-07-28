@@ -10,11 +10,24 @@ vi.mock('@/api', () => {
 
 // The timeseries chart pulls in apexcharts (SVG jsdom can't drive); stub it so
 // mounting the page doesn't touch a real chart — the chart isn't what these test.
+// Capture the options the component hands ApexCharts so a test can drive its
+// callbacks (tooltip renderer, axis formatters) without a real SVG chart.
+const chartMock = vi.hoisted(() => {
+	return { config: null as any };
+});
+
 vi.mock('apexcharts', () => {
 	return {
 		default: class {
+			constructor(_el: unknown, config: unknown) {
+				chartMock.config = config;
+			}
+
 			render() {}
-			updateOptions() {}
+			updateOptions(config: unknown) {
+				chartMock.config = config;
+			}
+
 			destroy() {}
 		},
 	};
@@ -914,5 +927,37 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(localStorage.getItem('cache-refresh-anon')).toBe('5');
+	});
+
+	it('builds a compact tooltip + human TTL axis from the chart config', async () => {
+		mockCacheGet(ENTRIES, {
+			// A non-zero bucket so hasTimeseries is true and the chart is built.
+			timeseries: {
+				buckets: [{ t: 1000, hits: 5, misses: 2, anomalies: 0, ttlMs: 3600000 }],
+				markers: [],
+			},
+		});
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartMock.config;
+		expect(config).toBeTruthy();
+
+		// Tooltip: one tight "name: value" row per metric, TTL humanised.
+		const html = config.tooltip.custom({
+			series: [[5], [2], [0], [3600]],
+			dataPointIndex: 0,
+			w: { globals: { seriesX: [[1000]] } },
+		});
+
+		expect(html).toContain('Hits: 5');
+		expect(html).toContain('Misses: 2');
+		expect(html).toContain('TTL: 1h');
+		expect(html).toContain('cache-tt-row');
+
+		// Count axis stays integer; TTL axis reads as a duration.
+		expect(config.yaxis[0].labels.formatter(5.4)).toBe('5');
+		expect(config.yaxis[1].labels.formatter(3600)).toBe('1h');
 	});
 });
