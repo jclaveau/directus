@@ -5,6 +5,15 @@ import { useI18n } from 'vue-i18n';
 
 const model = defineModel<number | null>({ required: true });
 
+const props = withDefaults(
+	defineProps<{
+		// Selectable auto-refresh intervals in seconds (`null` = off). Callers that
+		// watch fast-moving data (e.g. the cache page) can offer sub-10s intervals.
+		intervals?: (number | null)[];
+	}>(),
+	{ intervals: () => [null, 10, 30, 60, 300] },
+);
+
 const emit = defineEmits<{
 	refresh: [];
 }>();
@@ -42,9 +51,7 @@ onUnmounted(() => {
 watch(model, (value) => setRefreshInterval(value), { immediate: true });
 
 const items = computed(() => {
-	const intervals = [null, 10, 30, 60, 300];
-
-	return intervals.map((seconds) => {
+	return props.intervals.map((seconds) => {
 		if (seconds === null) {
 			return {
 				text: t('no_refresh'),
