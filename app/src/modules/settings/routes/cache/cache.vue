@@ -609,6 +609,21 @@ function themeVar(name: string, fallback: string): string {
 	return value || fallback;
 }
 
+function formatTooltipValue(
+	raw: number | null | undefined,
+	unit: 'count' | 'seconds',
+): string {
+	if (raw == null) {
+		return '—';
+	}
+
+	const value = Math.round(raw);
+
+	return unit === 'seconds'
+		? `${value}s`
+		: String(value);
+}
+
 function chartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
@@ -702,17 +717,35 @@ function chartConfig(): ApexOptions {
 			},
 		],
 		tooltip: {
-			y: {
-				// Format by the metric's own unit, not seriesIndex — otherwise the
-				// tooltip borrows yaxis[seriesIndex]'s formatter and a count series
-				// picks up the TTL axis's `s` suffix (Misses shown as "2s").
-				formatter: (v, { seriesIndex }) => {
-					const value = Math.round(Number(v));
+			// Custom compact tooltip: apex's shared layout right-aligns each value to
+			// the widest row (TTL 3600s), which spreads the short rows and pushes their
+			// marker out. Render one tight "dot name: value" line per metric instead,
+			// each value formatted by the metric's own unit.
+			custom: ({ series, dataPointIndex, w }) => {
+				const ts = w.globals.seriesX[0]?.[dataPointIndex];
 
-					return metrics[seriesIndex]?.unit === 'seconds'
-						? `${value}s`
-						: String(value);
-				},
+				const head = ts
+					? new Date(ts).toLocaleString()
+					: '';
+
+				const rows = metrics.map((metric, index) => {
+					const raw = series[index]?.[dataPointIndex];
+					const shown = formatTooltipValue(raw, metric.unit);
+
+					return [
+						`<div class="cache-tt-row">`,
+						`<span class="cache-tt-dot" style="background:${metric.color}"></span>`,
+						`${metric.name}: ${shown}`,
+						`</div>`,
+					].join('');
+				}).join('');
+
+				return [
+					`<div class="cache-tt">`,
+					`<div class="cache-tt-head">${head}</div>`,
+					rows,
+					`</div>`,
+				].join('');
 			},
 		},
 		annotations: {
@@ -1687,6 +1720,32 @@ table.entries .entry-row {
    markup (hence :deep) so the four series read as a single horizontal row. */
 .chart :deep(.apexcharts-legend-group-vertical) {
 	flex-direction: row;
+}
+
+/* Compact custom tooltip (see chartConfig): one tight row per metric, no spread. */
+.chart :deep(.cache-tt) {
+	padding: 6px 10px;
+	font-size: 12px;
+	line-height: 1.6;
+}
+
+.chart :deep(.cache-tt-head) {
+	font-weight: 600;
+	margin-block-end: 2px;
+}
+
+.chart :deep(.cache-tt-row) {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+}
+
+.chart :deep(.cache-tt-dot) {
+	inline-size: 8px;
+	block-size: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
 }
 
 /* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
