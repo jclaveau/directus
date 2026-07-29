@@ -134,6 +134,10 @@ let loadToken = 0;
 // same-key reopen) can't overwrite a newer open; a close discards it entirely.
 let entryToken = 0;
 
+// Chart's own token: loadTimeseries fires from load() (per window/refresh) and from
+// saveTtl(); a superseded fetch can't clobber the chart with out-of-order buckets.
+let timeseriesToken = 0;
+
 // Runtime collection state (Redis-backed). `configured` is the env opt-in: when
 // false the toggle is hidden, since the flag can only narrow, never widen it.
 const statsState = ref<{
@@ -656,10 +660,16 @@ const hasLatency = computed(() => {
 });
 
 async function loadTimeseries() {
+	const token = ++timeseriesToken;
+
 	try {
 		const response = await api.get('/utils/cache/timeseries', {
 			params: { window: selectedWindow.value, buckets: 60 },
 		});
+
+		if (token !== timeseriesToken) {
+			return;
+		}
 
 		// Normalise so buckets/markers are always arrays — the chart's series() and
 		// hasTimeseries read them directly and must never see an undefined.
@@ -676,6 +686,10 @@ async function loadTimeseries() {
 		};
 	}
 	catch {
+		if (token !== timeseriesToken) {
+			return;
+		}
+
 		timeseries.value = { buckets: [], markers: [], effectiveTtl: null };
 	}
 }
