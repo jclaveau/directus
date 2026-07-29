@@ -10,15 +10,45 @@ vi.mock('@/api', () => {
 
 // The timeseries chart pulls in apexcharts (SVG jsdom can't drive); stub it so
 // mounting the page doesn't touch a real chart — the chart isn't what these test.
+// Capture the options the component hands ApexCharts so a test can drive its
+// callbacks (tooltip renderer, axis formatters) without a real SVG chart.
+const chartMock = vi.hoisted(() => {
+	return { configs: [] as any[], hidden: [] as string[] };
+});
+
+// The page mounts two charts (counts + latency); record every config so a test can
+// pick the one it wants by series name.
 vi.mock('apexcharts', () => {
 	return {
 		default: class {
-			render() {}
-			updateOptions() {}
+			constructor(_el: unknown, config: any) {
+				chartMock.configs.push(config);
+			}
+
+			render() {
+				return Promise.resolve();
+			}
+
+			updateOptions(config: any) {
+				chartMock.configs.push(config);
+
+				return Promise.resolve();
+			}
+
+			hideSeries(name: string) {
+				chartMock.hidden.push(name);
+			}
+
 			destroy() {}
 		},
 	};
 });
+
+function chartConfigWithSeries(firstName: string) {
+	return chartMock.configs.find((config) => {
+		return config?.series?.[0]?.name === firstName;
+	});
+}
 
 vi.mock('@/utils/get-root-path', () => {
 	return { getRootPath: () => '/admin/' };
@@ -29,6 +59,7 @@ vi.mock('@/utils/notify', () => {
 });
 
 import api from '@/api';
+import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import CachePage from './cache.vue';
 
 const ENTRIES = [
@@ -183,6 +214,8 @@ describe('CachePage', () => {
 		// The page reads the settings + user stores at setup (TTL field, per-user flush
 		// selection), so an active Pinia must exist before mount.
 		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
+		chartMock.configs = [];
+		chartMock.hidden = [];
 
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
@@ -864,5 +897,197 @@ describe('CachePage', () => {
 		await flushPromises();
 
 		expect(wrapper.text()).toContain('evict failed');
+	});
+
+	it('restores the persisted per-user window on mount', async () => {
+		localStorage.clear();
+		// The window is a plain string, so vueuse stores it raw (no JSON quotes).
+		localStorage.setItem('cache-window-anon', '6h');
+		mockCacheGet(ENTRIES);
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache', {
+			params: { window: '6h' },
+		});
+	});
+
+	it('persists a window change to per-user localStorage', async () => {
+		localStorage.clear();
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// Seeds the default on first mount, then follows the selection.
+		expect(localStorage.getItem('cache-window-anon')).toBe('24h');
+
+		wrapper.findComponent('.window-select').vm.$emit('update:modelValue', '7d');
+		await flushPromises();
+
+		expect(localStorage.getItem('cache-window-anon')).toBe('7d');
+	});
+
+	it('restores and persists the per-user refresh interval', async () => {
+		localStorage.clear();
+		// The interval is number|null, so vueuse uses the JSON serializer.
+		localStorage.setItem('cache-refresh-anon', '30');
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const autoRefresh = wrapper.findComponent(AutoRefresh);
+		// A real number, not the raw string a null-default serializer would yield.
+		expect(autoRefresh.props('modelValue')).toBe(30);
+
+		autoRefresh.vm.$emit('update:modelValue', 5);
+		await flushPromises();
+
+		expect(localStorage.getItem('cache-refresh-anon')).toBe('5');
+	});
+
+	it('builds a compact tooltip + human TTL axis from the chart config', async () => {
+		mockCacheGet(ENTRIES, {
+			// A non-zero bucket so hasTimeseries is true and the chart is built.
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					fills: 1,
+					anomalies: 0,
+					ttlMs: 3600000,
+				}],
+				markers: [],
+			},
+		});
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Hits');
+		expect(config).toBeTruthy();
+
+		// Tooltip: one tight "name: value" row per metric, TTL humanised.
+		const html = config.tooltip.custom({
+			series: [[5], [2], [1], [0], [3600]],
+			dataPointIndex: 0,
+			w: { globals: { seriesX: [[1000]] } },
+		});
+
+		expect(html).toContain('Hits: 5');
+		expect(html).toContain('Misses: 2');
+		expect(html).toContain('Fills: 1');
+		expect(html).toContain('TTL: 1h');
+		expect(html).toContain('cache-tt-row');
+
+		// Count axis stays integer; TTL axis reads as a duration.
+		expect(config.yaxis[0].labels.formatter(5.4)).toBe('5');
+		expect(config.yaxis[1].labels.formatter(3600)).toBe('1h');
+	});
+
+	it('builds the latency chart with p50/p95 series + ms axis', async () => {
+		mockCacheGet(ENTRIES, {
+			// A bucket with latency samples so hasLatency is true and the chart builds.
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					anomalies: 0,
+					ttlMs: null,
+					hitP50: 2,
+					hitP95: 5,
+					fillP50: 20,
+					fillP95: 60,
+					anomalyP50: 80,
+					anomalyP95: 200,
+					missP50: 40,
+					missP95: 120,
+					bothP50: 3,
+					bothP95: 100,
+				}],
+				markers: [],
+			},
+		});
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Hits p50');
+		expect(config).toBeTruthy();
+
+		// Ten series: 5 categories × p50/p95, p95 dashed and hidden by default.
+		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
+			'Hits p50',
+			'Hits p95',
+			'Fills p50',
+			'Fills p95',
+			'Anomalies p50',
+			'Anomalies p95',
+			'Misses p50',
+			'Misses p95',
+			'Both p50',
+			'Both p95',
+		]);
+
+		expect(config.stroke.dashArray).toEqual([0, 4, 0, 4, 0, 4, 0, 4, 0, 4]);
+
+		// ms axis + a compact ms tooltip.
+		expect(config.yaxis.labels.formatter(40.6)).toBe('41ms');
+
+		const html = config.tooltip.custom({
+			series: [[2], [5], [20], [60], [80], [200], [40], [120], [3], [100]],
+			dataPointIndex: 0,
+			w: { globals: { seriesX: [[1000]] } },
+		});
+
+		expect(html).toContain('Hits p50: 2ms');
+		expect(html).toContain('Fills p50: 20ms');
+		expect(html).toContain('Anomalies p95: 200ms');
+		expect(html).toContain('Misses p95: 120ms');
+
+		// The p95 bands are hidden on first render; the p50 medians stay visible.
+		expect(chartMock.hidden).toContain('Hits p95');
+		expect(chartMock.hidden).toContain('Misses p95');
+		expect(chartMock.hidden).not.toContain('Hits p50');
+	});
+
+	it('persists a counts legend toggle to per-user localStorage', async () => {
+		localStorage.clear();
+
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					fills: 1,
+					anomalies: 0,
+					ttlMs: null,
+				}],
+				markers: [],
+			},
+		});
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Hits');
+
+		// Index 1 = Misses; toggling records then clears it via localStorage.
+		config.chart.events.legendClick(null, 1);
+		await flushPromises();
+
+		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
+			.toContain('Misses');
+
+		config.chart.events.legendClick(null, 1);
+		await flushPromises();
+
+		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
+			.not.toContain('Misses');
 	});
 });

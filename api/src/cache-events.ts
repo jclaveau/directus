@@ -10,6 +10,13 @@ import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
+// The timeseries wire types live in @directus/types so the app chart shares them.
+export type {
+	CacheConfigEvent,
+	CacheTimeseries,
+	CacheTimeseriesBucket,
+} from '@directus/types';
+
 /**
  * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
  * hit/miss never touches the DB on the hot path:
@@ -22,9 +29,12 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
  *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
  *
- * Four stream kinds: `h` hit + `m` miss (cache.ts), `d` descriptor (respond.ts on a
- * fill, or report-cache-anomaly.ts as an unfilled locator), `a` anomaly. The drainer
- * demuxes them into the three tables. Capture is gated by a runtime flag refreshed
+ * Seven stream kinds. Latency facts in `directus_cache_events` (numeric `kind`, all
+ * carrying duration_ms): `h` hit (0), `f` fill (2) a cached miss's compute, `x`
+ * anomaly-miss (3) a flagged-uncacheable miss, `o` other-miss (4) a silently-skipped
+ * miss — the "Misses" curve pools 2/3/4. `m` miss (1, cache.ts) is the count only.
+ * `d` descriptor + `a` anomaly demux to the other tables. Capture is gated by a
+ * runtime flag refreshed
  * from Redis, killable live by an admin or the size/buffer watchdog.
  */
 
@@ -112,27 +122,6 @@ export interface CacheEntryRecord {
 	lastHitAt: number | null;
 }
 
-export interface CacheTimeseriesBucket {
-	t: number; // bucket-start epoch ms
-	hits: number;
-	misses: number;
-	anomalies: number;
-	ttlMs: number | null; // effective TTL in force during the bucket
-}
-
-export interface CacheConfigEvent {
-	time: number;
-	kind: 'ttl_change' | 'flush';
-	detail: string | null;
-}
-
-export interface CacheTimeseries {
-	buckets: CacheTimeseriesBucket[];
-	markers: CacheConfigEvent[];
-	// The TTL in force (override, else env default) — for the page's TTL input.
-	effectiveTtl: string | null;
-}
-
 export interface CacheStatsState {
 	configured: boolean;
 	enabled: boolean;
@@ -144,6 +133,16 @@ export interface CacheStatsState {
 }
 
 const STREAM_HARD_CAP = 1_000_000;
+
+// Stream kind → the fact table's integer `kind`: 0 hit, 1 miss, 2 fill (the compute
+// latency of a filled miss). Descriptors ('d') / anomalies ('a') demux elsewhere.
+const EVENT_KIND_CODE: Record<string, number> = { h: 0, m: 1, f: 2, x: 3, o: 4 };
+
+const MISS_LATENCY_KIND: Record<'fill' | 'anomaly' | 'other', string> = {
+	fill: 'f',
+	anomaly: 'x',
+	other: 'o',
+};
 
 // One shared consumer group across all nodes: XREADGROUP '>' hands each entry to
 // a single consumer, so overlapping drains on other nodes take disjoint slices —
@@ -352,6 +351,27 @@ export async function queueCacheHit(hit: CacheHit): Promise<void> {
 		durationMs: hit.durationMs === null
 			? ''
 			: String(hit.durationMs),
+		ts: String(Date.now()),
+	});
+}
+
+// The compute latency of one miss, tagged by disposition so the latency chart can
+// slice the umbrella "Misses" curve: `fill` cached (kind f/2), `anomaly` flagged
+// uncacheable (x/3), `other` silently skipped (o/4). duration_ms carries the time;
+// none use kind `m`, so the miss count stays untouched.
+export function queueMissLatency(
+	durationMs: number,
+	disposition: 'fill' | 'anomaly' | 'other',
+	cacheKey = '',
+): void {
+	if (!cacheStatsActiveFlag) {
+		return;
+	}
+
+	xadd({
+		kind: MISS_LATENCY_KIND[disposition],
+		cacheKey,
+		durationMs: String(durationMs),
 		ts: String(Date.now()),
 	});
 }
@@ -743,9 +763,7 @@ async function persistStreamBatch(
 		events.push({
 			time: at,
 			cache_key: f['cacheKey']!,
-			kind: f['kind'] === 'h'
-				? 0
-				: 1,
+			kind: EVENT_KIND_CODE[f['kind']!] ?? 1,
 			age_ms: num(f['ageMs']),
 			gap_ms: num(f['gapMs']),
 			ttl_ms: num(f['ttlMs']),
@@ -1097,13 +1115,23 @@ export async function readCacheTimeseries(
 	const db = getDatabase();
 	const windowLen = clampCacheStatsWindow(windowMs);
 	const now = Date.now();
-	const sinceMs = now - windowLen;
-	const since = new Date(sinceMs);
 
 	const bucketCount = Math.min(
 		Math.max(Math.trunc(buckets), 1),
 		CACHE_TIMESERIES_MAX_BUCKETS,
 	);
+
+	const bucketSec = Math.max(1, Math.ceil(windowLen / bucketCount / 1000));
+	const bucketMs = bucketSec * 1000;
+
+	// Anchor the grid to a fixed bucketSec boundary so a fast (1s) refresh doesn't
+	// re-quantize every bucket — otherwise the whole curve crawls on each tick. Only
+	// the newest bucket fills as `now` advances; the grid steps by one whole bucket
+	// when `now` crosses a boundary. The last slot is the bucket CONTAINING now, so
+	// the most recent traffic is never dropped off the edge.
+	const anchorMs = Math.floor(now / bucketMs) * bucketMs;
+	const sinceMs = anchorMs - (bucketCount - 1) * bucketMs;
+	const since = new Date(sinceMs);
 
 	const markerRows = await db('directus_cache_config_events')
 		.where('time', '>', since)
@@ -1126,12 +1154,10 @@ export async function readCacheTimeseries(
 		? effective
 		: null;
 
-	// Bucket by whole seconds ELAPSED since `since` (an interval difference), so the
-	// index is 0-based (0 = oldest, bucketCount-1 = newest) and immune to the column's
-	// storage timezone. An absolute `floor(epoch/bucketSec)` grid instead pushed the
-	// `now` edge one slot past the array, silently dropping the most recent traffic.
-	const bucketSec = Math.max(1, Math.ceil(windowLen / bucketCount / 1000));
-
+	// Bucket by whole seconds ELAPSED since the anchored `since` (an interval
+	// difference): index is 0-based (0 = oldest, bucketCount-1 = the bucket holding
+	// now) and immune to the column's storage timezone. `since` itself is bucket-
+	// aligned above so the grid is stable across refreshes.
 	const dense: CacheTimeseriesBucket[] = Array.from(
 		{ length: bucketCount },
 		(_unused, index) => {
@@ -1139,8 +1165,19 @@ export async function readCacheTimeseries(
 				t: sinceMs + index * bucketSec * 1000,
 				hits: 0,
 				misses: 0,
+				fills: 0,
 				anomalies: 0,
 				ttlMs: null,
+				hitP50: null,
+				hitP95: null,
+				fillP50: null,
+				fillP95: null,
+				anomalyP50: null,
+				anomalyP95: null,
+				missP50: null,
+				missP95: null,
+				bothP50: null,
+				bothP95: null,
 			};
 		},
 	);
@@ -1158,7 +1195,38 @@ export async function readCacheTimeseries(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
 			db.raw('SUM(CASE WHEN kind = 0 THEN 1 ELSE 0 END) AS hits'),
 			db.raw('SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END) AS misses'),
+			db.raw('SUM(CASE WHEN kind = 2 THEN 1 ELSE 0 END) AS fills'),
 			db.raw('MAX(ttl_ms) AS ttl_ms'),
+		);
+
+	// Response-latency percentiles per bucket over duration_ms. Kind 0 = hit serve;
+	// 2/3/4 = miss compute (fill / anomaly / other); the unfiltered aggregate pools
+	// hits + all misses (both). Those kinds only, so the miss count (1) is skipped.
+	const pct = (p: number, filter?: string) => {
+		const base = `percentile_cont(${p}) WITHIN GROUP (ORDER BY duration_ms)`;
+
+		return filter
+			? `${base} FILTER (WHERE ${filter})`
+			: base;
+	};
+
+	const latencyRows = await db('directus_cache_events')
+		.where('time', '>', since)
+		.whereIn('kind', [0, 2, 3, 4])
+		.whereNotNull('duration_ms')
+		.groupByRaw('1')
+		.select(
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
+			db.raw(`${pct(0.5, 'kind = 0')} AS hit_p50`),
+			db.raw(`${pct(0.95, 'kind = 0')} AS hit_p95`),
+			db.raw(`${pct(0.5, 'kind = 2')} AS fill_p50`),
+			db.raw(`${pct(0.95, 'kind = 2')} AS fill_p95`),
+			db.raw(`${pct(0.5, 'kind = 3')} AS anomaly_p50`),
+			db.raw(`${pct(0.95, 'kind = 3')} AS anomaly_p95`),
+			db.raw(`${pct(0.5, 'kind IN (2, 3, 4)')} AS miss_p50`),
+			db.raw(`${pct(0.95, 'kind IN (2, 3, 4)')} AS miss_p95`),
+			db.raw(`${pct(0.5)} AS both_p50`),
+			db.raw(`${pct(0.95)} AS both_p95`),
 		);
 
 	const anomalyRows = await db('directus_cache_anomalies')
@@ -1169,8 +1237,9 @@ export async function readCacheTimeseries(
 			db.raw('COUNT(*) AS count'),
 		);
 
-	// `now` lands one bucket past the last slot — fold it into the last real bucket.
-	// `+=` below because the fold can collapse two DB buckets into one slot.
+	// Defensive clamp: a row at/after the next boundary (clock skew) would exceed the
+	// last slot; fold it into the last bucket rather than drop it. `+=` in the count
+	// loop because the fold can still collapse two DB buckets into one.
 	function slotOf(bucket: unknown): number {
 		return Math.min(Math.max(Number(bucket), 0), bucketCount - 1);
 	}
@@ -1179,6 +1248,7 @@ export async function readCacheTimeseries(
 		const index = slotOf(row['bucket']);
 		dense[index]!.hits += Number(row['hits'] ?? 0);
 		dense[index]!.misses += Number(row['misses'] ?? 0);
+		dense[index]!.fills += Number(row['fills'] ?? 0);
 
 		if (row['ttl_ms'] != null) {
 			dense[index]!.ttlMs = Number(row['ttl_ms']);
@@ -1187,6 +1257,28 @@ export async function readCacheTimeseries(
 
 	for (const row of anomalyRows as Record<string, unknown>[]) {
 		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
+	}
+
+	// A distinct grid (only kinds 0/2), so a latency bucket can't collide with a
+	// count bucket — assign, don't accumulate. Null percentiles (no sample) stay null.
+	function pctVal(value: unknown): number | null {
+		return value == null
+			? null
+			: Number(value);
+	}
+
+	for (const row of latencyRows as Record<string, unknown>[]) {
+		const slot = dense[slotOf(row['bucket'])]!;
+		slot.hitP50 = pctVal(row['hit_p50']);
+		slot.hitP95 = pctVal(row['hit_p95']);
+		slot.fillP50 = pctVal(row['fill_p50']);
+		slot.fillP95 = pctVal(row['fill_p95']);
+		slot.anomalyP50 = pctVal(row['anomaly_p50']);
+		slot.anomalyP95 = pctVal(row['anomaly_p95']);
+		slot.missP50 = pctVal(row['miss_p50']);
+		slot.missP95 = pctVal(row['miss_p95']);
+		slot.bothP50 = pctVal(row['both_p50']);
+		slot.bothP95 = pctVal(row['both_p95']);
 	}
 
 	return { buckets: dense, markers, effectiveTtl };
