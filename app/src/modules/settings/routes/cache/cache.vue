@@ -784,6 +784,75 @@ function renderChart() {
 	void chart.render();
 }
 
+type LatencyLine = {
+	name: string;
+	color: string;
+	dash: number;
+	pick: (b: CacheTimeseriesBucket) => number | null;
+};
+
+// Colour by category: hit serve, the miss slices (fill = cached, anomaly = flagged,
+// miss = all misses pooled), both = hits + misses. p50 solid (dash 0), p95 dashed
+// (dash 4); the p95 bands start hidden — see renderLatencyChart.
+function latencyLines(): LatencyLine[] {
+	const hitColor = themeVar('--theme--success', '#2ecda7');
+	const fillColor = themeVar('--theme--primary', '#6644ff');
+	const anomalyColor = themeVar('--theme--danger', '#e35169');
+	const missColor = themeVar('--theme--warning', '#ffa439');
+	const bothColor = themeVar('--theme--foreground-subdued', '#a2b5cd');
+
+	const categories: {
+		id: string;
+		label: string;
+		color: string;
+		p50: (b: CacheTimeseriesBucket) => number | null;
+		p95: (b: CacheTimeseriesBucket) => number | null;
+	}[] = [
+		{
+			id: 'hit',
+			label: t('cache_lat_hit', 'Hits'),
+			color: hitColor,
+			p50: (b) => b.hitP50,
+			p95: (b) => b.hitP95,
+		},
+		{
+			id: 'fill',
+			label: t('cache_lat_fill', 'Fills'),
+			color: fillColor,
+			p50: (b) => b.fillP50,
+			p95: (b) => b.fillP95,
+		},
+		{
+			id: 'anomaly',
+			label: t('cache_lat_anomaly', 'Anomalies'),
+			color: anomalyColor,
+			p50: (b) => b.anomalyP50,
+			p95: (b) => b.anomalyP95,
+		},
+		{
+			id: 'miss',
+			label: t('cache_lat_miss', 'Misses'),
+			color: missColor,
+			p50: (b) => b.missP50,
+			p95: (b) => b.missP95,
+		},
+		{
+			id: 'both',
+			label: t('cache_lat_both', 'Both'),
+			color: bothColor,
+			p50: (b) => b.bothP50,
+			p95: (b) => b.bothP95,
+		},
+	];
+
+	return categories.flatMap((c): LatencyLine[] => {
+		return [
+			{ name: `${c.label} p50`, color: c.color, dash: 0, pick: c.p50 },
+			{ name: `${c.label} p95`, color: c.color, dash: 4, pick: c.p95 },
+		];
+	});
+}
+
 function latencyChartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
@@ -791,55 +860,7 @@ function latencyChartConfig(): ApexOptions {
 		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
 	}
 
-	const hitColor = themeVar('--theme--success', '#2ecda7');
-	const missColor = themeVar('--theme--warning', '#ffa439');
-	const bothColor = themeVar('--theme--primary', '#6644ff');
-
-	// Colour by category (hit serve / miss compute / both pooled); p50 solid, p95
-	// dashed. `dash` feeds stroke.dashArray positionally, like the count curve.
-	const lines: {
-		name: string;
-		color: string;
-		dash: number;
-		pick: (b: CacheTimeseriesBucket) => number | null;
-	}[] = [
-		{
-			name: t('cache_lat_hit_p50', 'Hits p50'),
-			color: hitColor,
-			dash: 0,
-			pick: (b) => b.hitP50,
-		},
-		{
-			name: t('cache_lat_hit_p95', 'Hits p95'),
-			color: hitColor,
-			dash: 4,
-			pick: (b) => b.hitP95,
-		},
-		{
-			name: t('cache_lat_miss_p50', 'Misses p50'),
-			color: missColor,
-			dash: 0,
-			pick: (b) => b.missP50,
-		},
-		{
-			name: t('cache_lat_miss_p95', 'Misses p95'),
-			color: missColor,
-			dash: 4,
-			pick: (b) => b.missP95,
-		},
-		{
-			name: t('cache_lat_both_p50', 'Both p50'),
-			color: bothColor,
-			dash: 0,
-			pick: (b) => b.bothP50,
-		},
-		{
-			name: t('cache_lat_both_p95', 'Both p95'),
-			color: bothColor,
-			dash: 4,
-			pick: (b) => b.bothP95,
-		},
-	];
+	const lines = latencyLines();
 
 	return {
 		chart: {
@@ -922,7 +943,16 @@ function renderLatencyChart() {
 	}
 
 	latencyChart = new ApexCharts(latencyChartEl.value, latencyChartConfig());
-	void latencyChart.render();
+
+	void latencyChart.render().then(() => {
+		// p95 bands start hidden — the p50 medians are the default read. Apex keeps
+		// the toggle across each refresh's updateOptions, so hide on first paint.
+		for (const line of latencyLines()) {
+			if (line.dash !== 0) {
+				latencyChart?.hideSeries(line.name);
+			}
+		}
+	});
 }
 
 watch(

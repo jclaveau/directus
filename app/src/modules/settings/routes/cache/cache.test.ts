@@ -13,7 +13,7 @@ vi.mock('@/api', () => {
 // Capture the options the component hands ApexCharts so a test can drive its
 // callbacks (tooltip renderer, axis formatters) without a real SVG chart.
 const chartMock = vi.hoisted(() => {
-	return { configs: [] as any[] };
+	return { configs: [] as any[], hidden: [] as string[] };
 });
 
 // The page mounts two charts (counts + latency); record every config so a test can
@@ -25,9 +25,16 @@ vi.mock('apexcharts', () => {
 				chartMock.configs.push(config);
 			}
 
-			render() {}
+			render() {
+				return Promise.resolve();
+			}
+
 			updateOptions(config: any) {
 				chartMock.configs.push(config);
+			}
+
+			hideSeries(name: string) {
+				chartMock.hidden.push(name);
 			}
 
 			destroy() {}
@@ -206,6 +213,7 @@ describe('CachePage', () => {
 		// selection), so an active Pinia must exist before mount.
 		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
 		chartMock.configs = [];
+		chartMock.hidden = [];
 
 		vi.mocked(api.get).mockReset();
 		vi.mocked(api.delete).mockReset();
@@ -982,6 +990,10 @@ describe('CachePage', () => {
 					ttlMs: null,
 					hitP50: 2,
 					hitP95: 5,
+					fillP50: 20,
+					fillP95: 60,
+					anomalyP50: 80,
+					anomalyP95: 200,
 					missP50: 40,
 					missP95: 120,
 					bothP50: 3,
@@ -997,28 +1009,39 @@ describe('CachePage', () => {
 		const config = chartConfigWithSeries('Hits p50');
 		expect(config).toBeTruthy();
 
-		// Six series: 3 categories × p50/p95, p95 dashed.
+		// Ten series: 5 categories × p50/p95, p95 dashed and hidden by default.
 		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
 			'Hits p50',
 			'Hits p95',
+			'Fills p50',
+			'Fills p95',
+			'Anomalies p50',
+			'Anomalies p95',
 			'Misses p50',
 			'Misses p95',
 			'Both p50',
 			'Both p95',
 		]);
 
-		expect(config.stroke.dashArray).toEqual([0, 4, 0, 4, 0, 4]);
+		expect(config.stroke.dashArray).toEqual([0, 4, 0, 4, 0, 4, 0, 4, 0, 4]);
 
 		// ms axis + a compact ms tooltip.
 		expect(config.yaxis.labels.formatter(40.6)).toBe('41ms');
 
 		const html = config.tooltip.custom({
-			series: [[2], [5], [40], [120], [3], [100]],
+			series: [[2], [5], [20], [60], [80], [200], [40], [120], [3], [100]],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
 
 		expect(html).toContain('Hits p50: 2ms');
+		expect(html).toContain('Fills p50: 20ms');
+		expect(html).toContain('Anomalies p95: 200ms');
 		expect(html).toContain('Misses p95: 120ms');
+
+		// The p95 bands are hidden on first render; the p50 medians stay visible.
+		expect(chartMock.hidden).toContain('Hits p95');
+		expect(chartMock.hidden).toContain('Misses p95');
+		expect(chartMock.hidden).not.toContain('Hits p50');
 	});
 });

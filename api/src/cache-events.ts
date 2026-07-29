@@ -29,10 +29,12 @@ export type {
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
  *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
  *
- * Five stream kinds: `h` hit, `m` miss (cache.ts), `f` fill (respond.ts, the compute
- * time of a filled miss → events kind 2), `d` descriptor (respond.ts on a
- * fill, or report-cache-anomaly.ts as an unfilled locator), `a` anomaly. The drainer
- * demuxes them into the three tables. Capture is gated by a runtime flag refreshed
+ * Seven stream kinds. Latency facts in `directus_cache_events` (numeric `kind`, all
+ * carrying duration_ms): `h` hit (0), `f` fill (2) a cached miss's compute, `x`
+ * anomaly-miss (3) a flagged-uncacheable miss, `o` other-miss (4) a silently-skipped
+ * miss — the "Misses" curve pools 2/3/4. `m` miss (1, cache.ts) is the count only.
+ * `d` descriptor + `a` anomaly demux to the other tables. Capture is gated by a
+ * runtime flag refreshed
  * from Redis, killable live by an admin or the size/buffer watchdog.
  */
 
@@ -134,7 +136,13 @@ const STREAM_HARD_CAP = 1_000_000;
 
 // Stream kind → the fact table's integer `kind`: 0 hit, 1 miss, 2 fill (the compute
 // latency of a filled miss). Descriptors ('d') / anomalies ('a') demux elsewhere.
-const EVENT_KIND_CODE: Record<string, number> = { h: 0, m: 1, f: 2 };
+const EVENT_KIND_CODE: Record<string, number> = { h: 0, m: 1, f: 2, x: 3, o: 4 };
+
+const MISS_LATENCY_KIND: Record<'fill' | 'anomaly' | 'other', string> = {
+	fill: 'f',
+	anomaly: 'x',
+	other: 'o',
+};
 
 // One shared consumer group across all nodes: XREADGROUP '>' hands each entry to
 // a single consumer, so overlapping drains on other nodes take disjoint slices —
@@ -347,16 +355,21 @@ export async function queueCacheHit(hit: CacheHit): Promise<void> {
 	});
 }
 
-// The compute latency of a cache fill (a miss that produced + cached a response),
-// as its own event kind ('f') so it never inflates the miss count. duration_ms
-// carries the fill time; the latency chart reads it beside the hit serve latency.
-export function queueCacheFillLatency(cacheKey: string, durationMs: number): void {
+// The compute latency of one miss, tagged by disposition so the latency chart can
+// slice the umbrella "Misses" curve: `fill` cached (kind f/2), `anomaly` flagged
+// uncacheable (x/3), `other` silently skipped (o/4). duration_ms carries the time;
+// none use kind `m`, so the miss count stays untouched.
+export function queueMissLatency(
+	durationMs: number,
+	disposition: 'fill' | 'anomaly' | 'other',
+	cacheKey = '',
+): void {
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
 	xadd({
-		kind: 'f',
+		kind: MISS_LATENCY_KIND[disposition],
 		cacheKey,
 		durationMs: String(durationMs),
 		ts: String(Date.now()),
@@ -1156,6 +1169,10 @@ export async function readCacheTimeseries(
 				ttlMs: null,
 				hitP50: null,
 				hitP95: null,
+				fillP50: null,
+				fillP95: null,
+				anomalyP50: null,
+				anomalyP95: null,
 				missP50: null,
 				missP95: null,
 				bothP50: null,
@@ -1180,9 +1197,9 @@ export async function readCacheTimeseries(
 			db.raw('MAX(ttl_ms) AS ttl_ms'),
 		);
 
-	// Response-latency percentiles per bucket over duration_ms: kind 0 = hit serve,
-	// kind 2 = miss compute (fill); the unfiltered aggregate pools both. Scoped to
-	// kinds 0/2 so the miss-count kind (1) is ignored here.
+	// Response-latency percentiles per bucket over duration_ms. Kind 0 = hit serve;
+	// 2/3/4 = miss compute (fill / anomaly / other); the unfiltered aggregate pools
+	// hits + all misses (both). Those kinds only, so the miss count (1) is skipped.
 	const pct = (p: number, filter?: string) => {
 		const base = `percentile_cont(${p}) WITHIN GROUP (ORDER BY duration_ms)`;
 
@@ -1193,15 +1210,19 @@ export async function readCacheTimeseries(
 
 	const latencyRows = await db('directus_cache_events')
 		.where('time', '>', since)
-		.whereIn('kind', [0, 2])
+		.whereIn('kind', [0, 2, 3, 4])
 		.whereNotNull('duration_ms')
 		.groupByRaw('1')
 		.select(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
 			db.raw(`${pct(0.5, 'kind = 0')} AS hit_p50`),
 			db.raw(`${pct(0.95, 'kind = 0')} AS hit_p95`),
-			db.raw(`${pct(0.5, 'kind = 2')} AS miss_p50`),
-			db.raw(`${pct(0.95, 'kind = 2')} AS miss_p95`),
+			db.raw(`${pct(0.5, 'kind = 2')} AS fill_p50`),
+			db.raw(`${pct(0.95, 'kind = 2')} AS fill_p95`),
+			db.raw(`${pct(0.5, 'kind = 3')} AS anomaly_p50`),
+			db.raw(`${pct(0.95, 'kind = 3')} AS anomaly_p95`),
+			db.raw(`${pct(0.5, 'kind IN (2, 3, 4)')} AS miss_p50`),
+			db.raw(`${pct(0.95, 'kind IN (2, 3, 4)')} AS miss_p95`),
 			db.raw(`${pct(0.5)} AS both_p50`),
 			db.raw(`${pct(0.95)} AS both_p95`),
 		);
@@ -1247,6 +1268,10 @@ export async function readCacheTimeseries(
 		const slot = dense[slotOf(row['bucket'])]!;
 		slot.hitP50 = pctVal(row['hit_p50']);
 		slot.hitP95 = pctVal(row['hit_p95']);
+		slot.fillP50 = pctVal(row['fill_p50']);
+		slot.fillP95 = pctVal(row['fill_p95']);
+		slot.anomalyP50 = pctVal(row['anomaly_p50']);
+		slot.anomalyP95 = pctVal(row['anomaly_p95']);
 		slot.missP50 = pctVal(row['miss_p50']);
 		slot.missP95 = pctVal(row['miss_p95']);
 		slot.bothP50 = pctVal(row['both_p50']);
