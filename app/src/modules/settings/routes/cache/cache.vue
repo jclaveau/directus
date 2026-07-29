@@ -598,7 +598,13 @@ function applyHiddenSeries(instance: ApexCharts | null, hidden: string[]) {
 	}
 
 	for (const name of hidden) {
-		instance.hideSeries(name);
+		try {
+			instance.hideSeries(name);
+		}
+		catch {
+			// A series with no samples in the window isn't rendered; apex's
+			// hideSeries then derefs a null node. Nothing to hide — skip it.
+		}
 	}
 }
 
