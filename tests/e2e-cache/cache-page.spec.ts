@@ -62,7 +62,7 @@ test('the latency chart names the full disposition breakdown', async ({ page }) 
 		'Fills p50',
 		'Anomalies p50',
 		'Misses p50',
-		'Both p50',
+		'Response p50',
 	];
 
 	for (const label of slices) {
@@ -80,10 +80,11 @@ test('p95 hidden by default; a toggle survives reload', async ({ page }) => {
 
 	const latency = () => page.locator('.apexcharts-canvas').nth(1);
 
-	const inactive = (text: string) =>
-		latency()
+	const inactive = (text: string) => {
+		return latency()
 			.locator('.apexcharts-legend-series.apexcharts-inactive-legend')
 			.filter({ hasText: text });
+	};
 
 	// p95 start hidden (persisted default) — their legend item is greyed inactive.
 	await expect(inactive('Misses p95')).toHaveCount(1);
