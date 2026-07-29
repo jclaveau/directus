@@ -13,6 +13,13 @@ import { getEndpoint } from '@directus/utils';
 export function shouldSkipCache(req: Request): boolean {
 	const env = useEnv();
 
+	// The cache-monitoring endpoints (/utils/cache*) are dynamic admin telemetry —
+	// never cacheable, and letting them through the cache path logs a self-inflicted
+	// miss on every auto-refresh poll (the page watching itself). Skip them outright.
+	if (url.parse(req.originalUrl ?? '').pathname?.startsWith('/utils/cache')) {
+		return true;
+	}
+
 	// Always skip cache for requests coming from the data studio based on Referer header
 	const referer = req.get('Referer');
 

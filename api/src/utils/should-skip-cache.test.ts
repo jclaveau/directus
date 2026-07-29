@@ -95,6 +95,32 @@ test.each([
 	},
 );
 
+test.each([
+	'/utils/cache',
+	'/utils/cache/timeseries?window=1h',
+	'/utils/cache/anomalies',
+])('should skip cache for the self-monitoring endpoint %s', (originalUrl) => {
+	vi.mocked(useEnv).mockReturnValue({ PUBLIC_URL: '/', CACHE_SKIP_ALLOWED: false });
+
+	const req = {
+		get: vi.fn(() => undefined),
+		originalUrl,
+	} as unknown as Request;
+
+	expect(shouldSkipCache(req)).toBe(true);
+});
+
+test('should not skip cache for a normal /items request', () => {
+	vi.mocked(useEnv).mockReturnValue({ PUBLIC_URL: '/', CACHE_SKIP_ALLOWED: false });
+
+	const req = {
+		get: vi.fn(() => undefined),
+		originalUrl: '/items/articles',
+	} as unknown as Request;
+
+	expect(shouldSkipCache(req)).toBe(false);
+});
+
 test('should not skip cache for requests coming outside of data studio', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		PUBLIC_URL: 'http://admin.example.com',

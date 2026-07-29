@@ -7,6 +7,7 @@ import { resolvedCacheTtl } from '../cache-config.js';
 import {
 	cacheStatsActive,
 	queueCacheDescriptor,
+	queueMissLatency,
 	writeCacheTombstone,
 } from '../cache-events.js';
 import getDatabase from '../database/index.js';
@@ -128,6 +129,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
 
+	let filled = false;
+
 	if (
 		cacheableRequest &&
 		cache &&
@@ -144,6 +147,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			req.accountability,
 		))
 	) {
+		filled = true;
+
 		const { key, hash } = await getCacheKey(req);
 
 		try {
@@ -220,6 +225,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							(tag) => tag.collection === req.collection && tag.field === undefined,
 						);
 
+					// Compute cost of this miss: request entry (cache mw) → response ready.
+					const fillMs = Math.max(
+						now - Number(res.locals['requestStart'] ?? now),
+						0,
+					);
+
 					// The per-key descriptor — captured here (fill) where query/collection/
 					// user are fully populated, unlike the early cache middleware. Buffered
 					// like the events; the flusher upserts the descriptors dimension.
@@ -239,9 +250,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							? ''
 							: req.originalUrl,
 						bytes: size,
-						// Compute cost of this miss: request entry (cache mw) → response ready.
-						fillMs: Math.max(now - Number(res.locals['requestStart'] ?? now), 0),
+						fillMs,
 					}).catch(() => {});
+
+					// The same fill latency as a timestamped event (kind 'f') so the
+					// median-latency chart can plot miss compute time over the window;
+					// the descriptor above keeps only the latest per key.
+					queueMissLatency(fillMs, 'fill', hash);
 				}
 				catch (descriptorErr: any) {
 					logger.warn(descriptorErr, '[cache-stats] descriptor capture failed');
@@ -297,6 +312,27 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 			void reportCacheAnomaly(req, 'unautopurgeable_scope', detail).catch(() => {});
 		}
+	}
+
+	// Every cacheable-by-method request reaching here was a miss (hits are served
+	// in the cache middleware). Emit its compute latency so the "Misses" curve
+	// pools all misses: the fill above covered the cached ones; this covers the
+	// uncacheable rest, split anomaly (flagged just above) vs silently skipped.
+	if (cacheStatsActive() && cacheableRequest && !filled) {
+		const missMs = Math.max(
+			Date.now() - Number(res.locals['requestStart'] ?? Date.now()),
+			0,
+		);
+
+		const anomalous =
+			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope;
+
+		queueMissLatency(
+			missMs,
+			anomalous
+				? 'anomaly'
+				: 'other',
+		);
 	}
 
 	if (req.sanitizedQuery.export) {
