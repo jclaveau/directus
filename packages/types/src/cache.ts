@@ -15,6 +15,7 @@ export interface CacheTimeseriesBucket {
 	t: number; // bucket-start epoch ms
 	hits: number;
 	misses: number;
+	fills: number;
 	anomalies: number;
 	ttlMs: number | null;
 	hitP50: number | null;

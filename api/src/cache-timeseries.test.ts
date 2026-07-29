@@ -91,9 +91,9 @@ describe('readCacheTimeseries', () => {
 		// folds into the last slot, accumulating onto whatever's already there.
 		rowsByTable = {
 			directus_cache_events: [
-				{ bucket: 0, hits: 5, misses: 1, ttl_ms: 30000 },
-				{ bucket: 2, hits: 9, misses: 4, ttl_ms: 60000 },
-				{ bucket: 3, hits: 1, misses: 2, ttl_ms: null },
+				{ bucket: 0, hits: 5, misses: 1, fills: 3, ttl_ms: 30000 },
+				{ bucket: 2, hits: 9, misses: 4, fills: 2, ttl_ms: 60000 },
+				{ bucket: 3, hits: 1, misses: 2, fills: 1, ttl_ms: null },
 			],
 			directus_cache_anomalies: [
 				{ bucket: 2, count: 2 },
@@ -110,15 +110,15 @@ describe('readCacheTimeseries', () => {
 		// bucket 0 → slot 0; gap at slot 1; bucket 2 → slot 2; the out-of-range bucket
 		// 3 folds into the last slot too (5+1 hits, 4+2 misses).
 		expect(result.buckets[0]).toMatchObject({
-			hits: 5, misses: 1, anomalies: 0, ttlMs: 30000,
+			hits: 5, misses: 1, fills: 3, anomalies: 0, ttlMs: 30000,
 		});
 
 		expect(result.buckets[1]).toMatchObject({
-			hits: 0, misses: 0, anomalies: 0, ttlMs: null,
+			hits: 0, misses: 0, fills: 0, anomalies: 0, ttlMs: null,
 		});
 
 		expect(result.buckets[2]).toMatchObject({
-			hits: 10, misses: 6, anomalies: 2, ttlMs: 60000,
+			hits: 10, misses: 6, fills: 3, anomalies: 2, ttlMs: 60000,
 		});
 
 		// The grid is bucket-anchored: newest slot = now's bucket, the rest step back

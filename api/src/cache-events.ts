@@ -1165,6 +1165,7 @@ export async function readCacheTimeseries(
 				t: sinceMs + index * bucketSec * 1000,
 				hits: 0,
 				misses: 0,
+				fills: 0,
 				anomalies: 0,
 				ttlMs: null,
 				hitP50: null,
@@ -1194,6 +1195,7 @@ export async function readCacheTimeseries(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
 			db.raw('SUM(CASE WHEN kind = 0 THEN 1 ELSE 0 END) AS hits'),
 			db.raw('SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END) AS misses'),
+			db.raw('SUM(CASE WHEN kind = 2 THEN 1 ELSE 0 END) AS fills'),
 			db.raw('MAX(ttl_ms) AS ttl_ms'),
 		);
 
@@ -1246,6 +1248,7 @@ export async function readCacheTimeseries(
 		const index = slotOf(row['bucket']);
 		dense[index]!.hits += Number(row['hits'] ?? 0);
 		dense[index]!.misses += Number(row['misses'] ?? 0);
+		dense[index]!.fills += Number(row['fills'] ?? 0);
 
 		if (row['ttl_ms'] != null) {
 			dense[index]!.ttlMs = Number(row['ttl_ms']);

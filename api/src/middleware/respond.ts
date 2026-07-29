@@ -327,7 +327,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		const anomalous =
 			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope;
 
-		queueMissLatency(missMs, anomalous ? 'anomaly' : 'other');
+		queueMissLatency(
+			missMs,
+			anomalous
+				? 'anomaly'
+				: 'other',
+		);
 	}
 
 	if (req.sanitizedQuery.export) {

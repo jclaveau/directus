@@ -31,6 +31,8 @@ vi.mock('apexcharts', () => {
 
 			updateOptions(config: any) {
 				chartMock.configs.push(config);
+
+				return Promise.resolve();
 			}
 
 			hideSeries(name: string) {
@@ -950,7 +952,14 @@ describe('CachePage', () => {
 		mockCacheGet(ENTRIES, {
 			// A non-zero bucket so hasTimeseries is true and the chart is built.
 			timeseries: {
-				buckets: [{ t: 1000, hits: 5, misses: 2, anomalies: 0, ttlMs: 3600000 }],
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					fills: 1,
+					anomalies: 0,
+					ttlMs: 3600000,
+				}],
 				markers: [],
 			},
 		});
@@ -963,13 +972,14 @@ describe('CachePage', () => {
 
 		// Tooltip: one tight "name: value" row per metric, TTL humanised.
 		const html = config.tooltip.custom({
-			series: [[5], [2], [0], [3600]],
+			series: [[5], [2], [1], [0], [3600]],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
 
 		expect(html).toContain('Hits: 5');
 		expect(html).toContain('Misses: 2');
+		expect(html).toContain('Fills: 1');
 		expect(html).toContain('TTL: 1h');
 		expect(html).toContain('cache-tt-row');
 
@@ -1043,5 +1053,37 @@ describe('CachePage', () => {
 		expect(chartMock.hidden).toContain('Hits p95');
 		expect(chartMock.hidden).toContain('Misses p95');
 		expect(chartMock.hidden).not.toContain('Hits p50');
+	});
+
+	it('persists a counts legend toggle to per-user localStorage', async () => {
+		localStorage.clear();
+
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					fills: 1,
+					anomalies: 0,
+					ttlMs: null,
+				}],
+				markers: [],
+			},
+		});
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Hits');
+
+		// Index 1 = Misses; toggling records then clears it via localStorage.
+		config.chart.events.legendClick(null, 1);
+		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
+			.toContain('Misses');
+
+		config.chart.events.legendClick(null, 1);
+		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
+			.not.toContain('Misses');
 	});
 });
