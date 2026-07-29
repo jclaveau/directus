@@ -73,11 +73,7 @@ test('the latency chart names the full disposition breakdown', async ({ page }) 
 // Legend visibility is persisted to localStorage per chart: p95 bands hidden by
 // default, and a toggle survives a reload. The honest end-to-end check — the unit
 // test can only drive the handler directly, not apex's real legend click.
-// FIXME(cache-dashboard): this e2e proves the p95-hidden-by-default is NOT applied
-// in a real browser — 0 legend items are inactive — though the unit test (mock apex)
-// passes. applyHiddenSeries + the localStorage default check out in isolation, so the
-// wiring bug only shows against a live app. Re-enable once diagnosed + fixed.
-test.fixme('p95 hidden by default; a toggle survives reload', async ({ page }) => {
+test('p95 hidden by default; a toggle survives reload', async ({ page }) => {
 	await expect(page.locator('.apexcharts-canvas')).toHaveCount(2, {
 		timeout: 10000,
 	});
