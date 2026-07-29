@@ -42,7 +42,10 @@ test('lays the counts chart legend out on one row', async ({ page }) => {
 // headless (apex arms its tooltip on a mousemove sequence that doesn't reproduce
 // reliably in CI), so it's left to the unit test rather than kept as a flaky e2e.
 
-test('renders the latency chart with the p50/p95 series', async ({ page }) => {
+// The latency chart names every disposition slice — hit serve, fill (cached miss),
+// anomaly (flagged-uncacheable miss), the miss umbrella, and both pooled. The series
+// are always in the legend even where a slice has no samples yet.
+test('the latency chart names the full disposition breakdown', async ({ page }) => {
 	// The seeded fill traffic makes the latency chart appear as a second canvas.
 	await expect(page.locator('.apexcharts-canvas')).toHaveCount(2, {
 		timeout: 10000,
@@ -54,7 +57,42 @@ test('renders the latency chart with the p50/p95 series', async ({ page }) => {
 		.locator('.apexcharts-legend-series')
 		.allInnerTexts();
 
-	expect(names).toContain('Hits p50');
-	expect(names).toContain('Misses p95');
-	expect(names).toContain('Both p50');
+	const slices = ['Hits p50', 'Fills p50', 'Anomalies p50', 'Misses p50', 'Both p50'];
+
+	for (const label of slices) {
+		expect(names).toContain(label);
+	}
+});
+
+// Legend visibility is persisted to localStorage per chart: p95 bands hidden by
+// default, and a toggle survives a reload. The honest end-to-end check — the unit
+// test can only drive the handler directly, not apex's real legend click.
+test('p95 hidden by default; a legend toggle persists a reload', async ({ page }) => {
+	await expect(page.locator('.apexcharts-canvas')).toHaveCount(2, {
+		timeout: 10000,
+	});
+
+	const latency = () => page.locator('.apexcharts-canvas').nth(1);
+	const inactive = (text: string) =>
+		latency()
+			.locator('.apexcharts-legend-series.apexcharts-inactive-legend')
+			.filter({ hasText: text });
+
+	// p95 start hidden (persisted default) — their legend item is greyed inactive.
+	await expect(inactive('Misses p95')).toHaveCount(1);
+
+	// Hide a p50 via its legend; it goes inactive.
+	await latency()
+		.locator('.apexcharts-legend-series')
+		.filter({ hasText: 'Hits p50' })
+		.click();
+
+	await expect(inactive('Hits p50')).toHaveCount(1);
+
+	// Reload — the toggle must survive (localStorage-backed).
+	await page.reload({ waitUntil: 'networkidle' });
+	await page.waitForSelector('.apexcharts-canvas', { timeout: 20000 });
+	await page.waitForTimeout(1000);
+
+	await expect(inactive('Hits p50')).toHaveCount(1, { timeout: 10000 });
 });
