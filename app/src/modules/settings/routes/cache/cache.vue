@@ -32,7 +32,6 @@ import {
 	formatTooltipValue,
 	formatUser,
 	humanizeSeconds,
-	interpolate,
 	shortKey,
 	splitSections,
 	summariseAnomalies,
@@ -559,6 +558,40 @@ const totalMisses = computed(() => {
 	return timeseries.value.buckets.reduce((sum, b) => sum + b.misses, 0);
 });
 
+const totalFills = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.fills, 0);
+});
+
+// Median of the per-bucket p50s over the window — a single central response-time
+// number for the summary, formatted or an em-dash when nothing was sampled.
+function medianMs(values: (number | null)[]): string {
+	const nums = values.filter((v): v is number => v != null).sort((a, b) => a - b);
+
+	if (nums.length === 0) {
+		return '—';
+	}
+
+	const mid = Math.floor(nums.length / 2);
+
+	const median = nums.length % 2 === 0
+		? (nums[mid - 1]! + nums[mid]!) / 2
+		: nums[mid]!;
+
+	return `${Math.round(median)}ms`;
+}
+
+const medianResponse = computed(() => {
+	return medianMs(timeseries.value.buckets.map((b) => b.bothP50));
+});
+
+const medianMiss = computed(() => {
+	return medianMs(timeseries.value.buckets.map((b) => b.missP50));
+});
+
+const medianHit = computed(() => {
+	return medianMs(timeseries.value.buckets.map((b) => b.hitP50));
+});
+
 const totalAnomalies = computed(() => {
 	return searchedAnomalies.value.reduce((sum, a) => sum + a.count, 0);
 });
@@ -895,7 +928,7 @@ function latencyLines(): LatencyLine[] {
 		},
 		{
 			id: 'both',
-			label: t('cache_lat_both', 'Both'),
+			label: t('cache_lat_response', 'Response'),
 			color: bothColor,
 			p50: (b) => b.bothP50,
 			p95: (b) => b.bothP95,
@@ -914,10 +947,24 @@ function latencyChartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
 	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
-		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
+		return buckets.map((b): [number, number] => [b.t, pick(b) ?? 0]);
 	}
 
-	const lines = latencyLines();
+	// Drop series with no sample in the window — an all-null line adds a legend
+	// entry + a "—" tooltip row for data that isn't there.
+	const lines = latencyLines().filter((line) => {
+		return buckets.some((bucket) => line.pick(bucket) != null);
+	});
+
+	// A marker only where a bucket has a real sample — never on the 0-fill that
+	// keeps the line continuous through idle gaps.
+	const markerPoints = lines.flatMap((line, seriesIndex) => {
+		return buckets.flatMap((bucket, dataPointIndex) => {
+			return line.pick(bucket) == null
+				? []
+				: [{ seriesIndex, dataPointIndex, size: 3, fillColor: line.color }];
+		});
+	});
 
 	return {
 		chart: {
@@ -934,9 +981,9 @@ function latencyChartConfig(): ApexOptions {
 		},
 		colors: lines.map((l) => l.color),
 		stroke: { width: 2, curve: 'straight', dashArray: lines.map((l) => l.dash) },
-		// A lone sample still needs a dot (nothing to draw a line to); a marker keeps
-		// it visible without cluttering the interpolated runs.
-		markers: { size: 2, strokeWidth: 0 },
+		// Continuous line via 0-fill (idle gaps drop to zero); markers only on the
+		// real samples, so the zero-fill points carry no dot.
+		markers: { size: 0, discrete: markerPoints },
 		legend: {
 			show: true,
 			position: 'top',
@@ -944,10 +991,10 @@ function latencyChartConfig(): ApexOptions {
 			itemMargin: { horizontal: 12, vertical: 0 },
 		},
 		dataLabels: { enabled: false },
-		// Fills are sparse (one per key), so a series is mostly isolated points that
-		// apex won't join. Interpolate the interior gaps to draw a continuous curve.
+		// 0-fill keeps the line continuous; an idle bucket drops to zero rather than
+		// interpolating a fake value between distant real samples.
 		series: lines.map((l) => {
-			return { name: l.name, data: interpolate(series(l.pick)) };
+			return { name: l.name, data: series(l.pick) };
 		}),
 		xaxis: { type: 'datetime' },
 		yaxis: {
@@ -956,24 +1003,25 @@ function latencyChartConfig(): ApexOptions {
 			labels: { formatter: (v: number) => `${Math.round(v)}ms` },
 		},
 		tooltip: {
-			custom: ({ series: rowsData, dataPointIndex, w }) => {
-				const ts = w.globals.seriesX[0]?.[dataPointIndex];
+			custom: ({ dataPointIndex }) => {
+				const bucket = buckets[dataPointIndex];
 
-				const head = ts
-					? new Date(ts).toLocaleString()
+				const head = bucket
+					? new Date(bucket.t).toLocaleString()
 					: '';
 
-				const rows = lines.map((line, index) => {
-					const raw = rowsData[index]?.[dataPointIndex];
+				const rows = lines.map((line) => {
+					const raw = line.pick(bucket);
 
-					const shown = raw == null
-						? '—'
-						: `${Math.round(raw)}ms`;
+					// Skip a series with no sample at this bucket — no "—" clutter.
+					if (raw == null) {
+						return '';
+					}
 
 					return [
 						`<div class="cache-tt-row">`,
 						`<span class="cache-tt-dot" style="background:${line.color}"></span>`,
-						`${line.name}: ${shown}`,
+						`${line.name}: ${Math.round(raw)}ms`,
 						`</div>`,
 					].join('');
 				}).join('');
@@ -1246,10 +1294,48 @@ onUnmounted(() => {
 			<v-notice v-if="error" type="danger">{{ error }}</v-notice>
 
 			<div v-show="hasTimeseries" class="timeseries">
+				<div class="summary">
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
+						<span class="label">{{ t('cache_misses', 'Misses') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalHits) }}</span>
+						<span class="label">{{ t('cache_hits', 'Hits') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalFills) }}</span>
+						<span class="label">{{ t('cache_fills', 'Fills') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
+						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
+					</div>
+				</div>
 				<div ref="chartEl" class="chart" />
 			</div>
 
 			<div v-show="hasLatency" class="timeseries">
+				<div class="summary">
+					<div class="metric">
+						<span class="value">{{ medianResponse }}</span>
+						<span class="label">
+							{{ t('cache_lat_median_response', 'Median response') }}
+						</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ medianMiss }}</span>
+						<span class="label">
+							{{ t('cache_lat_median_miss', 'Median miss') }}
+						</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ medianHit }}</span>
+						<span class="label">
+							{{ t('cache_lat_median_hit', 'Median hit') }}
+						</span>
+					</div>
+				</div>
 				<div ref="latencyChartEl" class="chart" />
 			</div>
 
@@ -1262,18 +1348,6 @@ onUnmounted(() => {
 					<div class="metric">
 						<span class="value">{{ abbreviateNumber(totalEntries) }}</span>
 						<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
-					</div>
-					<div class="metric">
-						<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
-						<span class="label">{{ t('cache_misses', 'Misses') }}</span>
-					</div>
-					<div class="metric">
-						<span class="value">{{ abbreviateNumber(totalHits) }}</span>
-						<span class="label">{{ t('cache_hits', 'Hits') }}</span>
-					</div>
-					<div class="metric">
-						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
-						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 					</div>
 				</div>
 

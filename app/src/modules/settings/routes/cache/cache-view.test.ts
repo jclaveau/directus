@@ -12,7 +12,6 @@ import {
 	formatTooltipValue,
 	formatUser,
 	humanizeSeconds,
-	interpolate,
 	isSystemPath,
 	shortKey,
 	splitSections,
@@ -400,51 +399,5 @@ describe('carryForward', () => {
 			[1, null],
 			[2, null],
 		]);
-	});
-});
-
-describe('interpolate', () => {
-	it('linearly fills interior null gaps', () => {
-		const points: [number, number | null][] = [
-			[1, 10],
-			[2, null],
-			[3, null],
-			[4, 40],
-		];
-
-		expect(interpolate(points)).toEqual([
-			[1, 10],
-			[2, 20],
-			[3, 30],
-			[4, 40],
-		]);
-	});
-
-	it('leaves leading and trailing nulls untouched', () => {
-		const points: [number, number | null][] = [
-			[1, null],
-			[2, 10],
-			[3, null],
-			[4, 30],
-			[5, null],
-		];
-
-		expect(interpolate(points)).toEqual([
-			[1, null],
-			[2, 10],
-			[3, 20],
-			[4, 30],
-			[5, null],
-		]);
-	});
-
-	it('returns a single-known series unchanged (nothing to join)', () => {
-		const points: [number, number | null][] = [
-			[1, null],
-			[2, 5],
-			[3, null],
-		];
-
-		expect(interpolate(points)).toEqual(points);
 	});
 });

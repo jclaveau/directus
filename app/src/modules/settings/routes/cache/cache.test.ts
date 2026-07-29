@@ -190,7 +190,7 @@ const global = {
 // anomalies + stats to empty so an entries-only test doesn't leak them elsewhere.
 function mockCacheGet(
 	entries: unknown,
-	extra: { anomalies?: unknown; stats?: unknown } = {},
+	extra: { anomalies?: unknown; stats?: unknown; timeseries?: unknown } = {},
 ) {
 	vi.mocked(api.get).mockImplementation(((url: string) => {
 		if (url === '/utils/cache/anomalies') {
@@ -202,7 +202,9 @@ function mockCacheGet(
 		}
 
 		if (url === '/utils/cache/timeseries') {
-			return Promise.resolve({ data: { data: { buckets: [], markers: [] } } });
+			return Promise.resolve({
+				data: { data: extra.timeseries ?? { buckets: [], markers: [] } },
+			});
 		}
 
 		return Promise.resolve({ data: { data: entries } });
@@ -674,8 +676,18 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		// Metric order is Endpoints, Cached entries, Misses, Hits, Anomalies → index 1.
-		const entriesTotalBefore = Number(wrapper.findAll('.summary .value')[1]!.text());
+		// The Cached-entries total now lives in its own summary; find it by label
+		// rather than a positional index (the count/latency summaries moved above
+		// their charts).
+		function cachedEntriesTotal() {
+			const card = wrapper.findAll('.metric').find((m) => {
+				return m.find('.label').text() === 'Cached entries';
+			});
+
+			return Number(card!.find('.value').text());
+		}
+
+		const entriesTotalBefore = cachedEntriesTotal();
 
 		wrapper.findComponent(SearchInput).vm.$emit('update:modelValue', 'bob@corp.io');
 		await flushPromises();
@@ -684,7 +696,7 @@ describe('CachePage', () => {
 		expect(wrapper.text()).not.toContain('/items/articles');
 
 		// The summary totals track the filtered list, not the full set.
-		const entriesTotalAfter = Number(wrapper.findAll('.summary .value')[1]!.text());
+		const entriesTotalAfter = cachedEntriesTotal();
 		expect(entriesTotalAfter).toBeLessThan(entriesTotalBefore);
 	});
 
@@ -1029,8 +1041,8 @@ describe('CachePage', () => {
 			'Anomalies p95',
 			'Misses p50',
 			'Misses p95',
-			'Both p50',
-			'Both p95',
+			'Response p50',
+			'Response p95',
 		]);
 
 		expect(config.stroke.dashArray).toEqual([0, 4, 0, 4, 0, 4, 0, 4, 0, 4]);
@@ -1038,11 +1050,7 @@ describe('CachePage', () => {
 		// ms axis + a compact ms tooltip.
 		expect(config.yaxis.labels.formatter(40.6)).toBe('41ms');
 
-		const html = config.tooltip.custom({
-			series: [[2], [5], [20], [60], [80], [200], [40], [120], [3], [100]],
-			dataPointIndex: 0,
-			w: { globals: { seriesX: [[1000]] } },
-		});
+		const html = config.tooltip.custom({ dataPointIndex: 0 });
 
 		expect(html).toContain('Hits p50: 2ms');
 		expect(html).toContain('Fills p50: 20ms');
@@ -1053,6 +1061,85 @@ describe('CachePage', () => {
 		expect(chartMock.hidden).toContain('Hits p95');
 		expect(chartMock.hidden).toContain('Misses p95');
 		expect(chartMock.hidden).not.toContain('Hits p50');
+	});
+
+	it('drops empty series, zero-fills gaps, marks only real samples', async () => {
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [
+					{
+						t: 1000,
+						hits: 5,
+						misses: 2,
+						fills: 1,
+						anomalies: null,
+						ttlMs: null,
+						hitP50: 10,
+						hitP95: null,
+						fillP50: null,
+						fillP95: null,
+						anomalyP50: null,
+						anomalyP95: null,
+						missP50: 8,
+						missP95: null,
+						bothP50: 9,
+						bothP95: null,
+					},
+					{
+						t: 2000,
+						hits: null,
+						misses: null,
+						fills: null,
+						anomalies: null,
+						ttlMs: null,
+						hitP50: null,
+						hitP95: null,
+						fillP50: null,
+						fillP95: null,
+						anomalyP50: null,
+						anomalyP95: null,
+						missP50: null,
+						missP95: null,
+						bothP50: null,
+						bothP95: null,
+					},
+				],
+				markers: [],
+			},
+		});
+
+		mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Hits p50');
+
+		// Only series with a real sample survive — Fills/Anomalies (all-null) and
+		// every p95 here are dropped.
+		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
+			'Hits p50',
+			'Misses p50',
+			'Response p50',
+		]);
+
+		// The idle second bucket is zero-filled (continuous), not interpolated/null.
+		expect(config.series[0].data).toEqual([[1000, 10], [2000, 0]]);
+
+		// A marker only on the real sample (bucket 0), none on the zero-fill.
+		const discrete = config.markers.discrete as {
+			seriesIndex: number;
+			dataPointIndex: number;
+		}[];
+
+		expect(discrete).toHaveLength(3);
+		expect(discrete.map((m) => m.seriesIndex)).toEqual([0, 1, 2]);
+		expect(discrete.map((m) => m.dataPointIndex)).toEqual([0, 0, 0]);
+
+		// Tooltip skips no-sample rows: the empty bucket renders no row.
+		expect(config.tooltip.custom({ dataPointIndex: 1 })).not.toContain('cache-tt-row');
+
+		const html = config.tooltip.custom({ dataPointIndex: 0 });
+		expect(html).toContain('Hits p50: 10ms');
+		expect(html).not.toContain('Fills');
 	});
 
 	it('persists a counts legend toggle to per-user localStorage', async () => {
