@@ -1079,10 +1079,14 @@ describe('CachePage', () => {
 
 		// Index 1 = Misses; toggling records then clears it via localStorage.
 		config.chart.events.legendClick(null, 1);
+		await flushPromises();
+
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
 			.toContain('Misses');
 
 		config.chart.events.legendClick(null, 1);
+		await flushPromises();
+
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
 			.not.toContain('Misses');
 	});
