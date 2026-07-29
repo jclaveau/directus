@@ -7,7 +7,9 @@
 export type CacheFlushTarget = 'response' | 'system' | 'locks';
 
 /** One bucket of the cache timeseries: outcome counts, the effective TTL, and
- * response-latency percentiles (hit = serve, miss = compute/fill, both = pooled).
+ * response-latency percentiles: hit = serve, fill = a cached miss's compute,
+ * anomaly = a flagged-uncacheable miss's compute, miss = all misses pooled (the
+ * umbrella over fill + anomaly + silently-skipped), both = hits + misses pooled.
  * Shared so the API producer and the app chart can't drift. */
 export interface CacheTimeseriesBucket {
 	t: number; // bucket-start epoch ms
@@ -17,6 +19,10 @@ export interface CacheTimeseriesBucket {
 	ttlMs: number | null;
 	hitP50: number | null;
 	hitP95: number | null;
+	fillP50: number | null;
+	fillP95: number | null;
+	anomalyP50: number | null;
+	anomalyP95: number | null;
 	missP50: number | null;
 	missP95: number | null;
 	bothP50: number | null;
