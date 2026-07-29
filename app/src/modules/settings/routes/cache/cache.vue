@@ -7,6 +7,7 @@ import { useUserStore } from '@/stores/user';
 import { useLocalStorage } from '@vueuse/core';
 import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import type { Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { abbreviateNumber } from '@directus/utils';
 import type {
@@ -569,6 +570,39 @@ let chart: ApexCharts | null = null;
 const latencyChartEl = ref<HTMLElement | null>(null);
 let latencyChart: ApexCharts | null = null;
 
+// Legend visibility persisted per chart, so a hidden/shown series survives a reload
+// and the per-second refresh. Latency defaults to the p50 medians (p95 bands hidden
+// until the user opts in via the legend).
+const countsHiddenSeries = useLocalStorage<string[]>(
+	`cache-counts-hidden-${userId}`,
+	[],
+);
+
+const latencyHiddenSeries = useLocalStorage<string[]>(
+	`cache-latency-hidden-${userId}`,
+	latencyLines()
+		.filter((line) => line.dash !== 0)
+		.map((line) => line.name),
+);
+
+function toggleHiddenSeries(store: Ref<string[]>, name: string) {
+	store.value = store.value.includes(name)
+		? store.value.filter((entry) => entry !== name)
+		: [...store.value, name];
+}
+
+// Reassert stored visibility after each (re)render — apex resets legend toggles on
+// updateOptions, so this re-hides on every refresh and on first paint.
+function applyHiddenSeries(instance: ApexCharts | null, hidden: string[]) {
+	if (!instance) {
+		return;
+	}
+
+	for (const name of hidden) {
+		instance.hideSeries(name);
+	}
+}
+
 // Show the chart once there's anything to plot — sample counts or a config marker —
 // so a stats-off page with no markers doesn't render an empty axis.
 const hasTimeseries = computed(() => {
@@ -648,6 +682,13 @@ function chartConfig(): ApexOptions {
 			pick: (b) => b.misses,
 		},
 		{
+			name: t('cache_fills', 'Fills'),
+			unit: 'count',
+			curve: 'straight',
+			color: themeVar('--theme--secondary', '#3399ff'),
+			pick: (b) => b.fills,
+		},
+		{
 			name: t('cache_anomalies', 'Anomalies'),
 			unit: 'count',
 			curve: 'straight',
@@ -680,6 +721,11 @@ function chartConfig(): ApexOptions {
 			toolbar: { show: false },
 			animations: { enabled: false },
 			fontFamily: 'inherit',
+			events: {
+				legendClick: (_ctx: unknown, index: number) => {
+					toggleHiddenSeries(countsHiddenSeries, metrics[index]!.name);
+				},
+			},
 		},
 		colors: metrics.map((m) => m.color),
 		stroke: { width: 2, curve: metrics.map((m) => m.curve) },
@@ -776,12 +822,18 @@ function renderChart() {
 	}
 
 	if (chart) {
-		void chart.updateOptions(chartConfig(), true, false);
+		void chart.updateOptions(chartConfig(), true, false).then(() => {
+			applyHiddenSeries(chart, countsHiddenSeries.value);
+		});
+
 		return;
 	}
 
 	chart = new ApexCharts(chartEl.value, chartConfig());
-	void chart.render();
+
+	void chart.render().then(() => {
+		applyHiddenSeries(chart, countsHiddenSeries.value);
+	});
 }
 
 type LatencyLine = {
@@ -796,7 +848,7 @@ type LatencyLine = {
 // (dash 4); the p95 bands start hidden — see renderLatencyChart.
 function latencyLines(): LatencyLine[] {
 	const hitColor = themeVar('--theme--success', '#2ecda7');
-	const fillColor = themeVar('--theme--primary', '#6644ff');
+	const fillColor = themeVar('--theme--secondary', '#3399ff');
 	const anomalyColor = themeVar('--theme--danger', '#e35169');
 	const missColor = themeVar('--theme--warning', '#ffa439');
 	const bothColor = themeVar('--theme--foreground-subdued', '#a2b5cd');
@@ -869,6 +921,11 @@ function latencyChartConfig(): ApexOptions {
 			toolbar: { show: false },
 			animations: { enabled: false },
 			fontFamily: 'inherit',
+			events: {
+				legendClick: (_ctx: unknown, index: number) => {
+					toggleHiddenSeries(latencyHiddenSeries, lines[index]!.name);
+				},
+			},
 		},
 		colors: lines.map((l) => l.color),
 		stroke: { width: 2, curve: 'straight', dashArray: lines.map((l) => l.dash) },
@@ -938,20 +995,19 @@ function renderLatencyChart() {
 	}
 
 	if (latencyChart) {
-		void latencyChart.updateOptions(latencyChartConfig(), true, false);
+		void latencyChart
+			.updateOptions(latencyChartConfig(), true, false)
+			.then(() => {
+				applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
+			});
+
 		return;
 	}
 
 	latencyChart = new ApexCharts(latencyChartEl.value, latencyChartConfig());
 
 	void latencyChart.render().then(() => {
-		// p95 bands start hidden — the p50 medians are the default read. Apex keeps
-		// the toggle across each refresh's updateOptions, so hide on first paint.
-		for (const line of latencyLines()) {
-			if (line.dash !== 0) {
-				latencyChart?.hideSeries(line.name);
-			}
-		}
+		applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
 	});
 }
 
