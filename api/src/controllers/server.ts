@@ -58,6 +58,12 @@ router.get(
 
 		const data = await service.serverInfo();
 		res.locals['payload'] = { data };
+
+		// serverInfo reads directus_settings (+ a public_background files join) plus
+		// env/version constants. Scoped-purge mode can't tag a service-layer read, and
+		// no write event covers the env fields, so opt out explicitly rather than let
+		// respond flag it a `missing_scope` anomaly the operator can never resolve.
+		res.locals['cache'] = false;
 		return next();
 	}),
 	respond,
