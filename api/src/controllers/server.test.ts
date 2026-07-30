@@ -14,13 +14,6 @@ vi.mock('../middleware/respond.js', () => ({ respond: vi.fn() }));
 
 const { default: router } = await import('./server.js');
 
-// router.get('/info', asyncHandler(fn), respond) registers one Route layer whose
-// own stack holds [handler, respond]; drive the bare handler, respond is mocked.
-function infoHandler() {
-	const layer = router.stack.find((l: any) => l.route?.path === '/info');
-	return layer!.route.stack[0].handle;
-}
-
 describe('server controller /info', () => {
 	beforeEach(() => vi.clearAllMocks());
 
@@ -31,7 +24,10 @@ describe('server controller /info', () => {
 		const res = { locals: {} } as any;
 		const next = vi.fn();
 
-		await infoHandler()(req, res, next);
+		// router.get('/info', asyncHandler(fn), respond) registers one Route layer
+		// whose own stack holds [handler, respond]; drive the bare handler here.
+		const layer = router.stack.find((l: any) => l.route?.path === '/info');
+		await layer!.route.stack[0].handle(req, res, next);
 
 		expect(res.locals['cache']).toBe(false);
 		expect(res.locals['payload']).toEqual({ data: { project_name: 'x' } });
