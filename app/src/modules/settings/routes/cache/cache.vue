@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
+import { formatDuration } from '@/utils/format-duration';
+import { formatFilesize } from '@/utils/format-filesize';
 import { getRootPath } from '@/utils/get-root-path';
 import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
@@ -28,10 +30,8 @@ import {
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
-	formatSize,
 	formatTooltipValue,
 	formatUser,
-	humanizeSeconds,
 	shortKey,
 	splitSections,
 	summariseAnomalies,
@@ -202,7 +202,7 @@ const detailFields = computed(() => {
 		{ label: t('user_label', 'User'), value: userOf(entry.user) },
 		{ label: t('query', 'Query'), value: formatQuery(entry.query) },
 		{ label: t('url', 'URL'), value: entry.url || '—' },
-		{ label: t('size', 'Size'), value: formatSize(entry.size) },
+		{ label: t('size', 'Size'), value: formatFilesize(entry.size) },
 		{ label: t('hits', 'Hits'), value: String(entry.hits) },
 		{ label: t('compute_miss', 'Compute (miss)'), value: msLabel(entry.fillMs) },
 		{ label: t('serve_hit', 'Serve (hit avg)'), value: msLabel(entry.hitMs) },
@@ -281,8 +281,8 @@ const redisFields = computed(() => {
 			? Math.round((sizes.compressed / sizes.uncompressed) * 100)
 			: 0;
 
-		const packed = formatSize(sizes.compressed);
-		const raw = formatSize(sizes.uncompressed);
+		const packed = formatFilesize(sizes.compressed);
+		const raw = formatFilesize(sizes.uncompressed);
 
 		rows.push({
 			label: t('size', 'Size'),
@@ -812,7 +812,7 @@ function chartConfig(): ApexOptions {
 				opposite: true,
 				seriesName: secondsNames,
 				title: { text: t('cache_ttl_label', 'TTL') },
-				labels: { formatter: (v: number) => humanizeSeconds(v) },
+				labels: { formatter: (v: number) => formatDuration(v) },
 			},
 		],
 		tooltip: {
@@ -1455,7 +1455,7 @@ onUnmounted(() => {
 							<span class="stat hits">
 								{{ group.totalHits }} {{ t('hits', 'hits') }}
 							</span>
-							<span class="stat">{{ formatSize(group.totalSize) }}</span>
+							<span class="stat">{{ formatFilesize(group.totalSize) }}</span>
 							<span v-if="group.anomalyCount" class="stat anomaly-count">
 								{{ group.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
 							</span>
@@ -1491,7 +1491,7 @@ onUnmounted(() => {
 									<span class="stat hits">
 										{{ q.totalHits }} {{ t('hits', 'hits') }}
 									</span>
-									<span class="stat">{{ formatSize(q.totalSize) }}</span>
+									<span class="stat">{{ formatFilesize(q.totalSize) }}</span>
 									<span v-if="q.anomalyCount" class="stat anomaly-count">
 										{{ q.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
 									</span>
@@ -1558,7 +1558,7 @@ onUnmounted(() => {
 												<td class="num">
 													{{ expiryOf(entry.expiresAt) }}
 												</td>
-												<td class="num">{{ formatSize(entry.size) }}</td>
+												<td class="num">{{ formatFilesize(entry.size) }}</td>
 												<td class="key" :title="entry.redisKey">
 													{{ shortKey(entry.redisKey) }}
 													<span

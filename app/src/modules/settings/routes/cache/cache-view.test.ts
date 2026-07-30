@@ -8,10 +8,8 @@ import {
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
-	formatSize,
 	formatTooltipValue,
 	formatUser,
-	humanizeSeconds,
 	isSystemPath,
 	shortKey,
 	splitSections,
@@ -70,14 +68,6 @@ describe('isSystemPath', () => {
 	it('treats app data as non-system', () => {
 		expect(isSystemPath('/items/articles')).toBe(false);
 		expect(isSystemPath('/graphql')).toBe(false);
-	});
-});
-
-describe('formatSize', () => {
-	it('scales bytes to B / KB / MB', () => {
-		expect(formatSize(512)).toBe('512 B');
-		expect(formatSize(2048)).toBe('2.0 KB');
-		expect(formatSize(3 * 1024 * 1024)).toBe('3.0 MB');
 	});
 });
 
@@ -320,24 +310,6 @@ describe('summariseAnomalies + filterAnomalies', () => {
 		expect(filterAnomalies(list, '/items/b')).toHaveLength(1);
 		expect(filterAnomalies(list, 'limit')).toHaveLength(1);
 		expect(filterAnomalies(list, '')).toHaveLength(2);
-	});
-});
-
-describe('humanizeSeconds', () => {
-	it('renders whole hours and minutes on their own', () => {
-		expect(humanizeSeconds(3600)).toBe('1h');
-		expect(humanizeSeconds(300)).toBe('5m');
-	});
-
-	it('combines the non-zero parts, largest first', () => {
-		expect(humanizeSeconds(90)).toBe('1m 30s');
-		expect(humanizeSeconds(3661)).toBe('1h 1m 1s');
-	});
-
-	it('rounds and floors at zero', () => {
-		expect(humanizeSeconds(0)).toBe('0s');
-		expect(humanizeSeconds(-5)).toBe('0s');
-		expect(humanizeSeconds(59.6)).toBe('1m');
 	});
 });
 
