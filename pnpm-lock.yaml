@@ -2980,6 +2980,12 @@ importers:
         specifier: 'catalog:'
         version: 3.2.6(@types/node@26.0.0)(happy-dom@18.0.1)(jiti@2.7.0)(jsdom@20.0.3)(sass-embedded@1.100.0)(sass@1.100.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0)
 
+  tests/acceptance:
+    devDependencies:
+      '@playwright/test':
+        specifier: 'catalog:'
+        version: 1.59.1
+
   tests/blackbox:
     devDependencies:
       '@directus/env':
@@ -3072,12 +3078,6 @@ importers:
       ws:
         specifier: 8.21.0
         version: 8.21.0
-
-  tests/e2e-cache:
-    devDependencies:
-      '@playwright/test':
-        specifier: 'catalog:'
-        version: 1.59.1
 
 packages:
 
