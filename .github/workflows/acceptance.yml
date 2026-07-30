@@ -103,11 +103,20 @@ jobs:
             done
           done
 
+          # Collectionless cacheable GETs carry no scope tags, so in scoped-purge mode
+          # they orphan → a missing_scope anomaly. This gives the latency chart's
+          # Anomalies disposition real samples (otherwise it's all-null and filtered out).
+          for i in $(seq 1 8); do
+            for ep in schema/snapshot server/specs/oas; do
+              curl -s -o /dev/null "http://localhost:8055/$ep?e2e=$RANDOM$i" -H "authorization: Bearer $TOKEN"
+            done
+          done
+
           # Wait for the stats buffer + redis-stream drain to land latency in the DB.
           for _ in $(seq 1 20); do
             HAS=$(curl -s "http://localhost:8055/utils/cache/timeseries?window=5m&buckets=60" \
               -H "authorization: Bearer $TOKEN" \
-              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const b=JSON.parse(s).data.buckets;process.stdout.write(String(b.some(x=>x.hitP50!=null&&x.missP50!=null)))})')
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const b=JSON.parse(s).data.buckets;process.stdout.write(String(b.some(x=>x.hitP50!=null&&x.fillP50!=null&&x.anomalyP50!=null&&x.missP50!=null)))})')
             [ "$HAS" = "true" ] && break
             sleep 3
           done
