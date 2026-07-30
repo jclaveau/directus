@@ -4,7 +4,9 @@ import { defineConfig, devices } from '@playwright/test';
 // the admin (CI: http://localhost:8055; local dev: the Vite app).
 export default defineConfig({
 	testDir: '.',
-	timeout: 30_000,
+	// Heavy per test: boots two chart renders, a legend click and a full reload; a
+	// cold CI runner needs headroom over the default 30s.
+	timeout: 60_000,
 	fullyParallel: false,
 	workers: 1,
 	retries: process.env['CI'] ? 1 : 0,
