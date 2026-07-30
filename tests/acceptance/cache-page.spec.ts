@@ -1,8 +1,8 @@
 import { expect, test } from '@playwright/test';
 
-// Smoke-tests the fork's cache page in a real browser — the visual behaviour jsdom
-// can't drive (chart legend layout, tooltip, the second latency chart). Boots
-// against a seeded Directus that serves the admin at BASE_URL/admin.
+// Acceptance tests for the fork's cache page in a real browser — the behaviour jsdom
+// can't drive (chart legend layout + persistence, tooltip, the second latency chart).
+// Boots against a seeded Directus that serves the admin at BASE_URL/admin.
 
 const EMAIL = process.env['ADMIN_EMAIL'] ?? 'admin@example.com';
 const PASSWORD = process.env['ADMIN_PASSWORD'] ?? '';

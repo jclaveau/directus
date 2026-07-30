@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
-// Informational browser smoke for the cache page. BASE_URL points at a Directus
-// that serves the admin (CI: http://localhost:8055; local dev: the Vite app).
+// Browser acceptance tests for the app. BASE_URL points at a Directus that serves
+// the admin (CI: http://localhost:8055; local dev: the Vite app).
 export default defineConfig({
 	testDir: '.',
 	timeout: 30_000,
