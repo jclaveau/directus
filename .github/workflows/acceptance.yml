@@ -95,6 +95,12 @@ jobs:
             -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
             | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).data.access_token))')
 
+          # Accept the BSL license banner so its modal overlay doesn't intercept the
+          # legend clicks in the acceptance suite (a fresh instance shows it to admins).
+          curl -s -o /dev/null -X PATCH http://localhost:8055/settings \
+            -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+            -d '{"accepted_terms": true}'
+
           # Fresh query param = a new key = miss + fill; the bare repeat = a hit.
           for i in $(seq 1 15); do
             for ep in collections fields roles policies; do
