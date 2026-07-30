@@ -7,7 +7,9 @@ const HIDDEN = [
 	'directus_cache_anomalies',
 	'directus_cache_config_events',
 ];
+
 const VISIBLE = ['directus_cache_descriptors'];
+
 const ALL = [...HIDDEN, ...VISIBLE];
 
 /**
