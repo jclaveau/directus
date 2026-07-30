@@ -634,15 +634,36 @@ function applyHiddenSeries(instance: ApexCharts | null, hidden: string[]) {
 		return;
 	}
 
-	for (const name of hidden) {
-		try {
-			instance.hideSeries(name);
+	// apex resolves its render/updateOptions promise before the internal series
+	// registry (`w.globals.seriesNames`) is populated — reliably so in a production
+	// build — and hideSeries then derefs a null legend node. Wait a frame for the
+	// series to register before hiding, so the toggle actually lands.
+	const seriesReady = () => {
+		const names = (instance as ApexCharts & {
+			w?: { globals?: { seriesNames?: string[] } };
+		}).w?.globals?.seriesNames;
+
+		return Array.isArray(names) && names.length > 0;
+	};
+
+	const hide = (tries: number) => {
+		if (!seriesReady() && tries > 0) {
+			requestAnimationFrame(() => hide(tries - 1));
+			return;
 		}
-		catch {
-			// A series with no samples in the window isn't rendered; apex's
-			// hideSeries then derefs a null node. Nothing to hide — skip it.
+
+		for (const name of hidden) {
+			try {
+				instance.hideSeries(name);
+			}
+			catch {
+				// A series with no samples in the window isn't rendered; apex's
+				// hideSeries then derefs a null node. Nothing to hide — skip it.
+			}
 		}
-	}
+	};
+
+	hide(12);
 }
 
 // Show the chart once there's anything to plot — sample counts or a config marker —
