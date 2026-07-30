@@ -90,10 +90,16 @@ jobs:
 
       - name: Generate cache traffic (hits + misses + fills)
         run: |
+          set -o pipefail
+
           TOKEN=$(curl -s -X POST http://localhost:8055/auth/login \
             -H 'content-type: application/json' \
             -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
             | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).data.access_token))')
+
+          # A $(…) assignment swallows the pipe's exit even under pipefail, so guard
+          # the token explicitly — an empty one seeds no traffic and fails obscurely.
+          [ -n "$TOKEN" ] || { echo "login failed — empty access token"; cat /tmp/directus.log; exit 1; }
 
           # Accept the BSL license banner so its modal overlay doesn't intercept the
           # legend clicks in the acceptance suite (a fresh instance shows it to admins).
@@ -126,7 +132,10 @@ jobs:
             [ "$HAS" = "true" ] && break
             sleep 3
           done
-          echo "latency data present: ${HAS:-unknown}"
+
+          # Fail fast with a clear message rather than let the Playwright assertions
+          # trip on an empty chart downstream.
+          [ "${HAS:-}" = "true" ] || { echo "latency data absent after drain wait"; exit 1; }
 
       - name: Install Playwright chromium
         run: pnpm --filter tests-acceptance exec playwright install --with-deps chromium
