@@ -1046,7 +1046,9 @@ function latencyChartConfig(): ApexOptions {
 					: '';
 
 				const rows = lines.map((line) => {
-					const raw = line.pick(bucket);
+					const raw = bucket
+						? line.pick(bucket)
+						: null;
 
 					// Skip a series with no sample at this bucket — no "—" clutter.
 					if (raw == null) {
