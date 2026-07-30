@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 // Acceptance tests for the fork's cache page in a real browser — the behaviour jsdom
-// can't drive (chart legend layout + persistence, tooltip, the second latency chart).
+// can't drive (chart legend layout + persistence, tooltip, the latency chart).
 // Boots against a seeded Directus that serves the admin at BASE_URL/admin.
 
 const EMAIL = process.env['ADMIN_EMAIL'] ?? 'admin@example.com';
