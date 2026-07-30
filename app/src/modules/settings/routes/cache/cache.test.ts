@@ -1135,7 +1135,8 @@ describe('CachePage', () => {
 		expect(discrete.map((m) => m.dataPointIndex)).toEqual([0, 0, 0]);
 
 		// Tooltip skips no-sample rows: the empty bucket renders no row.
-		expect(config.tooltip.custom({ dataPointIndex: 1 })).not.toContain('cache-tt-row');
+		const emptyBucketHtml = config.tooltip.custom({ dataPointIndex: 1 });
+		expect(emptyBucketHtml).not.toContain('cache-tt-row');
 
 		const html = config.tooltip.custom({ dataPointIndex: 0 });
 		expect(html).toContain('Hits p50: 10ms');
