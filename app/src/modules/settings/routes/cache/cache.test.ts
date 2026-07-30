@@ -423,7 +423,7 @@ describe('CachePage', () => {
 		expect(text).toContain('ann@corp.io');
 		expect(text).toContain('articles:id=5');
 		expect(text).toContain('(12)'); // tag member count
-		expect(text).toContain('512 B / 2.0 KB raw (25%)'); // compressed vs raw
+		expect(text).toContain('512 B / 2.0 kB raw (25%)'); // compressed vs raw
 		expect(text).toContain('240 ms'); // miss compute cost
 		expect(text).toContain('90s (lengthen)'); // recommended TTL + verdict
 		expect(text).toContain('Key varies on');

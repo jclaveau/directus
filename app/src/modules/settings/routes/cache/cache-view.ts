@@ -1,4 +1,5 @@
 import type { Filter } from '@directus/types';
+import { formatDuration } from '@/utils/format-duration';
 import { matchesFilter } from './filter-entry';
 
 export interface CacheEntry {
@@ -117,18 +118,6 @@ export function isSystemPath(path: string): boolean {
 	return SYSTEM_SEGMENTS.has(head);
 }
 
-export function formatSize(bytes: number): string {
-	if (bytes < 1024) {
-		return `${bytes} B`;
-	}
-
-	if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)} KB`;
-	}
-
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 // Coarse s/m/h/d bucket for a second count (used by age + expiry).
 function coarse(seconds: number): string {
 	if (seconds < 60) {
@@ -178,36 +167,6 @@ export function formatLastHit(
 	}
 
 	return formatAge(now, lastHitAt);
-}
-
-// Seconds → a compact human duration (3600 → "1h", 300 → "5m", 90 → "1m 30s"),
-// so the TTL axis + tooltip read as durations rather than raw seconds.
-export function humanizeSeconds(seconds: number): string {
-	const total = Math.round(seconds);
-
-	if (total <= 0) {
-		return '0s';
-	}
-
-	const hours = Math.floor(total / 3600);
-	const minutes = Math.floor((total % 3600) / 60);
-	const secs = total % 60;
-
-	const parts: string[] = [];
-
-	if (hours) {
-		parts.push(`${hours}h`);
-	}
-
-	if (minutes) {
-		parts.push(`${minutes}m`);
-	}
-
-	if (secs) {
-		parts.push(`${secs}s`);
-	}
-
-	return parts.join(' ');
 }
 
 export function formatUser(
@@ -481,7 +440,7 @@ export function formatTooltipValue(
 	}
 
 	return unit === 'seconds'
-		? humanizeSeconds(raw)
+		? formatDuration(raw)
 		: String(Math.round(raw));
 }
 
