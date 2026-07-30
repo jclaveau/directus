@@ -634,16 +634,13 @@ function applyHiddenSeries(instance: ApexCharts | null, hidden: string[]) {
 		return;
 	}
 
-	// eslint-disable-next-line no-console
-	console.log('DIAGAPPLY hidden=', JSON.stringify(hidden), 'series=', JSON.stringify((instance as any).w?.globals?.seriesNames));
-
 	for (const name of hidden) {
 		try {
 			instance.hideSeries(name);
 		}
-		catch (e) {
-			// eslint-disable-next-line no-console
-			console.log('DIAGAPPLY threw', name, (e as any)?.message); // A series with no samples in the window isn't rendered; apex's hideSeries then derefs a null node.
+		catch {
+			// A series with no samples in the window isn't rendered; apex's
+			// hideSeries then derefs a null node. Nothing to hide — skip it.
 		}
 	}
 }

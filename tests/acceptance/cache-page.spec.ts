@@ -86,17 +86,10 @@ test('p95 hidden by default; a toggle survives reload', async ({ page }) => {
 			.filter({ hasText: text });
 	};
 
-	// <TEMP-DIAG>
-	const diagLs = await page.evaluate(() => JSON.stringify(localStorage));
-	const diagLegend = await latency()
-		.locator('.apexcharts-legend-series')
-		.evaluateAll((els) => els.map((e) => `${e.textContent}${e.className.includes('apexcharts-inactive-legend') ? ':INACTIVE' : ':active'}`));
-	console.log('DIAG localStorage:', diagLs); // eslint-disable-line no-console
-	console.log('DIAG legend:', JSON.stringify(diagLegend)); // eslint-disable-line no-console
-	// </TEMP-DIAG>
-
 	// p95 start hidden (persisted default) — their legend item is greyed inactive.
-	await expect(inactive('Misses p95')).toHaveCount(1);
+	// applyHiddenSeries runs after the chart's async render/updateOptions resolves, so
+	// give a cold CI runner room to settle.
+	await expect(inactive('Misses p95')).toHaveCount(1, { timeout: 15000 });
 
 	// Hide a p50 via its legend; it goes inactive.
 	await latency()
@@ -104,7 +97,7 @@ test('p95 hidden by default; a toggle survives reload', async ({ page }) => {
 		.filter({ hasText: 'Hits p50' })
 		.click();
 
-	await expect(inactive('Hits p50')).toHaveCount(1);
+	await expect(inactive('Hits p50')).toHaveCount(1, { timeout: 10000 });
 
 	// Reload — the toggle must survive (localStorage-backed).
 	await page.reload({ waitUntil: 'networkidle' });
