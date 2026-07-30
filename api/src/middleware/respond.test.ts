@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => {
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
+		queueMissLatency: vi.fn(),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
 });
@@ -53,6 +54,7 @@ vi.mock('../cache-events.js', () => {
 		cacheStatsActive: () => true,
 		queueCacheDescriptor: mocks.queueCacheDescriptor,
 		writeCacheTombstone: mocks.writeCacheTombstone,
+		queueMissLatency: mocks.queueMissLatency,
 	};
 });
 
@@ -214,6 +216,12 @@ describe('respond middleware', () => {
 			'cache-key',
 			expect.any(Number),
 		);
+
+		expect(mocks.queueMissLatency).toHaveBeenCalledWith(
+			expect.any(Number),
+			'fill',
+			'cache-hash',
+		);
 	});
 
 	test(oneLine`
@@ -325,6 +333,11 @@ describe('respond middleware', () => {
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
 		);
+
+		expect(mocks.queueMissLatency).toHaveBeenCalledWith(
+			expect.any(Number),
+			'anomaly',
+		);
 	});
 
 	test('$NOW query filter is not cached', async () => {
@@ -340,6 +353,11 @@ describe('respond middleware', () => {
 		// Skipped silently (KISS — no anomaly for an intentional hygiene skip).
 		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
 		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
+
+		expect(mocks.queueMissLatency).toHaveBeenCalledWith(
+			expect.any(Number),
+			'other',
+		);
 	});
 
 	test('a scoped-mode collection-less response flags missing_scope', async () => {
@@ -354,6 +372,11 @@ describe('respond middleware', () => {
 		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
 			expect.any(Object),
 			'missing_scope',
+		);
+
+		expect(mocks.queueMissLatency).toHaveBeenCalledWith(
+			expect.any(Number),
+			'anomaly',
 		);
 	});
 
@@ -437,6 +460,11 @@ describe('respond middleware', () => {
 			expect.any(Object),
 			'value_too_large',
 			expect.stringMatching(/^\d+B$/),
+		);
+
+		expect(mocks.queueMissLatency).toHaveBeenCalledWith(
+			expect.any(Number),
+			'anomaly',
 		);
 	});
 

@@ -6,6 +6,7 @@ import {
 	clampCacheStatsWindow,
 	claimCacheAnomalyThrottleSlot,
 	queueCacheAnomaly,
+	queueMissLatency,
 	queueCacheHit,
 	queueCacheMiss,
 	enforceCacheStatsBudget,
@@ -263,6 +264,43 @@ describe('queueCacheHit', () => {
 		});
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
+	});
+
+	it('queues a fill-latency event tagged kind f', async () => {
+		await armFlag(null);
+		mockRedis.call.mockClear();
+
+		queueMissLatency(42, 'fill', 'kf');
+		await flushCacheEventBuffer();
+
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(fieldAfter(call, 'kind')).toBe('f');
+		expect(fieldAfter(call, 'cacheKey')).toBe('kf');
+		expect(fieldAfter(call, 'durationMs')).toBe('42');
+	});
+
+	it('tags an anomaly-miss latency event kind x', async () => {
+		await armFlag(null);
+		mockRedis.call.mockClear();
+
+		queueMissLatency(10, 'anomaly');
+		await flushCacheEventBuffer();
+
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(fieldAfter(call, 'kind')).toBe('x');
+		expect(fieldAfter(call, 'durationMs')).toBe('10');
+	});
+
+	it('tags an other-miss latency event kind o', async () => {
+		await armFlag(null);
+		mockRedis.call.mockClear();
+
+		queueMissLatency(20, 'other');
+		await flushCacheEventBuffer();
+
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(fieldAfter(call, 'kind')).toBe('o');
+		expect(fieldAfter(call, 'durationMs')).toBe('20');
 	});
 });
 
@@ -798,6 +836,70 @@ describe('drainCacheEvents', () => {
 					cache_key: 'k9',
 					reason: 'value_too_large',
 					detail: '2048B',
+				},
+			],
+			500,
+		);
+	});
+
+	it('demuxes anomaly-miss (x→3) and other-miss (o→4) latency events', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'x', cacheKey: '', durationMs: '10', ts: '6000',
+			}),
+			streamEntry('2-0', {
+				kind: 'o', cacheKey: '', durationMs: '20', ts: '7000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_events',
+			[
+				{
+					time: new Date(6000),
+					cache_key: '',
+					kind: 3,
+					age_ms: null,
+					gap_ms: null,
+					ttl_ms: null,
+					duration_ms: 10,
+				},
+				{
+					time: new Date(7000),
+					cache_key: '',
+					kind: 4,
+					age_ms: null,
+					gap_ms: null,
+					ttl_ms: null,
+					duration_ms: 20,
+				},
+			],
+			500,
+		);
+	});
+
+	it('demuxes a fill-latency event to kind 2 with its duration', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'f', cacheKey: 'kf', durationMs: '42', ts: '5000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_events',
+			[
+				{
+					time: new Date(5000),
+					cache_key: 'kf',
+					kind: 2,
+					age_ms: null,
+					gap_ms: null,
+					ttl_ms: null,
+					duration_ms: 42,
 				},
 			],
 			500,
