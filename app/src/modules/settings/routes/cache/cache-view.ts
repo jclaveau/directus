@@ -1,4 +1,5 @@
 import type { Filter } from '@directus/types';
+import { formatDuration } from '@/utils/format-duration';
 import { matchesFilter } from './filter-entry';
 
 export interface CacheEntry {
@@ -115,18 +116,6 @@ export function isSystemPath(path: string): boolean {
 	}
 
 	return SYSTEM_SEGMENTS.has(head);
-}
-
-export function formatSize(bytes: number): string {
-	if (bytes < 1024) {
-		return `${bytes} B`;
-	}
-
-	if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)} KB`;
-	}
-
-	return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // Coarse s/m/h/d bucket for a second count (used by age + expiry).
@@ -434,5 +423,44 @@ export function filterAnomalies(
 		return [anomaly.path, anomaly.query, anomaly.reason].some((field) => {
 			return field?.toLowerCase().includes(query);
 		});
+	});
+}
+
+// A plotted point: [epoch ms, value] where value is null for an unsampled bucket.
+export type TimeseriesPoint = [number, number | null];
+
+// A chart value formatted by its metric's unit: a count as a plain integer, a
+// seconds value as a human duration; null/undefined as an em dash.
+export function formatTooltipValue(
+	raw: number | null | undefined,
+	unit: 'count' | 'seconds',
+): string {
+	if (raw == null) {
+		return '—';
+	}
+
+	return unit === 'seconds'
+		? formatDuration(raw)
+		: String(Math.round(raw));
+}
+
+// TTL is a persistent config value: a bucket with no sample (null) hasn't changed
+// it, so carry the last known value forward (and back-fill the lead) to keep the
+// curve continuous instead of broken across unsampled buckets.
+export function carryForward(points: TimeseriesPoint[]): TimeseriesPoint[] {
+	let last: number | null = null;
+
+	const forward = points.map(([t, value]): TimeseriesPoint => {
+		if (value !== null) {
+			last = value;
+		}
+
+		return [t, last];
+	});
+
+	const firstKnown = forward.find(([, value]) => value !== null)?.[1] ?? null;
+
+	return forward.map(([t, value]): TimeseriesPoint => {
+		return [t, value ?? firstKnown];
 	});
 }

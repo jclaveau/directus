@@ -1,0 +1,13 @@
+{
+	"name": "tests-acceptance",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"description": "Playwright browser acceptance tests for the fork's app (informational)",
+	"scripts": {
+		"test:e2e": "playwright test"
+	},
+	"devDependencies": {
+		"@playwright/test": "catalog:"
+	}
+}

@@ -1,27 +1,36 @@
 <script setup lang="ts">
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
+import { formatDuration } from '@/utils/format-duration';
+import { formatFilesize } from '@/utils/format-filesize';
 import { getRootPath } from '@/utils/get-root-path';
 import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
 import { useLocalStorage } from '@vueuse/core';
 import ApexCharts, { type ApexOptions } from 'apexcharts';
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { abbreviateNumber } from '@directus/utils';
-import type { CacheFlushTarget, Filter, User } from '@directus/types';
+import type {
+	CacheFlushTarget,
+	CacheTimeseries,
+	CacheTimeseriesBucket,
+	Filter,
+	User,
+} from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
 	buildGroups,
+	carryForward,
 	filterAnomalies,
 	filterEntries,
 	formatAge,
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
-	formatSize,
+	formatTooltipValue,
 	formatUser,
 	shortKey,
 	splitSections,
@@ -61,7 +70,6 @@ const entries = ref<CacheEntry[]>([]);
 const anomalies = ref<CacheAnomaly[]>([]);
 const expanded = ref<Record<string, boolean>>({});
 const now = ref(Date.now());
-const refreshInterval = ref<number | null>(null);
 const search = ref('');
 const filter = ref<Filter | null>(null);
 const entryPage = ref<Record<string, number>>({});
@@ -72,16 +80,52 @@ watch([search, filter], () => {
 	entryPage.value = {};
 });
 
-// How far back the listing looks — sent as ?window= to the API, which clamps it.
+// How far back the listing looks — sent as ?window= to the API, which clamps it
+// to [1m, max]. The sub-hour steps pair with a live short refresh interval.
 const windowOptions = [
+	{ text: t('cache_window_1m', 'Last 1m'), value: '1m' },
+	{ text: t('cache_window_3m', 'Last 3m'), value: '3m' },
+	{ text: t('cache_window_5m', 'Last 5m'), value: '5m' },
+	{ text: t('cache_window_10m', 'Last 10m'), value: '10m' },
+	{ text: t('cache_window_15m', 'Last 15m'), value: '15m' },
+	{ text: t('cache_window_30m', 'Last 30m'), value: '30m' },
 	{ text: t('cache_window_1h', 'Last 1h'), value: '1h' },
 	{ text: t('cache_window_6h', 'Last 6h'), value: '6h' },
 	{ text: t('cache_window_24h', 'Last 24h'), value: '24h' },
 	{ text: t('cache_window_7d', 'Last 7d'), value: '7d' },
+	{ text: t('cache_window_15d', 'Last 15d'), value: '15d' },
+	{ text: t('cache_window_21d', 'Last 21d'), value: '21d' },
 	{ text: t('cache_window_30d', 'Last 30d'), value: '30d' },
 ];
 
-const selectedWindow = ref('24h');
+const userStore = useUserStore();
+const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
+
+// Persist the window + refresh interval per-user so a reload restores the same
+// view (like the flush targets below).
+const selectedWindow = useLocalStorage(`cache-window-${userId}`, '24h');
+
+// vueuse's serializer for a null default is identity (stores/returns a raw string),
+// which would break the number|null contract; coerce so the interval round-trips as
+// a real number (empty = off).
+const refreshInterval = useLocalStorage<number | null>(
+	`cache-refresh-${userId}`,
+	null,
+	{
+		serializer: {
+			read: (value) => {
+				return value
+					? Number(value)
+					: null;
+			},
+			write: (value) => {
+				return value === null
+					? ''
+					: String(value);
+			},
+		},
+	},
+);
 
 // Bumped per load; a superseded window's late response can't clobber a newer one.
 let loadToken = 0;
@@ -89,6 +133,10 @@ let loadToken = 0;
 // Drawer version of loadToken: a per-open token so a late /entry response (even a
 // same-key reopen) can't overwrite a newer open; a close discards it entirely.
 let entryToken = 0;
+
+// Chart's own token: loadTimeseries fires from load() (per window/refresh) and from
+// saveTtl(); a superseded fetch can't clobber the chart with out-of-order buckets.
+let timeseriesToken = 0;
 
 // Runtime collection state (Redis-backed). `configured` is the env opt-in: when
 // false the toggle is hidden, since the flag can only narrow, never widen it.
@@ -154,7 +202,7 @@ const detailFields = computed(() => {
 		{ label: t('user_label', 'User'), value: userOf(entry.user) },
 		{ label: t('query', 'Query'), value: formatQuery(entry.query) },
 		{ label: t('url', 'URL'), value: entry.url || '—' },
-		{ label: t('size', 'Size'), value: formatSize(entry.size) },
+		{ label: t('size', 'Size'), value: formatFilesize(entry.size) },
 		{ label: t('hits', 'Hits'), value: String(entry.hits) },
 		{ label: t('compute_miss', 'Compute (miss)'), value: msLabel(entry.fillMs) },
 		{ label: t('serve_hit', 'Serve (hit avg)'), value: msLabel(entry.hitMs) },
@@ -233,8 +281,8 @@ const redisFields = computed(() => {
 			? Math.round((sizes.compressed / sizes.uncompressed) * 100)
 			: 0;
 
-		const packed = formatSize(sizes.compressed);
-		const raw = formatSize(sizes.uncompressed);
+		const packed = formatFilesize(sizes.compressed);
+		const raw = formatFilesize(sizes.uncompressed);
 
 		rows.push({
 			label: t('size', 'Size'),
@@ -416,7 +464,6 @@ async function evictPath(path: string) {
 }
 
 const settingsStore = useSettingsStore();
-const userStore = useUserStore();
 
 // The persisted global TTL. `ttlDraft` edits the input; saving PATCHes
 // directus_settings.cache_ttl, which the API broadcasts so every node's live
@@ -459,8 +506,6 @@ const flushTargetOptions = [
 	{ text: t('cache_flush_locks', 'Locks'), value: 'locks' },
 ];
 
-const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
-
 // The flush target subset is a pure UI preference → per-user localStorage, so
 // chained purges keep the last selection without re-picking it each time.
 const flushTargets = useLocalStorage<CacheFlushTarget[]>(
@@ -493,29 +538,7 @@ async function flush() {
 	}
 }
 
-interface TimeseriesBucket {
-	t: number;
-	hits: number;
-	misses: number;
-	anomalies: number;
-	ttlMs: number | null;
-}
-
-interface ConfigMarker {
-	time: number;
-	kind: 'ttl_change' | 'flush';
-	detail: string | null;
-}
-
-interface TimeseriesData {
-	buckets: TimeseriesBucket[];
-	markers: ConfigMarker[];
-	// The TTL in force server-side (override, else env default) — shown as the TTL
-	// input's placeholder so an empty field reveals what it inherits.
-	effectiveTtl: string | null;
-}
-
-const timeseries = ref<TimeseriesData>({
+const timeseries = ref<CacheTimeseries>({
 	buckets: [],
 	markers: [],
 	effectiveTtl: null,
@@ -539,12 +562,109 @@ const totalMisses = computed(() => {
 	return timeseries.value.buckets.reduce((sum, b) => sum + b.misses, 0);
 });
 
+const totalFills = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.fills, 0);
+});
+
+// Median of the per-bucket p50s over the window — a single central response-time
+// number for the summary, formatted or an em-dash when nothing was sampled.
+function medianMs(values: (number | null)[]): string {
+	const nums = values.filter((v): v is number => v != null).sort((a, b) => a - b);
+
+	if (nums.length === 0) {
+		return '—';
+	}
+
+	const mid = Math.floor(nums.length / 2);
+
+	const median = nums.length % 2 === 0
+		? (nums[mid - 1]! + nums[mid]!) / 2
+		: nums[mid]!;
+
+	return `${Math.round(median)}ms`;
+}
+
+const medianResponse = computed(() => {
+	return medianMs(timeseries.value.buckets.map((b) => b.bothP50));
+});
+
+const medianMiss = computed(() => {
+	return medianMs(timeseries.value.buckets.map((b) => b.missP50));
+});
+
+const medianHit = computed(() => {
+	return medianMs(timeseries.value.buckets.map((b) => b.hitP50));
+});
+
 const totalAnomalies = computed(() => {
 	return searchedAnomalies.value.reduce((sum, a) => sum + a.count, 0);
 });
 
 const chartEl = ref<HTMLElement | null>(null);
 let chart: ApexCharts | null = null;
+
+const latencyChartEl = ref<HTMLElement | null>(null);
+let latencyChart: ApexCharts | null = null;
+
+// Legend visibility persisted per chart, so a hidden/shown series survives a reload
+// and the per-second refresh. Latency defaults to the p50 medians (p95 bands hidden
+// until the user opts in via the legend).
+const countsHiddenSeries = useLocalStorage<string[]>(
+	`cache-counts-hidden-${userId}`,
+	[],
+);
+
+const latencyHiddenSeries = useLocalStorage<string[]>(
+	`cache-latency-hidden-${userId}`,
+	latencyLines()
+		.filter((line) => line.dash !== 0)
+		.map((line) => line.name),
+);
+
+function toggleHiddenSeries(store: Ref<string[]>, name: string) {
+	store.value = store.value.includes(name)
+		? store.value.filter((entry) => entry !== name)
+		: [...store.value, name];
+}
+
+// Reassert stored visibility after each (re)render — apex resets legend toggles on
+// updateOptions, so this re-hides on every refresh and on first paint.
+function applyHiddenSeries(instance: ApexCharts | null, hidden: string[]) {
+	if (!instance) {
+		return;
+	}
+
+	// apex resolves its render/updateOptions promise before the internal series
+	// registry (`w.globals.seriesNames`) is populated — reliably so in a production
+	// build — and hideSeries then derefs a null legend node. Wait a frame for the
+	// series to register before hiding, so the toggle actually lands.
+	const seriesReady = () => {
+		const names = (instance as ApexCharts & {
+			w?: { globals?: { seriesNames?: string[] } };
+		}).w?.globals?.seriesNames;
+
+		return Array.isArray(names) && names.length > 0;
+	};
+
+	const hide = (tries: number) => {
+		if (!seriesReady() && tries > 0) {
+			requestAnimationFrame(() => hide(tries - 1));
+			return;
+		}
+
+		for (const name of hidden) {
+			try {
+				instance.hideSeries(name);
+			}
+			catch {
+				// A series with no samples in the window isn't rendered; apex's
+				// hideSeries then derefs a null node. Nothing to hide — skip it.
+			}
+		}
+	};
+
+	hide(12);
+}
 
 // Show the chart once there's anything to plot — sample counts or a config marker —
 // so a stats-off page with no markers doesn't render an empty axis.
@@ -553,11 +673,24 @@ const hasTimeseries = computed(() => {
 		|| timeseries.value.buckets.some((b) => b.hits || b.misses || b.anomalies);
 });
 
+// The latency chart appears only once a bucket carries a percentile sample.
+const hasLatency = computed(() => {
+	return timeseries.value.buckets.some((b) => {
+		return typeof b.hitP50 === 'number' || typeof b.missP50 === 'number';
+	});
+});
+
 async function loadTimeseries() {
+	const token = ++timeseriesToken;
+
 	try {
 		const response = await api.get('/utils/cache/timeseries', {
 			params: { window: selectedWindow.value, buckets: 60 },
 		});
+
+		if (token !== timeseriesToken) {
+			return;
+		}
 
 		// Normalise so buckets/markers are always arrays — the chart's series() and
 		// hasTimeseries read them directly and must never see an undefined.
@@ -574,6 +707,10 @@ async function loadTimeseries() {
 		};
 	}
 	catch {
+		if (token !== timeseriesToken) {
+			return;
+		}
+
 		timeseries.value = { buckets: [], markers: [], effectiveTtl: null };
 	}
 }
@@ -589,9 +726,66 @@ function themeVar(name: string, fallback: string): string {
 function chartConfig(): ApexOptions {
 	const buckets = timeseries.value.buckets;
 
-	function series(pick: (b: TimeseriesBucket) => number | null) {
+	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
 		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
 	}
+
+	// Single source of truth for each plotted metric: name, unit and line style
+	// travel together so the tooltip, both y-axes and the stroke can't drift out
+	// of series order (apexcharts indexes formatters by positional seriesIndex).
+	const metrics: {
+		name: string;
+		unit: 'count' | 'seconds';
+		curve: 'straight' | 'stepline';
+		color: string;
+		pick: (b: CacheTimeseriesBucket) => number | null;
+	}[] = [
+		{
+			name: t('hits', 'Hits'),
+			unit: 'count',
+			curve: 'straight',
+			color: themeVar('--theme--success', '#2ecda7'),
+			pick: (b) => b.hits,
+		},
+		{
+			name: t('cache_misses', 'Misses'),
+			unit: 'count',
+			curve: 'straight',
+			color: themeVar('--theme--warning', '#ffa439'),
+			pick: (b) => b.misses,
+		},
+		{
+			name: t('cache_fills', 'Fills'),
+			unit: 'count',
+			curve: 'straight',
+			color: themeVar('--theme--secondary', '#3399ff'),
+			pick: (b) => b.fills,
+		},
+		{
+			name: t('cache_anomalies', 'Anomalies'),
+			unit: 'count',
+			curve: 'straight',
+			color: themeVar('--theme--danger', '#e35169'),
+			pick: (b) => b.anomalies,
+		},
+		{
+			name: t('ttl', 'TTL'),
+			unit: 'seconds',
+			curve: 'stepline',
+			color: themeVar('--theme--primary', '#6644ff'),
+			pick: (b) => {
+				return b.ttlMs === null
+					? null
+					: Math.round(b.ttlMs / 1000);
+			},
+		},
+	];
+
+	const countNames = metrics.filter((m) => m.unit === 'count').map((m) => m.name);
+
+	const secondsNames = metrics
+		.filter((m) => m.unit === 'seconds')
+		.map((m) => m.name);
 
 	return {
 		chart: {
@@ -600,50 +794,80 @@ function chartConfig(): ApexOptions {
 			toolbar: { show: false },
 			animations: { enabled: false },
 			fontFamily: 'inherit',
-		},
-		colors: [
-			themeVar('--theme--success', '#2ecda7'),
-			themeVar('--theme--warning', '#ffa439'),
-			themeVar('--theme--danger', '#e35169'),
-			themeVar('--theme--primary', '#6644ff'),
-		],
-		stroke: { width: 2, curve: ['smooth', 'smooth', 'smooth', 'stepline'] },
-		legend: { show: true, position: 'top' },
-		dataLabels: { enabled: false },
-		series: [
-			{ name: t('hits', 'Hits'), data: series((b) => b.hits) },
-			{ name: t('cache_misses', 'Misses'), data: series((b) => b.misses) },
-			{ name: t('cache_anomalies', 'Anomalies'), data: series((b) => b.anomalies) },
-			{
-				name: t('ttl', 'TTL'),
-				data: series((b) => {
-					return b.ttlMs === null
-						? null
-						: Math.round(b.ttlMs / 1000);
-				}),
+			events: {
+				legendClick: (_ctx: unknown, index: number) => {
+					toggleHiddenSeries(countsHiddenSeries, metrics[index]!.name);
+				},
 			},
-		],
+		},
+		colors: metrics.map((m) => m.color),
+		stroke: { width: 2, curve: metrics.map((m) => m.curve) },
+		legend: {
+			show: true,
+			position: 'top',
+			horizontalAlign: 'left',
+			itemMargin: { horizontal: 12, vertical: 0 },
+		},
+		dataLabels: { enabled: false },
+		series: metrics.map((m) => {
+			const data = series(m.pick);
+
+			return {
+				name: m.name,
+				data: m.unit === 'seconds'
+					? carryForward(data)
+					: data,
+			};
+		}),
 		xaxis: { type: 'datetime' },
 		yaxis: [
 			{
-				// Bind all three count series to this axis; without an explicit
+				// Bind every count series to this axis; without an explicit
 				// seriesName map apexcharts indexes a missing y-axis per series
 				// (misses/anomalies) and crashes on render.
-				seriesName: [
-					t('hits', 'Hits'),
-					t('cache_misses', 'Misses'),
-					t('cache_anomalies', 'Anomalies'),
-				],
+				seriesName: countNames,
 				title: { text: t('cache_count', 'Count') },
 				labels: { formatter: (v: number) => String(Math.round(v)) },
 			},
 			{
 				opposite: true,
-				seriesName: t('ttl', 'TTL'),
-				title: { text: t('cache_ttl_seconds', 'TTL (s)') },
-				labels: { formatter: (v: number) => `${Math.round(v)}s` },
+				seriesName: secondsNames,
+				title: { text: t('cache_ttl_label', 'TTL') },
+				labels: { formatter: (v: number) => formatDuration(v) },
 			},
 		],
+		tooltip: {
+			// Custom compact tooltip: apex's shared layout right-aligns each value to
+			// the widest row (TTL 3600s), which spreads the short rows and pushes their
+			// marker out. Render one tight "dot name: value" line per metric instead,
+			// each value formatted by the metric's own unit.
+			custom: ({ series, dataPointIndex, w }) => {
+				const ts = w.globals.seriesX[0]?.[dataPointIndex];
+
+				const head = ts
+					? new Date(ts).toLocaleString()
+					: '';
+
+				const rows = metrics.map((metric, index) => {
+					const raw = series[index]?.[dataPointIndex];
+					const shown = formatTooltipValue(raw, metric.unit);
+
+					return [
+						`<div class="cache-tt-row">`,
+						`<span class="cache-tt-dot" style="background:${metric.color}"></span>`,
+						`${metric.name}: ${shown}`,
+						`</div>`,
+					].join('');
+				}).join('');
+
+				return [
+					`<div class="cache-tt">`,
+					`<div class="cache-tt-head">${head}</div>`,
+					rows,
+					`</div>`,
+				].join('');
+			},
+		},
 		annotations: {
 			xaxis: timeseries.value.markers.map((m) => {
 				const flush = m.kind === 'flush';
@@ -671,18 +895,217 @@ function renderChart() {
 	}
 
 	if (chart) {
-		void chart.updateOptions(chartConfig(), true, false);
+		void chart.updateOptions(chartConfig(), true, false).then(() => {
+			applyHiddenSeries(chart, countsHiddenSeries.value);
+		});
+
 		return;
 	}
 
 	chart = new ApexCharts(chartEl.value, chartConfig());
-	void chart.render();
+
+	void chart.render().then(() => {
+		applyHiddenSeries(chart, countsHiddenSeries.value);
+	});
+}
+
+type LatencyLine = {
+	name: string;
+	color: string;
+	dash: number;
+	pick: (b: CacheTimeseriesBucket) => number | null;
+};
+
+// Colour by category: hit serve, the miss slices (fill = cached, anomaly = flagged,
+// miss = all misses pooled), both = hits + misses. p50 solid (dash 0), p95 dashed
+// (dash 4); the p95 bands start hidden — see renderLatencyChart.
+function latencyLines(): LatencyLine[] {
+	const hitColor = themeVar('--theme--success', '#2ecda7');
+	const fillColor = themeVar('--theme--secondary', '#3399ff');
+	const anomalyColor = themeVar('--theme--danger', '#e35169');
+	const missColor = themeVar('--theme--warning', '#ffa439');
+	const bothColor = themeVar('--theme--foreground-subdued', '#a2b5cd');
+
+	const categories: {
+		id: string;
+		label: string;
+		color: string;
+		p50: (b: CacheTimeseriesBucket) => number | null;
+		p95: (b: CacheTimeseriesBucket) => number | null;
+	}[] = [
+		{
+			id: 'hit',
+			label: t('cache_lat_hit', 'Hits'),
+			color: hitColor,
+			p50: (b) => b.hitP50,
+			p95: (b) => b.hitP95,
+		},
+		{
+			id: 'fill',
+			label: t('cache_lat_fill', 'Fills'),
+			color: fillColor,
+			p50: (b) => b.fillP50,
+			p95: (b) => b.fillP95,
+		},
+		{
+			id: 'anomaly',
+			label: t('cache_lat_anomaly', 'Anomalies'),
+			color: anomalyColor,
+			p50: (b) => b.anomalyP50,
+			p95: (b) => b.anomalyP95,
+		},
+		{
+			id: 'miss',
+			label: t('cache_lat_miss', 'Misses'),
+			color: missColor,
+			p50: (b) => b.missP50,
+			p95: (b) => b.missP95,
+		},
+		{
+			id: 'both',
+			label: t('cache_lat_response', 'Response'),
+			color: bothColor,
+			p50: (b) => b.bothP50,
+			p95: (b) => b.bothP95,
+		},
+	];
+
+	return categories.flatMap((c): LatencyLine[] => {
+		return [
+			{ name: `${c.label} p50`, color: c.color, dash: 0, pick: c.p50 },
+			{ name: `${c.label} p95`, color: c.color, dash: 4, pick: c.p95 },
+		];
+	});
+}
+
+function latencyChartConfig(): ApexOptions {
+	const buckets = timeseries.value.buckets;
+
+	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
+		return buckets.map((b): [number, number] => [b.t, pick(b) ?? 0]);
+	}
+
+	// Drop series with no sample in the window — an all-null line adds a legend
+	// entry + a "—" tooltip row for data that isn't there.
+	const lines = latencyLines().filter((line) => {
+		return buckets.some((bucket) => line.pick(bucket) != null);
+	});
+
+	// A marker only where a bucket has a real sample — never on the 0-fill that
+	// keeps the line continuous through idle gaps.
+	const markerPoints = lines.flatMap((line, seriesIndex) => {
+		return buckets.flatMap((bucket, dataPointIndex) => {
+			return line.pick(bucket) == null
+				? []
+				: [{ seriesIndex, dataPointIndex, size: 3, fillColor: line.color }];
+		});
+	});
+
+	return {
+		chart: {
+			type: 'line',
+			height: 240,
+			toolbar: { show: false },
+			animations: { enabled: false },
+			fontFamily: 'inherit',
+			events: {
+				legendClick: (_ctx: unknown, index: number) => {
+					toggleHiddenSeries(latencyHiddenSeries, lines[index]!.name);
+				},
+			},
+		},
+		colors: lines.map((l) => l.color),
+		stroke: { width: 2, curve: 'straight', dashArray: lines.map((l) => l.dash) },
+		// Continuous line via 0-fill (idle gaps drop to zero); markers only on the
+		// real samples, so the zero-fill points carry no dot.
+		markers: { size: 0, discrete: markerPoints },
+		legend: {
+			show: true,
+			position: 'top',
+			horizontalAlign: 'left',
+			itemMargin: { horizontal: 12, vertical: 0 },
+		},
+		dataLabels: { enabled: false },
+		// 0-fill keeps the line continuous; an idle bucket drops to zero rather than
+		// interpolating a fake value between distant real samples.
+		series: lines.map((l) => {
+			return { name: l.name, data: series(l.pick) };
+		}),
+		xaxis: { type: 'datetime' },
+		yaxis: {
+			min: 0,
+			title: { text: t('cache_lat_axis', 'Response (ms)') },
+			labels: { formatter: (v: number) => `${Math.round(v)}ms` },
+		},
+		tooltip: {
+			custom: ({ dataPointIndex }) => {
+				const bucket = buckets[dataPointIndex];
+
+				const head = bucket
+					? new Date(bucket.t).toLocaleString()
+					: '';
+
+				const rows = lines.map((line) => {
+					const raw = bucket
+						? line.pick(bucket)
+						: null;
+
+					// Skip a series with no sample at this bucket — no "—" clutter.
+					if (raw == null) {
+						return '';
+					}
+
+					return [
+						`<div class="cache-tt-row">`,
+						`<span class="cache-tt-dot" style="background:${line.color}"></span>`,
+						`${line.name}: ${Math.round(raw)}ms`,
+						`</div>`,
+					].join('');
+				}).join('');
+
+				return [
+					`<div class="cache-tt">`,
+					`<div class="cache-tt-head">${head}</div>`,
+					rows,
+					`</div>`,
+				].join('');
+			},
+		},
+	};
 }
 
 // Depend on chartEl too, not just the data: the chart's v-show container mounts a
 // tick after the route transition settles, so a data-only watcher fires while the
 // ref is still null. Re-firing when chartEl binds is what paints the first load.
 watch([timeseries, chartEl], renderChart, { deep: true, flush: 'post' });
+
+function renderLatencyChart() {
+	if (!latencyChartEl.value) {
+		return;
+	}
+
+	if (latencyChart) {
+		void latencyChart
+			.updateOptions(latencyChartConfig(), true, false)
+			.then(() => {
+				applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
+			});
+
+		return;
+	}
+
+	latencyChart = new ApexCharts(latencyChartEl.value, latencyChartConfig());
+
+	void latencyChart.render().then(() => {
+		applyHiddenSeries(latencyChart, latencyHiddenSeries.value);
+	});
+}
+
+watch(
+	[timeseries, latencyChartEl],
+	renderLatencyChart,
+	{ deep: true, flush: 'post' },
+);
 
 function toggle(path: string) {
 	expanded.value[path] = !expanded.value[path];
@@ -834,6 +1257,8 @@ onMounted(() => {
 onUnmounted(() => {
 	chart?.destroy();
 	chart = null;
+	latencyChart?.destroy();
+	latencyChart = null;
 });
 </script>
 
@@ -895,14 +1320,60 @@ onUnmounted(() => {
 		</template>
 
 		<template #sidebar>
-			<auto-refresh v-model="refreshInterval" @refresh="load" />
+			<auto-refresh
+				v-model="refreshInterval"
+				:intervals="[null, 1, 3, 5, 10, 30, 60, 300]"
+				@refresh="load"
+			/>
 		</template>
 
 		<div class="cache-page">
 			<v-notice v-if="error" type="danger">{{ error }}</v-notice>
 
 			<div v-show="hasTimeseries" class="timeseries">
+				<div class="summary">
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
+						<span class="label">{{ t('cache_misses', 'Misses') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalHits) }}</span>
+						<span class="label">{{ t('cache_hits', 'Hits') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalFills) }}</span>
+						<span class="label">{{ t('cache_fills', 'Fills') }}</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
+						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
+					</div>
+				</div>
 				<div ref="chartEl" class="chart" />
+			</div>
+
+			<div v-show="hasLatency" class="timeseries">
+				<div class="summary">
+					<div class="metric">
+						<span class="value">{{ medianResponse }}</span>
+						<span class="label">
+							{{ t('cache_lat_median_response', 'Median response') }}
+						</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ medianMiss }}</span>
+						<span class="label">
+							{{ t('cache_lat_median_miss', 'Median miss') }}
+						</span>
+					</div>
+					<div class="metric">
+						<span class="value">{{ medianHit }}</span>
+						<span class="label">
+							{{ t('cache_lat_median_hit', 'Median hit') }}
+						</span>
+					</div>
+				</div>
+				<div ref="latencyChartEl" class="chart" />
 			</div>
 
 			<div style="display: flex; justify-content:space-between;">
@@ -914,18 +1385,6 @@ onUnmounted(() => {
 					<div class="metric">
 						<span class="value">{{ abbreviateNumber(totalEntries) }}</span>
 						<span class="label">{{ t('cached_entries', 'Cached entries') }}</span>
-					</div>
-					<div class="metric">
-						<span class="value">{{ abbreviateNumber(totalMisses) }}</span>
-						<span class="label">{{ t('cache_misses', 'Misses') }}</span>
-					</div>
-					<div class="metric">
-						<span class="value">{{ abbreviateNumber(totalHits) }}</span>
-						<span class="label">{{ t('cache_hits', 'Hits') }}</span>
-					</div>
-					<div class="metric">
-						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
-						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 					</div>
 				</div>
 
@@ -1019,7 +1478,7 @@ onUnmounted(() => {
 							<span class="stat hits">
 								{{ group.totalHits }} {{ t('hits', 'hits') }}
 							</span>
-							<span class="stat">{{ formatSize(group.totalSize) }}</span>
+							<span class="stat">{{ formatFilesize(group.totalSize) }}</span>
 							<span v-if="group.anomalyCount" class="stat anomaly-count">
 								{{ group.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
 							</span>
@@ -1055,7 +1514,7 @@ onUnmounted(() => {
 									<span class="stat hits">
 										{{ q.totalHits }} {{ t('hits', 'hits') }}
 									</span>
-									<span class="stat">{{ formatSize(q.totalSize) }}</span>
+									<span class="stat">{{ formatFilesize(q.totalSize) }}</span>
 									<span v-if="q.anomalyCount" class="stat anomaly-count">
 										{{ q.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
 									</span>
@@ -1122,7 +1581,7 @@ onUnmounted(() => {
 												<td class="num">
 													{{ expiryOf(entry.expiresAt) }}
 												</td>
-												<td class="num">{{ formatSize(entry.size) }}</td>
+												<td class="num">{{ formatFilesize(entry.size) }}</td>
 												<td class="key" :title="entry.redisKey">
 													{{ shortKey(entry.redisKey) }}
 													<span
@@ -1605,6 +2064,39 @@ table.entries .entry-row {
 
 .timeseries {
 	margin-block-end: 24px;
+}
+
+/* The chart has two y-axes (counts + TTL seconds), so ApexCharts splits the legend
+   into a per-axis group and stacks each one vertically. Override its runtime-built
+   markup (hence :deep) so the four series read as a single horizontal row. */
+.chart :deep(.apexcharts-legend-group-vertical) {
+	flex-direction: row;
+}
+
+/* Compact custom tooltip (see chartConfig): one tight row per metric, no spread. */
+.chart :deep(.cache-tt) {
+	padding: 6px 10px;
+	font-size: 12px;
+	line-height: 1.6;
+}
+
+.chart :deep(.cache-tt-head) {
+	font-weight: 600;
+	margin-block-end: 2px;
+}
+
+.chart :deep(.cache-tt-row) {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	white-space: nowrap;
+}
+
+.chart :deep(.cache-tt-dot) {
+	inline-size: 8px;
+	block-size: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
 }
 
 /* Scoped under .cache-toolbar to out-specify v-input's own `inline-size: max-content`
