@@ -119,3 +119,21 @@ data:
     icon: memory
     note: $t:directus_collection.directus_cache_descriptors
     accountability: null
+
+  - collection: directus_cache_events
+    hidden: true
+    icon: memory
+    note: $t:directus_collection.directus_cache_events
+    accountability: null
+
+  - collection: directus_cache_anomalies
+    hidden: true
+    icon: memory
+    note: $t:directus_collection.directus_cache_anomalies
+    accountability: null
+
+  - collection: directus_cache_config_events
+    hidden: true
+    icon: memory
+    note: $t:directus_collection.directus_cache_config_events
+    accountability: null

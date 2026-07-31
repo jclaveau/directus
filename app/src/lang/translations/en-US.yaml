@@ -1277,6 +1277,9 @@ directus_collection:
   directus_access: Policy attachments
   directus_activity: Accountability logs for all events
   directus_cache_descriptors: Per-key cache-entry descriptors (telemetry)
+  directus_cache_events: Cache hit/miss/latency events (telemetry)
+  directus_cache_anomalies: Uncacheable / not-cached anomalies (telemetry)
+  directus_cache_config_events: Cache TTL-change and flush events (telemetry)
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module
