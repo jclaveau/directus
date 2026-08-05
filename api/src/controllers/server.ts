@@ -2,6 +2,7 @@ import { RouteNotFoundError } from '@directus/errors';
 import { format } from 'date-fns';
 import { Router } from 'express';
 import { respond } from '../middleware/respond.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache.js';
 import { ServerService } from '../services/server.js';
 import { SpecificationService } from '../services/specifications.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -61,9 +62,14 @@ router.get(
 
 		// serverInfo reads directus_settings (+ a public_background files join) plus
 		// env/version constants. Scoped-purge mode can't tag a service-layer read, and
-		// no write event covers the env fields, so opt out explicitly rather than let
-		// respond flag it a `missing_scope` anomaly the operator can never resolve.
-		res.locals['cache'] = false;
+		// no write event covers the env fields, so opt out rather than let respond flag
+		// it a `missing_scope` anomaly the operator can never resolve. Full-purge mode
+		// has no such problem — a mutation clears the whole cache, so nothing can go
+		// stale — and opting out there would drop a cacheable response for nothing.
+		if (scopedCachePurgeEnabled()) {
+			res.locals['cache'] = false;
+		}
+
 		return next();
 	}),
 	respond,
