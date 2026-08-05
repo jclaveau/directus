@@ -156,9 +156,15 @@ describe('normalizeFilter', () => {
 		});
 	});
 
-	test('keeps multiple operator keys on same field together', () => {
+	test('splits multiple operator keys on the same field', () => {
+		// They cannot share one part: `getOperation` reads `Object.keys(value)[0]` and
+		// returns that operator alone, so `{ _gte, _lte }` compiled to `field >= 1` with
+		// the `_lte` silently dropped. This test previously asserted the merged shape.
 		const filter = { field: { _gte: 1, _lte: 10 } };
-		expect(normalizeFilter(filter)).toEqual(filter);
+
+		expect(normalizeFilter(filter)).toEqual({
+			_and: [{ field: { _gte: 1 } }, { field: { _lte: 10 } }],
+		});
 	});
 
 	test('handles _some as relational key', () => {
