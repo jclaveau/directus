@@ -96,16 +96,29 @@ function packIntoBuckets(groups: string[][], count: number): string[][][] {
 	return buckets.map((bucket) => bucket.groups);
 }
 
-// Files that need a runner nobody else has touched. `m2o-max-batch-mutation` opens
-// websockets against the SHARED default instance, and it only ever passed on a shard
-// whose default server had served the `before` chain and nothing else: with o2m
-// (2642 tests) and the cache-scope suites ahead of it on the same runner, the file
-// went 35s → 88s and its websockets stopped reaching OPEN inside the 20s budget.
-// Giving it its own spawned Directus was tried (99e7b4f3e) and made it worse — all
-// three pkTypes failed where two had — so the shared instance is not the whole
-// story, and this reserves the quiet shard the passing configuration had instead.
-// #277 first flagged this file as starving under pool load.
-const ISOLATED_AFTER = ['/tests/db/routes/items/m2o-max-batch-mutation.test.ts'];
+// The websocket suites, kept together on a runner nobody else has touched and in
+// this order. `m2o-max-batch-mutation` opens websockets against the SHARED default
+// instance and is the fragile one (#277 flagged it starving under pool load); it has
+// only ever passed in CI when these ran ahead of it on the same shard.
+//
+// What has been ruled out, each by experiment rather than argument: a teardown race
+// (the killed server exits in 1.0s), the neighbouring file (it failed with the
+// "known-good" neighbour directly before it), leaked sockets (the gql client is
+// disposed), parallel load on the shard (it still failed with the runner to itself),
+// istanbul instrumentation, and host resolution (the URL is explicit IPv4). It does
+// not reproduce locally at all — 319/319 pass with both a clean and an instrumented
+// build — so the trigger is something about the runner, and this restores the only
+// arrangement observed to work there.
+const ISOLATED_AFTER = [
+	'/tests/db/websocket/auth-public-connects.test.ts',
+	'/tests/db/websocket/auth-public-pings.test.ts',
+	'/tests/db/websocket/auth-handshake-connects.test.ts',
+	'/tests/db/websocket/auth-handshake-pings.test.ts',
+	'/tests/db/websocket/auth-strict-connects.test.ts',
+	'/tests/db/websocket/auth-strict-pings.test.ts',
+	'/tests/db/websocket/general.test.ts',
+	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts',
+];
 
 /**
  * Files this shard (1-based `index` of `count`) should run. Every shard runs all
