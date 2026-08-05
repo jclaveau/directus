@@ -12,6 +12,7 @@ import {
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	listCacheGroupLatencies,
 	readCacheTombstone,
 	recordCacheConfigEvent,
 	setCacheStatsEnabled,
@@ -162,6 +163,13 @@ describe('Services / Utils', () => {
 				as not being an admin`,
 			);
 		});
+
+		it('getCacheGroupLatencies rejects a non-admin user', async () => {
+			await expect(nonAdminService().getCacheGroupLatencies()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect cache latencies
+				as not being an admin`,
+			);
+		});
 	});
 
 	describe('cache inspection (admin)', () => {
@@ -184,6 +192,16 @@ describe('Services / Utils', () => {
 			vi.mocked(listCacheAnomalies).mockResolvedValue(rows as any);
 
 			await expect(adminService().getCacheAnomalies()).resolves.toBe(rows);
+		});
+
+		it('getCacheGroupLatencies returns the per-node percentile rows', async () => {
+			const rows = [{ path: '/items/a', method: null, query: null }];
+			vi.mocked(listCacheGroupLatencies).mockResolvedValue(rows as any);
+
+			await expect(adminService().getCacheGroupLatencies(3600_000)).resolves
+				.toBe(rows);
+
+			expect(listCacheGroupLatencies).toHaveBeenCalledWith(3600_000);
 		});
 
 		it('evictCacheEntry evicts through the active cache', async () => {

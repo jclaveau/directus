@@ -350,6 +350,164 @@ describe('CachePage', () => {
 		expect(columns[2]!.attributes('data-tooltip')).toContain('p95  —');
 	});
 
+	it('falls back to Response when the stored metric no longer exists', async () => {
+		mockCacheGet(ENTRIES, {
+			latencies: [
+				{
+					path: '/items/articles',
+					method: null,
+					query: null,
+					response: { p50: 20, p95: 90, p99: 400 },
+					miss: { p50: 110, p95: 240, p99: 900 },
+					anomaly: { p50: null, p95: null, p99: null },
+					fill: { p50: 120, p95: 250, p99: 910 },
+					hit: { p50: 2, p95: 9, p99: 30 },
+				},
+			],
+		});
+
+		// A preference written by a build that named its metrics differently.
+		localStorage.setItem('cache-tree-latency-metric-anon', 'p50-of-something');
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// Renders rather than reading percentiles off an undefined metric.
+		const columns = wrapper.find('.endpoint-header').findAll('.stat.funnel');
+		expect(columns).toHaveLength(5);
+		expect(columns[0]!.attributes('data-tooltip')).toContain('Response');
+
+		localStorage.removeItem('cache-tree-latency-metric-anon');
+	});
+
+	it('drops a sort field the metric change stops offering', async () => {
+		mockCacheGet(ENTRIES);
+		localStorage.setItem('cache-tree-sort-field-anon', 'responseP95');
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const metricSelect = wrapper
+			.findAllComponents(VSelect)
+			.find((select) => select.classes().includes('tree-metric-select'));
+
+		metricSelect!.vm.$emit('update:modelValue', 'miss');
+		await flushPromises();
+
+		// `responseP95` is gone from the list, so ranking by it would be invisible.
+		expect(localStorage.getItem('cache-tree-sort-field-anon')).toBe('hits');
+
+		localStorage.removeItem('cache-tree-sort-field-anon');
+		localStorage.removeItem('cache-tree-latency-metric-anon');
+	});
+
+	it('reads a median of a second or more as a duration', async () => {
+		mockCacheGet(ENTRIES, {
+			latencies: [
+				{
+					path: '/items/articles',
+					method: null,
+					query: null,
+					response: { p50: 90_000, p95: 90_000, p99: 90_000 },
+					miss: { p50: null, p95: null, p99: null },
+					anomaly: { p50: null, p95: null, p99: null },
+					fill: { p50: null, p95: null, p99: null },
+					hit: { p50: null, p95: null, p99: null },
+				},
+			],
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const response = wrapper.find('.endpoint-header').find('.stat.funnel.response');
+		expect(response.find('.duration').text()).toBe('1m 30s');
+		// The exact figure stays in the title, which is never abbreviated.
+		expect(response.attributes('data-tooltip')).toContain('90000 ms');
+	});
+
+	it('toggles a latency series from the page legend and persists it', async () => {
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					fills: 1,
+					anomalies: 0,
+					ttlMs: null,
+					hitP50: 2,
+					missP50: 4,
+					bothP50: 3,
+				}],
+				markers: [],
+			},
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const hitsP50 = wrapper
+			.findAll('.cache-chart-legend-row')
+			.find((row) => row.text().includes('p50'))!
+			.findAll('.cache-chart-legend-entry')
+			.find((entry) => entry.text().includes('Hits'))!;
+
+		expect(hitsP50.classes()).not.toContain('is-muted');
+
+		await hitsP50.trigger('click');
+		await flushPromises();
+
+		expect(hitsP50.classes()).toContain('is-muted');
+		expect(chartMock.hidden).toContain('Hits p50');
+
+		expect(JSON.parse(localStorage.getItem('cache-latency-hidden-anon') ?? '[]'))
+			.toContain('Hits p50');
+
+		// Clicking again brings it back, and the store forgets it.
+		await hitsP50.trigger('click');
+		await flushPromises();
+
+		expect(hitsP50.classes()).not.toContain('is-muted');
+
+		expect(JSON.parse(localStorage.getItem('cache-latency-hidden-anon') ?? '[]'))
+			.not.toContain('Hits p50');
+
+		localStorage.removeItem('cache-latency-hidden-anon');
+	});
+
+	it('sorts the entries table by a clicked column', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		await wrapper.find('.endpoint-header').trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+
+		const hitsHeader = wrapper
+			.findAll('.entries thead th')
+			.find((th) => {
+				return th.text()
+					.toLowerCase()
+					.includes('hits');
+			})!;
+
+		// First click sorts ascending.
+		await hitsHeader.trigger('click');
+		expect(hitsHeader.text()).toContain('↑');
+
+		// Re-clicking flips it rather than starting over.
+		await hitsHeader.trigger('click');
+		expect(hitsHeader.text()).toContain('↓');
+
+		// A third click clears the column's sort instead of cycling back to
+		// ascending, so the table can return to its natural order.
+		await hitsHeader.trigger('click');
+		expect(hitsHeader.text()).not.toContain('↑');
+		expect(hitsHeader.text()).not.toContain('↓');
+	});
+
 	it('cuts the tree to the slowest band', async () => {
 		const slow = (path: string, p50: number) => {
 			return {
