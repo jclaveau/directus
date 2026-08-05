@@ -13,9 +13,14 @@ permissions:
 jobs:
   blackbox-tests:
     name: Blackbox Tests
-    # `Run Blackbox` runs the pg+sqlite smoke set; `Run Blackbox Full` runs the whole vendor
+    # `Run Blackbox` runs the postgres smoke set; `Run Blackbox Full` runs the whole vendor
     # matrix (and triggers on its own, no need to also add `Run Blackbox`).
+    #
+    # A `ci-dialect-*` branch runs unconditionally: it exists only to exercise the one
+    # dialect it names, and refresh-dialect-ci.yml recreates it on every trunk tip. Keying
+    # that off the branch rather than a label means a recreated PR can't lose its trigger.
     if: >-
+      startsWith(github.head_ref, 'ci-dialect-') ||
       contains(github.event.pull_request.labels.*.name, 'Run Blackbox') ||
       contains(github.event.pull_request.labels.*.name, 'Run Blackbox Full')
     uses: ./.github/workflows/blackbox.yml
