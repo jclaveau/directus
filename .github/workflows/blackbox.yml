@@ -48,7 +48,7 @@ jobs:
       shards: ${{ steps.matrix.outputs.shards }}
       shardCount: ${{ steps.matrix.outputs.shardCount }}
     steps:
-      # Default DB matrix is the pg+sqlite smoke set. The full vendor matrix runs on a
+      # Default DB matrix is the postgres smoke set. The full vendor matrix runs on a
       # push to a trunk branch, or on a PR carrying the `Run Blackbox Full` label (passed in
       # as `inputs.full` by blackbox-pr.yml). Each vendor's db files are split across N shards.
       - name: Select vendor + shard matrix
@@ -59,7 +59,12 @@ jobs:
             # Re-add to the array to support: "mysql","mssql","oracle".
             echo 'vendors=["sqlite3","postgres","maria"]' >> "$GITHUB_OUTPUT"
           else
-            echo 'vendors=["sqlite3","postgres"]' >> "$GITHUB_OUTPUT"
+            # sqlite3 held out of the smoke set: with 8 shards per vendor the two
+            # matrices queue behind each other on the runner pool, and the wait cost
+            # more wall clock than the shards saved. This fork runs on postgres, and
+            # sqlite3 still runs in the full matrix (trunk pushes, `Run Blackbox
+            # Full`). Re-add to the array to put it back on every PR: "sqlite3".
+            echo 'vendors=["postgres"]' >> "$GITHUB_OUTPUT"
           fi
           SHARD_COUNT="${{ inputs.shards || 3 }}"
           echo "shardCount=$SHARD_COUNT" >> "$GITHUB_OUTPUT"
