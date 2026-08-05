@@ -96,6 +96,17 @@ function packIntoBuckets(groups: string[][], count: number): string[][][] {
 	return buckets.map((bucket) => bucket.groups);
 }
 
+// Files that need a runner nobody else has touched. `m2o-max-batch-mutation` opens
+// websockets against the SHARED default instance, and it only ever passed on a shard
+// whose default server had served the `before` chain and nothing else: with o2m
+// (2642 tests) and the cache-scope suites ahead of it on the same runner, the file
+// went 35s → 88s and its websockets stopped reaching OPEN inside the 20s budget.
+// Giving it its own spawned Directus was tried (99e7b4f3e) and made it worse — all
+// three pkTypes failed where two had — so the shared instance is not the whole
+// story, and this reserves the quiet shard the passing configuration had instead.
+// #277 first flagged this file as starving under pool load.
+const ISOLATED_AFTER = ['/tests/db/routes/items/m2o-max-batch-mutation.test.ts'];
+
 /**
  * Files this shard (1-based `index` of `count`) should run. Every shard runs all
  * `before` files (the ordering barrier needs them) and ends with its own share
@@ -133,8 +144,29 @@ export function filesForShard(
 		.filter((file) => !isBefore(file) && !isAfter(file))
 		.map((file) => [file]);
 
-	const packed = packIntoBuckets([...parallel, ...afterGroups], count);
-	const mineFiles = (packed[index - 1] ?? []).flat();
+	// The last shard is reserved for the isolated files and runs no parallel work.
+	const isolate = count > 1 && ISOLATED_AFTER.length > 0;
+
+	const isolated = afterGroups.filter((group) => {
+		return group.some((file) => {
+			return ISOLATED_AFTER.some((entry) => file.endsWith(entry));
+		});
+	});
+
+	const packable = isolate
+		? afterGroups.filter((group) => !isolated.includes(group))
+		: afterGroups;
+
+	const packed = packIntoBuckets(
+		[...parallel, ...packable],
+		isolate
+			? count - 1
+			: count,
+	);
+
+	const mineFiles = isolate && index === count
+		? isolated.flat()
+		: (packed[index - 1] ?? []).flat();
 
 	// The tail goes back into declaration order, so a chain runs in the order it
 	// needs and the barrier indices the sequencer writes line up with it.

@@ -1,4 +1,4 @@
-import config, { getUrl, paths } from '@common/config';
+import config, { getUrl } from '@common/config';
 import { CreateItem, ReadItem } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import {
@@ -8,14 +8,9 @@ import {
 } from '@common/transport';
 import type { PrimaryKeyType } from '@common/types';
 import { PRIMARY_KEY_TYPES, USER } from '@common/variables';
-import { awaitDirectusConnection } from '@utils/await-connection';
-import { sleep } from '@utils/sleep';
-import { ChildProcess, spawn } from 'child_process';
-import getPort from 'get-port';
-import { cloneDeep } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
 	collectionCountries,
 	collectionStates,
@@ -50,50 +45,6 @@ function createState(pkType: PrimaryKeyType) {
 	return item;
 }
 
-// Its own Directus, like the other websocket suites (websocket/general, the auth
-// suites) and unlike the way this file used to run. Riding the shared instance made
-// it hostage to whatever else its shard had already done to that server: once the
-// shard packer started placing heavy item suites alongside it, the file went from
-// 35s to 88s and its websockets stopped reaching OPEN inside the 20s budget — on the
-// second and third pkType, after the first had warmed the damage in.
-const env = cloneDeep(config.envs);
-const directusInstances = {} as { [vendor: string]: ChildProcess };
-
-beforeAll(async () => {
-	const promises = [];
-
-	for (const vendor of vendors) {
-		const newServerPort = await getPort();
-		env[vendor].PORT = String(newServerPort);
-
-		directusInstances[vendor] = spawn('node', [paths.cli, 'start'], {
-			cwd: paths.cwd,
-			env: env[vendor],
-		});
-
-		promises.push(awaitDirectusConnection(newServerPort));
-	}
-
-	await Promise.all(promises);
-}, 180_000);
-
-afterAll(async () => {
-	for (const vendor of vendors) {
-		const server = directusInstances[vendor];
-
-		server?.kill();
-
-		// Wait for the exit, not just for the signal: the next file in the shard's
-		// serial tail starts the moment this one returns.
-		if (server && server.exitCode === null && server.signalCode === null) {
-			await Promise.race([
-				new Promise((resolve) => server.once('exit', resolve)),
-				sleep(10_000).then(() => server.kill('SIGKILL')),
-			]);
-		}
-	}
-});
-
 describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 	const localCollectionCountries = `${collectionCountries}_${pkType}`;
 	const localCollectionStates = `${collectionStates}_${pkType}`;
@@ -119,7 +70,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									states2[i].country_id = createCountry(pkType);
 								}
 
-								const ws = createWebSocketConn(getUrl(vendor, env), {
+								const ws = createWebSocketConn(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -133,7 +84,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									uid: localCollectionStates,
 								});
 
-								const wsGql = createWebSocketGql(getUrl(vendor, env), {
+								const wsGql = createWebSocketGql(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -165,7 +116,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								});
 
 								// Action
-								const response = await request(getUrl(vendor, env))
+								const response = await request(getUrl(vendor))
 									.post(`/items/${localCollectionStates}`)
 									.send(states)
 									.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
@@ -200,7 +151,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 
 								const gqlResponse = await requestGraphQL(
-									getUrl(vendor, env),
+									getUrl(vendor),
 									false,
 									USER.ADMIN.TOKEN,
 									gqlBody,
@@ -336,7 +287,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									states2[i].country_id = createCountry(pkType);
 								}
 
-								const ws = createWebSocketConn(getUrl(vendor, env), {
+								const ws = createWebSocketConn(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -350,7 +301,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									uid: localCollectionStates,
 								});
 
-								const wsGql = createWebSocketGql(getUrl(vendor, env), {
+								const wsGql = createWebSocketGql(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -378,7 +329,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								});
 
 								// Action
-								const response = await request(getUrl(vendor, env))
+								const response = await request(getUrl(vendor))
 									.post(`/items/${localCollectionStates}`)
 									.send(states)
 									.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
@@ -397,7 +348,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 
 								const gqlResponse = await requestGraphQL(
-									getUrl(vendor, env),
+									getUrl(vendor),
 									false,
 									USER.ADMIN.TOKEN,
 									gqlBody,
@@ -505,7 +456,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								}
 
 								// Action
-								const response = await request(getUrl(vendor, env))
+								const response = await request(getUrl(vendor))
 									.patch(`/items/${localCollectionStates}`)
 									.send(states)
 									.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
@@ -524,7 +475,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 
 								const gqlResponse = await requestGraphQL(
-									getUrl(vendor, env),
+									getUrl(vendor),
 									false,
 									USER.ADMIN.TOKEN,
 									gqlBody,
@@ -613,7 +564,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								}
 
 								// Action
-								const response = await request(getUrl(vendor, env))
+								const response = await request(getUrl(vendor))
 									.patch(`/items/${localCollectionStates}`)
 									.send(states)
 									.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
@@ -632,7 +583,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 
 								const gqlResponse = await requestGraphQL(
-									getUrl(vendor, env),
+									getUrl(vendor),
 									false,
 									USER.ADMIN.TOKEN,
 									gqlBody,
@@ -690,7 +641,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									})).id);
 								}
 
-								const ws = createWebSocketConn(getUrl(vendor, env), {
+								const ws = createWebSocketConn(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -704,7 +655,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									uid: localCollectionStates,
 								});
 
-								const wsGql = createWebSocketGql(getUrl(vendor, env), {
+								const wsGql = createWebSocketGql(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -736,7 +687,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								});
 
 								// Action
-								const response = await request(getUrl(vendor, env))
+								const response = await request(getUrl(vendor))
 									.patch(`/items/${localCollectionStates}`)
 									.send({ keys: stateIDs, data: { country_id: newCountry } })
 									.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
@@ -772,7 +723,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 
 								const gqlResponse = await requestGraphQL(
-									getUrl(vendor, env),
+									getUrl(vendor),
 									false,
 									USER.ADMIN.TOKEN,
 									gqlBody,
@@ -917,7 +868,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									})).id);
 								}
 
-								const ws = createWebSocketConn(getUrl(vendor, env), {
+								const ws = createWebSocketConn(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -931,7 +882,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 									uid: localCollectionStates,
 								});
 
-								const wsGql = createWebSocketGql(getUrl(vendor, env), {
+								const wsGql = createWebSocketGql(getUrl(vendor), {
 									auth: { access_token: USER.ADMIN.TOKEN },
 								});
 
@@ -963,7 +914,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								});
 
 								// Action
-								const response = await request(getUrl(vendor, env))
+								const response = await request(getUrl(vendor))
 									.patch(`/items/${localCollectionStates}`)
 									.send({ keys: stateIDs, data: { country_id: newCountry } })
 									.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
@@ -983,7 +934,7 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 								};
 
 								const gqlResponse = await requestGraphQL(
-									getUrl(vendor, env),
+									getUrl(vendor),
 									false,
 									USER.ADMIN.TOKEN,
 									gqlBody,
