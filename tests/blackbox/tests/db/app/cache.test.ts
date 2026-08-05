@@ -3008,7 +3008,7 @@ describe('App Caching Tests', () => {
 			// Mirror production's elapsed math to locate its slot; the edge folds in last.
 			const oldAgeMs = 1_770_000;
 			const oldTime = new Date(now - oldAgeMs);
-			const oldIndex = Math.floor((windowMs - oldAgeMs) / 1000 / bucketSec);
+			const bucketMs = bucketSec * 1000;
 			const lastIndex = buckets - 1;
 
 			// A decoy just past the window start — must be excluded from every window.
@@ -3124,6 +3124,18 @@ describe('App Caching Tests', () => {
 				expect(wideSeries[lastIndex].misses).toBe(edgeMisses);
 				expect(wideSeries[lastIndex].anomalies).toBe(1);
 				expect(wideSeries[lastIndex].ttlMs).toBe(30000);
+
+				// Locate the old row's slot from the grid the API actually returned. The
+				// grid is anchored to a bucket boundary — `floor(now / bucketMs) *
+				// bucketMs - (buckets - 1) * bucketMs` — so deriving the slot from
+				// `windowMs` here is one bucket too wide and lands on a boundary, putting
+				// the probe in slot 29 or 30 on nothing but where `now` fell inside its
+				// minute. Reading each bucket's own `t` also survives any delay between
+				// seeding these rows and the request being served.
+				const oldIndex = wideSeries.findIndex((bucket: any) => {
+					return oldTime.getTime() >= bucket.t
+						&& oldTime.getTime() < bucket.t + bucketMs;
+				});
 
 				// The old row sits in its own earlier slot — events spread by time, not
 				// swept into one bucket.
