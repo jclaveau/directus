@@ -1,21 +1,19 @@
 name: Check
 
-# Scalabus: run the full gate on EVERY commit (any branch) plus every PR — not just PRs into
-# the release branches. hhh-dev became the work branch after the old base-branch filter was set,
-# so that filter silently skipped it (no unit tests, no coverage upload codecov needs). `push:`
-# (unfiltered) covers every commit; GHA loads a push workflow from the pushed branch itself, so it
-# fires regardless of base. `pull_request:` keeps the merge-ref context + the diff-scoped style gate
-# (note: pull_request workflows load from the PR's BASE branch, so this trigger only updates once
-# the change lands on the base).
+# Scalabus: the full gate on EVERY commit, any branch — not just PRs into the release
+# branches. hhh-dev became the work branch after the old base-branch filter was set, so
+# that filter silently skipped it (no unit tests, no coverage upload codecov needs).
+# GHA loads a push workflow from the pushed branch itself, so it fires regardless of base.
+#
+# `push` only, every branch. Running both events meant every job reported twice — and
+# the `branches-ignore` list that was meant to prevent that enumerated prefixes
+# (`feat/**`, `*-fix/**`, …), so a branch outside the list, `v11.10.1-perf/…` for one,
+# matched neither rule and got both. Gating the jobs on `github.event_name` instead
+# still left a skipped twin of every check on the PR, so the diff-scoped gate — the
+# only job here that needed a PR base — moved to style-changes.yml and this file
+# dropped `pull_request` altogether. Checks attach to the commit, not the event, so
+# these still show on the PR.
 on:
-  pull_request:
-
-  # Every branch. The old `branches-ignore` kept feature branches on `pull_request`
-  # alone, but it enumerated prefixes (`feat/**`, `*-fix/**`, …) and anything outside
-  # that list — `v11.10.1-perf/…`, for one — matched neither rule and ran twice per
-  # commit. Rather than grow the list, each job below picks the one event it needs:
-  # branch-scoped jobs on `push`, and only `Style (changes)` on `pull_request`, since
-  # it is the one that needs a base to diff against.
   push:
 
 permissions:
@@ -32,8 +30,6 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    # push-only: it lints the files the push changed and needs no base context.
-    if: github.event_name == 'push'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -53,7 +49,6 @@ jobs:
   stylelint:
     name: Stylelint
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -76,33 +71,10 @@ jobs:
     # style authority. Kept as a passing no-op so a required "Format" check (if branch protection
     # still lists it) goes green instead of stranding pending.
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
     steps:
       - name: Format check
         run: echo "Formatting handled by eslint.style.config.js (see the Style (changes) job)."
 
-  style-changes:
-    name: Style (changes)
-    runs-on: ubuntu-latest
-    # PR-only by design: the gate diffs added lines against the PR base, so a direct push to a base
-    # branch (no PR context, no base to diff) is intentionally NOT gated. Style on base branches
-    # rides in through the PRs that merged them.
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-        with:
-          # Full history so the script can diff against the merge-base with the PR base.
-          fetch-depth: 0
-
-      - name: Prepare
-        uses: ./.github/actions/prepare
-        with:
-          build: false
-
-      # eslint max-len (comment width) over added lines only (mirrors `pnpm lint:style:changes`).
-      - name: Check changed-line style
-        run: node scripts/lint-style-changes.mjs "${{ github.event.pull_request.base.sha }}"
 
   unit:
     # Sharded across parallel runners because the suite ran serially package-by-package
@@ -114,9 +86,6 @@ jobs:
     # Codecov merges the per-folder flags on the shared commit, so no dedicated merge job.
     name: Unit Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
-    # push-only for the same reason as Lint, and it suits codecov better: on a push the
-    # commit IS the head, so the flags land where the PR shows them without pinning.
-    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:

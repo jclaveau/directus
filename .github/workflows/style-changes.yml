@@ -1,0 +1,37 @@
+name: Style
+
+# Split out of check.yml, which is `push`-only. This is the one gate that needs a pull
+# request: it lints ADDED LINES against the PR base, so a push — which has no base to
+# diff against — cannot run it. Keeping it here means no job in either file reports a
+# skipped twin on the PR.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: style-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  style-changes:
+    name: Style (changes)
+    runs-on: ubuntu-latest
+    # A direct push to a base branch is intentionally NOT gated — style on base branches
+    # rides in through the PRs that merged them.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Full history so the script can diff against the merge-base with the PR base.
+          fetch-depth: 0
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+        with:
+          build: false
+
+      # eslint max-len (comment width) over added lines only (mirrors `pnpm lint:style:changes`).
+      - name: Check changed-line style
+        run: node scripts/lint-style-changes.mjs "${{ github.event.pull_request.base.sha }}"
