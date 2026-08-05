@@ -17,6 +17,7 @@ import {
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	listCacheGroupLatencies,
 	readCacheMissGap,
 	reapCacheAnomalies,
 	reapCacheDescriptors,
@@ -124,7 +125,9 @@ beforeEach(() => {
 		whereNull: vi.fn(() => builder),
 		whereNotNull: vi.fn(() => builder),
 		whereNotIn: vi.fn(() => builder),
+		whereIn: vi.fn(() => builder),
 		groupBy: vi.fn(() => builder),
+		groupByRaw: vi.fn(() => builder),
 		orderBy: vi.fn(() => builder),
 		limit: vi.fn(() => builder),
 		select: vi.fn(() => builder),
@@ -1412,6 +1415,8 @@ describe('listCacheEntries', () => {
 				bytes: '42',
 				last_filled: new Date(1000).toISOString(),
 				hits: '3',
+				misses: '1',
+				fills: '2',
 				last_hit_at: new Date(2000).toISOString(),
 				ttl_ms: '300000',
 				fill_ms: '240',
@@ -1431,6 +1436,8 @@ describe('listCacheEntries', () => {
 				bytes: '0',
 				last_filled: new Date(500).toISOString(),
 				hits: '0',
+				misses: '0',
+				fills: '0',
 				last_hit_at: null,
 				ttl_ms: null,
 				fill_ms: null,
@@ -1458,6 +1465,8 @@ describe('listCacheEntries', () => {
 				url: '/items/a?limit=5',
 				size: 42,
 				hits: 3,
+				misses: 1,
+				fills: 2,
 				fillMs: 240,
 				hitMs: 8,
 				ttlMs: 300000,
@@ -1478,6 +1487,8 @@ describe('listCacheEntries', () => {
 				url: '',
 				size: 0,
 				hits: 0,
+				misses: 0,
+				fills: 0,
 				fillMs: null,
 				hitMs: null,
 				ttlMs: null,
@@ -1492,6 +1503,136 @@ describe('listCacheEntries', () => {
 	it('returns an empty array when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		expect(await listCacheEntries()).toEqual([]);
+	});
+});
+
+describe('listCacheGroupLatencies', () => {
+	it('maps query rows and the endpoint rollup', async () => {
+		queryRows = [
+			{
+				path: '/items/a',
+				method_rolled_up: '0',
+				method: 'GET',
+				query: '{"limit":5}',
+				response_p50: '20',
+				response_p95: '90.4',
+				response_p99: '400',
+				miss_p50: '110',
+				miss_p95: '240.6',
+				miss_p99: '900',
+				anomaly_p50: '70',
+				anomaly_p95: '75',
+				anomaly_p99: '80',
+				fill_p50: '120',
+				fill_p95: '250',
+				fill_p99: '910',
+				hit_p50: '8',
+				hit_p95: '15.4',
+				hit_p99: '22',
+			},
+			{
+				path: '/items/a',
+				method_rolled_up: '1',
+				method: null,
+				query: null,
+				response_p50: '21',
+				response_p95: null,
+				response_p99: '380',
+				miss_p50: null,
+				miss_p95: '231',
+				miss_p99: '880',
+				anomaly_p50: null,
+				anomaly_p95: null,
+				anomaly_p99: null,
+				fill_p50: '105',
+				fill_p95: null,
+				fill_p99: '870',
+				hit_p50: '9',
+				hit_p95: '14.8',
+				hit_p99: null,
+			},
+		];
+
+		const latencies = await listCacheGroupLatencies();
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors as d');
+		// Kind 1 is a bare miss count with no timing, so it never reaches a
+		// percentile; events with no timing and never-filled locators are out too.
+		expect(builder.whereIn).toHaveBeenCalledWith('e.kind', [0, 2, 3, 4]);
+		expect(builder.whereNotNull).toHaveBeenCalledWith('e.duration_ms');
+		expect(builder.whereNotNull).toHaveBeenCalledWith('d.last_filled');
+
+		expect(builder.groupByRaw).toHaveBeenCalledWith(
+			'GROUPING SETS ((d.path, d.method, d.query), (d.path))',
+		);
+
+		expect(latencies).toEqual([
+			{
+				path: '/items/a',
+				method: 'GET',
+				query: '{"limit":5}',
+				response: { p50: 20, p95: 90, p99: 400 },
+				miss: { p50: 110, p95: 241, p99: 900 },
+				anomaly: { p50: 70, p95: 75, p99: 80 },
+				fill: { p50: 120, p95: 250, p99: 910 },
+				hit: { p50: 8, p95: 15, p99: 22 },
+			},
+			{
+				path: '/items/a',
+				method: null,
+				query: null,
+				response: { p50: 21, p95: null, p99: 380 },
+				miss: { p50: null, p95: 231, p99: 880 },
+				anomaly: { p50: null, p95: null, p99: null },
+				fill: { p50: 105, p95: null, p99: 870 },
+				hit: { p50: 9, p95: 15, p99: null },
+			},
+		]);
+	});
+
+	it('filters each metric to its own event kinds', async () => {
+		queryRows = [];
+		await listCacheGroupLatencies();
+
+		const selected = mockDb.raw.mock.calls.map((call: unknown[]) => call[0]);
+
+		expect(selected).toContain(
+			'percentile_cont(0.95) WITHIN GROUP (ORDER BY e.duration_ms) '
+			+ 'FILTER (WHERE e.kind IN (0, 2, 3, 4)) AS response_p95',
+		);
+
+		expect(selected).toContain(
+			'percentile_cont(0.95) WITHIN GROUP (ORDER BY e.duration_ms) '
+			+ 'FILTER (WHERE e.kind IN (2, 3, 4)) AS miss_p95',
+		);
+
+		expect(selected).toContain(
+			'percentile_cont(0.5) WITHIN GROUP (ORDER BY e.duration_ms) '
+			+ 'FILTER (WHERE e.kind = 3) AS anomaly_p50',
+		);
+
+		// Fill is the cached slice of the miss compute, anomaly the flagged one —
+		// each a single kind, not the pooled 2/3/4 above.
+		expect(selected).toContain(
+			'percentile_cont(0.5) WITHIN GROUP (ORDER BY e.duration_ms) '
+			+ 'FILTER (WHERE e.kind = 2) AS fill_p50',
+		);
+
+		expect(selected).toContain(
+			'percentile_cont(0.99) WITHIN GROUP (ORDER BY e.duration_ms) '
+			+ 'FILTER (WHERE e.kind = 0) AS hit_p99',
+		);
+	});
+
+	it('returns an empty array on a non-Postgres dialect', async () => {
+		mockDb.client = { config: { client: 'sqlite3' } };
+		expect(await listCacheGroupLatencies()).toEqual([]);
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_descriptors as d');
+	});
+
+	it('returns an empty array when not configured', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		expect(await listCacheGroupLatencies()).toEqual([]);
 	});
 });
 

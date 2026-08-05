@@ -16,11 +16,55 @@ export interface CacheEntry {
 	lastHitAt: number | null;
 	size: number;
 	hits: number;
+	misses: number;
+	fills: number;
 	fillMs: number | null;
 	hitMs: number | null;
 	ttlMs: number | null;
 	recommendedTtlMs: number | null;
 	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
+}
+
+export type LatencyPercentile = 'p50' | 'p95' | 'p99';
+
+export const LATENCY_PERCENTILES: LatencyPercentile[] = ['p50', 'p95', 'p99'];
+
+// The latency chart's categories, in the funnel order the page reads them: every
+// timed response, the compute a miss had to do, then the flagged and the cached
+// slices of that compute, then a serve straight from cache.
+export const LATENCY_METRICS = [
+	'response',
+	'miss',
+	'anomaly',
+	'fill',
+	'hit',
+] as const;
+
+export type LatencyMetric = typeof LATENCY_METRICS[number];
+
+// Null where the window holds no such event for the node, or on a dialect with no
+// ordered-set aggregates (Postgres only — see listCacheGroupLatencies).
+export type NodeLatencies = Record<
+	LatencyMetric,
+	Record<LatencyPercentile, number | null>
+>;
+
+// One row of /utils/cache/latencies. `method`/`query` null marks the endpoint
+// rollup, aggregated over the path's own events rather than its query rows.
+export interface GroupLatencyRecord extends NodeLatencies {
+	path: string;
+	method: string | null;
+	query: string | null;
+}
+
+export function emptyLatencies(): NodeLatencies {
+	return {
+		response: { p50: null, p95: null, p99: null },
+		miss: { p50: null, p95: null, p99: null },
+		anomaly: { p50: null, p95: null, p99: null },
+		fill: { p50: null, p95: null, p99: null },
+		hit: { p50: null, p95: null, p99: null },
+	};
 }
 
 // A method+query bucket within an endpoint: cached entries (one per user/version/ip
@@ -35,9 +79,15 @@ export interface QueryGroup {
 	anomalyCount: number; // total not-cached/error anomaly occurrences
 	coarseCount: number; // cached entries here that over-purge (bare-tagged scoped reads)
 	totalHits: number;
+	totalMisses: number;
+	totalFills: number;
 	totalSize: number;
 	ttlMs: number | null;
 	recommendedTtlMs: number | null;
+	entryCount: number;
+	hitRatio: number | null; // % hits/(hits+fills); null when no traffic
+	maxFillMs: number | null; // slowest fill observed here, ms
+	latencies: NodeLatencies;
 }
 
 export type CacheAnomalyReason =
@@ -89,7 +139,12 @@ export interface EndpointGroup {
 	anomalyCount: number;
 	coarseCount: number;
 	totalHits: number;
+	totalMisses: number;
+	totalFills: number;
 	totalSize: number;
+	hitRatio: number | null; // % hits/(hits+fills); null when no traffic
+	maxFillMs: number | null; // slowest fill observed in this endpoint, ms
+	latencies: NodeLatencies;
 }
 
 // Directus system surface: the dedicated system routes + reads of a `directus_*`
@@ -190,6 +245,16 @@ export function formatQuery(query: string): string {
 	return query;
 }
 
+// Share of cache-servable requests served from cache: hits over hits plus fills
+// (a cached miss's compute). Null when nothing was served either way.
+export function formatHitRatio(hits: number, fills: number): string | null {
+	const percent = hitRatioPercent(hits, fills);
+
+	return percent === null
+		? null
+		: `${Math.round(percent)}%`;
+}
+
 export interface EndpointSection {
 	key: string;
 	label: string;
@@ -198,17 +263,17 @@ export interface EndpointSection {
 
 // Narrow the loaded list by the filter conditions, then the free-text search.
 export function filterEntries(
-	entries: CacheEntry[],
+	rows: CacheEntry[],
 	filter: Filter | null,
 	search: string,
-	fieldMap: Record<string, string>,
+	map: Record<string, keyof CacheEntry>,
 ): CacheEntry[] {
 	const query = search.trim().toLowerCase();
 
-	return entries.filter((entry) => {
+	return rows.filter((entry) => {
 		const row = entry as unknown as Record<string, unknown>;
 
-		if (!matchesFilter(row, filter, fieldMap)) {
+		if (!matchesFilter(row, filter, map)) {
 			return false;
 		}
 
@@ -226,6 +291,85 @@ export function filterEntries(
 		];
 
 		return haystack.some((field) => field?.toLowerCase().includes(query));
+	});
+}
+
+// The columns the entries table can sort by, mapped to a comparable value per
+// row. "Never" / "∞" / no-traffic cells sort last, whatever the direction.
+export type EntrySortField =
+	| 'user'
+	| 'hits'
+	| 'ratio'
+	| 'createdAt'
+	| 'lastHitAt'
+	| 'expiresAt'
+	| 'size'
+	| 'key';
+
+export interface EntrySort {
+	field: EntrySortField;
+	dir: 1 | -1;
+}
+
+// Nulls trail whatever the direction: a row with no last hit, no expiry or no
+// traffic has nothing to rank on, and floating those to the top would bury the
+// rows the sort was actually asked about.
+function compareNullsLast(
+	a: string | number | null,
+	b: string | number | null,
+	dir: 1 | -1,
+): number {
+	if (a === null && b === null) {
+		return 0;
+	}
+
+	if (a === null) {
+		return 1;
+	}
+
+	if (b === null) {
+		return -1;
+	}
+
+	if (a < b) {
+		return -1 * dir;
+	}
+
+	if (a > b) {
+		return dir;
+	}
+
+	return 0;
+}
+
+export function sortEntries(entries: CacheEntry[], sort: EntrySort): CacheEntry[] {
+	const pick: Record<
+		EntrySortField,
+		(entry: CacheEntry) => string | number | null
+	> = {
+		user: (entry) => entry.user?.email ?? null,
+		hits: (entry) => entry.hits,
+		ratio: (entry) => {
+			const total = entry.hits + entry.fills;
+
+			return total > 0
+				? entry.hits / total
+				: null;
+		},
+		createdAt: (entry) => entry.createdAt,
+		lastHitAt: (entry) => entry.lastHitAt,
+		expiresAt: (entry) => entry.expiresAt,
+		size: (entry) => entry.size,
+		key: (entry) => entry.redisKey,
+	};
+
+	const value = pick[sort.field];
+
+	return [...entries].sort((a, b) => {
+		const av = value(a);
+		const bv = value(b);
+
+		return compareNullsLast(av, bv, sort.dir);
 	});
 }
 
@@ -251,6 +395,26 @@ export function splitSections(
 
 function sumHits(entries: CacheEntry[]): number {
 	return entries.reduce((sum, entry) => sum + entry.hits, 0);
+}
+
+function sumMisses(entries: CacheEntry[]): number {
+	return entries.reduce((sum, entry) => sum + entry.misses, 0);
+}
+
+function sumFills(entries: CacheEntry[]): number {
+	return entries.reduce((sum, entry) => sum + entry.fills, 0);
+}
+
+// Hit ratio in percent: hits' share of (hits + fills). Null when there was no
+// traffic at all — the tree renders that as an em-dash, not a meaningless 0%.
+export function hitRatioPercent(hits: number, fills: number): number | null {
+	const traffic = hits + fills;
+
+	if (traffic > 0) {
+		return (hits / traffic) * 100;
+	}
+
+	return null;
 }
 
 function sumSize(entries: CacheEntry[]): number {
@@ -282,12 +446,43 @@ function countCoarse(entries: CacheEntry[]): number {
 	return entries.filter((entry) => entry.coarse).length;
 }
 
+// Latency rows keyed the way the tree looks them up: the endpoint rollup under
+// its bare path, each query row under path+method+query.
+type LatencyIndex = Map<string, NodeLatencies>;
+
+// \x00 separator, as in the QueryGroup key: a query containing spaces can't then
+// collide across method boundaries.
+function queryLatencyKey(path: string, method: string, query: string): string {
+	return `${path}\x00${method}\x00${query}`;
+}
+
+function indexLatencies(records: GroupLatencyRecord[]): LatencyIndex {
+	const index: LatencyIndex = new Map();
+
+	for (const record of records) {
+		const key = record.method === null
+			? record.path
+			: queryLatencyKey(record.path, record.method, record.query ?? '');
+
+		index.set(key, {
+			response: record.response,
+			miss: record.miss,
+			anomaly: record.anomaly,
+			fill: record.fill,
+			hit: record.hit,
+		});
+	}
+
+	return index;
+}
+
 // Group by method+query within an endpoint. Cached entries and anomalies (not-cached
 // requests) sharing a method+query share a bucket.
 function buildQueryGroups(
 	path: string,
 	entries: CacheEntry[],
 	anomalies: CacheAnomaly[],
+	latencies: LatencyIndex,
 ): QueryGroup[] {
 	interface Bucket {
 		method: string;
@@ -333,9 +528,16 @@ function buildQueryGroups(
 			anomalyCount: countAnomalies(bucket.anomalies),
 			coarseCount: countCoarse(bucket.entries),
 			totalHits: sumHits(bucket.entries),
+			totalMisses: sumMisses(bucket.entries),
+			totalFills: sumFills(bucket.entries),
 			totalSize: sumSize(bucket.entries),
 			ttlMs: maxOrNull(bucket.entries, (entry) => entry.ttlMs),
 			recommendedTtlMs: maxOrNull(bucket.entries, (entry) => entry.recommendedTtlMs),
+			entryCount: bucket.entries.length,
+			hitRatio: hitRatioPercent(sumHits(bucket.entries), sumFills(bucket.entries)),
+			maxFillMs: maxOrNull(bucket.entries, (entry) => entry.fillMs),
+			latencies: latencies.get(queryLatencyKey(path, bucket.method, bucket.query))
+				?? emptyLatencies(),
 		});
 	}
 
@@ -346,7 +548,10 @@ function buildQueryGroups(
 export function buildGroups(
 	entries: CacheEntry[],
 	anomalies: CacheAnomaly[],
+	latencyRecords: GroupLatencyRecord[] = [],
 ): EndpointGroup[] {
+	const latencies = indexLatencies(latencyRecords);
+
 	const entriesByPath = new Map<string, CacheEntry[]>();
 	const anomaliesByPath = new Map<string, CacheAnomaly[]>();
 
@@ -368,7 +573,7 @@ export function buildGroups(
 	for (const path of paths) {
 		const pathEntries = entriesByPath.get(path) ?? [];
 		const pathAnomalies = anomaliesByPath.get(path) ?? [];
-		const queries = buildQueryGroups(path, pathEntries, pathAnomalies);
+		const queries = buildQueryGroups(path, pathEntries, pathAnomalies, latencies);
 
 		const anomalyCount = queries.reduce((sum, group) => sum + group.anomalyCount, 0);
 		const coarseCount = queries.reduce((sum, group) => sum + group.coarseCount, 0);
@@ -380,11 +585,145 @@ export function buildGroups(
 			anomalyCount,
 			coarseCount,
 			totalHits: sumHits(pathEntries),
+			totalMisses: sumMisses(pathEntries),
+			totalFills: sumFills(pathEntries),
 			totalSize: sumSize(pathEntries),
+			hitRatio: hitRatioPercent(sumHits(pathEntries), sumFills(pathEntries)),
+			maxFillMs: maxOrNull(pathEntries, (entry) => entry.fillMs),
+			latencies: latencies.get(path) ?? emptyLatencies(),
 		});
 	}
 
 	return result.sort((a, b) => b.totalHits - a.totalHits);
+}
+
+// A latency field carries its metric as well as its percentile, so the field
+// alone still names a column once the toolbar's metric selection moves on.
+export type LatencySortField =
+	`${LatencyMetric}${Capitalize<LatencyPercentile>}`;
+
+export function latencySortField(
+	metric: LatencyMetric,
+	percentile: LatencyPercentile,
+): LatencySortField {
+	const suffix = percentile.toUpperCase() as Capitalize<LatencyPercentile>;
+
+	return `${metric}${suffix}`;
+}
+
+// How much of the tree to keep: `all`, or the slowest tail of it.
+export type LatencyBand = LatencyPercentile | 'all';
+
+export const LATENCY_BANDS: LatencyBand[] = ['all', 'p50', 'p95', 'p99'];
+
+// Keep only the slowest branches, cutting at the band's own percentile of the
+// distribution across branches: `p99` leaves the worst 1%, `p95` the worst 5%,
+// `p50` the worst half. Ranking is on the metric's median — the figure the row
+// shows — so a branch the window holds no timing for cannot be placed in the
+// tail at all, and a band drops it. Input order is preserved; the caller sorts.
+export function filterLatencyBand(
+	groups: EndpointGroup[],
+	band: LatencyBand,
+	metric: LatencyMetric,
+): EndpointGroup[] {
+	if (band === 'all') {
+		return groups;
+	}
+
+	const timed = groups.filter((group) => group.latencies[metric].p50 !== null);
+
+	if (timed.length === 0) {
+		return [];
+	}
+
+	// p99 keeps the top 1%, p95 the top 5%, p50 the top 50% — always at least one
+	// branch, or picking a band on a small tree would empty the page.
+	const share = (100 - Number(band.slice(1))) / 100;
+	const kept = Math.max(1, Math.ceil(timed.length * share));
+
+	const slowestFirst = [...timed].sort((a, b) => {
+		return b.latencies[metric].p50! - a.latencies[metric].p50!;
+	});
+
+	const survivors = new Set(slowestFirst.slice(0, kept));
+
+	return groups.filter((group) => survivors.has(group));
+}
+
+// Fields the tree can rank on. Each maps to a numeric pick on both node shapes.
+export type GroupSortField =
+	| 'hits'
+	| 'misses'
+	| 'fills'
+	| 'ratio'
+	| 'anomalies'
+	| 'coarse'
+	| 'entries'
+	| 'size'
+	| 'fillMs'
+	| LatencySortField;
+
+export interface GroupSort {
+	field: GroupSortField;
+	dir: 1 | -1; // 1 ascending, -1 descending
+}
+
+// Numeric pick that both EndpointGroup and QueryGroup satisfy. Null (e.g. no
+// traffic for a ratio) sorts last regardless of direction.
+type SortableNode = {
+	totalHits: number;
+	totalMisses: number;
+	totalFills: number;
+	totalSize: number;
+	entryCount: number;
+	hitRatio: number | null;
+	anomalyCount: number;
+	coarseCount: number;
+	maxFillMs: number | null;
+	latencies: NodeLatencies;
+};
+
+// Exhaustive by construction: a new GroupSortField won't compile until it has an
+// accessor here.
+const SORT_VALUES: Record<GroupSortField, (node: SortableNode) => number | null> = {
+	hits: (node) => node.totalHits,
+	misses: (node) => node.totalMisses,
+	fills: (node) => node.totalFills,
+	ratio: (node) => node.hitRatio,
+	anomalies: (node) => node.anomalyCount,
+	coarse: (node) => node.coarseCount,
+	entries: (node) => node.entryCount,
+	size: (node) => node.totalSize,
+	fillMs: (node) => node.maxFillMs,
+	responseP50: (node) => node.latencies.response.p50,
+	responseP95: (node) => node.latencies.response.p95,
+	responseP99: (node) => node.latencies.response.p99,
+	missP50: (node) => node.latencies.miss.p50,
+	missP95: (node) => node.latencies.miss.p95,
+	missP99: (node) => node.latencies.miss.p99,
+	anomalyP50: (node) => node.latencies.anomaly.p50,
+	anomalyP95: (node) => node.latencies.anomaly.p95,
+	anomalyP99: (node) => node.latencies.anomaly.p99,
+	fillP50: (node) => node.latencies.fill.p50,
+	fillP95: (node) => node.latencies.fill.p95,
+	fillP99: (node) => node.latencies.fill.p99,
+	hitP50: (node) => node.latencies.hit.p50,
+	hitP95: (node) => node.latencies.hit.p95,
+	hitP99: (node) => node.latencies.hit.p99,
+};
+
+// Stable clone + sort by a field; nulls always trail. `dir: 1` puts worst first
+// for ratio (lowest %), `dir: -1` worst first for the count/max fields.
+export function sortGroups<T extends SortableNode>(
+	groups: T[],
+	sort: GroupSort,
+): T[] {
+	return [...groups].sort((a, b) => {
+		const av = SORT_VALUES[sort.field](a);
+		const bv = SORT_VALUES[sort.field](b);
+
+		return compareNullsLast(av, bv, sort.dir);
+	});
 }
 
 export interface AnomalySummaryItem {
@@ -431,16 +770,22 @@ export type TimeseriesPoint = [number, number | null];
 
 // A chart value formatted by its metric's unit: a count as a plain integer, a
 // seconds value as a human duration; null/undefined as an em dash.
+export type TooltipUnit = 'count' | 'seconds' | 'percent';
+
 export function formatTooltipValue(
 	raw: number | null | undefined,
-	unit: 'count' | 'seconds',
+	unit: TooltipUnit,
 ): string {
 	if (raw == null) {
 		return '—';
 	}
 
-	return unit === 'seconds'
-		? formatDuration(raw)
+	if (unit === 'seconds') {
+		return formatDuration(raw);
+	}
+
+	return unit === 'percent'
+		? `${Math.round(raw)}%`
 		: String(Math.round(raw));
 }
 

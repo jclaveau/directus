@@ -256,6 +256,26 @@ router.get(
 );
 
 router.get(
+	'/cache/latencies',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		const windowMs = requestedWindowMs(req.query['window']);
+
+		res.locals['payload'] = {
+			data: await service.getCacheGroupLatencies(windowMs),
+		};
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
 	'/cache/timeseries',
 	asyncHandler(async (req, res, next) => {
 		const service = new UtilsService({

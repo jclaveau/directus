@@ -102,3 +102,11 @@ it) — a line is HIT if ANY session has >0, so union across sessions; don't rea
 (`scopedCache: createScopedCacheExtensionHandle(getSchema)` in manager/flows) — integration-only, only the blackbox
 flag covers them, so a flaky/failed blackbox shard dropping its upload reds the blocking aggregate patch even though
 per-flag patches pass. Consider `ignore:` for such inherently-integration-only wiring, like the controllers glue.
+
+**The aggregate `codecov/patch` target is 95%, not `auto`.** PR #326 read
+*"patch coverage (92.88%) is below the target coverage (95.00%)"* while EVERY per-flag
+`codecov/patch/<pkg>` passed — only the roll-up fails, so the per-flag greens tell you
+nothing. Codecov folds its impacted-file list behind a `<details>`, so compute the gap
+locally: `vitest run --coverage --coverage.reporter=json --coverage.include='<file>'`,
+then intersect `coverage-final.json` (`statementMap` + `s[id]===0`) with the PR's added
+lines from `git diff -U0 <base>...HEAD`. That named the exact 36 api + 40 app lines.
