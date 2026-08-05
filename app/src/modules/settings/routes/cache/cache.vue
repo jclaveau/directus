@@ -413,10 +413,16 @@ const treeMetricOptions: { text: string; value: LatencyMetric }[] = [
 const treeBand = useLocalStorage<LatencyBand>(`cache-tree-band-${userId}`, 'all');
 
 const treeBandOptions = LATENCY_BANDS.map((band) => {
+	if (band === 'all') {
+		return { text: t('cache_tree_band_all', 'All'), value: band };
+	}
+
+	// The percentile names where the cut falls, the label what survives it: p99
+	// keeps the slowest 1%.
+	const keptPercent = 100 - Number(band.slice(1));
+
 	return {
-		text: band === 'all'
-			? t('cache_tree_band_all', 'All')
-			: t(`cache_tree_band_${band}`, `slowest ${band}`),
+		text: t(`cache_tree_band_${band}`, `${band}: Slowest ${keptPercent}%`),
 		value: band,
 	};
 });
