@@ -107,11 +107,26 @@ jobs:
           pnpm --filter tests-blackbox merge-coverage
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
+
           # Pin the PR head sha: in this reusable workflow the codecov CLI otherwise detects
           # the checked-out merge commit, so the flag would land on the ephemeral merge ref
           # instead of the PR head (where the unit flags live) and never show on the PR.
+          COMMIT_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+
+          # A standing dialect branch is one throwaway commit over a trunk tip, force-replaced
+          # on the next refresh — coverage pinned to it would be orphaned, and the dialect-only
+          # lines (`database/helpers/*/dialects/sqlite.ts` plus the vendor branches in shared
+          # code, 29 of them measured) would read as uncovered on the trunk forever. Attribute
+          # it to the trunk commit the branch was cut from instead, recorded at refresh time
+          # because this job checks out shallow and a pull_request HEAD is the merge commit.
+          # Codecov merges same-flag uploads on a shared commit, exactly as the postgres shards
+          # already do, and `carryforward: true` on the blackbox flag propagates the union.
+          if [ -f .github/ci-dialect-base ]; then
+            COMMIT_SHA="$(cat .github/ci-dialect-base)"
+          fi
+
           ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
-            -C "${{ github.event.pull_request.head.sha || github.sha }}"
+            -C "$COMMIT_SHA"
 
   db:
     name: ${{ matrix.vendor }} (shard ${{ matrix.shard }})
@@ -180,8 +195,23 @@ jobs:
           pnpm --filter tests-blackbox merge-coverage
           curl -Os https://cli.codecov.io/latest/linux/codecov
           chmod +x codecov
+
           # Pin the PR head sha: in this reusable workflow the codecov CLI otherwise detects
           # the checked-out merge commit, so the flag would land on the ephemeral merge ref
           # instead of the PR head (where the unit flags live) and never show on the PR.
+          COMMIT_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+
+          # A standing dialect branch is one throwaway commit over a trunk tip, force-replaced
+          # on the next refresh — coverage pinned to it would be orphaned, and the dialect-only
+          # lines (`database/helpers/*/dialects/sqlite.ts` plus the vendor branches in shared
+          # code, 29 of them measured) would read as uncovered on the trunk forever. Attribute
+          # it to the trunk commit the branch was cut from instead, recorded at refresh time
+          # because this job checks out shallow and a pull_request HEAD is the merge commit.
+          # Codecov merges same-flag uploads on a shared commit, exactly as the postgres shards
+          # already do, and `carryforward: true` on the blackbox flag propagates the union.
+          if [ -f .github/ci-dialect-base ]; then
+            COMMIT_SHA="$(cat .github/ci-dialect-base)"
+          fi
+
           ./codecov upload-coverage -f "$COVERAGE_DIR/lcov.info" -F blackbox -Z --disable-search \
-            -C "${{ github.event.pull_request.head.sha || github.sha }}"
+            -C "$COMMIT_SHA"
