@@ -48,7 +48,15 @@ jobs:
           git config user.email 'hhh-bot@users.noreply.github.com'
 
           git checkout -B "$BRANCH" origin/v11.10.1-hhh-dev
+
           echo '${{ matrix.dialect }}' > .github/ci-dialect
-          git add .github/ci-dialect
+
+          # The trunk commit this run's coverage belongs to. Pinned here rather than
+          # derived at run time: the db job checks out shallow, and on a pull_request
+          # its HEAD is the merge commit, so neither `HEAD^` nor `<sha>^` reaches the
+          # tip we branched from. See the coverage upload in blackbox.yml.
+          git rev-parse origin/v11.10.1-hhh-dev > .github/ci-dialect-base
+
+          git add .github/ci-dialect .github/ci-dialect-base
           git commit -m 'ci: run the blackbox matrix on ${{ matrix.dialect }}'
           git push --force origin "$BRANCH"
