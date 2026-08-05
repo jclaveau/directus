@@ -43,66 +43,58 @@ test('lays the counts chart legend out on one row', async ({ page }) => {
 // reliably in CI), so it's left to the unit test rather than kept as a flaky e2e.
 
 // The latency chart names every disposition slice — hit serve, fill (cached miss),
-// anomaly (flagged-uncacheable miss), the miss umbrella, and both pooled. The series
-// are always in the legend even where a slice has no samples yet.
+// anomaly (flagged-uncacheable miss), the miss umbrella, and both pooled. Its legend
+// is the page's own, not apex's: one row per percentile, each naming every slice, so
+// a slice with no samples yet is still listed.
 test('the latency chart names the full disposition breakdown', async ({ page }) => {
 	// The seeded fill traffic makes the latency chart appear as a second canvas.
 	await expect(page.locator('.apexcharts-canvas')).toHaveCount(2, {
 		timeout: 10000,
 	});
 
-	const names = await page
-		.locator('.apexcharts-canvas')
-		.nth(1)
-		.locator('.apexcharts-legend-series')
-		.allInnerTexts();
+	const rows = page.locator('.cache-chart-legend-row');
+	await expect(rows).toHaveCount(3);
 
-	const slices = [
-		'Hits p50',
-		'Fills p50',
-		'Anomalies p50',
-		'Misses p50',
-		'Response p50',
-	];
+	// Funnel order, the same order the counts chart and the tree read in.
+	const slices = ['Response', 'Misses', 'Anomalies', 'Fills', 'Hits'];
 
-	for (const label of slices) {
-		expect(names).toContain(label);
+	for (const percentile of ['p50', 'p95', 'p99']) {
+		const row = rows.filter({ hasText: percentile });
+		await expect(row).toHaveCount(1);
+
+		const names = await row.locator('.cache-chart-legend-entry').allInnerTexts();
+		expect(names.map((name) => name.trim())).toEqual(slices);
 	}
 });
 
 // Legend visibility is persisted to localStorage per chart: p95 bands hidden by
 // default, and a toggle survives a reload. The honest end-to-end check — the unit
-// test can only drive the handler directly, not apex's real legend click.
+// test can only drive the handler directly, not a real click on the legend.
 test('p95 hidden by default; a toggle survives reload', async ({ page }) => {
 	await expect(page.locator('.apexcharts-canvas')).toHaveCount(2, {
 		timeout: 10000,
 	});
 
-	const latency = () => page.locator('.apexcharts-canvas').nth(1);
-
-	const inactive = (text: string) => {
-		return latency()
-			.locator('.apexcharts-legend-series.apexcharts-inactive-legend')
-			.filter({ hasText: text });
+	const entry = (percentile: string, slice: string) => {
+		return page
+			.locator('.cache-chart-legend-row')
+			.filter({ hasText: percentile })
+			.locator('.cache-chart-legend-entry')
+			.filter({ hasText: slice });
 	};
 
-	// p95 start hidden (persisted default) — their legend item is greyed inactive.
-	// applyHiddenSeries runs after the chart's async render/updateOptions resolves, so
-	// give a cold CI runner room to settle.
-	await expect(inactive('Misses p95')).toHaveCount(1, { timeout: 15000 });
+	// p95 starts hidden (persisted default) — its entries render muted. The state is
+	// applied after the chart's async render resolves, so give a cold runner room.
+	await expect(entry('p95', 'Misses')).toHaveClass(/is-muted/, { timeout: 15000 });
+	await expect(entry('p50', 'Hits')).not.toHaveClass(/is-muted/);
 
-	// Hide a p50 via its legend; it goes inactive.
-	await latency()
-		.locator('.apexcharts-legend-series')
-		.filter({ hasText: 'Hits p50' })
-		.click();
-
-	await expect(inactive('Hits p50')).toHaveCount(1, { timeout: 10000 });
+	// Hide a p50 slice by clicking it; it goes muted.
+	await entry('p50', 'Hits').click();
+	await expect(entry('p50', 'Hits')).toHaveClass(/is-muted/, { timeout: 10000 });
 
 	// Reload — the toggle must survive (localStorage-backed).
 	await page.reload({ waitUntil: 'networkidle' });
-	await page.waitForSelector('.apexcharts-canvas', { timeout: 20000 });
-	await page.waitForTimeout(1000);
+	await page.waitForSelector('.cache-chart-legend-row', { timeout: 20000 });
 
-	await expect(inactive('Hits p50')).toHaveCount(1, { timeout: 10000 });
+	await expect(entry('p50', 'Hits')).toHaveClass(/is-muted/, { timeout: 10000 });
 });
