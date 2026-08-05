@@ -2793,7 +2793,7 @@ describe('App Caching Tests', () => {
 
 	describe(oneLine`
 		Provokes and lists both cacheable-but-skipped anomalies — a missing scope
-		(/server/info) and an oversized value — joined to their descriptor
+		(/server/specs/oas) and an oversized value — joined to their descriptor
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisAnomaly;
@@ -2806,9 +2806,11 @@ describe('App Caching Tests', () => {
 			await request(url).post('/utils/cache/stats/truncate')
 				.set('Authorization', auth);
 
-			// missing_scope: /server/info has no collection + no scope tags under scoped
+			// missing_scope: the OAS spec has no collection + no scope tags under scoped
 			// purge, so caching it would orphan a stale entry — it's skipped and flagged.
-			await request(url).get('/server/info')
+			// (/server/info can't stand in here: it opts out of the cache entirely in
+			// scoped mode, so it is never cacheable and so never flagged.)
+			await request(url).get('/server/specs/oas')
 				.set('Authorization', auth);
 
 			// value_too_large: string_field is a varchar(255) — bulk-insert 80 near-max
@@ -2849,7 +2851,7 @@ describe('App Caching Tests', () => {
 			const orphan = byReason.get('missing_scope');
 			expect(orphan).toBeDefined();
 			// The anomaly resolves through its descriptor to the causing request.
-			expect(orphan.path).toBe('/server/info');
+			expect(orphan.path).toBe('/server/specs/oas');
 			expect(orphan.count).toBeGreaterThanOrEqual(1);
 
 			const oversized = byReason.get('value_too_large');
