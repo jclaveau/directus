@@ -26,13 +26,23 @@ import {
 	carryForward,
 	filterAnomalies,
 	filterEntries,
+	filterLatencyBand,
 	formatAge,
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
+	formatHitRatio,
 	formatTooltipValue,
+	type TooltipUnit,
 	formatUser,
+	hitRatioPercent,
 	shortKey,
+	sortEntries,
+	sortGroups,
+	LATENCY_BANDS,
+	LATENCY_METRICS,
+	LATENCY_PERCENTILES,
+	latencySortField,
 	splitSections,
 	summariseAnomalies,
 	ttlVerdict,
@@ -40,6 +50,13 @@ import {
 	type CacheAnomalyReason,
 	type CacheEntry,
 	type EndpointGroup,
+	type EntrySort,
+	type EntrySortField,
+	type GroupSort,
+	type GroupSortField,
+	type GroupLatencyRecord,
+	type LatencyBand,
+	type LatencyMetric,
 	type QueryGroup,
 } from './cache-view';
 
@@ -68,20 +85,28 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const entries = ref<CacheEntry[]>([]);
 const anomalies = ref<CacheAnomaly[]>([]);
+const latencies = ref<GroupLatencyRecord[]>([]);
 const expanded = ref<Record<string, boolean>>({});
 const now = ref(Date.now());
 const search = ref('');
 const filter = ref<Filter | null>(null);
 const entryPage = ref<Record<string, number>>({});
 
-// A search/filter change reshapes every group, so reset paging to the first page —
-// else the saved deep page strands the user on a tail slice of the filtered set.
+// Per-query sort state for the entries table; empty = the API's original order.
+const entrySort = ref<Record<string, EntrySort>>({});
+
+// A search/filter change reshapes every group, so reset paging + sorting to the
+// first/original state — else the saved deep page and column order strand the user
+// on a tail slice of the filtered set.
 watch([search, filter], () => {
 	entryPage.value = {};
+	entrySort.value = {};
 });
 
 // How far back the listing looks — sent as ?window= to the API, which clamps it
-// to [1m, max]. The sub-hour steps pair with a live short refresh interval.
+// to [1m, max]. The sub-hour steps pair with a live short refresh interval. The
+// select's allow-other entry accepts any ms()-parsable duration (e.g. "90m",
+// "3h30m"); unparseable input falls back to the 24h default server-side.
 const windowOptions = [
 	{ text: t('cache_window_1m', 'Last 1m'), value: '1m' },
 	{ text: t('cache_window_3m', 'Last 3m'), value: '3m' },
@@ -332,7 +357,120 @@ const searchedAnomalies = computed(() => {
 const anomalySummary = computed(() => summariseAnomalies(searchedAnomalies.value));
 
 const groups = computed<EndpointGroup[]>(() => {
-	return buildGroups(searchedEntries.value, searchedAnomalies.value);
+	const built = filterLatencyBand(
+		buildGroups(searchedEntries.value, searchedAnomalies.value, latencies.value),
+		treeBand.value,
+		selectedMetric.value,
+	);
+
+	const sort: GroupSort = {
+		field: treeSortField.value,
+		dir: treeSortDir.value,
+	};
+
+	return sortGroups(built, sort).map((endpoint) => {
+		return {
+			...endpoint,
+			queries: sortGroups(endpoint.queries, sort),
+		};
+	});
+});
+
+// Tree discovery control: rank both tree levels by the same field, worst-first
+// for the discovery fields.
+const treeSortField = useLocalStorage<GroupSortField>(
+	`cache-tree-sort-field-${userId}`,
+	'hits',
+);
+
+const treeSortDir = useLocalStorage<1 | -1>(`cache-tree-sort-dir-${userId}`, -1);
+
+// Which measurement the tree's latency column reports, named as the chart above
+// names its curves so one word means one thing on the whole page.
+const treeLatencyMetric = useLocalStorage<LatencyMetric>(
+	`cache-tree-latency-metric-${userId}`,
+	'response',
+);
+
+// A stored preference outlives the code that wrote it, so a metric that has since
+// been renamed or dropped must not reach the row as an undefined percentile set.
+const selectedMetric = computed<LatencyMetric>(() => {
+	return LATENCY_METRICS.includes(treeLatencyMetric.value)
+		? treeLatencyMetric.value
+		: 'response';
+});
+
+const treeMetricOptions: { text: string; value: LatencyMetric }[] = [
+	{ text: t('cache_lat_response', 'Response'), value: 'response' },
+	{ text: t('cache_lat_miss', 'Misses'), value: 'miss' },
+	{ text: t('cache_lat_anomaly', 'Anomalies'), value: 'anomaly' },
+	{ text: t('cache_lat_fill', 'Fills'), value: 'fill' },
+	{ text: t('cache_lat_hit', 'Hits'), value: 'hit' },
+];
+
+// How much of the tree to keep: everything, or only its slowest tail. One band at
+// a time — two bands at once would just mean the wider of the two.
+const treeBand = useLocalStorage<LatencyBand>(`cache-tree-band-${userId}`, 'all');
+
+const treeBandOptions = LATENCY_BANDS.map((band) => {
+	if (band === 'all') {
+		return { text: t('cache_tree_band_all', 'All'), value: band };
+	}
+
+	// The percentile names where the cut falls, the label what survives it: p99
+	// keeps the slowest 1%.
+	const keptPercent = 100 - Number(band.slice(1));
+
+	return {
+		text: t(`cache_tree_band_${band}`, `${band}: Slowest ${keptPercent}%`),
+		value: band,
+	};
+});
+
+function metricName(metric: LatencyMetric): string {
+	const option = treeMetricOptions.find((candidate) => {
+		return candidate.value === metric;
+	});
+
+	return option?.text ?? metric;
+}
+
+const metricLabel = computed(() => metricName(selectedMetric.value));
+
+const treeSortOptions = computed<{ text: string; value: GroupSortField }[]>(() => {
+	const latencyOptions = LATENCY_PERCENTILES.map((percentile) => {
+		return {
+			text: `${metricLabel.value} ${percentile}`,
+			value: latencySortField(selectedMetric.value, percentile),
+		};
+	});
+
+	return [
+		// The funnel first, in the tree's own column order, then the fields that
+		// don't sit on it.
+		{ text: t('cache_tree_sort_misses', 'Misses'), value: 'misses' },
+		{ text: t('cache_tree_sort_anomalies', 'Anomalies'), value: 'anomalies' },
+		{ text: t('cache_tree_sort_fills', 'Fills'), value: 'fills' },
+		{ text: t('cache_tree_sort_hits', 'Hits'), value: 'hits' },
+		{ text: t('cache_tree_sort_ratio', 'Hit ratio'), value: 'ratio' },
+		{ text: t('cache_tree_sort_coarse', 'Coarse'), value: 'coarse' },
+		{ text: t('cache_tree_sort_entries', 'Entries'), value: 'entries' },
+		{ text: t('cache_tree_sort_size', 'Size'), value: 'size' },
+		{ text: t('cache_tree_sort_fill_ms', 'Slowest fill'), value: 'fillMs' },
+		...latencyOptions,
+	];
+});
+
+// Deselecting the percentile — or switching metric — leaves the tree ranked by a
+// column the toolbar no longer offers; fall back to the default ranking instead.
+watch(treeSortOptions, (options) => {
+	const stillOffered = options.some((option) => {
+		return option.value === treeSortField.value;
+	});
+
+	if (!stillOffered) {
+		treeSortField.value = 'hits';
+	}
 });
 
 const sections = computed(() => {
@@ -357,11 +495,14 @@ async function load() {
 	try {
 		// Fetch both together and assign in one go: entries + anomalies feed one group
 		// tree, so a staggered assign would flash a phantom old-window anomaly node.
-		const [entriesRes, anomaliesRes] = await Promise.all([
+		const [entriesRes, anomaliesRes, latenciesRes] = await Promise.all([
 			api.get('/utils/cache', {
 				params: { window: selectedWindow.value },
 			}),
 			api.get('/utils/cache/anomalies', {
+				params: { window: selectedWindow.value },
+			}).catch(() => ({ data: { data: [] } })),
+			api.get('/utils/cache/latencies', {
 				params: { window: selectedWindow.value },
 			}).catch(() => ({ data: { data: [] } })),
 		]);
@@ -372,6 +513,7 @@ async function load() {
 
 		entries.value = entriesRes.data.data;
 		anomalies.value = anomaliesRes.data.data;
+		latencies.value = latenciesRes.data.data;
 		now.value = Date.now();
 	}
 	catch (err: any) {
@@ -566,6 +708,11 @@ const totalFills = computed(() => {
 	return timeseries.value.buckets.reduce((sum, b) => sum + b.fills, 0);
 });
 
+// Share of cache-servable traffic served from cache — hits over hits plus fills.
+const totalRatio = computed(() => {
+	return formatHitRatio(totalHits.value, totalFills.value) ?? '—';
+});
+
 // Median of the per-bucket p50s over the window — a single central response-time
 // number for the summary, formatted or an em-dash when nothing was sampled.
 function medianMs(values: (number | null)[]): string {
@@ -607,8 +754,8 @@ const latencyChartEl = ref<HTMLElement | null>(null);
 let latencyChart: ApexCharts | null = null;
 
 // Legend visibility persisted per chart, so a hidden/shown series survives a reload
-// and the per-second refresh. Latency defaults to the p50 medians (p95 bands hidden
-// until the user opts in via the legend).
+// and the per-second refresh. Latency defaults to the p50 medians plus the p99 tail
+// (only the p95 bands are hidden until the user opts in via the legend).
 const countsHiddenSeries = useLocalStorage<string[]>(
 	`cache-counts-hidden-${userId}`,
 	[],
@@ -617,7 +764,7 @@ const countsHiddenSeries = useLocalStorage<string[]>(
 const latencyHiddenSeries = useLocalStorage<string[]>(
 	`cache-latency-hidden-${userId}`,
 	latencyLines()
-		.filter((line) => line.dash !== 0)
+		.filter((line) => line.dash === 4)
 		.map((line) => line.name),
 );
 
@@ -625,6 +772,63 @@ function toggleHiddenSeries(store: Ref<string[]>, name: string) {
 	store.value = store.value.includes(name)
 		? store.value.filter((entry) => entry !== name)
 		: [...store.value, name];
+}
+
+// The latency chart's legend is 3 rows — one per percentile (p50/p95/p99) — each
+// listing its 5 category curves. The rows and entries come from latencyLines() so
+// a future percentile or category stays in sync.
+const latencyPercentiles = computed(() => {
+	const seen: string[] = [];
+
+	for (const line of latencyLines()) {
+		const percentile = line.name.split(' ').pop()!;
+
+		if (!seen.includes(percentile)) {
+			seen.push(percentile);
+		}
+	}
+
+	return seen;
+});
+
+// The per-category legend entries of one percentile row ("Hits", "Fills", ...).
+function latencyEntries(
+	percentile: string,
+): { name: string; label: string; color: string }[] {
+	return latencyLines()
+		.filter((line) => line.name.endsWith(` ${percentile}`))
+		.map((line) => {
+			return {
+				name: line.name,
+				label: line.name.slice(0, -percentile.length - 1),
+				color: line.color,
+			};
+		});
+}
+
+function isLatencyEntryHidden(name: string): boolean {
+	return latencyHiddenSeries.value.includes(name);
+}
+
+function toggleLatencyEntry(name: string) {
+	toggleHiddenSeries(latencyHiddenSeries, name);
+
+	if (!latencyChart) {
+		return;
+	}
+
+	try {
+		if (isLatencyEntryHidden(name)) {
+			latencyChart.hideSeries(name);
+		}
+		else {
+			latencyChart.showSeries(name);
+		}
+	}
+	catch {
+		// A series with no samples in the window isn't rendered; apex then
+		// derefs a null node. Nothing to toggle — skip it.
+	}
 }
 
 // Reassert stored visibility after each (re)render — apex resets legend toggles on
@@ -735,43 +939,73 @@ function chartConfig(): ApexOptions {
 	// of series order (apexcharts indexes formatters by positional seriesIndex).
 	const metrics: {
 		name: string;
-		unit: 'count' | 'seconds';
+		unit: TooltipUnit;
 		curve: 'straight' | 'stepline';
+		// Dashed marks a line that isn't on the Count axis, so a percentage can't
+		// be read against the counts it sits among.
+		dash: number;
 		color: string;
 		pick: (b: CacheTimeseriesBucket) => number | null;
 	}[] = [
 		{
-			name: t('hits', 'Hits'),
+			// Every request the cache answered, however it answered it — the line the
+			// hit/miss split below adds up to.
+			name: t('cache_responses', 'Responses'),
 			unit: 'count',
 			curve: 'straight',
-			color: themeVar('--theme--success', '#2ecda7'),
-			pick: (b) => b.hits,
+			dash: 0,
+			color: themeVar('--theme--foreground-subdued', '#a2b5cd'),
+			pick: (b) => b.hits + b.misses,
 		},
 		{
 			name: t('cache_misses', 'Misses'),
 			unit: 'count',
 			curve: 'straight',
+			dash: 0,
 			color: themeVar('--theme--warning', '#ffa439'),
 			pick: (b) => b.misses,
-		},
-		{
-			name: t('cache_fills', 'Fills'),
-			unit: 'count',
-			curve: 'straight',
-			color: themeVar('--theme--secondary', '#3399ff'),
-			pick: (b) => b.fills,
 		},
 		{
 			name: t('cache_anomalies', 'Anomalies'),
 			unit: 'count',
 			curve: 'straight',
+			dash: 0,
 			color: themeVar('--theme--danger', '#e35169'),
 			pick: (b) => b.anomalies,
+		},
+		{
+			name: t('cache_fills', 'Fills'),
+			unit: 'count',
+			curve: 'straight',
+			dash: 0,
+			color: themeVar('--theme--secondary', '#3399ff'),
+			pick: (b) => b.fills,
+		},
+		{
+			name: t('hits', 'Hits'),
+			unit: 'count',
+			curve: 'straight',
+			dash: 0,
+			color: themeVar('--theme--success', '#2ecda7'),
+			pick: (b) => b.hits,
+		},
+		{
+			// Same definition as the summary metric and the tree column: the share of
+			// cache-servable requests that were served from cache.
+			name: t('cache_hit_ratio', 'Hit ratio'),
+			unit: 'percent',
+			curve: 'straight',
+			dash: 6,
+			// The other five theme hues are taken by the count series and TTL; the
+			// accent reads as the headline metric it is, and flips with the theme.
+			color: themeVar('--theme--foreground-accent', '#172940'),
+			pick: (b) => hitRatioPercent(b.hits, b.fills),
 		},
 		{
 			name: t('ttl', 'TTL'),
 			unit: 'seconds',
 			curve: 'stepline',
+			dash: 0,
 			color: themeVar('--theme--primary', '#6644ff'),
 			pick: (b) => {
 				return b.ttlMs === null
@@ -785,6 +1019,10 @@ function chartConfig(): ApexOptions {
 
 	const secondsNames = metrics
 		.filter((m) => m.unit === 'seconds')
+		.map((m) => m.name);
+
+	const percentNames = metrics
+		.filter((m) => m.unit === 'percent')
 		.map((m) => m.name);
 
 	return {
@@ -801,7 +1039,11 @@ function chartConfig(): ApexOptions {
 			},
 		},
 		colors: metrics.map((m) => m.color),
-		stroke: { width: 2, curve: metrics.map((m) => m.curve) },
+		stroke: {
+			width: 2,
+			curve: metrics.map((m) => m.curve),
+			dashArray: metrics.map((m) => m.dash),
+		},
 		legend: {
 			show: true,
 			position: 'top',
@@ -834,6 +1076,17 @@ function chartConfig(): ApexOptions {
 				seriesName: secondsNames,
 				title: { text: t('cache_ttl_label', 'TTL') },
 				labels: { formatter: (v: number) => formatDuration(v) },
+			},
+			{
+				// A percentage carries its own scale, so this axis exists only to keep
+				// the ratio off the count scale — nothing is drawn for it. The ceiling
+				// sits above 100 on purpose: a cache at 95-100% would otherwise ride
+				// the plot's top edge and clip its own stroke out of the frame.
+				opposite: true,
+				seriesName: percentNames,
+				show: false,
+				min: 0,
+				max: 115,
 			},
 		],
 		tooltip: {
@@ -916,9 +1169,11 @@ type LatencyLine = {
 	pick: (b: CacheTimeseriesBucket) => number | null;
 };
 
-// Colour by category: hit serve, the miss slices (fill = cached, anomaly = flagged,
-// miss = all misses pooled), both = hits + misses. p50 solid (dash 0), p95 dashed
-// (dash 4); the p95 bands start hidden — see renderLatencyChart.
+// Colour by category, ordered as the funnel a request falls through: every
+// response, the misses pooled, the flagged ones, the fills they produced, and the
+// hits served straight from cache. p50 solid (dash 0), p95 dashed
+// (dash 4), p99 dotted (dash 8). The p95 bands start hidden — see
+// renderLatencyChart; p99 is visible so the tail is on screen without opting in.
 function latencyLines(): LatencyLine[] {
 	const hitColor = themeVar('--theme--success', '#2ecda7');
 	const fillColor = themeVar('--theme--secondary', '#3399ff');
@@ -932,27 +1187,15 @@ function latencyLines(): LatencyLine[] {
 		color: string;
 		p50: (b: CacheTimeseriesBucket) => number | null;
 		p95: (b: CacheTimeseriesBucket) => number | null;
+		p99: (b: CacheTimeseriesBucket) => number | null;
 	}[] = [
 		{
-			id: 'hit',
-			label: t('cache_lat_hit', 'Hits'),
-			color: hitColor,
-			p50: (b) => b.hitP50,
-			p95: (b) => b.hitP95,
-		},
-		{
-			id: 'fill',
-			label: t('cache_lat_fill', 'Fills'),
-			color: fillColor,
-			p50: (b) => b.fillP50,
-			p95: (b) => b.fillP95,
-		},
-		{
-			id: 'anomaly',
-			label: t('cache_lat_anomaly', 'Anomalies'),
-			color: anomalyColor,
-			p50: (b) => b.anomalyP50,
-			p95: (b) => b.anomalyP95,
+			id: 'both',
+			label: t('cache_lat_response', 'Response'),
+			color: bothColor,
+			p50: (b) => b.bothP50,
+			p95: (b) => b.bothP95,
+			p99: (b) => b.bothP99,
 		},
 		{
 			id: 'miss',
@@ -960,13 +1203,31 @@ function latencyLines(): LatencyLine[] {
 			color: missColor,
 			p50: (b) => b.missP50,
 			p95: (b) => b.missP95,
+			p99: (b) => b.missP99,
 		},
 		{
-			id: 'both',
-			label: t('cache_lat_response', 'Response'),
-			color: bothColor,
-			p50: (b) => b.bothP50,
-			p95: (b) => b.bothP95,
+			id: 'anomaly',
+			label: t('cache_lat_anomaly', 'Anomalies'),
+			color: anomalyColor,
+			p50: (b) => b.anomalyP50,
+			p95: (b) => b.anomalyP95,
+			p99: (b) => b.anomalyP99,
+		},
+		{
+			id: 'fill',
+			label: t('cache_lat_fill', 'Fills'),
+			color: fillColor,
+			p50: (b) => b.fillP50,
+			p95: (b) => b.fillP95,
+			p99: (b) => b.fillP99,
+		},
+		{
+			id: 'hit',
+			label: t('cache_lat_hit', 'Hits'),
+			color: hitColor,
+			p50: (b) => b.hitP50,
+			p95: (b) => b.hitP95,
+			p99: (b) => b.hitP99,
 		},
 	];
 
@@ -974,6 +1235,7 @@ function latencyLines(): LatencyLine[] {
 		return [
 			{ name: `${c.label} p50`, color: c.color, dash: 0, pick: c.p50 },
 			{ name: `${c.label} p95`, color: c.color, dash: 4, pick: c.p95 },
+			{ name: `${c.label} p99`, color: c.color, dash: 8, pick: c.p99 },
 		];
 	});
 }
@@ -1008,23 +1270,15 @@ function latencyChartConfig(): ApexOptions {
 			toolbar: { show: false },
 			animations: { enabled: false },
 			fontFamily: 'inherit',
-			events: {
-				legendClick: (_ctx: unknown, index: number) => {
-					toggleHiddenSeries(latencyHiddenSeries, lines[index]!.name);
-				},
-			},
 		},
 		colors: lines.map((l) => l.color),
 		stroke: { width: 2, curve: 'straight', dashArray: lines.map((l) => l.dash) },
 		// Continuous line via 0-fill (idle gaps drop to zero); markers only on the
 		// real samples, so the zero-fill points carry no dot.
 		markers: { size: 0, discrete: markerPoints },
-		legend: {
-			show: true,
-			position: 'top',
-			horizontalAlign: 'left',
-			itemMargin: { horizontal: 12, vertical: 0 },
-		},
+		// The legend is custom — one entry per percentile, each toggling its whole
+		// curve group — so apex's per-series legend is off.
+		legend: { show: false },
 		dataLabels: { enabled: false },
 		// 0-fill keeps the line continuous; an idle bucket drops to zero rather than
 		// interpolating a fake value between distant real samples.
@@ -1123,7 +1377,44 @@ function currentPage(query: QueryGroup): number {
 
 function pagedEntries(query: QueryGroup): CacheEntry[] {
 	const start = (currentPage(query) - 1) * PAGE_SIZE;
-	return query.entries.slice(start, start + PAGE_SIZE);
+	const sort = entrySort.value[query.key];
+
+	const ordered = sort
+		? sortEntries(query.entries, sort)
+		: query.entries;
+
+	return ordered.slice(start, start + PAGE_SIZE);
+}
+
+// Column header click: first click asc, second desc, third returns to the API order.
+function toggleEntrySort(query: QueryGroup, field: EntrySortField) {
+	const current = entrySort.value[query.key];
+
+	if (!current || current.field !== field) {
+		entrySort.value[query.key] = { field, dir: 1 };
+	}
+	else if (current.dir === 1) {
+		entrySort.value[query.key] = { field, dir: -1 };
+	}
+	else {
+		delete entrySort.value[query.key];
+	}
+}
+
+function sortActive(query: QueryGroup, field: EntrySortField): boolean {
+	return entrySort.value[query.key]?.field === field;
+}
+
+function sortArrow(query: QueryGroup, field: EntrySortField): string {
+	const sort = entrySort.value[query.key];
+
+	if (!sort || sort.field !== field) {
+		return '';
+	}
+
+	return sort.dir === 1
+		? '↑'
+		: '↓';
 }
 
 function setEntryPage(query: QueryGroup, page: number) {
@@ -1154,8 +1445,67 @@ function msLabel(ms: number | null): string {
 		: `${ms} ms`;
 }
 
+// The tree columns are narrow and fixed-width, so every figure in them is shown
+// compact and carries the exact one in its title.
+function countLabel(value: number): string {
+	return abbreviateNumber(value, 1);
+}
+
+function compactMs(ms: number | null): string {
+	if (ms === null) {
+		return '—';
+	}
+
+	return ms < 1000
+		? `${ms}ms`
+		: formatDuration(ms / 1000);
+}
+
+// The tree's funnel columns. Colour is the legend — the same hue the charts give
+// each metric — so a row shows figures alone and the name lives in the title,
+// alongside the count and the whole percentile tail.
+function funnelColumns(node: EndpointGroup | QueryGroup) {
+	const counts: Record<LatencyMetric, number> = {
+		response: node.totalHits + node.totalMisses,
+		miss: node.totalMisses,
+		anomaly: node.anomalyCount,
+		fill: node.totalFills,
+		hit: node.totalHits,
+	};
+
+	return LATENCY_METRICS.map((metric) => {
+		const count = counts[metric];
+		const percentiles = node.latencies[metric];
+
+		const tail = LATENCY_PERCENTILES.map((percentile) => {
+			return `${percentile}  ${msLabel(percentiles[percentile])}`;
+		});
+
+		return {
+			metric,
+			count: countLabel(count),
+			// A zero count has no duration to pair with, and an em-dash on every
+			// row would drown the columns that do carry traffic.
+			duration: count === 0
+				? ''
+				: compactMs(percentiles.p50),
+			title: [
+				metricName(metric),
+				`${t('cache_count', 'Count')}  ${count}`,
+				...tail,
+			].join('\n'),
+		};
+	});
+}
+
 function secLabel(ms: number): string {
 	return `${Math.round(ms / 1000)}s`;
+}
+
+// Same adapter pattern as ageOf/lastHitOf: the ratio formatter lives in cache-view,
+// this collapses its "no traffic" null to the page's em-dash.
+function ratioOf(hits: number, fills: number): string {
+	return formatHitRatio(hits, fills) ?? '—';
 }
 
 // The data-driven TTL plus its shorten/lengthen verdict against the TTL in force.
@@ -1279,6 +1629,7 @@ onUnmounted(() => {
 				v-model="selectedWindow"
 				class="window-select"
 				:items="windowOptions"
+				allow-other
 				inline
 				@update:model-value="load"
 			/>
@@ -1348,6 +1699,11 @@ onUnmounted(() => {
 						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
 						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 					</div>
+					<div class="metric-separator" />
+					<div class="metric">
+						<span class="value">{{ totalRatio }}</span>
+						<span class="label">{{ t('cache_hit_ratio', 'Hit ratio') }}</span>
+					</div>
 				</div>
 				<div ref="chartEl" class="chart" />
 			</div>
@@ -1370,6 +1726,34 @@ onUnmounted(() => {
 						<span class="value">{{ medianHit }}</span>
 						<span class="label">
 							{{ t('cache_lat_median_hit', 'Median hit') }}
+						</span>
+					</div>
+				</div>
+				<div class="cache-chart-legend">
+					<div
+						v-for="percentile in latencyPercentiles"
+						:key="percentile"
+						class="cache-chart-legend-row"
+					>
+						<span class="cache-chart-legend-percentile">
+							<span class="cache-chart-legend-line" :class="`dash-${percentile}`" />
+							{{ percentile }}
+						</span>
+						<span
+							v-for="entry in latencyEntries(percentile)"
+							:key="entry.name"
+							class="cache-chart-legend-entry"
+							:class="{ 'is-muted': isLatencyEntryHidden(entry.name) }"
+							role="button"
+							tabindex="0"
+							@click="toggleLatencyEntry(entry.name)"
+							@keydown.enter="toggleLatencyEntry(entry.name)"
+						>
+							<span
+								class="cache-chart-legend-dot"
+								:style="{ background: entry.color }"
+							/>
+							{{ entry.label }}
 						</span>
 					</div>
 				</div>
@@ -1461,7 +1845,47 @@ onUnmounted(() => {
 				}}
 			</v-info>
 
-			<div v-else class="endpoints">
+			<div v-if="groups.length > 0" class="tree-controls">
+				<span class="tree-controls-group">
+					<v-select
+						v-model="treeLatencyMetric"
+						class="tree-metric-select"
+						:items="treeMetricOptions"
+						inline
+					/>
+
+					<v-select
+						v-model="treeBand"
+						class="tree-band-select"
+						:items="treeBandOptions"
+						inline
+					/>
+				</span>
+
+				<span class="tree-controls-group">
+					<v-select
+						v-model="treeSortField"
+						class="tree-sort-select"
+						:items="treeSortOptions"
+						inline
+					/>
+					<v-button
+						v-tooltip.bottom="
+							treeSortDir === -1
+								? t('cache_tree_sort_asc', 'Ascending')
+								: t('cache_tree_sort_desc', 'Descending')
+						"
+						rounded
+						icon
+						x-small
+						@click="treeSortDir = treeSortDir === -1 ? 1 : -1"
+					>
+						<v-icon :name="treeSortDir === -1 ? 'arrow_downward' : 'arrow_upward'" />
+					</v-button>
+				</span>
+			</div>
+
+			<div class="endpoints">
 				<div v-for="section in sections" :key="section.key" class="section">
 					<h2 class="section-title">{{ section.label }}</h2>
 
@@ -1471,30 +1895,44 @@ onUnmounted(() => {
 								:name="expanded[group.path] ? 'expand_more' : 'chevron_right'"
 								small
 							/>
+							<span v-tooltip="`${group.entryCount} entries`" class="stat entries">
+								{{ countLabel(group.entryCount) }}
+							</span>
 							<span class="path">{{ group.path }}</span>
-							<span class="stat">
-								{{ group.entryCount }} {{ t('entries', 'entries') }}
-							</span>
-							<span class="stat hits">
-								{{ group.totalHits }} {{ t('hits', 'hits') }}
-							</span>
-							<span class="stat">{{ formatFilesize(group.totalSize) }}</span>
-							<span v-if="group.anomalyCount" class="stat anomaly-count">
-								{{ group.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
-							</span>
 							<span v-if="group.coarseCount" class="stat coarse-count">
 								{{ group.coarseCount }} {{ t('coarse_short', 'coarse') }}
 							</span>
-							<v-button
-								v-tooltip.bottom="t('evict_endpoint', 'Evict this endpoint')"
-								x-small
-								kind="danger"
-								secondary
-								:disabled="group.entryCount === 0"
-								@click.stop="evictPath(group.path)"
+							<span
+								v-for="column in funnelColumns(group)"
+								:key="column.metric"
+								v-tooltip="column.title"
+								class="stat funnel"
+								:class="column.metric"
 							>
-								<v-icon name="delete" x-small />
-							</v-button>
+								<span class="count">{{ column.count }}</span>
+								<span class="duration">{{ column.duration }}</span>
+							</span>
+							<span
+								v-tooltip="
+									t('cache_hit_ratio_tip', 'Hit ratio: hits / (hits + fills)')
+								"
+								class="stat ratio"
+							>{{ ratioOf(group.totalHits, group.totalFills) }}</span>
+							<span v-tooltip="`${group.totalSize} bytes`" class="stat size">
+								{{ formatFilesize(group.totalSize) }}
+							</span>
+							<span class="row-actions">
+								<v-button
+									v-tooltip.bottom="t('evict_endpoint', 'Evict this endpoint')"
+									x-small
+									kind="danger"
+									secondary
+									:disabled="group.entryCount === 0"
+									@click.stop="evictPath(group.path)"
+								>
+									<v-icon name="delete" x-small />
+								</v-button>
+							</span>
 						</div>
 
 						<div v-if="expanded[group.path]" class="query-groups">
@@ -1504,19 +1942,15 @@ onUnmounted(() => {
 										:name="expanded[q.key] ? 'expand_more' : 'chevron_right'"
 										small
 									/>
+									<span
+										v-tooltip="`${q.entries.length} entries`"
+										class="stat entries"
+									>
+										{{ countLabel(q.entries.length) }}
+									</span>
 									<span class="method">{{ q.method }}</span>
 									<span class="query" :title="q.query">
 										{{ formatQuery(q.query) }}
-									</span>
-									<span class="stat">
-										{{ q.entries.length }} {{ t('entries', 'entries') }}
-									</span>
-									<span class="stat hits">
-										{{ q.totalHits }} {{ t('hits', 'hits') }}
-									</span>
-									<span class="stat">{{ formatFilesize(q.totalSize) }}</span>
-									<span v-if="q.anomalyCount" class="stat anomaly-count">
-										{{ q.anomalyCount }} {{ t('anomalies_short', 'anomalies') }}
 									</span>
 									<span v-if="q.coarseCount" class="stat coarse-count">
 										{{ q.coarseCount }} {{ t('coarse_short', 'coarse') }}
@@ -1529,21 +1963,45 @@ onUnmounted(() => {
 									>
 										rec {{ secLabel(q.recommendedTtlMs) }}
 									</span>
-									<v-icon
-										v-if="q.url"
-										v-tooltip.bottom="t('open_in_new_tab', 'Open in new tab')"
-										name="open_in_new"
-										small
-										clickable
-										@click.stop="openQuery(q)"
-									/>
-									<v-icon
-										v-tooltip.bottom="t('copy_query', 'Copy query as JSON')"
-										name="content_copy"
-										small
-										clickable
-										@click.stop="copyQuery(q)"
-									/>
+									<span
+										v-for="column in funnelColumns(q)"
+										:key="column.metric"
+										v-tooltip="column.title"
+										class="stat funnel"
+										:class="column.metric"
+									>
+										<span class="count">{{ column.count }}</span>
+										<span class="duration">{{ column.duration }}</span>
+									</span>
+									<span
+										v-tooltip="
+											t(
+												'cache_hit_ratio_tip',
+												'Hit ratio: hits / (hits + fills)',
+											)
+										"
+										class="stat ratio"
+									>{{ ratioOf(q.totalHits, q.totalFills) }}</span>
+									<span v-tooltip="`${q.totalSize} bytes`" class="stat size">
+										{{ formatFilesize(q.totalSize) }}
+									</span>
+									<span class="row-actions">
+										<v-icon
+											v-if="q.url"
+											v-tooltip.bottom="t('open_in_new_tab', 'Open in new tab')"
+											name="open_in_new"
+											small
+											clickable
+											@click.stop="openQuery(q)"
+										/>
+										<v-icon
+											v-tooltip.bottom="t('copy_query', 'Copy query as JSON')"
+											name="content_copy"
+											small
+											clickable
+											@click.stop="copyQuery(q)"
+										/>
+									</span>
 								</div>
 
 								<div
@@ -1553,15 +2011,70 @@ onUnmounted(() => {
 									<table class="entries">
 										<thead>
 											<tr>
-												<th>{{ t('user_label', 'User') }}</th>
-												<th class="num">{{ t('hits', 'Hits') }}</th>
-												<th class="num">{{ t('age', 'Age') }}</th>
-												<th class="num">{{ t('last_hit', 'Last hit') }}</th>
-												<th class="num">
-													{{ t('expires_in', 'Expires in') }}
+												<th
+													class="sortable"
+													:class="{ sorted: sortActive(q, 'user') }"
+													@click="toggleEntrySort(q, 'user')"
+												>
+													{{ t('user_label', 'User') }}
+													<span class="arrow">{{ sortArrow(q, 'user') }}</span>
 												</th>
-												<th class="num">{{ t('size', 'Size') }}</th>
-												<th class="key">{{ t('key', 'Key') }}</th>
+												<th
+													class="num sortable"
+													:class="{ sorted: sortActive(q, 'hits') }"
+													@click="toggleEntrySort(q, 'hits')"
+												>
+													{{ t('hits', 'Hits') }}
+													<span class="arrow">{{ sortArrow(q, 'hits') }}</span>
+												</th>
+												<th
+													class="num sortable"
+													:class="{ sorted: sortActive(q, 'ratio') }"
+													@click="toggleEntrySort(q, 'ratio')"
+												>
+													{{ t('cache_hit_ratio', 'Hit ratio') }}
+													<span class="arrow">{{ sortArrow(q, 'ratio') }}</span>
+												</th>
+												<th
+													class="num sortable"
+													:class="{ sorted: sortActive(q, 'createdAt') }"
+													@click="toggleEntrySort(q, 'createdAt')"
+												>
+													{{ t('age', 'Age') }}
+													<span class="arrow">{{ sortArrow(q, 'createdAt') }}</span>
+												</th>
+												<th
+													class="num sortable"
+													:class="{ sorted: sortActive(q, 'lastHitAt') }"
+													@click="toggleEntrySort(q, 'lastHitAt')"
+												>
+													{{ t('last_hit', 'Last hit') }}
+													<span class="arrow">{{ sortArrow(q, 'lastHitAt') }}</span>
+												</th>
+												<th
+													class="num sortable"
+													:class="{ sorted: sortActive(q, 'expiresAt') }"
+													@click="toggleEntrySort(q, 'expiresAt')"
+												>
+													{{ t('expires_in', 'Expires in') }}
+													<span class="arrow">{{ sortArrow(q, 'expiresAt') }}</span>
+												</th>
+												<th
+													class="num sortable"
+													:class="{ sorted: sortActive(q, 'size') }"
+													@click="toggleEntrySort(q, 'size')"
+												>
+													{{ t('size', 'Size') }}
+													<span class="arrow">{{ sortArrow(q, 'size') }}</span>
+												</th>
+												<th
+													class="key sortable"
+													:class="{ sorted: sortActive(q, 'key') }"
+													@click="toggleEntrySort(q, 'key')"
+												>
+													{{ t('key', 'Key') }}
+													<span class="arrow">{{ sortArrow(q, 'key') }}</span>
+												</th>
 												<th></th>
 											</tr>
 										</thead>
@@ -1574,6 +2087,9 @@ onUnmounted(() => {
 											>
 												<td>{{ userOf(entry.user) }}</td>
 												<td class="num">{{ entry.hits }}</td>
+												<td class="num">
+													{{ ratioOf(entry.hits, entry.fills) }}
+												</td>
 												<td class="num">{{ ageOf(entry.createdAt) }}</td>
 												<td class="num">
 													{{ lastHitOf(entry.lastHitAt) }}
@@ -1745,6 +2261,12 @@ onUnmounted(() => {
 	flex-direction: column;
 }
 
+/* Sets the derived hit ratio apart from the raw outcome counts. */
+.metric-separator {
+	align-self: stretch;
+	border-inline-start: var(--theme--border-width) solid var(--theme--border-color-subdued);
+}
+
 .metric .value {
 	font-size: 28px;
 	font-weight: 700;
@@ -1789,6 +2311,38 @@ onUnmounted(() => {
 	color: var(--theme--primary);
 }
 
+.tree-controls {
+	align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 12px;
+	justify-content: space-between;
+	margin-block-end: 16px;
+}
+
+/* A v-select's root is a `v-menu` with no layout box of its own, so it can't be
+   pushed with an auto margin. The two groups are what the row actually lays out:
+   metric + percentile pick what the tree reports, the sort pair acts on the rows
+   below and so sits at the far edge, over their figures. */
+.tree-controls-group {
+	align-items: center;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px 12px;
+}
+
+.tree-sort-select {
+	inline-size: 160px;
+}
+
+.tree-metric-select {
+	inline-size: 120px;
+}
+
+.tree-band-select {
+	inline-size: 120px;
+}
+
 .anomaly-rows {
 	display: flex;
 	flex-direction: column;
@@ -1824,14 +2378,7 @@ onUnmounted(() => {
 	white-space: nowrap;
 }
 
-/* Scoped over the header `.stat` grey rules, which are more specific than a bare
-   `.anomaly-count` and would otherwise win. */
-.endpoint-header .stat.anomaly-count,
-.query-header .stat.anomaly-count {
-	color: var(--theme--warning);
-}
-
-/* Coarse is a tuning hint, not a problem — primary (not amber) so it reads apart
+/* Coarse is a tuning hint, not a problem — primary (not red) so it reads apart
    from anomalies. */
 .endpoint-header .stat.coarse-count,
 .query-header .stat.coarse-count {
@@ -1882,8 +2429,111 @@ onUnmounted(() => {
 	white-space: nowrap;
 }
 
-.endpoint-header .stat.hits {
-	color: var(--theme--primary);
+/* The numeric run is a fixed-width column set anchored to the right of the row,
+   so the figures line up down the tree instead of drifting with path length.
+   Variable chips (anomalies, coarse, rec) sit left of it, against the path, where
+   their width is absorbed by the growing path cell rather than shifting a column.
+   `.entries` opens the run left-aligned; everything after it reads as a number. */
+/* The figures carry the row; the labels around them are already muted, so weight
+   is what separates a number from its surroundings at 13px. Left off the coarse
+   and rec chips, which are words with a number in them rather than figures. */
+.endpoint-header .stat.entries,
+.endpoint-header .stat.funnel,
+.endpoint-header .stat.ratio,
+.endpoint-header .stat.size,
+.query-header .stat.entries,
+.query-header .stat.funnel,
+.query-header .stat.ratio,
+.query-header .stat.size {
+	font-weight: 700;
+}
+
+/* Never shrink a stat: the widths below are flex-bases, and a query row (deeper
+   indent, plus a `rec` chip) overflows where its endpoint row did not — flex would
+   then shave each column by a different amount and the two levels would stop
+   lining up. The path/query cell absorbs the deficit instead; it ellipsises. */
+.endpoint-header .stat,
+.query-header .stat {
+	flex-shrink: 0;
+	font-variant-numeric: tabular-nums;
+	text-align: end;
+}
+
+/* Leads the row rather than joining the numeric run: a constant width here is
+   what keeps every path — and every method one level down — starting at the same
+   x. The "entries" wording lives in the title, the column is just the count. */
+.endpoint-header .stat.entries,
+.query-header .stat.entries {
+	inline-size: 36px;
+	text-align: end;
+}
+
+/* The funnel a request falls through — every response, the misses, the flagged
+   and cached slices of those, the hits — each pairing a count with its median.
+   One width for all five: a metric with no traffic still holds its column, or
+   every row's figures would shift against the one above. */
+.endpoint-header .stat.funnel,
+.query-header .stat.funnel {
+	display: inline-flex;
+	gap: 6px;
+	inline-size: 82px;
+	justify-content: flex-end;
+}
+
+/* Counts read down one edge and durations down another, so a row can be compared
+   against the rows above it without reading the pairs apart. */
+.endpoint-header .stat.funnel .count,
+.query-header .stat.funnel .count {
+	inline-size: 32px;
+}
+
+.endpoint-header .stat.funnel .duration,
+.query-header .stat.funnel .duration {
+	inline-size: 44px;
+}
+
+/* Colour is the legend: the same hue each metric carries in the charts above. */
+.endpoint-header .stat.miss,
+.query-header .stat.miss {
+	color: var(--theme--warning);
+}
+
+.endpoint-header .stat.anomaly,
+.query-header .stat.anomaly {
+	color: var(--theme--danger);
+}
+
+.endpoint-header .stat.fill,
+.query-header .stat.fill {
+	color: var(--theme--secondary);
+}
+
+.endpoint-header .stat.hit,
+.query-header .stat.hit {
+	color: var(--theme--success);
+}
+
+.endpoint-header .stat.ratio,
+.query-header .stat.ratio {
+	inline-size: 40px;
+}
+
+.endpoint-header .stat.size,
+.query-header .stat.size {
+	inline-size: 62px;
+}
+
+/* One action slot of the same width at both levels, so the columns line up across
+   endpoint and query rows. It is fixed because `open_in_new` only renders for a
+   query carrying a URL, and its absence would otherwise slide every column right. */
+.endpoint-header .row-actions,
+.query-header .row-actions {
+	display: flex;
+	flex-shrink: 0;
+	gap: 12px;
+	align-items: center;
+	justify-content: flex-end;
+	inline-size: 60px;
 }
 
 .query-groups {
@@ -1924,10 +2574,6 @@ onUnmounted(() => {
 .query-header .stat {
 	color: var(--theme--foreground-subdued);
 	white-space: nowrap;
-}
-
-.query-header .stat.hits {
-	color: var(--theme--primary);
 }
 
 .query-header .stat.rec {
@@ -1971,6 +2617,21 @@ table.entries td {
 table.entries th {
 	color: var(--theme--foreground-subdued);
 	font-weight: 600;
+}
+
+table.entries th.sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+table.entries th.sortable:hover,
+table.entries th.sortable.sorted {
+	color: var(--theme--foreground);
+}
+
+table.entries .arrow {
+	font-size: 11px;
+	margin-inline-start: 4px;
 }
 
 table.entries .num {
@@ -2078,6 +2739,68 @@ table.entries .entry-row {
 	padding: 6px 10px;
 	font-size: 12px;
 	line-height: 1.6;
+}
+
+/* Latency chart legend: 3 rows — one per percentile (p50/p95/p99) — each listing
+   its 5 category curves. Apex's per-series legend is disabled; this replaces it.
+   A muted entry is hidden; clicking it toggles that single curve. */
+.cache-chart-legend {
+	display: grid;
+	gap: 4px;
+	margin-block-end: 8px;
+}
+
+.cache-chart-legend-row {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.cache-chart-legend-percentile {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	inline-size: 40px;
+	flex-shrink: 0;
+	font-size: 12px;
+	color: var(--theme--foreground-subdued);
+}
+
+.cache-chart-legend-entry {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 2px 6px;
+	border: none;
+	background: none;
+	cursor: pointer;
+	font-size: 12px;
+	color: var(--theme--foreground);
+}
+
+.cache-chart-legend-entry.is-muted {
+	opacity: 0.4;
+}
+
+.cache-chart-legend-dot {
+	inline-size: 8px;
+	block-size: 8px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+.cache-chart-legend-line {
+	inline-size: 16px;
+	block-size: 0;
+	border-block-end: 2px solid var(--theme--foreground-subdued);
+}
+
+.cache-chart-legend-line.dash-p95 {
+	border-block-end-style: dashed;
+}
+
+.cache-chart-legend-line.dash-p99 {
+	border-block-end-style: dotted;
 }
 
 .chart :deep(.cache-tt-head) {

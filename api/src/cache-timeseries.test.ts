@@ -139,14 +139,19 @@ describe('readCacheTimeseries', () => {
 					bucket: 0,
 					hit_p50: 2,
 					hit_p95: 5,
+					hit_p99: 9,
 					fill_p50: 20,
 					fill_p95: 60,
+					fill_p99: 140,
 					anomaly_p50: 80,
 					anomaly_p95: 200,
+					anomaly_p99: 320,
 					miss_p50: 40,
 					miss_p95: 120,
+					miss_p99: 260,
 					both_p50: 3,
 					both_p95: 100,
+					both_p99: 210,
 				},
 			],
 		};
@@ -156,18 +161,24 @@ describe('readCacheTimeseries', () => {
 		expect(result.buckets[0]).toMatchObject({
 			hitP50: 2,
 			hitP95: 5,
+			hitP99: 9,
 			fillP50: 20,
 			fillP95: 60,
+			fillP99: 140,
 			anomalyP50: 80,
 			anomalyP95: 200,
+			anomalyP99: 320,
 			missP50: 40,
 			missP95: 120,
+			missP99: 260,
 			bothP50: 3,
 			bothP95: 100,
+			bothP99: 210,
 		});
 
 		expect(result.buckets[1]!.hitP50).toBeNull();
 		expect(result.buckets[1]!.bothP95).toBeNull();
+		expect(result.buckets[1]!.bothP99).toBeNull();
 	});
 
 	it('anchors the grid so a sub-bucket refresh does not shift it', async () => {
