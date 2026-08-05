@@ -25,9 +25,12 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 				'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts',
 				'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts',
 			],
-			'/tests/db/websocket/auth-public.test.ts',
-			'/tests/db/websocket/auth-handshake.test.ts',
-			'/tests/db/websocket/auth-strict.test.ts',
+			'/tests/db/websocket/auth-public-connects.test.ts',
+			'/tests/db/websocket/auth-public-pings.test.ts',
+			'/tests/db/websocket/auth-handshake-connects.test.ts',
+			'/tests/db/websocket/auth-handshake-pings.test.ts',
+			'/tests/db/websocket/auth-strict-connects.test.ts',
+			'/tests/db/websocket/auth-strict-pings.test.ts',
 			'/tests/db/websocket/general.test.ts',
 			// WebSocket subscriptions starve under the parallel pool's load; run this
 			// (split out of m2o.test.ts) sequentially like the other WS suites (#277).
