@@ -25,6 +25,23 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 				'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts',
 				'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts',
 			],
+			// Every suite that spawns its own Directus runs here, serialised. Left in the
+			// parallel middle they raced each other: `cache-takeover-scope` applied a
+			// unique constraint before its own junction columns existed (postgres 42703)
+			// while two siblings were spawning servers on the same runner. They only ever
+			// passed because of how the packer happened to group them, so each repack
+			// broke a different one.
+			'/tests/db/routes/items/cache-cancel-write.test.ts',
+			'/tests/db/routes/items/cache-delete-scope.test.ts',
+			'/tests/db/routes/items/cache-nested-write.test.ts',
+			'/tests/db/routes/items/cache-poisoning-read.test.ts',
+			'/tests/db/routes/items/cache-poisoning-write.test.ts',
+			'/tests/db/routes/items/cache-raw-purge.test.ts',
+			'/tests/db/routes/items/cache-raw-purge-relational.test.ts',
+			'/tests/db/routes/items/cache-read-scope.test.ts',
+			'/tests/db/routes/items/cache-takeover-scope.test.ts',
+			'/tests/db/routes/items/cache-unautopurgeable-scope.test.ts',
+			'/tests/db/routes/items/cache-update-scope.test.ts',
 			'/tests/db/websocket/auth-public-connects.test.ts',
 			'/tests/db/websocket/auth-public-pings.test.ts',
 			'/tests/db/websocket/auth-handshake-connects.test.ts',
