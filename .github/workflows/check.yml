@@ -10,16 +10,13 @@ name: Check
 on:
   pull_request:
 
-  # Skip push on feature branches — they always have a PR, so `pull_request`
-  # already runs the full gate (and it alone carries the diff-scoped Style gate).
-  # push stays on the integration branches, which get direct commits and need the
-  # coverage upload codecov tracks. Covers both `feat/x` and `v11.10.1-feat/x`.
+  # Every branch. The old `branches-ignore` kept feature branches on `pull_request`
+  # alone, but it enumerated prefixes (`feat/**`, `*-fix/**`, …) and anything outside
+  # that list — `v11.10.1-perf/…`, for one — matched neither rule and ran twice per
+  # commit. Rather than grow the list, each job below picks the one event it needs:
+  # branch-scoped jobs on `push`, and only `Style (changes)` on `pull_request`, since
+  # it is the one that needs a base to diff against.
   push:
-    branches-ignore:
-      - feat/**
-      - fix/**
-      - '*-feat/**'
-      - '*-fix/**'
 
 permissions:
   contents: read
@@ -35,6 +32,8 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    # push-only: it lints the files the push changed and needs no base context.
+    if: github.event_name == 'push'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -54,6 +53,7 @@ jobs:
   stylelint:
     name: Stylelint
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -76,6 +76,7 @@ jobs:
     # style authority. Kept as a passing no-op so a required "Format" check (if branch protection
     # still lists it) goes green instead of stranding pending.
     runs-on: ubuntu-latest
+    if: github.event_name == 'push'
     steps:
       - name: Format check
         run: echo "Formatting handled by eslint.style.config.js (see the Style (changes) job)."
@@ -113,6 +114,9 @@ jobs:
     # Codecov merges the per-folder flags on the shared commit, so no dedicated merge job.
     name: Unit Tests (${{ matrix.shard }})
     runs-on: ubuntu-latest
+    # push-only for the same reason as Lint, and it suits codecov better: on a push the
+    # commit IS the head, so the flags land where the PR shows them without pinning.
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
