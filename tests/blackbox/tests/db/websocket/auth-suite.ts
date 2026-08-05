@@ -56,7 +56,21 @@ export function describeAuthMethod(authMethod: WebSocketAuthMethod): void {
 
 		afterAll(async () => {
 			for (const [vendor, connection] of databases) {
-				directusInstances[vendor]?.kill();
+				const server = directusInstances[vendor];
+
+				server?.kill();
+
+				// Wait for it to actually go, not just for the signal to be sent. It
+				// still holds its database connections while it shuts down, and the
+				// next file in the shard's serial tail starts the moment this one
+				// returns — a spawned server outliving its suite starved the default
+				// instance until its websockets timed out.
+				if (server && server.exitCode === null && server.signalCode === null) {
+					await Promise.race([
+						new Promise((resolve) => server.once('exit', resolve)),
+						sleep(10_000).then(() => server.kill('SIGKILL')),
+					]);
+				}
 
 				await connection.destroy();
 			}
