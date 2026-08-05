@@ -108,8 +108,9 @@ describe('App Caching Tests', () => {
 			scopedEnv['CACHE_TAGS_HEADER'] = tagsHeader;
 			scopedEnv['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 
-			// Scoped purge (so /server/info orphans) + an 8kb value cap: /server/info
-			// stays under it (orphan), a multi-row read clears it.
+			// Scoped purge (so a collection-less response orphans) + an 8kb value cap:
+			// a bare `{__typename}` query stays far under it (orphan), a multi-row
+			// read clears it.
 			const envRedisAnomaly = cloneDeep(envRedisScopedPurge);
 			envRedisAnomaly[vendor]['CACHE_VALUE_MAX_SIZE'] = '8kb';
 			envRedisAnomaly[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_redis_anomaly`;
@@ -2793,7 +2794,8 @@ describe('App Caching Tests', () => {
 
 	describe(oneLine`
 		Provokes and lists both cacheable-but-skipped anomalies — a missing scope
-		(/server/specs/oas) and an oversized value — joined to their descriptor
+		(a collection-less GraphQL query) and an oversized value — joined to their
+		descriptor
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedisAnomaly;
@@ -2806,11 +2808,14 @@ describe('App Caching Tests', () => {
 			await request(url).post('/utils/cache/stats/truncate')
 				.set('Authorization', auth);
 
-			// missing_scope: the OAS spec has no collection + no scope tags under scoped
-			// purge, so caching it would orphan a stale entry — it's skipped and flagged.
-			// (/server/info can't stand in here: it opts out of the cache entirely in
-			// scoped mode, so it is never cacheable and so never flagged.)
-			await request(url).get('/server/specs/oas')
+			// missing_scope: `{__typename}` reads no collection, so it carries no scope
+			// tags under scoped purge — caching it would orphan a stale entry, so it is
+			// skipped and flagged. (/server/info can't stand in here: it opts out of the
+			// cache entirely in scoped mode, so it is never cacheable and so never
+			// flagged. Neither can /server/specs/oas: at ~150kb it trips the 8kb cap
+			// below and reports as `value_too_large` instead — that check runs first.)
+			await request(url).get('/graphql')
+				.query({ query: '{__typename}' })
 				.set('Authorization', auth);
 
 			// value_too_large: string_field is a varchar(255) — bulk-insert 80 near-max
@@ -2851,7 +2856,7 @@ describe('App Caching Tests', () => {
 			const orphan = byReason.get('missing_scope');
 			expect(orphan).toBeDefined();
 			// The anomaly resolves through its descriptor to the causing request.
-			expect(orphan.path).toBe('/server/specs/oas');
+			expect(orphan.path).toBe('/graphql');
 			expect(orphan.count).toBeGreaterThanOrEqual(1);
 
 			const oversized = byReason.get('value_too_large');
