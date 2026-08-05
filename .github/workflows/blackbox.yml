@@ -48,22 +48,32 @@ jobs:
       shards: ${{ steps.matrix.outputs.shards }}
       shardCount: ${{ steps.matrix.outputs.shardCount }}
     steps:
+      # `.github/ci-dialect` is read from the branch, so the checkout has to come first.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
       # Default DB matrix is the postgres smoke set. The full vendor matrix runs on a
       # push to a trunk branch, or on a PR carrying the `Run Blackbox Full` label (passed in
       # as `inputs.full` by blackbox-pr.yml). Each vendor's db files are split across N shards.
       - name: Select vendor + shard matrix
         id: matrix
         run: |
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.full }}" = "true" ]; then
+          if [ -f .github/ci-dialect ]; then
+            # A standing dialect branch (see refresh-dialect-ci.yml) declares the one
+            # vendor it exists to exercise. The branch content is the declaration, so
+            # the PR is self-describing and needs no label.
+            VENDOR="$(tr -d '[:space:]' < .github/ci-dialect)"
+            echo "vendors=[\"$VENDOR\"]" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ] || [ "${{ inputs.full }}" = "true" ]; then
             # mysql, mssql, oracle dropped — not supported/maintained on this fork.
             # Re-add to the array to support: "mysql","mssql","oracle".
             echo 'vendors=["sqlite3","postgres","maria"]' >> "$GITHUB_OUTPUT"
           else
-            # sqlite3 held out of the smoke set: with 8 shards per vendor the two
-            # matrices queue behind each other on the runner pool, and the wait cost
-            # more wall clock than the shards saved. This fork runs on postgres, and
-            # sqlite3 still runs in the full matrix (trunk pushes, `Run Blackbox
-            # Full`). Re-add to the array to put it back on every PR: "sqlite3".
+            # sqlite3 and maria are held out of the smoke set: at 8 shards a vendor the
+            # matrices queue behind each other on the runner pool, and the wait cost more
+            # wall clock than the shards saved. This fork runs on postgres. The other two
+            # are covered by their standing dialect branches, which re-run against every
+            # `v11.10.1-hhh-dev` tip. Re-add here to gate a dialect on every PR again.
             echo 'vendors=["postgres"]' >> "$GITHUB_OUTPUT"
           fi
           SHARD_COUNT="${{ inputs.shards || 3 }}"
