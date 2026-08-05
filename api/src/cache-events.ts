@@ -113,6 +113,8 @@ export interface CacheEntryRecord {
 	url: string;
 	size: number;
 	hits: number;
+	misses: number;
+	fills: number;
 	fillMs: number | null;
 	hitMs: number | null;
 	ttlMs: number | null;
@@ -121,6 +123,34 @@ export interface CacheEntryRecord {
 	expiresAt: number | null;
 	lastHitAt: number | null;
 }
+
+// What a latency percentile is measured over, in the funnel order the cache page
+// reads: every timed response, the compute a miss had to do, the flagged and the
+// cached slices of that compute, then a serve straight from cache.
+export const CACHE_LATENCY_METRICS = [
+	'response',
+	'miss',
+	'anomaly',
+	'fill',
+	'hit',
+] as const;
+
+export type CacheLatencyMetric = typeof CACHE_LATENCY_METRICS[number];
+
+export interface CacheLatencyPercentiles {
+	p50: number | null;
+	p95: number | null;
+	p99: number | null;
+}
+
+// Response-latency percentiles for one tree node. `method`/`query` null marks the
+// endpoint rollup row, computed over the path's whole event set rather than summed
+// from its query rows — a percentile of percentiles is not a percentile.
+export type CacheGroupLatencyRecord = {
+	path: string;
+	method: string | null;
+	query: string | null;
+} & Record<CacheLatencyMetric, CacheLatencyPercentiles>;
 
 export interface CacheStatsState {
 	configured: boolean;
@@ -847,6 +877,8 @@ export async function listCacheEntries(
 		'd.fill_ms',
 		'd.last_filled',
 		db.raw('SUM(CASE WHEN e.kind = 0 THEN 1 ELSE 0 END) AS hits'),
+		db.raw('SUM(CASE WHEN e.kind = 1 THEN 1 ELSE 0 END) AS misses'),
+		db.raw('SUM(CASE WHEN e.kind = 2 THEN 1 ELSE 0 END) AS fills'),
 		db.raw('MAX(CASE WHEN e.kind = 0 THEN e.time END) AS last_hit_at'),
 		db.raw('MAX(e.ttl_ms) AS ttl_ms'),
 		db.raw('AVG(CASE WHEN e.kind = 0 THEN e.duration_ms END) AS hit_ms'),
@@ -916,6 +948,8 @@ export async function listCacheEntries(
 			url: (row['url'] as string) ?? '',
 			size: Number(row['bytes'] ?? 0),
 			hits: Number(row['hits'] ?? 0),
+			misses: Number(row['misses'] ?? 0),
+			fills: Number(row['fills'] ?? 0),
 			fillMs: row['fill_ms'] === null
 				? null
 				: Number(row['fill_ms']),
@@ -933,6 +967,110 @@ export async function listCacheEntries(
 			lastHitAt: lastHit
 				? new Date(lastHit).getTime()
 				: null,
+		};
+	});
+}
+
+/**
+ * Response-latency percentiles per tree node, for ranking endpoints by what a
+ * cache miss actually costs.
+ *
+ * - Two grouping sets in one pass: `(path, method, query)` matches the query
+ *   nodes of the page's tree, `(path)` the endpoint nodes above them.
+ * - Each set aggregates the raw events, so an endpoint's p95 is the p95 of its
+ *   own requests — not a rollup of its children's percentiles, which would not
+ *   be a percentile at all.
+ * - One entry per metric the timeseries chart also draws, over the same kinds:
+ *   `response` pools everything timed, `miss` the compute kinds 2/3/4, `anomaly`
+ *   and `fill` the flagged and cached slices of those, `hit` a serve straight
+ *   from cache.
+ * - `percentile_cont` is an ordered-set aggregate: Postgres only, like
+ *   `recommendedTtlMs`. Other dialects get an empty list and the tree drops the
+ *   percentile columns.
+ */
+export async function listCacheGroupLatencies(
+	windowMs?: number,
+): Promise<CacheGroupLatencyRecord[]> {
+	const db = getDatabase();
+
+	if (!cacheStatsConfigured() || db.client.config.client !== 'pg') {
+		return [];
+	}
+
+	const since = new Date(Date.now() - clampCacheStatsWindow(windowMs));
+
+	const pct = (p: number, filter: string) => {
+		return `percentile_cont(${p}) WITHIN GROUP (ORDER BY e.duration_ms) `
+			+ `FILTER (WHERE ${filter})`;
+	};
+
+	// Kind 1 is a bare miss count with no timing, so `response` pools 0/2/3/4 —
+	// the same set the chart's Response curve draws.
+	const metricKinds: Record<CacheLatencyMetric, string> = {
+		response: 'e.kind IN (0, 2, 3, 4)',
+		miss: 'e.kind IN (2, 3, 4)',
+		anomaly: 'e.kind = 3',
+		fill: 'e.kind = 2',
+		hit: 'e.kind = 0',
+	};
+
+	const percentileSelects = CACHE_LATENCY_METRICS.flatMap((metric) => {
+		return [0.5, 0.95, 0.99].map((quantile) => {
+			const column = `${metric}_p${Math.round(quantile * 100)}`;
+
+			return db.raw(`${pct(quantile, metricKinds[metric])} AS ${column}`);
+		});
+	});
+
+	const rows = await db('directus_cache_descriptors as d')
+		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
+		.where('e.time', '>', since)
+		.whereIn('e.kind', [0, 2, 3, 4])
+		.whereNotNull('e.duration_ms')
+		.whereNotNull('d.last_filled')
+		.groupByRaw('GROUPING SETS ((d.path, d.method, d.query), (d.path))')
+		.select(
+			'd.path',
+			// Null in a grouping-set row is ambiguous — it can be the rolled-up
+			// column or a genuinely null value. GROUPING() disambiguates: 1 = this
+			// row aggregates over the column.
+			db.raw('GROUPING(d.method) AS method_rolled_up'),
+			'd.method',
+			'd.query',
+			...percentileSelects,
+		);
+
+	function metricPercentiles(
+		row: Record<string, unknown>,
+		metric: CacheLatencyMetric,
+	): CacheLatencyPercentiles {
+		function millis(column: string): number | null {
+			const value = row[`${metric}_${column}`];
+
+			return value == null
+				? null
+				: Math.round(Number(value));
+		}
+
+		return { p50: millis('p50'), p95: millis('p95'), p99: millis('p99') };
+	}
+
+	return rows.map((row: Record<string, unknown>) => {
+		const rolledUp = Number(row['method_rolled_up']) === 1;
+
+		return {
+			path: row['path'] as string,
+			method: rolledUp
+				? null
+				: (row['method'] as string),
+			query: rolledUp
+				? null
+				: ((row['query'] as string) ?? ''),
+			response: metricPercentiles(row, 'response'),
+			miss: metricPercentiles(row, 'miss'),
+			anomaly: metricPercentiles(row, 'anomaly'),
+			fill: metricPercentiles(row, 'fill'),
+			hit: metricPercentiles(row, 'hit'),
 		};
 	});
 }
@@ -1170,14 +1308,19 @@ export async function readCacheTimeseries(
 				ttlMs: null,
 				hitP50: null,
 				hitP95: null,
+				hitP99: null,
 				fillP50: null,
 				fillP95: null,
+				fillP99: null,
 				anomalyP50: null,
 				anomalyP95: null,
+				anomalyP99: null,
 				missP50: null,
 				missP95: null,
+				missP99: null,
 				bothP50: null,
 				bothP95: null,
+				bothP99: null,
 			};
 		},
 	);
@@ -1219,14 +1362,19 @@ export async function readCacheTimeseries(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
 			db.raw(`${pct(0.5, 'kind = 0')} AS hit_p50`),
 			db.raw(`${pct(0.95, 'kind = 0')} AS hit_p95`),
+			db.raw(`${pct(0.99, 'kind = 0')} AS hit_p99`),
 			db.raw(`${pct(0.5, 'kind = 2')} AS fill_p50`),
 			db.raw(`${pct(0.95, 'kind = 2')} AS fill_p95`),
+			db.raw(`${pct(0.99, 'kind = 2')} AS fill_p99`),
 			db.raw(`${pct(0.5, 'kind = 3')} AS anomaly_p50`),
 			db.raw(`${pct(0.95, 'kind = 3')} AS anomaly_p95`),
+			db.raw(`${pct(0.99, 'kind = 3')} AS anomaly_p99`),
 			db.raw(`${pct(0.5, 'kind IN (2, 3, 4)')} AS miss_p50`),
 			db.raw(`${pct(0.95, 'kind IN (2, 3, 4)')} AS miss_p95`),
+			db.raw(`${pct(0.99, 'kind IN (2, 3, 4)')} AS miss_p99`),
 			db.raw(`${pct(0.5)} AS both_p50`),
 			db.raw(`${pct(0.95)} AS both_p95`),
+			db.raw(`${pct(0.99)} AS both_p99`),
 		);
 
 	const anomalyRows = await db('directus_cache_anomalies')
@@ -1271,14 +1419,19 @@ export async function readCacheTimeseries(
 		const slot = dense[slotOf(row['bucket'])]!;
 		slot.hitP50 = pctVal(row['hit_p50']);
 		slot.hitP95 = pctVal(row['hit_p95']);
+		slot.hitP99 = pctVal(row['hit_p99']);
 		slot.fillP50 = pctVal(row['fill_p50']);
 		slot.fillP95 = pctVal(row['fill_p95']);
+		slot.fillP99 = pctVal(row['fill_p99']);
 		slot.anomalyP50 = pctVal(row['anomaly_p50']);
 		slot.anomalyP95 = pctVal(row['anomaly_p95']);
+		slot.anomalyP99 = pctVal(row['anomaly_p99']);
 		slot.missP50 = pctVal(row['miss_p50']);
 		slot.missP95 = pctVal(row['miss_p95']);
+		slot.missP99 = pctVal(row['miss_p99']);
 		slot.bothP50 = pctVal(row['both_p50']);
 		slot.bothP95 = pctVal(row['both_p95']);
+		slot.bothP99 = pctVal(row['both_p99']);
 	}
 
 	return { buckets: dense, markers, effectiveTtl };

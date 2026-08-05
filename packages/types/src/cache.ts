@@ -20,14 +20,19 @@ export interface CacheTimeseriesBucket {
 	ttlMs: number | null;
 	hitP50: number | null;
 	hitP95: number | null;
+	hitP99: number | null;
 	fillP50: number | null;
 	fillP95: number | null;
+	fillP99: number | null;
 	anomalyP50: number | null;
 	anomalyP95: number | null;
+	anomalyP99: number | null;
 	missP50: number | null;
 	missP95: number | null;
+	missP99: number | null;
 	bothP50: number | null;
 	bothP95: number | null;
+	bothP99: number | null;
 }
 
 /** A plotted config change — a TTL edit or a flush — shown as a chart marker. */

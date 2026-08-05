@@ -44,8 +44,10 @@ vi.mock('apexcharts', () => {
 	};
 });
 
+// The page renders once before the timeseries lands and again after, so take the
+// latest matching config — the earlier one carries empty series.
 function chartConfigWithSeries(firstName: string) {
-	return chartMock.configs.find((config) => {
+	return chartMock.configs.findLast((config) => {
 		return config?.series?.[0]?.name === firstName;
 	});
 }
@@ -75,6 +77,8 @@ const ENTRIES = [
 		url: '/items/articles?limit=5',
 		size: 2048,
 		hits: 7,
+		misses: 2,
+		fills: 3,
 		fillMs: 240,
 		hitMs: 2,
 		ttlMs: 60000,
@@ -95,6 +99,8 @@ const ENTRIES = [
 		url: '/items/comments',
 		size: 512,
 		hits: 3,
+		misses: 1,
+		fills: 1,
 		fillMs: 90,
 		hitMs: 1,
 		ttlMs: 30000,
@@ -115,6 +121,8 @@ const ENTRIES = [
 		url: '',
 		size: 100,
 		hits: 0,
+		misses: 4,
+		fills: 0,
 		fillMs: null,
 		hitMs: null,
 		ttlMs: null,
@@ -190,11 +198,20 @@ const global = {
 // anomalies + stats to empty so an entries-only test doesn't leak them elsewhere.
 function mockCacheGet(
 	entries: unknown,
-	extra: { anomalies?: unknown; stats?: unknown; timeseries?: unknown } = {},
+	extra: {
+		anomalies?: unknown;
+		stats?: unknown;
+		timeseries?: unknown;
+		latencies?: unknown;
+	} = {},
 ) {
 	vi.mocked(api.get).mockImplementation(((url: string) => {
 		if (url === '/utils/cache/anomalies') {
 			return Promise.resolve({ data: { data: extra.anomalies ?? [] } });
+		}
+
+		if (url === '/utils/cache/latencies') {
+			return Promise.resolve({ data: { data: extra.latencies ?? [] } });
 		}
 
 		if (url === '/utils/cache/stats') {
@@ -258,6 +275,119 @@ describe('CachePage', () => {
 		expect(api.delete).toHaveBeenCalledWith('/utils/cache', {
 			params: { key: 'app-redis-key' },
 		});
+	});
+
+	it('shows count/median per funnel column, tail in the title', async () => {
+		mockCacheGet(ENTRIES, {
+			latencies: [
+				{
+					path: '/items/articles',
+					method: null,
+					query: null,
+					response: { p50: 20, p95: 90, p99: 400 },
+					miss: { p50: 110, p95: 240, p99: 900 },
+					anomaly: { p50: null, p95: null, p99: null },
+					fill: { p50: 120, p95: 250, p99: 910 },
+					hit: { p50: 2, p95: 9, p99: 30 },
+				},
+			],
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		expect(api.get).toHaveBeenCalledWith('/utils/cache/latencies', {
+			params: { window: '24h' },
+		});
+
+		const columns = wrapper.find('.endpoint-header').findAll('.stat.funnel');
+
+		// One per funnel step, in funnel order. Count and median are separate cells
+		// so each reads down its own edge; no metric name in the row itself, and no
+		// percentile beyond the median.
+		expect(columns.map((column) => column.find('.count').text())).toEqual([
+			'9', // responses = 7 hits + 2 misses
+			'2',
+			'0',
+			'3',
+			'7',
+		]);
+
+		expect(columns.map((column) => column.find('.duration').text())).toEqual([
+			'20ms',
+			'110ms',
+			'', // no anomaly, so no duration to pair with
+			'120ms',
+			'2ms',
+		]);
+
+		// The name and the whole tail live in the title.
+		const missTitle = wrapper
+			.find('.endpoint-header')
+			.find('.stat.funnel.miss')
+			.attributes('data-tooltip');
+
+		expect(missTitle).toContain('Misses');
+		expect(missTitle).toContain('Count  2');
+		expect(missTitle).toContain('p50  110 ms');
+		expect(missTitle).toContain('p95  240 ms');
+		expect(missTitle).toContain('p99  900 ms');
+	});
+
+	it('keeps a column for a metric with no traffic', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		// No latency rows at all: the counts still render, the durations don't.
+		const columns = wrapper.find('.endpoint-header').findAll('.stat.funnel');
+		expect(columns).toHaveLength(5);
+		expect(columns[0]!.find('.count').text()).toBe('9');
+		expect(columns[0]!.find('.duration').text()).toBe('—');
+		expect(columns[2]!.find('.count').text()).toBe('0');
+		expect(columns[2]!.find('.duration').text()).toBe('');
+		expect(columns[2]!.attributes('data-tooltip')).toContain('p95  —');
+	});
+
+	it('cuts the tree to the slowest band', async () => {
+		const slow = (path: string, p50: number) => {
+			return {
+				path,
+				method: null,
+				query: null,
+				response: { p50, p95: p50, p99: p50 },
+				miss: { p50, p95: p50, p99: p50 },
+				anomaly: { p50: null, p95: null, p99: null },
+				fill: { p50, p95: p50, p99: p50 },
+				hit: { p50, p95: p50, p99: p50 },
+			};
+		};
+
+		mockCacheGet(ENTRIES, {
+			latencies: [
+				slow('/items/articles', 300),
+				slow('/items/comments', 20),
+				slow('/server/info', 10),
+			],
+		});
+
+		// Default is the whole tree.
+		const all = mount(CachePage, { global });
+		await flushPromises();
+		expect(all.findAll('.endpoint-header')).toHaveLength(3);
+
+		// p99 over three branches keeps the slowest one, and only that one.
+		localStorage.setItem('cache-tree-band-anon', 'p99');
+
+		const banded = mount(CachePage, { global });
+		await flushPromises();
+
+		expect(banded.findAll('.endpoint-header')).toHaveLength(1);
+		expect(banded.text()).toContain('/items/articles');
+		expect(banded.text()).not.toContain('/items/comments');
+
+		localStorage.removeItem('cache-tree-band-anon');
 	});
 
 	it('renders the anomaly summary + an anomaly node in the tree', async () => {
@@ -389,6 +519,10 @@ describe('CachePage', () => {
 
 	it('opens a detail drawer with the live Redis state on row click', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/entry') {
 				const data = {
 					exists: true,
@@ -432,6 +566,10 @@ describe('CachePage', () => {
 
 	it('names a coarse-scope purge for an evicted coarse entry', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/entry') {
 				return Promise.resolve({
 					data: { data: { exists: false, value: null } },
@@ -457,6 +595,10 @@ describe('CachePage', () => {
 		const expired = [{ ...ENTRIES[1], expiresAt: Date.now() - 1000 }];
 
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/entry') {
 				return Promise.resolve({
 					data: { data: { exists: false, value: null } },
@@ -481,6 +623,10 @@ describe('CachePage', () => {
 		const evicted = [{ ...ENTRIES[1] }]; // non-coarse, future expiry
 
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/entry') {
 				return Promise.resolve({
 					data: { data: { exists: false, value: null } },
@@ -621,6 +767,10 @@ describe('CachePage', () => {
 
 	it('closes the detail drawer when the open entry is evicted', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/entry') {
 				return Promise.resolve({
 					data: { data: { exists: false, value: null } },
@@ -722,6 +872,10 @@ describe('CachePage', () => {
 
 	it('toggles cache stats collection at runtime', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/stats') {
 				return Promise.resolve({
 					data: {
@@ -756,6 +910,10 @@ describe('CachePage', () => {
 
 	it('renders ∞ / tombstone / dash branches for a bare entry', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/entry') {
 				const data = {
 					exists: true,
@@ -793,6 +951,10 @@ describe('CachePage', () => {
 
 	it('swallows a detail-fetch error and marks the value absent', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/entry') {
 				return Promise.reject(new Error('boom')) as never;
 			}
@@ -814,6 +976,10 @@ describe('CachePage', () => {
 
 	it('surfaces a stats-toggle error', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/stats') {
 				return Promise.resolve({
 					data: {
@@ -845,6 +1011,10 @@ describe('CachePage', () => {
 
 	it('hides the stats toggle when collection is not configured', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/stats') {
 				return Promise.resolve({
 					data: {
@@ -869,6 +1039,10 @@ describe('CachePage', () => {
 
 	it('shows the buffered backlog in the toggle tooltip', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/latencies') {
+				return Promise.resolve({ data: { data: [] } }) as never;
+			}
+
 			if (url === '/utils/cache/stats') {
 				return Promise.resolve({
 					data: {
@@ -979,25 +1153,43 @@ describe('CachePage', () => {
 		mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Hits');
+		const config = chartConfigWithSeries('Responses');
 		expect(config).toBeTruthy();
 
-		// Tooltip: one tight "name: value" row per metric, TTL humanised.
+		// Responses is the hit + miss total, the hit ratio hits/(hits + fills).
+		expect(config.series[0].data).toEqual([[1000, 7]]);
+		expect(config.series[5].name).toBe('Hit ratio');
+		expect(config.series[5].data[0]![1]).toBeCloseTo(83.33);
+
+		// Tooltip: one tight "name: value" row per metric, each in its own unit.
+		// Positional, in the funnel order the series are declared in.
 		const html = config.tooltip.custom({
-			series: [[5], [2], [1], [0], [3600]],
+			series: [[7], [2], [0], [1], [5], [83.33], [3600]],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
 
-		expect(html).toContain('Hits: 5');
+		expect(html).toContain('Responses: 7');
 		expect(html).toContain('Misses: 2');
+		expect(html).toContain('Anomalies: 0');
 		expect(html).toContain('Fills: 1');
+		expect(html).toContain('Hits: 5');
+		expect(html).toContain('Hit ratio: 83%');
 		expect(html).toContain('TTL: 1h');
 		expect(html).toContain('cache-tt-row');
 
-		// Count axis stays integer; TTL axis reads as a duration.
+		// The ratio is the one dashed line: it doesn't share the Count axis.
+		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 6, 0]);
+
+		// Count axis stays integer; TTL axis reads as a duration; the ratio gets a
+		// pinned 0-100 axis with nothing drawn, since a percent carries its scale.
 		expect(config.yaxis[0].labels.formatter(5.4)).toBe('5');
 		expect(config.yaxis[1].labels.formatter(3600)).toBe('1h');
+		expect(config.yaxis[2].show).toBe(false);
+		expect(config.yaxis[2].min).toBe(0);
+		// Above 100 so a near-perfect ratio keeps clear of the plot's top edge.
+		expect(config.yaxis[2].max).toBeGreaterThan(100);
+		expect(config.yaxis[2].seriesName).toEqual(['Hit ratio']);
 	});
 
 	it('builds the latency chart with p50/p95 series + ms axis', async () => {
@@ -1028,21 +1220,21 @@ describe('CachePage', () => {
 		mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Hits p50');
+		const config = chartConfigWithSeries('Response p50');
 		expect(config).toBeTruthy();
 
 		// Ten series: 5 categories × p50/p95, p95 dashed and hidden by default.
 		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
-			'Hits p50',
-			'Hits p95',
-			'Fills p50',
-			'Fills p95',
-			'Anomalies p50',
-			'Anomalies p95',
-			'Misses p50',
-			'Misses p95',
 			'Response p50',
 			'Response p95',
+			'Misses p50',
+			'Misses p95',
+			'Anomalies p50',
+			'Anomalies p95',
+			'Fills p50',
+			'Fills p95',
+			'Hits p50',
+			'Hits p95',
 		]);
 
 		expect(config.stroke.dashArray).toEqual([0, 4, 0, 4, 0, 4, 0, 4, 0, 4]);
@@ -1111,18 +1303,18 @@ describe('CachePage', () => {
 		mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Hits p50');
+		const config = chartConfigWithSeries('Response p50');
 
 		// Only series with a real sample survive — Fills/Anomalies (all-null) and
 		// every p95 here are dropped.
 		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
-			'Hits p50',
-			'Misses p50',
 			'Response p50',
+			'Misses p50',
+			'Hits p50',
 		]);
 
 		// The idle second bucket is zero-filled (continuous), not interpolated/null.
-		expect(config.series[0].data).toEqual([[1000, 10], [2000, 0]]);
+		expect(config.series[0].data).toEqual([[1000, 9], [2000, 0]]);
 
 		// A marker only on the real sample (bucket 0), none on the zero-fill.
 		const discrete = config.markers.discrete as {
@@ -1163,7 +1355,7 @@ describe('CachePage', () => {
 		mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Hits');
+		const config = chartConfigWithSeries('Responses');
 
 		// Index 1 = Misses; toggling records then clears it via localStorage.
 		config.chart.events.legendClick(null, 1);

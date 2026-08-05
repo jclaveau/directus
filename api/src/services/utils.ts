@@ -12,6 +12,7 @@ import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
+	type CacheGroupLatencyRecord,
 	type CacheStatsState,
 	type CacheTimeseries,
 	evictCacheEntriesForPath,
@@ -19,6 +20,7 @@ import {
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	listCacheGroupLatencies,
 	readCacheTimeseries,
 	readCacheTombstone,
 	recordCacheConfigEvent,
@@ -216,6 +218,14 @@ export class UtilsService {
 		this.assertCacheAdmin('inspect cache anomalies');
 
 		return listCacheAnomalies(windowMs);
+	}
+
+	async getCacheGroupLatencies(
+		windowMs?: number,
+	): Promise<CacheGroupLatencyRecord[]> {
+		this.assertCacheAdmin('inspect cache latencies');
+
+		return listCacheGroupLatencies(windowMs);
 	}
 
 	async getCacheTimeseries(
