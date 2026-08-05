@@ -12,13 +12,21 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-describe('WebSocket Auth Tests', () => {
-	const authMethods: WebSocketAuthMethod[] = ['public', 'handshake', 'strict'];
-	const authenticationTimeoutSeconds = 1;
-	const slightDelay = 100;
-	const pathREST = 'wsRest';
+const authenticationTimeoutSeconds = 1;
+const slightDelay = 100;
+const pathREST = 'wsRest';
 
-	describe.each(authMethods)('Authentication type: %s', (authMethod) => {
+/**
+ * The WebSocket auth matrix for one `WEBSOCKETS_REST_AUTH` method, spawning its
+ * own Directus for that method.
+ *
+ * Each method lives in its own test file rather than in a `describe.each` here:
+ * nearly all of the runtime is spent sleeping out `authenticationTimeoutSeconds`
+ * once per case, so as one file the three methods stacked ~350s onto whichever
+ * shard ran it. Split, the shard packer can spread them.
+ */
+export function describeAuthMethod(authMethod: WebSocketAuthMethod): void {
+	describe(`WebSocket Auth Tests - ${authMethod}`, () => {
 		const databases = new Map<string, Knex>();
 		const directusInstances = {} as { [vendor: string]: ChildProcess };
 		const env = cloneDeep(config.envs);
@@ -415,4 +423,4 @@ describe('WebSocket Auth Tests', () => {
 			});
 		});
 	});
-});
+}
