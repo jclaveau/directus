@@ -9,6 +9,10 @@ import { isObject } from '@directus/utils';
  *
  * This is necessary because `getFilterPath` only follows `Object.keys(value)[0]`,
  * silently dropping any sibling keys at the same nesting level.
+ *
+ * Any object left with several sibling conditions comes back as `{ _and: [...] }`
+ * — the same shape `parseFilter` produces for REST input — so the two paths agree
+ * on what siblings mean wherever the result lands, `_or` elements included.
  */
 export function normalizeFilter(filter: Filter): Filter {
 	const entries = Object.entries(filter);
@@ -55,13 +59,11 @@ export function normalizeFilter(filter: Filter): Filter {
 	if (parts.length === 0) return {} as Filter;
 	if (parts.length === 1) return parts[0]!;
 
-	// Merge into a flat object when all keys are unique (preserves original structure)
-	const allKeys = parts.flatMap((p) => Object.keys(p));
-
-	if (new Set(allKeys).size === allKeys.length) {
-		return Object.assign({}, ...parts) as Filter;
-	}
-
+	// Always `_and`, mirroring `parseFilter`. Merging unique keys back into one flat
+	// object reads as harmless — sibling keys are ANDed — but `addWhereClauses`
+	// recurses `_or` elements with `logical = 'or'`, so a flat element's siblings
+	// would be OR-combined. REST is safe because `parseFilter` wrapped it already;
+	// this is the programmatic `readByQuery` path (#325).
 	return { _and: parts } as Filter;
 }
 

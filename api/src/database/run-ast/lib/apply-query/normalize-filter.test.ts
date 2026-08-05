@@ -187,14 +187,63 @@ describe('normalizeFilter', () => {
 		});
 	});
 
-	test('preserves flat structure when top-level keys are unique', () => {
+	test('wraps unique top-level keys in _and rather than merging them flat', () => {
 		const filter = {
 			field_a: { _eq: 1 },
 			field_b: { _eq: 2 },
 			rel: { sub: { _eq: 3 } },
 		};
 
-		expect(normalizeFilter(filter)).toEqual(filter);
+		expect(normalizeFilter(filter)).toEqual({
+			_and: [
+				{ field_a: { _eq: 1 } },
+				{ field_b: { _eq: 2 } },
+				{ rel: { sub: { _eq: 3 } } },
+			],
+		});
+	});
+
+	test('wraps a multi-key _or element so its siblings stay ANDed', () => {
+		// The element's keys are distinct top-level fields with operator-only children,
+		// so nothing above forces a split — but `addWhereClauses` recurses an `_or`
+		// element with `logical = 'or'`, and would OR these three against each other.
+		const filter = {
+			_or: [
+				{
+					course_part: { _eq: 1 },
+					day: { _eq: '2023-09-19' },
+					method_range: { _in: ['a', 'b'] },
+				},
+			],
+		};
+
+		expect(normalizeFilter(filter)).toEqual({
+			_or: [
+				{
+					_and: [
+						{ course_part: { _eq: 1 } },
+						{ day: { _eq: '2023-09-19' } },
+						{ method_range: { _in: ['a', 'b'] } },
+					],
+				},
+			],
+		});
+	});
+
+	test('wraps every multi-key _or element, and leaves single-key ones alone', () => {
+		const filter = {
+			_or: [
+				{ status: { _eq: 'published' } },
+				{ author: { _eq: 7 }, status: { _eq: 'draft' } },
+			],
+		};
+
+		expect(normalizeFilter(filter)).toEqual({
+			_or: [
+				{ status: { _eq: 'published' } },
+				{ _and: [{ author: { _eq: 7 } }, { status: { _eq: 'draft' } }] },
+			],
+		});
 	});
 
 	test('handles non-object filter values', () => {
