@@ -26,6 +26,19 @@ on:
         # the loop everyone waits on.
         default: 8
 
+  # Same inputs by hand. Mainly so `act` can replay one shard locally — under a
+  # `push` event `inputs` is empty and every shard would think the count is 3.
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Run the full DB matrix (all vendors) instead of the pg smoke set'
+        type: boolean
+        default: false
+      shards:
+        description: 'Number of parallel shards to split each vendor db test run across'
+        type: number
+        default: 8
+
 permissions:
   contents: read
 
@@ -185,6 +198,21 @@ jobs:
           SHARD_COUNT=${{ needs.setup.outputs.shardCount }}
           pnpm run test:blackbox --project db
           --shard=${{ matrix.shard }}/${{ needs.setup.outputs.shardCount }}
+
+      # The suite spawns Directus instances and captures their output to
+      # server-log-<vendor>.txt, but nothing ever surfaced it — so a websocket that
+      # fails to reach OPEN has only ever been visible from the client's side, which
+      # is why every theory about it has had to be inferred. Dump the server's own
+      # view when the shard fails.
+      - name: Directus server logs (on failure)
+        if: failure()
+        run: |
+          for log in tests/blackbox/server-log-*.txt; do
+            [ -f "$log" ] || continue
+            echo "::group::$log"
+            tail -400 "$log"
+            echo "::endgroup::"
+          done
 
       - name: Merge + upload blackbox coverage
         if: always()
