@@ -1,4 +1,4 @@
-import config, { getUrl, paths } from '@common/config';
+import config, { getUrl, paths, type Env } from '@common/config';
 import vendors from '@common/get-dbs-to-test';
 import { createWebSocketConn } from '@common/transport';
 import type { WebSocketAuthMethod, WebSocketResponse } from '@common/types';
@@ -17,16 +17,22 @@ const slightDelay = 100;
 const pathREST = 'wsRest';
 
 /**
- * The WebSocket auth matrix for one `WEBSOCKETS_REST_AUTH` method, spawning its
- * own Directus for that method.
+ * Spawns a Directus configured for one `WEBSOCKETS_REST_AUTH` method and runs
+ * `scenarios` against it.
  *
- * Each method lives in its own test file rather than in a `describe.each` here:
- * nearly all of the runtime is spent sleeping out `authenticationTimeoutSeconds`
- * once per case, so as one file the three methods stacked ~350s onto whichever
- * shard ran it. Split, the shard packer can spread them.
+ * Every method-and-scenario pair lives in its own test file rather than in a
+ * `describe.each` here. Nearly all of the runtime is spent waiting — sleeping out
+ * `authenticationTimeoutSeconds` on the connect cases, and waiting out
+ * `getMessages` on the ping cases the server answers by closing the socket — so
+ * as one file the matrix stacked ~350s onto whichever shard drew it. Split, the
+ * shard packer can spread it.
  */
-export function describeAuthMethod(authMethod: WebSocketAuthMethod): void {
-	describe(`WebSocket Auth Tests - ${authMethod}`, () => {
+function describeAuthScenarios(
+	authMethod: WebSocketAuthMethod,
+	title: string,
+	scenarios: (env: Env) => void,
+): void {
+	describe(`WebSocket Auth Tests - ${authMethod} - ${title}`, () => {
 		const databases = new Map<string, Knex>();
 		const directusInstances = {} as { [vendor: string]: ChildProcess };
 		const env = cloneDeep(config.envs);
@@ -76,6 +82,12 @@ export function describeAuthMethod(authMethod: WebSocketAuthMethod): void {
 			}
 		});
 
+		scenarios(env);
+	});
+}
+
+export function describeAuthConnects(authMethod: WebSocketAuthMethod): void {
+	describeAuthScenarios(authMethod, 'connects', (env) => {
 		describe('connects without authentication', () => {
 			TEST_USERS.forEach((userKey) => {
 				describe(USER[userKey].NAME, () => {
@@ -318,7 +330,11 @@ export function describeAuthMethod(authMethod: WebSocketAuthMethod): void {
 				});
 			});
 		});
+	});
+}
 
+export function describeAuthPings(authMethod: WebSocketAuthMethod): void {
+	describeAuthScenarios(authMethod, 'pings', (env) => {
 		describe('pings without authentication', () => {
 			TEST_USERS.forEach((userKey) => {
 				describe(USER[userKey].NAME, () => {

@@ -24,11 +24,18 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/cache-cancel-write.test.ts': 11_000,
 	'/tests/db/routes/items/cache-poisoning-write.test.ts': 11_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
-	// The `after` chain. Each auth method sleeps out the REST auth timeout once
-	// per case, which is why the three cost the same on every vendor.
-	'/tests/db/websocket/auth-public.test.ts': 117_000,
-	'/tests/db/websocket/auth-handshake.test.ts': 117_000,
-	'/tests/db/websocket/auth-strict.test.ts': 117_000,
+	// The `after` chain. The auth files spend their time waiting, not querying,
+	// so they cost the same on every vendor — and the wait is per case, so the
+	// three methods are nothing like equal. `connects` sleeps out the REST auth
+	// timeout once per case; `pings` waits out `getMessages` on every case the
+	// method answers by closing the socket, which is what makes strict the
+	// heaviest file in the suite.
+	'/tests/db/websocket/auth-public-connects.test.ts': 26_000,
+	'/tests/db/websocket/auth-public-pings.test.ts': 12_000,
+	'/tests/db/websocket/auth-handshake-connects.test.ts': 26_000,
+	'/tests/db/websocket/auth-handshake-pings.test.ts': 92_000,
+	'/tests/db/websocket/auth-strict-connects.test.ts': 26_000,
+	'/tests/db/websocket/auth-strict-pings.test.ts': 168_000,
 	'/tests/db/app/cache.test.ts': 86_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,

@@ -21,7 +21,10 @@ on:
       shards:
         description: 'Number of parallel shards to split each vendor db test run across'
         type: number
-        default: 5
+        # Sized for wall clock, not runner minutes: every shard re-runs the ~110s
+        # `before` chain, so more shards cost more total minutes while shortening
+        # the loop everyone waits on.
+        default: 8
 
 permissions:
   contents: read
