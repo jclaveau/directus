@@ -55,32 +55,32 @@ describe(oneLine`
 						collection: CANCEL_DEP,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'val', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'val', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: CANCEL_READ,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'title', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'title', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: MANUAL_DEP,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'val', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'val', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: MANUAL_READ,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'title', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'title', type: 'string', meta: {} },
 						],
 					},
 				],

@@ -622,10 +622,14 @@ describe('Schema Snapshots', () => {
 
 						childrenIDs[pkType] = { id: item.id, m2o_id: item.all_id, o2m_id: item.o2m[0] };
 
+						// Only the per-pkType collections are seeded, so the unsuffixed
+						// target made this field non-relational — the very thing this
+						// case is named for.
 						await CreateFieldM2O(vendor, {
 							collection: `${collectionAll}_${pkType}`,
 							field: tempRelationalField,
-							otherCollection: collectionSelf,
+							primaryKeyType: pkType,
+							otherCollection: `${collectionSelf}_${pkType}`,
 						});
 					}
 

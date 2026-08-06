@@ -1,4 +1,9 @@
-import { CreateCollection, CreateField, CreateFieldM2A, CreateItem, DeleteCollection } from '@common/functions';
+import {
+	CreateCollections,
+	CreateFieldM2A,
+	CreateItem,
+	DeleteCollection,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { SeedFunctions } from '@common/seed-functions';
 import type { PrimaryKeyType } from '@common/types';
@@ -7,8 +12,8 @@ import type { CachedTestsSchema, TestsSchema, TestsSchemaVendorValues } from '..
 import { set } from 'lodash-es';
 import { expect, it } from 'vitest';
 import {
+	allFieldTypesStructure,
 	getTestsAllTypesSchema,
-	seedAllFieldTypesStructure,
 	seedAllFieldTypesValues,
 	seedM2AAliasAllFieldTypesValues,
 } from './seed-all-field-types';
@@ -160,52 +165,31 @@ export const seedDBStructure = () => {
 					await DeleteCollection(vendor, { collection: localCollectionCircles });
 					await DeleteCollection(vendor, { collection: localCollectionShapes });
 
-					// Create shapes collection
-					await CreateCollection(vendor, {
-						collection: localCollectionShapes,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionShapes,
-						field: 'name',
-						type: 'string',
-					});
-
-					// Create circles collection
-					await CreateCollection(vendor, {
-						collection: localCollectionCircles,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionCircles,
-						field: 'name',
-						type: 'string',
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionCircles,
-						field: 'radius',
-						type: 'float',
-					});
-
-					// Create squares collection
-					await CreateCollection(vendor, {
-						collection: localCollectionSquares,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionSquares,
-						field: 'name',
-						type: 'string',
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionSquares,
-						field: 'width',
-						type: 'float',
+					// Shapes, circles and squares differ by one column each, so one POST
+					// /collections builds all three in a single transaction. The M2A
+					// relation adds a junction collection of its own, so it follows.
+					await CreateCollections(vendor, {
+						collections: [
+							{ collection: localCollectionShapes, ownFields: [] },
+							{
+								collection: localCollectionCircles,
+								ownFields: [{ field: 'radius', type: 'float', meta: {} }],
+							},
+							{
+								collection: localCollectionSquares,
+								ownFields: [{ field: 'width', type: 'float', meta: {} }],
+							},
+						].map(({ collection, ownFields }) => {
+							return {
+								collection,
+								primaryKeyType: pkType,
+								fields: [
+									{ field: 'name', type: 'string', meta: {} },
+									...ownFields,
+									...allFieldTypesStructure(vendor, collection),
+								],
+							};
+						}),
 					});
 
 					// Create M2A relationships
@@ -216,10 +200,6 @@ export const seedDBStructure = () => {
 						relatedCollections: [localCollectionCircles, localCollectionSquares],
 						primaryKeyType: pkType,
 					});
-
-					await seedAllFieldTypesStructure(vendor, localCollectionShapes);
-					await seedAllFieldTypesStructure(vendor, localCollectionCircles);
-					await seedAllFieldTypesStructure(vendor, localCollectionSquares);
 
 					expect(true).toBeTruthy();
 				} catch (error) {

@@ -1,6 +1,5 @@
 import {
-	CreateCollection,
-	CreateField,
+	CreateCollections,
 	CreateFieldM2A,
 	CreateFieldM2M,
 	CreateFieldM2O,
@@ -12,7 +11,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import type { PrimaryKeyType } from '@common/types';
 import { PRIMARY_KEY_TYPES } from '@common/variables';
 import { expect, it } from 'vitest';
-import { seedAllFieldTypesStructure } from '../items/seed-all-field-types';
+import { allFieldTypesStructure } from '../items/seed-all-field-types';
 
 export const collectionAll = 'test_schema_all';
 export const collectionM2O = 'test_schema_m2o';
@@ -117,28 +116,49 @@ export const seedDBStructure = () => {
 						// Delete the temp collection created in previous test run
 						await DeleteCollection(vendor, { collection: tempTestCollection });
 
-						// Create All collection
-						await CreateCollection(vendor, {
-							collection: localCollectionAll,
-							primaryKeyType: pkType,
-						});
+						// Only `all` and `self` carry fields of their own; the rest exist
+						// to be pointed at.
+						const relatedCollections = [
+							localCollectionM2M,
+							localCollectionM2M2,
+							localCollectionM2A,
+							localCollectionM2A2,
+							localCollectionM2O,
+							localCollectionM2O2,
+							localCollectionO2M,
+							localCollectionO2M2,
+						];
 
-						await CreateField(vendor, {
-							collection: localCollectionAll,
-							field: 'name',
-							type: 'string',
-						});
-
-						// Create M2M collection
-						await CreateCollection(vendor, {
-							collection: localCollectionM2M,
-							primaryKeyType: pkType,
-						});
-
-						// Create nested M2M collection
-						await CreateCollection(vendor, {
-							collection: localCollectionM2M2,
-							primaryKeyType: pkType,
+						// Every collection in one POST /collections, so the whole
+						// structure lands in a single transaction. The relations then
+						// follow with both of their ends already in place.
+						await CreateCollections(vendor, {
+							collections: [
+								{
+									collection: localCollectionAll,
+									primaryKeyType: pkType,
+									fields: [
+										{ field: 'name', type: 'string', meta: {} },
+										...allFieldTypesStructure(
+											vendor,
+											localCollectionAll,
+											setDefaultValues,
+										),
+									],
+								},
+								{
+									collection: localCollectionSelf,
+									primaryKeyType: pkType,
+									fields: allFieldTypesStructure(
+										vendor,
+										localCollectionSelf,
+										setDefaultValues,
+									),
+								},
+								...relatedCollections.map((collection) => {
+									return { collection, primaryKeyType: pkType };
+								}),
+							],
 						});
 
 						// Create M2M relationships
@@ -160,18 +180,6 @@ export const seedDBStructure = () => {
 							primaryKeyType: pkType,
 						});
 
-						// Create M2A collection
-						await CreateCollection(vendor, {
-							collection: localCollectionM2A,
-							primaryKeyType: pkType,
-						});
-
-						// Create nested M2A collection
-						await CreateCollection(vendor, {
-							collection: localCollectionM2A2,
-							primaryKeyType: pkType,
-						});
-
 						// Create M2A relationships
 						await CreateFieldM2A(vendor, {
 							collection: localCollectionAll,
@@ -186,18 +194,6 @@ export const seedDBStructure = () => {
 							field: 'm2a_m2a2',
 							junctionCollection: localJunctionM2AM2A2,
 							relatedCollections: [localCollectionM2A2],
-							primaryKeyType: pkType,
-						});
-
-						// Create M2O collection
-						await CreateCollection(vendor, {
-							collection: localCollectionM2O,
-							primaryKeyType: pkType,
-						});
-
-						// Create nested M2O collection
-						await CreateCollection(vendor, {
-							collection: localCollectionM2O2,
 							primaryKeyType: pkType,
 						});
 
@@ -216,18 +212,6 @@ export const seedDBStructure = () => {
 							otherCollection: localCollectionM2O2,
 						});
 
-						// Create O2M collection
-						await CreateCollection(vendor, {
-							collection: localCollectionO2M,
-							primaryKeyType: pkType,
-						});
-
-						// Create nested O2M collection
-						await CreateCollection(vendor, {
-							collection: localCollectionO2M2,
-							primaryKeyType: pkType,
-						});
-
 						// Create O2M relationships
 						await CreateFieldO2M(vendor, {
 							collection: localCollectionAll,
@@ -242,12 +226,6 @@ export const seedDBStructure = () => {
 							field: 'o2m2',
 							otherCollection: localCollectionO2M2,
 							otherField: 'o2m_id',
-							primaryKeyType: pkType,
-						});
-
-						// Create Self collection
-						await CreateCollection(vendor, {
-							collection: localCollectionSelf,
 							primaryKeyType: pkType,
 						});
 
@@ -281,9 +259,6 @@ export const seedDBStructure = () => {
 								on_delete: 'NO ACTION',
 							},
 						});
-
-						await seedAllFieldTypesStructure(vendor, localCollectionAll, setDefaultValues);
-						await seedAllFieldTypesStructure(vendor, localCollectionSelf, setDefaultValues);
 
 						expect(true).toBeTruthy();
 					} catch (error) {

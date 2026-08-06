@@ -49,16 +49,16 @@ describe(oneLine`
 						collection: AUTHOR,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'name', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'name', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: ARTICLE,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'title', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'title', type: 'string', meta: {} },
 						],
 					},
 				],

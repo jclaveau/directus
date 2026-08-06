@@ -52,16 +52,16 @@ describe(oneLine`
 						collection: SOURCE,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'note', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'note', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: TARGET,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'tally', type: 'integer' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'tally', type: 'integer', meta: {} },
 						],
 					},
 				],

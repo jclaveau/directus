@@ -1,14 +1,19 @@
 import vendors from '@common/get-dbs-to-test';
 import type { CachedTestsSchema, TestsSchema, TestsSchemaVendorValues } from '../../query/filter';
 import {
-	seedAllFieldTypesStructure,
+	allFieldTypesStructure,
 	seedAllFieldTypesValues,
 	getTestsAllTypesSchema,
 	seedM2MAliasAllFieldTypesValues,
 } from './seed-all-field-types';
 import { set } from 'lodash-es';
 import { expect, it } from 'vitest';
-import { DeleteCollection, CreateCollection, CreateField, CreateFieldM2M, CreateItem } from '@common/functions';
+import {
+	DeleteCollection,
+	CreateCollections,
+	CreateFieldM2M,
+	CreateItem,
+} from '@common/functions';
 import { SeedFunctions } from '@common/seed-functions';
 import type { PrimaryKeyType } from '@common/types';
 import { PRIMARY_KEY_TYPES } from '@common/variables';
@@ -161,40 +166,25 @@ export const seedDBStructure = () => {
 					await DeleteCollection(vendor, { collection: localCollectionIngredients });
 					await DeleteCollection(vendor, { collection: localCollectionFoods });
 
-					// Create foods collection
-					await CreateCollection(vendor, {
-						collection: localCollectionFoods,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionFoods,
-						field: 'name',
-						type: 'string',
-					});
-
-					// Create ingredients collection
-					await CreateCollection(vendor, {
-						collection: localCollectionIngredients,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionIngredients,
-						field: 'name',
-						type: 'string',
-					});
-
-					// Create suppliers collection
-					await CreateCollection(vendor, {
-						collection: localCollectionSuppliers,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionSuppliers,
-						field: 'name',
-						type: 'string',
+					// Foods, ingredients and suppliers share their whole structure at
+					// this point, so one POST /collections builds all three in a single
+					// transaction. The M2M relations can't fold in — they each add a
+					// junction collection of their own — so they follow.
+					await CreateCollections(vendor, {
+						collections: [
+							localCollectionFoods,
+							localCollectionIngredients,
+							localCollectionSuppliers,
+						].map((collection) => {
+							return {
+								collection,
+								primaryKeyType: pkType,
+								fields: [
+									{ field: 'name', type: 'string', meta: {} },
+									...allFieldTypesStructure(vendor, collection),
+								],
+							};
+						}),
 					});
 
 					// Create M2M relationships
@@ -215,10 +205,6 @@ export const seedDBStructure = () => {
 						junctionCollection: localJunctionIngredientsSuppliers,
 						primaryKeyType: pkType,
 					});
-
-					await seedAllFieldTypesStructure(vendor, localCollectionFoods);
-					await seedAllFieldTypesStructure(vendor, localCollectionIngredients);
-					await seedAllFieldTypesStructure(vendor, localCollectionSuppliers);
 
 					expect(true).toBeTruthy();
 				} catch (error) {

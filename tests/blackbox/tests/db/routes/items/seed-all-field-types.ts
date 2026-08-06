@@ -26,39 +26,76 @@ export function getTestsAllTypesSchema(): TestsFieldSchema {
 	return fieldSchema;
 }
 
-export const seedAllFieldTypesStructure = async (vendor: Vendor, collection: string, setDefaultValues = false) => {
+/**
+ * The structure `seedAllFieldTypesStructure` seeds, as field payloads.
+ *
+ * - Folded into a `CreateCollection`/`CreateCollections` call it costs nothing:
+ *   the collection and every one of its fields land in a single transaction.
+ * - Seeded one field at a time, each pays its own transaction, cache purge and
+ *   schema rebuild — so only reach for `seedAllFieldTypesStructure` when the
+ *   collection already exists.
+ */
+export function allFieldTypesStructure(
+	vendor: Vendor,
+	collection: string,
+	setDefaultValues = false,
+) {
+	const fieldSchema = getTestsAllTypesSchema();
+
+	return Object.keys(fieldSchema).map((key) => {
+		const fieldType = fieldSchema[key].type;
+
+		const generateValue =
+			SeedFunctions.generateValues[
+				fieldType as keyof typeof SeedFunctions.generateValues
+			];
+
+		let meta = {};
+		let schema = {};
+
+		if (fieldType === 'uuid') {
+			meta = { special: ['uuid'] };
+		}
+
+		if (setDefaultValues && generateValue) {
+			const defaultValue = generateValue({
+				quantity: 1,
+				seed: `${collection}_${fieldType}`,
+				vendor,
+				isDefaultValue: true,
+			})[0];
+
+			// bigInteger generates BigInt, which JSON.stringify refuses — supertest
+			// then sends "[unable to serialize…]" and the server rejects the payload.
+			// The item values take the same detour, so the column stores strings too.
+			schema = {
+				default_value:
+					typeof defaultValue === 'bigint'
+						? String(defaultValue)
+						: defaultValue,
+			};
+		}
+
+		return {
+			field: fieldSchema[key].field.toLowerCase(),
+			type: fieldType,
+			meta,
+			schema,
+		};
+	});
+}
+
+export const seedAllFieldTypesStructure = async (
+	vendor: Vendor,
+	collection: string,
+	setDefaultValues = false,
+) => {
 	try {
-		const fieldSchema = getTestsAllTypesSchema();
+		const fields = allFieldTypesStructure(vendor, collection, setDefaultValues);
 
 		// Create fields
-		for (const key of Object.keys(fieldSchema)) {
-			let meta = {};
-			let schema = {};
-
-			const fieldType = fieldSchema[key].type;
-
-			if (fieldType === 'uuid') {
-				meta = { special: ['uuid'] };
-			}
-
-			if (setDefaultValues && SeedFunctions.generateValues[fieldType as keyof typeof SeedFunctions.generateValues]) {
-				schema = {
-					default_value: SeedFunctions.generateValues[fieldType as keyof typeof SeedFunctions.generateValues]({
-						quantity: 1,
-						seed: `${collection}_${fieldType}`,
-						vendor,
-						isDefaultValue: true,
-					})[0],
-				};
-			}
-
-			await CreateField(vendor, {
-				collection: collection,
-				field: fieldSchema[key].field.toLowerCase(),
-				type: fieldType,
-				meta,
-				schema,
-			});
+		for (const field of fields) {
+			await CreateField(vendor, { collection, ...field });
 		}
 
 		expect(true).toBeTruthy();
