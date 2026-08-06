@@ -5,6 +5,8 @@ on:
     branches:
       # release branches only — build a committed `<branch>-dist` for each *-hhh-dev line
       - '*-hhh-dev'
+  # manual retry handle: a lost/timed-out push run can be replayed without a commit
+  workflow_dispatch:
 
 jobs:
   create-release:
