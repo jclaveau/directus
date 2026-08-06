@@ -1,4 +1,4 @@
-import config, { getUrl, paths } from '@common/config';
+import config, { getUrl, paths, type Env } from '@common/config';
 import vendors from '@common/get-dbs-to-test';
 import { createWebSocketConn } from '@common/transport';
 import type { WebSocketAuthMethod, WebSocketResponse } from '@common/types';
@@ -12,13 +12,27 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-describe('WebSocket Auth Tests', () => {
-	const authMethods: WebSocketAuthMethod[] = ['public', 'handshake', 'strict'];
-	const authenticationTimeoutSeconds = 1;
-	const slightDelay = 100;
-	const pathREST = 'wsRest';
+const authenticationTimeoutSeconds = 1;
+const slightDelay = 100;
+const pathREST = 'wsRest';
 
-	describe.each(authMethods)('Authentication type: %s', (authMethod) => {
+/**
+ * Spawns a Directus configured for one `WEBSOCKETS_REST_AUTH` method and runs
+ * `scenarios` against it.
+ *
+ * Every method-and-scenario pair lives in its own test file rather than in a
+ * `describe.each` here. Nearly all of the runtime is spent waiting — sleeping out
+ * `authenticationTimeoutSeconds` on the connect cases, and waiting out
+ * `getMessages` on the ping cases the server answers by closing the socket — so
+ * as one file the matrix stacked ~350s onto whichever shard drew it. Split, the
+ * shard packer can spread it.
+ */
+function describeAuthScenarios(
+	authMethod: WebSocketAuthMethod,
+	title: string,
+	scenarios: (env: Env) => void,
+): void {
+	describe(`WebSocket Auth Tests - ${authMethod} - ${title}`, () => {
 		const databases = new Map<string, Knex>();
 		const directusInstances = {} as { [vendor: string]: ChildProcess };
 		const env = cloneDeep(config.envs);
@@ -48,12 +62,32 @@ describe('WebSocket Auth Tests', () => {
 
 		afterAll(async () => {
 			for (const [vendor, connection] of databases) {
-				directusInstances[vendor]?.kill();
+				const server = directusInstances[vendor];
+
+				server?.kill();
+
+				// Wait for it to actually go, not just for the signal to be sent. It
+				// still holds its database connections while it shuts down, and the
+				// next file in the shard's serial tail starts the moment this one
+				// returns — a spawned server outliving its suite starved the default
+				// instance until its websockets timed out.
+				if (server && server.exitCode === null && server.signalCode === null) {
+					await Promise.race([
+						new Promise((resolve) => server.once('exit', resolve)),
+						sleep(10_000).then(() => server.kill('SIGKILL')),
+					]);
+				}
 
 				await connection.destroy();
 			}
 		});
 
+		scenarios(env);
+	});
+}
+
+export function describeAuthConnects(authMethod: WebSocketAuthMethod): void {
+	describeAuthScenarios(authMethod, 'connects', (env) => {
 		describe('connects without authentication', () => {
 			TEST_USERS.forEach((userKey) => {
 				describe(USER[userKey].NAME, () => {
@@ -296,7 +330,11 @@ describe('WebSocket Auth Tests', () => {
 				});
 			});
 		});
+	});
+}
 
+export function describeAuthPings(authMethod: WebSocketAuthMethod): void {
+	describeAuthScenarios(authMethod, 'pings', (env) => {
 		describe('pings without authentication', () => {
 			TEST_USERS.forEach((userKey) => {
 				describe(USER[userKey].NAME, () => {
@@ -415,4 +453,4 @@ describe('WebSocket Auth Tests', () => {
 			});
 		});
 	});
-});
+}

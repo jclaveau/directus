@@ -124,7 +124,15 @@ describe('Integration Tests', () => {
 	beforeAll(async () => {
 		db = vi.mocked(knex.default({ client: MockClient }));
 		tracker = createTracker(db);
-	});
+
+		// PayloadService reaches for `get-service.js` lazily — a static import would be
+		// a cycle — and that module pulls in every service. Whichever test first walks a
+		// relational path pays the load-and-transform of that graph inside its own 5s
+		// budget, which is what timed the o2m case out under CI load. Pay it here
+		// instead, with a budget sized for module loading rather than for a test: 3.3s
+		// on an idle box, over 10s when the run is contended.
+		await import('../utils/get-service.js');
+	}, 120_000);
 
 	beforeEach(() => {
 		tracker.on.any('test').response({});
