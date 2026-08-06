@@ -70,7 +70,9 @@ export function getTestsAllTypesFields(
 			// The item values take the same detour, so the column stores strings too.
 			schema = {
 				default_value:
-					typeof defaultValue === 'bigint' ? String(defaultValue) : defaultValue,
+					typeof defaultValue === 'bigint'
+						? String(defaultValue)
+						: defaultValue,
 			};
 		}
 
