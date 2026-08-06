@@ -11,7 +11,7 @@ import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import type { PrimaryKeyType } from '@common/types';
 import { PRIMARY_KEY_TYPES } from '@common/variables';
 import { expect, it } from 'vitest';
-import { getTestsAllTypesFields } from '../items/seed-all-field-types';
+import { allFieldTypesStructure } from '../items/seed-all-field-types';
 
 export const collectionAll = 'test_schema_all';
 export const collectionM2O = 'test_schema_m2o';
@@ -139,7 +139,7 @@ export const seedDBStructure = () => {
 									primaryKeyType: pkType,
 									fields: [
 										{ field: 'name', type: 'string', meta: {} },
-										...getTestsAllTypesFields(
+										...allFieldTypesStructure(
 											vendor,
 											localCollectionAll,
 											setDefaultValues,
@@ -149,7 +149,7 @@ export const seedDBStructure = () => {
 								{
 									collection: localCollectionSelf,
 									primaryKeyType: pkType,
-									fields: getTestsAllTypesFields(
+									fields: allFieldTypesStructure(
 										vendor,
 										localCollectionSelf,
 										setDefaultValues,

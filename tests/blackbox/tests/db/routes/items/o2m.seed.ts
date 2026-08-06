@@ -12,7 +12,7 @@ import type { CachedTestsSchema, TestsSchema, TestsSchemaVendorValues } from '..
 import { set } from 'lodash-es';
 import { expect, it } from 'vitest';
 import {
-	getTestsAllTypesFields,
+	allFieldTypesStructure,
 	getTestsAllTypesSchema,
 	seedAllFieldTypesValues,
 	seedO2MAliasAllFieldTypesValues,
@@ -166,7 +166,7 @@ export const seedDBStructure = () => {
 								primaryKeyType: pkType,
 								fields: [
 									{ field: 'name', type: 'string', meta: {} },
-									...getTestsAllTypesFields(vendor, collection),
+									...allFieldTypesStructure(vendor, collection),
 								],
 							};
 						}),

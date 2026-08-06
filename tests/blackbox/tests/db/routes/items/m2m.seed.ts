@@ -1,7 +1,7 @@
 import vendors from '@common/get-dbs-to-test';
 import type { CachedTestsSchema, TestsSchema, TestsSchemaVendorValues } from '../../query/filter';
 import {
-	getTestsAllTypesFields,
+	allFieldTypesStructure,
 	seedAllFieldTypesValues,
 	getTestsAllTypesSchema,
 	seedM2MAliasAllFieldTypesValues,
@@ -181,7 +181,7 @@ export const seedDBStructure = () => {
 								primaryKeyType: pkType,
 								fields: [
 									{ field: 'name', type: 'string', meta: {} },
-									...getTestsAllTypesFields(vendor, collection),
+									...allFieldTypesStructure(vendor, collection),
 								],
 							};
 						}),

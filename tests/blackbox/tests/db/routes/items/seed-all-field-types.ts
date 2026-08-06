@@ -27,15 +27,15 @@ export function getTestsAllTypesSchema(): TestsFieldSchema {
 }
 
 /**
- * The same fields `seedAllFieldTypesStructure` creates, as payloads.
+ * The structure `seedAllFieldTypesStructure` seeds, as field payloads.
  *
- * - Folded into a `CreateCollection`/`CreateCollections` call they cost nothing:
+ * - Folded into a `CreateCollection`/`CreateCollections` call it costs nothing:
  *   the collection and every one of its fields land in a single transaction.
- * - Posted one at a time each pays its own transaction, cache purge and schema
- *   rebuild, so only reach for `seedAllFieldTypesStructure` when the collection
- *   already exists.
+ * - Seeded one field at a time, each pays its own transaction, cache purge and
+ *   schema rebuild — so only reach for `seedAllFieldTypesStructure` when the
+ *   collection already exists.
  */
-export function getTestsAllTypesFields(
+export function allFieldTypesStructure(
 	vendor: Vendor,
 	collection: string,
 	setDefaultValues = false,
@@ -91,7 +91,7 @@ export const seedAllFieldTypesStructure = async (
 	setDefaultValues = false,
 ) => {
 	try {
-		const fields = getTestsAllTypesFields(vendor, collection, setDefaultValues);
+		const fields = allFieldTypesStructure(vendor, collection, setDefaultValues);
 
 		// Create fields
 		for (const field of fields) {
