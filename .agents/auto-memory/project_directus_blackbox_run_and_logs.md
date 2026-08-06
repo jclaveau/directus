@@ -28,6 +28,46 @@ which `gh run list --branch <b> --workflow Blackbox` often returns empty for. Se
 read results per-job via `gh pr view <n> --json statusCheckRollup`; for the failure detail, read the streamed
 log around ELIFECYCLE, not the REST job-log body. The redis cache-purge + SAML tests are the high-signal ones.
 
+**Never run blackbox locally as a pre-push gate — push and read CI.** CI fans out 8
+shards in parallel (~7min for the lot, and this repo is public so the minutes are
+free); locally the same coverage is serial, one shard at a time against one
+postgres, after a `dist` build. One local shard costs as much wall clock as the
+whole CI run and covers an eighth of it. Jean: *"push without running locally bb
+tests, you make us lose a lot of time waiting for local runs"*. Local blackbox
+stays useful for **diagnosing a known failure** — reproducing one shard, querying
+the seeded DB directly (`docker exec blackbox-postgres-1 psql -U postgres -d
+directus …`) to confirm a mechanism. That is the targeted rung of
+[[feedback_test_run_ladder]], not a gate. Lint gates DO stay local: seconds to
+run, and a CI red on style burns a full cycle.
+
+**Local-run mechanics, when you do reproduce one:**
+- Mirror CI's command exactly: `TEST_DB=postgres SHARD_INDEX=N SHARD_COUNT=8 pnpm
+  test --project db --shard=N/8`. **Omitting `--project db` bootstraps the `common`
+  project's servers too, on the same ports** → `Port 20152 is already in use`, which
+  reads like a test failure and is not one.
+- A killed/timed-out run leaves `dist/cli start` servers holding those ports; reap
+  them before the next run (`ps -eo pid,cmd | grep '\.wt-bb-shards/dist/cli start'`,
+  kill by pid). The Bash tool's sandbox **silently swallows the signal** — the
+  processes survive and the command still reports success; needs
+  `dangerouslyDisableSandbox`. See [[feedback_pgrep_pkill_self_match]].
+- Can't run an arbitrary subset: the sequencer validates the whole `before` list and
+  dies with `Non-existent test file … in "before" list` if you pass two files.
+- Local ≠ CI state. Local timings swung 246s vs 379s for the same seed suite, and a
+  local DB carries prior runs' rows. Never quote a local duration as a result.
+
+**The failure step dumps per-request status lines.** `9_Directus server logs (on
+failure).txt` in the run-logs ZIP holds the server's own request log
+(`GET /fields/test_schema_all_integer/name 403 51ms`). That settles "did the request
+404, 403 or return an empty body" in one grep — decisive when a test reports
+`undefined` and you are guessing which layer produced it. Grep it before theorising
+about the code path.
+
+**Poll the CHILD checks, not the parent.** `Blackbox Tests` (the reusable-workflow
+caller) reports `COMPLETED / SKIPPED` while `Blackbox Tests / postgres (shard N)`
+are still `IN_PROGRESS` — a waiter filtering on `startsWith("Blackbox")` exits
+instantly and reports nothing. Filter on `"Blackbox Tests / "` and additionally
+require 8 postgres children to exist, or the poll races the matrix expansion.
+
 **BEST failure-detail method = the RUN-logs ZIP, not per-job.** The per-JOB endpoint
 (`/actions/jobs/<id>/logs`) returns ONLY the runner's setup/cleanup for a completed bb job — grepping the test
 name finds NOTHING (don't conclude "no failure"). The RUN-logs ZIP has the full per-shard vitest output:
