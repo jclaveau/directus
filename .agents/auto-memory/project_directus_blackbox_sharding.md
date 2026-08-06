@@ -23,6 +23,13 @@ Blackbox `db` tests sharded across parallel CI jobs (PR #213 branch). `tests/bla
 
 **Build-caching is a NET LOSS here** (counterintuitive): the ~2min build already runs in PARALLEL across all shard jobs (free runners), so it's overlapped. A shared build-job serializes it onto the critical path (`build → shards`) → +~1.5min. Only wins when builds are serial on one machine. See [[project_directus_db_connection_priority]].
 
+**Serialise anything that spawns a Directus.** 19 files do; 11 were in the parallel
+middle, racing each other (postgres 42703 — see
+[[project_directus_blackbox_websocket_flake]]). They belong in `after`, which is
+affordable only because `after` is distributed: ~14s of extra serialised time per
+shard. A reserved single-purpose shard (`ISOLATED_AFTER`) was tried and REMOVED —
+it was chasing a flake that had nothing to do with placement.
+
 **2026-08-05 (PR #328) — the after-chain distribution now WORKS and is the default.**
 The earlier "reverted" note below was true against its own numbers and is now stale:
 `m2m` is no longer ~6min (measured 76s), so it is not the floor. What was:
