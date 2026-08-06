@@ -96,29 +96,6 @@ function packIntoBuckets(groups: string[][], count: number): string[][][] {
 	return buckets.map((bucket) => bucket.groups);
 }
 
-// The websocket suites, kept together on a runner nobody else has touched and in
-// this order. `m2o-max-batch-mutation` opens websockets against the SHARED default
-// instance and is the fragile one (#277 flagged it starving under pool load); it has
-// only ever passed in CI when these ran ahead of it on the same shard.
-//
-// What has been ruled out, each by experiment rather than argument: a teardown race
-// (the killed server exits in 1.0s), the neighbouring file (it failed with the
-// "known-good" neighbour directly before it), leaked sockets (the gql client is
-// disposed), parallel load on the shard (it still failed with the runner to itself),
-// istanbul instrumentation, and host resolution (the URL is explicit IPv4). It does
-// not reproduce locally at all — 319/319 pass with both a clean and an instrumented
-// build — so the trigger is something about the runner, and this restores the only
-// arrangement observed to work there.
-const ISOLATED_AFTER = [
-	'/tests/db/websocket/auth-public-connects.test.ts',
-	'/tests/db/websocket/auth-public-pings.test.ts',
-	'/tests/db/websocket/auth-handshake-connects.test.ts',
-	'/tests/db/websocket/auth-handshake-pings.test.ts',
-	'/tests/db/websocket/auth-strict-connects.test.ts',
-	'/tests/db/websocket/auth-strict-pings.test.ts',
-	'/tests/db/websocket/general.test.ts',
-	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts',
-];
 
 /**
  * Files this shard (1-based `index` of `count`) should run. Every shard runs all
@@ -157,29 +134,8 @@ export function filesForShard(
 		.filter((file) => !isBefore(file) && !isAfter(file))
 		.map((file) => [file]);
 
-	// The last shard is reserved for the isolated files and runs no parallel work.
-	const isolate = count > 1 && ISOLATED_AFTER.length > 0;
-
-	const isolated = afterGroups.filter((group) => {
-		return group.some((file) => {
-			return ISOLATED_AFTER.some((entry) => file.endsWith(entry));
-		});
-	});
-
-	const packable = isolate
-		? afterGroups.filter((group) => !isolated.includes(group))
-		: afterGroups;
-
-	const packed = packIntoBuckets(
-		[...parallel, ...packable],
-		isolate
-			? count - 1
-			: count,
-	);
-
-	const mineFiles = isolate && index === count
-		? isolated.flat()
-		: (packed[index - 1] ?? []).flat();
+	const packed = packIntoBuckets([...parallel, ...afterGroups], count);
+	const mineFiles = (packed[index - 1] ?? []).flat();
 
 	// The tail goes back into declaration order, so a chain runs in the order it
 	// needs and the barrier indices the sequencer writes line up with it.
