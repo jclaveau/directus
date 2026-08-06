@@ -35,7 +35,7 @@ services:
     # timescaledb-ha bundles timescaledb (+ toolkit) AND postgis, so the
     # directus_cache_events hypertable path is exercised while the geometry
     # suite keeps postgis. init.sql creates both extensions on first boot.
-    image: timescale/timescaledb-ha:pg17
+    image: timescale/timescaledb-ha:pg18
     environment:
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: directus
