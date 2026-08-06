@@ -217,12 +217,34 @@ export async function CreateCollections(
 	vendor: Vendor,
 	options: OptionsCreateCollections,
 ) {
+	const payloads = options.collections.map((collection) => {
+		return buildCollectionPayload(collection);
+	});
+
+	// The server rejects a duplicate before creating anything, and createMany runs
+	// the whole batch in one transaction — so one leftover collection would roll
+	// back every sibling. Listing once drops them for a single request, where the
+	// per-collection probe CreateCollection does would cost one each.
+	const listed = await request(getUrl(vendor, options.env))
+		.get(`/collections`)
+		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+
+	const alreadyCreated = new Set<string>(
+		(listed.body?.data ?? []).map(({ collection }: any) => collection),
+	);
+
+	const missing = payloads.filter((payload) => {
+		return !alreadyCreated.has(payload.collection!);
+	});
+
+	if (missing.length === 0) {
+		return [];
+	}
+
 	const response = await request(getUrl(vendor, options.env))
 		.post(`/collections`)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
-		.send(
-			options.collections.map((collection) => buildCollectionPayload(collection)),
-		);
+		.send(missing);
 
 	return response.body.data;
 }

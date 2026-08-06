@@ -1,4 +1,9 @@
-import { CreateCollection, CreateField, CreateFieldM2O, CreateItem, DeleteCollection } from '@common/functions';
+import {
+	CreateCollections,
+	CreateFieldM2O,
+	CreateItem,
+	DeleteCollection,
+} from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { SeedFunctions } from '@common/seed-functions';
 import type { PrimaryKeyType } from '@common/types';
@@ -6,7 +11,11 @@ import { PRIMARY_KEY_TYPES } from '@common/variables';
 import type { CachedTestsSchema, TestsSchema, TestsSchemaVendorValues } from '../../query/filter';
 import { set } from 'lodash-es';
 import { expect, it } from 'vitest';
-import { getTestsAllTypesSchema, seedAllFieldTypesStructure, seedAllFieldTypesValues } from './seed-all-field-types';
+import {
+	getTestsAllTypesFields,
+	getTestsAllTypesSchema,
+	seedAllFieldTypesValues,
+} from './seed-all-field-types';
 import { seedRelationalFields } from './seed-relational-fields';
 
 export const collectionCountries = 'test_items_m2o_countries';
@@ -147,28 +156,25 @@ export const seedDBStructure = () => {
 					await DeleteCollection(vendor, { collection: localCollectionStates });
 					await DeleteCollection(vendor, { collection: localCollectionCountries });
 
-					// Create countries collection
-					await CreateCollection(vendor, {
-						collection: localCollectionCountries,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionCountries,
-						field: 'name',
-						type: 'string',
-					});
-
-					// Create states collection
-					await CreateCollection(vendor, {
-						collection: localCollectionStates,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionStates,
-						field: 'name',
-						type: 'string',
+					// Countries, states and cities share their whole structure at this
+					// point, so one POST /collections builds all three in a single
+					// transaction. The M2O relations can't fold in — POST /relations
+					// takes one relation at a time — so they follow.
+					await CreateCollections(vendor, {
+						collections: [
+							localCollectionCountries,
+							localCollectionStates,
+							localCollectionCities,
+						].map((collection) => {
+							return {
+								collection,
+								primaryKeyType: pkType,
+								fields: [
+									{ field: 'name', type: 'string' },
+									...getTestsAllTypesFields(vendor, collection),
+								],
+							};
+						}),
 					});
 
 					await CreateFieldM2O(vendor, {
@@ -178,28 +184,12 @@ export const seedDBStructure = () => {
 						otherCollection: localCollectionCountries,
 					});
 
-					// Create cities collection
-					await CreateCollection(vendor, {
-						collection: localCollectionCities,
-						primaryKeyType: pkType,
-					});
-
-					await CreateField(vendor, {
-						collection: localCollectionCities,
-						field: 'name',
-						type: 'string',
-					});
-
 					await CreateFieldM2O(vendor, {
 						collection: localCollectionCities,
 						field: 'state_id',
 						primaryKeyType: pkType,
 						otherCollection: localCollectionStates,
 					});
-
-					await seedAllFieldTypesStructure(vendor, localCollectionCountries);
-					await seedAllFieldTypesStructure(vendor, localCollectionStates);
-					await seedAllFieldTypesStructure(vendor, localCollectionCities);
 
 					expect(true).toBeTruthy();
 				} catch (error) {
