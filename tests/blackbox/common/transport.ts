@@ -288,6 +288,13 @@ export function createWebSocketGql(host: string, config?: WebSocketOptionsGql) {
 	const client = createClient({
 		webSocketImpl: WebSocket,
 		connectionParams: authParams,
+		// graphql-ws defaults to `lazy: true` with `lazyCloseTimeout: 0`, so the socket
+		// is torn down the instant no subscription is active — cleanly, with code 1000.
+		// The tests own this connection's lifetime (they call `client.dispose()`), and a
+		// socket that closes itself between a subscribe and the next assertion made
+		// `waitForState(OPEN)` time out: a flake that only bit when the run was slow
+		// enough for the gap to open, which is why it showed up in CI and never locally.
+		lazy: false,
 		...config?.client,
 		disablePong: !config?.respondToPing,
 		url: `ws://${parsedHost}/${config?.path ?? 'graphql'}${config?.queryString ? `?${config.queryString}` : ''}`,
