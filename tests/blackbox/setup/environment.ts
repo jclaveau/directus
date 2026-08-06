@@ -10,7 +10,10 @@ export default <Environment>{
 	transformMode: 'ssr',
 
 	async setup(global) {
-		const { totalTestsCount } = JSON.parse(await fs.readFile('sequencer-data.json', 'utf8'));
+		const { totalTestsCount, afterFiles } = JSON.parse(
+			await fs.readFile('sequencer-data.json', 'utf8'),
+		);
+
 		const testFilePath = global.__vitest_worker__.ctx.files[0].split('blackbox')[1];
 		const serverUrl = process.env['serverUrl'];
 
@@ -18,7 +21,11 @@ export default <Environment>{
 			throw 'Missing flow env variables';
 		}
 
-		const testIndex = getReversedTestIndex(testFilePath, global.__vitest_worker__.ctx.config.name);
+		const testIndex = getReversedTestIndex(
+			testFilePath,
+			global.__vitest_worker__.ctx.config.name,
+			afterFiles ?? [],
+		);
 
 		while (testIndex !== 0) {
 			try {

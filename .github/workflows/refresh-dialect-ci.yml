@@ -1,0 +1,62 @@
+name: Refresh dialect CI branches
+
+# Postgres is the only dialect gating a PR — see the vendor matrix in blackbox.yml.
+# sqlite3 and maria are covered instead by a standing branch each, carrying one no-op
+# commit that names the dialect in `.github/ci-dialect`. This workflow rebuilds those
+# branches on top of every new `v11.10.1-hhh-dev` tip, and the force-push fires
+# `pull_request: synchronize` on their standing PRs, which runs that dialect's matrix.
+#
+# The branch is regenerated rather than rebased: the head is one deterministic no-op
+# commit, so `checkout -B <branch> origin/<trunk>` rebuilds it with no three-way merge
+# and therefore no conflict, ever. A conflicting PR would be the worst outcome here —
+# `mergeable=CONFLICTING` stops every `pull_request` workflow silently, so the checks
+# would not go red, they would stop existing.
+
+on:
+  push:
+    # ONLY the trunk. Adding the dialect branches here would make each force-push
+    # below re-trigger this workflow, forever.
+    branches:
+      - v11.10.1-hhh-dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: ${{ matrix.dialect }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dialect: [sqlite3, maria]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          # NOT the default GITHUB_TOKEN: a push made with it does not create workflow
+          # runs, so the branch would move and no dialect matrix would ever start.
+          ssh-key: ${{ secrets.COMPOSE_SSH_KEY }}
+
+      - name: Rebuild the branch on the new trunk tip
+        env:
+          BRANCH: ci-dialect-${{ matrix.dialect }}
+        run: |
+          git config user.name 'hhh-bot'
+          git config user.email 'hhh-bot@users.noreply.github.com'
+
+          git checkout -B "$BRANCH" origin/v11.10.1-hhh-dev
+
+          echo '${{ matrix.dialect }}' > .github/ci-dialect
+
+          # The trunk commit this run's coverage belongs to. Pinned here rather than
+          # derived at run time: the db job checks out shallow, and on a pull_request
+          # its HEAD is the merge commit, so neither `HEAD^` nor `<sha>^` reaches the
+          # tip we branched from. See the coverage upload in blackbox.yml.
+          git rev-parse origin/v11.10.1-hhh-dev > .github/ci-dialect-base
+
+          git add .github/ci-dialect .github/ci-dialect-base
+          git commit -m 'ci: run the blackbox matrix on ${{ matrix.dialect }}'
+          git push --force origin "$BRANCH"

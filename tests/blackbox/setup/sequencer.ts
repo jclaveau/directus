@@ -2,13 +2,12 @@ import { findIndex } from 'lodash-es';
 import fs from 'node:fs/promises';
 import { BaseSequencer, type WorkspaceSpec } from 'vitest/node';
 import { filesForShard } from './shard-files';
-import { sequentialTestsList } from './sequential-tests';
+import { flatAfterList, sequentialTestsList } from './sequential-tests';
 
 export default class CustomSequencer extends BaseSequencer {
 	// Split files across `--shard=i/n` jobs, but keep every `before` file in each
-	// shard (the ordering barrier needs them) and the `after` chain in the last
-	// shard only. `sort()` then orders whatever this shard runs and writes the
-	// per-shard totalTestsCount.
+	// shard — the ordering barrier needs them. `sort()` then orders whatever this
+	// shard runs and writes the per-shard totalTestsCount and after chain.
 	override async shard(files: WorkspaceSpec[]) {
 		const shard = this.ctx.config.shard;
 
@@ -31,8 +30,10 @@ export default class CustomSequencer extends BaseSequencer {
 	}
 
 	override async sort(files: WorkspaceSpec[]) {
+		const project = files[0]![0].config.name as 'db' | 'common';
+
 		if (files.length > 1) {
-			const list = sequentialTestsList[files[0]![0].config.name as 'db' | 'common'];
+			const list = sequentialTestsList[project];
 
 			// If specified, only run these tests sequentially
 			if (list.only.length > 0) {
@@ -75,7 +76,7 @@ export default class CustomSequencer extends BaseSequencer {
 					}
 				}
 
-				for (const sequentialTest of list.after) {
+				for (const sequentialTest of flatAfterList(project)) {
 					const testIndex = findIndex(files, ([_, testFile]) => {
 						return testFile.endsWith(sequentialTest);
 					});
@@ -96,8 +97,19 @@ export default class CustomSequencer extends BaseSequencer {
 			}
 		}
 
+		// The after entries this shard actually runs, in the order sorted above.
+		// `setup/environment.ts` counts its barrier slots back from the end of THIS
+		// list — the project-wide one would wait on completions that never happen
+		// in a shard that only got part of the chain.
+		const afterFiles = flatAfterList(project).filter((entry) => {
+			return files.some(([, testFile]) => testFile.endsWith(entry));
+		});
+
 		// Expose sequencer data to setup & tests
-		await fs.writeFile('sequencer-data.json', JSON.stringify({ totalTestsCount: files.length }));
+		await fs.writeFile(
+			'sequencer-data.json',
+			JSON.stringify({ totalTestsCount: files.length, afterFiles }),
+		);
 
 		return files;
 	}
