@@ -45,6 +45,26 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 	);
 
 	let connectionAuthCompleted = false;
+
+	// The socket's own account of what went wrong. `conn.on('error')` used to discard
+	// it, so a handshake that never completed surfaced only as a bare timeout with no
+	// errno, no HTTP status and no close code — which is why the shard-8 websocket
+	// failure resisted diagnosis for so long.
+	let lastSocketError: string | undefined;
+	let lastSocketClose: string | undefined;
+
+	conn.on('error', (err: Error) => {
+		lastSocketError = err?.message ?? String(err);
+	});
+
+	conn.on('close', (code: number, reason: Buffer) => {
+		const detail = reason?.length
+			? ` reason=${reason.toString()}`
+			: '';
+
+		lastSocketClose = `code=${code}${detail}`;
+	});
+
 	const messages: Record<WebSocketUID, any[]> = {};
 	const messagesDefault: WebSocketResponse[] = [];
 	let readIndexDefault = 0;
@@ -90,7 +110,18 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 						}
 
 						conn.terminate();
-						return reject(new Error(`WebSocket failed to achieve the ${stateName} state`));
+
+						const why = [
+							`readyState=${conn?.readyState}`,
+							lastSocketError && `error=${lastSocketError}`,
+							lastSocketClose && `close=${lastSocketClose}`,
+						].filter(Boolean).join(', ');
+
+						return reject(
+							new Error(
+								`WebSocket failed to achieve the ${stateName} state (${why})`,
+							),
+						);
 					}
 				}, 5);
 			});
@@ -238,10 +269,6 @@ export function createWebSocketConn(host: string, config?: WebSocketOptions) {
 		});
 	});
 
-	conn.on('error', () => {
-		return;
-	});
-
 	return { conn, waitForState, getMessages, getMessageCount, sendMessage, subscribe, unsubscribe };
 }
 
@@ -250,6 +277,8 @@ export function createWebSocketGql(host: string, config?: WebSocketOptionsGql) {
 	const parsedHost = host.split('//').slice(1).join('/');
 	let conn: WebSocket | null;
 	let isConnReady = false;
+	let lastSocketError: string | undefined;
+	let lastSocketClose: string | undefined;
 	let authParams;
 
 	if (config?.auth && 'access_token' in config.auth) {
@@ -263,8 +292,17 @@ export function createWebSocketGql(host: string, config?: WebSocketOptionsGql) {
 		disablePong: !config?.respondToPing,
 		url: `ws://${parsedHost}/${config?.path ?? 'graphql'}${config?.queryString ? `?${config.queryString}` : ''}`,
 		on: {
-			closed: () => {
+			closed: (event: any) => {
+				// graphql-ws hands back the CloseEvent; keep why it went before dropping it.
+				const reason = event?.reason
+					? ` reason=${event.reason}`
+					: '';
+
+				lastSocketClose = `code=${event?.code}${reason}`;
 				conn = null;
+			},
+			error: (err: any) => {
+				lastSocketError = err?.message ?? String(err);
 			},
 			opened: (socket) => {
 				config?.client?.on?.opened?.(socket);
@@ -330,7 +368,18 @@ export function createWebSocketGql(host: string, config?: WebSocketOptionsGql) {
 						}
 
 						conn?.terminate();
-						return reject(new Error(`WebSocket failed to achieve the ${stateName} state`));
+
+						const why = [
+							`readyState=${conn?.readyState}`,
+							lastSocketError && `error=${lastSocketError}`,
+							lastSocketClose && `close=${lastSocketClose}`,
+						].filter(Boolean).join(', ');
+
+						return reject(
+							new Error(
+								`WebSocket failed to achieve the ${stateName} state (${why})`,
+							),
+						);
 					}
 				}, 5);
 			});

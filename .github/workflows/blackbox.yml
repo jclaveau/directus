@@ -48,6 +48,9 @@ concurrency:
 
 env:
   NODE_OPTIONS: --max_old_space_size=6144
+  # setup.ts only writes server-log-<vendor>.txt when this is set, and only on server
+  # exit — without it the "Directus server logs" failure step has nothing to print.
+  TEST_SAVE_LOGS: '1'
   # Setting COVERAGE_DIR flips api/tsdown.config.ts to instrument with rolldown-plugin-istanbul,
   # and the spawned blackbox servers (which inherit process.env) dump __coverage__ here on shutdown.
   COVERAGE_DIR: ${{ github.workspace }}/coverage/blackbox
