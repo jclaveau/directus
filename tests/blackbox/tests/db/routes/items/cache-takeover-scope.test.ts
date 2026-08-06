@@ -84,16 +84,28 @@ describe(oneLine`
 			// get an auto integer PK; CreateFieldM2M adds each junction and its two FKs.
 			await CreateCollections(vendor, {
 				collections: [
-					{ collection: ARTICLE, fields: [{ field: 'title', type: 'string' }] },
-					{ collection: AUTHOR, fields: [{ field: 'name', type: 'string' }] },
-					{ collection: POST, fields: [{ field: 'title', type: 'string' }] },
-					{ collection: TAG, fields: [{ field: 'name', type: 'string' }] },
+					{
+						collection: ARTICLE,
+						fields: [{ field: 'title', type: 'string', meta: {} }],
+					},
+					{
+						collection: AUTHOR,
+						fields: [{ field: 'name', type: 'string', meta: {} }],
+					},
+					{
+						collection: POST,
+						fields: [{ field: 'title', type: 'string', meta: {} }],
+					},
+					{
+						collection: TAG,
+						fields: [{ field: 'name', type: 'string', meta: {} }],
+					},
 					{
 						collection: MODERATED,
 						meta: { scoped_cache_fields: ['channel'] },
 						fields: [
-							{ field: 'channel', type: 'string' },
-							{ field: 'body', type: 'string' },
+							{ field: 'channel', type: 'string', meta: {} },
+							{ field: 'body', type: 'string', meta: {} },
 						],
 					},
 				],

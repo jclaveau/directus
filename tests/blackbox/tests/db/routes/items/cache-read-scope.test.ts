@@ -57,11 +57,14 @@ describe(oneLine`
 						collection: METRIC,
 						meta: { scoped_cache_fields: ['owner'] },
 						fields: [
-							{ field: 'owner', type: 'string' },
-							{ field: 'amount', type: 'string' },
+							{ field: 'owner', type: 'string', meta: {} },
+							{ field: 'amount', type: 'string', meta: {} },
 						],
 					},
-					{ collection: REPORT, fields: [{ field: 'name', type: 'string' }] },
+					{
+						collection: REPORT,
+						fields: [{ field: 'name', type: 'string', meta: {} }],
+					},
 				],
 			});
 

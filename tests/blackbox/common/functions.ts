@@ -1,12 +1,31 @@
 import type { Permission, Query } from '@directus/types';
 import { omit } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
-import request from 'supertest';
+import request, { type Response } from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { getNoCacheUrl, getUrl, type Env } from './config';
 import vendors, { type Vendor } from './get-dbs-to-test';
 import type { PrimaryKeyType } from './types';
 import { ROLE, USER } from './variables';
+
+/**
+ * The payload of a mutation that succeeded, refusing one that did not.
+ *
+ * Without this a rejected write returns `undefined` and the seed carries on, so
+ * `seed-database.test.ts` reports green over a database it failed to build — the
+ * seeds only assert `expect(true).toBeTruthy()`, and their catch never fires
+ * because nothing throws.
+ */
+function dataOrThrow(response: Response, what: string) {
+	if (!response.ok) {
+		throw new Error(
+			`Could not create ${what}: `
+			+ `${response.status} ${JSON.stringify(response.body)}`,
+		);
+	}
+
+	return response.body.data;
+}
 
 export function DisableTestCachingSetup() {
 	beforeEach(async () => {
@@ -69,7 +88,7 @@ export async function CreateRole(vendor: Vendor, options: OptionsCreateRole) {
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send({ name: options.name });
 
-	return response.body.data;
+	return dataOrThrow(response, `role "${options.name}"`);
 }
 
 export type OptionsCreateUser = {
@@ -115,14 +134,30 @@ export async function CreateUser(vendor: Vendor, options: Partial<OptionsCreateU
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(options);
 
-	return response.body.data;
+	return dataOrThrow(response, `user "${options.email}"`);
 }
+
+/**
+ * A field created as part of its collection rather than by its own POST /fields.
+ *
+ * - `meta` is required because omitting it is silent and destructive: the server
+ *   builds the directus_fields rows from `fields.filter((field) => field.meta)`,
+ *   so a field without it becomes a bare column Directus does not manage — absent
+ *   from `GET /fields/:collection/:field`, and from schema snapshots.
+ * - Pass `{}` for a normal field, or `null` to mean the bare column on purpose.
+ */
+export type FoldedField = {
+	field: string;
+	type: string;
+	meta: Record<string, any> | null;
+	schema?: any;
+};
 
 export type OptionsCreateCollection = {
 	collection: string;
 	meta?: any;
 	schema?: any;
-	fields?: any;
+	fields?: FoldedField[];
 	env?: Env;
 	// Automatically removed params
 	primaryKeyType?: PrimaryKeyType;
@@ -142,18 +177,23 @@ function buildCollectionPayload(
 	const defaultOptions = {
 		meta: {},
 		schema: {},
-		fields: [],
+		fields: [] as FoldedField[],
 		primaryKeyType: 'integer',
 	};
 
 	const payload = Object.assign({}, defaultOptions, options);
 
-	// A folded field with no `meta` gets its column created but no directus_fields
-	// row — collections.ts keeps only `payload.fields.filter((field) => field.meta)`.
-	// CreateField never hits that because it defaults `meta`, so default it here too.
-	// An explicit null still means "no metadata", as it does for an alias field.
-	payload.fields = payload.fields.map((field: any) => {
-		return { meta: {}, schema: {}, ...field };
+	// Nothing gates the blackbox typecheck, so refuse the omission here as well —
+	// silently defaulting it would hide the bare-column trap FoldedField documents.
+	payload.fields = payload.fields.map((field) => {
+		if (!('meta' in field)) {
+			throw new Error(
+				`Field "${field.field}" of "${payload.collection}" must set meta: `
+					+ `{} for a normal field, or null for a bare unmanaged column.`,
+			);
+		}
+
+		return { schema: {}, ...field };
 	});
 
 	switch (payload.primaryKeyType) {
@@ -212,7 +252,7 @@ export async function CreateCollection(
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(payload);
 
-	return response.body.data;
+	return dataOrThrow(response, `collection "${payload.collection}"`);
 }
 
 export type OptionsCreateCollections = {
@@ -254,7 +294,10 @@ export async function CreateCollections(
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(missing);
 
-	return response.body.data;
+	return dataOrThrow(
+		response,
+		`collections ${missing.map((one) => one.collection).join(', ')}`,
+	);
 }
 
 export type OptionsDeleteCollection = {
@@ -322,7 +365,7 @@ export async function CreateField(vendor: Vendor, options: OptionsCreateField) {
 		return existing.body.data;
 	}
 
-	return response.body.data;
+	return dataOrThrow(response, `field "${options.collection}.${options.field}"`);
 }
 
 export type OptionsCreateRelation = {
@@ -356,7 +399,7 @@ export async function CreateRelation(vendor: Vendor, options: OptionsCreateRelat
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(options);
 
-	return response.body.data;
+	return dataOrThrow(response, `relation "${options.collection}.${options.field}"`);
 }
 
 export type OptionsCreateFieldM2O = {
@@ -757,14 +800,7 @@ export async function CreateItem(vendor: Vendor, options: OptionsCreateItem) {
 			.send(options.item);
 	}
 
-	if (!response.ok) {
-		throw new Error(
-			`Could not create item in ${options.collection}: `
-			+ `${response.status} ${JSON.stringify(response.body)}`,
-		);
-	}
-
-	return response.body.data;
+	return dataOrThrow(response, `item in "${options.collection}"`);
 }
 
 export type OptionsReadItem = {
@@ -802,7 +838,7 @@ export async function UpdateItem(vendor: Vendor, options: OptionsUpdateItem) {
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(options.item);
 
-	return response.body.data;
+	return dataOrThrow(response, `item update in "${options.collection}"`);
 }
 
 export type OptionsCreatePolicy = {
@@ -846,7 +882,7 @@ export async function CreatePolicy(vendor: Vendor, options: OptionsCreatePolicy)
 			roles: [{ role: roleId }],
 		});
 
-	return response.body.data;
+	return dataOrThrow(response, `policy "${options.name}"`);
 }
 
 export type OptionsCreatePermission = {
@@ -885,7 +921,7 @@ export async function CreatePermission(vendor: Vendor, options: OptionsCreatePer
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send({ permissions: { create: [{ ...options.permission, policy: options.policy }], update: [], delete: [] } });
 
-	return response.body.data;
+	return dataOrThrow(response, `permission on policy "${options.policy}"`);
 }
 
 // TODO

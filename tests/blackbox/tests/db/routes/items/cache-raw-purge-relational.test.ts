@@ -49,11 +49,11 @@ describe(oneLine`
 					{
 						collection: ACCOUNT,
 						meta: { scoped_cache_fields: ['owner'] },
-						fields: [{ field: 'owner', type: 'string' }],
+						fields: [{ field: 'owner', type: 'string', meta: {} }],
 					},
 					{
 						collection: ENTRY,
-						fields: [{ field: 'revision', type: 'integer' }],
+						fields: [{ field: 'revision', type: 'integer', meta: {} }],
 					},
 				],
 			});

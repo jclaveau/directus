@@ -58,16 +58,16 @@ describe(oneLine`
 						collection: EDITABLE,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'note', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'note', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: REMOVABLE,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'mode', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'mode', type: 'string', meta: {} },
 						],
 					},
 				],

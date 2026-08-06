@@ -173,18 +173,18 @@ export const seedDBStructure = () => {
 							{ collection: localCollectionShapes, ownFields: [] },
 							{
 								collection: localCollectionCircles,
-								ownFields: [{ field: 'radius', type: 'float' }],
+								ownFields: [{ field: 'radius', type: 'float', meta: {} }],
 							},
 							{
 								collection: localCollectionSquares,
-								ownFields: [{ field: 'width', type: 'float' }],
+								ownFields: [{ field: 'width', type: 'float', meta: {} }],
 							},
 						].map(({ collection, ownFields }) => {
 							return {
 								collection,
 								primaryKeyType: pkType,
 								fields: [
-									{ field: 'name', type: 'string' },
+									{ field: 'name', type: 'string', meta: {} },
 									...ownFields,
 									...getTestsAllTypesFields(vendor, collection),
 								],

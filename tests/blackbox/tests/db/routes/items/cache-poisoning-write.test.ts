@@ -54,32 +54,32 @@ describe(oneLine`
 						collection: P2_SOURCE,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'note', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'note', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: P2_TARGET,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'tally', type: 'integer' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'tally', type: 'integer', meta: {} },
 						],
 					},
 					{
 						collection: P3_SOURCE,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'note', type: 'string' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'note', type: 'string', meta: {} },
 						],
 					},
 					{
 						collection: P3_TARGET,
 						meta: { scoped_cache_fields: ['space'] },
 						fields: [
-							{ field: 'space', type: 'string' },
-							{ field: 'tally', type: 'integer' },
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'tally', type: 'integer', meta: {} },
 						],
 					},
 				],
