@@ -138,7 +138,7 @@ export const seedDBStructure = () => {
 									collection: localCollectionAll,
 									primaryKeyType: pkType,
 									fields: [
-										{ field: 'name', type: 'string' },
+										{ field: 'name', type: 'string', meta: {} },
 										...getTestsAllTypesFields(
 											vendor,
 											localCollectionAll,

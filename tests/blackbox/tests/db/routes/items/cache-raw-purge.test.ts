@@ -50,16 +50,16 @@ describe(oneLine`
 						collection: DOCUMENT,
 						meta: { scoped_cache_fields: ['owner'] },
 						fields: [
-							{ field: 'owner', type: 'string' },
-							{ field: 'revision', type: 'integer' },
+							{ field: 'owner', type: 'string', meta: {} },
+							{ field: 'revision', type: 'integer', meta: {} },
 						],
 					},
 					{
 						collection: LINE,
 						meta: { scoped_cache_fields: ['owner'] },
 						fields: [
-							{ field: 'owner', type: 'string' },
-							{ field: 'revision', type: 'integer' },
+							{ field: 'owner', type: 'string', meta: {} },
+							{ field: 'revision', type: 'integer', meta: {} },
 						],
 					},
 				],

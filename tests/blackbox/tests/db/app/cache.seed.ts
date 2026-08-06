@@ -293,7 +293,7 @@ export const seedDBStructure = () => {
 						{
 							collection: collectionOwnedSubItem,
 							meta: { scoped_cache_fields: ['owned_item.owner_ref'] },
-							fields: [{ field: 'string_field', type: 'string' }],
+							fields: [{ field: 'string_field', type: 'string', meta: {} }],
 						},
 					],
 				});

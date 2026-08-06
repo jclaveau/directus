@@ -165,7 +165,7 @@ export const seedDBStructure = () => {
 								collection,
 								primaryKeyType: pkType,
 								fields: [
-									{ field: 'name', type: 'string' },
+									{ field: 'name', type: 'string', meta: {} },
 									...getTestsAllTypesFields(vendor, collection),
 								],
 							};

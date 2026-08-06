@@ -58,13 +58,19 @@ export function getTestsAllTypesFields(
 		}
 
 		if (setDefaultValues && generateValue) {
+			const defaultValue = generateValue({
+				quantity: 1,
+				seed: `${collection}_${fieldType}`,
+				vendor,
+				isDefaultValue: true,
+			})[0];
+
+			// bigInteger generates BigInt, which JSON.stringify refuses — supertest
+			// then sends "[unable to serialize…]" and the server rejects the payload.
+			// The item values take the same detour, so the column stores strings too.
 			schema = {
-				default_value: generateValue({
-					quantity: 1,
-					seed: `${collection}_${fieldType}`,
-					vendor,
-					isDefaultValue: true,
-				})[0],
+				default_value:
+					typeof defaultValue === 'bigint' ? String(defaultValue) : defaultValue,
 			};
 		}
 
