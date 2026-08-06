@@ -111,6 +111,20 @@ export async function CreateUser(vendor: Vendor, options: Partial<OptionsCreateU
 		throw new Error('Missing required field: email');
 	}
 
+	// Read the existing one back, as CreateRole and CreateField do: a re-seed onto
+	// a database that already holds these users is otherwise a unique violation,
+	// which used to pass unnoticed and now throws.
+	const userResponse = await request(getUrl(vendor))
+		.get(`/users`)
+		.query({
+			filter: { email: { _eq: options.email } },
+		})
+		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+
+	if (userResponse.body.data?.length > 0) {
+		return userResponse.body.data[0];
+	}
+
 	if (options.roleName) {
 		const roleResponse = await request(getUrl(vendor))
 			.get(`/roles`)
