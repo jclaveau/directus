@@ -148,6 +148,14 @@ function buildCollectionPayload(
 
 	const payload = Object.assign({}, defaultOptions, options);
 
+	// A folded field with no `meta` gets its column created but no directus_fields
+	// row — collections.ts keeps only `payload.fields.filter((field) => field.meta)`.
+	// CreateField never hits that because it defaults `meta`, so default it here too.
+	// An explicit null still means "no metadata", as it does for an alias field.
+	payload.fields = payload.fields.map((field: any) => {
+		return { meta: {}, schema: {}, ...field };
+	});
+
 	switch (payload.primaryKeyType) {
 		case 'uuid':
 			payload.fields.push({
