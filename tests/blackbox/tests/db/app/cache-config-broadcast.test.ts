@@ -188,18 +188,33 @@ describe('Cache config broadcast', () => {
 
 			expect(await awaitEffectiveTtl(vendor, peer, '7h')).toBe('7h');
 
-			const timeseries = await request(getUrl(vendor, writer))
-				.get('/utils/cache/timeseries')
-				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+			// The marker is written fire-and-forget so a chart annotation can never fail
+			// a settings save, which means it lands after the broadcast the poll above
+			// waits on. Poll for it too, or the read races the insert and finds the
+			// previous case's cleanup as the latest change.
+			let timeseries;
+			let ttlChanges = [];
 
-			const ttlChanges = timeseries.body.data.markers
-				.filter((marker: { kind: string }) => marker.kind === 'ttl_change');
+			for (let attempt = 0; attempt < 50; attempt++) {
+				timeseries = await request(getUrl(vendor, writer))
+					.get('/utils/cache/timeseries')
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+				ttlChanges = timeseries.body.data.markers
+					.filter((marker: { kind: string }) => marker.kind === 'ttl_change');
+
+				if (ttlChanges.at(-1)?.detail === '7h') {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
 
 			expect(ttlChanges.at(-1)).toMatchObject({ kind: 'ttl_change', detail: '7h' });
 
 			// And the replayed series ends on the value the marker announced, rather than
 			// on whatever lifetime the surviving entries were stamped with.
-			expect(timeseries.body.data.buckets.at(-1).effectiveTtlMs).toBe(25_200_000);
+			expect(timeseries!.body.data.buckets.at(-1).effectiveTtlMs).toBe(25_200_000);
 		});
 	});
 });
