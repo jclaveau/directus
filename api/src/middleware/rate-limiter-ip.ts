@@ -15,8 +15,6 @@ const env = useEnv();
 
 const RATE_LIMITER_CHARGES = ['cache-misses', 'every-request'] as const;
 
-type RateLimiterCharge = typeof RATE_LIMITER_CHARGES[number];
-
 /**
  * Which requests spend a per-IP token, from `RATE_LIMITER_CHARGE`. The answer picks
  * where `app.ts` registers this middleware, so it is read at boot, not per request.
@@ -31,7 +29,7 @@ type RateLimiterCharge = typeof RATE_LIMITER_CHARGES[number];
 export function rateLimiterChargesEveryRequest(): boolean {
 	const charge = env['RATE_LIMITER_CHARGE'];
 
-	if (!RATE_LIMITER_CHARGES.includes(charge as RateLimiterCharge)) {
+	if (!RATE_LIMITER_CHARGES.some((value) => value === charge)) {
 		const accepted = RATE_LIMITER_CHARGES
 			.map((value) => `"${value}"`)
 			.join(' or ');

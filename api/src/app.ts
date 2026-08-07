@@ -273,10 +273,12 @@ export default async function createApp(): Promise<express.Application> {
 	// a 100% hit rate — the load caching exists to absorb (#340). Below the cache it
 	// is spent only by requests that reach a handler, because a HIT answers from
 	// `checkCacheMiddleware` without calling `next()`.
-	const chargesEveryRequest = env['RATE_LIMITER_ENABLED'] === true
+	const rateLimiterEnabled = env['RATE_LIMITER_ENABLED'] === true;
+
+	const chargesEveryRequest = rateLimiterEnabled
 		&& rateLimiterChargesEveryRequest();
 
-	if (chargesEveryRequest) {
+	if (rateLimiterEnabled && chargesEveryRequest) {
 		app.use(rateLimiter);
 	}
 
@@ -293,7 +295,7 @@ export default async function createApp(): Promise<express.Application> {
 	// Misses, mutations and everything the cache skips land here; hits never do. The
 	// cache key needs `accountability` and `sanitizedQuery`, so the lookup cannot move
 	// any earlier and the charge has to move later instead.
-	if (env['RATE_LIMITER_ENABLED'] === true && !chargesEveryRequest) {
+	if (rateLimiterEnabled && !chargesEveryRequest) {
 		app.use(rateLimiter);
 	}
 

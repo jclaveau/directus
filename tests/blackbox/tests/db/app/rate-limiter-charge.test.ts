@@ -80,11 +80,17 @@ describe('Rate limiter charge', () => {
 		}
 	});
 
-	// A cacheable admin read. The query string is what varies the cache key, so a
-	// distinct `key` is a guaranteed miss and a repeat is a guaranteed hit.
-	function readAsIp(vendor: Vendor, env: Env, ip: string, key: string) {
+	// A cacheable admin read, varied by `fields`. It has to be a field the query
+	// sanitizer keeps: `getCacheKey` composes the key from the URL *pathname* plus
+	// `req.sanitizedQuery`, and `sanitizeQuery` copies only the parameters it knows,
+	// so an invented one would be dropped and every read here would share one key.
+	// A distinct `fields` is then a guaranteed miss, a repeat a guaranteed hit.
+	//
+	// The key carries no IP, so the two instances' caches are the isolation boundary,
+	// not the per-case address: cases sharing an instance must not share a `fields`.
+	function readAsIp(vendor: Vendor, env: Env, ip: string, fields: string) {
 		return request(getUrl(vendor, env))
-			.get(`/users/me?fields=id&rateLimiterChargeKey=${key}`)
+			.get(`/users/me?fields=${fields}`)
 			.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
 			.set('X-Forwarded-For', ip);
 	}
@@ -94,8 +100,8 @@ describe('Rate limiter charge', () => {
 			const { chargeDefault } = envs[vendor]!;
 			const ip = '10.40.0.1';
 
-			const cold = await readAsIp(vendor, chargeDefault, ip, 'a');
-			const warm = await readAsIp(vendor, chargeDefault, ip, 'a');
+			const cold = await readAsIp(vendor, chargeDefault, ip, 'id');
+			const warm = await readAsIp(vendor, chargeDefault, ip, 'id');
 
 			// Non-vacuity: without this a run that cached nothing would still pass, since
 			// two requests fit inside a 2-point budget either way.
@@ -104,11 +110,13 @@ describe('Rate limiter charge', () => {
 			expect(cold.status).toBe(200);
 			expect(warm.status).toBe(200);
 
-			// One point left. Spend it on a second miss, then keep reading the warm key:
-			// the budget is now empty and the hit must still be served.
-			expect((await readAsIp(vendor, chargeDefault, ip, 'b')).status).toBe(200);
+			// One point left. Spend it on a second miss — asserted as a MISS, so the
+			// budget provably reaches zero — then read the warm key again.
+			const secondMiss = await readAsIp(vendor, chargeDefault, ip, 'email');
+			expect(secondMiss.headers[cacheStatusHeader]).toBe('MISS');
+			expect(secondMiss.status).toBe(200);
 
-			const exhausted = await readAsIp(vendor, chargeDefault, ip, 'a');
+			const exhausted = await readAsIp(vendor, chargeDefault, ip, 'id');
 			expect(exhausted.headers[cacheStatusHeader]).toBe('HIT');
 			expect(exhausted.status).toBe(200);
 		});
@@ -119,10 +127,14 @@ describe('Rate limiter charge', () => {
 			const { chargeDefault } = envs[vendor]!;
 			const ip = '10.40.0.2';
 
-			expect((await readAsIp(vendor, chargeDefault, ip, 'c')).status).toBe(200);
-			expect((await readAsIp(vendor, chargeDefault, ip, 'd')).status).toBe(200);
+			// Three fields the previous case didn't warm, so all three are real misses on
+			// this instance's cache.
+			const firstMiss = await readAsIp(vendor, chargeDefault, ip, 'first_name');
+			const secondMiss = await readAsIp(vendor, chargeDefault, ip, 'last_name');
+			expect(firstMiss.status).toBe(200);
+			expect(secondMiss.status).toBe(200);
 
-			const overBudget = await readAsIp(vendor, chargeDefault, ip, 'e');
+			const overBudget = await readAsIp(vendor, chargeDefault, ip, 'title');
 			expect(overBudget.status).toBe(429);
 			expect(overBudget.headers['retry-after']).toBeDefined();
 		});
@@ -134,15 +146,16 @@ describe('Rate limiter charge', () => {
 			const { chargeEveryRequest } = envs[vendor]!;
 			const ip = '10.40.0.3';
 
-			const cold = await readAsIp(vendor, chargeEveryRequest, ip, 'f');
-			const warm = await readAsIp(vendor, chargeEveryRequest, ip, 'f');
+			const cold = await readAsIp(vendor, chargeEveryRequest, ip, 'id');
+			const warm = await readAsIp(vendor, chargeEveryRequest, ip, 'id');
 
 			expect(cold.status).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
 			expect(warm.status).toBe(200);
 
 			// A third read of the same warm key: served from cache, and rejected anyway.
-			expect((await readAsIp(vendor, chargeEveryRequest, ip, 'f')).status).toBe(429);
+			const overBudget = await readAsIp(vendor, chargeEveryRequest, ip, 'id');
+			expect(overBudget.status).toBe(429);
 		});
 	});
 });
