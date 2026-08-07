@@ -4,6 +4,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import createApp from './app.js';
+import { resolvedRateLimiterCharge } from './middleware/rate-limiter-ip.js';
 
 vi.mock('./database', () => ({
 	default: vi.fn(),
@@ -61,19 +62,40 @@ vi.mock('./webhooks', () => ({
 
 vi.mock('./utils/validate-env.js');
 
+// Both are named functions so the layers they register are identifiable by name in
+// the middleware stack — which is how the limiter's position is asserted below.
+vi.mock('./middleware/rate-limiter-ip.js', () => {
+	return {
+		default: function rateLimiterIp(_req: any, _res: any, next: any) {
+			next();
+		},
+		resolvedRateLimiterCharge: vi.fn(),
+	};
+});
+
+vi.mock('./middleware/cache.js', () => {
+	return {
+		default: function checkCache(_req: any, _res: any, next: any) {
+			next();
+		},
+	};
+});
+
+const BASE_ENV = {
+	SECRET: 'abcdef',
+	SERVE_APP: 'true',
+	PUBLIC_URL: 'http://localhost:8055/directus',
+	TELEMETRY: 'false',
+	LOG_STYLE: 'raw',
+	EXTENSIONS_PATH: './extensions',
+	STORAGE_LOCATIONS: ['local'],
+	ROBOTS_TXT: 'User-agent: *\nDisallow: /',
+	ROOT_REDIRECT: './admin',
+	IP_TRUST_PROXY: true,
+};
+
 beforeEach(() => {
-	vi.mocked(useEnv).mockReturnValue({
-		SECRET: 'abcdef',
-		SERVE_APP: 'true',
-		PUBLIC_URL: 'http://localhost:8055/directus',
-		TELEMETRY: 'false',
-		LOG_STYLE: 'raw',
-		EXTENSIONS_PATH: './extensions',
-		STORAGE_LOCATIONS: ['local'],
-		ROBOTS_TXT: 'User-agent: *\nDisallow: /',
-		ROOT_REDIRECT: './admin',
-		IP_TRUST_PROXY: true,
-	});
+	vi.mocked(useEnv).mockReturnValue({ ...BASE_ENV });
 });
 
 afterEach(() => {
@@ -203,6 +225,51 @@ describe('createApp', async () => {
 			const body = await response.json();
 
 			expect(body).toEqual(testResponse);
+		});
+	});
+
+	// What a rate-limit token buys is decided by where the limiter is registered, so
+	// the contract worth pinning is the position itself rather than any response.
+	describe('Rate limiter charge', () => {
+		const middlewareNames = async () => {
+			const app = await createApp();
+
+			return (app as any)._router.stack.map((layer: any) => layer.name);
+		};
+
+		test('registers the limiter below the cache by default', async () => {
+			vi.mocked(useEnv).mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
+			vi.mocked(resolvedRateLimiterCharge).mockReturnValue('cache-misses');
+
+			const names = await middlewareNames();
+
+			// A cache HIT answers without calling `next()`, so sitting after the cache is
+			// what makes a hit cost nothing.
+			expect(names).toContain('rateLimiterIp');
+
+			expect(names.indexOf('rateLimiterIp'))
+				.toBeGreaterThan(names.indexOf('checkCache'));
+		});
+
+		test('registers the limiter above the cache for every-request', async () => {
+			vi.mocked(useEnv).mockReturnValue({ ...BASE_ENV, RATE_LIMITER_ENABLED: true });
+			vi.mocked(resolvedRateLimiterCharge).mockReturnValue('every-request');
+
+			const names = await middlewareNames();
+
+			expect(names).toContain('rateLimiterIp');
+
+			expect(names.indexOf('rateLimiterIp'))
+				.toBeLessThan(names.indexOf('checkCache'));
+		});
+
+		test('registers the limiter nowhere when it is disabled', async () => {
+			const names = await middlewareNames();
+
+			// Neither call site matches, and the charge is never even resolved — an
+			// unparseable value must not break a deployment that runs no limiter.
+			expect(names).not.toContain('rateLimiterIp');
+			expect(resolvedRateLimiterCharge).not.toHaveBeenCalled();
 		});
 	});
 

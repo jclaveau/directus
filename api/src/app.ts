@@ -64,7 +64,10 @@ import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
-import rateLimiter from './middleware/rate-limiter-ip.js';
+import rateLimiter, {
+	resolvedRateLimiterCharge,
+	type RateLimiterCharge,
+} from './middleware/rate-limiter-ip.js';
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
 import cacheStatsSchedule from './schedules/cache-stats.js';
@@ -266,9 +269,26 @@ export default async function createApp(): Promise<express.Application> {
 		app.use(rateLimiterGlobal);
 	}
 
-	if (env['RATE_LIMITER_ENABLED'] === true) {
-		app.use(rateLimiter);
-	}
+	// Where the per-IP limiter sits decides what a token buys. Above the cache it is
+	// spent before the cache is consulted, so a burst of cacheable reads 429s even at
+	// a 100% hit rate — the load caching exists to absorb (#340). Below the cache it
+	// is spent only by requests that reach a handler, because a HIT answers from
+	// `checkCacheMiddleware` without calling `next()`.
+	//
+	// A position can't be a branch in one place, so the limiter is offered to both
+	// call sites below and taken by whichever matches the configured charge — exactly
+	// one, or neither when it is disabled.
+	const rateLimiterCharge = env['RATE_LIMITER_ENABLED'] === true
+		? resolvedRateLimiterCharge()
+		: null;
+
+	const useRateLimiterWhenCharging = (charge: RateLimiterCharge) => {
+		if (rateLimiterCharge === charge) {
+			app.use(rateLimiter);
+		}
+	};
+
+	useRateLimiterWhenCharging('every-request');
 
 	app.get('/server/ping', (_req, res) => res.send('pong'));
 
@@ -279,6 +299,23 @@ export default async function createApp(): Promise<express.Application> {
 	app.use(sanitizeQuery);
 
 	app.use(cache);
+
+	// Misses, mutations and everything the cache skips land here; hits never do. The
+	// cache key needs `accountability` and `sanitizedQuery`, so the lookup cannot move
+	// any earlier and the charge has to move later instead.
+	//
+	// The accepted cost: a request that THROWS above this line is never charged at
+	// all, not merely charged late — express skips the rest of the chain, so
+	// `consume()` never runs and no number of such requests can ever 429. That covers
+	// an invalid or expired token (`authenticate` throws, and each one still costs a
+	// `getAccountabilityForToken` lookup) and a malformed `?filter=` (`sanitizeQuery`
+	// throws, cheaper still to send). A request with NO token is unaffected: it falls
+	// through to the public accountability, reaches the cache, and pays on a miss.
+	//
+	// Structural rather than a placement bug — the exemption needs the cache lookup,
+	// and the failure happens before one exists, so no single position does both.
+	// `RATE_LIMITER_GLOBAL` is the ceiling for it; `every-request` opts out entirely.
+	useRateLimiterWhenCharging('cache-misses');
 
 	await emitter.emitInit('middlewares.after', { app });
 

@@ -13,6 +13,37 @@ export let rateLimiter: RateLimiterRedis | RateLimiterMemory;
 
 const env = useEnv();
 
+const RATE_LIMITER_CHARGES = ['cache-misses', 'every-request'] as const;
+
+export type RateLimiterCharge = typeof RATE_LIMITER_CHARGES[number];
+
+/**
+ * Which requests spend a per-IP token, from `RATE_LIMITER_CHARGE`. The answer picks
+ * where `app.ts` registers this middleware, so it is read at boot, not per request.
+ *
+ * - `cache-misses` (default) — registered below the cache, which answers a HIT
+ *   without calling `next()`. The limiter guards the expensive path and a HIT is not
+ *   that. With caching off every request is a miss, so every request is charged.
+ * - `every-request` — upstream's position, above `authenticate`. Charges before the
+ *   cache is consulted, so a burst of cacheable reads can 429 at a 100% hit rate.
+ *   The trade is that an invalid-token flood is rejected before it costs a lookup.
+ */
+export function resolvedRateLimiterCharge(): RateLimiterCharge {
+	const charge = env['RATE_LIMITER_CHARGE'];
+
+	if (!RATE_LIMITER_CHARGES.some((value) => value === charge)) {
+		const accepted = RATE_LIMITER_CHARGES
+			.map((value) => `"${value}"`)
+			.join(' or ');
+
+		throw new Error(
+			`Invalid RATE_LIMITER_CHARGE "${charge}" — expected ${accepted}`,
+		);
+	}
+
+	return charge as RateLimiterCharge;
+}
+
 if (env['RATE_LIMITER_ENABLED'] === true) {
 	validateEnv(['RATE_LIMITER_STORE', 'RATE_LIMITER_DURATION', 'RATE_LIMITER_POINTS']);
 
