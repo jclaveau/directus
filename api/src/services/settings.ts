@@ -5,7 +5,6 @@ import type {
 	PrimaryKey,
 } from '@directus/types';
 import { InvalidPayloadError } from '@directus/errors';
-import { publishCacheConfigChanged } from '../cache-config.js';
 import { recordCacheConfigEvent } from '../cache-events.js';
 import { isPositiveDuration } from '../utils/get-milliseconds.js';
 import { ItemsService } from './items.js';
@@ -15,9 +14,11 @@ export class SettingsService extends ItemsService {
 		super('directus_settings', options);
 	}
 
-	// The cache page edits `cache_ttl` through the settings singleton
-	// (PATCH /settings). Broadcast the new value so every node's live override flips
-	// at once, instead of waiting for a redeploy to re-seed it from the DB at boot.
+	// The cache page edits `cache_ttl` through the settings singleton (PATCH
+	// /settings). The broadcast that flips every node's live override rides the
+	// `settings.update` action instead (see `initCacheConfig`), so it also covers
+	// writers that never reach this service; what stays here is the validation the
+	// write must not skip, and the timeseries marker.
 	override async upsertSingleton(
 		data: Partial<Item>,
 		opts?: MutationOptions,
@@ -44,11 +45,11 @@ export class SettingsService extends ItemsService {
 		const result = await super.upsertSingleton(data, opts);
 
 		if ('cache_ttl' in data) {
-			const ttl = data['cache_ttl'] as string | null;
-			publishCacheConfigChanged(ttl);
-
 			// Best-effort marker for the cache-page timeseries; don't fail the save on it.
-			void recordCacheConfigEvent('ttl_change', ttl).catch(() => {});
+			void recordCacheConfigEvent(
+				'ttl_change',
+				data['cache_ttl'] as string | null,
+			).catch(() => {});
 		}
 
 		return result;

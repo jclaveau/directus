@@ -17,9 +17,16 @@ vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 const mockBus = { publish: vi.fn(), subscribe: vi.fn() };
 vi.mock('./bus/index.js', () => ({ useBus: () => mockBus }));
 
+const mockEmitter = { onAction: vi.fn() };
+vi.mock('./emitter.js', () => ({ default: mockEmitter }));
+
 // The last handler `subscribe` was registered with — invoked to simulate a peer's
 // `cacheConfigChanged` delivery.
 let busHandler: (payload: { ttl: string | null }) => void;
+
+// The last handler `onAction` was registered with — invoked to simulate a settings
+// write landing, whichever service performed it.
+let settingsUpdateHandler: (meta: Record<string, any>) => void;
 
 let settingsRow: { cache_ttl: string | null } | undefined;
 
@@ -40,6 +47,10 @@ beforeEach(() => {
 
 	mockBus.subscribe.mockImplementation((_channel: string, handler: any) => {
 		busHandler = handler;
+	});
+
+	mockEmitter.onAction.mockImplementation((_event: string, handler: any) => {
+		settingsUpdateHandler = handler;
 	});
 });
 
@@ -121,5 +132,48 @@ describe('initCacheConfig', () => {
 		// A cleared override on the bus falls back to env.
 		busHandler({ ttl: null });
 		expect(resolvedCacheTtl()).toBe('10m');
+	});
+
+	it('announces any settings write that carries cache_ttl', async () => {
+		await initCacheConfig();
+
+		expect(mockEmitter.onAction).toHaveBeenCalledWith(
+			'settings.update',
+			expect.any(Function),
+		);
+
+		// The write never went through SettingsService — this is the shape a config-sync
+		// import produces — yet the node must both apply and announce it.
+		settingsUpdateHandler({ payload: { cache_ttl: '90s' } });
+
+		expect(resolvedCacheTtl()).toBe('90s');
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheConfigChanged', {
+			ttl: '90s',
+		});
+	});
+
+	it('announces a cleared cache_ttl so peers fall back to env', async () => {
+		settingsRow = { cache_ttl: '5m' };
+		await initCacheConfig();
+
+		settingsUpdateHandler({ payload: { cache_ttl: null } });
+
+		expect(resolvedCacheTtl()).toBe('10m');
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheConfigChanged', {
+			ttl: null,
+		});
+	});
+
+	it('stays quiet on a settings write that leaves cache_ttl alone', async () => {
+		settingsRow = { cache_ttl: '5m' };
+		await initCacheConfig();
+		mockBus.publish.mockClear();
+
+		settingsUpdateHandler({ payload: { project_name: 'Acme' } });
+
+		expect(resolvedCacheTtl()).toBe('5m');
+		expect(mockBus.publish).not.toHaveBeenCalled();
 	});
 });

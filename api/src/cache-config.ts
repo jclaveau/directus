@@ -81,4 +81,18 @@ export async function initCacheConfig(): Promise<void> {
 	useBus().subscribe<CacheConfigChange>(CONFIG_CHANGED_CHANNEL, ({ ttl }) => {
 		cacheTtlOverride = normaliseTtl(ttl);
 	});
+
+	// Announcing from the action rather than from `SettingsService` is what makes the
+	// broadcast unconditional: every write to the singleton emits it, whatever wrote
+	// it — the cache page's PATCH, a config-sync import, a seed script. Announcing
+	// from the service instead left a bypassing writer's new value durable but
+	// unannounced, so each node kept serving its stale TTL until it happened to
+	// restart. Imported lazily for the same reason as the database above.
+	const { default: emitter } = await import('./emitter.js');
+
+	emitter.onAction('settings.update', ({ payload }) => {
+		if (payload && 'cache_ttl' in payload) {
+			publishCacheConfigChanged(payload['cache_ttl']);
+		}
+	});
 }
