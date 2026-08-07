@@ -21,6 +21,8 @@
   `git commit --amend` + `git push --force-with-lease` over layered fix-up commits
 - [Don't ask before pnpm install / build in this repo](feedback_no_ask_for_build_install.md) — project override of the
   global ask-before-install rule; routine install/build steps run silently, dep-modifying commands still ask
+- [Never run blackbox locally — run it in CI](feedback_directus_bb_tests_in_ci.md) — local is SLOWER (full dist deploy +
+  a server per env variant, no sharding) and re-seeds jean's docker stack; push, label `Run Blackbox`, loop on the run
 - [Fork integration branches](project_directus_fork_integration_branches.md) — ⚠️2026-07-27 pr-controle RETIRED (tag archive/pr-controle), `v11.10.1-hhh-dev` IS now default; control-plane curated-ported (#303/#305), compose+publish parked; main = clean upstream base; hhh-main = derived from the copy stack; supersedes old
   main-overlay model; blackbox/e2e label-gated; blackbox-pr.yml is name:Check; CI gates = build+eslint+stylelint (no
   tsc)
