@@ -13,6 +13,7 @@ import {
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	drainCacheEvents,
+	effectiveTtlByBucket,
 	flushCacheEventBuffer,
 	getCacheStatsState,
 	listCacheAnomalies,
@@ -1834,5 +1835,85 @@ describe('buffer cap under a stalled flush', () => {
 		// Drain the held flush so nothing dangles past this test.
 		releaseFlush();
 		await flushGate;
+	});
+});
+
+// The TTL series is a replay of the config's history, not a measurement, so all of
+// its correctness lives here. Buckets are 10 units apart throughout.
+describe('effectiveTtlByBucket', () => {
+	const buckets = [0, 10, 20, 30, 40];
+
+	it('holds the value the window opened on when nothing changed inside it', () => {
+		expect(effectiveTtlByBucket(buckets, [], 3_600_000))
+			.toEqual([3_600_000, 3_600_000, 3_600_000, 3_600_000, 3_600_000]);
+	});
+
+	it('applies a change from the bucket containing it onward', () => {
+		const changes = [{ time: 25, ttlMs: 86_400_000 }];
+
+		expect(effectiveTtlByBucket(buckets, changes, 3_600_000))
+			.toEqual([3_600_000, 3_600_000, 86_400_000, 86_400_000, 86_400_000]);
+	});
+
+	it('leaves the lead unknown rather than back-filling a later value', () => {
+		// The reset that motivated this: with no change recorded before the window, the
+		// buckets before the first one are genuinely unknown. Reporting 24h there would
+		// claim it was in force over a span it had not been set in.
+		const changes = [{ time: 25, ttlMs: 86_400_000 }];
+
+		expect(effectiveTtlByBucket(buckets, changes, null))
+			.toEqual([null, null, 86_400_000, 86_400_000, 86_400_000]);
+	});
+
+	it('follows a cleared override back down to the env fallback', () => {
+		// A clear resolves to the env value before it gets here, so the series steps
+		// down at the reset instead of holding the override it replaced.
+		const changes = [
+			{ time: 5, ttlMs: 86_400_000 },
+			{ time: 25, ttlMs: 3_600_000 },
+		];
+
+		expect(effectiveTtlByBucket(buckets, changes, null))
+			.toEqual([86_400_000, 86_400_000, 3_600_000, 3_600_000, 3_600_000]);
+	});
+
+	it('keeps only the last of several changes inside one bucket', () => {
+		const changes = [
+			{ time: 21, ttlMs: 60_000 },
+			{ time: 22, ttlMs: 120_000 },
+			{ time: 23, ttlMs: 300_000 },
+		];
+
+		expect(effectiveTtlByBucket(buckets, changes, null))
+			.toEqual([null, null, 300_000, 300_000, 300_000]);
+	});
+
+	it('orders changes by time rather than trusting the argument order', () => {
+		const changes = [
+			{ time: 35, ttlMs: 300_000 },
+			{ time: 15, ttlMs: 60_000 },
+		];
+
+		expect(effectiveTtlByBucket(buckets, changes, null))
+			.toEqual([null, 60_000, 60_000, 300_000, 300_000]);
+	});
+
+	it('carries a change landing in the final bucket to the window end', () => {
+		const changes = [{ time: 44, ttlMs: 300_000 }];
+
+		expect(effectiveTtlByBucket(buckets, changes, 60_000))
+			.toEqual([60_000, 60_000, 60_000, 60_000, 300_000]);
+	});
+
+	it('returns nothing for an empty grid', () => {
+		expect(effectiveTtlByBucket([], [{ time: 5, ttlMs: 60_000 }], null)).toEqual([]);
+	});
+
+	it('stays unknown throughout when neither a seed nor a change exists', () => {
+		// The caller is responsible for not landing here in the ordinary no-marker
+		// case — see the seed in `readCacheTimeseries`, which passes the value in
+		// force instead. Given nothing at all, the honest answer is nothing.
+		expect(effectiveTtlByBucket(buckets, [], null))
+			.toEqual([null, null, null, null, null]);
 	});
 });

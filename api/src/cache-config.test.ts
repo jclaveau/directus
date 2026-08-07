@@ -20,6 +20,12 @@ vi.mock('./bus/index.js', () => ({ useBus: () => mockBus }));
 const mockEmitter = { onAction: vi.fn() };
 vi.mock('./emitter.js', () => ({ default: mockEmitter }));
 
+const mockRecordCacheConfigEvent = vi.fn(() => Promise.resolve());
+
+vi.mock('./cache-events.js', () => {
+	return { recordCacheConfigEvent: mockRecordCacheConfigEvent };
+});
+
 // The last handler `subscribe` was registered with — invoked to simulate a peer's
 // `cacheConfigChanged` delivery.
 let busHandler: (payload: { ttl: string | null }) => void;
@@ -151,6 +157,10 @@ describe('initCacheConfig', () => {
 		expect(mockBus.publish).toHaveBeenCalledWith('cacheConfigChanged', {
 			ttl: '90s',
 		});
+
+		// And the marker, so the step the chart draws carries its own explanation.
+		expect(mockRecordCacheConfigEvent)
+			.toHaveBeenCalledWith('ttl_change', '90s');
 	});
 
 	it('announces a cleared cache_ttl so peers fall back to env', async () => {
@@ -164,16 +174,41 @@ describe('initCacheConfig', () => {
 		expect(mockBus.publish).toHaveBeenCalledWith('cacheConfigChanged', {
 			ttl: null,
 		});
+
+		// A reset is the case that went unexplained in production — it needs a marker
+		// as much as a set does.
+		expect(mockRecordCacheConfigEvent)
+			.toHaveBeenCalledWith('ttl_change', null);
 	});
 
 	it('stays quiet on a settings write that leaves cache_ttl alone', async () => {
 		settingsRow = { cache_ttl: '5m' };
 		await initCacheConfig();
 		mockBus.publish.mockClear();
+		mockRecordCacheConfigEvent.mockClear();
 
 		settingsUpdateHandler({ payload: { project_name: 'Acme' } });
 
 		expect(resolvedCacheTtl()).toBe('5m');
 		expect(mockBus.publish).not.toHaveBeenCalled();
+
+		// A project rename is not a TTL change and must not draw a marker on the chart.
+		expect(mockRecordCacheConfigEvent).not.toHaveBeenCalled();
+	});
+
+	it('survives a failing marker write, being only an annotation', async () => {
+		mockRecordCacheConfigEvent.mockRejectedValueOnce(new Error('table missing'));
+		await initCacheConfig();
+
+		expect(() => settingsUpdateHandler({ payload: { cache_ttl: '45s' } }))
+			.not.toThrow();
+
+		// The value still applied and still went out — losing the annotation must not
+		// cost the change itself.
+		expect(resolvedCacheTtl()).toBe('45s');
+
+		expect(mockBus.publish).toHaveBeenCalledWith('cacheConfigChanged', {
+			ttl: '45s',
+		});
 	});
 });

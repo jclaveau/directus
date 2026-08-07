@@ -89,10 +89,20 @@ export async function initCacheConfig(): Promise<void> {
 	// unannounced, so each node kept serving its stale TTL until it happened to
 	// restart. Imported lazily for the same reason as the database above.
 	const { default: emitter } = await import('./emitter.js');
+	const { recordCacheConfigEvent } = await import('./cache-events.js');
 
 	emitter.onAction('settings.update', ({ payload }) => {
-		if (payload && 'cache_ttl' in payload) {
-			publishCacheConfigChanged(payload['cache_ttl']);
+		if (!payload || 'cache_ttl' in payload === false) {
+			return;
 		}
+
+		publishCacheConfigChanged(payload['cache_ttl']);
+
+		// The marker is what explains a step in the TTL series, so it has to cover the
+		// same writers as the broadcast: a reset that leaves no marker is a change with
+		// no visible cause, which is how a production one stayed invisible until
+		// `directus_revisions` was read by hand (#342). Best-effort — a chart
+		// annotation must never fail a settings save.
+		void recordCacheConfigEvent('ttl_change', payload['cache_ttl']).catch(() => {});
 	});
 }

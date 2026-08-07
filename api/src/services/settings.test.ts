@@ -1,19 +1,15 @@
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { recordCacheConfigEvent } from '../cache-events.js';
 import { ItemsService } from './items.js';
 import { SettingsService } from './settings.js';
 
-vi.mock('../cache-events.js', () => {
-	return { recordCacheConfigEvent: vi.fn(() => Promise.resolve()) };
-});
-
 const db = knex({ client: MockClient });
 
-// Broadcasting the new value is not this service's job — it rides the
-// `settings.update` action so it covers writers that never reach here (see
-// cache-config.test.ts). What remains here is the validation gate and the marker.
+// Neither the broadcast nor the timeseries marker is this service's job — both ride
+// the `settings.update` action so they cover writers that never reach here (see
+// cache-config.test.ts). What remains is the validation, which has to run before the
+// write and so cannot live on an after-the-fact action.
 describe('SettingsService.upsertSingleton', () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();
@@ -29,16 +25,18 @@ describe('SettingsService.upsertSingleton', () => {
 		});
 	}
 
-	it('records the new cache_ttl on change', async () => {
+	it('persists a valid cache_ttl', async () => {
 		await service().upsertSingleton({ cache_ttl: '30s' });
 
-		expect(recordCacheConfigEvent).toHaveBeenCalledWith('ttl_change', '30s');
+		expect(ItemsService.prototype.upsertSingleton)
+			.toHaveBeenCalledWith({ cache_ttl: '30s' }, undefined);
 	});
 
-	it('records a cleared cache_ttl so the timeseries shows the reset', async () => {
+	it('persists a cleared cache_ttl, which hands the TTL back to env', async () => {
 		await service().upsertSingleton({ cache_ttl: null });
 
-		expect(recordCacheConfigEvent).toHaveBeenCalledWith('ttl_change', null);
+		expect(ItemsService.prototype.upsertSingleton)
+			.toHaveBeenCalledWith({ cache_ttl: null }, undefined);
 	});
 
 	it.each(['abc', '30x', '-5m', '0'])(
@@ -47,15 +45,15 @@ describe('SettingsService.upsertSingleton', () => {
 			await expect(service().upsertSingleton({ cache_ttl: bad }))
 				.rejects.toThrow(/Invalid cache_ttl/);
 
-			// Gate runs before the write, so nothing is persisted and nothing is recorded.
+			// The gate runs before the write, so nothing is persisted.
 			expect(ItemsService.prototype.upsertSingleton).not.toHaveBeenCalled();
-			expect(recordCacheConfigEvent).not.toHaveBeenCalled();
 		},
 	);
 
-	it('stays silent when the payload does not touch cache_ttl', async () => {
+	it('leaves a payload that does not touch cache_ttl alone', async () => {
 		await service().upsertSingleton({ project_name: 'Acme' });
 
-		expect(recordCacheConfigEvent).not.toHaveBeenCalled();
+		expect(ItemsService.prototype.upsertSingleton)
+			.toHaveBeenCalledWith({ project_name: 'Acme' }, undefined);
 	});
 });

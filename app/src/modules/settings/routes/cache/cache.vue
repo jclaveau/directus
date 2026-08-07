@@ -945,6 +945,10 @@ function chartConfig(): ApexOptions {
 		// be read against the counts it sits among.
 		dash: number;
 		color: string;
+		// A sampled value has gaps meaning "nothing was observed", so it carries its
+		// last reading across them. A value that is dense by construction does not,
+		// and carrying one would invent readings it never had.
+		sampled?: boolean;
 		pick: (b: CacheTimeseriesBucket) => number | null;
 	}[] = [
 		{
@@ -1002,11 +1006,29 @@ function chartConfig(): ApexOptions {
 			pick: (b) => hitRatioPercent(b.hits, b.fills),
 		},
 		{
+			// What the config says, replayed from the ttl_change markers. A step line
+			// because that is what a config value does — it holds, then jumps.
 			name: t('ttl', 'TTL'),
 			unit: 'seconds',
 			curve: 'stepline',
 			dash: 0,
 			color: themeVar('--theme--primary', '#6644ff'),
+			pick: (b) => {
+				return b.effectiveTtlMs === null
+					? null
+					: Math.round(b.effectiveTtlMs / 1000);
+			},
+		},
+		{
+			// Not the TTL in force: the longest lifetime stamped on an entry actually
+			// served here, as of when it was filled. Entries outlive the config that
+			// created them, so this trails the line above instead of tracking it (#343).
+			name: t('cache_entry_lifetime', 'Entry lifetime'),
+			unit: 'seconds',
+			curve: 'stepline',
+			dash: 4,
+			color: themeVar('--theme--secondary', '#ff99dd'),
+			sampled: true,
 			pick: (b) => {
 				return b.ttlMs === null
 					? null
@@ -1054,9 +1076,13 @@ function chartConfig(): ApexOptions {
 		series: metrics.map((m) => {
 			const data = series(m.pick);
 
+			// Carrying is for a SAMPLED value, whose gaps mean "nobody looked" — the
+			// entry lifetime, read off whichever entries happened to be served. The TTL
+			// arrives already dense from the marker replay, so carrying it would only
+			// back-fill its lead with a value that had not been set yet (#343).
 			return {
 				name: m.name,
-				data: m.unit === 'seconds'
+				data: m.sampled
 					? carryForward(data)
 					: data,
 			};
