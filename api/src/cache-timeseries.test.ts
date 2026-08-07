@@ -222,7 +222,7 @@ describe('readCacheTimeseries', () => {
 		env['CACHE_STATS_ENABLED'] = true;
 	});
 
-	it('replays the TTL in force from the markers, seeded by the prior change', async () => {
+	it('replays the TTL in force, seeded by the prior change', async () => {
 		env['CACHE_TTL'] = '10m';
 		const bucketSec = 60;
 
