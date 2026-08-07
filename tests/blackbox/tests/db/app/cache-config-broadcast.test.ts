@@ -173,5 +173,33 @@ describe('Cache config broadcast', () => {
 			expect(await awaitEffectiveTtl(vendor, peer, '11m')).toBe('11m');
 			expect(await awaitEffectiveTtl(vendor, writer, '11m')).toBe('11m');
 		});
+
+		it('marks the timeseries for an import write too', async () => {
+			// The chart draws a step wherever the TTL moved; a step with no marker is a
+			// change with no visible cause, which is how a production reset went
+			// unexplained until `directus_revisions` was read by hand.
+			const { writer, peer } = envs[vendor]!;
+
+			await request(getUrl(vendor, writer))
+				.post('/settings-import-write')
+				.send({ cache_ttl: '7h' })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.expect(200);
+
+			expect(await awaitEffectiveTtl(vendor, peer, '7h')).toBe('7h');
+
+			const timeseries = await request(getUrl(vendor, writer))
+				.get('/utils/cache/timeseries')
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			const ttlChanges = timeseries.body.data.markers
+				.filter((marker: { kind: string }) => marker.kind === 'ttl_change');
+
+			expect(ttlChanges.at(-1)).toMatchObject({ kind: 'ttl_change', detail: '7h' });
+
+			// And the replayed series ends on the value the marker announced, rather than
+			// on whatever lifetime the surviving entries were stamped with.
+			expect(timeseries.body.data.buckets.at(-1).effectiveTtlMs).toBe(25_200_000);
+		});
 	});
 });

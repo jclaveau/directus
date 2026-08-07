@@ -5,7 +5,6 @@ import type {
 	PrimaryKey,
 } from '@directus/types';
 import { InvalidPayloadError } from '@directus/errors';
-import { recordCacheConfigEvent } from '../cache-events.js';
 import { isPositiveDuration } from '../utils/get-milliseconds.js';
 import { ItemsService } from './items.js';
 
@@ -15,10 +14,10 @@ export class SettingsService extends ItemsService {
 	}
 
 	// The cache page edits `cache_ttl` through the settings singleton (PATCH
-	// /settings). The broadcast that flips every node's live override rides the
-	// `settings.update` action instead (see `initCacheConfig`), so it also covers
-	// writers that never reach this service; what stays here is the validation the
-	// write must not skip, and the timeseries marker.
+	// /settings). Both the broadcast and the timeseries marker ride the
+	// `settings.update` action instead (see `initCacheConfig`), so they cover writers
+	// that never reach this service. What stays here is the validation, which has to
+	// run BEFORE the write and so cannot live on an after-the-fact action.
 	override async upsertSingleton(
 		data: Partial<Item>,
 		opts?: MutationOptions,
@@ -42,16 +41,6 @@ export class SettingsService extends ItemsService {
 			}
 		}
 
-		const result = await super.upsertSingleton(data, opts);
-
-		if ('cache_ttl' in data) {
-			// Best-effort marker for the cache-page timeseries; don't fail the save on it.
-			void recordCacheConfigEvent(
-				'ttl_change',
-				data['cache_ttl'] as string | null,
-			).catch(() => {});
-		}
-
-		return result;
+		return super.upsertSingleton(data, opts);
 	}
 }

@@ -6,7 +6,7 @@
  */
 export type CacheFlushTarget = 'response' | 'system' | 'locks';
 
-/** One bucket of the cache timeseries: outcome counts, the effective TTL, and
+/** One bucket of the cache timeseries: outcome counts, two different TTLs, and
  * response-latency percentiles: hit = serve, fill = a cached miss's compute,
  * anomaly = a flagged-uncacheable miss's compute, miss = all misses pooled (the
  * umbrella over fill + anomaly + silently-skipped), both = hits + misses pooled.
@@ -17,7 +17,20 @@ export interface CacheTimeseriesBucket {
 	misses: number;
 	fills: number;
 	anomalies: number;
+	/**
+	 * The longest lifetime STAMPED ON AN ENTRY served in this bucket, as of when that
+	 * entry was filled — not the TTL in force. An entry filled under a since-changed
+	 * TTL keeps reporting the old value until it expires, so this stays high long
+	 * after the config moved. It answers "how long do the entries being served
+	 * actually live"; `effectiveTtlMs` answers what the config says.
+	 */
 	ttlMs: number | null;
+	/**
+	 * The TTL IN FORCE over this bucket, reconstructed from the `ttl_change` markers.
+	 * `null` when no change is recorded at or before the bucket — the honest answer,
+	 * rather than back-filling a later value over a window it did not apply to.
+	 */
+	effectiveTtlMs: number | null;
 	hitP50: number | null;
 	hitP95: number | null;
 	hitP99: number | null;

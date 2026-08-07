@@ -1240,6 +1240,51 @@ export async function recordCacheConfigEvent(
 }
 
 /**
+ * A `ttl_change` marker's value in ms. `null` detail is a CLEARED override, which
+ * hands the TTL back to env `CACHE_TTL` — so it resolves to the env value, not to
+ * "unknown".
+ */
+function markerTtlMs(detail: string | null): number | null {
+	const env = useEnv();
+
+	return getMilliseconds(detail ?? env['CACHE_TTL']) ?? null;
+}
+
+/**
+ * The TTL in force over each bucket, replaying the `ttl_change` markers across the
+ * grid. `seedTtlMs` is what the window opened on — the last change before it, or
+ * `null` when none is recorded, in which case the leading buckets stay `null` rather
+ * than inheriting a value from a change that had not happened yet.
+ *
+ * A change applies from the bucket that CONTAINS it onward: a bucket is a span, and
+ * the value that ends it is the one a reader is asking about when the marker sits on
+ * it. Exported for its own tests — the reconstruction is the whole point of the
+ * series and is worth pinning without a database.
+ */
+export function effectiveTtlByBucket(
+	bucketTimes: number[],
+	changes: { time: number; ttlMs: number | null }[],
+	seedTtlMs: number | null,
+): (number | null)[] {
+	const ordered = [...changes].sort((a, b) => a.time - b.time);
+	let pending = 0;
+	let inForce = seedTtlMs;
+
+	return bucketTimes.map((_bucketTime, index) => {
+		// Every change landing before this bucket ends has applied by the time the
+		// bucket closes. The last bucket has no successor, so it runs to the window end.
+		const bucketEnd = bucketTimes[index + 1] ?? Infinity;
+
+		while (pending < ordered.length && ordered[pending]!.time < bucketEnd) {
+			inForce = ordered[pending]!.ttlMs;
+			pending++;
+		}
+
+		return inForce;
+	});
+}
+
+/**
  * Bucketed hits / misses / anomalies + the effective TTL curve over `windowMs`, plus
  * the discrete config-event markers in the same window. The curves come from the
  * stats tables (only populated when stats are configured) and the bucketing is
@@ -1306,6 +1351,7 @@ export async function readCacheTimeseries(
 				fills: 0,
 				anomalies: 0,
 				ttlMs: null,
+				effectiveTtlMs: null,
 				hitP50: null,
 				hitP95: null,
 				hitP99: null,
@@ -1324,6 +1370,31 @@ export async function readCacheTimeseries(
 			};
 		},
 	);
+
+	// The window's own markers only say what changed INSIDE it; the value it opened on
+	// comes from the last change before it. Without that lookup every window would
+	// start unknown and the chart would back-fill its lead with a later value — the
+	// exact conflation this series exists to stop (#343).
+	const priorChange = await db('directus_cache_config_events')
+		.where('kind', 'ttl_change')
+		.andWhere('time', '<=', since)
+		.orderBy('time', 'desc')
+		.first();
+
+	const ttlChanges = markers
+		.filter((marker) => marker.kind === 'ttl_change')
+		.map((marker) => {
+			return { time: marker.time, ttlMs: markerTtlMs(marker.detail) };
+		});
+
+	const seedTtlMs = priorChange
+		? markerTtlMs((priorChange['detail'] as string | null) ?? null)
+		: null;
+
+	effectiveTtlByBucket(dense.map((bucket) => bucket.t), ttlChanges, seedTtlMs)
+		.forEach((ttlMs, index) => {
+			dense[index]!.effectiveTtlMs = ttlMs;
+		});
 
 	if (!cacheStatsConfigured() || db.client.config.client !== 'pg') {
 		return { buckets: dense, markers, effectiveTtl };

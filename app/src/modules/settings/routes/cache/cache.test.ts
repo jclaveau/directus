@@ -1336,8 +1336,10 @@ describe('CachePage', () => {
 		expect(html).toContain('TTL: 1h');
 		expect(html).toContain('cache-tt-row');
 
-		// The ratio is the one dashed line: it doesn't share the Count axis.
-		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 6, 0]);
+		// Dashes mark the lines that don't share the Count axis: the ratio, and the
+		// entry lifetime — dashed apart from the TTL it sits beside so the config and
+		// the lifetimes of the entries it produced can't be read as one line.
+		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 6, 0, 4]);
 
 		// Count axis stays integer; TTL axis reads as a duration; the ratio gets a
 		// pinned 0-100 axis with nothing drawn, since a percent carries its scale.
@@ -1348,6 +1350,51 @@ describe('CachePage', () => {
 		// Above 100 so a near-perfect ratio keeps clear of the plot's top edge.
 		expect(config.yaxis[2].max).toBeGreaterThan(100);
 		expect(config.yaxis[2].seriesName).toEqual(['Hit ratio']);
+	});
+
+	it('splits the TTL in force from the lifetimes entries carry', async () => {
+		// The reset that made this necessary: the config drops, but entries filled
+		// under the old value keep being served, so `ttlMs` stays high for hours. Two
+		// series, so the chart can't read the survivors as the current setting.
+		const bucket = { hits: 1, misses: 0, fills: 0, anomalies: 0 };
+
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [
+					// Before any recorded change the config is genuinely unknown, while
+					// entries are already being served under some earlier lifetime.
+					{ ...bucket, t: 1000, ttlMs: 86400000, effectiveTtlMs: null },
+					{ ...bucket, t: 2000, ttlMs: null, effectiveTtlMs: 3600000 },
+					{ ...bucket, t: 3000, ttlMs: 86400000, effectiveTtlMs: 3600000 },
+				],
+				markers: [],
+			},
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Responses');
+
+		const ttl = config.series.find((s: { name: string }) => s.name === 'TTL');
+
+		const lifetime = config.series
+			.find((s: { name: string }) => s.name === 'Entry lifetime');
+
+		// The config's own history, in seconds. The leading unknown stays unknown — it
+		// is not back-filled with the 1h that had not been set yet.
+		expect(ttl.data).toEqual([[1000, null], [2000, 3600], [3000, 3600]]);
+
+		// The lifetime is sampled off whichever entries were served, so its gap carries
+		// the previous reading rather than claiming nothing was cached.
+		expect(lifetime.data).toEqual([[1000, 86400], [2000, 86400], [3000, 86400]]);
+
+		// The shared fixture also renders the latency chart, whose default-hidden p95
+		// bands persist per user. A page left mounted keeps writing that key back, so
+		// the next test reads them as a restored choice and never re-hides — its own
+		// assertion then finds nothing hidden.
+		wrapper.unmount();
+		localStorage.removeItem('cache-latency-hidden-anon');
 	});
 
 	it('builds the latency chart with p50/p95 series + ms axis', async () => {
@@ -1406,6 +1453,14 @@ describe('CachePage', () => {
 		expect(html).toContain('Fills p50: 20ms');
 		expect(html).toContain('Anomalies p95: 200ms');
 		expect(html).toContain('Misses p95: 120ms');
+
+		// `applyHiddenSeries` retries across animation frames until apex has registered
+		// its series, which the stub never reports — so the hides land a dozen frames
+		// after the mount's promises settle, not with them. Wait for the effect being
+		// asserted instead of relying on whatever else happened to run first.
+		for (let frame = 0; frame < 20 && chartMock.hidden.length === 0; frame++) {
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+		}
 
 		// The p95 bands are hidden on first render; the p50 medians stay visible.
 		expect(chartMock.hidden).toContain('Hits p95');
