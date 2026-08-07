@@ -65,7 +65,8 @@ import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
 import rateLimiter, {
-	rateLimiterChargesEveryRequest,
+	resolvedRateLimiterCharge,
+	type RateLimiterCharge,
 } from './middleware/rate-limiter-ip.js';
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
@@ -273,14 +274,21 @@ export default async function createApp(): Promise<express.Application> {
 	// a 100% hit rate — the load caching exists to absorb (#340). Below the cache it
 	// is spent only by requests that reach a handler, because a HIT answers from
 	// `checkCacheMiddleware` without calling `next()`.
-	const rateLimiterEnabled = env['RATE_LIMITER_ENABLED'] === true;
+	//
+	// A position can't be a branch in one place, so the limiter is offered to both
+	// call sites below and taken by whichever matches the configured charge — exactly
+	// one, or neither when it is disabled.
+	const rateLimiterCharge = env['RATE_LIMITER_ENABLED'] === true
+		? resolvedRateLimiterCharge()
+		: null;
 
-	const chargesEveryRequest = rateLimiterEnabled
-		&& rateLimiterChargesEveryRequest();
+	const useRateLimiterWhenCharging = (charge: RateLimiterCharge) => {
+		if (rateLimiterCharge === charge) {
+			app.use(rateLimiter);
+		}
+	};
 
-	if (rateLimiterEnabled && chargesEveryRequest) {
-		app.use(rateLimiter);
-	}
+	useRateLimiterWhenCharging('every-request');
 
 	app.get('/server/ping', (_req, res) => res.send('pong'));
 
@@ -307,9 +315,7 @@ export default async function createApp(): Promise<express.Application> {
 	// Structural rather than a placement bug — the exemption needs the cache lookup,
 	// and the failure happens before one exists, so no single position does both.
 	// `RATE_LIMITER_GLOBAL` is the ceiling for it; `every-request` opts out entirely.
-	if (rateLimiterEnabled && !chargesEveryRequest) {
-		app.use(rateLimiter);
-	}
+	useRateLimiterWhenCharging('cache-misses');
 
 	await emitter.emitInit('middlewares.after', { app });
 

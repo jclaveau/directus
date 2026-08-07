@@ -15,6 +15,8 @@ const env = useEnv();
 
 const RATE_LIMITER_CHARGES = ['cache-misses', 'every-request'] as const;
 
+export type RateLimiterCharge = typeof RATE_LIMITER_CHARGES[number];
+
 /**
  * Which requests spend a per-IP token, from `RATE_LIMITER_CHARGE`. The answer picks
  * where `app.ts` registers this middleware, so it is read at boot, not per request.
@@ -26,7 +28,7 @@ const RATE_LIMITER_CHARGES = ['cache-misses', 'every-request'] as const;
  *   cache is consulted, so a burst of cacheable reads can 429 at a 100% hit rate.
  *   The trade is that an invalid-token flood is rejected before it costs a lookup.
  */
-export function rateLimiterChargesEveryRequest(): boolean {
+export function resolvedRateLimiterCharge(): RateLimiterCharge {
 	const charge = env['RATE_LIMITER_CHARGE'];
 
 	if (!RATE_LIMITER_CHARGES.some((value) => value === charge)) {
@@ -39,7 +41,7 @@ export function rateLimiterChargesEveryRequest(): boolean {
 		);
 	}
 
-	return charge === 'every-request';
+	return charge as RateLimiterCharge;
 }
 
 if (env['RATE_LIMITER_ENABLED'] === true) {
