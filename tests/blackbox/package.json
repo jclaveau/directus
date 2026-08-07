@@ -32,6 +32,7 @@
 		"knex": "3.1.0",
 		"listr2": "10.1.2",
 		"lodash-es": "catalog:",
+		"pm2": "catalog:",
 		"seedrandom": "3.0.5",
 		"supertest": "7.2.2",
 		"typescript": "catalog:",
