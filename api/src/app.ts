@@ -295,6 +295,18 @@ export default async function createApp(): Promise<express.Application> {
 	// Misses, mutations and everything the cache skips land here; hits never do. The
 	// cache key needs `accountability` and `sanitizedQuery`, so the lookup cannot move
 	// any earlier and the charge has to move later instead.
+	//
+	// The accepted cost: a request that THROWS above this line is never charged at
+	// all, not merely charged late — express skips the rest of the chain, so
+	// `consume()` never runs and no number of such requests can ever 429. That covers
+	// an invalid or expired token (`authenticate` throws, and each one still costs a
+	// `getAccountabilityForToken` lookup) and a malformed `?filter=` (`sanitizeQuery`
+	// throws, cheaper still to send). A request with NO token is unaffected: it falls
+	// through to the public accountability, reaches the cache, and pays on a miss.
+	//
+	// Structural rather than a placement bug — the exemption needs the cache lookup,
+	// and the failure happens before one exists, so no single position does both.
+	// `RATE_LIMITER_GLOBAL` is the ceiling for it; `every-request` opts out entirely.
 	if (rateLimiterEnabled && !chargesEveryRequest) {
 		app.use(rateLimiter);
 	}
