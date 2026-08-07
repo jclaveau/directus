@@ -59,6 +59,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_SCHEMA_SYNC_TIMEOUT: 'number',
 	CACHE_SCHEMA_FREEZE_ENABLED: 'boolean',
 
+	RATE_LIMITER_CHARGE: 'string',
+
 	IMPORT_IP_DENY_LIST: 'array',
 
 	FILE_METADATA_ALLOW_LIST: 'array',

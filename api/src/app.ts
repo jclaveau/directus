@@ -64,7 +64,9 @@ import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
-import rateLimiter from './middleware/rate-limiter-ip.js';
+import rateLimiter, {
+	rateLimiterChargesEveryRequest,
+} from './middleware/rate-limiter-ip.js';
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
 import cacheStatsSchedule from './schedules/cache-stats.js';
@@ -266,7 +268,15 @@ export default async function createApp(): Promise<express.Application> {
 		app.use(rateLimiterGlobal);
 	}
 
-	if (env['RATE_LIMITER_ENABLED'] === true) {
+	// Where the per-IP limiter sits decides what a token buys. Above the cache it is
+	// spent before the cache is consulted, so a burst of cacheable reads 429s even at
+	// a 100% hit rate — the load caching exists to absorb (#340). Below the cache it
+	// is spent only by requests that reach a handler, because a HIT answers from
+	// `checkCacheMiddleware` without calling `next()`.
+	const chargesEveryRequest = env['RATE_LIMITER_ENABLED'] === true
+		&& rateLimiterChargesEveryRequest();
+
+	if (chargesEveryRequest) {
 		app.use(rateLimiter);
 	}
 
@@ -279,6 +289,13 @@ export default async function createApp(): Promise<express.Application> {
 	app.use(sanitizeQuery);
 
 	app.use(cache);
+
+	// Misses, mutations and everything the cache skips land here; hits never do. The
+	// cache key needs `accountability` and `sanitizedQuery`, so the lookup cannot move
+	// any earlier and the charge has to move later instead.
+	if (env['RATE_LIMITER_ENABLED'] === true && !chargesEveryRequest) {
+		app.use(rateLimiter);
+	}
 
 	await emitter.emitInit('middlewares.after', { app });
 
