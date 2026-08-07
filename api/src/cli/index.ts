@@ -26,7 +26,14 @@ export async function createCli(): Promise<Command> {
 	program.name('directus').usage('[command] [options]');
 	program.version(version, '-v, --version');
 
-	program.command('start').description('Start the Directus API').action(startServer);
+	// Under pm2 cluster mode, ProcessContainer leaks the ecosystem config path and a
+	// stray "start" into argv; tolerate them so commander doesn't reject start's boot.
+	program
+		.command('start')
+		.description('Start the Directus API')
+		.allowExcessArguments()
+		.action(startServer);
+
 	program.command('init').description('Create a new Directus Project').action(init);
 
 	// Security
