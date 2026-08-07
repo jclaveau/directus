@@ -32,6 +32,7 @@ function makeBuilder(table: string) {
 
 	const builder: any = {
 		where: () => builder,
+		andWhere: () => builder,
 		whereIn: () => builder,
 		whereNotNull: (column: string) => {
 			if (column === 'duration_ms') {
@@ -43,6 +44,9 @@ function makeBuilder(table: string) {
 		orderBy: () => builder,
 		groupByRaw: () => builder,
 		select: () => builder,
+		// The TTL replay's seed: the last change BEFORE the window, read on its own
+		// under `<table>:prior` so a test can open a window on an existing value.
+		first: () => Promise.resolve(rowsByTable[`${table}:prior`]?.[0] ?? undefined),
 		insert: (row: unknown) => insertSpy(table, row),
 		delete: () => deleteSpy(table),
 		then: (resolve: any, reject: any) => {
@@ -216,6 +220,36 @@ describe('readCacheTimeseries', () => {
 		expect(result.buckets.every((b) => b.hits === 0 && b.misses === 0)).toBe(true);
 
 		env['CACHE_STATS_ENABLED'] = true;
+	});
+
+	it('replays the TTL in force from the markers, seeded by the prior change', async () => {
+		env['CACHE_TTL'] = '10m';
+		const bucketSec = 60;
+
+		rowsByTable = {
+			directus_cache_config_events: [
+				// A clear, mid-window: detail null hands the TTL back to env, so the
+				// series must step DOWN here rather than hold the 24h it replaced.
+				{ time: new Date(NOW - bucketSec * 1000), kind: 'ttl_change', detail: null },
+			],
+			// The window opened on a 24h override set before it began.
+			'directus_cache_config_events:prior': [{ detail: '24h' }],
+			directus_cache_events: [
+				// Entries stamped at 24h are still being served after the clear — the
+				// conflation this series exists to end: `ttlMs` stays high, the TTL drops.
+				{ bucket: 2, hits: 4, misses: 0, fills: 0, ttl_ms: 86_400_000 },
+			],
+		};
+
+		const result = await readCacheTimeseries(180_000, 3);
+
+		expect(result.buckets.map((b) => b.effectiveTtlMs))
+			.toEqual([86_400_000, 600_000, 600_000]);
+
+		// Same window, and the stamped lifetime disagrees — which is the point.
+		expect(result.buckets[2]!.ttlMs).toBe(86_400_000);
+
+		delete env['CACHE_TTL'];
 	});
 });
 
