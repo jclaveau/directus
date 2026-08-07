@@ -1243,6 +1243,11 @@ export async function recordCacheConfigEvent(
  * A `ttl_change` marker's value in ms. `null` detail is a CLEARED override, which
  * hands the TTL back to env `CACHE_TTL` — so it resolves to the env value, not to
  * "unknown".
+ *
+ * That env value is read NOW, not as of the marker: a clear recorded while
+ * `CACHE_TTL` was `5m`, replayed after a deploy moved it to `1h`, draws `1h` over a
+ * period that ran at `5m`. Closing that would mean recording the resolved value in
+ * `detail` at write time; until then a clear is only as accurate as env is stable.
  */
 function markerTtlMs(detail: string | null): number | null {
 	const env = useEnv();
@@ -1387,9 +1392,22 @@ export async function readCacheTimeseries(
 			return { time: marker.time, ttlMs: markerTtlMs(marker.detail) };
 		});
 
-	const seedTtlMs = priorChange
-		? markerTtlMs((priorChange['detail'] as string | null) ?? null)
-		: null;
+	// No change inside the window means the value in force now held across all of it,
+	// whatever the marker history — which is the ordinary case for a deployment that
+	// never edited the TTL and so has no markers at all. Falling back to `null` there
+	// would leave the series empty and the page looking broken. The lead is genuinely
+	// unknown only when the window contains changes but nothing precedes them.
+	function windowOpenedOn(): number | null {
+		if (priorChange) {
+			return markerTtlMs((priorChange['detail'] as string | null) ?? null);
+		}
+
+		return ttlChanges.length === 0
+			? getMilliseconds(effective) ?? null
+			: null;
+	}
+
+	const seedTtlMs = windowOpenedOn();
 
 	effectiveTtlByBucket(dense.map((bucket) => bucket.t), ttlChanges, seedTtlMs)
 		.forEach((ttlMs, index) => {

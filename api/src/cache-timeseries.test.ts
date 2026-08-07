@@ -222,6 +222,27 @@ describe('readCacheTimeseries', () => {
 		env['CACHE_STATS_ENABLED'] = true;
 	});
 
+	it('draws the TTL in force when no change was ever recorded', async () => {
+		// The ordinary deployment: the TTL comes from env and nobody ever edited it, so
+		// the markers table holds nothing to replay. The series must still show the
+		// value in force across the window — an empty line reads as a broken page, and
+		// it was the regression this case exists to catch.
+		env['CACHE_TTL'] = '10m';
+
+		rowsByTable = {
+			directus_cache_events: [
+				{ bucket: 0, hits: 3, misses: 0, fills: 0, ttl_ms: 600_000 },
+			],
+		};
+
+		const result = await readCacheTimeseries(180_000, 3);
+
+		expect(result.buckets.map((b) => b.effectiveTtlMs))
+			.toEqual([600_000, 600_000, 600_000]);
+
+		delete env['CACHE_TTL'];
+	});
+
 	it('replays the TTL in force, seeded by the prior change', async () => {
 		env['CACHE_TTL'] = '10m';
 		const bucketSec = 60;

@@ -1908,4 +1908,12 @@ describe('effectiveTtlByBucket', () => {
 	it('returns nothing for an empty grid', () => {
 		expect(effectiveTtlByBucket([], [{ time: 5, ttlMs: 60_000 }], null)).toEqual([]);
 	});
+
+	it('stays unknown throughout when neither a seed nor a change exists', () => {
+		// The caller is responsible for not landing here in the ordinary no-marker
+		// case — see the seed in `readCacheTimeseries`, which passes the value in
+		// force instead. Given nothing at all, the honest answer is nothing.
+		expect(effectiveTtlByBucket(buckets, [], null))
+			.toEqual([null, null, null, null, null]);
+	});
 });

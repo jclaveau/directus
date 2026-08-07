@@ -27,8 +27,12 @@ export interface CacheTimeseriesBucket {
 	ttlMs: number | null;
 	/**
 	 * The TTL IN FORCE over this bucket, reconstructed from the `ttl_change` markers.
-	 * `null` when no change is recorded at or before the bucket — the honest answer,
-	 * rather than back-filling a later value over a window it did not apply to.
+	 * `null` when the window contains a change but nothing precedes it — the honest
+	 * answer, rather than back-filling a later value over a span it did not apply to.
+	 *
+	 * Accurate only as far as the markers reach: a change whose marker has aged out of
+	 * retention reads the same as no change at all, so a flat stretch is not proof the
+	 * TTL held — only that nothing retained says otherwise.
 	 */
 	effectiveTtlMs: number | null;
 	hitP50: number | null;
