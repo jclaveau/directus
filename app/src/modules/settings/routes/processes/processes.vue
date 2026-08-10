@@ -552,7 +552,10 @@ onMounted(load);
 	position: absolute;
 	inset-block-start: 8px;
 	inset-inline-end: 8px;
-	z-index: 2;
+
+	// Over CodeMirror's own layers, which reach 6 and otherwise take the click
+	// even though the button paints in front of them.
+	z-index: 10;
 }
 
 .copyable {
