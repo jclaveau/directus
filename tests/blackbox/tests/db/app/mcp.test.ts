@@ -222,8 +222,10 @@ describe('Diagnostics MCP Tests', () => {
 			expect(response.statusCode).toBe(200);
 			expect(response.body.jsonrpc).toBe('2.0');
 			expect(response.body.result.protocolVersion).toBe('2025-06-18');
+
 			expect(response.body.result.capabilities.tools)
 				.toEqual({ listChanged: false });
+
 			expect(response.body.result.serverInfo.name).toBe('directus-diagnostics');
 			expect(response.body.result.serverInfo.version).toBeTruthy();
 			// Live state must never be served from a store in front of it.
@@ -312,6 +314,7 @@ describe('Diagnostics MCP Tests', () => {
 
 				expect(response.statusCode).toBe(200);
 				expect(response.body.result.isError).toBeUndefined();
+
 				expect(Array.isArray(JSON.parse(response.body.result.content[0].text)))
 					.toBe(true);
 			}

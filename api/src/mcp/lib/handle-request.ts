@@ -47,7 +47,9 @@ async function callTool(
 		return fail(id, INVALID_PARAMS, `Unknown tool: ${String(params['name'])}`);
 	}
 
-	const args = isRecord(params['arguments']) ? params['arguments'] : {};
+	const args = isRecord(params['arguments'])
+		? params['arguments']
+		: {};
 
 	try {
 		const result = await tool.run(args, context);
@@ -90,7 +92,9 @@ export async function handleMcpRequest(
 		return null;
 	}
 
-	const params = isRecord(body['params']) ? body['params'] : {};
+	const params = isRecord(body['params'])
+		? body['params']
+		: {};
 
 	if (method === 'initialize') {
 		return succeed(id, {
@@ -106,12 +110,14 @@ export async function handleMcpRequest(
 
 	if (method === 'tools/list') {
 		return succeed(id, {
-			tools: MCP_TOOLS.map((tool) => ({
-				name: tool.name,
-				title: tool.title,
-				description: tool.description,
-				inputSchema: tool.inputSchema,
-			})),
+			tools: MCP_TOOLS.map((tool) => {
+				return {
+					name: tool.name,
+					title: tool.title,
+					description: tool.description,
+					inputSchema: tool.inputSchema,
+				};
+			}),
 		});
 	}
 
