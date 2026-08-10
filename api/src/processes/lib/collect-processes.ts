@@ -187,8 +187,11 @@ export async function collectProcesses(): Promise<ProcessesReport> {
 		services,
 		degraded: {
 			crossReplica: redisConfigAvailable() === false,
-			supervisor: services.some((service) =>
-				service.replicas.some((replica) => replica.supervisor !== 'pm2')),
+			supervisor: services.some((service) => {
+				return service.replicas.some((replica) => {
+					return replica.supervisor !== 'pm2';
+				});
+			}),
 		},
 	};
 }

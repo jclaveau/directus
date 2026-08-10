@@ -24,7 +24,9 @@ import {
 function instanceNumber(): number | null {
 	const parsed = Number(process.env['NODE_APP_INSTANCE']);
 
-	return Number.isInteger(parsed) ? parsed : null;
+	return Number.isInteger(parsed)
+		? parsed
+		: null;
 }
 
 function runtimeStats(): ProcessRuntimeStats {

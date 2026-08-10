@@ -25,16 +25,27 @@ const refreshInterval = ref<number | null>(null);
 const expanded = ref<Record<string, boolean>>({});
 const envSearch = ref<Record<string, string>>({});
 
-const totals = computed(() =>
-	report.value === null
+const totals = computed(() => {
+	return report.value === null
 		? null
-		: processTotals(report.value));
+		: processTotals(report.value);
+});
 
-const carriesEnv = computed(() =>
-	report.value?.details.includes('env') === true);
+const carriesEnv = computed(() => {
+	return report.value?.details.includes('env') === true;
+});
 
-function nodeKey(replicaId: string, node: ProcessNode): string {
-	return `${replicaId}::${node.pmId ?? node.pid ?? node.nodeId}`;
+/**
+ * One row per process, carrying the key the expand/search state is stored under
+ * — a process is only identified by its replica plus its slot in it.
+ */
+function processRows(replica: ProcessReplica) {
+	return replica.processes.map((node) => {
+		return {
+			key: `${replica.replicaId}::${node.pmId ?? node.pid ?? node.nodeId}`,
+			node,
+		};
+	});
 }
 
 function toggle(key: string): void {
@@ -213,19 +224,15 @@ onMounted(load);
 						</v-chip>
 					</div>
 
-					<div
-						v-for="node in replica.processes"
-						:key="nodeKey(replica.replicaId, node)"
-						class="process"
-					>
+					<div v-for="{ key, node } in processRows(replica)" :key="key" class="process">
 						<button
 							type="button"
 							class="process-row"
 							:class="{ warning: isNearMemoryCap(node), silent: !node.responding }"
-							@click="toggle(nodeKey(replica.replicaId, node))"
+							@click="toggle(key)"
 						>
 							<v-icon
-								:name="expanded[nodeKey(replica.replicaId, node)]
+								:name="expanded[key]
 									? 'expand_more'
 									: 'chevron_right'"
 								small
@@ -250,7 +257,7 @@ onMounted(load);
 							<span class="mode">{{ node.supervisor?.execMode ?? '—' }}</span>
 						</button>
 
-						<div v-if="expanded[nodeKey(replica.replicaId, node)]" class="detail">
+						<div v-if="expanded[key]" class="detail">
 							<v-notice v-if="!node.responding" type="warning">
 								{{ t(
 									'processes_not_responding',
@@ -268,12 +275,11 @@ onMounted(load);
 
 							<template v-if="node.env">
 								<v-input
-									:model-value="envSearch[nodeKey(replica.replicaId, node)] ?? ''"
+									:model-value="envSearch[key] ?? ''"
 									small
 									icon-left="search"
 									:placeholder="t('processes_env_search', 'Search variables')"
-									@update:model-value="
-										envSearch[nodeKey(replica.replicaId, node)] = $event ?? ''"
+									@update:model-value="envSearch[key] = $event ?? ''"
 								/>
 
 								<table class="env">
@@ -286,7 +292,7 @@ onMounted(load);
 									</thead>
 									<tbody>
 										<tr
-											v-for="variable in envOf(nodeKey(replica.replicaId, node), node)"
+											v-for="variable in envOf(key, node)"
 											:key="variable.key"
 										>
 											<td class="key">{{ variable.key }}</td>

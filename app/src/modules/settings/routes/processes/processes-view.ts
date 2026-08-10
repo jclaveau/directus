@@ -40,14 +40,16 @@ export function filterEnvVariables(
 		return variables;
 	}
 
-	return variables.filter((variable) =>
-		variable.key.toLowerCase().includes(needle)
-		|| (variable.value ?? '').toLowerCase().includes(needle));
+	return variables.filter((variable) => {
+		return variable.key.toLowerCase().includes(needle)
+			|| (variable.value ?? '').toLowerCase().includes(needle);
+	});
 }
 
 function everyProcess(report: ProcessesReport): ProcessNode[] {
-	return report.services.flatMap((service) =>
-		service.replicas.flatMap((replica) => replica.processes));
+	return report.services.flatMap((service) => {
+		return service.replicas.flatMap((replica) => replica.processes);
+	});
 }
 
 /** Totals for the page header: how much of the deployment answered. */
