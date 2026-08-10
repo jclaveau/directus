@@ -1,0 +1,18 @@
+get:
+  summary: Read the cache telemetry state
+  description: >
+    Whether cache telemetry is being collected, and what stopped it if it was
+    disabled automatically. Admin only.
+  operationId: read-cache-stats-state
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            properties:
+              data:
+                type: object
+            type: object
+      description: Successful request
+  tags:
+    - Utilities

@@ -1,0 +1,32 @@
+get:
+  summary: Read the cache timeseries
+  description: >
+    Hits, misses, fills, anomalies, TTL in force and latency percentiles
+    bucketed over the window, plus the config changes and flushes that fall in
+    it. Admin only.
+  operationId: read-cache-timeseries
+  parameters:
+    - name: window
+      in: query
+      required: false
+      description: How far back to look, as a duration such as "15m", "6h" or "7d".
+      schema:
+        type: string
+    - name: buckets
+      in: query
+      required: false
+      description: How many buckets to split the window into.
+      schema:
+        type: integer
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            properties:
+              data:
+                type: object
+            type: object
+      description: Successful request
+  tags:
+    - Utilities

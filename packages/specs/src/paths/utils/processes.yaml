@@ -1,0 +1,42 @@
+get:
+  summary: List running processes
+  description: >
+    The running processes of this deployment as a service, replica and process
+    tree. Each process reports what its supervisor observed (status, restarts,
+    memory against the cap it is recycled at, uptime, exec mode) and the
+    environment it resolved, redacted, with the layer each value came from.
+    Admin only, and served only where PROCESSES_ENABLED is on.
+  operationId: list-processes
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            properties:
+              data:
+                type: object
+                properties:
+                  collectedAt:
+                    type: integer
+                  collectedForMs:
+                    type: integer
+                  details:
+                    type: array
+                    items:
+                      type: string
+                      enum: [stats, env]
+                  services:
+                    type: array
+                    items:
+                      type: object
+                  degraded:
+                    type: object
+                    properties:
+                      crossReplica:
+                        type: boolean
+                      supervisor:
+                        type: boolean
+            type: object
+      description: Successful request
+  tags:
+    - Utilities

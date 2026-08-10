@@ -234,6 +234,19 @@ CACHE_STORE=memory
 ASSETS_CACHE_TTL="30d"
 
 #####################################################################################
+### Diagnostics MCP
+
+# Serve a read-only MCP endpoint at /mcp exposing the diagnostic reads (the
+# processes tree, the cache listings, anomalies, latencies, timeseries and
+# telemetry state) as tools an LLM agent can call. Off by default. [false]
+# MCP_ENABLED=false
+
+# Bearer tokens accepted as `Authorization: Mcp <token>` on that endpoint, for
+# agents that have no login. A token reads every diagnostic tool, which is what
+# an admin can read — treat one as an admin credential. Unset by default.
+# MCP_TOKENS="a-long-random-token,another"
+
+#####################################################################################
 ### Processes
 
 # Serve the admin Processes page (Settings -> Processes). Admin-only either

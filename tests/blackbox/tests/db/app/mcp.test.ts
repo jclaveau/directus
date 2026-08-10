@@ -1,0 +1,398 @@
+import config, { getUrl, paths, type Env } from '@common/config';
+import vendors, { type Vendor } from '@common/get-dbs-to-test';
+import { USER } from '@common/variables';
+import { awaitDirectusConnection } from '@utils/await-connection';
+import { ChildProcess, spawn } from 'child_process';
+import getPort from 'get-port';
+import { cloneDeep } from 'lodash-es';
+import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+const mcpToken = 'blackbox-mcp-token-0123456789';
+const secondToken = 'blackbox-mcp-token-second';
+
+const toolNames = [
+	'list_processes',
+	'list_cache_entries',
+	'list_cache_anomalies',
+	'list_cache_latencies',
+	'read_cache_timeseries',
+	'read_cache_stats_state',
+];
+
+describe('Diagnostics MCP Tests', () => {
+	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
+
+	const envKeys = ['envMcp', 'envMcpNoTokens', 'envMcpOff'] as const;
+
+	type EnvTypes = Record<(typeof envKeys)[number], Env>;
+
+	const envs = {} as Record<Vendor, EnvTypes>;
+
+	beforeAll(async () => {
+		const promises = [];
+
+		for (const vendor of vendors) {
+			// Redis-backed cache with telemetry on, so the cache tools answer about
+			// something live rather than about a disabled subsystem.
+			const envMcp = cloneDeep(config.envs);
+			envMcp[vendor]['MCP_ENABLED'] = 'true';
+			envMcp[vendor]['MCP_TOKENS'] = `${mcpToken},${secondToken}`;
+			envMcp[vendor]['CACHE_ENABLED'] = 'true';
+			envMcp[vendor]['CACHE_STORE'] = 'redis';
+			envMcp[vendor]['REDIS_HOST'] = 'localhost';
+			envMcp[vendor]['REDIS_PORT'] = '6108';
+			envMcp[vendor]['CACHE_NAMESPACE'] = `blackbox-mcp-${vendor}`;
+			envMcp[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
+			// Enabled, but with no token configured: the header path must not become
+			// a way in just because the endpoint is served.
+			const envMcpNoTokens = cloneDeep(envMcp);
+			delete envMcpNoTokens[vendor]['MCP_TOKENS'];
+
+			const envMcpOff = cloneDeep(envMcp);
+			envMcpOff[vendor]['MCP_ENABLED'] = 'false';
+
+			const ports = await Promise.all(envKeys.map(() => getPort()));
+
+			envs[vendor] = { envMcp, envMcpNoTokens, envMcpOff };
+			directusInstances[vendor] = [];
+
+			for (const [index, key] of envKeys.entries()) {
+				const env = envs[vendor][key];
+				env[vendor].PORT = String(ports[index]);
+
+				directusInstances[vendor].push(
+					spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: env[vendor] }),
+				);
+
+				promises.push(awaitDirectusConnection(ports[index]!));
+			}
+		}
+
+		await Promise.all(promises);
+	}, 180_000);
+
+	afterAll(() => {
+		for (const vendor of vendors) {
+			for (const instance of directusInstances[vendor]!) {
+				instance.kill();
+			}
+		}
+	});
+
+	function post(vendor: Vendor, key: keyof EnvTypes, body: unknown) {
+		return request(getUrl(vendor, envs[vendor][key]))
+			.post('/mcp')
+			.send(body as object);
+	}
+
+	function call(vendor: Vendor, body: unknown) {
+		return post(vendor, 'envMcp', body).set('Authorization', `Mcp ${mcpToken}`);
+	}
+
+	async function callTool(vendor: Vendor, name: string, args: object = {}) {
+		return call(vendor, {
+			jsonrpc: '2.0',
+			id: 7,
+			method: 'tools/call',
+			params: { name, arguments: args },
+		});
+	}
+
+	describe('Serves no endpoint where the MCP is turned off', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcpOff', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}).set('Authorization', `Mcp ${mcpToken}`);
+
+			expect(response.statusCode).toBe(404);
+		});
+	});
+
+	describe('Refuses a call with no credential', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			});
+
+			expect(response.statusCode).toBe(403);
+		});
+	});
+
+	describe('Refuses a token that is not configured', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}).set('Authorization', 'Mcp not-the-configured-token');
+
+			expect(response.statusCode).toBe(403);
+		});
+	});
+
+	describe('Refuses a token that only prefixes a configured one', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}).set('Authorization', `Mcp ${mcpToken.slice(0, -4)}`);
+
+			expect(response.statusCode).toBe(403);
+		});
+	});
+
+	describe('Refuses a non-admin session', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}).set('Authorization', `Bearer ${USER.APP_ACCESS.TOKEN}`);
+
+			expect(response.statusCode).toBe(403);
+		});
+	});
+
+	describe('Refuses the header path where no token is configured', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcpNoTokens', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}).set('Authorization', `Mcp ${mcpToken}`);
+
+			expect(response.statusCode).toBe(403);
+
+			// An admin still gets in on that same instance, so the refusal above is
+			// the token path being closed, not the endpoint being broken.
+			const asAdmin = await post(vendor, 'envMcpNoTokens', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(asAdmin.statusCode).toBe(200);
+		});
+	});
+
+	describe('Accepts either configured token, and an admin', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			for (const token of [mcpToken, secondToken]) {
+				const response = await post(vendor, 'envMcp', {
+					jsonrpc: '2.0',
+					id: 1,
+					method: 'ping',
+				}).set('Authorization', `Mcp ${token}`);
+
+				expect(response.statusCode).toBe(200);
+				expect(response.body).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
+			}
+
+			const asAdmin = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 2,
+				method: 'ping',
+			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(asAdmin.statusCode).toBe(200);
+			expect(asAdmin.body.result).toEqual({});
+		});
+	});
+
+	describe('Announces itself to a client that initializes', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await call(vendor, {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'initialize',
+				params: {
+					protocolVersion: '2025-06-18',
+					capabilities: {},
+					clientInfo: { name: 'blackbox', version: '0.0.0' },
+				},
+			});
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.jsonrpc).toBe('2.0');
+			expect(response.body.result.protocolVersion).toBe('2025-06-18');
+			expect(response.body.result.capabilities.tools)
+				.toEqual({ listChanged: false });
+			expect(response.body.result.serverInfo.name).toBe('directus-diagnostics');
+			expect(response.body.result.serverInfo.version).toBeTruthy();
+			// Live state must never be served from a store in front of it.
+			expect(response.headers['cache-control']).toBe('no-store');
+		});
+	});
+
+	describe('Answers a notification with no body', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await call(vendor, {
+				jsonrpc: '2.0',
+				method: 'notifications/initialized',
+			});
+
+			expect(response.statusCode).toBe(202);
+			expect(response.text).toBe('');
+		});
+	});
+
+	describe('Lists every diagnostic tool with a callable schema', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await call(vendor, {
+				jsonrpc: '2.0',
+				id: 3,
+				method: 'tools/list',
+			});
+
+			expect(response.statusCode).toBe(200);
+
+			const tools = response.body.result.tools;
+
+			expect(tools.map((tool: { name: string }) => tool.name)).toEqual(toolNames);
+
+			for (const tool of tools) {
+				expect(tool.title).toBeTruthy();
+				// The description is what a model chooses on, so it has to say what
+				// the tool answers, not just name it.
+				expect(tool.description.length).toBeGreaterThan(60);
+				expect(tool.inputSchema.type).toBe('object');
+				expect(tool.inputSchema.properties).toBeDefined();
+			}
+
+			const windowed = tools.filter((tool: { name: string }) => {
+				return tool.name !== 'list_processes'
+					&& tool.name !== 'read_cache_stats_state';
+			});
+
+			for (const tool of windowed) {
+				expect(tool.inputSchema.properties.window.type).toBe('string');
+			}
+		});
+	});
+
+	describe('Answers the processes tool with the tree', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await callTool(vendor, 'list_processes');
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.result.isError).toBeUndefined();
+
+			const content = response.body.result.content;
+
+			expect(content[0].type).toBe('text');
+
+			const report = JSON.parse(content[0].text);
+
+			expect(report.services.length).toBeGreaterThan(0);
+			expect(report.details).toEqual(['stats', 'env']);
+			expect(report.degraded).toBeDefined();
+
+			// The tool inherits the endpoint's redaction: this instance sets SECRET.
+			expect(content[0].text).not.toContain('directus-test');
+		});
+	});
+
+	describe('Answers every cache tool', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const listings = [
+				'list_cache_entries',
+				'list_cache_anomalies',
+				'list_cache_latencies',
+			];
+
+			for (const name of listings) {
+				const response = await callTool(vendor, name, { window: '15m' });
+
+				expect(response.statusCode).toBe(200);
+				expect(response.body.result.isError).toBeUndefined();
+				expect(Array.isArray(JSON.parse(response.body.result.content[0].text)))
+					.toBe(true);
+			}
+
+			const timeseries = await callTool(vendor, 'read_cache_timeseries', {
+				window: '15m',
+				buckets: 5,
+			});
+
+			expect(JSON.parse(timeseries.body.result.content[0].text))
+				.toBeInstanceOf(Object);
+
+			// Non-vacuous: telemetry is on for this instance, so the tool reporting
+			// the collection state must say so.
+			const state = await callTool(vendor, 'read_cache_stats_state');
+
+			expect(JSON.parse(state.body.result.content[0].text).enabled).toBe(true);
+		});
+	});
+
+	describe('Reports an unknown method as a protocol error', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await call(vendor, {
+				jsonrpc: '2.0',
+				id: 4,
+				method: 'resources/list',
+			});
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.error.code).toBe(-32601);
+			expect(response.body.error.message).toContain('resources/list');
+		});
+	});
+
+	describe('Reports an unknown tool as a bad parameter', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await callTool(vendor, 'drop_everything');
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.error.code).toBe(-32602);
+			expect(response.body.error.message).toContain('drop_everything');
+		});
+	});
+
+	describe('Reports a malformed message', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const notAnObject = await call(vendor, ['jsonrpc', '2.0']);
+
+			expect(notAnObject.body.error.code).toBe(-32700);
+
+			const noMethod = await call(vendor, { jsonrpc: '2.0', id: 5 });
+
+			expect(noMethod.body.error.code).toBe(-32600);
+			expect(noMethod.body.id).toBe(5);
+		});
+	});
+
+	describe('Publishes the diagnostic reads in the OpenAPI spec', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await request(getUrl(vendor, envs[vendor]['envMcp']))
+				.get('/server/specs/oas')
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(200);
+
+			const paths = response.body.paths;
+
+			expect(paths['/mcp'].post.operationId).toBe('call-mcp');
+			expect(paths['/utils/processes'].get.operationId).toBe('list-processes');
+			expect(paths['/utils/cache'].get.operationId).toBe('list-cache-entries');
+			expect(paths['/utils/cache/anomalies']).toBeDefined();
+			expect(paths['/utils/cache/latencies']).toBeDefined();
+			expect(paths['/utils/cache/timeseries']).toBeDefined();
+			expect(paths['/utils/cache/stats']).toBeDefined();
+
+			// The window parameter is what makes the cache reads usable without
+			// guessing, so it has to reach the published spec.
+			const windowParam = paths['/utils/cache'].get.parameters
+				.find((parameter: { name: string }) => parameter.name === 'window');
+
+			expect(windowParam.schema.type).toBe('string');
+		});
+	});
+});

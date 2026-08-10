@@ -22,8 +22,9 @@ const randomStringSchema = Joi.object<{ length: number }>({
 });
 
 // The cache-listing ?window= range (a duration like 48h) → ms; undefined when
-// absent so the listing falls back to its default. Clamped downstream.
-function requestedWindowMs(raw: unknown): number | undefined {
+// absent so the listing falls back to its default. Clamped downstream. Exported
+// because the MCP tools take the same argument and must read it identically.
+export function requestedWindowMs(raw: unknown): number | undefined {
 	return raw === undefined
 		? undefined
 		: getMilliseconds(String(raw), Number.NaN);
