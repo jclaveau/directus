@@ -45,6 +45,7 @@ test('Only the halves this node is configured to report are reported', () => {
 	// A name that is not a half is dropped rather than reported back.
 	vi.mocked(useEnv)
 		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'secrets'] });
+
 	expect(reportedProcessDetails()).toEqual(['stats']);
 
 	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: [''] });
