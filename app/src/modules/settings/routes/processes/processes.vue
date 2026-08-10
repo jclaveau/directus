@@ -224,7 +224,11 @@ onMounted(load);
 						</v-chip>
 					</div>
 
-					<div v-for="{ key, node } in processRows(replica)" :key="key" class="process">
+					<div
+						v-for="{ key, node } in processRows(replica)"
+						:key="key"
+						class="process"
+					>
 						<button
 							type="button"
 							class="process-row"

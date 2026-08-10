@@ -27,7 +27,7 @@ interface SupervisedProcessEnv {
 	max_memory_restart?: number;
 	exec_mode?: string;
 	instances?: number | 'max';
-	NODE_APP_INSTANCE?: string;
+	NODE_APP_INSTANCE?: string | number;
 }
 
 /** One row of `pm2 list`, as this report needs it. */
@@ -39,7 +39,7 @@ export interface SupervisedProcess {
 	stats: ProcessSupervisorStats;
 }
 
-function instanceNumber(value: string | undefined): number | null {
+function instanceNumber(value: string | number | undefined): number | null {
 	const parsed = Number(value);
 
 	return value !== undefined && Number.isInteger(parsed)
