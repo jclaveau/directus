@@ -16,6 +16,14 @@ on:
         description: Branch/tag/SHA to boot (the code whose admin you want to see)
         type: string
         default: v11.10.1-hhh-dev
+      instances:
+        description: How many PM2 cluster workers to run (the Processes tree shows each)
+        type: string
+        default: '3'
+      pr:
+        description: PR number to publish the preview link into (blank to publish nowhere)
+        type: string
+        default: ''
   # Auto-boot on every push to a PR that carries the `Preview` label (and when the
   # label is first added). pull_request_target resolves this file from the PR's BASE
   # branch, so the workflow must also live on the branches PRs target.
@@ -95,6 +103,10 @@ jobs:
       # Off — no realtime needed to browse a preview.
       WEBSOCKETS_ENABLED: 'false'
       PORT: '8055'
+      # Started under PM2 below, so Settings → Processes has a real supervisor to
+      # report: two cluster workers with a recycling cap, not a lone process.
+      PROCESSES_SERVICE_NAME: preview
+      PM2_HOME: /home/runner/.pm2
     steps:
       - name: Checkout the ref to preview
         uses: actions/checkout@v7
@@ -128,6 +140,58 @@ jobs:
           fi
 
           echo "URL=$URL" >> "$GITHUB_ENV"
+
+      - name: Publish preview to the PR description
+        # Runs as soon as the tunnel has a URL — a job summary and a `::notice`
+        # only publish once the job ends, and this one stays up for hours, so the
+        # description is the only channel that shows the link while it is usable.
+        # Markers self-replace the block; ticking the checkbox fires `edited` → a
+        # fresh run.
+        if: github.event.pull_request.number || inputs.pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+          SHA: ${{ github.event.pull_request.head.sha || inputs.ref }}
+        run: |
+          # Backticks escaped (\`) so they stay literal markdown; $URL/$ADMIN_PASSWORD expand.
+          {
+            echo "<!-- admin-preview:start -->"
+            echo "### 🔎 Preview admin — \`${SHA}\`"
+            echo ""
+            echo "- **Open (auto-login):** ${URL}/auto-login"
+            echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary; on a public repo that summary is world-readable)."
+            echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
+            echo "- Runs under PM2 (cluster workers, 400M cap), so Settings → Processes has a real supervisor to report."
+            echo "- Give it a minute after the run starts: the tunnel answers 502 until Directus finishes booting."
+            echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
+            echo "- [ ] 🔄 Re-run admin preview"
+            echo "<!-- admin-preview:end -->"
+          } > /tmp/preview-block.md
+
+          cat > /tmp/splice.py <<'PY'
+          import re, sys
+          body = sys.stdin.read()
+          block = open('/tmp/preview-block.md').read().rstrip('\n')
+          pat = re.compile(r'<!-- admin-preview:start -->.*?<!-- admin-preview:end -->', re.S)
+          if pat.search(body):
+              out = pat.sub(lambda _: block, body)
+          else:
+              out = (body.rstrip() + '\n\n' + block) if body.strip() else block
+          sys.stdout.write(out)
+          PY
+
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.body // ""' > /tmp/pr-body.txt
+          python3 /tmp/splice.py < /tmp/pr-body.txt > /tmp/new-body.txt
+
+          # gh pr edit trips this repo's classic-Projects GraphQL bug → PATCH via REST.
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$PR" -f body="$(cat /tmp/new-body.txt)" >/dev/null
+
+          # Drop stale standalone preview comments (superseded by the description block).
+          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.body | contains("🔎 Preview admin")) | .id' \
+          | while read -r id; do
+              [ -n "$id" ] && gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" >/dev/null || true
+            done
 
       - name: Bootstrap + start Directus
         run: |
@@ -189,8 +253,18 @@ jobs:
           };
           IDX
 
-          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" node directus/cli.js start \
-            > /tmp/directus.log 2>&1 &
+          # Under PM2, the way the published image runs it, so the Processes page
+          # has a supervisor to report. Started from the repo root (not the image's
+          # /directus) so EXTENSIONS_PATH still finds the auto-login extension, and
+          # pointed at one log file so the streaming step below is unchanged.
+          npm install --global pm2@5
+          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" pm2 start directus/cli.js \
+            --name directus \
+            --instances "${{ inputs.instances || '3' }}" \
+            --max-memory-restart 400M \
+            --output /tmp/directus.log \
+            --error /tmp/directus.log \
+            -- start
 
           for _ in $(seq 1 60); do
             curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
@@ -361,53 +435,6 @@ jobs:
           path: /tmp/anomalies.json
           retention-days: 1
           if-no-files-found: warn
-
-      - name: Publish preview to the PR description
-        # PR events only (dispatch has no PR). Markers self-replace the block; ticking
-        # the checkbox fires `edited` → a fresh run.
-        if: github.event_name == 'pull_request_target'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          # Backticks escaped (\`) so they stay literal markdown; $URL/$ADMIN_PASSWORD expand.
-          {
-            echo "<!-- admin-preview:start -->"
-            echo "### 🔎 Preview admin — \`${SHA}\`"
-            echo ""
-            echo "- **Open (auto-login):** ${URL}/auto-login"
-            echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary; on a public repo that summary is world-readable)."
-            echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
-            echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
-            echo "- [ ] 🔄 Re-run admin preview"
-            echo "<!-- admin-preview:end -->"
-          } > /tmp/preview-block.md
-
-          cat > /tmp/splice.py <<'PY'
-          import re, sys
-          body = sys.stdin.read()
-          block = open('/tmp/preview-block.md').read().rstrip('\n')
-          pat = re.compile(r'<!-- admin-preview:start -->.*?<!-- admin-preview:end -->', re.S)
-          if pat.search(body):
-              out = pat.sub(lambda _: block, body)
-          else:
-              out = (body.rstrip() + '\n\n' + block) if body.strip() else block
-          sys.stdout.write(out)
-          PY
-
-          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '.body // ""' > /tmp/pr-body.txt
-          python3 /tmp/splice.py < /tmp/pr-body.txt > /tmp/new-body.txt
-
-          # gh pr edit trips this repo's classic-Projects GraphQL bug → PATCH via REST.
-          gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/$PR" -f body="$(cat /tmp/new-body.txt)" >/dev/null
-
-          # Drop stale standalone preview comments (superseded by the description block).
-          gh api "repos/$GITHUB_REPOSITORY/issues/$PR/comments" --paginate \
-            --jq '.[] | select(.body | contains("🔎 Preview admin")) | .id' \
-          | while read -r id; do
-              [ -n "$id" ] && gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/comments/$id" >/dev/null || true
-            done
 
       - name: Stream logs + publish URL
         run: |

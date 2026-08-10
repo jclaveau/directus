@@ -23,6 +23,7 @@ import PoliciesItem from './routes/policies/item.vue';
 import NewPolicy from './routes/policies/add-new.vue';
 import PresetsCollection from './routes/presets/collection/collection.vue';
 import PresetsItem from './routes/presets/item.vue';
+import Processes from './routes/processes/processes.vue';
 import Project from './routes/project/project.vue';
 import NewRole from './routes/roles/add-new.vue';
 import RolesCollection from './routes/roles/collection.vue';
@@ -311,6 +312,11 @@ export default defineModule({
 			name: 'settings-cache',
 			path: 'cache',
 			component: Cache,
+		},
+		{
+			name: 'settings-processes',
+			path: 'processes',
+			component: Processes,
 		},
 		{
 			name: 'settings-not-found',

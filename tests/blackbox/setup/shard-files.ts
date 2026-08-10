@@ -37,6 +37,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/websocket/auth-strict-connects.test.ts': 26_000,
 	'/tests/db/websocket/auth-strict-pings.test.ts': 168_000,
 	'/tests/db/app/cache.test.ts': 86_000,
+	// Six spawned instances plus a PM2 daemon of three, and every read waits
+	// out the collection window.
+	'/tests/db/app/processes.test.ts': 90_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,
 	'/tests/db/routes/collections/schema-cache.test.ts': 23_000,

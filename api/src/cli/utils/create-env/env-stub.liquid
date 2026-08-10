@@ -233,6 +233,28 @@ CACHE_STORE=memory
 # How long assets will be cached for in the browser. Sets the max-age value of the Cache-Control header ["30d"]
 ASSETS_CACHE_TTL="30d"
 
+#####################################################################################
+### Processes
+
+# Serve the admin Processes page (Settings -> Processes). Admin-only either
+# way; turn it off to remove the endpoint entirely. [true]
+# PROCESSES_REPORT_ENABLED=true
+
+# Which halves of each process the report carries: "stats" (supervisor +
+# runtime numbers) and "env" (the resolved environment, redacted by key
+# shape). Drop "env" to keep the page without reporting any env at all.
+# ["stats,env"]
+# PROCESSES_REPORT_DETAILS="stats,env"
+
+# Name this deployment reports itself under — the top level of the tree.
+# Defaults to the platform's service name, else the PM2 app name.
+# PROCESSES_SERVICE_NAME="directus"
+
+# How long replies from the other replicas are collected for before the tree
+# is rendered. A replica that misses the window is reported, not omitted.
+# ["750ms"]
+# PROCESSES_COLLECT_TIMEOUT="750ms"
+
 ####################################################################################################
 ### File Storage
 

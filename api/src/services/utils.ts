@@ -5,6 +5,7 @@ import type {
 	Accountability,
 	CacheFlushTarget,
 	PrimaryKey,
+	ProcessesReport,
 	SchemaOverview,
 } from '@directus/types';
 import type { Knex } from 'knex';
@@ -31,6 +32,7 @@ import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { collectProcesses } from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -198,7 +200,7 @@ export class UtilsService {
 		void recordCacheConfigEvent('flush', targets.join(',')).catch(() => {});
 	}
 
-	private assertCacheAdmin(action: string): void {
+	private assertAdmin(action: string): void {
 		if (this.accountability?.admin !== true) {
 			const reason =
 				`'${this.accountability?.user}' does not have permission `
@@ -209,13 +211,13 @@ export class UtilsService {
 	}
 
 	async getCacheEntries(windowMs?: number): Promise<CacheEntryRecord[]> {
-		this.assertCacheAdmin('inspect the cache');
+		this.assertAdmin('inspect the cache');
 
 		return listCacheEntries(windowMs);
 	}
 
 	async getCacheAnomalies(windowMs?: number): Promise<CacheAnomalyRecord[]> {
-		this.assertCacheAdmin('inspect cache anomalies');
+		this.assertAdmin('inspect cache anomalies');
 
 		return listCacheAnomalies(windowMs);
 	}
@@ -223,7 +225,7 @@ export class UtilsService {
 	async getCacheGroupLatencies(
 		windowMs?: number,
 	): Promise<CacheGroupLatencyRecord[]> {
-		this.assertCacheAdmin('inspect cache latencies');
+		this.assertAdmin('inspect cache latencies');
 
 		return listCacheGroupLatencies(windowMs);
 	}
@@ -232,7 +234,7 @@ export class UtilsService {
 		windowMs?: number,
 		buckets?: number,
 	): Promise<CacheTimeseries> {
-		this.assertCacheAdmin('inspect the cache timeseries');
+		this.assertAdmin('inspect the cache timeseries');
 
 		return readCacheTimeseries(windowMs, buckets);
 	}
@@ -249,7 +251,7 @@ export class UtilsService {
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
 	}> {
-		this.assertCacheAdmin('inspect a cache entry');
+		this.assertAdmin('inspect a cache entry');
 
 		const { cache } = getCache();
 
@@ -305,7 +307,7 @@ export class UtilsService {
 	}
 
 	async evictCacheEntry(key: string): Promise<void> {
-		this.assertCacheAdmin('evict a cache entry');
+		this.assertAdmin('evict a cache entry');
 
 		const { cache } = getCache();
 
@@ -315,7 +317,7 @@ export class UtilsService {
 	}
 
 	async evictCacheEntriesForPath(path: string): Promise<number> {
-		this.assertCacheAdmin('evict cache entries');
+		this.assertAdmin('evict cache entries');
 
 		const { cache } = getCache();
 
@@ -327,20 +329,26 @@ export class UtilsService {
 	}
 
 	async getCacheStatsState(): Promise<CacheStatsState> {
-		this.assertCacheAdmin('inspect cache stats');
+		this.assertAdmin('inspect cache stats');
 
 		return getCacheStatsState();
 	}
 
 	async setCacheStatsEnabled(enabled: boolean): Promise<void> {
-		this.assertCacheAdmin('toggle cache stats');
+		this.assertAdmin('toggle cache stats');
 
 		await setCacheStatsEnabled(enabled);
 	}
 
 	async truncateCacheStats(): Promise<void> {
-		this.assertCacheAdmin('truncate cache stats');
+		this.assertAdmin('truncate cache stats');
 
 		await truncateCacheEvents();
+	}
+
+	async readProcesses(): Promise<ProcessesReport> {
+		this.assertAdmin('inspect the running processes');
+
+		return collectProcesses();
 	}
 }

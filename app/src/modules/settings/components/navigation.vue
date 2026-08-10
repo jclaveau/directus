@@ -35,6 +35,11 @@ const links = computed<Link[][]>(() => [
 			name: t('cache', 'Cache'),
 			to: `/settings/cache`,
 		},
+		{
+			icon: 'account_tree',
+			name: t('processes', 'Processes'),
+			to: `/settings/processes`,
+		},
 	],
 	[
 		{

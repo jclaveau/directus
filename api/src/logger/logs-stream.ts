@@ -1,11 +1,9 @@
 import type { Bus } from '@directus/memory';
-import { nanoid } from 'nanoid';
 import { Writable } from 'stream';
 import { useBus } from '../bus/index.js';
+import { nodeId } from '../utils/node-id.js';
 
 type PrettyType = 'basic' | 'http' | false;
-
-const nodeId = nanoid(8);
 
 export class LogsStream extends Writable {
 	messenger: Bus;
