@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import api from '@/api';
+import { useClipboard } from '@/composables/use-clipboard';
 import { formatDuration } from '@/utils/format-duration';
 import { formatFilesize } from '@/utils/format-filesize';
+import { getStringifiedValue } from '@/utils/get-stringified-value';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
-import type { HeaderRaw } from '@/components/v-table/types';
+import type { HeaderRaw, Sort } from '@/components/v-table/types';
 import type { ProcessNode, ProcessReplica, ProcessesReport, ResolvedEnvVariable }
 	from '@directus/types';
 import { useLocalStorage } from '@vueuse/core';
@@ -20,6 +22,7 @@ import {
 defineOptions({ name: 'SettingsProcesses' });
 
 const { t } = useI18n();
+const { copyToClipboard } = useClipboard();
 
 const loading = ref(false);
 const error = ref<string | null>(null);
@@ -37,9 +40,14 @@ const envView = useLocalStorage<string[]>('settings-processes-env-view', ['table
 // column resizing needs to stick.
 const envHeaders = useLocalStorage<HeaderRaw[]>('settings-processes-env-headers', [
 	{ text: 'Variable', value: 'key', width: 320, sortable: true },
-	{ text: 'Value', value: 'value', width: 520, sortable: false },
+	{ text: 'Value', value: 'value', width: 520, sortable: true },
 	{ text: 'From', value: 'source', width: 140, sortable: true },
 ]);
+
+// `v-table` reports which column was clicked but never reorders anything, so
+// the rows are sorted here — without this the sort arrows move and nothing else
+// does. Null is the order the API answered in, which is already by key.
+const envSort = ref<Sort | null>(null);
 
 const totals = computed(() => {
 	return report.value === null
@@ -69,7 +77,30 @@ function toggle(key: string): void {
 }
 
 function envOf(key: string, node: ProcessNode): ResolvedEnvVariable[] {
-	return filterEnvVariables(node.env ?? [], envSearch.value[key] ?? '');
+	const rows = filterEnvVariables(node.env ?? [], envSearch.value[key] ?? '');
+	const sort = envSort.value;
+
+	if (!sort?.by) {
+		return rows;
+	}
+
+	const field = sort.by as keyof ResolvedEnvVariable;
+
+	// A redacted value reads as empty rather than as "null", so the redacted keys
+	// group together instead of sorting under the letter n.
+	return [...rows].sort((one, other) => {
+		const left = String(one[field] ?? '');
+		const right = String(other[field] ?? '');
+
+		return sort.desc
+			? right.localeCompare(left)
+			: left.localeCompare(right);
+	});
+}
+
+/** What the JSON view shows, stringified the way the code viewer does it. */
+function envAsJson(key: string, node: ProcessNode): string {
+	return getStringifiedValue(envOf(key, node), true);
 }
 
 /** The same rows a .env file would carry, redaction included. */
@@ -148,6 +179,29 @@ function memoryPercent(node: ProcessNode): string | null {
 	return ratio === null
 		? null
 		: `${Math.round(ratio * 100)}%`;
+}
+
+function copyName(variable: ResolvedEnvVariable): void {
+	copyToClipboard(variable.key, {
+		success: t('processes_copied_variable', 'Variable name copied'),
+	});
+}
+
+function copyValue(variable: ResolvedEnvVariable): void {
+	copyToClipboard(variable.value ?? '', {
+		success: t('processes_copied_value', 'Value copied'),
+	});
+}
+
+/** Copies exactly what the open view shows, filter, sort and redaction included. */
+function copyRaw(key: string, node: ProcessNode): void {
+	const raw = envView.value[0] === 'dotenv'
+		? envAsDotenv(key, node)
+		: envAsJson(key, node);
+
+	copyToClipboard(raw, {
+		success: t('processes_copied_env', 'Environment copied'),
+	});
 }
 
 async function load(): Promise<void> {
@@ -326,36 +380,74 @@ onMounted(load);
 								<v-table
 									v-if="envView[0] === 'table'"
 									v-model:headers="envHeaders"
+									v-model:sort="envSort"
 									:items="envOf(key, node)"
 									item-key="key"
 									show-resize
 								>
+									<template #[`item.key`]="{ item }">
+										<span class="copyable">
+											<span class="value">{{ item.key }}</span>
+											<v-icon
+												v-tooltip="t('processes_copy_variable', 'Copy name')"
+												name="content_copy"
+												x-small
+												clickable
+												class="copy"
+												@click.stop="copyName(item)"
+											/>
+										</span>
+									</template>
+
 									<template #[`item.value`]="{ item }">
 										<v-chip v-if="item.redacted" small class="redacted">
 											{{ item.isSet
 												? t('processes_env_redacted', 'redacted')
 												: t('processes_env_unset', 'unset') }}
 										</v-chip>
-										<span v-else class="value">{{ item.value }}</span>
+										<span v-else class="copyable">
+											<span class="value">{{ item.value }}</span>
+											<v-icon
+												v-tooltip="t('processes_copy_value', 'Copy value')"
+												name="content_copy"
+												x-small
+												clickable
+												class="copy"
+												@click.stop="copyValue(item)"
+											/>
+										</span>
 									</template>
 								</v-table>
 
-								<interface-input-code
-									v-else-if="envView[0] === 'dotenv'"
-									:value="envAsDotenv(key, node)"
-									language="plaintext"
-									disabled
-									line-wrapping
-								/>
+								<div v-else class="raw-view">
+									<v-button
+										v-tooltip.left="t('processes_copy_all', 'Copy all')"
+										class="copy-all"
+										secondary
+										x-small
+										icon
+										@click="copyRaw(key, node)"
+									>
+										<v-icon name="content_copy" small />
+									</v-button>
 
-								<interface-input-code
-									v-else
-									:value="envOf(key, node)"
-									language="json"
-									type="json"
-									disabled
-									line-wrapping
-								/>
+									<interface-input-code
+										v-if="envView[0] === 'dotenv'"
+										:value="envAsDotenv(key, node)"
+										language="plaintext"
+										disabled
+										line-wrapping
+									/>
+
+									<interface-input-code
+										v-else
+										:value="envOf(key, node)"
+										language="json"
+										type="json"
+										disabled
+										line-wrapping
+									/>
+								</div>
 							</template>
 						</div>
 					</div>
@@ -450,6 +542,34 @@ onMounted(load);
 
 .env-view {
 	margin-block: 12px 4px;
+}
+
+.raw-view {
+	position: relative;
+}
+
+.copy-all {
+	position: absolute;
+	inset-block-start: 8px;
+	inset-inline-end: 8px;
+	z-index: 2;
+}
+
+.copyable {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-inline-size: 100%;
+}
+
+.copyable .copy {
+	opacity: 0;
+	flex-shrink: 0;
+}
+
+.copyable:hover .copy,
+.copyable .copy:focus-visible {
+	opacity: 1;
 }
 
 .value {
