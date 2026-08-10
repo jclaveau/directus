@@ -171,14 +171,11 @@ describe('Processes Report Tests', () => {
 				[
 					'start',
 					pm2Script,
-					'--name',
-					pm2AppName,
-					'--instances',
-					String(pm2Instances),
+					'--name', pm2AppName,
+					'--instances', String(pm2Instances),
 					// High enough that nothing is actually recycled mid-suite; the
 					// assertion is that the cap is reported, not that it fires.
-					'--max-memory-restart',
-					'2000M',
+					'--max-memory-restart', '2000M',
 					'--',
 					'start',
 				],
