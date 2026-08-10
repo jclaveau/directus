@@ -176,8 +176,8 @@ describe('Processes Report Tests', () => {
 					// High enough that nothing is actually recycled mid-suite; the
 					// assertion is that the cap is reported, not that it fires.
 					'--max-memory-restart', '2000M',
-					'--',
-					'start',
+					// Everything past the separator is Directus's own argv.
+					'--', 'start',
 				],
 				{ cwd: paths.cwd, env: envSupervised[vendor], stdio: 'pipe' },
 			);
