@@ -175,15 +175,19 @@ describe('Diagnostics MCP Tests', () => {
 
 	describe('Accepts the browser origin it was given', () => {
 		it.each(vendors)('%s', async (vendor) => {
-			const response = await post(vendor, 'envMcp', {
-				jsonrpc: '2.0',
-				id: 3,
-				method: 'ping',
-			})
-				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
-				.set('Origin', allowedOrigin);
+			// The same origin in another case is the same origin: scheme and host
+			// are case-insensitive.
+			for (const origin of [allowedOrigin, allowedOrigin.toUpperCase()]) {
+				const response = await post(vendor, 'envMcp', {
+					jsonrpc: '2.0',
+					id: 3,
+					method: 'ping',
+				})
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+					.set('Origin', origin);
 
-			expect(response.statusCode).toBe(200);
+				expect(response.statusCode).toBe(200);
+			}
 		});
 	});
 
@@ -196,6 +200,8 @@ describe('Diagnostics MCP Tests', () => {
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(405);
+			// RFC 9110: a 405 MUST say what the resource does support.
+			expect(response.headers['allow']).toContain('POST');
 		});
 	});
 
@@ -211,19 +217,27 @@ describe('Diagnostics MCP Tests', () => {
 
 			expect(response.statusCode).toBe(400);
 
-			// The revision this server implements, and the one the spec says to
-			// assume when the header is absent, both pass.
-			for (const version of ['2025-06-18', '2025-03-26']) {
-				const accepted = await post(vendor, 'envMcp', {
-					jsonrpc: '2.0',
-					id: 1,
-					method: 'ping',
-				})
-					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
-					.set('MCP-Protocol-Version', version);
+			// 2025-03-26 makes batching mandatory and this server answers a single
+			// message, so it is refused rather than half-claimed.
+			const older = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'ping',
+			})
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.set('MCP-Protocol-Version', '2025-03-26');
 
-				expect(accepted.statusCode).toBe(200);
-			}
+			expect(older.statusCode).toBe(400);
+
+			const accepted = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'ping',
+			})
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.set('MCP-Protocol-Version', '2025-06-18');
+
+			expect(accepted.statusCode).toBe(200);
 		});
 	});
 
@@ -286,6 +300,7 @@ describe('Diagnostics MCP Tests', () => {
 				// one without asking the user to approve it.
 				expect(tool.annotations.readOnlyHint).toBe(true);
 				expect(tool.annotations.destructiveHint).toBe(false);
+				expect(tool.outputSchema.type).toBe('object');
 				// The description is what a model chooses on, so it has to say what
 				// the tool answers, not just name it.
 				expect(tool.description.length).toBeGreaterThan(60);
@@ -318,6 +333,10 @@ describe('Diagnostics MCP Tests', () => {
 			const report = JSON.parse(content[0].text);
 
 			expect(report.services.length).toBeGreaterThan(0);
+
+			// The structured answer is what a model reads, and it says the same
+			// thing as the text block beside it.
+			expect(response.body.result.structuredContent).toEqual(report);
 			expect(report.details).toEqual(['stats', 'env']);
 			expect(report.degraded).toBeDefined();
 
@@ -340,8 +359,13 @@ describe('Diagnostics MCP Tests', () => {
 				expect(response.statusCode).toBe(200);
 				expect(response.body.result.isError).toBeUndefined();
 
-				expect(Array.isArray(JSON.parse(response.body.result.content[0].text)))
-					.toBe(true);
+				// A list arrives named, since structured content must be an object.
+				const structured = response.body.result.structuredContent;
+
+				expect(Array.isArray(structured.items)).toBe(true);
+
+				expect(JSON.parse(response.body.result.content[0].text))
+					.toEqual(structured);
 			}
 
 			const timeseries = await callTool(vendor, 'read_cache_timeseries', {

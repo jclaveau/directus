@@ -15,6 +15,7 @@ const TOOL = {
 	title: 'List running processes',
 	description: 'A description long enough to choose on.',
 	inputSchema: { type: 'object', properties: {} },
+	outputSchema: { type: 'object', properties: { services: { type: 'array' } } },
 	annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 	run: tool.run,
 };
@@ -79,6 +80,10 @@ test('Lists the tools without the function behind them', async () => {
 				title: 'List running processes',
 				description: 'A description long enough to choose on.',
 				inputSchema: { type: 'object', properties: {} },
+				outputSchema: {
+					type: 'object',
+					properties: { services: { type: 'array' } },
+				},
 				// What lets a client run one without asking the user first.
 				annotations: {
 					readOnlyHint: true,
@@ -102,8 +107,42 @@ test('Calls a tool and returns what it answered as text', async () => {
 
 	expect(tool.run).toHaveBeenCalledWith({ window: '15m' }, context);
 
+	// Structured for a model that reads fields, text for a client that reads
+	// only content blocks — and the two say the same thing.
 	expect(response?.result).toEqual({
 		content: [{ type: 'text', text: '{"services":[]}' }],
+		structuredContent: { services: [] },
+	});
+});
+
+test('A list is named, since structured content must be an object', async () => {
+	tool.run.mockResolvedValue([{ key: 'one' }, { key: 'two' }]);
+
+	const response = await call({
+		jsonrpc: '2.0',
+		id: 14,
+		method: 'tools/call',
+		params: { name: 'list_processes' },
+	});
+
+	expect(response?.result).toEqual({
+		content: [{ type: 'text', text: '{"items":[{"key":"one"},{"key":"two"}]}' }],
+		structuredContent: { items: [{ key: 'one' }, { key: 'two' }] },
+	});
+});
+
+test('An answer that is neither object nor list carries no structure', async () => {
+	tool.run.mockResolvedValue('a bare string');
+
+	const response = await call({
+		jsonrpc: '2.0',
+		id: 15,
+		method: 'tools/call',
+		params: { name: 'list_processes' },
+	});
+
+	expect(response?.result).toEqual({
+		content: [{ type: 'text', text: '"a bare string"' }],
 	});
 });
 

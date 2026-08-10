@@ -9,14 +9,16 @@ import { exposedMcpTools, findMcpTool } from './tools.js';
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 
 /**
- * Revisions this server answers on. `2025-03-26` is what the spec says to assume
- * when a client sends no version header at all, so refusing it would refuse the
- * clients that behaviour exists for.
+ * Revisions this server answers on — this one only.
+ *
+ * `2025-03-26` is deliberately absent even though the spec says to assume it
+ * when no version header is sent: that revision makes batching mandatory (its
+ * POST body MAY be "an array batching one or more requests"), and this server
+ * answers a single message. Claiming it would be claiming a capability that is
+ * not here. A client that sends no header at all is still served, since the
+ * header is only checked when present.
  */
-export const SUPPORTED_MCP_PROTOCOL_VERSIONS = [
-	MCP_PROTOCOL_VERSION,
-	'2025-03-26',
-];
+export const SUPPORTED_MCP_PROTOCOL_VERSIONS = [MCP_PROTOCOL_VERSION];
 
 const INVALID_REQUEST = -32600;
 const METHOD_NOT_FOUND = -32601;
@@ -63,10 +65,20 @@ async function callTool(
 	try {
 		const result = await tool.run(args, context);
 
+		// Structured content has to be an object, and half these tools answer a
+		// list, so a list is named rather than dropped.
+		const structured = Array.isArray(result)
+			? { items: result }
+			: result;
+
 		// A tool answering `undefined` would stringify to nothing at all, and a
-		// content block without its text is not a content block.
+		// content block without its text is not a content block. The text mirrors
+		// the structured answer exactly, for clients that read only content.
 		return succeed(id, {
-			content: [{ type: 'text', text: JSON.stringify(result) ?? 'null' }],
+			content: [{ type: 'text', text: JSON.stringify(structured) ?? 'null' }],
+			...(isRecord(structured)
+				? { structuredContent: structured }
+				: {}),
 		});
 	}
 	catch (error) {
@@ -132,6 +144,7 @@ export async function handleMcpRequest(
 					title: tool.title,
 					description: tool.description,
 					inputSchema: tool.inputSchema,
+					outputSchema: tool.outputSchema,
 					annotations: tool.annotations,
 				};
 			}),

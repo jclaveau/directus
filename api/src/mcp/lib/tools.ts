@@ -15,6 +15,18 @@ function utils(context: McpToolContext): UtilsService {
 	});
 }
 
+/** What a windowed listing answers: the rows, under a name. */
+const LIST_OUTPUT = {
+	type: 'object',
+	properties: {
+		items: {
+			type: 'array',
+			description: 'The rows, in the order the API answered them.',
+			items: { type: 'object' },
+		},
+	},
+} as const;
+
 /**
  * Every tool here reads and nothing more, which is what lets a client call one
  * without asking the user to approve it first.
@@ -48,6 +60,22 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'each value came from. Use it to explain restart loops, memory '
 			+ 'pressure, or why two replicas behave differently.',
 		inputSchema: { type: 'object', properties: {} },
+		outputSchema: {
+			type: 'object',
+			properties: {
+				collectedAt: { type: 'number' },
+				collectedForMs: { type: 'number' },
+				services: {
+					type: 'array',
+					description: 'One entry per service, each holding its replicas.',
+					items: { type: 'object' },
+				},
+				degraded: {
+					type: 'object',
+					description: 'What could not be answered, rather than a silent gap.',
+				},
+			},
+		},
 		annotations: READ_ONLY,
 		run: async (_args, context) => utils(context).readProcesses(),
 	},
@@ -60,6 +88,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'query, with hit counts, size, age and remaining TTL. Use it to find '
 			+ 'what is filling the cache and what is never read back.',
 		inputSchema: { type: 'object', properties: windowProperty },
+		outputSchema: LIST_OUTPUT,
 		annotations: READ_ONLY,
 		run: async (args, context) => {
 			return utils(context).getCacheEntries(requestedWindowMs(args['window']));
@@ -74,6 +103,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'over the size cap, a read with no collection to purge it by, a scope '
 			+ 'too coarse to pin. Use it to explain a low hit ratio.',
 		inputSchema: { type: 'object', properties: windowProperty },
+		outputSchema: LIST_OUTPUT,
 		annotations: READ_ONLY,
 		run: async (args, context) => {
 			return utils(context).getCacheAnomalies(requestedWindowMs(args['window']));
@@ -88,6 +118,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'outcome (served from cache, filled, declined). Use it to say what the '
 			+ 'cache is actually saving.',
 		inputSchema: { type: 'object', properties: windowProperty },
+		outputSchema: LIST_OUTPUT,
 		annotations: READ_ONLY,
 		run: async (args, context) => {
 			const window = requestedWindowMs(args['window']);
@@ -113,6 +144,17 @@ export const MCP_TOOLS: McpTool[] = [
 				},
 			},
 		},
+		outputSchema: {
+			type: 'object',
+			properties: {
+				buckets: { type: 'array', items: { type: 'object' } },
+				events: {
+					type: 'array',
+					description: 'Config changes and flushes falling in the window.',
+					items: { type: 'object' },
+				},
+			},
+		},
 		annotations: READ_ONLY,
 		run: async (args, context) => {
 			const buckets = args['buckets'] === undefined
@@ -134,6 +176,13 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'was disabled automatically. Read this first when the other cache '
 			+ 'tools come back empty.',
 		inputSchema: { type: 'object', properties: {} },
+		outputSchema: {
+			type: 'object',
+			properties: {
+				enabled: { type: 'boolean' },
+				disabledReason: { type: ['string', 'null'] },
+			},
+		},
 		annotations: READ_ONLY,
 		run: async (_args, context) => utils(context).getCacheStatsState(),
 	},

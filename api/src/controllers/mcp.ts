@@ -33,9 +33,16 @@ router.post(
 			});
 		}
 
-		// The client states the revision it negotiated; one this server does not
-		// implement has to fail loudly rather than be answered in a dialect the
-		// caller cannot read.
+		if (req.accountability?.admin !== true) {
+			throw new ForbiddenError({
+				reason: 'The diagnostics MCP endpoint is admin only',
+			});
+		}
+
+		// After the credential, so an anonymous caller cannot tell a version this
+		// server refuses from one it accepts. The client states the revision it
+		// negotiated; one this server does not implement has to fail loudly rather
+		// than be answered in a dialect the caller cannot read.
 		const version = req.headers['mcp-protocol-version'];
 
 		if (
@@ -47,28 +54,30 @@ router.post(
 			});
 		}
 
-		if (req.accountability?.admin !== true) {
-			throw new ForbiddenError({
-				reason: 'The diagnostics MCP endpoint is admin only',
-			});
+		// Logged before the work, not after: a read that dies mid-flight is
+		// exactly the one an audit trail is wanted for. A call names its tool and
+		// is worth an `info`; the handshake chatter around it is not.
+		const method = req.body?.method;
+		const logger = useLogger();
+
+		const trace = {
+			ip: req.accountability.ip,
+			user: req.accountability.user,
+			method,
+			tool: req.body?.params?.name,
+		};
+
+		if (method === 'tools/call') {
+			logger.info(trace, 'Diagnostics MCP tool call');
+		}
+		else {
+			logger.debug(trace, 'Diagnostics MCP request');
 		}
 
 		const response = await handleMcpRequest(req.body, {
 			accountability: req.accountability,
 			schema: req.schema,
 		});
-
-		// An admin-grade read of process environments and cache contents leaves a
-		// trace, so who read what is answerable afterwards.
-		useLogger().info(
-			{
-				ip: req.accountability.ip,
-				user: req.accountability.user,
-				method: req.body?.method,
-				tool: req.body?.params?.name,
-			},
-			'Diagnostics MCP request',
-		);
 
 		// A notification is answered with no body at all, per JSON-RPC.
 		if (response === null) {
@@ -87,7 +96,9 @@ router.post(
  * for that is 405, not the 404 an unrouted method would produce.
  */
 router.get('/', (_req, res) => {
-	res.sendStatus(405);
+	// RFC 9110: a 405 MUST carry an Allow header naming what the resource does
+	// support.
+	res.set('Allow', 'POST').sendStatus(405);
 });
 
 export default router;

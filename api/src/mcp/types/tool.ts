@@ -28,6 +28,15 @@ export interface McpTool {
 		required?: string[];
 	};
 	/**
+	 * The shape of the answer, so a model reads fields rather than re-parsing a
+	 * blob. Kept permissive — properties are named, nothing is forbidden — so a
+	 * client validating against it does not break when a report gains a field.
+	 */
+	outputSchema: {
+		type: 'object';
+		properties: Record<string, unknown>;
+	};
+	/**
 	 * What a client may assume before calling. Every tool here reads and nothing
 	 * more, which is what lets a client run one without asking the user first.
 	 */

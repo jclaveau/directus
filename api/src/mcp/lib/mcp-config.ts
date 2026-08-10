@@ -55,7 +55,15 @@ export function isAllowedMcpOrigin(origin: string | undefined): boolean {
 		return false;
 	}
 
+	// Scheme and host are case-insensitive, so an allowlist written in another
+	// case than the browser sends would refuse silently.
+	const wanted = origin.toLowerCase();
+
 	return configured
-		.map((allowed) => String(allowed).trim())
-		.includes(origin);
+		.map((allowed) => {
+			return String(allowed)
+				.trim()
+				.toLowerCase();
+		})
+		.includes(wanted);
 }
