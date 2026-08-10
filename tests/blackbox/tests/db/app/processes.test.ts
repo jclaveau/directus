@@ -98,21 +98,21 @@ describe('Processes Report Tests', () => {
 			// nor answer anyone else's query.
 			const envDisabled = cloneDeep(envReplicaA);
 			envDisabled[vendor]['RAILWAY_REPLICA_ID'] = `${vendor}-off`;
-			envDisabled[vendor]['PROCESSES_ENABLED'] = 'false';
+			envDisabled[vendor]['PROCESSES_REPORT_ENABLED'] = 'false';
 
 			// Stats without env: the page still lists the process, the env half is
 			// absent rather than empty.
 			const envStatsOnly = cloneDeep(envReplicaA);
 			envStatsOnly[vendor]['PROCESSES_SERVICE_NAME'] = services[vendor].stats;
 			envStatsOnly[vendor]['RAILWAY_REPLICA_ID'] = `${vendor}-stats`;
-			envStatsOnly[vendor]['PROCESSES_DETAILS'] = 'stats';
+			envStatsOnly[vendor]['PROCESSES_REPORT_DETAILS'] = 'stats';
 
 			// Neither half: the process is still located in the tree, with nothing
 			// but its identity.
 			const envNoDetails = cloneDeep(envReplicaA);
 			envNoDetails[vendor]['PROCESSES_SERVICE_NAME'] = services[vendor].none;
 			envNoDetails[vendor]['RAILWAY_REPLICA_ID'] = `${vendor}-none`;
-			envNoDetails[vendor]['PROCESSES_DETAILS'] = '';
+			envNoDetails[vendor]['PROCESSES_REPORT_DETAILS'] = '';
 
 			// Nothing configured at all: no Redis, no service name, no replica id and
 			// no collection window, so every fallback is the one under test. The
@@ -330,8 +330,8 @@ describe('Processes Report Tests', () => {
 			});
 
 			// Nothing sets it here, so it comes off the shipped defaults table.
-			expect(variableNamed(node, 'PROCESSES_ENABLED')).toEqual({
-				key: 'PROCESSES_ENABLED',
+			expect(variableNamed(node, 'PROCESSES_REPORT_ENABLED')).toEqual({
+				key: 'PROCESSES_REPORT_ENABLED',
 				value: 'true',
 				redacted: false,
 				isSet: true,

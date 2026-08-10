@@ -238,13 +238,13 @@ ASSETS_CACHE_TTL="30d"
 
 # Serve the admin Processes page (Settings -> Processes). Admin-only either
 # way; turn it off to remove the endpoint entirely. [true]
-# PROCESSES_ENABLED=true
+# PROCESSES_REPORT_ENABLED=true
 
 # Which halves of each process the report carries: "stats" (supervisor +
 # runtime numbers) and "env" (the resolved environment, redacted by key
 # shape). Drop "env" to keep the page without reporting any env at all.
 # ["stats,env"]
-# PROCESSES_DETAILS="stats,env"
+# PROCESSES_REPORT_DETAILS="stats,env"
 
 # Name this deployment reports itself under — the top level of the tree.
 # Defaults to the platform's service name, else the PM2 app name.

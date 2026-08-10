@@ -274,7 +274,7 @@ onMounted(load);
 			<v-notice v-if="report && !carriesEnv" type="info">
 				{{ t(
 					'processes_env_disabled',
-					'Resolved environment reporting is off (PROCESSES_DETAILS).',
+					'Resolved environment reporting is off (PROCESSES_REPORT_DETAILS).',
 				) }}
 			</v-notice>
 

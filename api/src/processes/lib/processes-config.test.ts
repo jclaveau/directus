@@ -25,10 +25,10 @@ afterEach(() => {
 });
 
 test('The report is served only where it was turned on', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_ENABLED: true });
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_ENABLED: true });
 	expect(processesReportEnabled()).toBe(true);
 
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_ENABLED: false });
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_ENABLED: false });
 	expect(processesReportEnabled()).toBe(false);
 
 	vi.mocked(useEnv).mockReturnValue({});
@@ -36,21 +36,22 @@ test('The report is served only where it was turned on', () => {
 });
 
 test('Only the halves this node is configured to report are reported', () => {
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_DETAILS: ['stats', 'env'] });
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'env'] });
 	expect(reportedProcessDetails()).toEqual(['stats', 'env']);
 
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_DETAILS: [' stats '] });
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: [' stats '] });
 	expect(reportedProcessDetails()).toEqual(['stats']);
 
 	// A name that is not a half is dropped rather than reported back.
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_DETAILS: ['stats', 'secrets'] });
+	vi.mocked(useEnv)
+		.mockReturnValue({ PROCESSES_REPORT_DETAILS: ['stats', 'secrets'] });
 	expect(reportedProcessDetails()).toEqual(['stats']);
 
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_DETAILS: [''] });
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: [''] });
 	expect(reportedProcessDetails()).toEqual([]);
 
 	// Anything that is not a list at all reports nothing.
-	vi.mocked(useEnv).mockReturnValue({ PROCESSES_DETAILS: 'stats' });
+	vi.mocked(useEnv).mockReturnValue({ PROCESSES_REPORT_DETAILS: 'stats' });
 	expect(reportedProcessDetails()).toEqual([]);
 
 	vi.mocked(useEnv).mockReturnValue({});

@@ -6,7 +6,7 @@
  * Shared here so the API producer and the app view can't drift.
  */
 
-/** Which halves of a node the report carries, per `PROCESSES_DETAILS`. */
+/** Which halves of a node the report carries, per `PROCESSES_REPORT_DETAILS`. */
 export type ProcessDetail = 'stats' | 'env';
 
 /**

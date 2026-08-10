@@ -9,7 +9,7 @@ import { getMilliseconds } from '../../utils/get-milliseconds.js';
  * the surface has none of it — the page is admin-only either way.
  */
 export function processesReportEnabled(): boolean {
-	return useEnv()['PROCESSES_ENABLED'] === true;
+	return useEnv()['PROCESSES_REPORT_ENABLED'] === true;
 }
 
 function isProcessDetail(value: unknown): value is ProcessDetail {
@@ -22,7 +22,7 @@ function isProcessDetail(value: unknown): value is ProcessDetail {
  * reports env however it was asked.
  */
 export function reportedProcessDetails(): ProcessDetail[] {
-	const configured = useEnv()['PROCESSES_DETAILS'];
+	const configured = useEnv()['PROCESSES_REPORT_DETAILS'];
 
 	if (Array.isArray(configured) === false) {
 		return [];
