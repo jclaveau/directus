@@ -203,6 +203,10 @@ export const DEFAULTS = {
 	METRICS_SERVICES: 'database,cache,redis,storage',
 	METRICS_SCHEDULE: '*/1 * * * *',
 
+	PROCESSES_ENABLED: true,
+	PROCESSES_DETAILS: 'stats,env',
+	PROCESSES_COLLECT_TIMEOUT: '750ms',
+
 	FILES_MIME_TYPE_ALLOW_LIST: '*/*',
 
 	ACCEPT_TERMS: false,

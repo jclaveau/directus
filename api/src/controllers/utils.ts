@@ -6,6 +6,7 @@ import { Router } from 'express';
 import Joi from 'joi';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
+import { processesReportEnabled } from '../processes/index.js';
 import { ExportService, ImportService } from '../services/import-export.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
@@ -399,5 +400,26 @@ router.post(
 		return;
 	}),
 );
+
+// Registered only where the report is turned on, so a deployment that disabled it
+// answers a plain 404 — the endpoint is absent, not merely refusing.
+if (processesReportEnabled()) {
+	router.get(
+		'/processes',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			// Live supervisor state; a cached copy would be worse than none.
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readProcesses() };
+
+			return next();
+		}),
+		respond,
+	);
+}
 
 export default router;
