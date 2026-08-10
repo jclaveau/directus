@@ -3,7 +3,10 @@ import api from '@/api';
 import { formatDuration } from '@/utils/format-duration';
 import { formatFilesize } from '@/utils/format-filesize';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
-import type { ProcessNode, ProcessReplica, ProcessesReport } from '@directus/types';
+import type { HeaderRaw } from '@/components/v-table/types';
+import type { ProcessNode, ProcessReplica, ProcessesReport, ResolvedEnvVariable }
+	from '@directus/types';
+import { useLocalStorage } from '@vueuse/core';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
@@ -24,6 +27,19 @@ const report = ref<ProcessesReport | null>(null);
 const refreshInterval = ref<number | null>(null);
 const expanded = ref<Record<string, boolean>>({});
 const envSearch = ref<Record<string, string>>({});
+
+// How the resolved env reads: a resizable table, or the two shapes it is
+// actually pasted into — a .env file and JSON. Kept per user, like the cache
+// page's view state, so a preference survives a reload.
+const envView = useLocalStorage<string[]>('settings-processes-env-view', ['table']);
+
+// `v-table` writes the widths back through this model, so persisting it is all
+// column resizing needs to stick.
+const envHeaders = useLocalStorage<HeaderRaw[]>('settings-processes-env-headers', [
+	{ text: 'Variable', value: 'key', width: 320, sortable: true },
+	{ text: 'Value', value: 'value', width: 520, sortable: false },
+	{ text: 'From', value: 'source', width: 140, sortable: true },
+]);
 
 const totals = computed(() => {
 	return report.value === null
@@ -52,8 +68,21 @@ function toggle(key: string): void {
 	expanded.value[key] = !expanded.value[key];
 }
 
-function envOf(key: string, node: ProcessNode) {
+function envOf(key: string, node: ProcessNode): ResolvedEnvVariable[] {
 	return filterEnvVariables(node.env ?? [], envSearch.value[key] ?? '');
+}
+
+/** The same rows a .env file would carry, redaction included. */
+function envAsDotenv(key: string, node: ProcessNode): string {
+	return envOf(key, node)
+		.map((variable) => {
+			if (variable.redacted) {
+				return `${variable.key}=<redacted>`;
+			}
+
+			return `${variable.key}=${variable.value ?? ''}`;
+		})
+		.join('\n');
 }
 
 function supervisorLabel(replica: ProcessReplica): string {
@@ -286,28 +315,48 @@ onMounted(load);
 									@update:model-value="envSearch[key] = $event ?? ''"
 								/>
 
-								<table class="env">
-									<thead>
-										<tr>
-											<th>{{ t('processes_env_key', 'Variable') }}</th>
-											<th>{{ t('processes_env_value', 'Value') }}</th>
-											<th>{{ t('processes_env_source', 'From') }}</th>
-										</tr>
-									</thead>
-									<tbody>
-										<tr
-											v-for="variable in envOf(key, node)"
-											:key="variable.key"
-										>
-											<td class="key">{{ variable.key }}</td>
-											<td class="value">
-												<template v-if="variable.redacted">
-													<v-chip small class="redacted">
-														{{ variable.isSet
-															? t('processes_env_redacted', 'redacted')
-															: t('processes_env_unset', 'unset') }}
-													</v-chip>
-												</template>
+								<v-tabs v-model="envView" class="env-view">
+									<v-tab value="table">
+										{{ t('processes_env_view_table', 'Table') }}
+									</v-tab>
+									<v-tab value="dotenv">.env</v-tab>
+									<v-tab value="json">JSON</v-tab>
+								</v-tabs>
+
+								<v-table
+									v-if="envView[0] === 'table'"
+									v-model:headers="envHeaders"
+									:items="envOf(key, node)"
+									item-key="key"
+									show-resize
+								>
+									<template #[`item.value`]="{ item }">
+										<v-chip v-if="item.redacted" small class="redacted">
+											{{ item.isSet
+												? t('processes_env_redacted', 'redacted')
+												: t('processes_env_unset', 'unset') }}
+										</v-chip>
+										<span v-else class="value">{{ item.value }}</span>
+									</template>
+								</v-table>
+
+								<interface-input-code
+									v-else-if="envView[0] === 'dotenv'"
+									:value="envAsDotenv(key, node)"
+									language="plaintext"
+									disabled
+									line-wrapping
+								/>
+
+								<interface-input-code
+									v-else
+									:value="envOf(key, node)"
+									language="json"
+									type="json"
+									disabled
+									line-wrapping
+								/>
+							</template>
 												<template v-else>{{ variable.value }}</template>
 											</td>
 											<td class="source">{{ variable.source }}</td>
@@ -406,27 +455,12 @@ onMounted(load);
 	margin-block-end: 8px;
 }
 
-table.env {
-	inline-size: 100%;
-	margin-block-start: 8px;
-	border-collapse: collapse;
+.env-view {
+	margin-block: 12px 4px;
+}
 
-	th {
-		text-align: start;
-		color: var(--theme--foreground-subdued);
-	}
-
-	td,
-	th {
-		padding: 4px 8px;
-		border-block-end: var(--theme--border-width) solid
-			var(--theme--border-color-subdued);
-	}
-
-	td.key,
-	td.value {
-		font-family: var(--theme--fonts--monospace--font-family);
-		word-break: break-all;
-	}
+.value {
+	font-family: var(--theme--fonts--monospace--font-family);
+	word-break: break-all;
 }
 </style>
