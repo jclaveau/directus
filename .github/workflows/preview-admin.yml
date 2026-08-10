@@ -95,6 +95,10 @@ jobs:
       # Off — no realtime needed to browse a preview.
       WEBSOCKETS_ENABLED: 'false'
       PORT: '8055'
+      # Started under PM2 below, so Settings → Processes has a real supervisor to
+      # report: two cluster workers with a recycling cap, not a lone process.
+      PROCESSES_SERVICE_NAME: preview
+      PM2_HOME: /home/runner/.pm2
     steps:
       - name: Checkout the ref to preview
         uses: actions/checkout@v7
@@ -189,8 +193,18 @@ jobs:
           };
           IDX
 
-          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" node directus/cli.js start \
-            > /tmp/directus.log 2>&1 &
+          # Under PM2, the way the published image runs it, so the Processes page
+          # has a supervisor to report. Started from the repo root (not the image's
+          # /directus) so EXTENSIONS_PATH still finds the auto-login extension, and
+          # pointed at one log file so the streaming step below is unchanged.
+          npm install --global pm2@5
+          ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" pm2 start directus/cli.js \
+            --name directus \
+            --instances 2 \
+            --max-memory-restart 400M \
+            --output /tmp/directus.log \
+            --error /tmp/directus.log \
+            -- start
 
           for _ in $(seq 1 60); do
             curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break
@@ -379,6 +393,7 @@ jobs:
             echo "- **Open (auto-login):** ${URL}/auto-login"
             echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary; on a public repo that summary is world-readable)."
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
+            echo "- Runs under PM2 (2 cluster workers, 400M cap), so Settings → Processes has a real supervisor to report."
             echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
             echo "- [ ] 🔄 Re-run admin preview"
             echo "<!-- admin-preview:end -->"
