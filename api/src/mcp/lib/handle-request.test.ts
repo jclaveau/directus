@@ -9,26 +9,21 @@ const tool = vi.hoisted(() => {
 	return { run: vi.fn() };
 });
 
+const TOOL = {
+	name: 'list_processes',
+	group: 'processes',
+	title: 'List running processes',
+	description: 'A description long enough to choose on.',
+	inputSchema: { type: 'object', properties: {} },
+	run: tool.run,
+};
+
 vi.mock('./tools.js', () => {
 	return {
-		MCP_TOOLS: [
-			{
-				name: 'list_processes',
-				title: 'List running processes',
-				description: 'A description long enough to choose on.',
-				inputSchema: { type: 'object', properties: {} },
-				run: tool.run,
-			},
-		],
+		exposedMcpTools: () => [TOOL],
 		findMcpTool: (name: unknown) => {
 			return name === 'list_processes'
-				? {
-						name: 'list_processes',
-						title: 'List running processes',
-						description: 'A description long enough to choose on.',
-						inputSchema: { type: 'object', properties: {} },
-						run: tool.run,
-					}
+				? TOOL
 				: undefined;
 		},
 	};

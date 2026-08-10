@@ -6,13 +6,15 @@ import asyncHandler from '../utils/async-handler.js';
 const router = Router();
 
 /**
- * The diagnostics MCP endpoint: one JSON-RPC 2.0 exchange per request, no
- * session and no stream, which is all a read-only tool set needs.
+ * The diagnostics MCP endpoint, served at `/diagnostics/mcp`: one JSON-RPC 2.0
+ * exchange per request, no session and no stream, which is all a read-only tool
+ * set needs. Not `/mcp` — upstream Directus serves its own MCP there, over the
+ * content API, so the two must not land on the same path.
  *
  * An admin session or token gets in as itself; otherwise an
- * `Authorization: Mcp <token>` header from `MCP_TOKENS` does — the same shape
- * `/metrics` uses for the same reason, so an agent can be given a credential
- * that is not a login.
+ * `Authorization: Mcp <token>` header from `DIAGNOSTICS_MCP_TOKENS` does — the
+ * shape `/metrics` uses for the same reason, so an agent can be given a
+ * credential that is not a login.
  */
 router.post(
 	'/',
@@ -25,7 +27,7 @@ router.post(
 			throw new ForbiddenError({
 				reason: 'The diagnostics MCP endpoint needs an admin identity, or an '
 					+ '`Authorization: Mcp <token>` header naming a configured '
-					+ 'MCP_TOKENS value',
+					+ 'DIAGNOSTICS_MCP_TOKENS value',
 			});
 		}
 

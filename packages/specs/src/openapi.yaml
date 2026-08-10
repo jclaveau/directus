@@ -293,7 +293,7 @@ paths:
     $ref: './paths/utils/processes.yaml'
 
   # Diagnostics MCP
-  /mcp:
+  /diagnostics/mcp:
     $ref: './paths/mcp/mcp.yaml'
   /utils/random/string:
     $ref: './paths/utils/random.yaml'

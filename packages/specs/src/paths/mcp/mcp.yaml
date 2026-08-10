@@ -2,12 +2,13 @@ post:
   summary: Call a diagnostics tool
   description: >
     A read-only MCP (Model Context Protocol) endpoint over JSON-RPC 2.0,
-    exposing the diagnostic reads as tools an agent can discover and call:
+    served at /diagnostics/mcp rather than /mcp, which upstream Directus uses
+    for its own content MCP. Exposes the diagnostic reads as tools:
     the processes tree, the cache listings, anomalies, latencies, timeseries and
     telemetry state. Supports `initialize`, `ping`, `tools/list` and
     `tools/call`. Needs an admin identity or an `Authorization: Mcp <token>`
-    header naming a configured MCP_TOKENS value, and is served only where
-    MCP_ENABLED is on.
+    header naming a configured DIAGNOSTICS_MCP_TOKENS value, and is served only where
+    DIAGNOSTICS_MCP_ENABLED is on.
   operationId: call-mcp
   requestBody:
     content:

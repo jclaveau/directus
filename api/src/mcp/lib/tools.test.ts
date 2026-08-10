@@ -30,7 +30,15 @@ vi.mock('../../services/utils.js', () => {
 	};
 });
 
-import { findMcpTool, MCP_TOOLS } from './tools.js';
+const config = vi.hoisted(() => {
+	return { groups: vi.fn() };
+});
+
+vi.mock('./mcp-config.js', () => {
+	return { exposedMcpToolGroups: config.groups };
+});
+
+import { exposedMcpTools, findMcpTool, MCP_TOOLS } from './tools.js';
 
 const context = {
 	accountability: {
@@ -49,6 +57,7 @@ function run(name: string, args: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
+	config.groups.mockReturnValue(['processes', 'cache']);
 	service.constructed.length = 0;
 
 	Object.values(service).forEach((value) => {
@@ -89,6 +98,31 @@ test('Only the windowed reads take a window', () => {
 
 	expect(findMcpTool('read_cache_timeseries')!.inputSchema.properties)
 		.toHaveProperty('buckets');
+});
+
+test('A subsystem left out is neither listed nor callable', () => {
+	config.groups.mockReturnValue(['processes']);
+
+	expect(exposedMcpTools().map((tool) => tool.name)).toEqual(['list_processes']);
+	expect(findMcpTool('list_cache_entries')).toBeUndefined();
+	expect(findMcpTool('list_processes')).toBeDefined();
+
+	config.groups.mockReturnValue([]);
+	expect(exposedMcpTools()).toEqual([]);
+	expect(findMcpTool('list_processes')).toBeUndefined();
+});
+
+test('Every tool declares the subsystem it reads', () => {
+	const groups = MCP_TOOLS.map((tool) => tool.group);
+
+	expect(groups).toEqual([
+		'processes',
+		'cache',
+		'cache',
+		'cache',
+		'cache',
+		'cache',
+	]);
 });
 
 test('An unknown name resolves to no tool', () => {

@@ -1,6 +1,6 @@
 import { version } from 'directus/version';
 import type { McpToolContext } from '../types/tool.js';
-import { MCP_TOOLS, findMcpTool } from './tools.js';
+import { exposedMcpTools, findMcpTool } from './tools.js';
 
 /**
  * The protocol revision this server implements. A client that asks for another
@@ -110,7 +110,7 @@ export async function handleMcpRequest(
 
 	if (method === 'tools/list') {
 		return succeed(id, {
-			tools: MCP_TOOLS.map((tool) => {
+			tools: exposedMcpTools().map((tool) => {
 				return {
 					name: tool.name,
 					title: tool.title,

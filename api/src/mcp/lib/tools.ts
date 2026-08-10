@@ -1,6 +1,7 @@
 import { requestedWindowMs } from '../../utils/requested-window-ms.js';
 import { UtilsService } from '../../services/utils.js';
 import type { McpTool, McpToolContext } from '../types/tool.js';
+import { exposedMcpToolGroups } from './mcp-config.js';
 
 /**
  * Every tool reads through `UtilsService`, so the admin guard each of these
@@ -27,6 +28,7 @@ const windowProperty = {
 export const MCP_TOOLS: McpTool[] = [
 	{
 		name: 'list_processes',
+		group: 'processes',
 		title: 'List running processes',
 		description:
 			'The running processes of this deployment as a service → replica → '
@@ -40,6 +42,7 @@ export const MCP_TOOLS: McpTool[] = [
 	},
 	{
 		name: 'list_cache_entries',
+		group: 'cache',
 		title: 'List cache entries',
 		description:
 			'The response-cache entries seen in the window, grouped by endpoint and '
@@ -52,6 +55,7 @@ export const MCP_TOOLS: McpTool[] = [
 	},
 	{
 		name: 'list_cache_anomalies',
+		group: 'cache',
 		title: 'List cache anomalies',
 		description:
 			'Responses the cache declined to keep in the window, and why — a value '
@@ -64,6 +68,7 @@ export const MCP_TOOLS: McpTool[] = [
 	},
 	{
 		name: 'list_cache_latencies',
+		group: 'cache',
 		title: 'List cache latencies',
 		description:
 			'Response-time percentiles per endpoint group in the window, split by '
@@ -78,6 +83,7 @@ export const MCP_TOOLS: McpTool[] = [
 	},
 	{
 		name: 'read_cache_timeseries',
+		group: 'cache',
 		title: 'Read the cache timeseries',
 		description:
 			'Hits, misses, fills, anomalies, TTL in force and latency percentiles '
@@ -106,6 +112,7 @@ export const MCP_TOOLS: McpTool[] = [
 	},
 	{
 		name: 'read_cache_stats_state',
+		group: 'cache',
 		title: 'Read the cache telemetry state',
 		description:
 			'Whether cache telemetry is being collected, and what stopped it if it '
@@ -116,6 +123,16 @@ export const MCP_TOOLS: McpTool[] = [
 	},
 ];
 
+/**
+ * The tools this deployment exposes. A tool whose group is not exposed is not
+ * listed and, because lookups go through here, cannot be called either.
+ */
+export function exposedMcpTools(): McpTool[] {
+	const groups = exposedMcpToolGroups();
+
+	return MCP_TOOLS.filter((tool) => groups.includes(tool.group));
+}
+
 export function findMcpTool(name: unknown): McpTool | undefined {
-	return MCP_TOOLS.find((tool) => tool.name === name);
+	return exposedMcpTools().find((tool) => tool.name === name);
 }

@@ -345,8 +345,9 @@ export default async function createApp(): Promise<express.Application> {
 	app.use('/folders', foldersRouter);
 	app.use('/items', itemsRouter);
 
-	if (env['MCP_ENABLED'] === true) {
-		app.use('/mcp', mcpRouter);
+	// Not `/mcp`: upstream Directus serves its own MCP there.
+	if (env['DIAGNOSTICS_MCP_ENABLED'] === true) {
+		app.use('/diagnostics/mcp', mcpRouter);
 	}
 
 	if (env['METRICS_ENABLED'] === true) {

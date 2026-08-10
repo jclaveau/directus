@@ -23,7 +23,12 @@ const toolNames = [
 describe('Diagnostics MCP Tests', () => {
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
 
-	const envKeys = ['envMcp', 'envMcpNoTokens', 'envMcpOff'] as const;
+	const envKeys = [
+		'envMcp',
+		'envMcpNoTokens',
+		'envMcpProcessesOnly',
+		'envMcpOff',
+	] as const;
 
 	type EnvTypes = Record<(typeof envKeys)[number], Env>;
 
@@ -36,8 +41,8 @@ describe('Diagnostics MCP Tests', () => {
 			// Redis-backed cache with telemetry on, so the cache tools answer about
 			// something live rather than about a disabled subsystem.
 			const envMcp = cloneDeep(config.envs);
-			envMcp[vendor]['MCP_ENABLED'] = 'true';
-			envMcp[vendor]['MCP_TOKENS'] = `${mcpToken},${secondToken}`;
+			envMcp[vendor]['DIAGNOSTICS_MCP_ENABLED'] = 'true';
+			envMcp[vendor]['DIAGNOSTICS_MCP_TOKENS'] = `${mcpToken},${secondToken}`;
 			envMcp[vendor]['CACHE_ENABLED'] = 'true';
 			envMcp[vendor]['CACHE_STORE'] = 'redis';
 			envMcp[vendor]['REDIS_HOST'] = 'localhost';
@@ -48,14 +53,24 @@ describe('Diagnostics MCP Tests', () => {
 			// Enabled, but with no token configured: the header path must not become
 			// a way in just because the endpoint is served.
 			const envMcpNoTokens = cloneDeep(envMcp);
-			delete envMcpNoTokens[vendor]['MCP_TOKENS'];
+			delete envMcpNoTokens[vendor]['DIAGNOSTICS_MCP_TOKENS'];
+
+			// One subsystem only: the cache tools must be neither listed nor callable.
+			const envMcpProcessesOnly = cloneDeep(envMcp);
+			envMcpProcessesOnly[vendor]['DIAGNOSTICS_MCP_TOOLS'] = 'processes';
 
 			const envMcpOff = cloneDeep(envMcp);
-			envMcpOff[vendor]['MCP_ENABLED'] = 'false';
+			envMcpOff[vendor]['DIAGNOSTICS_MCP_ENABLED'] = 'false';
 
 			const ports = await Promise.all(envKeys.map(() => getPort()));
 
-			envs[vendor] = { envMcp, envMcpNoTokens, envMcpOff };
+			envs[vendor] = {
+				envMcp,
+				envMcpNoTokens,
+				envMcpProcessesOnly,
+				envMcpOff,
+			};
+
 			directusInstances[vendor] = [];
 
 			for (const [index, key] of envKeys.entries()) {
@@ -83,7 +98,7 @@ describe('Diagnostics MCP Tests', () => {
 
 	function post(vendor: Vendor, key: keyof EnvTypes, body: unknown) {
 		return request(getUrl(vendor, envs[vendor][key]))
-			.post('/mcp')
+			.post('/diagnostics/mcp')
 			.send(body as object);
 	}
 
@@ -335,6 +350,29 @@ describe('Diagnostics MCP Tests', () => {
 		});
 	});
 
+	describe('Exposes only the subsystems it was configured for', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const listed = await post(vendor, 'envMcpProcessesOnly', {
+				jsonrpc: '2.0',
+				id: 10,
+				method: 'tools/list',
+			}).set('Authorization', `Mcp ${mcpToken}`);
+
+			expect(listed.body.result.tools.map((tool: { name: string }) => tool.name))
+				.toEqual(['list_processes']);
+
+			// Not merely hidden: a cache tool cannot be called either.
+			const called = await post(vendor, 'envMcpProcessesOnly', {
+				jsonrpc: '2.0',
+				id: 11,
+				method: 'tools/call',
+				params: { name: 'list_cache_entries' },
+			}).set('Authorization', `Mcp ${mcpToken}`);
+
+			expect(called.body.error.code).toBe(-32602);
+		});
+	});
+
 	describe('Reports an unknown method as a protocol error', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await call(vendor, {
@@ -382,7 +420,7 @@ describe('Diagnostics MCP Tests', () => {
 
 			const paths = response.body.paths;
 
-			expect(paths['/mcp'].post.operationId).toBe('call-mcp');
+			expect(paths['/diagnostics/mcp'].post.operationId).toBe('call-mcp');
 			expect(paths['/utils/processes'].get.operationId).toBe('list-processes');
 			expect(paths['/utils/cache'].get.operationId).toBe('list-cache-entries');
 			expect(paths['/utils/cache/anomalies']).toBeDefined();

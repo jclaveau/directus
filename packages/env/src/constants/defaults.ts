@@ -203,7 +203,8 @@ export const DEFAULTS = {
 	METRICS_SERVICES: 'database,cache,redis,storage',
 	METRICS_SCHEDULE: '*/1 * * * *',
 
-	MCP_ENABLED: false,
+	DIAGNOSTICS_MCP_ENABLED: false,
+	DIAGNOSTICS_MCP_TOOLS: 'processes,cache',
 
 	PROCESSES_REPORT_ENABLED: true,
 	PROCESSES_REPORT_DETAILS: 'stats,env',

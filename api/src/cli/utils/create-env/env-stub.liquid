@@ -236,15 +236,20 @@ ASSETS_CACHE_TTL="30d"
 #####################################################################################
 ### Diagnostics MCP
 
-# Serve a read-only MCP endpoint at /mcp exposing the diagnostic reads (the
-# processes tree, the cache listings, anomalies, latencies, timeseries and
-# telemetry state) as tools an LLM agent can call. Off by default. [false]
-# MCP_ENABLED=false
+# Serve a read-only MCP endpoint at /diagnostics/mcp exposing the diagnostic
+# reads as tools an LLM agent can call. Off by default. Deliberately not /mcp:
+# upstream Directus serves its own MCP there, over the content API. [false]
+# DIAGNOSTICS_MCP_ENABLED=false
+
+# Which subsystems to expose tools for: "processes" (the process tree) and
+# "cache" (listings, anomalies, latencies, timeseries, telemetry state). A group
+# left out is neither listed nor callable. ["processes,cache"]
+# DIAGNOSTICS_MCP_TOOLS="processes,cache"
 
 # Bearer tokens accepted as `Authorization: Mcp <token>` on that endpoint, for
 # agents that have no login. A token reads every diagnostic tool, which is what
 # an admin can read — treat one as an admin credential. Unset by default.
-# MCP_TOKENS="a-long-random-token,another"
+# DIAGNOSTICS_MCP_TOKENS="a-long-random-token,another"
 
 #####################################################################################
 ### Processes
