@@ -1,4 +1,4 @@
-import { requestedWindowMs } from '../../controllers/utils.js';
+import { requestedWindowMs } from '../../utils/requested-window-ms.js';
 import { UtilsService } from '../../services/utils.js';
 import type { McpTool, McpToolContext } from '../types/tool.js';
 
