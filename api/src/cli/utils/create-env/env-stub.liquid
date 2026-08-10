@@ -246,10 +246,17 @@ ASSETS_CACHE_TTL="30d"
 # left out is neither listed nor callable. ["processes,cache"]
 # DIAGNOSTICS_MCP_TOOLS="processes,cache"
 
-# Bearer tokens accepted as `Authorization: Mcp <token>` on that endpoint, for
-# agents that have no login. A token reads every diagnostic tool, which is what
-# an admin can read — treat one as an admin credential. Unset by default.
-# DIAGNOSTICS_MCP_TOKENS="a-long-random-token,another"
+# Browser origins allowed to call the endpoint. Empty by default, so no browser
+# reaches it: the transport spec requires the Origin header to be validated,
+# because DNS rebinding defeats CORS. A caller with no Origin header is not a
+# browser, which is the agent case this endpoint is for. Separate from
+# CORS_ORIGIN on purpose: opening the Data Studio to an origin should not also
+# hand it the diagnostics. [""]
+# DIAGNOSTICS_MCP_ALLOWED_ORIGINS="https://agent.example.com"
+
+# The caller authenticates as an admin the usual way — a session, or a Directus
+# static token on an admin user sent as `Authorization: Bearer <token>`. There
+# is no MCP-specific credential to issue or revoke.
 
 #####################################################################################
 ### Processes

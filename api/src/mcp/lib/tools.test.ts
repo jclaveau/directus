@@ -81,6 +81,14 @@ test('Every tool is described well enough for a model to choose it', () => {
 		expect(tool.title).toBeTruthy();
 		expect(tool.description.length).toBeGreaterThan(60);
 		expect(tool.inputSchema.type).toBe('object');
+
+		// Every one of these reads and nothing more, and says so, which is what
+		// lets a client call it without asking the user to approve it.
+		expect(tool.annotations).toEqual({
+			readOnlyHint: true,
+			destructiveHint: false,
+			openWorldHint: false,
+		});
 	}
 });
 

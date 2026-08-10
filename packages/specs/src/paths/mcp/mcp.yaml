@@ -3,12 +3,18 @@ post:
   description: >
     A read-only MCP (Model Context Protocol) endpoint over JSON-RPC 2.0,
     served at /diagnostics/mcp rather than /mcp, which upstream Directus uses
-    for its own content MCP. Exposes the diagnostic reads as tools:
-    the processes tree, the cache listings, anomalies, latencies, timeseries and
+    for its own content MCP. Exposes the diagnostic reads as tools: the
+    processes tree, the cache listings, anomalies, latencies, timeseries and
     telemetry state. Supports `initialize`, `ping`, `tools/list` and
-    `tools/call`. Needs an admin identity or an `Authorization: Mcp <token>`
-    header naming a configured DIAGNOSTICS_MCP_TOKENS value, and is served only where
-    DIAGNOSTICS_MCP_ENABLED is on.
+    `tools/call`; every tool is annotated read-only.
+
+
+    Admin only, authenticated as any other admin surface here — a session, or a
+    Directus static token on an admin user. Which subsystems are exposed is set
+    by DIAGNOSTICS_MCP_TOOLS, and the endpoint is served only where
+    DIAGNOSTICS_MCP_ENABLED is on. Browser callers must send an Origin named in
+    DIAGNOSTICS_MCP_ALLOWED_ORIGINS; a caller with no Origin is not a browser.
+    GET is answered with 405: this server offers no SSE stream.
   operationId: call-mcp
   requestBody:
     content:
@@ -49,5 +55,11 @@ post:
       description: The JSON-RPC response
     '202':
       description: A notification was accepted, and is answered with no body
+    '400':
+      description: The MCP-Protocol-Version header names a revision this server does not implement
+    '403':
+      description: Not an admin, or an Origin that is not allowed
+    '405':
+      description: Returned for GET — this server offers no SSE stream
   tags:
     - Mcp

@@ -15,6 +15,7 @@ const TOOL = {
 	title: 'List running processes',
 	description: 'A description long enough to choose on.',
 	inputSchema: { type: 'object', properties: {} },
+	annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 	run: tool.run,
 };
 
@@ -78,6 +79,12 @@ test('Lists the tools without the function behind them', async () => {
 				title: 'List running processes',
 				description: 'A description long enough to choose on.',
 				inputSchema: { type: 'object', properties: {} },
+				// What lets a client run one without asking the user first.
+				annotations: {
+					readOnlyHint: true,
+					destructiveHint: false,
+					openWorldHint: false,
+				},
 			},
 		],
 	});
@@ -111,6 +118,39 @@ test('Arguments that are not an object are read as none', async () => {
 	});
 
 	expect(tool.run).toHaveBeenCalledWith({}, context);
+});
+
+test('A tool answering nothing still answers a content block', async () => {
+	tool.run.mockResolvedValue(undefined);
+
+	const response = await call({
+		jsonrpc: '2.0',
+		id: 12,
+		method: 'tools/call',
+		params: { name: 'list_processes' },
+	});
+
+	// `JSON.stringify(undefined)` is undefined, and a block without text is not
+	// a content block.
+	expect(response?.result).toEqual({
+		content: [{ type: 'text', text: 'null' }],
+	});
+});
+
+test('A thrown non-Error still reaches the caller as text', async () => {
+	tool.run.mockRejectedValue('redis is gone');
+
+	const response = await call({
+		jsonrpc: '2.0',
+		id: 13,
+		method: 'tools/call',
+		params: { name: 'list_processes' },
+	});
+
+	expect(response?.result).toEqual({
+		content: [{ type: 'text', text: 'redis is gone' }],
+		isError: true,
+	});
 });
 
 test('A refused read is the tool answer, not a protocol failure', async () => {
@@ -153,13 +193,14 @@ test('An unknown method is reported as such', async () => {
 });
 
 test.each([
+	// An array is how batching arrived, and this revision removed it.
 	['an array', ['jsonrpc', '2.0']],
 	['a string', 'jsonrpc'],
 	['null', null],
-])('A body that is %s cannot be parsed', async (_case, body) => {
+])('A body that is %s is not a single request', async (_case, body) => {
 	const response = await call(body);
 
-	expect(response?.error?.code).toBe(-32700);
+	expect(response?.error?.code).toBe(-32600);
 	expect(response?.id).toBeNull();
 });
 

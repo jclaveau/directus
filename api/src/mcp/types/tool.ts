@@ -27,5 +27,14 @@ export interface McpTool {
 		properties: Record<string, unknown>;
 		required?: string[];
 	};
+	/**
+	 * What a client may assume before calling. Every tool here reads and nothing
+	 * more, which is what lets a client run one without asking the user first.
+	 */
+	annotations: {
+		readOnlyHint: true;
+		destructiveHint: false;
+		openWorldHint: false;
+	};
 	run: (args: Record<string, unknown>, context: McpToolContext) => Promise<unknown>;
 }

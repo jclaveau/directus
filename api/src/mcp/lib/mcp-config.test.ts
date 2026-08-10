@@ -3,7 +3,7 @@ import { afterEach, expect, test, vi } from 'vitest';
 import {
 	diagnosticsMcpEnabled,
 	exposedMcpToolGroups,
-	mcpTokenAccountability,
+	isAllowedMcpOrigin,
 } from './mcp-config.js';
 
 vi.mock('@directus/env');
@@ -50,48 +50,40 @@ test('Only the configured subsystems are exposed', () => {
 	expect(exposedMcpToolGroups()).toEqual([]);
 });
 
-test('A configured token is answered with an admin identity', () => {
-	vi.mocked(useEnv).mockReturnValue({ DIAGNOSTICS_MCP_TOKENS: ['first', 'second'] });
-
-	expect(mcpTokenAccountability('Mcp second', '10.0.0.1')).toEqual({
-		role: null,
-		roles: [],
-		user: null,
-		admin: true,
-		app: false,
-		ip: '10.0.0.1',
-	});
-});
-
-test('The scheme is matched without regard to case', () => {
-	vi.mocked(useEnv).mockReturnValue({ DIAGNOSTICS_MCP_TOKENS: ['first'] });
-
-	expect(mcpTokenAccountability('mcp first', null)?.admin).toBe(true);
-	expect(mcpTokenAccountability('MCP first', null)?.admin).toBe(true);
-});
-
-test.each([
-	['no header at all', undefined],
-	['another scheme', 'Bearer first'],
-	['no token after the scheme', 'Mcp'],
-	['more than a scheme and a token', 'Mcp first and-then-some'],
-	['a token that is not configured', 'Mcp third'],
-	['a token that only prefixes a configured one', 'Mcp firs'],
-	['a token that only extends a configured one', 'Mcp firstly'],
-])('Refuses %s', (_case, header) => {
-	vi.mocked(useEnv).mockReturnValue({ DIAGNOSTICS_MCP_TOKENS: ['first', 'second'] });
-
-	expect(mcpTokenAccountability(header, null)).toBeNull();
-});
-
-test('Refuses every token where none is configured', () => {
+test('A caller with no Origin is not a browser, and is allowed', () => {
 	vi.mocked(useEnv).mockReturnValue({});
-	expect(mcpTokenAccountability('Mcp first', null)).toBeNull();
 
-	// An empty entry is not a token that matches an empty presentation.
-	vi.mocked(useEnv).mockReturnValue({ DIAGNOSTICS_MCP_TOKENS: ['', '  '] });
-	expect(mcpTokenAccountability('Mcp ', null)).toBeNull();
+	expect(isAllowedMcpOrigin(undefined)).toBe(true);
+});
 
-	vi.mocked(useEnv).mockReturnValue({ DIAGNOSTICS_MCP_TOKENS: 'not-an-array' });
-	expect(mcpTokenAccountability('Mcp first', null)).toBeNull();
+test('No browser origin is allowed until one is named', () => {
+	vi.mocked(useEnv).mockReturnValue({});
+	expect(isAllowedMcpOrigin('https://evil.example')).toBe(false);
+
+	vi.mocked(useEnv).mockReturnValue({ DIAGNOSTICS_MCP_ALLOWED_ORIGINS: [] });
+	expect(isAllowedMcpOrigin('https://evil.example')).toBe(false);
+
+	// Not a list at all is not an allowlist.
+	vi.mocked(useEnv)
+		.mockReturnValue({ DIAGNOSTICS_MCP_ALLOWED_ORIGINS: 'https://ok.example' });
+
+	expect(isAllowedMcpOrigin('https://ok.example')).toBe(false);
+});
+
+test('A named origin is allowed, and only that one', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		DIAGNOSTICS_MCP_ALLOWED_ORIGINS: [
+			' https://ok.example ',
+			'https://two.example',
+		],
+	});
+
+	expect(isAllowedMcpOrigin('https://ok.example')).toBe(true);
+	expect(isAllowedMcpOrigin('https://two.example')).toBe(true);
+
+	// A rebinding attack arrives as a different origin on the same host, and a
+	// prefix or a suffix of an allowed one is a different origin.
+	expect(isAllowedMcpOrigin('https://evil.example')).toBe(false);
+	expect(isAllowedMcpOrigin('https://ok.example.evil.test')).toBe(false);
+	expect(isAllowedMcpOrigin('http://ok.example')).toBe(false);
 });

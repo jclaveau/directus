@@ -8,8 +8,7 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-const mcpToken = 'blackbox-mcp-token-0123456789';
-const secondToken = 'blackbox-mcp-token-second';
+const allowedOrigin = 'https://agent.example';
 
 const toolNames = [
 	'list_processes',
@@ -25,7 +24,6 @@ describe('Diagnostics MCP Tests', () => {
 
 	const envKeys = [
 		'envMcp',
-		'envMcpNoTokens',
 		'envMcpProcessesOnly',
 		'envMcpOff',
 	] as const;
@@ -42,18 +40,13 @@ describe('Diagnostics MCP Tests', () => {
 			// something live rather than about a disabled subsystem.
 			const envMcp = cloneDeep(config.envs);
 			envMcp[vendor]['DIAGNOSTICS_MCP_ENABLED'] = 'true';
-			envMcp[vendor]['DIAGNOSTICS_MCP_TOKENS'] = `${mcpToken},${secondToken}`;
+			envMcp[vendor]['DIAGNOSTICS_MCP_ALLOWED_ORIGINS'] = allowedOrigin;
 			envMcp[vendor]['CACHE_ENABLED'] = 'true';
 			envMcp[vendor]['CACHE_STORE'] = 'redis';
 			envMcp[vendor]['REDIS_HOST'] = 'localhost';
 			envMcp[vendor]['REDIS_PORT'] = '6108';
 			envMcp[vendor]['CACHE_NAMESPACE'] = `blackbox-mcp-${vendor}`;
 			envMcp[vendor]['CACHE_STATS_ENABLED'] = 'true';
-
-			// Enabled, but with no token configured: the header path must not become
-			// a way in just because the endpoint is served.
-			const envMcpNoTokens = cloneDeep(envMcp);
-			delete envMcpNoTokens[vendor]['DIAGNOSTICS_MCP_TOKENS'];
 
 			// One subsystem only: the cache tools must be neither listed nor callable.
 			const envMcpProcessesOnly = cloneDeep(envMcp);
@@ -66,7 +59,6 @@ describe('Diagnostics MCP Tests', () => {
 
 			envs[vendor] = {
 				envMcp,
-				envMcpNoTokens,
 				envMcpProcessesOnly,
 				envMcpOff,
 			};
@@ -103,7 +95,8 @@ describe('Diagnostics MCP Tests', () => {
 	}
 
 	function call(vendor: Vendor, body: unknown) {
-		return post(vendor, 'envMcp', body).set('Authorization', `Mcp ${mcpToken}`);
+		return post(vendor, 'envMcp', body)
+			.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 	}
 
 	async function callTool(vendor: Vendor, name: string, args: object = {}) {
@@ -121,7 +114,7 @@ describe('Diagnostics MCP Tests', () => {
 				jsonrpc: '2.0',
 				id: 1,
 				method: 'tools/list',
-			}).set('Authorization', `Mcp ${mcpToken}`);
+			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(404);
 		});
@@ -139,31 +132,7 @@ describe('Diagnostics MCP Tests', () => {
 		});
 	});
 
-	describe('Refuses a token that is not configured', () => {
-		it.each(vendors)('%s', async (vendor) => {
-			const response = await post(vendor, 'envMcp', {
-				jsonrpc: '2.0',
-				id: 1,
-				method: 'tools/list',
-			}).set('Authorization', 'Mcp not-the-configured-token');
-
-			expect(response.statusCode).toBe(403);
-		});
-	});
-
-	describe('Refuses a token that only prefixes a configured one', () => {
-		it.each(vendors)('%s', async (vendor) => {
-			const response = await post(vendor, 'envMcp', {
-				jsonrpc: '2.0',
-				id: 1,
-				method: 'tools/list',
-			}).set('Authorization', `Mcp ${mcpToken.slice(0, -4)}`);
-
-			expect(response.statusCode).toBe(403);
-		});
-	});
-
-	describe('Refuses a non-admin session', () => {
+	describe('Refuses a token that is not an admin', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await post(vendor, 'envMcp', {
 				jsonrpc: '2.0',
@@ -175,49 +144,86 @@ describe('Diagnostics MCP Tests', () => {
 		});
 	});
 
-	describe('Refuses the header path where no token is configured', () => {
+	describe('Accepts an admin static token', () => {
 		it.each(vendors)('%s', async (vendor) => {
-			const response = await post(vendor, 'envMcpNoTokens', {
-				jsonrpc: '2.0',
-				id: 1,
-				method: 'tools/list',
-			}).set('Authorization', `Mcp ${mcpToken}`);
-
-			expect(response.statusCode).toBe(403);
-
-			// An admin still gets in on that same instance, so the refusal above is
-			// the token path being closed, not the endpoint being broken.
-			const asAdmin = await post(vendor, 'envMcpNoTokens', {
-				jsonrpc: '2.0',
-				id: 1,
-				method: 'tools/list',
-			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
-
-			expect(asAdmin.statusCode).toBe(200);
-		});
-	});
-
-	describe('Accepts either configured token, and an admin', () => {
-		it.each(vendors)('%s', async (vendor) => {
-			for (const token of [mcpToken, secondToken]) {
-				const response = await post(vendor, 'envMcp', {
-					jsonrpc: '2.0',
-					id: 1,
-					method: 'ping',
-				}).set('Authorization', `Mcp ${token}`);
-
-				expect(response.statusCode).toBe(200);
-				expect(response.body).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
-			}
-
-			const asAdmin = await post(vendor, 'envMcp', {
+			const response = await post(vendor, 'envMcp', {
 				jsonrpc: '2.0',
 				id: 2,
 				method: 'ping',
 			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			expect(asAdmin.statusCode).toBe(200);
-			expect(asAdmin.body.result).toEqual({});
+			expect(response.statusCode).toBe(200);
+			expect(response.body).toEqual({ jsonrpc: '2.0', id: 2, result: {} });
+		});
+	});
+
+	describe('Refuses a browser origin that was never named', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// DNS rebinding arrives as a valid credential from an origin the
+			// deployment never allowed, so the Origin is what has to be checked.
+			const response = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			})
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.set('Origin', 'https://evil.example');
+
+			expect(response.statusCode).toBe(403);
+		});
+	});
+
+	describe('Accepts the browser origin it was given', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 3,
+				method: 'ping',
+			})
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.set('Origin', allowedOrigin);
+
+			expect(response.statusCode).toBe(200);
+		});
+	});
+
+	describe('Answers GET with 405, not 404', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// The transport reserves GET for an SSE stream this server does not
+			// offer; 404 would read as a terminated session instead.
+			const response = await request(getUrl(vendor, envs[vendor]['envMcp']))
+				.get('/diagnostics/mcp')
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(405);
+		});
+	});
+
+	describe('Refuses a protocol revision it does not implement', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await post(vendor, 'envMcp', {
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'ping',
+			})
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.set('MCP-Protocol-Version', '2099-01-01');
+
+			expect(response.statusCode).toBe(400);
+
+			// The revision this server implements, and the one the spec says to
+			// assume when the header is absent, both pass.
+			for (const version of ['2025-06-18', '2025-03-26']) {
+				const accepted = await post(vendor, 'envMcp', {
+					jsonrpc: '2.0',
+					id: 1,
+					method: 'ping',
+				})
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+					.set('MCP-Protocol-Version', version);
+
+				expect(accepted.statusCode).toBe(200);
+			}
 		});
 	});
 
@@ -276,6 +282,10 @@ describe('Diagnostics MCP Tests', () => {
 
 			for (const tool of tools) {
 				expect(tool.title).toBeTruthy();
+				// Read-only is advertised, not merely true, so a client can call
+				// one without asking the user to approve it.
+				expect(tool.annotations.readOnlyHint).toBe(true);
+				expect(tool.annotations.destructiveHint).toBe(false);
 				// The description is what a model chooses on, so it has to say what
 				// the tool answers, not just name it.
 				expect(tool.description.length).toBeGreaterThan(60);
@@ -356,7 +366,7 @@ describe('Diagnostics MCP Tests', () => {
 				jsonrpc: '2.0',
 				id: 10,
 				method: 'tools/list',
-			}).set('Authorization', `Mcp ${mcpToken}`);
+			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(listed.body.result.tools.map((tool: { name: string }) => tool.name))
 				.toEqual(['list_processes']);
@@ -367,7 +377,7 @@ describe('Diagnostics MCP Tests', () => {
 				id: 11,
 				method: 'tools/call',
 				params: { name: 'list_cache_entries' },
-			}).set('Authorization', `Mcp ${mcpToken}`);
+			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(called.body.error.code).toBe(-32602);
 		});

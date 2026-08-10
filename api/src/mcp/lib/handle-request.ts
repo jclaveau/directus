@@ -8,7 +8,16 @@ import { exposedMcpTools, findMcpTool } from './tools.js';
  */
 export const MCP_PROTOCOL_VERSION = '2025-06-18';
 
-const PARSE_ERROR = -32700;
+/**
+ * Revisions this server answers on. `2025-03-26` is what the spec says to assume
+ * when a client sends no version header at all, so refusing it would refuse the
+ * clients that behaviour exists for.
+ */
+export const SUPPORTED_MCP_PROTOCOL_VERSIONS = [
+	MCP_PROTOCOL_VERSION,
+	'2025-03-26',
+];
+
 const INVALID_REQUEST = -32600;
 const METHOD_NOT_FOUND = -32601;
 const INVALID_PARAMS = -32602;
@@ -54,15 +63,18 @@ async function callTool(
 	try {
 		const result = await tool.run(args, context);
 
+		// A tool answering `undefined` would stringify to nothing at all, and a
+		// content block without its text is not a content block.
 		return succeed(id, {
-			content: [{ type: 'text', text: JSON.stringify(result) }],
+			content: [{ type: 'text', text: JSON.stringify(result) ?? 'null' }],
 		});
 	}
 	catch (error) {
 		// A refused or failed read is the tool's answer, not a broken protocol
 		// exchange: the caller is told so it can act, per the MCP tool contract.
+		// `String` rather than `.message`, which is undefined on a thrown non-Error.
 		return succeed(id, {
-			content: [{ type: 'text', text: (error as Error).message }],
+			content: [{ type: 'text', text: String((error as Error)?.message ?? error) }],
 			isError: true,
 		});
 	}
@@ -76,8 +88,12 @@ export async function handleMcpRequest(
 	body: unknown,
 	context: McpToolContext,
 ): Promise<JsonRpcResponse | null> {
+	// Malformed JSON never reaches here — the body parser rejects it with a 400
+	// first — so anything that is not an object is well-formed JSON of the wrong
+	// shape, which is an invalid request rather than a parse failure. An array
+	// lands here too: this revision of the protocol removed batching.
 	if (isRecord(body) === false) {
-		return fail(null, PARSE_ERROR, 'Expected a JSON-RPC 2.0 object');
+		return fail(null, INVALID_REQUEST, 'Expected a single JSON-RPC 2.0 object');
 	}
 
 	const id = (body['id'] ?? null) as JsonRpcId;
@@ -116,6 +132,7 @@ export async function handleMcpRequest(
 					title: tool.title,
 					description: tool.description,
 					inputSchema: tool.inputSchema,
+					annotations: tool.annotations,
 				};
 			}),
 		});

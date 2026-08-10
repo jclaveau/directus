@@ -15,6 +15,16 @@ function utils(context: McpToolContext): UtilsService {
 	});
 }
 
+/**
+ * Every tool here reads and nothing more, which is what lets a client call one
+ * without asking the user to approve it first.
+ */
+const READ_ONLY = {
+	readOnlyHint: true,
+	destructiveHint: false,
+	openWorldHint: false,
+} as const;
+
 /** The lookback every cache read takes, described once. */
 const windowProperty = {
 	window: {
@@ -38,6 +48,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'each value came from. Use it to explain restart loops, memory '
 			+ 'pressure, or why two replicas behave differently.',
 		inputSchema: { type: 'object', properties: {} },
+		annotations: READ_ONLY,
 		run: async (_args, context) => utils(context).readProcesses(),
 	},
 	{
@@ -49,6 +60,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'query, with hit counts, size, age and remaining TTL. Use it to find '
 			+ 'what is filling the cache and what is never read back.',
 		inputSchema: { type: 'object', properties: windowProperty },
+		annotations: READ_ONLY,
 		run: async (args, context) => {
 			return utils(context).getCacheEntries(requestedWindowMs(args['window']));
 		},
@@ -62,6 +74,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'over the size cap, a read with no collection to purge it by, a scope '
 			+ 'too coarse to pin. Use it to explain a low hit ratio.',
 		inputSchema: { type: 'object', properties: windowProperty },
+		annotations: READ_ONLY,
 		run: async (args, context) => {
 			return utils(context).getCacheAnomalies(requestedWindowMs(args['window']));
 		},
@@ -75,6 +88,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'outcome (served from cache, filled, declined). Use it to say what the '
 			+ 'cache is actually saving.',
 		inputSchema: { type: 'object', properties: windowProperty },
+		annotations: READ_ONLY,
 		run: async (args, context) => {
 			const window = requestedWindowMs(args['window']);
 
@@ -99,6 +113,7 @@ export const MCP_TOOLS: McpTool[] = [
 				},
 			},
 		},
+		annotations: READ_ONLY,
 		run: async (args, context) => {
 			const buckets = args['buckets'] === undefined
 				? undefined
@@ -119,6 +134,7 @@ export const MCP_TOOLS: McpTool[] = [
 			+ 'was disabled automatically. Read this first when the other cache '
 			+ 'tools come back empty.',
 		inputSchema: { type: 'object', properties: {} },
+		annotations: READ_ONLY,
 		run: async (_args, context) => utils(context).getCacheStatsState(),
 	},
 ];
