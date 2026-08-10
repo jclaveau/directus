@@ -357,13 +357,6 @@ onMounted(load);
 									line-wrapping
 								/>
 							</template>
-												<template v-else>{{ variable.value }}</template>
-											</td>
-											<td class="source">{{ variable.source }}</td>
-										</tr>
-									</tbody>
-								</table>
-							</template>
 						</div>
 					</div>
 				</div>
