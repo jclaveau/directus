@@ -29,6 +29,10 @@ export const createEnv = (): Env => {
 
 	const rawConfiguration = { ...baseConfiguration, ...fileConfiguration };
 
+	// `readConfigurationFromFile` answers null when there is no config file at all,
+	// which is the common case — hence the keys, not an `in` over a nullable object.
+	const fileKeys = new Set(Object.keys(fileConfiguration ?? {}));
+
 	const output: Env = {};
 
 	sources = {};
@@ -39,7 +43,7 @@ export const createEnv = (): Env => {
 	}
 
 	for (let [key, value] of Object.entries(rawConfiguration)) {
-		let source: EnvValueSource = key in fileConfiguration
+		let source: EnvValueSource = fileKeys.has(key)
 			? 'file'
 			: 'process';
 
