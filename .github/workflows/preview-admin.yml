@@ -16,6 +16,10 @@ on:
         description: Branch/tag/SHA to boot (the code whose admin you want to see)
         type: string
         default: v11.10.1-hhh-dev
+      instances:
+        description: How many PM2 cluster workers to run (the Processes tree shows each)
+        type: string
+        default: '3'
   # Auto-boot on every push to a PR that carries the `Preview` label (and when the
   # label is first added). pull_request_target resolves this file from the PR's BASE
   # branch, so the workflow must also live on the branches PRs target.
@@ -200,7 +204,7 @@ jobs:
           npm install --global pm2@5
           ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" pm2 start directus/cli.js \
             --name directus \
-            --instances 2 \
+            --instances "${{ inputs.instances || '3' }}" \
             --max-memory-restart 400M \
             --output /tmp/directus.log \
             --error /tmp/directus.log \
@@ -393,7 +397,7 @@ jobs:
             echo "- **Open (auto-login):** ${URL}/auto-login"
             echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary; on a public repo that summary is world-readable)."
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
-            echo "- Runs under PM2 (2 cluster workers, 400M cap), so Settings → Processes has a real supervisor to report."
+            echo "- Runs under PM2 (cluster workers, 400M cap), so Settings → Processes has a real supervisor to report."
             echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
             echo "- [ ] 🔄 Re-run admin preview"
             echo "<!-- admin-preview:end -->"
