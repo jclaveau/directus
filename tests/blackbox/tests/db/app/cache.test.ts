@@ -2554,8 +2554,10 @@ describe('App Caching Tests', () => {
 			await request(url).get(`/items/${collectionFirst}`)
 				.set('Authorization', auth);
 
-			// A read of an unrelated collection, which the mutation must not touch.
-			await request(url).get(`/items/${collectionRelated}`)
+			// `collectionIgnored`, not `collectionRelated`: a related collection's
+			// read can legitimately carry the mutated collection's tag, so only the
+			// pair the isolation test above already proves separate can assert zero.
+			await request(url).get(`/items/${collectionIgnored}`)
 				.set('Authorization', auth);
 
 			// Mutating the first collection purges the tags its read carries.
@@ -2580,7 +2582,7 @@ describe('App Caching Tests', () => {
 				});
 
 				untouched = rows.find((entry: any) => {
-					return entry.path === `/items/${collectionRelated}`;
+					return entry.path === `/items/${collectionIgnored}`;
 				});
 
 				if (mutated && untouched) {
@@ -2595,9 +2597,12 @@ describe('App Caching Tests', () => {
 			expect(mutated.purges).toBeGreaterThanOrEqual(1);
 			expect(mutated.hits).toBeGreaterThanOrEqual(1);
 
-			// ...and the other collection's was not, which is what makes this a
-			// per-entry attribution rather than a global counter repeated on
-			// every row.
+			// ...and this one's was not. `collectionIgnored` sits in
+			// CACHE_AUTO_PURGE_IGNORE_LIST, so what this pins is that the count is
+			// per-entry rather than one global number repeated on every row — a
+			// broken attribution would show the same figure here. Tag-level
+			// isolation between two purge-eligible collections is covered by the
+			// join's own unit tests, not from here.
 			expect(untouched).toBeDefined();
 			expect(untouched.purges).toBe(0);
 		});

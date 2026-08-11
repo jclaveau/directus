@@ -1961,6 +1961,12 @@ export async function truncateCacheEvents(): Promise<void> {
 	await db('directus_cache_events').truncate();
 	await db('directus_cache_descriptors').truncate();
 	await db('directus_cache_anomalies').truncate();
+	// Purges are telemetry of the same class, so they go with it. Left behind,
+	// they would count against entries whose own history was just cleared —
+	// purges without hits, on a window that reports no traffic at all.
+	await db('directus_cache_purges').truncate();
+	await db('directus_cache_purge_tags').truncate();
+	await db('directus_cache_entry_tags').truncate();
 
 	// Full reset: also drop the Redis transients tied to those rows — else buffered
 	// events drain back in and a held throttle slot suppresses the next sample.

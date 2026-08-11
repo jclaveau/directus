@@ -1443,13 +1443,19 @@ describe('getCacheStatsState', () => {
 });
 
 describe('truncateCacheEvents', () => {
-	it('truncates the fact, dimension, and anomaly tables', async () => {
+	it('truncates every telemetry table, purges included', async () => {
 		await truncateCacheEvents();
 
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_events');
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
-		expect(builder.truncate).toHaveBeenCalledTimes(3);
+
+		// Left behind, purges would count against entries whose own history was
+		// just cleared — purges without hits, on a window reporting no traffic.
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_purges');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_purge_tags');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_entry_tags');
+		expect(builder.truncate).toHaveBeenCalledTimes(6);
 	});
 
 	it('also clears the stream buffer and the throttle/tombstone keys', async () => {
@@ -1499,7 +1505,8 @@ describe('truncateCacheEvents', () => {
 
 		await truncateCacheEvents();
 
-		expect(builder.truncate).toHaveBeenCalledTimes(3);
+		// The SQL side still clears in full; only the Redis reset is skipped.
+		expect(builder.truncate).toHaveBeenCalledTimes(6);
 		expect(mockRedis.del).not.toHaveBeenCalled();
 	});
 });
