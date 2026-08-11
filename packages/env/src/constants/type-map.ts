@@ -79,9 +79,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	METRICS_TOKENS: 'array',
 	METRICS_SERVICES: 'array',
 
-	DIAGNOSTICS_MCP_ENABLED: 'boolean',
-	DIAGNOSTICS_MCP_TOOLS: 'array',
-	DIAGNOSTICS_MCP_ALLOWED_ORIGINS: 'array',
+	SYSTEM_MCP_ENABLED: 'boolean',
+	SYSTEM_MCP_TOOLS: 'array',
+	SYSTEM_MCP_ALLOWED_ORIGINS: 'array',
 
 	PROCESSES_REPORT_ENABLED: 'boolean',
 	PROCESSES_REPORT_DETAILS: 'array',

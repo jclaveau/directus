@@ -6,8 +6,8 @@ const mcp = vi.hoisted(() => {
 
 vi.mock('../mcp/index.js', () => {
 	return {
-		handleMcpRequest: mcp.handle,
-		isAllowedMcpOrigin: mcp.allowedOrigin,
+		handleSystemMcpRequest: mcp.handle,
+		systemMcpAllowsOrigin: mcp.allowedOrigin,
 		SUPPORTED_MCP_PROTOCOL_VERSIONS: ['2025-06-18'],
 	};
 });
@@ -107,7 +107,7 @@ beforeEach(() => {
 	mcp.handle.mockResolvedValue({ jsonrpc: '2.0', id: 1, result: {} });
 });
 
-describe('the diagnostics MCP endpoint', () => {
+describe('the system MCP endpoint', () => {
 	test('answers a request, uncacheably', async () => {
 		const res = response();
 		await post(request(), res, vi.fn());
@@ -198,7 +198,7 @@ describe('the diagnostics MCP endpoint', () => {
 				method: 'tools/call',
 				tool: 'list_processes',
 			},
-			'Diagnostics MCP tool call',
+			'System MCP tool call',
 		);
 
 		expect(logger.debug).not.toHaveBeenCalled();

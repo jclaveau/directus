@@ -345,9 +345,11 @@ export default async function createApp(): Promise<express.Application> {
 	app.use('/folders', foldersRouter);
 	app.use('/items', itemsRouter);
 
-	// Not `/mcp`: upstream Directus serves its own MCP there.
-	if (env['DIAGNOSTICS_MCP_ENABLED'] === true) {
-		app.use('/diagnostics/mcp', mcpRouter);
+	// Not `/mcp`: upstream Directus serves its own MCP there, over the content
+	// API. Its own top-level path rather than under `/admin`, which the Data
+	// Studio's `/admin/*` catch-all would answer before any router here.
+	if (env['SYSTEM_MCP_ENABLED'] === true) {
+		app.use('/system-mcp', mcpRouter);
 	}
 
 	if (env['METRICS_ENABLED'] === true) {

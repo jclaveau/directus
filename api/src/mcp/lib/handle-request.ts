@@ -1,6 +1,6 @@
 import { version } from 'directus/version';
 import type { McpToolContext } from '../types/tool.js';
-import { exposedMcpTools, findMcpTool } from './tools.js';
+import { systemMcpTools, findSystemMcpTool } from './tools.js';
 
 /**
  * The protocol revision this server implements. A client that asks for another
@@ -52,7 +52,7 @@ async function callTool(
 	params: Record<string, unknown>,
 	context: McpToolContext,
 ): Promise<JsonRpcResponse> {
-	const tool = findMcpTool(params['name']);
+	const tool = findSystemMcpTool(params['name']);
 
 	if (tool === undefined) {
 		return fail(id, INVALID_PARAMS, `Unknown tool: ${String(params['name'])}`);
@@ -66,19 +66,26 @@ async function callTool(
 		const result = await tool.run(args, context);
 
 		// Structured content has to be an object, and half these tools answer a
-		// list, so a list is named rather than dropped.
+		// list, so a list is named rather than dropped. Every tool declares an
+		// `outputSchema`, so every answer owes a `structuredContent` — anything
+		// that is neither object nor list would break that promise, and there is
+		// nothing sensible to name it.
 		const structured = Array.isArray(result)
 			? { items: result }
 			: result;
 
-		// A tool answering `undefined` would stringify to nothing at all, and a
-		// content block without its text is not a content block. The text mirrors
-		// the structured answer exactly, for clients that read only content.
+		if (isRecord(structured) === false) {
+			throw new TypeError(
+				`Tool ${tool.name} answered ${typeof result}, which cannot be `
+				+ 'structured content',
+			);
+		}
+
+		// The text mirrors the structured answer exactly, for clients that read
+		// only content blocks.
 		return succeed(id, {
-			content: [{ type: 'text', text: JSON.stringify(structured) ?? 'null' }],
-			...(isRecord(structured)
-				? { structuredContent: structured }
-				: {}),
+			content: [{ type: 'text', text: JSON.stringify(structured) }],
+			structuredContent: structured,
 		});
 	}
 	catch (error) {
@@ -96,7 +103,7 @@ async function callTool(
  * Answer one JSON-RPC message. Returns `null` for a notification — a message
  * with no `id`, which by the protocol gets no response at all.
  */
-export async function handleMcpRequest(
+export async function handleSystemMcpRequest(
 	body: unknown,
 	context: McpToolContext,
 ): Promise<JsonRpcResponse | null> {
@@ -128,7 +135,7 @@ export async function handleMcpRequest(
 		return succeed(id, {
 			protocolVersion: MCP_PROTOCOL_VERSION,
 			capabilities: { tools: { listChanged: false } },
-			serverInfo: { name: 'directus-diagnostics', version },
+			serverInfo: { name: 'directus-system', version },
 		});
 	}
 
@@ -138,7 +145,7 @@ export async function handleMcpRequest(
 
 	if (method === 'tools/list') {
 		return succeed(id, {
-			tools: exposedMcpTools().map((tool) => {
+			tools: systemMcpTools().map((tool) => {
 				return {
 					name: tool.name,
 					title: tool.title,

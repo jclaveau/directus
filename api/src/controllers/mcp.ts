@@ -2,8 +2,8 @@ import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { Router } from 'express';
 import { useLogger } from '../logger/index.js';
 import {
-	handleMcpRequest,
-	isAllowedMcpOrigin,
+	handleSystemMcpRequest,
+	systemMcpAllowsOrigin,
 	SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from '../mcp/index.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -11,7 +11,7 @@ import asyncHandler from '../utils/async-handler.js';
 const router = Router();
 
 /**
- * The diagnostics MCP endpoint, served at `/diagnostics/mcp`: one JSON-RPC 2.0
+ * The system MCP endpoint, served at `/system-mcp`: one JSON-RPC 2.0
  * exchange per request, no session and no stream, which is all a read-only tool
  * set needs. Not `/mcp` — upstream Directus serves its own MCP there, over the
  * content API, so the two must not land on the same path.
@@ -26,16 +26,16 @@ const router = Router();
 router.post(
 	'/',
 	asyncHandler(async (req, res) => {
-		if (isAllowedMcpOrigin(req.headers.origin) === false) {
+		if (systemMcpAllowsOrigin(req.headers.origin) === false) {
 			throw new ForbiddenError({
 				reason: `Origin '${req.headers.origin}' is not named in `
-					+ 'DIAGNOSTICS_MCP_ALLOWED_ORIGINS',
+					+ 'SYSTEM_MCP_ALLOWED_ORIGINS',
 			});
 		}
 
 		if (req.accountability?.admin !== true) {
 			throw new ForbiddenError({
-				reason: 'The diagnostics MCP endpoint is admin only',
+				reason: 'The system MCP endpoint is admin only',
 			});
 		}
 
@@ -68,13 +68,13 @@ router.post(
 		};
 
 		if (method === 'tools/call') {
-			logger.info(trace, 'Diagnostics MCP tool call');
+			logger.info(trace, 'System MCP tool call');
 		}
 		else {
-			logger.debug(trace, 'Diagnostics MCP request');
+			logger.debug(trace, 'System MCP request');
 		}
 
-		const response = await handleMcpRequest(req.body, {
+		const response = await handleSystemMcpRequest(req.body, {
 			accountability: req.accountability,
 			schema: req.schema,
 		});

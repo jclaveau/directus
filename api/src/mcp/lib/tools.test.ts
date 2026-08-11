@@ -35,10 +35,18 @@ const config = vi.hoisted(() => {
 });
 
 vi.mock('./mcp-config.js', () => {
-	return { exposedMcpToolGroups: config.groups };
+	return { systemMcpToolGroups: config.groups };
 });
 
-import { exposedMcpTools, findMcpTool, MCP_TOOLS } from './tools.js';
+const processes = vi.hoisted(() => {
+	return { details: vi.fn() };
+});
+
+vi.mock('../../processes/lib/processes-config.js', () => {
+	return { reportedProcessDetails: processes.details };
+});
+
+import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js';
 
 const context = {
 	accountability: {
@@ -53,11 +61,12 @@ const context = {
 };
 
 function run(name: string, args: Record<string, unknown> = {}) {
-	return findMcpTool(name)!.run(args, context);
+	return findSystemMcpTool(name)!.run(args, context);
 }
 
 beforeEach(() => {
 	config.groups.mockReturnValue(['processes', 'cache']);
+	processes.details.mockReturnValue(['stats', 'env']);
 	service.constructed.length = 0;
 
 	Object.values(service).forEach((value) => {
@@ -68,7 +77,7 @@ beforeEach(() => {
 });
 
 test('Every tool is described well enough for a model to choose it', () => {
-	expect(MCP_TOOLS.map((tool) => tool.name)).toEqual([
+	expect(allSystemMcpTools().map((tool) => tool.name)).toEqual([
 		'list_processes',
 		'list_cache_entries',
 		'list_cache_anomalies',
@@ -77,7 +86,7 @@ test('Every tool is described well enough for a model to choose it', () => {
 		'read_cache_stats_state',
 	]);
 
-	for (const tool of MCP_TOOLS) {
+	for (const tool of allSystemMcpTools()) {
 		expect(tool.title).toBeTruthy();
 		expect(tool.description.length).toBeGreaterThan(60);
 		expect(tool.inputSchema.type).toBe('object');
@@ -99,7 +108,7 @@ test('Every tool is described well enough for a model to choose it', () => {
 });
 
 test('Only the windowed reads take a window', () => {
-	const windowed = MCP_TOOLS.filter((tool) => {
+	const windowed = allSystemMcpTools().filter((tool) => {
 		return 'window' in tool.inputSchema.properties;
 	});
 
@@ -110,24 +119,24 @@ test('Only the windowed reads take a window', () => {
 		'read_cache_timeseries',
 	]);
 
-	expect(findMcpTool('read_cache_timeseries')!.inputSchema.properties)
+	expect(findSystemMcpTool('read_cache_timeseries')!.inputSchema.properties)
 		.toHaveProperty('buckets');
 });
 
 test('A subsystem left out is neither listed nor callable', () => {
 	config.groups.mockReturnValue(['processes']);
 
-	expect(exposedMcpTools().map((tool) => tool.name)).toEqual(['list_processes']);
-	expect(findMcpTool('list_cache_entries')).toBeUndefined();
-	expect(findMcpTool('list_processes')).toBeDefined();
+	expect(systemMcpTools().map((tool) => tool.name)).toEqual(['list_processes']);
+	expect(findSystemMcpTool('list_cache_entries')).toBeUndefined();
+	expect(findSystemMcpTool('list_processes')).toBeDefined();
 
 	config.groups.mockReturnValue([]);
-	expect(exposedMcpTools()).toEqual([]);
-	expect(findMcpTool('list_processes')).toBeUndefined();
+	expect(systemMcpTools()).toEqual([]);
+	expect(findSystemMcpTool('list_processes')).toBeUndefined();
 });
 
 test('Every tool declares the subsystem it reads', () => {
-	const groups = MCP_TOOLS.map((tool) => tool.group);
+	const groups = allSystemMcpTools().map((tool) => tool.group);
 
 	expect(groups).toEqual([
 		'processes',
@@ -140,8 +149,8 @@ test('Every tool declares the subsystem it reads', () => {
 });
 
 test('An unknown name resolves to no tool', () => {
-	expect(findMcpTool('drop_everything')).toBeUndefined();
-	expect(findMcpTool(undefined)).toBeUndefined();
+	expect(findSystemMcpTool('drop_everything')).toBeUndefined();
+	expect(findSystemMcpTool(undefined)).toBeUndefined();
 });
 
 test('Every read is made as the caller, through the guarded service', async () => {
@@ -185,4 +194,91 @@ test('The telemetry state takes no argument', async () => {
 
 	await expect(run('read_cache_stats_state')).resolves.toEqual({ enabled: true });
 	expect(service.getCacheStatsState).toHaveBeenCalledOnce();
+});
+
+/**
+ * The answers the services really give, keyed by the tool that returns them.
+ * Shapes copied from the types the services are declared with — `CacheTimeseries`,
+ * `CacheStatsState`, `ProcessesReport` — so a schema that names a field nobody
+ * returns fails here instead of misleading a model.
+ */
+const ANSWERS: Record<string, unknown> = {
+	list_processes: {
+		collectedAt: 1,
+		collectedForMs: 750,
+		details: ['stats', 'env'],
+		services: [],
+		degraded: { crossReplica: false, supervisor: false },
+	},
+	list_cache_entries: [],
+	list_cache_anomalies: [],
+	list_cache_latencies: [],
+	read_cache_timeseries: { buckets: [], markers: [], effectiveTtl: null },
+	read_cache_stats_state: {
+		configured: true,
+		enabled: true,
+		killedReason: null,
+		bufferLength: 0,
+		droppedEvents: 0,
+	},
+};
+
+test('Every declared output property is one the tool actually answers', async () => {
+	for (const tool of allSystemMcpTools()) {
+		const answer = ANSWERS[tool.name];
+
+		expect(answer, `no recorded answer for ${tool.name}`).toBeDefined();
+
+		// A list is named on the way out, which is what the schema describes.
+		const structured = Array.isArray(answer)
+			? { items: answer }
+			: answer as Record<string, unknown>;
+
+		const declared = Object.keys(tool.outputSchema.properties);
+		const answered = Object.keys(structured);
+
+		expect(
+			declared.filter((property) => answered.includes(property) === false),
+			`${tool.name} declares properties it does not answer`,
+		).toEqual([]);
+
+		// And nothing the answer carries is left undocumented.
+		expect(
+			answered.filter((property) => declared.includes(property) === false),
+			`${tool.name} answers properties it does not declare`,
+		).toEqual([]);
+	}
+});
+
+/** The description is rebuilt per listing, so it can name what is really on. */
+function processesDescriptionWith(details: string[]): string {
+	processes.details.mockReturnValue(details);
+
+	const listed = systemMcpTools()
+		.find((tool) => tool.name === 'list_processes')!;
+
+	return listed.description;
+}
+
+test('The process tool describes the halves this deployment reports', () => {
+	const both = processesDescriptionWith(['stats', 'env']);
+
+	expect(both).toContain('what its supervisor observed');
+	expect(both).toContain('the environment it resolved');
+
+	// With a half turned off, the description stops promising it rather than
+	// promising it and answering null.
+	const statsOnly = processesDescriptionWith(['stats']);
+
+	expect(statsOnly).toContain('what its supervisor observed');
+	expect(statsOnly).not.toContain('the environment it resolved');
+
+	const envOnly = processesDescriptionWith(['env']);
+
+	expect(envOnly).toContain('the environment it resolved');
+	expect(envOnly).not.toContain('what its supervisor observed');
+
+	const neither = processesDescriptionWith([]);
+
+	expect(neither).toContain('Only the identity of each process is reported');
 });

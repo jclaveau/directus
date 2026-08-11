@@ -8,7 +8,7 @@ export interface McpToolContext {
 
 /**
  * The subsystem a tool reads, so a deployment can expose one without the other
- * (`DIAGNOSTICS_MCP_TOOLS`).
+ * (`SYSTEM_MCP_TOOLS`).
  */
 export type McpToolGroup = 'processes' | 'cache';
 

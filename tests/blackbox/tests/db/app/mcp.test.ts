@@ -19,7 +19,7 @@ const toolNames = [
 	'read_cache_stats_state',
 ];
 
-describe('Diagnostics MCP Tests', () => {
+describe('System MCP Tests', () => {
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
 
 	const envKeys = [
@@ -39,8 +39,8 @@ describe('Diagnostics MCP Tests', () => {
 			// Redis-backed cache with telemetry on, so the cache tools answer about
 			// something live rather than about a disabled subsystem.
 			const envMcp = cloneDeep(config.envs);
-			envMcp[vendor]['DIAGNOSTICS_MCP_ENABLED'] = 'true';
-			envMcp[vendor]['DIAGNOSTICS_MCP_ALLOWED_ORIGINS'] = allowedOrigin;
+			envMcp[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
+			envMcp[vendor]['SYSTEM_MCP_ALLOWED_ORIGINS'] = allowedOrigin;
 			envMcp[vendor]['CACHE_ENABLED'] = 'true';
 			envMcp[vendor]['CACHE_STORE'] = 'redis';
 			envMcp[vendor]['REDIS_HOST'] = 'localhost';
@@ -50,10 +50,10 @@ describe('Diagnostics MCP Tests', () => {
 
 			// One subsystem only: the cache tools must be neither listed nor callable.
 			const envMcpProcessesOnly = cloneDeep(envMcp);
-			envMcpProcessesOnly[vendor]['DIAGNOSTICS_MCP_TOOLS'] = 'processes';
+			envMcpProcessesOnly[vendor]['SYSTEM_MCP_TOOLS'] = 'processes';
 
 			const envMcpOff = cloneDeep(envMcp);
-			envMcpOff[vendor]['DIAGNOSTICS_MCP_ENABLED'] = 'false';
+			envMcpOff[vendor]['SYSTEM_MCP_ENABLED'] = 'false';
 
 			const ports = await Promise.all(envKeys.map(() => getPort()));
 
@@ -90,7 +90,7 @@ describe('Diagnostics MCP Tests', () => {
 
 	function post(vendor: Vendor, key: keyof EnvTypes, body: unknown) {
 		return request(getUrl(vendor, envs[vendor][key]))
-			.post('/diagnostics/mcp')
+			.post('/system-mcp')
 			.send(body as object);
 	}
 
@@ -196,7 +196,7 @@ describe('Diagnostics MCP Tests', () => {
 			// The transport reserves GET for an SSE stream this server does not
 			// offer; 404 would read as a terminated session instead.
 			const response = await request(getUrl(vendor, envs[vendor]['envMcp']))
-				.get('/diagnostics/mcp')
+				.get('/system-mcp')
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
 			expect(response.statusCode).toBe(405);
@@ -261,7 +261,7 @@ describe('Diagnostics MCP Tests', () => {
 			expect(response.body.result.capabilities.tools)
 				.toEqual({ listChanged: false });
 
-			expect(response.body.result.serverInfo.name).toBe('directus-diagnostics');
+			expect(response.body.result.serverInfo.name).toBe('directus-system');
 			expect(response.body.result.serverInfo.version).toBeTruthy();
 			// Live state must never be served from a store in front of it.
 			expect(response.headers['cache-control']).toBe('no-store');
@@ -456,7 +456,7 @@ describe('Diagnostics MCP Tests', () => {
 
 			const paths = response.body.paths;
 
-			expect(paths['/diagnostics/mcp'].post.operationId).toBe('call-mcp');
+			expect(paths['/system-mcp'].post.operationId).toBe('call-mcp');
 			expect(paths['/utils/processes'].get.operationId).toBe('list-processes');
 			expect(paths['/utils/cache'].get.operationId).toBe('list-cache-entries');
 			expect(paths['/utils/cache/anomalies']).toBeDefined();

@@ -22,8 +22,8 @@ const TOOL = {
 
 vi.mock('./tools.js', () => {
 	return {
-		exposedMcpTools: () => [TOOL],
-		findMcpTool: (name: unknown) => {
+		systemMcpTools: () => [TOOL],
+		findSystemMcpTool: (name: unknown) => {
 			return name === 'list_processes'
 				? TOOL
 				: undefined;
@@ -31,7 +31,7 @@ vi.mock('./tools.js', () => {
 	};
 });
 
-import { handleMcpRequest, MCP_PROTOCOL_VERSION } from './handle-request.js';
+import { handleSystemMcpRequest, MCP_PROTOCOL_VERSION } from './handle-request.js';
 
 const context = {
 	accountability: {
@@ -45,7 +45,7 @@ const context = {
 	schema: {} as SchemaOverview,
 };
 
-const call = (body: unknown) => handleMcpRequest(body, context);
+const call = (body: unknown) => handleSystemMcpRequest(body, context);
 
 beforeEach(() => {
 	tool.run.mockReset();
@@ -60,7 +60,7 @@ test('Announces the protocol, its capability and itself', async () => {
 		result: {
 			protocolVersion: MCP_PROTOCOL_VERSION,
 			capabilities: { tools: { listChanged: false } },
-			serverInfo: { name: 'directus-diagnostics', version: '11.10.1' },
+			serverInfo: { name: 'directus-system', version: '11.10.1' },
 		},
 	});
 });
@@ -131,7 +131,7 @@ test('A list is named, since structured content must be an object', async () => 
 	});
 });
 
-test('An answer that is neither object nor list carries no structure', async () => {
+test('An answer that is neither object nor list is refused', async () => {
 	tool.run.mockResolvedValue('a bare string');
 
 	const response = await call({
@@ -141,9 +141,8 @@ test('An answer that is neither object nor list carries no structure', async () 
 		params: { name: 'list_processes' },
 	});
 
-	expect(response?.result).toEqual({
-		content: [{ type: 'text', text: '"a bare string"' }],
-	});
+	expect(response?.result).toMatchObject({ isError: true });
+	expect((response?.result as any).content[0].text).toContain('string');
 });
 
 test('Arguments that are not an object are read as none', async () => {
@@ -159,7 +158,7 @@ test('Arguments that are not an object are read as none', async () => {
 	expect(tool.run).toHaveBeenCalledWith({}, context);
 });
 
-test('A tool answering nothing still answers a content block', async () => {
+test('A tool answering nothing is a broken tool, and says so', async () => {
 	tool.run.mockResolvedValue(undefined);
 
 	const response = await call({
@@ -169,11 +168,11 @@ test('A tool answering nothing still answers a content block', async () => {
 		params: { name: 'list_processes' },
 	});
 
-	// `JSON.stringify(undefined)` is undefined, and a block without text is not
-	// a content block.
-	expect(response?.result).toEqual({
-		content: [{ type: 'text', text: 'null' }],
-	});
+	// Every tool declares an outputSchema, so every answer owes structured
+	// content. Nothing sensible can be built from `undefined`, and a silent
+	// half-answer would be worse than saying so.
+	expect(response?.result).toMatchObject({ isError: true });
+	expect((response?.result as any).content[0].text).toContain('list_processes');
 });
 
 test('A thrown non-Error still reaches the caller as text', async () => {

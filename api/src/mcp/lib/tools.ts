@@ -1,7 +1,8 @@
 import { requestedWindowMs } from '../../utils/requested-window-ms.js';
 import { UtilsService } from '../../services/utils.js';
 import type { McpTool, McpToolContext } from '../types/tool.js';
-import { exposedMcpToolGroups } from './mcp-config.js';
+import { systemMcpToolGroups } from './mcp-config.js';
+import { reportedProcessDetails } from '../../processes/lib/processes-config.js';
 
 /**
  * Every tool reads through `UtilsService`, so the admin guard each of these
@@ -13,6 +14,35 @@ function utils(context: McpToolContext): UtilsService {
 		accountability: context.accountability,
 		schema: context.schema,
 	});
+}
+
+/**
+ * What the process tree actually carries here. `PROCESSES_REPORT_DETAILS` can
+ * drop either half, so the description states what this deployment reports
+ * rather than promising both and answering `null`.
+ */
+function processesDescription(): string {
+	const details = reportedProcessDetails();
+
+	const halves = [
+		details.includes('stats')
+			? 'what its supervisor observed (status, restarts, memory against the '
+				+ 'cap it is recycled at, uptime, exec mode)'
+			: null,
+		details.includes('env')
+			? 'the environment it resolved, redacted, with the layer each value '
+				+ 'came from'
+			: null,
+	].filter((half) => half !== null);
+
+	const carries = halves.length === 0
+		? 'Only the identity of each process is reported: this deployment turned '
+			+ 'both halves off.'
+		: `Each process reports ${halves.join(', and ')}.`;
+
+	return 'The running processes of this deployment as a service → replica → '
+		+ `process tree. ${carries} Use it to explain restart loops, memory `
+		+ 'pressure, or why two replicas behave differently.';
 }
 
 /** What a windowed listing answers: the rows, under a name. */
@@ -47,24 +77,28 @@ const windowProperty = {
 	},
 };
 
-export const MCP_TOOLS: McpTool[] = [
+/**
+ * Every tool compiled in, built fresh: a description reads config, and config
+ * outlives no request. Nothing here is evaluated at import time.
+ */
+export function allSystemMcpTools(): McpTool[] {
+	return [
 	{
 		name: 'list_processes',
 		group: 'processes',
 		title: 'List running processes',
-		description:
-			'The running processes of this deployment as a service → replica → '
-			+ 'process tree. Each process reports what its supervisor observed '
-			+ '(status, restarts, memory against the cap it is recycled at, uptime, '
-			+ 'exec mode) and the environment it resolved, redacted, with the layer '
-			+ 'each value came from. Use it to explain restart loops, memory '
-			+ 'pressure, or why two replicas behave differently.',
+		description: processesDescription(),
 		inputSchema: { type: 'object', properties: {} },
 		outputSchema: {
 			type: 'object',
 			properties: {
 				collectedAt: { type: 'number' },
 				collectedForMs: { type: 'number' },
+				details: {
+					type: 'array',
+					description: 'Which halves each process reported: stats, env, or both.',
+					items: { type: 'string' },
+				},
 				services: {
 					type: 'array',
 					description: 'One entry per service, each holding its replicas.',
@@ -148,10 +182,14 @@ export const MCP_TOOLS: McpTool[] = [
 			type: 'object',
 			properties: {
 				buckets: { type: 'array', items: { type: 'object' } },
-				events: {
+				markers: {
 					type: 'array',
 					description: 'Config changes and flushes falling in the window.',
 					items: { type: 'object' },
+				},
+				effectiveTtl: {
+					type: ['string', 'null'],
+					description: 'The TTL in force over the window, where one is known.',
 				},
 			},
 		},
@@ -179,25 +217,35 @@ export const MCP_TOOLS: McpTool[] = [
 		outputSchema: {
 			type: 'object',
 			properties: {
+				configured: { type: 'boolean' },
 				enabled: { type: 'boolean' },
-				disabledReason: { type: ['string', 'null'] },
+				killedReason: {
+					type: ['string', 'null'],
+					description: 'What stopped collection, where it stopped by itself.',
+				},
+				bufferLength: { type: 'number' },
+				droppedEvents: {
+					type: 'number',
+					description: 'Lifetime count; non-zero means telemetry went lossy.',
+				},
 			},
 		},
 		annotations: READ_ONLY,
 		run: async (_args, context) => utils(context).getCacheStatsState(),
 	},
-];
+	];
+}
 
 /**
  * The tools this deployment exposes. A tool whose group is not exposed is not
  * listed and, because lookups go through here, cannot be called either.
  */
-export function exposedMcpTools(): McpTool[] {
-	const groups = exposedMcpToolGroups();
+export function systemMcpTools(): McpTool[] {
+	const groups = systemMcpToolGroups();
 
-	return MCP_TOOLS.filter((tool) => groups.includes(tool.group));
+	return allSystemMcpTools().filter((tool) => groups.includes(tool.group));
 }
 
-export function findMcpTool(name: unknown): McpTool | undefined {
-	return exposedMcpTools().find((tool) => tool.name === name);
+export function findSystemMcpTool(name: unknown): McpTool | undefined {
+	return systemMcpTools().find((tool) => tool.name === name);
 }

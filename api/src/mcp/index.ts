@@ -1,9 +1,9 @@
 export {
-	handleMcpRequest,
+	handleSystemMcpRequest,
 	MCP_PROTOCOL_VERSION,
 	SUPPORTED_MCP_PROTOCOL_VERSIONS,
 } from './lib/handle-request.js';
-export { diagnosticsMcpEnabled, isAllowedMcpOrigin } from './lib/mcp-config.js';
-// `MCP_TOOLS` deliberately stays inside the module: every caller goes through
-// `exposedMcpTools`, which is where `DIAGNOSTICS_MCP_TOOLS` is enforced.
-export { exposedMcpTools } from './lib/tools.js';
+export { systemMcpEnabled, systemMcpAllowsOrigin } from './lib/mcp-config.js';
+// The ungated list deliberately stays inside the module: every caller goes
+// through `systemMcpTools`, which is where `SYSTEM_MCP_TOOLS` is enforced.
+export { systemMcpTools } from './lib/tools.js';

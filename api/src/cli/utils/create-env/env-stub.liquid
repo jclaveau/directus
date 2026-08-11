@@ -234,17 +234,17 @@ CACHE_STORE=memory
 ASSETS_CACHE_TTL="30d"
 
 #####################################################################################
-### Diagnostics MCP
+### System MCP
 
-# Serve a read-only MCP endpoint at /diagnostics/mcp exposing the diagnostic
+# Serve a read-only MCP endpoint at /system-mcp exposing the diagnostic
 # reads as tools an LLM agent can call. Off by default. Deliberately not /mcp:
 # upstream Directus serves its own MCP there, over the content API. [false]
-# DIAGNOSTICS_MCP_ENABLED=false
+# SYSTEM_MCP_ENABLED=false
 
 # Which subsystems to expose tools for: "processes" (the process tree) and
 # "cache" (listings, anomalies, latencies, timeseries, telemetry state). A group
 # left out is neither listed nor callable. ["processes,cache"]
-# DIAGNOSTICS_MCP_TOOLS="processes,cache"
+# SYSTEM_MCP_TOOLS="processes,cache"
 
 # Browser origins allowed to call the endpoint. Empty by default, so no browser
 # reaches it: the transport spec requires the Origin header to be validated,
@@ -252,7 +252,7 @@ ASSETS_CACHE_TTL="30d"
 # browser, which is the agent case this endpoint is for. Separate from
 # CORS_ORIGIN on purpose: opening the Data Studio to an origin should not also
 # hand it the diagnostics. [""]
-# DIAGNOSTICS_MCP_ALLOWED_ORIGINS="https://agent.example.com"
+# SYSTEM_MCP_ALLOWED_ORIGINS="https://agent.example.com"
 
 # The caller authenticates as an admin the usual way — a session, or a Directus
 # static token on an admin user sent as `Authorization: Bearer <token>`. There
