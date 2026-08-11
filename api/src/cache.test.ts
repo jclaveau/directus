@@ -42,6 +42,18 @@ vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 // flushCaches() clears the permission cache too; orthogonal to the cache layers.
 vi.mock('./permissions/cache.js', () => ({ clearCache: vi.fn() }));
 
+// Everything else in the module stays real: only the purge emitter is watched,
+// because recording the purge is the one thing it does that leaves no other
+// trace on redis or the cache to assert against.
+const queueCachePurge = vi.hoisted(() => vi.fn());
+
+vi.mock('./cache-events.js', async (importOriginal) => {
+	return {
+		...(await importOriginal() as object),
+		queueCachePurge,
+	};
+});
+
 vi.mock('./redis/index.js', () => {
 	return {
 		redisConfigAvailable: () => true,
@@ -323,6 +335,76 @@ describe('scoped cache purging', () => {
 			);
 
 			expect(cache.clear).not.toHaveBeenCalled();
+		});
+
+		test('records the purge, how wide it reached and what it took', async () => {
+			redis.smembers.mockImplementation(async (tagKey: string) => {
+				return tagKey === 'scalabus:tag:slots'
+					? ['global-key']
+					: ['key-a', 'key-a__expires_at'];
+			});
+
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
+
+			// Two tag sets (the bare collection tag and the one slice), three entries
+			// between them — the count the eviction line on the chart plots.
+			expect(queueCachePurge).toHaveBeenCalledWith({
+				collection: 'slots',
+				mode: 'slices',
+				tags: 2,
+				evicted: 3,
+			});
+		});
+
+		test('records the coarse fallback as the wider thing it is', async () => {
+			redis.scan.mockResolvedValueOnce([
+				'0',
+				['scalabus:tag:articles:author=1', 'scalabus:tag:articles:author=2'],
+			]);
+
+			redis.smembers.mockImplementation(async (tagKey: string) => {
+				return tagKey === 'scalabus:tag:articles'
+					? ['global-key']
+					: ['slice-key'];
+			});
+
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'articles', null);
+
+			// Three tag sets: the bare tag plus every slice the scan turned up. Two
+			// entries, because both slices pointed at the same key — the count is of
+			// what was deleted, not of what was pointed at.
+			expect(queueCachePurge).toHaveBeenCalledWith({
+				collection: 'articles',
+				mode: 'collection',
+				tags: 3,
+				evicted: 2,
+			});
+		});
+
+		test('records a non-scoped flush without inventing a size', async () => {
+			env['CACHE_AUTO_PURGE_MODE'] = 'full';
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'articles', [
+				{ collection: 'articles', field: 'author', value: '1' },
+			]);
+
+			expect(cache.clear).toHaveBeenCalledOnce();
+
+			// The clear takes the whole namespace, so there is no member list to
+			// count. Reporting zero entries is honest; guessing one would not be.
+			expect(queueCachePurge).toHaveBeenCalledWith({
+				collection: null,
+				mode: 'namespace',
+				tags: 0,
+				evicted: 0,
+			});
 		});
 
 		test(oneLine`

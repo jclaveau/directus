@@ -137,3 +137,9 @@ data:
     icon: memory
     note: $t:directus_collection.directus_cache_config_events
     accountability: null
+
+  - collection: directus_cache_purges
+    hidden: true
+    icon: memory
+    note: $t:directus_collection.directus_cache_purges
+    accountability: null

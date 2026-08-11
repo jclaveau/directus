@@ -10,6 +10,7 @@ import type {
 } from '@directus/types';
 import type Keyv from 'keyv';
 import { resolvedCacheTtl } from './cache-config.js';
+import { queueCachePurge } from './cache-events.js';
 import emitter from './emitter.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -250,12 +251,18 @@ export async function countScopedCacheTagMembers(
 /**
  * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
  * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
+ *
+ * Returns how many entries it deleted — the members are read here anyway, so the
+ * count the telemetry records costs nothing extra.
  */
-async function purgeScopedCacheTagKeys(cache: Keyv, tagKeys: string[]): Promise<void> {
+async function purgeScopedCacheTagKeys(
+	cache: Keyv,
+	tagKeys: string[],
+): Promise<number> {
 	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty collection
 	// scan) can leave nothing to purge.
 	if (tagKeys.length === 0) {
-		return;
+		return 0;
 	}
 
 	const redis = useRedis();
@@ -267,6 +274,8 @@ async function purgeScopedCacheTagKeys(cache: Keyv, tagKeys: string[]): Promise<
 	}
 
 	await redis.del(...tagKeys);
+
+	return members.length;
 }
 
 /**
@@ -328,8 +337,17 @@ export async function purgeCollectionScopedCache(
 	// Slice keys are `<bareKey>:<field>=<value>`; the `:` delimiter keeps a prefix-sharing
 	// sibling (`articles` vs `articles_archive`) out of the scan.
 	const sliceKeys = await scanScopedCacheTagKeys(`${bareKey}:*`);
+	const tagKeys = [bareKey, ...sliceKeys];
+	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
-	await purgeScopedCacheTagKeys(cache, [bareKey, ...sliceKeys]);
+	// The expensive mode, and the one nothing else records: every slice of the
+	// collection went, because which slices actually changed was unresolvable.
+	queueCachePurge({
+		collection,
+		mode: 'collection',
+		tags: tagKeys.length,
+		evicted,
+	});
 }
 
 /**
@@ -357,10 +375,23 @@ export async function purgeScopedCache(
 	// a collection-wide purge; otherwise the resolved slice tags.
 	if (!scopedCachePurgeEnabled()) {
 		await cache.clear();
+
+		// No tag sets and no member list to count here: the clear takes the whole
+		// namespace, so the row records the reach and leaves the size unknown
+		// rather than inventing one.
+		queueCachePurge({
+			collection: null,
+			mode: 'namespace',
+			tags: 0,
+			evicted: 0,
+		});
+
 		return null;
 	}
 
 	if (scopedCacheTags === null) {
+		// Records its own purge — it is the one that knows how many slices the
+		// scan turned up.
 		await purgeCollectionScopedCache(cache, collection);
 		return [{ collection }];
 	}
@@ -374,10 +405,15 @@ export async function purgeScopedCache(
 		context,
 	)) as ScopedCacheTag[];
 
-	await purgeScopedCacheTagKeys(
-		cache,
-		[...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))],
-	);
+	const tagKeys = [...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))];
+	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+
+	queueCachePurge({
+		collection,
+		mode: 'slices',
+		tags: tagKeys.length,
+		evicted,
+	});
 
 	return resolvedScopedCacheTags;
 }

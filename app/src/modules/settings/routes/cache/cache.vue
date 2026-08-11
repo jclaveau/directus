@@ -994,6 +994,29 @@ function chartConfig(): ApexOptions {
 			pick: (b) => b.hits,
 		},
 		{
+			// Entries a purge deleted, rather than the number of purges: a hit ratio
+			// feels how much went, not how many operations went. Sits next to Hits
+			// because the two answer one question from opposite ends — what the cache
+			// served, and what was taken out from under it.
+			name: t('cache_purged_entries', 'Purged entries'),
+			unit: 'count',
+			curve: 'straight',
+			dash: 0,
+			color: themeVar('--theme--primary', '#6644ff'),
+			pick: (b) => b.purgedEntries,
+		},
+		{
+			// The purges that reached wider than their mutation did — a collection
+			// fallback or a namespace clear. Dashed because it is a subset of the
+			// purges behind the line above, not a separate population.
+			name: t('cache_coarse_purges', 'Coarse purges'),
+			unit: 'count',
+			curve: 'straight',
+			dash: 6,
+			color: themeVar('--theme--primary-subdued', '#af9aff'),
+			pick: (b) => b.coarsePurges,
+		},
+		{
 			// Same definition as the summary metric and the tree column: the share of
 			// cache-servable requests that were served from cache.
 			name: t('cache_hit_ratio', 'Hit ratio'),

@@ -1280,6 +1280,7 @@ directus_collection:
   directus_cache_events: Cache hit/miss/latency events (telemetry)
   directus_cache_anomalies: Uncacheable / not-cached anomalies (telemetry)
   directus_cache_config_events: Cache TTL-change and flush events (telemetry)
+  directus_cache_purges: Cache purge operations and their reach (telemetry)
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module

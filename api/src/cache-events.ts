@@ -13,6 +13,7 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
 // The timeseries wire types live in @directus/types so the app chart shares them.
 export type {
 	CacheConfigEvent,
+	CachePurgeMode,
 	CacheTimeseries,
 	CacheTimeseriesBucket,
 } from '@directus/types';
@@ -28,12 +29,15 @@ export type {
  *   - `directus_cache_descriptors` — dimension, one row per key: the request
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
  *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
+ *   - `directus_cache_purges` — one row per purge operation (not per evicted
+ *     key), carrying how far it reached and how many entries it took.
  *
- * Seven stream kinds. Latency facts in `directus_cache_events` (numeric `kind`, all
+ * Eight stream kinds. Latency facts in `directus_cache_events` (numeric `kind`, all
  * carrying duration_ms): `h` hit (0), `f` fill (2) a cached miss's compute, `x`
  * anomaly-miss (3) a flagged-uncacheable miss, `o` other-miss (4) a silently-skipped
  * miss — the "Misses" curve pools 2/3/4. `m` miss (1, cache.ts) is the count only.
- * `d` descriptor + `a` anomaly demux to the other tables. Capture is gated by a
+ * `d` descriptor + `a` anomaly + `p` purge demux to the other tables. Capture is
+ * gated by a
  * runtime flag refreshed
  * from Redis, killable live by an admin or the size/buffer watchdog.
  */
@@ -49,6 +53,14 @@ export interface CacheMiss {
 	cacheKey: string;
 	gapMs: number | null;
 	ttlMs: number | null;
+}
+
+/** One purge operation: how far it reached, and how much it took with it. */
+export interface CachePurge {
+	collection: string | null; // null on a namespace-wide clear
+	mode: CachePurgeMode;
+	tags: number; // tag sets the purge dropped
+	evicted: number; // entries those sets pointed at
 }
 
 export interface CacheDescriptor {
@@ -461,6 +473,26 @@ export function queueCacheAnomaly(entry: CacheAnomaly): void {
 	});
 }
 
+/**
+ * Emit one purge operation — not one event per evicted key, which would put the
+ * write path's fan-out onto the stream. A purge fires once per mutation, so this
+ * is mutation-rate, and each row carries how far it reached and what it took.
+ */
+export function queueCachePurge(entry: CachePurge): void {
+	if (!cacheStatsActiveFlag) {
+		return;
+	}
+
+	xadd({
+		kind: 'p',
+		collection: entry.collection ?? '',
+		mode: entry.mode,
+		tags: String(entry.tags),
+		evicted: String(entry.evicted),
+		ts: String(Date.now()),
+	});
+}
+
 // The per-key descriptor, emitted on a fill where every field is populated.
 export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void> {
 	if (!cacheStatsActiveFlag) {
@@ -742,10 +774,25 @@ async function persistStreamBatch(
 	const descriptors = new Map<string, CacheDescriptorRow>();
 	const locators = new Map<string, CacheDescriptorRow>();
 	const anomalies: CacheAnomalyRow[] = [];
+	const purges: CachePurgeRow[] = [];
 
 	for (const [, flat] of batch) {
 		const f = parseFields(flat);
 		const at = new Date(Number(f['ts']));
+
+		if (f['kind'] === 'p') {
+			purges.push({
+				time: at,
+				collection: f['collection']
+					? f['collection']
+					: null,
+				mode: (f['mode'] ?? 'slices') as CachePurgeMode,
+				tags: Number(f['tags'] ?? 0),
+				evicted: Number(f['evicted'] ?? 0),
+			});
+
+			continue;
+		}
 
 		if (f['kind'] === 'a') {
 			anomalies.push({
@@ -827,6 +874,10 @@ async function persistStreamBatch(
 
 			if (anomalies.length > 0) {
 				await trx.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
+			}
+
+			if (purges.length > 0) {
+				await trx.batchInsert('directus_cache_purges', purges, FLUSH_BATCH);
 			}
 		});
 	}
@@ -1156,6 +1207,23 @@ export async function reapCacheEvents(): Promise<number> {
 }
 
 /**
+ * Prune purge rows past the retention window. Bounded like every other fact
+ * table here: a purge row is written per mutation, so an unswept table grows
+ * with the write workload rather than with the cache.
+ */
+export async function reapCachePurges(): Promise<number> {
+	if (!cacheStatsConfigured()) {
+		return 0;
+	}
+
+	const cutoff = new Date(Date.now() - retentionMs());
+
+	return getDatabase()('directus_cache_purges')
+		.where('time', '<', cutoff)
+		.delete();
+}
+
+/**
  * Recent cache anomalies for the admin page, grouped by cache_key+reason and shown
  * under each path/method/query node, with an occurrence count. Windowed like the
  * entries listing; older rows are reaped.
@@ -1355,6 +1423,9 @@ export async function readCacheTimeseries(
 				misses: 0,
 				fills: 0,
 				anomalies: 0,
+				purges: 0,
+				coarsePurges: 0,
+				purgedEntries: 0,
 				ttlMs: null,
 				effectiveTtlMs: null,
 				hitP50: null,
@@ -1474,6 +1545,23 @@ export async function readCacheTimeseries(
 			db.raw('COUNT(*) AS count'),
 		);
 
+	// A purge is one operation however many entries it deleted, so the count and
+	// the eviction total are different questions and both are answered. The coarse
+	// modes are split out here rather than in the app: they are what turns a purge
+	// from the cache working into a hit ratio falling off a cliff.
+	const purgeRows = await db('directus_cache_purges')
+		.where('time', '>', since)
+		.groupByRaw('1')
+		.select(
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
+			db.raw('COUNT(*) AS count'),
+			db.raw(
+				"SUM(CASE WHEN mode IN ('collection', 'namespace') THEN 1 ELSE 0 END) "
+				+ 'AS coarse',
+			),
+			db.raw('SUM(evicted) AS evicted'),
+		);
+
 	// Defensive clamp: a row at/after the next boundary (clock skew) would exceed the
 	// last slot; fold it into the last bucket rather than drop it. `+=` in the count
 	// loop because the fold can still collapse two DB buckets into one.
@@ -1494,6 +1582,13 @@ export async function readCacheTimeseries(
 
 	for (const row of anomalyRows as Record<string, unknown>[]) {
 		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
+	}
+
+	for (const row of purgeRows as Record<string, unknown>[]) {
+		const index = slotOf(row['bucket']);
+		dense[index]!.purges += Number(row['count'] ?? 0);
+		dense[index]!.coarsePurges += Number(row['coarse'] ?? 0);
+		dense[index]!.purgedEntries += Number(row['evicted'] ?? 0);
 	}
 
 	// A distinct grid (only kinds 0/2), so a latency bucket can't collide with a

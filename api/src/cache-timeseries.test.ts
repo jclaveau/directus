@@ -136,6 +136,54 @@ describe('readCacheTimeseries', () => {
 		]);
 	});
 
+	it('counts purges, the coarse subset, and what they evicted', async () => {
+		rowsByTable = {
+			directus_cache_purges: [
+				// Four purges in the oldest bucket, one of them wider than its own
+				// mutation, together taking 40 entries with them.
+				{ bucket: 0, count: 4, coarse: 1, evicted: 40 },
+				// A bucket whose purges were all precise: the coarse line sits at zero
+				// under a non-zero eviction count, which is the healthy shape.
+				{ bucket: 1, count: 2, coarse: 0, evicted: 6 },
+				// Past the last slot (clock skew) — folds into it rather than dropping.
+				{ bucket: 3, count: 1, coarse: 1, evicted: 500 },
+			],
+		};
+
+		const result = await readCacheTimeseries(180_000, 3);
+
+		expect(result.buckets[0]).toMatchObject({
+			purges: 4, coarsePurges: 1, purgedEntries: 40,
+		});
+
+		expect(result.buckets[1]).toMatchObject({
+			purges: 2, coarsePurges: 0, purgedEntries: 6,
+		});
+
+		// Nothing of its own, plus the folded-in skew row.
+		expect(result.buckets[2]).toMatchObject({
+			purges: 1, coarsePurges: 1, purgedEntries: 500,
+		});
+	});
+
+	it('reports no purges rather than nothing when none were recorded', async () => {
+		// A window with traffic but no mutation plots zero, not a gap: the series is
+		// a count, and a gap would read as "not measured".
+		rowsByTable = {
+			directus_cache_events: [
+				{ bucket: 0, hits: 5, misses: 1, fills: 3, ttl_ms: 30000 },
+			],
+		};
+
+		const result = await readCacheTimeseries(180_000, 3);
+
+		for (const bucket of result.buckets) {
+			expect(bucket.purges).toBe(0);
+			expect(bucket.coarsePurges).toBe(0);
+			expect(bucket.purgedEntries).toBe(0);
+		}
+	});
+
 	it('maps latency percentiles into buckets, null when unsampled', async () => {
 		rowsByTable = {
 			'directus_cache_events:latency': [
