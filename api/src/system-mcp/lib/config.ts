@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import type { McpToolGroup } from '../types/tool.js';
+import type { SystemMcpToolGroup } from '../types/tool.js';
 
 /**
  * Whether this deployment serves the system MCP endpoint. Off by default:
@@ -10,7 +10,7 @@ export function systemMcpEnabled(): boolean {
 	return useEnv()['SYSTEM_MCP_ENABLED'] === true;
 }
 
-function isMcpToolGroup(value: unknown): value is McpToolGroup {
+function isSystemMcpToolGroup(value: unknown): value is SystemMcpToolGroup {
 	return value === 'processes' || value === 'cache';
 }
 
@@ -19,7 +19,7 @@ function isMcpToolGroup(value: unknown): value is McpToolGroup {
  * listed and cannot be called — an agent given the processes tools has no way to
  * reach the cache ones.
  */
-export function systemMcpToolGroups(): McpToolGroup[] {
+export function systemMcpToolGroups(): SystemMcpToolGroup[] {
 	const configured = useEnv()['SYSTEM_MCP_TOOLS'];
 
 	if (Array.isArray(configured) === false) {
@@ -28,7 +28,7 @@ export function systemMcpToolGroups(): McpToolGroup[] {
 
 	return configured
 		.map((group) => String(group).trim())
-		.filter(isMcpToolGroup);
+		.filter(isSystemMcpToolGroup);
 }
 
 /**

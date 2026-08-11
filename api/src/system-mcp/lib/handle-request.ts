@@ -1,5 +1,5 @@
 import { version } from 'directus/version';
-import type { McpToolContext } from '../types/tool.js';
+import type { SystemMcpToolContext } from '../types/tool.js';
 import { systemMcpTools, findSystemMcpTool } from './tools.js';
 
 /**
@@ -50,7 +50,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function callTool(
 	id: JsonRpcId,
 	params: Record<string, unknown>,
-	context: McpToolContext,
+	context: SystemMcpToolContext,
 ): Promise<JsonRpcResponse> {
 	const tool = findSystemMcpTool(params['name']);
 
@@ -105,7 +105,7 @@ async function callTool(
  */
 export async function handleSystemMcpRequest(
 	body: unknown,
-	context: McpToolContext,
+	context: SystemMcpToolContext,
 ): Promise<JsonRpcResponse | null> {
 	// Malformed JSON never reaches here — the body parser rejects it with a 400
 	// first — so anything that is not an object is well-formed JSON of the wrong

@@ -2,8 +2,8 @@ import { requestedWindowMs } from '../../utils/requested-window-ms.js';
 import { UtilsService } from '../../services/utils.js';
 import {
 	defineSystemMcpTool,
-	type McpTool,
-	type McpToolContext,
+	type SystemMcpTool,
+	type SystemMcpToolContext,
 } from '../types/tool.js';
 import { systemMcpToolGroups } from './config.js';
 import { reportedProcessDetails } from '../../processes/lib/processes-config.js';
@@ -13,7 +13,7 @@ import { reportedProcessDetails } from '../../processes/lib/processes-config.js'
  * surfaces already carries is the one that runs — this exposes no read the REST
  * API would have refused.
  */
-function utils(context: McpToolContext): UtilsService {
+function utils(context: SystemMcpToolContext): UtilsService {
 	return new UtilsService({
 		accountability: context.accountability,
 		schema: context.schema,
@@ -85,7 +85,7 @@ const windowProperty = {
  * Every tool compiled in, built fresh: a description reads config, and config
  * outlives no request. Nothing here is evaluated at import time.
  */
-export function allSystemMcpTools(): McpTool[] {
+export function allSystemMcpTools(): SystemMcpTool[] {
 	return [
 	defineSystemMcpTool({
 		name: 'list_processes',
@@ -244,12 +244,12 @@ export function allSystemMcpTools(): McpTool[] {
  * The tools this deployment exposes. A tool whose group is not exposed is not
  * listed and, because lookups go through here, cannot be called either.
  */
-export function systemMcpTools(): McpTool[] {
+export function systemMcpTools(): SystemMcpTool[] {
 	const groups = systemMcpToolGroups();
 
 	return allSystemMcpTools().filter((tool) => groups.includes(tool.group));
 }
 
-export function findSystemMcpTool(name: unknown): McpTool | undefined {
+export function findSystemMcpTool(name: unknown): SystemMcpTool | undefined {
 	return systemMcpTools().find((tool) => tool.name === name);
 }

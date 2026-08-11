@@ -1,7 +1,7 @@
 import type { Accountability, SchemaOverview } from '@directus/types';
 
 /** What a tool receives: the caller's identity and the schema it reads under. */
-export interface McpToolContext {
+export interface SystemMcpToolContext {
 	accountability: Accountability | null;
 	schema: SchemaOverview;
 }
@@ -10,16 +10,16 @@ export interface McpToolContext {
  * The subsystem a tool reads, so a deployment can expose one without the other
  * (`SYSTEM_MCP_TOOLS`).
  */
-export type McpToolGroup = 'processes' | 'cache';
+export type SystemMcpToolGroup = 'processes' | 'cache';
 
 /**
  * One diagnostic read, described well enough for a model to choose it and call
  * it without being told what it does — the `inputSchema` is the contract MCP
  * clients validate arguments against.
  */
-export interface McpTool {
+export interface SystemMcpTool {
 	name: string;
-	group: McpToolGroup;
+	group: SystemMcpToolGroup;
 	title: string;
 	description: string;
 	inputSchema: {
@@ -45,7 +45,10 @@ export interface McpTool {
 		destructiveHint: false;
 		openWorldHint: false;
 	};
-	run: (args: Record<string, unknown>, context: McpToolContext) => Promise<unknown>;
+	run: (
+		args: Record<string, unknown>,
+		context: SystemMcpToolContext,
+	) => Promise<unknown>;
 }
 
 /**
@@ -53,7 +56,7 @@ export interface McpTool {
  * mirrors that, and exists so the schema below is checked against what a client
  * really receives rather than against what the service returned.
  */
-export type StructuredAnswer<T> = T extends readonly unknown[]
+export type SystemMcpStructuredAnswer<T> = T extends readonly unknown[]
 	? { items: T }
 	: T;
 
@@ -65,9 +68,9 @@ export type StructuredAnswer<T> = T extends readonly unknown[]
  * which is the mistake this exists to prevent: two schemas once declared
  * `events` and `disabledReason`, neither of which any service ever returned.
  */
-export type McpOutputSchema<TAnswer> = {
+export type SystemMcpOutputSchema<TAnswer> = {
 	type: 'object';
-	properties: { [K in keyof Required<StructuredAnswer<TAnswer>>]: unknown };
+	properties: { [K in keyof Required<SystemMcpStructuredAnswer<TAnswer>>]: unknown };
 };
 
 /**
@@ -77,13 +80,16 @@ export type McpOutputSchema<TAnswer> = {
  */
 export function defineSystemMcpTool<TAnswer>(tool: {
 	name: string;
-	group: McpToolGroup;
+	group: SystemMcpToolGroup;
 	title: string;
 	description: string;
-	inputSchema: McpTool['inputSchema'];
-	outputSchema: McpOutputSchema<Awaited<TAnswer>>;
-	annotations: McpTool['annotations'];
-	run: (args: Record<string, unknown>, context: McpToolContext) => Promise<TAnswer>;
-}): McpTool {
-	return tool as unknown as McpTool;
+	inputSchema: SystemMcpTool['inputSchema'];
+	outputSchema: SystemMcpOutputSchema<Awaited<TAnswer>>;
+	annotations: SystemMcpTool['annotations'];
+	run: (
+		args: Record<string, unknown>,
+		context: SystemMcpToolContext,
+	) => Promise<TAnswer>;
+}): SystemMcpTool {
+	return tool as unknown as SystemMcpTool;
 }
