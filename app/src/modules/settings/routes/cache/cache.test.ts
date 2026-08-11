@@ -1302,6 +1302,9 @@ describe('CachePage', () => {
 					misses: 2,
 					fills: 1,
 					anomalies: 0,
+					purges: 3,
+					coarsePurges: 1,
+					purgedEntries: 9,
 					ttlMs: 3600000,
 				}],
 				markers: [],
@@ -1316,13 +1319,29 @@ describe('CachePage', () => {
 
 		// Responses is the hit + miss total, the hit ratio hits/(hits + fills).
 		expect(config.series[0].data).toEqual([[1000, 7]]);
-		expect(config.series[5].name).toBe('Hit ratio');
-		expect(config.series[5].data[0]![1]).toBeCloseTo(83.33);
+
+		// The tooltip below reads its values by position, so the order is the
+		// contract — pinned whole rather than by one index, which is what let two
+		// series be inserted after Hits without this test saying where they went.
+		expect(config.series.map((series: { name: string }) => series.name)).toEqual([
+			'Responses',
+			'Misses',
+			'Anomalies',
+			'Fills',
+			'Hits',
+			'Purged entries',
+			'Coarse purges',
+			'Hit ratio',
+			'TTL',
+			'Entry lifetime',
+		]);
+
+		expect(config.series[7].data[0]![1]).toBeCloseTo(83.33);
 
 		// Tooltip: one tight "name: value" row per metric, each in its own unit.
 		// Positional, in the funnel order the series are declared in.
 		const html = config.tooltip.custom({
-			series: [[7], [2], [0], [1], [5], [83.33], [3600]],
+			series: [[7], [2], [0], [1], [5], [9], [1], [83.33], [3600]],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
@@ -1332,14 +1351,19 @@ describe('CachePage', () => {
 		expect(html).toContain('Anomalies: 0');
 		expect(html).toContain('Fills: 1');
 		expect(html).toContain('Hits: 5');
+		// What a purge took, and how much of it reached wider than its mutation.
+		expect(html).toContain('Purged entries: 9');
+		expect(html).toContain('Coarse purges: 1');
 		expect(html).toContain('Hit ratio: 83%');
 		expect(html).toContain('TTL: 1h');
 		expect(html).toContain('cache-tt-row');
 
 		// Dashes mark the lines that don't share the Count axis: the ratio, and the
 		// entry lifetime — dashed apart from the TTL it sits beside so the config and
-		// the lifetimes of the entries it produced can't be read as one line.
-		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 6, 0, 4]);
+		// the lifetimes of the entries it produced can't be read as one line. Both
+		// purge series are counts, so both stay solid; a dash there would claim a
+		// second axis they do not use.
+		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 0, 0, 6, 0, 4]);
 
 		// Count axis stays integer; TTL axis reads as a duration; the ratio gets a
 		// pinned 0-100 axis with nothing drawn, since a percent carries its scale.

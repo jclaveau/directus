@@ -252,8 +252,11 @@ export async function countScopedCacheTagMembers(
  * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
  * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
  *
- * Returns how many entries it deleted — the members are read here anyway, so the
- * count the telemetry records costs nothing extra.
+ * Returns how many cache ENTRIES it deleted, which is not how many keys it
+ * deleted: a tag set holds each entry alongside its `__expires_at` sibling and
+ * any extra sibling (`__tags`), so counting members would report every entry
+ * twice over. A sidecar is recognisable by its base key being in the set beside
+ * it — the `sadd` writes them together — which stays right as siblings are added.
  */
 async function purgeScopedCacheTagKeys(
 	cache: Keyv,
@@ -275,7 +278,14 @@ async function purgeScopedCacheTagKeys(
 
 	await redis.del(...tagKeys);
 
-	return members.length;
+	const present = new Set(members);
+
+	return members.filter((member) => {
+		const sidecarSuffix = member.lastIndexOf('__');
+
+		return sidecarSuffix === -1
+			|| present.has(member.slice(0, sidecarSuffix)) === false;
+	}).length;
 }
 
 /**
@@ -377,13 +387,13 @@ export async function purgeScopedCache(
 		await cache.clear();
 
 		// No tag sets and no member list to count here: the clear takes the whole
-		// namespace, so the row records the reach and leaves the size unknown
-		// rather than inventing one.
+		// namespace, so the row records the reach and leaves the size unknown.
+		// Zero would draw the most destructive event here as one that took nothing.
 		queueCachePurge({
 			collection: null,
 			mode: 'namespace',
 			tags: 0,
-			evicted: 0,
+			evicted: null,
 		});
 
 		return null;

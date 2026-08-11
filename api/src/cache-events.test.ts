@@ -6,6 +6,7 @@ import {
 	clampCacheStatsWindow,
 	claimCacheAnomalyThrottleSlot,
 	queueCacheAnomaly,
+	queueCachePurge,
 	queueMissLatency,
 	queueCacheHit,
 	queueCacheMiss,
@@ -23,6 +24,7 @@ import {
 	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
+	reapCachePurges,
 	refreshCacheStatsFlag,
 	setCacheStatsEnabled,
 	subscribeCacheStatsToggle,
@@ -1726,6 +1728,94 @@ describe('reapCacheAnomalies', () => {
 		expect(await reapCacheAnomalies()).toBe(5);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
 		expect(builder.delete).toHaveBeenCalled();
+	});
+});
+
+describe('reapCachePurges', () => {
+	it('deletes purge rows past the retention window', async () => {
+		deleteCount = 4;
+
+		expect(await reapCachePurges()).toBe(4);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_purges');
+		expect(builder.delete).toHaveBeenCalled();
+	});
+});
+
+describe('queueCachePurge', () => {
+	it('emits the reach and the size of one purge', async () => {
+		await armFlag(null);
+
+		queueCachePurge({
+			collection: 'articles',
+			mode: 'collection',
+			tags: 3,
+			evicted: 12,
+		});
+
+		await flushCacheEventBuffer();
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(call[0]).toBe('XADD');
+		expect(fieldAfter(call, 'kind')).toBe('p');
+		expect(fieldAfter(call, 'collection')).toBe('articles');
+		expect(fieldAfter(call, 'mode')).toBe('collection');
+		expect(fieldAfter(call, 'tags')).toBe('3');
+		expect(fieldAfter(call, 'evicted')).toBe('12');
+	});
+
+	// A namespace clear has no member list to count, so the size is unknown
+	// rather than zero — `0` would draw the most destructive event in the system
+	// as one that took nothing.
+	it('emits an unknown size rather than zero for a namespace clear', async () => {
+		await armFlag(null);
+
+		queueCachePurge({
+			collection: null,
+			mode: 'namespace',
+			tags: 0,
+			evicted: null,
+		});
+
+		await flushCacheEventBuffer();
+		const call = mockRedis.call.mock.calls[0]!;
+		expect(fieldAfter(call, 'mode')).toBe('namespace');
+		expect(fieldAfter(call, 'collection')).toBe('');
+		expect(fieldAfter(call, 'evicted')).toBe('');
+	});
+
+	// `recordCacheConfigEvent` is deliberately ungated so a flush made while
+	// stats were off still shows once they return. A purge is the same class of
+	// event, and the watchdog that kills capture kills it for hit/miss VOLUME —
+	// purges are mutation-rate and are not what it defends against.
+	it('records while capture is switched off, as a flush marker does', async () => {
+		await armFlag('0');
+
+		queueCachePurge({
+			collection: 'articles',
+			mode: 'slices',
+			tags: 1,
+			evicted: 2,
+		});
+
+		await flushCacheEventBuffer();
+
+		expect(mockRedis.call).toHaveBeenCalled();
+		expect(fieldAfter(mockRedis.call.mock.calls[0]!, 'kind')).toBe('p');
+	});
+
+	it('stays silent where cache stats are not configured at all', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		await armFlag(null);
+
+		queueCachePurge({
+			collection: 'articles',
+			mode: 'slices',
+			tags: 1,
+			evicted: 2,
+		});
+
+		await flushCacheEventBuffer();
+
+		expect(mockRedis.call).not.toHaveBeenCalled();
 	});
 });
 

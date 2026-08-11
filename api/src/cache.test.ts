@@ -340,8 +340,8 @@ describe('scoped cache purging', () => {
 		test('records the purge, how wide it reached and what it took', async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
 				return tagKey === 'scalabus:tag:slots'
-					? ['global-key']
-					: ['key-a', 'key-a__expires_at'];
+					? ['global-key', 'global-key__expires_at']
+					: ['key-a', 'key-a__expires_at', 'key-a__tags'];
 			});
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
@@ -350,14 +350,21 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
-			// Two tag sets (the bare collection tag and the one slice), three entries
-			// between them — the count the eviction line on the chart plots.
+			// Two tag sets, and TWO entries — not the five keys deleted. A tag set
+			// holds each entry alongside its `__expires_at` sibling and any extra
+			// sibling (`__tags`), so counting members would report every entry twice
+			// over and draw an eviction line at double the truth.
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'slots',
 				mode: 'slices',
 				tags: 2,
-				evicted: 3,
+				evicted: 2,
 			});
+
+			// The sidecars are still deleted — only the count excludes them.
+			expect(cache.delete).toHaveBeenCalledWith('global-key__expires_at');
+			expect(cache.delete).toHaveBeenCalledWith('key-a__tags');
+			expect(cache.delete).toHaveBeenCalledTimes(5);
 		});
 
 		test('records the coarse fallback as the wider thing it is', async () => {
@@ -377,13 +384,43 @@ describe('scoped cache purging', () => {
 			await purgeScopedCache(cache, 'articles', null);
 
 			// Three tag sets: the bare tag plus every slice the scan turned up. Two
-			// entries, because both slices pointed at the same key — the count is of
-			// what was deleted, not of what was pointed at.
+			// entries, because both slices pointed at the same key — deduped across
+			// the sets rather than counted per set.
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'articles',
 				mode: 'collection',
 				tags: 3,
 				evicted: 2,
+			});
+		});
+
+		test(oneLine`
+			one coarse purge is one record, not one per tag set it swept
+		`, async () => {
+			// The fallback scans up to every slice of the collection. It is still a
+			// single purge operation, so a bucket count of purges stays a count of
+			// purges rather than tracking how wide each one happened to reach.
+			redis.scan.mockResolvedValueOnce([
+				'0',
+				[
+					'scalabus:tag:articles:author=1',
+					'scalabus:tag:articles:author=2',
+					'scalabus:tag:articles:author=3',
+				],
+			]);
+
+			redis.smembers.mockResolvedValue([]);
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'articles', null);
+
+			expect(queueCachePurge).toHaveBeenCalledOnce();
+
+			expect(queueCachePurge).toHaveBeenCalledWith({
+				collection: 'articles',
+				mode: 'collection',
+				tags: 4,
+				evicted: 0,
 			});
 		});
 
@@ -398,12 +435,13 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).toHaveBeenCalledOnce();
 
 			// The clear takes the whole namespace, so there is no member list to
-			// count. Reporting zero entries is honest; guessing one would not be.
+			// count. The size is unknown, not zero — zero would plot the most
+			// destructive event in the system as one that took nothing.
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: null,
 				mode: 'namespace',
 				tags: 0,
-				evicted: 0,
+				evicted: null,
 			});
 		});
 

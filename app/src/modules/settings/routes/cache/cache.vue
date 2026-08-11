@@ -1007,12 +1007,13 @@ function chartConfig(): ApexOptions {
 		},
 		{
 			// The purges that reached wider than their mutation did — a collection
-			// fallback or a namespace clear. Dashed because it is a subset of the
-			// purges behind the line above, not a separate population.
+			// fallback or a namespace clear. Solid, not dashed: on this chart a dash
+			// means the line does not share the Count axis, and this one does. Its
+			// kinship with the line above is carried by the colour instead.
 			name: t('cache_coarse_purges', 'Coarse purges'),
 			unit: 'count',
 			curve: 'straight',
-			dash: 6,
+			dash: 0,
 			color: themeVar('--theme--primary-subdued', '#af9aff'),
 			pick: (b) => b.coarsePurges,
 		},

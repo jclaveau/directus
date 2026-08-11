@@ -60,7 +60,7 @@ export interface CachePurge {
 	collection: string | null; // null on a namespace-wide clear
 	mode: CachePurgeMode;
 	tags: number; // tag sets the purge dropped
-	evicted: number; // entries those sets pointed at
+	evicted: number | null; // entries those sets held; null = whole-namespace clear
 }
 
 export interface CacheDescriptor {
@@ -479,7 +479,14 @@ export function queueCacheAnomaly(entry: CacheAnomaly): void {
  * is mutation-rate, and each row carries how far it reached and what it took.
  */
 export function queueCachePurge(entry: CachePurge): void {
-	if (!cacheStatsActiveFlag) {
+	// Gated on being CONFIGURED, not on the capture flag — deliberately unlike
+	// the hit/miss emitters beside it. `recordCacheConfigEvent` records a flush
+	// even while stats are off so it still shows once they return, and a purge is
+	// the same class of event. The watchdog that kills capture kills it for
+	// hit/miss volume; a purge is mutation-rate and is not what it defends
+	// against, so losing purges to it would blind the page exactly when an
+	// operator is looking for what evicted the cache.
+	if (!cacheStatsConfigured()) {
 		return;
 	}
 
@@ -488,7 +495,11 @@ export function queueCachePurge(entry: CachePurge): void {
 		collection: entry.collection ?? '',
 		mode: entry.mode,
 		tags: String(entry.tags),
-		evicted: String(entry.evicted),
+		// Empty = unknown, which is not the same as none. Only a namespace clear
+		// sends it: it has no member list to count.
+		evicted: entry.evicted === null
+			? ''
+			: String(entry.evicted),
 		ts: String(Date.now()),
 	});
 }
@@ -608,6 +619,14 @@ interface CacheAnomalyRow {
 	cache_key: string;
 	reason: string;
 	detail: string;
+}
+
+interface CachePurgeRow {
+	time: Date;
+	collection: string | null;
+	mode: CachePurgeMode;
+	tags: number;
+	evicted: number | null; // null = a namespace clear, whose size is unknowable
 }
 
 function parseFields(flat: string[]): Record<string, string> {
@@ -788,7 +807,10 @@ async function persistStreamBatch(
 					: null,
 				mode: (f['mode'] ?? 'slices') as CachePurgeMode,
 				tags: Number(f['tags'] ?? 0),
-				evicted: Number(f['evicted'] ?? 0),
+				// Empty came off a namespace clear: unknown, not none.
+				evicted: f['evicted']
+					? Number(f['evicted'])
+					: null,
 			});
 
 			continue;
