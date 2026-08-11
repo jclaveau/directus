@@ -1068,7 +1068,10 @@ export async function listCacheEntries(
 	// beside it. DISTINCT on the purge id so a purge covering two of an entry's
 	// tags counts once.
 	const purgesByKey = new Map<string, number>();
-	const listedKeys = rows.map((row: Record<string, unknown>) => row['cache_key']);
+
+	const listedKeys = rows.map((row: Record<string, unknown>) => {
+		return String(row['cache_key']);
+	});
 
 	if (listedKeys.length > 0) {
 		const purgeRows = await db('directus_cache_entry_tags as et')
