@@ -1,4 +1,4 @@
-import { requestedWindowMs } from '../../utils/requested-window-ms.js';
+import { getMilliseconds } from '../../utils/get-milliseconds.js';
 import { UtilsService } from '../../services/utils.js';
 import {
 	defineSystemMcpTool,
@@ -129,7 +129,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 		outputSchema: LIST_OUTPUT,
 		annotations: READ_ONLY,
 		run: async (args, context) => {
-			return utils(context).getCacheEntries(requestedWindowMs(args['window']));
+			return utils(context).getCacheEntries(getMilliseconds(args['window']));
 		},
 	}),
 	defineSystemMcpTool({
@@ -144,7 +144,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 		outputSchema: LIST_OUTPUT,
 		annotations: READ_ONLY,
 		run: async (args, context) => {
-			return utils(context).getCacheAnomalies(requestedWindowMs(args['window']));
+			return utils(context).getCacheAnomalies(getMilliseconds(args['window']));
 		},
 	}),
 	defineSystemMcpTool({
@@ -159,7 +159,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 		outputSchema: LIST_OUTPUT,
 		annotations: READ_ONLY,
 		run: async (args, context) => {
-			const window = requestedWindowMs(args['window']);
+			const window = getMilliseconds(args['window']);
 
 			return utils(context).getCacheGroupLatencies(window);
 		},
@@ -204,7 +204,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				: Number(args['buckets']);
 
 			return utils(context).getCacheTimeseries(
-				requestedWindowMs(args['window']),
+				getMilliseconds(args['window']),
 				buckets,
 			);
 		},

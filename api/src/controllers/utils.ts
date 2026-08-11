@@ -12,7 +12,7 @@ import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
 import { generateHash } from '../utils/generate-hash.js';
-import { requestedWindowMs } from '../utils/requested-window-ms.js';
+import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = Router();
@@ -223,7 +223,7 @@ router.get(
 
 		// Never cache the cache listing itself — it must reflect live state.
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
+		const windowMs = getMilliseconds(req.query['window']);
 		res.locals['payload'] = { data: await service.getCacheEntries(windowMs) };
 
 		return next();
@@ -240,7 +240,7 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
+		const windowMs = getMilliseconds(req.query['window']);
 		res.locals['payload'] = { data: await service.getCacheAnomalies(windowMs) };
 
 		return next();
@@ -257,7 +257,7 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
+		const windowMs = getMilliseconds(req.query['window']);
 
 		res.locals['payload'] = {
 			data: await service.getCacheGroupLatencies(windowMs),
@@ -277,7 +277,7 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
+		const windowMs = getMilliseconds(req.query['window']);
 
 		const buckets = req.query['buckets'] === undefined
 			? undefined

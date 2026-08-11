@@ -2,11 +2,11 @@ post:
   summary: Call a system tool
   description: >
     A read-only MCP (Model Context Protocol) endpoint over JSON-RPC 2.0,
-    served at /system-mcp rather than /mcp, which upstream Directus uses
-    for its own content MCP. Exposes the diagnostic reads as tools: the
-    processes tree, the cache listings, anomalies, latencies, timeseries and
-    telemetry state. Supports `initialize`, `ping`, `tools/list` and
-    `tools/call`; every tool is annotated read-only.
+    implementing the Streamable HTTP transport of revision 2025-06-18. Exposes
+    the diagnostic reads as tools: the processes tree, the cache listings,
+    anomalies, latencies, timeseries and telemetry state. Supports
+    `initialize`, `ping`, `tools/list` and `tools/call`; every tool is
+    annotated read-only.
 
 
     Admin only, authenticated as any other admin surface here — a session, or a
@@ -14,7 +14,8 @@ post:
     by SYSTEM_MCP_TOOLS, and the endpoint is served only where
     SYSTEM_MCP_ENABLED is on. Browser callers must send an Origin named in
     SYSTEM_MCP_ALLOWED_ORIGINS; a caller with no Origin is not a browser.
-    GET is answered with 405: this server offers no SSE stream.
+    GET and DELETE are answered with 405: this server offers no SSE stream and
+    opens no session.
   operationId: call-system-mcp
   requestBody:
     content:
