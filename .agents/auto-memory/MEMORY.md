@@ -21,6 +21,8 @@
   `git commit --amend` + `git push --force-with-lease` over layered fix-up commits
 - [Don't ask before pnpm install / build in this repo](feedback_no_ask_for_build_install.md) — project override of the
   global ask-before-install rule; routine install/build steps run silently, dep-modifying commands still ask
+- [Never run blackbox locally — run it in CI](feedback_directus_bb_tests_in_ci.md) — local is SLOWER (full dist deploy +
+  a server per env variant, no sharding) and re-seeds jean's docker stack; push, label `Run Blackbox`, loop on the run
 - [Fork integration branches](project_directus_fork_integration_branches.md) — ⚠️2026-07-27 pr-controle RETIRED (tag archive/pr-controle), `v11.10.1-hhh-dev` IS now default; control-plane curated-ported (#303/#305), compose+publish parked; main = clean upstream base; hhh-main = derived from the copy stack; supersedes old
   main-overlay model; blackbox/e2e label-gated; blackbox-pr.yml is name:Check; CI gates = build+eslint+stylelint (no
   tsc)
@@ -109,3 +111,8 @@
 - [/server/info is cacheable under FULL purge only](project_directus_server_info_cache_mode.md) — opt-out gated on `scopedCachePurgeEnabled()`; it can no longer provoke `missing_scope` → use `/server/specs/oas` as the provoker
 - [Scalabus licensing](project_scalabus_licensing.md) — fork additions = jean's own BSL-1.1, Additional Use Grant None, Change Date 4y; scope is repository-minus-upstream NEVER branch names; Licensor is jean personally, `license` stays Monospace's; PolyForm Shield or GPLv3 is a deliberate later decision
 - [Derived branches regenerate themselves](project_scalabus_derived_branches.md) — `*-dist` (release-fork.yml) and `ci-dialect-*` (refresh-dialect-ci.yml) rebuild from the trunk via `checkout -B` on every push; never rewrite, hand-edit or delete them; `-dist` ships api/src and is what the planner installs
+- [Cache key ignores unknown query params](project_directus_cache_key_ignores_unknown_params.md) — key = pathname + sanitizedQuery + user; sanitizeQuery copies only known params, so `?myKey=a|b` collapses to ONE entry (vary `fields` instead); no IP in the key
+- [Never wait for the admin preview when watching CI](feedback_directus_ci_watch_skip_preview.md) — the preview job holds `sleep infinity` to its 180min timeout; filter it out of watchers, judge on Check/Style/CodeQL, read the URL from the PR description
+- [Codecov patch can be stale two ways](project_directus_codecov_stale_flag.md) — a conflicting PR stops `pull_request` CI (only `pull_request_target` fires, so CI looks alive); and a flag upload can carry forward while green — tell is an identical percentage, fix is rerunning the uploading job
+- [Publishing a path in the OpenAPI](project_directus_oas_publishing.md) — `/server/specs/oas` is unauthenticated and gates per TAG (`x-authentication`), env-gated routes still appear (document the 404), spec is OAS 3.0.1 so `nullable: true` not `type: null`
+- [PR #350 system MCP — settled points](project_directus_pr350_accepted_exceptions.md) — foreign-spec names stay unprefixed, 2025-03-26 refused on purpose, static-token blast radius filed as #352, barrel 0% is an artefact; don't re-raise
