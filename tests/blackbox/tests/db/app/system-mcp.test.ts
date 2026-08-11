@@ -205,6 +205,38 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	describe('Answers DELETE with 405 too', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// DELETE ends a session, and this server opens none. Answering 404
+			// would send the client off to open a replacement for a session that
+			// never existed.
+			const response = await request(getUrl(vendor, envs[vendor]['envMcp']))
+				.delete('/system-mcp')
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(response.statusCode).toBe(405);
+			expect(response.headers['allow']).toContain('POST');
+		});
+	});
+
+	describe('Refuses a JSON-RPC response with an HTTP error', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// The transport allows a response or a notification only two answers:
+			// 202 when the server accepts it, an HTTP error when it cannot. This
+			// server never asks the client anything, so a response answers nothing
+			// and is refused — as a status, not as a JSON-RPC error, which would
+			// read as an answer to a request the client never sent.
+			const response = await call(vendor, {
+				jsonrpc: '2.0',
+				id: 1,
+				result: { tools: [] },
+			});
+
+			expect(response.statusCode).toBe(400);
+			expect(response.body.errors[0].message).toContain('JSON-RPC response');
+		});
+	});
+
 	describe('Refuses a protocol revision it does not implement', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await post(vendor, 'envMcp', {

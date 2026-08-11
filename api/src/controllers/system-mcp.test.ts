@@ -25,8 +25,9 @@ const { default: router } = await import('./system-mcp.js');
 /**
  * `router.post(path, asyncHandler(fn))` registers one Route layer whose own stack
  * holds the handler; drive the bare handler, as the utils controller test does.
+ * `router.all` registers the same way, under the `_all` method.
  */
-function handlerFor(path: string, method: 'post' | 'get') {
+function handlerFor(path: string, method: 'post' | '_all') {
 	const layer = router.stack.find((entry: any) => {
 		return entry.route?.path === path && entry.route?.methods?.[method];
 	});
@@ -81,7 +82,7 @@ function response() {
 }
 
 const post = handlerFor('/', 'post');
-const get = handlerFor('/', 'get');
+const anyOtherMethod = handlerFor('/', '_all');
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -265,11 +266,19 @@ describe('the system MCP endpoint', () => {
 		expect(logger.info).toHaveBeenCalledOnce();
 	});
 
-	test('answers GET with 405, naming what it does support', () => {
-		const res = response();
-		get({} as any, res, vi.fn());
+	// GET is the transport's SSE stream and DELETE ends a session; this server
+	// offers neither, and a 404 would tell a client its session had expired.
+	test.each(['GET', 'DELETE'])('answers %s with 405', (method) => {
+		const next = vi.fn();
 
-		expect(res.statusCode).toBe(405);
-		expect(res.headers['Allow']).toBe('POST');
+		anyOtherMethod({ method } as any, response(), next);
+
+		expect(next).toHaveBeenCalledOnce();
+
+		// The error handler turns this into the 405 and its `Allow` header.
+		expect(next.mock.calls[0]![0].extensions).toEqual({
+			allowed: ['POST'],
+			current: method,
+		});
 	});
 });

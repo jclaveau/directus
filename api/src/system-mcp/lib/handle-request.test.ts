@@ -260,6 +260,18 @@ test('A message with no method is invalid, and echoes its id', async () => {
 	expect(response?.id).toBe(9);
 });
 
+test.each([
+	['a result', { jsonrpc: '2.0', id: 10, result: { ok: true } }],
+	['an error', { jsonrpc: '2.0', id: 11, error: { code: -1, message: 'no' } }],
+])('A response carrying %s is refused over HTTP', async (_case, body) => {
+	// The transport asks for an HTTP error status here rather than a JSON-RPC
+	// one: this server never sends the client a request, so nothing it sent is
+	// being answered, and a JSON-RPC error would read as though something were.
+	await expect(handleSystemMcpRequest(body, context))
+		.rejects
+		.toThrow(/JSON-RPC response is not accepted/);
+});
+
 test('A notification is answered with nothing at all', async () => {
 	const initialized = await handleSystemMcpRequest(
 		{ jsonrpc: '2.0', method: 'notifications/initialized' },

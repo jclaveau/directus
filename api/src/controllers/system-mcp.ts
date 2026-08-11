@@ -1,4 +1,8 @@
-import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidPayloadError,
+	MethodNotAllowedError,
+} from '@directus/errors';
 import { Router } from 'express';
 import { useLogger } from '../logger/index.js';
 import {
@@ -21,7 +25,9 @@ const router = Router();
  * Directus static token on an admin user. There is no credential of its own to
  * issue, revoke or leak — `authenticate` resolves the token before this router
  * ever runs, and the tools then pass through the same service guard the REST
- * endpoints use.
+ * endpoints use. The rate limit the MCP tool spec asks for is the one Directus
+ * already applies: `rateLimiterGlobal` and `rateLimiter` are mounted ahead of
+ * every router, this one included.
  */
 router.post(
 	'/',
@@ -91,14 +97,17 @@ router.post(
 );
 
 /**
- * The transport reserves GET for an SSE stream. This server has none — a
- * read-only tool set needs no server-initiated messages — and the spec's answer
- * for that is 405, not the 404 an unrouted method would produce.
+ * The transport reserves GET for an SSE stream this server does not offer — a
+ * read-only tool set needs no server-initiated messages — and reserves DELETE
+ * for ending a session it never opens. Both are answered 405 rather than the
+ * 404 an unrouted method would give: a 404 from this endpoint tells a client
+ * its session expired, and it would go and open another one.
+ *
+ * `MethodNotAllowedError` is how the rest of the API answers this, and its
+ * handler writes the `Allow` header RFC 9110 requires of a 405.
  */
-router.get('/', (_req, res) => {
-	// RFC 9110: a 405 MUST carry an Allow header naming what the resource does
-	// support.
-	res.set('Allow', 'POST').sendStatus(405);
+router.all('/', (req, _res, next) => {
+	next(new MethodNotAllowedError({ allowed: ['POST'], current: req.method }));
 });
 
 export default router;

@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { version } from 'directus/version';
 import type { SystemMcpToolContext } from '../types/tool.js';
 import { systemMcpTools, findSystemMcpTool } from './tools.js';
@@ -117,6 +118,20 @@ export async function handleSystemMcpRequest(
 
 	const id = (body['id'] ?? null) as JsonRpcId;
 	const method = body['method'];
+
+	// A JSON-RPC *response* is a message this server has no use for: it never
+	// asks the client anything, so nothing it sent is being answered. The
+	// transport wants a response it cannot accept refused with an HTTP error
+	// status rather than a JSON-RPC one, which would read as an answer to a
+	// request the client never made.
+	if (
+		typeof method !== 'string'
+		&& ('result' in body || 'error' in body)
+	) {
+		throw new InvalidPayloadError({
+			reason: 'A JSON-RPC response is not accepted at this endpoint',
+		});
+	}
 
 	if (typeof method !== 'string') {
 		return fail(id, INVALID_REQUEST, 'Expected a `method` string');
