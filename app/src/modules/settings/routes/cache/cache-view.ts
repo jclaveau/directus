@@ -18,6 +18,10 @@ export interface CacheEntry {
 	hits: number;
 	misses: number;
 	fills: number;
+	// Purges that covered this entry's tags in the window. Read beside `hits`:
+	// more purges than hits means the cache is filling this response more often
+	// than it serves it.
+	purges: number;
 	fillMs: number | null;
 	hitMs: number | null;
 	ttlMs: number | null;
@@ -81,6 +85,7 @@ export interface QueryGroup {
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;
+	totalPurges: number;
 	totalSize: number;
 	ttlMs: number | null;
 	recommendedTtlMs: number | null;
@@ -141,6 +146,7 @@ export interface EndpointGroup {
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;
+	totalPurges: number;
 	totalSize: number;
 	hitRatio: number | null; // % hits/(hits+fills); null when no traffic
 	maxFillMs: number | null; // slowest fill observed in this endpoint, ms
@@ -405,6 +411,10 @@ function sumFills(entries: CacheEntry[]): number {
 	return entries.reduce((sum, entry) => sum + entry.fills, 0);
 }
 
+function sumPurges(entries: CacheEntry[]): number {
+	return entries.reduce((sum, entry) => sum + entry.purges, 0);
+}
+
 // Hit ratio in percent: hits' share of (hits + fills). Null when there was no
 // traffic at all — the tree renders that as an em-dash, not a meaningless 0%.
 export function hitRatioPercent(hits: number, fills: number): number | null {
@@ -530,6 +540,7 @@ function buildQueryGroups(
 			totalHits: sumHits(bucket.entries),
 			totalMisses: sumMisses(bucket.entries),
 			totalFills: sumFills(bucket.entries),
+			totalPurges: sumPurges(bucket.entries),
 			totalSize: sumSize(bucket.entries),
 			ttlMs: maxOrNull(bucket.entries, (entry) => entry.ttlMs),
 			recommendedTtlMs: maxOrNull(bucket.entries, (entry) => entry.recommendedTtlMs),
@@ -587,6 +598,7 @@ export function buildGroups(
 			totalHits: sumHits(pathEntries),
 			totalMisses: sumMisses(pathEntries),
 			totalFills: sumFills(pathEntries),
+			totalPurges: sumPurges(pathEntries),
 			totalSize: sumSize(pathEntries),
 			hitRatio: hitRatioPercent(sumHits(pathEntries), sumFills(pathEntries)),
 			maxFillMs: maxOrNull(pathEntries, (entry) => entry.fillMs),
@@ -655,6 +667,7 @@ export type GroupSortField =
 	| 'hits'
 	| 'misses'
 	| 'fills'
+	| 'purges'
 	| 'ratio'
 	| 'anomalies'
 	| 'coarse'
@@ -674,6 +687,7 @@ type SortableNode = {
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;
+	totalPurges: number;
 	totalSize: number;
 	entryCount: number;
 	hitRatio: number | null;
@@ -689,6 +703,7 @@ const SORT_VALUES: Record<GroupSortField, (node: SortableNode) => number | null>
 	hits: (node) => node.totalHits,
 	misses: (node) => node.totalMisses,
 	fills: (node) => node.totalFills,
+	purges: (node) => node.totalPurges,
 	ratio: (node) => node.hitRatio,
 	anomalies: (node) => node.anomalyCount,
 	coarse: (node) => node.coarseCount,

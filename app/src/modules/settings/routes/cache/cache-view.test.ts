@@ -44,6 +44,7 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		hits: 0,
 		misses: 0,
 		fills: 0,
+		purges: 0,
 		fillMs: null,
 		hitMs: null,
 		ttlMs: null,
@@ -609,6 +610,45 @@ describe('filterLatencyBand', () => {
 	it('always keeps at least one branch', () => {
 		const two = [timed('/a', 10), timed('/b', 20)];
 		expect(filterLatencyBand(two, 'p99', 'miss').map((g) => g.path)).toEqual(['/b']);
+	});
+});
+
+describe('purges on the tree', () => {
+	it('sums up both levels, so a path shows what its queries lost', () => {
+		const groups = buildGroups([
+			entry({
+				key: 'a', path: '/items/a', query: '{"limit":5}', hits: 2, purges: 3,
+			}),
+			entry({
+				key: 'b', path: '/items/a', query: '{"limit":9}', hits: 1, purges: 4,
+			}),
+			entry({ key: 'c', path: '/items/b', hits: 9, purges: 0 }),
+		], []);
+
+		const a = groups.find((group) => group.path === '/items/a')!;
+		const b = groups.find((group) => group.path === '/items/b')!;
+
+		expect(a.totalPurges).toBe(7);
+		expect(a.queries.map((query) => query.totalPurges).sort()).toEqual([3, 4]);
+
+		// Zero, not absent: a path nothing purged still has to render a number
+		// beside its hits for the comparison to read.
+		expect(b.totalPurges).toBe(0);
+	});
+
+	it('ranks by purges, which is not the hit ranking', () => {
+		const groups = buildGroups([
+			// The busiest path by hits is the least purged, so sorting by purges
+			// must reorder rather than track the default.
+			entry({ key: 'a', path: '/items/a', hits: 100, purges: 1 }),
+			entry({ key: 'b', path: '/items/b', hits: 2, purges: 50 }),
+			entry({ key: 'c', path: '/items/c', hits: 10, purges: 9 }),
+		], []);
+
+		const worst = sortGroups(groups, { field: 'purges', dir: -1 });
+
+		expect(worst.map((group) => group.path))
+			.toEqual(['/items/b', '/items/c', '/items/a']);
 	});
 });
 

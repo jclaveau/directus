@@ -452,6 +452,7 @@ const treeSortOptions = computed<{ text: string; value: GroupSortField }[]>(() =
 		{ text: t('cache_tree_sort_anomalies', 'Anomalies'), value: 'anomalies' },
 		{ text: t('cache_tree_sort_fills', 'Fills'), value: 'fills' },
 		{ text: t('cache_tree_sort_hits', 'Hits'), value: 'hits' },
+		{ text: t('cache_tree_sort_purges', 'Purges'), value: 'purges' },
 		{ text: t('cache_tree_sort_ratio', 'Hit ratio'), value: 'ratio' },
 		{ text: t('cache_tree_sort_coarse', 'Coarse'), value: 'coarse' },
 		{ text: t('cache_tree_sort_entries', 'Entries'), value: 'entries' },
@@ -1548,6 +1549,21 @@ function funnelColumns(node: EndpointGroup | QueryGroup) {
 	});
 }
 
+// Purges sit beside the funnel rather than inside it: every funnel column pairs a
+// count with a latency tail, and a purge has no duration to pair with. The title
+// carries the comparison the number exists to make.
+function purgeTitle(node: EndpointGroup | QueryGroup): string {
+	return [
+		t('cache_tree_sort_purges', 'Purges'),
+		`${t('cache_count', 'Count')}  ${node.totalPurges}`,
+		t(
+			'cache_purges_tip',
+			'Purges that covered these entries. More purges than hits means the '
+			+ 'cache is filling this response more often than it serves it.',
+		),
+	].join('\n');
+}
+
 function secLabel(ms: number): string {
 	return `${Math.round(ms / 1000)}s`;
 }
@@ -1963,6 +1979,10 @@ onUnmounted(() => {
 								<span class="duration">{{ column.duration }}</span>
 							</span>
 							<span
+								v-tooltip="purgeTitle(group)"
+								class="stat purges"
+							>{{ countLabel(group.totalPurges) }}</span>
+							<span
 								v-tooltip="
 									t('cache_hit_ratio_tip', 'Hit ratio: hits / (hits + fills)')
 								"
@@ -2023,6 +2043,10 @@ onUnmounted(() => {
 										<span class="count">{{ column.count }}</span>
 										<span class="duration">{{ column.duration }}</span>
 									</span>
+									<span
+										v-tooltip="purgeTitle(q)"
+										class="stat purges"
+									>{{ countLabel(q.totalPurges) }}</span>
 									<span
 										v-tooltip="
 											t(
@@ -2498,6 +2522,13 @@ onUnmounted(() => {
 	font-weight: 700;
 }
 
+/* Colour is the legend here too: the same hue the chart gives Purged entries. */
+.endpoint-header .stat.purges,
+.query-header .stat.purges {
+	color: var(--theme--primary);
+	font-weight: 700;
+}
+
 /* Never shrink a stat: the widths below are flex-bases, and a query row (deeper
    indent, plus a `rec` chip) overflows where its endpoint row did not — flex would
    then shave each column by a different amount and the two levels would stop
@@ -2566,6 +2597,12 @@ onUnmounted(() => {
 .endpoint-header .stat.ratio,
 .query-header .stat.ratio {
 	inline-size: 40px;
+}
+
+.endpoint-header .stat.purges,
+.query-header .stat.purges {
+	inline-size: 40px;
+	text-align: end;
 }
 
 .endpoint-header .stat.size,
