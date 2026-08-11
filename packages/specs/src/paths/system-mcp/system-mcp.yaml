@@ -3,8 +3,9 @@ post:
   description: >
     A read-only MCP (Model Context Protocol) endpoint over JSON-RPC 2.0,
     implementing the Streamable HTTP transport of revision 2025-06-18. Exposes
-    the diagnostic reads as tools: the processes tree, the cache listings,
-    anomalies, latencies, timeseries and telemetry state. Supports
+    the diagnostic reads as tools: the processes tree, the cache listings, one
+    cache entry by key, anomalies, latencies, timeseries and telemetry state.
+    Supports
     `initialize`, `ping`, `tools/list` and `tools/call`; every tool is
     annotated read-only.
 
@@ -12,11 +13,11 @@ post:
     Admin only, authenticated as any other admin surface here — a session, or a
     Directus static token on an admin user. Which subsystems are exposed is set
     by SYSTEM_MCP_TOOLS, and the endpoint is served only where
-    SYSTEM_MCP_ENABLED is on. Browser callers must send an Origin named in
+    SYSTEM_MCP_ENABLED is on — elsewhere the path is absent rather than
+    refusing. Browser callers must send an Origin named in
     SYSTEM_MCP_ALLOWED_ORIGINS; a caller with no Origin is not a browser.
     GET and DELETE are answered with 405: this server offers no SSE stream and
-    opens no session. Served only where SYSTEM_MCP_ENABLED is on — elsewhere the
-    path is absent rather than refusing.
+    opens no session.
   operationId: call-system-mcp
   requestBody:
     content:

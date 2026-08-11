@@ -1,5 +1,6 @@
 import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import { version } from 'directus/version';
+import { useLogger } from '../../logger/index.js';
 import type { SystemMcpToolContext } from '../types/tool.js';
 import { systemMcpTools, findSystemMcpTool } from './tools.js';
 
@@ -96,6 +97,19 @@ async function callTool(
 			return fail(id, INVALID_PARAMS, error.message);
 		}
 
+		// Answering the caller is what takes this out of `errorHandler`'s path, so
+		// here is the only place left where the server can record that a read blew
+		// up. A guard that refused it is the expected outcome and stays at debug —
+		// the same split `errorHandler` makes between the two.
+		const logger = useLogger();
+
+		if (isDirectusError(error)) {
+			logger.debug(error);
+		}
+		else {
+			logger.error(error);
+		}
+
 		// A refused or failed read is the tool's answer, not a broken protocol
 		// exchange: the caller is told so it can act, per the MCP tool contract.
 		// `String` rather than `.message`, which is undefined on a thrown non-Error.
@@ -139,18 +153,35 @@ export async function handleSystemMcpRequest(
 		});
 	}
 
+	// Notifications carry no id and are answered with nothing.
+	const isNotification = body['id'] === undefined;
+
+	/**
+	 * A notification is owed no response object at all, so a malformed one cannot
+	 * be answered with a JSON-RPC error — that would be replying to a message
+	 * whose whole point is that no reply is coming. The transport asks for an
+	 * HTTP error status there instead. A request gets the JSON-RPC error, with
+	 * its own id carried back.
+	 */
+	function refuse(reason: string): JsonRpcResponse {
+		if (isNotification) {
+			throw new InvalidPayloadError({ reason });
+		}
+
+		return fail(id, INVALID_REQUEST, reason);
+	}
+
 	if (typeof method !== 'string') {
-		return fail(id, INVALID_REQUEST, 'Expected a `method` string');
+		return refuse('Expected a `method` string');
 	}
 
 	// JSON-RPC 2.0 has the member spelled exactly this, and the published schema
 	// for this endpoint calls it required — so it is checked rather than assumed.
 	if (body['jsonrpc'] !== '2.0') {
-		return fail(id, INVALID_REQUEST, 'Expected `jsonrpc` to be "2.0"');
+		return refuse('Expected `jsonrpc` to be "2.0"');
 	}
 
-	// Notifications carry no id and are answered with nothing.
-	if (body['id'] === undefined) {
+	if (isNotification) {
 		return null;
 	}
 

@@ -9,6 +9,7 @@ const service = vi.hoisted(() => {
 	return {
 		readProcesses: vi.fn(),
 		getCacheEntries: vi.fn(),
+		readCacheEntry: vi.fn(),
 		getCacheAnomalies: vi.fn(),
 		getCacheGroupLatencies: vi.fn(),
 		getCacheTimeseries: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('../../services/utils.js', () => {
 
 			readProcesses = service.readProcesses;
 			getCacheEntries = service.getCacheEntries;
+			readCacheEntry = service.readCacheEntry;
 			getCacheAnomalies = service.getCacheAnomalies;
 			getCacheGroupLatencies = service.getCacheGroupLatencies;
 			getCacheTimeseries = service.getCacheTimeseries;
@@ -59,6 +61,8 @@ import type {
 	CacheGroupLatencyRecord,
 	CacheStatsState,
 } from '../../cache-events.js';
+// Type-only, so the mock above still stands in for the module at runtime.
+import type { UtilsService as GuardedUtils } from '../../services/utils.js';
 import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js';
 
 const context = {
@@ -93,6 +97,7 @@ test('Every tool is described well enough for a model to choose it', () => {
 	expect(allSystemMcpTools().map((tool) => tool.name)).toEqual([
 		'list_processes',
 		'list_cache_entries',
+		'read_cache_entry',
 		'list_cache_anomalies',
 		'list_cache_latencies',
 		'read_cache_timeseries',
@@ -157,6 +162,7 @@ test('A deployment that reports no processes offers no tool for them', () => {
 	expect(systemMcpTools().map((tool) => tool.name))
 		.toEqual([
 			'list_cache_entries',
+			'read_cache_entry',
 			'list_cache_anomalies',
 			'list_cache_latencies',
 			'read_cache_timeseries',
@@ -203,6 +209,48 @@ test('The timeseries refuses a bucket count that is not a number', async () => {
 	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
 });
 
+// "Servers MUST: validate all tool inputs."
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
+test.each([
+	['null', null],
+	['a boolean', true],
+	['a list', []],
+	['an object', {}],
+	['empty', ''],
+])('A window that is %s is refused, not read as absent', async (_case, window) => {
+	// The window parser answers a fallback for anything it cannot read, and that
+	// fallback is `undefined` — which reads as "no window given", so a wrong
+	// *type* would quietly answer the 24h default while a wrong *string* is
+	// refused. `null` is what an agent sends for "no window in particular".
+	for (const name of ['list_cache_entries', 'read_cache_timeseries']) {
+		await expect(findSystemMcpTool(name)!.run({ window }, context))
+			.rejects
+			.toThrow(/is not a duration/);
+	}
+
+	expect(service.getCacheEntries).not.toHaveBeenCalled();
+	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
+});
+
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
+test.each([
+	['null', null],
+	['a boolean', true],
+	['a list', []],
+	['empty', ''],
+])('A bucket count that is %s is refused, not coerced', async (_case, buckets) => {
+	// `Number(null)`, `Number([])` and `Number('')` are all 0 and `Number(true)`
+	// is 1 — every one of them finite, so the count survives the guard and the
+	// read is bucketed to a granularity nobody asked for.
+	await expect(
+		findSystemMcpTool('read_cache_timeseries')!.run({ buckets }, context),
+	)
+		.rejects
+		.toThrow(/is not a number/);
+
+	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
+});
+
 test('A window of zero is a window, not a missing one', async () => {
 	// `0` is falsy and a valid parse, so it must not be read as absent.
 	await findSystemMcpTool('list_cache_entries')!.run({ window: '0' }, context);
@@ -215,6 +263,7 @@ test('Every tool declares the subsystem it reads', () => {
 
 	expect(groups).toEqual([
 		'processes',
+		'cache',
 		'cache',
 		'cache',
 		'cache',
@@ -250,6 +299,41 @@ test.each([
 
 	await findSystemMcpTool(tool)!.run({}, context);
 	expect(service[method]).toHaveBeenLastCalledWith(undefined);
+});
+
+test('The entry read reads the one key it was given', async () => {
+	service.readCacheEntry.mockResolvedValue({ exists: true });
+
+	await findSystemMcpTool('read_cache_entry')!.run({ key: 'abcd' }, context);
+
+	expect(service.readCacheEntry).toHaveBeenCalledWith('abcd');
+});
+
+// A tool "MAY declare which of its arguments are required".
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool
+test.each([
+	['absent', {}],
+	['null', { key: null }],
+	['a number', { key: 42 }],
+	['empty', { key: '' }],
+])('The entry read refuses a key that is %s', async (_case, args) => {
+	// The key names the one entry to read; without it there is nothing to read
+	// rather than a default to fall back on.
+	await expect(findSystemMcpTool('read_cache_entry')!.run(args, context))
+		.rejects
+		.toThrow(/key/);
+
+	expect(service.readCacheEntry).not.toHaveBeenCalled();
+});
+
+test('The entry read publishes its key as required', () => {
+	const tool = findSystemMcpTool('read_cache_entry')!;
+
+	expect(tool.inputSchema.properties).toHaveProperty('key');
+	expect(tool.inputSchema.required).toEqual(['key']);
+
+	// It reads one named entry, so no window applies to it.
+	expect(tool.inputSchema.properties).not.toHaveProperty('window');
 });
 
 test('The timeseries takes both the window and the bucket count', async () => {
@@ -295,6 +379,7 @@ test('Every declared output property is one the tool actually answers', () => {
 	const answers: {
 		list_processes: ProcessesReport;
 		list_cache_entries: CacheEntryRecord[];
+		read_cache_entry: Awaited<ReturnType<GuardedUtils['readCacheEntry']>>;
 		list_cache_anomalies: CacheAnomalyRecord[];
 		list_cache_latencies: CacheGroupLatencyRecord[];
 		read_cache_timeseries: CacheTimeseries;
@@ -380,6 +465,15 @@ test('Every declared output property is one the tool actually answers', () => {
 				lastHitAt: 3,
 			},
 		],
+		read_cache_entry: {
+			exists: true,
+			value: { data: [{ id: 1 }] },
+			tags: ['collection:articles'],
+			tagCounts: { 'collection:articles': 2 },
+			expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
+			sizes: { uncompressed: 100, compressed: 40 },
+			tombstone: null,
+		},
 		list_cache_anomalies: [
 			{
 				cacheKey: 'hash',

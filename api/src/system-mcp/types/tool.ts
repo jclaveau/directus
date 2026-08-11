@@ -91,5 +91,5 @@ export function defineSystemMcpTool<TAnswer>(tool: {
 		context: SystemMcpToolContext,
 	) => Promise<TAnswer>;
 }): SystemMcpTool {
-	return tool as unknown as SystemMcpTool;
+	return tool;
 }

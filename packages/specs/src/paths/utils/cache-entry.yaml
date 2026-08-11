@@ -1,0 +1,49 @@
+get:
+  summary: Read one cache entry
+  description: >
+    The live state of a single response-cache entry: the payload still held for
+    it, its scoped-cache tags, when it was written and when it expires, its size
+    raw and compressed, and any tombstone. Takes the `key` a cache entry listing
+    returned. Admin only.
+  operationId: read-cache-entry
+  parameters:
+    - name: key
+      in: query
+      required: true
+      description: The entry key, as `key` in the cache entry listing.
+      schema:
+        type: string
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            properties:
+              data:
+                type: object
+                properties:
+                  exists:
+                    type: boolean
+                  value: {}
+                  tags:
+                    type: array
+                    nullable: true
+                    items:
+                      type: string
+                  tagCounts:
+                    type: object
+                  expiry:
+                    type: object
+                    nullable: true
+                  sizes:
+                    type: object
+                    nullable: true
+                  tombstone:
+                    type: integer
+                    nullable: true
+            type: object
+      description: Successful request
+    '400':
+      description: No `key` query parameter was given
+  tags:
+    - System Diagnostics

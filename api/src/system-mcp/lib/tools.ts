@@ -100,6 +100,39 @@ function requestedWindow(args: Record<string, unknown>): number | undefined {
 	return parsed;
 }
 
+/**
+ * How many buckets a timeseries read was asked for.
+ *
+ * `Number` reads `null`, `[]` and `''` as 0 and `true` as 1 — all of them
+ * finite — so a value that is no bucket count at all would survive a bare
+ * finiteness check and silently re-bucket the read. Only a number, or text
+ * spelling one, is taken.
+ */
+function requestedBuckets(args: Record<string, unknown>): number | undefined {
+	const raw = args['buckets'];
+
+	if (raw === undefined) {
+		return undefined;
+	}
+
+	const spellsANumber = typeof raw === 'number'
+		|| (typeof raw === 'string' && raw.trim() !== '');
+
+	const parsed = spellsANumber
+		? Number(raw)
+		: Number.NaN;
+
+	// `NaN` would reach the query as an Invalid Date and fail there, naming
+	// nothing the caller could act on.
+	if (Number.isFinite(parsed) === false) {
+		throw new InvalidPayloadError({
+			reason: `buckets '${String(raw)}' is not a number`,
+		});
+	}
+
+	return parsed;
+}
+
 /** The lookback every cache read takes, described once. */
 const windowProperty = {
 	window: {
@@ -159,6 +192,71 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			annotations: READ_ONLY,
 			run: async (args, context) => {
 				return utils(context).getCacheEntries(requestedWindow(args));
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_entry',
+			group: 'cache',
+			title: 'Read one cache entry',
+			description:
+				'The live state of a single response-cache entry: the payload still '
+				+ 'held for it, its scoped-cache tags, when it was written and when it '
+				+ 'expires, its size raw and compressed, and any tombstone. Use it to '
+				+ 'follow up a row the entry listing returned, whose `key` it takes.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					key: {
+						type: 'string',
+						description: 'The entry key, as `key` in the entry listing.',
+					},
+				},
+				required: ['key'],
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					exists: {
+						type: 'boolean',
+						description: 'Whether the value itself is still held.',
+					},
+					value: { description: 'The cached response, where it is still held.' },
+					tags: {
+						type: ['array', 'null'],
+						description: 'Scoped-cache tags, where that sidecar was written.',
+						items: { type: 'string' },
+					},
+					tagCounts: {
+						type: 'object',
+						description: 'How many entries each of those tags covers.',
+					},
+					expiry: {
+						type: ['object', 'null'],
+						description: 'When it was written, and the TTL it was written with.',
+					},
+					sizes: {
+						type: ['object', 'null'],
+						description: 'Its size as a response, and as Redis holds it.',
+					},
+					tombstone: {
+						type: ['number', 'null'],
+						description: 'When it was purged, where a tombstone outlived it.',
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				const key = args['key'];
+
+				// One named entry and no default: an empty key would read the
+				// deployment's own namespace prefix rather than anything asked for.
+				if (typeof key !== 'string' || key.trim() === '') {
+					throw new InvalidPayloadError({
+						reason: 'A `key` naming the entry to read is required',
+					});
+				}
+
+				return utils(context).readCacheEntry(key);
 			},
 		}),
 		defineSystemMcpTool({
@@ -228,23 +326,9 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			},
 			annotations: READ_ONLY,
 			run: async (args, context) => {
-				const requested = args['buckets'];
-
-				const buckets = requested === undefined
-					? undefined
-					: Number(requested);
-
-				// `NaN` would reach the query as an Invalid Date and fail there,
-				// naming nothing the caller could act on.
-				if (buckets !== undefined && Number.isFinite(buckets) === false) {
-					throw new InvalidPayloadError({
-						reason: `buckets '${String(requested)}' is not a number`,
-					});
-				}
-
 				return utils(context).getCacheTimeseries(
 					requestedWindow(args),
-					buckets,
+					requestedBuckets(args),
 				);
 			},
 		}),

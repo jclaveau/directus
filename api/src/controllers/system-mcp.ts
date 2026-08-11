@@ -26,8 +26,9 @@ const router = Router();
  * issue, revoke or leak — `authenticate` resolves the token before this router
  * ever runs, and the tools then pass through the same service guard the REST
  * endpoints use. The rate limit the MCP tool spec asks for is the one Directus
- * already applies: `rateLimiterGlobal` and `rateLimiter` are mounted ahead of
- * every router, this one included.
+ * already applies where the deployment turned it on: `rateLimiterGlobal` and
+ * `rateLimiter` are mounted ahead of every router, this one included, under
+ * `RATE_LIMITER_GLOBAL_ENABLED` and `RATE_LIMITER_ENABLED`.
  */
 router.post(
 	'/',

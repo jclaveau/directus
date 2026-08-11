@@ -287,6 +287,8 @@ paths:
     $ref: './paths/utils/cache-clear.yaml'
   /utils/cache:
     $ref: './paths/utils/cache-entries.yaml'
+  /utils/cache/entry:
+    $ref: './paths/utils/cache-entry.yaml'
   /utils/cache/anomalies:
     $ref: './paths/utils/cache-anomalies.yaml'
   /utils/cache/latencies:

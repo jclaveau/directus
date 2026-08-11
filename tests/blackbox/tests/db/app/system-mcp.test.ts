@@ -13,10 +13,21 @@ const allowedOrigin = 'https://agent.example';
 const toolNames = [
 	'list_processes',
 	'list_cache_entries',
+	'read_cache_entry',
 	'list_cache_anomalies',
 	'list_cache_latencies',
 	'read_cache_timeseries',
 	'read_cache_stats_state',
+];
+
+// The reads that look back over a period, as against the ones that answer about
+// right now (`list_processes`, `read_cache_stats_state`) or about a single named
+// entry (`read_cache_entry`).
+const windowedToolNames = [
+	'list_cache_entries',
+	'list_cache_anomalies',
+	'list_cache_latencies',
+	'read_cache_timeseries',
 ];
 
 describe('System MCP Tests', () => {
@@ -378,13 +389,22 @@ describe('System MCP Tests', () => {
 			}
 
 			const windowed = tools.filter((tool: { name: string }) => {
-				return tool.name !== 'list_processes'
-					&& tool.name !== 'read_cache_stats_state';
+				return windowedToolNames.includes(tool.name);
 			});
+
+			// Named rather than excluded, so a tool added later has to be placed
+			// on one side or the other instead of silently dropping out.
+			expect(windowed).toHaveLength(windowedToolNames.length);
 
 			for (const tool of windowed) {
 				expect(tool.inputSchema.properties.window.type).toBe('string');
 			}
+
+			const entry = tools.find((tool: { name: string }) => {
+				return tool.name === 'read_cache_entry';
+			});
+
+			expect(entry.inputSchema.required).toEqual(['key']);
 		});
 	});
 
@@ -458,6 +478,24 @@ describe('System MCP Tests', () => {
 			expect(JSON.parse(timeseries.body.result.content[0].text))
 				.toEqual(series);
 
+			// A key nothing ever wrote. The entry read goes straight to the store
+			// rather than to the telemetry descriptors, so this is a real read with
+			// no flush to wait on, and it must answer the whole shape a model reads
+			// fields off rather than a bare "no".
+			const missing = await callTool(vendor, 'read_cache_entry', {
+				key: 'blackbox-never-written',
+			});
+
+			const entry = missing.body.result.structuredContent;
+
+			expect(missing.body.result.isError).toBeUndefined();
+			expect(entry.exists).toBe(false);
+			expect(entry.tags).toBeNull();
+			expect(entry.tagCounts).toEqual({});
+			expect(entry.expiry).toBeNull();
+			expect(entry.sizes).toBeNull();
+			expect(entry.tombstone).toBeNull();
+
 			// Non-vacuous: telemetry is on for this instance, so the tool reporting
 			// the collection state must say so.
 			const state = await callTool(vendor, 'read_cache_stats_state');
@@ -486,6 +524,20 @@ describe('System MCP Tests', () => {
 
 			expect(buckets.body.error.code).toBe(-32602);
 			expect(buckets.body.error.message).toContain('five');
+
+			// `Number(null)` is 0, which is finite — so a count that is no count at
+			// all must be refused on its type rather than on the parse.
+			const noBuckets = await callTool(vendor, 'read_cache_timeseries', {
+				buckets: null,
+			});
+
+			expect(noBuckets.body.error.code).toBe(-32602);
+
+			// The entry read names one entry, so it has nothing to fall back on.
+			const noKey = await callTool(vendor, 'read_cache_entry', {});
+
+			expect(noKey.body.error.code).toBe(-32602);
+			expect(noKey.body.error.message).toContain('key');
 		});
 	});
 
@@ -607,6 +659,33 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "If the input consists solely of (any number of) JSON-RPC responses or
+	// notifications: […] If the server cannot accept the input, it MUST return
+	// an HTTP error status code (e.g., 400 Bad Request)."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
+	describe('Refuses a malformed notification with a status, not a body', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// It carries no id, so it is owed no response object — which leaves the
+			// status as the only way to say it was not accepted. Answering it with
+			// a JSON-RPC error would be replying to a message whose whole point is
+			// that no reply is coming.
+			const response = await call(vendor, {
+				method: 'notifications/initialized',
+			});
+
+			expect(response.statusCode).toBe(400);
+
+			// And a well-formed one is still accepted with nothing at all.
+			const accepted = await call(vendor, {
+				jsonrpc: '2.0',
+				method: 'notifications/initialized',
+			});
+
+			expect(accepted.statusCode).toBe(202);
+			expect(accepted.text).toBe('');
+		});
+	});
+
 	describe('Publishes the diagnostic reads in the OpenAPI spec', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await request(getUrl(vendor, envs[vendor]['envMcp']))
@@ -620,6 +699,7 @@ describe('System MCP Tests', () => {
 			expect(paths['/system-mcp'].post.operationId).toBe('call-system-mcp');
 			expect(paths['/utils/processes'].get.operationId).toBe('list-processes');
 			expect(paths['/utils/cache'].get.operationId).toBe('list-cache-entries');
+			expect(paths['/utils/cache/entry'].get.operationId).toBe('read-cache-entry');
 			expect(paths['/utils/cache/anomalies']).toBeDefined();
 			expect(paths['/utils/cache/latencies']).toBeDefined();
 			expect(paths['/utils/cache/timeseries']).toBeDefined();
@@ -655,6 +735,7 @@ describe('System MCP Tests', () => {
 						'/system-mcp',
 						'/utils/processes',
 						'/utils/cache',
+						'/utils/cache/entry',
 						'/utils/cache/anomalies',
 						'/utils/cache/latencies',
 						'/utils/cache/timeseries',

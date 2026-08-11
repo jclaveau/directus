@@ -20,6 +20,14 @@ const TOOL = {
 	run: tool.run,
 };
 
+const logger = vi.hoisted(() => {
+	return { error: vi.fn(), debug: vi.fn() };
+});
+
+vi.mock('../../logger/index.js', () => {
+	return { useLogger: () => logger };
+});
+
 vi.mock('./tools.js', () => {
 	return {
 		systemMcpTools: () => [TOOL],
@@ -31,7 +39,7 @@ vi.mock('./tools.js', () => {
 	};
 });
 
-import { InvalidPayloadError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { handleSystemMcpRequest, MCP_PROTOCOL_VERSION } from './handle-request.js';
 
 const context = {
@@ -48,6 +56,8 @@ const context = {
 
 beforeEach(() => {
 	tool.run.mockReset();
+	logger.error.mockReset();
+	logger.debug.mockReset();
 });
 
 // "The server MUST respond with its own capabilities and information", and
@@ -266,6 +276,39 @@ test('A refused read is the tool answer, not a protocol failure', async () => {
 	});
 });
 
+// A tool failure is answered to the caller as a result, which takes it out of
+// `errorHandler`'s path — so nothing else would ever record that it happened.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
+test('An unexpected failure is recorded, not only answered', async () => {
+	tool.run.mockRejectedValue(new Error('redis is gone'));
+
+	await handleSystemMcpRequest({
+		jsonrpc: '2.0',
+		id: 17,
+		method: 'tools/call',
+		params: { name: 'list_processes' },
+	}, context);
+
+	expect(logger.error).toHaveBeenCalledOnce();
+	expect(logger.error.mock.calls[0]![0]).toBeInstanceOf(Error);
+});
+
+test('A refused read is not a failure the operator has to see', async () => {
+	// A guard doing its job is the expected outcome of an unprivileged read, so
+	// it is answered to the caller without being raised to the operator.
+	tool.run.mockRejectedValue(new ForbiddenError());
+
+	await handleSystemMcpRequest({
+		jsonrpc: '2.0',
+		id: 18,
+		method: 'tools/call',
+		params: { name: 'list_processes' },
+	}, context);
+
+	expect(logger.error).not.toHaveBeenCalled();
+	expect(logger.debug).toHaveBeenCalledOnce();
+});
+
 // An unknown tool is a protocol error; the spec's own example is -32602.
 // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
 test('An unknown tool is a bad parameter', async () => {
@@ -366,6 +409,23 @@ test('A notification is answered with nothing at all', async () => {
 	);
 
 	expect(ping).toBeNull();
+});
+
+// "If the input consists solely of (any number of) JSON-RPC responses or
+// notifications: […] If the server cannot accept the input, it MUST return an
+// HTTP error status code (e.g., 400 Bad Request)."
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
+test.each([
+	['names no protocol', { method: 'notifications/initialized' }],
+	['names another protocol', { jsonrpc: '1.0', method: 'ping' }],
+	['names no method', { jsonrpc: '2.0', params: {} }],
+])('A notification that %s is refused over HTTP', async (_case, body) => {
+	// A notification is owed no response object at all, so a malformed one
+	// cannot be answered with a JSON-RPC error — that would be replying to a
+	// message whose whole point is that no reply is coming.
+	await expect(handleSystemMcpRequest(body, context))
+		.rejects
+		.toThrow(InvalidPayloadError);
 });
 
 // JSON-RPC 2.0 tells a notification from a request by the presence of `id`,
