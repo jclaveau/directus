@@ -272,6 +272,37 @@ describe('Integration Tests', () => {
 						expect(targetSchema).toHaveProperty('oneOf');
 						expect(targetSchema).not.toHaveProperty('type');
 					});
+
+					// A Path Item Object "MAY be extended with Specification
+					// Extensions", which is how OAS says to add what it has no field
+					// for — and it has no field for a path that exists only on some
+					// deployments.
+					// https://spec.openapis.org/oas/v3.0.1.html#specification-extensions
+					it('omits a path whose x-enabled-by env flag is off', async () => {
+						// Nothing is mocked: SYSTEM_MCP_ENABLED defaults to false, so
+						// this is the spec a deployment that never opted in serves.
+						const service = new SpecificationService({
+							knex: db,
+							schema,
+							accountability: { role: 'admin', admin: true } as Accountability,
+						});
+
+						const spec = await service.oas.generate();
+
+						expect(spec.paths).not.toHaveProperty('/system-mcp');
+
+						// The tag goes with it, rather than staying advertised with
+						// nothing underneath.
+						const tagNames = spec.tags?.map((tag) => tag.name);
+
+						expect(tagNames).not.toContain('System MCP');
+
+						// Non-vacuous: an ungated path, and a gated one whose flag
+						// defaults to on, are both still served to this admin.
+						expect(spec.paths).toHaveProperty('/utils/cache');
+						expect(spec.paths).toHaveProperty('/utils/processes');
+						expect(tagNames).toContain('System Diagnostics');
+					});
 				});
 			});
 		});

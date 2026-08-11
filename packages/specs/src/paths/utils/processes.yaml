@@ -1,3 +1,5 @@
+# Absent from the published spec where the endpoint is absent from the router.
+x-enabled-by: PROCESSES_REPORT_ENABLED
 get:
   summary: List running processes
   description: >
@@ -39,7 +41,5 @@ get:
                         type: boolean
             type: object
       description: Successful request
-    '404':
-      description: PROCESSES_REPORT_ENABLED is off, so the endpoint is not served at all
   tags:
     - System Diagnostics

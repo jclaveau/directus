@@ -1,3 +1,5 @@
+# Absent from the published spec where the endpoint is absent from the router.
+x-enabled-by: SYSTEM_MCP_ENABLED
 post:
   summary: Call a system tool
   description: >
@@ -67,8 +69,6 @@ post:
         server asked
     '403':
       description: Not an admin, or an Origin that is not allowed
-    '404':
-      description: SYSTEM_MCP_ENABLED is off, so the endpoint is not served at all
     '405':
       description: >
         Returned for GET and DELETE — this server offers no SSE stream and opens

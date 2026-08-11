@@ -724,6 +724,49 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// A Path Item Object "MAY be extended with Specification Extensions", which
+	// is how OAS says to add what it has no field for — and it has no field for
+	// a path that exists only on some deployments.
+	// https://spec.openapis.org/oas/v3.0.1.html#specification-extensions
+	describe('Publishes only the paths this deployment actually serves', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const spec = async (key: keyof EnvTypes) => {
+				const response = await request(getUrl(vendor, envs[vendor][key]))
+					.get('/server/specs/oas')
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+				return {
+					paths: Object.keys(response.body.paths),
+					tags: response.body.tags.map((tag: { name: string }) => tag.name),
+				};
+			};
+
+			// The endpoint is a 404 on this instance, so publishing it would
+			// document the 404 — `x-enabled-by` drops it instead.
+			const off = await spec('envMcpOff');
+
+			expect(off.paths).not.toContain('/system-mcp');
+
+			// And its tag goes with it rather than staying advertised empty.
+			expect(off.tags).not.toContain('System MCP');
+
+			// Non-vacuous: everything this instance does serve is still published.
+			expect(off.paths).toContain('/utils/cache');
+			expect(off.paths).toContain('/utils/processes');
+			expect(off.tags).toContain('System Diagnostics');
+
+			// The other gate, on an instance where the MCP itself is on: the
+			// processes read is absent, and its tag survives because the cache
+			// reads underneath it are still served.
+			const noReport = await spec('envMcpNoProcessesReport');
+
+			expect(noReport.paths).not.toContain('/utils/processes');
+			expect(noReport.paths).toContain('/system-mcp');
+			expect(noReport.paths).toContain('/utils/cache');
+			expect(noReport.tags).toContain('System Diagnostics');
+		});
+	});
+
 	describe('Publishes them to nobody but an administrator', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const url = getUrl(vendor, envs[vendor]['envMcp']);
