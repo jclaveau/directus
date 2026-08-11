@@ -45,14 +45,15 @@ const context = {
 	schema: {} as SchemaOverview,
 };
 
-const call = (body: unknown) => handleSystemMcpRequest(body, context);
-
 beforeEach(() => {
 	tool.run.mockReset();
 });
 
 test('Announces the protocol, its capability and itself', async () => {
-	const response = await call({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+	const response = await handleSystemMcpRequest(
+		{ jsonrpc: '2.0', id: 1, method: 'initialize' },
+		context,
+	);
 
 	expect(response).toEqual({
 		jsonrpc: '2.0',
@@ -66,12 +67,19 @@ test('Announces the protocol, its capability and itself', async () => {
 });
 
 test('Answers a ping', async () => {
-	expect(await call({ jsonrpc: '2.0', id: 2, method: 'ping' }))
-		.toEqual({ jsonrpc: '2.0', id: 2, result: {} });
+	const response = await handleSystemMcpRequest(
+		{ jsonrpc: '2.0', id: 2, method: 'ping' },
+		context,
+	);
+
+	expect(response).toEqual({ jsonrpc: '2.0', id: 2, result: {} });
 });
 
 test('Lists the tools without the function behind them', async () => {
-	const response = await call({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
+	const response = await handleSystemMcpRequest(
+		{ jsonrpc: '2.0', id: 3, method: 'tools/list' },
+		context,
+	);
 
 	expect(response?.result).toEqual({
 		tools: [
@@ -98,12 +106,12 @@ test('Lists the tools without the function behind them', async () => {
 test('Calls a tool and returns what it answered as text', async () => {
 	tool.run.mockResolvedValue({ services: [] });
 
-	const response = await call({
+	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 4,
 		method: 'tools/call',
 		params: { name: 'list_processes', arguments: { window: '15m' } },
-	});
+	}, context);
 
 	expect(tool.run).toHaveBeenCalledWith({ window: '15m' }, context);
 
@@ -118,12 +126,12 @@ test('Calls a tool and returns what it answered as text', async () => {
 test('A list is named, since structured content must be an object', async () => {
 	tool.run.mockResolvedValue([{ key: 'one' }, { key: 'two' }]);
 
-	const response = await call({
+	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 14,
 		method: 'tools/call',
 		params: { name: 'list_processes' },
-	});
+	}, context);
 
 	expect(response?.result).toEqual({
 		content: [{ type: 'text', text: '{"items":[{"key":"one"},{"key":"two"}]}' }],
@@ -134,12 +142,12 @@ test('A list is named, since structured content must be an object', async () => 
 test('An answer that is neither object nor list is refused', async () => {
 	tool.run.mockResolvedValue('a bare string');
 
-	const response = await call({
+	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 15,
 		method: 'tools/call',
 		params: { name: 'list_processes' },
-	});
+	}, context);
 
 	expect(response?.result).toMatchObject({ isError: true });
 	expect((response?.result as any).content[0].text).toContain('string');
@@ -148,12 +156,12 @@ test('An answer that is neither object nor list is refused', async () => {
 test('Arguments that are not an object are read as none', async () => {
 	tool.run.mockResolvedValue(null);
 
-	await call({
+	await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 5,
 		method: 'tools/call',
 		params: { name: 'list_processes', arguments: 'not-an-object' },
-	});
+	}, context);
 
 	expect(tool.run).toHaveBeenCalledWith({}, context);
 });
@@ -161,12 +169,12 @@ test('Arguments that are not an object are read as none', async () => {
 test('A tool answering nothing is a broken tool, and says so', async () => {
 	tool.run.mockResolvedValue(undefined);
 
-	const response = await call({
+	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 12,
 		method: 'tools/call',
 		params: { name: 'list_processes' },
-	});
+	}, context);
 
 	// Every tool declares an outputSchema, so every answer owes structured
 	// content. Nothing sensible can be built from `undefined`, and a silent
@@ -178,12 +186,12 @@ test('A tool answering nothing is a broken tool, and says so', async () => {
 test('A thrown non-Error still reaches the caller as text', async () => {
 	tool.run.mockRejectedValue('redis is gone');
 
-	const response = await call({
+	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 13,
 		method: 'tools/call',
 		params: { name: 'list_processes' },
-	});
+	}, context);
 
 	expect(response?.result).toEqual({
 		content: [{ type: 'text', text: 'redis is gone' }],
@@ -194,12 +202,12 @@ test('A thrown non-Error still reaches the caller as text', async () => {
 test('A refused read is the tool answer, not a protocol failure', async () => {
 	tool.run.mockRejectedValue(new Error('does not have permission'));
 
-	const response = await call({
+	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 6,
 		method: 'tools/call',
 		params: { name: 'list_processes' },
-	});
+	}, context);
 
 	expect(response?.result).toEqual({
 		content: [{ type: 'text', text: 'does not have permission' }],
@@ -208,12 +216,12 @@ test('A refused read is the tool answer, not a protocol failure', async () => {
 });
 
 test('An unknown tool is a bad parameter', async () => {
-	const response = await call({
+	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
 		id: 7,
 		method: 'tools/call',
 		params: { name: 'drop_everything' },
-	});
+	}, context);
 
 	expect(response?.error).toEqual({
 		code: -32602,
@@ -222,7 +230,10 @@ test('An unknown tool is a bad parameter', async () => {
 });
 
 test('An unknown method is reported as such', async () => {
-	const response = await call({ jsonrpc: '2.0', id: 8, method: 'resources/list' });
+	const response = await handleSystemMcpRequest(
+		{ jsonrpc: '2.0', id: 8, method: 'resources/list' },
+		context,
+	);
 
 	expect(response?.error).toEqual({
 		code: -32601,
@@ -236,29 +247,41 @@ test.each([
 	['a string', 'jsonrpc'],
 	['null', null],
 ])('A body that is %s is not a single request', async (_case, body) => {
-	const response = await call(body);
+	const response = await handleSystemMcpRequest(body, context);
 
 	expect(response?.error?.code).toBe(-32600);
 	expect(response?.id).toBeNull();
 });
 
 test('A message with no method is invalid, and echoes its id', async () => {
-	const response = await call({ jsonrpc: '2.0', id: 9 });
+	const response = await handleSystemMcpRequest({ jsonrpc: '2.0', id: 9 }, context);
 
 	expect(response?.error?.code).toBe(-32600);
 	expect(response?.id).toBe(9);
 });
 
 test('A notification is answered with nothing at all', async () => {
-	expect(await call({ jsonrpc: '2.0', method: 'notifications/initialized' }))
-		.toBeNull();
+	const initialized = await handleSystemMcpRequest(
+		{ jsonrpc: '2.0', method: 'notifications/initialized' },
+		context,
+	);
+
+	expect(initialized).toBeNull();
 
 	// Even one naming a method that would otherwise answer.
-	expect(await call({ jsonrpc: '2.0', method: 'ping' })).toBeNull();
+	const ping = await handleSystemMcpRequest(
+		{ jsonrpc: '2.0', method: 'ping' },
+		context,
+	);
+
+	expect(ping).toBeNull();
 });
 
 test('A null id is a request, not a notification', async () => {
-	const response = await call({ jsonrpc: '2.0', id: null, method: 'ping' });
+	const response = await handleSystemMcpRequest(
+		{ jsonrpc: '2.0', id: null, method: 'ping' },
+		context,
+	);
 
 	expect(response).toEqual({ jsonrpc: '2.0', id: null, result: {} });
 });

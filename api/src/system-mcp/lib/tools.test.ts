@@ -54,7 +54,6 @@ import type {
 	CacheAnomalyRecord,
 	CacheEntryRecord,
 	CacheGroupLatencyRecord,
-	CacheLatencyPercentiles,
 	CacheStatsState,
 } from '../../cache-events.js';
 import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js';
@@ -70,10 +69,6 @@ const context = {
 	},
 	schema: {} as SchemaOverview,
 };
-
-function run(name: string, args: Record<string, unknown> = {}) {
-	return findSystemMcpTool(name)!.run(args, context);
-}
 
 beforeEach(() => {
 	config.groups.mockReturnValue(['processes', 'cache']);
@@ -167,7 +162,7 @@ test('An unknown name resolves to no tool', () => {
 test('Every read is made as the caller, through the guarded service', async () => {
 	service.readProcesses.mockResolvedValue({ services: [] });
 
-	await run('list_processes');
+	await findSystemMcpTool('list_processes')!.run({}, context);
 
 	expect(service.readProcesses).toHaveBeenCalledOnce();
 
@@ -181,188 +176,195 @@ test.each([
 	['list_cache_anomalies', 'getCacheAnomalies'],
 	['list_cache_latencies', 'getCacheGroupLatencies'],
 ] as const)('%s reads the window it was given', async (tool, method) => {
-	await run(tool, { window: '15m' });
+	await findSystemMcpTool(tool)!.run({ window: '15m' }, context);
 	expect(service[method]).toHaveBeenCalledWith(900_000);
 
-	await run(tool);
+	await findSystemMcpTool(tool)!.run({}, context);
 	expect(service[method]).toHaveBeenLastCalledWith(undefined);
 });
 
 test('The timeseries takes both the window and the bucket count', async () => {
-	await run('read_cache_timeseries', { window: '1h', buckets: 12 });
+	await findSystemMcpTool('read_cache_timeseries')!
+		.run({ window: '1h', buckets: 12 }, context);
+
 	expect(service.getCacheTimeseries).toHaveBeenCalledWith(3_600_000, 12);
 
 	// A bucket count given as text still reaches the service as a number.
-	await run('read_cache_timeseries', { window: '1h', buckets: '6' });
+	await findSystemMcpTool('read_cache_timeseries')!
+		.run({ window: '1h', buckets: '6' }, context);
+
 	expect(service.getCacheTimeseries).toHaveBeenLastCalledWith(3_600_000, 6);
 
-	await run('read_cache_timeseries');
-	expect(service.getCacheTimeseries).toHaveBeenLastCalledWith(undefined, undefined);
+	await findSystemMcpTool('read_cache_timeseries')!.run({}, context);
+
+	expect(service.getCacheTimeseries)
+		.toHaveBeenLastCalledWith(undefined, undefined);
 });
 
 test('The telemetry state takes no argument', async () => {
 	service.getCacheStatsState.mockResolvedValue({ enabled: true });
 
-	await expect(run('read_cache_stats_state')).resolves.toEqual({ enabled: true });
+	await expect(findSystemMcpTool('read_cache_stats_state')!.run({}, context))
+		.resolves
+		.toEqual({ enabled: true });
+
 	expect(service.getCacheStatsState).toHaveBeenCalledOnce();
 });
 
-/**
- * The answers the services really give — typed as the services declare them, so
- * the compiler maintains this fixture. A field added to `CacheStatsState` or a
- * metric added to `CACHE_LATENCY_METRICS` fails to compile here until it is
- * recorded, which is what keeps the schemas below honest as the types move.
- *
- * Nested rows are filled rather than left as empty arrays: an empty array
- * type-checks against any element type, so it would track nothing.
- */
-const percentiles: CacheLatencyPercentiles = { p50: 1, p95: 2, p99: 3 };
-
-const ANSWERS: {
-	list_processes: ProcessesReport;
-	list_cache_entries: CacheEntryRecord[];
-	list_cache_anomalies: CacheAnomalyRecord[];
-	list_cache_latencies: CacheGroupLatencyRecord[];
-	read_cache_timeseries: CacheTimeseries;
-	read_cache_stats_state: CacheStatsState;
-} = {
-	list_processes: {
-		collectedAt: 1_700_000_000_000,
-		collectedForMs: 750,
-		details: ['stats', 'env'],
-		degraded: { crossReplica: false, supervisor: false },
-		services: [
-			{
-				service: 'api',
-				replicas: [
-					{
-						replicaId: 'replica-a',
-						hostname: 'host-a',
-						supervisor: 'pm2',
-						processes: [
-							{
-								nodeId: 'node-1',
-								pid: 100,
-								pmId: 0,
-								name: 'directus',
-								instance: 0,
-								responding: true,
-								runtime: {
-									rssBytes: 1,
-									heapUsedBytes: 2,
-									heapTotalBytes: 3,
-									externalBytes: 4,
-									uptimeMs: 5,
-									nodeVersion: 'v22.0.0',
-								},
-								supervisor: {
-									status: 'online',
-									restarts: 0,
-									unstableRestarts: 0,
-									uptimeMs: 6,
-									memoryBytes: 7,
-									cpuPercent: 8,
-									maxMemoryRestartBytes: 9,
-									execMode: 'cluster_mode',
-									configuredInstances: 2,
-								},
-								env: [
-									{
-										key: 'DB_CLIENT',
-										value: 'pg',
-										redacted: false,
-										isSet: true,
-										source: 'process',
+test('Every declared output property is one the tool actually answers', () => {
+	/**
+	 * The answers the services really give — typed as the services declare them,
+	 * so the compiler maintains them. A field added to `CacheStatsState` or a
+	 * metric added to `CACHE_LATENCY_METRICS` fails to compile here until it is
+	 * recorded, which is what keeps the schemas honest as the types move.
+	 *
+	 * Nested rows are filled rather than left as empty arrays: an empty array
+	 * type-checks against any element type, so it would track nothing.
+	 */
+	const answers: {
+		list_processes: ProcessesReport;
+		list_cache_entries: CacheEntryRecord[];
+		list_cache_anomalies: CacheAnomalyRecord[];
+		list_cache_latencies: CacheGroupLatencyRecord[];
+		read_cache_timeseries: CacheTimeseries;
+		read_cache_stats_state: CacheStatsState;
+	} = {
+		list_processes: {
+			collectedAt: 1_700_000_000_000,
+			collectedForMs: 750,
+			details: ['stats', 'env'],
+			degraded: { crossReplica: false, supervisor: false },
+			services: [
+				{
+					service: 'api',
+					replicas: [
+						{
+							replicaId: 'replica-a',
+							hostname: 'host-a',
+							supervisor: 'pm2',
+							processes: [
+								{
+									nodeId: 'node-1',
+									pid: 100,
+									pmId: 0,
+									name: 'directus',
+									instance: 0,
+									responding: true,
+									runtime: {
+										rssBytes: 1,
+										heapUsedBytes: 2,
+										heapTotalBytes: 3,
+										externalBytes: 4,
+										uptimeMs: 5,
+										nodeVersion: 'v22.0.0',
 									},
-								],
-							},
-						],
-					},
-				],
-			},
-		],
-	},
-	list_cache_entries: [
-		{
-			key: 'hash',
-			redisKey: 'scalabus:key',
-			coarse: false,
-			method: 'GET',
-			path: '/items/articles',
-			collection: 'articles',
-			user: { id: 'u1', email: 'ann@corp.io' },
-			query: '{"limit":5}',
-			url: '/items/articles?limit=5',
-			size: 2048,
-			hits: 7,
-			misses: 2,
-			fills: 3,
-			fillMs: 240,
-			hitMs: 2,
-			ttlMs: 60_000,
-			recommendedTtlMs: 90_000,
-			createdAt: 1,
-			expiresAt: 2,
-			lastHitAt: 3,
+									supervisor: {
+										status: 'online',
+										restarts: 0,
+										unstableRestarts: 0,
+										uptimeMs: 6,
+										memoryBytes: 7,
+										cpuPercent: 8,
+										maxMemoryRestartBytes: 9,
+										execMode: 'cluster_mode',
+										configuredInstances: 2,
+									},
+									env: [
+										{
+											key: 'DB_CLIENT',
+											value: 'pg',
+											redacted: false,
+											isSet: true,
+											source: 'process',
+										},
+									],
+								},
+							],
+						},
+					],
+				},
+			],
 		},
-	],
-	list_cache_anomalies: [
-		{
-			cacheKey: 'hash',
-			reason: 'value_too_large',
-			path: '/items/big',
-			method: 'GET',
-			query: '{}',
-			url: '/items/big',
-			count: 4,
-			sample: null,
-			lastSeen: 5,
-		},
-	],
-	list_cache_latencies: [
-		{
-			path: '/items/articles',
-			method: null,
-			query: null,
-			response: percentiles,
-			miss: percentiles,
-			anomaly: percentiles,
-			fill: percentiles,
-			hit: percentiles,
-		},
-	],
-	read_cache_timeseries: {
-		buckets: [
+		list_cache_entries: [
 			{
-				t: 1,
-				hits: 2,
-				misses: 3,
-				fills: 4,
-				anomalies: 5,
-				ttlMs: 6,
-				effectiveTtlMs: 7,
-				hitP50: 1, hitP95: 2, hitP99: 3,
-				fillP50: 1, fillP95: 2, fillP99: 3,
-				anomalyP50: 1, anomalyP95: 2, anomalyP99: 3,
-				missP50: 1, missP95: 2, missP99: 3,
-				bothP50: 1, bothP95: 2, bothP99: 3,
+				key: 'hash',
+				redisKey: 'scalabus:key',
+				coarse: false,
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				user: { id: 'u1', email: 'ann@corp.io' },
+				query: '{"limit":5}',
+				url: '/items/articles?limit=5',
+				size: 2048,
+				hits: 7,
+				misses: 2,
+				fills: 3,
+				fillMs: 240,
+				hitMs: 2,
+				ttlMs: 60_000,
+				recommendedTtlMs: 90_000,
+				createdAt: 1,
+				expiresAt: 2,
+				lastHitAt: 3,
 			},
 		],
-		markers: [{ time: 1, kind: 'flush', detail: 'response' }],
-		effectiveTtl: '5m',
-	},
-	read_cache_stats_state: {
-		configured: true,
-		enabled: true,
-		killedReason: null,
-		bufferLength: 0,
-		droppedEvents: 0,
-	},
-};
+		list_cache_anomalies: [
+			{
+				cacheKey: 'hash',
+				reason: 'value_too_large',
+				path: '/items/big',
+				method: 'GET',
+				query: '{}',
+				url: '/items/big',
+				count: 4,
+				sample: null,
+				lastSeen: 5,
+			},
+		],
+		list_cache_latencies: [
+			{
+				path: '/items/articles',
+				method: null,
+				query: null,
+				response: { p50: 1, p95: 2, p99: 3 },
+				miss: { p50: 1, p95: 2, p99: 3 },
+				anomaly: { p50: 1, p95: 2, p99: 3 },
+				fill: { p50: 1, p95: 2, p99: 3 },
+				hit: { p50: 1, p95: 2, p99: 3 },
+			},
+		],
+		read_cache_timeseries: {
+			buckets: [
+				{
+					t: 1,
+					hits: 2,
+					misses: 3,
+					fills: 4,
+					anomalies: 5,
+					ttlMs: 6,
+					effectiveTtlMs: 7,
+					hitP50: 1, hitP95: 2, hitP99: 3,
+					fillP50: 1, fillP95: 2, fillP99: 3,
+					anomalyP50: 1, anomalyP95: 2, anomalyP99: 3,
+					missP50: 1, missP95: 2, missP99: 3,
+					bothP50: 1, bothP95: 2, bothP99: 3,
+				},
+			],
+			markers: [{ time: 1, kind: 'flush', detail: 'response' }],
+			effectiveTtl: '5m',
+		},
+		read_cache_stats_state: {
+			configured: true,
+			enabled: true,
+			killedReason: null,
+			bufferLength: 0,
+			droppedEvents: 0,
+		},
+	};
 
-test('Every declared output property is one the tool actually answers', async () => {
 	for (const tool of allSystemMcpTools()) {
-		const answer = ANSWERS[tool.name as keyof typeof ANSWERS];
+		const answer = answers[tool.name as keyof typeof answers];
 
 		expect(answer, `no recorded answer for ${tool.name}`).toBeDefined();
 
@@ -387,35 +389,42 @@ test('Every declared output property is one the tool actually answers', async ()
 	}
 });
 
-/** The description is rebuilt per listing, so it can name what is really on. */
-function processesDescriptionWith(details: string[]): string {
-	processes.details.mockReturnValue(details);
-
-	const listed = systemMcpTools()
-		.find((tool) => tool.name === 'list_processes')!;
-
-	return listed.description;
-}
-
 test('The process tool describes the halves this deployment reports', () => {
-	const both = processesDescriptionWith(['stats', 'env']);
+	// The description is rebuilt on every listing, so it can name what is on.
+	processes.details.mockReturnValue(['stats', 'env']);
+
+	const both = systemMcpTools()
+		.find((tool) => tool.name === 'list_processes')!
+		.description;
 
 	expect(both).toContain('what its supervisor observed');
 	expect(both).toContain('the environment it resolved');
 
 	// With a half turned off, the description stops promising it rather than
 	// promising it and answering null.
-	const statsOnly = processesDescriptionWith(['stats']);
+	processes.details.mockReturnValue(['stats']);
+
+	const statsOnly = systemMcpTools()
+		.find((tool) => tool.name === 'list_processes')!
+		.description;
 
 	expect(statsOnly).toContain('what its supervisor observed');
 	expect(statsOnly).not.toContain('the environment it resolved');
 
-	const envOnly = processesDescriptionWith(['env']);
+	processes.details.mockReturnValue(['env']);
+
+	const envOnly = systemMcpTools()
+		.find((tool) => tool.name === 'list_processes')!
+		.description;
 
 	expect(envOnly).toContain('the environment it resolved');
 	expect(envOnly).not.toContain('what its supervisor observed');
 
-	const neither = processesDescriptionWith([]);
+	processes.details.mockReturnValue([]);
+
+	const neither = systemMcpTools()
+		.find((tool) => tool.name === 'list_processes')!
+		.description;
 
 	expect(neither).toContain('Only the identity of each process is reported');
 });

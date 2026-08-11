@@ -38,16 +38,7 @@ function handlerFor(path: string, method: 'post' | 'get') {
 	) => Promise<void>;
 }
 
-function request(overrides: Record<string, unknown> = {}) {
-	return {
-		headers: {},
-		body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
-		accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
-		schema: {},
-		...overrides,
-	} as any;
-}
-
+/** A response that records what was written to it rather than writing it. */
 function response() {
 	const res: any = {
 		statusCode: null,
@@ -92,19 +83,6 @@ function response() {
 const post = handlerFor('/', 'post');
 const get = handlerFor('/', 'get');
 
-/**
- * `asyncHandler` hands a throw to `next` rather than rejecting, so a refusal is
- * observed there — which is also how express turns it into a status.
- */
-async function refusal(req: any, res: any = response()) {
-	const next = vi.fn();
-	await post(req, res, next);
-
-	expect(next).toHaveBeenCalledOnce();
-
-	return next.mock.calls[0]![0] as Error;
-}
-
 beforeEach(() => {
 	vi.clearAllMocks();
 	mcp.allowedOrigin.mockReturnValue(true);
@@ -114,7 +92,13 @@ beforeEach(() => {
 describe('the system MCP endpoint', () => {
 	test('answers a request, uncacheably', async () => {
 		const res = response();
-		await post(request(), res, vi.fn());
+
+		await post({
+			headers: {},
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, res, vi.fn());
 
 		expect(res.body).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
 		expect(res.headers['Cache-Control']).toBe('no-store');
@@ -124,7 +108,13 @@ describe('the system MCP endpoint', () => {
 		mcp.handle.mockResolvedValue(null);
 
 		const res = response();
-		await post(request(), res, vi.fn());
+
+		await post({
+			headers: {},
+			body: { jsonrpc: '2.0', method: 'notifications/initialized' },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, res, vi.fn());
 
 		expect(res.statusCode).toBe(202);
 		expect(res.ended).toBe(true);
@@ -134,66 +124,108 @@ describe('the system MCP endpoint', () => {
 	test('refuses an origin the deployment never named', async () => {
 		mcp.allowedOrigin.mockReturnValue(false);
 
-		const req = request({ headers: { origin: 'https://evil.example' } });
+		// `asyncHandler` hands a throw to `next` rather than rejecting, which is
+		// also how express turns it into a status.
+		const next = vi.fn();
 
-		expect((await refusal(req)).message).toMatch(/evil.example/);
+		await post({
+			headers: { origin: 'https://evil.example' },
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, response(), next);
+
+		expect(next).toHaveBeenCalledOnce();
+		expect(next.mock.calls[0]![0].message).toMatch(/evil.example/);
 
 		// Refused before anything else looks at the request.
 		expect(mcp.handle).not.toHaveBeenCalled();
 	});
 
 	test('refuses anyone who is not an admin', async () => {
-		const anonymous = await refusal(request({ accountability: null }));
+		const anonymous = vi.fn();
 
-		expect(anonymous.message).toMatch(/admin only/);
+		await post({
+			headers: {},
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: null,
+			schema: {},
+		}, response(), anonymous);
 
-		const appUser = await refusal(request({ accountability: { admin: false } }));
+		expect(anonymous.mock.calls[0]![0].message).toMatch(/admin only/);
 
-		expect(appUser.message).toMatch(/admin only/);
+		const appUser = vi.fn();
+
+		await post({
+			headers: {},
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: { admin: false, user: 'u2', ip: '10.0.0.2' },
+			schema: {},
+		}, response(), appUser);
+
+		expect(appUser.mock.calls[0]![0].message).toMatch(/admin only/);
 		expect(mcp.handle).not.toHaveBeenCalled();
 	});
 
 	test('refuses a protocol revision it does not implement', async () => {
-		const req = request({ headers: { 'mcp-protocol-version': '2099-01-01' } });
+		const next = vi.fn();
 
-		expect((await refusal(req)).message).toMatch(/2099-01-01/);
+		await post({
+			headers: { 'mcp-protocol-version': '2099-01-01' },
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, response(), next);
+
+		expect(next.mock.calls[0]![0].message).toMatch(/2099-01-01/);
 		expect(mcp.handle).not.toHaveBeenCalled();
 	});
 
 	test('is refused before the version is judged', async () => {
-		const req = request({
-			accountability: null,
+		const next = vi.fn();
+
+		await post({
 			headers: { 'mcp-protocol-version': '2099-01-01' },
-		});
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: null,
+			schema: {},
+		}, response(), next);
 
 		// The credential decides first: an anonymous caller cannot tell a refused
 		// revision from an accepted one.
-		expect((await refusal(req)).message).toMatch(/admin only/);
+		expect(next.mock.calls[0]![0].message).toMatch(/admin only/);
 	});
 
 	test('accepts the revision it implements, and no header at all', async () => {
-		const withHeader = request({
+		await post({
 			headers: { 'mcp-protocol-version': '2025-06-18' },
-		});
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, response(), vi.fn());
 
-		await post(withHeader, response(), vi.fn());
-
-		await post(request(), response(), vi.fn());
+		await post({
+			headers: {},
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, response(), vi.fn());
 
 		expect(mcp.handle).toHaveBeenCalledTimes(2);
 	});
 
 	test('traces a tool call, and only chatters about the rest', async () => {
-		const call = request({
+		await post({
+			headers: {},
 			body: {
 				jsonrpc: '2.0',
 				id: 1,
 				method: 'tools/call',
 				params: { name: 'list_processes' },
 			},
-		});
-
-		await post(call, response(), vi.fn());
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, response(), vi.fn());
 
 		expect(logger.info).toHaveBeenCalledWith(
 			{
@@ -207,7 +239,12 @@ describe('the system MCP endpoint', () => {
 
 		expect(logger.debug).not.toHaveBeenCalled();
 
-		await post(request(), response(), vi.fn());
+		await post({
+			headers: {},
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, response(), vi.fn());
 
 		expect(logger.debug).toHaveBeenCalledOnce();
 	});
@@ -215,11 +252,16 @@ describe('the system MCP endpoint', () => {
 	test('traces before the work, so a read that dies still leaves one', async () => {
 		mcp.handle.mockRejectedValue(new Error('redis is gone'));
 
-		const call = request({
-			body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: {} },
-		});
+		const next = vi.fn();
 
-		expect((await refusal(call)).message).toBe('redis is gone');
+		await post({
+			headers: {},
+			body: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: {} },
+			accountability: { admin: true, user: 'u1', ip: '10.0.0.1' },
+			schema: {},
+		}, response(), next);
+
+		expect(next.mock.calls[0]![0].message).toBe('redis is gone');
 		expect(logger.info).toHaveBeenCalledOnce();
 	});
 
