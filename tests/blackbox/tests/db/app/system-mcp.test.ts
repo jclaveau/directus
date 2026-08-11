@@ -472,4 +472,46 @@ describe('System MCP Tests', () => {
 			expect(windowParam.schema.type).toBe('string');
 		});
 	});
+
+	describe('Publishes them to nobody but an administrator', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const url = getUrl(vendor, envs[vendor]['envMcp']);
+
+			// `/server/specs/oas` needs no credential at all, so the spec is where
+			// an admin-only endpoint leaks its existence if its tag is not gated.
+			const [anonymous, appUser] = await Promise.all([
+				request(url).get('/server/specs/oas'),
+				request(url)
+					.get('/server/specs/oas')
+					.set('Authorization', `Bearer ${USER.APP_ACCESS.TOKEN}`),
+			]);
+
+			for (const response of [anonymous, appUser]) {
+				expect(response.statusCode).toBe(200);
+
+				expect(Object.keys(response.body.paths)).toEqual(
+					expect.not.arrayContaining([
+						'/system-mcp',
+						'/utils/processes',
+						'/utils/cache',
+						'/utils/cache/anomalies',
+						'/utils/cache/latencies',
+						'/utils/cache/timeseries',
+						'/utils/cache/stats',
+					]),
+				);
+
+				// Not a spec emptied by the credential: what they may read is there.
+				expect(response.body.paths['/server/ping']).toBeDefined();
+			}
+
+			// And the tags themselves, which is what the gate really acts on.
+			const tagNames = anonymous.body.tags
+				.map((tag: { name: string }) => tag.name);
+
+			expect(tagNames).toEqual(
+				expect.not.arrayContaining(['System MCP', 'System Diagnostics']),
+			);
+		});
+	});
 });

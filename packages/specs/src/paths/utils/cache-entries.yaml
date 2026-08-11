@@ -22,4 +22,4 @@ get:
             type: object
       description: Successful request
   tags:
-    - Utilities
+    - System Diagnostics
