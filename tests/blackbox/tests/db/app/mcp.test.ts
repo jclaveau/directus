@@ -433,9 +433,11 @@ describe('Diagnostics MCP Tests', () => {
 
 	describe('Reports a malformed message', () => {
 		it.each(vendors)('%s', async (vendor) => {
+			// An array is well-formed JSON of the wrong shape — an invalid request,
+			// not a parse failure, and this revision removed batching anyway.
 			const notAnObject = await call(vendor, ['jsonrpc', '2.0']);
 
-			expect(notAnObject.body.error.code).toBe(-32700);
+			expect(notAnObject.body.error.code).toBe(-32600);
 
 			const noMethod = await call(vendor, { jsonrpc: '2.0', id: 5 });
 
