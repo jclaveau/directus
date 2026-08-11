@@ -309,6 +309,47 @@ test('The entry read reads the one key it was given', async () => {
 	expect(service.readCacheEntry).toHaveBeenCalledWith('abcd');
 });
 
+// "Servers MUST provide structured results that conform to this schema", and
+// this one deliberately does not name the payload.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
+test('The entry read never answers with the response inside it', async () => {
+	// The cache key carries the user, so a cached body is one person's
+	// permission-filtered view. A tool answer is read by a model and travels
+	// wherever that context travels, which is not where it belongs — the REST
+	// endpoint still answers it to an administrator who asks for it.
+	service.readCacheEntry.mockResolvedValue({
+		exists: true,
+		value: { data: [{ id: 1, email: 'ann@corp.io' }] },
+		tags: ['collection:articles'],
+		tagCounts: { 'collection:articles': 2 },
+		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
+		sizes: { uncompressed: 100, compressed: 40 },
+		tombstone: null,
+	});
+
+	const answer = await findSystemMcpTool('read_cache_entry')!
+		.run({ key: 'abcd' }, context);
+
+	expect(answer).toEqual({
+		exists: true,
+		tags: ['collection:articles'],
+		tagCounts: { 'collection:articles': 2 },
+		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
+		sizes: { uncompressed: 100, compressed: 40 },
+		tombstone: null,
+	});
+
+	// Not merely absent from the schema: absent from the answer, and from the
+	// text block the answer is mirrored into.
+	expect(JSON.stringify(answer)).not.toContain('ann@corp.io');
+
+	const declared = findSystemMcpTool('read_cache_entry')!
+		.outputSchema
+		.properties;
+
+	expect(declared).not.toHaveProperty('value');
+});
+
 // A tool "MAY declare which of its arguments are required".
 // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool
 test.each([
@@ -379,7 +420,13 @@ test('Every declared output property is one the tool actually answers', () => {
 	const answers: {
 		list_processes: ProcessesReport;
 		list_cache_entries: CacheEntryRecord[];
-		read_cache_entry: Awaited<ReturnType<GuardedUtils['readCacheEntry']>>;
+		// Everything the service answers except the cached response itself, which
+		// this tool deliberately drops. A field added to the service lands here
+		// and fails to compile until it is declared or explicitly omitted too.
+		read_cache_entry: Omit<
+			Awaited<ReturnType<GuardedUtils['readCacheEntry']>>,
+			'value'
+		>;
 		list_cache_anomalies: CacheAnomalyRecord[];
 		list_cache_latencies: CacheGroupLatencyRecord[];
 		read_cache_timeseries: CacheTimeseries;
@@ -467,7 +514,6 @@ test('Every declared output property is one the tool actually answers', () => {
 		],
 		read_cache_entry: {
 			exists: true,
-			value: { data: [{ id: 1 }] },
 			tags: ['collection:articles'],
 			tagCounts: { 'collection:articles': 2 },
 			expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },

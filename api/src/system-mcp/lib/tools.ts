@@ -199,10 +199,11 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			group: 'cache',
 			title: 'Read one cache entry',
 			description:
-				'The live state of a single response-cache entry: the payload still '
-				+ 'held for it, its scoped-cache tags, when it was written and when it '
-				+ 'expires, its size raw and compressed, and any tombstone. Use it to '
-				+ 'follow up a row the entry listing returned, whose `key` it takes.',
+				'The live state of a single response-cache entry: whether its value '
+				+ 'is still held, its scoped-cache tags, when it was written and when '
+				+ 'it expires, its size raw and compressed, and any tombstone. The '
+				+ 'cached response itself is not returned. Use it to follow up a row '
+				+ 'the entry listing returned, whose `key` it takes.',
 			inputSchema: {
 				type: 'object',
 				properties: {
@@ -220,7 +221,6 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'boolean',
 						description: 'Whether the value itself is still held.',
 					},
-					value: { description: 'The cached response, where it is still held.' },
 					tags: {
 						type: ['array', 'null'],
 						description: 'Scoped-cache tags, where that sidecar was written.',
@@ -256,7 +256,23 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					});
 				}
 
-				return utils(context).readCacheEntry(key);
+				const entry = await utils(context).readCacheEntry(key);
+
+				// Everything the entry is, and not the response inside it. The cache
+				// key carries the user (`get-cache-key.ts`), so a cached body is one
+				// person's permission-filtered view, and a tool answer travels
+				// wherever the model's context travels. Every lifecycle question —
+				// is it held, how big, when does it die, what pins it, was it
+				// tombstoned — is answered without it. `GET /utils/cache/entry`
+				// still hands the body to an administrator who asks for it.
+				return {
+					exists: entry.exists,
+					tags: entry.tags,
+					tagCounts: entry.tagCounts,
+					expiry: entry.expiry,
+					sizes: entry.sizes,
+					tombstone: entry.tombstone,
+				};
 			},
 		}),
 		defineSystemMcpTool({

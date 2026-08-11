@@ -405,6 +405,11 @@ describe('System MCP Tests', () => {
 			});
 
 			expect(entry.inputSchema.required).toEqual(['key']);
+
+			// It answers about the entry, never with the response inside it, and
+			// the published schema is what tells a model so before it calls.
+			expect(entry.outputSchema.properties).not.toHaveProperty('value');
+			expect(entry.outputSchema.properties).toHaveProperty('sizes');
 		});
 	});
 
@@ -495,6 +500,11 @@ describe('System MCP Tests', () => {
 			expect(entry.expiry).toBeNull();
 			expect(entry.sizes).toBeNull();
 			expect(entry.tombstone).toBeNull();
+
+			// The cached response itself is never handed back: the cache key
+			// carries the user, so a body is one person's view of the data, and a
+			// tool answer travels wherever the model's context travels.
+			expect(entry).not.toHaveProperty('value');
 
 			// Non-vacuous: telemetry is on for this instance, so the tool reporting
 			// the collection state must say so.
