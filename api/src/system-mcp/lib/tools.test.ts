@@ -43,11 +43,14 @@ vi.mock('./config.js', () => {
 });
 
 const processes = vi.hoisted(() => {
-	return { details: vi.fn() };
+	return { details: vi.fn(), reportEnabled: vi.fn() };
 });
 
 vi.mock('../../processes/lib/processes-config.js', () => {
-	return { reportedProcessDetails: processes.details };
+	return {
+		reportedProcessDetails: processes.details,
+		processesReportEnabled: processes.reportEnabled,
+	};
 });
 
 import type {
@@ -73,6 +76,7 @@ const context = {
 beforeEach(() => {
 	config.groups.mockReturnValue(['processes', 'cache']);
 	processes.details.mockReturnValue(['stats', 'env']);
+	processes.reportEnabled.mockReturnValue(true);
 	service.constructed.length = 0;
 
 	Object.values(service).forEach((value) => {
@@ -142,6 +146,68 @@ test('A subsystem left out is neither listed nor callable', () => {
 	config.groups.mockReturnValue([]);
 	expect(systemMcpTools()).toEqual([]);
 	expect(findSystemMcpTool('list_processes')).toBeUndefined();
+});
+
+test('A deployment that reports no processes offers no tool for them', () => {
+	// `PROCESSES_REPORT_ENABLED` off takes every responder with it, so the read
+	// behind this tool would wait out its window and answer an empty tree. The
+	// REST route is absent in that deployment; the tool has to be too.
+	processes.reportEnabled.mockReturnValue(false);
+
+	expect(systemMcpTools().map((tool) => tool.name))
+		.toEqual([
+			'list_cache_entries',
+			'list_cache_anomalies',
+			'list_cache_latencies',
+			'read_cache_timeseries',
+			'read_cache_stats_state',
+		]);
+
+	// Not merely unlisted: it cannot be called either.
+	expect(findSystemMcpTool('list_processes')).toBeUndefined();
+
+	// And the cache tools are untouched by it.
+	expect(findSystemMcpTool('list_cache_entries')).toBeDefined();
+});
+
+// "Servers MUST: validate all tool inputs."
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
+test.each([
+	'list_cache_entries',
+	'list_cache_anomalies',
+	'list_cache_latencies',
+	'read_cache_timeseries',
+])('%s refuses a window it cannot read', async (tool) => {
+	// Silently answering the default would tell an agent "here are the last 24h"
+	// when it asked for something else, with no way to notice.
+	await expect(findSystemMcpTool(tool)!.run({ window: 'yesterday' }, context))
+		.rejects
+		.toThrow(/window 'yesterday' is not a duration/);
+
+	expect(service.getCacheEntries).not.toHaveBeenCalled();
+	expect(service.getCacheAnomalies).not.toHaveBeenCalled();
+	expect(service.getCacheGroupLatencies).not.toHaveBeenCalled();
+	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
+});
+
+test('The timeseries refuses a bucket count that is not a number', async () => {
+	// `Number('five')` is NaN, which would reach the query as an Invalid Date and
+	// fail there, naming nothing the caller could act on.
+	await expect(
+		findSystemMcpTool('read_cache_timeseries')!
+			.run({ buckets: 'five' }, context),
+	)
+		.rejects
+		.toThrow(/buckets 'five' is not a number/);
+
+	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
+});
+
+test('A window of zero is a window, not a missing one', async () => {
+	// `0` is falsy and a valid parse, so it must not be read as absent.
+	await findSystemMcpTool('list_cache_entries')!.run({ window: '0' }, context);
+
+	expect(service.getCacheEntries).toHaveBeenCalledWith(0);
 });
 
 test('Every tool declares the subsystem it reads', () => {

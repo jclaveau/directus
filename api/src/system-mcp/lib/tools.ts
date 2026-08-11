@@ -1,3 +1,4 @@
+import { InvalidPayloadError } from '@directus/errors';
 import { getMilliseconds } from '../../utils/get-milliseconds.js';
 import { UtilsService } from '../../services/utils.js';
 import {
@@ -6,7 +7,10 @@ import {
 	type SystemMcpToolContext,
 } from '../types/tool.js';
 import { systemMcpToolGroups } from './config.js';
-import { reportedProcessDetails } from '../../processes/lib/processes-config.js';
+import {
+	processesReportEnabled,
+	reportedProcessDetails,
+} from '../../processes/lib/processes-config.js';
 
 /**
  * Every tool reads through `UtilsService`, so the admin guard each of these
@@ -71,6 +75,31 @@ const READ_ONLY = {
 	openWorldHint: false,
 } as const;
 
+/**
+ * The lookback a cache read was asked for, as milliseconds.
+ *
+ * A duration the parser cannot read is refused rather than quietly becoming the
+ * default: the tool spec has servers validate their inputs, and an agent told
+ * "here are the last 24h" when it asked for "yesterday" has no way to notice.
+ */
+function requestedWindow(args: Record<string, unknown>): number | undefined {
+	const raw = args['window'];
+
+	if (raw === undefined) {
+		return undefined;
+	}
+
+	const parsed = getMilliseconds(raw);
+
+	if (parsed === undefined) {
+		throw new InvalidPayloadError({
+			reason: `window '${String(raw)}' is not a duration such as "15m"`,
+		});
+	}
+
+	return parsed;
+}
+
 /** The lookback every cache read takes, described once. */
 const windowProperty = {
 	window: {
@@ -87,156 +116,166 @@ const windowProperty = {
  */
 export function allSystemMcpTools(): SystemMcpTool[] {
 	return [
-	defineSystemMcpTool({
-		name: 'list_processes',
-		group: 'processes',
-		title: 'List running processes',
-		description: processesDescription(),
-		inputSchema: { type: 'object', properties: {} },
-		outputSchema: {
-			type: 'object',
-			properties: {
-				collectedAt: { type: 'number' },
-				collectedForMs: { type: 'number' },
-				details: {
-					type: 'array',
-					description: 'Which halves each process reported: stats, env, or both.',
-					items: { type: 'string' },
-				},
-				services: {
-					type: 'array',
-					description: 'One entry per service, each holding its replicas.',
-					items: { type: 'object' },
-				},
-				degraded: {
-					type: 'object',
-					description: 'What could not be answered, rather than a silent gap.',
+		defineSystemMcpTool({
+			name: 'list_processes',
+			group: 'processes',
+			title: 'List running processes',
+			description: processesDescription(),
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					collectedAt: { type: 'number' },
+					collectedForMs: { type: 'number' },
+					details: {
+						type: 'array',
+						description: 'Which halves each process reported: stats, env, or both.',
+						items: { type: 'string' },
+					},
+					services: {
+						type: 'array',
+						description: 'One entry per service, each holding its replicas.',
+						items: { type: 'object' },
+					},
+					degraded: {
+						type: 'object',
+						description: 'What could not be answered, rather than a silent gap.',
+					},
 				},
 			},
-		},
-		annotations: READ_ONLY,
-		run: async (_args, context) => utils(context).readProcesses(),
-	}),
-	defineSystemMcpTool({
-		name: 'list_cache_entries',
-		group: 'cache',
-		title: 'List cache entries',
-		description:
-			'The response-cache entries seen in the window, grouped by endpoint and '
-			+ 'query, with hit counts, size, age and remaining TTL. Use it to find '
-			+ 'what is filling the cache and what is never read back.',
-		inputSchema: { type: 'object', properties: windowProperty },
-		outputSchema: LIST_OUTPUT,
-		annotations: READ_ONLY,
-		run: async (args, context) => {
-			return utils(context).getCacheEntries(getMilliseconds(args['window']));
-		},
-	}),
-	defineSystemMcpTool({
-		name: 'list_cache_anomalies',
-		group: 'cache',
-		title: 'List cache anomalies',
-		description:
-			'Responses the cache declined to keep in the window, and why — a value '
-			+ 'over the size cap, a read with no collection to purge it by, a scope '
-			+ 'too coarse to pin. Use it to explain a low hit ratio.',
-		inputSchema: { type: 'object', properties: windowProperty },
-		outputSchema: LIST_OUTPUT,
-		annotations: READ_ONLY,
-		run: async (args, context) => {
-			return utils(context).getCacheAnomalies(getMilliseconds(args['window']));
-		},
-	}),
-	defineSystemMcpTool({
-		name: 'list_cache_latencies',
-		group: 'cache',
-		title: 'List cache latencies',
-		description:
-			'Response-time percentiles per endpoint group in the window, split by '
-			+ 'outcome (served from cache, filled, declined). Use it to say what the '
-			+ 'cache is actually saving.',
-		inputSchema: { type: 'object', properties: windowProperty },
-		outputSchema: LIST_OUTPUT,
-		annotations: READ_ONLY,
-		run: async (args, context) => {
-			const window = getMilliseconds(args['window']);
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).readProcesses(),
+		}),
+		defineSystemMcpTool({
+			name: 'list_cache_entries',
+			group: 'cache',
+			title: 'List cache entries',
+			description:
+				'The response-cache entries seen in the window, grouped by endpoint and '
+				+ 'query, with hit counts, size, age and remaining TTL. Use it to find '
+				+ 'what is filling the cache and what is never read back.',
+			inputSchema: { type: 'object', properties: windowProperty },
+			outputSchema: LIST_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				return utils(context).getCacheEntries(requestedWindow(args));
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'list_cache_anomalies',
+			group: 'cache',
+			title: 'List cache anomalies',
+			description:
+				'Responses the cache declined to keep in the window, and why — a value '
+				+ 'over the size cap, a read with no collection to purge it by, a scope '
+				+ 'too coarse to pin. Use it to explain a low hit ratio.',
+			inputSchema: { type: 'object', properties: windowProperty },
+			outputSchema: LIST_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				return utils(context).getCacheAnomalies(requestedWindow(args));
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'list_cache_latencies',
+			group: 'cache',
+			title: 'List cache latencies',
+			description:
+				'Response-time percentiles per endpoint group in the window, split by '
+				+ 'outcome (served from cache, filled, declined). Use it to say what the '
+				+ 'cache is actually saving.',
+			inputSchema: { type: 'object', properties: windowProperty },
+			outputSchema: LIST_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				const window = requestedWindow(args);
 
-			return utils(context).getCacheGroupLatencies(window);
-		},
-	}),
-	defineSystemMcpTool({
-		name: 'read_cache_timeseries',
-		group: 'cache',
-		title: 'Read the cache timeseries',
-		description:
-			'Hits, misses, fills, anomalies, TTL in force and latency percentiles '
-			+ 'bucketed over the window, plus the config changes and flushes that '
-			+ 'fall in it. Use it to correlate a change with what followed.',
-		inputSchema: {
-			type: 'object',
-			properties: {
-				...windowProperty,
-				buckets: {
-					type: 'number',
-					description: 'How many buckets to split the window into.',
+				return utils(context).getCacheGroupLatencies(window);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_timeseries',
+			group: 'cache',
+			title: 'Read the cache timeseries',
+			description:
+				'Hits, misses, fills, anomalies, TTL in force and latency percentiles '
+				+ 'bucketed over the window, plus the config changes and flushes that '
+				+ 'fall in it. Use it to correlate a change with what followed.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					...windowProperty,
+					buckets: {
+						type: 'number',
+						description: 'How many buckets to split the window into.',
+					},
 				},
 			},
-		},
-		outputSchema: {
-			type: 'object',
-			properties: {
-				buckets: { type: 'array', items: { type: 'object' } },
-				markers: {
-					type: 'array',
-					description: 'Config changes and flushes falling in the window.',
-					items: { type: 'object' },
-				},
-				effectiveTtl: {
-					type: ['string', 'null'],
-					description: 'The TTL in force over the window, where one is known.',
+			outputSchema: {
+				type: 'object',
+				properties: {
+					buckets: { type: 'array', items: { type: 'object' } },
+					markers: {
+						type: 'array',
+						description: 'Config changes and flushes falling in the window.',
+						items: { type: 'object' },
+					},
+					effectiveTtl: {
+						type: ['string', 'null'],
+						description: 'The TTL in force over the window, where one is known.',
+					},
 				},
 			},
-		},
-		annotations: READ_ONLY,
-		run: async (args, context) => {
-			const buckets = args['buckets'] === undefined
-				? undefined
-				: Number(args['buckets']);
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				const requested = args['buckets'];
 
-			return utils(context).getCacheTimeseries(
-				getMilliseconds(args['window']),
-				buckets,
-			);
-		},
-	}),
-	defineSystemMcpTool({
-		name: 'read_cache_stats_state',
-		group: 'cache',
-		title: 'Read the cache telemetry state',
-		description:
-			'Whether cache telemetry is being collected, and what stopped it if it '
-			+ 'was disabled automatically. Read this first when the other cache '
-			+ 'tools come back empty.',
-		inputSchema: { type: 'object', properties: {} },
-		outputSchema: {
-			type: 'object',
-			properties: {
-				configured: { type: 'boolean' },
-				enabled: { type: 'boolean' },
-				killedReason: {
-					type: ['string', 'null'],
-					description: 'What stopped collection, where it stopped by itself.',
-				},
-				bufferLength: { type: 'number' },
-				droppedEvents: {
-					type: 'number',
-					description: 'Lifetime count; non-zero means telemetry went lossy.',
+				const buckets = requested === undefined
+					? undefined
+					: Number(requested);
+
+				// `NaN` would reach the query as an Invalid Date and fail there,
+				// naming nothing the caller could act on.
+				if (buckets !== undefined && Number.isFinite(buckets) === false) {
+					throw new InvalidPayloadError({
+						reason: `buckets '${String(requested)}' is not a number`,
+					});
+				}
+
+				return utils(context).getCacheTimeseries(
+					requestedWindow(args),
+					buckets,
+				);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_stats_state',
+			group: 'cache',
+			title: 'Read the cache telemetry state',
+			description:
+				'Whether cache telemetry is being collected, and what stopped it if it '
+				+ 'was disabled automatically. Read this first when the other cache '
+				+ 'tools come back empty.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					configured: { type: 'boolean' },
+					enabled: { type: 'boolean' },
+					killedReason: {
+						type: ['string', 'null'],
+						description: 'What stopped collection, where it stopped by itself.',
+					},
+					bufferLength: { type: 'number' },
+					droppedEvents: {
+						type: 'number',
+						description: 'Lifetime count; non-zero means telemetry went lossy.',
+					},
 				},
 			},
-		},
-		annotations: READ_ONLY,
-		run: async (_args, context) => utils(context).getCacheStatsState(),
-	}),
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).getCacheStatsState(),
+		}),
 	];
 }
 
@@ -245,7 +284,12 @@ export function allSystemMcpTools(): SystemMcpTool[] {
  * listed and, because lookups go through here, cannot be called either.
  */
 export function systemMcpTools(): SystemMcpTool[] {
-	const groups = systemMcpToolGroups();
+	const groups = systemMcpToolGroups()
+		// `PROCESSES_REPORT_ENABLED` off means every node's responder is gone
+		// (`initProcessReports` returns early), so the collector would wait out its
+		// window and answer an empty tree. The REST route is absent in that
+		// deployment; the tool it shares a service with has to be too.
+		.filter((group) => group !== 'processes' || processesReportEnabled());
 
 	return allSystemMcpTools().filter((tool) => groups.includes(tool.group));
 }

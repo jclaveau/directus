@@ -5,7 +5,8 @@ get:
     tree. Each process reports what its supervisor observed (status, restarts,
     memory against the cap it is recycled at, uptime, exec mode) and the
     environment it resolved, redacted, with the layer each value came from.
-    Admin only, and served only where PROCESSES_ENABLED is on.
+    Admin only, and served only where PROCESSES_REPORT_ENABLED is on —
+    elsewhere the path is absent rather than refusing.
   operationId: list-processes
   responses:
     '200':
@@ -38,5 +39,7 @@ get:
                         type: boolean
             type: object
       description: Successful request
+    '404':
+      description: PROCESSES_REPORT_ENABLED is off, so the endpoint is not served at all
   tags:
     - System Diagnostics

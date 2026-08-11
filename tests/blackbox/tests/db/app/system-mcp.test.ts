@@ -26,6 +26,7 @@ describe('System MCP Tests', () => {
 		'envMcp',
 		'envMcpProcessesOnly',
 		'envMcpOff',
+		'envMcpNoProcessesReport',
 	] as const;
 
 	type EnvTypes = Record<(typeof envKeys)[number], Env>;
@@ -55,12 +56,18 @@ describe('System MCP Tests', () => {
 			const envMcpOff = cloneDeep(envMcp);
 			envMcpOff[vendor]['SYSTEM_MCP_ENABLED'] = 'false';
 
+			// The processes group is configured, but the report it reads is off:
+			// the tool must follow the feature, not the group list.
+			const envMcpNoProcessesReport = cloneDeep(envMcp);
+			envMcpNoProcessesReport[vendor]['PROCESSES_REPORT_ENABLED'] = 'false';
+
 			const ports = await Promise.all(envKeys.map(() => getPort()));
 
 			envs[vendor] = {
 				envMcp,
 				envMcpProcessesOnly,
 				envMcpOff,
+				envMcpNoProcessesReport,
 			};
 
 			directusInstances[vendor] = [];
@@ -441,14 +448,93 @@ describe('System MCP Tests', () => {
 				buckets: 5,
 			});
 
+			const series = timeseries.body.result.structuredContent;
+
+			// The bucket count is what proves the argument reached the read rather
+			// than being dropped on the way.
+			expect(series.buckets).toHaveLength(5);
+			expect(Array.isArray(series.markers)).toBe(true);
+
 			expect(JSON.parse(timeseries.body.result.content[0].text))
-				.toBeInstanceOf(Object);
+				.toEqual(series);
 
 			// Non-vacuous: telemetry is on for this instance, so the tool reporting
 			// the collection state must say so.
 			const state = await callTool(vendor, 'read_cache_stats_state');
 
 			expect(JSON.parse(state.body.result.content[0].text).enabled).toBe(true);
+		});
+	});
+
+	// "Servers MUST: validate all tool inputs."
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
+	describe('Refuses an argument it cannot read, as a protocol error', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// Not `isError`: the read never ran, so this is "invalid arguments",
+			// which the spec lists among the protocol errors.
+			const window = await callTool(vendor, 'list_cache_entries', {
+				window: 'yesterday',
+			});
+
+			expect(window.body.error.code).toBe(-32602);
+			expect(window.body.error.message).toContain('yesterday');
+			expect(window.body.result).toBeUndefined();
+
+			const buckets = await callTool(vendor, 'read_cache_timeseries', {
+				buckets: 'five',
+			});
+
+			expect(buckets.body.error.code).toBe(-32602);
+			expect(buckets.body.error.message).toContain('five');
+		});
+	});
+
+	// JSON-RPC 2.0: the member MUST be exactly "2.0".
+	// https://www.jsonrpc.org/specification#request_object
+	describe('Refuses a message that does not name the protocol', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await call(vendor, { id: 30, method: 'ping' });
+
+			expect(response.body.error.code).toBe(-32600);
+			expect(response.body.error.message).toContain('jsonrpc');
+		});
+	});
+
+	describe('Offers no processes tool where the report itself is off', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// `PROCESSES_REPORT_ENABLED` off takes every node's responder with it,
+			// so the read behind this tool would wait out its collection window and
+			// answer an empty tree. The REST route is absent in that deployment.
+			const rest = await request(
+				getUrl(vendor, envs[vendor]['envMcpNoProcessesReport']),
+			)
+				.get('/utils/processes')
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(rest.statusCode).toBe(404);
+
+			const listed = await post(vendor, 'envMcpNoProcessesReport', {
+				jsonrpc: '2.0',
+				id: 12,
+				method: 'tools/list',
+			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			const names = listed.body.result.tools
+				.map((tool: { name: string }) => tool.name);
+
+			expect(names).not.toContain('list_processes');
+			// The cache tools it was configured for are still there.
+			expect(names).toContain('list_cache_entries');
+
+			// Not merely unlisted: it cannot be called either.
+			const called = await post(vendor, 'envMcpNoProcessesReport', {
+				jsonrpc: '2.0',
+				id: 13,
+				method: 'tools/call',
+				params: { name: 'list_processes' },
+			}).set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			expect(called.body.error.code).toBe(-32602);
 		});
 	});
 

@@ -237,8 +237,8 @@ ASSETS_CACHE_TTL="30d"
 ### System MCP
 
 # Serve a read-only MCP endpoint at /system-mcp exposing the diagnostic
-# reads as tools an LLM agent can call. Off by default. Deliberately not /mcp:
-# upstream Directus serves its own MCP there, over the content API. [false]
+# reads as tools an LLM agent can call, over the Streamable HTTP transport of
+# MCP revision 2025-06-18. Off by default. [false]
 # SYSTEM_MCP_ENABLED=false
 
 # Which subsystems to expose tools for: "processes" (the process tree) and

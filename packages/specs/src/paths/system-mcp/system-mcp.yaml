@@ -15,7 +15,8 @@ post:
     SYSTEM_MCP_ENABLED is on. Browser callers must send an Origin named in
     SYSTEM_MCP_ALLOWED_ORIGINS; a caller with no Origin is not a browser.
     GET and DELETE are answered with 405: this server offers no SSE stream and
-    opens no session.
+    opens no session. Served only where SYSTEM_MCP_ENABLED is on — elsewhere the
+    path is absent rather than refusing.
   operationId: call-system-mcp
   requestBody:
     content:
@@ -27,6 +28,7 @@ post:
               type: string
               enum: ['2.0']
             id:
+              nullable: true
               oneOf:
                 - type: string
                 - type: integer
@@ -46,6 +48,7 @@ post:
               jsonrpc:
                 type: string
               id:
+                nullable: true
                 oneOf:
                   - type: string
                   - type: integer
@@ -57,10 +60,17 @@ post:
     '202':
       description: A notification was accepted, and is answered with no body
     '400':
-      description: The MCP-Protocol-Version header names a revision this server does not implement
+      description: >
+        The MCP-Protocol-Version header names a revision this server does not
+        implement, or the body is a JSON-RPC response, which answers nothing this
+        server asked
     '403':
       description: Not an admin, or an Origin that is not allowed
+    '404':
+      description: SYSTEM_MCP_ENABLED is off, so the endpoint is not served at all
     '405':
-      description: Returned for GET — this server offers no SSE stream
+      description: >
+        Returned for GET and DELETE — this server offers no SSE stream and opens
+        no session
   tags:
     - System MCP

@@ -1,4 +1,4 @@
-import { InvalidPayloadError } from '@directus/errors';
+import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import { version } from 'directus/version';
 import type { SystemMcpToolContext } from '../types/tool.js';
 import { systemMcpTools, findSystemMcpTool } from './tools.js';
@@ -90,6 +90,12 @@ async function callTool(
 		});
 	}
 	catch (error) {
+		// An argument the tool would not take never became a read at all, so it is
+		// a protocol error — the spec's own example of -32602 is exactly this.
+		if (isDirectusError(error, ErrorCode.InvalidPayload)) {
+			return fail(id, INVALID_PARAMS, error.message);
+		}
+
 		// A refused or failed read is the tool's answer, not a broken protocol
 		// exchange: the caller is told so it can act, per the MCP tool contract.
 		// `String` rather than `.message`, which is undefined on a thrown non-Error.
@@ -135,6 +141,12 @@ export async function handleSystemMcpRequest(
 
 	if (typeof method !== 'string') {
 		return fail(id, INVALID_REQUEST, 'Expected a `method` string');
+	}
+
+	// JSON-RPC 2.0 has the member spelled exactly this, and the published schema
+	// for this endpoint calls it required — so it is checked rather than assumed.
+	if (body['jsonrpc'] !== '2.0') {
+		return fail(id, INVALID_REQUEST, 'Expected `jsonrpc` to be "2.0"');
 	}
 
 	// Notifications carry no id and are answered with nothing.

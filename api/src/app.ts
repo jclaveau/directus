@@ -25,7 +25,7 @@ import flowsRouter from './controllers/flows.js';
 import foldersRouter from './controllers/folders.js';
 import graphqlRouter from './controllers/graphql.js';
 import itemsRouter from './controllers/items.js';
-import mcpRouter from './controllers/system-mcp.js';
+import systemMcpRouter from './controllers/system-mcp.js';
 import metricsRouter from './controllers/metrics.js';
 import notFoundHandler from './controllers/not-found.js';
 import notificationsRouter from './controllers/notifications.js';
@@ -72,6 +72,7 @@ import rateLimiter, {
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
 import { initProcessReports } from './processes/index.js';
+import { systemMcpEnabled } from './system-mcp/index.js';
 import cacheStatsSchedule from './schedules/cache-stats.js';
 import metricsSchedule from './schedules/metrics.js';
 import retentionSchedule from './schedules/retention.js';
@@ -348,8 +349,8 @@ export default async function createApp(): Promise<express.Application> {
 	// Not `/mcp`: upstream Directus serves its own MCP there, over the content
 	// API. Its own top-level path rather than under `/admin`, which the Data
 	// Studio's `/admin/*` catch-all would answer before any router here.
-	if (env['SYSTEM_MCP_ENABLED'] === true) {
-		app.use('/system-mcp', mcpRouter);
+	if (systemMcpEnabled()) {
+		app.use('/system-mcp', systemMcpRouter);
 	}
 
 	if (env['METRICS_ENABLED'] === true) {

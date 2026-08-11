@@ -31,6 +31,7 @@ vi.mock('./tools.js', () => {
 	};
 });
 
+import { InvalidPayloadError } from '@directus/errors';
 import { handleSystemMcpRequest, MCP_PROTOCOL_VERSION } from './handle-request.js';
 
 const context = {
@@ -204,6 +205,29 @@ test('A tool answering nothing is a broken tool, and says so', async () => {
 	expect((response?.result as any).content[0].text).toContain('list_processes');
 });
 
+// An argument the tool would not take is a protocol error, not a tool result —
+// "invalid arguments" is listed among the protocol ones.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
+test('An argument the tool refuses is a bad parameter, not a result', async () => {
+	tool.run.mockRejectedValue(
+		new InvalidPayloadError({ reason: "window 'yesterday' is not a duration" }),
+	);
+
+	const response = await handleSystemMcpRequest({
+		jsonrpc: '2.0',
+		id: 16,
+		method: 'tools/call',
+		params: { name: 'list_processes', arguments: { window: 'yesterday' } },
+	}, context);
+
+	expect(response?.error?.code).toBe(-32602);
+	expect(response?.error?.message).toContain('yesterday');
+
+	// And not the other shape: a result carrying isError would read as a read
+	// that ran and failed.
+	expect(response?.result).toBeUndefined();
+});
+
 // A tool execution error is "reported in tool results with isError: true",
 // not as a JSON-RPC error.
 // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
@@ -294,6 +318,19 @@ test('A message with no method is invalid, and echoes its id', async () => {
 
 	expect(response?.error?.code).toBe(-32600);
 	expect(response?.id).toBe(9);
+});
+
+// JSON-RPC 2.0: "A String specifying the version of the JSON-RPC protocol. MUST
+// be exactly \"2.0\"." The published schema for this endpoint requires it too.
+// https://www.jsonrpc.org/specification#request_object
+test.each([
+	['absent', { id: 20, method: 'ping' }],
+	['another version', { jsonrpc: '1.0', id: 21, method: 'ping' }],
+])('A message whose jsonrpc member is %s is invalid', async (_case, body) => {
+	const response = await handleSystemMcpRequest(body, context);
+
+	expect(response?.error?.code).toBe(-32600);
+	expect(response?.error?.message).toContain('jsonrpc');
 });
 
 test.each([
