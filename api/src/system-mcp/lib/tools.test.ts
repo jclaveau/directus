@@ -1,4 +1,8 @@
-import type { SchemaOverview } from '@directus/types';
+import type {
+	CacheTimeseries,
+	ProcessesReport,
+	SchemaOverview,
+} from '@directus/types';
 import { beforeEach, expect, test, vi } from 'vitest';
 
 const service = vi.hoisted(() => {
@@ -34,7 +38,7 @@ const config = vi.hoisted(() => {
 	return { groups: vi.fn() };
 });
 
-vi.mock('./mcp-config.js', () => {
+vi.mock('./config.js', () => {
 	return { systemMcpToolGroups: config.groups };
 });
 
@@ -46,6 +50,13 @@ vi.mock('../../processes/lib/processes-config.js', () => {
 	return { reportedProcessDetails: processes.details };
 });
 
+import type {
+	CacheAnomalyRecord,
+	CacheEntryRecord,
+	CacheGroupLatencyRecord,
+	CacheLatencyPercentiles,
+	CacheStatsState,
+} from '../../cache-events.js';
 import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js';
 
 const context = {
@@ -197,23 +208,149 @@ test('The telemetry state takes no argument', async () => {
 });
 
 /**
- * The answers the services really give, keyed by the tool that returns them.
- * Shapes copied from the types the services are declared with — `CacheTimeseries`,
- * `CacheStatsState`, `ProcessesReport` — so a schema that names a field nobody
- * returns fails here instead of misleading a model.
+ * The answers the services really give — typed as the services declare them, so
+ * the compiler maintains this fixture. A field added to `CacheStatsState` or a
+ * metric added to `CACHE_LATENCY_METRICS` fails to compile here until it is
+ * recorded, which is what keeps the schemas below honest as the types move.
+ *
+ * Nested rows are filled rather than left as empty arrays: an empty array
+ * type-checks against any element type, so it would track nothing.
  */
-const ANSWERS: Record<string, unknown> = {
+const percentiles: CacheLatencyPercentiles = { p50: 1, p95: 2, p99: 3 };
+
+const ANSWERS: {
+	list_processes: ProcessesReport;
+	list_cache_entries: CacheEntryRecord[];
+	list_cache_anomalies: CacheAnomalyRecord[];
+	list_cache_latencies: CacheGroupLatencyRecord[];
+	read_cache_timeseries: CacheTimeseries;
+	read_cache_stats_state: CacheStatsState;
+} = {
 	list_processes: {
-		collectedAt: 1,
+		collectedAt: 1_700_000_000_000,
 		collectedForMs: 750,
 		details: ['stats', 'env'],
-		services: [],
 		degraded: { crossReplica: false, supervisor: false },
+		services: [
+			{
+				service: 'api',
+				replicas: [
+					{
+						replicaId: 'replica-a',
+						hostname: 'host-a',
+						supervisor: 'pm2',
+						processes: [
+							{
+								nodeId: 'node-1',
+								pid: 100,
+								pmId: 0,
+								name: 'directus',
+								instance: 0,
+								responding: true,
+								runtime: {
+									rssBytes: 1,
+									heapUsedBytes: 2,
+									heapTotalBytes: 3,
+									externalBytes: 4,
+									uptimeMs: 5,
+									nodeVersion: 'v22.0.0',
+								},
+								supervisor: {
+									status: 'online',
+									restarts: 0,
+									unstableRestarts: 0,
+									uptimeMs: 6,
+									memoryBytes: 7,
+									cpuPercent: 8,
+									maxMemoryRestartBytes: 9,
+									execMode: 'cluster_mode',
+									configuredInstances: 2,
+								},
+								env: [
+									{
+										key: 'DB_CLIENT',
+										value: 'pg',
+										redacted: false,
+										isSet: true,
+										source: 'process',
+									},
+								],
+							},
+						],
+					},
+				],
+			},
+		],
 	},
-	list_cache_entries: [],
-	list_cache_anomalies: [],
-	list_cache_latencies: [],
-	read_cache_timeseries: { buckets: [], markers: [], effectiveTtl: null },
+	list_cache_entries: [
+		{
+			key: 'hash',
+			redisKey: 'scalabus:key',
+			coarse: false,
+			method: 'GET',
+			path: '/items/articles',
+			collection: 'articles',
+			user: { id: 'u1', email: 'ann@corp.io' },
+			query: '{"limit":5}',
+			url: '/items/articles?limit=5',
+			size: 2048,
+			hits: 7,
+			misses: 2,
+			fills: 3,
+			fillMs: 240,
+			hitMs: 2,
+			ttlMs: 60_000,
+			recommendedTtlMs: 90_000,
+			createdAt: 1,
+			expiresAt: 2,
+			lastHitAt: 3,
+		},
+	],
+	list_cache_anomalies: [
+		{
+			cacheKey: 'hash',
+			reason: 'value_too_large',
+			path: '/items/big',
+			method: 'GET',
+			query: '{}',
+			url: '/items/big',
+			count: 4,
+			sample: null,
+			lastSeen: 5,
+		},
+	],
+	list_cache_latencies: [
+		{
+			path: '/items/articles',
+			method: null,
+			query: null,
+			response: percentiles,
+			miss: percentiles,
+			anomaly: percentiles,
+			fill: percentiles,
+			hit: percentiles,
+		},
+	],
+	read_cache_timeseries: {
+		buckets: [
+			{
+				t: 1,
+				hits: 2,
+				misses: 3,
+				fills: 4,
+				anomalies: 5,
+				ttlMs: 6,
+				effectiveTtlMs: 7,
+				hitP50: 1, hitP95: 2, hitP99: 3,
+				fillP50: 1, fillP95: 2, fillP99: 3,
+				anomalyP50: 1, anomalyP95: 2, anomalyP99: 3,
+				missP50: 1, missP95: 2, missP99: 3,
+				bothP50: 1, bothP95: 2, bothP99: 3,
+			},
+		],
+		markers: [{ time: 1, kind: 'flush', detail: 'response' }],
+		effectiveTtl: '5m',
+	},
 	read_cache_stats_state: {
 		configured: true,
 		enabled: true,
@@ -225,7 +362,7 @@ const ANSWERS: Record<string, unknown> = {
 
 test('Every declared output property is one the tool actually answers', async () => {
 	for (const tool of allSystemMcpTools()) {
-		const answer = ANSWERS[tool.name];
+		const answer = ANSWERS[tool.name as keyof typeof ANSWERS];
 
 		expect(answer, `no recorded answer for ${tool.name}`).toBeDefined();
 

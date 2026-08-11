@@ -4,7 +4,7 @@ import {
 	systemMcpEnabled,
 	systemMcpToolGroups,
 	systemMcpAllowsOrigin,
-} from './mcp-config.js';
+} from './config.js';
 
 vi.mock('@directus/env');
 

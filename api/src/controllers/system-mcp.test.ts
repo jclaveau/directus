@@ -4,7 +4,7 @@ const mcp = vi.hoisted(() => {
 	return { handle: vi.fn(), allowedOrigin: vi.fn() };
 });
 
-vi.mock('../mcp/index.js', () => {
+vi.mock('../system-mcp/index.js', () => {
 	return {
 		handleSystemMcpRequest: mcp.handle,
 		systemMcpAllowsOrigin: mcp.allowedOrigin,
@@ -20,7 +20,7 @@ vi.mock('../logger/index.js', () => {
 	return { useLogger: () => logger };
 });
 
-const { default: router } = await import('./mcp.js');
+const { default: router } = await import('./system-mcp.js');
 
 /**
  * `router.post(path, asyncHandler(fn))` registers one Route layer whose own stack
@@ -31,7 +31,11 @@ function handlerFor(path: string, method: 'post' | 'get') {
 		return entry.route?.path === path && entry.route?.methods?.[method];
 	});
 
-	return layer!.route.stack[0].handle;
+	return (layer as any).route.stack[0].handle as (
+		req: any,
+		res: any,
+		next?: any,
+	) => Promise<void>;
 }
 
 function request(overrides: Record<string, unknown> = {}) {
@@ -92,7 +96,7 @@ const get = handlerFor('/', 'get');
  * `asyncHandler` hands a throw to `next` rather than rejecting, so a refusal is
  * observed there — which is also how express turns it into a status.
  */
-async function refusal(req: unknown, res: unknown = response()) {
+async function refusal(req: any, res: any = response()) {
 	const next = vi.fn();
 	await post(req, res, next);
 
@@ -221,7 +225,7 @@ describe('the system MCP endpoint', () => {
 
 	test('answers GET with 405, naming what it does support', () => {
 		const res = response();
-		get({} as any, res);
+		get({} as any, res, vi.fn());
 
 		expect(res.statusCode).toBe(405);
 		expect(res.headers['Allow']).toBe('POST');

@@ -108,7 +108,7 @@ describe('System MCP Tests', () => {
 		});
 	}
 
-	describe('Serves no endpoint where the MCP is turned off', () => {
+	describe('Serves no endpoint where the system MCP is turned off', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await post(vendor, 'envMcpOff', {
 				jsonrpc: '2.0',
@@ -456,7 +456,7 @@ describe('System MCP Tests', () => {
 
 			const paths = response.body.paths;
 
-			expect(paths['/system-mcp'].post.operationId).toBe('call-mcp');
+			expect(paths['/system-mcp'].post.operationId).toBe('call-system-mcp');
 			expect(paths['/utils/processes'].get.operationId).toBe('list-processes');
 			expect(paths['/utils/cache'].get.operationId).toBe('list-cache-entries');
 			expect(paths['/utils/cache/anomalies']).toBeDefined();

@@ -5,7 +5,7 @@ import {
 	handleSystemMcpRequest,
 	systemMcpAllowsOrigin,
 	SUPPORTED_MCP_PROTOCOL_VERSIONS,
-} from '../mcp/index.js';
+} from '../system-mcp/index.js';
 import asyncHandler from '../utils/async-handler.js';
 
 const router = Router();

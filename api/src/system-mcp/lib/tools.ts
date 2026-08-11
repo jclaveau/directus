@@ -5,7 +5,7 @@ import {
 	type McpTool,
 	type McpToolContext,
 } from '../types/tool.js';
-import { systemMcpToolGroups } from './mcp-config.js';
+import { systemMcpToolGroups } from './config.js';
 import { reportedProcessDetails } from '../../processes/lib/processes-config.js';
 
 /**

@@ -1,5 +1,5 @@
 post:
-  summary: Call a diagnostics tool
+  summary: Call a system tool
   description: >
     A read-only MCP (Model Context Protocol) endpoint over JSON-RPC 2.0,
     served at /system-mcp rather than /mcp, which upstream Directus uses
@@ -15,7 +15,7 @@ post:
     SYSTEM_MCP_ENABLED is on. Browser callers must send an Origin named in
     SYSTEM_MCP_ALLOWED_ORIGINS; a caller with no Origin is not a browser.
     GET is answered with 405: this server offers no SSE stream.
-  operationId: call-mcp
+  operationId: call-system-mcp
   requestBody:
     content:
       application/json:
@@ -62,4 +62,4 @@ post:
     '405':
       description: Returned for GET — this server offers no SSE stream
   tags:
-    - Mcp
+    - System MCP
