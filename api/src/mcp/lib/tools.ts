@@ -1,6 +1,10 @@
 import { requestedWindowMs } from '../../utils/requested-window-ms.js';
 import { UtilsService } from '../../services/utils.js';
-import type { McpTool, McpToolContext } from '../types/tool.js';
+import {
+	defineSystemMcpTool,
+	type McpTool,
+	type McpToolContext,
+} from '../types/tool.js';
 import { systemMcpToolGroups } from './mcp-config.js';
 import { reportedProcessDetails } from '../../processes/lib/processes-config.js';
 
@@ -83,7 +87,7 @@ const windowProperty = {
  */
 export function allSystemMcpTools(): McpTool[] {
 	return [
-	{
+	defineSystemMcpTool({
 		name: 'list_processes',
 		group: 'processes',
 		title: 'List running processes',
@@ -112,8 +116,8 @@ export function allSystemMcpTools(): McpTool[] {
 		},
 		annotations: READ_ONLY,
 		run: async (_args, context) => utils(context).readProcesses(),
-	},
-	{
+	}),
+	defineSystemMcpTool({
 		name: 'list_cache_entries',
 		group: 'cache',
 		title: 'List cache entries',
@@ -127,8 +131,8 @@ export function allSystemMcpTools(): McpTool[] {
 		run: async (args, context) => {
 			return utils(context).getCacheEntries(requestedWindowMs(args['window']));
 		},
-	},
-	{
+	}),
+	defineSystemMcpTool({
 		name: 'list_cache_anomalies',
 		group: 'cache',
 		title: 'List cache anomalies',
@@ -142,8 +146,8 @@ export function allSystemMcpTools(): McpTool[] {
 		run: async (args, context) => {
 			return utils(context).getCacheAnomalies(requestedWindowMs(args['window']));
 		},
-	},
-	{
+	}),
+	defineSystemMcpTool({
 		name: 'list_cache_latencies',
 		group: 'cache',
 		title: 'List cache latencies',
@@ -159,8 +163,8 @@ export function allSystemMcpTools(): McpTool[] {
 
 			return utils(context).getCacheGroupLatencies(window);
 		},
-	},
-	{
+	}),
+	defineSystemMcpTool({
 		name: 'read_cache_timeseries',
 		group: 'cache',
 		title: 'Read the cache timeseries',
@@ -204,8 +208,8 @@ export function allSystemMcpTools(): McpTool[] {
 				buckets,
 			);
 		},
-	},
-	{
+	}),
+	defineSystemMcpTool({
 		name: 'read_cache_stats_state',
 		group: 'cache',
 		title: 'Read the cache telemetry state',
@@ -232,7 +236,7 @@ export function allSystemMcpTools(): McpTool[] {
 		},
 		annotations: READ_ONLY,
 		run: async (_args, context) => utils(context).getCacheStatsState(),
-	},
+	}),
 	];
 }
 

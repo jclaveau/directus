@@ -47,3 +47,43 @@ export interface McpTool {
 	};
 	run: (args: Record<string, unknown>, context: McpToolContext) => Promise<unknown>;
 }
+
+/**
+ * A list cannot be structured content, so the runtime names it `items`. The type
+ * mirrors that, and exists so the schema below is checked against what a client
+ * really receives rather than against what the service returned.
+ */
+export type StructuredAnswer<T> = T extends readonly unknown[]
+	? { items: T }
+	: T;
+
+/**
+ * An output schema whose properties are exactly the keys of the answer.
+ *
+ * A mapped type over `keyof` makes a missing key a compile error, and excess
+ * property checking on the literal makes an invented one a compile error too —
+ * which is the mistake this exists to prevent: two schemas once declared
+ * `events` and `disabledReason`, neither of which any service ever returned.
+ */
+export type McpOutputSchema<TAnswer> = {
+	type: 'object';
+	properties: { [K in keyof Required<StructuredAnswer<TAnswer>>]: unknown };
+};
+
+/**
+ * Declares a tool, tying its `outputSchema` to the return type of its own `run`.
+ * The array they live in is homogeneous, so the check has to happen here, at
+ * each declaration, while the answer type is still known.
+ */
+export function defineSystemMcpTool<TAnswer>(tool: {
+	name: string;
+	group: McpToolGroup;
+	title: string;
+	description: string;
+	inputSchema: McpTool['inputSchema'];
+	outputSchema: McpOutputSchema<Awaited<TAnswer>>;
+	annotations: McpTool['annotations'];
+	run: (args: Record<string, unknown>, context: McpToolContext) => Promise<TAnswer>;
+}): McpTool {
+	return tool as unknown as McpTool;
+}
