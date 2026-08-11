@@ -45,6 +45,13 @@ vi.mock('../scoped-cache.js', () => {
 		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
 		serializeScopedCacheTags: mocks.serializeScopedCacheTags,
+		// The descriptor carries the entry's tags in this same display form, so a
+		// later purge of any of them is attributable back to this request.
+		scopedCacheTagLabel: (tag: any) => {
+			return tag.field === undefined
+				? tag.collection
+				: `${tag.collection}:${tag.field}=${tag.value}`;
+		},
 	};
 });
 

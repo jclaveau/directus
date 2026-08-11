@@ -32,8 +32,8 @@ function recordingTable(columns: string[], indexes: string[]) {
 }
 
 function fakeKnex(client: string, hasTimescale: boolean) {
-	const columns: string[] = [];
-	const indexes: string[] = [];
+	const columns: Record<string, string[]> = {};
+	const indexes: Record<string, string[]> = {};
 
 	const raw = vi.fn(async (sql: string) => {
 		return sql.includes('pg_extension')
@@ -44,8 +44,12 @@ function fakeKnex(client: string, hasTimescale: boolean) {
 	return {
 		client: { config: { client } },
 		schema: {
-			createTable: vi.fn(async (_name: string, build: (t: any) => void) => {
-				build(recordingTable(columns, indexes));
+			// Per table, so the three CREATEs in this migration are asserted apart
+			// rather than as one flattened list.
+			createTable: vi.fn(async (name: string, build: (t: any) => void) => {
+				columns[name] = [];
+				indexes[name] = [];
+				build(recordingTable(columns[name], indexes[name]));
 			}),
 			dropTable: vi.fn(async () => undefined),
 		},
@@ -68,13 +72,13 @@ describe('the cache purges migration', () => {
 		expect(knex.schema.createTable)
 			.toHaveBeenCalledWith('directus_cache_purges', expect.any(Function));
 
-		expect(knex.columns).toEqual([
+		expect(knex.columns['directus_cache_purges']).toEqual([
 			'timestamp time notNullable',
 			'string collection nullable',
+			// Correlates the tag rows back to one purge, so an entry covered by
+			// two of a purge's tags counts that purge once.
+			'string purge_id notNullable',
 			'string mode notNullable',
-			// The tags themselves, so a purge row joins against an entry's own
-			// tags — null where the list is derived rather than chosen.
-			'text tags nullable',
 			'integer tag_count notNullable',
 			// Unknown on a namespace clear, which has no member list to count.
 			'integer evicted nullable',
@@ -82,11 +86,30 @@ describe('the cache purges migration', () => {
 
 		// No surrogate key: a hypertable refuses a unique index that leaves out its
 		// partitioning column, so an `id` would have to become `(id, time)`.
-		expect(knex.columns.some((c: string) => c.startsWith('increments'))).toBe(false);
+		expect(
+			knex.columns['directus_cache_purges']
+				.some((c: string) => c.startsWith('increments')),
+		).toBe(false);
 
 		// `time` only — `mode` has three values and the timeseries folds it into a
 		// CASE, so an index there would be write cost with no reader.
-		expect(knex.indexes).toEqual(['time']);
+		expect(knex.indexes['directus_cache_purges']).toEqual(['time']);
+
+		// The two halves of the join that attributes a purge to an entry.
+		expect(knex.columns['directus_cache_entry_tags']).toEqual([
+			'string cache_key notNullable',
+			'string tag notNullable',
+		]);
+
+		expect(knex.columns['directus_cache_purge_tags']).toEqual([
+			'string purge_id notNullable',
+			'timestamp time notNullable',
+			'string tag notNullable',
+		]);
+
+		// Both sides of the equi-join are indexed, plus `time` for the reap.
+		expect(knex.indexes['directus_cache_entry_tags']).toEqual(['cache_key', 'tag']);
+		expect(knex.indexes['directus_cache_purge_tags']).toEqual(['time', 'tag']);
 	});
 
 	it('drops the table on the way back down', async () => {

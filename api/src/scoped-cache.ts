@@ -165,17 +165,19 @@ export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 // Render scope tags for the dev-only `X-Scoped-Cache-*` headers: each tag as its
 // key suffix (no `<namespace>:tag:` prefix) — `collection`, or `collection:field=
 // value` for a pinned slice (same canonical value as the Redis key). Comma-joined.
+export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
+	if (tag.field === undefined) {
+		return tag.collection;
+	}
+
+	return `${tag.collection}:${tag.field}=${
+		canonicalScopedCacheValue(tag.value, tag.type)
+	}`;
+}
+
 export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
 	return tags
-		.map((tag) => {
-			if (tag.field === undefined) {
-				return tag.collection;
-			}
-
-			const value = canonicalScopedCacheValue(tag.value, tag.type);
-
-			return `${tag.collection}:${tag.field}=${value}`;
-		})
+		.map(scopedCacheTagLabel)
 		.join(', ');
 }
 
@@ -428,7 +430,7 @@ export async function purgeScopedCache(
 	queueCachePurge({
 		collection,
 		mode: 'slices',
-		tags: serializeScopedCacheTags(resolvedScopedCacheTags),
+		tags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
 		tagCount: tagKeys.length,
 		evicted,
 	});

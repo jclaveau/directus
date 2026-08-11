@@ -42,8 +42,11 @@ export async function up(knex: Knex): Promise<void> {
 		table.timestamp('time').notNullable();
 		table.string('collection').nullable(); // null on a namespace-wide clear
 		// slices | collection | namespace
+		// Correlates the tag rows below back to one purge, so an entry covered by
+		// two of a purge's tags counts that purge once. Not a key: a hypertable
+		// refuses a unique index that leaves out its partitioning column.
+		table.string('purge_id', 36).notNullable();
 		table.string('mode', 16).notNullable();
-		table.text('tags').nullable();
 		table.integer('tag_count').notNullable();
 		table.integer('evicted').nullable();
 		// Only `time` is indexed: the timeseries filters by it and folds `mode`
@@ -51,6 +54,8 @@ export async function up(knex: Knex): Promise<void> {
 		// with no reader.
 		table.index('time');
 	});
+
+	await createTagIndex(knex);
 
 	if (knex.client.config.client !== 'pg') {
 		return;
@@ -92,6 +97,38 @@ export async function up(knex: Knex): Promise<void> {
 	);
 }
 
+/**
+ * The two sides of "was this entry covered by that purge?".
+ *
+ * `directus_cache_entry_tags` is the dimension half: the tags an entry was
+ * filled under, written where `respond.ts` already indexes the key into its tag
+ * sets. `directus_cache_purge_tags` is the fact half: the tags each purge
+ * dropped. Equi-joining them on `tag` answers, per request, how often the cache
+ * threw its entry away — the number that only means something beside its hits.
+ *
+ * Two tables rather than the comma-joined columns they replace: matching joined
+ * text against joined text means LIKE, which cannot index and false-matches on
+ * a prefix (`articles` against `articles_archive`).
+ */
+async function createTagIndex(knex: Knex): Promise<void> {
+	await knex.schema.createTable('directus_cache_entry_tags', (table) => {
+		table.string('cache_key').notNullable(); // → descriptors.cache_key (no FK)
+		table.string('tag').notNullable();
+		table.index('cache_key');
+		table.index('tag');
+	});
+
+	await knex.schema.createTable('directus_cache_purge_tags', (table) => {
+		table.string('purge_id', 36).notNullable();
+		table.timestamp('time').notNullable();
+		table.string('tag').notNullable();
+		table.index('time');
+		table.index('tag');
+	});
+}
+
 export async function down(knex: Knex): Promise<void> {
+	await knex.schema.dropTable('directus_cache_purge_tags');
+	await knex.schema.dropTable('directus_cache_entry_tags');
 	await knex.schema.dropTable('directus_cache_purges');
 }

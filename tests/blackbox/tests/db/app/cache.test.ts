@@ -2531,6 +2531,78 @@ describe('App Caching Tests', () => {
 		});
 	});
 
+	// The point of recording purges: an entry the cache keeps throwing away is
+	// doing negative work, and that only reads as such NEXT TO its own hits.
+	describe('The registry counts the purges that covered each entry', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// A prior run's rows for this path would otherwise satisfy the assertion
+			// below without this run having purged anything.
+			await request(url).post('/utils/cache/stats/truncate')
+				.set('Authorization', auth);
+
+			// Fill, then hit — the entry is now tagged with the collection it read.
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			// A read of an unrelated collection, which the mutation must not touch.
+			await request(url).get(`/items/${collectionRelated}`)
+				.set('Authorization', auth);
+
+			// Mutating the first collection purges the tags its read carries.
+			await request(url).post(`/items/${collectionFirst}`)
+				.set('Authorization', auth)
+				.send({ name: 'purge-counter' });
+
+			let mutated: any;
+			let untouched: any;
+
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				const rows = listed.body.data as any[];
+
+				mutated = rows.find((entry: any) => {
+					return entry.path === `/items/${collectionFirst}`
+						&& entry.purges >= 1;
+				});
+
+				untouched = rows.find((entry: any) => {
+					return entry.path === `/items/${collectionRelated}`;
+				});
+
+				if (mutated && untouched) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			// The mutated collection's entry was covered by the purge...
+			expect(mutated).toBeDefined();
+			expect(mutated.purges).toBeGreaterThanOrEqual(1);
+			expect(mutated.hits).toBeGreaterThanOrEqual(1);
+
+			// ...and the other collection's was not, which is what makes this a
+			// per-entry attribution rather than a global counter repeated on
+			// every row.
+			expect(untouched).toBeDefined();
+			expect(untouched.purges).toBe(0);
+		});
+	});
+
 	describe('The cache registry lists and evicts cached entries', () => {
 		// Telemetry is buffered in Redis and flushed to Postgres on a schedule, so the
 		// listing is eventually-consistent — poll until the fill/hit land.

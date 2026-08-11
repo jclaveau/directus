@@ -359,7 +359,7 @@ describe('scoped cache purging', () => {
 				mode: 'slices',
 				// The tags themselves, in the display form the entry sidecar stores,
 				// so a purge row joins against an entry rather than merely counting.
-				tags: 'slots, slots:student=A',
+				tags: ['slots', 'slots:student=A'],
 				tagCount: 2,
 				evicted: 2,
 			});

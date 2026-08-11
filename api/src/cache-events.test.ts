@@ -24,7 +24,9 @@ import {
 	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
+	reapCacheEntryTags,
 	reapCachePurges,
+	reapCachePurgeTags,
 	refreshCacheStatsFlag,
 	setCacheStatsEnabled,
 	subscribeCacheStatsToggle,
@@ -67,6 +69,11 @@ let mockRedis: {
 
 let builder: any;
 let queryRows: any[];
+// Per-table override for the few reads that fire more than one query, keyed by
+// the exact table expression. Falls back to `queryRows` so every other test is
+// untouched.
+let rowsByTable: Record<string, any[]>;
+let lastTable: string;
 let pluckResult: string[];
 let deleteCount: number;
 
@@ -75,6 +82,8 @@ let mockDb: any;
 beforeEach(() => {
 	streamBatch = [];
 	queryRows = [];
+	rowsByTable = {};
+	lastTable = '';
 	pluckResult = [];
 	deleteCount = 0;
 
@@ -138,11 +147,16 @@ beforeEach(() => {
 		pluck: vi.fn(() => Promise.resolve(pluckResult)),
 		delete: vi.fn(() => Promise.resolve(deleteCount)),
 		then: (resolve: any, reject: any) => {
-			return Promise.resolve(queryRows).then(resolve, reject);
+			const rows = rowsByTable[lastTable] ?? queryRows;
+			return Promise.resolve(rows).then(resolve, reject);
 		},
 	};
 
-	mockDb = vi.fn(() => builder);
+	mockDb = vi.fn((table: string) => {
+		lastTable = table;
+		return builder;
+	});
+
 	mockDb.batchInsert = vi.fn();
 	mockDb.raw = vi.fn();
 	mockDb.client = { config: { client: 'pg' } };
@@ -343,6 +357,7 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 			url: '/x',
 			bytes: 0,
 			fillMs: 0,
+			tags: [],
 		});
 
 		await flushCacheEventBuffer();
@@ -473,6 +488,7 @@ describe('queueCacheDescriptor', () => {
 			url: '/items/articles?limit=5',
 			bytes: 42,
 			fillMs: 240,
+			tags: [],
 		});
 
 		await flushCacheEventBuffer();
@@ -501,6 +517,7 @@ describe('queueCacheDescriptor', () => {
 			url: '',
 			bytes: 0,
 			fillMs: 0,
+			tags: [],
 		});
 
 		await flushCacheEventBuffer();
@@ -854,7 +871,8 @@ describe('drainCacheEvents', () => {
 				kind: 'p',
 				collection: 'articles',
 				mode: 'collection',
-				tags: '',
+				purgeId: 'p-1',
+				tags: 'articles,articles:author=2',
 				tagCount: '4',
 				evicted: '11',
 				ts: '6000',
@@ -866,6 +884,7 @@ describe('drainCacheEvents', () => {
 				kind: 'p',
 				collection: '',
 				mode: 'namespace',
+				purgeId: 'p-2',
 				tags: '',
 				tagCount: '0',
 				evicted: '',
@@ -880,17 +899,17 @@ describe('drainCacheEvents', () => {
 			[
 				{
 					time: new Date(6000),
+					purge_id: 'p-1',
 					collection: 'articles',
 					mode: 'collection',
-					tags: null,
 					tag_count: 4,
 					evicted: 11,
 				},
 				{
 					time: new Date(7000),
+					purge_id: 'p-2',
 					collection: null,
 					mode: 'namespace',
-					tags: null,
 					tag_count: 0,
 					evicted: null,
 				},
@@ -898,9 +917,67 @@ describe('drainCacheEvents', () => {
 			expect.any(Number),
 		);
 
+		// Each tag becomes its own row, carrying the purge's id so an entry covered
+		// by two of them still counts the purge once.
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_purge_tags',
+			[
+				{ purge_id: 'p-1', time: new Date(6000), tag: 'articles' },
+				{ purge_id: 'p-1', time: new Date(6000), tag: 'articles:author=2' },
+			],
+			expect.any(Number),
+		);
+
 		// And none of it leaked into the hit/miss fact table beside it.
 		expect(mockDb.batchInsert).not.toHaveBeenCalledWith(
 			'directus_cache_events',
+			expect.anything(),
+			expect.anything(),
+		);
+	});
+
+	it('replaces an entry\'s tags on refill rather than merging them', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'd', cacheKey: 'k1', redisKey: 'r1', coarse: '0', method: 'GET',
+				path: '/items/a', collection: 'a', userId: '', query: '{}',
+				url: '/items/a', bytes: '42', fillMs: '5',
+				// The same tag twice: a read can resolve one slice through two paths.
+				tags: 'a,a:owner=7,a', ts: '1000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		// Deleted first, so a refill under a narrower scope cannot leave an old tag
+		// behind claiming coverage the entry no longer has.
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['k1']);
+		expect(builder.delete).toHaveBeenCalled();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_entry_tags',
+			[
+				{ cache_key: 'k1', tag: 'a' },
+				{ cache_key: 'k1', tag: 'a:owner=7' },
+			],
+			expect.any(Number),
+		);
+	});
+
+	it('records no tags for a locator, which never resolved any', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'd', cacheKey: 'k9', redisKey: 'r9', coarse: '0', method: 'GET',
+				path: '/items/a', collection: 'a', userId: '', query: '{}',
+				url: '/items/a', bytes: '0', fillMs: '0', tags: '',
+				ts: '', // empty ts = a locator, written at an anomaly site
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).not.toHaveBeenCalledWith(
+			'directus_cache_entry_tags',
 			expect.anything(),
 			expect.anything(),
 		);
@@ -1453,6 +1530,7 @@ describe('capture is gated by the runtime flag', () => {
 			url: '',
 			bytes: 0,
 			fillMs: 0,
+			tags: [],
 		});
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
@@ -1460,6 +1538,87 @@ describe('capture is gated by the runtime flag', () => {
 });
 
 describe('listCacheEntries', () => {
+	// The number this whole feature exists for: purges beside hits, per request.
+	it('counts the purges that covered each entry, deduped by purge', async () => {
+		rowsByTable['directus_cache_descriptors as d'] = [
+			{
+				cache_key: 'k1',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/a',
+				collection: 'a',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/a',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '2',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+			{
+				cache_key: 'k2',
+				redis_key: 'r2',
+				coarse: false,
+				method: 'GET',
+				path: '/items/b',
+				collection: 'b',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/b',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '9',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		// k1 was covered three times; k2 has no row at all, which must read as 0
+		// rather than as missing.
+		rowsByTable['directus_cache_entry_tags as et'] = [
+			{ cache_key: 'k1', purges: '3' },
+		];
+
+		const entries = await listCacheEntries();
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_entry_tags as et');
+
+		// COUNT(DISTINCT purge_id), so a purge covering two of an entry's tags is
+		// one purge and not two.
+		expect(mockDb.raw).toHaveBeenCalledWith(
+			expect.stringContaining('COUNT(DISTINCT pt.purge_id)'),
+		);
+
+		expect(entries.map((entry) => [entry.key, entry.purges, entry.hits]))
+			.toEqual([
+				['k1', 3, 2],
+				['k2', 0, 9],
+			]);
+	});
+
+	it('asks for no purge counts when nothing was listed', async () => {
+		rowsByTable['directus_cache_descriptors as d'] = [];
+
+		await expect(listCacheEntries()).resolves.toEqual([]);
+
+		// An empty `whereIn` would scan the whole join for rows nothing can use.
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_entry_tags as et');
+	});
+
 	it('maps descriptor + windowed hit rows to entry records', async () => {
 		queryRows = [
 			{
@@ -1516,6 +1675,8 @@ describe('listCacheEntries', () => {
 		expect(entries).toEqual([
 			{
 				key: 'k1',
+				// No purge-tag rows in this fixture, so nothing covered it.
+				purges: 0,
 				redisKey: '/items/a?limit=5:u1',
 				coarse: true,
 				method: 'GET',
@@ -1538,6 +1699,7 @@ describe('listCacheEntries', () => {
 			},
 			{
 				key: 'k2',
+				purges: 0,
 				redisKey: '',
 				coarse: false,
 				method: 'GET',
@@ -1862,7 +2024,7 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'slices',
-			tags: 'articles:id=1',
+			tags: ['articles:id=1'],
 			tagCount: 1,
 			evicted: 2,
 		});
@@ -1880,7 +2042,7 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'slices',
-			tags: 'articles:id=1',
+			tags: ['articles:id=1'],
 			tagCount: 1,
 			evicted: 2,
 		});
@@ -1888,6 +2050,42 @@ describe('queueCachePurge', () => {
 		await flushCacheEventBuffer();
 
 		expect(mockRedis.call).not.toHaveBeenCalled();
+	});
+});
+
+describe('reapCachePurgeTags', () => {
+	it('deletes tag rows past the retention window', async () => {
+		deleteCount = 7;
+
+		expect(await reapCachePurgeTags()).toBe(7);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_purge_tags');
+	});
+
+	it('returns 0 without touching the table when not configured', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+		expect(await reapCachePurgeTags()).toBe(0);
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_purge_tags');
+	});
+});
+
+describe('reapCacheEntryTags', () => {
+	it('drops tag rows whose entry no longer has a descriptor', async () => {
+		deleteCount = 2;
+
+		expect(await reapCacheEntryTags()).toBe(2);
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_entry_tags');
+
+		// Followed out by their descriptor rather than aged out by time: the tags
+		// are a dimension of the entry, not a fact of their own.
+		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
+	});
+
+	it('returns 0 without touching the table when not configured', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+		expect(await reapCacheEntryTags()).toBe(0);
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_entry_tags');
 	});
 });
 
