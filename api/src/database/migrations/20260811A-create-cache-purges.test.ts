@@ -1,11 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { up } from './20260811A-create-cache-purges.js';
+import { down, up } from './20260811A-create-cache-purges.js';
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 const env: Record<string, unknown> = { CACHE_STATS_RETENTION: '30d' };
 
+/**
+ * Records the column definitions rather than stubbing them away, so the shape
+ * is asserted and not merely the fact that a table was asked for.
+ */
+function recordingTable(columns: string[], indexes: string[]) {
+	function column(kind: string, name: string) {
+		columns.push(`${kind} ${name}`);
+
+		const chain: any = {
+			notNullable: () => (columns[columns.length - 1] += ' notNullable', chain),
+			nullable: () => (columns[columns.length - 1] += ' nullable', chain),
+		};
+
+		return chain;
+	}
+
+	return {
+		increments: (name: string) => column('increments', name),
+		timestamp: (name: string) => column('timestamp', name),
+		string: (name: string) => column('string', name),
+		integer: (name: string) => column('integer', name),
+		index: (name: string) => indexes.push(name),
+	};
+}
+
 function fakeKnex(client: string, hasTimescale: boolean) {
+	const columns: string[] = [];
+	const indexes: string[] = [];
+
 	const raw = vi.fn(async (sql: string) => {
 		return sql.includes('pg_extension')
 			? { rows: [{ has: hasTimescale }] }
@@ -14,8 +42,15 @@ function fakeKnex(client: string, hasTimescale: boolean) {
 
 	return {
 		client: { config: { client } },
-		schema: { createTable: vi.fn(async () => undefined) },
+		schema: {
+			createTable: vi.fn(async (_name: string, build: (t: any) => void) => {
+				build(recordingTable(columns, indexes));
+			}),
+			dropTable: vi.fn(async () => undefined),
+		},
 		raw,
+		columns,
+		indexes,
 	} as any;
 }
 
@@ -31,6 +66,31 @@ describe('the cache purges migration', () => {
 
 		expect(knex.schema.createTable)
 			.toHaveBeenCalledWith('directus_cache_purges', expect.any(Function));
+
+		expect(knex.columns).toEqual([
+			'timestamp time notNullable',
+			'string collection nullable',
+			'string mode notNullable',
+			'integer tags notNullable',
+			// Unknown on a namespace clear, which has no member list to count.
+			'integer evicted nullable',
+		]);
+
+		// No surrogate key: a hypertable refuses a unique index that leaves out its
+		// partitioning column, so an `id` would have to become `(id, time)`.
+		expect(knex.columns.some((c: string) => c.startsWith('increments'))).toBe(false);
+
+		// `time` only — `mode` has three values and the timeseries folds it into a
+		// CASE, so an index there would be write cost with no reader.
+		expect(knex.indexes).toEqual(['time']);
+	});
+
+	it('drops the table on the way back down', async () => {
+		const knex = fakeKnex('pg', true);
+
+		await down(knex);
+
+		expect(knex.schema.dropTable).toHaveBeenCalledWith('directus_cache_purges');
 	});
 
 	// The fact table beside it is a hypertable with compression and a retention

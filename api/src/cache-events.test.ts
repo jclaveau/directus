@@ -848,6 +848,60 @@ describe('drainCacheEvents', () => {
 		);
 	});
 
+	it('demuxes purges to their own table, unknown size and all', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'p',
+				collection: 'articles',
+				mode: 'collection',
+				tags: '4',
+				evicted: '11',
+				ts: '6000',
+			}),
+			// A namespace clear: no collection, and a size that was never knowable.
+			// The empty field must arrive as null rather than 0 — on the chart the
+			// two say different things.
+			streamEntry('2-0', {
+				kind: 'p',
+				collection: '',
+				mode: 'namespace',
+				tags: '0',
+				evicted: '',
+				ts: '7000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_purges',
+			[
+				{
+					time: new Date(6000),
+					collection: 'articles',
+					mode: 'collection',
+					tags: 4,
+					evicted: 11,
+				},
+				{
+					time: new Date(7000),
+					collection: null,
+					mode: 'namespace',
+					tags: 0,
+					evicted: null,
+				},
+			],
+			expect.any(Number),
+		);
+
+		// And none of it leaked into the hit/miss fact table beside it.
+		expect(mockDb.batchInsert).not.toHaveBeenCalledWith(
+			'directus_cache_events',
+			expect.anything(),
+			expect.anything(),
+		);
+	});
+
 	it('demuxes anomaly-miss (x→3) and other-miss (o→4) latency events', async () => {
 		streamBatch = [
 			streamEntry('1-0', {
@@ -1738,6 +1792,15 @@ describe('reapCachePurges', () => {
 		expect(await reapCachePurges()).toBe(4);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_purges');
 		expect(builder.delete).toHaveBeenCalled();
+	});
+
+	it('returns 0 without touching the table when not configured', async () => {
+		// The daily job runs on every deployment, including those that never
+		// enabled cache stats and so have no rows — and, on a fresh one, no table.
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+		expect(await reapCachePurges()).toBe(0);
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_purges');
 	});
 });
 
