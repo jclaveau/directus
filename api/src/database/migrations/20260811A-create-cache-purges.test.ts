@@ -99,17 +99,25 @@ describe('the cache purges migration', () => {
 		expect(knex.columns['directus_cache_entry_tags']).toEqual([
 			'string cache_key notNullable',
 			'string tag notNullable',
+			// Carried so a collection-wide purge, which names no tag, still has
+			// something to be attributed by.
+			'string collection notNullable',
 		]);
 
 		expect(knex.columns['directus_cache_purge_tags']).toEqual([
 			'string purge_id notNullable',
 			'timestamp time notNullable',
 			'string tag notNullable',
+			'string collection notNullable',
 		]);
 
-		// Both sides of the equi-join are indexed, plus `time` for the reap.
-		expect(knex.indexes['directus_cache_entry_tags']).toEqual(['cache_key', 'tag']);
-		expect(knex.indexes['directus_cache_purge_tags']).toEqual(['time', 'tag']);
+		// Both join keys indexed on both sides — the precise pass matches on tag,
+		// the coarse pass on collection — plus `time` for the reap.
+		expect(knex.indexes['directus_cache_entry_tags'])
+			.toEqual(['cache_key', 'tag', 'collection']);
+
+		expect(knex.indexes['directus_cache_purge_tags'])
+			.toEqual(['time', 'tag', 'collection']);
 	});
 
 	it('drops the table on the way back down', async () => {

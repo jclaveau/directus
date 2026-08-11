@@ -647,6 +647,19 @@ interface CachePurgeRow {
 	evicted: number | null; // null = a namespace clear, whose size is unknowable
 }
 
+/**
+ * The collection a display-form tag belongs to: `articles` or the head of
+ * `articles:owner=7`. Taken off the tag rather than off the descriptor, since one
+ * entry can read across collections and carry a tag from each.
+ */
+function collectionOfTag(tag: string): string {
+	const slice = tag.indexOf(':');
+
+	return slice === -1
+		? tag
+		: tag.slice(0, slice);
+}
+
 function parseFields(flat: string[]): Record<string, string> {
 	const fields: Record<string, string> = {};
 
@@ -812,10 +825,17 @@ async function persistStreamBatch(
 	const locators = new Map<string, CacheDescriptorRow>();
 	const anomalies: CacheAnomalyRow[] = [];
 	const purges: CachePurgeRow[] = [];
-	const purgeTags: { purge_id: string; time: Date; tag: string }[] = [];
+
+	const purgeTags: {
+		purge_id: string;
+		time: Date;
+		tag: string;
+		collection: string;
+	}[] = [];
+
 	// Keyed so the last fill in a batch wins, matching the descriptor upsert: an
 	// entry's tags are replaced wholesale on refill, never merged with the old set.
-	const entryTags = new Map<string, string[]>();
+	const entryTags = new Map<string, { tag: string; collection: string }[]>();
 
 	for (const [, flat] of batch) {
 		const f = parseFields(flat);
@@ -839,7 +859,26 @@ async function persistStreamBatch(
 			// One row per tag the purge dropped, carrying the purge's own id so an
 			// entry covered by two of them still counts the purge once.
 			for (const tag of (f['tags'] ?? '').split(',').filter(Boolean)) {
-				purgeTags.push({ purge_id: f['purgeId'] ?? '', time: at, tag });
+				purgeTags.push({
+					purge_id: f['purgeId'] ?? '',
+					time: at,
+					tag,
+					collection: collectionOfTag(tag),
+				});
+			}
+
+			// A collection-wide purge names no tag: it dropped the bare tag AND
+			// every slice, and a pinned entry carries only its slice tag. Recording
+			// the bare tag alone would attribute it to global reads and miss every
+			// pinned entry, which is most of what it destroyed — so it is recorded
+			// against the collection, in one row rather than one per derived slice.
+			if (f['mode'] === 'collection' && f['collection']) {
+				purgeTags.push({
+					purge_id: f['purgeId'] ?? '',
+					time: at,
+					tag: '',
+					collection: f['collection'],
+				});
 			}
 
 			continue;
@@ -888,9 +927,11 @@ async function persistStreamBatch(
 			// Only a real fill knows the tags; a locator is written at an anomaly
 			// site where the read never got far enough to resolve them.
 			if (row.last_filled !== null) {
+				const tags = [...new Set((f['tags'] ?? '').split(',').filter(Boolean))];
+
 				entryTags.set(
 					row.cache_key,
-					[...new Set((f['tags'] ?? '').split(',').filter(Boolean))],
+					tags.map((tag) => ({ tag, collection: collectionOfTag(tag) })),
 				);
 			}
 
@@ -956,7 +997,9 @@ async function persistStreamBatch(
 					.delete();
 
 				const rows = [...entryTags].flatMap(([cacheKey, tags]) => {
-					return tags.map((tag) => ({ cache_key: cacheKey, tag }));
+					return tags.map(({ tag, collection }) => {
+						return { cache_key: cacheKey, tag, collection };
+					});
 				});
 
 				if (rows.length > 0) {
@@ -1086,6 +1129,28 @@ export async function listCacheEntries(
 
 		for (const row of purgeRows as Record<string, unknown>[]) {
 			purgesByKey.set(row['cache_key'] as string, Number(row['purges'] ?? 0));
+		}
+
+		// The coarse pass, joined on collection rather than on tag: a
+		// collection-wide purge names no tag, and a pinned entry carries only its
+		// slice tag, so nothing above would ever match it. Added to the precise
+		// count rather than replacing it — a purge is tag-bearing or
+		// collection-bearing and never both, so the two cannot double-count one.
+		const coarseRows = await db('directus_cache_purge_tags as pt')
+			.join('directus_cache_entry_tags as et', 'et.collection', 'pt.collection')
+			.where('pt.time', '>', since)
+			.where('pt.tag', '')
+			.whereIn('et.cache_key', listedKeys)
+			.groupBy('et.cache_key')
+			.select(
+				'et.cache_key',
+				db.raw('COUNT(DISTINCT pt.purge_id) AS purges'),
+			);
+
+		for (const row of coarseRows as Record<string, unknown>[]) {
+			const key = row['cache_key'] as string;
+			const precise = purgesByKey.get(key) ?? 0;
+			purgesByKey.set(key, precise + Number(row['purges'] ?? 0));
 		}
 	}
 

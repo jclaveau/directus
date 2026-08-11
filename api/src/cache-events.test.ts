@@ -922,8 +922,26 @@ describe('drainCacheEvents', () => {
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
 			'directus_cache_purge_tags',
 			[
-				{ purge_id: 'p-1', time: new Date(6000), tag: 'articles' },
-				{ purge_id: 'p-1', time: new Date(6000), tag: 'articles:author=2' },
+				{
+					purge_id: 'p-1',
+					time: new Date(6000),
+					tag: 'articles',
+					collection: 'articles',
+				},
+				{
+					purge_id: 'p-1',
+					time: new Date(6000),
+					tag: 'articles:author=2',
+					collection: 'articles',
+				},
+				// The purge was a `collection` one, so it also lands as a
+				// collection-wide row that pinned entries can be attributed by.
+				{
+					purge_id: 'p-1',
+					time: new Date(6000),
+					tag: '',
+					collection: 'articles',
+				},
 			],
 			expect.any(Number),
 		);
@@ -933,6 +951,68 @@ describe('drainCacheEvents', () => {
 			'directus_cache_events',
 			expect.anything(),
 			expect.anything(),
+		);
+	});
+
+	// A coarse purge drops the bare collection tag AND every slice of it, so it
+	// covers pinned entries too — and a pinned read carries only its slice tag
+	// (`articles:owner=7`), never the bare one. Recording the bare tag alone
+	// would attribute the purge to global reads and miss every pinned entry,
+	// which is most of what it destroys. So it records the COLLECTION.
+	it('records a coarse purge as covering its whole collection', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'p',
+				purgeId: 'p-coarse',
+				collection: 'articles',
+				mode: 'collection',
+				tags: '',
+				tagCount: '9',
+				evicted: '30',
+				ts: '6000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		// One row, not one per slice the scan turned up: the reach is the
+		// collection, and enumerating derived slices is the unbounded fan-out this
+		// table exists to avoid.
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_purge_tags',
+			[
+				{
+					purge_id: 'p-coarse',
+					time: new Date(6000),
+					tag: '',
+					collection: 'articles',
+				},
+			],
+			expect.any(Number),
+		);
+	});
+
+	it('carries each entry tag\'s own collection, for the coarse join', async () => {
+		streamBatch = [
+			streamEntry('1-0', {
+				kind: 'd', cacheKey: 'k1', redisKey: 'r1', coarse: '0', method: 'GET',
+				path: '/items/a', collection: 'articles', userId: '', query: '{}',
+				url: '/items/a', bytes: '42', fillMs: '5',
+				// A read spanning two collections carries a tag from each, so the
+				// collection comes off the TAG rather than off the descriptor.
+				tags: 'articles:owner=7,directus_users', ts: '1000',
+			}),
+		];
+
+		await drainCacheEvents();
+
+		expect(mockDb.batchInsert).toHaveBeenCalledWith(
+			'directus_cache_entry_tags',
+			[
+				{ cache_key: 'k1', tag: 'articles:owner=7', collection: 'articles' },
+				{ cache_key: 'k1', tag: 'directus_users', collection: 'directus_users' },
+			],
+			expect.any(Number),
 		);
 	});
 
@@ -957,8 +1037,8 @@ describe('drainCacheEvents', () => {
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
 			'directus_cache_entry_tags',
 			[
-				{ cache_key: 'k1', tag: 'a' },
-				{ cache_key: 'k1', tag: 'a:owner=7' },
+				{ cache_key: 'k1', tag: 'a', collection: 'a' },
+				{ cache_key: 'k1', tag: 'a:owner=7', collection: 'a' },
 			],
 			expect.any(Number),
 		);
@@ -1615,6 +1695,92 @@ describe('listCacheEntries', () => {
 				['k1', 3, 2],
 				['k2', 0, 9],
 			]);
+	});
+
+	// The symptom this whole fix exists for: an endpoint destroyed only by
+	// collection-wide fallbacks read 0, because a coarse purge writes no tag row
+	// to equi-join against. It is the expensive mode, so reading zero for it
+	// inverts the very ranking the column was added to provide.
+	it('counts a coarse purge against every entry of that collection', async () => {
+		rowsByTable['directus_cache_descriptors as d'] = [
+			{
+				cache_key: 'pinned',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/articles',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '1',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		// No precise match at all — a pinned entry carries only its slice tag, and
+		// the coarse purge recorded no slice tags.
+		rowsByTable['directus_cache_entry_tags as et'] = [];
+
+		// The coarse pass, joined on collection rather than on tag.
+		rowsByTable['directus_cache_purge_tags as pt'] = [
+			{ cache_key: 'pinned', purges: '2' },
+		];
+
+		const entries = await listCacheEntries();
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_purge_tags as pt');
+		expect(entries[0]!.purges).toBe(2);
+	});
+
+	it('adds the precise and coarse passes rather than taking one', async () => {
+		rowsByTable['directus_cache_descriptors as d'] = [
+			{
+				cache_key: 'k1',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/articles',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '1',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		// A purge is only ever tag-bearing or collection-bearing, never both, so
+		// the two passes cannot double-count one purge and simply add.
+		rowsByTable['directus_cache_entry_tags as et'] = [
+			{ cache_key: 'k1', purges: '3' },
+		];
+
+		rowsByTable['directus_cache_purge_tags as pt'] = [
+			{ cache_key: 'k1', purges: '4' },
+		];
+
+		const entries = await listCacheEntries();
+
+		expect(entries[0]!.purges).toBe(7);
 	});
 
 	it('asks for no purge counts when nothing was listed', async () => {

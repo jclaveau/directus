@@ -114,16 +114,26 @@ async function createTagIndex(knex: Knex): Promise<void> {
 	await knex.schema.createTable('directus_cache_entry_tags', (table) => {
 		table.string('cache_key').notNullable(); // → descriptors.cache_key (no FK)
 		table.string('tag').notNullable();
+		// The tag's own collection, so a collection-wide purge can be attributed
+		// without matching tag strings by prefix. Off the TAG, not the
+		// descriptor: one entry can read across collections and carry a tag from
+		// each, and the descriptor names only the primary one.
+		table.string('collection').notNullable();
 		table.index('cache_key');
 		table.index('tag');
+		table.index('collection');
 	});
 
 	await knex.schema.createTable('directus_cache_purge_tags', (table) => {
 		table.string('purge_id', 36).notNullable();
 		table.timestamp('time').notNullable();
+		// Empty on a collection-wide purge: it dropped the bare tag AND every
+		// slice, so no single tag names its reach — the collection does.
 		table.string('tag').notNullable();
+		table.string('collection').notNullable();
 		table.index('time');
 		table.index('tag');
+		table.index('collection');
 	});
 }
 
