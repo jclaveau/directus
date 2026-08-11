@@ -59,7 +59,11 @@ export interface CacheMiss {
 export interface CachePurge {
 	collection: string | null; // null on a namespace-wide clear
 	mode: CachePurgeMode;
-	tags: number; // tag sets the purge dropped
+	// The tags actually dropped, comma-joined in display form, so a purge row
+	// joins against an entry's own tags. Null where the list is derived rather
+	// than chosen (`collection`, `namespace`) and `collection` states the reach.
+	tags: string | null;
+	tagCount: number; // that reach as a number, for every mode
 	evicted: number | null; // entries those sets held; null = whole-namespace clear
 }
 
@@ -494,7 +498,8 @@ export function queueCachePurge(entry: CachePurge): void {
 		kind: 'p',
 		collection: entry.collection ?? '',
 		mode: entry.mode,
-		tags: String(entry.tags),
+		tags: entry.tags ?? '',
+		tagCount: String(entry.tagCount),
 		// Empty = unknown, which is not the same as none. Only a namespace clear
 		// sends it: it has no member list to count.
 		evicted: entry.evicted === null
@@ -625,7 +630,8 @@ interface CachePurgeRow {
 	time: Date;
 	collection: string | null;
 	mode: CachePurgeMode;
-	tags: number;
+	tags: string | null;
+	tag_count: number;
 	evicted: number | null; // null = a namespace clear, whose size is unknowable
 }
 
@@ -806,7 +812,10 @@ async function persistStreamBatch(
 					? f['collection']
 					: null,
 				mode: (f['mode'] ?? 'slices') as CachePurgeMode,
-				tags: Number(f['tags'] ?? 0),
+				tags: f['tags']
+					? f['tags']
+					: null,
+				tag_count: Number(f['tagCount'] ?? 0),
 				// Empty came off a namespace clear: unknown, not none.
 				evicted: f['evicted']
 					? Number(f['evicted'])

@@ -352,10 +352,13 @@ export async function purgeCollectionScopedCache(
 
 	// The expensive mode, and the one nothing else records: every slice of the
 	// collection went, because which slices actually changed was unresolvable.
+	// No tag list: every slice the scan happened to find is derived rather than
+	// chosen, and unbounded. `collection` plus the mode already state the reach.
 	queueCachePurge({
 		collection,
 		mode: 'collection',
-		tags: tagKeys.length,
+		tags: null,
+		tagCount: tagKeys.length,
 		evicted,
 	});
 }
@@ -392,7 +395,8 @@ export async function purgeScopedCache(
 		queueCachePurge({
 			collection: null,
 			mode: 'namespace',
-			tags: 0,
+			tags: null,
+			tagCount: 0,
 			evicted: null,
 		});
 
@@ -418,10 +422,14 @@ export async function purgeScopedCache(
 	const tagKeys = [...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))];
 	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
+	// The tags a mutation actually resolved, in the same display form the entry
+	// sidecar stores — so "this entry carries tag X, and tag X was purged at T"
+	// is a join rather than a guess.
 	queueCachePurge({
 		collection,
 		mode: 'slices',
-		tags: tagKeys.length,
+		tags: serializeScopedCacheTags(resolvedScopedCacheTags),
+		tagCount: tagKeys.length,
 		evicted,
 	});
 

@@ -25,6 +25,7 @@ function recordingTable(columns: string[], indexes: string[]) {
 		increments: (name: string) => column('increments', name),
 		timestamp: (name: string) => column('timestamp', name),
 		string: (name: string) => column('string', name),
+		text: (name: string) => column('text', name),
 		integer: (name: string) => column('integer', name),
 		index: (name: string) => indexes.push(name),
 	};
@@ -71,7 +72,10 @@ describe('the cache purges migration', () => {
 			'timestamp time notNullable',
 			'string collection nullable',
 			'string mode notNullable',
-			'integer tags notNullable',
+			// The tags themselves, so a purge row joins against an entry's own
+			// tags — null where the list is derived rather than chosen.
+			'text tags nullable',
+			'integer tag_count notNullable',
 			// Unknown on a namespace clear, which has no member list to count.
 			'integer evicted nullable',
 		]);

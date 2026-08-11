@@ -16,6 +16,19 @@ import { getMilliseconds } from '../../utils/get-milliseconds.js';
  *                    separates it out rather than counting purges as one number.
  *   - `namespace`  — non-scoped mode, where a mutation clears the whole cache.
  *
+ * `tags` holds the tags the purge actually dropped, comma-joined in the display
+ * form `collection[:field=value]` — the same spelling the `X-Scoped-Cache-*`
+ * headers use and the `__tags` sidecar stores, so a purge row joins directly
+ * against an entry's own tags. That join is the point: "written at T0, a purge
+ * covering tag X fired at T1, still present" is what proves a missed
+ * invalidation, where the counts alone only say something was purged.
+ *
+ * It is NULL for `collection` and `namespace`, where the list is derived rather
+ * than chosen — every slice the scan happened to find, unbounded — and where
+ * `collection` plus `mode` already state the reach exactly.
+ *
+ * `tag_count` is that reach as a number, for every mode.
+ *
  * `evicted` counts the ENTRIES the operation deleted, excluding each entry's
  * `__expires_at`/`__tags` sidecars, and is NULL for a `namespace` clear — that
  * one has no member list to count, and 0 would read as "took nothing".
@@ -30,7 +43,8 @@ export async function up(knex: Knex): Promise<void> {
 		table.string('collection').nullable(); // null on a namespace-wide clear
 		// slices | collection | namespace
 		table.string('mode', 16).notNullable();
-		table.integer('tags').notNullable();
+		table.text('tags').nullable();
+		table.integer('tag_count').notNullable();
 		table.integer('evicted').nullable();
 		// Only `time` is indexed: the timeseries filters by it and folds `mode`
 		// into a CASE, so an index on a three-value column would be write cost

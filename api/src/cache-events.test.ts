@@ -854,7 +854,8 @@ describe('drainCacheEvents', () => {
 				kind: 'p',
 				collection: 'articles',
 				mode: 'collection',
-				tags: '4',
+				tags: '',
+				tagCount: '4',
 				evicted: '11',
 				ts: '6000',
 			}),
@@ -865,7 +866,8 @@ describe('drainCacheEvents', () => {
 				kind: 'p',
 				collection: '',
 				mode: 'namespace',
-				tags: '0',
+				tags: '',
+				tagCount: '0',
 				evicted: '',
 				ts: '7000',
 			}),
@@ -880,14 +882,16 @@ describe('drainCacheEvents', () => {
 					time: new Date(6000),
 					collection: 'articles',
 					mode: 'collection',
-					tags: 4,
+					tags: null,
+					tag_count: 4,
 					evicted: 11,
 				},
 				{
 					time: new Date(7000),
 					collection: null,
 					mode: 'namespace',
-					tags: 0,
+					tags: null,
+					tag_count: 0,
 					evicted: null,
 				},
 			],
@@ -1811,7 +1815,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'collection',
-			tags: 3,
+			tags: null,
+			tagCount: 3,
 			evicted: 12,
 		});
 
@@ -1821,7 +1826,8 @@ describe('queueCachePurge', () => {
 		expect(fieldAfter(call, 'kind')).toBe('p');
 		expect(fieldAfter(call, 'collection')).toBe('articles');
 		expect(fieldAfter(call, 'mode')).toBe('collection');
-		expect(fieldAfter(call, 'tags')).toBe('3');
+		expect(fieldAfter(call, 'tags')).toBe('');
+		expect(fieldAfter(call, 'tagCount')).toBe('3');
 		expect(fieldAfter(call, 'evicted')).toBe('12');
 	});
 
@@ -1834,7 +1840,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: null,
 			mode: 'namespace',
-			tags: 0,
+			tags: null,
+			tagCount: 0,
 			evicted: null,
 		});
 
@@ -1855,7 +1862,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'slices',
-			tags: 1,
+			tags: 'articles:id=1',
+			tagCount: 1,
 			evicted: 2,
 		});
 
@@ -1872,7 +1880,8 @@ describe('queueCachePurge', () => {
 		queueCachePurge({
 			collection: 'articles',
 			mode: 'slices',
-			tags: 1,
+			tags: 'articles:id=1',
+			tagCount: 1,
 			evicted: 2,
 		});
 

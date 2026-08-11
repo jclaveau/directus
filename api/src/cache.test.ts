@@ -357,7 +357,10 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'slots',
 				mode: 'slices',
-				tags: 2,
+				// The tags themselves, in the display form the entry sidecar stores,
+				// so a purge row joins against an entry rather than merely counting.
+				tags: 'slots, slots:student=A',
+				tagCount: 2,
 				evicted: 2,
 			});
 
@@ -389,7 +392,10 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'articles',
 				mode: 'collection',
-				tags: 3,
+				// Derived rather than chosen: every slice the scan found, unbounded.
+				// `collection` plus the mode already state the reach exactly.
+				tags: null,
+				tagCount: 3,
 				evicted: 2,
 			});
 		});
@@ -419,7 +425,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'articles',
 				mode: 'collection',
-				tags: 4,
+				tags: null,
+				tagCount: 4,
 				evicted: 0,
 			});
 		});
@@ -440,7 +447,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: null,
 				mode: 'namespace',
-				tags: 0,
+				tags: null,
+				tagCount: 0,
 				evicted: null,
 			});
 		});
