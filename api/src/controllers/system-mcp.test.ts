@@ -91,6 +91,9 @@ beforeEach(() => {
 });
 
 describe('the system MCP endpoint', () => {
+	// For a request the server "MUST either return Content-Type:
+	// text/event-stream […] or application/json, to return one JSON object".
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
 	test('answers a request, uncacheably', async () => {
 		const res = response();
 
@@ -105,6 +108,9 @@ describe('the system MCP endpoint', () => {
 		expect(res.headers['Cache-Control']).toBe('no-store');
 	});
 
+	// "If the server accepts the input, the server MUST return HTTP status code
+	// 202 Accepted with no body."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
 	test('answers a notification with nothing at all', async () => {
 		mcp.handle.mockResolvedValue(null);
 
@@ -122,6 +128,9 @@ describe('the system MCP endpoint', () => {
 		expect(res.body).toBeNull();
 	});
 
+	// "Servers MUST validate the Origin header on all incoming connections to
+	// prevent DNS rebinding attacks."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 	test('refuses an origin the deployment never named', async () => {
 		mcp.allowedOrigin.mockReturnValue(false);
 
@@ -143,6 +152,10 @@ describe('the system MCP endpoint', () => {
 		expect(mcp.handle).not.toHaveBeenCalled();
 	});
 
+	// "Servers SHOULD implement proper authentication for all connections", and
+	// the tool spec asks servers to "implement proper access controls".
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
 	test('refuses anyone who is not an admin', async () => {
 		const anonymous = vi.fn();
 
@@ -168,6 +181,9 @@ describe('the system MCP endpoint', () => {
 		expect(mcp.handle).not.toHaveBeenCalled();
 	});
 
+	// "If the server receives a request with an invalid or unsupported
+	// MCP-Protocol-Version, it MUST respond with 400 Bad Request."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#protocol-version-header
 	test('refuses a protocol revision it does not implement', async () => {
 		const next = vi.fn();
 
@@ -182,6 +198,9 @@ describe('the system MCP endpoint', () => {
 		expect(mcp.handle).not.toHaveBeenCalled();
 	});
 
+	// The 400 above is owed to a caller that got past the credential; ordering
+	// it after authentication is this server's choice, not the spec's.
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#protocol-version-header
 	test('is refused before the version is judged', async () => {
 		const next = vi.fn();
 
@@ -197,6 +216,9 @@ describe('the system MCP endpoint', () => {
 		expect(next.mock.calls[0]![0].message).toMatch(/admin only/);
 	});
 
+	// The header is what the client "MUST include […] on all subsequent
+	// requests"; its absence is met by assuming a revision, not by refusing.
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#protocol-version-header
 	test('accepts the revision it implements, and no header at all', async () => {
 		await post({
 			headers: { 'mcp-protocol-version': '2025-06-18' },
@@ -215,6 +237,8 @@ describe('the system MCP endpoint', () => {
 		expect(mcp.handle).toHaveBeenCalledTimes(2);
 	});
 
+	// The tool spec expects tool usage to be logged for audit purposes.
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
 	test('traces a tool call, and only chatters about the rest', async () => {
 		await post({
 			headers: {},
@@ -268,6 +292,11 @@ describe('the system MCP endpoint', () => {
 
 	// GET is the transport's SSE stream and DELETE ends a session; this server
 	// offers neither, and a 404 would tell a client its session had expired.
+	// GET: the server "MUST either return Content-Type: text/event-stream […]
+	// or else return HTTP 405 Method Not Allowed". DELETE ends a session, and a
+	// server that does not allow that "MAY respond […] with HTTP 405".
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#listening-for-messages-from-the-server
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management
 	test.each(['GET', 'DELETE'])('answers %s with 405', (method) => {
 		const next = vi.fn();
 

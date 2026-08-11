@@ -120,6 +120,8 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "Servers SHOULD implement proper authentication for all connections."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 	describe('Refuses a call with no credential', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await post(vendor, 'envMcp', {
@@ -132,6 +134,8 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// The tool spec asks servers to "implement proper access controls".
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
 	describe('Refuses a token that is not an admin', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await post(vendor, 'envMcp', {
@@ -157,6 +161,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "Servers MUST validate the Origin header on all incoming connections to
+	// prevent DNS rebinding attacks."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 	describe('Refuses a browser origin that was never named', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			// DNS rebinding arrives as a valid credential from an origin the
@@ -173,6 +180,7 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 	describe('Accepts the browser origin it was given', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			// The same origin in another case is the same origin: scheme and host
@@ -191,6 +199,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// The server "MUST either return Content-Type: text/event-stream in response
+	// to this HTTP GET, or else return HTTP 405 Method Not Allowed".
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#listening-for-messages-from-the-server
 	describe('Answers GET with 405, not 404', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			// The transport reserves GET for an SSE stream this server does not
@@ -205,6 +216,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// A server that does not let clients end sessions "MAY respond to this
+	// request with HTTP 405 Method Not Allowed".
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#session-management
 	describe('Answers DELETE with 405 too', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			// DELETE ends a session, and this server opens none. Answering 404
@@ -219,6 +233,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "If the server cannot accept the input, it MUST return an HTTP error
+	// status code (e.g., 400 Bad Request)."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
 	describe('Refuses a JSON-RPC response with an HTTP error', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			// The transport allows a response or a notification only two answers:
@@ -237,6 +254,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "If the server receives a request with an invalid or unsupported
+	// MCP-Protocol-Version, it MUST respond with 400 Bad Request."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#protocol-version-header
 	describe('Refuses a protocol revision it does not implement', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await post(vendor, 'envMcp', {
@@ -273,6 +293,10 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "The server MUST respond with its own capabilities and information", and
+	// with a protocol version it supports.
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#initialization
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#version-negotiation
 	describe('Announces itself to a client that initializes', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await call(vendor, {
@@ -300,6 +324,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "If the server accepts the input, the server MUST return HTTP status code
+	// 202 Accepted with no body."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
 	describe('Answers a notification with no body', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await call(vendor, {
@@ -312,6 +339,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// The shape of a `tools/list` result, and the fields a tool carries.
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#listing-tools
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool
 	describe('Lists every diagnostic tool with a callable schema', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await call(vendor, {
@@ -351,6 +381,10 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "Servers MUST provide structured results that conform to this schema",
+	// and SHOULD "also return the serialized JSON in a TextContent block".
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#structured-content
 	describe('Answers the processes tool with the tree', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await callTool(vendor, 'list_processes');
@@ -377,6 +411,8 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#structured-content
 	describe('Answers every cache tool', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const listings = [
@@ -439,6 +475,8 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// JSON-RPC 2.0: -32601 is "the method does not exist / is not available".
+	// https://www.jsonrpc.org/specification#error_object
 	describe('Reports an unknown method as a protocol error', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await call(vendor, {
@@ -453,6 +491,8 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// An unknown tool is a protocol error; the spec's own example is -32602.
+	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
 	describe('Reports an unknown tool as a bad parameter', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			const response = await callTool(vendor, 'drop_everything');
@@ -463,6 +503,9 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	// "The body of the POST request MUST be a single JSON-RPC request,
+	// notification, or response."
+	// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
 	describe('Reports a malformed message', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			// An array is well-formed JSON of the wrong shape — an invalid request,

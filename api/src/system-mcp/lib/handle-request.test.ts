@@ -49,6 +49,10 @@ beforeEach(() => {
 	tool.run.mockReset();
 });
 
+// "The server MUST respond with its own capabilities and information", and
+// with a protocol version it supports.
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#initialization
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle#version-negotiation
 test('Announces the protocol, its capability and itself', async () => {
 	const response = await handleSystemMcpRequest(
 		{ jsonrpc: '2.0', id: 1, method: 'initialize' },
@@ -66,6 +70,8 @@ test('Announces the protocol, its capability and itself', async () => {
 	});
 });
 
+// "The receiver MUST respond promptly with an empty response."
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/utilities/ping
 test('Answers a ping', async () => {
 	const response = await handleSystemMcpRequest(
 		{ jsonrpc: '2.0', id: 2, method: 'ping' },
@@ -75,6 +81,8 @@ test('Answers a ping', async () => {
 	expect(response).toEqual({ jsonrpc: '2.0', id: 2, result: {} });
 });
 
+// The shape of a `tools/list` result.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#listing-tools
 test('Lists the tools without the function behind them', async () => {
 	const response = await handleSystemMcpRequest(
 		{ jsonrpc: '2.0', id: 3, method: 'tools/list' },
@@ -103,6 +111,9 @@ test('Lists the tools without the function behind them', async () => {
 	});
 });
 
+// "For backwards compatibility, a tool that returns structured content SHOULD
+// also return the serialized JSON in a TextContent block."
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#structured-content
 test('Calls a tool and returns what it answered as text', async () => {
 	tool.run.mockResolvedValue({ services: [] });
 
@@ -123,6 +134,9 @@ test('Calls a tool and returns what it answered as text', async () => {
 	});
 });
 
+// "Structured content is returned as a JSON object in the structuredContent
+// field of a result" — so a list has to be named to be returned at all.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#structured-content
 test('A list is named, since structured content must be an object', async () => {
 	tool.run.mockResolvedValue([{ key: 'one' }, { key: 'two' }]);
 
@@ -139,6 +153,8 @@ test('A list is named, since structured content must be an object', async () => 
 	});
 });
 
+// "Servers MUST provide structured results that conform to this schema."
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
 test('An answer that is neither object nor list is refused', async () => {
 	tool.run.mockResolvedValue('a bare string');
 
@@ -153,6 +169,8 @@ test('An answer that is neither object nor list is refused', async () => {
 	expect((response?.result as any).content[0].text).toContain('string');
 });
 
+// `params.arguments` is an object; anything else names no argument.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#calling-tools
 test('Arguments that are not an object are read as none', async () => {
 	tool.run.mockResolvedValue(null);
 
@@ -166,6 +184,9 @@ test('Arguments that are not an object are read as none', async () => {
 	expect(tool.run).toHaveBeenCalledWith({}, context);
 });
 
+// Every tool here declares an outputSchema, and "servers MUST provide
+// structured results that conform to this schema".
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
 test('A tool answering nothing is a broken tool, and says so', async () => {
 	tool.run.mockResolvedValue(undefined);
 
@@ -183,6 +204,9 @@ test('A tool answering nothing is a broken tool, and says so', async () => {
 	expect((response?.result as any).content[0].text).toContain('list_processes');
 });
 
+// A tool execution error is "reported in tool results with isError: true",
+// not as a JSON-RPC error.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
 test('A thrown non-Error still reaches the caller as text', async () => {
 	tool.run.mockRejectedValue('redis is gone');
 
@@ -199,6 +223,9 @@ test('A thrown non-Error still reaches the caller as text', async () => {
 	});
 });
 
+// Tool execution errors — "API failures, invalid input data, business logic
+// errors" — are results, not protocol errors.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
 test('A refused read is the tool answer, not a protocol failure', async () => {
 	tool.run.mockRejectedValue(new Error('does not have permission'));
 
@@ -215,6 +242,8 @@ test('A refused read is the tool answer, not a protocol failure', async () => {
 	});
 });
 
+// An unknown tool is a protocol error; the spec's own example is -32602.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#error-handling
 test('An unknown tool is a bad parameter', async () => {
 	const response = await handleSystemMcpRequest({
 		jsonrpc: '2.0',
@@ -229,6 +258,8 @@ test('An unknown tool is a bad parameter', async () => {
 	});
 });
 
+// JSON-RPC 2.0: -32601 is "the method does not exist / is not available".
+// https://www.jsonrpc.org/specification#error_object
 test('An unknown method is reported as such', async () => {
 	const response = await handleSystemMcpRequest(
 		{ jsonrpc: '2.0', id: 8, method: 'resources/list' },
@@ -246,6 +277,9 @@ test.each([
 	['an array', ['jsonrpc', '2.0']],
 	['a string', 'jsonrpc'],
 	['null', null],
+// "The body of the POST request MUST be a single JSON-RPC request,
+// notification, or response."
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
 ])('A body that is %s is not a single request', async (_case, body) => {
 	const response = await handleSystemMcpRequest(body, context);
 
@@ -253,6 +287,8 @@ test.each([
 	expect(response?.id).toBeNull();
 });
 
+// JSON-RPC 2.0: -32600 is "the JSON sent is not a valid Request object".
+// https://www.jsonrpc.org/specification#error_object
 test('A message with no method is invalid, and echoes its id', async () => {
 	const response = await handleSystemMcpRequest({ jsonrpc: '2.0', id: 9 }, context);
 
@@ -263,6 +299,9 @@ test('A message with no method is invalid, and echoes its id', async () => {
 test.each([
 	['a result', { jsonrpc: '2.0', id: 10, result: { ok: true } }],
 	['an error', { jsonrpc: '2.0', id: 11, error: { code: -1, message: 'no' } }],
+// "If the server cannot accept the input, it MUST return an HTTP error status
+// code (e.g., 400 Bad Request)."
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#sending-messages-to-the-server
 ])('A response carrying %s is refused over HTTP', async (_case, body) => {
 	// The transport asks for an HTTP error status here rather than a JSON-RPC
 	// one: this server never sends the client a request, so nothing it sent is
@@ -272,6 +311,9 @@ test.each([
 		.toThrow(/JSON-RPC response is not accepted/);
 });
 
+// JSON-RPC 2.0: "a Notification signifies the Client's lack of interest in the
+// corresponding Response object", and the server MUST NOT reply to one.
+// https://www.jsonrpc.org/specification#notification
 test('A notification is answered with nothing at all', async () => {
 	const initialized = await handleSystemMcpRequest(
 		{ jsonrpc: '2.0', method: 'notifications/initialized' },
@@ -289,6 +331,9 @@ test('A notification is answered with nothing at all', async () => {
 	expect(ping).toBeNull();
 });
 
+// JSON-RPC 2.0 tells a notification from a request by the presence of `id`,
+// and null is present.
+// https://www.jsonrpc.org/specification#request_object
 test('A null id is a request, not a notification', async () => {
 	const response = await handleSystemMcpRequest(
 		{ jsonrpc: '2.0', id: null, method: 'ping' },

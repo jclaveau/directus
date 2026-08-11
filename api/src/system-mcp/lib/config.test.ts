@@ -50,12 +50,17 @@ test('Only the configured subsystems are exposed', () => {
 	expect(systemMcpToolGroups()).toEqual([]);
 });
 
+// "Servers MUST validate the Origin header on all incoming connections to
+// prevent DNS rebinding attacks" — the attack is a browser one, and a caller
+// that sends no Origin is not a browser.
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 test('A caller with no Origin is not a browser, and is allowed', () => {
 	vi.mocked(useEnv).mockReturnValue({});
 
 	expect(systemMcpAllowsOrigin(undefined)).toBe(true);
 });
 
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 test('No browser origin is allowed until one is named', () => {
 	vi.mocked(useEnv).mockReturnValue({});
 	expect(systemMcpAllowsOrigin('https://evil.example')).toBe(false);
@@ -70,6 +75,7 @@ test('No browser origin is allowed until one is named', () => {
 	expect(systemMcpAllowsOrigin('https://ok.example')).toBe(false);
 });
 
+// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#security-warning
 test('A named origin is allowed, and only that one', () => {
 	vi.mocked(useEnv).mockReturnValue({
 		SYSTEM_MCP_ALLOWED_ORIGINS: [

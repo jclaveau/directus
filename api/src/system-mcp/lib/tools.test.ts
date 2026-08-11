@@ -82,6 +82,9 @@ beforeEach(() => {
 	});
 });
 
+// The fields a tool definition carries — name, title, description,
+// inputSchema, optional outputSchema and annotations.
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool
 test('Every tool is described well enough for a model to choose it', () => {
 	expect(allSystemMcpTools().map((tool) => tool.name)).toEqual([
 		'list_processes',
@@ -211,6 +214,8 @@ test('The telemetry state takes no argument', async () => {
 	expect(service.getCacheStatsState).toHaveBeenCalledOnce();
 });
 
+// "Servers MUST provide structured results that conform to this schema."
+// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
 test('Every declared output property is one the tool actually answers', () => {
 	/**
 	 * The answers the services really give — typed as the services declare them,
