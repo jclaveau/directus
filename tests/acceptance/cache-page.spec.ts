@@ -55,8 +55,8 @@ test('lays the counts chart legend out on two meaning rows', async ({ page }) =>
 
 	expect(derived.map((name) => name.trim())).toEqual([
 		'Lifetime',
-		'Hit Ratio',
-		'Purge Ratio',
+		'Hit Score',
+		'Purge Score',
 		'Coarse purges',
 	]);
 

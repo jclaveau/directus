@@ -370,7 +370,7 @@ describe('CachePage', () => {
 
 		// Order is the contract — the row is figures alone, so a column that moves
 		// is a column that has silently changed meaning.
-		const stats = header.findAll('.stat.funnel.hit, .stat.ratio, .stat.purges');
+		const stats = header.findAll('.stat.funnel.hit, .stat.score, .stat.purges');
 
 		// A funnel column pairs its count with a median, so read its count cell —
 		// asserting the whole text would tie this to whether a median was known.
@@ -394,10 +394,54 @@ describe('CachePage', () => {
 
 		// The title states the formula, and states a DIFFERENT one per column.
 		expect(stats[1]!.attributes('data-tooltip'))
-			.toContain('Hit Ratio = (Hits − Fills) / (Hits + Fills)');
+			.toContain('Hit Score = (Hits − Fills) / (Hits + Fills)');
 
 		expect(stats[3]!.attributes('data-tooltip'))
-			.toContain('Purge Ratio = (Hits − Purges) / (Hits + Purges)');
+			.toContain('Purge Score = (Hits − Purges) / (Hits + Purges)');
+	});
+
+	it('hangs a formula on each score in the legend, on nothing else', async () => {
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					fills: 1,
+					anomalies: 0,
+					purges: 1,
+					coarsePurges: 0,
+					purgedEntries: 3,
+					ttlMs: null,
+				}],
+				markers: [],
+			},
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const entries = wrapper.findAll(
+			'.cache-counts-legend .cache-chart-legend-entry',
+		);
+
+		const titleOf = (label: string) => {
+			return entries
+				.find((entry) => entry.text().trim() === label)!
+				.attributes('data-tooltip');
+		};
+
+		// Each ratio names its own denominator. The legend reads that off the line
+		// itself, so a line that never declared one cannot inherit this one — which
+		// is what comparing against the entry's own rendered label used to allow.
+		expect(titleOf('Hit Score'))
+			.toContain('Hit Score = (Hits − Fills) / (Hits + Fills)');
+
+		expect(titleOf('Purge Score'))
+			.toContain('Purge Score = (Hits − Purges) / (Hits + Purges)');
+
+		// A raw count is its own label; no formula hangs off it.
+		expect(titleOf('Hits')).not.toContain('Hits −');
 	});
 
 	// The directive places the tooltip where it is told and has no collision
@@ -423,7 +467,7 @@ describe('CachePage', () => {
 
 		// The tree is mid-page, and its last row has nothing below it — these keep
 		// the default, so the fix is scoped rather than applied page-wide.
-		expect(placementOf('.endpoint-header .stat.ratio')).toBe('top');
+		expect(placementOf('.endpoint-header .stat.score')).toBe('top');
 	});
 
 	it('keeps a column for a metric with no traffic', async () => {
@@ -1427,8 +1471,8 @@ describe('CachePage', () => {
 			'Hits',
 			'Purges',
 			'Lifetime',
-			'Hit Ratio',
-			'Purge Ratio',
+			'Hit Score',
+			'Purge Score',
 			'Coarse purges',
 		]);
 
@@ -1457,8 +1501,8 @@ describe('CachePage', () => {
 		expect(html).toContain('Lifetime: 1m');
 		// Signed: a bare "29%" would read as the winning case when it is the
 		// losing one.
-		expect(html).toContain('Hit Ratio: +67%');
-		expect(html).toContain('Purge Ratio: -29%');
+		expect(html).toContain('Hit Score: +67%');
+		expect(html).toContain('Purge Score: -29%');
 		expect(html).toContain('Coarse purges: 1');
 		expect(html).toContain('cache-tt-row');
 
@@ -1477,7 +1521,7 @@ describe('CachePage', () => {
 		expect(config.yaxis[2].max).toBeGreaterThan(100);
 
 		expect(config.yaxis[2].seriesName)
-			.toEqual(['Hit Ratio', 'Purge Ratio']);
+			.toEqual(['Hit Score', 'Purge Score']);
 	});
 
 	it('splits the TTL in force from the lifetimes entries carry', async () => {

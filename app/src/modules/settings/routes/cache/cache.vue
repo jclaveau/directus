@@ -452,7 +452,7 @@ const treeSortOptions = computed<{ text: string; value: GroupSortField }[]>(() =
 		{ text: t('cache_tree_sort_fills', 'Fills'), value: 'fills' },
 		{ text: t('cache_tree_sort_hits', 'Hits'), value: 'hits' },
 		{ text: t('cache_tree_sort_purges', 'Purges'), value: 'purges' },
-		{ text: t('cache_tree_sort_ratio', 'Hit ratio'), value: 'ratio' },
+		{ text: t('cache_tree_sort_ratio', 'Hit score'), value: 'ratio' },
 		{ text: t('cache_tree_sort_coarse', 'Coarse'), value: 'coarse' },
 		{ text: t('cache_tree_sort_entries', 'Entries'), value: 'entries' },
 		{ text: t('cache_tree_sort_size', 'Size'), value: 'size' },
@@ -713,7 +713,7 @@ const totalPurgedEntries = computed(() => {
 });
 
 // Both tiles read the SAME form the chart plots — `(hits − other) / (hits + other)`
-// as a signed percentage — so "Hit Ratio" means one thing on the whole page rather
+// as a signed percentage — so "Hit Score" means one thing on the whole page rather
 // than a share here and a balance above.
 const totalPurgeRatio = computed(() => {
 	return formatTooltipValue(
@@ -808,32 +808,44 @@ const latencyPercentiles = computed(() => {
 	return seen;
 });
 
+// Which count a score is measured against — the one thing that differs between
+// the two. Taken as a value rather than read back off the rendered label: a
+// label is output, and branching on it makes every future score whose name
+// doesn't match silently render this one's formula.
+type ScoreAgainst = 'fills' | 'purges';
+
 /**
- * What a ratio line means, read off its legend entry. Both are the same form —
+ * What a score line means, read off its legend entry. Both are the same form —
  * `(hits − other) / (hits + other)` — so the landmarks are the same shape and
  * only the losing side differs.
  */
-function ratioTitle(name: string): string {
-	const against = name === t('cache_hit_ratio', 'Hit Ratio')
-		? t('cache_fills', 'Fills')
-		: t('cache_purges', 'Purges');
+function scoreTitle(against: ScoreAgainst): string {
+	const wording = against === 'fills'
+		? {
+			name: t('cache_hit_score', 'Hit Score'),
+			label: t('cache_fills', 'Fills'),
+			spent: t('cache_score_filled', 'filled'),
+		}
+		: {
+			name: t('cache_purge_score', 'Purge Score'),
+			label: t('cache_purges', 'Purges'),
+			spent: t('cache_score_purged', 'purged'),
+		};
 
-	const spent = name === t('cache_hit_ratio', 'Hit Ratio')
-		? t('cache_ratio_filled', 'filled')
-		: t('cache_ratio_purged', 'purged');
+	const { name, label, spent } = wording;
 
 	return [
-		`${name} = (${t('hits', 'Hits')} − ${against}) / `
-		+ `(${t('hits', 'Hits')} + ${against})`,
+		`${name} = (${t('hits', 'Hits')} − ${label}) / `
+		+ `(${t('hits', 'Hits')} + ${label})`,
 		'',
-		`+100%  ${t('cache_ratio_best', 'only hits — never')} ${spent}`,
-		`+50%   3 ${t('hits', 'Hits').toLowerCase()} : 1 ${against.toLowerCase()}`,
-		`0%     ${t('cache_ratio_even', 'break-even — one each')}`,
-		`−50%   1 ${t('hits', 'Hits').toLowerCase()} : 3 ${against.toLowerCase()}`,
-		`−100%  ${t('cache_ratio_worst', 'no hits at all — only')} ${spent}`,
+		`+100%  ${t('cache_score_best', 'only hits — never')} ${spent}`,
+		`+50%   3 ${t('hits', 'Hits').toLowerCase()} : 1 ${label.toLowerCase()}`,
+		`0%     ${t('cache_score_even', 'break-even — one each')}`,
+		`−50%   1 ${t('hits', 'Hits').toLowerCase()} : 3 ${label.toLowerCase()}`,
+		`−100%  ${t('cache_score_worst', 'no hits at all — only')} ${spent}`,
 		'',
 		t(
-			'cache_ratio_meaning',
+			'cache_score_meaning',
 			'Below zero the cache costs more than it returns for this traffic.',
 		),
 	].join('\n');
@@ -852,10 +864,10 @@ function countsEntries(
 			return {
 				name: line.name,
 				color: line.color,
-				// Only the derived lines need explaining; a count is its own label.
-				title: line.unit === 'balance'
-					? ratioTitle(line.name)
-					: undefined,
+							// Only the score lines need explaining; a count is its own label.
+				title: line.against === undefined
+					? undefined
+					: scoreTitle(line.against),
 			};
 		});
 }
@@ -1036,6 +1048,10 @@ interface CountsLine {
 		// last reading across them. A value that is dense by construction does not,
 		// and carrying one would invent readings it never had.
 		sampled?: boolean;
+		// Set only on a score line, and it names the count that score divides — so
+		// the tooltip's formula comes off the line itself rather than off a compare
+		// against its own rendered name.
+		against?: ScoreAgainst;
 		pick: (b: CacheTimeseriesBucket) => number | null;
 }
 
@@ -1109,7 +1125,7 @@ function countsLines(): CountsLine[] {
 			pick: (b) => b.hits,
 		},
 		{
-			// Entries a purge deleted, not the purges themselves: a hit ratio feels
+			// Entries a purge deleted, not the purges themselves: a hit score feels
 			// how much went, not how many operations went it.
 			name: t('cache_purges', 'Purges'),
 			unit: 'count',
@@ -1141,8 +1157,9 @@ function countsLines(): CountsLine[] {
 			// Above the line each fill bought more than one hit, below it the cache
 			// filled more often than it served. Symmetric and bounded, so the losing
 			// half reads at the same scale as the winning one and neither can clip.
-			name: t('cache_hit_ratio', 'Hit Ratio'),
+			name: t('cache_hit_score', 'Hit Score'),
 			unit: 'balance',
+			against: 'fills',
 			row: 2,
 			curve: 'straight',
 			dash: 6,
@@ -1153,8 +1170,9 @@ function countsLines(): CountsLine[] {
 			// The same shape against what destroyed the entry rather than what built
 			// it. Below zero the cache threw this traffic away more often than it
 			// served it — the request is paying for a cache that never pays back.
-			name: t('cache_purge_ratio', 'Purge Ratio'),
+			name: t('cache_purge_score', 'Purge Score'),
 			unit: 'balance',
+			against: 'purges',
 			row: 2,
 			curve: 'straight',
 			dash: 6,
@@ -1707,11 +1725,11 @@ function secLabel(ms: number): string {
 	return `${Math.round(ms / 1000)}s`;
 }
 
-// Both ratio columns, on the same balance the tiles and the counts chart show:
+// Both score columns, on the same balance the tiles and the counts chart show:
 // `(hits − against) / (hits + against)` as a signed percentage. One form across
-// the page, so a row's ratio can be read against the window's without converting
-// — and so `ratioTitle`, which states that formula, is true wherever it hangs.
-function ratioOf(hits: number, against: number): string {
+// the page, so a row's score can be read against the window's without converting
+// — and so `scoreTitle`, which states that formula, is true wherever it hangs.
+function scoreOf(hits: number, against: number): string {
 	return formatTooltipValue(balancePercent(hits, against), 'balance');
 }
 
@@ -1912,18 +1930,18 @@ onUnmounted(() => {
 					</div>
 					<div class="metric-separator" />
 					<div
-						v-tooltip.bottom="ratioTitle(t('cache_hit_ratio', 'Hit Ratio'))"
+						v-tooltip.bottom="scoreTitle('fills')"
 						class="metric"
 					>
 						<span class="value">{{ totalRatio }}</span>
-						<span class="label">{{ t('cache_hit_ratio', 'Hit Ratio') }}</span>
+						<span class="label">{{ t('cache_hit_score', 'Hit Score') }}</span>
 					</div>
 					<div
-						v-tooltip.bottom="ratioTitle(t('cache_purge_ratio', 'Purge Ratio'))"
+						v-tooltip.bottom="scoreTitle('purges')"
 						class="metric"
 					>
 						<span class="value">{{ totalPurgeRatio }}</span>
-						<span class="label">{{ t('cache_purge_ratio', 'Purge Ratio') }}</span>
+						<span class="label">{{ t('cache_purge_score', 'Purge Score') }}</span>
 					</div>
 				</div>
 				<div class="cache-chart-legend cache-counts-legend">
@@ -2159,17 +2177,17 @@ onUnmounted(() => {
 								<span class="duration">{{ column.duration }}</span>
 							</span>
 							<span
-								v-tooltip="ratioTitle(t('cache_hit_ratio', 'Hit Ratio'))"
-								class="stat ratio hit"
-							>{{ ratioOf(group.totalHits, group.totalFills) }}</span>
+								v-tooltip="scoreTitle('fills')"
+								class="stat score hit"
+							>{{ scoreOf(group.totalHits, group.totalFills) }}</span>
 							<span
 								v-tooltip="purgeTitle(group)"
 								class="stat purges"
 							>{{ countLabel(group.totalPurges) }}</span>
 							<span
-								v-tooltip="ratioTitle(t('cache_purge_ratio', 'Purge Ratio'))"
-								class="stat ratio purge"
-							>{{ ratioOf(group.totalHits, group.totalPurges) }}</span>
+								v-tooltip="scoreTitle('purges')"
+								class="stat score purge"
+							>{{ scoreOf(group.totalHits, group.totalPurges) }}</span>
 							<span v-tooltip="`${group.totalSize} bytes`" class="stat size">
 								{{ formatFilesize(group.totalSize) }}
 							</span>
@@ -2226,17 +2244,17 @@ onUnmounted(() => {
 										<span class="duration">{{ column.duration }}</span>
 									</span>
 									<span
-										v-tooltip="ratioTitle(t('cache_hit_ratio', 'Hit Ratio'))"
-										class="stat ratio hit"
-									>{{ ratioOf(q.totalHits, q.totalFills) }}</span>
+										v-tooltip="scoreTitle('fills')"
+										class="stat score hit"
+									>{{ scoreOf(q.totalHits, q.totalFills) }}</span>
 									<span
 										v-tooltip="purgeTitle(q)"
 										class="stat purges"
 									>{{ countLabel(q.totalPurges) }}</span>
 									<span
-										v-tooltip="ratioTitle(t('cache_purge_ratio', 'Purge Ratio'))"
-										class="stat ratio purge"
-									>{{ ratioOf(q.totalHits, q.totalPurges) }}</span>
+										v-tooltip="scoreTitle('purges')"
+										class="stat score purge"
+									>{{ scoreOf(q.totalHits, q.totalPurges) }}</span>
 									<span v-tooltip="`${q.totalSize} bytes`" class="stat size">
 										{{ formatFilesize(q.totalSize) }}
 									</span>
@@ -2287,7 +2305,7 @@ onUnmounted(() => {
 													:class="{ sorted: sortActive(q, 'ratio') }"
 													@click="toggleEntrySort(q, 'ratio')"
 												>
-													{{ t('cache_hit_ratio', 'Hit ratio') }}
+													{{ t('cache_hit_score', 'Hit score') }}
 													<span class="arrow">{{ sortArrow(q, 'ratio') }}</span>
 												</th>
 												<th
@@ -2343,7 +2361,7 @@ onUnmounted(() => {
 												<td>{{ userOf(entry.user) }}</td>
 												<td class="num">{{ entry.hits }}</td>
 												<td class="num">
-													{{ ratioOf(entry.hits, entry.fills) }}
+													{{ scoreOf(entry.hits, entry.fills) }}
 												</td>
 												<td class="num">{{ ageOf(entry.createdAt) }}</td>
 												<td class="num">
@@ -2516,7 +2534,7 @@ onUnmounted(() => {
 	flex-direction: column;
 }
 
-/* Sets the derived hit ratio apart from the raw outcome counts. */
+/* Sets the derived hit score apart from the raw outcome counts. */
 .metric-separator {
 	align-self: stretch;
 	border-inline-start: var(--theme--border-width) solid var(--theme--border-color-subdued);
@@ -2694,22 +2712,22 @@ onUnmounted(() => {
    and rec chips, which are words with a number in them rather than figures. */
 .endpoint-header .stat.entries,
 .endpoint-header .stat.funnel,
-.endpoint-header .stat.ratio,
+.endpoint-header .stat.score,
 .endpoint-header .stat.size,
 .query-header .stat.entries,
 .query-header .stat.funnel,
-.query-header .stat.ratio,
+.query-header .stat.score,
 .query-header .stat.size {
 	font-weight: 700;
 }
 
 /* Colour is the legend here too: the same hue the chart gives Purged entries —
-   carried by the purge ratio beside it, since a ratio takes the colour of what it
-   is measured against. The hit ratio does the same off `.stat.hit` below. */
+   carried by the purge score beside it, since a score takes the colour of what it
+   is measured against. The hit score does the same off `.stat.hit` below. */
 .endpoint-header .stat.purges,
-.endpoint-header .stat.ratio.purge,
+.endpoint-header .stat.score.purge,
 .query-header .stat.purges,
-.query-header .stat.ratio.purge {
+.query-header .stat.score.purge {
 	color: var(--theme--primary);
 	font-weight: 700;
 }
@@ -2781,8 +2799,8 @@ onUnmounted(() => {
 
 /* Wider than the share form it replaced: a balance carries a sign and reaches
    three digits, so "−100%" has to fit where "83%" used to. */
-.endpoint-header .stat.ratio,
-.query-header .stat.ratio {
+.endpoint-header .stat.score,
+.query-header .stat.score {
 	inline-size: 48px;
 }
 
