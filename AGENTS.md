@@ -2,6 +2,16 @@
 
 Guidance for AI coding assistants working in this repository.
 
+## Project memory
+
+Everything this repo has already learned — ports, harness gotchas, settled
+decisions, conventions — is indexed here, one line per entry. Read the linked
+file before re-deriving anything it covers, and add to it rather than to this
+file: a fact belongs in `.agents/auto-memory/`, and only the non-discoverable
+conventions below belong here.
+
+@.agents/auto-memory/MEMORY.md
+
 ## This fork (Scalabus)
 
 This is **Scalabus**, a performance/scalability fork of
