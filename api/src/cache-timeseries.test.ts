@@ -26,8 +26,10 @@ let insertSpy: ReturnType<typeof vi.fn>;
 let deleteSpy: ReturnType<typeof vi.fn>;
 
 function makeBuilder(table: string) {
-	// The latency query hits the same events table but filters on duration_ms;
-	// route it to a separate `<table>:latency` reply so it can return percentiles.
+	// Two queries per fact table — the counts and the percentiles over the same
+	// rows — so the latency one is routed to a separate `<table>:latency` reply and
+	// can answer with percentile columns. Recognised by what it asks for: the
+	// events pass filters on duration_ms, the purges pass selects a `purge_p*`.
 	let latencyQuery = false;
 
 	const builder: any = {
@@ -43,7 +45,13 @@ function makeBuilder(table: string) {
 		},
 		orderBy: () => builder,
 		groupByRaw: () => builder,
-		select: () => builder,
+		select: (...columns: any[]) => {
+			if (columns.some((column) => String(column?.sql).includes('purge_p50'))) {
+				latencyQuery = true;
+			}
+
+			return builder;
+		},
 		// The TTL replay's seed: the last change BEFORE the window, read on its own
 		// under `<table>:prior` so a test can open a window on an existing value.
 		first: () => Promise.resolve(rowsByTable[`${table}:prior`]?.[0] ?? undefined),
@@ -182,6 +190,39 @@ describe('readCacheTimeseries', () => {
 			expect(bucket.coarsePurges).toBe(0);
 			expect(bucket.purgedEntries).toBe(0);
 		}
+	});
+
+	it('plots how long purges took, blank where none was timed', async () => {
+		rowsByTable = {
+			directus_cache_purges: [
+				{ bucket: 0, count: 3, coarse: 0, evicted: 9 },
+				{ bucket: 2, count: 1, coarse: 0, evicted: 2 },
+			],
+			'directus_cache_purges:latency': [
+				{ bucket: 0, purge_p50: 30, purge_p95: 48, purge_p99: 49.6 },
+				// A bucket whose purges carry no duration at all: `percentile_cont`
+				// over nothing but NULLs is NULL, and it has to stay a gap. A zero
+				// would draw the slowest thing a write waits on as instant.
+				{ bucket: 2, purge_p50: null, purge_p95: null, purge_p99: null },
+			],
+		};
+
+		const result = await readCacheTimeseries(180_000, 3);
+
+		expect(result.buckets[0]).toMatchObject({
+			purgeP50: 30, purgeP95: 48, purgeP99: 49.6,
+		});
+
+		// Counted, and still blank on the latency line — the two are separate
+		// measurements, so purges without durations is a shape that has to survive.
+		expect(result.buckets[2]).toMatchObject({
+			purges: 1, purgeP50: null, purgeP95: null, purgeP99: null,
+		});
+
+		// Reached by neither pass: no purge happened here at all.
+		expect(result.buckets[1]).toMatchObject({
+			purges: 0, purgeP50: null, purgeP95: null, purgeP99: null,
+		});
 	});
 
 	it('maps latency percentiles into buckets, null when unsampled', async () => {

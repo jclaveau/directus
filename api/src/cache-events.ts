@@ -1810,28 +1810,6 @@ export async function readCacheTimeseries(
 		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
 	}
 
-	// Purge latency, Postgres only — `percentile_cont` is an ordered-set aggregate.
-	// Kept in its own pass because the durations live on the purges table, not on
-	// the events fact the other percentiles come from.
-	if (db.client.config.client === 'pg') {
-		const purgeLatencyRows = await db('directus_cache_purges')
-			.where('time', '>', since)
-			.groupByRaw('1')
-			.select(
-				db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
-				db.raw(`${pct(0.5)} AS purge_p50`),
-				db.raw(`${pct(0.95)} AS purge_p95`),
-				db.raw(`${pct(0.99)} AS purge_p99`),
-			);
-
-		for (const row of purgeLatencyRows as Record<string, unknown>[]) {
-			const index = slotOf(row['bucket']);
-			dense[index]!.purgeP50 = num(row['purge_p50']);
-			dense[index]!.purgeP95 = num(row['purge_p95']);
-			dense[index]!.purgeP99 = num(row['purge_p99']);
-		}
-	}
-
 	for (const row of purgeRows as Record<string, unknown>[]) {
 		const index = slotOf(row['bucket']);
 		dense[index]!.purges += Number(row['count'] ?? 0);
@@ -1864,6 +1842,27 @@ export async function readCacheTimeseries(
 		slot.bothP50 = pctVal(row['both_p50']);
 		slot.bothP95 = pctVal(row['both_p95']);
 		slot.bothP99 = pctVal(row['both_p99']);
+	}
+
+	// A pass of its own because the durations live on the purges table, not on the
+	// events fact every percentile above comes from — same `pct` window function,
+	// a different grid. `pctVal`, so a bucket whose purges were never timed keeps
+	// its null: an untimed purge is not an instant one.
+	const purgeLatencyRows = await db('directus_cache_purges')
+		.where('time', '>', since)
+		.groupByRaw('1')
+		.select(
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
+			db.raw(`${pct(0.5)} AS purge_p50`),
+			db.raw(`${pct(0.95)} AS purge_p95`),
+			db.raw(`${pct(0.99)} AS purge_p99`),
+		);
+
+	for (const row of purgeLatencyRows as Record<string, unknown>[]) {
+		const slot = dense[slotOf(row['bucket'])]!;
+		slot.purgeP50 = pctVal(row['purge_p50']);
+		slot.purgeP95 = pctVal(row['purge_p95']);
+		slot.purgeP99 = pctVal(row['purge_p99']);
 	}
 
 	return { buckets: dense, markers, effectiveTtl };
