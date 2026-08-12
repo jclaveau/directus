@@ -50,7 +50,11 @@ test('lays the counts chart legend out on two meaning rows', async ({ page }) =>
 		'Anomalies',
 		'Fills',
 		'Hits',
+		// Two purge figures, not one: the operations, then what they destroyed.
+		// A single coarse purge can take forty entries, so the count and the size
+		// are different units and cannot share a line.
 		'Purges',
+		'Purged entries',
 	]);
 
 	expect(derived.map((name) => name.trim())).toEqual([

@@ -1470,6 +1470,7 @@ describe('CachePage', () => {
 			'Fills',
 			'Hits',
 			'Purges',
+			'Purged entries',
 			'Lifetime',
 			'Hit Score',
 			'Purge Score',
@@ -1477,16 +1478,21 @@ describe('CachePage', () => {
 		]);
 
 		// (hits − fills) / (hits + fills) = (5 − 1) / 6, as a percentage.
-		expect(config.series[8].data[0]![1]).toBeCloseTo(66.7, 1);
+		expect(config.series[9].data[0]![1]).toBeCloseTo(66.7, 1);
 
-		// (hits − purges) / (hits + purges) = (5 − 9) / 14: below zero, this
-		// request was thrown away more often than it was served.
-		expect(config.series[9].data[0]![1]).toBeCloseTo(-28.6, 1);
+		// (hits − purged entries) / (hits + purged entries) = (5 − 9) / 14: below
+		// zero, this request was thrown away more often than it was served. Measured
+		// against what the purges DESTROYED, not against how many of them ran.
+		expect(config.series[10].data[0]![1]).toBeCloseTo(-28.6, 1);
 
 		// Tooltip: one tight "name: value" row per metric, each in its own unit.
 		// Positional, in the order the series are declared in.
 		const html = config.tooltip.custom({
-			series: [[3600], [7], [2], [0], [1], [5], [9], [60], [66.7], [-28.6], [1]],
+			// Positions 6 and 7 are the pair this split exists for: 3 purges, and the
+			// 9 entries between them — one coarse purge can account for most of that.
+			series: [
+				[3600], [7], [2], [0], [1], [5], [3], [9], [60], [66.7], [-28.6], [1],
+			],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
@@ -1497,7 +1503,8 @@ describe('CachePage', () => {
 		expect(html).toContain('Anomalies: 0');
 		expect(html).toContain('Fills: 1');
 		expect(html).toContain('Hits: 5');
-		expect(html).toContain('Purges: 9');
+		expect(html).toContain('Purges: 3');
+		expect(html).toContain('Purged entries: 9');
 		expect(html).toContain('Lifetime: 1m');
 		// Signed: a bare "29%" would read as the winning case when it is the
 		// losing one.
@@ -1509,7 +1516,7 @@ describe('CachePage', () => {
 		// Dashes mark the lines that don't share the Count axis: the two balances,
 		// and the lifetime — dashed apart from the TTL it trails so the config and
 		// the lifetimes of the entries it produced can't be read as one line.
-		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 0, 0, 4, 6, 6, 0]);
+		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 4, 6, 6, 0]);
 
 		// Count axis stays integer; TTL axis reads as a duration; the balances get
 		// their own hidden axis, pinned to the form's bounds so zero sits at a

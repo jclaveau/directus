@@ -1125,14 +1125,27 @@ function countsLines(): CountsLine[] {
 			pick: (b) => b.hits,
 		},
 		{
-			// Entries a purge deleted, not the purges themselves: a hit score feels
-			// how much went, not how many operations went it.
+			// The operations. One purge is one event however many entries it took
+			// with it, which is what makes the coarse line below a share of something.
 			name: t('cache_purges', 'Purges'),
 			unit: 'count',
 			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--primary', '#6644ff'),
+			pick: (b) => b.purges,
+		},
+		{
+			// What those operations destroyed, plotted apart from their count: one
+			// coarse purge can take forty entries, so on a shared axis the two are
+			// different units and reading either as a slice of the other is exactly
+			// how a page like this lies. Same hue, darker — one family, two figures.
+			name: t('cache_purged_entries', 'Purged entries'),
+			unit: 'count',
+			row: 1,
+			curve: 'straight',
+			dash: 0,
+			color: themeVar('--theme--primary-accent', '#4a2fd6'),
 			pick: (b) => b.purgedEntries,
 		},
 		{
@@ -1181,8 +1194,8 @@ function countsLines(): CountsLine[] {
 		},
 		{
 			// The purges that reached wider than their mutation did — a collection
-			// fallback or a namespace clear. A count, kept on the insight row because
-			// it qualifies the purge line rather than adding to the funnel.
+			// fallback or a namespace clear. A genuine subset of the Purges line now
+			// that that one counts operations too, so the pair reads together.
 			name: t('cache_coarse_purges', 'Coarse purges'),
 			unit: 'count',
 			row: 2,
@@ -1926,7 +1939,9 @@ onUnmounted(() => {
 					</div>
 					<div class="metric">
 						<span class="value">{{ abbreviateNumber(totalPurgedEntries) }}</span>
-						<span class="label">{{ t('cache_purges', 'Purges') }}</span>
+						<span class="label">
+							{{ t('cache_purged_entries', 'Purged entries') }}
+						</span>
 					</div>
 					<div class="metric-separator" />
 					<div
