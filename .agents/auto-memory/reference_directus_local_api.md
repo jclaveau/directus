@@ -14,3 +14,15 @@ Port **8155** = the local fork dev api (`api/src/start.ts` via `tsx watch`, bran
 - App: `cd app && API_URL=http://127.0.0.1:8155 pnpm dev` — Vite on :8080 proxies to the API (`app/vite.config.ts` reads `API_URL`, defaulting to 8055 if unset).
 - Boot gotcha: `api/src/extensions/lib/get-shared-deps-mapping.ts:17` unconditionally resolves `@directus/app` → needs `app/dist/index.html` (the real vite build, or a gitignored stub — the full `vite build` is OOM-killed in low-RAM dev, ~3GB free).
 - Stale `tsx watch` zombie watchers (no children) can pile up from crashed boots; clean them by cwd (`/proc/<pid>/cwd` = the fork's `api/`).
+
+**Acceptance/built flavour (2026-08-12)** — for Playwright (`tests/acceptance`), which needs the admin served BY the api (`BASE_URL/admin`), not Vite on :8080:
+- **Which DB depends on what you are driving — MEASURED 2026-08-12, not guessed:**
+  - **sqlite** (`DB_CLIENT=sqlite3 DB_FILENAME=/tmp/…​.db`) is enough for the API and the counts chart: entries, hits/misses/fills, purge attribution all work.
+  - **Postgres is REQUIRED for the acceptance suite.** The latency percentiles use `percentile_cont(…) WITHIN GROUP` (PG-only), so on sqlite `/utils/cache/latencies` returns `[]`, every `*P50/95/99` bucket field is null, and all three specs fail in `beforeEach` — the chart canvases exist but never become visible. On PG all three pass. This is why `.github/workflows/acceptance.yml` runs a postgres service.
+  - Redis is required either way (scoped purge needs `CACHE_STORE=redis`).
+- Still port **8155**. `node directus/cli.js bootstrap` then `start`, after `pnpm run build` (needs a real `app/dist`).
+- Seed traffic the way `.github/workflows/acceptance.yml` does (fresh `?e2e=$RANDOM` → miss+fill, bare repeat → hit, collection-less GETs → `missing_scope` anomalies) and wait on the stats drain, or the charts are empty and every assertion trips.
+- Run: `BASE_URL=http://127.0.0.1:8155 ADMIN_EMAIL=… ADMIN_PASSWORD=… pnpm --filter tests-acceptance test:e2e` — the spec defaults `PASSWORD` to `''`, so a missing export shows as "Wrong username or password".
+- **Rebuild app → RESTART directus** ([[feedback_rebuild_then_restart_served_stack]]).
+- Boot warns `Collection "directus_cache_*" doesn't have a primary key column and will be ignored` for the fact tables — **expected**, they carry no surrogate key by design.
+
