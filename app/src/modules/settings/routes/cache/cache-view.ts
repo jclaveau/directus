@@ -18,6 +18,10 @@ export interface CacheEntry {
 	hits: number;
 	misses: number;
 	fills: number;
+	// Purges that covered this entry's tags in the window. Read beside `hits`:
+	// more purges than hits means the cache is filling this response more often
+	// than it serves it.
+	purges: number;
 	fillMs: number | null;
 	hitMs: number | null;
 	ttlMs: number | null;
@@ -81,6 +85,7 @@ export interface QueryGroup {
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;
+	totalPurges: number;
 	totalSize: number;
 	ttlMs: number | null;
 	recommendedTtlMs: number | null;
@@ -141,6 +146,7 @@ export interface EndpointGroup {
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;
+	totalPurges: number;
 	totalSize: number;
 	hitRatio: number | null; // % hits/(hits+fills); null when no traffic
 	maxFillMs: number | null; // slowest fill observed in this endpoint, ms
@@ -243,16 +249,6 @@ export function formatQuery(query: string): string {
 	}
 
 	return query;
-}
-
-// Share of cache-servable requests served from cache: hits over hits plus fills
-// (a cached miss's compute). Null when nothing was served either way.
-export function formatHitRatio(hits: number, fills: number): string | null {
-	const percent = hitRatioPercent(hits, fills);
-
-	return percent === null
-		? null
-		: `${Math.round(percent)}%`;
 }
 
 export interface EndpointSection {
@@ -405,6 +401,33 @@ function sumFills(entries: CacheEntry[]): number {
 	return entries.reduce((sum, entry) => sum + entry.fills, 0);
 }
 
+function sumPurges(entries: CacheEntry[]): number {
+	return entries.reduce((sum, entry) => sum + entry.purges, 0);
+}
+
+/**
+ * The normalised balance between two counts: `(a − b) / (a + b)`.
+ *
+ * Algebraically this is the share `a / (a + b)` re-centred on zero and rescaled
+ * to [−1, +1], which buys three things a share does not. Zero is break-even, so
+ * the sign alone says whether the cache is earning its keep and a zero line can
+ * be drawn. It is symmetric — swapping the two flips the sign and keeps the
+ * magnitude, where a plain `a / b` squashes the whole losing half into (0, 1).
+ * And it is bounded, so the axis cannot clip the very cases worth seeing.
+ *
+ * Null when both are zero: no traffic is not break-even, and must plot as a gap
+ * rather than as a 0 the eye reads as a measurement.
+ */
+export function balancePercent(a: number, b: number): number | null {
+	const total = a + b;
+
+	if (total === 0) {
+		return null;
+	}
+
+	return ((a - b) / total) * 100;
+}
+
 // Hit ratio in percent: hits' share of (hits + fills). Null when there was no
 // traffic at all — the tree renders that as an em-dash, not a meaningless 0%.
 export function hitRatioPercent(hits: number, fills: number): number | null {
@@ -530,6 +553,7 @@ function buildQueryGroups(
 			totalHits: sumHits(bucket.entries),
 			totalMisses: sumMisses(bucket.entries),
 			totalFills: sumFills(bucket.entries),
+			totalPurges: sumPurges(bucket.entries),
 			totalSize: sumSize(bucket.entries),
 			ttlMs: maxOrNull(bucket.entries, (entry) => entry.ttlMs),
 			recommendedTtlMs: maxOrNull(bucket.entries, (entry) => entry.recommendedTtlMs),
@@ -587,6 +611,7 @@ export function buildGroups(
 			totalHits: sumHits(pathEntries),
 			totalMisses: sumMisses(pathEntries),
 			totalFills: sumFills(pathEntries),
+			totalPurges: sumPurges(pathEntries),
 			totalSize: sumSize(pathEntries),
 			hitRatio: hitRatioPercent(sumHits(pathEntries), sumFills(pathEntries)),
 			maxFillMs: maxOrNull(pathEntries, (entry) => entry.fillMs),
@@ -655,6 +680,7 @@ export type GroupSortField =
 	| 'hits'
 	| 'misses'
 	| 'fills'
+	| 'purges'
 	| 'ratio'
 	| 'anomalies'
 	| 'coarse'
@@ -674,6 +700,7 @@ type SortableNode = {
 	totalHits: number;
 	totalMisses: number;
 	totalFills: number;
+	totalPurges: number;
 	totalSize: number;
 	entryCount: number;
 	hitRatio: number | null;
@@ -689,6 +716,7 @@ const SORT_VALUES: Record<GroupSortField, (node: SortableNode) => number | null>
 	hits: (node) => node.totalHits,
 	misses: (node) => node.totalMisses,
 	fills: (node) => node.totalFills,
+	purges: (node) => node.totalPurges,
 	ratio: (node) => node.hitRatio,
 	anomalies: (node) => node.anomalyCount,
 	coarse: (node) => node.coarseCount,
@@ -770,7 +798,7 @@ export type TimeseriesPoint = [number, number | null];
 
 // A chart value formatted by its metric's unit: a count as a plain integer, a
 // seconds value as a human duration; null/undefined as an em dash.
-export type TooltipUnit = 'count' | 'seconds' | 'percent';
+export type TooltipUnit = 'count' | 'seconds' | 'percent' | 'balance';
 
 export function formatTooltipValue(
 	raw: number | null | undefined,
@@ -782,6 +810,16 @@ export function formatTooltipValue(
 
 	if (unit === 'seconds') {
 		return formatDuration(raw);
+	}
+
+	if (unit === 'balance') {
+		// Signed: the sign is the verdict, so it is never dropped — a bare "50%"
+		// would read as the winning case when it may be the losing one.
+		const sign = raw > 0
+			? '+'
+			: '';
+
+		return `${sign}${Math.round(raw)}%`;
 	}
 
 	return unit === 'percent'

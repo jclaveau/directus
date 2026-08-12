@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	countScopedCacheTagMembers,
+	scopedCacheTagLabel,
+	serializeScopedCacheTags,
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
 	scopedCacheTagKey,
@@ -35,6 +37,38 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+});
+
+// The one spelling of a tag that the entry index, the purge index and the dev
+// headers all share — if these two drift, a purge stops matching the entries it
+// actually dropped and the attribution silently reads zero.
+describe('the tag display form', () => {
+	it('renders a bare collection and a pinned slice', () => {
+		expect(scopedCacheTagLabel({ collection: 'articles' })).toBe('articles');
+
+		expect(scopedCacheTagLabel({
+			collection: 'articles',
+			field: 'author',
+			value: 7,
+		})).toBe('articles:author=7');
+	});
+
+	it('canonicalises the value the same way the Redis key does', () => {
+		// A filter's `true` and a driver's `1` must resolve one slice, not two.
+		expect(scopedCacheTagLabel({
+			collection: 'slots',
+			field: 'active',
+			value: 1,
+			type: 'boolean',
+		})).toBe('slots:active=true');
+	});
+
+	it('joins a set for the header form', () => {
+		expect(serializeScopedCacheTags([
+			{ collection: 'articles' },
+			{ collection: 'articles', field: 'author', value: 7 },
+		])).toBe('articles, articles:author=7');
+	});
 });
 
 describe('countScopedCacheTagMembers', () => {

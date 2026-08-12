@@ -45,6 +45,9 @@ export async function reportCacheAnomaly(
 			: req.originalUrl,
 		bytes: 0,
 		fillMs: 0,
+		// A locator is written where the read never got far enough to resolve a
+		// scope, so it carries none — the drain records tags for real fills only.
+		scopedCacheTags: [],
 		lastFilled: null,
 	});
 

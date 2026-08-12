@@ -13,6 +13,7 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
 // The timeseries wire types live in @directus/types so the app chart shares them.
 export type {
 	CacheConfigEvent,
+	CachePurgeMode,
 	CacheTimeseries,
 	CacheTimeseriesBucket,
 } from '@directus/types';
@@ -28,12 +29,15 @@ export type {
  *   - `directus_cache_descriptors` — dimension, one row per key: the request
  *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
  *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
+ *   - `directus_cache_purges` — one row per purge operation (not per evicted
+ *     key), carrying how far it reached and how many entries it took.
  *
- * Seven stream kinds. Latency facts in `directus_cache_events` (numeric `kind`, all
+ * Eight stream kinds. Latency facts in `directus_cache_events` (numeric `kind`, all
  * carrying duration_ms): `h` hit (0), `f` fill (2) a cached miss's compute, `x`
  * anomaly-miss (3) a flagged-uncacheable miss, `o` other-miss (4) a silently-skipped
  * miss — the "Misses" curve pools 2/3/4. `m` miss (1, cache.ts) is the count only.
- * `d` descriptor + `a` anomaly demux to the other tables. Capture is gated by a
+ * `d` descriptor + `a` anomaly + `p` purge demux to the other tables. Capture is
+ * gated by a
  * runtime flag refreshed
  * from Redis, killable live by an admin or the size/buffer watchdog.
  */
@@ -51,6 +55,30 @@ export interface CacheMiss {
 	ttlMs: number | null;
 }
 
+/** One purge operation: how far it reached, and how much it took with it. */
+export interface CachePurge {
+	/**
+	 * Correlates the operations of ONE purge. Omitted, each operation gets its own
+	 * id — right when it is its own purge. Passed, several share it: a mutation
+	 * whose scope was unresolvable runs the coarse collection fallback AND a second
+	 * pass for the tags a hook declared, and an entry both reach must count one
+	 * purge, not two.
+	 */
+	purgeId?: string;
+	collection: string | null; // null on a namespace-wide clear
+	mode: CachePurgeMode;
+	// The scoped cache tags this purge actually dropped, in the display form
+	// `collection[:field=value]`, so a purge joins against an entry's own tags.
+	// Null where the list is derived rather than chosen (`collection`,
+	// `namespace`) and `collection` plus `mode` already state the reach.
+	scopedCacheTags: string[] | null;
+	scopedCacheTagCount: number; // that reach as a number, for every mode
+	evicted: number | null; // entries those sets held; null = whole-namespace clear
+	// Wall-clock of the purge itself. It is awaited inside the mutation, so this
+	// is time added to the write, not a background cost.
+	durationMs: number;
+}
+
 export interface CacheDescriptor {
 	cacheKey: string; // stats identity (getCacheKey().hash) — always fixed-length
 	redisKey: string; // the actual Redis key, for inspection + eviction
@@ -63,6 +91,10 @@ export interface CacheDescriptor {
 	url: string;
 	bytes: number;
 	fillMs: number;
+	// The scoped cache tags this entry was filled under, in the display form the
+	// purge side records — the join that answers "was this entry covered by that
+	// purge?".
+	scopedCacheTags: string[];
 	// null = an anomaly locator, never filled (bytes/fillMs 0). It stamps last_filled
 	// NULL, which alone marks it: never clobbers a real fill, hidden from the listing.
 	lastFilled?: Date | null;
@@ -102,6 +134,12 @@ export interface CacheAnomalyRecord {
 }
 
 export interface CacheEntryRecord {
+	/**
+	 * Purges that covered this entry's tags in the window. Read beside `hits`:
+	 * more purges than hits means the cache is filling this response more often
+	 * than it serves it, which is negative work.
+	 */
+	purges: number;
 	key: string; // stats identity (the hash)
 	redisKey: string; // the actual Redis key, for inspect + evict
 	coarse: boolean; // scoped collection tagged bare — over-purges (a tuning signal)
@@ -461,6 +499,43 @@ export function queueCacheAnomaly(entry: CacheAnomaly): void {
 	});
 }
 
+/**
+ * Emit one purge operation — not one event per evicted key, which would put the
+ * write path's fan-out onto the stream. A purge fires once per mutation, so this
+ * is mutation-rate, and each row carries how far it reached and what it took.
+ */
+export function queueCachePurge(entry: CachePurge): void {
+	// Gated on being CONFIGURED, not on the capture flag — deliberately unlike
+	// the hit/miss emitters beside it. `recordCacheConfigEvent` records a flush
+	// even while stats are off so it still shows once they return, and a purge is
+	// the same class of event. The watchdog that kills capture kills it for
+	// hit/miss volume; a purge is mutation-rate and is not what it defends
+	// against, so losing purges to it would blind the page exactly when an
+	// operator is looking for what evicted the cache.
+	if (!cacheStatsConfigured()) {
+		return;
+	}
+
+	xadd({
+		kind: 'p',
+		collection: entry.collection ?? '',
+		mode: entry.mode,
+		// One id per purge, so an entry covered by two of its tags counts it once —
+		// and, where the caller supplies one, an entry covered by two operations of
+		// the same purge counts it once too.
+		purgeId: entry.purgeId ?? randomUUID(),
+		scopedCacheTags: (entry.scopedCacheTags ?? []).join(','),
+		scopedCacheTagCount: String(entry.scopedCacheTagCount),
+		// Empty = unknown, which is not the same as none. Only a namespace clear
+		// sends it: it has no member list to count.
+		evicted: entry.evicted === null
+			? ''
+			: String(entry.evicted),
+		durationMs: String(entry.durationMs),
+		ts: String(Date.now()),
+	});
+}
+
 // The per-key descriptor, emitted on a fill where every field is populated.
 export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void> {
 	if (!cacheStatsActiveFlag) {
@@ -482,6 +557,7 @@ export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void
 		url: entry.url,
 		bytes: String(entry.bytes),
 		fillMs: String(entry.fillMs),
+		scopedCacheTags: entry.scopedCacheTags.join(','),
 		// Empty ts = no fill time = a locator; the drain reads last_filled off it.
 		ts: entry.lastFilled === null
 			? ''
@@ -576,6 +652,29 @@ interface CacheAnomalyRow {
 	cache_key: string;
 	reason: string;
 	detail: string;
+}
+
+interface CachePurgeRow {
+	time: Date;
+	purge_id: string;
+	collection: string | null;
+	mode: CachePurgeMode;
+	scoped_cache_tag_count: number;
+	evicted: number | null; // null = a namespace clear, whose size is unknowable
+	duration_ms: number | null;
+}
+
+/**
+ * The collection a display-form scoped cache tag belongs to: `articles`, or the
+ * head of `articles:owner=7`. Taken off the tag rather than off the descriptor,
+ * since one entry can read across collections and carry a tag from each.
+ */
+function collectionOfScopedCacheTag(scopedCacheTag: string): string {
+	const slice = scopedCacheTag.indexOf(':');
+
+	return slice === -1
+		? scopedCacheTag
+		: scopedCacheTag.slice(0, slice);
 }
 
 function parseFields(flat: string[]): Record<string, string> {
@@ -742,10 +841,74 @@ async function persistStreamBatch(
 	const descriptors = new Map<string, CacheDescriptorRow>();
 	const locators = new Map<string, CacheDescriptorRow>();
 	const anomalies: CacheAnomalyRow[] = [];
+	const purges: CachePurgeRow[] = [];
+
+	const purgedScopedCacheTags: {
+		purge_id: string;
+		time: Date;
+		scoped_cache_tag: string;
+		collection: string;
+	}[] = [];
+
+	// Keyed so the last fill in a batch wins, matching the descriptor upsert: an
+	// entry's tags are replaced wholesale on refill, never merged with the old set.
+	const entryScopedCacheTags = new Map<string, {
+		scoped_cache_tag: string;
+		collection: string;
+	}[]>();
 
 	for (const [, flat] of batch) {
 		const f = parseFields(flat);
 		const at = new Date(Number(f['ts']));
+
+		if (f['kind'] === 'p') {
+			purges.push({
+				time: at,
+				collection: f['collection']
+					? f['collection']
+					: null,
+				purge_id: f['purgeId'] ?? '',
+				mode: (f['mode'] ?? 'slices') as CachePurgeMode,
+				scoped_cache_tag_count: Number(f['scopedCacheTagCount'] ?? 0),
+				// Empty came off a namespace clear: unknown, not none.
+				evicted: f['evicted']
+					? Number(f['evicted'])
+					: null,
+				// Absent = never measured; 0 would be an instant purge.
+				duration_ms: f['durationMs']
+					? Number(f['durationMs'])
+					: null,
+			});
+
+			// One row per tag the purge dropped, carrying the purge's own id so an
+			// entry covered by two of them still counts the purge once.
+			for (const scopedCacheTag of (f['scopedCacheTags'] ?? '')
+				.split(',')
+				.filter(Boolean)) {
+				purgedScopedCacheTags.push({
+					purge_id: f['purgeId'] ?? '',
+					time: at,
+					scoped_cache_tag: scopedCacheTag,
+					collection: collectionOfScopedCacheTag(scopedCacheTag),
+				});
+			}
+
+			// A collection-wide purge names no tag: it dropped the bare tag AND
+			// every slice, and a pinned entry carries only its slice tag. Recording
+			// the bare tag alone would attribute it to global reads and miss every
+			// pinned entry, which is most of what it destroyed — so it is recorded
+			// against the collection, in one row rather than one per derived slice.
+			if (f['mode'] === 'collection' && f['collection']) {
+				purgedScopedCacheTags.push({
+					purge_id: f['purgeId'] ?? '',
+					time: at,
+					scoped_cache_tag: '',
+					collection: f['collection'],
+				});
+			}
+
+			continue;
+		}
 
 		if (f['kind'] === 'a') {
 			anomalies.push({
@@ -787,6 +950,24 @@ async function persistStreamBatch(
 				? locators
 				: descriptors).set(row.cache_key, row);
 
+			// Only a real fill knows the tags; a locator is written at an anomaly
+			// site where the read never got far enough to resolve them.
+			if (row.last_filled !== null) {
+				const filledUnder = [...new Set(
+					(f['scopedCacheTags'] ?? '').split(',').filter(Boolean),
+				)];
+
+				entryScopedCacheTags.set(
+					row.cache_key,
+					filledUnder.map((scopedCacheTag) => {
+						return {
+							scoped_cache_tag: scopedCacheTag,
+							collection: collectionOfScopedCacheTag(scopedCacheTag),
+						};
+					}),
+				);
+			}
+
 			continue;
 		}
 
@@ -827,6 +1008,41 @@ async function persistStreamBatch(
 
 			if (anomalies.length > 0) {
 				await trx.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
+			}
+
+			if (purges.length > 0) {
+				await trx.batchInsert('directus_cache_purges', purges, FLUSH_BATCH);
+			}
+
+			if (purgedScopedCacheTags.length > 0) {
+				await trx.batchInsert(
+					'directus_scoped_cache_purge_tags',
+					purgedScopedCacheTags,
+					FLUSH_BATCH,
+				);
+			}
+
+			// Replaced, not merged: a refill under a narrower scope must not leave
+			// the old tags behind claiming coverage the entry no longer has.
+			if (entryScopedCacheTags.size > 0) {
+				await trx('directus_scoped_cache_entry_tags')
+					.whereIn('cache_key', [...entryScopedCacheTags.keys()])
+					.delete();
+
+				const rows = [...entryScopedCacheTags]
+					.flatMap(([cacheKey, filledUnder]) => {
+						return filledUnder.map((tagged) => {
+							return { cache_key: cacheKey, ...tagged };
+						});
+					});
+
+				if (rows.length > 0) {
+					await trx.batchInsert(
+						'directus_scoped_cache_entry_tags',
+						rows,
+						FLUSH_BATCH,
+					);
+				}
 			}
 		});
 	}
@@ -924,6 +1140,62 @@ export async function listCacheEntries(
 		.limit(CACHE_STATS_LISTING_LIMIT)
 		.select(selects);
 
+	// Counted in its own pass rather than joined in above: entry_tags × purge_tags
+	// multiplies the descriptor's rows, which would inflate the hit/miss/fill SUMs
+	// beside it. DISTINCT on the purge id so a purge covering two of an entry's
+	// tags counts once.
+	const purgesByKey = new Map<string, number>();
+
+	const listedKeys = rows.map((row: Record<string, unknown>) => {
+		return String(row['cache_key']);
+	});
+
+	if (listedKeys.length > 0) {
+		const purgeRows = await db('directus_scoped_cache_entry_tags as et')
+			.join(
+				'directus_scoped_cache_purge_tags as pt',
+				'pt.scoped_cache_tag',
+				'et.scoped_cache_tag',
+			)
+			.where('pt.time', '>', since)
+			.whereIn('et.cache_key', listedKeys)
+			.groupBy('et.cache_key')
+			.select(
+				'et.cache_key',
+				db.raw('COUNT(DISTINCT pt.purge_id) AS purges'),
+			);
+
+		for (const row of purgeRows as Record<string, unknown>[]) {
+			purgesByKey.set(row['cache_key'] as string, Number(row['purges'] ?? 0));
+		}
+
+		// The coarse pass, joined on collection rather than on tag: a
+		// collection-wide purge names no tag, and a pinned entry carries only its
+		// slice tag, so nothing above would ever match it. Added to the precise
+		// count rather than replacing it — a purge is tag-bearing or
+		// collection-bearing and never both, so the two cannot double-count one.
+		const coarseRows = await db('directus_scoped_cache_purge_tags as pt')
+			.join(
+				'directus_scoped_cache_entry_tags as et',
+				'et.collection',
+				'pt.collection',
+			)
+			.where('pt.time', '>', since)
+			.where('pt.scoped_cache_tag', '')
+			.whereIn('et.cache_key', listedKeys)
+			.groupBy('et.cache_key')
+			.select(
+				'et.cache_key',
+				db.raw('COUNT(DISTINCT pt.purge_id) AS purges'),
+			);
+
+		for (const row of coarseRows as Record<string, unknown>[]) {
+			const key = row['cache_key'] as string;
+			const precise = purgesByKey.get(key) ?? 0;
+			purgesByKey.set(key, precise + Number(row['purges'] ?? 0));
+		}
+	}
+
 	return rows.map((row: Record<string, unknown>) => {
 		const createdAt = new Date(row['last_filled'] as string).getTime();
 
@@ -936,6 +1208,7 @@ export async function listCacheEntries(
 
 		return {
 			key: row['cache_key'] as string,
+			purges: purgesByKey.get(row['cache_key'] as string) ?? 0,
 			redisKey: row['redis_key'] as string,
 			coarse: Boolean(row['coarse']),
 			method: row['method'] as string,
@@ -1156,6 +1429,57 @@ export async function reapCacheEvents(): Promise<number> {
 }
 
 /**
+ * Prune purge-tag rows past the retention window, alongside the purges they
+ * belong to — the join half ages out with the fact half or it would outlive it
+ * and keep claiming coverage for purges nothing remembers.
+ */
+export async function reapScopedCachePurgeTags(): Promise<number> {
+	if (!cacheStatsConfigured()) {
+		return 0;
+	}
+
+	const cutoff = new Date(Date.now() - retentionMs());
+
+	return getDatabase()('directus_scoped_cache_purge_tags')
+		.where('time', '<', cutoff)
+		.delete();
+}
+
+/**
+ * Drop tag rows whose entry no longer has a descriptor. The tags are a dimension
+ * of the entry, so they follow it out rather than accumulating for keys that
+ * stopped appearing.
+ */
+export async function reapScopedCacheEntryTags(): Promise<number> {
+	if (!cacheStatsConfigured()) {
+		return 0;
+	}
+
+	const db = getDatabase();
+
+	return db('directus_scoped_cache_entry_tags')
+		.whereNotIn('cache_key', db('directus_cache_descriptors').distinct('cache_key'))
+		.delete();
+}
+
+/**
+ * Prune purge rows past the retention window. Bounded like every other fact
+ * table here: a purge row is written per mutation, so an unswept table grows
+ * with the write workload rather than with the cache.
+ */
+export async function reapCachePurges(): Promise<number> {
+	if (!cacheStatsConfigured()) {
+		return 0;
+	}
+
+	const cutoff = new Date(Date.now() - retentionMs());
+
+	return getDatabase()('directus_cache_purges')
+		.where('time', '<', cutoff)
+		.delete();
+}
+
+/**
  * Recent cache anomalies for the admin page, grouped by cache_key+reason and shown
  * under each path/method/query node, with an occurrence count. Windowed like the
  * entries listing; older rows are reaped.
@@ -1355,6 +1679,12 @@ export async function readCacheTimeseries(
 				misses: 0,
 				fills: 0,
 				anomalies: 0,
+				purges: 0,
+				coarsePurges: 0,
+				purgedEntries: 0,
+				purgeP50: null,
+				purgeP95: null,
+				purgeP99: null,
 				ttlMs: null,
 				effectiveTtlMs: null,
 				hitP50: null,
@@ -1474,6 +1804,33 @@ export async function readCacheTimeseries(
 			db.raw('COUNT(*) AS count'),
 		);
 
+	// The drain is at-least-once: it acks the Redis stream only after the insert
+	// commits, so a crash in between redelivers the batch and writes each purge
+	// twice. Aggregating the rows straight would then double both the count and the
+	// eviction total. A purge carries an id, and a redelivery repeats it verbatim,
+	// so reading DISTINCT rows collapses the copies before anything is summed.
+	// (The events fact has no id and cannot do this — hence the id here.)
+	const distinctPurges = db('directus_cache_purges')
+		.where('time', '>', since)
+		.distinct('purge_id', 'time', 'mode', 'evicted', 'duration_ms')
+		.as('p');
+
+	// A purge is one operation however many entries it deleted, so the count and
+	// the eviction total are different questions and both are answered. The coarse
+	// modes are split out here rather than in the app: they are what turns a purge
+	// from the cache working into a hit ratio falling off a cliff.
+	const purgeRows = await db(distinctPurges)
+		.groupByRaw('1')
+		.select(
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
+			db.raw('COUNT(*) AS count'),
+			db.raw(
+				"SUM(CASE WHEN mode IN ('collection', 'namespace') THEN 1 ELSE 0 END) "
+				+ 'AS coarse',
+			),
+			db.raw('SUM(evicted) AS evicted'),
+		);
+
 	// Defensive clamp: a row at/after the next boundary (clock skew) would exceed the
 	// last slot; fold it into the last bucket rather than drop it. `+=` in the count
 	// loop because the fold can still collapse two DB buckets into one.
@@ -1494,6 +1851,13 @@ export async function readCacheTimeseries(
 
 	for (const row of anomalyRows as Record<string, unknown>[]) {
 		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
+	}
+
+	for (const row of purgeRows as Record<string, unknown>[]) {
+		const index = slotOf(row['bucket']);
+		dense[index]!.purges += Number(row['count'] ?? 0);
+		dense[index]!.coarsePurges += Number(row['coarse'] ?? 0);
+		dense[index]!.purgedEntries += Number(row['evicted'] ?? 0);
 	}
 
 	// A distinct grid (only kinds 0/2), so a latency bucket can't collide with a
@@ -1521,6 +1885,26 @@ export async function readCacheTimeseries(
 		slot.bothP50 = pctVal(row['both_p50']);
 		slot.bothP95 = pctVal(row['both_p95']);
 		slot.bothP99 = pctVal(row['both_p99']);
+	}
+
+	// A pass of its own because the durations live on the purges table, not on the
+	// events fact every percentile above comes from — same `pct` window function,
+	// a different grid. `pctVal`, so a bucket whose purges were never timed keeps
+	// its null: an untimed purge is not an instant one.
+	const purgeLatencyRows = await db(distinctPurges)
+		.groupByRaw('1')
+		.select(
+			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
+			db.raw(`${pct(0.5)} AS purge_p50`),
+			db.raw(`${pct(0.95)} AS purge_p95`),
+			db.raw(`${pct(0.99)} AS purge_p99`),
+		);
+
+	for (const row of purgeLatencyRows as Record<string, unknown>[]) {
+		const slot = dense[slotOf(row['bucket'])]!;
+		slot.purgeP50 = pctVal(row['purge_p50']);
+		slot.purgeP95 = pctVal(row['purge_p95']);
+		slot.purgeP99 = pctVal(row['purge_p99']);
 	}
 
 	return { buckets: dense, markers, effectiveTtl };
@@ -1717,6 +2101,12 @@ export async function truncateCacheEvents(): Promise<void> {
 	await db('directus_cache_events').truncate();
 	await db('directus_cache_descriptors').truncate();
 	await db('directus_cache_anomalies').truncate();
+	// Purges are telemetry of the same class, so they go with it. Left behind,
+	// they would count against entries whose own history was just cleared —
+	// purges without hits, on a window that reports no traffic at all.
+	await db('directus_cache_purges').truncate();
+	await db('directus_scoped_cache_purge_tags').truncate();
+	await db('directus_scoped_cache_entry_tags').truncate();
 
 	// Full reset: also drop the Redis transients tied to those rows — else buffered
 	// events drain back in and a held throttle slot suppresses the next sample.

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	balancePercent,
 	buildGroups,
 	carryForward,
 	filterAnomalies,
@@ -9,7 +10,6 @@ import {
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
-	formatHitRatio,
 	formatTooltipValue,
 	formatUser,
 	isSystemPath,
@@ -44,6 +44,7 @@ function entry(over: Partial<CacheEntry>): CacheEntry {
 		hits: 0,
 		misses: 0,
 		fills: 0,
+		purges: 0,
 		fillMs: null,
 		hitMs: null,
 		ttlMs: null,
@@ -125,19 +126,6 @@ describe('formatQuery', () => {
 		expect(formatQuery('')).toBe('—');
 		expect(formatQuery('{}')).toBe('—');
 		expect(formatQuery('{"limit":5}')).toBe('{"limit":5}');
-	});
-});
-
-describe('formatHitRatio', () => {
-	it('rounds hits over hits plus fills to a percentage', () => {
-		expect(formatHitRatio(90, 10)).toBe('90%');
-		expect(formatHitRatio(2, 1)).toBe('67%');
-		expect(formatHitRatio(0, 3)).toBe('0%');
-		expect(formatHitRatio(4, 0)).toBe('100%');
-	});
-
-	it('returns null when nothing was served either way', () => {
-		expect(formatHitRatio(0, 0)).toBe(null);
 	});
 });
 
@@ -488,9 +476,41 @@ describe('formatTooltipValue', () => {
 		expect(formatTooltipValue(83.6, 'percent')).toBe('84%');
 	});
 
+	it('signs a balance, so a loss cannot be read as the winning case', () => {
+		expect(formatTooltipValue(83.6, 'balance')).toBe('+84%');
+		expect(formatTooltipValue(-83.6, 'balance')).toBe('-84%');
+
+		// Break-even takes no sign: there is no side to name.
+		expect(formatTooltipValue(0, 'balance')).toBe('0%');
+	});
+
 	it('shows an em dash for a null/undefined value', () => {
 		expect(formatTooltipValue(null, 'count')).toBe('—');
 		expect(formatTooltipValue(undefined, 'seconds')).toBe('—');
+	});
+});
+
+describe('balancePercent', () => {
+	it('centres on zero, so the sign alone says which side is ahead', () => {
+		expect(balancePercent(3, 1)).toBe(50);
+		expect(balancePercent(1, 3)).toBe(-50);
+		expect(balancePercent(2, 2)).toBe(0);
+	});
+
+	it('is symmetric and bounded, where a share squashes the losing half', () => {
+		// Swapping the pair flips the sign and keeps the magnitude...
+		expect(balancePercent(9, 1)).toBe(80);
+		expect(balancePercent(1, 9)).toBe(-80);
+
+		// ...and neither end can run off the axis and clip.
+		expect(balancePercent(5, 0)).toBe(100);
+		expect(balancePercent(0, 5)).toBe(-100);
+	});
+
+	it('reads no traffic as unknown rather than as break-even', () => {
+		// A gap, not a zero: nothing happened, which is not the same as the two
+		// sides having cancelled each other out.
+		expect(balancePercent(0, 0)).toBeNull();
 	});
 });
 
@@ -609,6 +629,45 @@ describe('filterLatencyBand', () => {
 	it('always keeps at least one branch', () => {
 		const two = [timed('/a', 10), timed('/b', 20)];
 		expect(filterLatencyBand(two, 'p99', 'miss').map((g) => g.path)).toEqual(['/b']);
+	});
+});
+
+describe('purges on the tree', () => {
+	it('sums up both levels, so a path shows what its queries lost', () => {
+		const groups = buildGroups([
+			entry({
+				key: 'a', path: '/items/a', query: '{"limit":5}', hits: 2, purges: 3,
+			}),
+			entry({
+				key: 'b', path: '/items/a', query: '{"limit":9}', hits: 1, purges: 4,
+			}),
+			entry({ key: 'c', path: '/items/b', hits: 9, purges: 0 }),
+		], []);
+
+		const a = groups.find((group) => group.path === '/items/a')!;
+		const b = groups.find((group) => group.path === '/items/b')!;
+
+		expect(a.totalPurges).toBe(7);
+		expect(a.queries.map((query) => query.totalPurges).sort()).toEqual([3, 4]);
+
+		// Zero, not absent: a path nothing purged still has to render a number
+		// beside its hits for the comparison to read.
+		expect(b.totalPurges).toBe(0);
+	});
+
+	it('ranks by purges, which is not the hit ranking', () => {
+		const groups = buildGroups([
+			// The busiest path by hits is the least purged, so sorting by purges
+			// must reorder rather than track the default.
+			entry({ key: 'a', path: '/items/a', hits: 100, purges: 1 }),
+			entry({ key: 'b', path: '/items/b', hits: 2, purges: 50 }),
+			entry({ key: 'c', path: '/items/c', hits: 10, purges: 9 }),
+		], []);
+
+		const worst = sortGroups(groups, { field: 'purges', dir: -1 });
+
+		expect(worst.map((group) => group.path))
+			.toEqual(['/items/b', '/items/c', '/items/a']);
 	});
 });
 

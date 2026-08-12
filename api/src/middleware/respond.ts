@@ -15,6 +15,7 @@ import { useLogger } from '../logger/index.js';
 import {
 	scopedCachePurgeEnabled,
 	serializeScopedCacheTags,
+	scopedCacheTagLabel,
 	tagScopedCacheKeys,
 } from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
@@ -251,6 +252,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							: req.originalUrl,
 						bytes: size,
 						fillMs,
+						// The scoped cache tags the key was just indexed under, so a
+						// later purge of any of them is attributable back to this
+						// request.
+						scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
 					}).catch(() => {});
 
 					// The same fill latency as a timestamped event (kind 'f') so the

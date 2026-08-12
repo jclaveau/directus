@@ -165,21 +165,38 @@ const VSelect = {
 	template: '<div class="v-select-stub" />',
 };
 
+interface TooltipBinding {
+	value: unknown;
+	modifiers: Record<string, boolean>;
+}
+
+function recordTooltip(el: HTMLElement, binding: TooltipBinding): void {
+	el.setAttribute('data-tooltip', String(binding.value));
+
+	// `top` is the directive's default, so an unmodified binding reports it.
+	const placement = ['top', 'right', 'bottom', 'left']
+		.find((side) => binding.modifiers[side] === true);
+
+	el.setAttribute('data-tooltip-placement', placement ?? 'top');
+}
+
 // Hyphenated Directus components (private-view, v-*, …) aren't registered here;
 // treat them as custom elements so Vue renders their default slot — the
 // `.cache-page` body and its table — without stubbing each one. search-input is
 // the exception: it's a real stub so a test can drive its filter/search models.
 const global = {
 	plugins: [i18n],
-	// Record the bound value so a test can assert the tooltip text (the real directive
-	// renders it out-of-tree, invisible to wrapper.text()).
+	// Record the bound value so a test can assert the tooltip text (the real
+	// directive renders it out-of-tree, invisible to wrapper.text()). The modifiers
+	// come with it: the directive places the tooltip where it is told and never
+	// flips off a viewport edge, so the side asked for is behaviour, not decoration.
 	directives: {
 		tooltip: {
-			mounted(el: HTMLElement, binding: { value: unknown }) {
-				el.setAttribute('data-tooltip', String(binding.value));
+			mounted(el: HTMLElement, binding: TooltipBinding) {
+				recordTooltip(el, binding);
 			},
-			updated(el: HTMLElement, binding: { value: unknown }) {
-				el.setAttribute('data-tooltip', String(binding.value));
+			updated(el: HTMLElement, binding: TooltipBinding) {
+				recordTooltip(el, binding);
 			},
 		},
 	},
@@ -332,6 +349,125 @@ describe('CachePage', () => {
 		expect(missTitle).toContain('p50  110 ms');
 		expect(missTitle).toContain('p95  240 ms');
 		expect(missTitle).toContain('p99  900 ms');
+	});
+
+	// Each ratio sits against the count it is measured from, in that count's
+	// colour: the hit ratio right after Hits, the purge ratio right after Purges.
+	it('pairs each ratio column with the count it is measured against', async () => {
+		mockCacheGet([{
+			...ENTRIES[0]!,
+			hits: 7,
+			fills: 3,
+			// Deliberately asymmetric, and enough to push the purge balance below
+			// zero: one column reading the other's pair would show +40% twice.
+			purges: 21,
+		}]);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const header = wrapper.find('.endpoint-header');
+
+		// Order is the contract — the row is figures alone, so a column that moves
+		// is a column that has silently changed meaning.
+		const stats = header.findAll('.stat.funnel.hit, .stat.score, .stat.purges');
+
+		// A funnel column pairs its count with a median, so read its count cell —
+		// asserting the whole text would tie this to whether a median was known.
+		const shown = stats.map((stat) => {
+			return stat.find('.count').exists()
+				? stat.find('.count').text()
+				: stat.text();
+		});
+
+		expect(shown).toEqual([
+			'7', // Hits, the funnel column both ratios are measured from
+			'+40%', // (7 − 3) / (7 + 3)
+			'21', // Purges
+			'-50%', // (7 − 21) / (7 + 21)
+		]);
+
+		// Colour is the legend: each ratio takes the hue of its own pair, so the
+		// two are told apart without reading their titles.
+		expect(stats[1]!.classes()).toContain('hit');
+		expect(stats[3]!.classes()).toContain('purge');
+
+		// The title states the formula, and states a DIFFERENT one per column.
+		expect(stats[1]!.attributes('data-tooltip'))
+			.toContain('Hit Score = (Hits − Fills) / (Hits + Fills)');
+
+		expect(stats[3]!.attributes('data-tooltip'))
+			.toContain('Purge Score = (Hits − Purges) / (Hits + Purges)');
+	});
+
+	it('hangs a formula on each score in the legend, on nothing else', async () => {
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					fills: 1,
+					anomalies: 0,
+					purges: 1,
+					coarsePurges: 0,
+					purgedEntries: 3,
+					ttlMs: null,
+				}],
+				markers: [],
+			},
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const entries = wrapper.findAll(
+			'.cache-counts-legend .cache-chart-legend-entry',
+		);
+
+		const titleOf = (label: string) => {
+			return entries
+				.find((entry) => entry.text().trim() === label)!
+				.attributes('data-tooltip');
+		};
+
+		// Each ratio names its own denominator. The legend reads that off the line
+		// itself, so a line that never declared one cannot inherit this one — which
+		// is what comparing against the entry's own rendered label used to allow.
+		expect(titleOf('Hit Score'))
+			.toContain('Hit Score = (Hits − Fills) / (Hits + Fills)');
+
+		expect(titleOf('Purge Score'))
+			.toContain('Purge Score = (Hits − Purges) / (Hits + Purges)');
+
+		// A raw count is its own label; no formula hangs off it.
+		expect(titleOf('Hits')).not.toContain('Hits −');
+	});
+
+	// The directive places the tooltip where it is told and has no collision
+	// handling — no flip, no viewport clamp (app/src/directives/tooltip.ts). So the
+	// tall ratio/legend titles opened UPWARDS off the top of the page from the two
+	// blocks that sit at the very top. A real fix (flip/shift in the directive) is
+	// tracked at https://github.com/jclaveau/directus/issues/354.
+	it('opens the top-of-page tooltips downwards, the tree rows upwards', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const placementOf = (selector: string) => {
+			return wrapper.find(selector).attributes('data-tooltip-placement');
+		};
+
+		// Nothing above these two to open into.
+		expect(placementOf('.summary .metric[data-tooltip]')).toBe('bottom');
+
+		expect(placementOf('.cache-counts-legend .cache-chart-legend-entry'))
+			.toBe('bottom');
+
+		// The tree is mid-page, and its last row has nothing below it — these keep
+		// the default, so the fix is scoped rather than applied page-wide.
+		expect(placementOf('.endpoint-header .stat.score')).toBe('top');
 	});
 
 	it('keeps a column for a metric with no traffic', async () => {
@@ -1302,7 +1438,11 @@ describe('CachePage', () => {
 					misses: 2,
 					fills: 1,
 					anomalies: 0,
-					ttlMs: 3600000,
+					purges: 3,
+					coarsePurges: 1,
+					purgedEntries: 9,
+					ttlMs: 60000,
+					effectiveTtlMs: 3600000,
 				}],
 				markers: [],
 			},
@@ -1311,45 +1451,84 @@ describe('CachePage', () => {
 		mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Responses');
+		const config = chartConfigWithSeries('TTL');
 		expect(config).toBeTruthy();
 
-		// Responses is the hit + miss total, the hit ratio hits/(hits + fills).
-		expect(config.series[0].data).toEqual([[1000, 7]]);
-		expect(config.series[5].name).toBe('Hit ratio');
-		expect(config.series[5].data[0]![1]).toBeCloseTo(83.33);
+		// TTL leads: the config value the lines after it are a consequence of.
+		expect(config.series[0].data).toEqual([[1000, 3600]]);
+		expect(config.series[1].data).toEqual([[1000, 7]]);
+
+		// The tooltip reads its values by position, so the order is the contract —
+		// pinned whole rather than by one index, which is what let two series be
+		// inserted after Hits without this test saying where they went. Row 1 is
+		// the raw funnel plus its TTL; row 2 the metrics derived from them.
+		expect(config.series.map((series: { name: string }) => series.name)).toEqual([
+			'TTL',
+			'Responses',
+			'Misses',
+			'Anomalies',
+			'Fills',
+			'Hits',
+			'Purges',
+			'Purged entries',
+			'Lifetime',
+			'Hit Score',
+			'Purge Score',
+			'Coarse purges',
+		]);
+
+		// (hits − fills) / (hits + fills) = (5 − 1) / 6, as a percentage.
+		expect(config.series[9].data[0]![1]).toBeCloseTo(66.7, 1);
+
+		// (hits − purged entries) / (hits + purged entries) = (5 − 9) / 14: below
+		// zero, this request was thrown away more often than it was served. Measured
+		// against what the purges DESTROYED, not against how many of them ran.
+		expect(config.series[10].data[0]![1]).toBeCloseTo(-28.6, 1);
 
 		// Tooltip: one tight "name: value" row per metric, each in its own unit.
-		// Positional, in the funnel order the series are declared in.
+		// Positional, in the order the series are declared in.
 		const html = config.tooltip.custom({
-			series: [[7], [2], [0], [1], [5], [83.33], [3600]],
+			// Positions 6 and 7 are the pair this split exists for: 3 purges, and the
+			// 9 entries between them — one coarse purge can account for most of that.
+			series: [
+				[3600], [7], [2], [0], [1], [5], [3], [9], [60], [66.7], [-28.6], [1],
+			],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
 
+		expect(html).toContain('TTL: 1h');
 		expect(html).toContain('Responses: 7');
 		expect(html).toContain('Misses: 2');
 		expect(html).toContain('Anomalies: 0');
 		expect(html).toContain('Fills: 1');
 		expect(html).toContain('Hits: 5');
-		expect(html).toContain('Hit ratio: 83%');
-		expect(html).toContain('TTL: 1h');
+		expect(html).toContain('Purges: 3');
+		expect(html).toContain('Purged entries: 9');
+		expect(html).toContain('Lifetime: 1m');
+		// Signed: a bare "29%" would read as the winning case when it is the
+		// losing one.
+		expect(html).toContain('Hit Score: +67%');
+		expect(html).toContain('Purge Score: -29%');
+		expect(html).toContain('Coarse purges: 1');
 		expect(html).toContain('cache-tt-row');
 
-		// Dashes mark the lines that don't share the Count axis: the ratio, and the
-		// entry lifetime — dashed apart from the TTL it sits beside so the config and
+		// Dashes mark the lines that don't share the Count axis: the two balances,
+		// and the lifetime — dashed apart from the TTL it trails so the config and
 		// the lifetimes of the entries it produced can't be read as one line.
-		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 6, 0, 4]);
+		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 4, 6, 6, 0]);
 
-		// Count axis stays integer; TTL axis reads as a duration; the ratio gets a
-		// pinned 0-100 axis with nothing drawn, since a percent carries its scale.
+		// Count axis stays integer; TTL axis reads as a duration; the balances get
+		// their own hidden axis, pinned to the form's bounds so zero sits at a
+		// fixed height and the two lines stay comparable across windows.
 		expect(config.yaxis[0].labels.formatter(5.4)).toBe('5');
 		expect(config.yaxis[1].labels.formatter(3600)).toBe('1h');
 		expect(config.yaxis[2].show).toBe(false);
-		expect(config.yaxis[2].min).toBe(0);
-		// Above 100 so a near-perfect ratio keeps clear of the plot's top edge.
+		expect(config.yaxis[2].min).toBeLessThan(-100);
 		expect(config.yaxis[2].max).toBeGreaterThan(100);
-		expect(config.yaxis[2].seriesName).toEqual(['Hit ratio']);
+
+		expect(config.yaxis[2].seriesName)
+			.toEqual(['Hit Score', 'Purge Score']);
 	});
 
 	it('splits the TTL in force from the lifetimes entries carry', async () => {
@@ -1374,12 +1553,12 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Responses');
+		const config = chartConfigWithSeries('TTL');
 
 		const ttl = config.series.find((s: { name: string }) => s.name === 'TTL');
 
 		const lifetime = config.series
-			.find((s: { name: string }) => s.name === 'Entry lifetime');
+			.find((s: { name: string }) => s.name === 'Lifetime');
 
 		// The config's own history, in seconds. The leading unknown stays unknown — it
 		// is not back-filled with the 1h that had not been set yet.
@@ -1466,6 +1645,69 @@ describe('CachePage', () => {
 		expect(chartMock.hidden).toContain('Hits p95');
 		expect(chartMock.hidden).toContain('Misses p95');
 		expect(chartMock.hidden).not.toContain('Hits p50');
+	});
+
+	// The tooltip reads by position here too, and the legend is the read order the
+	// page teaches: the read dispositions first, then the purge — the one duration
+	// that is charged to a WRITE rather than to a read.
+	it('puts the purge durations last, after the read dispositions', async () => {
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					anomalies: 0,
+					ttlMs: null,
+					hitP50: 2,
+					hitP95: 5,
+					fillP50: 20,
+					fillP95: 60,
+					anomalyP50: 80,
+					anomalyP95: 200,
+					missP50: 40,
+					missP95: 120,
+					bothP50: 3,
+					bothP95: 100,
+					// Present, so the purge lines survive the all-null filter — the
+					// previous test's fixture omits them, which is why it sees five
+					// categories and cannot say where a sixth would land.
+					purgeP50: 7,
+					purgeP95: 30,
+				}],
+				markers: [],
+			},
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Response p50');
+
+		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
+			'Response p50',
+			'Response p95',
+			'Misses p50',
+			'Misses p95',
+			'Anomalies p50',
+			'Anomalies p95',
+			'Fills p50',
+			'Fills p95',
+			'Hits p50',
+			'Hits p95',
+			'Purges p50',
+			'Purges p95',
+		]);
+
+		// Its own values, not Hits' — a swap that kept the names in place would
+		// still be caught.
+		const html = config.tooltip.custom({ dataPointIndex: 0 });
+
+		expect(html).toContain('Purges p50: 7ms');
+		expect(html).toContain('Hits p50: 2ms');
+
+		wrapper.unmount();
+		localStorage.removeItem('cache-latency-hidden-anon');
 	});
 
 	it('drops empty series, zero-fills gaps, marks only real samples', async () => {
@@ -1565,19 +1807,23 @@ describe('CachePage', () => {
 			},
 		});
 
-		mount(CachePage, { global });
+		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Responses');
+		// Apex's own legend is off — the page renders its own two rows — so the
+		// toggle is a click on that, not a legendClick callback.
+		const misses = wrapper.findAll('.cache-chart-legend-entry')
+			.find((entry) => entry.text().trim() === 'Misses')!;
 
-		// Index 1 = Misses; toggling records then clears it via localStorage.
-		config.chart.events.legendClick(null, 1);
+		expect(misses).toBeDefined();
+
+		await misses.trigger('click');
 		await flushPromises();
 
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
 			.toContain('Misses');
 
-		config.chart.events.legendClick(null, 1);
+		await misses.trigger('click');
 		await flushPromises();
 
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))

@@ -22,19 +22,63 @@ test.beforeEach(async ({ page }) => {
 	await page.waitForTimeout(1000);
 });
 
-test('lays the counts chart legend out on one row', async ({ page }) => {
+test('lays the counts chart legend out on two meaning rows', async ({ page }) => {
 	await expect(page.locator('.apexcharts-canvas').first()).toBeVisible();
 
-	// The multi-axis legend must lay out on one row — the grouped-vertical fix. A
-	// regression (e.g. an apex bump) would stack the items again.
-	const rowCount = await page.evaluate(() => {
-		const chart = document.querySelector('.apexcharts-canvas');
-		const items = [...(chart?.querySelectorAll('.apexcharts-legend-series') ?? [])];
-		const tops = items.map((el) => Math.round(el.getBoundingClientRect().top));
-		return new Set(tops).size;
-	});
+	// The page renders this legend itself rather than letting apex group it per
+	// y-axis: the split that reads is by meaning, not by scale. Row one is the raw
+	// funnel and the TTL those entries were written under; row two the metrics
+	// derived from them.
+	const rows = page.locator('.cache-counts-legend')
+		.locator('.cache-chart-legend-row');
 
-	expect(rowCount).toBe(1);
+	await expect(rows).toHaveCount(2);
+
+	const entries = (index: number) => {
+		return rows.nth(index)
+			.locator('.cache-chart-legend-entry')
+			.allInnerTexts();
+	};
+
+	const raw = await entries(0);
+	const derived = await entries(1);
+
+	expect(raw.map((name) => name.trim())).toEqual([
+		'TTL',
+		'Responses',
+		'Misses',
+		'Anomalies',
+		'Fills',
+		'Hits',
+		// Two purge figures, not one: the operations, then what they destroyed.
+		// A single coarse purge can take forty entries, so the count and the size
+		// are different units and cannot share a line.
+		'Purges',
+		'Purged entries',
+	]);
+
+	expect(derived.map((name) => name.trim())).toEqual([
+		'Lifetime',
+		'Hit Score',
+		'Purge Score',
+		'Coarse purges',
+	]);
+
+	// Each row still lays out on one line — the reason apex's own legend was
+	// dropped was that it stacked its groups vertically.
+	for (const row of [rows.nth(0), rows.nth(1)]) {
+		const lines = await row
+			.locator('.cache-chart-legend-entry')
+			.evaluateAll((els) => {
+				const tops = els.map((el) => {
+					return Math.round(el.getBoundingClientRect().top);
+				});
+
+				return new Set(tops).size;
+			});
+
+		expect(lines).toBe(1);
+	}
 });
 
 // The compact-tooltip rendering (the `.cache-tt-row` HTML) is asserted by the unit
@@ -52,11 +96,15 @@ test('the latency chart names the full disposition breakdown', async ({ page }) 
 		timeout: 10000,
 	});
 
-	const rows = page.locator('.cache-chart-legend-row');
+	// Two legends carry these classes now (the counts chart grew its own), so
+	// this one is addressed by its own modifier rather than by document order.
+	const rows = page.locator('.cache-latency-legend .cache-chart-legend-row');
 	await expect(rows).toHaveCount(3);
 
-	// Funnel order, the same order the counts chart and the tree read in.
-	const slices = ['Response', 'Misses', 'Anomalies', 'Fills', 'Hits'];
+	// Funnel order, the same order the counts chart and the tree read in — purges
+	// last, after the read dispositions, being the only slice whose duration is
+	// spent inside a write rather than while serving a read.
+	const slices = ['Response', 'Misses', 'Anomalies', 'Fills', 'Hits', 'Purges'];
 
 	for (const percentile of ['p50', 'p95', 'p99']) {
 		const row = rows.filter({ hasText: percentile });

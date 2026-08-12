@@ -11,12 +11,39 @@ export type CacheFlushTarget = 'response' | 'system' | 'locks';
  * anomaly = a flagged-uncacheable miss's compute, miss = all misses pooled (the
  * umbrella over fill + anomaly + silently-skipped), both = hits + misses pooled.
  * Shared so the API producer and the app chart can't drift. */
+/**
+ * How wide a purge reached. `slices` is the resolved value slices a mutation
+ * touched; `collection` is the coarse fallback over one whole collection, taken
+ * when those values could not be resolved; `namespace` is a non-scoped-mode
+ * mutation clearing the entire cache.
+ */
+export type CachePurgeMode = 'slices' | 'collection' | 'namespace';
+
 export interface CacheTimeseriesBucket {
 	t: number; // bucket-start epoch ms
 	hits: number;
 	misses: number;
 	fills: number;
 	anomalies: number;
+	/** Purge operations in this bucket, every mode pooled. */
+	purges: number;
+	/**
+	 * The subset of `purges` that reached wider than the mutation did — a
+	 * `collection` fallback or a whole-`namespace` clear. Counted apart because a
+	 * precise purge is the cache working, while these two evict entries nothing
+	 * asked to evict, and only they explain a hit ratio falling off a cliff.
+	 */
+	coarsePurges: number;
+	/** Entries those purges deleted — the size of what they took, not their count. */
+	purgedEntries: number;
+	/**
+	 * How long the purges themselves took. A purge is awaited inside the mutation,
+	 * so this is latency ADDED to the write — it belongs beside the fill/hit
+	 * percentiles, not in a background-cost bucket.
+	 */
+	purgeP50: number | null;
+	purgeP95: number | null;
+	purgeP99: number | null;
 	/**
 	 * The longest lifetime STAMPED ON AN ENTRY served in this bucket, as of when that
 	 * entry was filled — not the TTL in force. An entry filled under a since-changed

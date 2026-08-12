@@ -31,11 +31,10 @@ import {
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
-	formatHitRatio,
 	formatTooltipValue,
 	type TooltipUnit,
+	balancePercent,
 	formatUser,
-	hitRatioPercent,
 	shortKey,
 	sortEntries,
 	sortGroups,
@@ -452,7 +451,8 @@ const treeSortOptions = computed<{ text: string; value: GroupSortField }[]>(() =
 		{ text: t('cache_tree_sort_anomalies', 'Anomalies'), value: 'anomalies' },
 		{ text: t('cache_tree_sort_fills', 'Fills'), value: 'fills' },
 		{ text: t('cache_tree_sort_hits', 'Hits'), value: 'hits' },
-		{ text: t('cache_tree_sort_ratio', 'Hit ratio'), value: 'ratio' },
+		{ text: t('cache_tree_sort_purges', 'Purges'), value: 'purges' },
+		{ text: t('cache_tree_sort_ratio', 'Hit score'), value: 'ratio' },
 		{ text: t('cache_tree_sort_coarse', 'Coarse'), value: 'coarse' },
 		{ text: t('cache_tree_sort_entries', 'Entries'), value: 'entries' },
 		{ text: t('cache_tree_sort_size', 'Size'), value: 'size' },
@@ -708,9 +708,26 @@ const totalFills = computed(() => {
 	return timeseries.value.buckets.reduce((sum, b) => sum + b.fills, 0);
 });
 
+const totalPurgedEntries = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.purgedEntries, 0);
+});
+
+// Both tiles read the SAME form the chart plots — `(hits − other) / (hits + other)`
+// as a signed percentage — so "Hit Score" means one thing on the whole page rather
+// than a share here and a balance above.
+const totalPurgeRatio = computed(() => {
+	return formatTooltipValue(
+		balancePercent(totalHits.value, totalPurgedEntries.value),
+		'balance',
+	);
+});
+
 // Share of cache-servable traffic served from cache — hits over hits plus fills.
 const totalRatio = computed(() => {
-	return formatHitRatio(totalHits.value, totalFills.value) ?? '—';
+	return formatTooltipValue(
+		balancePercent(totalHits.value, totalFills.value),
+		'balance',
+	);
 });
 
 // Median of the per-bucket p50s over the window — a single central response-time
@@ -790,6 +807,95 @@ const latencyPercentiles = computed(() => {
 
 	return seen;
 });
+
+// Which count a score is measured against — the one thing that differs between
+// the two. Taken as a value rather than read back off the rendered label: a
+// label is output, and branching on it makes every future score whose name
+// doesn't match silently render this one's formula.
+type ScoreAgainst = 'fills' | 'purges';
+
+/**
+ * What a score line means, read off its legend entry. Both are the same form —
+ * `(hits − other) / (hits + other)` — so the landmarks are the same shape and
+ * only the losing side differs.
+ */
+function scoreTitle(against: ScoreAgainst): string {
+	const wording = against === 'fills'
+		? {
+			name: t('cache_hit_score', 'Hit Score'),
+			label: t('cache_fills', 'Fills'),
+			spent: t('cache_score_filled', 'filled'),
+		}
+		: {
+			name: t('cache_purge_score', 'Purge Score'),
+			label: t('cache_purges', 'Purges'),
+			spent: t('cache_score_purged', 'purged'),
+		};
+
+	const { name, label, spent } = wording;
+
+	return [
+		`${name} = (${t('hits', 'Hits')} − ${label}) / `
+		+ `(${t('hits', 'Hits')} + ${label})`,
+		'',
+		`+100%  ${t('cache_score_best', 'only hits — never')} ${spent}`,
+		`+50%   3 ${t('hits', 'Hits').toLowerCase()} : 1 ${label.toLowerCase()}`,
+		`0%     ${t('cache_score_even', 'break-even — one each')}`,
+		`−50%   1 ${t('hits', 'Hits').toLowerCase()} : 3 ${label.toLowerCase()}`,
+		`−100%  ${t('cache_score_worst', 'no hits at all — only')} ${spent}`,
+		'',
+		t(
+			'cache_score_meaning',
+			'Below zero the cache costs more than it returns for this traffic.',
+		),
+	].join('\n');
+}
+
+// The counts chart renders its own legend on two lines: the raw funnel plus the
+// TTL it was written under, then the metrics derived from them. Apex groups by
+// y-axis instead, which splits TTL from the counts it explains and puts the two
+// balances beside it — a grouping by mechanism rather than by meaning.
+function countsEntries(
+	row: 1 | 2,
+): { name: string; color: string; title: string | undefined }[] {
+	return countsLines()
+		.filter((line) => line.row === row)
+		.map((line) => {
+			return {
+				name: line.name,
+				color: line.color,
+							// Only the score lines need explaining; a count is its own label.
+				title: line.against === undefined
+					? undefined
+					: scoreTitle(line.against),
+			};
+		});
+}
+
+function isCountsEntryHidden(name: string): boolean {
+	return countsHiddenSeries.value.includes(name);
+}
+
+function toggleCountsEntry(name: string) {
+	toggleHiddenSeries(countsHiddenSeries, name);
+
+	if (!chart) {
+		return;
+	}
+
+	try {
+		if (isCountsEntryHidden(name)) {
+			chart.hideSeries(name);
+		}
+		else {
+			chart.showSeries(name);
+		}
+	}
+	catch {
+		// A series with no samples in the window isn't rendered; apex then derefs
+		// a null node. Nothing to toggle — skip it.
+	}
+}
 
 // The per-category legend entries of one percentile row ("Hits", "Fills", ...).
 function latencyEntries(
@@ -927,19 +1033,12 @@ function themeVar(name: string, fallback: string): string {
 	return value || fallback;
 }
 
-function chartConfig(): ApexOptions {
-	const buckets = timeseries.value.buckets;
-
-	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
-		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
-	}
-
-	// Single source of truth for each plotted metric: name, unit and line style
-	// travel together so the tooltip, both y-axes and the stroke can't drift out
-	// of series order (apexcharts indexes formatters by positional seriesIndex).
-	const metrics: {
+interface CountsLine {
 		name: string;
 		unit: TooltipUnit;
+		// Which legend line it belongs to: 1 is the raw funnel and the TTL it was
+		// written under, 2 the metrics derived from them.
+		row: 1 | 2;
 		curve: 'straight' | 'stepline';
 		// Dashed marks a line that isn't on the Count axis, so a percentage can't
 		// be read against the counts it sits among.
@@ -949,13 +1048,41 @@ function chartConfig(): ApexOptions {
 		// last reading across them. A value that is dense by construction does not,
 		// and carrying one would invent readings it never had.
 		sampled?: boolean;
+		// Set only on a score line, and it names the count that score divides — so
+		// the tooltip's formula comes off the line itself rather than off a compare
+		// against its own rendered name.
+		against?: ScoreAgainst;
 		pick: (b: CacheTimeseriesBucket) => number | null;
-	}[] = [
+}
+
+/**
+ * The counts chart's lines, factored out so the page's own two-line legend and
+ * the chart config read from one list and cannot drift on order, colour, or
+ * which row a line belongs to.
+ */
+function countsLines(): CountsLine[] {
+	return [
+		{
+			// The config value the entries below were written under. Leads the raw
+			// line because it is the setting everything after it is a consequence of.
+			name: t('ttl', 'TTL'),
+			unit: 'seconds',
+			row: 1,
+			curve: 'stepline',
+			dash: 0,
+			color: themeVar('--theme--primary-subdued', '#af9aff'),
+			pick: (b) => {
+				return b.effectiveTtlMs === null
+					? null
+					: Math.round(b.effectiveTtlMs / 1000);
+			},
+		},
 		{
 			// Every request the cache answered, however it answered it — the line the
 			// hit/miss split below adds up to.
 			name: t('cache_responses', 'Responses'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--foreground-subdued', '#a2b5cd'),
@@ -964,6 +1091,7 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('cache_misses', 'Misses'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--warning', '#ffa439'),
@@ -972,6 +1100,7 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('cache_anomalies', 'Anomalies'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--danger', '#e35169'),
@@ -980,6 +1109,7 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('cache_fills', 'Fills'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--secondary', '#3399ff'),
@@ -988,43 +1118,43 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('hits', 'Hits'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--success', '#2ecda7'),
 			pick: (b) => b.hits,
 		},
 		{
-			// Same definition as the summary metric and the tree column: the share of
-			// cache-servable requests that were served from cache.
-			name: t('cache_hit_ratio', 'Hit ratio'),
-			unit: 'percent',
+			// The operations. One purge is one event however many entries it took
+			// with it, which is what makes the coarse line below a share of something.
+			name: t('cache_purges', 'Purges'),
+			unit: 'count',
+			row: 1,
 			curve: 'straight',
-			dash: 6,
-			// The other five theme hues are taken by the count series and TTL; the
-			// accent reads as the headline metric it is, and flips with the theme.
-			color: themeVar('--theme--foreground-accent', '#172940'),
-			pick: (b) => hitRatioPercent(b.hits, b.fills),
-		},
-		{
-			// What the config says, replayed from the ttl_change markers. A step line
-			// because that is what a config value does — it holds, then jumps.
-			name: t('ttl', 'TTL'),
-			unit: 'seconds',
-			curve: 'stepline',
 			dash: 0,
 			color: themeVar('--theme--primary', '#6644ff'),
-			pick: (b) => {
-				return b.effectiveTtlMs === null
-					? null
-					: Math.round(b.effectiveTtlMs / 1000);
-			},
+			pick: (b) => b.purges,
+		},
+		{
+			// What those operations destroyed, plotted apart from their count: one
+			// coarse purge can take forty entries, so on a shared axis the two are
+			// different units and reading either as a slice of the other is exactly
+			// how a page like this lies. Same hue, darker — one family, two figures.
+			name: t('cache_purged_entries', 'Purged entries'),
+			unit: 'count',
+			row: 1,
+			curve: 'straight',
+			dash: 0,
+			color: themeVar('--theme--primary-accent', '#4a2fd6'),
+			pick: (b) => b.purgedEntries,
 		},
 		{
 			// Not the TTL in force: the longest lifetime stamped on an entry actually
 			// served here, as of when it was filled. Entries outlive the config that
-			// created them, so this trails the line above instead of tracking it (#343).
-			name: t('cache_entry_lifetime', 'Entry lifetime'),
+			// created them, so this trails the TTL above instead of tracking it (#343).
+			name: t('cache_entry_lifetime', 'Lifetime'),
 			unit: 'seconds',
+			row: 2,
 			curve: 'stepline',
 			dash: 4,
 			color: themeVar('--theme--secondary', '#ff99dd'),
@@ -1035,7 +1165,59 @@ function chartConfig(): ApexOptions {
 					: Math.round(b.ttlMs / 1000);
 			},
 		},
+		{
+			// `(hits − fills) / (hits + fills)`: the hit share re-centred on zero.
+			// Above the line each fill bought more than one hit, below it the cache
+			// filled more often than it served. Symmetric and bounded, so the losing
+			// half reads at the same scale as the winning one and neither can clip.
+			name: t('cache_hit_score', 'Hit Score'),
+			unit: 'balance',
+			against: 'fills',
+			row: 2,
+			curve: 'straight',
+			dash: 6,
+			color: themeVar('--theme--foreground-accent', '#172940'),
+			pick: (b) => balancePercent(b.hits, b.fills),
+		},
+		{
+			// The same shape against what destroyed the entry rather than what built
+			// it. Below zero the cache threw this traffic away more often than it
+			// served it — the request is paying for a cache that never pays back.
+			name: t('cache_purge_score', 'Purge Score'),
+			unit: 'balance',
+			against: 'purges',
+			row: 2,
+			curve: 'straight',
+			dash: 6,
+			color: themeVar('--theme--primary', '#6644ff'),
+			pick: (b) => balancePercent(b.hits, b.purgedEntries),
+		},
+		{
+			// The purges that reached wider than their mutation did — a collection
+			// fallback or a namespace clear. A genuine subset of the Purges line now
+			// that that one counts operations too, so the pair reads together.
+			name: t('cache_coarse_purges', 'Coarse purges'),
+			unit: 'count',
+			row: 2,
+			curve: 'straight',
+			dash: 0,
+			color: themeVar('--theme--danger-subdued', '#e35169'),
+			pick: (b) => b.coarsePurges,
+		},
 	];
+}
+
+function chartConfig(): ApexOptions {
+	const buckets = timeseries.value.buckets;
+
+	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
+		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
+	}
+
+	// Single source of truth for each plotted metric: name, unit and line style
+	// travel together so the tooltip, both y-axes and the stroke can't drift out
+	// of series order (apexcharts indexes formatters by positional seriesIndex).
+	const metrics = countsLines();
 
 	const countNames = metrics.filter((m) => m.unit === 'count').map((m) => m.name);
 
@@ -1043,8 +1225,8 @@ function chartConfig(): ApexOptions {
 		.filter((m) => m.unit === 'seconds')
 		.map((m) => m.name);
 
-	const percentNames = metrics
-		.filter((m) => m.unit === 'percent')
+	const balanceNames = metrics
+		.filter((m) => m.unit === 'balance')
 		.map((m) => m.name);
 
 	return {
@@ -1066,12 +1248,10 @@ function chartConfig(): ApexOptions {
 			curve: metrics.map((m) => m.curve),
 			dashArray: metrics.map((m) => m.dash),
 		},
-		legend: {
-			show: true,
-			position: 'top',
-			horizontalAlign: 'left',
-			itemMargin: { horizontal: 12, vertical: 0 },
-		},
+		// Apex groups its own legend per y-axis and stacks the groups; the split
+		// wanted here is by meaning, not by axis, so the page renders its own —
+		// the same custom-legend shape the latency chart already uses.
+		legend: { show: false },
 		dataLabels: { enabled: false },
 		series: metrics.map((m) => {
 			const data = series(m.pick);
@@ -1104,15 +1284,16 @@ function chartConfig(): ApexOptions {
 				labels: { formatter: (v: number) => formatDuration(v) },
 			},
 			{
-				// A percentage carries its own scale, so this axis exists only to keep
-				// the ratio off the count scale — nothing is drawn for it. The ceiling
-				// sits above 100 on purpose: a cache at 95-100% would otherwise ride
-				// the plot's top edge and clip its own stroke out of the frame.
+				// The balances carry their own scale, so this axis exists only to keep
+				// them off the count scale — nothing is drawn for it. Pinned to the
+				// form's own bounds so zero sits at a fixed height and the two lines
+				// stay comparable across windows, with a little headroom so a line at
+				// exactly ±1 doesn't clip its own stroke on the frame.
 				opposite: true,
-				seriesName: percentNames,
+				seriesName: balanceNames,
 				show: false,
-				min: 0,
-				max: 115,
+				min: -105,
+				max: 105,
 			},
 		],
 		tooltip: {
@@ -1206,6 +1387,7 @@ function latencyLines(): LatencyLine[] {
 	const anomalyColor = themeVar('--theme--danger', '#e35169');
 	const missColor = themeVar('--theme--warning', '#ffa439');
 	const bothColor = themeVar('--theme--foreground-subdued', '#a2b5cd');
+	const purgeColor = themeVar('--theme--primary', '#6644ff');
 
 	const categories: {
 		id: string;
@@ -1254,6 +1436,19 @@ function latencyLines(): LatencyLine[] {
 			p50: (b) => b.hitP50,
 			p95: (b) => b.hitP95,
 			p99: (b) => b.hitP99,
+		},
+		{
+			// Last, after the read dispositions, because it is the only line here
+			// that is not a READ's compute: a purge is awaited inside the mutation,
+			// so its time is added to the WRITE that triggered it. Per collection or
+			// scope, never per endpoint — which is why it lives on this chart and
+			// not in the tree's per-endpoint columns.
+			id: 'purge',
+			label: t('cache_lat_purge', 'Purges'),
+			color: purgeColor,
+			p50: (b) => b.purgeP50,
+			p95: (b) => b.purgeP95,
+			p99: (b) => b.purgeP99,
 		},
 	];
 
@@ -1524,14 +1719,31 @@ function funnelColumns(node: EndpointGroup | QueryGroup) {
 	});
 }
 
+// Purges sit beside the funnel rather than inside it: every funnel column pairs a
+// count with a latency tail, and a purge has no duration to pair with. The title
+// carries the comparison the number exists to make.
+function purgeTitle(node: EndpointGroup | QueryGroup): string {
+	return [
+		t('cache_tree_sort_purges', 'Purges'),
+		`${t('cache_count', 'Count')}  ${node.totalPurges}`,
+		t(
+			'cache_purges_tip',
+			'Purges that covered these entries. More purges than hits means the '
+			+ 'cache is filling this response more often than it serves it.',
+		),
+	].join('\n');
+}
+
 function secLabel(ms: number): string {
 	return `${Math.round(ms / 1000)}s`;
 }
 
-// Same adapter pattern as ageOf/lastHitOf: the ratio formatter lives in cache-view,
-// this collapses its "no traffic" null to the page's em-dash.
-function ratioOf(hits: number, fills: number): string {
-	return formatHitRatio(hits, fills) ?? '—';
+// Both score columns, on the same balance the tiles and the counts chart show:
+// `(hits − against) / (hits + against)` as a signed percentage. One form across
+// the page, so a row's score can be read against the window's without converting
+// — and so `scoreTitle`, which states that formula, is true wherever it hangs.
+function scoreOf(hits: number, against: number): string {
+	return formatTooltipValue(balancePercent(hits, against), 'balance');
 }
 
 // The data-driven TTL plus its shorten/lengthen verdict against the TTL in force.
@@ -1725,10 +1937,51 @@ onUnmounted(() => {
 						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
 						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 					</div>
-					<div class="metric-separator" />
 					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalPurgedEntries) }}</span>
+						<span class="label">
+							{{ t('cache_purged_entries', 'Purged entries') }}
+						</span>
+					</div>
+					<div class="metric-separator" />
+					<div
+						v-tooltip.bottom="scoreTitle('fills')"
+						class="metric"
+					>
 						<span class="value">{{ totalRatio }}</span>
-						<span class="label">{{ t('cache_hit_ratio', 'Hit ratio') }}</span>
+						<span class="label">{{ t('cache_hit_score', 'Hit Score') }}</span>
+					</div>
+					<div
+						v-tooltip.bottom="scoreTitle('purges')"
+						class="metric"
+					>
+						<span class="value">{{ totalPurgeRatio }}</span>
+						<span class="label">{{ t('cache_purge_score', 'Purge Score') }}</span>
+					</div>
+				</div>
+				<div class="cache-chart-legend cache-counts-legend">
+					<div
+						v-for="row in ([1, 2] as const)"
+						:key="row"
+						class="cache-chart-legend-row"
+					>
+						<span
+							v-for="entry in countsEntries(row)"
+							:key="entry.name"
+							v-tooltip.bottom="entry.title"
+							class="cache-chart-legend-entry"
+							:class="{ 'is-muted': isCountsEntryHidden(entry.name) }"
+							role="button"
+							tabindex="0"
+							@click="toggleCountsEntry(entry.name)"
+							@keydown.enter="toggleCountsEntry(entry.name)"
+						>
+							<span
+								class="cache-chart-legend-dot"
+								:style="{ background: entry.color }"
+							/>
+							{{ entry.name }}
+						</span>
 					</div>
 				</div>
 				<div ref="chartEl" class="chart" />
@@ -1755,7 +2008,7 @@ onUnmounted(() => {
 						</span>
 					</div>
 				</div>
-				<div class="cache-chart-legend">
+				<div class="cache-chart-legend cache-latency-legend">
 					<div
 						v-for="percentile in latencyPercentiles"
 						:key="percentile"
@@ -1939,11 +2192,17 @@ onUnmounted(() => {
 								<span class="duration">{{ column.duration }}</span>
 							</span>
 							<span
-								v-tooltip="
-									t('cache_hit_ratio_tip', 'Hit ratio: hits / (hits + fills)')
-								"
-								class="stat ratio"
-							>{{ ratioOf(group.totalHits, group.totalFills) }}</span>
+								v-tooltip="scoreTitle('fills')"
+								class="stat score hit"
+							>{{ scoreOf(group.totalHits, group.totalFills) }}</span>
+							<span
+								v-tooltip="purgeTitle(group)"
+								class="stat purges"
+							>{{ countLabel(group.totalPurges) }}</span>
+							<span
+								v-tooltip="scoreTitle('purges')"
+								class="stat score purge"
+							>{{ scoreOf(group.totalHits, group.totalPurges) }}</span>
 							<span v-tooltip="`${group.totalSize} bytes`" class="stat size">
 								{{ formatFilesize(group.totalSize) }}
 							</span>
@@ -2000,14 +2259,17 @@ onUnmounted(() => {
 										<span class="duration">{{ column.duration }}</span>
 									</span>
 									<span
-										v-tooltip="
-											t(
-												'cache_hit_ratio_tip',
-												'Hit ratio: hits / (hits + fills)',
-											)
-										"
-										class="stat ratio"
-									>{{ ratioOf(q.totalHits, q.totalFills) }}</span>
+										v-tooltip="scoreTitle('fills')"
+										class="stat score hit"
+									>{{ scoreOf(q.totalHits, q.totalFills) }}</span>
+									<span
+										v-tooltip="purgeTitle(q)"
+										class="stat purges"
+									>{{ countLabel(q.totalPurges) }}</span>
+									<span
+										v-tooltip="scoreTitle('purges')"
+										class="stat score purge"
+									>{{ scoreOf(q.totalHits, q.totalPurges) }}</span>
 									<span v-tooltip="`${q.totalSize} bytes`" class="stat size">
 										{{ formatFilesize(q.totalSize) }}
 									</span>
@@ -2058,7 +2320,7 @@ onUnmounted(() => {
 													:class="{ sorted: sortActive(q, 'ratio') }"
 													@click="toggleEntrySort(q, 'ratio')"
 												>
-													{{ t('cache_hit_ratio', 'Hit ratio') }}
+													{{ t('cache_hit_score', 'Hit score') }}
 													<span class="arrow">{{ sortArrow(q, 'ratio') }}</span>
 												</th>
 												<th
@@ -2114,7 +2376,7 @@ onUnmounted(() => {
 												<td>{{ userOf(entry.user) }}</td>
 												<td class="num">{{ entry.hits }}</td>
 												<td class="num">
-													{{ ratioOf(entry.hits, entry.fills) }}
+													{{ scoreOf(entry.hits, entry.fills) }}
 												</td>
 												<td class="num">{{ ageOf(entry.createdAt) }}</td>
 												<td class="num">
@@ -2287,7 +2549,7 @@ onUnmounted(() => {
 	flex-direction: column;
 }
 
-/* Sets the derived hit ratio apart from the raw outcome counts. */
+/* Sets the derived hit score apart from the raw outcome counts. */
 .metric-separator {
 	align-self: stretch;
 	border-inline-start: var(--theme--border-width) solid var(--theme--border-color-subdued);
@@ -2465,12 +2727,23 @@ onUnmounted(() => {
    and rec chips, which are words with a number in them rather than figures. */
 .endpoint-header .stat.entries,
 .endpoint-header .stat.funnel,
-.endpoint-header .stat.ratio,
+.endpoint-header .stat.score,
 .endpoint-header .stat.size,
 .query-header .stat.entries,
 .query-header .stat.funnel,
-.query-header .stat.ratio,
+.query-header .stat.score,
 .query-header .stat.size {
+	font-weight: 700;
+}
+
+/* Colour is the legend here too: the same hue the chart gives Purged entries —
+   carried by the purge score beside it, since a score takes the colour of what it
+   is measured against. The hit score does the same off `.stat.hit` below. */
+.endpoint-header .stat.purges,
+.endpoint-header .stat.score.purge,
+.query-header .stat.purges,
+.query-header .stat.score.purge {
+	color: var(--theme--primary);
 	font-weight: 700;
 }
 
@@ -2539,9 +2812,17 @@ onUnmounted(() => {
 	color: var(--theme--success);
 }
 
-.endpoint-header .stat.ratio,
-.query-header .stat.ratio {
+/* Wider than the share form it replaced: a balance carries a sign and reaches
+   three digits, so "−100%" has to fit where "83%" used to. */
+.endpoint-header .stat.score,
+.query-header .stat.score {
+	inline-size: 48px;
+}
+
+.endpoint-header .stat.purges,
+.query-header .stat.purges {
 	inline-size: 40px;
+	text-align: end;
 }
 
 .endpoint-header .stat.size,

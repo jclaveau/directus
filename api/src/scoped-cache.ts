@@ -10,6 +10,7 @@ import type {
 } from '@directus/types';
 import type Keyv from 'keyv';
 import { resolvedCacheTtl } from './cache-config.js';
+import { queueCachePurge } from './cache-events.js';
 import emitter from './emitter.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -164,17 +165,19 @@ export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 // Render scope tags for the dev-only `X-Scoped-Cache-*` headers: each tag as its
 // key suffix (no `<namespace>:tag:` prefix) — `collection`, or `collection:field=
 // value` for a pinned slice (same canonical value as the Redis key). Comma-joined.
+export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
+	if (tag.field === undefined) {
+		return tag.collection;
+	}
+
+	return `${tag.collection}:${tag.field}=${
+		canonicalScopedCacheValue(tag.value, tag.type)
+	}`;
+}
+
 export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
 	return tags
-		.map((tag) => {
-			if (tag.field === undefined) {
-				return tag.collection;
-			}
-
-			const value = canonicalScopedCacheValue(tag.value, tag.type);
-
-			return `${tag.collection}:${tag.field}=${value}`;
-		})
+		.map(scopedCacheTagLabel)
 		.join(', ');
 }
 
@@ -250,23 +253,57 @@ export async function countScopedCacheTagMembers(
 /**
  * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
  * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
+ *
+ * Returns how many cache ENTRIES it actually deleted, which is neither how many
+ * keys it deleted nor how many the tag sets named.
+ *
+ * Not the key count, because a tag set holds each entry alongside its
+ * `__expires_at` sibling and any extra sibling (`__tags`), so counting members
+ * would report every entry twice over. A sidecar is recognisable by its base key
+ * being in the set beside it — the `sadd` writes them together — which stays
+ * right as siblings are added.
+ *
+ * Not the membership count either, because nothing ever SREMs: a member that
+ * expired by TTL stays named by the set until the set itself is dropped here. On
+ * the workload this fork exists for — per-user keys, so high cardinality, TTLs
+ * shorter than the gap between mutations — most of a set can be entries that were
+ * already gone, and counting them would inflate every purge figure on the page.
+ * So the store's own answer decides. Only an explicit `false` is evidence the key
+ * was absent; a store that reports nothing leaves the count where it was rather
+ * than silently collapsing it to zero.
  */
-async function purgeScopedCacheTagKeys(cache: Keyv, tagKeys: string[]): Promise<void> {
+async function purgeScopedCacheTagKeys(
+	cache: Keyv,
+	tagKeys: string[],
+): Promise<number> {
 	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty collection
 	// scan) can leave nothing to purge.
 	if (tagKeys.length === 0) {
-		return;
+		return 0;
 	}
 
 	const redis = useRedis();
 	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
 	const members = [...new Set(memberLists.flat())];
 
-	if (members.length > 0) {
-		await Promise.all(members.map((member) => cache.delete(member)));
-	}
+	const wasDeleted = await Promise.all(members.map((member) => {
+		return cache.delete(member);
+	}));
 
 	await redis.del(...tagKeys);
+
+	const present = new Set(members);
+
+	return members.filter((member, index) => {
+		if (wasDeleted[index] === false) {
+			return false;
+		}
+
+		const sidecarSuffix = member.lastIndexOf('__');
+
+		return sidecarSuffix === -1
+			|| present.has(member.slice(0, sidecarSuffix)) === false;
+	}).length;
 }
 
 /**
@@ -322,14 +359,30 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 export async function purgeCollectionScopedCache(
 	cache: Keyv,
 	collection: string,
+	scopedCachePurgeId?: string,
 ): Promise<void> {
 	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
 
 	// Slice keys are `<bareKey>:<field>=<value>`; the `:` delimiter keeps a prefix-sharing
 	// sibling (`articles` vs `articles_archive`) out of the scan.
+	const startedAt = Date.now();
 	const sliceKeys = await scanScopedCacheTagKeys(`${bareKey}:*`);
+	const tagKeys = [bareKey, ...sliceKeys];
+	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
-	await purgeScopedCacheTagKeys(cache, [bareKey, ...sliceKeys]);
+	// The expensive mode, and the one nothing else records: every slice of the
+	// collection went, because which slices actually changed was unresolvable.
+	// No tag list: every slice the scan happened to find is derived rather than
+	// chosen, and unbounded. `collection` plus the mode already state the reach.
+	queueCachePurge({
+		purgeId: scopedCachePurgeId,
+		collection,
+		mode: 'collection',
+		scopedCacheTags: null,
+		scopedCacheTagCount: tagKeys.length,
+		evicted,
+		durationMs: Date.now() - startedAt,
+	});
 }
 
 /**
@@ -350,18 +403,56 @@ export async function purgeScopedCache(
 	collection: string,
 	scopedCacheTags: ScopedCacheTag[] | null = [],
 	context: EventContext | null = null,
-	options: { includeCollectionTag?: boolean } = {},
+	options: {
+		includeCollectionTag?: boolean;
+		// One mutation can need more than one purge operation — the coarse
+		// collection fallback plus the tags a hook declared. Sharing an id across
+		// them is what keeps `COUNT(DISTINCT purge_id)` reporting one purge per
+		// mutation instead of one per operation. Absent, each operation gets its
+		// own id, which is right when it IS its own purge.
+		scopedCachePurgeId?: string;
+	} = {},
 ): Promise<ScopedCacheTag[] | null> {
 	// Returns the purged tags so a caller can surface them (dev-only debug header):
 	// `null` = whole namespace flushed (non-scoped mode); bare `[{ collection }]` =
 	// a collection-wide purge; otherwise the resolved slice tags.
+	const startedAt = Date.now();
+
 	if (!scopedCachePurgeEnabled()) {
 		await cache.clear();
+
+		// Not folded into the `flush` config-event marker, though both mean "the
+		// whole cache went": that marker is a direct, unbuffered INSERT, which is
+		// fine for an operator flushing by hand and ruinous here, where this fires
+		// on every mutation. They stay distinct events on purpose — `flush` is an
+		// operator acting, this is a mutation invalidating everything because
+		// scoped mode is off.
+		//
+		// No tag sets and no member list to count here: the clear takes the whole
+		// namespace, so the row records the reach and leaves the size unknown.
+		// Zero would draw the most destructive event here as one that took nothing.
+		queueCachePurge({
+			purgeId: options.scopedCachePurgeId,
+			collection: null,
+			mode: 'namespace',
+			scopedCacheTags: null,
+			scopedCacheTagCount: 0,
+			evicted: null,
+			durationMs: Date.now() - startedAt,
+		});
+
 		return null;
 	}
 
 	if (scopedCacheTags === null) {
-		await purgeCollectionScopedCache(cache, collection);
+		// Records its own purge — it is the one that knows how many slices the
+		// scan turned up.
+		await purgeCollectionScopedCache(
+			cache,
+			collection,
+			options.scopedCachePurgeId,
+		);
+
 		return [{ collection }];
 	}
 
@@ -374,10 +465,23 @@ export async function purgeScopedCache(
 		context,
 	)) as ScopedCacheTag[];
 
-	await purgeScopedCacheTagKeys(
-		cache,
-		[...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))],
-	);
+	const tagKeys = [...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))];
+	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+
+	// The tags a mutation actually resolved, in the same display form the entry
+	// sidecar stores — so "this entry carries tag X, and tag X was purged at T"
+	// is a join rather than a guess.
+	queueCachePurge({
+		purgeId: options.scopedCachePurgeId,
+		collection,
+		mode: 'slices',
+		scopedCacheTags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
+		scopedCacheTagCount: tagKeys.length,
+		evicted,
+		// Awaited inside the mutation, so this time is ADDED to the write's own
+		// latency — a slow purge slows the request that triggered it.
+		durationMs: Date.now() - startedAt,
+	});
 
 	return resolvedScopedCacheTags;
 }

@@ -7,6 +7,9 @@ import {
 	reapCacheConfigEvents,
 	reapCacheDescriptors,
 	reapCacheEvents,
+	reapScopedCacheEntryTags,
+	reapCachePurges,
+	reapScopedCachePurgeTags,
 	refreshCacheStatsFlag,
 	subscribeCacheStatsToggle,
 } from '../cache-events.js';
@@ -61,6 +64,9 @@ export default async function schedule(): Promise<boolean> {
 				await reapCacheEvents();
 				await reapCacheDescriptors();
 				await reapCacheAnomalies();
+				await reapCachePurges();
+				await reapScopedCachePurgeTags();
+				await reapScopedCacheEntryTags();
 				await reapCacheConfigEvents();
 			}
 			catch (err: any) {

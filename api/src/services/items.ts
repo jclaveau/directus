@@ -26,6 +26,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
+import { randomUUID } from 'node:crypto';
 import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
@@ -258,11 +259,18 @@ implements AbstractService<Item> {
 		// reaches, so purge them too — but with `includeCollectionTag: false`, since the
 		// coarse pass already owns this collection's bare tag (else it's purged twice
 		// and doubled in the debug header).
+		//
+		// The two operations share one purge id for the same reason they share one
+		// header: they are one purge. Telemetry counts by that id, so without it an
+		// entry both reach reports two purges for the one mutation that caused them.
+		const scopedCachePurgeId = randomUUID();
+
 		const coarsePurged = await purgeScopedCache(
 			this.cache,
 			this.collection,
 			null,
 			context,
+			{ scopedCachePurgeId },
 		);
 
 		if (hookTags.length === 0) {
@@ -275,7 +283,7 @@ implements AbstractService<Item> {
 			this.collection,
 			hookTags,
 			context,
-			{ includeCollectionTag: false },
+			{ includeCollectionTag: false, scopedCachePurgeId },
 		);
 
 		// Reflect BOTH purges in the dev debug header (coarse ∪ hook); a `null` from
