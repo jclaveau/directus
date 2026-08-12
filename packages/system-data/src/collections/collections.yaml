@@ -143,3 +143,15 @@ data:
     icon: memory
     note: $t:directus_collection.directus_cache_purges
     accountability: null
+
+  - collection: directus_cache_entry_tags
+    hidden: true
+    icon: memory
+    note: $t:directus_collection.directus_cache_entry_tags
+    accountability: null
+
+  - collection: directus_cache_purge_tags
+    hidden: true
+    icon: memory
+    note: $t:directus_collection.directus_cache_purge_tags
+    accountability: null
