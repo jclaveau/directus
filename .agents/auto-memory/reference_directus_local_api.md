@@ -15,6 +15,11 @@ Port **8155** = the local fork dev api (`api/src/start.ts` via `tsx watch`, bran
 - Boot gotcha: `api/src/extensions/lib/get-shared-deps-mapping.ts:17` unconditionally resolves `@directus/app` → needs `app/dist/index.html` (the real vite build, or a gitignored stub — the full `vite build` is OOM-killed in low-RAM dev, ~3GB free).
 - Stale `tsx watch` zombie watchers (no children) can pile up from crashed boots; clean them by cwd (`/proc/<pid>/cwd` = the fork's `api/`).
 
+**Iterating on the admin page without a rebuild (2026-08-12)** — jean: *"could you run it in dev mode to avoid requiring rebuild / restart for every change?"*. Put Vite in FRONT of whatever api is already running, instead of rebuilding the bundle the api serves:
+- `cd app && API_URL=http://127.0.0.1:8155/ pnpm dev` → **http://localhost:8080/admin/...**, same data, same PG/Redis. `app/vite.config.js` proxies `'^/(?!admin)'` to `API_URL`, so every api call lands on 8155 while `/admin` is served from source with HMR.
+- Works against ANY running api, including the built acceptance flavour — leave that process alone.
+- Only APP changes hot-reload. An api change (`cache-events.ts`, a migration) still needs the 8155 restart.
+
 **Acceptance/built flavour (2026-08-12)** — for Playwright (`tests/acceptance`), which needs the admin served BY the api (`BASE_URL/admin`), not Vite on :8080:
 - **Which DB depends on what you are driving — MEASURED 2026-08-12, not guessed:**
   - **sqlite** (`DB_CLIENT=sqlite3 DB_FILENAME=/tmp/…​.db`) is enough for the API and the counts chart: entries, hits/misses/fills, purge attribution all work.
