@@ -97,8 +97,10 @@ test('the latency chart names the full disposition breakdown', async ({ page }) 
 	const rows = page.locator('.cache-latency-legend .cache-chart-legend-row');
 	await expect(rows).toHaveCount(3);
 
-	// Funnel order, the same order the counts chart and the tree read in.
-	const slices = ['Response', 'Misses', 'Anomalies', 'Fills', 'Hits'];
+	// Funnel order, the same order the counts chart and the tree read in — purges
+	// last, after the read dispositions, being the only slice whose duration is
+	// spent inside a write rather than while serving a read.
+	const slices = ['Response', 'Misses', 'Anomalies', 'Fills', 'Hits', 'Purges'];
 
 	for (const percentile of ['p50', 'p95', 'p99']) {
 		const row = rows.filter({ hasText: percentile });

@@ -3257,4 +3257,269 @@ describe('App Caching Tests', () => {
 			]);
 		}, 60000);
 	});
+
+	describe(oneLine`
+		The timeseries counts purge operations apart from what they evicted, splits
+		out the coarse ones, and times them (Postgres only)
+	`, () => {
+		// Seeded straight into directus_cache_purges so the mode, the eviction count
+		// and the duration are chosen rather than whatever a mutation happened to do.
+		// What is under test here is the SQL: the CASE that isolates the two coarse
+		// modes, a SUM over a column left NULL where the size is unknowable, and
+		// percentile_cont over the durations.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+			const db = databases.get(vendor)!;
+			const isPg = db.client.config.client === 'pg';
+
+			const windowMs = 3_600_000;
+			const buckets = 60;
+			const lastIndex = buckets - 1;
+			const bucketMs = Math.max(1, Math.ceil(windowMs / buckets / 1000)) * 1000;
+
+			const now = Date.now();
+			const edgeTime = new Date(now);
+			// 29.5 min back — inside the wide window, and mid-bucket so no boundary
+			// gets to decide which slot it lands in.
+			const oldTime = new Date(now - 1_770_000);
+			const decoyTime = new Date(now - windowMs - 120_000);
+
+			const seeded: string[] = [];
+
+			const purge = (
+				time: Date,
+				mode: string,
+				evicted: number | null,
+				durationMs: number,
+			) => {
+				const purgeId = randomUUID();
+				seeded.push(purgeId);
+
+				return {
+					time,
+					purge_id: purgeId,
+					// A namespace clear belongs to no collection: it took every one.
+					collection: mode === 'namespace'
+						? null
+						: collectionFirst,
+					mode,
+					tag_count: 2,
+					evicted,
+					duration_ms: durationMs,
+				};
+			};
+
+			// Every other block in this file mutates, and a mutation purges — so the
+			// window is cleared first, these counts being exact.
+			await db('directus_cache_purges')
+				.where('time', '>', new Date(now - windowMs))
+				.delete();
+
+			await db('directus_cache_purges').insert([
+				// Now-edge: three precise purges, plus one collection-wide fallback
+				// that was both the slowest and by far the most destructive.
+				purge(edgeTime, 'slices', 4, 10),
+				purge(edgeTime, 'slices', 6, 30),
+				purge(edgeTime, 'slices', 2, 50),
+				purge(edgeTime, 'collection', 40, 90),
+				// Earlier: a namespace clear — coarse as well, and the one mode whose
+				// eviction count is unknowable.
+				purge(oldTime, 'namespace', null, 5),
+				// Far past: outside the window opened below.
+				purge(decoyTime, 'collection', 999, 999),
+			]);
+
+			const series = await request(url)
+				.get('/utils/cache/timeseries')
+				.query({ window: String(windowMs), buckets: String(buckets) })
+				.set('Authorization', auth);
+
+			expect(series.statusCode).toBe(200);
+
+			const rows = series.body.data.buckets;
+			expect(rows).toHaveLength(buckets);
+
+			const sumOf = (field: string) => {
+				return rows.reduce((total: number, bucket: any) => {
+					return total + bucket[field];
+				}, 0);
+			};
+
+			if (!isPg) {
+				// Non-Postgres never runs the queries: the bucketing and the
+				// percentiles are both ordered-set aggregates. Dense zeros and gaps.
+				expect(sumOf('purges')).toBe(0);
+				expect(sumOf('coarsePurges')).toBe(0);
+				expect(sumOf('purgedEntries')).toBe(0);
+				expect(rows[lastIndex].purgeP50).toBeNull();
+			}
+			else {
+				// The now-edge folds into the LAST slot. Four operations, one of them
+				// coarse, and 52 entries between them — the count and the size being
+				// different questions, both answered.
+				expect(rows[lastIndex].purges).toBe(4);
+				expect(rows[lastIndex].coarsePurges).toBe(1);
+				expect(rows[lastIndex].purgedEntries).toBe(52);
+
+				// p50 of 10/30/50/90 interpolates across the middle pair; p95 and p99
+				// climb toward the coarse purge's own 90ms, which is the point of
+				// plotting them next to the fills they slow down.
+				expect(rows[lastIndex].purgeP50).toBe(40);
+				expect(rows[lastIndex].purgeP95).toBeCloseTo(84, 5);
+				expect(rows[lastIndex].purgeP99).toBeCloseTo(88.8, 5);
+
+				// Read the old row's slot off the grid the API returned rather than
+				// deriving it: the grid is anchored to a bucket boundary.
+				const oldIndex = rows.findIndex((bucket: any) => {
+					return oldTime.getTime() >= bucket.t
+						&& oldTime.getTime() < bucket.t + bucketMs;
+				});
+
+				expect(oldIndex).toBeGreaterThan(0);
+				expect(oldIndex).toBeLessThan(lastIndex);
+
+				// A namespace clear is coarse too, and its size is unknown rather
+				// than none: SUM over that NULL leaves the eviction line untouched,
+				// where a 0 would draw the most destructive event as taking nothing.
+				expect(rows[oldIndex].purges).toBe(1);
+				expect(rows[oldIndex].coarsePurges).toBe(1);
+				expect(rows[oldIndex].purgedEntries).toBe(0);
+				expect(rows[oldIndex].purgeP50).toBe(5);
+
+				// The far-past decoy is outside the window — a broken `time > since`
+				// would clamp its negative bucket into slot 0.
+				expect(rows[0].purges).toBe(0);
+				expect(rows[0].purgeP50).toBeNull();
+
+				expect(sumOf('purges')).toBe(5);
+				expect(sumOf('coarsePurges')).toBe(2);
+				expect(sumOf('purgedEntries')).toBe(52);
+			}
+
+			await db('directus_cache_purges')
+				.whereIn('purge_id', seeded)
+				.delete();
+		}, 60000);
+	});
+
+	describe(oneLine`
+		A collection-wide purge counts against every entry that read the collection,
+		once per purge however many of that entry's tags it covered
+	`, () => {
+		// The coarse half of the attribution, which the tag-level join can never
+		// reach: a `collection` purge names no tag, and a pinned entry carries only
+		// its slice tag. It is joined on the collection instead. Seeded rather than
+		// provoked — driving a real purge into the collection fallback needs a scope
+		// that cannot be resolved, and what is under test is the join.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+			const db = databases.get(vendor)!;
+
+			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// A prior run's rows would otherwise carry a purge count into the
+			// baseline this asserts is zero.
+			await request(url).post('/utils/cache/stats/truncate')
+				.set('Authorization', auth);
+
+			// Fill, then hit: the entry now has a descriptor and its own tag rows.
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			let entry: any;
+
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				entry = (listed.body.data as any[]).find((row: any) => {
+					return row.path === `/items/${collectionFirst}`;
+				});
+
+				if (entry) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			expect(entry).toBeDefined();
+
+			// Nothing has purged it yet — the baseline the assertion below moves off.
+			expect(entry.purges).toBe(0);
+
+			// A second tag of the same collection on the same entry, so the coarse
+			// join has two rows through which to reach one purge.
+			await db('directus_cache_entry_tags').insert({
+				cache_key: entry.key,
+				tag: `${collectionFirst}:decoy=1`,
+				collection: collectionFirst,
+			});
+
+			const covering = randomUUID();
+			const elsewhere = randomUUID();
+			const expired = randomUUID();
+			const now = Date.now();
+
+			await db('directus_cache_purge_tags').insert([
+				// The purge that covered it: one tag-less row naming the collection,
+				// which is all a collection-wide purge knows about its own reach.
+				{
+					purge_id: covering,
+					time: new Date(now),
+					tag: '',
+					collection: collectionFirst,
+				},
+				// Another collection's coarse purge, which must not reach this entry.
+				{
+					purge_id: elsewhere,
+					time: new Date(now),
+					tag: '',
+					collection: collectionIgnored,
+				},
+				// This collection's, but older than the window asked for below.
+				{
+					purge_id: expired,
+					time: new Date(now - 600_000),
+					tag: '',
+					collection: collectionFirst,
+				},
+			]);
+
+			const listed = await request(url).get('/utils/cache')
+				.query({ window: '5m' })
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+
+			const after = (listed.body.data as any[]).find((row: any) => {
+				return row.key === entry.key;
+			});
+
+			// One. Not two for the entry's two matching tag rows — the count is
+			// DISTINCT on the purge, not on what it matched through. Not two for
+			// another collection's purge, and not two for the one that has aged out
+			// of the window.
+			expect(after).toBeDefined();
+			expect(after.purges).toBe(1);
+
+			await db('directus_cache_purge_tags')
+				.whereIn('purge_id', [covering, elsewhere, expired])
+				.delete();
+
+			await db('directus_cache_entry_tags')
+				.where({ cache_key: entry.key, tag: `${collectionFirst}:decoy=1` })
+				.delete();
+		}, 60000);
+	});
 });
