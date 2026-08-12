@@ -31,7 +31,6 @@ import {
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
-	formatHitRatio,
 	formatTooltipValue,
 	type TooltipUnit,
 	balancePercent,
@@ -709,9 +708,26 @@ const totalFills = computed(() => {
 	return timeseries.value.buckets.reduce((sum, b) => sum + b.fills, 0);
 });
 
+const totalPurgedEntries = computed(() => {
+	return timeseries.value.buckets.reduce((sum, b) => sum + b.purgedEntries, 0);
+});
+
+// Both tiles read the SAME form the chart plots — `(hits − other) / (hits + other)`
+// as a signed percentage — so "Hit Ratio" means one thing on the whole page rather
+// than a share here and a balance above.
+const totalPurgeRatio = computed(() => {
+	return formatTooltipValue(
+		balancePercent(totalHits.value, totalPurgedEntries.value),
+		'balance',
+	);
+});
+
 // Share of cache-servable traffic served from cache — hits over hits plus fills.
 const totalRatio = computed(() => {
-	return formatHitRatio(totalHits.value, totalFills.value) ?? '—';
+	return formatTooltipValue(
+		balancePercent(totalHits.value, totalFills.value),
+		'balance',
+	);
 });
 
 // Median of the per-bucket p50s over the window — a single central response-time
@@ -1383,24 +1399,25 @@ function latencyLines(): LatencyLine[] {
 			p99: (b) => b.fillP99,
 		},
 		{
-			// The only line here that is not a READ's compute: a purge is awaited
-			// inside the mutation, so its time is added to the WRITE that triggered
-			// it. Per collection or scope, never per endpoint — which is why it
-			// lives on this chart and not in the tree's per-endpoint columns.
-			id: 'purge',
-			label: t('cache_lat_purge', 'Purges'),
-			color: purgeColor,
-			p50: (b) => b.purgeP50,
-			p95: (b) => b.purgeP95,
-			p99: (b) => b.purgeP99,
-		},
-		{
 			id: 'hit',
 			label: t('cache_lat_hit', 'Hits'),
 			color: hitColor,
 			p50: (b) => b.hitP50,
 			p95: (b) => b.hitP95,
 			p99: (b) => b.hitP99,
+		},
+		{
+			// Last, after the read dispositions, because it is the only line here
+			// that is not a READ's compute: a purge is awaited inside the mutation,
+			// so its time is added to the WRITE that triggered it. Per collection or
+			// scope, never per endpoint — which is why it lives on this chart and
+			// not in the tree's per-endpoint columns.
+			id: 'purge',
+			label: t('cache_lat_purge', 'Purges'),
+			color: purgeColor,
+			p50: (b) => b.purgeP50,
+			p95: (b) => b.purgeP95,
+			p99: (b) => b.purgeP99,
 		},
 	];
 
@@ -1690,10 +1707,12 @@ function secLabel(ms: number): string {
 	return `${Math.round(ms / 1000)}s`;
 }
 
-// Same adapter pattern as ageOf/lastHitOf: the ratio formatter lives in cache-view,
-// this collapses its "no traffic" null to the page's em-dash.
-function ratioOf(hits: number, fills: number): string {
-	return formatHitRatio(hits, fills) ?? '—';
+// Both ratio columns, on the same balance the tiles and the counts chart show:
+// `(hits − against) / (hits + against)` as a signed percentage. One form across
+// the page, so a row's ratio can be read against the window's without converting
+// — and so `ratioTitle`, which states that formula, is true wherever it hangs.
+function ratioOf(hits: number, against: number): string {
+	return formatTooltipValue(balancePercent(hits, against), 'balance');
 }
 
 // The data-driven TTL plus its shorten/lengthen verdict against the TTL in force.
@@ -1887,10 +1906,24 @@ onUnmounted(() => {
 						<span class="value">{{ abbreviateNumber(totalAnomalies) }}</span>
 						<span class="label">{{ t('cache_anomalies', 'Anomalies') }}</span>
 					</div>
-					<div class="metric-separator" />
 					<div class="metric">
+						<span class="value">{{ abbreviateNumber(totalPurgedEntries) }}</span>
+						<span class="label">{{ t('cache_purges', 'Purges') }}</span>
+					</div>
+					<div class="metric-separator" />
+					<div
+						v-tooltip.bottom="ratioTitle(t('cache_hit_ratio', 'Hit Ratio'))"
+						class="metric"
+					>
 						<span class="value">{{ totalRatio }}</span>
-						<span class="label">{{ t('cache_hit_ratio', 'Hit ratio') }}</span>
+						<span class="label">{{ t('cache_hit_ratio', 'Hit Ratio') }}</span>
+					</div>
+					<div
+						v-tooltip.bottom="ratioTitle(t('cache_purge_ratio', 'Purge Ratio'))"
+						class="metric"
+					>
+						<span class="value">{{ totalPurgeRatio }}</span>
+						<span class="label">{{ t('cache_purge_ratio', 'Purge Ratio') }}</span>
 					</div>
 				</div>
 				<div class="cache-chart-legend cache-counts-legend">
@@ -1902,7 +1935,7 @@ onUnmounted(() => {
 						<span
 							v-for="entry in countsEntries(row)"
 							:key="entry.name"
-							v-tooltip="entry.title"
+							v-tooltip.bottom="entry.title"
 							class="cache-chart-legend-entry"
 							:class="{ 'is-muted': isCountsEntryHidden(entry.name) }"
 							role="button"
@@ -2126,15 +2159,17 @@ onUnmounted(() => {
 								<span class="duration">{{ column.duration }}</span>
 							</span>
 							<span
+								v-tooltip="ratioTitle(t('cache_hit_ratio', 'Hit Ratio'))"
+								class="stat ratio hit"
+							>{{ ratioOf(group.totalHits, group.totalFills) }}</span>
+							<span
 								v-tooltip="purgeTitle(group)"
 								class="stat purges"
 							>{{ countLabel(group.totalPurges) }}</span>
 							<span
-								v-tooltip="
-									t('cache_hit_ratio_tip', 'Hit ratio: hits / (hits + fills)')
-								"
-								class="stat ratio"
-							>{{ ratioOf(group.totalHits, group.totalFills) }}</span>
+								v-tooltip="ratioTitle(t('cache_purge_ratio', 'Purge Ratio'))"
+								class="stat ratio purge"
+							>{{ ratioOf(group.totalHits, group.totalPurges) }}</span>
 							<span v-tooltip="`${group.totalSize} bytes`" class="stat size">
 								{{ formatFilesize(group.totalSize) }}
 							</span>
@@ -2191,18 +2226,17 @@ onUnmounted(() => {
 										<span class="duration">{{ column.duration }}</span>
 									</span>
 									<span
+										v-tooltip="ratioTitle(t('cache_hit_ratio', 'Hit Ratio'))"
+										class="stat ratio hit"
+									>{{ ratioOf(q.totalHits, q.totalFills) }}</span>
+									<span
 										v-tooltip="purgeTitle(q)"
 										class="stat purges"
 									>{{ countLabel(q.totalPurges) }}</span>
 									<span
-										v-tooltip="
-											t(
-												'cache_hit_ratio_tip',
-												'Hit ratio: hits / (hits + fills)',
-											)
-										"
-										class="stat ratio"
-									>{{ ratioOf(q.totalHits, q.totalFills) }}</span>
+										v-tooltip="ratioTitle(t('cache_purge_ratio', 'Purge Ratio'))"
+										class="stat ratio purge"
+									>{{ ratioOf(q.totalHits, q.totalPurges) }}</span>
 									<span v-tooltip="`${q.totalSize} bytes`" class="stat size">
 										{{ formatFilesize(q.totalSize) }}
 									</span>
@@ -2669,9 +2703,13 @@ onUnmounted(() => {
 	font-weight: 700;
 }
 
-/* Colour is the legend here too: the same hue the chart gives Purged entries. */
+/* Colour is the legend here too: the same hue the chart gives Purged entries —
+   carried by the purge ratio beside it, since a ratio takes the colour of what it
+   is measured against. The hit ratio does the same off `.stat.hit` below. */
 .endpoint-header .stat.purges,
-.query-header .stat.purges {
+.endpoint-header .stat.ratio.purge,
+.query-header .stat.purges,
+.query-header .stat.ratio.purge {
 	color: var(--theme--primary);
 	font-weight: 700;
 }
@@ -2741,9 +2779,11 @@ onUnmounted(() => {
 	color: var(--theme--success);
 }
 
+/* Wider than the share form it replaced: a balance carries a sign and reaches
+   three digits, so "−100%" has to fit where "83%" used to. */
 .endpoint-header .stat.ratio,
 .query-header .stat.ratio {
-	inline-size: 40px;
+	inline-size: 48px;
 }
 
 .endpoint-header .stat.purges,

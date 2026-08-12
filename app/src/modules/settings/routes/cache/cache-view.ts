@@ -251,16 +251,6 @@ export function formatQuery(query: string): string {
 	return query;
 }
 
-// Share of cache-servable requests served from cache: hits over hits plus fills
-// (a cached miss's compute). Null when nothing was served either way.
-export function formatHitRatio(hits: number, fills: number): string | null {
-	const percent = hitRatioPercent(hits, fills);
-
-	return percent === null
-		? null
-		: `${Math.round(percent)}%`;
-}
-
 export interface EndpointSection {
 	key: string;
 	label: string;

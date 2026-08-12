@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+	balancePercent,
 	buildGroups,
 	carryForward,
 	filterAnomalies,
@@ -9,7 +10,6 @@ import {
 	formatExpiry,
 	formatLastHit,
 	formatQuery,
-	formatHitRatio,
 	formatTooltipValue,
 	formatUser,
 	isSystemPath,
@@ -126,19 +126,6 @@ describe('formatQuery', () => {
 		expect(formatQuery('')).toBe('—');
 		expect(formatQuery('{}')).toBe('—');
 		expect(formatQuery('{"limit":5}')).toBe('{"limit":5}');
-	});
-});
-
-describe('formatHitRatio', () => {
-	it('rounds hits over hits plus fills to a percentage', () => {
-		expect(formatHitRatio(90, 10)).toBe('90%');
-		expect(formatHitRatio(2, 1)).toBe('67%');
-		expect(formatHitRatio(0, 3)).toBe('0%');
-		expect(formatHitRatio(4, 0)).toBe('100%');
-	});
-
-	it('returns null when nothing was served either way', () => {
-		expect(formatHitRatio(0, 0)).toBe(null);
 	});
 });
 
@@ -489,9 +476,41 @@ describe('formatTooltipValue', () => {
 		expect(formatTooltipValue(83.6, 'percent')).toBe('84%');
 	});
 
+	it('signs a balance, so a loss cannot be read as the winning case', () => {
+		expect(formatTooltipValue(83.6, 'balance')).toBe('+84%');
+		expect(formatTooltipValue(-83.6, 'balance')).toBe('-84%');
+
+		// Break-even takes no sign: there is no side to name.
+		expect(formatTooltipValue(0, 'balance')).toBe('0%');
+	});
+
 	it('shows an em dash for a null/undefined value', () => {
 		expect(formatTooltipValue(null, 'count')).toBe('—');
 		expect(formatTooltipValue(undefined, 'seconds')).toBe('—');
+	});
+});
+
+describe('balancePercent', () => {
+	it('centres on zero, so the sign alone says which side is ahead', () => {
+		expect(balancePercent(3, 1)).toBe(50);
+		expect(balancePercent(1, 3)).toBe(-50);
+		expect(balancePercent(2, 2)).toBe(0);
+	});
+
+	it('is symmetric and bounded, where a share squashes the losing half', () => {
+		// Swapping the pair flips the sign and keeps the magnitude...
+		expect(balancePercent(9, 1)).toBe(80);
+		expect(balancePercent(1, 9)).toBe(-80);
+
+		// ...and neither end can run off the axis and clip.
+		expect(balancePercent(5, 0)).toBe(100);
+		expect(balancePercent(0, 5)).toBe(-100);
+	});
+
+	it('reads no traffic as unknown rather than as break-even', () => {
+		// A gap, not a zero: nothing happened, which is not the same as the two
+		// sides having cancelled each other out.
+		expect(balancePercent(0, 0)).toBeNull();
 	});
 });
 

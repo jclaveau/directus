@@ -165,21 +165,38 @@ const VSelect = {
 	template: '<div class="v-select-stub" />',
 };
 
+interface TooltipBinding {
+	value: unknown;
+	modifiers: Record<string, boolean>;
+}
+
+function recordTooltip(el: HTMLElement, binding: TooltipBinding): void {
+	el.setAttribute('data-tooltip', String(binding.value));
+
+	// `top` is the directive's default, so an unmodified binding reports it.
+	const placement = ['top', 'right', 'bottom', 'left']
+		.find((side) => binding.modifiers[side] === true);
+
+	el.setAttribute('data-tooltip-placement', placement ?? 'top');
+}
+
 // Hyphenated Directus components (private-view, v-*, …) aren't registered here;
 // treat them as custom elements so Vue renders their default slot — the
 // `.cache-page` body and its table — without stubbing each one. search-input is
 // the exception: it's a real stub so a test can drive its filter/search models.
 const global = {
 	plugins: [i18n],
-	// Record the bound value so a test can assert the tooltip text (the real directive
-	// renders it out-of-tree, invisible to wrapper.text()).
+	// Record the bound value so a test can assert the tooltip text (the real
+	// directive renders it out-of-tree, invisible to wrapper.text()). The modifiers
+	// come with it: the directive places the tooltip where it is told and never
+	// flips off a viewport edge, so the side asked for is behaviour, not decoration.
 	directives: {
 		tooltip: {
-			mounted(el: HTMLElement, binding: { value: unknown }) {
-				el.setAttribute('data-tooltip', String(binding.value));
+			mounted(el: HTMLElement, binding: TooltipBinding) {
+				recordTooltip(el, binding);
 			},
-			updated(el: HTMLElement, binding: { value: unknown }) {
-				el.setAttribute('data-tooltip', String(binding.value));
+			updated(el: HTMLElement, binding: TooltipBinding) {
+				recordTooltip(el, binding);
 			},
 		},
 	},
@@ -332,6 +349,81 @@ describe('CachePage', () => {
 		expect(missTitle).toContain('p50  110 ms');
 		expect(missTitle).toContain('p95  240 ms');
 		expect(missTitle).toContain('p99  900 ms');
+	});
+
+	// Each ratio sits against the count it is measured from, in that count's
+	// colour: the hit ratio right after Hits, the purge ratio right after Purges.
+	it('pairs each ratio column with the count it is measured against', async () => {
+		mockCacheGet([{
+			...ENTRIES[0]!,
+			hits: 7,
+			fills: 3,
+			// Deliberately asymmetric, and enough to push the purge balance below
+			// zero: one column reading the other's pair would show +40% twice.
+			purges: 21,
+		}]);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const header = wrapper.find('.endpoint-header');
+
+		// Order is the contract — the row is figures alone, so a column that moves
+		// is a column that has silently changed meaning.
+		const stats = header.findAll('.stat.funnel.hit, .stat.ratio, .stat.purges');
+
+		// A funnel column pairs its count with a median, so read its count cell —
+		// asserting the whole text would tie this to whether a median was known.
+		const shown = stats.map((stat) => {
+			return stat.find('.count').exists()
+				? stat.find('.count').text()
+				: stat.text();
+		});
+
+		expect(shown).toEqual([
+			'7', // Hits, the funnel column both ratios are measured from
+			'+40%', // (7 − 3) / (7 + 3)
+			'21', // Purges
+			'-50%', // (7 − 21) / (7 + 21)
+		]);
+
+		// Colour is the legend: each ratio takes the hue of its own pair, so the
+		// two are told apart without reading their titles.
+		expect(stats[1]!.classes()).toContain('hit');
+		expect(stats[3]!.classes()).toContain('purge');
+
+		// The title states the formula, and states a DIFFERENT one per column.
+		expect(stats[1]!.attributes('data-tooltip'))
+			.toContain('Hit Ratio = (Hits − Fills) / (Hits + Fills)');
+
+		expect(stats[3]!.attributes('data-tooltip'))
+			.toContain('Purge Ratio = (Hits − Purges) / (Hits + Purges)');
+	});
+
+	// The directive places the tooltip where it is told and has no collision
+	// handling — no flip, no viewport clamp (app/src/directives/tooltip.ts). So the
+	// tall ratio/legend titles opened UPWARDS off the top of the page from the two
+	// blocks that sit at the very top. A real fix (flip/shift in the directive) is
+	// tracked at https://github.com/jclaveau/directus/issues/354.
+	it('opens the top-of-page tooltips downwards, the tree rows upwards', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const placementOf = (selector: string) => {
+			return wrapper.find(selector).attributes('data-tooltip-placement');
+		};
+
+		// Nothing above these two to open into.
+		expect(placementOf('.summary .metric[data-tooltip]')).toBe('bottom');
+
+		expect(placementOf('.cache-counts-legend .cache-chart-legend-entry'))
+			.toBe('bottom');
+
+		// The tree is mid-page, and its last row has nothing below it — these keep
+		// the default, so the fix is scoped rather than applied page-wide.
+		expect(placementOf('.endpoint-header .stat.ratio')).toBe('top');
 	});
 
 	it('keeps a column for a metric with no traffic', async () => {
@@ -1502,6 +1594,69 @@ describe('CachePage', () => {
 		expect(chartMock.hidden).toContain('Hits p95');
 		expect(chartMock.hidden).toContain('Misses p95');
 		expect(chartMock.hidden).not.toContain('Hits p50');
+	});
+
+	// The tooltip reads by position here too, and the legend is the read order the
+	// page teaches: the read dispositions first, then the purge — the one duration
+	// that is charged to a WRITE rather than to a read.
+	it('puts the purge durations last, after the read dispositions', async () => {
+		mockCacheGet(ENTRIES, {
+			timeseries: {
+				buckets: [{
+					t: 1000,
+					hits: 5,
+					misses: 2,
+					anomalies: 0,
+					ttlMs: null,
+					hitP50: 2,
+					hitP95: 5,
+					fillP50: 20,
+					fillP95: 60,
+					anomalyP50: 80,
+					anomalyP95: 200,
+					missP50: 40,
+					missP95: 120,
+					bothP50: 3,
+					bothP95: 100,
+					// Present, so the purge lines survive the all-null filter — the
+					// previous test's fixture omits them, which is why it sees five
+					// categories and cannot say where a sixth would land.
+					purgeP50: 7,
+					purgeP95: 30,
+				}],
+				markers: [],
+			},
+		});
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const config = chartConfigWithSeries('Response p50');
+
+		expect(config.series.map((s: { name: string }) => s.name)).toEqual([
+			'Response p50',
+			'Response p95',
+			'Misses p50',
+			'Misses p95',
+			'Anomalies p50',
+			'Anomalies p95',
+			'Fills p50',
+			'Fills p95',
+			'Hits p50',
+			'Hits p95',
+			'Purges p50',
+			'Purges p95',
+		]);
+
+		// Its own values, not Hits' — a swap that kept the names in place would
+		// still be caught.
+		const html = config.tooltip.custom({ dataPointIndex: 0 });
+
+		expect(html).toContain('Purges p50: 7ms');
+		expect(html).toContain('Hits p50: 2ms');
+
+		wrapper.unmount();
+		localStorage.removeItem('cache-latency-hidden-anon');
 	});
 
 	it('drops empty series, zero-fills gaps, marks only real samples', async () => {
