@@ -391,6 +391,13 @@ export async function purgeScopedCache(
 	if (!scopedCachePurgeEnabled()) {
 		await cache.clear();
 
+		// Not folded into the `flush` config-event marker, though both mean "the
+		// whole cache went": that marker is a direct, unbuffered INSERT, which is
+		// fine for an operator flushing by hand and ruinous here, where this fires
+		// on every mutation. They stay distinct events on purpose — `flush` is an
+		// operator acting, this is a mutation invalidating everything because
+		// scoped mode is off.
+		//
 		// No tag sets and no member list to count here: the clear takes the whole
 		// namespace, so the row records the reach and leaves the size unknown.
 		// Zero would draw the most destructive event here as one that took nothing.

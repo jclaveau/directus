@@ -34,8 +34,8 @@ import {
 	formatHitRatio,
 	formatTooltipValue,
 	type TooltipUnit,
+	countBalance,
 	formatUser,
-	hitRatioPercent,
 	shortKey,
 	sortEntries,
 	sortGroups,
@@ -792,6 +792,41 @@ const latencyPercentiles = computed(() => {
 	return seen;
 });
 
+// The counts chart renders its own legend on two lines: the raw funnel plus the
+// TTL it was written under, then the metrics derived from them. Apex groups by
+// y-axis instead, which splits TTL from the counts it explains and puts the two
+// balances beside it — a grouping by mechanism rather than by meaning.
+function countsEntries(row: 1 | 2): { name: string; color: string }[] {
+	return countsLines()
+		.filter((line) => line.row === row)
+		.map((line) => ({ name: line.name, color: line.color }));
+}
+
+function isCountsEntryHidden(name: string): boolean {
+	return countsHiddenSeries.value.includes(name);
+}
+
+function toggleCountsEntry(name: string) {
+	toggleHiddenSeries(countsHiddenSeries, name);
+
+	if (!chart) {
+		return;
+	}
+
+	try {
+		if (isCountsEntryHidden(name)) {
+			chart.hideSeries(name);
+		}
+		else {
+			chart.showSeries(name);
+		}
+	}
+	catch {
+		// A series with no samples in the window isn't rendered; apex then derefs
+		// a null node. Nothing to toggle — skip it.
+	}
+}
+
 // The per-category legend entries of one percentile row ("Hits", "Fills", ...).
 function latencyEntries(
 	percentile: string,
@@ -928,19 +963,12 @@ function themeVar(name: string, fallback: string): string {
 	return value || fallback;
 }
 
-function chartConfig(): ApexOptions {
-	const buckets = timeseries.value.buckets;
-
-	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
-		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
-	}
-
-	// Single source of truth for each plotted metric: name, unit and line style
-	// travel together so the tooltip, both y-axes and the stroke can't drift out
-	// of series order (apexcharts indexes formatters by positional seriesIndex).
-	const metrics: {
+interface CountsLine {
 		name: string;
 		unit: TooltipUnit;
+		// Which legend line it belongs to: 1 is the raw funnel and the TTL it was
+		// written under, 2 the metrics derived from them.
+		row: 1 | 2;
 		curve: 'straight' | 'stepline';
 		// Dashed marks a line that isn't on the Count axis, so a percentage can't
 		// be read against the counts it sits among.
@@ -951,12 +979,36 @@ function chartConfig(): ApexOptions {
 		// and carrying one would invent readings it never had.
 		sampled?: boolean;
 		pick: (b: CacheTimeseriesBucket) => number | null;
-	}[] = [
+}
+
+/**
+ * The counts chart's lines, factored out so the page's own two-line legend and
+ * the chart config read from one list and cannot drift on order, colour, or
+ * which row a line belongs to.
+ */
+function countsLines(): CountsLine[] {
+	return [
+		{
+			// The config value the entries below were written under. Leads the raw
+			// line because it is the setting everything after it is a consequence of.
+			name: t('ttl', 'TTL'),
+			unit: 'seconds',
+			row: 1,
+			curve: 'stepline',
+			dash: 0,
+			color: themeVar('--theme--primary-subdued', '#af9aff'),
+			pick: (b) => {
+				return b.effectiveTtlMs === null
+					? null
+					: Math.round(b.effectiveTtlMs / 1000);
+			},
+		},
 		{
 			// Every request the cache answered, however it answered it — the line the
 			// hit/miss split below adds up to.
 			name: t('cache_responses', 'Responses'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--foreground-subdued', '#a2b5cd'),
@@ -965,6 +1017,7 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('cache_misses', 'Misses'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--warning', '#ffa439'),
@@ -973,6 +1026,7 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('cache_anomalies', 'Anomalies'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--danger', '#e35169'),
@@ -981,6 +1035,7 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('cache_fills', 'Fills'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--secondary', '#3399ff'),
@@ -989,67 +1044,30 @@ function chartConfig(): ApexOptions {
 		{
 			name: t('hits', 'Hits'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--success', '#2ecda7'),
 			pick: (b) => b.hits,
 		},
 		{
-			// Entries a purge deleted, rather than the number of purges: a hit ratio
-			// feels how much went, not how many operations went. Sits next to Hits
-			// because the two answer one question from opposite ends — what the cache
-			// served, and what was taken out from under it.
-			name: t('cache_purged_entries', 'Purged entries'),
+			// Entries a purge deleted, not the purges themselves: a hit ratio feels
+			// how much went, not how many operations went it.
+			name: t('cache_purges', 'Purges'),
 			unit: 'count',
+			row: 1,
 			curve: 'straight',
 			dash: 0,
 			color: themeVar('--theme--primary', '#6644ff'),
 			pick: (b) => b.purgedEntries,
 		},
 		{
-			// The purges that reached wider than their mutation did — a collection
-			// fallback or a namespace clear. Solid, not dashed: on this chart a dash
-			// means the line does not share the Count axis, and this one does. Its
-			// kinship with the line above is carried by the colour instead.
-			name: t('cache_coarse_purges', 'Coarse purges'),
-			unit: 'count',
-			curve: 'straight',
-			dash: 0,
-			color: themeVar('--theme--primary-subdued', '#af9aff'),
-			pick: (b) => b.coarsePurges,
-		},
-		{
-			// Same definition as the summary metric and the tree column: the share of
-			// cache-servable requests that were served from cache.
-			name: t('cache_hit_ratio', 'Hit ratio'),
-			unit: 'percent',
-			curve: 'straight',
-			dash: 6,
-			// The other five theme hues are taken by the count series and TTL; the
-			// accent reads as the headline metric it is, and flips with the theme.
-			color: themeVar('--theme--foreground-accent', '#172940'),
-			pick: (b) => hitRatioPercent(b.hits, b.fills),
-		},
-		{
-			// What the config says, replayed from the ttl_change markers. A step line
-			// because that is what a config value does — it holds, then jumps.
-			name: t('ttl', 'TTL'),
-			unit: 'seconds',
-			curve: 'stepline',
-			dash: 0,
-			color: themeVar('--theme--primary', '#6644ff'),
-			pick: (b) => {
-				return b.effectiveTtlMs === null
-					? null
-					: Math.round(b.effectiveTtlMs / 1000);
-			},
-		},
-		{
 			// Not the TTL in force: the longest lifetime stamped on an entry actually
 			// served here, as of when it was filled. Entries outlive the config that
-			// created them, so this trails the line above instead of tracking it (#343).
-			name: t('cache_entry_lifetime', 'Entry lifetime'),
+			// created them, so this trails the TTL above instead of tracking it (#343).
+			name: t('cache_entry_lifetime', 'Lifetime'),
 			unit: 'seconds',
+			row: 2,
 			curve: 'stepline',
 			dash: 4,
 			color: themeVar('--theme--secondary', '#ff99dd'),
@@ -1060,7 +1078,57 @@ function chartConfig(): ApexOptions {
 					: Math.round(b.ttlMs / 1000);
 			},
 		},
+		{
+			// `(hits − fills) / (hits + fills)`: the hit share re-centred on zero.
+			// Above the line each fill bought more than one hit, below it the cache
+			// filled more often than it served. Symmetric and bounded, so the losing
+			// half reads at the same scale as the winning one and neither can clip.
+			name: t('cache_hits_per_fills', 'Hits per Fills'),
+			unit: 'balance',
+			row: 2,
+			curve: 'straight',
+			dash: 6,
+			color: themeVar('--theme--foreground-accent', '#172940'),
+			pick: (b) => countBalance(b.hits, b.fills),
+		},
+		{
+			// The same shape against what destroyed the entry rather than what built
+			// it. Below zero the cache threw this traffic away more often than it
+			// served it — the request is paying for a cache that never pays back.
+			name: t('cache_hits_per_purges', 'Hits per Purges'),
+			unit: 'balance',
+			row: 2,
+			curve: 'straight',
+			dash: 6,
+			color: themeVar('--theme--primary', '#6644ff'),
+			pick: (b) => countBalance(b.hits, b.purgedEntries),
+		},
+		{
+			// The purges that reached wider than their mutation did — a collection
+			// fallback or a namespace clear. A count, kept on the insight row because
+			// it qualifies the purge line rather than adding to the funnel.
+			name: t('cache_coarse_purges', 'Coarse purges'),
+			unit: 'count',
+			row: 2,
+			curve: 'straight',
+			dash: 0,
+			color: themeVar('--theme--danger-subdued', '#e35169'),
+			pick: (b) => b.coarsePurges,
+		},
 	];
+}
+
+function chartConfig(): ApexOptions {
+	const buckets = timeseries.value.buckets;
+
+	function series(pick: (b: CacheTimeseriesBucket) => number | null) {
+		return buckets.map((b): [number, number | null] => [b.t, pick(b)]);
+	}
+
+	// Single source of truth for each plotted metric: name, unit and line style
+	// travel together so the tooltip, both y-axes and the stroke can't drift out
+	// of series order (apexcharts indexes formatters by positional seriesIndex).
+	const metrics = countsLines();
 
 	const countNames = metrics.filter((m) => m.unit === 'count').map((m) => m.name);
 
@@ -1068,8 +1136,8 @@ function chartConfig(): ApexOptions {
 		.filter((m) => m.unit === 'seconds')
 		.map((m) => m.name);
 
-	const percentNames = metrics
-		.filter((m) => m.unit === 'percent')
+	const balanceNames = metrics
+		.filter((m) => m.unit === 'balance')
 		.map((m) => m.name);
 
 	return {
@@ -1091,12 +1159,10 @@ function chartConfig(): ApexOptions {
 			curve: metrics.map((m) => m.curve),
 			dashArray: metrics.map((m) => m.dash),
 		},
-		legend: {
-			show: true,
-			position: 'top',
-			horizontalAlign: 'left',
-			itemMargin: { horizontal: 12, vertical: 0 },
-		},
+		// Apex groups its own legend per y-axis and stacks the groups; the split
+		// wanted here is by meaning, not by axis, so the page renders its own —
+		// the same custom-legend shape the latency chart already uses.
+		legend: { show: false },
 		dataLabels: { enabled: false },
 		series: metrics.map((m) => {
 			const data = series(m.pick);
@@ -1129,15 +1195,16 @@ function chartConfig(): ApexOptions {
 				labels: { formatter: (v: number) => formatDuration(v) },
 			},
 			{
-				// A percentage carries its own scale, so this axis exists only to keep
-				// the ratio off the count scale — nothing is drawn for it. The ceiling
-				// sits above 100 on purpose: a cache at 95-100% would otherwise ride
-				// the plot's top edge and clip its own stroke out of the frame.
+				// The balances carry their own scale, so this axis exists only to keep
+				// them off the count scale — nothing is drawn for it. Pinned to the
+				// form's own bounds so zero sits at a fixed height and the two lines
+				// stay comparable across windows, with a little headroom so a line at
+				// exactly ±1 doesn't clip its own stroke on the frame.
 				opposite: true,
-				seriesName: percentNames,
+				seriesName: balanceNames,
 				show: false,
-				min: 0,
-				max: 115,
+				min: -1.05,
+				max: 1.05,
 			},
 		],
 		tooltip: {
@@ -1769,6 +1836,30 @@ onUnmounted(() => {
 					<div class="metric">
 						<span class="value">{{ totalRatio }}</span>
 						<span class="label">{{ t('cache_hit_ratio', 'Hit ratio') }}</span>
+					</div>
+				</div>
+				<div class="cache-chart-legend">
+					<div
+						v-for="row in ([1, 2] as const)"
+						:key="row"
+						class="cache-chart-legend-row"
+					>
+						<span
+							v-for="entry in countsEntries(row)"
+							:key="entry.name"
+							class="cache-chart-legend-entry"
+							:class="{ 'is-muted': isCountsEntryHidden(entry.name) }"
+							role="button"
+							tabindex="0"
+							@click="toggleCountsEntry(entry.name)"
+							@keydown.enter="toggleCountsEntry(entry.name)"
+						>
+							<span
+								class="cache-chart-legend-dot"
+								:style="{ background: entry.color }"
+							/>
+							{{ entry.name }}
+						</span>
 					</div>
 				</div>
 				<div ref="chartEl" class="chart" />

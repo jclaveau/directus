@@ -415,6 +415,29 @@ function sumPurges(entries: CacheEntry[]): number {
 	return entries.reduce((sum, entry) => sum + entry.purges, 0);
 }
 
+/**
+ * The normalised balance between two counts: `(a − b) / (a + b)`.
+ *
+ * Algebraically this is the share `a / (a + b)` re-centred on zero and rescaled
+ * to [−1, +1], which buys three things a share does not. Zero is break-even, so
+ * the sign alone says whether the cache is earning its keep and a zero line can
+ * be drawn. It is symmetric — swapping the two flips the sign and keeps the
+ * magnitude, where a plain `a / b` squashes the whole losing half into (0, 1).
+ * And it is bounded, so the axis cannot clip the very cases worth seeing.
+ *
+ * Null when both are zero: no traffic is not break-even, and must plot as a gap
+ * rather than as a 0 the eye reads as a measurement.
+ */
+export function countBalance(a: number, b: number): number | null {
+	const total = a + b;
+
+	if (total === 0) {
+		return null;
+	}
+
+	return (a - b) / total;
+}
+
 // Hit ratio in percent: hits' share of (hits + fills). Null when there was no
 // traffic at all — the tree renders that as an em-dash, not a meaningless 0%.
 export function hitRatioPercent(hits: number, fills: number): number | null {
@@ -785,7 +808,7 @@ export type TimeseriesPoint = [number, number | null];
 
 // A chart value formatted by its metric's unit: a count as a plain integer, a
 // seconds value as a human duration; null/undefined as an em dash.
-export type TooltipUnit = 'count' | 'seconds' | 'percent';
+export type TooltipUnit = 'count' | 'seconds' | 'percent' | 'balance';
 
 export function formatTooltipValue(
 	raw: number | null | undefined,
@@ -797,6 +820,16 @@ export function formatTooltipValue(
 
 	if (unit === 'seconds') {
 		return formatDuration(raw);
+	}
+
+	if (unit === 'balance') {
+		// Signed and to two places: the sign is the verdict, and rounding to whole
+		// numbers would collapse the whole [-1, 1] range onto three values.
+		const sign = raw > 0
+			? '+'
+			: '';
+
+		return `${sign}${raw.toFixed(2)}`;
 	}
 
 	return unit === 'percent'

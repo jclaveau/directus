@@ -1305,7 +1305,8 @@ describe('CachePage', () => {
 					purges: 3,
 					coarsePurges: 1,
 					purgedEntries: 9,
-					ttlMs: 3600000,
+					ttlMs: 60000,
+					effectiveTtlMs: 3600000,
 				}],
 				markers: [],
 			},
@@ -1314,66 +1315,77 @@ describe('CachePage', () => {
 		mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Responses');
+		const config = chartConfigWithSeries('TTL');
 		expect(config).toBeTruthy();
 
-		// Responses is the hit + miss total, the hit ratio hits/(hits + fills).
-		expect(config.series[0].data).toEqual([[1000, 7]]);
+		// TTL leads: the config value the lines after it are a consequence of.
+		expect(config.series[0].data).toEqual([[1000, 3600]]);
+		expect(config.series[1].data).toEqual([[1000, 7]]);
 
-		// The tooltip below reads its values by position, so the order is the
-		// contract — pinned whole rather than by one index, which is what let two
-		// series be inserted after Hits without this test saying where they went.
+		// The tooltip reads its values by position, so the order is the contract —
+		// pinned whole rather than by one index, which is what let two series be
+		// inserted after Hits without this test saying where they went. Row 1 is
+		// the raw funnel plus its TTL; row 2 the metrics derived from them.
 		expect(config.series.map((series: { name: string }) => series.name)).toEqual([
+			'TTL',
 			'Responses',
 			'Misses',
 			'Anomalies',
 			'Fills',
 			'Hits',
-			'Purged entries',
+			'Purges',
+			'Lifetime',
+			'Hits per Fills',
+			'Hits per Purges',
 			'Coarse purges',
-			'Hit ratio',
-			'TTL',
-			'Entry lifetime',
 		]);
 
-		expect(config.series[7].data[0]![1]).toBeCloseTo(83.33);
+		// (hits − fills) / (hits + fills) = (5 − 1) / 6.
+		expect(config.series[8].data[0]![1]).toBeCloseTo(0.667);
+
+		// (hits − purges) / (hits + purges) = (5 − 9) / 14: below zero, this
+		// request was thrown away more often than it was served.
+		expect(config.series[9].data[0]![1]).toBeCloseTo(-0.286);
 
 		// Tooltip: one tight "name: value" row per metric, each in its own unit.
-		// Positional, in the funnel order the series are declared in.
+		// Positional, in the order the series are declared in.
 		const html = config.tooltip.custom({
-			series: [[7], [2], [0], [1], [5], [9], [1], [83.33], [3600]],
+			series: [[3600], [7], [2], [0], [1], [5], [9], [60], [0.667], [-0.286], [1]],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
 
+		expect(html).toContain('TTL: 1h');
 		expect(html).toContain('Responses: 7');
 		expect(html).toContain('Misses: 2');
 		expect(html).toContain('Anomalies: 0');
 		expect(html).toContain('Fills: 1');
 		expect(html).toContain('Hits: 5');
-		// What a purge took, and how much of it reached wider than its mutation.
-		expect(html).toContain('Purged entries: 9');
+		expect(html).toContain('Purges: 9');
+		expect(html).toContain('Lifetime: 1m');
+		// Signed and to two places: the sign is the verdict, and whole numbers
+		// would collapse the whole [-1, 1] range onto three values.
+		expect(html).toContain('Hits per Fills: +0.67');
+		expect(html).toContain('Hits per Purges: -0.29');
 		expect(html).toContain('Coarse purges: 1');
-		expect(html).toContain('Hit ratio: 83%');
-		expect(html).toContain('TTL: 1h');
 		expect(html).toContain('cache-tt-row');
 
-		// Dashes mark the lines that don't share the Count axis: the ratio, and the
-		// entry lifetime — dashed apart from the TTL it sits beside so the config and
-		// the lifetimes of the entries it produced can't be read as one line. Both
-		// purge series are counts, so both stay solid; a dash there would claim a
-		// second axis they do not use.
-		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 0, 0, 6, 0, 4]);
+		// Dashes mark the lines that don't share the Count axis: the two balances,
+		// and the lifetime — dashed apart from the TTL it trails so the config and
+		// the lifetimes of the entries it produced can't be read as one line.
+		expect(config.stroke.dashArray).toEqual([0, 0, 0, 0, 0, 0, 0, 4, 6, 6, 0]);
 
-		// Count axis stays integer; TTL axis reads as a duration; the ratio gets a
-		// pinned 0-100 axis with nothing drawn, since a percent carries its scale.
+		// Count axis stays integer; TTL axis reads as a duration; the balances get
+		// their own hidden axis, pinned to the form's bounds so zero sits at a
+		// fixed height and the two lines stay comparable across windows.
 		expect(config.yaxis[0].labels.formatter(5.4)).toBe('5');
 		expect(config.yaxis[1].labels.formatter(3600)).toBe('1h');
 		expect(config.yaxis[2].show).toBe(false);
-		expect(config.yaxis[2].min).toBe(0);
-		// Above 100 so a near-perfect ratio keeps clear of the plot's top edge.
-		expect(config.yaxis[2].max).toBeGreaterThan(100);
-		expect(config.yaxis[2].seriesName).toEqual(['Hit ratio']);
+		expect(config.yaxis[2].min).toBeLessThan(-1);
+		expect(config.yaxis[2].max).toBeGreaterThan(1);
+
+		expect(config.yaxis[2].seriesName)
+			.toEqual(['Hits per Fills', 'Hits per Purges']);
 	});
 
 	it('splits the TTL in force from the lifetimes entries carry', async () => {
@@ -1398,12 +1410,12 @@ describe('CachePage', () => {
 		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Responses');
+		const config = chartConfigWithSeries('TTL');
 
 		const ttl = config.series.find((s: { name: string }) => s.name === 'TTL');
 
 		const lifetime = config.series
-			.find((s: { name: string }) => s.name === 'Entry lifetime');
+			.find((s: { name: string }) => s.name === 'Lifetime');
 
 		// The config's own history, in seconds. The leading unknown stays unknown — it
 		// is not back-filled with the 1h that had not been set yet.
@@ -1589,19 +1601,23 @@ describe('CachePage', () => {
 			},
 		});
 
-		mount(CachePage, { global });
+		const wrapper = mount(CachePage, { global });
 		await flushPromises();
 
-		const config = chartConfigWithSeries('Responses');
+		// Apex's own legend is off — the page renders its own two rows — so the
+		// toggle is a click on that, not a legendClick callback.
+		const misses = wrapper.findAll('.cache-chart-legend-entry')
+			.find((entry) => entry.text().trim() === 'Misses')!;
 
-		// Index 1 = Misses; toggling records then clears it via localStorage.
-		config.chart.events.legendClick(null, 1);
+		expect(misses).toBeDefined();
+
+		await misses.trigger('click');
 		await flushPromises();
 
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
 			.toContain('Misses');
 
-		config.chart.events.legendClick(null, 1);
+		await misses.trigger('click');
 		await flushPromises();
 
 		expect(JSON.parse(localStorage.getItem('cache-counts-hidden-anon') ?? '[]'))
