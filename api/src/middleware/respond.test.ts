@@ -2,14 +2,19 @@ import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-const env: Record<string, any> = {
-	CACHE_ENABLED: true,
-	CACHE_VALUE_MAX_SIZE: false,
-	CACHE_TTL: '5m',
-	CACHE_STATUS_HEADER: 'x-cache-status',
-	CACHE_AUTO_PURGE: false,
-	CACHE_NAMESPACE: 'test',
-};
+// Hoisted, because `scoped-cache.js` is now imported for real (see its mock
+// below) and reads `useEnv()` at module scope — which runs while the mock
+// factories do, before a plain `const` here would be initialised.
+const env: Record<string, any> = vi.hoisted(() => {
+	return {
+		CACHE_ENABLED: true,
+		CACHE_VALUE_MAX_SIZE: false,
+		CACHE_TTL: '5m',
+		CACHE_STATUS_HEADER: 'x-cache-status',
+		CACHE_AUTO_PURGE: false,
+		CACHE_NAMESPACE: 'test',
+	};
+});
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
@@ -40,18 +45,18 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', () => {
+vi.mock('../scoped-cache.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../scoped-cache.js')>();
+
 	return {
 		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
 		serializeScopedCacheTags: mocks.serializeScopedCacheTags,
-		// The descriptor carries the entry's tags in this same display form, so a
-		// later purge of any of them is attributable back to this request.
-		scopedCacheTagLabel: (tag: any) => {
-			return tag.field === undefined
-				? tag.collection
-				: `${tag.collection}:${tag.field}=${tag.value}`;
-		},
+		// The real one, not a stand-in. The descriptor assertion reads the tag
+		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
+		// would render a boolean slice `=1` where production writes `=true`, so
+		// the test would agree with itself while the purge join matched nothing.
+		scopedCacheTagLabel: actual.scopedCacheTagLabel,
 	};
 });
 
@@ -429,6 +434,32 @@ describe('respond middleware', () => {
 
 		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({ coarse: false }),
+		);
+	});
+
+	test(oneLine`
+		the descriptor carries the tags in the same spelling the purge side records
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
+
+		// A boolean slice, because that is where a re-implementation of the label
+		// would diverge: the driver hands back `1`, and only
+		// `canonicalScopedCacheValue` turns it into the `true` the Redis key and
+		// the purge row both use. Written `=1` here, every purge of that slice
+		// would fail to join back to this entry and its purge count would read 0.
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'active', value: 1, type: 'boolean' },
+				],
+			},
+		);
+
+		await respond(makeReq({ schema: scopedSchema }), res, next);
+
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ scopedCacheTags: ['articles:active=true'] }),
 		);
 	});
 
