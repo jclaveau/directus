@@ -25,7 +25,14 @@ let rowsByTable: Record<string, any[]>;
 let insertSpy: ReturnType<typeof vi.fn>;
 let deleteSpy: ReturnType<typeof vi.fn>;
 
-function makeBuilder(table: string) {
+function makeBuilder(source: string | { sourceTable: string }) {
+	// A subquery can stand in for a table name: the purge passes read DISTINCT
+	// rows so a redelivered batch cannot double their sums, and knex takes the
+	// aliased builder where a table string would go. Route it by what it reads.
+	const table = typeof source === 'string'
+		? source
+		: source.sourceTable;
+
 	// Two queries per fact table — the counts and the percentiles over the same
 	// rows — so the latency one is routed to a separate `<table>:latency` reply and
 	// can answer with percentile columns. Recognised by what it asks for: the
@@ -45,6 +52,10 @@ function makeBuilder(table: string) {
 		},
 		orderBy: () => builder,
 		groupByRaw: () => builder,
+		distinct: () => builder,
+		// What `knex(subquery)` reads back to find which rows are being aliased.
+		as: () => builder,
+		sourceTable: table,
 		select: (...columns: any[]) => {
 			if (columns.some((column) => String(column?.sql).includes('purge_p50'))) {
 				latencyQuery = true;

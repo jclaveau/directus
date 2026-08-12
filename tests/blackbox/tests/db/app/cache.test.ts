@@ -3317,7 +3317,7 @@ describe('App Caching Tests', () => {
 				.where('time', '>', new Date(now - windowMs))
 				.delete();
 
-			await db('directus_cache_purges').insert([
+			const rowsToSeed = [
 				// Now-edge: three precise purges, plus one collection-wide fallback
 				// that was both the slowest and by far the most destructive.
 				purge(edgeTime, 'slices', 4, 10),
@@ -3329,6 +3329,15 @@ describe('App Caching Tests', () => {
 				purge(oldTime, 'namespace', null, 5),
 				// Far past: outside the window opened below.
 				purge(decoyTime, 'collection', 999, 999),
+			];
+
+			// The drain acks its Redis stream only after the insert commits, so a crash
+			// in between redelivers the batch and writes each purge again, verbatim.
+			// One purge is duplicated here: every figure below must be unmoved by it,
+			// or a single crash permanently doubles a bucket.
+			await db('directus_cache_purges').insert([
+				...rowsToSeed,
+				rowsToSeed[0]!,
 			]);
 
 			const series = await request(url)

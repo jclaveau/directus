@@ -372,6 +372,41 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledTimes(5);
 		});
 
+		test('counts only the entries that were still there to delete', async () => {
+			// Nothing ever SREMs a tag set, so a key that expired by TTL is still
+			// named by it until the set itself is dropped. Counting memberships would
+			// report it as evicted — and on the per-user keys this fork exists for,
+			// with a TTL shorter than the gap between mutations, that is most of a set.
+			redis.smembers.mockResolvedValue([
+				'live-key',
+				'live-key__expires_at',
+				'stale-key',
+				'stale-key__expires_at',
+			]);
+
+			const cache = {
+				clear: vi.fn(),
+				// What a Keyv store answers: false where the key was already gone.
+				delete: vi.fn(async (key: string) => {
+					return key.startsWith('live-key');
+				}),
+			} as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
+
+			// One, not two: the stale entry was named by the set and deleted for
+			// nothing. Counted, it would inflate the eviction line, the Purges tile
+			// and the purge ratio all at once.
+			expect(queueCachePurge).toHaveBeenCalledWith(
+				expect.objectContaining({ evicted: 1 }),
+			);
+
+			// It was still ASKED for — the count changes, the cleanup does not.
+			expect(cache.delete).toHaveBeenCalledWith('stale-key');
+		});
+
 		test('records the coarse fallback as the wider thing it is', async () => {
 			redis.scan.mockResolvedValueOnce([
 				'0',

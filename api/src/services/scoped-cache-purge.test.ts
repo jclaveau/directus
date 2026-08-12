@@ -168,6 +168,9 @@ describe(oneLine`
 			'test',
 			null,
 			expect.anything(),
+			// The mutation's own purge id travels with it, so telemetry counts the
+			// purge rather than the operations it took to make it.
+			{ scopedCachePurgeId: expect.any(String) },
 		);
 	});
 
@@ -279,6 +282,9 @@ describe(oneLine`
 			'test',
 			null,
 			expect.anything(),
+			// The mutation's own purge id travels with it, so telemetry counts the
+			// purge rather than the operations it took to make it.
+			{ scopedCachePurgeId: expect.any(String) },
 		);
 	});
 
@@ -369,6 +375,7 @@ describe(oneLine`
 			'test',
 			null,
 			expect.anything(),
+			{ scopedCachePurgeId: expect.any(String) },
 		);
 		}
 		finally {
@@ -831,6 +838,7 @@ describe(oneLine`
 					'test',
 					null,
 					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
 				);
 
 				// Coarse already flushed this collection's bare tag + every slice, so the
@@ -842,8 +850,19 @@ describe(oneLine`
 					'test',
 					[authorsDependency],
 					expect.anything(),
-					{ includeCollectionTag: false },
+					{
+						includeCollectionTag: false,
+						scopedCachePurgeId: expect.any(String),
+					},
 				);
+
+				// Two operations, ONE purge — they share the id telemetry counts by,
+				// for the same reason they share one debug header. Without it an entry
+				// both reach reports two purges for the one mutation behind them.
+				const [coarseCall, hookCall] = purgeScopedCache.mock.calls;
+
+				expect(hookCall![4].scopedCachePurgeId)
+					.toBe(coarseCall![4].scopedCachePurgeId);
 
 				expect(svc.scopedCachePurged).toEqual([
 					{ collection: 'test' },
@@ -889,6 +908,7 @@ describe(oneLine`
 					'test',
 					null,
 					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
 				);
 
 				// Never the precise take-over slice (Z) — that would leak the old slice.

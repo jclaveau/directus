@@ -254,11 +254,23 @@ export async function countScopedCacheTagMembers(
  * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
  * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
  *
- * Returns how many cache ENTRIES it deleted, which is not how many keys it
- * deleted: a tag set holds each entry alongside its `__expires_at` sibling and
- * any extra sibling (`__tags`), so counting members would report every entry
- * twice over. A sidecar is recognisable by its base key being in the set beside
- * it — the `sadd` writes them together — which stays right as siblings are added.
+ * Returns how many cache ENTRIES it actually deleted, which is neither how many
+ * keys it deleted nor how many the tag sets named.
+ *
+ * Not the key count, because a tag set holds each entry alongside its
+ * `__expires_at` sibling and any extra sibling (`__tags`), so counting members
+ * would report every entry twice over. A sidecar is recognisable by its base key
+ * being in the set beside it — the `sadd` writes them together — which stays
+ * right as siblings are added.
+ *
+ * Not the membership count either, because nothing ever SREMs: a member that
+ * expired by TTL stays named by the set until the set itself is dropped here. On
+ * the workload this fork exists for — per-user keys, so high cardinality, TTLs
+ * shorter than the gap between mutations — most of a set can be entries that were
+ * already gone, and counting them would inflate every purge figure on the page.
+ * So the store's own answer decides. Only an explicit `false` is evidence the key
+ * was absent; a store that reports nothing leaves the count where it was rather
+ * than silently collapsing it to zero.
  */
 async function purgeScopedCacheTagKeys(
 	cache: Keyv,
@@ -274,15 +286,19 @@ async function purgeScopedCacheTagKeys(
 	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
 	const members = [...new Set(memberLists.flat())];
 
-	if (members.length > 0) {
-		await Promise.all(members.map((member) => cache.delete(member)));
-	}
+	const wasDeleted = await Promise.all(members.map((member) => {
+		return cache.delete(member);
+	}));
 
 	await redis.del(...tagKeys);
 
 	const present = new Set(members);
 
-	return members.filter((member) => {
+	return members.filter((member, index) => {
+		if (wasDeleted[index] === false) {
+			return false;
+		}
+
 		const sidecarSuffix = member.lastIndexOf('__');
 
 		return sidecarSuffix === -1
@@ -343,6 +359,7 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 export async function purgeCollectionScopedCache(
 	cache: Keyv,
 	collection: string,
+	scopedCachePurgeId?: string,
 ): Promise<void> {
 	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
 
@@ -358,6 +375,7 @@ export async function purgeCollectionScopedCache(
 	// No tag list: every slice the scan happened to find is derived rather than
 	// chosen, and unbounded. `collection` plus the mode already state the reach.
 	queueCachePurge({
+		purgeId: scopedCachePurgeId,
 		collection,
 		mode: 'collection',
 		scopedCacheTags: null,
@@ -385,7 +403,15 @@ export async function purgeScopedCache(
 	collection: string,
 	scopedCacheTags: ScopedCacheTag[] | null = [],
 	context: EventContext | null = null,
-	options: { includeCollectionTag?: boolean } = {},
+	options: {
+		includeCollectionTag?: boolean;
+		// One mutation can need more than one purge operation — the coarse
+		// collection fallback plus the tags a hook declared. Sharing an id across
+		// them is what keeps `COUNT(DISTINCT purge_id)` reporting one purge per
+		// mutation instead of one per operation. Absent, each operation gets its
+		// own id, which is right when it IS its own purge.
+		scopedCachePurgeId?: string;
+	} = {},
 ): Promise<ScopedCacheTag[] | null> {
 	// Returns the purged tags so a caller can surface them (dev-only debug header):
 	// `null` = whole namespace flushed (non-scoped mode); bare `[{ collection }]` =
@@ -406,6 +432,7 @@ export async function purgeScopedCache(
 		// namespace, so the row records the reach and leaves the size unknown.
 		// Zero would draw the most destructive event here as one that took nothing.
 		queueCachePurge({
+			purgeId: options.scopedCachePurgeId,
 			collection: null,
 			mode: 'namespace',
 			scopedCacheTags: null,
@@ -420,7 +447,12 @@ export async function purgeScopedCache(
 	if (scopedCacheTags === null) {
 		// Records its own purge — it is the one that knows how many slices the
 		// scan turned up.
-		await purgeCollectionScopedCache(cache, collection);
+		await purgeCollectionScopedCache(
+			cache,
+			collection,
+			options.scopedCachePurgeId,
+		);
+
 		return [{ collection }];
 	}
 
@@ -440,6 +472,7 @@ export async function purgeScopedCache(
 	// sidecar stores — so "this entry carries tag X, and tag X was purged at T"
 	// is a join rather than a guess.
 	queueCachePurge({
+		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'slices',
 		scopedCacheTags: resolvedScopedCacheTags.map(scopedCacheTagLabel),

@@ -57,6 +57,14 @@ export interface CacheMiss {
 
 /** One purge operation: how far it reached, and how much it took with it. */
 export interface CachePurge {
+	/**
+	 * Correlates the operations of ONE purge. Omitted, each operation gets its own
+	 * id — right when it is its own purge. Passed, several share it: a mutation
+	 * whose scope was unresolvable runs the coarse collection fallback AND a second
+	 * pass for the tags a hook declared, and an entry both reach must count one
+	 * purge, not two.
+	 */
+	purgeId?: string;
 	collection: string | null; // null on a namespace-wide clear
 	mode: CachePurgeMode;
 	// The scoped cache tags this purge actually dropped, in the display form
@@ -512,8 +520,10 @@ export function queueCachePurge(entry: CachePurge): void {
 		kind: 'p',
 		collection: entry.collection ?? '',
 		mode: entry.mode,
-		// One id per purge so an entry covered by two of its tags counts it once.
-		purgeId: randomUUID(),
+		// One id per purge, so an entry covered by two of its tags counts it once —
+		// and, where the caller supplies one, an entry covered by two operations of
+		// the same purge counts it once too.
+		purgeId: entry.purgeId ?? randomUUID(),
 		scopedCacheTags: (entry.scopedCacheTags ?? []).join(','),
 		scopedCacheTagCount: String(entry.scopedCacheTagCount),
 		// Empty = unknown, which is not the same as none. Only a namespace clear
@@ -1794,12 +1804,22 @@ export async function readCacheTimeseries(
 			db.raw('COUNT(*) AS count'),
 		);
 
+	// The drain is at-least-once: it acks the Redis stream only after the insert
+	// commits, so a crash in between redelivers the batch and writes each purge
+	// twice. Aggregating the rows straight would then double both the count and the
+	// eviction total. A purge carries an id, and a redelivery repeats it verbatim,
+	// so reading DISTINCT rows collapses the copies before anything is summed.
+	// (The events fact has no id and cannot do this — hence the id here.)
+	const distinctPurges = db('directus_cache_purges')
+		.where('time', '>', since)
+		.distinct('purge_id', 'time', 'mode', 'evicted', 'duration_ms')
+		.as('p');
+
 	// A purge is one operation however many entries it deleted, so the count and
 	// the eviction total are different questions and both are answered. The coarse
 	// modes are split out here rather than in the app: they are what turns a purge
 	// from the cache working into a hit ratio falling off a cliff.
-	const purgeRows = await db('directus_cache_purges')
-		.where('time', '>', since)
+	const purgeRows = await db(distinctPurges)
 		.groupByRaw('1')
 		.select(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
@@ -1871,8 +1891,7 @@ export async function readCacheTimeseries(
 	// events fact every percentile above comes from — same `pct` window function,
 	// a different grid. `pctVal`, so a bucket whose purges were never timed keeps
 	// its null: an untimed purge is not an instant one.
-	const purgeLatencyRows = await db('directus_cache_purges')
-		.where('time', '>', since)
+	const purgeLatencyRows = await db(distinctPurges)
 		.groupByRaw('1')
 		.select(
 			db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
