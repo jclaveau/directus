@@ -29,7 +29,7 @@ test('lays the counts chart legend out on two meaning rows', async ({ page }) =>
 	// y-axis: the split that reads is by meaning, not by scale. Row one is the raw
 	// funnel and the TTL those entries were written under; row two the metrics
 	// derived from them.
-	const rows = page.locator('.cache-chart-legend').first()
+	const rows = page.locator('.cache-counts-legend')
 		.locator('.cache-chart-legend-row');
 
 	await expect(rows).toHaveCount(2);
@@ -55,8 +55,8 @@ test('lays the counts chart legend out on two meaning rows', async ({ page }) =>
 
 	expect(derived.map((name) => name.trim())).toEqual([
 		'Lifetime',
-		'Hits per Fills',
-		'Hits per Purges',
+		'Hit Ratio',
+		'Purge Ratio',
 		'Coarse purges',
 	]);
 
@@ -92,7 +92,9 @@ test('the latency chart names the full disposition breakdown', async ({ page }) 
 		timeout: 10000,
 	});
 
-	const rows = page.locator('.cache-chart-legend-row');
+	// Two legends carry these classes now (the counts chart grew its own), so
+	// this one is addressed by its own modifier rather than by document order.
+	const rows = page.locator('.cache-latency-legend .cache-chart-legend-row');
 	await expect(rows).toHaveCount(3);
 
 	// Funnel order, the same order the counts chart and the tree read in.

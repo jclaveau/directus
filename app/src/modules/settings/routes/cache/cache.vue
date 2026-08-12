@@ -34,7 +34,7 @@ import {
 	formatHitRatio,
 	formatTooltipValue,
 	type TooltipUnit,
-	countBalance,
+	balancePercent,
 	formatUser,
 	shortKey,
 	sortEntries,
@@ -792,14 +792,56 @@ const latencyPercentiles = computed(() => {
 	return seen;
 });
 
+/**
+ * What a ratio line means, read off its legend entry. Both are the same form —
+ * `(hits − other) / (hits + other)` — so the landmarks are the same shape and
+ * only the losing side differs.
+ */
+function ratioTitle(name: string): string {
+	const against = name === t('cache_hit_ratio', 'Hit Ratio')
+		? t('cache_fills', 'Fills')
+		: t('cache_purges', 'Purges');
+
+	const spent = name === t('cache_hit_ratio', 'Hit Ratio')
+		? t('cache_ratio_filled', 'filled')
+		: t('cache_ratio_purged', 'purged');
+
+	return [
+		`${name} = (${t('hits', 'Hits')} − ${against}) / `
+		+ `(${t('hits', 'Hits')} + ${against})`,
+		'',
+		`+100%  ${t('cache_ratio_best', 'only hits — never')} ${spent}`,
+		`+50%   3 ${t('hits', 'Hits').toLowerCase()} : 1 ${against.toLowerCase()}`,
+		`0%     ${t('cache_ratio_even', 'break-even — one each')}`,
+		`−50%   1 ${t('hits', 'Hits').toLowerCase()} : 3 ${against.toLowerCase()}`,
+		`−100%  ${t('cache_ratio_worst', 'no hits at all — only')} ${spent}`,
+		'',
+		t(
+			'cache_ratio_meaning',
+			'Below zero the cache costs more than it returns for this traffic.',
+		),
+	].join('\n');
+}
+
 // The counts chart renders its own legend on two lines: the raw funnel plus the
 // TTL it was written under, then the metrics derived from them. Apex groups by
 // y-axis instead, which splits TTL from the counts it explains and puts the two
 // balances beside it — a grouping by mechanism rather than by meaning.
-function countsEntries(row: 1 | 2): { name: string; color: string }[] {
+function countsEntries(
+	row: 1 | 2,
+): { name: string; color: string; title: string | undefined }[] {
 	return countsLines()
 		.filter((line) => line.row === row)
-		.map((line) => ({ name: line.name, color: line.color }));
+		.map((line) => {
+			return {
+				name: line.name,
+				color: line.color,
+				// Only the derived lines need explaining; a count is its own label.
+				title: line.unit === 'balance'
+					? ratioTitle(line.name)
+					: undefined,
+			};
+		});
 }
 
 function isCountsEntryHidden(name: string): boolean {
@@ -1083,25 +1125,25 @@ function countsLines(): CountsLine[] {
 			// Above the line each fill bought more than one hit, below it the cache
 			// filled more often than it served. Symmetric and bounded, so the losing
 			// half reads at the same scale as the winning one and neither can clip.
-			name: t('cache_hits_per_fills', 'Hits per Fills'),
+			name: t('cache_hit_ratio', 'Hit Ratio'),
 			unit: 'balance',
 			row: 2,
 			curve: 'straight',
 			dash: 6,
 			color: themeVar('--theme--foreground-accent', '#172940'),
-			pick: (b) => countBalance(b.hits, b.fills),
+			pick: (b) => balancePercent(b.hits, b.fills),
 		},
 		{
 			// The same shape against what destroyed the entry rather than what built
 			// it. Below zero the cache threw this traffic away more often than it
 			// served it — the request is paying for a cache that never pays back.
-			name: t('cache_hits_per_purges', 'Hits per Purges'),
+			name: t('cache_purge_ratio', 'Purge Ratio'),
 			unit: 'balance',
 			row: 2,
 			curve: 'straight',
 			dash: 6,
 			color: themeVar('--theme--primary', '#6644ff'),
-			pick: (b) => countBalance(b.hits, b.purgedEntries),
+			pick: (b) => balancePercent(b.hits, b.purgedEntries),
 		},
 		{
 			// The purges that reached wider than their mutation did — a collection
@@ -1203,8 +1245,8 @@ function chartConfig(): ApexOptions {
 				opposite: true,
 				seriesName: balanceNames,
 				show: false,
-				min: -1.05,
-				max: 1.05,
+				min: -105,
+				max: 105,
 			},
 		],
 		tooltip: {
@@ -1298,6 +1340,7 @@ function latencyLines(): LatencyLine[] {
 	const anomalyColor = themeVar('--theme--danger', '#e35169');
 	const missColor = themeVar('--theme--warning', '#ffa439');
 	const bothColor = themeVar('--theme--foreground-subdued', '#a2b5cd');
+	const purgeColor = themeVar('--theme--primary', '#6644ff');
 
 	const categories: {
 		id: string;
@@ -1338,6 +1381,18 @@ function latencyLines(): LatencyLine[] {
 			p50: (b) => b.fillP50,
 			p95: (b) => b.fillP95,
 			p99: (b) => b.fillP99,
+		},
+		{
+			// The only line here that is not a READ's compute: a purge is awaited
+			// inside the mutation, so its time is added to the WRITE that triggered
+			// it. Per collection or scope, never per endpoint — which is why it
+			// lives on this chart and not in the tree's per-endpoint columns.
+			id: 'purge',
+			label: t('cache_lat_purge', 'Purges'),
+			color: purgeColor,
+			p50: (b) => b.purgeP50,
+			p95: (b) => b.purgeP95,
+			p99: (b) => b.purgeP99,
 		},
 		{
 			id: 'hit',
@@ -1838,7 +1893,7 @@ onUnmounted(() => {
 						<span class="label">{{ t('cache_hit_ratio', 'Hit ratio') }}</span>
 					</div>
 				</div>
-				<div class="cache-chart-legend">
+				<div class="cache-chart-legend cache-counts-legend">
 					<div
 						v-for="row in ([1, 2] as const)"
 						:key="row"
@@ -1847,6 +1902,7 @@ onUnmounted(() => {
 						<span
 							v-for="entry in countsEntries(row)"
 							:key="entry.name"
+							v-tooltip="entry.title"
 							class="cache-chart-legend-entry"
 							:class="{ 'is-muted': isCountsEntryHidden(entry.name) }"
 							role="button"
@@ -1886,7 +1942,7 @@ onUnmounted(() => {
 						</span>
 					</div>
 				</div>
-				<div class="cache-chart-legend">
+				<div class="cache-chart-legend cache-latency-legend">
 					<div
 						v-for="percentile in latencyPercentiles"
 						:key="percentile"

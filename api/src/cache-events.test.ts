@@ -875,6 +875,7 @@ describe('drainCacheEvents', () => {
 				tags: 'articles,articles:author=2',
 				tagCount: '4',
 				evicted: '11',
+				durationMs: '7',
 				ts: '6000',
 			}),
 			// A namespace clear: no collection, and a size that was never knowable.
@@ -888,6 +889,7 @@ describe('drainCacheEvents', () => {
 				tags: '',
 				tagCount: '0',
 				evicted: '',
+				durationMs: '3',
 				ts: '7000',
 			}),
 		];
@@ -904,6 +906,7 @@ describe('drainCacheEvents', () => {
 					mode: 'collection',
 					tag_count: 4,
 					evicted: 11,
+					duration_ms: 7,
 				},
 				{
 					time: new Date(7000),
@@ -912,6 +915,7 @@ describe('drainCacheEvents', () => {
 					mode: 'namespace',
 					tag_count: 0,
 					evicted: null,
+					duration_ms: 3,
 				},
 			],
 			expect.any(Number),
@@ -2153,6 +2157,7 @@ describe('queueCachePurge', () => {
 			tags: null,
 			tagCount: 3,
 			evicted: 12,
+			durationMs: 12,
 		});
 
 		await flushCacheEventBuffer();
@@ -2164,6 +2169,7 @@ describe('queueCachePurge', () => {
 		expect(fieldAfter(call, 'tags')).toBe('');
 		expect(fieldAfter(call, 'tagCount')).toBe('3');
 		expect(fieldAfter(call, 'evicted')).toBe('12');
+		expect(fieldAfter(call, 'durationMs')).toBe('12');
 	});
 
 	// A namespace clear has no member list to count, so the size is unknown
@@ -2178,6 +2184,7 @@ describe('queueCachePurge', () => {
 			tags: null,
 			tagCount: 0,
 			evicted: null,
+			durationMs: 12,
 		});
 
 		await flushCacheEventBuffer();
@@ -2200,6 +2207,7 @@ describe('queueCachePurge', () => {
 			tags: ['articles:id=1'],
 			tagCount: 1,
 			evicted: 2,
+			durationMs: 12,
 		});
 
 		await flushCacheEventBuffer();
@@ -2218,6 +2226,7 @@ describe('queueCachePurge', () => {
 			tags: ['articles:id=1'],
 			tagCount: 1,
 			evicted: 2,
+			durationMs: 12,
 		});
 
 		await flushCacheEventBuffer();

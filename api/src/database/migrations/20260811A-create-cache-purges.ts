@@ -49,6 +49,11 @@ export async function up(knex: Knex): Promise<void> {
 		table.string('mode', 16).notNullable();
 		table.integer('tag_count').notNullable();
 		table.integer('evicted').nullable();
+		// Awaited inside the mutation, so this is latency added to the write.
+		// Nullable, not defaulted: 0ms is a real reading (an instant purge), so a
+		// default would manufacture one — and `percentile_cont` ignores NULLs, so
+		// an unknown drops out of the percentile instead of dragging it to zero.
+		table.integer('duration_ms').nullable();
 		// Only `time` is indexed: the timeseries filters by it and folds `mode`
 		// into a CASE, so an index on a three-value column would be write cost
 		// with no reader.

@@ -37,6 +37,14 @@ export interface CacheTimeseriesBucket {
 	/** Entries those purges deleted — the size of what they took, not their count. */
 	purgedEntries: number;
 	/**
+	 * How long the purges themselves took. A purge is awaited inside the mutation,
+	 * so this is latency ADDED to the write — it belongs beside the fill/hit
+	 * percentiles, not in a background-cost bucket.
+	 */
+	purgeP50: number | null;
+	purgeP95: number | null;
+	purgeP99: number | null;
+	/**
 	 * The longest lifetime STAMPED ON AN ENTRY served in this bucket, as of when that
 	 * entry was filled — not the TTL in force. An entry filled under a since-changed
 	 * TTL keeps reporting the old value until it expires, so this stays high long

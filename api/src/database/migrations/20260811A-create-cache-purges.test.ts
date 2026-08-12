@@ -16,6 +16,7 @@ function recordingTable(columns: string[], indexes: string[]) {
 		const chain: any = {
 			notNullable: () => (columns[columns.length - 1] += ' notNullable', chain),
 			nullable: () => (columns[columns.length - 1] += ' nullable', chain),
+			defaultTo: () => chain,
 		};
 
 		return chain;
@@ -82,6 +83,8 @@ describe('the cache purges migration', () => {
 			'integer tag_count notNullable',
 			// Unknown on a namespace clear, which has no member list to count.
 			'integer evicted nullable',
+			// Nullable: 0ms is a real reading, so a default would invent one.
+			'integer duration_ms nullable',
 		]);
 
 		// No surrogate key: a hypertable refuses a unique index that leaves out its

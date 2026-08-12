@@ -428,14 +428,14 @@ function sumPurges(entries: CacheEntry[]): number {
  * Null when both are zero: no traffic is not break-even, and must plot as a gap
  * rather than as a 0 the eye reads as a measurement.
  */
-export function countBalance(a: number, b: number): number | null {
+export function balancePercent(a: number, b: number): number | null {
 	const total = a + b;
 
 	if (total === 0) {
 		return null;
 	}
 
-	return (a - b) / total;
+	return ((a - b) / total) * 100;
 }
 
 // Hit ratio in percent: hits' share of (hits + fills). Null when there was no
@@ -823,13 +823,13 @@ export function formatTooltipValue(
 	}
 
 	if (unit === 'balance') {
-		// Signed and to two places: the sign is the verdict, and rounding to whole
-		// numbers would collapse the whole [-1, 1] range onto three values.
+		// Signed: the sign is the verdict, so it is never dropped — a bare "50%"
+		// would read as the winning case when it may be the losing one.
 		const sign = raw > 0
 			? '+'
 			: '';
 
-		return `${sign}${raw.toFixed(2)}`;
+		return `${sign}${Math.round(raw)}%`;
 	}
 
 	return unit === 'percent'

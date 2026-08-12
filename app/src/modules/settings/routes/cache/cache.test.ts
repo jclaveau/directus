@@ -1335,22 +1335,22 @@ describe('CachePage', () => {
 			'Hits',
 			'Purges',
 			'Lifetime',
-			'Hits per Fills',
-			'Hits per Purges',
+			'Hit Ratio',
+			'Purge Ratio',
 			'Coarse purges',
 		]);
 
-		// (hits − fills) / (hits + fills) = (5 − 1) / 6.
-		expect(config.series[8].data[0]![1]).toBeCloseTo(0.667);
+		// (hits − fills) / (hits + fills) = (5 − 1) / 6, as a percentage.
+		expect(config.series[8].data[0]![1]).toBeCloseTo(66.7, 1);
 
 		// (hits − purges) / (hits + purges) = (5 − 9) / 14: below zero, this
 		// request was thrown away more often than it was served.
-		expect(config.series[9].data[0]![1]).toBeCloseTo(-0.286);
+		expect(config.series[9].data[0]![1]).toBeCloseTo(-28.6, 1);
 
 		// Tooltip: one tight "name: value" row per metric, each in its own unit.
 		// Positional, in the order the series are declared in.
 		const html = config.tooltip.custom({
-			series: [[3600], [7], [2], [0], [1], [5], [9], [60], [0.667], [-0.286], [1]],
+			series: [[3600], [7], [2], [0], [1], [5], [9], [60], [66.7], [-28.6], [1]],
 			dataPointIndex: 0,
 			w: { globals: { seriesX: [[1000]] } },
 		});
@@ -1363,10 +1363,10 @@ describe('CachePage', () => {
 		expect(html).toContain('Hits: 5');
 		expect(html).toContain('Purges: 9');
 		expect(html).toContain('Lifetime: 1m');
-		// Signed and to two places: the sign is the verdict, and whole numbers
-		// would collapse the whole [-1, 1] range onto three values.
-		expect(html).toContain('Hits per Fills: +0.67');
-		expect(html).toContain('Hits per Purges: -0.29');
+		// Signed: a bare "29%" would read as the winning case when it is the
+		// losing one.
+		expect(html).toContain('Hit Ratio: +67%');
+		expect(html).toContain('Purge Ratio: -29%');
 		expect(html).toContain('Coarse purges: 1');
 		expect(html).toContain('cache-tt-row');
 
@@ -1381,11 +1381,11 @@ describe('CachePage', () => {
 		expect(config.yaxis[0].labels.formatter(5.4)).toBe('5');
 		expect(config.yaxis[1].labels.formatter(3600)).toBe('1h');
 		expect(config.yaxis[2].show).toBe(false);
-		expect(config.yaxis[2].min).toBeLessThan(-1);
-		expect(config.yaxis[2].max).toBeGreaterThan(1);
+		expect(config.yaxis[2].min).toBeLessThan(-100);
+		expect(config.yaxis[2].max).toBeGreaterThan(100);
 
 		expect(config.yaxis[2].seriesName)
-			.toEqual(['Hits per Fills', 'Hits per Purges']);
+			.toEqual(['Hit Ratio', 'Purge Ratio']);
 	});
 
 	it('splits the TTL in force from the lifetimes entries carry', async () => {

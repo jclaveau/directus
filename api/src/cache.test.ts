@@ -362,6 +362,8 @@ describe('scoped cache purging', () => {
 				tags: ['slots', 'slots:student=A'],
 				tagCount: 2,
 				evicted: 2,
+				// Wall-clock, so only its presence is asserted.
+				durationMs: expect.any(Number),
 			});
 
 			// The sidecars are still deleted — only the count excludes them.
@@ -397,6 +399,8 @@ describe('scoped cache purging', () => {
 				tags: null,
 				tagCount: 3,
 				evicted: 2,
+				// Wall-clock, so only its presence is asserted.
+				durationMs: expect.any(Number),
 			});
 		});
 
@@ -428,6 +432,8 @@ describe('scoped cache purging', () => {
 				tags: null,
 				tagCount: 4,
 				evicted: 0,
+				// Wall-clock, so only its presence is asserted.
+				durationMs: expect.any(Number),
 			});
 		});
 
@@ -450,6 +456,8 @@ describe('scoped cache purging', () => {
 				tags: null,
 				tagCount: 0,
 				evicted: null,
+				// Wall-clock, so only its presence is asserted.
+				durationMs: expect.any(Number),
 			});
 		});
 

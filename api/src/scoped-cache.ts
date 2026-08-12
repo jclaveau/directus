@@ -348,6 +348,7 @@ export async function purgeCollectionScopedCache(
 
 	// Slice keys are `<bareKey>:<field>=<value>`; the `:` delimiter keeps a prefix-sharing
 	// sibling (`articles` vs `articles_archive`) out of the scan.
+	const startedAt = Date.now();
 	const sliceKeys = await scanScopedCacheTagKeys(`${bareKey}:*`);
 	const tagKeys = [bareKey, ...sliceKeys];
 	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
@@ -362,6 +363,7 @@ export async function purgeCollectionScopedCache(
 		tags: null,
 		tagCount: tagKeys.length,
 		evicted,
+		durationMs: Date.now() - startedAt,
 	});
 }
 
@@ -388,6 +390,8 @@ export async function purgeScopedCache(
 	// Returns the purged tags so a caller can surface them (dev-only debug header):
 	// `null` = whole namespace flushed (non-scoped mode); bare `[{ collection }]` =
 	// a collection-wide purge; otherwise the resolved slice tags.
+	const startedAt = Date.now();
+
 	if (!scopedCachePurgeEnabled()) {
 		await cache.clear();
 
@@ -407,6 +411,7 @@ export async function purgeScopedCache(
 			tags: null,
 			tagCount: 0,
 			evicted: null,
+			durationMs: Date.now() - startedAt,
 		});
 
 		return null;
@@ -440,6 +445,9 @@ export async function purgeScopedCache(
 		tags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
 		tagCount: tagKeys.length,
 		evicted,
+		// Awaited inside the mutation, so this time is ADDED to the write's own
+		// latency — a slow purge slows the request that triggered it.
+		durationMs: Date.now() - startedAt,
 	});
 
 	return resolvedScopedCacheTags;

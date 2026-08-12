@@ -65,6 +65,9 @@ export interface CachePurge {
 	tags: string[] | null;
 	tagCount: number; // that reach as a number, for every mode
 	evicted: number | null; // entries those sets held; null = whole-namespace clear
+	// Wall-clock of the purge itself. It is awaited inside the mutation, so this
+	// is time added to the write, not a background cost.
+	durationMs: number;
 }
 
 export interface CacheDescriptor {
@@ -516,6 +519,7 @@ export function queueCachePurge(entry: CachePurge): void {
 		evicted: entry.evicted === null
 			? ''
 			: String(entry.evicted),
+		durationMs: String(entry.durationMs),
 		ts: String(Date.now()),
 	});
 }
@@ -645,6 +649,7 @@ interface CachePurgeRow {
 	mode: CachePurgeMode;
 	tag_count: number;
 	evicted: number | null; // null = a namespace clear, whose size is unknowable
+	duration_ms: number | null;
 }
 
 /**
@@ -853,6 +858,10 @@ async function persistStreamBatch(
 				// Empty came off a namespace clear: unknown, not none.
 				evicted: f['evicted']
 					? Number(f['evicted'])
+					: null,
+				// Absent = never measured; 0 would be an instant purge.
+				duration_ms: f['durationMs']
+					? Number(f['durationMs'])
 					: null,
 			});
 
@@ -1640,6 +1649,9 @@ export async function readCacheTimeseries(
 				purges: 0,
 				coarsePurges: 0,
 				purgedEntries: 0,
+				purgeP50: null,
+				purgeP95: null,
+				purgeP99: null,
 				ttlMs: null,
 				effectiveTtlMs: null,
 				hitP50: null,
@@ -1796,6 +1808,28 @@ export async function readCacheTimeseries(
 
 	for (const row of anomalyRows as Record<string, unknown>[]) {
 		dense[slotOf(row['bucket'])]!.anomalies += Number(row['count'] ?? 0);
+	}
+
+	// Purge latency, Postgres only — `percentile_cont` is an ordered-set aggregate.
+	// Kept in its own pass because the durations live on the purges table, not on
+	// the events fact the other percentiles come from.
+	if (db.client.config.client === 'pg') {
+		const purgeLatencyRows = await db('directus_cache_purges')
+			.where('time', '>', since)
+			.groupByRaw('1')
+			.select(
+				db.raw(`${bucketExpr} AS bucket`, [since, bucketSec]),
+				db.raw(`${pct(0.5)} AS purge_p50`),
+				db.raw(`${pct(0.95)} AS purge_p95`),
+				db.raw(`${pct(0.99)} AS purge_p99`),
+			);
+
+		for (const row of purgeLatencyRows as Record<string, unknown>[]) {
+			const index = slotOf(row['bucket']);
+			dense[index]!.purgeP50 = num(row['purge_p50']);
+			dense[index]!.purgeP95 = num(row['purge_p95']);
+			dense[index]!.purgeP99 = num(row['purge_p99']);
+		}
 	}
 
 	for (const row of purgeRows as Record<string, unknown>[]) {
