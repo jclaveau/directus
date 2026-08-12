@@ -1281,8 +1281,8 @@ directus_collection:
   directus_cache_anomalies: Uncacheable / not-cached anomalies (telemetry)
   directus_cache_config_events: Cache TTL-change and flush events (telemetry)
   directus_cache_purges: Cache purge operations and their reach (telemetry)
-  directus_cache_entry_tags: Tags each cache entry was filled under (telemetry)
-  directus_cache_purge_tags: Tags each purge dropped, for attribution (telemetry)
+  directus_scoped_cache_entry_tags: Tags each cache entry was filled under (telemetry)
+  directus_scoped_cache_purge_tags: Tags each purge dropped, for attribution (telemetry)
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module

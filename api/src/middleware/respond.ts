@@ -252,9 +252,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							: req.originalUrl,
 						bytes: size,
 						fillMs,
-						// The tags the key was just indexed under, so a later purge
-						// of any of them is attributable back to this request.
-						tags: scopedCacheTags.map(scopedCacheTagLabel),
+						// The scoped cache tags the key was just indexed under, so a
+						// later purge of any of them is attributable back to this
+						// request.
+						scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
 					}).catch(() => {});
 
 					// The same fill latency as a timestamped event (kind 'f') so the

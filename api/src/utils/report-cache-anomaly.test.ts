@@ -68,7 +68,7 @@ describe('reportCacheAnomaly', () => {
 				// rather than assumed: the descriptor emitter joins this array, so
 				// omitting it throws and the locator is never written at all —
 				// which reads downstream as an anomaly with no descriptor.
-				tags: [],
+				scopedCacheTags: [],
 				lastFilled: null,
 			}),
 		);

@@ -360,8 +360,8 @@ export async function purgeCollectionScopedCache(
 	queueCachePurge({
 		collection,
 		mode: 'collection',
-		tags: null,
-		tagCount: tagKeys.length,
+		scopedCacheTags: null,
+		scopedCacheTagCount: tagKeys.length,
 		evicted,
 		durationMs: Date.now() - startedAt,
 	});
@@ -408,8 +408,8 @@ export async function purgeScopedCache(
 		queueCachePurge({
 			collection: null,
 			mode: 'namespace',
-			tags: null,
-			tagCount: 0,
+			scopedCacheTags: null,
+			scopedCacheTagCount: 0,
 			evicted: null,
 			durationMs: Date.now() - startedAt,
 		});
@@ -442,8 +442,8 @@ export async function purgeScopedCache(
 	queueCachePurge({
 		collection,
 		mode: 'slices',
-		tags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
-		tagCount: tagKeys.length,
+		scopedCacheTags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
+		scopedCacheTagCount: tagKeys.length,
 		evicted,
 		// Awaited inside the mutation, so this time is ADDED to the write's own
 		// latency — a slow purge slows the request that triggered it.

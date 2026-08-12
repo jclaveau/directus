@@ -359,8 +359,8 @@ describe('scoped cache purging', () => {
 				mode: 'slices',
 				// The tags themselves, in the display form the entry sidecar stores,
 				// so a purge row joins against an entry rather than merely counting.
-				tags: ['slots', 'slots:student=A'],
-				tagCount: 2,
+				scopedCacheTags: ['slots', 'slots:student=A'],
+				scopedCacheTagCount: 2,
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -396,8 +396,8 @@ describe('scoped cache purging', () => {
 				mode: 'collection',
 				// Derived rather than chosen: every slice the scan found, unbounded.
 				// `collection` plus the mode already state the reach exactly.
-				tags: null,
-				tagCount: 3,
+				scopedCacheTags: null,
+				scopedCacheTagCount: 3,
 				evicted: 2,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -429,8 +429,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: 'articles',
 				mode: 'collection',
-				tags: null,
-				tagCount: 4,
+				scopedCacheTags: null,
+				scopedCacheTagCount: 4,
 				evicted: 0,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),
@@ -453,8 +453,8 @@ describe('scoped cache purging', () => {
 			expect(queueCachePurge).toHaveBeenCalledWith({
 				collection: null,
 				mode: 'namespace',
-				tags: null,
-				tagCount: 0,
+				scopedCacheTags: null,
+				scopedCacheTagCount: 0,
 				evicted: null,
 				// Wall-clock, so only its presence is asserted.
 				durationMs: expect.any(Number),

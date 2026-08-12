@@ -59,11 +59,12 @@ export interface CacheMiss {
 export interface CachePurge {
 	collection: string | null; // null on a namespace-wide clear
 	mode: CachePurgeMode;
-	// The tags actually dropped, comma-joined in display form, so a purge row
-	// joins against an entry's own tags. Null where the list is derived rather
-	// than chosen (`collection`, `namespace`) and `collection` states the reach.
-	tags: string[] | null;
-	tagCount: number; // that reach as a number, for every mode
+	// The scoped cache tags this purge actually dropped, in the display form
+	// `collection[:field=value]`, so a purge joins against an entry's own tags.
+	// Null where the list is derived rather than chosen (`collection`,
+	// `namespace`) and `collection` plus `mode` already state the reach.
+	scopedCacheTags: string[] | null;
+	scopedCacheTagCount: number; // that reach as a number, for every mode
 	evicted: number | null; // entries those sets held; null = whole-namespace clear
 	// Wall-clock of the purge itself. It is awaited inside the mutation, so this
 	// is time added to the write, not a background cost.
@@ -82,9 +83,10 @@ export interface CacheDescriptor {
 	url: string;
 	bytes: number;
 	fillMs: number;
-	// The tags this entry was filled under, in the display form the purge side
-	// records — the join that answers "was this entry covered by that purge?".
-	tags: string[];
+	// The scoped cache tags this entry was filled under, in the display form the
+	// purge side records — the join that answers "was this entry covered by that
+	// purge?".
+	scopedCacheTags: string[];
 	// null = an anomaly locator, never filled (bytes/fillMs 0). It stamps last_filled
 	// NULL, which alone marks it: never clobbers a real fill, hidden from the listing.
 	lastFilled?: Date | null;
@@ -512,8 +514,8 @@ export function queueCachePurge(entry: CachePurge): void {
 		mode: entry.mode,
 		// One id per purge so an entry covered by two of its tags counts it once.
 		purgeId: randomUUID(),
-		tags: (entry.tags ?? []).join(','),
-		tagCount: String(entry.tagCount),
+		scopedCacheTags: (entry.scopedCacheTags ?? []).join(','),
+		scopedCacheTagCount: String(entry.scopedCacheTagCount),
 		// Empty = unknown, which is not the same as none. Only a namespace clear
 		// sends it: it has no member list to count.
 		evicted: entry.evicted === null
@@ -545,7 +547,7 @@ export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void
 		url: entry.url,
 		bytes: String(entry.bytes),
 		fillMs: String(entry.fillMs),
-		tags: entry.tags.join(','),
+		scopedCacheTags: entry.scopedCacheTags.join(','),
 		// Empty ts = no fill time = a locator; the drain reads last_filled off it.
 		ts: entry.lastFilled === null
 			? ''
@@ -647,22 +649,22 @@ interface CachePurgeRow {
 	purge_id: string;
 	collection: string | null;
 	mode: CachePurgeMode;
-	tag_count: number;
+	scoped_cache_tag_count: number;
 	evicted: number | null; // null = a namespace clear, whose size is unknowable
 	duration_ms: number | null;
 }
 
 /**
- * The collection a display-form tag belongs to: `articles` or the head of
- * `articles:owner=7`. Taken off the tag rather than off the descriptor, since one
- * entry can read across collections and carry a tag from each.
+ * The collection a display-form scoped cache tag belongs to: `articles`, or the
+ * head of `articles:owner=7`. Taken off the tag rather than off the descriptor,
+ * since one entry can read across collections and carry a tag from each.
  */
-function collectionOfTag(tag: string): string {
-	const slice = tag.indexOf(':');
+function collectionOfScopedCacheTag(scopedCacheTag: string): string {
+	const slice = scopedCacheTag.indexOf(':');
 
 	return slice === -1
-		? tag
-		: tag.slice(0, slice);
+		? scopedCacheTag
+		: scopedCacheTag.slice(0, slice);
 }
 
 function parseFields(flat: string[]): Record<string, string> {
@@ -831,16 +833,19 @@ async function persistStreamBatch(
 	const anomalies: CacheAnomalyRow[] = [];
 	const purges: CachePurgeRow[] = [];
 
-	const purgeTags: {
+	const purgedScopedCacheTags: {
 		purge_id: string;
 		time: Date;
-		tag: string;
+		scoped_cache_tag: string;
 		collection: string;
 	}[] = [];
 
 	// Keyed so the last fill in a batch wins, matching the descriptor upsert: an
 	// entry's tags are replaced wholesale on refill, never merged with the old set.
-	const entryTags = new Map<string, { tag: string; collection: string }[]>();
+	const entryScopedCacheTags = new Map<string, {
+		scoped_cache_tag: string;
+		collection: string;
+	}[]>();
 
 	for (const [, flat] of batch) {
 		const f = parseFields(flat);
@@ -854,7 +859,7 @@ async function persistStreamBatch(
 					: null,
 				purge_id: f['purgeId'] ?? '',
 				mode: (f['mode'] ?? 'slices') as CachePurgeMode,
-				tag_count: Number(f['tagCount'] ?? 0),
+				scoped_cache_tag_count: Number(f['scopedCacheTagCount'] ?? 0),
 				// Empty came off a namespace clear: unknown, not none.
 				evicted: f['evicted']
 					? Number(f['evicted'])
@@ -867,12 +872,14 @@ async function persistStreamBatch(
 
 			// One row per tag the purge dropped, carrying the purge's own id so an
 			// entry covered by two of them still counts the purge once.
-			for (const tag of (f['tags'] ?? '').split(',').filter(Boolean)) {
-				purgeTags.push({
+			for (const scopedCacheTag of (f['scopedCacheTags'] ?? '')
+				.split(',')
+				.filter(Boolean)) {
+				purgedScopedCacheTags.push({
 					purge_id: f['purgeId'] ?? '',
 					time: at,
-					tag,
-					collection: collectionOfTag(tag),
+					scoped_cache_tag: scopedCacheTag,
+					collection: collectionOfScopedCacheTag(scopedCacheTag),
 				});
 			}
 
@@ -882,10 +889,10 @@ async function persistStreamBatch(
 			// pinned entry, which is most of what it destroyed — so it is recorded
 			// against the collection, in one row rather than one per derived slice.
 			if (f['mode'] === 'collection' && f['collection']) {
-				purgeTags.push({
+				purgedScopedCacheTags.push({
 					purge_id: f['purgeId'] ?? '',
 					time: at,
-					tag: '',
+					scoped_cache_tag: '',
 					collection: f['collection'],
 				});
 			}
@@ -936,11 +943,18 @@ async function persistStreamBatch(
 			// Only a real fill knows the tags; a locator is written at an anomaly
 			// site where the read never got far enough to resolve them.
 			if (row.last_filled !== null) {
-				const tags = [...new Set((f['tags'] ?? '').split(',').filter(Boolean))];
+				const filledUnder = [...new Set(
+					(f['scopedCacheTags'] ?? '').split(',').filter(Boolean),
+				)];
 
-				entryTags.set(
+				entryScopedCacheTags.set(
 					row.cache_key,
-					tags.map((tag) => ({ tag, collection: collectionOfTag(tag) })),
+					filledUnder.map((scopedCacheTag) => {
+						return {
+							scoped_cache_tag: scopedCacheTag,
+							collection: collectionOfScopedCacheTag(scopedCacheTag),
+						};
+					}),
 				);
 			}
 
@@ -990,30 +1004,31 @@ async function persistStreamBatch(
 				await trx.batchInsert('directus_cache_purges', purges, FLUSH_BATCH);
 			}
 
-			if (purgeTags.length > 0) {
+			if (purgedScopedCacheTags.length > 0) {
 				await trx.batchInsert(
-					'directus_cache_purge_tags',
-					purgeTags,
+					'directus_scoped_cache_purge_tags',
+					purgedScopedCacheTags,
 					FLUSH_BATCH,
 				);
 			}
 
 			// Replaced, not merged: a refill under a narrower scope must not leave
 			// the old tags behind claiming coverage the entry no longer has.
-			if (entryTags.size > 0) {
-				await trx('directus_cache_entry_tags')
-					.whereIn('cache_key', [...entryTags.keys()])
+			if (entryScopedCacheTags.size > 0) {
+				await trx('directus_scoped_cache_entry_tags')
+					.whereIn('cache_key', [...entryScopedCacheTags.keys()])
 					.delete();
 
-				const rows = [...entryTags].flatMap(([cacheKey, tags]) => {
-					return tags.map(({ tag, collection }) => {
-						return { cache_key: cacheKey, tag, collection };
+				const rows = [...entryScopedCacheTags]
+					.flatMap(([cacheKey, filledUnder]) => {
+						return filledUnder.map((tagged) => {
+							return { cache_key: cacheKey, ...tagged };
+						});
 					});
-				});
 
 				if (rows.length > 0) {
 					await trx.batchInsert(
-						'directus_cache_entry_tags',
+						'directus_scoped_cache_entry_tags',
 						rows,
 						FLUSH_BATCH,
 					);
@@ -1126,8 +1141,12 @@ export async function listCacheEntries(
 	});
 
 	if (listedKeys.length > 0) {
-		const purgeRows = await db('directus_cache_entry_tags as et')
-			.join('directus_cache_purge_tags as pt', 'pt.tag', 'et.tag')
+		const purgeRows = await db('directus_scoped_cache_entry_tags as et')
+			.join(
+				'directus_scoped_cache_purge_tags as pt',
+				'pt.scoped_cache_tag',
+				'et.scoped_cache_tag',
+			)
 			.where('pt.time', '>', since)
 			.whereIn('et.cache_key', listedKeys)
 			.groupBy('et.cache_key')
@@ -1145,10 +1164,14 @@ export async function listCacheEntries(
 		// slice tag, so nothing above would ever match it. Added to the precise
 		// count rather than replacing it — a purge is tag-bearing or
 		// collection-bearing and never both, so the two cannot double-count one.
-		const coarseRows = await db('directus_cache_purge_tags as pt')
-			.join('directus_cache_entry_tags as et', 'et.collection', 'pt.collection')
+		const coarseRows = await db('directus_scoped_cache_purge_tags as pt')
+			.join(
+				'directus_scoped_cache_entry_tags as et',
+				'et.collection',
+				'pt.collection',
+			)
 			.where('pt.time', '>', since)
-			.where('pt.tag', '')
+			.where('pt.scoped_cache_tag', '')
 			.whereIn('et.cache_key', listedKeys)
 			.groupBy('et.cache_key')
 			.select(
@@ -1400,14 +1423,14 @@ export async function reapCacheEvents(): Promise<number> {
  * belong to — the join half ages out with the fact half or it would outlive it
  * and keep claiming coverage for purges nothing remembers.
  */
-export async function reapCachePurgeTags(): Promise<number> {
+export async function reapScopedCachePurgeTags(): Promise<number> {
 	if (!cacheStatsConfigured()) {
 		return 0;
 	}
 
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_cache_purge_tags')
+	return getDatabase()('directus_scoped_cache_purge_tags')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -1417,14 +1440,14 @@ export async function reapCachePurgeTags(): Promise<number> {
  * of the entry, so they follow it out rather than accumulating for keys that
  * stopped appearing.
  */
-export async function reapCacheEntryTags(): Promise<number> {
+export async function reapScopedCacheEntryTags(): Promise<number> {
 	if (!cacheStatsConfigured()) {
 		return 0;
 	}
 
 	const db = getDatabase();
 
-	return db('directus_cache_entry_tags')
+	return db('directus_scoped_cache_entry_tags')
 		.whereNotIn('cache_key', db('directus_cache_descriptors').distinct('cache_key'))
 		.delete();
 }
@@ -2063,8 +2086,8 @@ export async function truncateCacheEvents(): Promise<void> {
 	// they would count against entries whose own history was just cleared —
 	// purges without hits, on a window that reports no traffic at all.
 	await db('directus_cache_purges').truncate();
-	await db('directus_cache_purge_tags').truncate();
-	await db('directus_cache_entry_tags').truncate();
+	await db('directus_scoped_cache_purge_tags').truncate();
+	await db('directus_scoped_cache_entry_tags').truncate();
 
 	// Full reset: also drop the Redis transients tied to those rows — else buffered
 	// events drain back in and a held throttle slot suppresses the next sample.
