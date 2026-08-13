@@ -2970,8 +2970,8 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
-		The timeseries refuses a bucket count it cannot read, rather than failing
-		inside the query
+		A cache read refuses a window or a bucket count it cannot take, rather than
+		answering something the caller did not ask for
 	`, () => {
 		// `Number('five')` is NaN, which used to become `new Date(NaN)` and reach
 		// the driver as an Invalid Date — a 500 naming nothing the caller could act
@@ -3007,6 +3007,43 @@ describe('App Caching Tests', () => {
 
 			expect(defaulted.statusCode).toBe(200);
 			expect(defaulted.body.data.buckets.length).toBeGreaterThan(0);
+
+			// Out of range is refused too, not clamped: the read clamps to 1-500,
+			// and a caller that asked for a thousand buckets and silently got five
+			// hundred goes on dividing by the count it asked for.
+			for (const buckets of ['0', '-5', '501']) {
+				const outOfRange = await request(url).get('/utils/cache/timeseries')
+					.query({ window: '5m', buckets })
+					.set('Authorization', auth);
+
+				expect(outOfRange.statusCode).toBe(400);
+				expect(outOfRange.body.errors[0].message).toContain('is outside 1-500');
+			}
+
+			// The window is read by the same service the MCP tools call, so what one
+			// surface refuses the other cannot quietly answer with the default.
+			for (const path of [
+				'/utils/cache',
+				'/utils/cache/anomalies',
+				'/utils/cache/latencies',
+				'/utils/cache/timeseries',
+			]) {
+				const unreadable = await request(url).get(path)
+					.query({ window: 'yesterday' })
+					.set('Authorization', auth);
+
+				expect(unreadable.statusCode).toBe(400);
+
+				expect(unreadable.body.errors[0].message)
+					.toContain(`window 'yesterday' is not a duration`);
+			}
+
+			// Non-vacuous: the same paths answer under a window they can read.
+			const listed = await request(url).get('/utils/cache')
+				.query({ window: '5m' })
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
 		});
 	});
 
@@ -3111,6 +3148,19 @@ describe('App Caching Tests', () => {
 			});
 
 			expect(phantom).toBeUndefined();
+
+			// Nor as a phantom fill. `last_filled` is NULL on a locator, and
+			// `new Date(null)` is the epoch — so reading it by the key the anomaly
+			// listing just handed out would have dated the fill to 1970 and offered
+			// every purge recorded since as having covered it.
+			const locator = await request(url).get('/utils/cache/entry')
+				.query({ key: oversized.cacheKey })
+				.set('Authorization', auth);
+
+			expect(locator.statusCode).toBe(200);
+			expect(locator.body.data.exists).toBe(false);
+			expect(locator.body.data.filledAt).toBeNull();
+			expect(locator.body.data.purgesSinceFilled).toBeNull();
 		}, 60000);
 	});
 

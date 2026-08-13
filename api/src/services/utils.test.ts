@@ -7,6 +7,8 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	CACHE_TIMESERIES_MAX_BUCKETS,
+	CACHE_TIMESERIES_MIN_BUCKETS,
 	evictCacheEntriesForPath,
 	evictCacheEntry as registryEvictCacheEntry,
 	getCacheStatsState,
@@ -216,10 +218,65 @@ describe('Services / Utils', () => {
 			const rows = [{ path: '/items/a', method: null, query: null }];
 			vi.mocked(listCacheGroupLatencies).mockResolvedValue(rows as any);
 
-			await expect(adminService().getCacheGroupLatencies(3600_000)).resolves
+			await expect(adminService().getCacheGroupLatencies('1h')).resolves
 				.toBe(rows);
 
 			expect(listCacheGroupLatencies).toHaveBeenCalledWith(3600_000);
+		});
+
+		// The window guard every cache read shares. `GET /utils/cache*` and the MCP
+		// tools both hand their value here unread, so a duration one of them accepts
+		// cannot be one the other refuses.
+		//
+		// `getMilliseconds` answers its fallback for anything it cannot read, and
+		// that fallback is `undefined` — which reads as "no window given" — so a
+		// wrong *type* would quietly answer the 24h default while a wrong *string*
+		// was refused.
+		it.each([
+			['a word', 'yesterday'],
+			['null', null],
+			['a boolean', true],
+			['a list', []],
+			['an object', {}],
+			['empty', ''],
+		])('every cache read refuses a window that is %s', async (_case, window) => {
+			const service = adminService();
+
+			await expect(service.getCacheEntries(window)).rejects
+				.toThrowError(`window '${String(window)}' is not a duration`);
+
+			await expect(service.getCacheAnomalies(window)).rejects
+				.toThrowError(`window '${String(window)}' is not a duration`);
+
+			await expect(service.getCacheGroupLatencies(window)).rejects
+				.toThrowError(`window '${String(window)}' is not a duration`);
+
+			await expect(service.getCacheTimeseries(window)).rejects
+				.toThrowError(`window '${String(window)}' is not a duration`);
+
+			// Not merely refused: no read was made under a window nobody asked for.
+			expect(listCacheEntries).not.toHaveBeenCalled();
+			expect(listCacheAnomalies).not.toHaveBeenCalled();
+			expect(listCacheGroupLatencies).not.toHaveBeenCalled();
+			expect(readCacheTimeseries).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['a duration', '15m', 900_000],
+			// Falsy and a valid parse, so reading it as absent would answer the
+			// default window instead of the empty one that was asked for.
+			['zero as text', '0', 0],
+			['zero as a number', 0, 0],
+			['already milliseconds', 900_000, 900_000],
+			['absent', undefined, undefined],
+		])('every cache read takes a window that is %s', async (
+			_case,
+			window,
+			expected,
+		) => {
+			await adminService().getCacheEntries(window);
+
+			expect(listCacheEntries).toHaveBeenCalledWith(expected);
 		});
 
 		// `Number` reads `null`, `[]` and `''` as 0 and `true` as 1 — every one of
@@ -244,13 +301,35 @@ describe('Services / Utils', () => {
 			expect(readCacheTimeseries).not.toHaveBeenCalled();
 		});
 
+		// Out of range is refused rather than clamped, for the reason the window is:
+		// the read clamps to these bounds, and a caller that asked for ten thousand
+		// buckets and silently got five hundred goes on dividing by the count it
+		// asked for. The published schema names the same two numbers.
+		it.each([
+			['under the floor', 0],
+			['negative', -5],
+			['over the ceiling', CACHE_TIMESERIES_MAX_BUCKETS + 1],
+		])('getCacheTimeseries refuses a bucket count that is %s', async (
+			_case,
+			buckets,
+		) => {
+			await expect(adminService().getCacheTimeseries(undefined, buckets))
+				.rejects
+				.toThrowError(
+					`buckets '${String(buckets)}' is outside `
+					+ `${CACHE_TIMESERIES_MIN_BUCKETS}-${CACHE_TIMESERIES_MAX_BUCKETS}`,
+				);
+
+			expect(readCacheTimeseries).not.toHaveBeenCalled();
+		});
+
 		it.each([
 			['a number', 12, 12],
 			['text spelling one', '12', 12],
 			['text around one', ' 12 ', 12],
-			// Out of range rather than unreadable: the read clamps it, and the tool
-			// schema names the same bounds, so it is not this guard's to refuse.
-			['under the floor', -5, -5],
+			// The bounds themselves are inside, not outside.
+			['the floor', CACHE_TIMESERIES_MIN_BUCKETS, CACHE_TIMESERIES_MIN_BUCKETS],
+			['the ceiling', CACHE_TIMESERIES_MAX_BUCKETS, CACHE_TIMESERIES_MAX_BUCKETS],
 			['absent', undefined, undefined],
 		])('getCacheTimeseries reads a bucket count that is %s', async (
 			_case,

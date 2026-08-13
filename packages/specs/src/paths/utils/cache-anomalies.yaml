@@ -21,5 +21,7 @@ get:
                   type: object
             type: object
       description: Successful request
+    '400':
+      description: The `window` is not a duration such as "15m"
   tags:
     - System Diagnostics

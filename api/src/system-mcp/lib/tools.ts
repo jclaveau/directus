@@ -1,6 +1,8 @@
 import { InvalidPayloadError } from '@directus/errors';
-import { CACHE_TIMESERIES_MAX_BUCKETS } from '../../cache-events.js';
-import { getMilliseconds } from '../../utils/get-milliseconds.js';
+import {
+	CACHE_TIMESERIES_MAX_BUCKETS,
+	CACHE_TIMESERIES_MIN_BUCKETS,
+} from '../../cache-events.js';
 import { UtilsService } from '../../services/utils.js';
 import {
 	defineSystemMcpTool,
@@ -76,31 +78,6 @@ const READ_ONLY = {
 	openWorldHint: false,
 } as const;
 
-/**
- * The lookback a cache read was asked for, as milliseconds.
- *
- * A duration the parser cannot read is refused rather than quietly becoming the
- * default: the tool spec has servers validate their inputs, and an agent told
- * "here are the last 24h" when it asked for "yesterday" has no way to notice.
- */
-function requestedWindow(args: Record<string, unknown>): number | undefined {
-	const raw = args['window'];
-
-	if (raw === undefined) {
-		return undefined;
-	}
-
-	const parsed = getMilliseconds(raw);
-
-	if (parsed === undefined) {
-		throw new InvalidPayloadError({
-			reason: `window '${String(raw)}' is not a duration such as "15m"`,
-		});
-	}
-
-	return parsed;
-}
-
 /** The lookback every cache read takes, described once. */
 const windowProperty = {
 	window: {
@@ -159,7 +136,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {
-				return utils(context).getCacheEntries(requestedWindow(args));
+				return utils(context).getCacheEntries(args['window']);
 			},
 		}),
 		defineSystemMcpTool({
@@ -215,16 +192,19 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					},
 					filledAt: {
 						type: ['number', 'null'],
-						description: 'When it was last written, per its descriptor.',
+						description:
+							'When it was last written, per its descriptor. Null where it '
+							+ 'was never cached at all — a key known only from an anomaly '
+							+ 'has a descriptor but no fill.',
 					},
 					purgesSinceFilled: {
 						type: ['array', 'null'],
 						description:
 							'Purges that covered this entry after it was filled, newest '
-							+ 'first. Beside `exists: true` each one is an invalidation '
-							+ 'the entry survived. Empty means none covered it; null '
-							+ 'means it has no descriptor, so there is no fill to '
-							+ 'measure from.',
+							+ 'first, a namespace clear included. Beside `exists: true` '
+							+ 'each one is an invalidation the entry survived. Empty '
+							+ 'means none covered it; null means it was never filled, so '
+							+ 'there is nothing to measure from.',
 						items: { type: 'object' },
 					},
 				},
@@ -274,7 +254,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {
-				return utils(context).getCacheAnomalies(requestedWindow(args));
+				return utils(context).getCacheAnomalies(args['window']);
 			},
 		}),
 		defineSystemMcpTool({
@@ -289,9 +269,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {
-				const window = requestedWindow(args);
-
-				return utils(context).getCacheGroupLatencies(window);
+				return utils(context).getCacheGroupLatencies(args['window']);
 			},
 		}),
 		defineSystemMcpTool({
@@ -310,7 +288,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'number',
 						// The bounds the read clamps to, so a client validating against
 						// this schema knows what it will get rather than discovering it.
-						minimum: 1,
+						minimum: CACHE_TIMESERIES_MIN_BUCKETS,
 						maximum: CACHE_TIMESERIES_MAX_BUCKETS,
 						description: 'How many buckets to split the window into.',
 					},
@@ -334,7 +312,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			annotations: READ_ONLY,
 			run: async (args, context) => {
 				return utils(context).getCacheTimeseries(
-					requestedWindow(args),
+					args['window'],
 					args['buckets'],
 				);
 			},

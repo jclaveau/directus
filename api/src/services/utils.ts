@@ -16,6 +16,8 @@ import {
 	type CacheGroupLatencyRecord,
 	type CacheStatsState,
 	type CacheTimeseries,
+	CACHE_TIMESERIES_MAX_BUCKETS,
+	CACHE_TIMESERIES_MIN_BUCKETS,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	getCacheStatsState,
@@ -38,8 +40,32 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { collectProcesses } from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
+import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+
+/**
+ * How far back a cache read was asked to look, as milliseconds.
+ *
+ * A duration the parser cannot read is refused rather than quietly becoming the
+ * default: a caller told "here are the last 24h" when it asked for "yesterday"
+ * has no way to notice, and an agent that chose the tool has no way at all.
+ */
+function requestedStatsWindow(raw: unknown): number | undefined {
+	if (raw === undefined) {
+		return undefined;
+	}
+
+	const parsed = getMilliseconds(raw);
+
+	if (parsed === undefined) {
+		throw new InvalidPayloadError({
+			reason: `window '${String(raw)}' is not a duration such as "15m"`,
+		});
+	}
+
+	return parsed;
+}
 
 /**
  * How many buckets a timeseries read was asked for.
@@ -49,6 +75,10 @@ import { shouldClearCache } from '../utils/should-clear-cache.js';
  * check and silently re-bucket the read. Only a number, or text spelling one, is
  * taken; anything else is refused rather than reaching the query as an Invalid
  * Date, which fails there naming nothing the caller could act on.
+ *
+ * Out of range is refused for the same reason the window is: the read clamps to
+ * these bounds, and a caller that asked for ten thousand buckets and silently
+ * got five hundred would go on dividing by the count it asked for.
  */
 function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	if (raw === undefined) {
@@ -65,6 +95,16 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	if (Number.isFinite(parsed) === false) {
 		throw new InvalidPayloadError({
 			reason: `buckets '${String(raw)}' is not a number`,
+		});
+	}
+
+	if (
+		parsed < CACHE_TIMESERIES_MIN_BUCKETS
+		|| parsed > CACHE_TIMESERIES_MAX_BUCKETS
+	) {
+		throw new InvalidPayloadError({
+			reason: `buckets '${String(raw)}' is outside `
+				+ `${CACHE_TIMESERIES_MIN_BUCKETS}-${CACHE_TIMESERIES_MAX_BUCKETS}`,
 		});
 	}
 
@@ -243,38 +283,42 @@ export class UtilsService {
 		}
 	}
 
-	async getCacheEntries(windowMs?: number): Promise<CacheEntryRecord[]> {
+	/**
+	 * `window` and `buckets` arrive untrusted from whichever surface asked — a
+	 * query string, a tool argument — so every cache read below takes them raw and
+	 * they are read here, which is what keeps the surfaces from disagreeing about
+	 * the same value.
+	 */
+	async getCacheEntries(window?: unknown): Promise<CacheEntryRecord[]> {
 		this.assertAdmin('inspect the cache');
 
-		return listCacheEntries(windowMs);
+		return listCacheEntries(requestedStatsWindow(window));
 	}
 
-	async getCacheAnomalies(windowMs?: number): Promise<CacheAnomalyRecord[]> {
+	async getCacheAnomalies(window?: unknown): Promise<CacheAnomalyRecord[]> {
 		this.assertAdmin('inspect cache anomalies');
 
-		return listCacheAnomalies(windowMs);
+		return listCacheAnomalies(requestedStatsWindow(window));
 	}
 
 	async getCacheGroupLatencies(
-		windowMs?: number,
+		window?: unknown,
 	): Promise<CacheGroupLatencyRecord[]> {
 		this.assertAdmin('inspect cache latencies');
 
-		return listCacheGroupLatencies(windowMs);
+		return listCacheGroupLatencies(requestedStatsWindow(window));
 	}
 
-	/**
-	 * `buckets` arrives untrusted from whichever surface asked — a query string, a
-	 * tool argument — so it is read here rather than at each of them, which is what
-	 * keeps the two from disagreeing about the same value.
-	 */
 	async getCacheTimeseries(
-		windowMs?: number,
+		window?: unknown,
 		buckets?: unknown,
 	): Promise<CacheTimeseries> {
 		this.assertAdmin('inspect the cache timeseries');
 
-		return readCacheTimeseries(windowMs, requestedTimeseriesBuckets(buckets));
+		return readCacheTimeseries(
+			requestedStatsWindow(window),
+			requestedTimeseriesBuckets(buckets),
+		);
 	}
 
 	// The live Redis state for a single key — the cached response plus its

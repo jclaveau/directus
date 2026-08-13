@@ -12,7 +12,6 @@ import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
 import { generateHash } from '../utils/generate-hash.js';
-import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = Router();
@@ -223,8 +222,14 @@ router.get(
 
 		// Never cache the cache listing itself — it must reflect live state.
 		res.locals['cache'] = false;
-		const windowMs = getMilliseconds(req.query['window']);
-		res.locals['payload'] = { data: await service.getCacheEntries(windowMs) };
+
+		res.locals['payload'] = {
+			// `window` and `buckets` go through unread: the service reads both, so
+			// this route and the MCP tool beside it cannot come to differ on what a
+			// value means. A duration it cannot parse is a 400 naming it, where it
+			// used to be answered with a silent fall back to the default window.
+			data: await service.getCacheEntries(req.query['window']),
+		};
 
 		return next();
 	}),
@@ -240,8 +245,10 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = getMilliseconds(req.query['window']);
-		res.locals['payload'] = { data: await service.getCacheAnomalies(windowMs) };
+
+		res.locals['payload'] = {
+			data: await service.getCacheAnomalies(req.query['window']),
+		};
 
 		return next();
 	}),
@@ -257,10 +264,9 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = getMilliseconds(req.query['window']);
 
 		res.locals['payload'] = {
-			data: await service.getCacheGroupLatencies(windowMs),
+			data: await service.getCacheGroupLatencies(req.query['window']),
 		};
 
 		return next();
@@ -277,13 +283,12 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = getMilliseconds(req.query['window']);
 
 		res.locals['payload'] = {
-			// `buckets` goes through unread: `Number` turned a word into NaN, which
-			// reached the query as an Invalid Date and answered 500. The service
-			// refuses it with a 400 naming the value.
-			data: await service.getCacheTimeseries(windowMs, req.query['buckets']),
+			data: await service.getCacheTimeseries(
+				req.query['window'],
+				req.query['buckets'],
+			),
 		};
 
 		return next();

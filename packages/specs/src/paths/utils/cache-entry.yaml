@@ -46,16 +46,19 @@ get:
                   filledAt:
                     type: integer
                     nullable: true
-                    description: When it was last written, per its descriptor.
+                    description: >
+                      When it was last written, per its descriptor. Null where
+                      it was never cached at all — a key known only from an
+                      anomaly has a descriptor but no fill.
                   purgesSinceFilled:
                     type: array
                     nullable: true
                     description: >
                       Purges that covered this entry after it was filled,
-                      newest first. Beside `exists: true` each one is an
-                      invalidation the entry survived. Empty means none
-                      covered it; null means it has no descriptor, so there
-                      is no fill to measure from.
+                      newest first, a namespace clear included. Beside
+                      `exists: true` each one is an invalidation the entry
+                      survived. Empty means none covered it; null means it was
+                      never filled, so there is nothing to measure from.
                     items:
                       type: object
                       properties:
@@ -72,7 +75,9 @@ get:
                           nullable: true
                           description: >
                             The tag both sides matched on, or null where the
-                            purge named none and its collection is its reach.
+                            purge named none — a collection-wide purge, whose
+                            collection is its reach, or a namespace clear,
+                            which reached everything.
                         evicted:
                           type: integer
                           nullable: true

@@ -2532,6 +2532,97 @@ describe('listPurgesCoveringEntry', () => {
 		expect(builder.distinct).toHaveBeenCalled();
 	});
 
+	it('counts a purge that covered several of the entry\'s tags once', async () => {
+		// A mutation touching two rows drops a tag per row, and an entry that read
+		// both carries both — so the join answers the same purge twice, differing
+		// only in which tag matched. The listing counts it once
+		// (`COUNT(DISTINCT purge_id)`), and this has to agree with that.
+		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+			{
+				purge_id: 'p-wide',
+				time: new Date(4_000).toISOString(),
+				mode: 'slices',
+				collection: 'articles',
+				scoped_cache_tag: 'articles:id=5',
+				evicted: 7,
+			},
+			{
+				purge_id: 'p-wide',
+				time: new Date(4_000).toISOString(),
+				mode: 'slices',
+				collection: 'articles',
+				scoped_cache_tag: 'articles:id=6',
+				evicted: 7,
+			},
+		];
+
+		const covering = await listPurgesCoveringEntry('k1', new Date(500));
+
+		// One record, and the tag kept is the one the ordering makes first, so a
+		// re-read answers the same string rather than whichever row came back.
+		expect(covering).toEqual([
+			{
+				time: 4_000,
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTag: 'articles:id=5',
+				evicted: 7,
+			},
+		]);
+
+		expect(builder.orderBy).toHaveBeenCalledWith('pt.scoped_cache_tag', 'asc');
+	});
+
+	// A namespace clear names neither a tag nor a collection, so it leaves no
+	// `purge_tags` row for either reach to join — and it took every entry, this
+	// one included. Missing it would answer "nothing purged this" about the most
+	// total invalidation there is.
+	it('names a namespace clear, which no tag or collection joins', async () => {
+		rowsByTable['directus_cache_purges as p'] = [
+			{
+				purge_id: 'p-clear',
+				time: new Date(6_000).toISOString(),
+				mode: 'namespace',
+				collection: null,
+				evicted: null,
+			},
+		];
+
+		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+			{
+				purge_id: 'p-tagged',
+				time: new Date(2_000).toISOString(),
+				mode: 'slices',
+				collection: 'articles',
+				scoped_cache_tag: 'articles:id=5',
+				evicted: 1,
+			},
+		];
+
+		const covering = await listPurgesCoveringEntry('k1', new Date(500));
+
+		expect(covering).toEqual([
+			{
+				time: 6_000,
+				mode: 'namespace',
+				// It named no scope at all, which is what made it reach everything.
+				collection: null,
+				scopedCacheTag: null,
+				evicted: null,
+			},
+			{
+				time: 2_000,
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTag: 'articles:id=5',
+				evicted: 1,
+			},
+		]);
+
+		expect(builder.where).toHaveBeenCalledWith('p.mode', 'namespace');
+		expect(builder.where).toHaveBeenCalledWith('p.time', '>', new Date(500));
+	});
+
 	it('answers nothing where telemetry was never configured', async () => {
 		env['CACHE_STATS_ENABLED'] = false;
 		queryRows = [{ purge_id: 'p1', time: new Date(1).toISOString() }];
@@ -2588,6 +2679,19 @@ describe('readCacheDescriptorForRedisKey', () => {
 
 		await expect(readCacheDescriptorForRedisKey('')).resolves.toBeNull();
 		expect(builder.first).not.toHaveBeenCalled();
+	});
+
+	it('answers null for a descriptor that was never filled', async () => {
+		// An anomaly locator: a descriptor written where the response was declined,
+		// so `last_filled` is NULL. `new Date(null)` is the epoch, which would have
+		// it report a fill on 1970-01-01 and take every purge recorded since with
+		// it — and the anomaly listing hands out exactly this key.
+		firstRows = [{ cache_key: 'h5', last_filled: null }];
+
+		await expect(readCacheDescriptorForRedisKey('h5')).resolves.toBeNull();
+
+		// The row was found, not missed: it is the fill that is absent.
+		expect(builder.where).toHaveBeenCalledWith('cache_key', 'h5');
 	});
 
 	it('answers null where telemetry was never configured', async () => {

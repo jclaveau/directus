@@ -18,6 +18,8 @@ get:
       description: How many buckets to split the window into.
       schema:
         type: integer
+        minimum: 1
+        maximum: 500
   responses:
     '200':
       content:
@@ -28,5 +30,9 @@ get:
                 type: object
             type: object
       description: Successful request
+    '400':
+      description: >
+        The `window` is not a duration such as "15m", or `buckets` is not a
+        number within 1-500
   tags:
     - System Diagnostics

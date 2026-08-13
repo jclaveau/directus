@@ -57,6 +57,7 @@ vi.mock('../../processes/lib/processes-config.js', () => {
 
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
+	CACHE_TIMESERIES_MIN_BUCKETS,
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
 	type CacheGroupLatencyRecord,
@@ -179,63 +180,40 @@ test('A deployment that reports no processes offers no tool for them', () => {
 
 // "Servers MUST: validate all tool inputs."
 // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
+//
+// Both arguments are handed over unread: `UtilsService` refuses a window or a
+// bucket count it cannot take, so this tool and `GET /utils/cache/timeseries`
+// judge the same value the same way rather than each keeping its own opinion of
+// it. What the guards accept and refuse is tabled with them, in
+// `services/utils.test.ts`; what this file owes is that nothing is lost, coerced
+// or defaulted on the way there.
 test.each([
-	'list_cache_entries',
-	'list_cache_anomalies',
-	'list_cache_latencies',
-	'read_cache_timeseries',
-])('%s refuses a window it cannot read', async (tool) => {
-	// Silently answering the default would tell an agent "here are the last 24h"
-	// when it asked for something else, with no way to notice.
-	await expect(findSystemMcpTool(tool)!.run({ window: 'yesterday' }, context))
-		.rejects
-		.toThrow(/window 'yesterday' is not a duration/);
-
-	expect(service.getCacheEntries).not.toHaveBeenCalled();
-	expect(service.getCacheAnomalies).not.toHaveBeenCalled();
-	expect(service.getCacheGroupLatencies).not.toHaveBeenCalled();
-	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
-});
-
-// "Servers MUST: validate all tool inputs."
-// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
-test.each([
+	['a duration', '15m'],
+	['one it cannot read', 'yesterday'],
+	// Falsy and a valid parse, so a tool reading it as absent would answer the
+	// default window instead.
+	['zero', '0'],
+	// `null` is what an agent sends for "no window in particular", and it is a
+	// different thing from sending none at all.
 	['null', null],
 	['a boolean', true],
 	['a list', []],
 	['an object', {}],
 	['empty', ''],
-])('A window that is %s is refused, not read as absent', async (_case, window) => {
-	// The window parser answers a fallback for anything it cannot read, and that
-	// fallback is `undefined` — which reads as "no window given", so a wrong
-	// *type* would quietly answer the 24h default while a wrong *string* is
-	// refused. `null` is what an agent sends for "no window in particular".
-	for (const name of ['list_cache_entries', 'read_cache_timeseries']) {
-		await expect(findSystemMcpTool(name)!.run({ window }, context))
-			.rejects
-			.toThrow(/is not a duration/);
-	}
+])('A window that is %s reaches the service as it was given', async (
+	_case,
+	window,
+) => {
+	await findSystemMcpTool('list_cache_entries')!.run({ window }, context);
 
-	expect(service.getCacheEntries).not.toHaveBeenCalled();
-	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
+	expect(service.getCacheEntries).toHaveBeenCalledWith(window);
 });
 
-// The bucket count is handed over unread: `UtilsService.getCacheTimeseries`
-// refuses one it cannot take, so both this tool and `GET /utils/cache/timeseries`
-// judge the same value the same way. Its own table lives with that guard, in
-// `services/utils.test.ts`.
 test('The bucket count reaches the service as it was given', async () => {
 	await findSystemMcpTool('read_cache_timeseries')!
 		.run({ buckets: 'five' }, context);
 
 	expect(service.getCacheTimeseries).toHaveBeenCalledWith(undefined, 'five');
-});
-
-test('A window of zero is a window, not a missing one', async () => {
-	// `0` is falsy and a valid parse, so it must not be read as absent.
-	await findSystemMcpTool('list_cache_entries')!.run({ window: '0' }, context);
-
-	expect(service.getCacheEntries).toHaveBeenCalledWith(0);
 });
 
 test('Every tool declares the subsystem it reads', () => {
@@ -275,8 +253,9 @@ test.each([
 	['list_cache_latencies', 'getCacheGroupLatencies'],
 ] as const)('%s reads the window it was given', async (tool, method) => {
 	await findSystemMcpTool(tool)!.run({ window: '15m' }, context);
-	expect(service[method]).toHaveBeenCalledWith(900_000);
+	expect(service[method]).toHaveBeenCalledWith('15m');
 
+	// Absent stays absent rather than becoming a window of its own.
 	await findSystemMcpTool(tool)!.run({}, context);
 	expect(service[method]).toHaveBeenLastCalledWith(undefined);
 });
@@ -375,7 +354,7 @@ test('The timeseries takes both the window and the bucket count', async () => {
 	await findSystemMcpTool('read_cache_timeseries')!
 		.run({ window: '1h', buckets: 12 }, context);
 
-	expect(service.getCacheTimeseries).toHaveBeenCalledWith(3_600_000, 12);
+	expect(service.getCacheTimeseries).toHaveBeenCalledWith('1h', 12);
 
 	await findSystemMcpTool('read_cache_timeseries')!.run({}, context);
 
@@ -392,7 +371,7 @@ test('The timeseries declares the bounds the read clamps to', () => {
 
 	expect(buckets).toMatchObject({
 		type: 'number',
-		minimum: 1,
+		minimum: CACHE_TIMESERIES_MIN_BUCKETS,
 		maximum: CACHE_TIMESERIES_MAX_BUCKETS,
 	});
 });

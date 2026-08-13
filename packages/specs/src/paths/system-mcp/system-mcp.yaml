@@ -6,7 +6,8 @@ post:
     A read-only MCP (Model Context Protocol) endpoint over JSON-RPC 2.0,
     implementing the Streamable HTTP transport of revision 2025-06-18. Exposes
     the diagnostic reads as tools: the processes tree, the cache listings, one
-    cache entry by key, anomalies, latencies, timeseries and telemetry state.
+    cache entry by its `redisKey`, anomalies, latencies, timeseries and
+    telemetry state.
     Supports
     `initialize`, `ping`, `tools/list` and `tools/call`; every tool is
     annotated read-only.

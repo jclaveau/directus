@@ -1144,14 +1144,14 @@ export async function listPurgesCoveringEntry(
 	}
 
 	const db = getDatabase();
-	const covering: CacheEntryPurgeRecord[] = [];
+
+	// The DB boundary: knex resolves a builder to `any`, so the row shape is
+	// asserted here rather than at each field below.
+	const rows: Record<string, unknown>[] = [];
 
 	for (const reach of SCOPED_CACHE_PURGE_REACHES) {
-		// The DB boundary: knex resolves a builder to `any`, so the row shape is
-		// asserted once here rather than at each field below.
-		const rows = await scopedCachePurgeCoverage(db, reach, [cacheKey], since)
+		rows.push(...await scopedCachePurgeCoverage(db, reach, [cacheKey], since)
 			.join('directus_cache_purges as p', 'p.purge_id', 'pt.purge_id')
-			// One purge covering two of the entry's tags is one row, not two.
 			.distinct(
 				'p.purge_id',
 				'p.time',
@@ -1160,26 +1160,53 @@ export async function listPurgesCoveringEntry(
 				'pt.scoped_cache_tag',
 				'p.evicted',
 			)
+			// Ordered by tag as well so that where a purge covered several of the
+			// entry's tags, which of them the deduplication below keeps is the same
+			// answer on every read rather than whichever the DB happened to emit.
 			.orderBy('p.time', 'desc')
-			.limit(CACHE_ENTRY_PURGE_LIMIT) as Record<string, unknown>[];
-
-		for (const row of rows) {
-			covering.push({
-				time: new Date(row['time'] as string).getTime(),
-				mode: row['mode'] as CachePurgeMode,
-				collection: (row['collection'] as string | null) ?? null,
-				// Empty is how the collection reach spells "named no tag"; null says
-				// it outward, so a reader cannot mistake it for a tag called ''.
-				scopedCacheTag: (row['scoped_cache_tag'] as string) || null,
-				evicted: row['evicted'] === null
-					? null
-					: Number(row['evicted']),
-			});
-		}
+			.orderBy('pt.scoped_cache_tag', 'asc')
+			.limit(CACHE_ENTRY_PURGE_LIMIT) as Record<string, unknown>[]);
 	}
 
-	// Re-sorted across both reaches, which were each newest-first on their own.
-	return covering
+	// A namespace clear names neither a tag nor a collection, so neither reach
+	// above can join it — and it took every entry, this one included. Read
+	// straight from the purges table, which is the only trace it leaves. Not
+	// counted in the listing's `purges`: that column attributes a purge to the
+	// scope it named, and a clear named none.
+	rows.push(...await db('directus_cache_purges as p')
+		.where('p.mode', 'namespace')
+		.where('p.time', '>', since)
+		.select('p.purge_id', 'p.time', 'p.mode', 'p.collection', 'p.evicted')
+		.orderBy('p.time', 'desc')
+		.limit(CACHE_ENTRY_PURGE_LIMIT) as Record<string, unknown>[]);
+
+	// One purge is one record however many of the entry's tags it covered: the
+	// rows differ only in which tag matched, which `DISTINCT` keeps apart, and
+	// the listing counts the same purge once (`COUNT(DISTINCT purge_id)`).
+	const byPurgeId = new Map<string, CacheEntryPurgeRecord>();
+
+	for (const row of rows) {
+		const purgeId = row['purge_id'] as string;
+
+		if (byPurgeId.has(purgeId)) {
+			continue;
+		}
+
+		byPurgeId.set(purgeId, {
+			time: new Date(row['time'] as string).getTime(),
+			mode: row['mode'] as CachePurgeMode,
+			collection: (row['collection'] as string | null) ?? null,
+			// Empty is how the collection reach spells "named no tag"; null says
+			// it outward, so a reader cannot mistake it for a tag called ''.
+			scopedCacheTag: (row['scoped_cache_tag'] as string) || null,
+			evicted: row['evicted'] === null
+				? null
+				: Number(row['evicted']),
+		});
+	}
+
+	// Re-sorted across the reaches, which were each newest-first on their own.
+	return [...byPurgeId.values()]
 		.sort((a, b) => b.time - a.time)
 		.slice(0, CACHE_ENTRY_PURGE_LIMIT);
 }
@@ -1196,6 +1223,11 @@ export async function listPurgesCoveringEntry(
  * The primary-key arm goes first for a second reason: `redis_key` defaults to
  * `''` on rows written before it existed and on anomaly locators, so an empty
  * probe would match all of them at once.
+ *
+ * A locator answers null like a key with no descriptor at all: `last_filled` is
+ * nullable exactly so that a descriptor written at an anomaly site can say the
+ * response was never cached, and there is no fill to measure anything from. The
+ * entries listing draws the same line with `WHERE last_filled IS NOT NULL`.
  */
 export async function readCacheDescriptorForRedisKey(
 	redisKey: string,
@@ -1214,7 +1246,9 @@ export async function readCacheDescriptorForRedisKey(
 		.where('redis_key', redisKey)
 		.first('cache_key', 'last_filled');
 
-	if (found === undefined) {
+	// `new Date(null)` is the epoch, so a locator would otherwise report having
+	// been filled on 1970-01-01 and take every purge recorded since with it.
+	if (found === undefined || found['last_filled'] === null) {
 		return null;
 	}
 
@@ -1682,9 +1716,11 @@ export async function reapCacheAnomalies(): Promise<number> {
 }
 
 /**
- * The ceiling a requested bucket count is clamped to. Exported so the tool schema
- * declaring that argument names the same bound the read enforces.
+ * The range a requested bucket count has to fall in. Exported so that the schema
+ * publishing the argument, the guard refusing it and the clamp below all name
+ * one bound rather than three that can drift.
  */
+export const CACHE_TIMESERIES_MIN_BUCKETS = 1;
 export const CACHE_TIMESERIES_MAX_BUCKETS = 500;
 
 /**
@@ -1770,7 +1806,7 @@ export async function readCacheTimeseries(
 	const now = Date.now();
 
 	const bucketCount = Math.min(
-		Math.max(Math.trunc(buckets), 1),
+		Math.max(Math.trunc(buckets), CACHE_TIMESERIES_MIN_BUCKETS),
 		CACHE_TIMESERIES_MAX_BUCKETS,
 	);
 
