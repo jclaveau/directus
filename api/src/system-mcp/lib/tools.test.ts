@@ -55,11 +55,12 @@ vi.mock('../../processes/lib/processes-config.js', () => {
 	};
 });
 
-import type {
-	CacheAnomalyRecord,
-	CacheEntryRecord,
-	CacheGroupLatencyRecord,
-	CacheStatsState,
+import {
+	CACHE_TIMESERIES_MAX_BUCKETS,
+	type CacheAnomalyRecord,
+	type CacheEntryRecord,
+	type CacheGroupLatencyRecord,
+	type CacheStatsState,
 } from '../../cache-events.js';
 // Type-only, so the mock above still stands in for the module at runtime.
 import type { UtilsService as GuardedUtils } from '../../services/utils.js';
@@ -196,19 +197,6 @@ test.each([
 	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
 });
 
-test('The timeseries refuses a bucket count that is not a number', async () => {
-	// `Number('five')` is NaN, which would reach the query as an Invalid Date and
-	// fail there, naming nothing the caller could act on.
-	await expect(
-		findSystemMcpTool('read_cache_timeseries')!
-			.run({ buckets: 'five' }, context),
-	)
-		.rejects
-		.toThrow(/buckets 'five' is not a number/);
-
-	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
-});
-
 // "Servers MUST: validate all tool inputs."
 // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
 test.each([
@@ -232,23 +220,15 @@ test.each([
 	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
 });
 
-// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#security-considerations
-test.each([
-	['null', null],
-	['a boolean', true],
-	['a list', []],
-	['empty', ''],
-])('A bucket count that is %s is refused, not coerced', async (_case, buckets) => {
-	// `Number(null)`, `Number([])` and `Number('')` are all 0 and `Number(true)`
-	// is 1 — every one of them finite, so the count survives the guard and the
-	// read is bucketed to a granularity nobody asked for.
-	await expect(
-		findSystemMcpTool('read_cache_timeseries')!.run({ buckets }, context),
-	)
-		.rejects
-		.toThrow(/is not a number/);
+// The bucket count is handed over unread: `UtilsService.getCacheTimeseries`
+// refuses one it cannot take, so both this tool and `GET /utils/cache/timeseries`
+// judge the same value the same way. Its own table lives with that guard, in
+// `services/utils.test.ts`.
+test('The bucket count reaches the service as it was given', async () => {
+	await findSystemMcpTool('read_cache_timeseries')!
+		.run({ buckets: 'five' }, context);
 
-	expect(service.getCacheTimeseries).not.toHaveBeenCalled();
+	expect(service.getCacheTimeseries).toHaveBeenCalledWith(undefined, 'five');
 });
 
 test('A window of zero is a window, not a missing one', async () => {
@@ -383,16 +363,24 @@ test('The timeseries takes both the window and the bucket count', async () => {
 
 	expect(service.getCacheTimeseries).toHaveBeenCalledWith(3_600_000, 12);
 
-	// A bucket count given as text still reaches the service as a number.
-	await findSystemMcpTool('read_cache_timeseries')!
-		.run({ window: '1h', buckets: '6' }, context);
-
-	expect(service.getCacheTimeseries).toHaveBeenLastCalledWith(3_600_000, 6);
-
 	await findSystemMcpTool('read_cache_timeseries')!.run({}, context);
 
 	expect(service.getCacheTimeseries)
 		.toHaveBeenLastCalledWith(undefined, undefined);
+});
+
+test('The timeseries declares the bounds the read clamps to', () => {
+	// The inputSchema is what a client validates arguments against, so a bound the
+	// read enforces and the schema omits is one the caller learns by surprise.
+	const buckets = findSystemMcpTool('read_cache_timeseries')!
+		.inputSchema
+		.properties['buckets'];
+
+	expect(buckets).toMatchObject({
+		type: 'number',
+		minimum: 1,
+		maximum: CACHE_TIMESERIES_MAX_BUCKETS,
+	});
 });
 
 test('The telemetry state takes no argument', async () => {

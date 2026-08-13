@@ -38,6 +38,36 @@ import { compress } from '../utils/compress.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 
+/**
+ * How many buckets a timeseries read was asked for.
+ *
+ * `Number` reads `null`, `[]` and `''` as 0 and `true` as 1 — all of them finite
+ * — so a value that is no bucket count at all would survive a bare finiteness
+ * check and silently re-bucket the read. Only a number, or text spelling one, is
+ * taken; anything else is refused rather than reaching the query as an Invalid
+ * Date, which fails there naming nothing the caller could act on.
+ */
+function requestedTimeseriesBuckets(raw: unknown): number | undefined {
+	if (raw === undefined) {
+		return undefined;
+	}
+
+	const spellsANumber = typeof raw === 'number'
+		|| (typeof raw === 'string' && raw.trim() !== '');
+
+	const parsed = spellsANumber
+		? Number(raw)
+		: Number.NaN;
+
+	if (Number.isFinite(parsed) === false) {
+		throw new InvalidPayloadError({
+			reason: `buckets '${String(raw)}' is not a number`,
+		});
+	}
+
+	return parsed;
+}
+
 export class UtilsService {
 	knex: Knex;
 	accountability: Accountability | null;
@@ -230,13 +260,18 @@ export class UtilsService {
 		return listCacheGroupLatencies(windowMs);
 	}
 
+	/**
+	 * `buckets` arrives untrusted from whichever surface asked — a query string, a
+	 * tool argument — so it is read here rather than at each of them, which is what
+	 * keeps the two from disagreeing about the same value.
+	 */
 	async getCacheTimeseries(
 		windowMs?: number,
-		buckets?: number,
+		buckets?: unknown,
 	): Promise<CacheTimeseries> {
 		this.assertAdmin('inspect the cache timeseries');
 
-		return readCacheTimeseries(windowMs, buckets);
+		return readCacheTimeseries(windowMs, requestedTimeseriesBuckets(buckets));
 	}
 
 	// The live Redis state for a single key — the cached response plus its

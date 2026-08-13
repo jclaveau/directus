@@ -2854,6 +2854,47 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		The timeseries refuses a bucket count it cannot read, rather than failing
+		inside the query
+	`, () => {
+		// `Number('five')` is NaN, which used to become `new Date(NaN)` and reach
+		// the driver as an Invalid Date — a 500 naming nothing the caller could act
+		// on. `null`, `[]` and `''` are all 0 to `Number` and `true` is 1, so a
+		// bare finiteness check would have let them re-bucket the read instead.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			for (const buckets of ['five', '', 'true', '[]']) {
+				const refused = await request(url).get('/utils/cache/timeseries')
+					.query({ window: '5m', buckets })
+					.set('Authorization', auth);
+
+				expect(refused.statusCode).toBe(400);
+				expect(refused.body.errors[0].message).toContain('is not a number');
+			}
+
+			// Non-vacuous: the same read with a count it can take still answers, and
+			// answers with that many buckets.
+			const served = await request(url).get('/utils/cache/timeseries')
+				.query({ window: '5m', buckets: '4' })
+				.set('Authorization', auth);
+
+			expect(served.statusCode).toBe(200);
+			expect(served.body.data.buckets).toHaveLength(4);
+
+			// And an absent count is not a malformed one — it falls back.
+			const defaulted = await request(url).get('/utils/cache/timeseries')
+				.query({ window: '5m' })
+				.set('Authorization', auth);
+
+			expect(defaulted.statusCode).toBe(200);
+			expect(defaulted.body.data.buckets.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe(oneLine`
 		The cache anomalies endpoint reports its shape when none are staged
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {

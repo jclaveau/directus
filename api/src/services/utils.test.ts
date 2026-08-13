@@ -13,6 +13,7 @@ import {
 	listCacheAnomalies,
 	listCacheEntries,
 	listCacheGroupLatencies,
+	readCacheTimeseries,
 	readCacheTombstone,
 	recordCacheConfigEvent,
 	setCacheStatsEnabled,
@@ -170,6 +171,21 @@ describe('Services / Utils', () => {
 				as not being an admin`,
 			);
 		});
+
+		it('getCacheTimeseries rejects a non-admin user', async () => {
+			await expect(nonAdminService().getCacheTimeseries()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect the cache
+				timeseries as not being an admin`,
+			);
+		});
+
+		it('getCacheTimeseries judges the credential before the argument', async () => {
+			// A bucket count nobody may ask for is refused for the credential, not
+			// told it is malformed — which would answer a caller who got nothing.
+			await expect(nonAdminService().getCacheTimeseries(undefined, 'five'))
+				.rejects
+				.toThrowError(ForbiddenError);
+		});
 	});
 
 	describe('cache inspection (admin)', () => {
@@ -202,6 +218,46 @@ describe('Services / Utils', () => {
 				.toBe(rows);
 
 			expect(listCacheGroupLatencies).toHaveBeenCalledWith(3600_000);
+		});
+
+		// `Number` reads `null`, `[]` and `''` as 0 and `true` as 1 — every one of
+		// them finite, so a bare finiteness check would let a value that is no
+		// bucket count at all re-bucket the read. A word becomes `NaN`, which used
+		// to reach the query as an Invalid Date and answer 500.
+		it.each([
+			['a word', 'five'],
+			['null', null],
+			['a boolean', true],
+			['a list', []],
+			['an object', {}],
+			['empty', ''],
+		])('getCacheTimeseries refuses a bucket count that is %s', async (
+			_case,
+			buckets,
+		) => {
+			await expect(adminService().getCacheTimeseries(undefined, buckets))
+				.rejects
+				.toThrowError(`buckets '${String(buckets)}' is not a number`);
+
+			expect(readCacheTimeseries).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['a number', 12, 12],
+			['text spelling one', '12', 12],
+			['text around one', ' 12 ', 12],
+			// Out of range rather than unreadable: the read clamps it, and the tool
+			// schema names the same bounds, so it is not this guard's to refuse.
+			['under the floor', -5, -5],
+			['absent', undefined, undefined],
+		])('getCacheTimeseries reads a bucket count that is %s', async (
+			_case,
+			buckets,
+			expected,
+		) => {
+			await adminService().getCacheTimeseries(60_000, buckets);
+
+			expect(readCacheTimeseries).toHaveBeenCalledWith(60_000, expected);
 		});
 
 		it('evictCacheEntry evicts through the active cache', async () => {

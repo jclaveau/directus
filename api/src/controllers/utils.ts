@@ -279,12 +279,11 @@ router.get(
 		res.locals['cache'] = false;
 		const windowMs = getMilliseconds(req.query['window']);
 
-		const buckets = req.query['buckets'] === undefined
-			? undefined
-			: Number(req.query['buckets']);
-
 		res.locals['payload'] = {
-			data: await service.getCacheTimeseries(windowMs, buckets),
+			// `buckets` goes through unread: `Number` turned a word into NaN, which
+			// reached the query as an Invalid Date and answered 500. The service
+			// refuses it with a 400 naming the value.
+			data: await service.getCacheTimeseries(windowMs, req.query['buckets']),
 		};
 
 		return next();

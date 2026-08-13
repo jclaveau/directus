@@ -1,4 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { CACHE_TIMESERIES_MAX_BUCKETS } from '../../cache-events.js';
 import { getMilliseconds } from '../../utils/get-milliseconds.js';
 import { UtilsService } from '../../services/utils.js';
 import {
@@ -94,39 +95,6 @@ function requestedWindow(args: Record<string, unknown>): number | undefined {
 	if (parsed === undefined) {
 		throw new InvalidPayloadError({
 			reason: `window '${String(raw)}' is not a duration such as "15m"`,
-		});
-	}
-
-	return parsed;
-}
-
-/**
- * How many buckets a timeseries read was asked for.
- *
- * `Number` reads `null`, `[]` and `''` as 0 and `true` as 1 — all of them
- * finite — so a value that is no bucket count at all would survive a bare
- * finiteness check and silently re-bucket the read. Only a number, or text
- * spelling one, is taken.
- */
-function requestedBuckets(args: Record<string, unknown>): number | undefined {
-	const raw = args['buckets'];
-
-	if (raw === undefined) {
-		return undefined;
-	}
-
-	const spellsANumber = typeof raw === 'number'
-		|| (typeof raw === 'string' && raw.trim() !== '');
-
-	const parsed = spellsANumber
-		? Number(raw)
-		: Number.NaN;
-
-	// `NaN` would reach the query as an Invalid Date and fail there, naming
-	// nothing the caller could act on.
-	if (Number.isFinite(parsed) === false) {
-		throw new InvalidPayloadError({
-			reason: `buckets '${String(raw)}' is not a number`,
 		});
 	}
 
@@ -321,6 +289,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					...windowProperty,
 					buckets: {
 						type: 'number',
+						// The bounds the read clamps to, so a client validating against
+						// this schema knows what it will get rather than discovering it.
+						minimum: 1,
+						maximum: CACHE_TIMESERIES_MAX_BUCKETS,
 						description: 'How many buckets to split the window into.',
 					},
 				},
@@ -344,7 +316,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			run: async (args, context) => {
 				return utils(context).getCacheTimeseries(
 					requestedWindow(args),
-					requestedBuckets(args),
+					args['buckets'],
 				);
 			},
 		}),

@@ -1544,7 +1544,11 @@ export async function reapCacheAnomalies(): Promise<number> {
 		.delete();
 }
 
-const CACHE_TIMESERIES_MAX_BUCKETS = 500;
+/**
+ * The ceiling a requested bucket count is clamped to. Exported so the tool schema
+ * declaring that argument names the same bound the read enforces.
+ */
+export const CACHE_TIMESERIES_MAX_BUCKETS = 500;
 
 /**
  * Append a marker for an admin cache action (a TTL change, a flush) so the cache

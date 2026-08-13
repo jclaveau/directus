@@ -535,13 +535,18 @@ describe('System MCP Tests', () => {
 			expect(buckets.body.error.code).toBe(-32602);
 			expect(buckets.body.error.message).toContain('five');
 
-			// `Number(null)` is 0, which is finite — so a count that is no count at
-			// all must be refused on its type rather than on the parse.
-			const noBuckets = await callTool(vendor, 'read_cache_timeseries', {
-				buckets: null,
-			});
+			// `Number(null)` is 0 and `Number({})` is NaN — one finite, one not — so
+			// a count that is no count at all is refused on its type, not its parse.
+			// The guard itself lives in `UtilsService.getCacheTimeseries`, which is
+			// what makes `GET /utils/cache/timeseries` refuse these same values.
+			for (const noCount of [null, {}, true, []]) {
+				const noBuckets = await callTool(vendor, 'read_cache_timeseries', {
+					buckets: noCount,
+				});
 
-			expect(noBuckets.body.error.code).toBe(-32602);
+				expect(noBuckets.body.error.code).toBe(-32602);
+				expect(noBuckets.body.error.message).toContain('is not a number');
+			}
 
 			// The entry read names one entry, so it has nothing to fall back on.
 			const noKey = await callTool(vendor, 'read_cache_entry', {});
