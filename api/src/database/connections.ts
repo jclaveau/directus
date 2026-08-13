@@ -200,6 +200,17 @@ function resolveNamedConnectionConfig(name: string): Record<string, any> {
 }
 
 /**
+ * The knex config any configured connection resolves to, base included, so a
+ * caller that only needs to know where a connection points (which host, which
+ * database) reads the same answer the pool itself was built from.
+ */
+export function resolveConnectionConfig(name: string): Record<string, any> {
+	return name === getBaseConnectionName()
+		? getBaseDbConfig()
+		: resolveNamedConnectionConfig(name);
+}
+
+/**
  * A named connection's merged config must carry every field its client needs —
  * an inherited base field counts. Throws a pointed error (which env var to set)
  * instead of letting knex fail lazily with a cryptic driver error.
@@ -322,7 +333,7 @@ export function getDatabaseForAccountability(
 	// config drifted incomplete after boot (e.g. a live env reload).
 	assertConnectionConfigComplete(name, config);
 
-	const db = constructDatabase(config);
+	const db = constructDatabase(config, name);
 
 	namedDatabases.set(name, db);
 	return db;

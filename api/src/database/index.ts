@@ -14,11 +14,13 @@ import { performance } from 'perf_hooks';
 import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
+import { nodeId } from '../utils/node-id.js';
 import { validateEnv } from '../utils/validate-env.js';
 import {
 	assertConnectionNamesAreUnique,
 	assertNamedConnectionsAreComplete,
 	connectionFieldEnvKey,
+	getBaseConnectionName,
 	getBaseDbConfig,
 	requiredConnectionFields,
 } from './connections.js';
@@ -58,7 +60,7 @@ export function getDatabase(): Knex {
 	assertConnectionNamesAreUnique();
 	assertNamedConnectionsAreComplete();
 
-	database = constructDatabase(config);
+	database = constructDatabase(config, getBaseConnectionName());
 	return database;
 }
 
@@ -66,8 +68,14 @@ export function getDatabase(): Knex {
  * Build a knex instance from a resolved DB config. Shared by the default pool
  * and named connections so both get the same client-specific pool hooks and
  * query instrumentation.
+ *
+ * The connection name is what every one of this pool's sessions announces itself
+ * as; a pool built without one stays anonymous.
  */
-export function constructDatabase(config: Record<string, any>): Knex {
+export function constructDatabase(
+	config: Record<string, any>,
+	connectionName?: string,
+): Knex {
 	const logger = useLogger();
 	const metrics = useMetrics();
 
@@ -79,6 +87,22 @@ export function constructDatabase(config: Record<string, any>): Knex {
 		pool: poolConfig = {},
 		...connectionConfig
 	} = config;
+
+	// pgbouncer prints this per client and Postgres carries it in
+	// `pg_stat_activity`, so a connection can be traced back to the process and
+	// the pool it came from. `DB_APPLICATION_NAME` resolves camelCased, which the
+	// driver does not read, so a configured name is forwarded under the parameter
+	// the driver does read. A connection string carries its own parameters, so
+	// only the object form is filled.
+	if (
+		connectionName !== undefined
+		&& connectionString === undefined
+		&& (client === 'pg' || client === 'cockroachdb')
+	) {
+		connectionConfig['application_name'] = connectionConfig['application_name']
+			?? connectionConfig['applicationName']
+			?? `directus:${nodeId}:${connectionName}`;
+	}
 
 	const knexConfig: Knex.Config = {
 		client,
