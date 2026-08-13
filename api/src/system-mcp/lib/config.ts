@@ -42,7 +42,8 @@ export function systemMcpToolGroups(): SystemMcpToolGroup[] {
  *
  * Empty by default, so no browser origin is accepted until one is named. Kept
  * separate from `CORS_ORIGIN` on purpose: opening the Data Studio to an origin
- * should not also hand it the diagnostics.
+ * should not also hand it the diagnostics — which means a browser needs both,
+ * this one to get past here and `CORS_ORIGIN` to be allowed to read the answer.
  */
 export function systemMcpAllowsOrigin(origin: string | undefined): boolean {
 	if (origin === undefined) {

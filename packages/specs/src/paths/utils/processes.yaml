@@ -4,9 +4,12 @@ get:
   summary: List running processes
   description: >
     The running processes of this deployment as a service, replica and process
-    tree. Each process reports what its supervisor observed (status, restarts,
-    memory against the cap it is recycled at, uptime, exec mode) and the
-    environment it resolved, redacted, with the layer each value came from.
+    tree. Each process reports whichever halves PROCESSES_REPORT_DETAILS names:
+    "stats", what its supervisor observed (status, restarts, memory against the
+    cap it is recycled at, uptime, exec mode), and "env", the environment it
+    resolved, redacted, with the layer each value came from. A deployment that
+    named neither reports only the identity of each process, and the `details`
+    field answers which of the two this one carries.
     Admin only, and served only where PROCESSES_REPORT_ENABLED is on —
     elsewhere the path is absent rather than refusing.
   operationId: list-processes

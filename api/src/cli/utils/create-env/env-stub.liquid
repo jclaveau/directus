@@ -252,7 +252,8 @@ ASSETS_CACHE_TTL="30d"
 # because DNS rebinding defeats CORS. A caller with no Origin header is not a
 # browser, which is the agent case this endpoint is for. Separate from
 # CORS_ORIGIN on purpose: opening the Data Studio to an origin should not also
-# hand it the diagnostics. [""]
+# hand it the diagnostics — so a browser needs BOTH, this one to be let in and
+# CORS_ENABLED/CORS_ORIGIN to be allowed to read the answer. [""]
 # SYSTEM_MCP_ALLOWED_ORIGINS="https://agent.example.com"
 
 # The caller authenticates as an admin the usual way — a session, or a Directus

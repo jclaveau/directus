@@ -69,9 +69,8 @@ post:
         server asked
     '403':
       description: Not an admin, or an Origin that is not allowed
-    '405':
-      description: >
-        Returned for GET and DELETE — this server offers no SSE stream and opens
-        no session
+  # The 405 that GET and DELETE answer is stated in the description above rather
+  # than declared: it belongs to no operation here, and giving those two methods
+  # an operation object of their own would publish them as callable.
   tags:
     - System MCP
