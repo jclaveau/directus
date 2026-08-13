@@ -569,7 +569,12 @@ describe('System MCP Tests', () => {
 			const noKey = await callTool(vendor, 'read_cache_entry', {});
 
 			expect(noKey.body.error.code).toBe(-32602);
-			expect(noKey.body.error.message).toContain('key');
+
+			// The argument by name, not a bare `key`: that is the entry listing's
+			// other identity, and `'redisKey'.includes('key')` is false anyway —
+			// the capital K is what broke this assertion when the argument was
+			// renamed.
+			expect(noKey.body.error.message).toContain('redisKey');
 		});
 	});
 
