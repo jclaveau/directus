@@ -18,6 +18,7 @@ import MarketplaceAccount from './routes/marketplace/routes/account/account.vue'
 import MarketplaceExtension from './routes/marketplace/routes/extension/extension.vue';
 import MarketplaceRegistry from './routes/marketplace/routes/registry/registry.vue';
 import NotFound from './routes/not-found.vue';
+import PgBouncer from './routes/pgbouncer/pgbouncer.vue';
 import PoliciesCollection from './routes/policies/collection.vue';
 import PoliciesItem from './routes/policies/item.vue';
 import NewPolicy from './routes/policies/add-new.vue';
@@ -317,6 +318,11 @@ export default defineModule({
 			name: 'settings-processes',
 			path: 'processes',
 			component: Processes,
+		},
+		{
+			name: 'settings-pgbouncer',
+			path: 'pgbouncer',
+			component: PgBouncer,
 		},
 		{
 			name: 'settings-not-found',
