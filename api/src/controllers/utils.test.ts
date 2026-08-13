@@ -27,7 +27,7 @@ function handlerFor(path: string) {
 describe('utils controller /cache/latencies', () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	test('never caches the listing and passes the parsed window down', async () => {
+	test('never caches the listing and hands the window down unread', async () => {
 		const rows = [{ path: '/items/a', method: null, query: null }];
 		getCacheGroupLatencies.mockResolvedValueOnce(rows);
 
@@ -45,12 +45,14 @@ describe('utils controller /cache/latencies', () => {
 		// The latencies must reflect live state, so the response itself is never
 		// served from the cache it reports on.
 		expect(res.locals['cache']).toBe(false);
-		expect(getCacheGroupLatencies).toHaveBeenCalledWith(43_200_000);
+		// Unread on purpose: `UtilsService` parses it, so this route and the MCP
+		// tool beside it cannot come to disagree about what a duration means.
+		expect(getCacheGroupLatencies).toHaveBeenCalledWith('12h');
 		expect(res.locals['payload']).toEqual({ data: rows });
 		expect(next).toHaveBeenCalledOnce();
 	});
 
-	test('leaves the window undefined so the listing keeps its default', async () => {
+	test('leaves an absent window absent, so the listing defaults', async () => {
 		getCacheGroupLatencies.mockResolvedValueOnce([]);
 
 		const req = { accountability: null, schema: {}, query: {} } as any;

@@ -94,6 +94,21 @@ class OASSpecsService implements SpecificationSubService {
 		const paths = await this.generatePaths(schemaForSpec, permissions, tags);
 		const components = await this.generateComponents(schemaForSpec, tags);
 
+		// A tag whose every path was gated away by `x-enabled-by` would otherwise
+		// stay advertised with nothing under it. Only tags carrying no collection
+		// are considered: their operations are served unconditionally, so an
+		// unreferenced one can have lost its paths to the env gate and nothing
+		// else — a collection tag drives its own paths and is left alone.
+		const servedTagNames = new Set(
+			Object.values(paths)
+				.flatMap((pathItem) => Object.values(pathItem as Record<string, any>))
+				.flatMap((operation) => operation?.tags ?? []),
+		);
+
+		const servedTags = tags?.filter((tag) => {
+			return 'x-collection' in tag || servedTagNames.has(tag.name);
+		});
+
 		const isDefaultPublicUrl = env['PUBLIC_URL'] === '/';
 		const url = isDefaultPublicUrl && host ? host : (env['PUBLIC_URL'] as string);
 
@@ -119,7 +134,10 @@ class OASSpecsService implements SpecificationSubService {
 			paths,
 		};
 
-		if (tags) spec.tags = tags;
+		if (servedTags) {
+			spec.tags = servedTags;
+		}
+
 		if (components) spec.components = components;
 
 		return spec;
@@ -185,6 +203,17 @@ class OASSpecsService implements SpecificationSubService {
 
 			if (isSystem) {
 				for (const [path, pathItem] of Object.entries<PathItemObject>(spec.paths)) {
+					// A path whose feature is switched off is absent from this deployment's
+					// router, so publishing it would document a 404. `x-enabled-by` names the
+					// env flag that decides. The document is already per-instance (which
+					// collections exist) and per-caller (what they may see); this is the same
+					// tailoring, and an `x-` field is how OAS 3.0.1 says to add one.
+					const enabledBy = (pathItem as Record<string, unknown>)['x-enabled-by'];
+
+					if (typeof enabledBy === 'string' && env[enabledBy] !== true) {
+						continue;
+					}
+
 					for (const [method, operation] of Object.entries(pathItem)) {
 						if (operation.tags?.includes(tag.name)) {
 							if (!paths[path]) {

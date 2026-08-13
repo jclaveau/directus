@@ -230,6 +230,11 @@ const DEFAULT_CACHE_STATS_WINDOW = getMilliseconds('24h', 86_400_000);
 const MIN_CACHE_STATS_WINDOW = getMilliseconds('1m', 60_000);
 const CACHE_STATS_LISTING_LIMIT = 200;
 
+// An entry pinned to a hot slice is covered by every mutation of it, so the
+// purges since its fill are unbounded. The newest few answer "was this entry
+// invalidated and kept anyway"; the rest are the same answer repeated.
+const CACHE_ENTRY_PURGE_LIMIT = 50;
+
 // A descriptor with no fill in this window AND no live event or anomaly is an
 // orphan (past a Directus upgrade, or a query combo that stopped being requested).
 const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
@@ -256,7 +261,7 @@ function statsNamespace(): string {
 const streamKey = () => `${statsNamespace()}:events`;
 const flagKey = () => `${statsNamespace()}:enabled`;
 const reasonKey = () => `${statsNamespace()}:killed_reason`;
-const tombstoneKey = (key: string) => `${statsNamespace()}:tomb:${key}`;
+const tombstoneKey = (redisKey: string) => `${statsNamespace()}:tomb:${redisKey}`;
 
 const anomalyThrottleKey = (reason: string, cacheKey: string) =>
 	`${statsNamespace()}:anom:${reason}:${cacheKey}`;
@@ -575,7 +580,7 @@ export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void
  * signal for exactly the entries the recommendation targets.
  */
 export async function writeCacheTombstone(
-	key: string,
+	redisKey: string,
 	expiredAt: number,
 ): Promise<void> {
 	if (!cacheStatsActiveFlag) {
@@ -585,7 +590,7 @@ export async function writeCacheTombstone(
 	const remainingLifeMs = Math.max(expiredAt - Date.now(), 0);
 
 	await useRedis().set(
-		tombstoneKey(key),
+		tombstoneKey(redisKey),
 		String(expiredAt),
 		'PX',
 		// Floor at 1ms: an already-expired entry with a zero lookback would otherwise
@@ -596,10 +601,10 @@ export async function writeCacheTombstone(
 
 // Gap since the entry expired, or null for a cold miss (no tombstone).
 export async function readCacheMissGap(
-	key: string,
+	redisKey: string,
 	now: number,
 ): Promise<number | null> {
-	const stored = await useRedis().get(tombstoneKey(key));
+	const stored = await useRedis().get(tombstoneKey(redisKey));
 
 	if (stored === null) {
 		return null;
@@ -610,12 +615,14 @@ export async function readCacheMissGap(
 
 // The expiry timestamp a live tombstone holds (when the key last expired), or
 // null if none — for the admin drawer's per-key inspection.
-export async function readCacheTombstone(key: string): Promise<number | null> {
+export async function readCacheTombstone(
+	redisKey: string,
+): Promise<number | null> {
 	if (!redisConfigAvailable()) {
 		return null;
 	}
 
-	const stored = await useRedis().get(tombstoneKey(key));
+	const stored = await useRedis().get(tombstoneKey(redisKey));
 
 	return stored === null
 		? null
@@ -1063,6 +1070,194 @@ async function persistStreamBatch(
 	await redis.call('XDEL', streamKey(), ...ids);
 }
 
+/** How far a purge reached, which decides what it can be matched against. */
+const SCOPED_CACHE_PURGE_REACHES = ['tag', 'collection'] as const;
+
+type ScopedCachePurgeReach = (typeof SCOPED_CACHE_PURGE_REACHES)[number];
+
+/**
+ * The join that answers "did this purge cover that entry", as a builder the
+ * caller projects. One reach per call, because the two are asked in turn.
+ *
+ *  - `tag` — the purge named a tag the entry was filled under.
+ *  - `collection` — the purge named no tag at all (the coarse fallback dropped
+ *    the bare tag AND every slice, so no single tag states its reach), and a
+ *    pinned entry carries only its slice tag, so the tag reach never sees it.
+ *
+ * Shared rather than written per caller because it is the join CONDITION the two
+ * readers must agree on: a count saying an entry was purged, beside a listing
+ * that cannot name the purge, would be reporting different things.
+ */
+function scopedCachePurgeCoverage(
+	db: Knex,
+	reach: ScopedCachePurgeReach,
+	cacheKeys: string[],
+	since: Date,
+): Knex.QueryBuilder {
+	if (reach === 'tag') {
+		return db('directus_scoped_cache_entry_tags as et')
+			.join(
+				'directus_scoped_cache_purge_tags as pt',
+				'pt.scoped_cache_tag',
+				'et.scoped_cache_tag',
+			)
+			.where('pt.time', '>', since)
+			.whereIn('et.cache_key', cacheKeys);
+	}
+
+	return db('directus_scoped_cache_purge_tags as pt')
+		.join(
+			'directus_scoped_cache_entry_tags as et',
+			'et.collection',
+			'pt.collection',
+		)
+		.where('pt.time', '>', since)
+		.where('pt.scoped_cache_tag', '')
+		.whereIn('et.cache_key', cacheKeys);
+}
+
+/** One purge that covered an entry, with the reach it was fired with. */
+export interface CacheEntryPurgeRecord {
+	time: number;
+	mode: CachePurgeMode;
+	collection: string | null;
+	/** The tag both sides matched on, or null where the purge named none. */
+	scopedCacheTag: string | null;
+	evicted: number | null;
+}
+
+/**
+ * The purges that covered one entry since `since` — pass its `last_filled` and
+ * the answer is what happened to it after it was written. Read beside `exists`:
+ * a purge covering an entry that is still held is a missed invalidation, which
+ * is the question the cached payload used to be eyeballed for.
+ *
+ * Ordered newest first and capped, because an entry pinned to a hot slice can
+ * be covered by thousands of purges and the first few answer the question.
+ */
+export async function listPurgesCoveringEntry(
+	cacheKey: string,
+	since: Date,
+): Promise<CacheEntryPurgeRecord[]> {
+	if (!cacheStatsConfigured()) {
+		return [];
+	}
+
+	const db = getDatabase();
+
+	// The DB boundary: knex resolves a builder to `any`, so the row shape is
+	// asserted here rather than at each field below.
+	const rows: Record<string, unknown>[] = [];
+
+	for (const reach of SCOPED_CACHE_PURGE_REACHES) {
+		rows.push(...await scopedCachePurgeCoverage(db, reach, [cacheKey], since)
+			.join('directus_cache_purges as p', 'p.purge_id', 'pt.purge_id')
+			.distinct(
+				'p.purge_id',
+				'p.time',
+				'p.mode',
+				'p.collection',
+				'pt.scoped_cache_tag',
+				'p.evicted',
+			)
+			// Ordered by tag as well so that where a purge covered several of the
+			// entry's tags, which of them the deduplication below keeps is the same
+			// answer on every read rather than whichever the DB happened to emit.
+			.orderBy('p.time', 'desc')
+			.orderBy('pt.scoped_cache_tag', 'asc')
+			.limit(CACHE_ENTRY_PURGE_LIMIT) as Record<string, unknown>[]);
+	}
+
+	// A namespace clear names neither a tag nor a collection, so neither reach
+	// above can join it — and it took every entry, this one included. Read
+	// straight from the purges table, which is the only trace it leaves. Not
+	// counted in the listing's `purges`: that column attributes a purge to the
+	// scope it named, and a clear named none.
+	rows.push(...await db('directus_cache_purges as p')
+		.where('p.mode', 'namespace')
+		.where('p.time', '>', since)
+		.select('p.purge_id', 'p.time', 'p.mode', 'p.collection', 'p.evicted')
+		.orderBy('p.time', 'desc')
+		.limit(CACHE_ENTRY_PURGE_LIMIT) as Record<string, unknown>[]);
+
+	// One purge is one record however many of the entry's tags it covered: the
+	// rows differ only in which tag matched, which `DISTINCT` keeps apart, and
+	// the listing counts the same purge once (`COUNT(DISTINCT purge_id)`).
+	const byPurgeId = new Map<string, CacheEntryPurgeRecord>();
+
+	for (const row of rows) {
+		const purgeId = row['purge_id'] as string;
+
+		if (byPurgeId.has(purgeId)) {
+			continue;
+		}
+
+		byPurgeId.set(purgeId, {
+			time: new Date(row['time'] as string).getTime(),
+			mode: row['mode'] as CachePurgeMode,
+			collection: (row['collection'] as string | null) ?? null,
+			// Empty is how the collection reach spells "named no tag"; null says
+			// it outward, so a reader cannot mistake it for a tag called ''.
+			scopedCacheTag: (row['scoped_cache_tag'] as string) || null,
+			evicted: row['evicted'] === null
+				? null
+				: Number(row['evicted']),
+		});
+	}
+
+	// Re-sorted across the reaches, which were each newest-first on their own.
+	return [...byPurgeId.values()]
+		.sort((a, b) => b.time - a.time)
+		.slice(0, CACHE_ENTRY_PURGE_LIMIT);
+}
+
+/**
+ * The descriptor behind a Redis key.
+ *
+ * `cache_key` is tried first and answers on any install that hashes, where both
+ * columns hold the same digest and that one is the primary key. Only a readable
+ * key (`CACHE_KEY_HASH_ENABLED=false`) falls through to `redis_key`, which is
+ * TEXT — unindexed, since MySQL cannot index it without a prefix length, and the
+ * scan is paid once per inspection rather than on any hot path.
+ *
+ * The primary-key arm goes first for a second reason: `redis_key` defaults to
+ * `''` on rows written before it existed and on anomaly locators, so an empty
+ * probe would match all of them at once.
+ *
+ * A locator answers null like a key with no descriptor at all: `last_filled` is
+ * nullable exactly so that a descriptor written at an anomaly site can say the
+ * response was never cached, and there is no fill to measure anything from. The
+ * entries listing draws the same line with `WHERE last_filled IS NOT NULL`.
+ */
+export async function readCacheDescriptorForRedisKey(
+	redisKey: string,
+): Promise<{ cacheKey: string; lastFilled: Date } | null> {
+	if (!cacheStatsConfigured() || redisKey === '') {
+		return null;
+	}
+
+	const db = getDatabase();
+
+	const byIdentity = await db('directus_cache_descriptors')
+		.where('cache_key', redisKey)
+		.first('cache_key', 'last_filled');
+
+	const found = byIdentity ?? await db('directus_cache_descriptors')
+		.where('redis_key', redisKey)
+		.first('cache_key', 'last_filled');
+
+	// `new Date(null)` is the epoch, so a locator would otherwise report having
+	// been filled on 1970-01-01 and take every purge recorded since with it.
+	if (found === undefined || found['last_filled'] === null) {
+		return null;
+	}
+
+	return {
+		cacheKey: found['cache_key'] as string,
+		lastFilled: new Date(found['last_filled'] as string),
+	};
+}
+
 /**
  * Recent cache activity for the admin page: descriptor (dimension, survives
  * retention) joined to windowed hits (fact). Not a live view — an entry evicted
@@ -1151,48 +1346,21 @@ export async function listCacheEntries(
 	});
 
 	if (listedKeys.length > 0) {
-		const purgeRows = await db('directus_scoped_cache_entry_tags as et')
-			.join(
-				'directus_scoped_cache_purge_tags as pt',
-				'pt.scoped_cache_tag',
-				'et.scoped_cache_tag',
-			)
-			.where('pt.time', '>', since)
-			.whereIn('et.cache_key', listedKeys)
-			.groupBy('et.cache_key')
-			.select(
-				'et.cache_key',
-				db.raw('COUNT(DISTINCT pt.purge_id) AS purges'),
-			);
+		// Summed rather than merged: a purge names a tag or names a collection and
+		// never both, so the two reaches cannot double-count one of them.
+		for (const reach of SCOPED_CACHE_PURGE_REACHES) {
+			const counted = await scopedCachePurgeCoverage(db, reach, listedKeys, since)
+				.groupBy('et.cache_key')
+				.select(
+					'et.cache_key',
+					db.raw('COUNT(DISTINCT pt.purge_id) AS purges'),
+				);
 
-		for (const row of purgeRows as Record<string, unknown>[]) {
-			purgesByKey.set(row['cache_key'] as string, Number(row['purges'] ?? 0));
-		}
-
-		// The coarse pass, joined on collection rather than on tag: a
-		// collection-wide purge names no tag, and a pinned entry carries only its
-		// slice tag, so nothing above would ever match it. Added to the precise
-		// count rather than replacing it — a purge is tag-bearing or
-		// collection-bearing and never both, so the two cannot double-count one.
-		const coarseRows = await db('directus_scoped_cache_purge_tags as pt')
-			.join(
-				'directus_scoped_cache_entry_tags as et',
-				'et.collection',
-				'pt.collection',
-			)
-			.where('pt.time', '>', since)
-			.where('pt.scoped_cache_tag', '')
-			.whereIn('et.cache_key', listedKeys)
-			.groupBy('et.cache_key')
-			.select(
-				'et.cache_key',
-				db.raw('COUNT(DISTINCT pt.purge_id) AS purges'),
-			);
-
-		for (const row of coarseRows as Record<string, unknown>[]) {
-			const key = row['cache_key'] as string;
-			const precise = purgesByKey.get(key) ?? 0;
-			purgesByKey.set(key, precise + Number(row['purges'] ?? 0));
+			for (const row of counted as Record<string, unknown>[]) {
+				const cacheKey = row['cache_key'] as string;
+				const already = purgesByKey.get(cacheKey) ?? 0;
+				purgesByKey.set(cacheKey, already + Number(row['purges'] ?? 0));
+			}
 		}
 	}
 
@@ -1353,10 +1521,13 @@ export async function listCacheGroupLatencies(
  * siblings. Best-effort — a no-op if it already expired. The descriptor lingers
  * until the reaper prunes it.
  */
-export async function evictCacheEntry(cache: Keyv, key: string): Promise<void> {
-	await cache.delete(key);
-	await cache.delete(`${key}__expires_at`);
-	await cache.delete(`${key}__tags`);
+export async function evictCacheEntry(
+	cache: Keyv,
+	redisKey: string,
+): Promise<void> {
+	await cache.delete(redisKey);
+	await cache.delete(`${redisKey}__expires_at`);
+	await cache.delete(`${redisKey}__tags`);
 }
 
 // Evict every currently-described entry on a path. Returns the count attempted.
@@ -1544,7 +1715,13 @@ export async function reapCacheAnomalies(): Promise<number> {
 		.delete();
 }
 
-const CACHE_TIMESERIES_MAX_BUCKETS = 500;
+/**
+ * The range a requested bucket count has to fall in. Exported so that the schema
+ * publishing the argument, the guard refusing it and the clamp below all name
+ * one bound rather than three that can drift.
+ */
+export const CACHE_TIMESERIES_MIN_BUCKETS = 1;
+export const CACHE_TIMESERIES_MAX_BUCKETS = 500;
 
 /**
  * Append a marker for an admin cache action (a TTL change, a flush) so the cache
@@ -1629,7 +1806,7 @@ export async function readCacheTimeseries(
 	const now = Date.now();
 
 	const bucketCount = Math.min(
-		Math.max(Math.trunc(buckets), 1),
+		Math.max(Math.trunc(buckets), CACHE_TIMESERIES_MIN_BUCKETS),
 		CACHE_TIMESERIES_MAX_BUCKETS,
 	);
 

@@ -1,0 +1,27 @@
+get:
+  summary: List cache entries
+  description: The response-cache entries seen in the window, grouped by endpoint and query, with hit counts, size, age and remaining TTL. Admin only.
+  operationId: list-cache-entries
+  parameters:
+    - name: window
+      in: query
+      required: false
+      description: How far back to look, as a duration such as "15m", "6h" or "7d".
+      schema:
+        type: string
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            properties:
+              data:
+                type: array
+                items:
+                  type: object
+            type: object
+      description: Successful request
+    '400':
+      description: The `window` is not a duration such as "15m"
+  tags:
+    - System Diagnostics

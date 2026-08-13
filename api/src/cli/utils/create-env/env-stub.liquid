@@ -234,6 +234,33 @@ CACHE_STORE=memory
 ASSETS_CACHE_TTL="30d"
 
 #####################################################################################
+### System MCP
+
+# Serve a read-only MCP endpoint at /system-mcp exposing the diagnostic
+# reads as tools an LLM agent can call, over the Streamable HTTP transport of
+# MCP revision 2025-06-18. Off by default. [false]
+# SYSTEM_MCP_ENABLED=false
+
+# Which subsystems to expose tools for: "processes" (the process tree) and
+# "cache" (listings, one entry by key, anomalies, latencies, timeseries,
+# telemetry state). A group left out is neither listed nor callable.
+# ["processes,cache"]
+# SYSTEM_MCP_TOOLS="processes,cache"
+
+# Browser origins allowed to call the endpoint. Empty by default, so no browser
+# reaches it: the transport spec requires the Origin header to be validated,
+# because DNS rebinding defeats CORS. A caller with no Origin header is not a
+# browser, which is the agent case this endpoint is for. Separate from
+# CORS_ORIGIN on purpose: opening the Data Studio to an origin should not also
+# hand it the diagnostics — so a browser needs BOTH, this one to be let in and
+# CORS_ENABLED/CORS_ORIGIN to be allowed to read the answer. [""]
+# SYSTEM_MCP_ALLOWED_ORIGINS="https://agent.example.com"
+
+# The caller authenticates as an admin the usual way — a session, or a Directus
+# static token on an admin user sent as `Authorization: Bearer <token>`. There
+# is no MCP-specific credential to issue or revoke.
+
+#####################################################################################
 ### Processes
 
 # Serve the admin Processes page (Settings -> Processes). Admin-only either

@@ -56,6 +56,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/flows/webhook.test.ts',
 			'/tests/db/app/cache.test.ts',
 			'/tests/db/app/processes.test.ts',
+			'/tests/db/app/system-mcp.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 		],
 		// If specified, only run these tests sequentially

@@ -1,0 +1,27 @@
+get:
+  summary: List cache anomalies
+  description: Responses the cache declined to keep in the window, and why. Admin only.
+  operationId: list-cache-anomalies
+  parameters:
+    - name: window
+      in: query
+      required: false
+      description: How far back to look, as a duration such as "15m", "6h" or "7d".
+      schema:
+        type: string
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            properties:
+              data:
+                type: array
+                items:
+                  type: object
+            type: object
+      description: Successful request
+    '400':
+      description: The `window` is not a duration such as "15m"
+  tags:
+    - System Diagnostics

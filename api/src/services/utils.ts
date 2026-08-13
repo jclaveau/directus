@@ -16,12 +16,17 @@ import {
 	type CacheGroupLatencyRecord,
 	type CacheStatsState,
 	type CacheTimeseries,
+	CACHE_TIMESERIES_MAX_BUCKETS,
+	CACHE_TIMESERIES_MIN_BUCKETS,
 	evictCacheEntriesForPath,
 	evictCacheEntry,
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	type CacheEntryPurgeRecord,
 	listCacheGroupLatencies,
+	listPurgesCoveringEntry,
+	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
 	recordCacheConfigEvent,
@@ -35,8 +40,76 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { collectProcesses } from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
+import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+
+/**
+ * How far back a cache read was asked to look, as milliseconds.
+ *
+ * A duration the parser cannot read is refused rather than quietly becoming the
+ * default: a caller told "here are the last 24h" when it asked for "yesterday"
+ * has no way to notice, and an agent that chose the tool has no way at all.
+ */
+function requestedStatsWindow(raw: unknown): number | undefined {
+	if (raw === undefined) {
+		return undefined;
+	}
+
+	const parsed = getMilliseconds(raw);
+
+	if (parsed === undefined) {
+		throw new InvalidPayloadError({
+			reason: `window '${String(raw)}' is not a duration such as "15m"`,
+		});
+	}
+
+	return parsed;
+}
+
+/**
+ * How many buckets a timeseries read was asked for.
+ *
+ * `Number` reads `null`, `[]` and `''` as 0 and `true` as 1 — all of them finite
+ * — so a value that is no bucket count at all would survive a bare finiteness
+ * check and silently re-bucket the read. Only a number, or text spelling one, is
+ * taken; anything else is refused rather than reaching the query as an Invalid
+ * Date, which fails there naming nothing the caller could act on.
+ *
+ * Out of range is refused for the same reason the window is: the read clamps to
+ * these bounds, and a caller that asked for ten thousand buckets and silently
+ * got five hundred would go on dividing by the count it asked for.
+ */
+function requestedTimeseriesBuckets(raw: unknown): number | undefined {
+	if (raw === undefined) {
+		return undefined;
+	}
+
+	const spellsANumber = typeof raw === 'number'
+		|| (typeof raw === 'string' && raw.trim() !== '');
+
+	const parsed = spellsANumber
+		? Number(raw)
+		: Number.NaN;
+
+	if (Number.isFinite(parsed) === false) {
+		throw new InvalidPayloadError({
+			reason: `buckets '${String(raw)}' is not a number`,
+		});
+	}
+
+	if (
+		parsed < CACHE_TIMESERIES_MIN_BUCKETS
+		|| parsed > CACHE_TIMESERIES_MAX_BUCKETS
+	) {
+		throw new InvalidPayloadError({
+			reason: `buckets '${String(raw)}' is outside `
+				+ `${CACHE_TIMESERIES_MIN_BUCKETS}-${CACHE_TIMESERIES_MAX_BUCKETS}`,
+		});
+	}
+
+	return parsed;
+}
 
 export class UtilsService {
 	knex: Knex;
@@ -210,39 +283,54 @@ export class UtilsService {
 		}
 	}
 
-	async getCacheEntries(windowMs?: number): Promise<CacheEntryRecord[]> {
+	/**
+	 * `window` and `buckets` arrive untrusted from whichever surface asked — a
+	 * query string, a tool argument — so every cache read below takes them raw and
+	 * they are read here, which is what keeps the surfaces from disagreeing about
+	 * the same value.
+	 */
+	async getCacheEntries(window?: unknown): Promise<CacheEntryRecord[]> {
 		this.assertAdmin('inspect the cache');
 
-		return listCacheEntries(windowMs);
+		return listCacheEntries(requestedStatsWindow(window));
 	}
 
-	async getCacheAnomalies(windowMs?: number): Promise<CacheAnomalyRecord[]> {
+	async getCacheAnomalies(window?: unknown): Promise<CacheAnomalyRecord[]> {
 		this.assertAdmin('inspect cache anomalies');
 
-		return listCacheAnomalies(windowMs);
+		return listCacheAnomalies(requestedStatsWindow(window));
 	}
 
 	async getCacheGroupLatencies(
-		windowMs?: number,
+		window?: unknown,
 	): Promise<CacheGroupLatencyRecord[]> {
 		this.assertAdmin('inspect cache latencies');
 
-		return listCacheGroupLatencies(windowMs);
+		return listCacheGroupLatencies(requestedStatsWindow(window));
 	}
 
 	async getCacheTimeseries(
-		windowMs?: number,
-		buckets?: number,
+		window?: unknown,
+		buckets?: unknown,
 	): Promise<CacheTimeseries> {
 		this.assertAdmin('inspect the cache timeseries');
 
-		return readCacheTimeseries(windowMs, buckets);
+		return readCacheTimeseries(
+			requestedStatsWindow(window),
+			requestedTimeseriesBuckets(buckets),
+		);
 	}
 
 	// The live Redis state for a single key — the cached response plus its
 	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
 	// descriptor holds. All may be gone: the descriptor outlives the value.
-	async readCacheEntry(key: string): Promise<{
+	/**
+	 * Takes the REDIS key — the same string `evictCacheEntry` takes, and what the
+	 * listing answers as `redisKey`. Its descriptor supplies the stats identity
+	 * the purge join needs; the two differ only where `CACHE_KEY_HASH_ENABLED` is
+	 * off and the Redis key becomes a readable descriptor.
+	 */
+	async readCacheEntry(redisKey: string): Promise<{
 		exists: boolean;
 		value: unknown;
 		tags: string[] | null;
@@ -250,8 +338,21 @@ export class UtilsService {
 		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
+		filledAt: number | null;
+		purgesSinceFilled: CacheEntryPurgeRecord[] | null;
 	}> {
 		this.assertAdmin('inspect a cache entry');
+
+		const descriptor = await readCacheDescriptorForRedisKey(redisKey);
+
+		// Empty is a reading — nothing covered it since it was written. `null` is
+		// not: with no descriptor there is no fill to measure from, and answering
+		// "no purges" would claim a proof this cannot give.
+		const purgesSinceFilled = descriptor === null
+			? null
+			: await listPurgesCoveringEntry(descriptor.cacheKey, descriptor.lastFilled);
+
+		const filledAt = descriptor?.lastFilled.getTime() ?? null;
 
 		const { cache } = getCache();
 
@@ -264,12 +365,14 @@ export class UtilsService {
 				expiry: null,
 				sizes: null,
 				tombstone: null,
+				filledAt,
+				purgesSinceFilled,
 			};
 		}
 
-		const value = await getCacheValue(cache, key);
-		const expiry = (await getCacheValue(cache, `${key}__expires_at`)) ?? null;
-		const tagged = await getCacheValue(cache, `${key}__tags`);
+		const value = await getCacheValue(cache, redisKey);
+		const expiry = (await getCacheValue(cache, `${redisKey}__expires_at`)) ?? null;
+		const tagged = await getCacheValue(cache, `${redisKey}__tags`);
 
 		// `__tags` stores the comma-joined scoped-cache tags (only when the
 		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).
@@ -302,17 +405,19 @@ export class UtilsService {
 			expiry,
 			sizes,
 			// When this key last expired, if a miss-gap tombstone still lives.
-			tombstone: await readCacheTombstone(key),
+			tombstone: await readCacheTombstone(redisKey),
+			filledAt,
+			purgesSinceFilled,
 		};
 	}
 
-	async evictCacheEntry(key: string): Promise<void> {
+	async evictCacheEntry(redisKey: string): Promise<void> {
 		this.assertAdmin('evict a cache entry');
 
 		const { cache } = getCache();
 
 		if (cache) {
-			await evictCacheEntry(cache, key);
+			await evictCacheEntry(cache, redisKey);
 		}
 	}
 

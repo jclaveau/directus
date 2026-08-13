@@ -2608,6 +2608,122 @@ describe('App Caching Tests', () => {
 		});
 	});
 
+	describe(oneLine`
+		The entry read names the purges that covered it since it was filled
+	`, () => {
+		// What replaced the cached payload on the MCP entry read: a body only ever
+		// *looks* stale, whereas "filled at T0, a purge covering its tags fired at
+		// T1, still held" is a proof of a missed invalidation.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedisScopedPurge;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			await request(url).post('/utils/cache/stats/truncate')
+				.set('Authorization', auth);
+
+			// A purge BEFORE the fill below. It must not show up: the window is the
+			// entry's own life, not the retention window.
+			await request(url).post(`/items/${collectionFirst}`)
+				.set('Authorization', auth)
+				.send({ name: 'purge-before-fill' });
+
+			await request(url).get(`/items/${collectionFirst}`)
+				.set('Authorization', auth);
+
+			async function entryFor(path: string): Promise<any> {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				return (listed.body.data as any[]).find((row: any) => {
+					return row.path === path;
+				});
+			}
+
+			let filled: any;
+
+			for (let attempt = 0; attempt < 20; attempt++) {
+				filled = await entryFor(`/items/${collectionFirst}`);
+
+				if (filled) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			expect(filled).toBeDefined();
+
+			// Nothing has covered it since it was written.
+			const fresh = await request(url).get('/utils/cache/entry')
+				.query({ key: filled.redisKey })
+				.set('Authorization', auth);
+
+			expect(fresh.statusCode).toBe(200);
+			expect(fresh.body.data.exists).toBe(true);
+			expect(fresh.body.data.filledAt).toBeGreaterThan(0);
+
+			// Empty rather than null: it has a fill to measure from. And empty
+			// despite the purge above, which predates that fill.
+			expect(fresh.body.data.purgesSinceFilled).toEqual([]);
+
+			// Now purge it for real.
+			await request(url).post(`/items/${collectionFirst}`)
+				.set('Authorization', auth)
+				.send({ name: 'purge-after-fill' });
+
+			let covered: any;
+
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const read = await request(url).get('/utils/cache/entry')
+					.query({ key: filled.redisKey })
+					.set('Authorization', auth);
+
+				expect(read.statusCode).toBe(200);
+
+				if (read.body.data.purgesSinceFilled?.length > 0) {
+					covered = read.body.data;
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			expect(covered).toBeDefined();
+
+			const [newest] = covered.purgesSinceFilled;
+
+			expect(newest.time).toBeGreaterThanOrEqual(covered.filledAt);
+			expect(['slices', 'collection']).toContain(newest.mode);
+			expect(newest.collection).toBe(collectionFirst);
+
+			// A purge that reached this entry by naming its collection carries no
+			// tag of its own, so the field says so with null rather than an empty
+			// string a reader could mistake for a tag.
+			if (newest.mode === 'collection') {
+				expect(newest.scopedCacheTag).toBeNull();
+			}
+			else {
+				expect(newest.scopedCacheTag).toContain(collectionFirst);
+			}
+
+			// A key nothing ever described cannot be dated, which is a different
+			// answer from "nothing covered it".
+			const unknown = await request(url).get('/utils/cache/entry')
+				.query({ key: 'blackbox-never-described' })
+				.set('Authorization', auth);
+
+			expect(unknown.statusCode).toBe(200);
+			expect(unknown.body.data.purgesSinceFilled).toBeNull();
+			expect(unknown.body.data.filledAt).toBeNull();
+		});
+	});
+
 	describe('The cache registry lists and evicts cached entries', () => {
 		// Telemetry is buffered in Redis and flushed to Postgres on a schedule, so the
 		// listing is eventually-consistent — poll until the fill/hit land.
@@ -2854,6 +2970,84 @@ describe('App Caching Tests', () => {
 	});
 
 	describe(oneLine`
+		A cache read refuses a window or a bucket count it cannot take, rather than
+		answering something the caller did not ask for
+	`, () => {
+		// `Number('five')` is NaN, which used to become `new Date(NaN)` and reach
+		// the driver as an Invalid Date — a 500 naming nothing the caller could act
+		// on. `null`, `[]` and `''` are all 0 to `Number` and `true` is 1, so a
+		// bare finiteness check would have let them re-bucket the read instead.
+		it.each(vendors)('%s', async (vendor) => {
+			const env = envs[vendor].envRedis;
+			const url = getUrl(vendor, env);
+			const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+			for (const buckets of ['five', '', 'true', '[]']) {
+				const refused = await request(url).get('/utils/cache/timeseries')
+					.query({ window: '5m', buckets })
+					.set('Authorization', auth);
+
+				expect(refused.statusCode).toBe(400);
+				expect(refused.body.errors[0].message).toContain('is not a number');
+			}
+
+			// Non-vacuous: the same read with a count it can take still answers, and
+			// answers with that many buckets.
+			const served = await request(url).get('/utils/cache/timeseries')
+				.query({ window: '5m', buckets: '4' })
+				.set('Authorization', auth);
+
+			expect(served.statusCode).toBe(200);
+			expect(served.body.data.buckets).toHaveLength(4);
+
+			// And an absent count is not a malformed one — it falls back.
+			const defaulted = await request(url).get('/utils/cache/timeseries')
+				.query({ window: '5m' })
+				.set('Authorization', auth);
+
+			expect(defaulted.statusCode).toBe(200);
+			expect(defaulted.body.data.buckets.length).toBeGreaterThan(0);
+
+			// Out of range is refused too, not clamped: the read clamps to 1-500,
+			// and a caller that asked for a thousand buckets and silently got five
+			// hundred goes on dividing by the count it asked for.
+			for (const buckets of ['0', '-5', '501']) {
+				const outOfRange = await request(url).get('/utils/cache/timeseries')
+					.query({ window: '5m', buckets })
+					.set('Authorization', auth);
+
+				expect(outOfRange.statusCode).toBe(400);
+				expect(outOfRange.body.errors[0].message).toContain('is outside 1-500');
+			}
+
+			// The window is read by the same service the MCP tools call, so what one
+			// surface refuses the other cannot quietly answer with the default.
+			for (const path of [
+				'/utils/cache',
+				'/utils/cache/anomalies',
+				'/utils/cache/latencies',
+				'/utils/cache/timeseries',
+			]) {
+				const unreadable = await request(url).get(path)
+					.query({ window: 'yesterday' })
+					.set('Authorization', auth);
+
+				expect(unreadable.statusCode).toBe(400);
+
+				expect(unreadable.body.errors[0].message)
+					.toContain(`window 'yesterday' is not a duration`);
+			}
+
+			// Non-vacuous: the same paths answer under a window they can read.
+			const listed = await request(url).get('/utils/cache')
+				.query({ window: '5m' })
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+		});
+	});
+
+	describe(oneLine`
 		The cache anomalies endpoint reports its shape when none are staged
 	`, () => {
 		it.each(vendors)('%s', async (vendor) => {
@@ -2954,6 +3148,19 @@ describe('App Caching Tests', () => {
 			});
 
 			expect(phantom).toBeUndefined();
+
+			// Nor as a phantom fill. `last_filled` is NULL on a locator, and
+			// `new Date(null)` is the epoch — so reading it by the key the anomaly
+			// listing just handed out would have dated the fill to 1970 and offered
+			// every purge recorded since as having covered it.
+			const locator = await request(url).get('/utils/cache/entry')
+				.query({ key: oversized.cacheKey })
+				.set('Authorization', auth);
+
+			expect(locator.statusCode).toBe(200);
+			expect(locator.body.data.exists).toBe(false);
+			expect(locator.body.data.filledAt).toBeNull();
+			expect(locator.body.data.purgesSinceFilled).toBeNull();
 		}, 60000);
 	});
 

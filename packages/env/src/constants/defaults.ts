@@ -203,6 +203,10 @@ export const DEFAULTS = {
 	METRICS_SERVICES: 'database,cache,redis,storage',
 	METRICS_SCHEDULE: '*/1 * * * *',
 
+	SYSTEM_MCP_ENABLED: false,
+	SYSTEM_MCP_TOOLS: 'processes,cache',
+	SYSTEM_MCP_ALLOWED_ORIGINS: '',
+
 	PROCESSES_REPORT_ENABLED: true,
 	PROCESSES_REPORT_DETAILS: 'stats,env',
 	PROCESSES_COLLECT_TIMEOUT: '750ms',

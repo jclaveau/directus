@@ -12,6 +12,16 @@ externalDocs:
   description: Directus Docs
   url: 'https://docs.directus.io'
 tags:
+  - name: System MCP
+    description:
+      A read-only MCP (Model Context Protocol) endpoint exposing this deployment's own state — the
+      process tree and the cache telemetry — as tools an agent can discover and call.
+    x-authentication: admin
+  - name: System Diagnostics
+    description:
+      What this deployment is doing right now — the processes it runs and the behaviour of its
+      response cache. Read-only, and readable by an administrator only.
+    x-authentication: admin
   - name: Activity
     description:
       All events that happen within Directus are tracked and stored in the activities collection. This gives you full
@@ -275,6 +285,24 @@ paths:
     $ref: './paths/utils/export.yaml'
   /utils/cache/clear:
     $ref: './paths/utils/cache-clear.yaml'
+  /utils/cache:
+    $ref: './paths/utils/cache-entries.yaml'
+  /utils/cache/entry:
+    $ref: './paths/utils/cache-entry.yaml'
+  /utils/cache/anomalies:
+    $ref: './paths/utils/cache-anomalies.yaml'
+  /utils/cache/latencies:
+    $ref: './paths/utils/cache-latencies.yaml'
+  /utils/cache/timeseries:
+    $ref: './paths/utils/cache-timeseries.yaml'
+  /utils/cache/stats:
+    $ref: './paths/utils/cache-stats.yaml'
+  /utils/processes:
+    $ref: './paths/utils/processes.yaml'
+
+  # System MCP
+  /system-mcp:
+    $ref: './paths/system-mcp/system-mcp.yaml'
   /utils/random/string:
     $ref: './paths/utils/random.yaml'
 

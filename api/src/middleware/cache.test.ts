@@ -143,7 +143,12 @@ beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	delete env['CACHE_TAGS_HEADER'];
 	shouldSkipCache.mockReturnValue(false);
-	getCacheKey.mockResolvedValue({ key: 'cache-key', hash: 'cache-hash' });
+
+	getCacheKey.mockResolvedValue({
+		redisKey: 'cache-key',
+		cacheKey: 'cache-hash',
+	});
+
 	vi.mocked(cacheStatsActive).mockReturnValue(false);
 	vi.mocked(readCacheMissGap).mockResolvedValue(null);
 });

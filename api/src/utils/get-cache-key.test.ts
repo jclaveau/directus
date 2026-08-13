@@ -105,17 +105,21 @@ describe('get cache key', async () => {
 	});
 
 	test.each(cases)('should create a cache key for %s', async (_, params, key) => {
-		const { key: redisKey, hash } = await getCacheKey(params as unknown as Request);
-		// Hashing on (default): the Redis key and the stats hash are the same digest.
-		expect(hash).toEqual(key);
+		const { redisKey, cacheKey } = await getCacheKey(
+			params as unknown as Request,
+		);
+
+		// Hashing on (default): the Redis key and the stats identity are the
+		// same digest.
+		expect(cacheKey).toEqual(key);
 		expect(redisKey).toEqual(key);
 	});
 
 	test('should create a unique key for each request', async () => {
 		const keys = await Promise.all(
 			cases.map(async ([, params]) => {
-				const { hash } = await getCacheKey(params as unknown as Request);
-				return hash;
+				const { cacheKey } = await getCacheKey(params as unknown as Request);
+				return cacheKey;
 			}),
 		);
 
@@ -167,19 +171,20 @@ describe('get cache key', async () => {
 		});
 
 		test('returns the readable request descriptor instead of a hash', async () => {
-			const { key, hash } = await getCacheKey({
+			const { redisKey, cacheKey } = await getCacheKey({
 				method,
 				originalUrl: restUrl,
 				accountability,
 				sanitizedQuery: { fields: ['id', 'name'] },
 			} as unknown as Request);
 
-			expect(key).toContain('"path":"/items/example"');
-			expect(key).toContain(`"user":"${accountability.user}"`);
-			expect(key).toContain('"fields":["id","name"]');
-			expect(key).toContain('"version":"1.2.3"');
-			// The stats hash stays a fixed-length digest even for a readable Redis key.
-			expect(hash).toMatch(/^[0-9a-f]{40}$/);
+			expect(redisKey).toContain('"path":"/items/example"');
+			expect(redisKey).toContain(`"user":"${accountability.user}"`);
+			expect(redisKey).toContain('"fields":["id","name"]');
+			expect(redisKey).toContain('"version":"1.2.3"');
+			// The stats identity stays a fixed-length digest even where the Redis
+			// key is readable.
+			expect(cacheKey).toMatch(/^[0-9a-f]{40}$/);
 		});
 
 		test('canonical key order → equivalent queries share one key', async () => {
@@ -238,21 +243,21 @@ describe('Accept-Language dimension (always on)', () => {
 		const without = await getCacheKey(varyRequest());
 		const star = await getCacheKey(acceptLanguage('*'));
 
-		expect(star.hash).toEqual(without.hash);
+		expect(star.cacheKey).toEqual(without.cacheKey);
 	});
 
 	test('the primary language is folded in when the caller sends one', async () => {
 		const base = await getCacheKey(varyRequest());
 		const fr = await getCacheKey(acceptLanguage('fr'));
 
-		expect(fr.hash).not.toEqual(base.hash);
+		expect(fr.cacheKey).not.toEqual(base.cacheKey);
 	});
 
 	test('different languages get different keys', async () => {
 		const fr = await getCacheKey(acceptLanguage('fr'));
 		const en = await getCacheKey(acceptLanguage('en'));
 
-		expect(fr.hash).not.toEqual(en.hash);
+		expect(fr.cacheKey).not.toEqual(en.cacheKey);
 	});
 
 	test('region and q-weights collapse to the primary tag', async () => {
@@ -261,7 +266,7 @@ describe('Accept-Language dimension (always on)', () => {
 		for (const header of ['fr-FR', 'fr-CA,fr;q=0.9', 'en;q=0.5,fr;q=0.9', 'FR']) {
 			const variant = await getCacheKey(acceptLanguage(header));
 
-			expect(variant.hash).toEqual(canonical.hash);
+			expect(variant.cacheKey).toEqual(canonical.cacheKey);
 		}
 	});
 
@@ -269,7 +274,7 @@ describe('Accept-Language dimension (always on)', () => {
 		const canonical = await getCacheKey(acceptLanguage('fr'));
 		const spaced = await getCacheKey(acceptLanguage('fr ;q=0.9'));
 
-		expect(spaced.hash).toEqual(canonical.hash);
+		expect(spaced.cacheKey).toEqual(canonical.cacheKey);
 	});
 });
 
@@ -280,7 +285,7 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 		const csv = await getCacheKey(varyRequest({ accepts: () => 'csv' }));
 		const json = await getCacheKey(varyRequest({ accepts: () => 'json' }));
 
-		expect(csv.hash).toEqual(json.hash);
+		expect(csv.cacheKey).toEqual(json.cacheKey);
 	});
 
 	test('set: negotiates the request against the declared list', async () => {
@@ -299,9 +304,9 @@ describe('CACHE_VARY_CONTENT_TYPES dimension (opt-in)', () => {
 		const json = await getCacheKey(varyRequest({ accepts: () => 'json' }));
 		const unsupported = await getCacheKey(varyRequest({ accepts: () => false }));
 
-		expect(csv.hash).not.toEqual(json.hash);
-		expect(unsupported.hash).not.toEqual(csv.hash);
-		expect(unsupported.hash).not.toEqual(json.hash);
+		expect(csv.cacheKey).not.toEqual(json.cacheKey);
+		expect(unsupported.cacheKey).not.toEqual(csv.cacheKey);
+		expect(unsupported.cacheKey).not.toEqual(json.cacheKey);
 	});
 
 	test('trims and dedupes the list, preserving order (not sorted)', async () => {
@@ -336,7 +341,7 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 		const a = await getCacheKey(tenant('a'));
 		const b = await getCacheKey(tenant('b'));
 
-		expect(a.hash).toEqual(b.hash);
+		expect(a.cacheKey).toEqual(b.cacheKey);
 	});
 
 	test('exact name: distinct values split; absence is its own bucket', async () => {
@@ -346,8 +351,8 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 		const b = await getCacheKey(tenant('b'));
 		const absent = await getCacheKey(varyRequest({ headers: {} }));
 
-		expect(a.hash).not.toEqual(b.hash);
-		expect(absent.hash).not.toEqual(a.hash);
+		expect(a.cacheKey).not.toEqual(b.cacheKey);
+		expect(absent.cacheKey).not.toEqual(a.cacheKey);
 	});
 
 	test('unlisted proxy headers are ignored', async () => {
@@ -361,7 +366,7 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 			varyRequest({ headers: { 'x-tenant-id': 'a', 'x-request-id': '222' } }),
 		);
 
-		expect(one.hash).toEqual(two.hash);
+		expect(one.cacheKey).toEqual(two.cacheKey);
 	});
 
 	test('glob matches present headers, ignores unlisted ones', async () => {
@@ -374,8 +379,8 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 			varyRequest({ headers: { 'x-feature-beta': '1', 'x-unrelated': 'z' } }),
 		);
 
-		expect(on.hash).not.toEqual(off.hash);
-		expect(withNoise.hash).toEqual(on.hash);
+		expect(on.cacheKey).not.toEqual(off.cacheKey);
+		expect(withNoise.cacheKey).toEqual(on.cacheKey);
 	});
 
 	test('trims whitespace the env array cast leaves around a name', async () => {
@@ -385,7 +390,7 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 		const b = await getCacheKey(tenant('b'));
 
 		// Without the trim the padded name matches no header → both null → one bucket.
-		expect(a.hash).not.toEqual(b.hash);
+		expect(a.cacheKey).not.toEqual(b.cacheKey);
 	});
 
 	test('a glob skips proxy/tracing headers but folds the rest', async () => {
@@ -400,14 +405,14 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 		);
 
 		// x-forwarded-for changed but is denied → same bucket (cache not disabled)
-		expect(proxyA.hash).toEqual(proxyB.hash);
+		expect(proxyA.cacheKey).toEqual(proxyB.cacheKey);
 
 		// x-tenant-id is matched by the glob and not denied → still splits
 		const tenantB = await getCacheKey(
 			varyRequest({ headers: { 'x-tenant-id': 'b', 'x-forwarded-for': '1.1.1.1' } }),
 		);
 
-		expect(tenantB.hash).not.toEqual(proxyA.hash);
+		expect(tenantB.cacheKey).not.toEqual(proxyA.cacheKey);
 	});
 
 	test('an exact proxy-header name overrides the glob denylist', async () => {
@@ -421,7 +426,7 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 			varyRequest({ headers: { 'x-forwarded-for': '2.2.2.2' } }),
 		);
 
-		expect(a.hash).not.toEqual(b.hash);
+		expect(a.cacheKey).not.toEqual(b.cacheKey);
 	});
 
 	test('CACHE_VARY_REQUEST_HEADERS_EXCLUDED extends the glob denylist', async () => {
@@ -434,12 +439,12 @@ describe('CACHE_VARY_REQUEST_HEADERS dimension (opt-in)', () => {
 		const a = await getCacheKey(tenant('a'));
 		const b = await getCacheKey(tenant('b'));
 
-		expect(a.hash).toEqual(b.hash);
+		expect(a.cacheKey).toEqual(b.cacheKey);
 
 		// a sibling the exclusion doesn't name still splits
 		const featureOn = await getCacheKey(feature('1'));
 		const featureOff = await getCacheKey(feature('0'));
 
-		expect(featureOn.hash).not.toEqual(featureOff.hash);
+		expect(featureOn.cacheKey).not.toEqual(featureOff.cacheKey);
 	});
 });

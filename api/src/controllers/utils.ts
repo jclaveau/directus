@@ -12,7 +12,6 @@ import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
 import { generateHash } from '../utils/generate-hash.js';
-import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
 const router = Router();
@@ -20,14 +19,6 @@ const router = Router();
 const randomStringSchema = Joi.object<{ length: number }>({
 	length: Joi.number().integer().min(1).max(500).default(32),
 });
-
-// The cache-listing ?window= range (a duration like 48h) → ms; undefined when
-// absent so the listing falls back to its default. Clamped downstream.
-function requestedWindowMs(raw: unknown): number | undefined {
-	return raw === undefined
-		? undefined
-		: getMilliseconds(String(raw), Number.NaN);
-}
 
 router.get(
 	'/random/string',
@@ -231,8 +222,14 @@ router.get(
 
 		// Never cache the cache listing itself — it must reflect live state.
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
-		res.locals['payload'] = { data: await service.getCacheEntries(windowMs) };
+
+		res.locals['payload'] = {
+			// `window` and `buckets` go through unread: the service reads both, so
+			// this route and the MCP tool beside it cannot come to differ on what a
+			// value means. A duration it cannot parse is a 400 naming it, where it
+			// used to be answered with a silent fall back to the default window.
+			data: await service.getCacheEntries(req.query['window']),
+		};
 
 		return next();
 	}),
@@ -248,8 +245,10 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
-		res.locals['payload'] = { data: await service.getCacheAnomalies(windowMs) };
+
+		res.locals['payload'] = {
+			data: await service.getCacheAnomalies(req.query['window']),
+		};
 
 		return next();
 	}),
@@ -265,10 +264,9 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
 
 		res.locals['payload'] = {
-			data: await service.getCacheGroupLatencies(windowMs),
+			data: await service.getCacheGroupLatencies(req.query['window']),
 		};
 
 		return next();
@@ -285,14 +283,12 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		const windowMs = requestedWindowMs(req.query['window']);
-
-		const buckets = req.query['buckets'] === undefined
-			? undefined
-			: Number(req.query['buckets']);
 
 		res.locals['payload'] = {
-			data: await service.getCacheTimeseries(windowMs, buckets),
+			data: await service.getCacheTimeseries(
+				req.query['window'],
+				req.query['buckets'],
+			),
 		};
 
 		return next();
