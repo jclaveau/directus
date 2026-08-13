@@ -284,7 +284,11 @@ test.each([
 test('The entry read reads the one key it was given', async () => {
 	service.readCacheEntry.mockResolvedValue({ exists: true });
 
-	await findSystemMcpTool('read_cache_entry')!.run({ key: 'abcd' }, context);
+	// The REDIS key, which is the string the service reads Redis by. The
+	// listing's `key` is the stats identity, and the two differ wherever
+	// CACHE_KEY_HASH_ENABLED is off.
+	await findSystemMcpTool('read_cache_entry')!
+		.run({ redisKey: 'abcd' }, context);
 
 	expect(service.readCacheEntry).toHaveBeenCalledWith('abcd');
 });
@@ -305,10 +309,12 @@ test('The entry read never answers with the response inside it', async () => {
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
+		filledAt: 1,
+		purgesSinceFilled: [],
 	});
 
 	const answer = await findSystemMcpTool('read_cache_entry')!
-		.run({ key: 'abcd' }, context);
+		.run({ redisKey: 'abcd' }, context);
 
 	expect(answer).toEqual({
 		exists: true,
@@ -317,6 +323,8 @@ test('The entry read never answers with the response inside it', async () => {
 		expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
+		filledAt: 1,
+		purgesSinceFilled: [],
 	});
 
 	// Not merely absent from the schema: absent from the answer, and from the
@@ -334,15 +342,17 @@ test('The entry read never answers with the response inside it', async () => {
 // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool
 test.each([
 	['absent', {}],
-	['null', { key: null }],
-	['a number', { key: 42 }],
-	['empty', { key: '' }],
+	['null', { redisKey: null }],
+	['a number', { redisKey: 42 }],
+	['empty', { redisKey: '' }],
+	['blank', { redisKey: '   ' }],
+	['under the listing\u2019s other name', { key: 'abcd' }],
 ])('The entry read refuses a key that is %s', async (_case, args) => {
 	// The key names the one entry to read; without it there is nothing to read
 	// rather than a default to fall back on.
 	await expect(findSystemMcpTool('read_cache_entry')!.run(args, context))
 		.rejects
-		.toThrow(/key/);
+		.toThrow(/redisKey/);
 
 	expect(service.readCacheEntry).not.toHaveBeenCalled();
 });
@@ -350,8 +360,12 @@ test.each([
 test('The entry read publishes its key as required', () => {
 	const tool = findSystemMcpTool('read_cache_entry')!;
 
-	expect(tool.inputSchema.properties).toHaveProperty('key');
-	expect(tool.inputSchema.required).toEqual(['key']);
+	expect(tool.inputSchema.properties).toHaveProperty('redisKey');
+	expect(tool.inputSchema.required).toEqual(['redisKey']);
+
+	// And not under the listing's other name, which reads the same and is a
+	// different string wherever CACHE_KEY_HASH_ENABLED is off.
+	expect(tool.inputSchema.properties).not.toHaveProperty('key');
 
 	// It reads one named entry, so no window applies to it.
 	expect(tool.inputSchema.properties).not.toHaveProperty('window');
@@ -507,6 +521,16 @@ test('Every declared output property is one the tool actually answers', () => {
 			expiry: { exp: 3, createdAt: 1, ttlMs: 60_000 },
 			sizes: { uncompressed: 100, compressed: 40 },
 			tombstone: null,
+			filledAt: 1,
+			purgesSinceFilled: [
+				{
+					time: 4,
+					mode: 'slices',
+					collection: 'articles',
+					scopedCacheTag: 'articles:id=5',
+					evicted: 2,
+				},
+			],
 		},
 		list_cache_anomalies: [
 			{

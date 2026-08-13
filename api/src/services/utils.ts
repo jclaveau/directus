@@ -21,7 +21,10 @@ import {
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	type CacheEntryPurgeRecord,
 	listCacheGroupLatencies,
+	listPurgesCoveringEntry,
+	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
 	recordCacheConfigEvent,
@@ -277,7 +280,13 @@ export class UtilsService {
 	// The live Redis state for a single key — the cached response plus its
 	// sidecars (scoped-cache tags, expiry metadata) — none of which the Postgres
 	// descriptor holds. All may be gone: the descriptor outlives the value.
-	async readCacheEntry(key: string): Promise<{
+	/**
+	 * Takes the REDIS key — the same string `evictCacheEntry` takes, and what the
+	 * listing answers as `redisKey`. Its descriptor supplies the stats identity
+	 * the purge join needs; the two differ only where `CACHE_KEY_HASH_ENABLED` is
+	 * off and the Redis key becomes a readable descriptor.
+	 */
+	async readCacheEntry(redisKey: string): Promise<{
 		exists: boolean;
 		value: unknown;
 		tags: string[] | null;
@@ -285,8 +294,21 @@ export class UtilsService {
 		expiry: { exp: number; createdAt: number; ttlMs: number | null } | null;
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
+		filledAt: number | null;
+		purgesSinceFilled: CacheEntryPurgeRecord[] | null;
 	}> {
 		this.assertAdmin('inspect a cache entry');
+
+		const descriptor = await readCacheDescriptorForRedisKey(redisKey);
+
+		// Empty is a reading — nothing covered it since it was written. `null` is
+		// not: with no descriptor there is no fill to measure from, and answering
+		// "no purges" would claim a proof this cannot give.
+		const purgesSinceFilled = descriptor === null
+			? null
+			: await listPurgesCoveringEntry(descriptor.cacheKey, descriptor.lastFilled);
+
+		const filledAt = descriptor?.lastFilled.getTime() ?? null;
 
 		const { cache } = getCache();
 
@@ -299,12 +321,14 @@ export class UtilsService {
 				expiry: null,
 				sizes: null,
 				tombstone: null,
+				filledAt,
+				purgesSinceFilled,
 			};
 		}
 
-		const value = await getCacheValue(cache, key);
-		const expiry = (await getCacheValue(cache, `${key}__expires_at`)) ?? null;
-		const tagged = await getCacheValue(cache, `${key}__tags`);
+		const value = await getCacheValue(cache, redisKey);
+		const expiry = (await getCacheValue(cache, `${redisKey}__expires_at`)) ?? null;
+		const tagged = await getCacheValue(cache, `${redisKey}__tags`);
 
 		// `__tags` stores the comma-joined scoped-cache tags (only when the
 		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).
@@ -337,17 +361,19 @@ export class UtilsService {
 			expiry,
 			sizes,
 			// When this key last expired, if a miss-gap tombstone still lives.
-			tombstone: await readCacheTombstone(key),
+			tombstone: await readCacheTombstone(redisKey),
+			filledAt,
+			purgesSinceFilled,
 		};
 	}
 
-	async evictCacheEntry(key: string): Promise<void> {
+	async evictCacheEntry(redisKey: string): Promise<void> {
 		this.assertAdmin('evict a cache entry');
 
 		const { cache } = getCache();
 
 		if (cache) {
-			await evictCacheEntry(cache, key);
+			await evictCacheEntry(cache, redisKey);
 		}
 	}
 

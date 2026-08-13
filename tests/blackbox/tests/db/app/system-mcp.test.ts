@@ -404,12 +404,24 @@ describe('System MCP Tests', () => {
 				return tool.name === 'read_cache_entry';
 			});
 
-			expect(entry.inputSchema.required).toEqual(['key']);
+			// The REDIS key, not the listing's `key`: the latter is the stats
+			// identity, and the two are different strings wherever the deployment
+			// runs with CACHE_KEY_HASH_ENABLED off.
+			expect(entry.inputSchema.required).toEqual(['redisKey']);
+			expect(entry.inputSchema.properties).not.toHaveProperty('key');
 
 			// It answers about the entry, never with the response inside it, and
 			// the published schema is what tells a model so before it calls.
 			expect(entry.outputSchema.properties).not.toHaveProperty('value');
 			expect(entry.outputSchema.properties).toHaveProperty('sizes');
+
+			// What replaced the payload: whether a purge covering this entry fired
+			// after it was written is a proof of a missed invalidation, where a
+			// body only ever looks old.
+			expect(entry.outputSchema.properties)
+				.toHaveProperty('purgesSinceFilled');
+
+			expect(entry.outputSchema.properties).toHaveProperty('filledAt');
 		});
 	});
 
@@ -488,7 +500,7 @@ describe('System MCP Tests', () => {
 			// no flush to wait on, and it must answer the whole shape a model reads
 			// fields off rather than a bare "no".
 			const missing = await callTool(vendor, 'read_cache_entry', {
-				key: 'blackbox-never-written',
+				redisKey: 'blackbox-never-written',
 			});
 
 			const entry = missing.body.result.structuredContent;
@@ -500,6 +512,11 @@ describe('System MCP Tests', () => {
 			expect(entry.expiry).toBeNull();
 			expect(entry.sizes).toBeNull();
 			expect(entry.tombstone).toBeNull();
+
+			// Never described, so there is no fill to date purges from — `null`
+			// rather than the empty list that would claim none had covered it.
+			expect(entry.filledAt).toBeNull();
+			expect(entry.purgesSinceFilled).toBeNull();
 
 			// The cached response itself is never handed back: the cache key
 			// carries the user, so a body is one person's view of the data, and a

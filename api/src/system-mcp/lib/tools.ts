@@ -169,18 +169,21 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			description:
 				'The live state of a single response-cache entry: whether its value '
 				+ 'is still held, its scoped-cache tags, when it was written and when '
-				+ 'it expires, its size raw and compressed, and any tombstone. The '
-				+ 'cached response itself is not returned. Use it to follow up a row '
-				+ 'the entry listing returned, whose `key` it takes.',
+				+ 'it expires, its size raw and compressed, any tombstone, and the '
+				+ 'purges that covered it since it was filled. The cached response '
+				+ 'itself is not returned. Use it to follow up a row the entry '
+				+ 'listing returned, whose `redisKey` it takes — not its `key`, which '
+				+ 'is the stats identity the two differ by where the deployment does '
+				+ 'not hash its cache keys.',
 			inputSchema: {
 				type: 'object',
 				properties: {
-					key: {
+					redisKey: {
 						type: 'string',
-						description: 'The entry key, as `key` in the entry listing.',
+						description: 'The entry key, as `redisKey` in the entry listing.',
 					},
 				},
-				required: ['key'],
+				required: ['redisKey'],
 			},
 			outputSchema: {
 				type: 'object',
@@ -210,21 +213,35 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: ['number', 'null'],
 						description: 'When it was purged, where a tombstone outlived it.',
 					},
+					filledAt: {
+						type: ['number', 'null'],
+						description: 'When it was last written, per its descriptor.',
+					},
+					purgesSinceFilled: {
+						type: ['array', 'null'],
+						description:
+							'Purges that covered this entry after it was filled, newest '
+							+ 'first. Beside `exists: true` each one is an invalidation '
+							+ 'the entry survived. Empty means none covered it; null '
+							+ 'means it has no descriptor, so there is no fill to '
+							+ 'measure from.',
+						items: { type: 'object' },
+					},
 				},
 			},
 			annotations: READ_ONLY,
 			run: async (args, context) => {
-				const key = args['key'];
+				const redisKey = args['redisKey'];
 
 				// One named entry and no default: an empty key would read the
 				// deployment's own namespace prefix rather than anything asked for.
-				if (typeof key !== 'string' || key.trim() === '') {
+				if (typeof redisKey !== 'string' || redisKey.trim() === '') {
 					throw new InvalidPayloadError({
-						reason: 'A `key` naming the entry to read is required',
+						reason: 'A `redisKey` naming the entry to read is required',
 					});
 				}
 
-				const entry = await utils(context).readCacheEntry(key);
+				const entry = await utils(context).readCacheEntry(redisKey);
 
 				// Everything the entry is, and not the response inside it. The cache
 				// key carries the user (`get-cache-key.ts`), so a cached body is one
@@ -240,6 +257,8 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					expiry: entry.expiry,
 					sizes: entry.sizes,
 					tombstone: entry.tombstone,
+					filledAt: entry.filledAt,
+					purgesSinceFilled: entry.purgesSinceFilled,
 				};
 			},
 		}),

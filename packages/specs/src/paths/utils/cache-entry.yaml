@@ -3,14 +3,16 @@ get:
   description: >
     The live state of a single response-cache entry: the payload still held for
     it, its scoped-cache tags, when it was written and when it expires, its size
-    raw and compressed, and any tombstone. Takes the `key` a cache entry listing
-    returned. Admin only.
+    raw and compressed, any tombstone, and the purges that covered it since it
+    was filled. Takes the `redisKey` a cache entry listing returned — not its
+    `key`, which is the stats identity and a different string wherever
+    CACHE_KEY_HASH_ENABLED is off. Admin only.
   operationId: read-cache-entry
   parameters:
     - name: key
       in: query
       required: true
-      description: The entry key, as `key` in the cache entry listing.
+      description: The entry key, as `redisKey` in the cache entry listing.
       schema:
         type: string
   responses:
@@ -41,6 +43,39 @@ get:
                   tombstone:
                     type: integer
                     nullable: true
+                  filledAt:
+                    type: integer
+                    nullable: true
+                    description: When it was last written, per its descriptor.
+                  purgesSinceFilled:
+                    type: array
+                    nullable: true
+                    description: >
+                      Purges that covered this entry after it was filled,
+                      newest first. Beside `exists: true` each one is an
+                      invalidation the entry survived. Empty means none
+                      covered it; null means it has no descriptor, so there
+                      is no fill to measure from.
+                    items:
+                      type: object
+                      properties:
+                        time:
+                          type: integer
+                        mode:
+                          type: string
+                          enum: [slices, collection, namespace]
+                        collection:
+                          type: string
+                          nullable: true
+                        scopedCacheTag:
+                          type: string
+                          nullable: true
+                          description: >
+                            The tag both sides matched on, or null where the
+                            purge named none and its collection is its reach.
+                        evicted:
+                          type: integer
+                          nullable: true
             type: object
       description: Successful request
     '400':

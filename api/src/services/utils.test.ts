@@ -13,6 +13,8 @@ import {
 	listCacheAnomalies,
 	listCacheEntries,
 	listCacheGroupLatencies,
+	listPurgesCoveringEntry,
+	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
 	recordCacheConfigEvent,
@@ -311,6 +313,21 @@ describe('Services / Utils', () => {
 			vi.mocked(compress).mockResolvedValue(Buffer.from('abc'));
 			vi.mocked(readCacheTombstone).mockResolvedValue(999);
 
+			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue({
+				cacheKey: 'h1',
+				lastFilled: new Date(1),
+			});
+
+			vi.mocked(listPurgesCoveringEntry).mockResolvedValue([
+				{
+					time: 400,
+					mode: 'slices',
+					collection: 'articles',
+					scopedCacheTag: 'articles:id=5',
+					evicted: 2,
+				},
+			]);
+
 			vi.mocked(countScopedCacheTagMembers).mockResolvedValue({
 				'articles': 3,
 				'articles:id=5': 7,
@@ -325,7 +342,20 @@ describe('Services / Utils', () => {
 				// '{"data":[1,2]}' = 14 bytes raw; the mocked compress = 3.
 				sizes: { uncompressed: 14, compressed: 3 },
 				tombstone: 999,
+				filledAt: 1,
+				purgesSinceFilled: [
+					{
+						time: 400,
+						mode: 'slices',
+						collection: 'articles',
+						scopedCacheTag: 'articles:id=5',
+						evicted: 2,
+					},
+				],
 			});
+
+			// Measured from the entry's own fill, not from a window.
+			expect(listPurgesCoveringEntry).toHaveBeenCalledWith('h1', new Date(1));
 
 			expect(countScopedCacheTagMembers).toHaveBeenCalledWith([
 				'articles',
@@ -338,6 +368,13 @@ describe('Services / Utils', () => {
 			vi.mocked(getCacheValue).mockResolvedValue(undefined);
 			vi.mocked(readCacheTombstone).mockResolvedValue(null);
 
+			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue({
+				cacheKey: 'h1',
+				lastFilled: new Date(1),
+			});
+
+			vi.mocked(listPurgesCoveringEntry).mockResolvedValue([]);
+
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
 				value: null,
@@ -346,11 +383,33 @@ describe('Services / Utils', () => {
 				expiry: null,
 				sizes: null,
 				tombstone: null,
+				filledAt: 1,
+				// Empty, not null: it has a fill to measure from and nothing
+				// covered it since.
+				purgesSinceFilled: [],
 			});
+		});
+
+		it(oneLine`
+			readCacheEntry cannot date purges for an entry it never described
+		`, async () => {
+			vi.mocked(getCache).mockReturnValue({ cache: mockCache } as any);
+			vi.mocked(getCacheValue).mockResolvedValue(undefined);
+			vi.mocked(readCacheTombstone).mockResolvedValue(null);
+			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
+
+			const entry = await adminService().readCacheEntry('k1');
+
+			// `null`, not `[]`: with no fill to measure from, answering "none"
+			// would claim a proof this cannot give.
+			expect(entry.purgesSinceFilled).toBeNull();
+			expect(entry.filledAt).toBeNull();
+			expect(listPurgesCoveringEntry).not.toHaveBeenCalled();
 		});
 
 		it('readCacheEntry returns absent without a cache', async () => {
 			vi.mocked(getCache).mockReturnValue({ cache: null } as any);
+			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
 
 			await expect(adminService().readCacheEntry('k1')).resolves.toEqual({
 				exists: false,
@@ -360,6 +419,8 @@ describe('Services / Utils', () => {
 				expiry: null,
 				sizes: null,
 				tombstone: null,
+				filledAt: null,
+				purgesSinceFilled: null,
 			});
 
 			expect(getCacheValue).not.toHaveBeenCalled();
