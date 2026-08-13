@@ -19,6 +19,9 @@ import {
 	getCacheStatsState,
 	listCacheAnomalies,
 	listCacheEntries,
+	listPurgesCoveringEntry,
+	readCacheDescriptorForRedisKey,
+	readCacheTombstone,
 	listCacheGroupLatencies,
 	readCacheMissGap,
 	reapCacheAnomalies,
@@ -73,6 +76,9 @@ let queryRows: any[];
 // the exact table expression. Falls back to `queryRows` so every other test is
 // untouched.
 let rowsByTable: Record<string, any[]>;
+// `.first()` answers in call order: the descriptor lookup asks the primary
+// key, then falls back to `redis_key`, and the two must be stageable apart.
+let firstRows: any[];
 let lastTable: string;
 let pluckResult: string[];
 let deleteCount: number;
@@ -83,6 +89,7 @@ beforeEach(() => {
 	streamBatch = [];
 	queryRows = [];
 	rowsByTable = {};
+	firstRows = [];
 	lastTable = '';
 	pluckResult = [];
 	deleteCount = 0;
@@ -144,6 +151,7 @@ beforeEach(() => {
 		limit: vi.fn(() => builder),
 		select: vi.fn(() => builder),
 		distinct: vi.fn(() => builder),
+		first: vi.fn(() => Promise.resolve(firstRows.shift())),
 		pluck: vi.fn(() => Promise.resolve(pluckResult)),
 		delete: vi.fn(() => Promise.resolve(deleteCount)),
 		then: (resolve: any, reject: any) => {
@@ -2466,5 +2474,151 @@ describe('effectiveTtlByBucket', () => {
 		// force instead. Given nothing at all, the honest answer is nothing.
 		expect(effectiveTtlByBucket(buckets, [], null))
 			.toEqual([null, null, null, null, null]);
+	});
+});
+
+describe('listPurgesCoveringEntry', () => {
+	// The two reaches answer separately — a purge names a tag the entry was filled
+	// under, or it names none and its collection is its reach — so the merge, the
+	// ordering across them and the cap are this function's own work.
+	it('merges both reaches into one list, newest first', async () => {
+		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+			{
+				purge_id: 'p-old',
+				time: new Date(1_000).toISOString(),
+				mode: 'slices',
+				collection: 'articles',
+				scoped_cache_tag: 'articles:id=5',
+				evicted: 2,
+			},
+		];
+
+		rowsByTable['directus_scoped_cache_purge_tags as pt'] = [
+			{
+				purge_id: 'p-new',
+				time: new Date(9_000).toISOString(),
+				mode: 'collection',
+				collection: 'articles',
+				// A collection-wide purge names no tag; the empty string is how the
+				// row spells that, and null is how the answer says it outward.
+				scoped_cache_tag: '',
+				evicted: null,
+			},
+		];
+
+		const covering = await listPurgesCoveringEntry('k1', new Date(500));
+
+		expect(covering).toEqual([
+			{
+				time: 9_000,
+				mode: 'collection',
+				collection: 'articles',
+				scopedCacheTag: null,
+				evicted: null,
+			},
+			{
+				time: 1_000,
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTag: 'articles:id=5',
+				evicted: 2,
+			},
+		]);
+
+		// Bounded by the entry's own fill, not by a retention window.
+		expect(builder.where).toHaveBeenCalledWith('pt.time', '>', new Date(500));
+
+		// One purge covering two of the entry's tags is one row, not two.
+		expect(builder.distinct).toHaveBeenCalled();
+	});
+
+	it('answers nothing where telemetry was never configured', async () => {
+		env['CACHE_STATS_ENABLED'] = false;
+		queryRows = [{ purge_id: 'p1', time: new Date(1).toISOString() }];
+
+		await expect(listPurgesCoveringEntry('k1', new Date(0))).resolves.toEqual([]);
+
+		// Not merely empty: no query was built at all.
+		expect(mockDb)
+			.not
+			.toHaveBeenCalledWith('directus_scoped_cache_entry_tags as et');
+	});
+});
+
+describe('readCacheDescriptorForRedisKey', () => {
+	// The two columns hold the same digest unless CACHE_KEY_HASH_ENABLED is off,
+	// so the primary-key arm answers on any hashing install and the TEXT scan is
+	// only ever paid by a readable-key one.
+	it('answers from the primary key without a second query', async () => {
+		firstRows = [{ cache_key: 'h1', last_filled: new Date(7).toISOString() }];
+
+		await expect(readCacheDescriptorForRedisKey('h1')).resolves.toEqual({
+			cacheKey: 'h1',
+			lastFilled: new Date(7),
+		});
+
+		expect(builder.where).toHaveBeenCalledWith('cache_key', 'h1');
+		expect(builder.where).not.toHaveBeenCalledWith('redis_key', 'h1');
+	});
+
+	it('falls back to the redis key where the identity misses', async () => {
+		// A readable Redis key: the identity column holds a digest it never equals.
+		firstRows = [
+			undefined,
+			{ cache_key: 'h2', last_filled: new Date(8).toISOString() },
+		];
+
+		await expect(readCacheDescriptorForRedisKey('{"path":"/items/a"}'))
+			.resolves
+			.toEqual({ cacheKey: 'h2', lastFilled: new Date(8) });
+
+		expect(builder.where).toHaveBeenCalledWith('redis_key', '{"path":"/items/a"}');
+	});
+
+	it('answers null for a key neither column knows', async () => {
+		firstRows = [undefined, undefined];
+
+		await expect(readCacheDescriptorForRedisKey('nope')).resolves.toBeNull();
+	});
+
+	it('never probes on an empty key', async () => {
+		// `redis_key` defaults to '' on rows predating the column and on anomaly
+		// locators, so an empty probe would match all of them at once.
+		firstRows = [{ cache_key: 'h3', last_filled: new Date(9).toISOString() }];
+
+		await expect(readCacheDescriptorForRedisKey('')).resolves.toBeNull();
+		expect(builder.first).not.toHaveBeenCalled();
+	});
+
+	it('answers null where telemetry was never configured', async () => {
+		env['CACHE_STATS_ENABLED'] = false;
+		firstRows = [{ cache_key: 'h4', last_filled: new Date(9).toISOString() }];
+
+		await expect(readCacheDescriptorForRedisKey('h4')).resolves.toBeNull();
+		expect(builder.first).not.toHaveBeenCalled();
+	});
+});
+
+describe('readCacheTombstone', () => {
+	// A tombstone outlives the entry, so it is what tells an inspection when the
+	// key last expired rather than that it was simply never there.
+	it('answers when the key last expired', async () => {
+		mockRedis.get.mockResolvedValue('1700');
+
+		await expect(readCacheTombstone('r1')).resolves.toBe(1700);
+		expect(mockRedis.get).toHaveBeenCalledWith('scalabus:stats:tomb:r1');
+	});
+
+	it('answers null where no tombstone outlived it', async () => {
+		mockRedis.get.mockResolvedValue(null);
+
+		await expect(readCacheTombstone('r1')).resolves.toBeNull();
+	});
+
+	it('answers null with no redis to ask', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+		await expect(readCacheTombstone('r1')).resolves.toBeNull();
+		expect(mockRedis.get).not.toHaveBeenCalled();
 	});
 });
