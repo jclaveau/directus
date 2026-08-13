@@ -15,8 +15,11 @@ const PGBOUNCER_VENDORS = vendors.filter((vendor) => vendor === 'postgres');
 
 const PGBOUNCER_PORT = '6109';
 
-/** How long the saturating queries are held while the report is read. */
-const SATURATION_SECONDS = 6;
+/**
+ * How long the saturating queries are held while the report is read. Wide enough
+ * that a loaded runner still lands its reads inside the window.
+ */
+const SATURATION_SECONDS = 12;
 
 describe('PgBouncer Report Tests', () => {
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
@@ -199,10 +202,10 @@ describe('PgBouncer Report Tests', () => {
 
 	describe('Shows a saturated pool while it is saturated', () => {
 		it.each(PGBOUNCER_VENDORS)('%s', async (vendor) => {
-			// Hold the free pool's single server connection, without awaiting: the
-			// probe answers only once its sleeping queries are done, and the report
-			// has to be read while they are still running.
-			const saturation = request(getUrl(vendor, envs[vendor].envReport))
+			// The probe fires its sleeping queries and answers straight away without
+			// awaiting them, so they are still held for `sleep` seconds after this
+			// resolves — that is the window the report is read in.
+			const saturation = await request(getUrl(vendor, envs[vendor].envReport))
 				.post('/db-connection-probe/pools-under-load')
 				.send({
 					saturate: [{ connection: 'free', concurrency: 2 }],
@@ -212,17 +215,30 @@ describe('PgBouncer Report Tests', () => {
 				})
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			await new Promise((resolve) => setTimeout(resolve, 1500));
+			expect(saturation.statusCode).toBe(200);
 
-			const response = await readReport(
-				vendor,
-				USER.ADMIN.TOKEN,
-				'pools,stats,clients,servers',
-			);
+			// Poll for the state being asserted rather than sleeping a guessed
+			// interval — a loaded runner takes longer to get a query in flight, and
+			// the window closes when the sleeps end.
+			let instance!: PgBouncerInstance;
 
-			expect(response.statusCode).toBe(200);
+			for (let attempt = 0; attempt < 20; attempt++) {
+				const response = await readReport(
+					vendor,
+					USER.ADMIN.TOKEN,
+					'pools,stats,clients,servers',
+				);
 
-			const instance = soleInstance(response.body.data);
+				expect(response.statusCode).toBe(200);
+				instance = soleInstance(response.body.data);
+
+				if (poolNamed(instance, 'directus_free')!.serversActive > 0) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
 			const free = poolNamed(instance, 'directus_free')!;
 
 			// The one server the pool is allowed is busy running the held query.
@@ -250,10 +266,10 @@ describe('PgBouncer Report Tests', () => {
 			expect(servers).toHaveLength(1);
 			expect(servers[0]!.remotePid).toBeGreaterThan(0);
 
-			await saturation;
-
 			// The queue that formed is not a live reading, so it is read off the
 			// counter that keeps it: waiting time only accrues when a client waited.
+			// The second saturating client queues behind the first and gives up at
+			// `query_wait_timeout`, which is a second — so by now it has accrued.
 			const after = await readReport(vendor, USER.ADMIN.TOKEN);
 
 			const stats = soleInstance(after.body.data).stats.find((row) => {
