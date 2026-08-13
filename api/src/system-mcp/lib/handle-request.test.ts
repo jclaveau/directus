@@ -39,6 +39,17 @@ vi.mock('./tools.js', () => {
 	};
 });
 
+// The real one dispatches on the default pool's dialect, which would build a
+// database to answer an error. Passing the error through is what it does for
+// anything no dialect recognised, so that is the default here.
+const translate = vi.hoisted(() => {
+	return { extract: vi.fn(async (error: unknown) => error) };
+});
+
+vi.mock('../../database/errors/translate.js', () => {
+	return { extractDatabaseError: translate.extract };
+});
+
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { handleSystemMcpRequest, MCP_PROTOCOL_VERSION } from './handle-request.js';
 
@@ -58,6 +69,8 @@ beforeEach(() => {
 	tool.run.mockReset();
 	logger.error.mockReset();
 	logger.debug.mockReset();
+	translate.extract.mockReset();
+	translate.extract.mockImplementation(async (error: unknown) => error);
 });
 
 // "The server MUST respond with its own capabilities and information", and
@@ -291,6 +304,37 @@ test('An unexpected failure is recorded, not only answered', async () => {
 
 	expect(logger.error).toHaveBeenCalledOnce();
 	expect(logger.error.mock.calls[0]![0]).toBeInstanceOf(Error);
+});
+
+// Answering the caller here is what takes a tool failure out of `errorHandler`,
+// which is where a raw driver error is normally turned into the Directus error
+// naming it. Running that translation here keeps the two surfaces telling the
+// same story about the same failure.
+test('A driver error is named, not handed over raw', async () => {
+	const raw = new Error('Knex: Timeout acquiring a connection');
+	const named = new ForbiddenError();
+
+	tool.run.mockRejectedValue(raw);
+	translate.extract.mockResolvedValue(named);
+
+	const response = await handleSystemMcpRequest({
+		jsonrpc: '2.0',
+		id: 19,
+		method: 'tools/call',
+		params: { name: 'list_processes' },
+	}, context);
+
+	expect(translate.extract).toHaveBeenCalledWith(raw, {});
+
+	expect(response?.result).toEqual({
+		content: [{ type: 'text', text: named.message }],
+		isError: true,
+	});
+
+	// And the translated error decides how loudly it is recorded: a Directus
+	// error is the expected outcome, so it stays at debug.
+	expect(logger.error).not.toHaveBeenCalled();
+	expect(logger.debug).toHaveBeenCalledOnce();
 });
 
 test('A refused read is not a failure the operator has to see', async () => {

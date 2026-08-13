@@ -1,5 +1,7 @@
 import { ErrorCode, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import { version } from 'directus/version';
+import type { SQLError } from '../../database/errors/dialects/types.js';
+import { extractDatabaseError } from '../../database/errors/translate.js';
 import { useLogger } from '../../logger/index.js';
 import type { SystemMcpToolContext } from '../types/tool.js';
 import { systemMcpTools, findSystemMcpTool } from './tools.js';
@@ -90,7 +92,16 @@ async function callTool(
 			structuredContent: structured,
 		});
 	}
-	catch (error) {
+	catch (rawError) {
+		// The same translation `errorHandler` runs on the REST path, which answering
+		// the caller here takes this out of: a raw driver error becomes the Directus
+		// error naming what happened, so an agent reads "pool exhausted" rather than
+		// a knex timeout string it would have to pattern-match. Every tool reads on
+		// the default pool, so that pool's dialect is the right one to translate for.
+		const error = isDirectusError(rawError)
+			? rawError
+			: await extractDatabaseError(rawError as SQLError, {});
+
 		// An argument the tool would not take never became a read at all, so it is
 		// a protocol error — the spec's own example of -32602 is exactly this.
 		if (isDirectusError(error, ErrorCode.InvalidPayload)) {
