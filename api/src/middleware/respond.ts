@@ -150,32 +150,32 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	) {
 		filled = true;
 
-		const { key, hash } = await getCacheKey(req);
+		const { redisKey, cacheKey } = await getCacheKey(req);
 
 		try {
 			const now = Date.now();
 			const ttlMs = getMilliseconds(resolvedCacheTtl());
 			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
 
-			await setCacheValue(cache, key, res.locals['payload'], ttlMs);
+			await setCacheValue(cache, redisKey, res.locals['payload'], ttlMs);
 
 			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
 			// `ttlMs` explicitly so it tracks the live override, not the Keyv default
 			// TTL frozen at the response cache's construction.
-			await setCacheValue(cache, `${key}__expires_at`, {
+			await setCacheValue(cache, `${redisKey}__expires_at`, {
 				exp: expiresAt,
 				createdAt: now,
 				ttlMs: ttlMs ?? null,
 			}, ttlMs);
 
 			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
-			void writeCacheTombstone(key, expiresAt).catch(() => {});
+			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
 
 			await tagScopedCacheKeys(
-				key,
+				redisKey,
 				scopedCacheTags,
 				env['CACHE_TAGS_HEADER']
-					? [`${key}__tags`]
+					? [`${redisKey}__tags`]
 					: [],
 			);
 
@@ -189,7 +189,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// a CacheValue (object) — a raw string won't round-trip.
 					await setCacheValue(
 						cache,
-						`${key}__tags`,
+						`${redisKey}__tags`,
 						{ tags: serializeScopedCacheTags(pins) },
 						getMilliseconds(resolvedCacheTtl()),
 					);
@@ -236,8 +236,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// user are fully populated, unlike the early cache middleware. Buffered
 					// like the events; the flusher upserts the descriptors dimension.
 					void queueCacheDescriptor({
-						cacheKey: hash,
-						redisKey: key,
+						cacheKey,
+						redisKey,
 						coarse,
 						method: req.method,
 						path: req.originalUrl.split('?')[0]!,
@@ -261,7 +261,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// The same fill latency as a timestamped event (kind 'f') so the
 					// median-latency chart can plot miss compute time over the window;
 					// the descriptor above keeps only the latest per key.
-					queueMissLatency(fillMs, 'fill', hash);
+					queueMissLatency(fillMs, 'fill', cacheKey);
 				}
 				catch (descriptorErr: any) {
 					logger.warn(descriptorErr, '[cache-stats] descriptor capture failed');
@@ -269,7 +269,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			}
 		}
 		catch (err: any) {
-			logger.warn(err, `[cache] Couldn't set key ${key}. ${err}`);
+			logger.warn(err, `[cache] Couldn't set key ${redisKey}. ${err}`);
 
 			if (cacheStatsActive()) {
 				void reportCacheAnomaly(

@@ -19,12 +19,18 @@ function sortNestedKeys(_key: string, value: unknown): unknown {
 	return value;
 }
 
+/**
+ * The two identities one cached response has. They hold the same digest unless
+ * `CACHE_KEY_HASH_ENABLED=false` makes the Redis one readable, and are named
+ * apart because a bare `key` says which of them it is to nobody.
+ */
 export interface CacheKey {
-	// Redis key: readable descriptor (CACHE_KEY_HASH_ENABLED=false), else the hash.
-	key: string;
+	// What Redis is keyed by: a readable descriptor under
+	// CACHE_KEY_HASH_ENABLED=false, else the same digest as below.
+	redisKey: string;
 	// Fixed-length stats identity (object-hash of the info): stats tables key by
 	// this, so a readable Redis key can't overflow their 255-char column.
-	hash: string;
+	cacheKey: string;
 }
 
 // Highest-q language from Accept-Language, region-stripped and lowercased
@@ -251,9 +257,9 @@ export async function getCacheKey(req: Request): Promise<CacheKey> {
 
 	// CACHE_KEY_HASH_ENABLED=false makes the Redis key the readable descriptor (a dev
 	// sees which request an entry is); the stats identity stays the fixed digest.
-	const key = env['CACHE_KEY_HASH_ENABLED'] === false
+	const redisKey = env['CACHE_KEY_HASH_ENABLED'] === false
 		? JSON.stringify(info, sortNestedKeys)
 		: digest;
 
-	return { key, hash: digest };
+	return { redisKey, cacheKey: digest };
 }

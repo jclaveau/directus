@@ -35,14 +35,14 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		return next();
 	}
 
-	const { key, hash } = await getCacheKey(req);
+	const { redisKey, cacheKey } = await getCacheKey(req);
 
 	let cachedData;
 
 	try {
-		cachedData = await getCacheValue(cache, key);
+		cachedData = await getCacheValue(cache, redisKey);
 	} catch (err: any) {
-		logger.warn(err, `[cache] Couldn't read key ${key}. ${err.message}`);
+		logger.warn(err, `[cache] Couldn't read key ${redisKey}. ${err.message}`);
 
 		if (cacheStatsActive()) {
 			void reportCacheAnomaly(
@@ -61,10 +61,13 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		let expiresMeta;
 
 		try {
-			expiresMeta = await getCacheValue(cache, `${key}__expires_at`);
+			expiresMeta = await getCacheValue(cache, `${redisKey}__expires_at`);
 			cacheExpiryDate = expiresMeta?.exp;
 		} catch (err: any) {
-			logger.warn(err, `[cache] Couldn't read key ${`${key}__expires_at`}. ${err.message}`);
+			logger.warn(
+				err,
+				`[cache] Couldn't read key ${redisKey}__expires_at. ${err.message}`,
+			);
 
 			if (cacheStatsActive()) {
 				void reportCacheAnomaly(
@@ -97,7 +100,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 		if (cacheStatsActive() && createdAt > 0) {
 			void queueCacheHit({
-				cacheKey: hash,
+				cacheKey,
 				ageMs: Math.max(Date.now() - createdAt, 0),
 				ttlMs: expiresMeta?.ttlMs ?? null,
 				durationMs: Math.max(Date.now() - Number(res.locals['requestStart']), 0),
@@ -105,10 +108,10 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		}
 
 		if (env['CACHE_TAGS_HEADER']) {
-			// Dev-only: pins were persisted to a `${key}__tags` sibling at write
+			// Dev-only: pins were persisted to a `${redisKey}__tags` sibling at write
 			// time (respond.ts); the read that builds them is skipped on a HIT.
 			try {
-				const stored = await getCacheValue(cache, `${key}__tags`);
+				const stored = await getCacheValue(cache, `${redisKey}__tags`);
 
 				if (stored?.tags) {
 					res.setHeader(`${env['CACHE_TAGS_HEADER']}`, stored.tags);
@@ -132,10 +135,10 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		if (cacheStatsActive()) {
 			const missAt = Date.now();
 
-			void readCacheMissGap(key, missAt)
+			void readCacheMissGap(redisKey, missAt)
 				.then((gapMs) => {
 					return queueCacheMiss({
-						cacheKey: hash,
+						cacheKey,
 						gapMs,
 						ttlMs: getMilliseconds(resolvedCacheTtl()) ?? null,
 					});

@@ -21,17 +21,17 @@ export async function reportCacheAnomaly(
 	reason: CacheAnomalyReason,
 	detail?: string | null,
 ): Promise<void> {
-	const { key, hash } = await getCacheKey(req);
+	const { redisKey, cacheKey } = await getCacheKey(req);
 
-	if (!(await claimCacheAnomalyThrottleSlot(reason, hash))) {
+	if (!(await claimCacheAnomalyThrottleSlot(reason, cacheKey))) {
 		return;
 	}
 
 	const isGraphQl = req.originalUrl?.startsWith('/graphql') === true;
 
 	await queueCacheDescriptor({
-		cacheKey: hash,
-		redisKey: key,
+		cacheKey,
+		redisKey,
 		coarse: false,
 		method: req.method,
 		path: req.originalUrl.split('?')[0]!,
@@ -51,5 +51,5 @@ export async function reportCacheAnomaly(
 		lastFilled: null,
 	});
 
-	queueCacheAnomaly({ cacheKey: hash, reason, detail: detail ?? null });
+	queueCacheAnomaly({ cacheKey, reason, detail: detail ?? null });
 }

@@ -92,7 +92,10 @@ vi.mock('../utils/query-cachable.js', () => {
 
 vi.mock('../utils/get-cache-key.js', () => {
 	return {
-		getCacheKey: vi.fn().mockResolvedValue({ key: 'cache-key', hash: 'cache-hash' }),
+		getCacheKey: vi.fn().mockResolvedValue({
+			redisKey: 'cache-key',
+			cacheKey: 'cache-hash',
+		}),
 	};
 });
 

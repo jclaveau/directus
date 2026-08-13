@@ -45,7 +45,7 @@ describe('reportCacheAnomaly', () => {
 	});
 
 	it('claims the slot, then writes the descriptor + anomaly', async () => {
-		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk1', hash: 'h1' });
+		mocks.getCacheKey.mockResolvedValueOnce({ redisKey: 'rk1', cacheKey: 'h1' });
 
 		await reportCacheAnomaly(makeReq(), 'value_too_large', '2048B');
 
@@ -81,7 +81,7 @@ describe('reportCacheAnomaly', () => {
 	});
 
 	it('records a graphql request with a blank url + the graphql query', async () => {
-		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk2', hash: 'h2' });
+		mocks.getCacheKey.mockResolvedValueOnce({ redisKey: 'rk2', cacheKey: 'h2' });
 
 		const req = makeReq({ method: 'POST', originalUrl: '/graphql' });
 		await reportCacheAnomaly(req, 'missing_scope');
@@ -103,7 +103,7 @@ describe('reportCacheAnomaly', () => {
 	});
 
 	it('writes nothing when the throttle slot is already claimed', async () => {
-		mocks.getCacheKey.mockResolvedValueOnce({ key: 'rk3', hash: 'h3' });
+		mocks.getCacheKey.mockResolvedValueOnce({ redisKey: 'rk3', cacheKey: 'h3' });
 		mocks.claimCacheAnomalyThrottleSlot.mockResolvedValueOnce(false);
 
 		await reportCacheAnomaly(makeReq(), 'missing_scope');
