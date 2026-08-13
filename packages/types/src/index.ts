@@ -21,6 +21,7 @@ export * from './misc.js';
 export * from './notifications.js';
 export * from './payload.js';
 export * from './permissions.js';
+export * from './pgbouncer.js';
 export * from './policies.js';
 export * from './presets.js';
 export * from './processes.js';

@@ -4,6 +4,8 @@ import type {
 	AbstractServiceOptions,
 	Accountability,
 	CacheFlushTarget,
+	PgBouncerDetail,
+	PgBouncerReport,
 	PrimaryKey,
 	ProcessesReport,
 	SchemaOverview,
@@ -37,6 +39,7 @@ import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { collectPgBouncer } from '../pgbouncer/index.js';
 import { collectProcesses } from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
@@ -455,5 +458,11 @@ export class UtilsService {
 		this.assertAdmin('inspect the running processes');
 
 		return collectProcesses();
+	}
+
+	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {
+		this.assertAdmin('inspect the pgbouncer pools');
+
+		return collectPgBouncer(details);
 	}
 }

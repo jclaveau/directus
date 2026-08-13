@@ -282,6 +282,37 @@ ASSETS_CACHE_TTL="30d"
 # ["750ms"]
 # PROCESSES_COLLECT_TIMEOUT="750ms"
 
+#####################################################################################
+### PgBouncer
+
+# Serve the admin PgBouncer page (Settings -> PgBouncer), which reads live pool
+# and connection state from each pooler's admin console. Admin-only either way;
+# off removes the endpoint entirely. [false]
+# PGBOUNCER_REPORT_ENABLED=false
+
+# Which DB connections reach Postgres through pgbouncer, as a CSV of names from
+# DB_CONNECTIONS (the base connection's own name is accepted too). Each one's
+# host and port say which pooler to read, so nothing is configured twice. A name
+# the registry does not know, or one on a non-Postgres client, fails at boot.
+# PGBOUNCER_CONNECTIONS="free,premium"
+
+# How long one admin query may take. [2s]
+# PGBOUNCER_QUERY_TIMEOUT="2s"
+
+# The admin console credentials for a connection's pooler. Both default to the
+# connection's own DB user and password; set them when the pooler's admin_users
+# (or stats_users) is a different account.
+# PGBOUNCER_FREE_ADMIN_USER="pgbouncer_stats"
+# PGBOUNCER_FREE_ADMIN_PASSWORD=""
+
+# The virtual database the admin console answers on. ["pgbouncer"]
+# PGBOUNCER_FREE_ADMIN_DATABASE="pgbouncer"
+
+# Where several pgbouncer processes sit behind one address, name each member so
+# every one is read as its own instance — their pools and counters are per
+# process and share nothing, so one address would report an arbitrary member.
+# PGBOUNCER_FREE_ADMIN_HOSTS="pgb1:6432,pgb2:6432"
+
 ####################################################################################################
 ### File Storage
 
