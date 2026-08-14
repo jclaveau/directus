@@ -40,6 +40,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Six spawned instances plus a PM2 daemon of three, and every read waits
 	// out the collection window.
 	'/tests/db/app/processes.test.ts': 90_000,
+	// Two spawned instances, and one case holds a pool saturated for six seconds.
+	'/tests/db/app/pgbouncer.test.ts': 40_000,
 	'/tests/db/app/system-mcp.test.ts': 50_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,

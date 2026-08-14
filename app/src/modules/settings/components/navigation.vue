@@ -40,6 +40,11 @@ const links = computed<Link[][]>(() => [
 			name: t('processes', 'Processes'),
 			to: `/settings/processes`,
 		},
+		{
+			icon: 'hub',
+			name: t('pgbouncer', 'PgBouncer'),
+			to: `/settings/pgbouncer`,
+		},
 	],
 	[
 		{

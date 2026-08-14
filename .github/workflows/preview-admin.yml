@@ -82,6 +82,17 @@ jobs:
       DB_DATABASE: directus
       DB_USER: directus
       DB_PASSWORD: directus
+      # Two tiers over the pgbouncer started below, so Settings → PgBouncer has real
+      # pools to read: a tiny `free` beside a `premium` the admin policy is granted,
+      # which is the tiering the granted-connection feature exists for. The base pool
+      # stays direct, so migrations and DDL never ride a transaction-pooled session.
+      DB_CONNECTIONS: free,premium
+      DB_CONNECTION_FREE_PORT: '6432'
+      DB_CONNECTION_FREE_DATABASE: directus_free
+      DB_CONNECTION_PREMIUM_PORT: '6432'
+      DB_CONNECTION_PREMIUM_DATABASE: directus_premium
+      PGBOUNCER_REPORT_ENABLED: 'true'
+      PGBOUNCER_CONNECTIONS: free,premium
       KEY: preview
       SECRET: preview
       CACHE_ENABLED: 'true'
@@ -118,6 +129,50 @@ jobs:
 
       - name: Prepare
         uses: ./.github/actions/prepare
+
+      # A pooler in front of the same database, sized so the page shows every state
+      # it can render: `free` starves at one server, `premium` carries the admin's
+      # traffic, `default` is configured and never used. Host networking so it
+      # reaches the postgres service on the runner's published port and Directus
+      # reaches it back on 6432. Digest-pinned to the same 1.25.2 the blackbox stack
+      # runs; its config is mounted because the image otherwise regenerates one from
+      # env, which can only describe a single wildcard pool.
+      - name: Start pgbouncer
+        run: |
+          mkdir -p /tmp/pgbouncer
+
+          cat > /tmp/pgbouncer/pgbouncer.ini <<'INI'
+          [databases]
+          directus_default = host=127.0.0.1 port=5432 dbname=directus user=directus password=directus pool_size=20
+          directus_free = host=127.0.0.1 port=5432 dbname=directus user=directus password=directus pool_size=1
+          directus_premium = host=127.0.0.1 port=5432 dbname=directus user=directus password=directus pool_size=4
+
+          [pgbouncer]
+          listen_addr = 0.0.0.0
+          listen_port = 6432
+          auth_type = trust
+          auth_file = /etc/pgbouncer/userlist.txt
+          pool_mode = transaction
+          max_client_conn = 1000
+          query_wait_timeout = 5
+          admin_users = directus
+          INI
+
+          printf '"directus" "directus"\n' > /tmp/pgbouncer/userlist.txt
+
+          docker run -d --name preview-pgbouncer --network host \
+            -v /tmp/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro \
+            -v /tmp/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro \
+            --entrypoint /usr/bin/pgbouncer \
+            edoburu/pgbouncer@sha256:4c1ca296ef525f108f5d3552cc337c0c09587cf8dae7f0067fd93349e47dc1cd \
+            /etc/pgbouncer/pgbouncer.ini
+
+          for _ in $(seq 1 30); do
+            (echo > /dev/tcp/127.0.0.1/6432) 2>/dev/null && break
+            sleep 1
+          done
+
+          docker logs preview-pgbouncer
 
       - name: Start tunnel
         run: |
@@ -202,6 +257,14 @@ jobs:
           echo "ADMIN_PASSWORD=$PW" >> "$GITHUB_ENV"
 
           ADMIN_PASSWORD="$PW" node directus/cli.js bootstrap
+
+          # Grant the admin policy the `premium` tier, so the preview's own traffic
+          # is routed through pgbouncer and the page has a pool with live clients on
+          # it rather than three idle ones. Applied before the server starts, since
+          # the grant is read through the permissions cache.
+          PG=$(docker ps --filter ancestor=postgres:16-alpine -q | head -1)
+          docker exec "$PG" psql -U directus -d directus -c \
+            "UPDATE directus_policies SET db_connections='premium' WHERE admin_access = true;"
 
           # Auto-login endpoint: relays a server-side session /auth/login to the browser,
           # so opening <url>/auto-login lands in the Data Studio with no password typing.

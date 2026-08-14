@@ -88,6 +88,14 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	PROCESSES_SERVICE_NAME: 'string',
 	PROCESSES_COLLECT_TIMEOUT: 'string',
 
+	PGBOUNCER_REPORT_ENABLED: 'boolean',
+	PGBOUNCER_CONNECTIONS: 'array',
+	PGBOUNCER_QUERY_TIMEOUT: 'string',
+	'PGBOUNCER_.+_ADMIN_HOSTS': 'array',
+	'PGBOUNCER_.+_ADMIN_DATABASE': 'string',
+	'PGBOUNCER_.+_ADMIN_USER': 'string',
+	'PGBOUNCER_.+_ADMIN_PASSWORD': 'string',
+
 	DB_SSL__CA_FILE: 'string',
 
 	ADMIN_PASSWORD: 'string',

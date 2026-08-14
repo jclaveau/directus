@@ -6,6 +6,10 @@ import { Router } from 'express';
 import Joi from 'joi';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
+import {
+	pgbouncerReportEnabled,
+	requestedPgBouncerDetails,
+} from '../pgbouncer/index.js';
 import { processesReportEnabled } from '../processes/index.js';
 import { ExportService, ImportService } from '../services/import-export.js';
 import { RevisionsService } from '../services/revisions.js';
@@ -411,6 +415,28 @@ if (processesReportEnabled()) {
 			// Live supervisor state; a cached copy would be worse than none.
 			res.locals['cache'] = false;
 			res.locals['payload'] = { data: await service.readProcesses() };
+
+			return next();
+		}),
+		respond,
+	);
+}
+
+// Same gate as the processes report: no pooler configured, no endpoint.
+if (pgbouncerReportEnabled()) {
+	router.get(
+		'/pgbouncer',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const details = requestedPgBouncerDetails(req.query['details']);
+
+			// Live pool state; a cached copy would be worse than none.
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readPgBouncer(details) };
 
 			return next();
 		}),

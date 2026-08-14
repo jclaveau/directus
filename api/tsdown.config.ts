@@ -52,7 +52,13 @@ export default defineConfig({
 	// rolldown 1.1.3 otherwise follows the workspace:* @directus/types into api/dist and
 	// rewrites its `@sinclair/typebox` import to a physical .pnpm store path that isn't
 	// shipped, breaking boot. They're separately installed packages — resolve them at runtime.
-	external: [/^@directus\//, /^@sinclair\/typebox/],
+	//
+	// `pg` is resolved at runtime too, the way knex already resolves its drivers
+	// by name. Bundling it drags in pg's native client, whose top-level
+	// `require('pg-native')` runs on load and kills boot — pg-native is optional
+	// and not installed. knex's own require is dynamic, so nothing hit this until
+	// the pgbouncer admin console imported pg directly.
+	external: [/^@directus\//, /^@sinclair\/typebox/, /^pg(-native)?$/],
 	tsconfig: 'tsconfig.prod.json',
 	plugins: coverage
 		? [

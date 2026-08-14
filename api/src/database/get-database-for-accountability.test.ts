@@ -39,8 +39,14 @@ vi.mock('../logger/index.js', () => {
 
 vi.mock('../metrics/index.js', () => ({ useMetrics: () => undefined }));
 
+vi.mock('../utils/node-id.js', () => ({ nodeId: 'testnode' }));
+
 function connectedDatabaseOf(db: any): string {
 	return db.__knexConfig.connection.database;
+}
+
+function applicationNameOf(db: any): string | undefined {
+	return db.__knexConfig.connection.application_name;
 }
 
 beforeEach(() => {
@@ -243,6 +249,51 @@ test('Lets a policy grant the base pool by its configured name', async () => {
 			),
 		),
 	).toBe('directus');
+});
+
+test('Every pool announces which pool it is', async () => {
+	const { default: getDatabase, getDatabaseForAccountability } =
+		await import('./index.js');
+
+	expect(applicationNameOf(getDatabase())).toBe('directus:testnode:base');
+
+	// pgbouncer prints this per client, so a connection is traceable back to the
+	// process and the pool it came from without guessing from an address.
+	expect(
+		applicationNameOf(
+			getDatabaseForAccountability(
+				createDefaultAccountability({ grantedDbConnections: ['premium'] }),
+			),
+		),
+	).toBe('directus:testnode:premium');
+});
+
+test('A configured application name wins, under the driver\'s own key', async () => {
+	mockEnv['DB_APPLICATION_NAME'] = 'reporting';
+
+	const { default: getDatabase } = await import('./index.js');
+
+	expect(applicationNameOf(getDatabase())).toBe('reporting');
+});
+
+test('A pool that cannot carry the parameter is not given one', async () => {
+	// sqlite has no such connection parameter, and a connection string carries
+	// its own — neither takes the stamp.
+	mockEnv['DB_CLIENT'] = 'sqlite3';
+	mockEnv['DB_FILENAME'] = './data.db';
+
+	const { default: getDatabase } = await import('./index.js');
+
+	expect(applicationNameOf(getDatabase())).toBeUndefined();
+});
+
+test('A pool built from a connection string keeps the string', async () => {
+	mockEnv['DB_CONNECTION_STRING'] = 'postgres://u:p@localhost:5432/directus';
+
+	const { default: getDatabase } = await import('./index.js');
+
+	expect(getDatabase().__knexConfig.connection)
+		.toBe('postgres://u:p@localhost:5432/directus');
 });
 
 test('Base priority can outrank a lower-priority granted pool', async () => {
