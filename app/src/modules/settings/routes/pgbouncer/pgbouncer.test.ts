@@ -120,9 +120,15 @@ const router = createRouter({ history: createMemoryHistory(), routes: [] });
 const global = {
 	plugins: [i18n, router],
 	directives: {
+		// The real directive renders into a floating element the test DOM never
+		// gets; parking the text on the node is what makes a tooltip assertable.
 		tooltip: {
-			mounted: () => undefined,
-			updated: () => undefined,
+			mounted: (el: HTMLElement, binding: { value: unknown }) => {
+				el.setAttribute('data-tooltip', String(binding.value));
+			},
+			updated: (el: HTMLElement, binding: { value: unknown }) => {
+				el.setAttribute('data-tooltip', String(binding.value));
+			},
 			unmounted: () => undefined,
 		},
 	},
@@ -212,6 +218,49 @@ describe('the pools', () => {
 		const wrapper = await mountLoaded();
 
 		expect(wrapper.findAll('.pool-row')[1]!.text()).toContain('—');
+	});
+});
+
+describe('the tooltips', () => {
+	test('the saturation bar explains what it measures against', async () => {
+		const wrapper = await mountLoaded();
+		const tip = wrapper.findAll('.saturation')[0]!.attributes('data-tooltip');
+
+		expect(tip).toContain('sv_active / pool_size');
+	});
+
+	test('a pool with no size of its own says why its bar is empty', async () => {
+		const inherited = report();
+		inherited.instances[0]!.pools[1]!.poolSize = null;
+
+		const wrapper = await mountLoaded(inherited);
+		const tip = wrapper.findAll('.saturation')[1]!.attributes('data-tooltip');
+
+		expect(tip).toContain('default_pool_size');
+		expect(tip).toContain('stays empty on purpose');
+	});
+
+	test('a limit names pgbouncer\'s own default when it was changed', async () => {
+		const wrapper = await mountLoaded();
+		const limits = wrapper.findAll('.limit');
+
+		// pool_mode is transaction against a default of session.
+		expect(limits[0]!.attributes('data-tooltip'))
+			.toContain('default is session.');
+
+		// max_client_conn was left alone, so there is no other value to name.
+		expect(limits[1]!.attributes('data-tooltip'))
+			.toContain('Left at pgbouncer’s default.');
+	});
+
+	test('the application column explains what Directus stamps there', async () => {
+		const wrapper = await mountLoaded();
+
+		await wrapper.findAll('.pool-row')[0]!.trigger('click');
+		await flushPromises();
+
+		expect(wrapper.find('.connections th').attributes('data-tooltip'))
+			.toContain('directus:<node>:<connection>');
 	});
 });
 
