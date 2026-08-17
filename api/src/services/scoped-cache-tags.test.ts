@@ -66,9 +66,59 @@ describe('canonicalScopedCacheValue', () => {
 			.toBe('9007199254740993');
 	});
 
-	test('unknown/undefined type falls back to `String` (owner-id/uuid path)', () => {
+	test(oneLine`
+		uuid: an uppercase spelling and a lowercase one collapse — the DB compares uuid
+		case-insensitively, so both name the same row and must name one slice
+	`, () => {
+		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
+
+		expect(canonicalScopedCacheValue(upper, 'uuid'))
+			.toBe(canonicalScopedCacheValue(upper.toLowerCase(), 'uuid'));
+
+		expect(canonicalScopedCacheValue(upper, 'uuid')).toBe(upper.toLowerCase());
+	});
+
+	test(oneLine`
+		integer: a leading zero, a leading plus and a driver number all collapse — the DB
+		reads them as one key, so they cannot resolve different slices
+	`, () => {
+		for (const spelling of [1, '1', '01', '+1', '0001']) {
+			expect(canonicalScopedCacheValue(spelling, 'integer')).toBe('1');
+		}
+
+		// A signed zero is still zero, and a zero must not be stripped to empty.
+		expect(canonicalScopedCacheValue('-0', 'integer')).toBe('0');
+		expect(canonicalScopedCacheValue('000', 'integer')).toBe('0');
+		expect(canonicalScopedCacheValue('-007', 'integer')).toBe('-7');
+	});
+
+	test(oneLine`
+		bigInteger: a leading-zero spelling collapses without a numeric pass, so
+		precision past MAX_SAFE_INTEGER survives
+	`, () => {
+		expect(canonicalScopedCacheValue('00009007199254740993', 'bigInteger'))
+			.toBe('9007199254740993');
+	});
+
+	test(oneLine`
+		a non-numeric value on an integer field keeps its string form rather than
+		becoming an empty token
+	`, () => {
+		expect(canonicalScopedCacheValue('', 'integer')).toBe('');
+		expect(canonicalScopedCacheValue('7a', 'integer')).toBe('7a');
+	});
+
+	test(oneLine`
+		string: spelling is NOT normalized — a varchar key really is a distinct value,
+		and the DB would not match the other spelling either
+	`, () => {
+		expect(canonicalScopedCacheValue('01', 'string')).toBe('01');
+		expect(canonicalScopedCacheValue('ABC', 'string')).toBe('ABC');
+	});
+
+	test('unknown/undefined type falls back to `String` (owner-id path)', () => {
 		expect(canonicalScopedCacheValue(42, undefined)).toBe('42');
-		expect(canonicalScopedCacheValue('7c9e-uuid', 'uuid')).toBe('7c9e-uuid');
+		expect(canonicalScopedCacheValue('7c9e-uuid', undefined)).toBe('7c9e-uuid');
 	});
 });
 
@@ -615,6 +665,60 @@ describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
 		expect(
 			pinnedScopedCacheTagsFromFilter('slots', [], { id: { _eq: 7 } }),
 		).toEqual([]);
+	});
+
+	test(oneLine`
+		read↔purge symmetry on a uuid key: the URL's uppercase spelling and the driver's
+		lowercase row resolve ONE slice, or a write never purges the read it changed
+	`, () => {
+		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
+
+		const pinned = pinnedScopedCacheTagsFromFilter(
+			'notes',
+			[],
+			{ id: { _eq: upper } },
+			{ id: 'uuid' },
+			{},
+			[],
+			'id',
+		);
+
+		const purged = scopedCacheTagsFromRows(
+			'notes',
+			['id'],
+			[{ id: upper.toLowerCase() }],
+			'coarse',
+			{ id: 'uuid' },
+		);
+
+		expect(serializeScopedCacheTags(pinned))
+			.toBe(serializeScopedCacheTags(purged ?? []));
+	});
+
+	test(oneLine`
+		read↔purge symmetry on an integer key: a padded URL key and the driver's number
+		resolve ONE slice
+	`, () => {
+		const pinned = pinnedScopedCacheTagsFromFilter(
+			'notes',
+			[],
+			{ id: { _eq: '007' } },
+			{ id: 'integer' },
+			{},
+			[],
+			'id',
+		);
+
+		const purged = scopedCacheTagsFromRows(
+			'notes',
+			['id'],
+			[{ id: 7 }],
+			'coarse',
+			{ id: 'integer' },
+		);
+
+		expect(serializeScopedCacheTags(pinned))
+			.toBe(serializeScopedCacheTags(purged ?? []));
 	});
 
 	test(oneLine`

@@ -131,8 +131,36 @@ export function canonicalScopedCacheValue(
 			: String(ms);
 	}
 
-	// integer/bigInteger keep `String` to preserve precision past MAX_SAFE_INTEGER; they
-	// already collapse (`7` and `'7'` → `'7'`). Only fixed-scale types need the numeric pass.
+	// A uuid is compared case-insensitively by the DB, so both spellings name one row
+	// and must name one slice. Neither side normalizes for us — `validateKeys` accepts
+	// either case without rewriting it — so the token would otherwise be whatever the
+	// caller sent: an iOS client reading `UUID().uuidString` (uppercase) against a
+	// web client writing lowercase would pin and purge different keys → stale HIT.
+	if (type === 'uuid') {
+		return String(value).toLowerCase();
+	}
+
+	// integer/bigInteger normalize the SPELLING but never go through `Number`: past
+	// MAX_SAFE_INTEGER a numeric pass corrupts the value, so leading zeros and a
+	// leading `+` are stripped as string surgery. `01`, `+1`, `0001` and a driver's
+	// `1` are one key to the DB, so they must not resolve different slices. Anything
+	// that isn't a plain integer keeps its string form rather than becoming empty.
+	if (type === 'integer' || type === 'bigInteger') {
+		const digits = /^([+-]?)0*(\d+)$/.exec(String(value));
+
+		if (digits === null) {
+			return String(value);
+		}
+
+		// `-0` is zero; only a non-zero magnitude keeps the sign.
+		const sign = digits[1] === '-' && digits[2] !== '0'
+			? '-'
+			: '';
+
+		return `${sign}${digits[2]}`;
+	}
+
+	// Only fixed-scale types need the numeric pass (`'1.50'` vs `1.5`).
 	if (type === 'decimal' || type === 'float') {
 		const num = Number(value);
 
