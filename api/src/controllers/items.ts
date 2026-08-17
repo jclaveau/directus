@@ -147,6 +147,15 @@ router.get(
 			data: result || null,
 		};
 
+		// Forward the read's pins, same as `readHandler`: without them respond.ts falls
+		// back to the bare collection tag, so the key slice this read pinned would never
+		// reach the tag index and any write to the collection would drop the entry.
+		const resultMeta = readMeta(result);
+		res.locals['scopedCacheTags'] = resultMeta?.scopedCacheTags;
+
+		res.locals['scopedCacheUnautopurgeableTags'] =
+			resultMeta?.scopedCacheUnautopurgeableTags;
+
 		return next();
 	}),
 	mergeContentVersions,

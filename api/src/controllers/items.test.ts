@@ -228,6 +228,27 @@ describe('items controller', () => {
 			expect(res.locals['payload']).toEqual({ data: { id: 1 } });
 			expect(next).toHaveBeenCalledOnce();
 		});
+
+		// Without this the pin never reaches respond.ts, which then falls back to the
+		// bare collection tag — so the key slice a single-item read pinned would be
+		// indexed under nothing, and any write to the collection would drop the entry.
+		test('stamps the read\'s pins and its unautopurgeable tags', async () => {
+			const pin = { collection: 'articles', field: 'id', value: 1 };
+			const orphan = { collection: 'authors', field: 'ghost', value: 'g' };
+
+			readOne.mockResolvedValueOnce(
+				withMeta(
+					{ id: 1 },
+					{ scopedCacheTags: [pin], scopedCacheUnautopurgeableTags: [orphan] },
+				),
+			);
+
+			const res = { locals: {} } as any;
+			await handler()(makeReq(), res, vi.fn());
+
+			expect(res.locals['scopedCacheTags']).toEqual([pin]);
+			expect(res.locals['scopedCacheUnautopurgeableTags']).toEqual([orphan]);
+		});
 	});
 
 	describe('PATCH /:collection', () => {
