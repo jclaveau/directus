@@ -394,6 +394,13 @@ export async function purgeCollectionScopedCache(
  * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
  * risk leaving a slice stale; still narrower than nuking the whole namespace.
  *
+ * To purge EVERY entry of a collection, pass `null` — it dispatches to
+ * `purgeCollectionScopedCache`, which scans `<namespace>:tag:<collection>:*` and
+ * drops the bare tag plus every slice key. A bare `[{ collection }]` in the tag
+ * list is NOT that: this function deletes exactly the keys it is handed, and a read
+ * pinned to a slice (an owner, or its primary key) carries no bare tag, so it
+ * survives.
+ *
  * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —
  * for a cancelled mutation nothing in `collection` changed, so only the hook's own
  * declared (usually foreign) slices should drop, not this collection's global reads.
