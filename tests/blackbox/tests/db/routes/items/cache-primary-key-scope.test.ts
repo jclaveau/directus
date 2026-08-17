@@ -217,11 +217,13 @@ describe(oneLine`
 				meta: 'total_count',
 			};
 
-			// The bare collection tag rides beside the key slice here, and only here:
-			// the pins bound the rows the read returns, the count they carry is over
-			// the whole collection.
+			// The header carries the read's RAW pins, not what the entry was indexed
+			// under, so it still reads as one key here — which is what makes the drop
+			// below conclusive: the read pinned nothing but `id=1`, an insert cannot
+			// touch that slice, and the entry goes anyway. Only the bare collection
+			// tag the count adds to the index can explain that.
 			const pins = await pinsOfCachedRead(`/items/${NOTE}`, counted);
-			expect(pins).toBe(`${NOTE}:id=${readNote}, ${NOTE}`);
+			expect(pins).toBe(`${NOTE}:id=${readNote}`);
 
 			const cached = await get(`/items/${NOTE}`, counted);
 			expect(cached.headers[cacheStatusHeader]).toBe('HIT');
