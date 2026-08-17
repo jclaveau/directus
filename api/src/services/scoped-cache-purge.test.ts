@@ -1035,10 +1035,57 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			an undeclared take-over stays precise on a collection declaring no scope field
-			— a take-over cannot move a row between key slices, so nothing can leak
+			an undeclared take-over falls back to a coarse purge on a collection declaring
+			no scope field too — the key it returned is not the only row it may have
+			written, and every other row's key slice would stay stale
 		`, async () => {
-			const takeOver = async () => 99;
+			// The hook writes a row it never names (the shape a merge/dedup take-over
+			// has) and returns a different key. Only 99 is knowable here, so a precise
+			// purge of 99 alone leaves 5's own keyed read serving the pre-write row.
+			// Before the key axis, an unscoped collection was entirely bare-tagged and
+			// the bare purge covered 5 by accident; now nothing does.
+			const takeOver = async () => {
+				await db('test')
+					.where({ id: 5 })
+					.update({ name: 'merged' });
+
+				return 99;
+			};
+
+			emitter.onFilter('test.items.create', takeOver);
+			tracker.on.update('test').response(1);
+
+			try {
+				await unscopedService().createMany([{ name: 'x' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					null,
+					expect.anything(),
+					{ scopedCachePurgeId: expect.any(String) },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
+
+		it(oneLine`
+			a take-over that DECLARES its footprint keeps the precise purge on a
+			collection declaring no scope field — the claim is what buys the precision
+		`, async () => {
+			const takeOver = async (_payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy({
+					collection: 'test',
+					field: 'id',
+					value: 5,
+					type: 'integer',
+				});
+
+				return 99;
+			};
+
 			emitter.onFilter('test.items.create', takeOver);
 
 			try {
@@ -1047,7 +1094,10 @@ describe(oneLine`
 				expect(purgeScopedCache).toHaveBeenCalledWith(
 					expect.anything(),
 					'test',
-					[{ collection: 'test', field: 'id', value: 99, type: 'integer' }],
+					[
+						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
+						{ collection: 'test', field: 'id', value: 5, type: 'integer' },
+					],
 					expect.anything(),
 				);
 			}
