@@ -73,6 +73,14 @@ export interface ScopedCachePurgeHandle {
  * silently drift into a stale read, the exact poison scoped cache prevents. Prefer
  * `ItemsService` (auto-purge); reach for this ONLY when you deliberately bypass it.
  *
+ * And it is now needed where it once wasn't. A collection declaring no
+ * `scopedCacheFields` used to carry ONE tag — its bare collection tag — so any write
+ * anywhere in it dropped every cached read of it, and a bypassing write was covered
+ * by accident. With the primary key pinned on every collection, a read of row K is
+ * dropped only by a purge that names K, so rows you write outside `ItemsService` —
+ * or beside the key a create-filter take-over returned — stay cached at their old
+ * value unless you hand them here.
+ *
  * Sandboxed extensions can't reach the host cache, so this is register-type
  * extensions only.
  */
