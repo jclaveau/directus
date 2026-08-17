@@ -1,3 +1,5 @@
+import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	countScopedCacheTagMembers,
@@ -108,6 +110,16 @@ describe('countScopedCacheTagMembers', () => {
 });
 
 describe('createScopedCacheCollector', () => {
+	// A uuid key is where a missing type bites hardest: `canonicalScopedCacheValue`
+	// lowercases a `uuid` and leaves an untyped value alone.
+	const notesSchema = new SchemaBuilder()
+		.collection('notes', (c) => {
+			c.field('id')
+				.uuid()
+				.primary();
+		})
+		.build();
+
 	it('scopeTo and purgeBy feed one idempotent tag set', () => {
 		const { scope, purge, tags } = createScopedCacheCollector();
 		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
@@ -139,6 +151,57 @@ describe('createScopedCacheCollector', () => {
 		purge.purgeBy({ field: 'author', value: '7', collection: 'articles' });
 
 		expect(tags).toHaveLength(1);
+	});
+
+	it(oneLine`
+		fills a type-less tag's type from the schema — the type is what canonicalizes
+		the value, so an uppercase uuid a hook names would otherwise resolve a
+		different key from the lowercase one the purge side emits for the same row
+	`, () => {
+		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
+		const { scope, purge, tags } = createScopedCacheCollector(notesSchema);
+
+		scope.scopeTo({ collection: 'notes', field: 'id', value: upper });
+		// The spelling the driver hands the purge side for the very same row.
+		purge.purgeBy({ collection: 'notes', field: 'id', value: upper.toLowerCase() });
+
+		expect(tags).toEqual([
+			{ collection: 'notes', field: 'id', value: upper, type: 'uuid' },
+		]);
+
+		expect(scopedCacheTagKey(tags[0]!)).toBe(
+			`ns:tag:notes:id=${upper.toLowerCase()}`,
+		);
+	});
+
+	it(oneLine`
+		leaves a tag whose type the hook DID declare alone, and a bare collection tag
+		has no field to look up
+	`, () => {
+		const { scope, tags } = createScopedCacheCollector(notesSchema);
+
+		scope.scopeTo({ collection: 'notes', field: 'id', value: 7, type: 'integer' });
+		scope.scopeTo({ collection: 'notes' });
+
+		expect(tags).toEqual([
+			{ collection: 'notes', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'notes' },
+		]);
+	});
+
+	it(oneLine`
+		leaves a tag naming a collection or field the schema doesn't know untyped
+		rather than inventing one
+	`, () => {
+		const { scope, tags } = createScopedCacheCollector(notesSchema);
+
+		scope.scopeTo({ collection: 'ghosts', field: 'id', value: 'A' });
+		scope.scopeTo({ collection: 'notes', field: 'ghost', value: 'A' });
+
+		expect(tags).toEqual([
+			{ collection: 'ghosts', field: 'id', value: 'A' },
+			{ collection: 'notes', field: 'ghost', value: 'A' },
+		]);
 	});
 
 	it('records a manuallyPurged scopeTo tag key (anomaly-exempt)', () => {

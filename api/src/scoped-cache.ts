@@ -24,10 +24,29 @@ const env = useEnv();
  * the service drains `tags` into the read's scope or the mutation's purge tags. Both
  * are the same idempotent sink. Safe with purging off (then `tags` is unread).
  */
-export function createScopedCacheCollector(): ScopedCacheCollector {
+export function createScopedCacheCollector(
+	schema?: SchemaOverview,
+): ScopedCacheCollector {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
+
+	// A hook names a slice by collection/field/value and rarely knows the column's
+	// type, but the type is what canonicalizes the value: `uuid` lowercases and
+	// `integer` strips a leading zero, so a type-less tag and the schema-typed one
+	// the purge side emits resolve DIFFERENT keys for the SAME row — a pin nothing
+	// ever purges. Fill it from the schema so both sides agree.
+	function withSchemaType(tag: ScopedCacheTag): ScopedCacheTag {
+		if (tag.type !== undefined || tag.field === undefined) {
+			return tag;
+		}
+
+		const schemaType = schema?.collections[tag.collection]?.fields[tag.field]?.type;
+
+		return schemaType === undefined
+			? tag
+			: { ...tag, type: schemaType };
+	}
 
 	function add(
 		input: ScopedCacheTag | readonly ScopedCacheTag[],
@@ -37,7 +56,9 @@ export function createScopedCacheCollector(): ScopedCacheCollector {
 			? input
 			: [input];
 
-		for (const tag of batch) {
+		for (const declaredTag of batch) {
+			const tag = withSchemaType(declaredTag);
+
 			// Idempotent: a hook looping over rows that resolve the same slice — or a
 			// batch/upsert parent's shared collector fed by many children — must not
 			// inflate the set. Key on the canonical tag key (the same one the purge side
