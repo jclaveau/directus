@@ -77,6 +77,16 @@ const selfRefSchema = new SchemaBuilder()
 
 selfRefSchema.collections['test']!.scopedCacheFields = ['student'];
 
+// The same collection declaring NO scope field, where the primary key is the only
+// pinning axis there is — the shape every deployment has on every collection.
+const unscopedSchema = new SchemaBuilder()
+	.collection('test', (c) => {
+		c.field('id').id();
+		c.field('name').string();
+		c.field('student').string();
+	})
+	.build();
+
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
 // (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
 // asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
@@ -118,11 +128,15 @@ describe(oneLine`
 
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
+		// Each snapshot also emits the mutated row's primary-key slice, so it appears
+		// once per capture (old and new) — the real purge dedups on the tag key.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
 			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 			],
 			expect.anything(),
@@ -145,7 +159,9 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			],
 			expect.anything(),
@@ -192,6 +208,8 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 			],
@@ -212,7 +230,10 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			[{ collection: 'test', field: 'student', value: 'A', type: 'string' }],
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			],
 			expect.anything(),
 		);
 	});
@@ -261,7 +282,9 @@ describe(oneLine`
 			expect.anything(),
 			'test',
 			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 			],
 			expect.anything(),
@@ -308,7 +331,10 @@ describe(oneLine`
 			expect(purgeScopedCache).toHaveBeenCalledWith(
 				expect.anything(),
 				'test',
-				[{ collection: 'test', field: 'student', value: 'B', type: 'string' }],
+				[
+					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+					{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				],
 				expect.anything(),
 			);
 		}
@@ -331,7 +357,15 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			[{ collection: 'test', field: 'student', value: 'default-owner', type: 'string' }],
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{
+					collection: 'test',
+					field: 'student',
+					value: 'default-owner',
+					type: 'string',
+				},
+			],
 			expect.anything(),
 		);
 	});
@@ -352,7 +386,10 @@ describe(oneLine`
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			'test',
-			[{ collection: 'test', field: 'student', value: null, type: 'string' }],
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'student', value: null, type: 'string' },
+			],
 			expect.anything(),
 		);
 	});
@@ -403,7 +440,9 @@ describe(oneLine`
 				expect.anything(),
 				'test',
 				[
+					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 					{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 					{ collection: 'test', field: 'student', value: 'C', type: 'string' },
 				],
 				expect.anything(),
@@ -649,6 +688,7 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
+						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 						authorsDependency,
 					],
@@ -682,7 +722,9 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
+						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'B', type: 'string' },
 						authorsDependency,
 					],
@@ -715,6 +757,7 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
+						{ collection: 'test', field: 'id', value: 1, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'A', type: 'string' },
 						authorsDependency,
 					],
@@ -750,6 +793,7 @@ describe(oneLine`
 					expect.anything(),
 					'test',
 					[
+						{ collection: 'test', field: 'id', value: 99, type: 'integer' },
 						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
 						authorsDependency,
 					],
@@ -918,6 +962,92 @@ describe(oneLine`
 					expect.arrayContaining([
 						{ collection: 'test', field: 'student', value: 'Z', type: 'string' },
 					]),
+					expect.anything(),
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.create', takeOver);
+			}
+		});
+	});
+
+	// The primary key pins on every collection with no config, so both sides must
+	// agree on a collection that declares nothing at all — what most deployments have.
+	describe('implicit primary-key axis', () => {
+		const unscopedService = () => {
+			return new ItemsService('test', { knex: db, schema: unscopedSchema });
+		};
+
+		it(oneLine`
+			readOne pins the row it is bounded to instead of the bare collection tag, on a
+			collection declaring no scope field
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const result = await unscopedService().readOne(1);
+
+			expect(readMeta(result)?.scopedCacheTags).toEqual([
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+			]);
+		});
+
+		it(oneLine`
+			a self-referential readOne does not pin the key — the embedded same-collection
+			rows are unbounded, so a write to any of them has to invalidate the read
+		`, async () => {
+			tracker.on
+				.select('test')
+				.response([{ id: 1, name: 'a', student: 'A', parent: null }]);
+
+			const selfRefService = new ItemsService('test', {
+				knex: db,
+				schema: selfRefSchema,
+			});
+
+			const result = await selfRefService.readOne(1, { fields: ['*', 'parent.*'] });
+
+			expect(readMeta(result)?.scopedCacheTags).toEqual([{ collection: 'test' }]);
+		});
+
+		it(oneLine`
+			an update on a collection declaring no scope field purges the mutated row's key
+			slice, and pays no SELECT for it
+		`, async () => {
+			tracker.on.update('test').response(1);
+
+			await unscopedService().updateMany([1], { name: 'renamed' });
+
+			// old ∪ new both resolve from the keys already in hand, so it repeats — the
+			// real purge dedups on the tag key.
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[
+					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+					{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				],
+				expect.anything(),
+			);
+
+			// Only the declared-scope snapshot issues a SELECT; the key axis reads the
+			// keys it was handed, so this mutation touches the DB for the write alone.
+			expect(tracker.history.select).toHaveLength(0);
+		});
+
+		it(oneLine`
+			an undeclared take-over stays precise on a collection declaring no scope field
+			— a take-over cannot move a row between key slices, so nothing can leak
+		`, async () => {
+			const takeOver = async () => 99;
+			emitter.onFilter('test.items.create', takeOver);
+
+			try {
+				await unscopedService().createMany([{ name: 'x' }]);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[{ collection: 'test', field: 'id', value: 99, type: 'integer' }],
 					expect.anything(),
 				);
 			}

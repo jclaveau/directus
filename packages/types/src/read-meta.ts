@@ -62,10 +62,12 @@ export interface ScopedCachePurgeHandle {
  * full `cache.clear()`. No admin gate — a cache-maintenance op on trusted server
  * code, matching `purgeBy`.
  *
- * Each row must carry the collection's flat scope fields; a row missing one, or a
- * collection scoped through a relation (a dotted/M2O field whose terminal a raw row
- * can't resolve), degrades to a collection-wide purge (this collection's bare tag +
- * every slice, still sparing others) rather than risk a stale slice.
+ * Each row must carry the collection's primary key and its flat scope fields; a row
+ * missing one, or a collection scoped through a relation (a dotted/M2O field whose
+ * terminal a raw row can't resolve), degrades to a collection-wide purge (this
+ * collection's bare tag + every slice, still sparing others) rather than risk a
+ * stale slice. The primary key is required because every collection pins that slice,
+ * so a read of a single row depends on it even with no scope field declared.
  *
  * Footgun: a manual purge decouples "what changed" from "what's dropped" — they can
  * silently drift into a stale read, the exact poison scoped cache prevents. Prefer

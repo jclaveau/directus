@@ -119,30 +119,41 @@ implements AbstractService<Item> {
 	 * Snapshot the current scope values for the given keys as scoped cache tags, before
 	 * a mutation runs. Snapshots the *old* values an update/delete is about to change so
 	 * their slices get purged (an update that moves a row from `student=A` to `student=B`
-	 * must drop both). Returns an empty list when the collection has no scoped cache
-	 * fields or there are no keys (a collection-level purge then suffices).
+	 * must drop both). Returns an empty list when there are no keys (a
+	 * collection-level purge then suffices).
+	 *
+	 * Always emits the primary-key slice of every key, on every collection, whether it
+	 * declares scope fields or not: the read side pins that axis on every collection,
+	 * and a read pinning an axis the write never emits is never purged — stale, which
+	 * is worse than any hit ratio. It costs no query, since the keys are already here.
 	 */
 	private async snapshotScopedCacheTags(
 		keys: PrimaryKey[],
 	): Promise<ScopedCacheTag[] | null> {
-		if (!scopedCachePurgeEnabled()) {
+		if (!scopedCachePurgeEnabled() || keys.length === 0) {
 			return [];
 		}
 
 		const flatFields = this.collectionScopedCacheFlatFields;
 		const paths = this.collectionScopedCachePaths;
 
-		if ((flatFields.length === 0 && paths.length === 0) || keys.length === 0) {
-			return [];
-		}
-
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const fieldTypes = this.collectionScopedCacheFieldTypes;
-		const tags: ScopedCacheTag[] = [];
+
+		const tags: ScopedCacheTag[] = keys.map((key) => {
+			return {
+				collection: this.collection,
+				field: primaryKeyField,
+				value: key,
+				type: fieldTypes[primaryKeyField],
+			};
+		});
 
 		if (flatFields.length > 0) {
 			const rows = await this.knex
-				.select(primaryKeyField, ...flatFields)
+				// Deduped: a project that also lists its primary key in
+				// `scoped_cache_fields` would otherwise project the column twice.
+				.select([...new Set([primaryKeyField, ...flatFields])])
 				.from(this.collection)
 				.whereIn(primaryKeyField, keys);
 
@@ -391,6 +402,14 @@ implements AbstractService<Item> {
 	private get collectionScopedCacheFieldTypes(): Record<string, Type | undefined> {
 		const rootFields = this.schema.collections[this.collection]?.fields ?? {};
 		const types: Record<string, Type | undefined> = {};
+
+		// The primary key pins implicitly on every collection, so its type travels with
+		// the declared ones — both sides canonicalize the key the same way.
+		const primaryKeyField = this.schema.collections[this.collection]?.primary;
+
+		if (primaryKeyField !== undefined) {
+			types[primaryKeyField] = rootFields[primaryKeyField]?.type;
+		}
 
 		for (const field of this.collectionScopedCacheFlatFields) {
 			types[field] = rootFields[field]?.type;
@@ -966,8 +985,6 @@ implements AbstractService<Item> {
 		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			const scopedCacheFields = this.collectionScopedCacheFields;
-
 			// Scope off the committed rows' stored values (re-read by returned key), not the
 			// raw input: a create hook can rewrite a scope field, a value left to a DB default
 			// is only knowable after the insert, and a DB trigger/coercion can diverge from the
@@ -982,20 +999,21 @@ implements AbstractService<Item> {
 			// `scopedCache.purgeBy` (a read-only dedup declares its one slice; an
 			// upsert-move declares old + new) — then we trust it and narrow to the
 			// snapshot ∪ declared tags.
-			let scopedCacheTags: ScopedCacheTag[] | null = [];
+			//
+			// A takeover cannot move a row between primary-key slices — the key it
+			// returned IS the slice — so a collection declaring no scope field has
+			// nothing to leak and keeps its precise purge.
+			const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
+			const someRowTakenOver = liveKeys.length > actionPayloads.length;
 
-			if (scopedCacheFields.length > 0) {
-				const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
-				const someRowTakenOver = liveKeys.length > actionPayloads.length;
+			const takeoverUndeclared =
+				someRowTakenOver &&
+				this.collectionScopedCacheFields.length > 0 &&
+				scopedCacheCollector.tags.length === scopedCacheTagsAtStart;
 
-				const takeoverUndeclared =
-					someRowTakenOver &&
-					scopedCacheCollector.tags.length === scopedCacheTagsAtStart;
-
-				scopedCacheTags = takeoverUndeclared
-					? null
-					: await this.snapshotScopedCacheTags(liveKeys);
-			}
+			const scopedCacheTags = takeoverUndeclared
+				? null
+				: await this.snapshotScopedCacheTags(liveKeys);
 
 			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
@@ -1101,7 +1119,9 @@ implements AbstractService<Item> {
 			// collection reached again through a nested field) pulls rows the root filter
 			// doesn't bound — a parent/child can belong to any slice — so a write to another
 			// slice would leave this read stale. Detect it (the root collection at more than
-			// one field-map path) and fall back to the bare collection tag.
+			// one field-map path) and fall back to the bare collection tag. It guards the
+			// implicit primary-key axis too: `readOne(1, { fields: ['*', 'children.*'] })`
+			// embeds rows whose own keys the `<pk>._eq 1` filter never bounded.
 			const rootPaths = new Set<string>();
 
 			for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
@@ -1127,6 +1147,7 @@ implements AbstractService<Item> {
 					this.collectionScopedCacheFieldTypes,
 					this.collectionScopedCacheFieldRelatedPks,
 					this.collectionScopedCachePaths,
+					this.schema.collections[this.collection]?.primary,
 				);
 
 			for (const collection of collectionsInFieldMap(fieldMap)) {
@@ -1159,11 +1180,16 @@ implements AbstractService<Item> {
 					return false;
 				}
 
-				const collectionScopedFields =
-					this.schema.collections[tag.collection]?.scopedCacheFields;
+				const collectionSchema = this.schema.collections[tag.collection];
+
+				// Every collection auto-purges its primary-key slice, so a hook pinning
+				// a foreign row by its key needs no `manuallyPurged` claim.
+				if (tag.field === collectionSchema?.primary) {
+					return false;
+				}
 
 				return (
-					!collectionScopedFields?.includes(tag.field) &&
+					!collectionSchema?.scopedCacheFields?.includes(tag.field) &&
 					!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
 				);
 			});

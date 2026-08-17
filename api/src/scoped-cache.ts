@@ -555,6 +555,14 @@ export function scopedCacheTagsFromRows(
  * (one case = its own values; a case that leaves ALL fields unbound → bare). No pinned field → `[]`,
  * and the caller falls back to the bare collection tag. `fieldTypes` canonicalizes a value the way
  * the purge side does and skips date-ish types (not pin-safe, `PIN_UNSAFE_SCOPE_TYPES`).
+ *
+ * `primaryKeyField` joins the declared fields implicitly and always, no config:
+ *   - Every row has a primary key, so this axis always resolves.
+ *   - An inserted row carries a different key, so it can never join a `<pk>._eq`
+ *     or `<pk>._in` read's result set — the insert-blindness that bars a value
+ *     slice elsewhere cannot bite here.
+ *   - The purge side emits the same tag from the keys it already holds, so read and
+ *     write agree without either paying a query for it.
  */
 export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
@@ -563,12 +571,17 @@ export function pinnedScopedCacheTagsFromFilter(
 	fieldTypes: Record<string, Type | undefined> = {},
 	relatedPrimaryKeys: Record<string, string> = {},
 	scopedCachePaths: ScopedCachePath[] = [],
+	primaryKeyField?: string,
 ): ScopedCacheTag[] {
-	if (!filter || (fields.length === 0 && scopedCachePaths.length === 0)) {
-		return [];
+	const fieldSet = new Set(fields);
+
+	if (primaryKeyField !== undefined) {
+		fieldSet.add(primaryKeyField);
 	}
 
-	const fieldSet = new Set(fields);
+	if (!filter || (fieldSet.size === 0 && scopedCachePaths.length === 0)) {
+		return [];
+	}
 
 	// A relational-path scope field (`enrollment.student.user`) is pinned by walking
 	// the nested filter down its segments to the terminal `_eq`/`_in` (`evalPathsAt`).

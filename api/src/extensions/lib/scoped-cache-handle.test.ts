@@ -66,15 +66,19 @@ describe('createScopedCacheExtensionHandle', () => {
 		const handle = createScopedCacheExtensionHandle(getSchema);
 
 		// owner 7 appears twice — must collapse to one slice; 9 is a decoy second slice.
+		// Every row also owes its primary-key slice, which never collapses.
 		await handle.purgeForMutatedRows('articles', [
-			{ owner: 7 },
-			{ owner: 7 },
-			{ owner: 9 },
+			{ id: 1, owner: 7 },
+			{ id: 2, owner: 7 },
+			{ id: 3, owner: 9 },
 		]);
 
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', [
+			{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+			{ collection: 'articles', field: 'id', value: 2, type: 'integer' },
+			{ collection: 'articles', field: 'id', value: 3, type: 'integer' },
 			{ collection: 'articles', field: 'owner', value: 7, type: 'integer' },
 			{ collection: 'articles', field: 'owner', value: 9, type: 'integer' },
 		]);
@@ -82,7 +86,7 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(state.cache.clear).not.toHaveBeenCalled();
 	});
 
-	it('no scopedCacheFields: bare-tag purge only', async () => {
+	it('no scopedCacheFields: purges the rows\' primary-key slices', async () => {
 		const bare = new SchemaBuilder()
 			.collection('logs', (c) => {
 				c.field('id').id();
@@ -93,7 +97,11 @@ describe('createScopedCacheExtensionHandle', () => {
 
 		await handle.purgeForMutatedRows('logs', [{ id: 1 }]);
 
-		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'logs', []);
+		// A collection declaring nothing still pins its key on every single-row read,
+		// so a bypassed write owes that slice — the bare tag alone would leave it stale.
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'logs', [
+			{ collection: 'logs', field: 'id', value: 1, type: 'integer' },
+		]);
 	});
 
 	it('row missing a scope field: collection-wide purge, not stale', async () => {
@@ -101,7 +109,23 @@ describe('createScopedCacheExtensionHandle', () => {
 
 		// One row resolves owner, the other omits it — 'coarse' must degrade the whole
 		// purge to collection-wide (null) rather than drop only the resolvable slice.
-		await handle.purgeForMutatedRows('articles', [{ owner: 7 }, { note: 'x' }]);
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, owner: 7 },
+			{ id: 2, note: 'x' },
+		]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
+	});
+
+	it('row missing its primary key: collection-wide purge, not stale', async () => {
+		const handle = createScopedCacheExtensionHandle(getSchema);
+
+		// The key is a pinned field like any other, so a row handed over without it
+		// leaves its own slice unresolvable → collection-wide rather than stale.
+		await handle.purgeForMutatedRows('articles', [
+			{ id: 1, owner: 7 },
+			{ owner: 9 },
+		]);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'articles', null);
 	});

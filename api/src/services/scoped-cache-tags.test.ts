@@ -1,6 +1,6 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
-import type { SchemaOverview } from '@directus/types';
+import type { Filter, SchemaOverview } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
 	composeScopedCachePaths,
@@ -517,6 +517,121 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
+	});
+});
+
+// The primary key is a pinning axis on every collection, taking no config and no
+// query: `readOne` bounds the read to one key, and only that row's own write can
+// change it. An inserted row carries a different key, so the insert-blindness that
+// bars a value slice elsewhere cannot apply here.
+describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
+	// `slots` declares no scope field here: the pin comes from the key alone.
+	const unscoped = (filter: Filter) => {
+		return pinnedScopedCacheTagsFromFilter(
+			'slots',
+			[],
+			filter,
+			{ id: 'integer' },
+			{},
+			[],
+			'id',
+		);
+	};
+
+	test('_eq on the primary key pins that row, with no scope field declared', () => {
+		expect(unscoped({ id: { _eq: 7 } })).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+		]);
+	});
+
+	test('_in on the primary key pins every listed key (the readMany shape)', () => {
+		expect(unscoped({ _and: [{ id: { _in: [7, 8] } }, {}] })).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'slots', field: 'id', value: 8, type: 'integer' },
+		]);
+	});
+
+	test(oneLine`
+		a filter leaving the key unbound still pins nothing — a list read has no key to
+		pin, so it stays on the bare collection tag
+	`, () => {
+		expect(unscoped({ name: { _eq: 'a' } })).toEqual([]);
+		expect(unscoped({ id: { _gt: 7 } })).toEqual([]);
+		expect(unscoped({})).toEqual([]);
+	});
+
+	test(oneLine`
+		an _or branch that leaves the key unbound drops the pin — a row matching that
+		branch carries a key outside the union
+	`, () => {
+		const filter = { _or: [{ id: { _eq: 7 } }, { name: { _eq: 'a' } }] };
+		expect(unscoped(filter)).toEqual([]);
+	});
+
+	test(oneLine`
+		the key pins alongside a declared scope field bound by the same filter
+	`, () => {
+		const filter = { _and: [{ id: { _eq: 7 } }, { student: { _eq: 'A' } }] };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				filter,
+				{ id: 'integer', student: 'string' },
+				{},
+				[],
+				'id',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'slots', field: 'student', value: 'A', type: 'string' },
+		]);
+	});
+
+	test(oneLine`
+		a project that also lists its key as a scope field gets one tag, not two — the
+		purge side dedups its projection for the same reason
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['id'],
+				{ id: { _eq: 7 } },
+				{ id: 'integer' },
+				{},
+				[],
+				'id',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+		]);
+	});
+
+	test(oneLine`
+		a caller passing no primary key pins nothing on an unscoped collection — the axis
+		reaches only callers that opt in, so no other pinner gains it silently
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', [], { id: { _eq: 7 } }),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		a date-typed key is refused like any other unpinnable type — it goes through the
+		same PIN_UNSAFE_SCOPE_TYPES gate
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				[],
+				{ stamped_at: { _eq: '2026-01-02T03:04:05.000Z' } },
+				{ stamped_at: 'dateTime' },
+				{},
+				[],
+				'stamped_at',
+			),
+		).toEqual([]);
 	});
 });
 
