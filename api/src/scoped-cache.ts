@@ -327,7 +327,7 @@ async function purgeScopedCacheTagKeys(
 		return cache.delete(member);
 	}));
 
-	await redis.del(...tagKeys);
+	await redis.del(tagKeys); // array, never spread: 300k keys → RangeError
 
 	const present = new Set(members);
 
@@ -383,7 +383,7 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 		return;
 	}
 
-	await useRedis().del(...tagKeys);
+	await useRedis().del(tagKeys); // array, never spread: the SCAN is unbounded
 }
 
 /**

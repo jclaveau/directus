@@ -174,11 +174,13 @@ describe('dropScopedCacheTagIndex', () => {
 		expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:tag:*', 'COUNT', 250);
 		expect(scan).toHaveBeenCalledWith('4', 'MATCH', 'ns:tag:*', 'COUNT', 250);
 
-		expect(del).toHaveBeenCalledWith(
+		// ONE array argument, never a spread: the SCAN result is unbounded, and
+		// spreading it past the stack's headroom throws RangeError.
+		expect(del).toHaveBeenCalledWith([
 			'ns:tag:articles',
 			'ns:tag:authors',
 			'ns:tag:articles:id=1',
-		);
+		]);
 	});
 
 	it('no-ops (never DELs an empty list) when nothing matches', async () => {

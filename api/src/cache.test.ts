@@ -329,10 +329,10 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.delete).toHaveBeenCalledWith('key-a__expires_at');
 
-			expect(redis.del).toHaveBeenCalledWith(
+			expect(redis.del).toHaveBeenCalledWith([
 				'scalabus:tag:slots',
 				'scalabus:tag:slots:student=A',
-			);
+			]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
@@ -522,7 +522,7 @@ describe('scoped cache purging', () => {
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
 			expect(redis.smembers).toHaveBeenCalledOnce();
 			expect(cache.delete).toHaveBeenCalledTimes(3);
-			expect(redis.del).toHaveBeenCalledWith('scalabus:tag:articles');
+			expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles']);
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -561,11 +561,11 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
 
-			expect(redis.del).toHaveBeenCalledWith(
+			expect(redis.del).toHaveBeenCalledWith([
 				'scalabus:tag:articles',
 				'scalabus:tag:articles:author=1',
 				'scalabus:tag:articles:author=2',
-			);
+			]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
@@ -591,11 +591,11 @@ describe('scoped cache purging', () => {
 				250,
 			);
 
-			expect(redis.del).toHaveBeenCalledWith(
+			expect(redis.del).toHaveBeenCalledWith([
 				'scalabus:tag:articles',
 				'scalabus:tag:articles:author=1',
 				'scalabus:tag:articles:author=2',
-			);
+			]);
 		});
 
 		test('full mode flushes the whole cache and never touches redis', async () => {
@@ -627,10 +627,10 @@ describe('scoped cache purging', () => {
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=7');
 			expect(cache.delete).toHaveBeenCalledWith('read-key');
 
-			expect(redis.del).toHaveBeenCalledWith(
+			expect(redis.del).toHaveBeenCalledWith([
 				'scalabus:tag:slots',
 				'scalabus:tag:slots:student=7',
-			);
+			]);
 		});
 
 		test(oneLine`
@@ -675,10 +675,10 @@ describe('scoped cache purging', () => {
 
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:owner=B');
 
-			expect(redis.del).toHaveBeenCalledWith(
+			expect(redis.del).toHaveBeenCalledWith([
 				'scalabus:tag:slots',
 				'scalabus:tag:slots:owner=B',
-			);
+			]);
 		});
 
 		test('returns null when scoped purge is off', async () => {
@@ -889,6 +889,6 @@ describe('flushCaches', () => {
 			250,
 		);
 
-		expect(redis.del).toHaveBeenCalledWith('scalabus:tag:articles:id=1');
+		expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
 	});
 });
