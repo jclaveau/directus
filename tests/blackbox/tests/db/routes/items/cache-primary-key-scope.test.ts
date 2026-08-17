@@ -209,6 +209,41 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			a keyed read reporting total_count still drops on an insert elsewhere — the
+			count ignores the filter, so it depends on rows the key never bounded
+		`, async () => {
+			const counted = {
+				'filter[id][_in]': String(readNote),
+				meta: 'total_count',
+			};
+
+			// The bare collection tag rides beside the key slice here, and only here:
+			// the pins bound the rows the read returns, the count they carry is over
+			// the whole collection.
+			const pins = await pinsOfCachedRead(`/items/${NOTE}`, counted);
+			expect(pins).toBe(`${NOTE}:id=${readNote}, ${NOTE}`);
+
+			const cached = await get(`/items/${NOTE}`, counted);
+			expect(cached.headers[cacheStatusHeader]).toBe('HIT');
+
+			const created = await request(getUrl(vendor, env))
+				.post(`/items/${NOTE}`)
+				.send({ subject: 'counted' })
+				.set('Authorization', auth);
+
+			const refetched = await get(`/items/${NOTE}`, counted);
+
+			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(refetched.body.meta.total_count)
+				.toBe(cached.body.meta.total_count + 1);
+
+			await request(getUrl(vendor, env))
+				.delete(`/items/${NOTE}/${created.body.data.id}`)
+				.set('Authorization', auth);
+		});
+
+		it(oneLine`
 			an unbounded list read is not pinned — it bounds no key, so any write to the
 			collection still drops it
 		`, async () => {

@@ -291,6 +291,73 @@ describe('respond middleware', () => {
 		);
 	});
 
+	test(oneLine`
+		a pinned read reporting total_count keeps the bare collection tag beside its
+		pins — the count drops the filter, so a row the pins never bounded changes it
+	`, async () => {
+		const res = makeRes(
+			{ meta: { total_count: 2 }, data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				],
+			},
+		);
+
+		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } as any });
+
+		await respond(req, res, next);
+
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[
+				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'articles' },
+			],
+			[],
+		);
+	});
+
+	test(oneLine`
+		filter_count alone leaves the pins alone — it counts inside the same filter, so
+		no row outside the pinned slices can move it
+	`, async () => {
+		const res = makeRes(
+			{ meta: { filter_count: 1 }, data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				],
+			},
+		);
+
+		const req = makeReq({ sanitizedQuery: { meta: ['filter_count'] } as any });
+
+		await respond(req, res, next);
+
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles', field: 'id', value: 1, type: 'integer' }],
+			[],
+		);
+	});
+
+	test(oneLine`
+		total_count on an unpinned read adds no duplicate — the bare collection tag it
+		already fell back to is the same tag the count needs
+	`, async () => {
+		const res = makeRes({ meta: { total_count: 2 }, data: [{ id: 1 }] });
+		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } as any });
+
+		await respond(req, res, next);
+
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[{ collection: 'articles' }],
+			[],
+		);
+	});
+
 	test('skips caching a collection-less response in scoped mode', async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValueOnce(true);
 		const res = makeRes({ data: {} });
