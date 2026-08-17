@@ -146,10 +146,19 @@ export function canonicalScopedCacheValue(
 	// `1` are one key to the DB, so they must not resolve different slices. Anything
 	// that isn't a plain integer keeps its string form rather than becoming empty.
 	if (type === 'integer' || type === 'bigInteger') {
-		const digits = /^([+-]?)0*(\d+)$/.exec(String(value));
+		const raw = String(value).trim();
+		const digits = /^([+-]?)0*(\d+)$/.exec(raw);
 
 		if (digits === null) {
-			return String(value);
+			// Spellings `validateKeys` still lets through, since it only asks
+			// `Number.isInteger(Number(key))`: `1e3`, `0x10`, `1.0`. Normalize through
+			// `Number` when it round-trips safely; past MAX_SAFE_INTEGER no token can be
+			// right, and such a key cannot have matched a row either, so keep it raw.
+			const num = Number(raw);
+
+			return raw !== '' && Number.isSafeInteger(num)
+				? String(num)
+				: raw;
 		}
 
 		// `-0` is zero; only a non-zero magnitude keeps the sign.

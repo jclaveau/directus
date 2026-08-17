@@ -101,11 +101,34 @@ describe('canonicalScopedCacheValue', () => {
 	});
 
 	test(oneLine`
+		integer: every spelling \`validateKeys\` lets through collapses — it only asks
+		\`Number.isInteger(Number(key))\`, so whitespace, exponent and hex forms reach a
+		tag, and postgres trims whitespace casting text to int, so \` 1\` really is row 1
+	`, () => {
+		for (const spelling of [' 1', '1 ', '1.0']) {
+			expect(canonicalScopedCacheValue(spelling, 'integer')).toBe('1');
+		}
+
+		expect(canonicalScopedCacheValue('1e3', 'integer')).toBe('1000');
+		expect(canonicalScopedCacheValue('0x10', 'integer')).toBe('16');
+	});
+
+	test(oneLine`
 		a non-numeric value on an integer field keeps its string form rather than
 		becoming an empty token
 	`, () => {
 		expect(canonicalScopedCacheValue('', 'integer')).toBe('');
 		expect(canonicalScopedCacheValue('7a', 'integer')).toBe('7a');
+
+		// Not an integer at all: no token can be right, so don't invent one.
+		expect(canonicalScopedCacheValue('1.5', 'integer')).toBe('1.5');
+	});
+
+	test(oneLine`
+		bigInteger past MAX_SAFE_INTEGER keeps its raw spelling — no numeric token can
+		round-trip it, and such a key cannot have matched a row either
+	`, () => {
+		expect(canonicalScopedCacheValue('1e30', 'bigInteger')).toBe('1e30');
 	});
 
 	test(oneLine`

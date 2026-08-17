@@ -4,6 +4,7 @@ import {
 	CreateFieldM2O,
 	CreateItem,
 	DeleteCollection,
+	DeleteField,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -103,6 +104,12 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			// The self-relation has to go first: `DELETE /collections` on a collection
+			// whose M2O points at itself answers 500 ("Cannot read properties of
+			// undefined (reading 'sql')") and leaves the collection behind — and
+			// `DeleteCollection` never looks at the response, so the leak is silent and
+			// only bites a re-run against the same database.
+			await DeleteField(vendor, { collection: NOTE, field: 'answers' });
 			await DeleteCollection(vendor, { collection: NOTE });
 		});
 
