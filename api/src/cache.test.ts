@@ -865,4 +865,30 @@ describe('flushCaches', () => {
 		// Else cache-build-identity would re-flush on every boot.
 		expect(await lockCache.get('build-identity')).toBe('fingerprint');
 	});
+
+	test(oneLine`
+		drops the scoped-tag index too — those SETs live in raw redis outside the Keyv
+		namespace, so the response clear misses them and they would linger as pointers
+		to keys that no longer exist
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockResolvedValueOnce(['0', ['scalabus:tag:articles:id=1']]);
+
+		await flushCaches(true);
+
+		expect(redis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'scalabus:tag:*',
+			'COUNT',
+			250,
+		);
+
+		expect(redis.del).toHaveBeenCalledWith('scalabus:tag:articles:id=1');
+	});
 });

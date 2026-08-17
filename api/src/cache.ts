@@ -167,6 +167,14 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 	const { cache } = getCache();
 	await clearSystemCache({ forced });
 	await cache?.clear();
+
+	// Same reason as the `response` target in `clearCacheTargets`: the scoped-tag
+	// index sits in raw Redis outside the Keyv namespace, so the clear above misses
+	// it. Both callers here — the migration runner and the build-identity self-heal
+	// — mean "the response cache is gone", and leaving the index behind strands tag
+	// SETs pointing at keys that no longer exist until their `ttl*2` self-expiry,
+	// or forever when `CACHE_TTL` is unset and they are deliberately unbounded.
+	await dropScopedCacheTagIndex();
 }
 
 export async function clearSystemCache(opts?: {
