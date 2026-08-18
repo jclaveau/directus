@@ -10,8 +10,16 @@ import type {
 } from '@directus/types';
 import type Keyv from 'keyv';
 import { resolvedCacheTtl } from './cache-config.js';
-import { queueCachePurge } from './cache-events.js';
+import { queueCacheAnomaly, queueCachePurge } from './cache-events.js';
 import emitter from './emitter.js';
+import { useLogger } from './logger/index.js';
+import {
+	clearPendingScopedCachePurges,
+	countFailedScopedCachePurgeRetry,
+	listPendingScopedCachePurges,
+	recordPendingScopedCachePurge,
+	type PendingScopedCachePurge,
+} from './scoped-cache-pending-purges.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
@@ -463,6 +471,185 @@ export async function purgeCollectionScopedCache(
  * for a cancelled mutation nothing in `collection` changed, so only the hook's own
  * declared (usually foreign) slices should drop, not this collection's global reads.
  */
+/**
+ * Run a purge, and on failure record it for a later retry instead of throwing.
+ *
+ * A purge is awaited by its mutation but runs after the transaction, so by the
+ * time it can fail the write is durable. Propagating the error would answer 500
+ * for a write that succeeded, and the client's natural response — retry — turns a
+ * stale cache entry into a duplicate row on any non-idempotent mutation. The
+ * entry is the smaller harm, so the request wins and the purge is finished later.
+ *
+ * Nothing is lost meanwhile: a cache read fails open (`cache.ts` catches and
+ * treats a Redis error as a MISS), so while Redis is unreachable no stale entry
+ * can be SERVED. The recorded purge only has to beat Redis coming back.
+ *
+ * Returns whether the purge ran, so the caller can skip the telemetry that would
+ * otherwise report a purge that did not happen.
+ */
+async function purgeOrRecord(
+	run: () => Promise<void>,
+	pending: PendingScopedCachePurge,
+): Promise<boolean> {
+	try {
+		await run();
+		return true;
+	}
+	catch (error: any) {
+		useLogger().warn(
+			error,
+			`[scoped-cache] purge failed and was recorded for retry: ${error}`,
+		);
+
+		await recordPendingScopedCachePurge(pending, error);
+		return false;
+	}
+}
+
+/**
+ * Rebuild a tag key from the display label a pending purge stored. The label is
+ * namespace-free on purpose, so this resolves against whatever `CACHE_NAMESPACE`
+ * is at retry time rather than the one that was set when the purge failed.
+ */
+function scopedCacheTagKeyFromLabel(label: string): string {
+	return `${env['CACHE_NAMESPACE']}:tag:${label}`;
+}
+
+/**
+ * Finish the purges that failed after their mutation committed. Called at boot
+ * and whenever the shared Redis client reports ready, which are the two moments a
+ * previously unreachable Redis can have come back.
+ *
+ * Retries the recorded targets, never the namespace: a failure records what it
+ * could not drop, so recovery drops exactly that and every other slice stays
+ * warm. Returns how many targets it finished, for the caller's log line.
+ */
+export async function retryPendingScopedCachePurges(): Promise<number> {
+	if (!redisConfigAvailable()) {
+		return 0;
+	}
+
+	const pending = await listPendingScopedCachePurges();
+
+	if (pending.length === 0) {
+		return 0;
+	}
+
+	// Imported lazily so the module graph stays acyclic: `cache.js` imports this
+	// module for `dropScopedCacheTagIndex`, so a static import back would close
+	// the loop. Same reason `cache-config.ts` defers its database import.
+	const { getCache } = await import('./cache.js');
+	const { cache } = getCache();
+
+	if (!cache) {
+		return 0;
+	}
+
+	let finished = 0;
+
+	for (const target of pending) {
+		const tagKeys = target.scopedCacheTags.map(scopedCacheTagKeyFromLabel);
+
+		try {
+			await reportRecoveredScopedCacheEntries(tagKeys);
+
+			if (target.mode === 'namespace') {
+				await cache.clear();
+			}
+			else if (target.mode === 'collection' && target.collection !== null) {
+				await purgeCollectionScopedCache(cache, target.collection);
+			}
+			else {
+				await purgeScopedCacheTagKeys(cache, tagKeys);
+			}
+
+			await clearPendingScopedCachePurges(target.ids);
+			finished++;
+		}
+		catch (error: any) {
+			// Left in place deliberately — the next ready/boot tries again. A purge is
+			// idempotent, so retrying forever is safe, and giving up would leave the
+			// entry stale with nothing else coming for it.
+			await countFailedScopedCachePurgeRetry(target.ids, error);
+		}
+	}
+
+	return finished;
+}
+
+/**
+ * Start finishing purges that failed after their mutation committed.
+ *
+ * Two triggers, because there are two ways a recorded purge becomes runnable
+ * again: the process restarted (boot) and the client reconnected (`ready`).
+ * ioredis emits `ready` on the first connect too, so the boot call only matters
+ * when the client was already up before this listener existed.
+ *
+ * Not awaited by the caller — recovery is bounded by how much failed, and a boot
+ * that blocked on it would be held up by the same Redis that is still down.
+ */
+export function startScopedCachePurgeRecovery(): void {
+	if (!redisConfigAvailable()) {
+		return;
+	}
+
+	const logger = useLogger();
+
+	const recover = () => {
+		retryPendingScopedCachePurges()
+			.then((finished) => {
+				if (finished > 0) {
+					logger.info(`[scoped-cache] finished ${finished} pending purge(s)`);
+				}
+			})
+			.catch((error: any) => {
+				logger.warn(error, `[scoped-cache] pending purge retry failed: ${error}`);
+			});
+	};
+
+	useRedis().on('ready', recover);
+	recover();
+}
+
+/**
+ * Name the entries a failed purge left stale, on the way to finally dropping
+ * them. Emitted HERE rather than at failure time because the anomaly stream is
+ * itself Redis-backed — reporting when the purge failed would report nothing in
+ * the one case worth reporting, a Redis outage.
+ *
+ * Best-effort: an entry with no descriptor (stats were off when it was filled)
+ * is purged all the same, it just cannot be named on the admin page.
+ */
+async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<void> {
+	if (tagKeys.length === 0) {
+		return;
+	}
+
+	const { readCacheDescriptorForRedisKey } = await import('./cache-events.js');
+	const redis = useRedis();
+	const memberLists = await Promise.all(tagKeys.map((key) => redis.smembers(key)));
+
+	// The sidecars ride the same tag set as the entry they belong to, so they are
+	// the same stale entry counted two more times.
+	const members = [...new Set(memberLists.flat())].filter((member) => {
+		return !member.endsWith('__expires_at') && !member.endsWith('__tags');
+	});
+
+	for (const member of members) {
+		const descriptor = await readCacheDescriptorForRedisKey(member);
+
+		if (descriptor === null) {
+			continue;
+		}
+
+		queueCacheAnomaly({
+			cacheKey: descriptor.cacheKey,
+			reason: 'redis_error',
+			detail: 'served stale until a failed purge was retried',
+		});
+	}
+}
+
 export async function purgeScopedCache(
 	cache: Keyv,
 	collection: string,
@@ -484,7 +671,14 @@ export async function purgeScopedCache(
 	const startedAt = Date.now();
 
 	if (!scopedCachePurgeEnabled()) {
-		await cache.clear();
+		const cleared = await purgeOrRecord(
+			() => cache.clear(),
+			{ mode: 'namespace', collection: null, scopedCacheTags: [] },
+		);
+
+		if (!cleared) {
+			return null;
+		}
 
 		// Not folded into the `flush` config-event marker, though both mean "the
 		// whole cache went": that marker is a direct, unbuffered INSERT, which is
@@ -512,10 +706,15 @@ export async function purgeScopedCache(
 	if (scopedCacheTags === null) {
 		// Records its own purge — it is the one that knows how many slices the
 		// scan turned up.
-		await purgeCollectionScopedCache(
-			cache,
-			collection,
-			options.scopedCachePurgeId,
+		await purgeOrRecord(
+			() => {
+				return purgeCollectionScopedCache(
+					cache,
+					collection,
+					options.scopedCachePurgeId,
+				);
+			},
+			{ mode: 'collection', collection, scopedCacheTags: [] },
 		);
 
 		return [{ collection }];
@@ -531,7 +730,22 @@ export async function purgeScopedCache(
 	)) as ScopedCacheTag[];
 
 	const tagKeys = [...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))];
-	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+	let evicted: number | null = null;
+
+	const purged = await purgeOrRecord(
+		async () => {
+			evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+		},
+		{
+			mode: 'slices',
+			collection,
+			scopedCacheTags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
+		},
+	);
+
+	if (!purged) {
+		return resolvedScopedCacheTags;
+	}
 
 	// The tags a mutation actually resolved, in the same display form the entry
 	// sidecar stores — so "this entry carries tag X, and tag X was purged at T"
