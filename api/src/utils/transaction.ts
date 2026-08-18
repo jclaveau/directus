@@ -17,6 +17,13 @@ export const transaction = async <T = unknown>(
 	onRetry?: () => void,
 ): Promise<T> => {
 	if (knex.isTransaction) {
+		// Reusing the caller's trx means this returns BEFORE any commit, so anything a
+		// nested caller runs "after the transaction" actually runs inside it. That is
+		// what makes a hook-invoked `ItemsService` write purge the scoped cache
+		// pre-commit — a reader in that window re-indexes uncommitted rows under the
+		// tag just dropped, and a slow Redis holds the connection `idle in transaction`.
+		// The deferred drain belongs here:
+		// https://github.com/jclaveau/directus/issues/363
 		return handler(knex);
 	} else {
 		try {

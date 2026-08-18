@@ -1369,7 +1369,10 @@ implements AbstractService<Item> {
 			if (shouldClearCache(this.cache, opts, this.collection)) {
 				// Per-item hooks can rewrite scope fields inside each forked updateOne, so
 				// the raw `data` may not be what's stored. Re-snapshot the now-committed
-				// rows for the new values (old ∪ new).
+				// rows for the new values (old ∪ new). Committed only when THIS call owns
+				// the transaction: invoked from a hook it shares the caller's, so the
+				// purge below lands pre-commit —
+				// https://github.com/jclaveau/directus/issues/363
 				const newScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
 
 				const scopedCacheTags =
@@ -1714,7 +1717,10 @@ implements AbstractService<Item> {
 			// Old slices from the pre-update capture, plus the new value re-read from the
 			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
 			// type coercion can rewrite the scope column on write, so the stored row is
-			// authoritative, the payload isn't (same rule as createMany).
+			// authoritative, the payload isn't (same rule as createMany). "Committed"
+			// holds only when this call owns the transaction; from a hook it shares the
+			// caller's and this purge runs pre-commit —
+			// https://github.com/jclaveau/directus/issues/363
 			const newScopedCacheTags = await this.snapshotScopedCacheTags(keys);
 
 			const scopedCacheTags =
