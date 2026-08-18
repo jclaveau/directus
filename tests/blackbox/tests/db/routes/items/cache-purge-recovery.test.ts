@@ -167,7 +167,13 @@ describe(oneLine`
 
 		// A supertest ECONNRESET means the server is gone, and the useful evidence is
 		// in its log rather than in the socket error. Fail with the log instead.
-		function assertInstanceAlive() {
+		//
+		// Waits first: the socket dies before the child is reaped, so reading
+		// `exitCode` the moment the request rejects still reports a live process and
+		// rethrows the useless error.
+		async function assertInstanceAlive() {
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+
 			if (instance.exitCode === null) {
 				return;
 			}
@@ -215,12 +221,12 @@ describe(oneLine`
 				.patch(`/items/${NOTE}/${readNote}`)
 				.send({ subject: `renamed-${Date.now()}` })
 				.set('Authorization', auth)
-				.catch((error: Error) => {
-					assertInstanceAlive();
+				.catch(async (error: Error) => {
+					await assertInstanceAlive();
 					throw error;
 				});
 
-			assertInstanceAlive();
+			await assertInstanceAlive();
 			expect(written.status).toBe(200);
 
 			// Recorded by its display label, so the retry can rebuild the key against
