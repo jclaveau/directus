@@ -263,7 +263,18 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 
 	if (store === 'redis') {
 		const { default: KeyvRedis } = require('@keyv/redis');
-		config.store = new KeyvRedis(getRedisConnection());
+		const keyvRedis = new KeyvRedis(getRedisConnection());
+
+		// v5 wraps its own node-redis client, and Keyv does not re-emit that client's
+		// `error` events — the `on('error')` handlers on the Keyv instances above only
+		// ever see errors Keyv itself raises. An EventEmitter with no `error` listener
+		// rethrows, so an unreachable Redis took the process down through this client
+		// even once the ioredis ones were handled. Four stores, four clients.
+		keyvRedis.client.on('error', (error: Error) => {
+			logger.warn(error, `[cache-store] ${error}`);
+		});
+
+		config.store = keyvRedis;
 	}
 
 	return config;
