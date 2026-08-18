@@ -303,7 +303,7 @@ export async function countScopedCacheTagMembers(
 	const pipeline = redis.pipeline();
 
 	for (const tag of displayTags) {
-		pipeline.scard(`${env['CACHE_NAMESPACE']}:tag:${tag}`);
+		pipeline.scard(scopedCacheTagKeyFromLabel(tag));
 	}
 
 	const results = await pipeline.exec();
@@ -338,6 +338,21 @@ export async function countScopedCacheTagMembers(
  * was absent; a store that reports nothing leaves the count where it was rather
  * than silently collapsing it to zero.
  */
+// The suffixes a cached response's siblings carry. They ride the same tag set as
+// the payload key, so both the purge (which must not count them as evictions of
+// their own) and the recovery report (which must not name them as stale entries)
+// need the same answer to "whose sidecar is this?".
+const SCOPED_CACHE_SIDECAR_SUFFIXES = ['__expires_at', '__tags'];
+
+function scopedCacheSidecarOwner(member: string): string | null {
+	const suffix = SCOPED_CACHE_SIDECAR_SUFFIXES
+		.find((candidate) => member.endsWith(candidate));
+
+	return suffix === undefined
+		? null
+		: member.slice(0, -suffix.length);
+}
+
 async function purgeScopedCacheTagKeys(
 	cache: Keyv,
 	tagKeys: string[],
@@ -365,10 +380,9 @@ async function purgeScopedCacheTagKeys(
 			return false;
 		}
 
-		const sidecarSuffix = member.lastIndexOf('__');
+		const owner = scopedCacheSidecarOwner(member);
 
-		return sidecarSuffix === -1
-			|| present.has(member.slice(0, sidecarSuffix)) === false;
+		return owner === null || present.has(owner) === false;
 	}).length;
 }
 
@@ -452,26 +466,6 @@ export async function purgeCollectionScopedCache(
 }
 
 /**
- * Purge cached responses affected by a mutation on `collection`. Outside scoped mode
- * the whole data cache is flushed (legacy `cache.clear()` behavior). In scoped mode
- * the bare collection tag (global reads) is always purged alongside the resolved
- * `scopedCacheTags` (the owner/partition slices the mutation touched), leaving every
- * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
- * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
- * risk leaving a slice stale; still narrower than nuking the whole namespace.
- *
- * To purge EVERY entry of a collection, pass `null` — it dispatches to
- * `purgeCollectionScopedCache`, which scans `<namespace>:tag:<collection>:*` and
- * drops the bare tag plus every slice key. A bare `[{ collection }]` in the tag
- * list is NOT that: this function deletes exactly the keys it is handed, and a read
- * pinned to a slice (an owner, or its primary key) carries no bare tag, so it
- * survives.
- *
- * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —
- * for a cancelled mutation nothing in `collection` changed, so only the hook's own
- * declared (usually foreign) slices should drop, not this collection's global reads.
- */
-/**
  * Run a purge, and on failure record it for a later retry instead of throwing.
  *
  * A purge is awaited by its mutation but runs after the transaction, so by the
@@ -515,16 +509,38 @@ function scopedCacheTagKeyFromLabel(label: string): string {
 	return `${env['CACHE_NAMESPACE']}:tag:${label}`;
 }
 
+// The drain in flight, so the next trigger queues behind it rather than beside it.
+let pendingScopedCachePurgeDrain: Promise<number> = Promise.resolve(0);
+
 /**
  * Finish the purges that failed after their mutation committed. Called at boot
  * and whenever the shared Redis client reports ready, which are the two moments a
  * previously unreachable Redis can have come back.
  *
+ * Serialized, never overlapped: `ready` can fire while a drain is still running,
+ * and two of them read the same rows and report the same stale entry to the
+ * anomaly stream twice. Chaining rather than sharing the in-flight promise, so a
+ * purge recorded mid-drain still gets its own pass instead of being answered by a
+ * run that started before it existed.
+ */
+export function retryPendingScopedCachePurges(): Promise<number> {
+	const drained = pendingScopedCachePurgeDrain
+		.catch(() => 0)
+		.then(() => drainPendingScopedCachePurges());
+
+	pendingScopedCachePurgeDrain = drained;
+
+	return drained;
+}
+
+/**
  * Retries the recorded targets, never the namespace: a failure records what it
  * could not drop, so recovery drops exactly that and every other slice stays
- * warm. Returns how many targets it finished, for the caller's log line.
+ * warm. Returns how many recorded rows it cleared — not how many targets they
+ * collapsed into, since an outage records one slice once per write that touched
+ * it and the operator reads the table, not the grouping.
  */
-export async function retryPendingScopedCachePurges(): Promise<number> {
+async function drainPendingScopedCachePurges(): Promise<number> {
 	if (!redisConfigAvailable()) {
 		return 0;
 	}
@@ -545,18 +561,40 @@ export async function retryPendingScopedCachePurges(): Promise<number> {
 		return 0;
 	}
 
-	let finished = 0;
+	let cleared = 0;
 
 	for (const target of pending) {
 		const tagKeys = target.scopedCacheTags.map(scopedCacheTagKeyFromLabel);
 
 		try {
-			await reportRecoveredScopedCacheEntries(tagKeys);
+			// Guarded on its own: naming the stale entries is best-effort telemetry and
+			// reads Postgres, so its failure must not abort the purge — the purge is
+			// what makes the cache correct again, and a blocked one stays blocked for
+			// every later retry too.
+			try {
+				await reportRecoveredScopedCacheEntries(tagKeys);
+			}
+			catch (error: any) {
+				useLogger().warn(
+					error,
+					`[scoped-cache] could not name the entries a purge left stale: ${error}`,
+				);
+			}
 
 			if (target.mode === 'namespace') {
 				await cache.clear();
 			}
-			else if (target.mode === 'collection' && target.collection !== null) {
+			else if (target.mode === 'collection') {
+				if (target.collection === null) {
+					// Nothing here can purge it: `collection` mode IS a collection scan and
+					// the column is nullable. Raising drops into the catch below, which
+					// keeps the row and counts the attempt — the safe direction, since the
+					// alternative silently deletes a record whose entries are still stale.
+					throw new Error(
+						`collection-mode pending purge ${target.ids} names no collection`,
+					);
+				}
+
 				await purgeCollectionScopedCache(cache, target.collection);
 			}
 			else {
@@ -564,7 +602,7 @@ export async function retryPendingScopedCachePurges(): Promise<number> {
 			}
 
 			await clearPendingScopedCachePurges(target.ids);
-			finished++;
+			cleared += target.ids.length;
 		}
 		catch (error: any) {
 			// Left in place deliberately — the next ready/boot tries again. A purge is
@@ -574,7 +612,7 @@ export async function retryPendingScopedCachePurges(): Promise<number> {
 		}
 	}
 
-	return finished;
+	return cleared;
 }
 
 /**
@@ -632,7 +670,7 @@ async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<voi
 	// The sidecars ride the same tag set as the entry they belong to, so they are
 	// the same stale entry counted two more times.
 	const members = [...new Set(memberLists.flat())].filter((member) => {
-		return !member.endsWith('__expires_at') && !member.endsWith('__tags');
+		return scopedCacheSidecarOwner(member) === null;
 	});
 
 	for (const member of members) {
@@ -650,6 +688,26 @@ async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<voi
 	}
 }
 
+/**
+ * Purge cached responses affected by a mutation on `collection`. Outside scoped mode
+ * the whole data cache is flushed (legacy `cache.clear()` behavior). In scoped mode
+ * the bare collection tag (global reads) is always purged alongside the resolved
+ * `scopedCacheTags` (the owner/partition slices the mutation touched), leaving every
+ * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
+ * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
+ * risk leaving a slice stale; still narrower than nuking the whole namespace.
+ *
+ * To purge EVERY entry of a collection, pass `null` — it dispatches to
+ * `purgeCollectionScopedCache`, which scans `<namespace>:tag:<collection>:*` and
+ * drops the bare tag plus every slice key. A bare `[{ collection }]` in the tag
+ * list is NOT that: this function deletes exactly the keys it is handed, and a read
+ * pinned to a slice (an owner, or its primary key) carries no bare tag, so it
+ * survives.
+ *
+ * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —
+ * for a cancelled mutation nothing in `collection` changed, so only the hook's own
+ * declared (usually foreign) slices should drop, not this collection's global reads.
+ */
 export async function purgeScopedCache(
 	cache: Keyv,
 	collection: string,

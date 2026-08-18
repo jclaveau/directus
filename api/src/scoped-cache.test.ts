@@ -412,13 +412,106 @@ describe('retryPendingScopedCachePurges', () => {
 		]);
 
 		const closed = new Error('Connection is closed.');
-		redis.smembers.mockRejectedValueOnce(closed);
+
+		// Fails the DEL rather than the SMEMBERS: the report reads members too, and its
+		// own guard swallows a failure there, so injecting it earlier would prove
+		// nothing about the purge.
+		redis.del.mockRejectedValueOnce(closed);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(countFailedScopedCachePurgeRetry).toHaveBeenCalledWith([7], closed);
 		expect(clearPendingScopedCachePurges).not.toHaveBeenCalledWith([7]);
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([8]);
+	});
+
+	it(oneLine`
+		still purges when naming the stale entries fails — the report is best-effort and
+		the purge is the correctness step, so a descriptor read must not gate it
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+
+		vi.mocked(readCacheDescriptorForRedisKey)
+			.mockRejectedValue(new Error('relation does not exist'));
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
+		expect(countFailedScopedCachePurgeRetry).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		keeps a collection-mode record naming no collection instead of deleting it — an
+		unpurgeable shape is a failed retry, never a success
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'collection',
+			collection: null,
+			scopedCacheTags: [],
+			ids: [7],
+		}]);
+
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+
+		expect(clearPendingScopedCachePurges).not.toHaveBeenCalled();
+
+		expect(countFailedScopedCachePurgeRetry)
+			.toHaveBeenCalledWith([7], expect.any(Error));
+	});
+
+	it(oneLine`
+		counts the rows it dropped, not the targets they collapsed into — an outage
+		records one slice once per write that touched it
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7, 8, 9],
+		}]);
+
+		expect(await retryPendingScopedCachePurges()).toBe(3);
+	});
+
+	it(oneLine`
+		serializes overlapping drains — a reconnect can fire while one is still running,
+		and two of them report the same stale entry twice
+	`, async () => {
+		// Model the table rather than a fixed reply: the second drain must see what the
+		// first one already deleted, which is the whole point of not overlapping.
+		let rows = [{
+			mode: 'slices' as const,
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}];
+
+		vi.mocked(listPendingScopedCachePurges).mockImplementation(async () => rows);
+
+		vi.mocked(clearPendingScopedCachePurges).mockImplementation(async () => {
+			rows = [];
+		});
+
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+
+		vi.mocked(readCacheDescriptorForRedisKey)
+			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
+
+		const [first, second] = await Promise.all([
+			retryPendingScopedCachePurges(),
+			retryPendingScopedCachePurges(),
+		]);
+
+		expect(queueCacheAnomaly).toHaveBeenCalledOnce();
+		expect(first + second).toBe(1);
 	});
 
 	it('reads nothing when there is no Redis to retry against', async () => {

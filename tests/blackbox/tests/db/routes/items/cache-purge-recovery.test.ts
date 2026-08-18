@@ -73,8 +73,16 @@ function createRedisProxy(upstreamPort: number, listenPort: number) {
 
 		sockets.clear();
 
+		// Already down: the cleanup calls this too, and a case that failed before
+		// reopening would otherwise throw here and bury the real failure.
+		if (server === null) {
+			return Promise.resolve();
+		}
+
+		const listening = server;
+
 		return new Promise((resolve) => {
-			server!.close(() => {
+			listening.close(() => {
 				server = null;
 				resolve();
 			});
@@ -160,6 +168,9 @@ describe(oneLine`
 
 		afterAll(async () => {
 			instance.kill();
+			// The proxy is a listening server, so it keeps the port and its sockets for
+			// the rest of the run unless it is closed here.
+			await proxy.cut();
 			await db(PENDING).delete();
 			await db.destroy();
 			await DeleteCollection(vendor, { collection: NOTE });

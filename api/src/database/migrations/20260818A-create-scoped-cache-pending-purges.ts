@@ -28,9 +28,9 @@ import type { Knex } from 'knex';
  * No unique index, deliberately. Postgres treats NULLs as distinct, so one would
  * not constrain the coarse rows anyway, and an upsert would cost a round trip on
  * a path that only runs while Redis is already down. Repeated failures for one
- * slice therefore insert repeatedly; the drain collapses them with DISTINCT and
- * deletes what it processed, so the row count is bounded by the writes that
- * happened during the outage.
+ * slice therefore insert repeatedly; the drain groups them by target in memory
+ * (`listPendingScopedCachePurges`) and deletes every row a retry finished, so the
+ * row count is bounded by the writes that happened during the outage.
  */
 export async function up(knex: Knex): Promise<void> {
 	await knex.schema.createTable('directus_scoped_cache_pending_purges', (table) => {
