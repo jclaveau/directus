@@ -95,6 +95,12 @@ describe(oneLine`
 		let readNote: number;
 		let siblingNote: number;
 
+		// Cutting Redis is exactly the condition an unhandled `error` event turns into
+		// a dead process, and a dead server answers ECONNRESET — which says nothing
+		// about why. Keep the instance's own output so a failure here reports the
+		// crash instead of the symptom.
+		const instanceLog: string[] = [];
+
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 		const db = knex(config.knexConfig[vendor]!);
 
@@ -142,6 +148,13 @@ describe(oneLine`
 				env: env[vendor],
 			});
 
+			instance.stdout?.on('data', (chunk) => instanceLog.push(String(chunk)));
+			instance.stderr?.on('data', (chunk) => instanceLog.push(String(chunk)));
+
+			instance.on('exit', (code) => {
+				instanceLog.push(`=== instance exited with ${code} ===`);
+			});
+
 			await awaitDirectusConnection(port);
 		}, 60_000);
 
@@ -151,6 +164,20 @@ describe(oneLine`
 			await db.destroy();
 			await DeleteCollection(vendor, { collection: NOTE });
 		});
+
+		// A supertest ECONNRESET means the server is gone, and the useful evidence is
+		// in its log rather than in the socket error. Fail with the log instead.
+		function assertInstanceAlive() {
+			if (instance.exitCode === null) {
+				return;
+			}
+
+			const tail = instanceLog.join('').slice(-4000);
+
+			throw new Error(
+				`the Directus instance exited with ${instance.exitCode}:\n${tail}`,
+			);
+		}
 
 		function get(key: number) {
 			return request(getUrl(vendor, env))
@@ -187,8 +214,13 @@ describe(oneLine`
 			const written = await request(getUrl(vendor, env))
 				.patch(`/items/${NOTE}/${readNote}`)
 				.send({ subject: `renamed-${Date.now()}` })
-				.set('Authorization', auth);
+				.set('Authorization', auth)
+				.catch((error: Error) => {
+					assertInstanceAlive();
+					throw error;
+				});
 
+			assertInstanceAlive();
 			expect(written.status).toBe(200);
 
 			// Recorded by its display label, so the retry can rebuild the key against
