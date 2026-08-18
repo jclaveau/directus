@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import { Redis, type RedisOptions } from 'ioredis';
+import { useLogger } from '../../logger/index.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 
 /**
@@ -65,7 +66,18 @@ export const createRedis = () => {
 	const env = useEnv();
 	const options: RedisOptions = { retryStrategy: retryStrategyFromEnv() };
 
-	return env['REDIS']
+	const redis = env['REDIS']
 		? new Redis(env['REDIS'] as string, options)
 		: new Redis({ ...getConfigFromEnv('REDIS'), ...options });
+
+	// An EventEmitter with no `error` listener rethrows, and ioredis emits one per
+	// failed reconnect — so an unreachable Redis took the whole API process down
+	// rather than degrading. Every consumer already survives a failed command (a
+	// read falls through to a MISS, a purge is recorded and retried), which is only
+	// reachable if the process is still alive to do it.
+	redis.on('error', (error) => {
+		useLogger().warn(error, `[redis] ${error}`);
+	});
+
+	return redis;
 };
