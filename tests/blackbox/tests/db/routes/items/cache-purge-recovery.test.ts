@@ -191,6 +191,16 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		// Per CASE, never per read: the first case warms two entries and needs both,
+		// so `cachedRead` cannot clear. And a case cannot inherit the cache either —
+		// the recovery poll re-fills on the very MISS it waits for, so whatever ran
+		// before leaves its entry warm.
+		function emptyCache() {
+			return request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+		}
+
 		async function cachedRead(key: number) {
 			const miss = await get(key);
 			const hit = await get(key);
@@ -203,10 +213,7 @@ describe(oneLine`
 			the write succeeds while Redis is down, its purge is recorded, and reconnecting
 			drops the entry it could not — leaving every other slice warm
 		`, async () => {
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
-
+			await emptyCache();
 			await db(PENDING).delete();
 
 			await cachedRead(readNote);
@@ -267,6 +274,7 @@ describe(oneLine`
 			a purge that succeeds records nothing — the table is written on failure only,
 			so it stays empty on every normal write
 		`, async () => {
+			await emptyCache();
 			await db(PENDING).delete();
 
 			await cachedRead(readNote);
