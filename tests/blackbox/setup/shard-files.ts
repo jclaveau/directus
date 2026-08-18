@@ -25,6 +25,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/cache-cancel-write.test.ts': 11_000,
 	'/tests/db/routes/items/cache-poisoning-write.test.ts': 11_000,
 	'/tests/db/routes/items/cache-primary-key-scope.test.ts': 11_000,
+	'/tests/db/routes/items/cache-purge-recovery.test.ts': 20_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
 	// The `after` chain. The auth files spend their time waiting, not querying,
 	// so they cost the same on every vendor — and the wait is per case, so the
