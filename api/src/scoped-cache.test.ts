@@ -7,9 +7,26 @@ import {
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
+	purgeScopedCache,
+	retryPendingScopedCachePurges,
 	scopedCacheTagKey,
+	startScopedCachePurgeRecovery,
 } from './scoped-cache.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
+import emitter from './emitter.js';
+import { getCache } from './cache.js';
+import { useLogger } from './logger/index.js';
+import {
+	queueCacheAnomaly,
+	queueCachePurge,
+	readCacheDescriptorForRedisKey,
+} from './cache-events.js';
+import {
+	clearPendingScopedCachePurges,
+	countFailedScopedCachePurgeRetry,
+	listPendingScopedCachePurges,
+	recordPendingScopedCachePurge,
+} from './scoped-cache-pending-purges.js';
 
 // hoisted: scoped-cache.ts reads `const env = useEnv()` at module load, before a
 // plain `const env` below would be initialised (temporal dead zone).
@@ -23,7 +40,30 @@ const env = vi.hoisted(() => {
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
-vi.mock('./emitter.js', () => ({ default: { emitAction: vi.fn() } }));
+
+vi.mock('./emitter.js', () => {
+	return { default: { emitAction: vi.fn(), emitFilter: vi.fn() } };
+});
+
+vi.mock('./logger/index.js', () => ({ useLogger: vi.fn() }));
+vi.mock('./cache.js', () => ({ getCache: vi.fn() }));
+
+vi.mock('./cache-events.js', () => {
+	return {
+		queueCacheAnomaly: vi.fn(),
+		queueCachePurge: vi.fn(),
+		readCacheDescriptorForRedisKey: vi.fn(),
+	};
+});
+
+vi.mock('./scoped-cache-pending-purges.js', () => {
+	return {
+		clearPendingScopedCachePurges: vi.fn(),
+		countFailedScopedCachePurgeRetry: vi.fn(),
+		listPendingScopedCachePurges: vi.fn(),
+		recordPendingScopedCachePurge: vi.fn(),
+	};
+});
 
 const pipeline = {
 	scard: vi.fn().mockReturnThis(),
@@ -33,8 +73,11 @@ const pipeline = {
 beforeEach(() => {
 	env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
 	env['CACHE_STORE'] = 'redis';
+	env['CACHE_NAMESPACE'] = 'ns';
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useRedis).mockReturnValue({ pipeline: () => pipeline } as any);
+	vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn: vi.fn() } as any);
+	vi.mocked(listPendingScopedCachePurges).mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -264,5 +307,358 @@ describe('dropScopedCacheTagIndex', () => {
 		await dropScopedCacheTagIndex();
 
 		expect(scan).not.toHaveBeenCalled();
+	});
+});
+
+// A purge that failed after its mutation committed is finished later
+// (https://github.com/jclaveau/directus/issues/365). What the retry must NOT do is
+// as load-bearing as what it does: it drops exactly the targets that were recorded,
+// so every slice that was never in doubt stays warm.
+describe('retryPendingScopedCachePurges', () => {
+	const cache = { clear: vi.fn(), delete: vi.fn().mockResolvedValue(true) };
+	const redis = { smembers: vi.fn(), del: vi.fn(), scan: vi.fn() };
+
+	beforeEach(() => {
+		vi.mocked(getCache).mockReturnValue({ cache } as any);
+		vi.mocked(useRedis).mockReturnValue(redis as any);
+		redis.smembers.mockResolvedValue([]);
+		redis.scan.mockResolvedValue(['0', []]);
+
+		// The shape a deployment with CACHE_STATS off returns for every entry, so a
+		// case has to opt IN to being able to name what it recovered.
+		vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
+	});
+
+	it(oneLine`
+		rebuilds a recorded label against the namespace in force AT RETRY TIME, so a
+		CACHE_NAMESPACE change between the failure and the retry cannot misaim it
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+
+		// The label was recorded under `ns`; the process now runs under `other`.
+		env['CACHE_NAMESPACE'] = 'other';
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(redis.smembers).toHaveBeenCalledWith('other:tag:articles:id=1');
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+		expect(redis.del).toHaveBeenCalledWith(['other:tag:articles:id=1']);
+		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
+	});
+
+	it(oneLine`
+		rescans the collection for a collection-mode record — it named no tag because
+		which slices changed was unresolvable when it failed
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'collection',
+			collection: 'articles',
+			scopedCacheTags: [],
+			ids: [7],
+		}]);
+
+		redis.scan.mockResolvedValue(['0', ['ns:tag:articles:id=1']]);
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(redis.scan)
+			.toHaveBeenCalledWith('0', 'MATCH', 'ns:tag:articles:*', 'COUNT', 250);
+
+		expect(redis.del)
+			.toHaveBeenCalledWith(['ns:tag:articles', 'ns:tag:articles:id=1']);
+
+		expect(cache.clear).not.toHaveBeenCalled();
+	});
+
+	it('flushes the whole namespace for a namespace-mode record', async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'namespace',
+			collection: null,
+			scopedCacheTags: [],
+			ids: [7],
+		}]);
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(cache.clear).toHaveBeenCalledOnce();
+		expect(redis.del).not.toHaveBeenCalled();
+		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
+	});
+
+	it(oneLine`
+		keeps a record whose retry failed again and counts the attempt, then carries on
+		to the targets behind it
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:id=1'],
+				ids: [7],
+			},
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:id=2'],
+				ids: [8],
+			},
+		]);
+
+		const closed = new Error('Connection is closed.');
+		redis.smembers.mockRejectedValueOnce(closed);
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(countFailedScopedCachePurgeRetry).toHaveBeenCalledWith([7], closed);
+		expect(clearPendingScopedCachePurges).not.toHaveBeenCalledWith([7]);
+		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([8]);
+	});
+
+	it('reads nothing when there is no Redis to retry against', async () => {
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+		expect(listPendingScopedCachePurges).not.toHaveBeenCalled();
+	});
+
+	it('touches the cache at all only when something is pending', async () => {
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+		expect(getCache).not.toHaveBeenCalled();
+	});
+
+	it('leaves the records in place when the cache itself is off', async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'namespace',
+			collection: null,
+			scopedCacheTags: [],
+			ids: [7],
+		}]);
+
+		vi.mocked(getCache).mockReturnValue({ cache: null } as any);
+
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+		expect(clearPendingScopedCachePurges).not.toHaveBeenCalled();
+	});
+
+	// Reported here rather than when the purge failed, because the anomaly stream is
+	// itself Redis-backed: reporting at failure time reports nothing in the one case
+	// worth reporting.
+	it(oneLine`
+		names each entry it found stale, counting the sidecars that ride the same tag as
+		the entry they belong to rather than as two more
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		redis.smembers.mockResolvedValue([
+			'ns:entry-a',
+			'ns:entry-a__expires_at',
+			'ns:entry-a__tags',
+		]);
+
+		vi.mocked(readCacheDescriptorForRedisKey)
+			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
+
+		await retryPendingScopedCachePurges();
+
+		expect(queueCacheAnomaly).toHaveBeenCalledOnce();
+
+		expect(queueCacheAnomaly).toHaveBeenCalledWith({
+			cacheKey: 'GET /items/articles/1',
+			reason: 'redis_error',
+			detail: 'served stale until a failed purge was retried',
+		});
+	});
+
+	it(oneLine`
+		purges an entry whose descriptor is gone all the same — stats were off when it
+		was filled, so it can be dropped but not named
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+		vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(queueCacheAnomaly).not.toHaveBeenCalled();
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+	});
+});
+
+describe('startScopedCachePurgeRecovery', () => {
+	it(oneLine`
+		retries at boot and again on every reconnect — those are the two moments a
+		previously unreachable Redis can have come back
+	`, async () => {
+		const on = vi.fn();
+		vi.mocked(useRedis).mockReturnValue({ on } as any);
+
+		startScopedCachePurgeRecovery();
+
+		expect(on).toHaveBeenCalledWith('ready', expect.any(Function));
+		await vi.waitFor(() => expect(listPendingScopedCachePurges).toHaveBeenCalled());
+
+		on.mock.calls[0]![1]();
+
+		await vi.waitFor(() => {
+			expect(listPendingScopedCachePurges).toHaveBeenCalledTimes(2);
+		});
+	});
+
+	it('registers no listener when there is no Redis config', () => {
+		const on = vi.fn();
+		vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		vi.mocked(useRedis).mockReturnValue({ on } as any);
+
+		startScopedCachePurgeRecovery();
+
+		expect(on).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		logs a retry that throws rather than leaving the rejection unhandled — nothing
+		awaits this, so an unhandled one would take the process down
+	`, async () => {
+		const warn = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
+
+		vi.mocked(listPendingScopedCachePurges)
+			.mockRejectedValue(new Error('Connection is closed.'));
+
+		startScopedCachePurgeRecovery();
+
+		await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+	});
+
+	it('reports the count once there was something to finish', async () => {
+		const info = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ info, warn: vi.fn() } as any);
+		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
+		vi.mocked(getCache).mockReturnValue({ cache: { clear: vi.fn() } } as any);
+
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'namespace',
+			collection: null,
+			scopedCacheTags: [],
+			ids: [7],
+		}]);
+
+		startScopedCachePurgeRecovery();
+
+		await vi.waitFor(() => {
+			expect(info)
+				.toHaveBeenCalledWith('[scoped-cache] finished 1 pending purge(s)');
+		});
+	});
+});
+
+// A purge runs AFTER its mutation committed, so by the time it can fail the write
+// is durable. Answering 500 would have the client retry a mutation that already
+// landed, so the request wins and the purge is recorded to be finished later.
+describe('a purge that fails after its mutation committed', () => {
+	const cache = { clear: vi.fn(), delete: vi.fn().mockResolvedValue(true) };
+	const closed = new Error('Connection is closed.');
+
+	beforeEach(() => {
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue([]),
+			del: vi.fn(),
+			scan: vi.fn().mockResolvedValue(['0', []]),
+		} as any);
+
+		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, tags) => tags);
+		cache.clear.mockResolvedValue(undefined);
+	});
+
+	it(oneLine`
+		records the slices it could not drop, and reports no purge it did not run
+	`, async () => {
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockRejectedValue(closed),
+		} as any);
+
+		const purged = await purgeScopedCache(cache as any, 'articles', [
+			{ collection: 'articles', field: 'id', value: 1 },
+		]);
+
+		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles', 'articles:id=1'],
+			},
+			closed,
+		);
+
+		// Still answered with the tags the mutation resolved — the caller's dev header
+		// names what SHOULD have gone, and the recovery is what makes that true.
+		expect(purged).toEqual([
+			{ collection: 'articles' },
+			{ collection: 'articles', field: 'id', value: 1 },
+		]);
+
+		expect(queueCachePurge).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		records the collection when the slices were unresolvable and the fallback scan
+		failed too
+	`, async () => {
+		vi.mocked(useRedis).mockReturnValue({
+			scan: vi.fn().mockRejectedValue(closed),
+		} as any);
+
+		expect(await purgeScopedCache(cache as any, 'articles', null))
+			.toEqual([{ collection: 'articles' }]);
+
+		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
+			{ mode: 'collection', collection: 'articles', scopedCacheTags: [] },
+			closed,
+		);
+
+		expect(queueCachePurge).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		records the whole namespace when scoped mode is off and the flush failed
+	`, async () => {
+		env['CACHE_AUTO_PURGE_MODE'] = 'all';
+		cache.clear.mockRejectedValue(closed);
+
+		expect(await purgeScopedCache(cache as any, 'articles', [])).toBeNull();
+
+		expect(recordPendingScopedCachePurge).toHaveBeenCalledWith(
+			{ mode: 'namespace', collection: null, scopedCacheTags: [] },
+			closed,
+		);
+
+		expect(queueCachePurge).not.toHaveBeenCalled();
+	});
+
+	it('records nothing, and reports the purge, when it went through', async () => {
+		await purgeScopedCache(cache as any, 'articles', [
+			{ collection: 'articles', field: 'id', value: 1 },
+		]);
+
+		expect(recordPendingScopedCachePurge).not.toHaveBeenCalled();
+		expect(queueCachePurge).toHaveBeenCalledOnce();
 	});
 });

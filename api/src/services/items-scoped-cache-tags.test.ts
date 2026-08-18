@@ -1,4 +1,5 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -120,5 +121,42 @@ describe('readByQuery scoped cache tag accumulation', () => {
 		const result = await service.readByQuery({ fields: ['*', 'author.*'] }, { emitEvents: false });
 
 		expect(readMeta(result)?.scopedCacheTags.length).toBe(0);
+	});
+});
+
+// The write-side snapshot ran behind a "no scope fields declared" early return until
+// the key axis made it run for every mutation, so it now meets collections absent
+// from the schema. Every mutation reaching it dereferences that collection first, so
+// only a direct call gets here today — the guard is what keeps a caller that stops
+// doing so from throwing on `.primary` of undefined.
+describe(oneLine`
+	the write-side snapshot on a collection the schema does not know
+`, () => {
+	beforeEach(() => {
+		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
+	});
+
+	test(oneLine`
+		resolves no tag rather than throwing, leaving the bare collection tag
+	`, async () => {
+		const service = new ItemsService('ghost', {
+			knex: db,
+			schema,
+			accountability: null,
+		});
+
+		expect(await (service as any).snapshotScopedCacheTags([1])).toEqual([]);
+	});
+
+	test('resolves the key slice on a collection it does know', async () => {
+		const service = new ItemsService('articles', {
+			knex: db,
+			schema,
+			accountability: null,
+		});
+
+		expect(await (service as any).snapshotScopedCacheTags([1])).toEqual([
+			{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+		]);
 	});
 });

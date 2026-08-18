@@ -1,4 +1,5 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import { oneLine } from '@directus/utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Mutable fixture the hoisted mocks read, so each test can flip cache presence and
@@ -102,6 +103,17 @@ describe('createScopedCacheExtensionHandle', () => {
 		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'logs', [
 			{ collection: 'logs', field: 'id', value: 1, type: 'integer' },
 		]);
+	});
+
+	it(oneLine`
+		collection absent from the schema: purges its bare tag only — it resolves no key
+		and no scope field, and that tag still drops its reads
+	`, async () => {
+		const handle = createScopedCacheExtensionHandle(getSchema);
+
+		await handle.purgeForMutatedRows('ghost', [{ id: 1 }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(state.cache, 'ghost', []);
 	});
 
 	it('row missing a scope field: collection-wide purge, not stale', async () => {

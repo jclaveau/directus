@@ -668,6 +668,52 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			does NOT flag a scopeTo on a collection's PRIMARY KEY, though it is not among
+			its scoped fields — every collection auto-purges its key slice
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			// `test` is scoped on `student` only, so `id` reads as an undeclared field
+			// and used to be flagged — the key axis is what makes it reproducible.
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({ collection: 'test', field: 'id', value: 1 });
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			does NOT flag a bare collection tag — it names no slice, so any write to the
+			collection reproduces it
+		`, async () => {
+			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({ collection: 'test' });
+				return payload;
+			};
+
+			emitter.onFilter('test.items.read', declare);
+
+			try {
+				const result = await service().readByQuery({});
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('test.items.read', declare);
+			}
+		});
+
+		it(oneLine`
 			an items.create hook adds a tag, unioned after the committed-row slice in the
 			purge
 		`, async () => {
