@@ -70,6 +70,17 @@ describe('warnOncePerConnectionOutage', () => {
 		);
 	});
 
+	it(oneLine`
+		tells two message-less failures apart — a dual-stack connect fails as an
+		AggregateError whose own message is empty, and so does more than one thing
+	`, () => {
+		emit('error', new AggregateError([], ''));
+		emit('error', new AggregateError([], ''));
+		emit('error', Object.assign(new Error(''), { name: 'ClientClosedError' }));
+
+		expect(warn).toHaveBeenCalledTimes(2);
+	});
+
 	it('reports the next outage from scratch once the client reconnects', () => {
 		emit('error', new Error('ECONNREFUSED'));
 		expect(warn).toHaveBeenCalledOnce();

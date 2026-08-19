@@ -14,10 +14,10 @@ import createApp from './app.js';
 import getDatabase from './database/index.js';
 import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
-import { useMetrics } from './metrics/index.js';
 import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
+import { reportUnhandledRejection } from './utils/report-unhandled-rejection.js';
 import { getAddress } from './utils/get-address.js';
 import {
 	createLogsController,
@@ -163,32 +163,12 @@ export async function createServer(): Promise<http.Server> {
 }
 
 export async function startServer(): Promise<void> {
-	// Node turns an unhandled rejection into an uncaught exception, and the API has
-	// no shortage of promises nothing awaits — a scheduled tick, a fire-and-forget
-	// telemetry write, a client library settling a command long after its caller
-	// gave up. Each one is a way for a background dependency to exit a process that
-	// was serving requests fine: an unreachable Redis alone reached it through the
-	// shared ioredis client, the bus subscriber, the Keyv stores and the scheduler,
-	// each fixed at its own site and none of which was the last one.
-	//
-	// Registered here rather than in `createApp`, so it covers the server process
-	// and not the unit suite or a CLI command, where swallowing a rejection would
-	// hide a failure from the run that should have reported it.
-	//
-	// Logged at error, never silently: the point is to keep a background failure
-	// from killing the foreground, not to stop hearing about it. `uncaughtException`
-	// is deliberately NOT handled — by then the state that threw is unknown, and
-	// Node's own guidance is to exit.
-	process.on('unhandledRejection', (reason) => {
-		logger.error(reason, `Unhandled promise rejection: ${reason}`);
-
-		// Counted as well as logged: a log line is where you look once you already
-		// suspect something, a counter is what tells you to start looking. Rising
-		// after a deploy is the signal that a new floating promise shipped.
-		useMetrics()
-			?.getUnhandledRejectionMetric()
-			?.inc();
-	});
+	// Registered here rather than in `createApp`, so it covers the server process and
+	// not the unit suite or a CLI command, where swallowing a rejection would hide a
+	// failure from the run that should have reported it. `uncaughtException` is
+	// deliberately NOT handled — by then the state that threw is unknown, and Node's
+	// own guidance is to exit.
+	process.on('unhandledRejection', reportUnhandledRejection);
 
 	const server = await createServer();
 

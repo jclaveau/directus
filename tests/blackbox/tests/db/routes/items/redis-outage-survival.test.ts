@@ -27,6 +27,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // way to exit. The cache-stats flush already runs on `*/10 * * * * *`, the shortest
 // schedule in the codebase, so one cut held past ten seconds lands a tick — no new
 // knob and no minute-long wait.
+//
+// Two clients reach the outage only under a setting: `SynchronizationManagerRedis`
+// and the per-IP rate limiter each build a `new Redis(…)` of their own instead of
+// sharing `useRedis()`, so they are invisible to a default-configured instance. The
+// first is switched on below; the second gets an instance to itself, because a
+// redis-backed limiter refuses every request for the length of the outage and that
+// would drown everything else this file asserts.
 
 const NOTE = 'test_items_outage_note';
 const cacheStatusHeader = 'x-cache-status';
@@ -142,6 +149,14 @@ describe('the API outlives an unreachable Redis', () => {
 			// that used to take the process down when a tick met an outage.
 			env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
+			// And makes that claim a Redis write at all. The synchronization store
+			// defaults to memory, where the clock writes to a plain object and cannot
+			// fail — so under the default the scheduler guard is unreachable and
+			// asserting on it proves nothing. It also puts a client in the outage that
+			// no other setting reaches: `SynchronizationManagerRedis` builds its own
+			// `new Redis(…)` instead of sharing `useRedis()`.
+			env[vendor]['SYNCHRONIZATION_STORE'] = 'redis';
+
 			// The stock backoff gives up on a queued command after ~30s; this brings the
 			// whole outage inside a test's patience and reconnects within one poll of
 			// the proxy returning.
@@ -167,7 +182,14 @@ describe('the API outlives an unreachable Redis', () => {
 		}, 60_000);
 
 		afterAll(async () => {
-			instance.kill();
+			// Awaited: the shard reuses the port range straight away, and an instance
+			// still shutting down is still holding its port.
+			if (instance.exitCode === null) {
+				const exited = new Promise((resolve) => instance.once('exit', resolve));
+				instance.kill();
+				await exited;
+			}
+
 			await proxy.cut();
 			await DeleteCollection(vendor, { collection: NOTE });
 		});
@@ -227,13 +249,17 @@ describe('the API outlives an unreachable Redis', () => {
 			// The listeners are what make this reachable at all: unhandled, the errors
 			// ioredis emits per failed reconnect end the process, and this request would
 			// come back ECONNRESET rather than 200.
+			const askedAt = Date.now();
+
 			const served = await get(`/items/${NOTE}/${note}`)
 				.catch(async (error: Error) => {
 					await assertInstanceAlive();
 					throw error;
 				});
 
-			mark('read served with redis down');
+			const servedIn = Date.now() - askedAt;
+
+			mark(`read served with redis down in ${servedIn}ms`);
 			await assertInstanceAlive();
 
 			expect(served.status).toBe(200);
@@ -243,6 +269,12 @@ describe('the API outlives an unreachable Redis', () => {
 			// as a MISS rather than serving, throwing, or — as it did before
 			// `disableOfflineQueue` — blocking until Redis came back.
 			expect(served.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Named rather than left to the case's own timeout, which reports "the test
+			// took too long" for a request that answered in its own time. Without
+			// `disableOfflineQueue` node-redis holds the read in a queue with no deadline
+			// and this arrives when Redis does; with it, the read is one uncached query.
+			expect(servedIn).toBeLessThan(5_000);
 
 			// Nothing else went with it: a route that never touches the cache still
 			// answers, which separates "the cache is degraded" from "the app is hurt".
@@ -285,18 +317,45 @@ describe('the API outlives an unreachable Redis', () => {
 			expect(tickSurvived).toBe(true);
 			await assertInstanceAlive();
 
+			// Traffic, so the volume assertions below can tell an outage-sized log from a
+			// traffic-sized one. Every one of these reads asks the cache and is refused.
+			const READS_UNDER_OUTAGE = 12;
+
+			for (let read = 0; read < READS_UNDER_OUTAGE; read++) {
+				expect((await get(`/items/${NOTE}/${note}`)).status).toBe(200);
+			}
+
+			mark(`${READS_UNDER_OUTAGE} reads served with redis down`);
+
+			const outageLog = instanceLog.slice(logAtCut).join('');
+
 			// The outage is reported, and reported ONCE. At the retry delays set above
 			// the client reconnects every few tens of ms, so the ~12s spent waiting for
 			// a scheduled tick is a few hundred failed attempts — one warning each would
 			// fill a disk over a real outage. Both bounds matter: the upper one is the
 			// throttle, the lower one keeps the assertion from passing because the label
 			// changed and it now counts nothing.
-			const outageLog = instanceLog.slice(logAtCut).join('');
 			const reported = outageLog.split('[redis] ').length - 1;
 
 			mark(`redis outage warnings=${reported}`);
 			expect(reported).toBeGreaterThanOrEqual(1);
 			expect(reported).toBeLessThanOrEqual(5);
+
+			// Each Keyv store reports its own failures too, and `disableOfflineQueue`
+			// turned those from "never, the command waits" into "once per refused
+			// command" — a log that grows with traffic instead of with the outage, which
+			// is the flood the connection-level throttle exists to prevent, moved to the
+			// request path. Bounded well under the reads that provoked it.
+			const storeReported = outageLog.split('[response-cache]').length - 1;
+
+			mark(`response-cache warnings=${storeReported}`);
+			expect(storeReported).toBeGreaterThanOrEqual(1);
+			expect(storeReported).toBeLessThan(READS_UNDER_OUTAGE);
+
+			// One label per cache, not one shared by all four clients: which of them lost
+			// its connection is the first thing you want from the line.
+			expect(outageLog).toContain('[response-cache-client]');
+			expect(outageLog).not.toContain('[cache-store]');
 
 			await proxy.open();
 			mark('redis back');
@@ -321,5 +380,89 @@ describe('the API outlives an unreachable Redis', () => {
 			expect(status).toBe('HIT');
 			await assertInstanceAlive();
 		}, 180_000);
+	});
+});
+
+describe('the API outlives an unreachable Redis behind the rate limiter', () => {
+	describe.each(vendors)('%s', (vendor) => {
+		const env = cloneDeep(config.envs);
+		const instanceLog: string[] = [];
+
+		let proxy: ReturnType<typeof createRedisProxy>;
+		let instance: ChildProcess;
+
+		beforeAll(async () => {
+			const proxyPort = await getPort();
+			proxy = createRedisProxy(6108, proxyPort);
+			await proxy.open();
+
+			env[vendor]['REDIS_HOST'] = 'localhost';
+			env[vendor]['REDIS_PORT'] = String(proxyPort);
+
+			env[vendor]['RATE_LIMITER_ENABLED'] = 'true';
+			env[vendor]['RATE_LIMITER_STORE'] = 'redis';
+
+			// Charged above the cache, so `/server/ping` spends a token and one request
+			// is enough to make the limiter talk to Redis.
+			env[vendor]['RATE_LIMITER_CHARGE'] = 'every-request';
+			env[vendor]['RATE_LIMITER_POINTS'] = '1000';
+			env[vendor]['RATE_LIMITER_DURATION'] = '60';
+
+			env[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
+			env[vendor]['REDIS_RETRY_MAX_DELAY'] = '50';
+
+			const port = await getPort();
+			env[vendor].PORT = String(port);
+
+			instance = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: env[vendor],
+			});
+
+			instance.stdout?.on('data', (chunk) => instanceLog.push(String(chunk)));
+			instance.stderr?.on('data', (chunk) => instanceLog.push(String(chunk)));
+
+			await awaitDirectusConnection(port);
+		}, 60_000);
+
+		afterAll(async () => {
+			if (instance.exitCode === null) {
+				const exited = new Promise((resolve) => instance.once('exit', resolve));
+				instance.kill();
+				await exited;
+			}
+
+			await proxy.cut();
+		});
+
+		it(oneLine`
+			degrades to refusing requests rather than exiting when the limiter's own Redis
+			client goes away
+		`, async () => {
+			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
+				.toBe('pong');
+
+			await proxy.cut();
+
+			// Charged against a Redis that is gone, so this request fails — a redis-backed
+			// limiter has nothing to fall back on. That it fails rather than takes the
+			// process with it is the whole point: ioredis emits an error per failed
+			// reconnect, and this client is built without a listener for them.
+			await request(getUrl(vendor, env))
+				.get('/server/ping')
+				.catch(() => undefined);
+
+			// The reconnect that kills the process happens within a few tens of ms of the
+			// cut; the wait is for the child to be reaped, not for the failure.
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+
+			const tail = instanceLog.join('').slice(-4000);
+
+			expect(instance.exitCode, `the instance exited:\n${tail}`).toBeNull();
+
+			// Named for the limiter, so the line says which client dropped rather than
+			// leaving four candidates.
+			expect(instanceLog.join('')).toContain('[rate-limiter]');
+		}, 120_000);
 	});
 });
