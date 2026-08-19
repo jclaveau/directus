@@ -59,10 +59,9 @@ function getConfig(
 		// reported as a raw `console.error` stack per failed reconnect rather than
 		// through the logger. `RATE_LIMITER_GLOBAL` reports as `[rate-limiter-global]`.
 		// What the limiter does is unchanged: it still refuses what it cannot count.
-		warnOncePerConnectionOutage(
-			config.storeClient,
-			configPrefix.toLowerCase().replace(/_/g, '-'),
-		);
+		const limiterLabel = configPrefix.toLowerCase().replace(/_/g, '-');
+
+		warnOncePerConnectionOutage(config.storeClient, limiterLabel);
 	}
 
 	delete config.enabled;

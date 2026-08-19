@@ -141,6 +141,29 @@ describe('getCacheErrorMetric', () => {
 		expect(entry?.values[0]?.value).toBe(1);
 	});
 
+	it(oneLine`
+		counts a probe the store refused by throwing — Keyv raises rather than emits
+		when it is the serializer that fails, or when the adapter is configured to
+		throw, so both arms are reachable and both mean the same thing
+	`, async () => {
+		const throwing = new EventEmitter() as EventEmitter & Partial<Keyv>;
+
+		throwing.set = async () => {
+			throw new Error('ECONNREFUSED');
+		};
+
+		throwing.delete = async () => true;
+
+		responseCache.current = throwing as unknown as Keyv;
+
+		await createMetrics().generate();
+
+		const entry = (await register.getMetricsAsJSON())
+			.find((metric) => metric.name === 'directus_cache_redis_connection_errors');
+
+		expect(entry?.values[0]?.value).toBe(1);
+	});
+
 	it('leaves the counter alone when the probe round-trips', async () => {
 		const working = new EventEmitter() as EventEmitter & Partial<Keyv>;
 

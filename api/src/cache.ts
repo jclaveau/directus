@@ -319,10 +319,7 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 			? { url: connection }
 			: connection;
 
-		const keyvRedis = new KeyvRedis({
-			...clientOptions,
-			disableOfflineQueue: true,
-		});
+		const keyvRedis = new KeyvRedis({ ...clientOptions, disableOfflineQueue: true });
 
 		config.store = keyvRedis;
 	}
