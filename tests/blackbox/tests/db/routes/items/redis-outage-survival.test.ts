@@ -43,6 +43,10 @@ const NOTE = 'test_items_outage_note';
 // the number of requests that meet the failure — and two windows of the same size
 // cannot tell those two apart, whatever constant they are measured against.
 const READS_PER_OUTAGE = [3, 12];
+
+// The per-IP budget the rate-limiter instance runs with. Small, because the case has
+// to exhaust it while Redis is down to prove the fallback is still counting.
+const LIMITER_POINTS = 5;
 const cacheStatusHeader = 'x-cache-status';
 
 // A proxy we can kill and bring back, so the API keeps its config and only the
@@ -509,7 +513,9 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 			// Charged above the cache, so `/server/ping` spends a token and one request
 			// is enough to make the limiter talk to Redis.
 			env[vendor]['RATE_LIMITER_CHARGE'] = 'every-request';
-			env[vendor]['RATE_LIMITER_POINTS'] = '1000';
+			// Small enough that the case can spend the whole budget in a few requests,
+			// which is the only way to see whether the fallback counts or just yields.
+			env[vendor]['RATE_LIMITER_POINTS'] = String(LIMITER_POINTS);
 			env[vendor]['RATE_LIMITER_DURATION'] = '60';
 
 			env[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
@@ -558,6 +564,28 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 			// for the length of the outage and is the trade being made.
 			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
 				.toBe('pong');
+
+			// Serving is half of it. A fallback wired with the wrong budget — or none at
+			// all, with the error swallowed somewhere — also answers every request, so
+			// spend the rest of the allowance and require the limit to arrive. This is
+			// what says the memory limiter is counting rather than yielding.
+			let refusedAt = 0;
+
+			for (let charged = 1; charged <= LIMITER_POINTS + 2; charged++) {
+				const answer = await request(getUrl(vendor, env)).get('/server/ping');
+
+				if (answer.status === 429) {
+					refusedAt = charged;
+					break;
+				}
+			}
+
+			mark(`limited under the outage after ${refusedAt} charged requests`);
+
+			// Counted in this process from zero, so the budget outlasts the two requests
+			// already spent above and the limit lands within one round of it.
+			expect(refusedAt).toBeGreaterThan(0);
+			expect(refusedAt).toBeLessThanOrEqual(LIMITER_POINTS + 1);
 
 			// Long enough for several reconnect attempts at the delays set above, which
 			// is what makes the volume below mean something.
