@@ -81,10 +81,12 @@ function getConfig(
 		// than to enforce a number nobody chose. Redis keeps its counters and their
 		// TTLs throughout, so the limit resumes from where it was rather than from
 		// zero the moment the store answers again.
-		config.insuranceLimiter = new RateLimiterMemory({
+		const noLimitWhileRedisIsAway = new RateLimiterMemory({
 			points: Number.MAX_SAFE_INTEGER,
 			duration: 1,
 		});
+
+		config.insuranceLimiter = noLimitWhileRedisIsAway;
 
 		// And reach it without waiting. Left to itself the limiter sends the command
 		// anyway and falls back only once ioredis gives up on it, which at ioredis's own

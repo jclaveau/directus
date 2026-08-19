@@ -247,6 +247,8 @@ export default abstract class SocketController {
 				try {
 					await this.rateLimiter.consume(client.uid);
 				} catch (limit) {
+					// Always a spent budget, never a Redis outage: the limiter falls back to
+					// one that refuses nothing. See `rate-limiter.ts`.
 					const timeout = (limit as any)?.msBeforeNext ?? this.rateLimiter.msDuration;
 
 					const error = new WebSocketError(
