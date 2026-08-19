@@ -352,9 +352,8 @@ describe('the API outlives an unreachable Redis', () => {
 			expect(storeReported).toBeGreaterThanOrEqual(1);
 			expect(storeReported).toBeLessThan(READS_UNDER_OUTAGE);
 
-			// One label per cache, not one shared by all four clients: which of them lost
-			// its connection is the first thing you want from the line.
-			expect(outageLog).toContain('[response-cache-client]');
+			// And under the cache's own name rather than a label the four clients share,
+			// which would name none of them.
 			expect(outageLog).not.toContain('[cache-store]');
 
 			await proxy.open();

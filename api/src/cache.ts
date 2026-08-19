@@ -6,6 +6,7 @@ import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { redisConfigAvailable } from './redis/index.js';
 import {
+	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
 import { dropScopedCacheTagIndex } from './scoped-cache.js';
@@ -87,6 +88,35 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 	});
 }
 
+/**
+ * Report what goes wrong with one cache, under that cache's own name.
+ *
+ * Two things have to be heard from. `@keyv/redis` v5 wraps a node-redis client
+ * of its own and Keyv does not re-emit its `error` events, so without a listener
+ * there an unreachable Redis took the process down through it even once the
+ * ioredis clients were handled. And the store reports what its own commands hit,
+ * which since `disableOfflineQueue` is one error per refused command — a log that
+ * grows with traffic rather than with the outage.
+ *
+ * Both are the same failure, so both go under one label and share one throttle.
+ * Attached here rather than where the client is built, because a shared label
+ * across the four caches names none of them, and this is where the names live.
+ * Nothing has connected yet at this point: node-redis dials on its first command.
+ */
+function warnOnCacheFailure(keyv: Keyv, cacheLabel: string): void {
+	const { client } = keyv.store as { client?: ConnectionEvents };
+
+	// A memory store has no client, and fails for reasons that are not outages —
+	// serialization, not connectivity — so there is nothing to collapse and nothing to
+	// wait for. Every one of those is worth a line.
+	if (client === undefined) {
+		keyv.on('error', (error) => logger.warn(error, `[${cacheLabel}] ${error}`));
+		return;
+	}
+
+	warnOncePerConnectionOutage(client, cacheLabel, keyv);
+}
+
 export function getCache(): {
 	cache: Keyv | null;
 	systemCache: Keyv;
@@ -106,7 +136,7 @@ export function getCache(): {
 			'_response',
 		);
 
-		cache.on('error', (err) => logger.warn(err, `[response-cache] ${err}`));
+		warnOnCacheFailure(cache, 'response-cache');
 	}
 
 	if (systemCache === null) {
@@ -116,17 +146,17 @@ export function getCache(): {
 			'_system',
 		);
 
-		systemCache.on('error', (err) => logger.warn(err, `[system-cache] ${err}`));
+		warnOnCacheFailure(systemCache, 'system-cache');
 	}
 
 	if (localSchemaCache === null) {
 		localSchemaCache = getKeyvInstance('memory', getMilliseconds(env['CACHE_SYSTEM_TTL']), '_schema');
-		localSchemaCache.on('error', (err) => logger.warn(err, `[schema-cache] ${err}`));
+		warnOnCacheFailure(localSchemaCache, 'schema-cache');
 	}
 
 	if (lockCache === null) {
 		lockCache = getKeyvInstance(store, undefined, '_lock');
-		lockCache.on('error', (err) => logger.warn(err, `[lock-cache] ${err}`));
+		warnOnCacheFailure(lockCache, 'lock-cache');
 	}
 
 	return { cache, systemCache, localSchemaCache, lockCache };
@@ -293,14 +323,6 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 			...clientOptions,
 			disableOfflineQueue: true,
 		});
-
-		// v5 wraps its own node-redis client, and Keyv does not re-emit that client's
-		// `error` events — the `on('error')` handlers on the Keyv instances above only
-		// ever see errors Keyv itself raises. An EventEmitter with no `error` listener
-		// rethrows, so an unreachable Redis took the process down through this client
-		// even once the ioredis ones were handled. Four stores, four clients, which is
-		// also why the same outage must not be logged four times per reconnect.
-		warnOncePerConnectionOutage(keyvRedis.client, 'cache-store');
 
 		config.store = keyvRedis;
 	}

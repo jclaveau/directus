@@ -1,9 +1,14 @@
 import { useLogger } from '../../logger/index.js';
 
 /** The slice of an ioredis / node-redis client this needs: two events. */
-interface ConnectionEvents {
+export interface ConnectionEvents {
 	on(event: 'error', listener: (error: Error) => void): unknown;
 	on(event: 'ready', listener: () => void): unknown;
+}
+
+/** What something built on that connection reports when its own calls hit it. */
+interface ConnectionFailures {
+	on(event: 'error', listener: (error: Error) => void): unknown;
 }
 
 /**
@@ -20,23 +25,37 @@ interface ConnectionEvents {
  * default retry policy never gives up (`REDIS_RETRY_MAX_ATTEMPTS` unset), and each
  * failed reconnect emits an error, so an outage would otherwise write a warning
  * every couple of seconds for as long as it lasts — across the shared client, the
- * bus subscriber and one client per Keyv store. A changed message is still reported:
+ * bus subscriber and one client per Keyv store. A changed failure is still reported:
  * `ECONNREFUSED` turning into an auth failure is news, not repetition.
+ *
+ * A consumer of the connection can be handed over with it. A Keyv store reports what
+ * its own commands hit, which during an outage is one error per refused command and
+ * so grows with traffic rather than with the failure; folded in here it shares the
+ * throttle, the label and the reconnect that ends them both.
  */
 export function warnOncePerConnectionOutage(
 	client: ConnectionEvents,
-	label: string,
+	connectionLabel: string,
+	consumer?: ConnectionFailures,
 ): void {
 	let reported: string | null = null;
 
-	client.on('error', (error) => {
-		if (error.message === reported) {
+	function warnOnce(error: Error) {
+		// Named as well as worded: a dual-stack connect fails as an `AggregateError`
+		// carrying no message of its own, so the message alone cannot tell one
+		// message-less failure from another and would collapse them into one line.
+		const failure = `${error.name}: ${error.message}`;
+
+		if (failure === reported) {
 			return;
 		}
 
-		reported = error.message;
-		useLogger().warn(error, `[${label}] ${error}`);
-	});
+		reported = failure;
+		useLogger().warn(error, `[${connectionLabel}] ${error}`);
+	}
+
+	client.on('error', warnOnce);
+	consumer?.on('error', warnOnce);
 
 	// Reconnected, so the next outage is reported from scratch rather than being
 	// mistaken for a continuation of this one.
