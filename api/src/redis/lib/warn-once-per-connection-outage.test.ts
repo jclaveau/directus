@@ -1,4 +1,5 @@
 import { oneLine } from '@directus/utils';
+import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLogger } from '../../logger/index.js';
 import { warnOncePerConnectionOutage } from './warn-once-per-connection-outage.js';
@@ -115,5 +116,124 @@ describe('warnOncePerConnectionOutage', () => {
 		emit('error', new Error('ECONNREFUSED'));
 
 		expect(warn).toHaveBeenCalledTimes(2);
+	});
+});
+
+// The hand-written cases above each name one sequence somebody thought of. This one
+// asks for sequences nobody thought of: fast-check generates runs of failures and
+// reconnects, checks the same rule after every step, and on a violation shrinks to
+// the shortest run that still breaks it. The alternating pair that defeated the
+// original one-slot throttle is two commands long, so it falls out immediately.
+describe('warnOncePerConnectionOutage over generated sequences', () => {
+	// A small alphabet, deliberately: unique messages would never collide and the
+	// throttle would never be asked to do anything. Two of these carry no message at
+	// all and differ only by name, which is the pair a message-only key confuses.
+	const FAILURES = [
+		{ name: 'Error', message: 'connect ECONNREFUSED 127.0.0.1:6379' },
+		{ name: 'Error', message: 'Socket closed unexpectedly' },
+		{ name: 'Error', message: 'The client is offline' },
+		{ name: 'AggregateError', message: '' },
+		{ name: 'ClientClosedError', message: '' },
+	];
+
+	// What the log should hold: every distinct failure of the current outage, and a
+	// reconnect is not itself news.
+	interface OutageModel {
+		reported: Set<string>;
+	}
+
+	type OutageClient = ReturnType<typeof listeningClient>;
+
+	class Fail implements fc.Command<OutageModel, OutageClient> {
+		constructor(private readonly failure: typeof FAILURES[number]) {}
+
+		check(): boolean {
+			return true;
+		}
+
+		run(model: OutageModel, client: OutageClient): void {
+			const identity = `${this.failure.name}: ${this.failure.message}`;
+			const before = warn.mock.calls.length;
+
+			client.fail(Object.assign(new Error(this.failure.message), {
+				name: this.failure.name,
+			}));
+
+			const lines = warn.mock.calls.length - before;
+
+			const alreadyReported = model.reported.has(identity);
+
+			expect(lines).toBe(
+				alreadyReported
+					? 0
+					: 1,
+			);
+
+			model.reported.add(identity);
+		}
+
+		toString(): string {
+			return `fail(${this.failure.name}: ${this.failure.message})`;
+		}
+	}
+
+	class Reconnect implements fc.Command<OutageModel, OutageClient> {
+		check(): boolean {
+			return true;
+		}
+
+		run(model: OutageModel, client: OutageClient): void {
+			const before = warn.mock.calls.length;
+
+			client.recover();
+
+			expect(warn.mock.calls.length).toBe(before);
+			model.reported.clear();
+		}
+
+		toString(): string {
+			return 'reconnect';
+		}
+	}
+
+	function listeningClient() {
+		const handlers: Record<string, ((arg?: any) => void)[]> = {};
+
+		warnOncePerConnectionOutage({
+			on: (event: string, listener: (arg?: any) => void) => {
+				(handlers[event] ??= []).push(listener);
+				return undefined;
+			},
+		} as any, 'redis');
+
+		return {
+			fail: (error: Error) => {
+				handlers['error']?.forEach((listener) => listener(error));
+			},
+			recover: () => {
+				handlers['ready']?.forEach((listener) => listener());
+			},
+		};
+	}
+
+	it(oneLine`
+		reports each distinct failure once per outage, whatever order failures and
+		reconnects arrive in
+	`, () => {
+		const commands = [
+			fc.constantFrom(...FAILURES).map((failure) => new Fail(failure)),
+			fc.constant(new Reconnect()),
+		];
+
+		fc.assert(
+			fc.property(fc.commands(commands, { maxCommands: 50 }), (run) => {
+				warn.mockClear();
+
+				fc.modelRun(() => {
+					return { model: { reported: new Set<string>() }, real: listeningClient() };
+				}, run);
+			}),
+			{ numRuns: 200 },
+		);
 	});
 });
