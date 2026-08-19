@@ -2,6 +2,9 @@ import { useEnv } from '@directus/env';
 import { merge } from 'lodash-es';
 import type { IRateLimiterOptions, IRateLimiterStoreOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import { RateLimiterMemory, RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
+import {
+	warnOncePerConnectionOutage,
+} from './redis/lib/warn-once-per-connection-outage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 
 import { createRequire } from 'node:module';
@@ -50,6 +53,15 @@ function getConfig(
 		const env = useEnv();
 
 		config.storeClient = new Redis(env[`REDIS`] || getConfigFromEnv(`REDIS_`));
+
+		// One client per configured limiter, none of them shared, so this is the only
+		// place an `error` listener can be put on them — and without one the first
+		// failed reconnect after a Redis outage rethrows and ends the process. The
+		// limiter still refuses what it cannot count; refusing is not exiting.
+		warnOncePerConnectionOutage(
+			config.storeClient,
+			configPrefix.toLowerCase().replace(/_/g, '-'),
+		);
 	}
 
 	delete config.enabled;

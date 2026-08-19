@@ -1,5 +1,8 @@
 import { useEnv } from '@directus/env';
 import { Redis } from 'ioredis';
+import {
+	warnOncePerConnectionOutage,
+} from './redis/lib/warn-once-per-connection-outage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 
 interface SynchronizationManager {
@@ -106,6 +109,13 @@ class SynchronizationManagerRedis implements SynchronizationManager {
 		const config = getConfigFromEnv('REDIS');
 
 		this.client = new Redis(env['REDIS'] ?? config);
+
+		// A client of its own rather than `useRedis()`'s, because it defines a Lua
+		// command on it — so nothing else's listener covers this one, and an
+		// EventEmitter with no `error` handler rethrows. Under
+		// `SYNCHRONIZATION_STORE=redis` an unreachable Redis exited the process through
+		// here, on the first failed reconnect, whatever the rest of the app survived.
+		warnOncePerConnectionOutage(this.client, 'synchronization');
 		this.namespace = (env['SYNCHRONIZATION_NAMESPACE'] as string) ?? 'directus-sync';
 
 		this.client.defineCommand('setGreaterThan', {
