@@ -42,6 +42,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-takeover-scope.test.ts',
 			'/tests/db/routes/items/cache-unautopurgeable-scope.test.ts',
 			'/tests/db/routes/items/cache-update-scope.test.ts',
+			'/tests/db/routes/items/redis-outage-survival.test.ts',
 			'/tests/db/websocket/auth-public-connects.test.ts',
 			'/tests/db/websocket/auth-public-pings.test.ts',
 			'/tests/db/websocket/auth-handshake-connects.test.ts',
