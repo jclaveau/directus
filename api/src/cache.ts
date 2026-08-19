@@ -5,6 +5,9 @@ import { useBus } from './bus/index.js';
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { redisConfigAvailable } from './redis/index.js';
+import {
+	warnOncePerConnectionOutage,
+} from './redis/lib/warn-once-per-connection-outage.js';
 import { dropScopedCacheTagIndex } from './scoped-cache.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
@@ -269,10 +272,9 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 		// `error` events — the `on('error')` handlers on the Keyv instances above only
 		// ever see errors Keyv itself raises. An EventEmitter with no `error` listener
 		// rethrows, so an unreachable Redis took the process down through this client
-		// even once the ioredis ones were handled. Four stores, four clients.
-		keyvRedis.client.on('error', (error: Error) => {
-			logger.warn(error, `[cache-store] ${error}`);
-		});
+		// even once the ioredis ones were handled. Four stores, four clients, which is
+		// also why the same outage must not be logged four times per reconnect.
+		warnOncePerConnectionOutage(keyvRedis.client, 'cache-store');
 
 		config.store = keyvRedis;
 	}
