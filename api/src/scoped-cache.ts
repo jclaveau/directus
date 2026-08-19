@@ -173,7 +173,9 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 
 			const value = canonicalScopedCacheValue(tag.value, tag.type);
 
-			return `${tag.collection}:${tag.field}=${value}`;
+			// Percent-encode: a NUL sentinel or non-ASCII value would make
+			// res.setHeader throw ERR_INVALID_CHAR (header stays valid ASCII).
+			return `${tag.collection}:${tag.field}=${encodeURIComponent(value)}`;
 		})
 		.join(', ');
 }

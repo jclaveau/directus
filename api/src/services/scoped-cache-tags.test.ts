@@ -703,6 +703,37 @@ describe('serializeScopedCacheTags', () => {
 	`, () => {
 		expect(serializeScopedCacheTags([])).toBe('');
 	});
+
+	test(oneLine`
+		a non-ASCII value is percent-encoded so the header stays valid
+	`, () => {
+		expect(
+			serializeScopedCacheTags([
+				{ collection: 'discipline', field: 'name', value: 'Santé' },
+			]),
+		).toBe('discipline:name=Sant%C3%A9');
+	});
+
+	test(oneLine`
+		a null value's NUL sentinel is percent-encoded, not emitted raw
+	`, () => {
+		expect(
+			serializeScopedCacheTags([
+				{ collection: 'a', field: 'x', value: null },
+			]),
+		).toBe('a:x=%00null');
+	});
+
+	test(oneLine`
+		every serialized tag is printable ASCII, safe for res.setHeader
+	`, () => {
+		const serialized = serializeScopedCacheTags([
+			{ collection: 'discipline', field: 'name', value: 'Santé, Léo' },
+			{ collection: 'a', field: 'x', value: null },
+		]);
+
+		expect(serialized).toMatch(/^[\x20-\x7E]*$/);
+	});
 });
 
 describe('composeScopedCachePaths — auto-derived multi-hop paths', () => {
