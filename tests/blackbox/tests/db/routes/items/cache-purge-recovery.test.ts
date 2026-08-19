@@ -25,6 +25,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const NOTE = 'test_items_recovery_note';
 const PENDING = 'directus_scoped_cache_pending_purges';
+
+// A failing assertion here reports one header and nothing about the state that
+// produced it, and the instance's own log is only dumped when the process exits — so
+// each step says what it saw while it still can.
+const startedAt = Date.now();
+
+function mark(phase: string) {
+	// eslint-disable-next-line no-console
+	console.info(`[recovery] ${Date.now() - startedAt}ms ${phase}`);
+}
+
 const cacheStatusHeader = 'x-cache-status';
 
 // A proxy we can kill and bring back, so the API keeps its config and only the
@@ -251,6 +262,12 @@ describe(oneLine`
 			// whatever CACHE_NAMESPACE is set to when it runs.
 			const pending = await db(PENDING).select('mode', 'scoped_cache_tag');
 
+			// Every row, not only the one asserted below: `toContainEqual` permits others,
+			// and a `namespace` row drains as `cache.clear()` — which would wipe the
+			// sibling this case expects to survive and leave the assertion pointing at
+			// the wrong culprit.
+			mark(`recorded while down: ${JSON.stringify(pending)}`);
+
 			expect(pending).toContainEqual({
 				mode: 'slices',
 				scoped_cache_tag: `${NOTE}:id=${readNote}`,
@@ -276,9 +293,21 @@ describe(oneLine`
 
 			// The recovery retried the recorded tag, not the namespace: a slice that was
 			// never in doubt is still cached.
-			expect((await get(siblingNote)).headers[cacheStatusHeader]).toBe('HIT');
+			const sibling = (await get(siblingNote)).headers[cacheStatusHeader];
+			const drained = await db(PENDING).select('mode', 'scoped_cache_tag');
 
-			expect(await db(PENDING).select('id')).toEqual([]);
+			mark(`after recovery: read=${status} sibling=${sibling}`);
+			mark(`left in the table: ${JSON.stringify(drained)}`);
+
+			if (sibling !== 'HIT') {
+				const tail = instanceLog.join('').slice(-6000);
+
+				// eslint-disable-next-line no-console
+				console.info(`[recovery] instance log:\n${tail}`);
+			}
+
+			expect(sibling).toBe('HIT');
+			expect(drained).toEqual([]);
 		}, 60_000);
 
 		it(oneLine`
