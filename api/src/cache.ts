@@ -266,7 +266,33 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 
 	if (store === 'redis') {
 		const { default: KeyvRedis } = require('@keyv/redis');
-		const keyvRedis = new KeyvRedis(getRedisConnection());
+		const connection = getRedisConnection();
+
+		// node-redis gives a command issued while it is reconnecting no deadline at all:
+		// `sendCommand` rejects only when the client is closed or when this flag is set,
+		// and its default reconnect strategy retries forever. `KeyvRedis.getClient()`
+		// does not help either — it returns early while `isOpen` is true, so its
+		// `connectionTimeout` guards the first connect and nothing after it. A cached
+		// read during an outage therefore never settled, and the request that made it
+		// blocked for as long as Redis was away instead of missing.
+		//
+		// Rejecting instead is the behaviour the rest of the stack already expects:
+		// `@keyv/redis` swallows the rejection into `undefined`, which is exactly the
+		// MISS the response cache serves when it has nothing. Losing Redis costs hit
+		// ratio again, rather than availability.
+		//
+		// Passing options rather than the URL string also settles which reconnect
+		// strategy applies. `KeyvRedis` installs its own only on the string form, so a
+		// `REDIS` url and a `REDIS_HOST`/`REDIS_PORT` pair used to back off differently
+		// (2^n*100ms vs 2^n*50ms, both capped at 2s). Both now use node-redis's.
+		const clientOptions = typeof connection === 'string'
+			? { url: connection }
+			: connection;
+
+		const keyvRedis = new KeyvRedis({
+			...clientOptions,
+			disableOfflineQueue: true,
+		});
 
 		// v5 wraps its own node-redis client, and Keyv does not re-emit that client's
 		// `error` events — the `on('error')` handlers on the Keyv instances above only

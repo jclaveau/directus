@@ -236,7 +236,8 @@ describe('the API outlives an unreachable Redis', () => {
 			expect(served.body.data.subject).toBe('read');
 
 			// A cache read fails open, so the entry that was HIT a moment ago now reads
-			// as a MISS rather than serving or throwing.
+			// as a MISS rather than serving, throwing, or — as it did before
+			// `disableOfflineQueue` — blocking until Redis came back.
 			expect(served.headers[cacheStatusHeader]).toBe('MISS');
 
 			// Nothing else went with it: a route that never touches the cache still
