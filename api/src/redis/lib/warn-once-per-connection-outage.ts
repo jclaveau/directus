@@ -29,15 +29,20 @@ interface ConnectionFailures {
  * failure is still reported once: `ECONNREFUSED` turning into an auth failure is
  * news, not repetition.
  *
- * A consumer of the connection can be handed over with it. A Keyv store reports what
- * its own commands hit, which during an outage is one error per refused command and
- * so grows with traffic rather than with the failure; folded in here it shares the
+ * A store built on the connection can be handed over with it. Keyv reports what its
+ * own commands hit, which during an outage is one error per refused command and so
+ * grows with traffic rather than with the failure; folded in here it shares the
  * throttle, the label and the reconnect that ends them both.
+ *
+ * Which of the two raised a line is written into the line rather than into a second
+ * label, so provenance costs nothing in volume. They are not throttled apart though:
+ * the same failure text arriving from both sides is one failure seen twice, and
+ * counting it twice is how a log starts growing with traffic again.
  */
 export function warnOncePerConnectionOutage(
 	client: ConnectionEvents,
 	connectionLabel: string,
-	consumer?: ConnectionFailures,
+	store?: ConnectionFailures,
 ): void {
 	// Every distinct failure of this outage, not just the last one. A single slot
 	// collapses repeats and nothing else, and an outage does not repeat: a refused
@@ -46,7 +51,7 @@ export function warnOncePerConnectionOutage(
 	// ways one connection can fail, and emptied when it comes back.
 	const reported = new Set<string>();
 
-	function warnOnce(error: Error) {
+	function warnOnce(origin: 'connection' | 'store', error: Error) {
 		// Named as well as worded: a dual-stack connect fails as an `AggregateError`
 		// carrying no message of its own, so the message alone cannot tell one
 		// message-less failure from another and would collapse them into one line.
@@ -57,11 +62,14 @@ export function warnOncePerConnectionOutage(
 		}
 
 		reported.add(failure);
-		useLogger().warn(error, `[${connectionLabel}] ${error}`);
+		useLogger().warn(error, `[${connectionLabel}] ${origin}: ${error}`);
 	}
 
-	client.on('error', warnOnce);
-	consumer?.on('error', warnOnce);
+	// A socket that dropped, versus a command the store could not send over one. The
+	// difference decides whether you go and look at Redis or at what the app asked of
+	// it, and it is invisible once both are called the same thing.
+	client.on('error', (error) => warnOnce('connection', error));
+	store?.on('error', (error) => warnOnce('store', error));
 
 	// Reconnected, so the next outage is reported from scratch rather than being
 	// mistaken for a continuation of this one.

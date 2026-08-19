@@ -379,6 +379,12 @@ describe('the API outlives an unreachable Redis', () => {
 			expect(storeReported).toBeGreaterThanOrEqual(1);
 			expect(storeReported).toBeLessThan(READS_UNDER_OUTAGE);
 
+			// Both listeners live, and each line saying which of them raised it: a socket
+			// that dropped and a command the store could not send over one are answered
+			// in different places, and read identically without this.
+			expect(outageLog).toContain('[response-cache] connection:');
+			expect(outageLog).toContain('[response-cache] store:');
+
 			// And under the cache's own name rather than a label the four clients share,
 			// which would name none of them.
 			expect(outageLog).not.toContain('[cache-store]');

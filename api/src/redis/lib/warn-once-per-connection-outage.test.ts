@@ -67,7 +67,7 @@ describe('warnOncePerConnectionOutage', () => {
 
 		expect(warn).toHaveBeenLastCalledWith(
 			expect.any(Error),
-			'[redis] Error: NOAUTH Authentication required.',
+			'[redis] connection: Error: NOAUTH Authentication required.',
 		);
 	});
 
@@ -104,6 +104,51 @@ describe('warnOncePerConnectionOutage', () => {
 			emit('error', new Error('ECONNREFUSED'));
 			emit('ready');
 		}
+
+		expect(warn).toHaveBeenCalledTimes(3);
+	});
+
+	it(oneLine`
+		says which side raised a line, since a dropped socket and a command the store
+		could not send over it are answered in different places
+	`, () => {
+		const connection: Record<string, ((arg?: any) => void)[]> = {};
+		const store: Record<string, ((arg?: any) => void)[]> = {};
+
+		const collect = (sink: Record<string, ((arg?: any) => void)[]>) => {
+			return {
+				on: (event: string, listener: (arg?: any) => void) => {
+					(sink[event] ??= []).push(listener);
+					return undefined;
+				},
+			} as any;
+		};
+
+		warnOncePerConnectionOutage(
+			collect(connection),
+			'response-cache',
+			collect(store),
+		);
+
+		connection['error']![0]!(new Error('connect ECONNREFUSED'));
+		store['error']![0]!(new Error('The client is offline'));
+
+		expect(warn).toHaveBeenNthCalledWith(
+			1,
+			expect.any(Error),
+			'[response-cache] connection: Error: connect ECONNREFUSED',
+		);
+
+		expect(warn).toHaveBeenNthCalledWith(
+			2,
+			expect.any(Error),
+			'[response-cache] store: Error: The client is offline',
+		);
+
+		// Deliberately one throttle rather than two: the same text from both sides is
+		// one failure seen twice, and counting it twice is how a log grows with traffic.
+		connection['error']![0]!(new Error('Socket closed unexpectedly'));
+		store['error']![0]!(new Error('Socket closed unexpectedly'));
 
 		expect(warn).toHaveBeenCalledTimes(3);
 	});
