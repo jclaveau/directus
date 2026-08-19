@@ -68,25 +68,22 @@ function getConfig(
 		warnOncePerConnectionOutage(config.storeClient, limiterLabel);
 
 		// What the limiter does when it cannot reach Redis is a choice, and this is the
-		// one we make: keep serving. Without a fallback `consume()` rejects with the
+		// one we make: stop limiting. Without a fallback `consume()` rejects with the
 		// connection error, `rate-limiter-ip` rethrows anything that is an Error, and
 		// every charged request answers 500 for as long as Redis is away — an outage in
 		// a dependency taking the API down, which is the failure this whole branch
 		// exists to remove.
 		//
-		// The cost is real and worth stating: the fallback counts in this process only,
-		// so while Redis is away N instances each grant the full budget and the
-		// effective limit is N times what it says. Under-enforcing a limit for the
-		// length of an outage beats refusing everyone for it.
-		//
-		// Built after the overrides are merged, so it mirrors the limits actually in
-		// force rather than the ones the env asked for — `authentication.ts` passes
-		// `duration: 0` and would otherwise fall back to a different limiter than the
-		// one it configured. `blockDuration` and `execEvenly` the library copies over
-		// itself.
+		// Counting per process instead was the other option and is worse than it looks:
+		// N instances would each grant the whole budget, which is not the configured
+		// limit and not a knowable one either. An unreachable Redis is rare and brief,
+		// so the honest answer is to admit there is no limit for that moment rather
+		// than to enforce a number nobody chose. Redis keeps its counters and their
+		// TTLs throughout, so the limit resumes from where it was rather than from
+		// zero the moment the store answers again.
 		config.insuranceLimiter = new RateLimiterMemory({
-			points: config.points,
-			duration: config.duration,
+			points: Number.MAX_SAFE_INTEGER,
+			duration: 1,
 		});
 
 		// And reach it without waiting. Left to itself the limiter sends the command

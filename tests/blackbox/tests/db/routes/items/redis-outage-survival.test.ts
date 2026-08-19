@@ -573,8 +573,8 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 		});
 
 		it(oneLine`
-			keeps answering charged requests with Redis gone, and reports the outage
-			through the logger rather than leaving ioredis to dump a stack per reconnect
+			stops limiting rather than refusing while Redis is gone, reports the outage
+			through the logger, and limits again from where Redis left off once it is back
 		`, async () => {
 			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
 				.toBe('pong');
@@ -606,27 +606,21 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 			// not meaningfully different from failing closed.
 			expect(servedIn).toBeLessThan(5_000);
 
-			// Serving is half of it. A fallback wired with the wrong budget — or none at
-			// all, with the error swallowed somewhere — also answers every request, so
-			// spend the rest of the allowance and require the limit to arrive. This is
-			// what says the memory limiter is counting rather than yielding.
-			let refusedAt = 0;
+			// Well past the configured budget, and none of it refused: while the store is
+			// unreachable there is no limit, rather than a per-process one. A fallback
+			// that counted here would refuse around the fifth of these and would be
+			// enforcing a number nobody configured — N instances each granting the whole
+			// budget is not the limit that was asked for.
+			const answers = [];
 
-			for (let charged = 1; charged <= LIMITER_POINTS + 2; charged++) {
+			for (let charged = 0; charged < LIMITER_POINTS * 3; charged++) {
 				const answer = await request(getUrl(vendor, env)).get('/server/ping');
 
-				if (answer.status === 429) {
-					refusedAt = charged;
-					break;
-				}
+				answers.push(answer.status);
 			}
 
-			mark(`limited under the outage after ${refusedAt} charged requests`);
-
-			// Counted in this process from zero, so the budget outlasts the two requests
-			// already spent above and the limit lands within one round of it.
-			expect(refusedAt).toBeGreaterThan(0);
-			expect(refusedAt).toBeLessThanOrEqual(LIMITER_POINTS + 1);
+			mark(`${answers.length} charged requests under the outage, none refused`);
+			expect(answers).not.toContain(429);
 
 			// Long enough for several reconnect attempts at the delays set above, which
 			// is what makes the volume below mean something.
@@ -647,6 +641,29 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 			// Reported through the logger and named for the limiter, so the line says
 			// which client dropped rather than leaving four candidates.
 			expect(outageLog).toContain('[rate-limiter]');
+
+			// And the limit comes back on its own. Redis kept its counters and their TTLs
+			// through the outage, so counting resumes from what it still holds rather
+			// than from zero — the budget was already partly spent before the cut, and
+			// what is left of it runs out here. Polled, because the limiter goes on using
+			// the fallback until its client reports ready again.
+			await proxy.open();
+
+			let refusedAfterRecovery = false;
+
+			for (let attempt = 0; attempt < 40; attempt++) {
+				const answer = await request(getUrl(vendor, env)).get('/server/ping');
+
+				if (answer.status === 429) {
+					refusedAfterRecovery = true;
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
+			mark(`limiting again after recovery=${refusedAfterRecovery}`);
+			expect(refusedAfterRecovery).toBe(true);
 		}, 120_000);
 	});
 });
