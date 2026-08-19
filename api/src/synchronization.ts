@@ -1,5 +1,8 @@
 import { useEnv } from '@directus/env';
 import { Redis } from 'ioredis';
+import {
+	warnOncePerConnectionOutage,
+} from './redis/lib/warn-once-per-connection-outage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 
 interface SynchronizationManager {
@@ -112,6 +115,14 @@ class SynchronizationManagerRedis implements SynchronizationManager {
 			numberOfKeys: 1,
 			lua: SET_GREATER_THAN_SCRIPT,
 		});
+
+		// A client of its own rather than `useRedis()`'s, because it defines a Lua
+		// command on it — so nothing else's listener covers this one. ioredis routes
+		// connection errors through `silentEmit`, which does not throw when nobody is
+		// listening: it writes the stack to stderr with `console.error` instead, once
+		// per failed reconnect, outside the logger and outside every throttle. A
+		// 25-second outage measured 124 of those. One line says the same thing.
+		warnOncePerConnectionOutage(this.client, 'synchronization');
 	}
 
 	public async set(key: string, value: string | number): Promise<void> {

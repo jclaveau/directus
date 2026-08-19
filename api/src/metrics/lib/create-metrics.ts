@@ -176,6 +176,25 @@ export function createMetrics() {
 		return metric;
 	}
 
+	// Process health rather than a service's: a rejection nothing awaited is the one
+	// failure that used to end the process instead of being reported by it, so it is
+	// deliberately NOT behind a `METRICS_SERVICES` entry — there is no service to
+	// attribute it to, and gating it would hide exactly what it exists to surface.
+	function getUnhandledRejectionMetric(): Counter {
+		let metric = register.getSingleMetric('directus_unhandled_rejections_total') as
+			| Counter
+			| undefined;
+
+		if (!metric) {
+			metric = new Counter({
+				name: 'directus_unhandled_rejections_total',
+				help: 'Promise rejections that reached the process handler',
+			});
+		}
+
+		return metric;
+	}
+
 	// Response-cache effectiveness on the endpoint ops already scrape: one labeled
 	// counter (result=hit|miss) so hit-ratio is a PromQL rate() away, independent of
 	// the CACHE_STATS opt-in (that's the durable drill-down; this is the live gauge).
@@ -262,10 +281,30 @@ export function createMetrics() {
 			return;
 		}
 
+		// `@keyv/redis` reports a refused command by emitting on the store and resolving
+		// the call anyway, so a try/catch alone waits for something that never arrives
+		// and the probe reports a healthy cache for the length of the outage it exists
+		// to catch. Anything the store raises inside this window is this probe's.
+		let refused = false;
+
+		const noteRefusal = () => {
+			refused = true;
+		};
+
+		cache.on('error', noteRefusal);
+
 		try {
 			await cache.set(`metrics-${checkId}`, '1', 5);
 			await cache.delete(`metrics-${checkId}`);
-		} catch {
+		}
+		catch {
+			refused = true;
+		}
+		finally {
+			cache.off('error', noteRefusal);
+		}
+
+		if (refused) {
 			metric.inc();
 		}
 	}
@@ -327,6 +366,7 @@ export function createMetrics() {
 		getCacheErrorMetric,
 		getCacheResponseMetric,
 		getRedisErrorMetric,
+		getUnhandledRejectionMetric,
 		getStorageErrorMetric,
 		aggregate,
 		generate,

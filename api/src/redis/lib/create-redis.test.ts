@@ -1,12 +1,15 @@
 import { useEnv } from '@directus/env';
 import { Redis } from 'ioredis';
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { useLogger } from '../../logger/index.js';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
 import { createRedis } from './create-redis.js';
 
 vi.mock('ioredis');
 vi.mock('../../utils/get-config-from-env.js');
 vi.mock('@directus/env');
+vi.mock('../../logger/index.js');
 
 type RetryStrategy = (attempt: number) => number | null;
 
@@ -37,6 +40,30 @@ function retryStrategyFor(env: Record<string, unknown>): RetryStrategy {
 }
 
 describe('createRedis', () => {
+	test(oneLine`
+		Registers an error listener, so an outage is reported through the logger
+		rather than dumped to stderr
+	`, () => {
+		const warn = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ warn } as any);
+		vi.mocked(useEnv).mockReturnValue({ REDIS: 'x' });
+
+		const redis = createRedis();
+
+		// ioredis reports one error per failed reconnect and, with nobody listening,
+		// `console.error`s each stack straight to stderr — outside the logger and
+		// outside any throttle, for as long as the outage lasts.
+		expect(redis.on).toHaveBeenCalledWith('error', expect.any(Function));
+
+		const [, listener] = vi.mocked(redis.on).mock.calls
+			.find(([event]) => event === 'error')!;
+
+		expect(() => (listener as (error: Error) => void)(new Error('ECONNREFUSED')))
+			.not.toThrow();
+
+		expect(warn).toHaveBeenCalledOnce();
+	});
+
 	test('Creates and returns new Redis instance from connection string', () => {
 		const connectionString = 'test-connection-string';
 		vi.mocked(useEnv).mockReturnValue({ REDIS: connectionString });

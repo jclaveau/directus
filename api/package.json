@@ -225,6 +225,7 @@
 		"@types/ws": "catalog:",
 		"@vitest/coverage-v8": "catalog:",
 		"copyfiles": "catalog:",
+		"fast-check": "catalog:",
 		"form-data": "catalog:",
 		"get-port": "catalog:",
 		"knex-mock-client": "catalog:",

@@ -1,0 +1,102 @@
+import { useLogger } from '../../logger/index.js';
+
+/** The slice of an ioredis / node-redis client this needs: two events. */
+export interface ConnectionEvents {
+	on(event: 'error', listener: (error: Error) => void): unknown;
+	on(event: 'ready', listener: () => void): unknown;
+}
+
+/** What something built on that connection reports when its own calls hit it. */
+interface ConnectionFailures {
+	on(event: 'error', listener: (error: Error) => void): unknown;
+}
+
+/**
+ * Give a Redis client an `error` listener, and log at most one line per distinct
+ * failure per outage.
+ *
+ * What it buys is a readable log rather than survival — a claim this module carried
+ * for a while and got wrong twice. ioredis routes connection errors through
+ * `silentEmit`, which does not throw at an empty listener list; it writes the stack
+ * to stderr with `console.error` instead, outside the logger, unlevelled and
+ * unredacted. A node-redis client is never unlistened at all, because `@keyv/redis`
+ * attaches to it from its own constructor. What did end the process was unhandled
+ * *rejections*, which is a different fix in `utils/report-unhandled-rejection.ts`
+ * and `utils/schedule.ts`.
+ *
+ * The throttling is what makes either survivable for a day rather than a minute.
+ * The default retry policy never gives up (`REDIS_RETRY_MAX_ATTEMPTS` unset) and
+ * every failed reconnect reports, so an outage writes for as long as it lasts —
+ * 124 stack dumps in 25 seconds, measured on one unlistened client. Every distinct
+ * failure is still reported once: `ECONNREFUSED` turning into an auth failure is
+ * news, not repetition.
+ *
+ * A store built on the connection can be handed over with it. Keyv reports what its
+ * own commands hit, which during an outage is one error per refused command and so
+ * grows with traffic rather than with the failure; folded in here it shares the
+ * throttle, the label and the reconnect that ends them both.
+ *
+ * Which of the two raised a line is written into the line rather than into a second
+ * label, so provenance costs nothing in volume. They are not throttled apart though:
+ * the same failure text arriving from both sides is one failure seen twice, and
+ * counting it twice is how a log starts growing with traffic again.
+ */
+export function warnOncePerConnectionOutage(
+	client: ConnectionEvents,
+	connectionLabel: string,
+	store?: ConnectionFailures,
+): void {
+	// Every distinct failure of this outage, not just the last one. A single slot
+	// collapses repeats and nothing else, and an outage does not repeat: a refused
+	// command and the reconnect racing it report different things turn and turn about,
+	// which alternate past a one-slot check and log every time. Bounded by how many
+	// ways one connection can fail, and emptied when it comes back.
+	const reported = new Set<string>();
+
+	function warnOnce(origin: 'connection' | 'store', error: Error) {
+		// Named as well as worded: a dual-stack connect fails as an `AggregateError`
+		// carrying no message of its own, so the message alone cannot tell one
+		// message-less failure from another and would collapse them into one line.
+		const failure = `${error.name}: ${error.message}`;
+
+		if (reported.has(failure)) {
+			return;
+		}
+
+		reported.add(failure);
+		useLogger().warn(error, `[${connectionLabel}] ${origin}: ${error}`);
+	}
+
+	// A socket that dropped, versus a command the store could not send over one. The
+	// difference decides whether you go and look at Redis or at what the app asked of
+	// it, and it is invisible once both are called the same thing.
+	const raisedByConnection = new WeakSet<Error>();
+
+	client.on('error', (error) => {
+		raisedByConnection.add(error);
+		warnOnce('connection', error);
+	});
+
+	// Keyv re-emits what its client raises, and `@keyv/redis` registers that forwarder
+	// in its own constructor — before this one — so a dropped socket arrives here
+	// first and would be reported as a command that failed. It is the same object on
+	// both paths, so the connection can claim it; but only once this emit has run to
+	// the end, since the listener that claims it is registered after this one. Hence
+	// the microtask: by the time it runs, both listeners have seen the error and only
+	// what the client never raised is left.
+	store?.on('error', (error) => {
+		queueMicrotask(() => {
+			if (raisedByConnection.has(error)) {
+				return;
+			}
+
+			warnOnce('store', error);
+		});
+	});
+
+	// Reconnected, so the next outage is reported from scratch rather than being
+	// mistaken for a continuation of this one.
+	client.on('ready', () => {
+		reported.clear();
+	});
+}

@@ -77,6 +77,21 @@ describe('constructor', () => {
 		expect(bus['handlers']).toEqual({});
 	});
 
+	test('Forwards the subscriber\'s errors to the publisher client', () => {
+		// `duplicate()` copies no listeners, so without this the subscriber reports
+		// its errors to nobody and ioredis dumps each one to stderr, unlevelled and
+		// unthrottled, for the length of an outage the host never hears about.
+		expect(mockSubRedis.on).toHaveBeenCalledWith('error', expect.any(Function));
+
+		const [, forward] = vi.mocked(mockSubRedis.on).mock.calls
+			.find(([event]) => event === 'error')!;
+
+		const error = new Error('ECONNREFUSED');
+		(forward as (error: Error) => void)(error);
+
+		expect(mockRedis.emit).toHaveBeenCalledWith('error', error);
+	});
+
 	test('Defaults compression settings', () => {
 		expect(bus['compression']).toBe(true);
 		expect(bus['compressionMinSize']).toBe(1000);

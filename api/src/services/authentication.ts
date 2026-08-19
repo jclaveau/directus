@@ -135,6 +135,8 @@ export class AuthenticationService {
 			try {
 				await loginAttemptsLimiter.consume(user.id);
 			} catch (error) {
+				// Only a spent budget reaches the else below now — a Redis outage falls
+				// back to a limiter that refuses nothing. See `rate-limiter.ts`.
 				if (error instanceof RateLimiterRes && error.remainingPoints === 0) {
 					await this.knex('directus_users').update({ status: 'suspended' }).where({ id: user.id });
 					user.status = 'suspended';

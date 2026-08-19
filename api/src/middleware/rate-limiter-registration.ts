@@ -25,6 +25,8 @@ if (env['RATE_LIMITER_REGISTRATION_ENABLED'] === true) {
 			try {
 				await rateLimiter.consume(ip, 1);
 			} catch (rateLimiterRes: any) {
+				// A Redis outage no longer arrives here: the limiter falls back to one
+				// that refuses nothing rather than rejecting. See `rate-limiter.ts`.
 				if (rateLimiterRes instanceof Error) throw rateLimiterRes;
 
 				res.set('Retry-After', String(Math.round(rateLimiterRes.msBeforeNext / 1000)));

@@ -14,6 +14,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/m2m.test.ts': 76_000,
 	'/tests/db/routes/items/m2o.test.ts': 63_000,
 	'/tests/db/routes/items/o2m.test.ts': 57_000,
+	'/tests/db/routes/items/redis-outage-survival.test.ts': 80_000,
 	'/tests/db/routes/auth/login.test.ts': 25_000,
 	'/tests/db/routes/items/cache-takeover-scope.test.ts': 16_000,
 	'/tests/db/routes/auth/refresh.test.ts': 14_000,

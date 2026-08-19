@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import { Redis, type RedisOptions } from 'ioredis';
 import { getConfigFromEnv } from '../../utils/get-config-from-env.js';
+import { warnOncePerConnectionOutage } from './warn-once-per-connection-outage.js';
 
 /**
  * ioredis' reconnect policy is a function, so it can't be set through the env like the other
@@ -65,7 +66,11 @@ export const createRedis = () => {
 	const env = useEnv();
 	const options: RedisOptions = { retryStrategy: retryStrategyFromEnv() };
 
-	return env['REDIS']
+	const redis = env['REDIS']
 		? new Redis(env['REDIS'] as string, options)
 		: new Redis({ ...getConfigFromEnv('REDIS'), ...options });
+
+	warnOncePerConnectionOutage(redis, 'redis');
+
+	return redis;
 };

@@ -17,6 +17,7 @@ import { useLogger } from './logger/index.js';
 import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
+import { reportUnhandledRejection } from './utils/report-unhandled-rejection.js';
 import { getAddress } from './utils/get-address.js';
 import {
 	createLogsController,
@@ -162,6 +163,13 @@ export async function createServer(): Promise<http.Server> {
 }
 
 export async function startServer(): Promise<void> {
+	// Registered here rather than in `createApp`, so it covers the server process and
+	// not the unit suite or a CLI command, where swallowing a rejection would hide a
+	// failure from the run that should have reported it. `uncaughtException` is
+	// deliberately NOT handled — by then the state that threw is unknown, and Node's
+	// own guidance is to exit.
+	process.on('unhandledRejection', reportUnhandledRejection);
+
 	const server = await createServer();
 
 	const host = env['HOST'] as string;

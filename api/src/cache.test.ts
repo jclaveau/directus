@@ -746,6 +746,97 @@ describe('getCache', () => {
 		// the store narrowing down its redis branch
 		expect(getCache().systemCache).toBeTruthy();
 	});
+
+	// The caches are module-level and built once, so the store the module settles on
+	// is decided by whichever test ran first — every case above this one gets the
+	// memory build back and none of them reaches `getConfig`'s redis half. Reloading
+	// the module is the only way to ask it to build a redis store, and the options it
+	// hands `@keyv/redis` are the whole point of that half: without
+	// `disableOfflineQueue` a command issued during an outage waits in a queue with no
+	// deadline, and the request that made it waits with it.
+	async function reloadCacheWith(env: Record<string, unknown>) {
+		setEnv(env);
+		vi.resetModules();
+
+		const reloaded = await import('./cache.js');
+
+		return reloaded.getCache();
+	}
+
+	test('refuses queued commands on the store built from REDIS_HOST', async () => {
+		const { systemCache } = await reloadCacheWith({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			REDIS_HOST: 'localhost',
+			REDIS_PORT: '6108',
+		});
+
+		const store = systemCache.store as { client: { options: Record<string, any> } };
+
+		expect(store.client.options['disableOfflineQueue']).toBe(true);
+
+		expect(store.client.options['socket'])
+			.toEqual({ host: 'localhost', port: 6108 });
+	});
+
+	test(oneLine`
+		the adapter listens to its own client and forwards what it hears, so a cache
+		never leaves a connection unlistened — the opposite was asserted in comments on
+		this branch for a while, and only a test keeps it honest
+	`, async () => {
+		const { systemCache } = await reloadCacheWith({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			REDIS_HOST: 'localhost',
+			REDIS_PORT: '6108',
+		});
+
+		const store = systemCache.store as {
+			client: {
+				listenerCount(event: string): number;
+				emit(event: string, payload: unknown): boolean;
+			};
+		};
+
+		// Registered by `KeyvRedis.initClient()` from its own constructor, before
+		// anything here attaches — so the client is never an EventEmitter without an
+		// `error` listener, and an unreachable Redis cannot rethrow through it.
+		expect(store.client.listenerCount('error')).toBeGreaterThan(0);
+
+		// And what it hears it passes on, which is why a handler on the Keyv instance
+		// sees connection failures rather than only what Keyv itself raises.
+		const seen: unknown[] = [];
+
+		systemCache.on('error', (error) => seen.push(error));
+
+		const dropped = new Error('Socket closed unexpectedly');
+
+		store.client.emit('error', dropped);
+
+		expect(seen).toContain(dropped);
+	});
+
+	test(oneLine`
+		and on the one built from a REDIS url, which reaches the adapter as options
+		rather than as a string, so both spellings back off the same way
+	`, async () => {
+		const { systemCache } = await reloadCacheWith({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			REDIS: 'redis://localhost:6379/2',
+		});
+
+		const store = systemCache.store as { client: { options: Record<string, any> } };
+
+		expect(store.client.options['disableOfflineQueue']).toBe(true);
+		expect(store.client.options['url']).toBe('redis://localhost:6379/2');
+	});
 });
 
 describe('flushCaches', () => {
