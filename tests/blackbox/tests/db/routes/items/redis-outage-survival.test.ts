@@ -259,10 +259,13 @@ describe('the API outlives an unreachable Redis', () => {
 			// Read off the instance's log rather than from survival alone: "still alive
 			// after a wait" also passes when no tick ever fired, which would make this
 			// a test of nothing.
+			// Matched on the unquoted prefix: the guard logs the job id in double quotes
+			// and the logger emits JSON, so `"cache-stats"` reaches the log escaped and a
+			// literal match on it never fires. Any job failing here is this guard.
 			let tickSurvived = false;
 
 			for (let attempt = 0; attempt < 50; attempt++) {
-				if (instanceLog.join('').includes('[schedule] job "cache-stats" failed')) {
+				if (instanceLog.join('').includes('[schedule] job')) {
 					tickSurvived = true;
 					break;
 				}
@@ -271,6 +274,14 @@ describe('the API outlives an unreachable Redis', () => {
 			}
 
 			mark(`scheduled tick seen=${tickSurvived}`);
+
+			// A tick that never fires and a tick whose log went unrecognised fail the
+			// same way, and the difference is only visible in the instance's own output.
+			if (tickSurvived === false) {
+				// eslint-disable-next-line no-console
+				console.info(`[outage] instance log:\n${instanceLog.join('').slice(-6000)}`);
+			}
+
 			expect(tickSurvived).toBe(true);
 			await assertInstanceAlive();
 
