@@ -19,6 +19,7 @@ const responseCache = vi.hoisted(() => ({ current: null as Keyv | null }));
 vi.mock('../../cache.js', () => {
 	return { getCache: () => ({ cache: responseCache.current }) };
 });
+
 vi.mock('../../database/index.js', () => ({ hasDatabaseConnection: vi.fn() }));
 vi.mock('../../storage/index.js', () => ({ getStorage: vi.fn() }));
 

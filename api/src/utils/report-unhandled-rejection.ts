@@ -16,12 +16,19 @@ import { useMetrics } from '../metrics/index.js';
  * killing the foreground, not to stop hearing about it.
  */
 export function reportUnhandledRejection(reason: unknown): void {
-	useLogger().error(reason, `Unhandled promise rejection: ${reason}`);
+	// A rejection is not required to be an Error, and pino reads a primitive first
+	// argument as the message and drops the second — so an unwrapped `reject('boom')`
+	// logs `boom` and loses the words that say what happened.
+	const reported = reason instanceof Error
+		? reason
+		: { reason };
+
+	useLogger().error(reported, `Unhandled promise rejection: ${reason}`);
 
 	// Counted as well as logged: a log line is where you look once you already suspect
 	// something, a counter is what tells you to start looking. Rising after a deploy
 	// is the signal that a new floating promise shipped.
 	useMetrics()
 		?.getUnhandledRejectionMetric()
-		?.inc();
+		.inc();
 }
