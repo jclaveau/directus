@@ -111,10 +111,11 @@ class SynchronizationManagerRedis implements SynchronizationManager {
 		this.client = new Redis(env['REDIS'] ?? config);
 
 		// A client of its own rather than `useRedis()`'s, because it defines a Lua
-		// command on it — so nothing else's listener covers this one, and an
-		// EventEmitter with no `error` handler rethrows. Under
-		// `SYNCHRONIZATION_STORE=redis` an unreachable Redis exited the process through
-		// here, on the first failed reconnect, whatever the rest of the app survived.
+		// command on it — so nothing else's listener covers this one. ioredis routes
+		// connection errors through `silentEmit`, which does not throw when nobody is
+		// listening: it writes the stack to stderr with `console.error` instead, once
+		// per failed reconnect, outside the logger and outside every throttle. A
+		// 25-second outage measured 124 of those. One line says the same thing.
 		warnOncePerConnectionOutage(this.client, 'synchronization');
 		this.namespace = (env['SYNCHRONIZATION_NAMESPACE'] as string) ?? 'directus-sync';
 

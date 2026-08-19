@@ -78,9 +78,9 @@ describe('constructor', () => {
 	});
 
 	test('Forwards the subscriber\'s errors to the publisher client', () => {
-		// `duplicate()` copies no listeners, so without this the subscriber is an
-		// EventEmitter with no `error` handler — and an unhandled `error` event is a
-		// thrown exception, which is a dead process rather than a degraded bus.
+		// `duplicate()` copies no listeners, so without this the subscriber reports
+		// its errors to nobody and ioredis dumps each one to stderr, unlevelled and
+		// unthrottled, for the length of an outage the host never hears about.
 		expect(mockSubRedis.on).toHaveBeenCalledWith('error', expect.any(Function));
 
 		const [, forward] = vi.mocked(mockSubRedis.on).mock.calls

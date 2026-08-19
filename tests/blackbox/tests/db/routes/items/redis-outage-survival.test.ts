@@ -16,11 +16,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // against a mocked client — it cannot assert what this does: that a real process,
 // serving real requests, is still there after its Redis goes away.
 //
-// It is the shape that found the bugs in the first place. An EventEmitter with no
-// `error` listener rethrows and Node turns an unhandled rejection into an uncaught
-// exception, so every missing handler ended the process, and a dead server answers
-// ECONNRESET — which names nothing. Hence the instance's own log is captured and
-// reported here instead.
+// It is the shape that found the bugs in the first place, and the shape that keeps
+// the story honest. A node-redis client rethrows what nobody listens to and Node
+// turns an unhandled rejection into an uncaught exception, so those two really did
+// end the process — and a dead server answers ECONNRESET, which names nothing, so
+// the instance's own log is captured and reported here instead. An ioredis client
+// does not: it `console.error`s every failed reconnect to stderr, which is why what
+// is asserted below is the shape of the log and not only that something is alive.
 //
 // `scheduleSynchronizedJob` is in scope too, and it is why the outage lasts as long
 // as it does: its claim is a Redis write, so a tick landing mid-outage was the fifth
@@ -356,6 +358,13 @@ describe('the API outlives an unreachable Redis', () => {
 			// which would name none of them.
 			expect(outageLog).not.toContain('[cache-store]');
 
+			// Nothing reports around the logger. ioredis writes the stack of every
+			// failed reconnect straight to stderr when nobody is listening for it —
+			// unlevelled, unredacted and unthrottled — and an unlistened client is the
+			// only way that happens. This outage measured 124 of them before the
+			// synchronization client got its listener.
+			expect(outageLog).not.toContain('[ioredis] Unhandled error event');
+
 			await proxy.open();
 			mark('redis back');
 
@@ -435,33 +444,42 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 		});
 
 		it(oneLine`
-			degrades to refusing requests rather than exiting when the limiter's own Redis
-			client goes away
+			reports its own outage through the logger, rather than leaving ioredis to
+			dump a stack per failed reconnect to stderr
 		`, async () => {
 			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
 				.toBe('pong');
 
+			const logAtCut = instanceLog.length;
+
 			await proxy.cut();
 
 			// Charged against a Redis that is gone, so this request fails — a redis-backed
-			// limiter has nothing to fall back on. That it fails rather than takes the
-			// process with it is the whole point: ioredis emits an error per failed
-			// reconnect, and this client is built without a listener for them.
+			// limiter has nothing to fall back on, and refusing what it cannot count is
+			// the behaviour, not the defect.
 			await request(getUrl(vendor, env))
 				.get('/server/ping')
 				.catch(() => undefined);
 
-			// The reconnect that kills the process happens within a few tens of ms of the
-			// cut; the wait is for the child to be reaped, not for the failure.
-			await new Promise((resolve) => setTimeout(resolve, 1000));
+			// Long enough for several reconnect attempts at the delays set above, which
+			// is what makes the volume below mean something.
+			await new Promise((resolve) => setTimeout(resolve, 2000));
 
-			const tail = instanceLog.join('').slice(-4000);
+			const outageLog = instanceLog.slice(logAtCut).join('');
 
-			expect(instance.exitCode, `the instance exited:\n${tail}`).toBeNull();
+			// Control: it degrades, it does not die. ioredis reports connection errors
+			// through `silentEmit`, which does not throw at an empty listener list, so
+			// this passes either way — it is here to say which failure the rest is about.
+			expect(instance.exitCode, `the instance exited:\n${outageLog.slice(-4000)}`)
+				.toBeNull();
 
-			// Named for the limiter, so the line says which client dropped rather than
-			// leaving four candidates.
-			expect(instanceLog.join('')).toContain('[rate-limiter]');
+			// What `silentEmit` does instead: `console.error` the stack of every failed
+			// reconnect, straight to stderr, outside the logger and outside any throttle.
+			expect(outageLog).not.toContain('[ioredis] Unhandled error event');
+
+			// Reported through the logger and named for the limiter, so the line says
+			// which client dropped rather than leaving four candidates.
+			expect(outageLog).toContain('[rate-limiter]');
 		}, 120_000);
 	});
 });

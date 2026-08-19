@@ -38,7 +38,7 @@ afterEach(() => {
 
 describe('warnOncePerConnectionOutage', () => {
 	it(oneLine`
-		registers the error listener that keeps an outage from exiting the process
+		registers the error listener without which the client reports for itself
 	`, () => {
 		expect(listeners['error']).toHaveLength(1);
 

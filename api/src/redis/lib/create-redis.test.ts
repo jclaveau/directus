@@ -41,8 +41,8 @@ function retryStrategyFor(env: Record<string, unknown>): RetryStrategy {
 
 describe('createRedis', () => {
 	test(oneLine`
-		Registers an error listener, so an unreachable Redis degrades instead of
-		taking the process down
+		Registers an error listener, so an outage is reported through the logger
+		rather than dumped to stderr
 	`, () => {
 		const warn = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ warn } as any);
@@ -50,9 +50,9 @@ describe('createRedis', () => {
 
 		const redis = createRedis();
 
-		// An EventEmitter with no `error` listener rethrows, and ioredis emits one
-		// per failed reconnect — so without this a Redis outage is an unhandled
-		// exception rather than a degraded cache.
+		// ioredis reports one error per failed reconnect and, with nobody listening,
+		// `console.error`s each stack straight to stderr — outside the logger and
+		// outside any throttle, for as long as the outage lasts.
 		expect(redis.on).toHaveBeenCalledWith('error', expect.any(Function));
 
 		const [, listener] = vi.mocked(redis.on).mock.calls

@@ -55,9 +55,10 @@ function getConfig(
 		config.storeClient = new Redis(env[`REDIS`] || getConfigFromEnv(`REDIS_`));
 
 		// One client per configured limiter, none of them shared, so this is the only
-		// place an `error` listener can be put on them — and without one the first
-		// failed reconnect after a Redis outage rethrows and ends the process. The
-		// limiter still refuses what it cannot count; refusing is not exiting.
+		// place an `error` listener can be put on them — and without one an outage is
+		// reported as a raw `console.error` stack per failed reconnect rather than
+		// through the logger. `RATE_LIMITER_GLOBAL` reports as `[rate-limiter-global]`.
+		// What the limiter does is unchanged: it still refuses what it cannot count.
 		warnOncePerConnectionOutage(
 			config.storeClient,
 			configPrefix.toLowerCase().replace(/_/g, '-'),

@@ -15,18 +15,19 @@ interface ConnectionFailures {
  * Give a Redis client the `error` listener it cannot live without, and log at most
  * one line per distinct failure per outage.
  *
- * The listener itself is not optional: an EventEmitter with no `error` handler
- * rethrows, so an unreachable Redis exits a process that was serving requests fine.
- * Every consumer already survives a failed command — a read falls through to a MISS,
- * a purge is recorded and retried — which is only reachable if the process is alive
- * to do it.
+ * The listener is not optional, and what it prevents depends on the client. A
+ * node-redis one — the four `@keyv/redis` stores — emits `error` as a plain
+ * EventEmitter, so with nobody listening an unreachable Redis rethrows and exits a
+ * process that was serving requests fine. ioredis routes connection errors through
+ * `silentEmit`, which does not throw; it writes the stack to stderr with
+ * `console.error` instead, outside the logger, unlevelled and unredacted.
  *
- * The throttling is what makes that survivable for a day rather than a minute. The
- * default retry policy never gives up (`REDIS_RETRY_MAX_ATTEMPTS` unset), and each
- * failed reconnect emits an error, so an outage would otherwise write a warning
- * every couple of seconds for as long as it lasts — across the shared client, the
- * bus subscriber and one client per Keyv store. A changed failure is still reported:
- * `ECONNREFUSED` turning into an auth failure is news, not repetition.
+ * The throttling is what makes either survivable for a day rather than a minute.
+ * The default retry policy never gives up (`REDIS_RETRY_MAX_ATTEMPTS` unset) and
+ * every failed reconnect reports, so an outage writes for as long as it lasts —
+ * 124 stack dumps in 25 seconds, measured on one unlistened client. A changed
+ * failure is still reported: `ECONNREFUSED` turning into an auth failure is news,
+ * not repetition.
  *
  * A consumer of the connection can be handed over with it. A Keyv store reports what
  * its own commands hit, which during an outage is one error per refused command and

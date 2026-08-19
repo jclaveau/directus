@@ -28,11 +28,11 @@ export class BusRedis implements Bus {
 		this.sub.on('messageBuffer', (channel, message) => this.messageBufferHandler(channel, message));
 
 		// `duplicate()` copies the options and none of the listeners, so the
-		// subscriber starts with no `error` handler of its own — and ioredis emits one
-		// per failed reconnect. Unhandled, that is a thrown exception on the host's
-		// event loop: an unreachable Redis took the whole process down instead of
-		// degrading to a bus nobody can publish on. Forwarded rather than swallowed or
-		// logged here, so whoever owns the shared client keeps owning what an error
+		// subscriber starts with no `error` handler of its own — and ioredis reports
+		// one per failed reconnect. With nobody listening it `console.error`s the
+		// stack to stderr, so an unreachable Redis buried the host's log under raw
+		// dumps from a subscriber the host never sees. Forwarded rather than swallowed
+		// or logged here, so whoever owns the shared client keeps owning what an error
 		// means — this package has no logger and should not grow one for this.
 		this.sub.on('error', (error) => this.pub.emit('error', error));
 		this.compression = config.compression ?? true;
