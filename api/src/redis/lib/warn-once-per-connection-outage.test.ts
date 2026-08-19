@@ -109,9 +109,9 @@ describe('warnOncePerConnectionOutage', () => {
 	});
 
 	it(oneLine`
-		says which side raised a line, since a dropped socket and a command the store
-		could not send over it are answered in different places
-	`, () => {
+		attributes a forwarded error to the connection that raised it, not to the store
+		that heard it first — the two are answered in different places
+	`, async () => {
 		const connection: Record<string, ((arg?: any) => void)[]> = {};
 		const store: Record<string, ((arg?: any) => void)[]> = {};
 
@@ -130,27 +130,36 @@ describe('warnOncePerConnectionOutage', () => {
 			collect(store),
 		);
 
-		connection['error']![0]!(new Error('connect ECONNREFUSED'));
-		store['error']![0]!(new Error('The client is offline'));
+		// The order a real outage arrives in: `@keyv/redis` forwards what its client
+		// raises and registered that forwarder first, so the store hears a dropped
+		// socket before the connection does — and it is the same object on both paths.
+		const dropped = new Error('Socket closed unexpectedly');
+
+		store['error']![0]!(dropped);
+		connection['error']![0]!(dropped);
+
+		// Only what the client never raised is the store's own.
+		const refused = new Error('The client is offline');
+
+		store['error']![0]!(refused);
+
+		await new Promise((resolve) => setImmediate(resolve));
 
 		expect(warn).toHaveBeenNthCalledWith(
 			1,
-			expect.any(Error),
-			'[response-cache] connection: Error: connect ECONNREFUSED',
+			dropped,
+			'[response-cache] connection: Error: Socket closed unexpectedly',
 		);
 
 		expect(warn).toHaveBeenNthCalledWith(
 			2,
-			expect.any(Error),
+			refused,
 			'[response-cache] store: Error: The client is offline',
 		);
 
 		// Deliberately one throttle rather than two: the same text from both sides is
 		// one failure seen twice, and counting it twice is how a log grows with traffic.
-		connection['error']![0]!(new Error('Socket closed unexpectedly'));
-		store['error']![0]!(new Error('Socket closed unexpectedly'));
-
-		expect(warn).toHaveBeenCalledTimes(3);
+		expect(warn).toHaveBeenCalledTimes(2);
 	});
 
 	it('reports the next outage from scratch once the client reconnects', () => {

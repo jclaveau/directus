@@ -453,6 +453,19 @@ describe('the API outlives an unreachable Redis', () => {
 				reportedPerOutage.push(reported);
 				mark(`outage ${outage}: ${reads} reads, warnings=${reported}`);
 
+				// A window that reports nothing and a window whose lines landed somewhere
+				// else fail the same way, and the throttle only rearms on the client's own
+				// `ready` — not on the proxy reopening — so a silent window is a real
+				// answer and needs to say so rather than be guessed at afterwards.
+				for (const line of new Set(
+					cycleLog
+						.split('\n')
+						.filter((entry) => entry.includes('[response-cache]'))
+						.map((entry) => entry.slice(entry.indexOf('[response-cache]'), 150)),
+				)) {
+					mark(`outage ${outage}: ${line}`);
+				}
+
 				// Nothing routed around the logger during this window either — the raw
 				// stderr dump is per failed reconnect, so a second outage is where a
 				// listener that was somehow dropped on recovery would show.
@@ -475,6 +488,12 @@ describe('the API outlives an unreachable Redis', () => {
 				mark(`outage ${outage}: caching again status=${status}`);
 				expect(status).toBe('HIT');
 				await assertInstanceAlive();
+
+				// A HIT proves commands work again, which is not quite the same as the
+				// client having announced it: the throttle rearms on `ready`, so cutting
+				// again before that lands would make the next window a continuation of
+				// this outage rather than a new one, and legitimately silent.
+				await new Promise((resolve) => setTimeout(resolve, 1000));
 			}
 
 			const [quiet, busy] = reportedPerOutage as [number, number];

@@ -68,8 +68,29 @@ export function warnOncePerConnectionOutage(
 	// A socket that dropped, versus a command the store could not send over one. The
 	// difference decides whether you go and look at Redis or at what the app asked of
 	// it, and it is invisible once both are called the same thing.
-	client.on('error', (error) => warnOnce('connection', error));
-	store?.on('error', (error) => warnOnce('store', error));
+	const raisedByConnection = new WeakSet<Error>();
+
+	client.on('error', (error) => {
+		raisedByConnection.add(error);
+		warnOnce('connection', error);
+	});
+
+	// Keyv re-emits what its client raises, and `@keyv/redis` registers that forwarder
+	// in its own constructor — before this one — so a dropped socket arrives here
+	// first and would be reported as a command that failed. It is the same object on
+	// both paths, so the connection can claim it; but only once this emit has run to
+	// the end, since the listener that claims it is registered after this one. Hence
+	// the microtask: by the time it runs, both listeners have seen the error and only
+	// what the client never raised is left.
+	store?.on('error', (error) => {
+		queueMicrotask(() => {
+			if (raisedByConnection.has(error)) {
+				return;
+			}
+
+			warnOnce('store', error);
+		});
+	});
 
 	// Reconnected, so the next outage is reported from scratch rather than being
 	// mistaken for a continuation of this one.
