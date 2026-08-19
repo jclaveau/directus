@@ -22,9 +22,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // ECONNRESET — which names nothing. Hence the instance's own log is captured and
 // reported here instead.
 //
-// What it does NOT cover: `scheduleSynchronizedJob`. Its claim is a Redis write,
-// so a tick landing during an outage was a fifth way to exit, but no scheduled job
-// fires inside a test's patience — that one stays unit-only.
+// `scheduleSynchronizedJob` is in scope too, and it is why the outage lasts as long
+// as it does: its claim is a Redis write, so a tick landing mid-outage was the fifth
+// way to exit. The cache-stats flush already runs on `*/10 * * * * *`, the shortest
+// schedule in the codebase, so one cut held past ten seconds lands a tick — no new
+// knob and no minute-long wait.
 
 const NOTE = 'test_items_outage_note';
 const cacheStatusHeader = 'x-cache-status';
@@ -135,6 +137,11 @@ describe('the API outlives an unreachable Redis', () => {
 			env[vendor]['REDIS_PORT'] = String(proxyPort);
 			env[vendor]['CACHE_NAMESPACE'] = `directus-outage-${vendor}`;
 
+			// Brings the only sub-minute scheduled job into the test: `cache-stats`
+			// flushes on `*/10 * * * * *`, and its synchronized claim is the Redis write
+			// that used to take the process down when a tick met an outage.
+			env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
 			// The stock backoff gives up on a queued command after ~30s; this brings the
 			// whole outage inside a test's patience and reconnects within one poll of
 			// the proxy returning.
@@ -181,6 +188,16 @@ describe('the API outlives an unreachable Redis', () => {
 			);
 		}
 
+		// A timeout kills the case before any assertion runs and before the instance
+		// log is read, so the only way a failure names the phase that stalled is for
+		// each phase to say when it finished. Printed, not collected.
+		const startedAt = Date.now();
+
+		function mark(phase: string) {
+			// eslint-disable-next-line no-console
+			console.info(`[outage] ${Date.now() - startedAt}ms ${phase}`);
+		}
+
 		function get(path: string) {
 			return request(getUrl(vendor, env))
 				.get(path)
@@ -188,8 +205,9 @@ describe('the API outlives an unreachable Redis', () => {
 		}
 
 		it(oneLine`
-			keeps serving reads with Redis gone, then caches again once it is back — the
-			cache is a dependency, so losing it must cost hit ratio and nothing else
+			keeps serving reads with Redis gone, survives a scheduled tick landing in the
+			outage, and caches again once it is back — the cache is a dependency, so
+			losing it must cost hit ratio and nothing else
 		`, async () => {
 			expect((await get(`/items/${NOTE}/${note}`)).headers[cacheStatusHeader])
 				.toBe('MISS');
@@ -197,7 +215,10 @@ describe('the API outlives an unreachable Redis', () => {
 			expect((await get(`/items/${NOTE}/${note}`)).headers[cacheStatusHeader])
 				.toBe('HIT');
 
+			mark('warmed');
+
 			await proxy.cut();
+			mark('redis cut');
 
 			// The listeners are what make this reachable at all: unhandled, the errors
 			// ioredis emits per failed reconnect end the process, and this request would
@@ -208,6 +229,7 @@ describe('the API outlives an unreachable Redis', () => {
 					throw error;
 				});
 
+			mark('read served with redis down');
 			await assertInstanceAlive();
 
 			expect(served.status).toBe(200);
@@ -222,14 +244,41 @@ describe('the API outlives an unreachable Redis', () => {
 			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
 				.toBe('pong');
 
+			mark('ping answered');
+
+			// Hold the outage past a `*/10` boundary so a cache-stats tick lands inside
+			// it. The claim rejects about a second after the cut (20 reconnect attempts
+			// at the delays set above), and node-schedule drops the promise it returns —
+			// so before the guard this was the last thing the process did.
+			//
+			// Read off the instance's log rather than from survival alone: "still alive
+			// after a wait" also passes when no tick ever fired, which would make this
+			// a test of nothing.
+			let tickSurvived = false;
+
+			for (let attempt = 0; attempt < 50; attempt++) {
+				if (instanceLog.join('').includes('[schedule] job "cache-stats" failed')) {
+					tickSurvived = true;
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 500));
+			}
+
+			mark(`scheduled tick seen=${tickSurvived}`);
+			expect(tickSurvived).toBe(true);
+			await assertInstanceAlive();
+
 			await proxy.open();
+			mark('redis back');
 
 			// Reconnecting restores caching rather than merely leaving the process up.
 			// Polled, because the reconnect backoff is asynchronous.
 			let status: string | undefined;
 
-			for (let attempt = 0; attempt < 40; attempt++) {
-				await get(`/items/${NOTE}/${note}`);
+			for (let attempt = 0; attempt < 24; attempt++) {
+				// One request per attempt: the first fills the entry, the next reads it as
+				// a HIT, so alternating attempts is what actually converges.
 				status = (await get(`/items/${NOTE}/${note}`)).headers[cacheStatusHeader];
 
 				if (status === 'HIT') {
@@ -239,8 +288,9 @@ describe('the API outlives an unreachable Redis', () => {
 				await new Promise((resolve) => setTimeout(resolve, 250));
 			}
 
+			mark(`caching again status=${status}`);
 			expect(status).toBe('HIT');
 			await assertInstanceAlive();
-		}, 60_000);
+		}, 180_000);
 	});
 });
