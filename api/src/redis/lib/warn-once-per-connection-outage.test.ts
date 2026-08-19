@@ -81,6 +81,18 @@ describe('warnOncePerConnectionOutage', () => {
 		expect(warn).toHaveBeenCalledTimes(2);
 	});
 
+	it(oneLine`
+		collapses two failures that alternate, not only two that repeat — a refused
+		command and the reconnect it races report different things, turn and turn about
+	`, () => {
+		for (let attempt = 0; attempt < 10; attempt++) {
+			emit('error', new Error('ECONNREFUSED'));
+			emit('error', new Error('The client is offline'));
+		}
+
+		expect(warn).toHaveBeenCalledTimes(2);
+	});
+
 	it('reports the next outage from scratch once the client reconnects', () => {
 		emit('error', new Error('ECONNREFUSED'));
 		expect(warn).toHaveBeenCalledOnce();

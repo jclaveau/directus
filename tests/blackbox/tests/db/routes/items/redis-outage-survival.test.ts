@@ -350,7 +350,23 @@ describe('the API outlives an unreachable Redis', () => {
 			// request path. Bounded well under the reads that provoked it.
 			const storeReported = outageLog.split('[response-cache]').length - 1;
 
+			// Named, not just counted: a number over the bound says the throttle let
+			// something through but not what, and the instance's log is gone by the time
+			// the failure is read. One line per distinct message is what a working
+			// throttle should leave behind anyway.
+			const storeFailures = new Set(
+				outageLog
+					.split('\n')
+					.filter((line) => line.includes('[response-cache]'))
+					.map((line) => line.slice(line.indexOf('[response-cache]'), 160)),
+			);
+
 			mark(`response-cache warnings=${storeReported}`);
+
+			for (const failure of storeFailures) {
+				mark(`response-cache failure: ${failure}`);
+			}
+
 			expect(storeReported).toBeGreaterThanOrEqual(1);
 			expect(storeReported).toBeLessThan(READS_UNDER_OUTAGE);
 

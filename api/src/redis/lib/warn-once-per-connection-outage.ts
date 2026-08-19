@@ -25,9 +25,9 @@ interface ConnectionFailures {
  * The throttling is what makes either survivable for a day rather than a minute.
  * The default retry policy never gives up (`REDIS_RETRY_MAX_ATTEMPTS` unset) and
  * every failed reconnect reports, so an outage writes for as long as it lasts —
- * 124 stack dumps in 25 seconds, measured on one unlistened client. A changed
- * failure is still reported: `ECONNREFUSED` turning into an auth failure is news,
- * not repetition.
+ * 124 stack dumps in 25 seconds, measured on one unlistened client. Every distinct
+ * failure is still reported once: `ECONNREFUSED` turning into an auth failure is
+ * news, not repetition.
  *
  * A consumer of the connection can be handed over with it. A Keyv store reports what
  * its own commands hit, which during an outage is one error per refused command and
@@ -39,7 +39,12 @@ export function warnOncePerConnectionOutage(
 	connectionLabel: string,
 	consumer?: ConnectionFailures,
 ): void {
-	let reported: string | null = null;
+	// Every distinct failure of this outage, not just the last one. A single slot
+	// collapses repeats and nothing else, and an outage does not repeat: a refused
+	// command and the reconnect racing it report different things turn and turn about,
+	// which alternate past a one-slot check and log every time. Bounded by how many
+	// ways one connection can fail, and emptied when it comes back.
+	const reported = new Set<string>();
 
 	function warnOnce(error: Error) {
 		// Named as well as worded: a dual-stack connect fails as an `AggregateError`
@@ -47,11 +52,11 @@ export function warnOncePerConnectionOutage(
 		// message-less failure from another and would collapse them into one line.
 		const failure = `${error.name}: ${error.message}`;
 
-		if (failure === reported) {
+		if (reported.has(failure)) {
 			return;
 		}
 
-		reported = failure;
+		reported.add(failure);
 		useLogger().warn(error, `[${connectionLabel}] ${error}`);
 	}
 
@@ -61,6 +66,6 @@ export function warnOncePerConnectionOutage(
 	// Reconnected, so the next outage is reported from scratch rather than being
 	// mistaken for a continuation of this one.
 	client.on('ready', () => {
-		reported = null;
+		reported.clear();
 	});
 }
