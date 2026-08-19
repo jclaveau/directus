@@ -38,6 +38,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // would drown everything else this file asserts.
 
 const NOTE = 'test_items_outage_note';
+
+// Per outage in the repeated-outage case: enough traffic that a per-request line
+// would break the bound, few enough that two cycles stay inside a shard's patience.
+const CYCLE_READS = 6;
 const cacheStatusHeader = 'x-cache-status';
 
 // A proxy we can kill and bring back, so the API keeps its config and only the
@@ -403,6 +407,72 @@ describe('the API outlives an unreachable Redis', () => {
 			mark(`caching again status=${status}`);
 			expect(status).toBe('HIT');
 			await assertInstanceAlive();
+		}, 180_000);
+
+		it(oneLine`
+			hears the outages after the first one, with working calls in between — a
+			throttle is per outage, and one that fills and never empties passes every
+			single-outage assertion and then goes quiet for good
+		`, async () => {
+			// The defect this covers was a sequence, not a state: two failures that
+			// alternate defeated a throttle comparing against the last one only, and no
+			// amount of one steady outage would have shown it. Line coverage says the
+			// handler ran; only a run of outages says what it does the second time.
+			const reportedPerOutage: number[] = [];
+
+			for (const outage of [1, 2]) {
+				const logAtCut = instanceLog.length;
+
+				await proxy.cut();
+
+				// Cache-eligible and cache-free requests interleaved, so failing and
+				// working calls alternate through the same window rather than arriving as
+				// one uniform run.
+				for (let read = 0; read < CYCLE_READS; read++) {
+					expect((await get(`/items/${NOTE}/${note}`)).status).toBe(200);
+
+					expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
+						.toBe('pong');
+				}
+
+				const cycleLog = instanceLog.slice(logAtCut).join('');
+				const reported = cycleLog.split('[response-cache]').length - 1;
+
+				reportedPerOutage.push(reported);
+				mark(`outage ${outage}: response-cache warnings=${reported}`);
+
+				// Nothing routed around the logger during this window either — the raw
+				// stderr dump is per failed reconnect, so a second outage is where a
+				// listener that was somehow dropped on recovery would show.
+				expect(cycleLog).not.toContain('[ioredis] Unhandled error event');
+
+				await proxy.open();
+
+				let status: string | undefined;
+
+				for (let attempt = 0; attempt < 24; attempt++) {
+					status = (await get(`/items/${NOTE}/${note}`)).headers[cacheStatusHeader];
+
+					if (status === 'HIT') {
+						break;
+					}
+
+					await new Promise((resolve) => setTimeout(resolve, 250));
+				}
+
+				mark(`outage ${outage}: caching again status=${status}`);
+				expect(status).toBe('HIT');
+				await assertInstanceAlive();
+			}
+
+			// Both bounds on every outage, which is the whole point of running more than
+			// one: the lower one fails when a throttle stops rearming and the outage goes
+			// unreported, the upper one when it stops throttling and the log grows with
+			// traffic. A single outage cannot tell those apart from working.
+			for (const reported of reportedPerOutage) {
+				expect(reported).toBeGreaterThanOrEqual(1);
+				expect(reported).toBeLessThan(CYCLE_READS);
+			}
 		}, 180_000);
 	});
 });

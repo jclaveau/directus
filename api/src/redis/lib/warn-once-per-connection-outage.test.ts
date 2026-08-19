@@ -93,6 +93,20 @@ describe('warnOncePerConnectionOutage', () => {
 		expect(warn).toHaveBeenCalledTimes(2);
 	});
 
+	it(oneLine`
+		reports every outage in a run of them, not the first — the throttle is per
+		outage, and a record that fills and never empties passes each one-outage case
+		and then goes quiet for good
+	`, () => {
+		for (let outage = 0; outage < 3; outage++) {
+			emit('error', new Error('ECONNREFUSED'));
+			emit('error', new Error('ECONNREFUSED'));
+			emit('ready');
+		}
+
+		expect(warn).toHaveBeenCalledTimes(3);
+	});
+
 	it('reports the next outage from scratch once the client reconnects', () => {
 		emit('error', new Error('ECONNREFUSED'));
 		expect(warn).toHaveBeenCalledOnce();
