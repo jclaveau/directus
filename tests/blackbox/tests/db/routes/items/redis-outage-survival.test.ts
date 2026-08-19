@@ -44,8 +44,9 @@ const NOTE = 'test_items_outage_note';
 // cannot tell those two apart, whatever constant they are measured against.
 const READS_PER_OUTAGE = [3, 12];
 
-// The per-IP budget the rate-limiter instance runs with. Small, because the case has
-// to exhaust it while Redis is down to prove the fallback is still counting.
+// The per-IP budget the rate-limiter instance runs with. Small, because the case
+// spends several times over it while Redis is down to show nothing refuses, then
+// lets what Redis still holds run out once it is back.
 const LIMITER_POINTS = 5;
 
 // A timeout kills a case before any assertion runs and before the instance log is
@@ -540,8 +541,8 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 			// Charged above the cache, so `/server/ping` spends a token and one request
 			// is enough to make the limiter talk to Redis.
 			env[vendor]['RATE_LIMITER_CHARGE'] = 'every-request';
-			// Small enough that the case can spend the whole budget in a few requests,
-			// which is the only way to see whether the fallback counts or just yields.
+			// Small enough to spend several times over during the outage, and to run out
+			// in a few requests once Redis is counting again.
 			env[vendor]['RATE_LIMITER_POINTS'] = String(LIMITER_POINTS);
 			env[vendor]['RATE_LIMITER_DURATION'] = '60';
 

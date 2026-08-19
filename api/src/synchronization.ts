@@ -109,6 +109,12 @@ class SynchronizationManagerRedis implements SynchronizationManager {
 		const config = getConfigFromEnv('REDIS');
 
 		this.client = new Redis(env['REDIS'] ?? config);
+		this.namespace = (env['SYNCHRONIZATION_NAMESPACE'] as string) ?? 'directus-sync';
+
+		this.client.defineCommand('setGreaterThan', {
+			numberOfKeys: 1,
+			lua: SET_GREATER_THAN_SCRIPT,
+		});
 
 		// A client of its own rather than `useRedis()`'s, because it defines a Lua
 		// command on it — so nothing else's listener covers this one. ioredis routes
@@ -117,12 +123,6 @@ class SynchronizationManagerRedis implements SynchronizationManager {
 		// per failed reconnect, outside the logger and outside every throttle. A
 		// 25-second outage measured 124 of those. One line says the same thing.
 		warnOncePerConnectionOutage(this.client, 'synchronization');
-		this.namespace = (env['SYNCHRONIZATION_NAMESPACE'] as string) ?? 'directus-sync';
-
-		this.client.defineCommand('setGreaterThan', {
-			numberOfKeys: 1,
-			lua: SET_GREATER_THAN_SCRIPT,
-		});
 	}
 
 	public async set(key: string, value: string | number): Promise<void> {

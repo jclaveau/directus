@@ -91,12 +91,13 @@ if (redisConfigAvailable() && !messengerSubscribed) {
 /**
  * Report what goes wrong with one cache, under that cache's own name.
  *
- * Two things have to be heard from. `@keyv/redis` v5 wraps a node-redis client
- * of its own and Keyv does not re-emit its `error` events, so without a listener
- * there an unreachable Redis took the process down through it even once the
- * ioredis clients were handled. And the store reports what its own commands hit,
- * which since `disableOfflineQueue` is one error per refused command — a log that
- * grows with traffic rather than with the outage.
+ * Two things have to be heard from, and neither is a matter of survival: the
+ * adapter registers an `error` listener on its client from its own constructor and
+ * forwards what it hears, so the connection is never unlistened and the handlers
+ * this replaced already saw connection failures. What was missing is a line worth
+ * reading. The client reports the outage; the store reports what its own commands
+ * hit, which since `disableOfflineQueue` is one error per refused command — a log
+ * that grows with traffic rather than with the outage.
  *
  * Both are the same failure, so both go under one label and share one throttle.
  * Attached here rather than where the client is built, because a shared label

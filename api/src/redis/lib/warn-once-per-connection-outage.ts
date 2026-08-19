@@ -12,15 +12,17 @@ interface ConnectionFailures {
 }
 
 /**
- * Give a Redis client the `error` listener it cannot live without, and log at most
- * one line per distinct failure per outage.
+ * Give a Redis client an `error` listener, and log at most one line per distinct
+ * failure per outage.
  *
- * The listener is not optional, and what it prevents depends on the client. A
- * node-redis one — the four `@keyv/redis` stores — emits `error` as a plain
- * EventEmitter, so with nobody listening an unreachable Redis rethrows and exits a
- * process that was serving requests fine. ioredis routes connection errors through
- * `silentEmit`, which does not throw; it writes the stack to stderr with
- * `console.error` instead, outside the logger, unlevelled and unredacted.
+ * What it buys is a readable log rather than survival — a claim this module carried
+ * for a while and got wrong twice. ioredis routes connection errors through
+ * `silentEmit`, which does not throw at an empty listener list; it writes the stack
+ * to stderr with `console.error` instead, outside the logger, unlevelled and
+ * unredacted. A node-redis client is never unlistened at all, because `@keyv/redis`
+ * attaches to it from its own constructor. What did end the process was unhandled
+ * *rejections*, which is a different fix in `utils/report-unhandled-rejection.ts`
+ * and `utils/schedule.ts`.
  *
  * The throttling is what makes either survivable for a day rather than a minute.
  * The default retry policy never gives up (`REDIS_RETRY_MAX_ATTEMPTS` unset) and
