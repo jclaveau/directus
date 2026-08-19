@@ -304,7 +304,7 @@ describe('respond middleware', () => {
 			},
 		);
 
-		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } as any });
+		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } });
 
 		await respond(req, res, next);
 
@@ -331,7 +331,7 @@ describe('respond middleware', () => {
 			},
 		);
 
-		const req = makeReq({ sanitizedQuery: { meta: ['filter_count'] } as any });
+		const req = makeReq({ sanitizedQuery: { meta: ['filter_count'] } });
 
 		await respond(req, res, next);
 
@@ -343,11 +343,42 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
+		meta=* keeps the bare tag too — it expands to every counter, so the read carries
+		total_count without ever naming it
+	`, async () => {
+		const res = makeRes(
+			{ meta: { total_count: 2, filter_count: 1 }, data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				],
+			},
+		);
+
+		// The shape `sanitizeMeta` produces for `*`, which is where the expansion
+		// happens — this guard only ever sees the expanded list.
+		const req = makeReq({
+			sanitizedQuery: { meta: ['total_count', 'filter_count'] },
+		});
+
+		await respond(req, res, next);
+
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[
+				{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'articles' },
+			],
+			[],
+		);
+	});
+
+	test(oneLine`
 		total_count on an unpinned read adds no duplicate — the bare collection tag it
 		already fell back to is the same tag the count needs
 	`, async () => {
 		const res = makeRes({ meta: { total_count: 2 }, data: [{ id: 1 }] });
-		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } as any });
+		const req = makeReq({ sanitizedQuery: { meta: ['total_count'] } });
 
 		await respond(req, res, next);
 

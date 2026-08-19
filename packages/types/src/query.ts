@@ -16,6 +16,12 @@ export type Query = {
 	deep?: NestedDeepQuery | null;
 	alias?: Record<string, string> | null;
 	backlink?: boolean;
+	// Which counts the response reports (`total_count`, `filter_count`). Set by
+	// `sanitizeQuery` and read by the responder, both of which had to cast around its
+	// absence — and one of those reads decides whether a cached response depends on
+	// rows its filter never bounded, which is too load-bearing to leave untyped.
+	// A plain `string[]`: an unrecognised `meta=` value reaches this list unchanged.
+	meta?: string[];
 };
 
 export type DeepQuery = {

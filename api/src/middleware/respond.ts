@@ -97,8 +97,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// slice moves the number, and no pinned tag can express that. Such a response
 	// keeps the bare collection tag beside its pins so any write drops it.
 	const countsWholeCollection =
-		(req.sanitizedQuery as { meta?: string[] }).meta
-			?.includes(Meta.TOTAL_COUNT) === true;
+		req.sanitizedQuery.meta?.includes(Meta.TOTAL_COUNT) === true;
 
 	const scopedCacheTags = controllerTags?.length && countsWholeCollection === false
 		? controllerTags
