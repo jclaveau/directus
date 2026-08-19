@@ -71,6 +71,19 @@ describe('scheduleSynchronizedJob', () => {
 		expect(warn).toHaveBeenCalledOnce();
 	});
 
+	test('Runs the job when it won the claim, and logs nothing', async () => {
+		const clock = { set: vi.fn().mockResolvedValue(true) };
+		const { tick } = scheduledTick(clock);
+		const body = vi.fn().mockResolvedValue(undefined);
+
+		scheduleSynchronizedJob('cache-stats', '* * * * *', body);
+
+		await tick();
+
+		expect(body).toHaveBeenCalledWith(new Date(0));
+		expect(warn).not.toHaveBeenCalled();
+	});
+
 	test('Runs the job only when it won the claim', async () => {
 		const clock = { set: vi.fn().mockResolvedValue(false) };
 		const { tick } = scheduledTick(clock);

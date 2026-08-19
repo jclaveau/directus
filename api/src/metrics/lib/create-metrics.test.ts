@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { register } from 'prom-client';
 
@@ -70,5 +71,32 @@ describe('getCacheResponseMetric', () => {
 	it('returns null when the cache is disabled', () => {
 		env['CACHE_ENABLED'] = false;
 		expect(createMetrics().getCacheResponseMetric()).toBeNull();
+	});
+});
+
+describe('getUnhandledRejectionMetric', () => {
+	it('registers a counter and reuses it on the second call', async () => {
+		const metrics = createMetrics();
+
+		const first = metrics.getUnhandledRejectionMetric();
+		expect(first).not.toBeNull();
+
+		first!.inc();
+
+		expect(metrics.getUnhandledRejectionMetric()).toBe(first);
+
+		expect((await register.getMetricsAsJSON())
+			.find((metric) => metric.name === 'directus_unhandled_rejections_total'))
+			.toBeDefined();
+	});
+
+	it(oneLine`
+		is reported whatever METRICS_SERVICES names — a rejection nothing awaited is
+		process health, and there is no service to attribute it to
+	`, () => {
+		env['METRICS_SERVICES'] = [];
+		env['CACHE_ENABLED'] = false;
+
+		expect(createMetrics().getUnhandledRejectionMetric()).not.toBeNull();
 	});
 });
