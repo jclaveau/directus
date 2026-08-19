@@ -217,6 +217,10 @@ describe('the API outlives an unreachable Redis', () => {
 
 			mark('warmed');
 
+			// Everything the outage writes to the log arrives after this index, so the
+			// volume assertion below cannot be fooled by a line from boot.
+			const logAtCut = instanceLog.length;
+
 			await proxy.cut();
 			mark('redis cut');
 
@@ -269,6 +273,19 @@ describe('the API outlives an unreachable Redis', () => {
 			mark(`scheduled tick seen=${tickSurvived}`);
 			expect(tickSurvived).toBe(true);
 			await assertInstanceAlive();
+
+			// The outage is reported, and reported ONCE. At the retry delays set above
+			// the client reconnects every few tens of ms, so the ~12s spent waiting for
+			// a scheduled tick is a few hundred failed attempts — one warning each would
+			// fill a disk over a real outage. Both bounds matter: the upper one is the
+			// throttle, the lower one keeps the assertion from passing because the label
+			// changed and it now counts nothing.
+			const outageLog = instanceLog.slice(logAtCut).join('');
+			const reported = outageLog.split('[redis] ').length - 1;
+
+			mark(`redis outage warnings=${reported}`);
+			expect(reported).toBeGreaterThanOrEqual(1);
+			expect(reported).toBeLessThanOrEqual(5);
 
 			await proxy.open();
 			mark('redis back');
