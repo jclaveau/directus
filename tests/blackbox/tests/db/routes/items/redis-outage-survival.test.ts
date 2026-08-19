@@ -47,6 +47,18 @@ const READS_PER_OUTAGE = [3, 12];
 // The per-IP budget the rate-limiter instance runs with. Small, because the case has
 // to exhaust it while Redis is down to prove the fallback is still counting.
 const LIMITER_POINTS = 5;
+
+// A timeout kills a case before any assertion runs and before the instance log is
+// read, so the only way a failure names the phase that stalled is for each phase to
+// say when it finished. Printed, not collected — and module-level, because both
+// describes here have phases worth naming.
+const startedAt = Date.now();
+
+function mark(phase: string) {
+	// eslint-disable-next-line no-console
+	console.info(`[outage] ${Date.now() - startedAt}ms ${phase}`);
+}
+
 const cacheStatusHeader = 'x-cache-status';
 
 // A proxy we can kill and bring back, so the API keeps its config and only the
@@ -219,16 +231,6 @@ describe('the API outlives an unreachable Redis', () => {
 			throw new Error(
 				`the Directus instance exited with ${instance.exitCode}:\n${tail}`,
 			);
-		}
-
-		// A timeout kills the case before any assertion runs and before the instance
-		// log is read, so the only way a failure names the phase that stalled is for
-		// each phase to say when it finished. Printed, not collected.
-		const startedAt = Date.now();
-
-		function mark(phase: string) {
-			// eslint-disable-next-line no-console
-			console.info(`[outage] ${Date.now() - startedAt}ms ${phase}`);
 		}
 
 		function get(path: string) {
@@ -587,8 +589,22 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 			// fallback a Redis outage takes every charged route down with it. The count
 			// is per process while the fallback is in use, which under-enforces the limit
 			// for the length of the outage and is the trade being made.
+			const askedAt = Date.now();
+
 			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
 				.toBe('pong');
+
+			const servedIn = Date.now() - askedAt;
+
+			mark(`charged request served with redis down in ${servedIn}ms`);
+
+			// Named, rather than left to the case's own timeout to report as "too long".
+			// Without `rejectIfRedisNotReady` the limiter sends the command anyway and
+			// reaches its fallback only once ioredis gives up — about ten seconds at the
+			// defaults its own client is built with, since `REDIS_RETRY_*` never reaches
+			// it — so every charged request stalls for that. Failing open that slowly is
+			// not meaningfully different from failing closed.
+			expect(servedIn).toBeLessThan(5_000);
 
 			// Serving is half of it. A fallback wired with the wrong budget — or none at
 			// all, with the error swallowed somewhere — also answers every request, so

@@ -88,6 +88,14 @@ function getConfig(
 			points: config.points,
 			duration: config.duration,
 		});
+
+		// And reach it without waiting. Left to itself the limiter sends the command
+		// anyway and falls back only once ioredis gives up on it, which at ioredis's own
+		// defaults is around ten seconds — its client is built here rather than by
+		// `createRedis`, so `REDIS_RETRY_*` never reaches it. Every charged request
+		// would stall for that before being served, which is failing open slowly enough
+		// to be indistinguishable from failing closed. Asking first costs a status read.
+		config.rejectIfRedisNotReady = true;
 	}
 
 	return config;
