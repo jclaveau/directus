@@ -33,9 +33,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // Two clients reach the outage only under a setting: `SynchronizationManagerRedis`
 // and the per-IP rate limiter each build a `new Redis(…)` of their own instead of
 // sharing `useRedis()`, so they are invisible to a default-configured instance. The
-// first is switched on below; the second gets an instance to itself, because a
-// redis-backed limiter refuses every request for the length of the outage and that
-// would drown everything else this file asserts.
+// first is switched on below; the second gets an instance to itself, so that the
+// traffic this file drives is not also spending rate-limiter tokens.
 
 const NOTE = 'test_items_outage_note';
 
@@ -541,8 +540,8 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 		});
 
 		it(oneLine`
-			reports its own outage through the logger, rather than leaving ioredis to
-			dump a stack per failed reconnect to stderr
+			keeps answering charged requests with Redis gone, and reports the outage
+			through the logger rather than leaving ioredis to dump a stack per reconnect
 		`, async () => {
 			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
 				.toBe('pong');
@@ -551,12 +550,14 @@ describe('the API outlives an unreachable Redis behind the rate limiter', () => 
 
 			await proxy.cut();
 
-			// Charged against a Redis that is gone, so this request fails — a redis-backed
-			// limiter has nothing to fall back on, and refusing what it cannot count is
-			// the behaviour, not the defect.
-			await request(getUrl(vendor, env))
-				.get('/server/ping')
-				.catch(() => undefined);
+			// Charged against a Redis that is gone. The limiter falls back to counting in
+			// this process, so the request is served rather than answered 500 —
+			// `rate-limiter-ip` rethrows anything that is an Error, so without the
+			// fallback a Redis outage takes every charged route down with it. The count
+			// is per process while the fallback is in use, which under-enforces the limit
+			// for the length of the outage and is the trade being made.
+			expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
+				.toBe('pong');
 
 			// Long enough for several reconnect attempts at the delays set above, which
 			// is what makes the volume below mean something.

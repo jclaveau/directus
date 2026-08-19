@@ -47,6 +47,11 @@ function getConfig(
 ): IRateLimiterOptions | IRateLimiterStoreOptions {
 	const config: any = getConfigFromEnv(`${configPrefix}_`, { omitPrefix: `${configPrefix}_${store}_` });
 
+	delete config.enabled;
+	delete config.store;
+
+	merge(config, overrides || {});
+
 	if (store === 'redis') {
 		const Redis = require('ioredis');
 
@@ -58,16 +63,32 @@ function getConfig(
 		// place an `error` listener can be put on them — and without one an outage is
 		// reported as a raw `console.error` stack per failed reconnect rather than
 		// through the logger. `RATE_LIMITER_GLOBAL` reports as `[rate-limiter-global]`.
-		// What the limiter does is unchanged: it still refuses what it cannot count.
 		const limiterLabel = configPrefix.toLowerCase().replace(/_/g, '-');
 
 		warnOncePerConnectionOutage(config.storeClient, limiterLabel);
+
+		// What the limiter does when it cannot reach Redis is a choice, and this is the
+		// one we make: keep serving. Without a fallback `consume()` rejects with the
+		// connection error, `rate-limiter-ip` rethrows anything that is an Error, and
+		// every charged request answers 500 for as long as Redis is away — an outage in
+		// a dependency taking the API down, which is the failure this whole branch
+		// exists to remove.
+		//
+		// The cost is real and worth stating: the fallback counts in this process only,
+		// so while Redis is away N instances each grant the full budget and the
+		// effective limit is N times what it says. Under-enforcing a limit for the
+		// length of an outage beats refusing everyone for it.
+		//
+		// Built after the overrides are merged, so it mirrors the limits actually in
+		// force rather than the ones the env asked for — `authentication.ts` passes
+		// `duration: 0` and would otherwise fall back to a different limiter than the
+		// one it configured. `blockDuration` and `execEvenly` the library copies over
+		// itself.
+		config.insuranceLimiter = new RateLimiterMemory({
+			points: config.points,
+			duration: config.duration,
+		});
 	}
-
-	delete config.enabled;
-	delete config.store;
-
-	merge(config, overrides || {});
 
 	return config;
 }
