@@ -39,9 +39,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const NOTE = 'test_items_outage_note';
 
-// Per outage in the repeated-outage case: enough traffic that a per-request line
-// would break the bound, few enough that two cycles stay inside a shard's patience.
-const CYCLE_READS = 6;
+// Reads per outage in the repeated-outage case, deliberately unequal. The property
+// under test is that the log grows with the ways a connection can fail and not with
+// the number of requests that meet the failure — and two windows of the same size
+// cannot tell those two apart, whatever constant they are measured against.
+const READS_PER_OUTAGE = [3, 12];
 const cacheStatusHeader = 'x-cache-status';
 
 // A proxy we can kill and bring back, so the API keeps its config and only the
@@ -420,7 +422,8 @@ describe('the API outlives an unreachable Redis', () => {
 			// handler ran; only a run of outages says what it does the second time.
 			const reportedPerOutage: number[] = [];
 
-			for (const outage of [1, 2]) {
+			for (const [index, reads] of READS_PER_OUTAGE.entries()) {
+				const outage = index + 1;
 				const logAtCut = instanceLog.length;
 
 				await proxy.cut();
@@ -428,7 +431,7 @@ describe('the API outlives an unreachable Redis', () => {
 				// Cache-eligible and cache-free requests interleaved, so failing and
 				// working calls alternate through the same window rather than arriving as
 				// one uniform run.
-				for (let read = 0; read < CYCLE_READS; read++) {
+				for (let read = 0; read < reads; read++) {
 					expect((await get(`/items/${NOTE}/${note}`)).status).toBe(200);
 
 					expect((await request(getUrl(vendor, env)).get('/server/ping')).text)
@@ -439,7 +442,7 @@ describe('the API outlives an unreachable Redis', () => {
 				const reported = cycleLog.split('[response-cache]').length - 1;
 
 				reportedPerOutage.push(reported);
-				mark(`outage ${outage}: response-cache warnings=${reported}`);
+				mark(`outage ${outage}: ${reads} reads, warnings=${reported}`);
 
 				// Nothing routed around the logger during this window either — the raw
 				// stderr dump is per failed reconnect, so a second outage is where a
@@ -465,14 +468,22 @@ describe('the API outlives an unreachable Redis', () => {
 				await assertInstanceAlive();
 			}
 
-			// Both bounds on every outage, which is the whole point of running more than
-			// one: the lower one fails when a throttle stops rearming and the outage goes
-			// unreported, the upper one when it stops throttling and the log grows with
-			// traffic. A single outage cannot tell those apart from working.
-			for (const reported of reportedPerOutage) {
-				expect(reported).toBeGreaterThanOrEqual(1);
-				expect(reported).toBeLessThan(CYCLE_READS);
-			}
+			const [quiet, busy] = reportedPerOutage as [number, number];
+			const [quietReads, busyReads] = READS_PER_OUTAGE as [number, number];
+
+			// Reported at all, both times. A throttle that fills and never empties goes
+			// silent after the first outage, which every one-outage assertion passes.
+			expect(quiet).toBeGreaterThanOrEqual(1);
+			expect(busy).toBeGreaterThanOrEqual(1);
+
+			// And the extra requests must not buy proportional lines. Stated as a slope
+			// rather than a constant, because how many distinct ways a connection fails
+			// is the client's business and not this test's: nine more requests may not
+			// cost more than four more lines. Measured at three either way — a closed
+			// socket, an offline client and a dual-stack connect — so the headroom here
+			// belongs to the throttle rather than to luck. Reporting per refused command
+			// lands on nine.
+			expect(busy - quiet).toBeLessThan((busyReads - quietReads) / 2);
 		}, 180_000);
 	});
 });
