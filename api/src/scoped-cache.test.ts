@@ -3,11 +3,11 @@ import {
 	countScopedCacheTagMembers,
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
-	headerSafeScopedCacheTags,
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
 	scopedCacheTagKey,
 } from './scoped-cache.js';
+import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 
 // hoisted: scoped-cache.ts reads `const env = useEnv()` at module load, before a
@@ -85,22 +85,22 @@ describe('the tag display form', () => {
 	});
 });
 
-// `res.setHeader` throws ERR_INVALID_CHAR on a control byte, which took down every
-// write to a collection whose scope field was null — after the row had committed.
-describe('the header form', () => {
+// A header throws ERR_INVALID_CHAR on a control byte and a Postgres text column
+// rejects the NUL, so both exits render the tag through this one escaper.
+describe('the exit form', () => {
 	it('escapes the NULL token', () => {
-		expect(headerSafeScopedCacheTags(serializeScopedCacheTags([
+		expect(printableScopedCacheTags(serializeScopedCacheTags([
 			{ collection: 'student_method_range', field: 'method', value: null },
 		]))).toBe('student_method_range:method=%00null');
 	});
 
 	it('escapes any control byte a string scope value carries', () => {
-		expect(headerSafeScopedCacheTags('articles:slug=a\u001Fb\u007F'))
+		expect(printableScopedCacheTags('articles:slug=a\u001Fb\u007F'))
 		.toBe('articles:slug=a%1Fb%7F');
 	});
 
 	it('leaves a printable tag list untouched', () => {
-		expect(headerSafeScopedCacheTags('articles, articles:author=7'))
+		expect(printableScopedCacheTags('articles, articles:author=7'))
 		.toBe('articles, articles:author=7');
 	});
 });

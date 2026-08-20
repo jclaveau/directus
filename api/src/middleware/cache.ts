@@ -8,12 +8,12 @@ import {
 	queueCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
-import { headerSafeScopedCacheTags } from '../scoped-cache.js';
 import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
+import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { shouldSkipCache } from '../utils/should-skip-cache.js';
@@ -119,7 +119,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 				if (typeof stored?.tags === 'string' && stored.tags !== '') {
 					res.setHeader(
 						`${env['CACHE_TAGS_HEADER']}`,
-						headerSafeScopedCacheTags(stored.tags),
+						printableScopedCacheTags(stored.tags),
 					);
 				}
 			}

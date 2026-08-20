@@ -15,13 +15,13 @@ import { useLogger } from '../logger/index.js';
 import {
 	scopedCachePurgeEnabled,
 	serializeScopedCacheTags,
-	headerSafeScopedCacheTags,
 	scopedCacheTagLabel,
 	tagScopedCacheKeys,
 } from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
+import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
@@ -51,7 +51,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		if (Array.isArray(pins) && pins.length) {
 			res.setHeader(
 				`${env['CACHE_TAGS_HEADER']}`,
-				headerSafeScopedCacheTags(serializeScopedCacheTags(pins)),
+				printableScopedCacheTags(serializeScopedCacheTags(pins)),
 			);
 		}
 	}
@@ -62,7 +62,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		if (Array.isArray(purged) && purged.length) {
 			res.setHeader(
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				headerSafeScopedCacheTags(serializeScopedCacheTags(purged)),
+				printableScopedCacheTags(serializeScopedCacheTags(purged)),
 			);
 		}
 	}

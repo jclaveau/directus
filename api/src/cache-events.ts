@@ -9,6 +9,7 @@ import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
+import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 
 // The timeseries wire types live in @directus/types so the app chart shares them.
 export type {
@@ -895,7 +896,9 @@ async function persistStreamBatch(
 				purgedScopedCacheTags.push({
 					purge_id: f['purgeId'] ?? '',
 					time: at,
-					scoped_cache_tag: scopedCacheTag,
+					// Escaped on the way into the column, not at the producer, so any
+					// caller queueing a purge is covered — a raw NUL fails the whole tick.
+					scoped_cache_tag: printableScopedCacheTags(scopedCacheTag),
 					collection: collectionOfScopedCacheTag(scopedCacheTag),
 				});
 			}
@@ -968,7 +971,8 @@ async function persistStreamBatch(
 					row.cache_key,
 					filledUnder.map((scopedCacheTag) => {
 						return {
-							scoped_cache_tag: scopedCacheTag,
+							// Same escaping as the purge side, or the two stop joining.
+							scoped_cache_tag: printableScopedCacheTags(scopedCacheTag),
 							collection: collectionOfScopedCacheTag(scopedCacheTag),
 						};
 					}),
