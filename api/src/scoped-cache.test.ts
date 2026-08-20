@@ -215,6 +215,14 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 		.toEqual(['node']);
 	});
 
+	// Deliberate, and the reason is cost: those rows survive in their slices, and
+	// finding which ones moved means scanning by an unindexed foreign key per delete.
+	it('leaves itself out when a self-relation only nulls the foreign key', () => {
+		const schema = { relations: [nullify('node', 'node')] } as any;
+
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node')).toEqual([]);
+	});
+
 	it('reports the root again when a cascade cycles back into it', () => {
 		const schema = {
 			relations: [cascade('child', 'parent'), cascade('parent', 'child')],

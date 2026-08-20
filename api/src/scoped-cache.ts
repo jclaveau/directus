@@ -192,9 +192,11 @@ const rowChangingOnDeleteRules = ['CASCADE', 'SET NULL', 'SET DEFAULT'];
  *   - `SET NULL` and `SET DEFAULT` leave the rows in place carrying a changed
  *     foreign key — a slice they have left — and stop there, since nothing below
  *     a surviving row changes.
- * `collection` is reported like any other when a rule reaches back into it: the rows
- * the database removes there are ones the caller never named, so the snapshot taken
- * from its keys does not cover them.
+ * `collection` is reported when a `CASCADE` reaches back into it — the rows the
+ * database removes there are ones the caller never named, so the snapshot taken from
+ * its keys does not cover them. A self-referencing `SET NULL` / `SET DEFAULT` is
+ * left out on purpose: those rows survive in their slices, and finding which ones
+ * the rule rewrote means scanning by a foreign key Directus does not index.
  */
 export function scopedCacheCollectionsChangedByOnDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
@@ -220,6 +222,13 @@ export function scopedCacheCollectionsChangedByOnDelete(
 				|| onDelete === undefined
 				|| rowChangingOnDeleteRules.includes(onDelete) === false
 			) {
+				continue;
+			}
+
+			// A rule reaching back into the mutated collection counts only when it
+			// deletes. One that rewrites a foreign key leaves the rows where they
+			// were, and resolving which slices they sit in costs a scan per delete.
+			if (child === collection && onDelete !== 'CASCADE') {
 				continue;
 			}
 
