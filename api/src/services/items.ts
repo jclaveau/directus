@@ -239,14 +239,12 @@ implements AbstractService<Item> {
 	private async purgeScopedCache(
 		tags: ScopedCacheTag[] | null,
 		collector?: Pick<ScopedCacheCollector, 'tags'>,
-		extraTags: ScopedCacheTag[] = [],
+		changedCollections: string[] = [],
 	): Promise<void> {
 		const context = this.scopedCachePurgeContext();
-		// Both reach collections OTHER than this one, so they ride the same channel —
-		// including beside the coarse pass, which owns only this collection's bare tag.
-		const hookTags = [...(collector?.tags ?? []), ...extraTags];
+		const hookTags = collector?.tags ?? [];
 
-		if (tags !== null) {
+		if (tags !== null && changedCollections.length === 0) {
 			this.scopedCachePurged = await purgeScopedCache(
 				this.cache,
 				this.collection,
@@ -257,45 +255,68 @@ implements AbstractService<Item> {
 			return;
 		}
 
-		// A `null` tag set means this collection's own slices are unresolvable → coarse
-		// whole-collection purge (bare tag + every slice). Tags a hook added via
-		// `context.scopedCache` are often for OTHER collections the coarse pass never
-		// reaches, so purge them too — but with `includeCollectionTag: false`, since the
-		// coarse pass already owns this collection's bare tag (else it's purged twice
-		// and doubled in the debug header).
-		//
-		// The two operations share one purge id for the same reason they share one
-		// header: they are one purge. Telemetry counts by that id, so without it an
-		// entry both reach reports two purges for the one mutation that caused them.
+		// Every operation below serves one mutation, so they share one purge id for
+		// the same reason they share one header: they are one purge. Telemetry counts
+		// by that id, so without it an entry several of them reach reports several
+		// purges for the one mutation that caused them. The single-operation case
+		// returns above precisely so it keeps minting its own, being its own purge.
 		const scopedCachePurgeId = randomUUID();
+		const purged: (ScopedCacheTag[] | null)[] = [];
 
-		const coarsePurged = await purgeScopedCache(
-			this.cache,
-			this.collection,
-			null,
-			context,
-			{ scopedCachePurgeId },
-		);
+		if (tags !== null) {
+			purged.push(await purgeScopedCache(
+				this.cache,
+				this.collection,
+				[...tags, ...hookTags],
+				context,
+				{ scopedCachePurgeId },
+			));
+		}
+		else {
+			// A `null` tag set means this collection's own slices are unresolvable →
+			// coarse whole-collection purge (bare tag + every slice).
+			purged.push(await purgeScopedCache(
+				this.cache,
+				this.collection,
+				null,
+				context,
+				{ scopedCachePurgeId },
+			));
 
-		if (hookTags.length === 0) {
-			this.scopedCachePurged = coarsePurged;
-			return;
+			// Tags a hook added via `context.scopedCache` are often for OTHER collections
+			// the coarse pass never reaches, so purge them too — but with
+			// `includeCollectionTag: false`, since the coarse pass already owns this
+			// collection's bare tag (else it's purged twice and doubled in the header).
+			if (hookTags.length > 0) {
+				purged.push(await purgeScopedCache(
+					this.cache,
+					this.collection,
+					hookTags,
+					context,
+					{ includeCollectionTag: false, scopedCachePurgeId },
+				));
+			}
 		}
 
-		const hookPurged = await purgeScopedCache(
-			this.cache,
-			this.collection,
-			hookTags,
-			context,
-			{ includeCollectionTag: false, scopedCachePurgeId },
-		);
+		// A collection the database changed under this mutation. Which of its slices
+		// moved is unresolvable — those rows were never read — and its bare tag indexes
+		// none of them (a read bounded to one value is filed under that slice alone), so
+		// each takes the collection-wide purge rather than a tag that cannot reach it.
+		purged.push(...await Promise.all(changedCollections.map((changedCollection) => {
+			return purgeScopedCache(
+				this.cache,
+				changedCollection,
+				null,
+				context,
+				{ scopedCachePurgeId },
+			);
+		})));
 
-		// Reflect BOTH purges in the dev debug header (coarse ∪ hook); a `null` from
-		// either means the whole namespace was flushed, which already covers everything.
-		this.scopedCachePurged =
-			coarsePurged === null || hookPurged === null
-				? null
-				: [...coarsePurged, ...hookPurged];
+		// Reflect every purge in the dev debug header; a `null` from any of them means
+		// the whole namespace was flushed, which already covers what the others reached.
+		this.scopedCachePurged = purged.some((tagSet) => tagSet === null)
+			? null
+			: purged.flatMap((tagSet) => tagSet ?? []);
 	}
 
 	private get collectionScopedCacheFields(): string[] {
@@ -1993,17 +2014,13 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Bare tag per changed collection: resolving their slices would mean reading
-			// every affected row before the delete, on the hot path.
-			const changedTags = scopedCacheCollectionsChangedByOnDelete(
-				this.schema,
-				this.collection,
-			).map((collection) => ({ collection }));
-
 			await this.purgeScopedCache(
 				oldScopedCacheTags,
 				scopedCacheCollector,
-				changedTags,
+				scopedCacheCollectionsChangedByOnDelete(
+					this.schema,
+					this.collection,
+				),
 			);
 		}
 

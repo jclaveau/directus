@@ -106,8 +106,8 @@ describe('the exit form', () => {
 	});
 });
 
-// The blackbox witness covers the parent/child/grandchild walk end to end; these are
-// the shapes it cannot build — a self-referencing FK and a diamond.
+// The blackbox witness covers the rules end to end against a real database; these
+// are the shapes it cannot build — a cycle, a diamond, and a rule-less relation.
 describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	function cascade(collection: string, related: string) {
 		return {
@@ -167,23 +167,61 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 		.toEqual(['child', 'grandchild']);
 	});
 
-	it('ignores a rule that leaves the rows untouched', () => {
+	// The default is nullable here or not, but either way the row keeps its place
+	// carrying a foreign key it did not have — the SET NULL shape under another name.
+	it('reports a collection whose foreign key is reset to a default', () => {
 		const schema = {
 			relations: [{
 				collection: 'child',
 				related_collection: 'parent',
-				schema: { on_delete: 'NO ACTION' },
+				schema: { on_delete: 'SET DEFAULT' },
 			}],
+		} as any;
+
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
+		.toEqual(['child']);
+	});
+
+	it.each(['NO ACTION', 'RESTRICT'])(
+		'ignores %s, which refuses the delete',
+		(rule) => {
+		const schema = {
+			relations: [{
+				collection: 'child',
+				related_collection: 'parent',
+				schema: { on_delete: rule },
+			}],
+		} as any;
+
+			expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
+			.toEqual([]);
+		},
+	);
+
+	it('ignores a relation the database defines no rule for', () => {
+		const schema = {
+			relations: [{ collection: 'child', related_collection: 'parent' }],
 		} as any;
 
 		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent')).toEqual([]);
 	});
 
-	it('terminates on a self-referencing cascade', () => {
+	// The rows it takes down are its own, and the caller named only the one key, so
+	// every other slice of it would stay warm on a tag purge built from that key.
+	it('reports itself on a self-referencing cascade, and terminates', () => {
 		const schema = { relations: [cascade('node', 'node')] } as any;
 
-		// The collection already purges its own tags, so it is not its own descendant.
-		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node')).toEqual([]);
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node'))
+		.toEqual(['node']);
+	});
+
+	it('reports the root again when a cascade cycles back into it', () => {
+		const schema = {
+			relations: [cascade('child', 'parent'), cascade('parent', 'child')],
+		} as any;
+
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
+		.toEqual(['child', 'parent']);
 	});
 
 	it('reports a diamond once and terminates', () => {

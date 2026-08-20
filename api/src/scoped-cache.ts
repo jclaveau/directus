@@ -181,15 +181,29 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 		.join(', ');
 }
 
-// The collections a delete on `collection` also changes through the database's own
-// ON DELETE rules. It applies them itself, so nothing else ever purges them.
+// The `ON DELETE` rules that change rows. NO ACTION and RESTRICT make the database
+// refuse the delete instead, leaving nothing to purge.
+const rowChangingOnDeleteRules = ['CASCADE', 'SET NULL', 'SET DEFAULT'];
+
+/**
+ * The collections a delete on `collection` also changes through the database's own
+ * `ON DELETE` rules. It applies them itself, so nothing else ever purges them.
+ *   - `CASCADE` deletes the rows, so the walk carries on into their own children.
+ *   - `SET NULL` and `SET DEFAULT` leave the rows in place carrying a changed
+ *     foreign key — a slice they have left — and stop there, since nothing below
+ *     a surviving row changes.
+ * `collection` is reported like any other when a rule reaches back into it: the rows
+ * the database removes there are ones the caller never named, so the snapshot taken
+ * from its keys does not cover them.
+ */
 export function scopedCacheCollectionsChangedByOnDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
 	collection: string,
 ): string[] {
 	const changed = new Set<string>();
-	// Separate from `changed`: a collection reached by SET NULL first and CASCADE
-	// later must still be walked into on the cascading path.
+	// Separate from `changed`: a collection reached by a non-propagating rule first
+	// and a cascade later must still be walked into on the cascading path. Seeded
+	// with the root, which is what terminates a collection cascading into itself.
 	const walked = new Set<string>([collection]);
 	const pending = [collection];
 
@@ -203,17 +217,16 @@ export function scopedCacheCollectionsChangedByOnDelete(
 
 			if (
 				relation.related_collection !== parent
-				|| (onDelete !== 'CASCADE' && onDelete !== 'SET NULL')
-				// The root purges its own tags already; this also closes a self-reference.
-				|| child === collection
+				|| onDelete === undefined
+				|| rowChangingOnDeleteRules.includes(onDelete) === false
 			) {
 				continue;
 			}
 
 			changed.add(child);
 
-			// CASCADE removes the rows, so their own children follow. SET NULL leaves them
-			// in place with a nulled FK, and nothing below a surviving row changes.
+			// CASCADE removes the rows, so their own children follow. The other rules
+			// leave them in place, and nothing below a surviving row changes.
 			if (onDelete === 'CASCADE' && ! walked.has(child)) {
 				walked.add(child);
 				pending.push(child);
@@ -223,6 +236,7 @@ export function scopedCacheCollectionsChangedByOnDelete(
 
 	return [...changed];
 }
+
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the
