@@ -6,6 +6,7 @@ import {
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
 	scopedCacheTagKey,
+	scopedCacheCascadedCollections,
 } from './scoped-cache.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -102,6 +103,60 @@ describe('the exit form', () => {
 	it('leaves a printable tag list untouched', () => {
 		expect(printableScopedCacheTags('articles, articles:author=7'))
 		.toBe('articles, articles:author=7');
+	});
+});
+
+// The blackbox witness covers the parent/child/grandchild walk end to end; these are
+// the shapes it cannot build — a self-referencing FK and a diamond.
+describe('scopedCacheCascadedCollections', () => {
+	function cascade(collection: string, related: string) {
+		return {
+			collection,
+			related_collection: related,
+			schema: { on_delete: 'CASCADE' },
+		};
+	}
+
+	it('walks children and grandchildren', () => {
+		const schema = {
+			relations: [cascade('child', 'parent'), cascade('grandchild', 'child')],
+		} as any;
+
+		expect(scopedCacheCascadedCollections(schema, 'parent'))
+		.toEqual(['child', 'grandchild']);
+	});
+
+	it('ignores a relation that does not cascade', () => {
+		const schema = {
+			relations: [{
+				collection: 'child',
+				related_collection: 'parent',
+				schema: { on_delete: 'SET NULL' },
+			}],
+		} as any;
+
+		expect(scopedCacheCascadedCollections(schema, 'parent')).toEqual([]);
+	});
+
+	it('terminates on a self-referencing cascade', () => {
+		const schema = { relations: [cascade('node', 'node')] } as any;
+
+		// The collection already purges its own tags, so it is not its own descendant.
+		expect(scopedCacheCascadedCollections(schema, 'node')).toEqual([]);
+	});
+
+	it('reports a diamond once and terminates', () => {
+		const schema = {
+			relations: [
+				cascade('left', 'parent'),
+				cascade('right', 'parent'),
+				cascade('leaf', 'left'),
+				cascade('leaf', 'right'),
+			],
+		} as any;
+
+		expect(scopedCacheCascadedCollections(schema, 'parent'))
+		.toEqual(['left', 'right', 'leaf']);
 	});
 });
 

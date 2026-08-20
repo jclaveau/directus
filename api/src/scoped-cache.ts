@@ -181,6 +181,40 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 		.join(', ');
 }
 
+// The collections a delete on `collection` also empties through ON DELETE CASCADE,
+// transitively. The database applies those itself, so nothing else ever purges them.
+export function scopedCacheCascadedCollections(
+	schema: Pick<SchemaOverview, 'relations'>,
+	collection: string,
+): string[] {
+	const cascaded = new Set<string>();
+	const pending = [collection];
+
+	while (pending.length > 0) {
+		const parent = pending.shift()!;
+
+		for (const relation of schema.relations) {
+			// `collection` holds the FK (the child); `related_collection` is the parent.
+			if (
+				relation.related_collection !== parent
+				|| relation.schema?.on_delete !== 'CASCADE'
+			) {
+				continue;
+			}
+
+			// Closes both cycles: a self-referencing FK, and a diamond where two paths
+			// reach the same collection.
+			if (relation.collection === collection || cascaded.has(relation.collection)) {
+				continue;
+			}
+
+			cascaded.add(relation.collection);
+			pending.push(relation.collection);
+		}
+	}
+
+	return [...cascaded];
+}
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the

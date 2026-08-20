@@ -33,6 +33,7 @@ import {
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
+	scopedCacheCascadedCollections,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
@@ -238,9 +239,12 @@ implements AbstractService<Item> {
 	private async purgeScopedCache(
 		tags: ScopedCacheTag[] | null,
 		collector?: Pick<ScopedCacheCollector, 'tags'>,
+		extraTags: ScopedCacheTag[] = [],
 	): Promise<void> {
 		const context = this.scopedCachePurgeContext();
-		const hookTags = collector?.tags ?? [];
+		// Both reach collections OTHER than this one, so they ride the same channel —
+		// including beside the coarse pass, which owns only this collection's bare tag.
+		const hookTags = [...(collector?.tags ?? []), ...extraTags];
 
 		if (tags !== null) {
 			this.scopedCachePurged = await purgeScopedCache(
@@ -1989,7 +1993,18 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.purgeScopedCache(oldScopedCacheTags, scopedCacheCollector);
+			// Bare tag per cascaded collection: resolving their slices would mean reading
+			// every doomed descendant row before the delete, on the hot path.
+			const cascadeTags = scopedCacheCascadedCollections(
+				this.schema,
+				this.collection,
+			).map((collection) => ({ collection }));
+
+			await this.purgeScopedCache(
+				oldScopedCacheTags,
+				scopedCacheCollector,
+				cascadeTags,
+			);
 		}
 
 		if (opts.emitEvents !== false) {
