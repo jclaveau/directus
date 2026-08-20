@@ -467,12 +467,12 @@ describe('dropScopedCacheTagIndex', () => {
 		// scanned only that pattern would leave it naming keys it just dropped.
 		expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:slices:*', 'COUNT', 250);
 
-		expect(del).toHaveBeenCalledWith(
+		expect(del).toHaveBeenCalledWith([
 			'ns:tag:articles',
 			'ns:tag:authors',
 			'ns:tag:articles:id=1',
 			'ns:slices:articles',
-		);
+		]);
 	});
 
 	it('no-ops (never DELs an empty list) when nothing matches', async () => {

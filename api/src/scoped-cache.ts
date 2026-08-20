@@ -394,7 +394,9 @@ async function purgeScopedCacheTagKeys(
 		return cache.delete(member);
 	}));
 
-	await redis.del(...tagKeys);
+	// Array form: one key per tag purged, so a spread throws RangeError once
+	// the list is long enough.
+	await redis.del(tagKeys);
 
 	// Drop the purged slice keys from their collection's index: one pruned only
 	// wholesale keeps naming keys that are gone, and grows without bound. A
@@ -485,7 +487,8 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 		return;
 	}
 
-	await useRedis().del(...tagKeys);
+	// Array form: this list is a whole-keyspace scan, so it is the longest of them.
+	await useRedis().del(tagKeys);
 }
 
 /**
