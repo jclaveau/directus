@@ -7,6 +7,7 @@
 		"build": "pnpm --recursive run build",
 		"lint": "eslint --cache .",
 		"lint:style:changes": "node scripts/lint-style-changes.mjs",
+    "lint:rules:test": "node eslint-rules/single-use-rules.test.mjs",
 		"lint:style": "stylelint '**/*.{css,scss,vue}' --ignore-path .gitignore --cache",
 		"test": "pnpm --recursive --filter '!tests-blackbox' test",
 		"test:blackbox": "rimraf ./dist && pnpm --filter directus deploy --legacy --prod dist && pnpm --filter tests-blackbox test",
