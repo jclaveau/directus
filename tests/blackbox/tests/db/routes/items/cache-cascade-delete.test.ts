@@ -16,16 +16,18 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // Scoped purging is driven by ItemsService: snapshot the mutated collection's
-// scope values, then purge its tags. A database-level ON DELETE CASCADE never
-// goes through the service — no call, no items.delete event, no snapshot, no
-// purge — so deleting a parent removes the child rows underneath while their
-// cache entries stay indexed and servable until TTL. Reads of a collection
-// reachable only by cascade therefore serve rows that no longer exist, and a
-// grandchild cascades just as silently.
+// scope values, then purge its tags. A database-level ON DELETE never goes
+// through the service — no call, no items.delete event, no snapshot, no purge.
+// CASCADE removes the child rows underneath, so their entries describe rows that
+// are gone. SET NULL is the quieter half: the rows survive with a nulled FK, so
+// they keep being served under a slice they no longer belong to. It also stops
+// there — nothing below a nulled row changes, so its own children stay warm.
 
 const PARENT = 'test_items_cascade_parent';
 const CHILD = 'test_items_cascade_child';
 const GRANDCHILD = 'test_items_cascade_grandchild';
+const NULLED = 'test_items_cascade_nulled';
+const NULLED_CHILD = 'test_items_cascade_nulled_child';
 const SIBLING = 'test_items_cascade_sibling';
 const cacheStatusHeader = 'x-cache-status';
 
@@ -50,7 +52,8 @@ describe(oneLine`
 
 		beforeAll(async () => {
 			await CreateCollections(vendor, {
-				collections: [PARENT, CHILD, GRANDCHILD, SIBLING].map((collection) => {
+				collections: [PARENT, CHILD, GRANDCHILD, NULLED, NULLED_CHILD, SIBLING]
+					.map((collection) => {
 					return {
 						collection,
 						fields: [{ field: 'label', type: 'string', meta: {} }],
@@ -74,6 +77,22 @@ describe(oneLine`
 				relationSchema: { on_delete: 'CASCADE' },
 			});
 
+			// The other half: these rows outlive the parent, carrying a nulled FK.
+			await CreateFieldM2O(vendor, {
+				collection: NULLED,
+				field: 'parent',
+				otherCollection: PARENT,
+				relationSchema: { on_delete: 'SET NULL' },
+			});
+
+			// Below a nulled row nothing changes, so this one must stay warm.
+			await CreateFieldM2O(vendor, {
+				collection: NULLED_CHILD,
+				field: 'nulled',
+				otherCollection: NULLED,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
 			const parents = await CreateItem(vendor, {
 				collection: PARENT,
 				item: [{ label: 'doomed' }],
@@ -86,10 +105,19 @@ describe(oneLine`
 				item: [{ label: 'child-of-doomed', parent: doomedParent }],
 			});
 
+			const nulled = await CreateItem(vendor, {
+				collection: NULLED,
+				item: [{ label: 'nulled-by-doomed', parent: doomedParent }],
+			});
+
 			await Promise.all([
 				CreateItem(vendor, {
 					collection: GRANDCHILD,
 					item: [{ label: 'grandchild-of-doomed', child: children[0].id }],
+				}),
+				CreateItem(vendor, {
+					collection: NULLED_CHILD,
+					item: [{ label: 'child-of-nulled', nulled: nulled[0].id }],
 				}),
 				CreateItem(vendor, {
 					collection: SIBLING,
@@ -111,9 +139,14 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
-			// Grandchild first: its FK holds the child, and the child's holds the parent.
+			// Depth first: every FK must go before the collection it points at.
 			await DeleteCollection(vendor, { collection: GRANDCHILD });
-			await DeleteCollection(vendor, { collection: CHILD });
+			await DeleteCollection(vendor, { collection: NULLED_CHILD });
+
+			await Promise.all([
+				DeleteCollection(vendor, { collection: CHILD }),
+				DeleteCollection(vendor, { collection: NULLED }),
+			]);
 
 			await Promise.all([
 				DeleteCollection(vendor, { collection: PARENT }),
@@ -128,8 +161,8 @@ describe(oneLine`
 		}
 
 		it(oneLine`
-			a cascaded child and grandchild go cold with the parent, while an unrelated
-			collection stays warm
+			a delete purges what it cascades into and what it nulls, and nothing past a
+			nulled row
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -140,6 +173,8 @@ describe(oneLine`
 			const warmed = await Promise.all([
 				read(CHILD),
 				read(GRANDCHILD),
+				read(NULLED),
+				read(NULLED_CHILD),
 				read(SIBLING),
 			]);
 
@@ -151,14 +186,23 @@ describe(oneLine`
 				.delete(`/items/${PARENT}/${doomedParent}`)
 				.set('Authorization', auth);
 
-			const [child, grandchild, sibling] = await Promise.all([
+			const [child, grandchild, nulled, nulledChild, sibling] = await Promise.all([
 				read(CHILD),
 				read(GRANDCHILD),
+				read(NULLED),
+				read(NULLED_CHILD),
 				read(SIBLING),
 			]);
 
 			expect(child.headers[cacheStatusHeader]).toBe('MISS');
 			expect(grandchild.headers[cacheStatusHeader]).toBe('MISS');
+
+			// The nulled rows survive, so this entry is not describing absent rows — it
+			// is describing them under a foreign key they no longer carry.
+			expect(nulled.headers[cacheStatusHeader]).toBe('MISS');
+
+			// SET NULL does not propagate, so purging past it would be over-purging.
+			expect(nulledChild.headers[cacheStatusHeader]).toBe('HIT');
 
 			// The control: a coarse "purge everything on any delete" would drop this too,
 			// so it is what keeps the assertions above meaningful.
@@ -169,6 +213,11 @@ describe(oneLine`
 			expect(child.body.data).toHaveLength(0);
 			expect(grandchild.body.data).toHaveLength(0);
 			expect(sibling.body.data).toHaveLength(1);
+
+			// The distinction from a cascade: still one row, now pointing at nothing.
+			expect(nulled.body.data).toHaveLength(1);
+			expect(nulled.body.data[0].parent).toBe(null);
+			expect(nulledChild.body.data).toHaveLength(1);
 		});
 	});
 });
