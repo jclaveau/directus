@@ -69,6 +69,24 @@ describe('the tag display form', () => {
 			{ collection: 'articles', field: 'author', value: 7 },
 		])).toBe('articles, articles:author=7');
 	});
+
+	// A raw NUL is rejected by res.setHeader (ERR_INVALID_CHAR), which took down
+	// every write to a collection whose scope field was null on the row.
+	it('escapes the NULL token so a nullable scope stays header-legal', () => {
+		expect(scopedCacheTagLabel({
+			collection: 'student_method_range',
+			field: 'method',
+			value: null,
+		})).toBe('student_method_range:method=%00null');
+	});
+
+	it('escapes any control byte carried by a string scope value', () => {
+		expect(scopedCacheTagLabel({
+			collection: 'articles',
+			field: 'slug',
+			value: 'a\u001Fb\u007F',
+		})).toBe('articles:slug=a%1Fb%7F');
+	});
 });
 
 describe('countScopedCacheTagMembers', () => {
