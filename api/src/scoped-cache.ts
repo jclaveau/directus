@@ -422,8 +422,10 @@ async function purgeScopedCacheTagKeys(
 		]);
 	}
 
+	// One member per slice the collection owns, so the array form: a spread
+	// throws RangeError once the list is long enough.
 	await Promise.all([...sliceKeysByCollection].map(([collection, sliceKeys]) => {
-		return redis.srem(scopedCacheCollectionSlicesKey(collection), ...sliceKeys);
+		return redis.srem(scopedCacheCollectionSlicesKey(collection), sliceKeys);
 	}));
 
 	const present = new Set(members);

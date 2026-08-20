@@ -599,8 +599,10 @@ describe('scoped cache purging', () => {
 			// it would grow without bound and inflate every count taken off it.
 			expect(redis.srem).toHaveBeenCalledWith(
 				'scalabus:slices:articles',
-				'scalabus:tag:articles:author=1',
-				'scalabus:tag:articles:author=2',
+				[
+					'scalabus:tag:articles:author=1',
+					'scalabus:tag:articles:author=2',
+				],
 			);
 		});
 

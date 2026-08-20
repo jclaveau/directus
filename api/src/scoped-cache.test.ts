@@ -444,7 +444,7 @@ describe('collection slice index', () => {
 
 		// An index pruned only wholesale keeps naming keys that are gone.
 		expect(srem)
-		.toHaveBeenCalledWith('ns:slices:articles', 'ns:tag:articles:author=7');
+		.toHaveBeenCalledWith('ns:slices:articles', ['ns:tag:articles:author=7']);
 	});
 });
 
