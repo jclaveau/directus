@@ -57,7 +57,6 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// would render a boolean slice `=1` where production writes `=true`, so
 		// the test would agree with itself while the purge join matched nothing.
 		scopedCacheTagLabel: actual.scopedCacheTagLabel,
-		headerSafeScopedCacheTags: actual.headerSafeScopedCacheTags,
 	};
 });
 
