@@ -18,6 +18,7 @@ const redis = vi.hoisted(() => {
 		isCluster: false,
 		smembers: vi.fn(),
 		del: vi.fn(),
+		srem: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
@@ -264,12 +265,18 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: '7' },
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledOnce();
+			// One tag set, plus the one index entry filing it under its collection.
+			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
+			);
+
+			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+				'scalabus:slices:slots',
+				'scalabus:tag:slots:student=7',
 			);
 		});
 
@@ -279,7 +286,8 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledOnce();
+			// The tag set and its index entry, once each — not once per duplicate.
+			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
 		});
 
 		test('no-op when no tags', async () => {
@@ -408,13 +416,15 @@ describe('scoped cache purging', () => {
 		});
 
 		test('records the coarse fallback as the wider thing it is', async () => {
-			redis.scan.mockResolvedValueOnce([
-				'0',
-				['scalabus:tag:articles:author=1', 'scalabus:tag:articles:author=2'],
-			]);
+			redis.smembers.mockImplementation(async (key: string) => {
+				if (key === 'scalabus:slices:articles') {
+					return [
+						'scalabus:tag:articles:author=1',
+						'scalabus:tag:articles:author=2',
+					];
+				}
 
-			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'scalabus:tag:articles'
+				return key === 'scalabus:tag:articles'
 					? ['global-key']
 					: ['slice-key'];
 			});
@@ -423,7 +433,7 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			// Three tag sets: the bare tag plus every slice the scan turned up. Two
+			// Three tag sets: the bare tag plus every slice the index named. Two
 			// entries, because both slices pointed at the same key — deduped across
 			// the sets rather than counted per set.
 			expect(queueCachePurge).toHaveBeenCalledWith({
@@ -445,16 +455,16 @@ describe('scoped cache purging', () => {
 			// The fallback scans up to every slice of the collection. It is still a
 			// single purge operation, so a bucket count of purges stays a count of
 			// purges rather than tracking how wide each one happened to reach.
-			redis.scan.mockResolvedValueOnce([
-				'0',
-				[
-					'scalabus:tag:articles:author=1',
-					'scalabus:tag:articles:author=2',
-					'scalabus:tag:articles:author=3',
-				],
-			]);
+			redis.smembers.mockImplementation(async (key: string) => {
+				return key === 'scalabus:slices:articles'
+					? [
+						'scalabus:tag:articles:author=1',
+						'scalabus:tag:articles:author=2',
+						'scalabus:tag:articles:author=3',
+					]
+					: [];
+			});
 
-			redis.smembers.mockResolvedValue([]);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', null);
@@ -530,13 +540,15 @@ describe('scoped cache purging', () => {
 			null scopedCacheTags falls back to a collection-wide purge (bare tag + every
 			slice), sparing other collections
 		`, async () => {
-			redis.scan.mockResolvedValueOnce([
-				'0',
-				['scalabus:tag:articles:author=1', 'scalabus:tag:articles:author=2'],
-			]);
+			redis.smembers.mockImplementation(async (key: string) => {
+				if (key === 'scalabus:slices:articles') {
+					return [
+						'scalabus:tag:articles:author=1',
+						'scalabus:tag:articles:author=2',
+					];
+				}
 
-			redis.smembers.mockImplementation(async (tagKey: string) => {
-				if (tagKey === 'scalabus:tag:articles') {
+				if (key === 'scalabus:tag:articles') {
 					return ['global-key'];
 				}
 
@@ -547,14 +559,10 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			// The `:` delimiter keeps a prefix sibling (`articles_archive`) out of the scan.
-			expect(redis.scan).toHaveBeenCalledWith(
-				'0',
-				'MATCH',
-				'scalabus:tag:articles:*',
-				'COUNT',
-				250,
-			);
+			// Its own index rather than a keyspace walk, which is also what keeps a
+			// prefix sibling (`articles_archive`) out of the purge.
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:slices:articles');
+			expect(redis.scan).not.toHaveBeenCalled();
 
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles:author=1');
@@ -570,29 +578,27 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
-		test('the collection-wide purge follows the scan cursor across batches', async () => {
-			redis.scan
-				.mockResolvedValueOnce(['42', ['scalabus:tag:articles:author=1']])
-				.mockResolvedValueOnce(['0', ['scalabus:tag:articles:author=2']]);
+		test('the collection-wide purge takes every slice the index names', async () => {
+			redis.smembers.mockImplementation(async (key: string) => {
+				return key === 'scalabus:slices:articles'
+					? ['scalabus:tag:articles:author=1', 'scalabus:tag:articles:author=2']
+					: [];
+			});
 
-			redis.smembers.mockResolvedValue([]);
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			expect(redis.scan).toHaveBeenCalledTimes(2);
-
-			expect(redis.scan).toHaveBeenNthCalledWith(
-				2,
-				'42',
-				'MATCH',
-				'scalabus:tag:articles:*',
-				'COUNT',
-				250,
-			);
-
 			expect(redis.del).toHaveBeenCalledWith(
 				'scalabus:tag:articles',
+				'scalabus:tag:articles:author=1',
+				'scalabus:tag:articles:author=2',
+			);
+
+			// The index is pruned by the same purge: left naming keys it just dropped,
+			// it would grow without bound and inflate every count taken off it.
+			expect(redis.srem).toHaveBeenCalledWith(
+				'scalabus:slices:articles',
 				'scalabus:tag:articles:author=1',
 				'scalabus:tag:articles:author=2',
 			);

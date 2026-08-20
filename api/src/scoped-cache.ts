@@ -155,6 +155,12 @@ function isPinnableScopeType(type: Type | undefined): boolean {
 	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
 }
 
+// The slice tag keys a collection currently owns, so a collection-wide purge reads
+// them instead of walking the whole keyspace to find them again.
+function scopedCacheCollectionSlicesKey(collection: string): string {
+	return `${env['CACHE_NAMESPACE']}:slices:${collection}`;
+}
+
 export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
 	return tag.field === undefined
@@ -267,23 +273,52 @@ export async function tagScopedCacheKeys(
 		return;
 	}
 
-	const tagKeys = [...new Set([...scopedCacheTags].map(scopedCacheTagKey))];
+	const taggedKeys = new Set<string>();
 
-	if (tagKeys.length === 0) {
+	for (const tag of scopedCacheTags) {
+		taggedKeys.add(scopedCacheTagKey(tag));
+	}
+
+	if (taggedKeys.size === 0) {
 		return;
 	}
 
 	const redis = useRedis();
 	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000) * 2;
 	const pipeline = redis.pipeline();
+	const filedKeys = new Set<string>();
 
-	for (const tagKey of tagKeys) {
+	for (const tag of scopedCacheTags) {
+		const tagKey = scopedCacheTagKey(tag);
+
+		if (filedKeys.has(tagKey)) {
+			continue;
+		}
+
+		filedKeys.add(tagKey);
+
 		// `extraSiblings` = other keys written with the entry a purge must also drop
 		// — e.g. the dev-only `${key}__tags` sibling (respond.ts). Empty by default.
 		pipeline.sadd(tagKey, key, `${key}__expires_at`, ...extraSiblings);
 
 		if (ttlSeconds > 0) {
 			pipeline.expire(tagKey, ttlSeconds);
+		}
+
+		// The bare tag is where a collection-wide purge starts, so filing it would
+		// only name a key that purge already holds.
+		if (tag.field === undefined) {
+			continue;
+		}
+
+		const slicesKey = scopedCacheCollectionSlicesKey(tag.collection);
+
+		pipeline.sadd(slicesKey, tagKey);
+
+		// Same expiry as the tag sets it names, written in the same pipeline, so the
+		// index cannot outlive — or predecease — what it points at.
+		if (ttlSeconds > 0) {
+			pipeline.expire(slicesKey, ttlSeconds);
 		}
 	}
 
@@ -361,6 +396,36 @@ async function purgeScopedCacheTagKeys(
 
 	await redis.del(...tagKeys);
 
+	// Drop the purged slice keys from their collection's index: one pruned only
+	// wholesale keeps naming keys that are gone, and grows without bound. A
+	// collection name cannot hold a `:`, so the first one after the prefix is
+	// where the field starts.
+	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
+	const sliceKeysByCollection = new Map<string, string[]>();
+
+	for (const tagKey of tagKeys) {
+		const label = tagKey.startsWith(tagPrefix)
+			? tagKey.slice(tagPrefix.length)
+			: '';
+
+		const fieldAt = label.indexOf(':');
+
+		if (fieldAt === -1) {
+			continue;
+		}
+
+		const collection = label.slice(0, fieldAt);
+
+		sliceKeysByCollection.set(collection, [
+			...sliceKeysByCollection.get(collection) ?? [],
+			tagKey,
+		]);
+	}
+
+	await Promise.all([...sliceKeysByCollection].map(([collection, sliceKeys]) => {
+		return redis.srem(scopedCacheCollectionSlicesKey(collection), ...sliceKeys);
+	}));
+
 	const present = new Set(members);
 
 	return members.filter((member, index) => {
@@ -409,7 +474,10 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 		return;
 	}
 
-	const tagKeys = await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`);
+	const tagKeys = [
+		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`),
+		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:slices:*`),
+	];
 
 	if (tagKeys.length === 0) {
 		return;
@@ -432,11 +500,16 @@ export async function purgeCollectionScopedCache(
 ): Promise<void> {
 	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
 
-	// Slice keys are `<bareKey>:<field>=<value>`; the `:` delimiter keeps a prefix-sharing
-	// sibling (`articles` vs `articles_archive`) out of the scan.
+	// Read off the index each slice files itself into, rather than walking the whole
+	// keyspace for keys that a collection owning none can never yield.
 	const startedAt = Date.now();
-	const sliceKeys = await scanScopedCacheTagKeys(`${bareKey}:*`);
+
+	const sliceKeys = await useRedis().smembers(
+		scopedCacheCollectionSlicesKey(collection),
+	);
+
 	const tagKeys = [bareKey, ...sliceKeys];
+
 	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
 	// The expensive mode, and the one nothing else records: every slice of the

@@ -5,7 +5,10 @@ import {
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
+	purgeCollectionScopedCache,
+	purgeScopedCache,
 	scopedCacheTagKey,
+	tagScopedCacheKeys,
 	scopedCacheCollectionsChangedByOnDelete,
 } from './scoped-cache.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
@@ -23,7 +26,15 @@ const env = vi.hoisted(() => {
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
-vi.mock('./emitter.js', () => ({ default: { emitAction: vi.fn() } }));
+
+vi.mock('./emitter.js', () => {
+	return {
+		default: {
+			emitAction: vi.fn(),
+			emitFilter: vi.fn((_event, payload) => payload),
+		},
+	};
+});
 
 const pipeline = {
 	scard: vi.fn().mockReturnThis(),
@@ -372,11 +383,77 @@ describe('createScopedCacheCollector', () => {
 	});
 });
 
+describe('collection slice index', () => {
+	it('files a slice tag key under its collection, never a bare one', async () => {
+		const indexPipeline = {
+			sadd: vi.fn().mockReturnThis(),
+			expire: vi.fn().mockReturnThis(),
+			exec: vi.fn(),
+		};
+
+		vi.mocked(useRedis).mockReturnValue({ pipeline: () => indexPipeline } as any);
+
+		await tagScopedCacheKeys('entry', [
+			{ collection: 'articles' },
+			{ collection: 'articles', field: 'author', value: 7 },
+		]);
+
+		expect(indexPipeline.sadd)
+		.toHaveBeenCalledWith('ns:slices:articles', 'ns:tag:articles:author=7');
+
+		// The bare tag is where a collection-wide purge starts, so indexing it would
+		// only name a key the purge already holds.
+		expect(indexPipeline.sadd)
+		.not.toHaveBeenCalledWith('ns:slices:articles', 'ns:tag:articles');
+	});
+
+	it('reads a collection purge off the index, not a keyspace scan', async () => {
+		const smembers = vi.fn()
+			.mockResolvedValueOnce(['ns:tag:articles:author=7'])
+			.mockResolvedValue([]);
+
+		const scan = vi.fn();
+
+		vi.mocked(useRedis).mockReturnValue({
+			smembers,
+			scan,
+			del: vi.fn(),
+			srem: vi.fn(),
+		} as any);
+
+		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
+
+		expect(smembers).toHaveBeenCalledWith('ns:slices:articles');
+		expect(scan).not.toHaveBeenCalled();
+	});
+
+	it('drops a purged slice key from its collection index', async () => {
+		const srem = vi.fn();
+
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue([]),
+			del: vi.fn(),
+			srem,
+		} as any);
+
+		await purgeScopedCache(
+			{ delete: vi.fn() } as any,
+			'articles',
+			[{ collection: 'articles', field: 'author', value: 7 }],
+		);
+
+		// An index pruned only wholesale keeps naming keys that are gone.
+		expect(srem)
+		.toHaveBeenCalledWith('ns:slices:articles', 'ns:tag:articles:author=7');
+	});
+});
+
 describe('dropScopedCacheTagIndex', () => {
-	it('scans the tag namespace and deletes every index set', async () => {
+	it('scans both namespaces and deletes every index set', async () => {
 		const scan = vi.fn()
 			.mockResolvedValueOnce(['4', ['ns:tag:articles', 'ns:tag:authors']])
-			.mockResolvedValueOnce(['0', ['ns:tag:articles:id=1']]);
+			.mockResolvedValueOnce(['0', ['ns:tag:articles:id=1']])
+			.mockResolvedValueOnce(['0', ['ns:slices:articles']]);
 
 		const del = vi.fn();
 		vi.mocked(useRedis).mockReturnValue({ scan, del } as any);
@@ -386,10 +463,15 @@ describe('dropScopedCacheTagIndex', () => {
 		expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:tag:*', 'COUNT', 250);
 		expect(scan).toHaveBeenCalledWith('4', 'MATCH', 'ns:tag:*', 'COUNT', 250);
 
+		// The per-collection slice index sits outside `ns:tag:*`, so a flush that
+		// scanned only that pattern would leave it naming keys it just dropped.
+		expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:slices:*', 'COUNT', 250);
+
 		expect(del).toHaveBeenCalledWith(
 			'ns:tag:articles',
 			'ns:tag:authors',
 			'ns:tag:articles:id=1',
+			'ns:slices:articles',
 		);
 	});
 
