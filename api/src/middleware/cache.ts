@@ -114,7 +114,9 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 			try {
 				const stored = await getCacheValue(cache, `${redisKey}__tags`);
 
-				if (stored?.tags) {
+				// Same guard utils.ts puts on this sidecar: anything else flattens into
+				// a garbled header instead of being skipped.
+				if (typeof stored?.tags === 'string' && stored.tags !== '') {
 					res.setHeader(
 						`${env['CACHE_TAGS_HEADER']}`,
 						headerSafeScopedCacheTags(stored.tags),

@@ -190,6 +190,20 @@ describe('checkCacheMiddleware', () => {
 		expect(names).not.toContain('X-Scoped-Cache-Tags');
 	});
 
+	// utils.ts reads this sidecar behind `typeof tagged?.tags === 'string'`; without
+	// the same guard a non-string flattens into a garbled header instead of skipping.
+	test('HIT skips the tags header when the sibling is not a string', async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		primeHit(['articles:owner=U1']);
+
+		const res = makeRes();
+
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		const names = vi.mocked(res.setHeader).mock.calls.map((call) => call[0]);
+		expect(names).not.toContain('X-Scoped-Cache-Tags');
+	});
+
 	test('a __tags read failure is caught and logged, not thrown', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit(undefined, true);
