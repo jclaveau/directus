@@ -181,6 +181,24 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 		.join(', ');
 }
 
+// Escaped here, not in the label: the label stays byte-identical to its Redis key,
+// which countScopedCacheTagMembers rebuilds from it and the tag rows join on.
+export function headerSafeScopedCacheTags(serialized: string): string {
+	return Array.from(serialized)
+		.map((char) => {
+			const code = char.charCodeAt(0);
+
+			if (code >= 0x20 && code !== 0x7F) {
+				return char;
+			}
+
+			const hex = code.toString(16).padStart(2, '0');
+
+			return `%${hex.toUpperCase()}`;
+		})
+		.join('');
+}
+
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the

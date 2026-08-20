@@ -8,6 +8,7 @@ import {
 	queueCacheMiss,
 	readCacheMissGap,
 } from '../cache-events.js';
+import { headerSafeScopedCacheTags } from '../scoped-cache.js';
 import { reportCacheAnomaly } from '../utils/report-cache-anomaly.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
@@ -113,8 +114,13 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 			try {
 				const stored = await getCacheValue(cache, `${redisKey}__tags`);
 
-				if (stored?.tags) {
-					res.setHeader(`${env['CACHE_TAGS_HEADER']}`, stored.tags);
+				// Same guard utils.ts puts on this sidecar: anything else flattens into
+				// a garbled header instead of being skipped.
+				if (typeof stored?.tags === 'string' && stored.tags !== '') {
+					res.setHeader(
+						`${env['CACHE_TAGS_HEADER']}`,
+						headerSafeScopedCacheTags(stored.tags),
+					);
 				}
 			}
 			catch (err: any) {

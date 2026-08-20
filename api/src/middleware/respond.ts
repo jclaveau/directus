@@ -15,6 +15,7 @@ import { useLogger } from '../logger/index.js';
 import {
 	scopedCachePurgeEnabled,
 	serializeScopedCacheTags,
+	headerSafeScopedCacheTags,
 	scopedCacheTagLabel,
 	tagScopedCacheKeys,
 } from '../scoped-cache.js';
@@ -50,7 +51,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		if (Array.isArray(pins) && pins.length) {
 			res.setHeader(
 				`${env['CACHE_TAGS_HEADER']}`,
-				serializeScopedCacheTags(pins),
+				headerSafeScopedCacheTags(serializeScopedCacheTags(pins)),
 			);
 		}
 	}
@@ -61,7 +62,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		if (Array.isArray(purged) && purged.length) {
 			res.setHeader(
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				serializeScopedCacheTags(purged),
+				headerSafeScopedCacheTags(serializeScopedCacheTags(purged)),
 			);
 		}
 	}
