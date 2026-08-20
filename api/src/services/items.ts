@@ -33,7 +33,7 @@ import {
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
-	scopedCacheCascadedCollections,
+	scopedCacheCollectionsDisturbedByDelete,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
@@ -1993,9 +1993,9 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Bare tag per cascaded collection: resolving their slices would mean reading
-			// every doomed descendant row before the delete, on the hot path.
-			const cascadeTags = scopedCacheCascadedCollections(
+			// Bare tag per disturbed collection: resolving their slices would mean reading
+			// every affected row before the delete, on the hot path.
+			const disturbedTags = scopedCacheCollectionsDisturbedByDelete(
 				this.schema,
 				this.collection,
 			).map((collection) => ({ collection }));
@@ -2003,7 +2003,7 @@ implements AbstractService<Item> {
 			await this.purgeScopedCache(
 				oldScopedCacheTags,
 				scopedCacheCollector,
-				cascadeTags,
+				disturbedTags,
 			);
 		}
 

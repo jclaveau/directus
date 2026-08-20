@@ -181,13 +181,16 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 		.join(', ');
 }
 
-// The collections a delete on `collection` also empties through ON DELETE CASCADE,
-// transitively. The database applies those itself, so nothing else ever purges them.
-export function scopedCacheCascadedCollections(
+// The collections a delete on `collection` also disturbs through the database's own
+// ON DELETE rules. It applies them itself, so nothing else ever purges them.
+export function scopedCacheCollectionsDisturbedByDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
 	collection: string,
 ): string[] {
-	const cascaded = new Set<string>();
+	const disturbed = new Set<string>();
+	// Separate from `disturbed`: a collection reached by SET NULL first and CASCADE
+	// later must still be walked into on the cascading path.
+	const walked = new Set<string>([collection]);
 	const pending = [collection];
 
 	while (pending.length > 0) {
@@ -195,25 +198,30 @@ export function scopedCacheCascadedCollections(
 
 		for (const relation of schema.relations) {
 			// `collection` holds the FK (the child); `related_collection` is the parent.
+			const onDelete = relation.schema?.on_delete;
+			const child = relation.collection;
+
 			if (
 				relation.related_collection !== parent
-				|| relation.schema?.on_delete !== 'CASCADE'
+				|| (onDelete !== 'CASCADE' && onDelete !== 'SET NULL')
+				// The root purges its own tags already; this also closes a self-reference.
+				|| child === collection
 			) {
 				continue;
 			}
 
-			// Closes both cycles: a self-referencing FK, and a diamond where two paths
-			// reach the same collection.
-			if (relation.collection === collection || cascaded.has(relation.collection)) {
-				continue;
-			}
+			disturbed.add(child);
 
-			cascaded.add(relation.collection);
-			pending.push(relation.collection);
+			// CASCADE removes the rows, so their own children follow. SET NULL leaves them
+			// in place with a nulled FK, and nothing below a surviving row changes.
+			if (onDelete === 'CASCADE' && ! walked.has(child)) {
+				walked.add(child);
+				pending.push(child);
+			}
 		}
 	}
 
-	return [...cascaded];
+	return [...disturbed];
 }
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later

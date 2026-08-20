@@ -6,7 +6,7 @@ import {
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
 	scopedCacheTagKey,
-	scopedCacheCascadedCollections,
+	scopedCacheCollectionsDisturbedByDelete,
 } from './scoped-cache.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -108,7 +108,7 @@ describe('the exit form', () => {
 
 // The blackbox witness covers the parent/child/grandchild walk end to end; these are
 // the shapes it cannot build — a self-referencing FK and a diamond.
-describe('scopedCacheCascadedCollections', () => {
+describe('scopedCacheCollectionsDisturbedByDelete', () => {
 	function cascade(collection: string, related: string) {
 		return {
 			collection,
@@ -122,27 +122,68 @@ describe('scopedCacheCascadedCollections', () => {
 			relations: [cascade('child', 'parent'), cascade('grandchild', 'child')],
 		} as any;
 
-		expect(scopedCacheCascadedCollections(schema, 'parent'))
+		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
 		.toEqual(['child', 'grandchild']);
 	});
 
-	it('ignores a relation that does not cascade', () => {
+	function nullify(collection: string, related: string) {
+		return {
+			collection,
+			related_collection: related,
+			schema: { on_delete: 'SET NULL' },
+		};
+	}
+
+	// The rows survive with a nulled FK, so they stay indexed under a slice they have
+	// just left — stale in a way a cascade never is.
+	it('reports a collection whose foreign key is nulled', () => {
+		const schema = { relations: [nullify('child', 'parent')] } as any;
+
+		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		.toEqual(['child']);
+	});
+
+	it('stops at a nulled collection, since nothing below it changes', () => {
+		const schema = {
+			relations: [nullify('child', 'parent'), cascade('grandchild', 'child')],
+		} as any;
+
+		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		.toEqual(['child']);
+	});
+
+	// Reached by SET NULL first, so a shared visited-set would have skipped the walk
+	// the cascading path owes it.
+	it('still walks a collection a cascade reaches after a nullify', () => {
+		const schema = {
+			relations: [
+				nullify('child', 'parent'),
+				cascade('child', 'parent'),
+				cascade('grandchild', 'child'),
+			],
+		} as any;
+
+		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		.toEqual(['child', 'grandchild']);
+	});
+
+	it('ignores a rule that leaves the rows untouched', () => {
 		const schema = {
 			relations: [{
 				collection: 'child',
 				related_collection: 'parent',
-				schema: { on_delete: 'SET NULL' },
+				schema: { on_delete: 'NO ACTION' },
 			}],
 		} as any;
 
-		expect(scopedCacheCascadedCollections(schema, 'parent')).toEqual([]);
+		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent')).toEqual([]);
 	});
 
 	it('terminates on a self-referencing cascade', () => {
 		const schema = { relations: [cascade('node', 'node')] } as any;
 
 		// The collection already purges its own tags, so it is not its own descendant.
-		expect(scopedCacheCascadedCollections(schema, 'node')).toEqual([]);
+		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'node')).toEqual([]);
 	});
 
 	it('reports a diamond once and terminates', () => {
@@ -155,7 +196,7 @@ describe('scopedCacheCascadedCollections', () => {
 			],
 		} as any;
 
-		expect(scopedCacheCascadedCollections(schema, 'parent'))
+		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
 		.toEqual(['left', 'right', 'leaf']);
 	});
 });
