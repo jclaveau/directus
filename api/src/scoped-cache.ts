@@ -162,16 +162,29 @@ export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
 }
 
-// Render scope tags for the dev-only `X-Scoped-Cache-*` headers: `collection`, or
-// `collection:field=value` — the Redis key's canonical value, control bytes escaped.
+// Render scope tags for the dev-only `X-Scoped-Cache-*` headers: each tag as its
+// key suffix (no `<namespace>:tag:` prefix) — `collection`, or `collection:field=
+// value` for a pinned slice (same canonical value as the Redis key). Comma-joined.
 export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
 	if (tag.field === undefined) {
 		return tag.collection;
 	}
 
-	// res.setHeader rejects control bytes, and the NULL token opens with a raw NUL so
-	// that it can never collide with a literal 'null' value.
-	const value = Array.from(canonicalScopedCacheValue(tag.value, tag.type))
+	return `${tag.collection}:${tag.field}=${
+		canonicalScopedCacheValue(tag.value, tag.type)
+	}`;
+}
+
+export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
+	return tags
+		.map(scopedCacheTagLabel)
+		.join(', ');
+}
+
+// Escaped here, not in the label: the label stays byte-identical to its Redis key,
+// which countScopedCacheTagMembers rebuilds from it and the tag rows join on.
+export function headerSafeScopedCacheTags(serialized: string): string {
+	return Array.from(serialized)
 		.map((char) => {
 			const code = char.charCodeAt(0);
 
@@ -184,14 +197,6 @@ export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
 			return `%${hex.toUpperCase()}`;
 		})
 		.join('');
-
-	return `${tag.collection}:${tag.field}=${value}`;
-}
-
-export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): string {
-	return tags
-		.map(scopedCacheTagLabel)
-		.join(', ');
 }
 
 /**

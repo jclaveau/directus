@@ -3,6 +3,7 @@ import {
 	countScopedCacheTagMembers,
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
+	headerSafeScopedCacheTags,
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
 	scopedCacheTagKey,
@@ -70,22 +71,37 @@ describe('the tag display form', () => {
 		])).toBe('articles, articles:author=7');
 	});
 
-	// A raw NUL is rejected by res.setHeader (ERR_INVALID_CHAR), which took down
-	// every write to a collection whose scope field was null on the row.
-	it('escapes the NULL token so a nullable scope stays header-legal', () => {
-		expect(scopedCacheTagLabel({
+	// countScopedCacheTagMembers rebuilds the Redis key from this string and the
+	// entry/purge tag rows join on it, so escaping it here would read zero instead.
+	it('keeps a null scope byte-identical to its Redis key', () => {
+		const nullSlice = {
 			collection: 'student_method_range',
 			field: 'method',
 			value: null,
-		})).toBe('student_method_range:method=%00null');
+		};
+
+		expect(scopedCacheTagKey(nullSlice))
+		.toBe(`ns:tag:${scopedCacheTagLabel(nullSlice)}`);
+	});
+});
+
+// `res.setHeader` throws ERR_INVALID_CHAR on a control byte, which took down every
+// write to a collection whose scope field was null — after the row had committed.
+describe('the header form', () => {
+	it('escapes the NULL token', () => {
+		expect(headerSafeScopedCacheTags(serializeScopedCacheTags([
+			{ collection: 'student_method_range', field: 'method', value: null },
+		]))).toBe('student_method_range:method=%00null');
 	});
 
-	it('escapes any control byte carried by a string scope value', () => {
-		expect(scopedCacheTagLabel({
-			collection: 'articles',
-			field: 'slug',
-			value: 'a\u001Fb\u007F',
-		})).toBe('articles:slug=a%1Fb%7F');
+	it('escapes any control byte a string scope value carries', () => {
+		expect(headerSafeScopedCacheTags('articles:slug=a\u001Fb\u007F'))
+		.toBe('articles:slug=a%1Fb%7F');
+	});
+
+	it('leaves a printable tag list untouched', () => {
+		expect(headerSafeScopedCacheTags('articles, articles:author=7'))
+		.toBe('articles, articles:author=7');
 	});
 });
 
@@ -104,6 +120,19 @@ describe('countScopedCacheTagMembers', () => {
 		expect(pipeline.scard).toHaveBeenCalledWith('ns:tag:articles');
 		expect(pipeline.scard).toHaveBeenCalledWith('ns:tag:articles:id=5');
 		expect(counts).toEqual({ 'articles': 3, 'articles:id=5': 7 });
+	});
+
+	it('scards the raw key of a null scope slice', async () => {
+		pipeline.exec.mockResolvedValue([[null, 2]]);
+
+		await countScopedCacheTagMembers([scopedCacheTagLabel({
+			collection: 'articles',
+			field: 'author',
+			value: null,
+		})]);
+
+		expect(pipeline.scard)
+		.toHaveBeenCalledWith('ns:tag:articles:author=\u0000null');
 	});
 
 	it('treats a missing pipeline reply as a zero count', async () => {

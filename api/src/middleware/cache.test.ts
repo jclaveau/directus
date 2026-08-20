@@ -1,10 +1,14 @@
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-const env: Record<string, any> = {
-	CACHE_ENABLED: true,
-	CACHE_STATUS_HEADER: 'x-cache-status',
-};
+// Hoisted: cache.ts now imports scoped-cache.js, which reads `useEnv()` at module
+// scope — that runs while the mock factories do, before a plain `const` would exist.
+const env: Record<string, any> = vi.hoisted(() => {
+	return {
+		CACHE_ENABLED: true,
+		CACHE_STATUS_HEADER: 'x-cache-status',
+	};
+});
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
