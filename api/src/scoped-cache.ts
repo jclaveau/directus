@@ -181,14 +181,14 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 		.join(', ');
 }
 
-// The collections a delete on `collection` also disturbs through the database's own
+// The collections a delete on `collection` also changes through the database's own
 // ON DELETE rules. It applies them itself, so nothing else ever purges them.
-export function scopedCacheCollectionsDisturbedByDelete(
+export function scopedCacheCollectionsChangedByOnDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
 	collection: string,
 ): string[] {
-	const disturbed = new Set<string>();
-	// Separate from `disturbed`: a collection reached by SET NULL first and CASCADE
+	const changed = new Set<string>();
+	// Separate from `changed`: a collection reached by SET NULL first and CASCADE
 	// later must still be walked into on the cascading path.
 	const walked = new Set<string>([collection]);
 	const pending = [collection];
@@ -210,7 +210,7 @@ export function scopedCacheCollectionsDisturbedByDelete(
 				continue;
 			}
 
-			disturbed.add(child);
+			changed.add(child);
 
 			// CASCADE removes the rows, so their own children follow. SET NULL leaves them
 			// in place with a nulled FK, and nothing below a surviving row changes.
@@ -221,7 +221,7 @@ export function scopedCacheCollectionsDisturbedByDelete(
 		}
 	}
 
-	return [...disturbed];
+	return [...changed];
 }
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later

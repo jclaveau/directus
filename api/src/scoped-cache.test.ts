@@ -6,7 +6,7 @@ import {
 	createScopedCacheCollector,
 	dropScopedCacheTagIndex,
 	scopedCacheTagKey,
-	scopedCacheCollectionsDisturbedByDelete,
+	scopedCacheCollectionsChangedByOnDelete,
 } from './scoped-cache.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -108,7 +108,7 @@ describe('the exit form', () => {
 
 // The blackbox witness covers the parent/child/grandchild walk end to end; these are
 // the shapes it cannot build — a self-referencing FK and a diamond.
-describe('scopedCacheCollectionsDisturbedByDelete', () => {
+describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	function cascade(collection: string, related: string) {
 		return {
 			collection,
@@ -122,7 +122,7 @@ describe('scopedCacheCollectionsDisturbedByDelete', () => {
 			relations: [cascade('child', 'parent'), cascade('grandchild', 'child')],
 		} as any;
 
-		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 		.toEqual(['child', 'grandchild']);
 	});
 
@@ -139,7 +139,7 @@ describe('scopedCacheCollectionsDisturbedByDelete', () => {
 	it('reports a collection whose foreign key is nulled', () => {
 		const schema = { relations: [nullify('child', 'parent')] } as any;
 
-		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 		.toEqual(['child']);
 	});
 
@@ -148,7 +148,7 @@ describe('scopedCacheCollectionsDisturbedByDelete', () => {
 			relations: [nullify('child', 'parent'), cascade('grandchild', 'child')],
 		} as any;
 
-		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 		.toEqual(['child']);
 	});
 
@@ -163,7 +163,7 @@ describe('scopedCacheCollectionsDisturbedByDelete', () => {
 			],
 		} as any;
 
-		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 		.toEqual(['child', 'grandchild']);
 	});
 
@@ -176,14 +176,14 @@ describe('scopedCacheCollectionsDisturbedByDelete', () => {
 			}],
 		} as any;
 
-		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent')).toEqual([]);
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent')).toEqual([]);
 	});
 
 	it('terminates on a self-referencing cascade', () => {
 		const schema = { relations: [cascade('node', 'node')] } as any;
 
 		// The collection already purges its own tags, so it is not its own descendant.
-		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'node')).toEqual([]);
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node')).toEqual([]);
 	});
 
 	it('reports a diamond once and terminates', () => {
@@ -196,7 +196,7 @@ describe('scopedCacheCollectionsDisturbedByDelete', () => {
 			],
 		} as any;
 
-		expect(scopedCacheCollectionsDisturbedByDelete(schema, 'parent'))
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 		.toEqual(['left', 'right', 'leaf']);
 	});
 });
