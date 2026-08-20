@@ -188,60 +188,66 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
  *   - `SET NULL` and `SET DEFAULT` leave the rows in place carrying a changed
  *     foreign key — a slice they have left — and stop there, since nothing below
  *     a surviving row changes.
- * `collection` is reported when a `CASCADE` reaches back into it — the rows the
- * database removes there are ones the caller never named, so the snapshot taken from
- * its keys does not cover them. A self-referencing `SET NULL` / `SET DEFAULT` is
- * left out on purpose: those rows survive in their slices, and finding which ones
- * the rule rewrote means scanning by a foreign key Directus does not index.
+ *   - a rule reaching back into `collection` reports it like any other: the rows
+ *     the database changes there are ones the caller never named, so the snapshot
+ *     taken from its keys does not cover them.
+ *   - the one exception is a DIRECT self-relation that only rewrites a foreign key.
+ *     Those rows survive in their slices, and finding which ones the rule moved
+ *     means scanning by a foreign key Directus does not index.
  */
 export function scopedCacheCollectionsChangedByOnDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
 	collection: string,
 ): string[] {
-	const changed = new Set<string>();
-	// Separate from `changed`: a collection reached by a non-propagating rule first
-	// and a cascade later must still be walked into on the cascading path. Seeded
-	// with the root, which is what terminates a collection cascading into itself.
-	const walked = new Set<string>([collection]);
-	const pending = [collection];
+	const changedCollections = new Set<string>();
+	// Separate from the reported set: a collection reached by a non-propagating rule
+	// first and a cascade later must still be walked into on the cascading path.
+	// Seeded with the root, which terminates a collection cascading into itself.
+	const walkedCollections = new Set<string>([collection]);
+	const pendingCollections = [collection];
 
-	while (pending.length > 0) {
-		const parent = pending.shift()!;
+	while (pendingCollections.length > 0) {
+		const parentCollection = pendingCollections.shift()!;
 
 		for (const relation of schema.relations) {
-			// `collection` holds the FK (the child); `related_collection` is the parent.
-			const onDelete = relation.schema?.on_delete;
-			const child = relation.collection;
+			// A relation's `collection` holds the FK; `related_collection` is its parent.
+			const onDeleteRule = relation.schema?.on_delete;
+			const childCollection = relation.collection;
 
 			if (
-				relation.related_collection !== parent
-				|| onDelete === undefined
+				relation.related_collection !== parentCollection
+				|| onDeleteRule === undefined
+				|| onDeleteRule === null
 				// NO ACTION and RESTRICT make the database refuse the delete
 				// instead, so they leave nothing to purge.
-				|| ['CASCADE', 'SET NULL', 'SET DEFAULT'].includes(onDelete) === false
+				|| ['CASCADE', 'SET NULL', 'SET DEFAULT'].includes(onDeleteRule) === false
 			) {
 				continue;
 			}
 
-			// A rule reaching back into the mutated collection counts only when it
-			// deletes. One that rewrites a foreign key leaves the rows where they
-			// were, and resolving which slices they sit in costs a scan per delete.
-			if (child === collection && onDelete !== 'CASCADE') {
+			// Only a DIRECT self-relation is exempt, and only when it rewrites
+			// rather than deletes. Reached from another collection, the rewritten
+			// rows are not children of the deleted ones.
+			if (
+				parentCollection === collection
+				&& childCollection === collection
+				&& onDeleteRule !== 'CASCADE'
+			) {
 				continue;
 			}
 
-			changed.add(child);
+			changedCollections.add(childCollection);
 
 			// CASCADE removes the rows, so their own children follow. The other rules
 			// leave them in place, and nothing below a surviving row changes.
-			if (onDelete === 'CASCADE' && ! walked.has(child)) {
-				walked.add(child);
-				pending.push(child);
+			if (onDeleteRule === 'CASCADE' && ! walkedCollections.has(childCollection)) {
+				walkedCollections.add(childCollection);
+				pendingCollections.push(childCollection);
 			}
 		}
 	}
 
-	return [...changed];
+	return [...changedCollections];
 }
 
 /**

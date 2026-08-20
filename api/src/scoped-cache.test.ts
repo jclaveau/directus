@@ -109,7 +109,7 @@ describe('the exit form', () => {
 // The blackbox witness covers the rules end to end against a real database; these
 // are the shapes it cannot build — a cycle, a diamond, and a rule-less relation.
 describe('scopedCacheCollectionsChangedByOnDelete', () => {
-	function cascade(collection: string, related: string) {
+	function cascadeRelation(collection: string, related: string) {
 		return {
 			collection,
 			related_collection: related,
@@ -119,14 +119,17 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 
 	it('walks children and grandchildren', () => {
 		const schema = {
-			relations: [cascade('child', 'parent'), cascade('grandchild', 'child')],
+			relations: [
+				cascadeRelation('child', 'parent'),
+				cascadeRelation('grandchild', 'child'),
+			],
 		} as any;
 
 		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 		.toEqual(['child', 'grandchild']);
 	});
 
-	function nullify(collection: string, related: string) {
+	function nullifyRelation(collection: string, related: string) {
 		return {
 			collection,
 			related_collection: related,
@@ -137,7 +140,7 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	// The rows survive with a nulled FK, so they stay indexed under a slice they have
 	// just left — stale in a way a cascade never is.
 	it('reports a collection whose foreign key is nulled', () => {
-		const schema = { relations: [nullify('child', 'parent')] } as any;
+		const schema = { relations: [nullifyRelation('child', 'parent')] } as any;
 
 		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 		.toEqual(['child']);
@@ -145,7 +148,10 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 
 	it('stops at a nulled collection, since nothing below it changes', () => {
 		const schema = {
-			relations: [nullify('child', 'parent'), cascade('grandchild', 'child')],
+			relations: [
+				nullifyRelation('child', 'parent'),
+				cascadeRelation('grandchild', 'child'),
+			],
 		} as any;
 
 		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
@@ -157,9 +163,9 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	it('still walks a collection a cascade reaches after a nullify', () => {
 		const schema = {
 			relations: [
-				nullify('child', 'parent'),
-				cascade('child', 'parent'),
-				cascade('grandchild', 'child'),
+				nullifyRelation('child', 'parent'),
+				cascadeRelation('child', 'parent'),
+				cascadeRelation('grandchild', 'child'),
 			],
 		} as any;
 
@@ -184,14 +190,14 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 
 	it.each(['NO ACTION', 'RESTRICT'])(
 		'ignores %s, which refuses the delete',
-		(rule) => {
-		const schema = {
-			relations: [{
-				collection: 'child',
-				related_collection: 'parent',
-				schema: { on_delete: rule },
-			}],
-		} as any;
+		(onDeleteRule) => {
+			const schema = {
+				relations: [{
+					collection: 'child',
+					related_collection: 'parent',
+					schema: { on_delete: onDeleteRule },
+				}],
+			} as any;
 
 			expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
 			.toEqual([]);
@@ -209,7 +215,7 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	// The rows it takes down are its own, and the caller named only the one key, so
 	// every other slice of it would stay warm on a tag purge built from that key.
 	it('reports itself on a self-referencing cascade, and terminates', () => {
-		const schema = { relations: [cascade('node', 'node')] } as any;
+		const schema = { relations: [cascadeRelation('node', 'node')] } as any;
 
 		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node'))
 		.toEqual(['node']);
@@ -218,14 +224,31 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	// Deliberate, and the reason is cost: those rows survive in their slices, and
 	// finding which ones moved means scanning by an unindexed foreign key per delete.
 	it('leaves itself out when a self-relation only nulls the foreign key', () => {
-		const schema = { relations: [nullify('node', 'node')] } as any;
+		const schema = { relations: [nullifyRelation('node', 'node')] } as any;
 
 		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'node')).toEqual([]);
 	});
 
+	// The rule is reached from ANOTHER collection, so the rows it rewrites are not
+	// children of the deleted ones and no scan of this collection would find them.
+	it('reports the root when a cascade cycles back through a nullify', () => {
+		const schema = {
+			relations: [
+				cascadeRelation('match', 'team'),
+				nullifyRelation('team', 'match'),
+			],
+		} as any;
+
+		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'team'))
+		.toEqual(['match', 'team']);
+	});
+
 	it('reports the root again when a cascade cycles back into it', () => {
 		const schema = {
-			relations: [cascade('child', 'parent'), cascade('parent', 'child')],
+			relations: [
+				cascadeRelation('child', 'parent'),
+				cascadeRelation('parent', 'child'),
+			],
 		} as any;
 
 		expect(scopedCacheCollectionsChangedByOnDelete(schema, 'parent'))
@@ -235,10 +258,10 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 	it('reports a diamond once and terminates', () => {
 		const schema = {
 			relations: [
-				cascade('left', 'parent'),
-				cascade('right', 'parent'),
-				cascade('leaf', 'left'),
-				cascade('leaf', 'right'),
+				cascadeRelation('left', 'parent'),
+				cascadeRelation('right', 'parent'),
+				cascadeRelation('leaf', 'left'),
+				cascadeRelation('leaf', 'right'),
 			],
 		} as any;
 

@@ -244,11 +244,26 @@ implements AbstractService<Item> {
 		const context = this.scopedCachePurgeContext();
 		const hookTags = collector?.tags ?? [];
 
-		if (tags !== null && changedCollections.length === 0) {
+		// A rule reaching back into this collection leaves its own slices unresolvable
+		// too, so it takes the collection-wide purge — whose reach already covers the
+		// tag purge it would otherwise get alongside.
+		const ownTags = changedCollections.includes(this.collection)
+			? null
+			: tags;
+
+		// Outside scoped mode a purge clears the whole namespace, so one is all it
+		// takes and the fan-out would be that many more flushes to no effect.
+		const otherCollections = scopedCachePurgeEnabled()
+			? changedCollections.filter((changedCollection) => {
+				return changedCollection !== this.collection;
+			})
+			: [];
+
+		if (ownTags !== null && otherCollections.length === 0) {
 			this.scopedCachePurged = await purgeScopedCache(
 				this.cache,
 				this.collection,
-				[...tags, ...hookTags],
+				[...ownTags, ...hookTags],
 				context,
 			);
 
@@ -261,13 +276,13 @@ implements AbstractService<Item> {
 		// purges for the one mutation that caused them. The single-operation case
 		// returns above precisely so it keeps minting its own, being its own purge.
 		const scopedCachePurgeId = randomUUID();
-		const purged: (ScopedCacheTag[] | null)[] = [];
+		const purgedTagSets: (ScopedCacheTag[] | null)[] = [];
 
-		if (tags !== null) {
-			purged.push(await purgeScopedCache(
+		if (ownTags !== null) {
+			purgedTagSets.push(await purgeScopedCache(
 				this.cache,
 				this.collection,
-				[...tags, ...hookTags],
+				[...ownTags, ...hookTags],
 				context,
 				{ scopedCachePurgeId },
 			));
@@ -275,7 +290,7 @@ implements AbstractService<Item> {
 		else {
 			// A `null` tag set means this collection's own slices are unresolvable →
 			// coarse whole-collection purge (bare tag + every slice).
-			purged.push(await purgeScopedCache(
+			purgedTagSets.push(await purgeScopedCache(
 				this.cache,
 				this.collection,
 				null,
@@ -288,7 +303,7 @@ implements AbstractService<Item> {
 			// `includeCollectionTag: false`, since the coarse pass already owns this
 			// collection's bare tag (else it's purged twice and doubled in the header).
 			if (hookTags.length > 0) {
-				purged.push(await purgeScopedCache(
+				purgedTagSets.push(await purgeScopedCache(
 					this.cache,
 					this.collection,
 					hookTags,
@@ -302,21 +317,23 @@ implements AbstractService<Item> {
 		// moved is unresolvable — those rows were never read — and its bare tag indexes
 		// none of them (a read bounded to one value is filed under that slice alone), so
 		// each takes the collection-wide purge rather than a tag that cannot reach it.
-		purged.push(...await Promise.all(changedCollections.map((changedCollection) => {
-			return purgeScopedCache(
-				this.cache,
-				changedCollection,
-				null,
-				context,
-				{ scopedCachePurgeId },
-			);
-		})));
+		purgedTagSets.push(...await Promise.all(
+			otherCollections.map((changedCollection) => {
+				return purgeScopedCache(
+					this.cache,
+					changedCollection,
+					null,
+					context,
+					{ scopedCachePurgeId },
+				);
+			}),
+		));
 
 		// Reflect every purge in the dev debug header; a `null` from any of them means
 		// the whole namespace was flushed, which already covers what the others reached.
-		this.scopedCachePurged = purged.some((tagSet) => tagSet === null)
+		this.scopedCachePurged = purgedTagSets.some((tagSet) => tagSet === null)
 			? null
-			: purged.flatMap((tagSet) => tagSet ?? []);
+			: purgedTagSets.flatMap((tagSet) => tagSet ?? []);
 	}
 
 	private get collectionScopedCacheFields(): string[] {

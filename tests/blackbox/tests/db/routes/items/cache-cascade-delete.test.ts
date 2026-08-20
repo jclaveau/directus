@@ -43,6 +43,7 @@ const RESTRICTED = 'test_items_cascade_restricted';
 const SELF = 'test_items_cascade_self';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-cache-tags';
+const purgedTagsHeader = 'x-cache-purged-tags';
 
 // InnoDB rejects a table definition carrying ON DELETE SET DEFAULT and Oracle has no
 // such rule at all; postgres, sqlite and mssql all take it.
@@ -58,6 +59,7 @@ describe(oneLine`
 		// Proves the reads below are pinned to a value slice instead of falling back to
 		// the bare collection tag, which is the whole subject.
 		env[vendor]['CACHE_TAGS_HEADER'] = cacheTagsHeader;
+		env[vendor]['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 		env[vendor]['CACHE_AUTO_PURGE'] = 'true';
 		env[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
 		env[vendor]['CACHE_STORE'] = 'redis';
@@ -290,8 +292,8 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
-		// `fields` excludes the foreign key so the field map holds this collection alone
-		// and the tag header below is the read's whole tag set, not a prefix of it.
+		// Bounded by `_eq` on the collection's one scope field and touching no other
+		// collection, so the tag header below is the read's whole tag set.
 		function readSlice(collection: string, owner: string) {
 			const sliceQuery = `fields=id,label,owner&filter[owner][_eq]=${owner}`;
 
@@ -385,7 +387,12 @@ describe(oneLine`
 			expect(doomedSlice.headers[cacheTagsHeader])
 			.toBe(`${SCOPED_CHILD}:owner=a`);
 
-			await request(url)
+			// The paired witness: without it the control below could pass because the
+			// read fell back to the bare tag, not because the purge spared it.
+			expect(keptSlice.headers[cacheTagsHeader])
+			.toBe(`${SCOPED_CHILD}:owner=b`);
+
+			const deleted = await request(url)
 				.delete(`/items/${PARENT}/${doomedRuleParent}`)
 				.set('Authorization', auth);
 
@@ -415,6 +422,19 @@ describe(oneLine`
 			// from a cascade.
 			expect(keptSliceAfter.body.data).toHaveLength(1);
 			expect(restrictedAfter.body.data).toHaveLength(1);
+
+			// Every collection the rules reach, each named once: a collection purged
+			// both by its own tags and collection-wide would appear twice.
+			expect(deleted.headers[purgedTagsHeader].split(', ').sort()).toEqual([
+				CHILD,
+				GRANDCHILD,
+				NULLED,
+				PARENT,
+				SCOPED_CHILD,
+				...(supportsSetDefault
+					? [DEFAULTED]
+					: []),
+			].sort());
 		});
 
 		it.runIf(supportsSetDefault)(oneLine`
@@ -426,17 +446,28 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			const warmed = await read(DEFAULTED);
+			const [warmed, control] = await Promise.all([
+				read(DEFAULTED),
+				read(SIBLING),
+			]);
 
 			expect(warmed.headers[cacheStatusHeader]).toBe('MISS');
+			expect(control.headers[cacheStatusHeader]).toBe('MISS');
 
 			await request(url)
 				.delete(`/items/${PARENT}/${doomedDefaultParent}`)
 				.set('Authorization', auth);
 
-			const defaulted = await read(DEFAULTED);
+			const [defaulted, controlAfter] = await Promise.all([
+				read(DEFAULTED),
+				read(SIBLING),
+			]);
 
 			expect(defaulted.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Unrelated to the parent, so a whole-namespace flush is the only thing
+			// that would cool it.
+			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
 
 			// The row outlived its parent, so the entry was serving it under a foreign
 			// key it no longer carries.
@@ -453,8 +484,12 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			const branch = await readSlice(SELF, 'branch');
+			const [branch, control] = await Promise.all([
+				readSlice(SELF, 'branch'),
+				read(SIBLING),
+			]);
 
+			expect(control.headers[cacheStatusHeader]).toBe('MISS');
 			expect(branch.headers[cacheStatusHeader]).toBe('MISS');
 			expect(branch.headers[cacheTagsHeader]).toBe(`${SELF}:owner=branch`);
 			expect(branch.body.data).toHaveLength(1);
@@ -463,7 +498,14 @@ describe(oneLine`
 				.delete(`/items/${SELF}/${selfRoot}`)
 				.set('Authorization', auth);
 
-			const branchAfter = await readSlice(SELF, 'branch');
+			const [branchAfter, controlAfter] = await Promise.all([
+				readSlice(SELF, 'branch'),
+				read(SIBLING),
+			]);
+
+			// Nothing relates SIBLING to SELF, so this is what separates the purge
+			// below from a whole-namespace flush.
+			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
 
 			// The service was handed the root key alone, so its snapshot never saw the
 			// slice the branch row lived in — and the branch row went with the root.

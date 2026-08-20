@@ -33,6 +33,7 @@ vi.mock('../../src/database/index', () => {
 // Spy purgeScopedCache and force scoped mode; the cache itself just needs to be truthy
 // for shouldClearCache.
 const purgeScopedCache = vi.fn();
+let scopedPurgeEnabled = true;
 
 vi.mock('../cache.js', () => {
 	return {
@@ -44,7 +45,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 	return {
 		...(await importOriginal<typeof import('../scoped-cache.js')>()),
 		purgeScopedCache,
-		scopedCachePurgeEnabled: () => true,
+		scopedCachePurgeEnabled: () => scopedPurgeEnabled,
 	};
 });
 
@@ -77,6 +78,35 @@ const selfRefSchema = new SchemaBuilder()
 
 selfRefSchema.collections['test']!.scopedCacheFields = ['student'];
 
+// Cascading into itself: a delete takes rows the caller never named, in slices the
+// snapshot cannot see, so the collection needs the collection-wide purge — once.
+const selfCascadeSchema = new SchemaBuilder()
+	.collection('test', (c) => {
+		c.field('id').id();
+		c.field('name').string();
+		c.field('student').string();
+		c.field('parent').m2o('test');
+	})
+	.build();
+
+selfCascadeSchema.collections['test']!.scopedCacheFields = ['student'];
+selfCascadeSchema.relations[0]!.schema = { on_delete: 'CASCADE' } as any;
+
+const cascadeChildSchema = new SchemaBuilder()
+	.collection('test', (c) => {
+		c.field('id').id();
+		c.field('name').string();
+		c.field('student').string();
+	})
+	.collection('test_child', (c) => {
+		c.field('id').id();
+		c.field('parent').m2o('test');
+	})
+	.build();
+
+cascadeChildSchema.collections['test']!.scopedCacheFields = ['student'];
+cascadeChildSchema.relations[0]!.schema = { on_delete: 'CASCADE' } as any;
+
 // Drives the purge-tag resolution at every mutation site: which ScopedCacheTags
 // (or null = coarse collection-wide purge) each mutation hands to purgeScopedCache —
 // asserted via toHaveBeenCalledWith(cache, collection, tags, context). The tag-derivation
@@ -102,7 +132,50 @@ describe(oneLine`
 		purgeScopedCache.mockClear();
 	});
 
-	const service = () => new ItemsService('test', { knex: db, schema });
+	const service = (withSchema = schema) => {
+		return new ItemsService('test', { knex: db, schema: withSchema });
+	};
+
+	it(oneLine`
+		a delete on a collection that cascades into itself purges it once,
+		collection-wide
+	`, async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.delete('test').response(1);
+
+		await service(selfCascadeSchema).deleteMany([1]);
+
+		// Not twice: the slice purge the tags would have driven is a subset of this.
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			null,
+			expect.anything(),
+			expect.objectContaining({ scopedCachePurgeId: expect.any(String) }),
+		);
+	});
+
+	it(oneLine`
+		outside scoped mode a delete flushes the namespace once, not once per
+		collection the database changes
+	`, async () => {
+		scopedPurgeEnabled = false;
+
+		try {
+			tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+			tracker.on.delete('test').response(1);
+
+			await service(cascadeChildSchema).deleteMany([1]);
+		}
+		finally {
+			scopedPurgeEnabled = true;
+		}
+
+		// Each call clears the WHOLE namespace, so the fan-out is pure added latency.
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+	});
 
 	it(oneLine`
 		updateMany purges old ∪ new — a row moved student A→B drops both slices
