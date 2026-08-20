@@ -181,10 +181,6 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 		.join(', ');
 }
 
-// The `ON DELETE` rules that change rows. NO ACTION and RESTRICT make the database
-// refuse the delete instead, leaving nothing to purge.
-const rowChangingOnDeleteRules = ['CASCADE', 'SET NULL', 'SET DEFAULT'];
-
 /**
  * The collections a delete on `collection` also changes through the database's own
  * `ON DELETE` rules. It applies them itself, so nothing else ever purges them.
@@ -220,7 +216,9 @@ export function scopedCacheCollectionsChangedByOnDelete(
 			if (
 				relation.related_collection !== parent
 				|| onDelete === undefined
-				|| rowChangingOnDeleteRules.includes(onDelete) === false
+				// NO ACTION and RESTRICT make the database refuse the delete
+				// instead, so they leave nothing to purge.
+				|| ['CASCADE', 'SET NULL', 'SET DEFAULT'].includes(onDelete) === false
 			) {
 				continue;
 			}
