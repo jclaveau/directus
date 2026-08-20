@@ -155,6 +155,12 @@ function isPinnableScopeType(type: Type | undefined): boolean {
 	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
 }
 
+// The slice tag keys a collection currently owns, so a collection-wide purge reads
+// them instead of walking the whole keyspace to find them again.
+function scopedCacheCollectionSlicesKey(collection: string): string {
+	return `${env['CACHE_NAMESPACE']}:slices:${collection}`;
+}
+
 export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
 	return tag.field === undefined
@@ -182,6 +188,75 @@ export function serializeScopedCacheTags(tags: readonly ScopedCacheTag[]): strin
 }
 
 /**
+ * The collections a delete on `collection` also changes through the database's own
+ * `ON DELETE` rules. It applies them itself, so nothing else ever purges them.
+ *   - `CASCADE` deletes the rows, so the walk carries on into their own children.
+ *   - `SET NULL` and `SET DEFAULT` leave the rows in place carrying a changed
+ *     foreign key — a slice they have left — and stop there, since nothing below
+ *     a surviving row changes.
+ *   - a rule reaching back into `collection` reports it like any other: the rows
+ *     the database changes there are ones the caller never named, so the snapshot
+ *     taken from its keys does not cover them.
+ *   - the one exception is a DIRECT self-relation that only rewrites a foreign key.
+ *     Those rows survive in their slices, and finding which ones the rule moved
+ *     means scanning by a foreign key Directus does not index.
+ */
+export function scopedCacheCollectionsChangedByOnDelete(
+	schema: Pick<SchemaOverview, 'relations'>,
+	collection: string,
+): string[] {
+	const changedCollections = new Set<string>();
+	// Separate from the reported set: a collection reached by a non-propagating rule
+	// first and a cascade later must still be walked into on the cascading path.
+	// Seeded with the root, which terminates a collection cascading into itself.
+	const walkedCollections = new Set<string>([collection]);
+	const pendingCollections = [collection];
+
+	while (pendingCollections.length > 0) {
+		const parentCollection = pendingCollections.shift()!;
+
+		for (const relation of schema.relations) {
+			// A relation's `collection` holds the FK; `related_collection` is its parent.
+			const onDeleteRule = relation.schema?.on_delete;
+			const childCollection = relation.collection;
+
+			if (
+				relation.related_collection !== parentCollection
+				|| onDeleteRule === undefined
+				|| onDeleteRule === null
+				// NO ACTION and RESTRICT make the database refuse the delete
+				// instead, so they leave nothing to purge.
+				|| ['CASCADE', 'SET NULL', 'SET DEFAULT'].includes(onDeleteRule) === false
+			) {
+				continue;
+			}
+
+			// Only a DIRECT self-relation is exempt, and only when it rewrites
+			// rather than deletes. Reached from another collection, the rewritten
+			// rows are not children of the deleted ones.
+			if (
+				parentCollection === collection
+				&& childCollection === collection
+				&& onDeleteRule !== 'CASCADE'
+			) {
+				continue;
+			}
+
+			changedCollections.add(childCollection);
+
+			// CASCADE removes the rows, so their own children follow. The other rules
+			// leave them in place, and nothing below a surviving row changes.
+			if (onDeleteRule === 'CASCADE' && ! walkedCollections.has(childCollection)) {
+				walkedCollections.add(childCollection);
+				pendingCollections.push(childCollection);
+			}
+		}
+	}
+
+	return [...changedCollections];
+}
+
+/**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the
  * payload key and its `__expires_at` sibling are tagged. When a cache TTL is set, each tag
@@ -198,23 +273,52 @@ export async function tagScopedCacheKeys(
 		return;
 	}
 
-	const tagKeys = [...new Set([...scopedCacheTags].map(scopedCacheTagKey))];
+	const taggedKeys = new Set<string>();
 
-	if (tagKeys.length === 0) {
+	for (const tag of scopedCacheTags) {
+		taggedKeys.add(scopedCacheTagKey(tag));
+	}
+
+	if (taggedKeys.size === 0) {
 		return;
 	}
 
 	const redis = useRedis();
 	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000) * 2;
 	const pipeline = redis.pipeline();
+	const filedKeys = new Set<string>();
 
-	for (const tagKey of tagKeys) {
+	for (const tag of scopedCacheTags) {
+		const tagKey = scopedCacheTagKey(tag);
+
+		if (filedKeys.has(tagKey)) {
+			continue;
+		}
+
+		filedKeys.add(tagKey);
+
 		// `extraSiblings` = other keys written with the entry a purge must also drop
 		// — e.g. the dev-only `${key}__tags` sibling (respond.ts). Empty by default.
 		pipeline.sadd(tagKey, key, `${key}__expires_at`, ...extraSiblings);
 
 		if (ttlSeconds > 0) {
 			pipeline.expire(tagKey, ttlSeconds);
+		}
+
+		// The bare tag is where a collection-wide purge starts, so filing it would
+		// only name a key that purge already holds.
+		if (tag.field === undefined) {
+			continue;
+		}
+
+		const slicesKey = scopedCacheCollectionSlicesKey(tag.collection);
+
+		pipeline.sadd(slicesKey, tagKey);
+
+		// Same expiry as the tag sets it names, written in the same pipeline, so the
+		// index cannot outlive — or predecease — what it points at.
+		if (ttlSeconds > 0) {
+			pipeline.expire(slicesKey, ttlSeconds);
 		}
 	}
 
@@ -290,7 +394,41 @@ async function purgeScopedCacheTagKeys(
 		return cache.delete(member);
 	}));
 
-	await redis.del(...tagKeys);
+	// Array form: one key per tag purged, so a spread throws RangeError once
+	// the list is long enough.
+	await redis.del(tagKeys);
+
+	// Drop the purged slice keys from their collection's index: one pruned only
+	// wholesale keeps naming keys that are gone, and grows without bound. A
+	// collection name cannot hold a `:`, so the first one after the prefix is
+	// where the field starts.
+	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
+	const sliceKeysByCollection = new Map<string, string[]>();
+
+	for (const tagKey of tagKeys) {
+		const label = tagKey.startsWith(tagPrefix)
+			? tagKey.slice(tagPrefix.length)
+			: '';
+
+		const fieldAt = label.indexOf(':');
+
+		if (fieldAt === -1) {
+			continue;
+		}
+
+		const collection = label.slice(0, fieldAt);
+
+		sliceKeysByCollection.set(collection, [
+			...sliceKeysByCollection.get(collection) ?? [],
+			tagKey,
+		]);
+	}
+
+	// One member per slice the collection owns, so the array form: a spread
+	// throws RangeError once the list is long enough.
+	await Promise.all([...sliceKeysByCollection].map(([collection, sliceKeys]) => {
+		return redis.srem(scopedCacheCollectionSlicesKey(collection), sliceKeys);
+	}));
 
 	const present = new Set(members);
 
@@ -340,13 +478,17 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 		return;
 	}
 
-	const tagKeys = await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`);
+	const tagKeys = [
+		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`),
+		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:slices:*`),
+	];
 
 	if (tagKeys.length === 0) {
 		return;
 	}
 
-	await useRedis().del(...tagKeys);
+	// Array form: this list is a whole-keyspace scan, so it is the longest of them.
+	await useRedis().del(tagKeys);
 }
 
 /**
@@ -363,11 +505,16 @@ export async function purgeCollectionScopedCache(
 ): Promise<void> {
 	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
 
-	// Slice keys are `<bareKey>:<field>=<value>`; the `:` delimiter keeps a prefix-sharing
-	// sibling (`articles` vs `articles_archive`) out of the scan.
+	// Read off the index each slice files itself into, rather than walking the whole
+	// keyspace for keys that a collection owning none can never yield.
 	const startedAt = Date.now();
-	const sliceKeys = await scanScopedCacheTagKeys(`${bareKey}:*`);
+
+	const sliceKeys = await useRedis().smembers(
+		scopedCacheCollectionSlicesKey(collection),
+	);
+
 	const tagKeys = [bareKey, ...sliceKeys];
+
 	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
 	// The expensive mode, and the one nothing else records: every slice of the
