@@ -20,6 +20,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const COLLECTION = 'test_items_null_scope';
 const purgedTagsHeader = 'x-scoped-cache-purged-tags';
+const tagsHeader = 'x-scoped-cache-tags';
+const statusHeader = 'x-cache-status';
 
 function carriesControlByte(value: string): boolean {
 	return Array.from(value).some((char) => {
@@ -43,6 +45,8 @@ describe(oneLine`
 		env[vendor]['CACHE_NAMESPACE'] = `directus-null-scope-${vendor}`;
 		// The trigger: without it the tags are never rendered and the write survives.
 		env[vendor]['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
+		env[vendor]['CACHE_TAGS_HEADER'] = tagsHeader;
+		env[vendor]['CACHE_STATUS_HEADER'] = statusHeader;
 
 		let instance: ChildProcess;
 
@@ -97,6 +101,37 @@ describe(oneLine`
 			const response = await createItem({ amount: '7' });
 
 			const header = response.headers[purgedTagsHeader];
+			expect(carriesControlByte(header)).toBe(false);
+			expect(header.split(', ')).toContain(`${COLLECTION}:owner=%00null`);
+		});
+
+		// A read pinned to `_eq: null` stores the raw token in the __tags sidecar, so
+		// the HIT re-emits it from cache.ts — the escaping site the MISS never reaches.
+		it(oneLine`
+			escapes the null scope again when the read is served from cache
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			function readNullOwner() {
+				return request(url)
+					.get(`/items/${COLLECTION}`)
+					.query({ filter: JSON.stringify({ owner: { _eq: null } }) })
+					.set('Authorization', auth);
+			}
+
+			const miss = await readNullOwner();
+			expect(miss.statusCode).toBe(200);
+			expect(miss.headers[statusHeader]).toBe('MISS');
+
+			const hit = await readNullOwner();
+			expect(hit.statusCode).toBe(200);
+			expect(hit.headers[statusHeader]).toBe('HIT');
+
+			const header = hit.headers[tagsHeader];
 			expect(carriesControlByte(header)).toBe(false);
 			expect(header.split(', ')).toContain(`${COLLECTION}:owner=%00null`);
 		});
