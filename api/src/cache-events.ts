@@ -1286,7 +1286,7 @@ export async function listCacheEntries(
 		Date.now() - clampCacheStatsWindow(windowMs ?? DEFAULT_CACHE_ENTRIES_WINDOW),
 	);
 
-	const activitySelects: (string | Knex.Raw)[] = [
+	const eventAggregateSelects: (string | Knex.Raw)[] = [
 		'e.cache_key',
 		db.raw('SUM(CASE WHEN e.kind = 0 THEN 1 ELSE 0 END) AS hits'),
 		db.raw('SUM(CASE WHEN e.kind = 1 THEN 1 ELSE 0 END) AS misses'),
@@ -1300,7 +1300,7 @@ export async function listCacheEntries(
 		// Recommended TTL = p95 of the re-request age distribution: hit ages plus
 		// near-expiry miss ages (ttl + gap). An ordered-set aggregate, so Postgres
 		// only — plain-DB installs get null (the telemetry targets Timescale).
-		activitySelects.push(
+		eventAggregateSelects.push(
 			db.raw(
 				'percentile_cont(0.95) WITHIN GROUP (ORDER BY '
 				+ 'CASE WHEN e.kind = 0 THEN e.age_ms ELSE e.ttl_ms + e.gap_ms END) '
@@ -1313,7 +1313,7 @@ export async function listCacheEntries(
 	// Grouped on the event's own key alone: folding the descriptor's wide text
 	// columns into the grouping key spills the sort to disk and outruns the
 	// statement timeout once the window holds millions of events.
-	const activityRows = await db('directus_cache_events as e')
+	const eventAggregateRows = await db('directus_cache_events as e')
 		.where('e.time', '>', since)
 		// Anomaly locators (never filled) resolve as anomaly rows, not cache entries.
 		// A semi-join, so excluding them adds no column to the grouping key.
@@ -1328,9 +1328,9 @@ export async function listCacheEntries(
 		.orderBy('hits', 'desc')
 		.orderBy('e.cache_key', 'asc')
 		.limit(CACHE_STATS_LISTING_LIMIT)
-		.select(activitySelects);
+		.select(eventAggregateSelects);
 
-	const listedKeys = activityRows.map((row: Record<string, unknown>) => {
+	const listedKeys = eventAggregateRows.map((row: Record<string, unknown>) => {
 		return String(row['cache_key']);
 	});
 
@@ -1365,7 +1365,7 @@ export async function listCacheEntries(
 
 	// Reaped between the two reads: the semi-join saw a descriptor the lookup no
 	// longer finds, and an entry with no dimension row has nothing to show.
-	const rows = activityRows.flatMap((row: Record<string, unknown>) => {
+	const rows = eventAggregateRows.flatMap((row: Record<string, unknown>) => {
 		const descriptor = descriptorsByKey.get(String(row['cache_key']));
 
 		return descriptor === undefined
