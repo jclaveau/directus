@@ -78,15 +78,18 @@ const READ_ONLY = {
 	openWorldHint: false,
 } as const;
 
-/** The lookback every cache read takes, described once. */
-const windowProperty = {
-	window: {
-		type: 'string',
-		description:
-			'How far back to look, as a duration such as "15m", "6h" or "7d". '
-			+ 'Defaults to 24h, and is clamped to what telemetry retention holds.',
-	},
-};
+/** The lookback a cache read takes, described once for every default. */
+function windowProperty(fallbackWindow: string) {
+	return {
+		window: {
+			type: 'string',
+			description:
+				'How far back to look, as a duration such as "15m", "6h" or "7d". '
+				+ `Defaults to ${fallbackWindow}, and is clamped to what telemetry `
+				+ 'retention holds.',
+		},
+	};
+}
 
 /**
  * Every tool compiled in, built fresh: a description reads config, and config
@@ -132,7 +135,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				'The response-cache entries seen in the window, grouped by endpoint and '
 				+ 'query, with hit counts, size, age and remaining TTL. Use it to find '
 				+ 'what is filling the cache and what is never read back.',
-			inputSchema: { type: 'object', properties: windowProperty },
+			inputSchema: { type: 'object', properties: windowProperty('10m') },
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {
@@ -250,7 +253,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				'Responses the cache declined to keep in the window, and why — a value '
 				+ 'over the size cap, a read with no collection to purge it by, a scope '
 				+ 'too coarse to pin. Use it to explain a low hit ratio.',
-			inputSchema: { type: 'object', properties: windowProperty },
+			inputSchema: { type: 'object', properties: windowProperty('24h') },
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {
@@ -265,7 +268,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				'Response-time percentiles per endpoint group in the window, split by '
 				+ 'outcome (served from cache, filled, declined). Use it to say what the '
 				+ 'cache is actually saving.',
-			inputSchema: { type: 'object', properties: windowProperty },
+			inputSchema: { type: 'object', properties: windowProperty('10m') },
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {
@@ -283,7 +286,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			inputSchema: {
 				type: 'object',
 				properties: {
-					...windowProperty,
+					...windowProperty('24h'),
 					buckets: {
 						type: 'number',
 						// The bounds the read clamps to, so a client validating against

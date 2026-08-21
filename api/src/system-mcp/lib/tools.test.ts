@@ -143,6 +143,31 @@ test('Only the windowed reads take a window', () => {
 		.toHaveProperty('buckets');
 });
 
+// The entries and latency listings aggregate every event in their window and so
+// default shorter than the other reads; an agent picks its window off this text.
+test('Each windowed read documents the default it actually takes', () => {
+	const documented = new Map(
+		allSystemMcpTools()
+			.filter((tool) => 'window' in tool.inputSchema.properties)
+			.map((tool) => {
+				return [tool.name, tool.inputSchema.properties['window'].description];
+			}),
+	);
+
+	const defaultsTo24h = 'How far back to look, as a duration such as "15m", "6h" '
+		+ 'or "7d". Defaults to 24h, and is clamped to what telemetry retention holds.';
+
+	const defaultsTo10m = 'How far back to look, as a duration such as "15m", "6h" '
+		+ 'or "7d". Defaults to 10m, and is clamped to what telemetry retention holds.';
+
+	expect([...documented]).toEqual([
+		['list_cache_entries', defaultsTo10m],
+		['list_cache_anomalies', defaultsTo24h],
+		['list_cache_latencies', defaultsTo10m],
+		['read_cache_timeseries', defaultsTo24h],
+	]);
+});
+
 test('A subsystem left out is neither listed nor callable', () => {
 	config.groups.mockReturnValue(['processes']);
 
