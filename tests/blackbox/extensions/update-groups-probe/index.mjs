@@ -8,6 +8,8 @@
 // control endpoint:
 //   name 'cancel-me'  → the per-row filter returns null, cancelling that row.
 //   name 'rewrite-me' → the per-row filter rewrites it, splitting its group.
+// The name is read back from the row, since the event carries only what is
+// being written.
 
 const COLLECTION = 'test_update_groups';
 const LOG = 'test_update_groups_log';
@@ -35,11 +37,18 @@ export default function registerHooks({ filter, action }, { database }) {
 	filter(`${COLLECTION}.items.update.one`, async (payload) => {
 		await record('items.update.one', 'filter', payload);
 
-		if (payload.name === 'cancel-me') {
+		// The payload carries the primary key and the fields being written, not the
+		// row's current ones — so the marker has to be read back, the way a real
+		// per-row hook looks up what it is about to change.
+		const row = await database(COLLECTION)
+			.where({ id: payload.id })
+			.first();
+
+		if (row?.name === 'cancel-me') {
 			return null;
 		}
 
-		if (payload.name === 'rewrite-me') {
+		if (row?.name === 'rewrite-me') {
 			return { ...payload, name: 'rewritten' };
 		}
 
