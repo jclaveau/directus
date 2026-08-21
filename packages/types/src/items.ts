@@ -8,6 +8,16 @@ export type Item = Record<string, any>;
 
 export type PrimaryKey = string | number;
 
+/**
+ * One change applied to a set of rows. `updateGroups` takes a list of these, and the
+ * `items.update` event carries that same list, so a hook sees every row a single
+ * update touches instead of one firing per row.
+ */
+export type UpdateGroup<Item = any> = {
+	data: Partial<Item>;
+	keys: PrimaryKey[];
+};
+
 export type Alterations<T extends Item = Item, K extends keyof T | undefined = undefined> = {
 	create: Partial<T>[];
 	update: (K extends keyof T ? Partial<T> & Pick<T, K> : Partial<T>)[];

@@ -48,12 +48,16 @@ function registerActionHooks(modules: string[]) {
 			payload,
 		}));
 
-		registerAction(module + '.update', ({ keys, collection, payload = {} }) => ({
-			collection,
-			action: 'update',
-			keys,
-			payload,
-		}));
+		// `items.update` carries a group per change rather than one payload and a flat
+		// key list, so the wire's `keys` is the union of every group's.
+		registerAction(`${module}.update`, ({ collection, payload = [] }) => {
+			return {
+				collection,
+				action: 'update',
+				keys: payload.flatMap((group: any) => group.keys),
+				payload,
+			};
+		});
 
 		registerAction(module + '.delete', ({ keys, collection, payload = [] }) => ({
 			collection,
@@ -97,12 +101,14 @@ function registerFilesHooks() {
 		payload,
 	}));
 
-	registerAction('files.update', ({ keys, collection, payload = {} }) => ({
-		collection,
-		action: 'update',
-		keys,
-		payload,
-	}));
+	registerAction('files.update', ({ collection, payload = [] }) => {
+		return {
+			collection,
+			action: 'update',
+			keys: payload.flatMap((group: any) => group.keys),
+			payload,
+		};
+	});
 
 	registerAction('files.delete', ({ keys, collection, payload = [] }) => ({
 		collection,

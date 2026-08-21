@@ -19,6 +19,7 @@ import type {
 	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
+	UpdateGroup,
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -1446,84 +1447,28 @@ implements AbstractService<Item> {
 			throw new InvalidPayloadError({ reason: 'Input should be an array of items' });
 		}
 
-		if (!opts.mutationTracker) {
-			opts.mutationTracker = this.createMutationTracker();
-		}
-
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 
-		const keys: PrimaryKey[] = [];
+		// Each row is its own group: the payloads differ per row, which is
+		// exactly what one `keys`-plus-one-payload update cannot express.
+		const groups = data.map((item) => {
+			const primaryKey = item[primaryKeyField];
 
-		// Pre-update scope values for every row this batch touches (old ∪ new on purge,
-		// like updateMany).
-		const batchKeys = data
-			.map((item) => item[primaryKeyField])
-			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
-
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
-
-		// One collector shared across the forked child updates so an `items.update`
-		// hook's `purgeBy` survives to the single deferred purge below (children run
-		// with autoPurgeCache off, so their own drain is suppressed).
-		const scopedCacheCollector = createScopedCacheCollector(this.schema);
-
-		try {
-			await transaction(this.knex, async (knex) => {
-				const service = this.fork({ knex });
-
-				let userIntegrityCheckFlags = opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
-
-				for (const item of data) {
-					const primaryKey = item[primaryKeyField];
-
-					if (!primaryKey) {
-						throw new InvalidPayloadError({
-							reason: `Item in update misses primary key`,
-						});
-					}
-
-					const combinedOpts: MutationOptions = {
-						autoPurgeCache: false,
-						...opts,
-						scopedCacheCollector,
-						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
-					};
-
-					keys.push(await service.updateOne(primaryKey, omit(item, primaryKeyField), combinedOpts));
-				}
-
-				if (userIntegrityCheckFlags) {
-					if (opts.onRequireUserIntegrityCheck) {
-						opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
-					}
-					else {
-						await validateUserCountIntegrity({ flags: userIntegrityCheckFlags, knex });
-					}
-				}
-			}, opts.mutationTracker.snapshot());
-		}
-		finally {
-			if (shouldClearCache(this.cache, opts, this.collection)) {
-				// Per-item hooks can rewrite scope fields inside each forked updateOne, so
-				// the raw `data` may not be what's stored. Re-snapshot the now-committed
-				// rows for the new values (old ∪ new). Committed only when THIS call owns
-				// the transaction: invoked from a hook it shares the caller's, so the
-				// purge below lands pre-commit —
-				// https://github.com/jclaveau/directus/issues/363
-				const newScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
-
-				const scopedCacheTags =
-					oldScopedCacheTags === null || newScopedCacheTags === null
-						? null
-						: [...oldScopedCacheTags, ...newScopedCacheTags];
-
-				await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
+			if (!primaryKey) {
+				throw new InvalidPayloadError({
+					reason: `Item in update misses primary key`,
+				});
 			}
-		}
 
-		return keys;
+			return { data: omit(item, primaryKeyField), keys: [primaryKey] };
+		});
+
+		return await this.updateGroups(groups, opts);
 	}
 
+	/**
+	 * Update many items by primary key, setting all items to the same change.
+	 */
 	/**
 	 * Update many items by primary key, setting all items to the same change.
 	 */
@@ -1534,102 +1479,36 @@ implements AbstractService<Item> {
 	): Promise<(PrimaryKey | null)[]>;
 
 	async updateMany(keys: PrimaryKey[], data: Partial<Item>, opts?: MutationOptions): Promise<PrimaryKey[]>;
+
 	async updateMany(
 		keys: PrimaryKey[],
 		data: Partial<Item>,
 		opts: MutationOptions = {},
 	): Promise<(PrimaryKey | null)[]> {
-		if (!opts.mutationTracker) {
-			opts.mutationTracker = this.createMutationTracker();
-		}
+		return await this.updateGroups(
+			[{ data, keys }],
+			opts as MutationOptions & { allowFilterCancel: true },
+		);
+	}
 
-		if (!opts.bypassLimits) {
-			opts.mutationTracker.trackMutations(keys.length);
-		}
-
-		const { ActivityService } = await import('./activity.js');
-		const { RevisionsService } = await import('./revisions.js');
-
+	/**
+	 * Whether a group would write nothing: an empty payload, a primary-key-only one,
+	 * or one whose every field is an alterations object carrying no item. Decided
+	 * before the transaction opens, so a no-op update costs no round trip.
+	 */
+	private groupChangesNothing(group: UpdateGroup<Item>): boolean {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-		validateKeys(this.schema, this.collection, primaryKeyField, keys);
-
-		// Capture the scope values these rows hold before the update so an update that
-		// moves a row to a new scope value purges both slices (old ∪ new). Empty when the
-		// collection isn't scoped.
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(keys);
-
-		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
 
-		const payload: Partial<AnyItem> = cloneDeep(data);
-		const nestedActionEvents: ActionEventParams[] = [];
-
-		// An `items.update` hook can add purge tags via `context.scopedCache.purgeBy`;
-		// drained into the purge below.
-		const scopedCacheCollector =
-			opts.scopedCacheCollector ?? createScopedCacheCollector(this.schema);
-
-		// Run all hooks that are attached to this event so the end user has the chance to augment the
-		// item that is about to be saved
-		const payloadAfterHooks =
-			opts.emitEvents !== false
-				? await emitter.emitFilter<Partial<AnyItem>, null>(
-					this.eventScope === 'items'
-						? ['items.update', `${this.collection}.items.update`]
-						: `${this.eventScope}.update`,
-					payload,
-					{
-						keys,
-						collection: this.collection,
-					},
-					{
-						database: this.knex,
-						schema: this.schema,
-						accountability: this.accountability,
-						scopedCache: scopedCacheCollector.purge,
-					},
-				)
-				: payload;
-
-		if (payloadAfterHooks === null) {
-			if (!opts.allowFilterCancel) {
-				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
-				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
-				// option; on its own a null payload is invalid rather than a silent no-op.
-				throw new InvalidPayloadError({
-					reason: `A filter hook cancelled the update, but this operation requires it`,
-				});
-			}
-
-			// A hook that declared a purge via `purgeBy` before cancelling still gets it
-			// (parity with create's cancel); a plain validation cancel is a no-op (the
-			// guard keeps an empty collector from reaching the purge). The cancel purges
-			// only the declared tags — `includeCollectionTag: false` leaves this
-			// collection's own bare tag (its global reads) warm, since nothing changed.
-			if (
-				scopedCacheCollector.tags.length > 0 &&
-				shouldClearCache(this.cache, opts, this.collection)
-			) {
-				this.scopedCachePurged = await purgeScopedCache(
-					this.cache,
-					this.collection,
-					scopedCacheCollector.tags,
-					this.scopedCachePurgeContext(),
-					{ includeCollectionTag: false },
-				);
-			}
-
-			// The filter cancelled the update: nothing is written; return a null per key
-			// so the result stays index-aligned with the input keys.
-			return keys.map(() => null);
-		}
+		const payloadAfterHooks = group.data as Partial<AnyItem>;
 
 		const isEmptyAlterations = (value: unknown): boolean => {
-			// A bare `[]` is not empty here: for o2m it removes every existing child (see processO2M),
-			// so only the `{ create, update, delete }` object form can count as no change.
+			// A bare `[]` is not empty here: for o2m it removes every existing
+			// child (see processO2M), so only the `{ create, update, delete }`
+			// object form can count as no change.
 			if (!isPlainObject(value)) {
 				return false;
 			}
@@ -1661,14 +1540,254 @@ implements AbstractService<Item> {
 			return false;
 		};
 
-		const changedFields = Object.keys(payloadAfterHooks ?? {}).filter((field) => !changesNothing(field));
+		const changedFields = Object.keys(payloadAfterHooks ?? {}).filter((field) => {
+			return !changesNothing(field);
+		});
 
 		if (changedFields.length === 0) {
-			// An empty payload, a PK-only update, or a filter hook that cleared every field to an
-			// empty alterations object leaves nothing to change — skip the transaction,
-			// activity/revision rows and integrity checks.
+			// Nothing to write: no transaction, no activity or revision rows, and no
+			// integrity check.
+			return true;
+		}
+
+		return false;
+	}
+
+	async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts: MutationOptions & { allowFilterCancel: true },
+	): Promise<(PrimaryKey | null)[]>;
+
+	async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts?: MutationOptions,
+	): Promise<PrimaryKey[]>;
+
+	/**
+	 * Update rows in groups, each group one change applied to the keys it names.
+	 *
+	 * Every update entrypoint funnels through here so the `items.update` events fire
+	 * once for the whole update, carrying every group, rather than once per row.
+	 */
+	async updateGroups(
+		groups: UpdateGroup<Item>[],
+		opts: MutationOptions = {},
+	): Promise<(PrimaryKey | null)[]> {
+		if (!opts.mutationTracker) {
+			opts.mutationTracker = this.createMutationTracker();
+		}
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const nestedActionEvents: ActionEventParams[] = [];
+		const inputKeys = groups.flatMap((group) => group.keys);
+
+		// An `items.update` hook can add purge tags via `context.scopedCache.purgeBy`;
+		// drained into the purge below.
+		const scopedCacheCollector =
+			opts.scopedCacheCollector ?? createScopedCacheCollector(this.schema);
+
+		// Run all hooks that are attached to this event so the end user has the chance to augment the
+		// items that are about to be saved
+		const payload = groups.map((group) => {
+			return { data: cloneDeep(group.data), keys: [...group.keys] };
+		});
+
+		const groupsAfterHooks =
+			opts.emitEvents !== false
+				? await emitter.emitFilter<UpdateGroup<Item>[], null>(
+					this.eventScope === 'items'
+						? ['items.update', `${this.collection}.items.update`]
+						: `${this.eventScope}.update`,
+					payload,
+					{
+						collection: this.collection,
+					},
+					{
+						database: this.knex,
+						schema: this.schema,
+						accountability: this.accountability,
+						scopedCache: scopedCacheCollector.purge,
+					},
+				)
+				: payload;
+
+		if (groupsAfterHooks === null) {
+			if (!opts.allowFilterCancel) {
+				// A filter hook cleared the payload to null. Treating that as an explicit, opt-in
+				// cancellation (returning a null per key) is owned by the `allowFilterCancel` mutation
+				// option; on its own a null payload is invalid rather than a silent no-op.
+				throw new InvalidPayloadError({
+					reason: `A filter hook cancelled the update, but this operation requires it`,
+				});
+			}
+
+			// A hook that declared a purge via `purgeBy` before cancelling still gets it
+			// (parity with create's cancel); a plain validation cancel is a no-op (the
+			// guard keeps an empty collector from reaching the purge). The cancel purges
+			// only the declared tags — `includeCollectionTag: false` leaves this
+			// collection's own bare tag (its global reads) warm, since nothing changed.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await purgeScopedCache(
+					this.cache,
+					this.collection,
+					scopedCacheCollector.tags,
+					this.scopedCachePurgeContext(),
+					{ includeCollectionTag: false },
+				);
+			}
+
+			// The filter cancelled the update: nothing is written; return a null per key
+			// so the result stays index-aligned with the input keys.
+			return inputKeys.map(() => null);
+		}
+
+		// The guards read the key set the hooks settled on, not the one the caller
+		// sent, so keys a hook added are counted and validated like any other.
+		const keys = groupsAfterHooks.flatMap((group) => group.keys);
+
+		if (!opts.bypassLimits) {
+			opts.mutationTracker.trackMutations(keys.length);
+		}
+
+		validateKeys(this.schema, this.collection, primaryKeyField, keys);
+
+		// Capture the scope values these rows hold before the update so an update that
+		// moves a row to a new scope value purges both slices (old ∪ new).
+		// Empty when the collection isn't scoped.
+		const oldScopedCacheTags = await this.snapshotScopedCacheTags(keys);
+
+		const writingGroups = groupsAfterHooks.filter((group) => {
+			return !this.groupChangesNothing(group);
+		});
+
+		if (writingGroups.length === 0) {
+			// Every group is a no-op: nothing to write, purge or report.
 			return [];
 		}
+
+		const applied: UpdateGroup<Item>[] = [];
+		const updated: PrimaryKey[] = [];
+
+		// One transaction around every group, so a failure anywhere rolls the whole
+		// update back and the integrity check below sees the finished state once
+		// rather than once per group.
+		await transaction(this.knex, async (trx) => {
+			const service = this.fork({ knex: trx });
+
+			let userIntegrityCheckFlags =
+				opts.userIntegrityCheckFlags ?? UserIntegrityCheckFlag.None;
+
+			for (const group of writingGroups) {
+				const result = await service.applyUpdateGroup(
+					group,
+					{
+						...opts,
+						onRequireUserIntegrityCheck: (flags) => {
+							userIntegrityCheckFlags |= flags;
+						},
+					},
+					nestedActionEvents,
+				);
+
+				if (result === null) {
+					continue;
+				}
+
+				applied.push(result);
+				updated.push(...result.keys);
+			}
+
+			if (userIntegrityCheckFlags) {
+				if (opts.onRequireUserIntegrityCheck) {
+					opts.onRequireUserIntegrityCheck(userIntegrityCheckFlags);
+				}
+				else {
+					await validateUserCountIntegrity({
+						flags: userIntegrityCheckFlags,
+						knex: trx,
+					});
+				}
+			}
+		}, opts.mutationTracker.snapshot());
+
+		if (applied.length === 0) {
+			// Every group turned out to change nothing, so no transaction ran: there is
+			// nothing to purge and no action to report, exactly as for a single update
+			// whose payload was a no-op.
+			return updated;
+		}
+
+		if (shouldClearCache(this.cache, opts, this.collection)) {
+			// Old slices from the pre-update capture, plus the new value re-read from the
+			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
+			// type coercion can rewrite the scope column on write, so the stored row is
+			// authoritative, the payload isn't (same rule as createMany). "Committed"
+			// holds only when this call owns the transaction; from a hook it shares the
+			// caller's and this purge runs pre-commit —
+			// https://github.com/jclaveau/directus/issues/363
+			const newScopedCacheTags = await this.snapshotScopedCacheTags(keys);
+
+			const scopedCacheTags =
+				oldScopedCacheTags === null || newScopedCacheTags === null
+					? null
+					: [...oldScopedCacheTags, ...newScopedCacheTags];
+
+			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
+		}
+
+		if (opts.emitEvents !== false) {
+			const actionEvent = {
+				event:
+					this.eventScope === 'items'
+						? ['items.update', `${this.collection}.items.update`]
+						: `${this.eventScope}.update`,
+				meta: {
+					payload: applied,
+					collection: this.collection,
+				},
+				context: {
+					database: getDatabase(),
+					schema: this.schema,
+					accountability: this.accountability,
+				},
+			};
+
+			await emitActionEvents([actionEvent, ...nestedActionEvents], opts);
+		}
+
+		return updated;
+	}
+
+	/**
+	 * Apply one group's change to the rows it names, in its own transaction.
+	 *
+	 * The `items.update` events belong to the whole update and are emitted by
+	 * `updateGroups` around the loop, never here. Returns what was written — the
+	 * payload after presets, and the keys it reached — or null when the group
+	 * turned out to change nothing.
+	 */
+	private async applyUpdateGroup(
+		group: UpdateGroup<Item>,
+		opts: MutationOptions,
+		nestedActionEvents: ActionEventParams[],
+	): Promise<UpdateGroup<Item> | null> {
+		const { ActivityService } = await import('./activity.js');
+		const { RevisionsService } = await import('./revisions.js');
+
+		const keys = group.keys;
+		const data = group.data;
+		const payloadAfterHooks = group.data as Partial<AnyItem>;
+
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
+
+		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
+			.filter((field) => field.alias === true)
+			.map((field) => field.field);
+
 
 		// Sort keys to ensure that the order is maintained
 		keys.sort();
@@ -1870,46 +1989,7 @@ implements AbstractService<Item> {
 			}
 		}, opts.mutationTracker.snapshot());
 
-		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Old slices from the pre-update capture, plus the new value re-read from the
-			// now-committed rows (old ∪ new) — not the post-hook payload: a DB trigger or
-			// type coercion can rewrite the scope column on write, so the stored row is
-			// authoritative, the payload isn't (same rule as createMany). "Committed"
-			// holds only when this call owns the transaction; from a hook it shares the
-			// caller's and this purge runs pre-commit —
-			// https://github.com/jclaveau/directus/issues/363
-			const newScopedCacheTags = await this.snapshotScopedCacheTags(keys);
-
-			const scopedCacheTags =
-				oldScopedCacheTags === null || newScopedCacheTags === null
-					? null
-					: [...oldScopedCacheTags, ...newScopedCacheTags];
-
-			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
-		}
-
-		if (opts.emitEvents !== false) {
-			const actionEvent = {
-				event:
-					this.eventScope === 'items'
-						? ['items.update', `${this.collection}.items.update`]
-						: `${this.eventScope}.update`,
-				meta: {
-					payload: payloadWithPresets,
-					keys,
-					collection: this.collection,
-				},
-				context: {
-					database: getDatabase(),
-					schema: this.schema,
-					accountability: this.accountability,
-				},
-			};
-
-			await emitActionEvents([actionEvent, ...nestedActionEvents], opts);
-		}
-
-		return keys;
+		return { data: payloadWithPresets, keys };
 	}
 
 	/**

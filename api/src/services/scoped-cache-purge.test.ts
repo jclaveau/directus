@@ -566,7 +566,13 @@ describe(oneLine`
 		tracker.on.select('test').responseOnce([{ id: 1, student: 'C' }]);
 		tracker.on.update('test').response(1);
 
-		const rewrite = async (payload: any) => ({ ...payload, student: 'C' });
+		// The event now carries a group per change, so a rewriting hook maps over
+		// them rather than spreading a single payload.
+		const rewrite = async (groups: any) => {
+			return groups.map((group: any) => {
+				return { ...group, data: { ...group.data, student: 'C' } };
+			});
+		};
 		emitter.onFilter('test.items.update', rewrite);
 
 		try {

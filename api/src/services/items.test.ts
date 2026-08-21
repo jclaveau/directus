@@ -463,9 +463,25 @@ describe('Integration Tests', () => {
 
 		describe('updateBatch', () => {
 			it('should validate user count if requested', async () => {
-				await service.updateBatch([{ id: 1 }], { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+				await service.updateBatch(
+					[{ id: 1, name: 'test' }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
+			});
+
+			it('should not validate user count when every row is a no-op', async () => {
+				// `{ id: 1 }` carries nothing but the primary key, so nothing is written and
+				// the user count cannot have moved. `updateBatch` used to run the check
+				// anyway, unlike `updateMany`; going through `updateGroups` settles both on
+				// the latter — no write, no check.
+				await service.updateBatch(
+					[{ id: 1 }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
+
+				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
 			});
 		});
 
@@ -558,7 +574,9 @@ describe('Integration Tests', () => {
 
 			it('should skip when a filter hook strips the only changed field down to the primary key', async () => {
 				// the decision is made on the post-hook payload, so a hook can turn a write into a no-op
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1 });
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValue([{ data: { id: 1 }, keys: [1] }]);
 
 				const keys = await service.updateMany([1], { name: 'changed' });
 
@@ -570,7 +588,9 @@ describe('Integration Tests', () => {
 
 			it('should write when a filter hook adds a real field to a would-be no-op payload', async () => {
 				// the inverse: a PK-only payload that a hook enriches must no longer be skipped
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1, name: 'added' });
+				const emitFilterSpy = vi
+					.spyOn(emitter, 'emitFilter')
+					.mockResolvedValue([{ data: { id: 1, name: 'added' }, keys: [1] }]);
 
 				await service.updateMany([1], { id: 1 });
 
