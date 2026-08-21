@@ -1,6 +1,7 @@
-// Names an SFC's `<template>` mentions. A binding used from markup is used from an
-// AST the script's scope analysis never links to, so both single-use rules have to
-// ask the template before deciding a binding has one use — or none.
+// Names an SFC's `<template>` mentions. Both single-use rules leave those alone: a
+// template expression cannot take a function body or a multi-line initializer, and
+// what inline template code can reach is not what the script can — so "inline it at
+// its one use" is not an instruction that can be carried out there.
 //
 // `ref="el"` and `<style> v-bind(x)` bind by string rather than by expression, so
 // they are not identifiers here and stay invisible.

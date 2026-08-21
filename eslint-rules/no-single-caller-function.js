@@ -28,8 +28,6 @@ export default {
   create(context) {
     const sourceCode = context.sourceCode ?? context.getSourceCode()
 
-    // A template calls its script's functions from an AST scope analysis never links
-    // to, so those calls are counted here rather than the whole component exempted.
     const templateNames = vueTemplateIdentifiers(sourceCode)
 
     return {
@@ -44,9 +42,13 @@ export default {
           return
         }
 
-        let callerCount = templateNames.has(node.id.name)
-          ? 1
-          : 0
+        // Used from markup: a template expression cannot take a function body, and
+        // what it can reach from there is not what the script can.
+        if (templateNames.has(node.id.name)) {
+          return
+        }
+
+        let callerCount = 0
 
         for (const reference of variable.references) {
           if (!reference.isRead() || isExportReference(reference)) {

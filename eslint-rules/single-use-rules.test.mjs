@@ -257,19 +257,34 @@ ruleTester.run(`no-single-caller-function`, noSingleCallerFunction, {
 sfcRuleTester.run(`no-single-caller-function in an SFC`, noSingleCallerFunction, {
   valid: [
     {
-      // Called from the script and from the template: two callers, not one.
+      // Called from the template: there is nowhere in an attribute to put a body.
       filename: `Comp.vue`,
-      code: sfc(`function go() {}\nfunction wrap() { go() }\nuse(wrap)\nuse(wrap)`,
-        `<b @click="go()" />`),
+      code: sfc(`function onPick() {}`, `<b @click="onPick()" />`),
+    },
+    {
+      // Handed to the template by reference rather than called from it.
+      filename: `Comp.vue`,
+      code: sfc(`function onPick() {}`, `<b @click="onPick" />`),
+    },
+    {
+      // Called once from the script, and the template also reaches it.
+      filename: `Comp.vue`,
+      code: sfc(
+        `function go() {}\nfunction wrap() { go() }\nuse(wrap)\nuse(wrap)`,
+        `<b @click="go()" />`,
+      ),
     },
   ],
   invalid: [
     {
-      // The template call is the single caller — counted, where it used to make the
-      // whole component exempt.
+      // The control: one script caller and the template never mentions it, so the
+      // component being an SFC is not on its own a reason to stay quiet.
       filename: `Comp.vue`,
-      code: sfc(`function onPick() {}`, `<b @click="onPick()" />`),
-      errors: [{ messageId: `singleCaller`, data: { name: `onPick` } }],
+      code: sfc(
+        `function helper() {}\nfunction shown() { helper() }`,
+        `<b @click="shown()" />`,
+      ),
+      errors: [{ messageId: `singleCaller`, data: { name: `helper` } }],
     },
   ],
 })

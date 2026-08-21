@@ -114,8 +114,8 @@ export default {
           return
         }
 
-        // Used from markup: the one use is in an AST this rule cannot edit, and
-        // deleting the binding would leave the template referring to nothing.
+        // Used from markup: a template expression cannot take a multi-line
+        // initializer, and what it can reach from there is not what the script can.
         if (templateNames.has(node.id.name)) {
           return
         }
