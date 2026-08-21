@@ -1,4 +1,5 @@
 import type { Type } from './fields.js';
+import type { PrimaryKey } from './items.js';
 
 /**
  * A unit of cache scope. A collection-level tag (no `field`) covers every entry that
