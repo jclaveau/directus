@@ -7,7 +7,9 @@ const input = JSON.parse(readFileSync(0, 'utf8'));
 const file = input.tool_input?.file_path ?? '';
 const root = process.env.CLAUDE_PROJECT_DIR;
 
-if (!/\.(js|mjs|ts|vue)$/.test(file)) process.exit(0);
+if (!/\.(js|mjs|ts|vue)$/.test(file)) {
+	process.exit(0);
+}
 
 // TODO(diff-scope): `--fix` runs whole-file, so a latent base-config fix on
 // upstream lines could drift the diff vs upstream. Investigate scoping fixes
@@ -40,7 +42,8 @@ function git(args) {
 			encoding: 'utf8',
 			stdio: ['ignore', 'pipe', 'ignore'],
 		});
-	} catch {
+	}
+	catch {
 		return '';
 	}
 }
@@ -54,8 +57,12 @@ let newLine = 0;
 for (const raw of diff.split('\n')) {
 	if (raw.startsWith('@@')) {
 		const match = raw.match(/\+(\d+)/);
-		newLine = match ? Number(match[1]) : 0;
-	} else if (raw.startsWith('+') && !raw.startsWith('+++')) {
+
+		newLine = match
+			? Number(match[1])
+			: 0;
+	}
+	else if (raw.startsWith('+') && !raw.startsWith('+++')) {
 		added.add(newLine);
 		newLine++;
 	}
@@ -69,12 +76,17 @@ try {
 	report = execFileSync(
 		'pnpm',
 		[
-			'exec', 'eslint', '--no-config-lookup',
-			'--config', 'eslint.style.config.js', '--format', 'json', rel,
+			'exec',
+			'eslint',
+			'--no-config-lookup',
+			'--config', 'eslint.style.config.js',
+			'--format', 'json',
+			rel,
 		],
 		{ cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
 	);
-} catch (error) {
+}
+catch (error) {
 	report = error.stdout;
 }
 
@@ -82,7 +94,8 @@ let parsed;
 
 try {
 	parsed = JSON.parse(report);
-} catch {
+}
+catch {
 	process.exit(0);
 }
 
@@ -90,9 +103,18 @@ const notes = parsed
 	.flatMap((result) => result.messages)
 	.filter((message) => message.ruleId?.startsWith('local/'))
 	.filter((message) => !tracked || added.has(message.line))
-	.map((message) => `  ${rel}:${message.line}  ${message.ruleId}: ${message.message}`);
+	.map((message) => {
+		return `  ${rel}:${message.line}  ${message.ruleId}: ${message.message}`;
+	});
 
 if (notes.length > 0) {
-	console.log(`\n${notes.length} line(s) worth a second look (advice, not a gate):`);
-	for (const note of notes) console.log(note);
+	// process.stdout rather than console: this file is linted as product code,
+	// where a console statement is an error, and a hook's whole job is to print.
+	process.stdout.write(
+		`\n${notes.length} line(s) worth a second look (advice, not a gate):\n`,
+	);
+
+	for (const note of notes) {
+		process.stdout.write(`${note}\n`);
+	}
 }
