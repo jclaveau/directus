@@ -1,4 +1,7 @@
-import { vueTemplateIdentifiers } from './vue-template-identifiers.js'
+import {
+  isExportReference,
+  vueTemplateIdentifiers,
+} from './vue-template-identifiers.js'
 
 // Inlining moves the initializer to the read, so a read that runs a different
 // number of times than its declaration changes when the value is computed.
@@ -97,8 +100,7 @@ export default {
           return
         }
 
-        // Exported: the readers that would justify the name are in another file.
-        if (!node.init || node.parent.parent.type === `ExportNamedDeclaration`) {
+        if (!node.init) {
           return
         }
 
@@ -128,7 +130,9 @@ export default {
         // `<script setup>` also marks the declaration itself as read so that a
         // template-only binding is not reported unused, and that is not a use.
         const reads = variable.references.filter((reference) => {
-          return reference.isRead() && reference.identifier !== node.id
+          return reference.isRead()
+            && reference.identifier !== node.id
+            && !isExportReference(reference)
         })
 
         if (reads.length !== 1) {

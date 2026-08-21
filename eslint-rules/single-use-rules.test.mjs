@@ -43,8 +43,12 @@ function sfc(script, template) {
 ruleTester.run(`no-single-use-const`, noSingleUseConst, {
   valid: [
     { code: `const twoReads = 1; use(twoReads); use(twoReads)` },
-    { code: `export const exportedOnce = 1; use(exportedOnce)` },
     { code: `const neverRead = 1` },
+    {
+      // The export list is not a read, so this one is used zero times, not once.
+      code: `const onlyExported = 1; export { onlyExported }`,
+    },
+    { code: `const onlyDefault = 1; export default onlyDefault` },
     { code: `const { destructured } = source; use(destructured)` },
     {
       code: `async function outer() { const awaited = await load(); use(awaited) }`,
@@ -98,6 +102,15 @@ ruleTester.run(`no-single-use-const`, noSingleUseConst, {
     {
       code: `const singleRead = compute(); use(singleRead)`,
       errors: [{ messageId: `singleUse`, data: { name: `singleRead` } }],
+    },
+    {
+      // Exported, but with exactly one reader here: the export does not add one.
+      code: `export const exportedOnce = 1; use(exportedOnce)`,
+      errors: [{ messageId: `singleUse`, data: { name: `exportedOnce` } }],
+    },
+    {
+      code: `const listed = 1; use(listed); export { listed }`,
+      errors: [{ messageId: `singleUse`, data: { name: `listed` } }],
     },
     {
       code: `function outer() { const localOnce = 1; return localOnce }`,
@@ -188,8 +201,11 @@ sfcRuleTester.run(`no-single-use-const in an SFC`, noSingleUseConst, {
 ruleTester.run(`no-single-caller-function`, noSingleCallerFunction, {
   valid: [
     { code: `function twoCallers() {}; twoCallers(); twoCallers()` },
-    { code: `export function exportedOnce() {}; exportedOnce()` },
-    { code: `export default function defaultOnce() {}; defaultOnce()` },
+    {
+      // The export list is not a call, so this one has zero callers, not one.
+      code: `function onlyExported() {}; export { onlyExported }`,
+    },
+    { code: `function onlyDefault() {}; export default onlyDefault` },
     { code: `function neverCalled() {}` },
     {
       // The single reference is the recursive call itself, so there is no caller.
@@ -200,6 +216,19 @@ ruleTester.run(`no-single-caller-function`, noSingleCallerFunction, {
     {
       code: `function onlyCaller() {}; onlyCaller()`,
       errors: [{ messageId: `singleCaller`, data: { name: `onlyCaller` } }],
+    },
+    {
+      // Exported, but with exactly one caller here: the export does not add one.
+      code: `export function exportedOnce() {}; exportedOnce()`,
+      errors: [{ messageId: `singleCaller`, data: { name: `exportedOnce` } }],
+    },
+    {
+      code: `function listed() {}; listed(); export { listed }`,
+      errors: [{ messageId: `singleCaller`, data: { name: `listed` } }],
+    },
+    {
+      code: `export default function defaultOnce() {}; defaultOnce()`,
+      errors: [{ messageId: `singleCaller`, data: { name: `defaultOnce` } }],
     },
     {
       // Recursion plus one outside caller is still one caller.

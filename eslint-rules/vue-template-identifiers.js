@@ -37,3 +37,13 @@ export function vueTemplateIdentifiers(sourceCode) {
 
   return names
 }
+
+// An export names a symbol for other files; it is not a use of it here. Both rules
+// count uses, so the reference standing in an export list has to be left out —
+// `export { x }` and `export default x` alike.
+export function isExportReference(reference) {
+  const parent = reference.identifier.parent
+
+  return parent.type === `ExportSpecifier`
+    || parent.type === `ExportDefaultDeclaration`
+}

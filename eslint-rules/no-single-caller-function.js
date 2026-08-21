@@ -1,4 +1,7 @@
-import { vueTemplateIdentifiers } from './vue-template-identifiers.js'
+import {
+  isExportReference,
+  vueTemplateIdentifiers,
+} from './vue-template-identifiers.js'
 
 export default {
   meta: {
@@ -35,14 +38,6 @@ export default {
           return
         }
 
-        // Exported: the callers justifying the extraction are in another file.
-        if (
-          node.parent.type === `ExportNamedDeclaration`
-          || node.parent.type === `ExportDefaultDeclaration`
-        ) {
-          return
-        }
-
         const [variable] = sourceCode.getDeclaredVariables(node)
 
         if (!variable) {
@@ -54,7 +49,7 @@ export default {
           : 0
 
         for (const reference of variable.references) {
-          if (!reference.isRead()) {
+          if (!reference.isRead() || isExportReference(reference)) {
             continue
           }
 
