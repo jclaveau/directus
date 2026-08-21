@@ -135,7 +135,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				'The response-cache entries seen in the window, grouped by endpoint and '
 				+ 'query, with hit counts, size, age and remaining TTL. Use it to find '
 				+ 'what is filling the cache and what is never read back.',
-			inputSchema: { type: 'object', properties: windowProperty('1h') },
+			inputSchema: { type: 'object', properties: windowProperty('10m') },
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {

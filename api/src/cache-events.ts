@@ -232,8 +232,9 @@ const MIN_CACHE_STATS_WINDOW = getMilliseconds('1m', 60_000);
 const CACHE_STATS_LISTING_LIMIT = 200;
 
 // The entries listing aggregates every event in its window, so its default is
-// shorter than the shared one: a day of a busy cache is millions of rows.
-const DEFAULT_CACHE_ENTRIES_WINDOW = getMilliseconds('1h', 3_600_000);
+// far shorter than the shared one: the row count scales with traffic, and a day
+// of a busy cache spills the aggregate to disk.
+const DEFAULT_CACHE_ENTRIES_WINDOW = getMilliseconds('10m', 600_000);
 
 // An entry pinned to a hot slice is covered by every mutation of it, so the
 // purges since its fill are unbounded. The newest few answer "was this entry

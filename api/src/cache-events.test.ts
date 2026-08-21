@@ -2189,7 +2189,7 @@ describe('listCacheEntries', () => {
 
 	// Its own default, shorter than the 24h the anomaly and latency listings
 	// share, because this one aggregates every event in the window.
-	it('windows the listing over the last hour by default', async () => {
+	it('windows the listing over the last ten minutes by default', async () => {
 		const now = 1_700_000_000_000;
 		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
 
@@ -2198,7 +2198,7 @@ describe('listCacheEntries', () => {
 		expect(builder.where).toHaveBeenCalledWith(
 			'e.time',
 			'>',
-			new Date(now - 3_600_000),
+			new Date(now - 600_000),
 		);
 
 		nowSpy.mockRestore();

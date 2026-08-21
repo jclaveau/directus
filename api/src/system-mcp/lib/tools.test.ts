@@ -161,7 +161,7 @@ test('Each windowed read documents the default it actually takes', () => {
 		[
 			'list_cache_entries',
 			'How far back to look, as a duration such as "15m", "6h" or "7d". '
-			+ 'Defaults to 1h, and is clamped to what telemetry retention holds.',
+			+ 'Defaults to 10m, and is clamped to what telemetry retention holds.',
 		],
 		['list_cache_anomalies', shared],
 		['list_cache_latencies', shared],
