@@ -245,6 +245,12 @@ ruleTester.run(`no-single-caller-function`, noSingleCallerFunction, {
       code: `function passedOnce() {}; register(passedOnce)`,
       errors: [{ messageId: `singleCaller` }],
     },
+    {
+      // Reviewed and kept: a type position is still the one and only use, even
+      // though it is the one use you cannot literally inline a body into.
+      code: `function typedOnce() {}; type Signature = typeof typedOnce`,
+      errors: [{ messageId: `singleCaller`, data: { name: `typedOnce` } }],
+    },
   ],
 })
 
