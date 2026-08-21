@@ -35,6 +35,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //     post) → coarse: the moved-from post's slice is purged, so it can't go stale.
 //   - moderated (flat, channel-scoped), a create hook that VETOES a row: a pure veto
 //     purges nothing; a veto that declares its slice via `purgeBy` purges precisely.
+//   - inert_dedup (flat, channel-scoped), a take-over that writes NOTHING and says
+//     so via `skipPurgeFor` → purges nothing: both channel slices stay warm.
 
 const ARTICLE = 'test_items_article';
 const AUTHOR = 'test_items_author';
@@ -49,6 +51,7 @@ const POST_FK = 'test_items_post_id';
 const TAG_FK = 'test_items_tag_id';
 
 const MODERATED = 'test_items_moderated';
+const INERT_DEDUP = 'test_items_inert_dedup';
 
 const COLLECTIONS = 'directus_collections';
 const cacheStatusHeader = 'x-cache-status';
@@ -102,6 +105,14 @@ describe(oneLine`
 					},
 					{
 						collection: MODERATED,
+						meta: { scoped_cache_fields: ['channel'] },
+						fields: [
+							{ field: 'channel', type: 'string', meta: {} },
+							{ field: 'body', type: 'string', meta: {} },
+						],
+					},
+					{
+						collection: INERT_DEDUP,
 						meta: { scoped_cache_fields: ['channel'] },
 						fields: [
 							{ field: 'channel', type: 'string', meta: {} },
@@ -179,6 +190,13 @@ describe(oneLine`
 						{ channel: 'random', body: 'hi' },
 					],
 				}),
+				CreateItem(vendor, {
+					collection: INERT_DEDUP,
+					item: [
+						{ channel: 'general', body: 'hello' },
+						{ channel: 'random', body: 'hi' },
+					],
+				}),
 			]);
 
 			[ada, bob, cal] = authors.map((author: { id: number }) => author.id);
@@ -228,6 +246,7 @@ describe(oneLine`
 				DeleteCollection(vendor, { collection: POST }),
 				DeleteCollection(vendor, { collection: TAG }),
 				DeleteCollection(vendor, { collection: MODERATED }),
+				DeleteCollection(vendor, { collection: INERT_DEDUP }),
 			]);
 		});
 
@@ -367,6 +386,48 @@ describe(oneLine`
 			// Nothing purged: both slices still warm, and the veto persisted no row.
 			expect(general.headers[cacheStatusHeader]).toBe('HIT');
 			expect(random.headers[cacheStatusHeader]).toBe('HIT');
+			expect(general.body.data).toHaveLength(1);
+		});
+
+		it(oneLine`
+			a take-over that wrote nothing and says so purges nothing — both channel
+			slices stay warm
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const warmed = await Promise.all([
+				readSlice(INERT_DEDUP, 'channel', 'general'),
+				readSlice(INERT_DEDUP, 'channel', 'random'),
+			]);
+
+			// Non-vacuity: a cold read would make the HITs below meaningless.
+			for (const response of warmed) {
+				expect(response.headers[cacheStatusHeader]).toBe('MISS');
+			}
+
+			// Byte-for-byte the row already stored, so the hook takes the create over
+			// and writes nothing. Undeclared this would be COARSE — the sibling
+			// channel is what proves it is not.
+			const taken = await request(url)
+				.post(`/items/${INERT_DEDUP}`)
+				.send({ channel: 'general', body: 'hello' })
+				.set('Authorization', auth);
+
+			expect(taken.statusCode).toBe(200);
+
+			const [general, random] = await Promise.all([
+				readSlice(INERT_DEDUP, 'channel', 'general'),
+				readSlice(INERT_DEDUP, 'channel', 'random'),
+			]);
+
+			expect(general.headers[cacheStatusHeader]).toBe('HIT');
+			expect(random.headers[cacheStatusHeader]).toBe('HIT');
+
+			// The take-over really happened: no duplicate row landed.
 			expect(general.body.data).toHaveLength(1);
 		});
 
