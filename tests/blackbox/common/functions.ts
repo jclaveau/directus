@@ -261,10 +261,19 @@ export async function CreateCollection(
 		return collectionResponse.body.data;
 	}
 
-	const response = await request(getUrl(vendor, options.env))
+	const auth = `Bearer ${USER.TESTS_FLOW.TOKEN}`;
+
+	let response = await request(getUrl(vendor, options.env))
 		.post(`/collections`)
-		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
+		.set('Authorization', auth)
 		.send(payload);
+
+	if (response.status === 403) {
+		response = await request(getNoCacheUrl(vendor))
+			.post(`/collections`)
+			.set('Authorization', auth)
+			.send(payload);
+	}
 
 	return dataOrThrow(response, `collection "${payload.collection}"`);
 }
@@ -303,10 +312,21 @@ export async function CreateCollections(
 		return [];
 	}
 
-	const response = await request(getUrl(vendor, options.env))
+	const auth = `Bearer ${USER.TESTS_FLOW.TOKEN}`;
+
+	let response = await request(getUrl(vendor, options.env))
 		.post(`/collections`)
-		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
+		.set('Authorization', auth)
 		.send(missing);
+
+	// As in CreateField: a stale schema snapshot on the cache server answers 403 for
+	// structure the database already has.
+	if (response.status === 403) {
+		response = await request(getNoCacheUrl(vendor))
+			.post(`/collections`)
+			.set('Authorization', auth)
+			.send(missing);
+	}
 
 	return dataOrThrow(
 		response,
@@ -359,10 +379,23 @@ export async function CreateField(vendor: Vendor, options: OptionsCreateField) {
 	options = Object.assign({}, defaultOptions, options);
 
 	// Action
-	const response = await request(getUrl(vendor))
+	const auth = `Bearer ${USER.TESTS_FLOW.TOKEN}`;
+
+	let response = await request(getUrl(vendor))
 		.post(`/fields/${options.collection}`)
-		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
+		.set('Authorization', auth)
 		.send(options);
+
+	// Same schema-lag 403 as CreateItem: the cache server can still be serving a
+	// snapshot taken before the collection existed, so a brand-new collection reads
+	// as forbidden even to an admin. The no-cache instance recomputes the schema
+	// from the database every request, so it always sees it.
+	if (response.status === 403) {
+		response = await request(getNoCacheUrl(vendor))
+			.post(`/fields/${options.collection}`)
+			.set('Authorization', auth)
+			.send(options);
+	}
 
 	// Idempotent re-seed: a shared shard can seed the same structure twice. The
 	// server throws "already exists in collection" before creating (fields.ts), so
@@ -374,7 +407,7 @@ export async function CreateField(vendor: Vendor, options: OptionsCreateField) {
 	if (alreadyExists) {
 		const existing = await request(getUrl(vendor))
 			.get(`/fields/${options.collection}/${options.field}`)
-			.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`);
+			.set('Authorization', auth);
 
 		return existing.body.data;
 	}
