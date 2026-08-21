@@ -1,3 +1,5 @@
+import { vueTemplateIdentifiers } from './vue-template-identifiers.js'
+
 export default {
   meta: {
     type: `suggestion`,
@@ -21,13 +23,11 @@ export default {
   },
 
   create(context) {
-    // A template calls its script's functions from an AST this rule never sees, so
-    // every helper in a component would read as callerless.
-    if (context.filename.endsWith(`.vue`)) {
-      return {}
-    }
-
     const sourceCode = context.sourceCode ?? context.getSourceCode()
+
+    // A template calls its script's functions from an AST scope analysis never links
+    // to, so those calls are counted here rather than the whole component exempted.
+    const templateNames = vueTemplateIdentifiers(sourceCode)
 
     return {
       FunctionDeclaration(node) {
@@ -49,7 +49,9 @@ export default {
           return
         }
 
-        let callerCount = 0
+        let callerCount = templateNames.has(node.id.name)
+          ? 1
+          : 0
 
         for (const reference of variable.references) {
           if (!reference.isRead()) {

@@ -1,3 +1,40 @@
+import { vueTemplateIdentifiers } from './vue-template-identifiers.js'
+
+// Inlining moves the initializer to the read, so a read that runs a different
+// number of times than its declaration changes when the value is computed.
+const REPEATING_STATEMENTS = new Set([
+  `ForStatement`,
+  `ForInStatement`,
+  `ForOfStatement`,
+  `WhileStatement`,
+  `DoWhileStatement`,
+])
+
+function runsWithItsDeclaration(read, declarationBlock) {
+  let current = read
+
+  while (current && current.parent && current !== declarationBlock) {
+    const parent = current.parent
+
+    if (
+      REPEATING_STATEMENTS.has(parent.type)
+      || parent.type === `SwitchCase`
+      // Moving the initializer inside a `try` also hands it that catch clause.
+      || parent.type === `TryStatement`
+      || parent.type === `CatchClause`
+      || ((parent.type === `IfStatement` || parent.type === `ConditionalExpression`)
+        && parent.test !== current)
+      || (parent.type === `LogicalExpression` && parent.right === current)
+    ) {
+      return false
+    }
+
+    current = parent
+  }
+
+  return true
+}
+
 function enclosingFunction(node) {
   let current = node
 
@@ -48,6 +85,7 @@ export default {
     const ignoreAwait = options.ignoreAwait ?? true
     const ignoreAssertedValues = options.ignoreAssertedValues ?? true
     const sourceCode = context.sourceCode ?? context.getSourceCode()
+    const templateNames = vueTemplateIdentifiers(sourceCode)
 
     return {
       VariableDeclarator(node) {
@@ -71,6 +109,12 @@ export default {
           return
         }
 
+        // Used from markup: the one use is in an AST this rule cannot edit, and
+        // deleting the binding would leave the template referring to nothing.
+        if (templateNames.has(node.id.name)) {
+          return
+        }
+
         const [variable] = sourceCode.getDeclaredVariables(node)
 
         if (!variable) {
@@ -78,8 +122,10 @@ export default {
         }
 
         // The initializer is a write reference; reads are what "used once" counts.
+        // `<script setup>` also marks the declaration itself as read so that a
+        // template-only binding is not reported unused, and that is not a use.
         const reads = variable.references.filter((reference) => {
-          return reference.isRead()
+          return reference.isRead() && reference.identifier !== node.id
         })
 
         if (reads.length !== 1) {
@@ -90,6 +136,11 @@ export default {
 
         // Across functions, inlining moves WHEN the initializer runs.
         if (enclosingFunction(read.identifier) !== enclosingFunction(node)) {
+          return
+        }
+
+        // A loop or a branch does the same within one function.
+        if (!runsWithItsDeclaration(read.identifier, node.parent.parent)) {
           return
         }
 
@@ -107,11 +158,20 @@ export default {
         // Only a single-line initializer has a measurable width once inlined.
         if (node.init.loc.start.line === node.init.loc.end.line) {
           const readLine = sourceCode.lines[read.identifier.loc.start.line - 1]
+          const declaration = node.parent
+
+          // The declaration goes away with the inlining, so when it shares the
+          // read's line its text must not be measured as if it stayed.
+          const before = declaration.loc.end.line === read.identifier.loc.start.line
+            ? readLine
+              .slice(declaration.loc.end.column, read.identifier.loc.start.column)
+              .replace(/^[\s;]+/u, ``)
+            : readLine.slice(0, read.identifier.loc.start.column)
 
           // A tab counts as `tabWidth` columns, the way `max-len` measures a line.
           let inlinedWidth = 0
 
-          for (const char of readLine.slice(0, read.identifier.loc.start.column)
+          for (const char of before
             + sourceCode.getText(node.init)
             + readLine.slice(read.identifier.loc.end.column)) {
             inlinedWidth += char === `\t`

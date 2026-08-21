@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import { RuleTester } from 'eslint'
 import tseslint from 'typescript-eslint'
 import noSingleUseConst from './no-single-use-const.js'
@@ -10,6 +11,34 @@ const ruleTester = new RuleTester({
     sourceType: `module`,
   },
 })
+
+// Resolved through eslint-plugin-vue's own dependency rather than added as a direct
+// one: the SFC cases are the only thing here that needs it.
+const vueParser = createRequire(import.meta.resolve(`eslint-plugin-vue`))(
+  `vue-eslint-parser`,
+)
+
+const sfcRuleTester = new RuleTester({
+  languageOptions: {
+    parser: vueParser,
+    parserOptions: {
+      parser: tseslint.parser,
+      ecmaVersion: 2022,
+      sourceType: `module`,
+    },
+  },
+})
+
+function sfc(script, template) {
+  return [
+    `<template>`,
+    `  ${template}`,
+    `</template>`,
+    `<script setup lang="ts">`,
+    script,
+    `</script>`,
+  ].join(`\n`)
+}
 
 ruleTester.run(`no-single-use-const`, noSingleUseConst, {
   valid: [
@@ -44,6 +73,25 @@ ruleTester.run(`no-single-use-const`, noSingleUseConst, {
       // A read inside a loop still runs once per iteration, but the const is read
       // twice at source level here, so the rule stays quiet.
       code: `const reused = 1; for (const x of xs) { use(reused, x) } use(reused)`,
+    },
+    {
+      // Inlining would run the initializer once per iteration instead of once.
+      code: `function o(ys) { const x = f(); for (const y of ys) { use(x, y) } }`,
+    },
+    {
+      // Inlining would make the initializer conditional: it may never run at all.
+      code: `function o(c) { const x = f(); if (c) { use(x) } }`,
+    },
+    {
+      // Same hazard through a short-circuit rather than a statement.
+      code: `function o(c) { const x = f(); return c && use(x) }`,
+    },
+    {
+      // Inlining into the `try` would hand the initializer that catch clause.
+      code: `function o() { const x = f(); try { use(x) } catch {} }`,
+    },
+    {
+      code: `function o(k) { const x = f(); switch (k) { case 1: use(x) } }`,
     },
   ],
   invalid: [
@@ -89,6 +137,51 @@ ruleTester.run(`no-single-use-const`, noSingleUseConst, {
       ].join(`\n`),
       errors: [{ messageId: `singleUse`, data: { name: `ruleList` } }],
     },
+    {
+      // Declaration and read share a line. Measuring the line as it stands puts the
+      // pair at 72 columns and the projection at 59, so counting the declaration
+      // that the inlining removes would wrongly suppress this one.
+      code: `function o() { const q = '${`a`.repeat(30)}'; return g(q) }`,
+      options: [{ code: 85, tabWidth: 4 }],
+      errors: [{ messageId: `singleUse`, data: { name: `q` } }],
+    },
+  ],
+})
+
+sfcRuleTester.run(`no-single-use-const in an SFC`, noSingleUseConst, {
+  valid: [
+    {
+      // `<script setup>` marks every top-level binding as read at its declaration so
+      // a template-only one is not reported unused. That marker is not a use.
+      filename: `Comp.vue`,
+      code: sfc(`const label = compute()`, `<b>{{ label }}</b>`),
+    },
+    {
+      // `ref="el"` binds by string, so the template never mentions `el` as an
+      // identifier and only the declaration marker is left to count.
+      filename: `Comp.vue`,
+      code: sfc(`const el = ref(null)`, `<b ref="el" />`),
+    },
+    {
+      // One script read, but the template needs the binding: deleting it would leave
+      // the markup pointing at nothing.
+      filename: `Comp.vue`,
+      code: sfc(
+        `const rows = load()\nconst total = rows.length`,
+        `<b>{{ rows }}{{ total }}</b>`,
+      ),
+    },
+  ],
+  invalid: [
+    {
+      // The control: one real read and the template never mentions it.
+      filename: `Comp.vue`,
+      code: sfc(
+        `const inner = compute()\nconst shown = wrap(inner)`,
+        `<b>{{ shown }}</b>`,
+      ),
+      errors: [{ messageId: `singleUse`, data: { name: `inner` } }],
+    },
   ],
 })
 
@@ -122,6 +215,26 @@ ruleTester.run(`no-single-caller-function`, noSingleCallerFunction, {
       // Passed by reference rather than called — still one use site.
       code: `function passedOnce() {}; register(passedOnce)`,
       errors: [{ messageId: `singleCaller` }],
+    },
+  ],
+})
+
+sfcRuleTester.run(`no-single-caller-function in an SFC`, noSingleCallerFunction, {
+  valid: [
+    {
+      // Called from the script and from the template: two callers, not one.
+      filename: `Comp.vue`,
+      code: sfc(`function go() {}\nfunction wrap() { go() }\nuse(wrap)\nuse(wrap)`,
+        `<b @click="go()" />`),
+    },
+  ],
+  invalid: [
+    {
+      // The template call is the single caller — counted, where it used to make the
+      // whole component exempt.
+      filename: `Comp.vue`,
+      code: sfc(`function onPick() {}`, `<b @click="onPick()" />`),
+      errors: [{ messageId: `singleCaller`, data: { name: `onPick` } }],
     },
   ],
 })
