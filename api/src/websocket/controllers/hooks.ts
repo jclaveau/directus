@@ -38,6 +38,20 @@ export function registerWebSocketEvents() {
 	registerSortHooks();
 }
 
+// `items.update` carries a group per change rather than one payload and a flat key
+// list, so the wire's `keys` is the union of every group's. Shared by every module's
+// update and by files', which differ only in the event they register for.
+function updateEvent(
+	{ collection, payload = [] }: Record<string, any>,
+): WebSocketEvent {
+	return {
+		collection,
+		action: 'update',
+		keys: payload.flatMap((group: any) => group.keys),
+		payload,
+	};
+}
+
 function registerActionHooks(modules: string[]) {
 	// register event hooks that can be handled in an uniform manner
 	for (const module of modules) {
@@ -48,16 +62,7 @@ function registerActionHooks(modules: string[]) {
 			payload,
 		}));
 
-		// `items.update` carries a group per change rather than one payload and a flat
-		// key list, so the wire's `keys` is the union of every group's.
-		registerAction(`${module}.update`, ({ collection, payload = [] }) => {
-			return {
-				collection,
-				action: 'update',
-				keys: payload.flatMap((group: any) => group.keys),
-				payload,
-			};
-		});
+		registerAction(`${module}.update`, updateEvent);
 
 		registerAction(module + '.delete', ({ keys, collection, payload = [] }) => ({
 			collection,
@@ -101,14 +106,7 @@ function registerFilesHooks() {
 		payload,
 	}));
 
-	registerAction('files.update', ({ collection, payload = [] }) => {
-		return {
-			collection,
-			action: 'update',
-			keys: payload.flatMap((group: any) => group.keys),
-			payload,
-		};
-	});
+	registerAction('files.update', updateEvent);
 
 	registerAction('files.delete', ({ keys, collection, payload = [] }) => ({
 		collection,

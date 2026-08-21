@@ -1776,10 +1776,6 @@ implements AbstractService<Item> {
 					nestedActionEvents,
 				);
 
-				if (result === null) {
-					continue;
-				}
-
 				applied.push(result);
 				updated.push(...result.keys);
 			}
@@ -1796,13 +1792,6 @@ implements AbstractService<Item> {
 				}
 			}
 		}, opts.mutationTracker.snapshot());
-
-		if (applied.length === 0) {
-			// Every group turned out to change nothing, so no transaction ran: there is
-			// nothing to purge and no action to report, exactly as for a single update
-			// whose payload was a no-op.
-			return updated;
-		}
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
 			// Old slices from the pre-update capture, plus the new value re-read from the
@@ -1884,7 +1873,7 @@ implements AbstractService<Item> {
 		group: UpdateGroup<Item>,
 		opts: MutationOptions,
 		nestedActionEvents: ActionEventParams[],
-	): Promise<UpdateGroup<Item> | null> {
+	): Promise<UpdateGroup<Item>> {
 		const { ActivityService } = await import('./activity.js');
 		const { RevisionsService } = await import('./revisions.js');
 

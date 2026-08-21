@@ -898,6 +898,12 @@ function eventNames(event: unknown): string[] {
 	return names.map((name) => String(name));
 }
 
+function updateEvents(spy: MockedFunction<any>, suffix: string) {
+	return spy.mock.calls.filter((call) => {
+		return eventNames(call[0]).includes(suffix);
+	});
+}
+
 // `updateMany` emits the grouped `items.update` and then `items.update.one` per row,
 // so a stub standing in for a hook has to answer the shape each one expects.
 function stubUpdateFilter(groups: unknown) {
@@ -1273,6 +1279,31 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			]);
 		});
 
+		it('emits neither update event when emitEvents is off', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			const keys = await service.updateMany(
+				[1],
+				{ name: 'quiet' },
+				{ emitEvents: false },
+			);
+
+			// The write still lands; only the announcing is suppressed — for the grouped
+			// event and the per-row one alike.
+			expect(keys).toEqual([1]);
+			expect(tracker.history.update).toHaveLength(1);
+			expect(updateEvents(filterSpy, 'items.update')).toHaveLength(0);
+			expect(updateEvents(filterSpy, 'items.update.one')).toHaveLength(0);
+			expect(updateEvents(actionSpy, 'items.update')).toHaveLength(0);
+			expect(updateEvents(actionSpy, 'items.update.one')).toHaveLength(0);
+		});
+
 		it('pairs snapshots when the keys cross a digit boundary', async () => {
 			const accountabilitySchema = new SchemaBuilder()
 				.collection('tracked', (c) => {
@@ -1321,12 +1352,6 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		const trackedService = () => {
 			return new ItemsService('test', { knex: db, schema: shapesSchema });
 		};
-
-		function updateEvents(spy: MockedFunction<any>, suffix: string) {
-			return spy.mock.calls.filter((call) => {
-				return eventNames(call[0]).includes(suffix);
-			});
-		}
 
 		it('emits the grouped event once and the per-row event per key', async () => {
 			tracker.on.update('test').response(3);
