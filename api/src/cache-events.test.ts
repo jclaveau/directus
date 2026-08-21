@@ -2343,6 +2343,40 @@ describe('listCacheGroupLatencies', () => {
 		);
 	});
 
+	// Its own default, shorter than the 24h the anomaly and timeseries reads share,
+	// because this one runs fifteen ordered-set aggregates over the whole window.
+	it('windows the latencies over the last ten minutes by default', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+		queryRows = [];
+		await listCacheGroupLatencies();
+
+		expect(builder.where).toHaveBeenCalledWith(
+			'e.time',
+			'>',
+			new Date(now - 600_000),
+		);
+
+		nowSpy.mockRestore();
+	});
+
+	it('windows the latencies over an explicitly asked span', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+		queryRows = [];
+		await listCacheGroupLatencies(21_600_000);
+
+		expect(builder.where).toHaveBeenCalledWith(
+			'e.time',
+			'>',
+			new Date(now - 21_600_000),
+		);
+
+		nowSpy.mockRestore();
+	});
+
 	it('returns an empty array on a non-Postgres dialect', async () => {
 		mockDb.client = { config: { client: 'sqlite3' } };
 		expect(await listCacheGroupLatencies()).toEqual([]);

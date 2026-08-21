@@ -268,7 +268,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				'Response-time percentiles per endpoint group in the window, split by '
 				+ 'outcome (served from cache, filled, declined). Use it to say what the '
 				+ 'cache is actually saving.',
-			inputSchema: { type: 'object', properties: windowProperty('24h') },
+			inputSchema: { type: 'object', properties: windowProperty('10m') },
 			outputSchema: LIST_OUTPUT,
 			annotations: READ_ONLY,
 			run: async (args, context) => {

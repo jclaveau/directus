@@ -154,18 +154,17 @@ test('Each windowed read documents the default it actually takes', () => {
 			}),
 	);
 
-	const shared = 'How far back to look, as a duration such as "15m", "6h" or '
-		+ '"7d". Defaults to 24h, and is clamped to what telemetry retention holds.';
+	const defaultsTo24h = 'How far back to look, as a duration such as "15m", "6h" '
+		+ 'or "7d". Defaults to 24h, and is clamped to what telemetry retention holds.';
+
+	const defaultsTo10m = 'How far back to look, as a duration such as "15m", "6h" '
+		+ 'or "7d". Defaults to 10m, and is clamped to what telemetry retention holds.';
 
 	expect([...documented]).toEqual([
-		[
-			'list_cache_entries',
-			'How far back to look, as a duration such as "15m", "6h" or "7d". '
-			+ 'Defaults to 10m, and is clamped to what telemetry retention holds.',
-		],
-		['list_cache_anomalies', shared],
-		['list_cache_latencies', shared],
-		['read_cache_timeseries', shared],
+		['list_cache_entries', defaultsTo10m],
+		['list_cache_anomalies', defaultsTo24h],
+		['list_cache_latencies', defaultsTo10m],
+		['read_cache_timeseries', defaultsTo24h],
 	]);
 });
 

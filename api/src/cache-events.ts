@@ -236,6 +236,11 @@ const CACHE_STATS_LISTING_LIMIT = 200;
 // of a busy cache spills the aggregate to disk.
 const DEFAULT_CACHE_ENTRIES_WINDOW = getMilliseconds('10m', 600_000);
 
+// The latency listing scans that same event window through fifteen ordered-set
+// aggregates, and returns a row per endpoint group rather than a capped listing,
+// so it is the most expensive of the four cache reads and defaults shortest.
+const DEFAULT_CACHE_LATENCIES_WINDOW = getMilliseconds('10m', 600_000);
+
 // An entry pinned to a hot slice is covered by every mutation of it, so the
 // purges since its fill are unbounded. The newest few answer "was this entry
 // invalidated and kept anyway"; the rest are the same answer repeated.
@@ -1473,7 +1478,9 @@ export async function listCacheGroupLatencies(
 		return [];
 	}
 
-	const since = new Date(Date.now() - clampCacheStatsWindow(windowMs));
+	const since = new Date(
+		Date.now() - clampCacheStatsWindow(windowMs ?? DEFAULT_CACHE_LATENCIES_WINDOW),
+	);
 
 	const pct = (p: number, filter: string) => {
 		return `percentile_cont(${p}) WITHIN GROUP (ORDER BY e.duration_ms) `
