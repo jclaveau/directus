@@ -143,8 +143,8 @@ test('Only the windowed reads take a window', () => {
 		.toHaveProperty('buckets');
 });
 
-// The entries listing aggregates every event in its window and so defaults to a
-// shorter one than the other reads; an agent picks its window off this text.
+// The entries and latency listings aggregate every event in their window and so
+// default shorter than the other reads; an agent picks its window off this text.
 test('Each windowed read documents the default it actually takes', () => {
 	const documented = new Map(
 		allSystemMcpTools()

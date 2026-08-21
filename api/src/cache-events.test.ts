@@ -2058,8 +2058,8 @@ describe('listCacheEntries', () => {
 		expect(builder.whereIn).toHaveBeenCalledWith('d.cache_key', ['k2', 'k1']);
 	});
 
-	// The regression this listing was rewritten for: grouping on the descriptor's
-	// wide text columns spilled the sort and outran the statement timeout.
+	// The descriptor's thirteen columns are dimensions OF the key, so grouping on
+	// them only widened the key; the aggregate needs nothing but the key itself.
 	it('groups the aggregate on the cache key alone', async () => {
 		queryRows = [
 			{
@@ -2187,7 +2187,7 @@ describe('listCacheEntries', () => {
 			.toEqual([['kept', 500]]);
 	});
 
-	// Its own default, shorter than the 24h the anomaly and latency listings
+	// Its own default, shorter than the 24h the anomaly and timeseries reads
 	// share, because this one aggregates every event in the window.
 	it('windows the listing over the last ten minutes by default', async () => {
 		const now = 1_700_000_000_000;
