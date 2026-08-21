@@ -896,6 +896,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 	afterEach(() => {
 		tracker.reset();
+		revisionWrites.length = 0;
 		vi.clearAllMocks();
 	});
 
@@ -1054,6 +1055,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const keys = await service.updateMany([1], { name: 'after' });
 
 			expect(keys).toEqual([1]);
+
+			expect(revisionWrites[0]).toMatchObject([
+				{ item: 1, data: '{"id":1,"name":"after"}' },
+			]);
 		});
 
 		it('files each snapshot under its own item, not by read order', async () => {
@@ -1092,6 +1097,43 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(rows!.map((row) => [row.item, JSON.parse(row.data)])).toEqual([
 				[1, { id: 1, name: 'first' }],
 				[2, { id: 2, name: 'second' }],
+			]);
+		});
+
+		it('pairs snapshots when the caller passes the keys as strings', async () => {
+			const accountabilitySchema = new SchemaBuilder()
+				.collection('tracked', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			accountabilitySchema.collections['tracked']!.accountability = 'all';
+
+			const service = new ItemsService('tracked', {
+				knex: db,
+				schema: accountabilitySchema,
+				accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+			});
+
+			tracker.on.update('tracked').response(2);
+
+			tracker.on.select('tracked').response([
+				{ id: 2, name: 'second' },
+				{ id: 1, name: 'first' },
+			]);
+
+			// A REST caller hands the keys through as strings while the driver
+			// answers with numbers, so both sides of the lookup need coercing.
+			await service.updateMany(['1', '2'], { name: 'after' });
+
+			const rows = revisionWrites[0];
+
+			expect(rows).toHaveLength(2);
+
+			expect(rows!.map((row) => [row.item, JSON.parse(row.data)])).toEqual([
+				['1', { id: 1, name: 'first' }],
+				['2', { id: 2, name: 'second' }],
 			]);
 		});
 	});
