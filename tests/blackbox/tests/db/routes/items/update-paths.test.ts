@@ -89,7 +89,7 @@ describe('update paths', () => {
 
 		it('refuses an updateBatch payload that is not a list', async () => {
 			const response = await request(getUrl(vendor))
-				.post(`/update-paths/not-an-array`)
+				.post(`/update-paths-probe/not-an-array`)
 				.set('Authorization', AUTH);
 
 			expect(response.statusCode).toEqual(200);
@@ -101,7 +101,7 @@ describe('update paths', () => {
 			const row = await createRow(vendor, 'untouched');
 
 			const response = await request(getUrl(vendor))
-				.post(`/update-paths/pre-mutation`)
+				.post(`/update-paths-probe/pre-mutation`)
 				.send({ key: row.id })
 				.set('Authorization', AUTH);
 
@@ -121,7 +121,7 @@ describe('update paths', () => {
 			const before = await readLog(vendor);
 
 			const response = await request(getUrl(vendor))
-				.post(`/update-paths/silent`)
+				.post(`/update-paths-probe/silent`)
 				.send({ keys: [row.id], name: 'after-silent' })
 				.set('Authorization', AUTH);
 
