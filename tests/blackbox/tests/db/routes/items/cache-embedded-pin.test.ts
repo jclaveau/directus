@@ -10,12 +10,13 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// A read that EMBEDS rows of another collection must be purged when that collection is
-// written (#380). The root is pinned to its slice and the collections one hop away get a
-// bare tag, but a collection reached through a nested relation gets no tag at all — so
-// its writes cannot reach the entry and the next read is a stale HIT.
-// Sibling cases: cache-poisoning-read covers a hook enriching with NO scopeTo (an author
-// contract limit, not this), and #361 covers bare-vs-sliced (a cost, not a staleness).
+// A read that EMBEDS rows of another collection through a nested RELATION is purged when
+// that collection is written: `extractFieldsFromChildren` recurses m2o/o2m/a2o with no
+// depth limit, so every touched collection reaches `collectionsInFieldMap` and gets at
+// least a bare tag. A guard, not a regression — #380 suspected this was broken and the
+// measurement refuted it; the staleness there came from a read hook splicing in a field
+// no relation describes, which is the #292 limit asserted in cache-poisoning-read.
+// The boundary this pins down: traversal covers what the AST describes, and only that.
 
 const OWNER = 'pin_owner';
 const OWNED_ITEM = 'pin_owned_item';
@@ -166,6 +167,8 @@ describe(oneLine`
 		it(oneLine`
 			the read pins every collection it embedded, at least by a bare tag
 		`, async () => {
+			// The bare tag is what a write to that collection purges, so this is the
+			// mechanism behind the refresh asserted above.
 			const url = getUrl(vendor, env);
 
 			await request(url).post('/utils/cache/clear').set('Authorization', auth);
@@ -173,8 +176,6 @@ describe(oneLine`
 			const read = await readOwnerWithSubItems();
 			const tags = read.headers[cacheTagsHeader];
 
-			// The bare tag is what a write to that collection purges, so its absence is
-			// exactly why the entry above survives.
 			expect(tags).toMatch(new RegExp(`(^|, )${OWNED_ITEM}(:|,|$)`));
 			expect(tags).toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(:|,|$)`));
 		});
