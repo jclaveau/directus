@@ -1632,6 +1632,21 @@ implements AbstractService<Item> {
 
 					const snapshots = await itemsService.readMany(keys);
 
+					// `readMany` applies no ordering, so pairing its rows
+					// with `keys` by position files a revision under one item
+					// holding another item's data, which `revert` would then
+					// write straight back onto the wrong row.
+					const snapshotJsonByKey = new Map<string, string>();
+
+					if (Array.isArray(snapshots)) {
+						for (const snapshot of snapshots) {
+							snapshotJsonByKey.set(
+								String(snapshot[primaryKeyField]),
+								JSON.stringify(snapshot),
+							);
+						}
+					}
+
 					const revisionsService = new RevisionsService({
 						knex: trx,
 						schema: this.schema,
@@ -1645,7 +1660,7 @@ implements AbstractService<Item> {
 								item: keys[index],
 								data:
 									snapshots && Array.isArray(snapshots)
-										? JSON.stringify(snapshots[index])
+										? snapshotJsonByKey.get(String(keys[index]))
 										: JSON.stringify(snapshots),
 								delta: await payloadService.prepareDelta(payloadWithTypeCasting),
 							})),

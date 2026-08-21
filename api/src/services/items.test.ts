@@ -63,6 +63,10 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 	};
 });
 
+// Every batch of rows handed to the revision writer, so a test can assert
+// which snapshot was filed under which item.
+const revisionWrites = vi.hoisted<any[][]>(() => []);
+
 // The revision path dynamically imports these; stub them so the activity/revision write loop
 // (incl. the `snapshots && Array.isArray(snapshots)` ternary) runs without a full system schema.
 vi.mock('./activity.js', () => {
@@ -79,6 +83,7 @@ vi.mock('./revisions.js', () => {
 	return {
 		RevisionsService: class {
 			createMany = vi.fn(async (rows: any[]) => {
+				revisionWrites.push(rows);
 				return rows.map((_, i) => i + 1);
 			});
 
@@ -1049,6 +1054,45 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const keys = await service.updateMany([1], { name: 'after' });
 
 			expect(keys).toEqual([1]);
+		});
+
+		it('files each snapshot under its own item, not by read order', async () => {
+			const accountabilitySchema = new SchemaBuilder()
+				.collection('tracked', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			accountabilitySchema.collections['tracked']!.accountability = 'all';
+
+			const service = new ItemsService('tracked', {
+				knex: db,
+				schema: accountabilitySchema,
+				accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+			});
+
+			tracker.on.update('tracked').response(2);
+
+			// `readMany` applies no ordering, so the rows may come back in any order —
+			// here reversed, which is what positional pairing got wrong.
+			tracker.on.select('tracked').response([
+				{ id: 2, name: 'second' },
+				{ id: 1, name: 'first' },
+			]);
+
+			revisionWrites.length = 0;
+
+			await service.updateMany([1, 2], { name: 'after' });
+
+			const rows = revisionWrites[0];
+
+			expect(rows).toHaveLength(2);
+
+			expect(rows!.map((row) => [row.item, JSON.parse(row.data)])).toEqual([
+				[1, { id: 1, name: 'first' }],
+				[2, { id: 2, name: 'second' }],
+			]);
 		});
 	});
 
