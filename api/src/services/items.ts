@@ -1730,7 +1730,25 @@ implements AbstractService<Item> {
 		);
 
 		if (writingGroups.length === 0) {
-			// Every group is a no-op: nothing to write, purge or report.
+			// Nothing is written — every group was a no-op, or the per-row filter
+			// cancelled every row. A hook that declared a purge via `purgeBy` before
+			// cancelling still gets it, since a cancel can touch state out of band;
+			// `includeCollectionTag: false` leaves this collection's own bare tag warm,
+			// because nothing here changed. A plain no-op declares nothing and so
+			// purges nothing.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await purgeScopedCache(
+					this.cache,
+					this.collection,
+					scopedCacheCollector.tags,
+					this.scopedCachePurgeContext(),
+					{ includeCollectionTag: false },
+				);
+			}
+
 			return [];
 		}
 
