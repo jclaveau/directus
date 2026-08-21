@@ -1,5 +1,6 @@
 import { getUrl } from '@common/config';
-import vendors from '@common/get-dbs-to-test';
+import { CreateItem } from '@common/functions';
+import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
@@ -15,15 +16,13 @@ import { collectionTracked } from './batch-update-revisions.seed';
 
 type TrackedRow = { id: number; name: string; status: string | null };
 
-async function createRows(vendor: string): Promise<TrackedRow[]> {
-	const response = await request(getUrl(vendor))
-		.post(`/items/${collectionTracked}`)
-		.send([{ name: 'alpha' }, { name: 'beta' }, { name: 'gamma' }])
-		.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
-
-	expect(response.statusCode).toEqual(200);
-
-	return response.body.data;
+// One round-trip for the three rows, and `CreateItem` falls back to the no-cache
+// instance when the cached one still 403s on a just-seeded collection.
+async function createRows(vendor: Vendor): Promise<TrackedRow[]> {
+	return await CreateItem(vendor, {
+		collection: collectionTracked,
+		item: [{ name: 'alpha' }, { name: 'beta' }, { name: 'gamma' }],
+	});
 }
 
 describe('batch update revisions', () => {
