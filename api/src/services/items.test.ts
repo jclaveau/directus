@@ -1181,6 +1181,54 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
+	describe('mutationId identifies one operation across its events', () => {
+		it('is shared by every event a single updateBatch produces', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			// Forks a child update per row, so without a shared identity each row's
+			// events would look like a separate operation to a hook.
+			await service.updateBatch([
+				{ id: 1, name: 'first' },
+				{ id: 2, name: 'second' },
+			]);
+
+			const emitted = [
+				...filterSpy.mock.calls.map((call) => call[3]),
+				...actionSpy.mock.calls.map((call) => call[2]),
+			];
+
+			const ids = new Set(emitted.map((context: any) => context?.mutationId));
+
+			expect(emitted.length).toBeGreaterThan(1);
+			expect(ids.size).toBe(1);
+			expect([...ids][0]).toEqual(expect.any(String));
+		});
+
+		it('differs between two separate operations', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			await service.updateMany([1], { name: 'first' });
+			await service.updateMany([1], { name: 'second' });
+
+			const ids = filterSpy.mock.calls
+				.map((call) => (call[3] as any)?.mutationId)
+				.filter((id) => id !== undefined);
+
+			expect(ids).toHaveLength(2);
+			expect(ids[0]).not.toEqual(ids[1]);
+		});
+	});
+
 	describe('singletons', () => {
 		it('readSingleton synthesizes defaults for an empty collection', async () => {
 			tracker.on.select('settings').response([]);

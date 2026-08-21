@@ -9,6 +9,13 @@ export type EventContext = {
 	schema: SchemaOverview | null;
 	accountability: Accountability | null;
 	/**
+	 * Identifies the top-level mutation this event belongs to. Every event a single
+	 * write produces carries the same value, including the nested ones a relational
+	 * payload triggers on other collections, so a hook can do a piece of work once
+	 * per operation rather than once per event. Absent on reads.
+	 */
+	mutationId?: string;
+	/**
 	 * Scoped-cache tag channel, carrying ONLY the method for this filter's event:
 	 * `scopeTo` on `items.read`, `purgeBy` on `items.create`/`update`/`delete`.
 	 */

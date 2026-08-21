@@ -21,6 +21,12 @@ export type ActionEventParams = {
 };
 
 export type MutationTracker = {
+	/**
+	 * Identifies one top-level mutation. Created with the tracker at the entrypoint
+	 * and threaded through every nested write, so all of an operation's events —
+	 * across collections and nesting levels — carry the same value.
+	 */
+	id: string;
 	trackMutations: (count: number) => void;
 	getCount: () => number;
 	/**

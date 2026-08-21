@@ -522,6 +522,7 @@ implements AbstractService<Item> {
 		const maxCount = Number(env['MAX_BATCH_MUTATION']);
 		let mutationCount = initialCount;
 		return {
+			id: randomUUID(),
 			trackMutations(count: number) {
 				mutationCount += count;
 
@@ -657,6 +658,7 @@ implements AbstractService<Item> {
 								schema: this.schema,
 								accountability: this.accountability,
 								scopedCache: scopedCacheCollector.purge,
+						mutationId: opts.mutationTracker?.id,
 							},
 						)
 						: payload;
@@ -999,6 +1001,7 @@ implements AbstractService<Item> {
 					database: getDatabase(),
 					schema: this.schema,
 					accountability: this.accountability,
+					mutationId: opts.mutationTracker?.id,
 				},
 			}));
 
@@ -1474,6 +1477,7 @@ implements AbstractService<Item> {
 						schema: this.schema,
 						accountability: this.accountability,
 						scopedCache: scopedCacheCollector.purge,
+						mutationId: opts.mutationTracker?.id,
 					},
 				)
 				: payload;
@@ -1779,6 +1783,7 @@ implements AbstractService<Item> {
 					database: getDatabase(),
 					schema: this.schema,
 					accountability: this.accountability,
+					mutationId: opts.mutationTracker?.id,
 				},
 			};
 
@@ -1960,6 +1965,7 @@ implements AbstractService<Item> {
 						schema: this.schema,
 						accountability: this.accountability,
 						scopedCache: scopedCacheCollector.purge,
+						mutationId: opts.mutationTracker?.id,
 					},
 				)
 				: keys;
@@ -2088,6 +2094,7 @@ implements AbstractService<Item> {
 					database: getDatabase(),
 					schema: this.schema,
 					accountability: this.accountability,
+					mutationId: opts.mutationTracker?.id,
 				},
 			};
 
