@@ -58,7 +58,10 @@ export default {
     type: `suggestion`,
     docs: {
       description:
-        `inline a const whose value is read exactly once, rather than naming it`,
+        `inline a const whose value is read exactly once, rather than naming it. `
+        + `Quiet when inlining would move the initializer: across a function, into `
+        + `a loop, or under a branch that may not run — and quiet when the one read `
+        + `is a Vue template, which this rule cannot edit`,
     },
     // No fixer: it would drop the declaration and any comment sitting on it.
     schema: [{
