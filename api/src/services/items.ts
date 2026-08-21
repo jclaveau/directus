@@ -26,7 +26,16 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
+import {
+	assign,
+	clone,
+	cloneDeep,
+	isEqual,
+	isPlainObject,
+	omit,
+	pick,
+	without,
+} from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import { getCache } from '../cache.js';
 import {
@@ -1654,14 +1663,71 @@ implements AbstractService<Item> {
 
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
+		// Then once per row, so a hook that only ever handled a single item keeps a seam
+		// that fires exactly once per row — which the group event, by design, does not.
+		const rows: { key: PrimaryKey; data: Partial<AnyItem> }[] = [];
+
+		for (const group of groupsAfterHooks) {
+			for (const key of group.keys) {
+				const rowPayload = {
+					[primaryKeyField]: key,
+					...cloneDeep(group.data),
+				} as Partial<AnyItem>;
+
+				const rowAfterHooks =
+					opts.emitEvents !== false
+						? await emitter.emitFilter<Partial<AnyItem>, null>(
+							this.eventScope === 'items'
+								? ['items.update.one', `${this.collection}.items.update.one`]
+								: `${this.eventScope}.update.one`,
+							rowPayload,
+							{
+								collection: this.collection,
+							},
+							{
+								database: this.knex,
+								schema: this.schema,
+								accountability: this.accountability,
+								scopedCache: scopedCacheCollector.purge,
+							},
+						)
+						: rowPayload;
+
+				if (rowAfterHooks === null) {
+					// This row alone is cancelled; its siblings still go through.
+					continue;
+				}
+
+				rows.push({ key, data: omit(rowAfterHooks, primaryKeyField) });
+			}
+		}
+
+		// Rebuild the groups from the rows the per-row hooks settled on. Only adjacent
+		// rows carrying the same payload merge, so the caller's order is never disturbed
+		// and, with no rewrite, the groups come back exactly as they went in.
+		const mergedGroups: UpdateGroup<Item>[] = [];
+
+		for (const row of rows) {
+			const previous = mergedGroups[mergedGroups.length - 1];
+
+			if (previous && isEqual(previous.data, row.data)) {
+				previous.keys.push(row.key);
+			}
+			else {
+				mergedGroups.push({ data: row.data as Partial<Item>, keys: [row.key] });
+			}
+		}
+
+		const writingGroups = mergedGroups.filter((group) => {
+			return !this.groupChangesNothing(group);
+		});
+
 		// Capture the scope values these rows hold before the update so an update that
 		// moves a row to a new scope value purges both slices (old ∪ new).
 		// Empty when the collection isn't scoped.
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(keys);
-
-		const writingGroups = groupsAfterHooks.filter((group) => {
-			return !this.groupChangesNothing(group);
-		});
+		const oldScopedCacheTags = await this.snapshotScopedCacheTags(
+			writingGroups.flatMap((group) => group.keys),
+		);
 
 		if (writingGroups.length === 0) {
 			// Every group is a no-op: nothing to write, purge or report.
@@ -1755,7 +1821,34 @@ implements AbstractService<Item> {
 				},
 			};
 
-			await emitActionEvents([actionEvent, ...nestedActionEvents], opts);
+			// One per surviving row, after the grouped event, so a per-row consumer sees
+			// exactly the rows that were written. Rows a per-row filter cancelled never
+			// reach here. `emitActionEvents` starts them together, so they are not
+			// ordered against the grouped event.
+			const rowActionEvents: ActionEventParams[] = applied.flatMap((group) => {
+				return group.keys.map((key) => {
+					return {
+						event:
+							this.eventScope === 'items'
+								? ['items.update.one', `${this.collection}.items.update.one`]
+								: `${this.eventScope}.update.one`,
+						meta: {
+							payload: { [primaryKeyField]: key, ...group.data },
+							collection: this.collection,
+						},
+						context: {
+							database: getDatabase(),
+							schema: this.schema,
+							accountability: this.accountability,
+						},
+					};
+				});
+			});
+
+			await emitActionEvents(
+				[actionEvent, ...rowActionEvents, ...nestedActionEvents],
+				opts,
+			);
 		}
 
 		return updated;
