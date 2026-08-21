@@ -457,6 +457,65 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		a take-over the hook declares wrote nothing purges nothing at all
+	`, async () => {
+		// Nothing was written, so no entry can have gone stale — and an empty tag
+		// array is not "nothing": it still resolves to this collection's bare tag.
+		const takeOver = async (payload: any, _meta: any, ctx: any) => {
+			ctx.scopedCache.skipPurgeFor(99);
+			return 99;
+		};
+
+		emitter.onFilter('test.items.create', takeOver);
+
+		try {
+			await service().createMany([{ name: 'x', student: 'A' }]);
+
+			expect(purgeScopedCache).not.toHaveBeenCalled();
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOver);
+		}
+	});
+
+	it(oneLine`
+		a skipped take-over beside a real create still purges the created row's slice
+	`, async () => {
+		tracker.on.insert('test').response([1]);
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+
+		const takeOverDuplicate = async (payload: any, _meta: any, ctx: any) => {
+			if (payload.name !== `dup`) {
+				return payload;
+			}
+
+			ctx.scopedCache.skipPurgeFor(99);
+			return 99;
+		};
+
+		emitter.onFilter('test.items.create', takeOverDuplicate);
+
+		try {
+			await service().createMany([
+				{ name: 'x', student: 'A' },
+				{ name: 'dup', student: 'A' },
+			]);
+
+			// Precise, not coarse: discounting the skipped row leaves the live keys
+			// matching the create actions, so the take-over check no longer trips.
+			expect(purgeScopedCache).toHaveBeenCalledWith(
+				expect.anything(),
+				'test',
+				[{ collection: 'test', field: 'student', value: 'A', type: 'string' }],
+				expect.anything(),
+			);
+		}
+		finally {
+			emitter.offFilter('test.items.create', takeOverDuplicate);
+		}
+	});
+
+	it(oneLine`
 		updateMany's new slice reflects a hook-rewritten scope value — it re-reads the
 		committed row, and the hook's payload is what got written
 	`, async () => {
