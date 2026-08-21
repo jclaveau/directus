@@ -332,11 +332,11 @@ describe('countScopedCacheTagMembers', () => {
 
 describe('createScopedCacheCollector', () => {
 	it('records a key whose purge a hook skipped, without adding a tag', () => {
-		const { purge, tags, unpurgeableKeys } = createScopedCacheCollector();
+		const { purge, tags, purgeSkippedKeys } = createScopedCacheCollector();
 
 		purge.skipPurgeFor(7);
 
-		expect([...unpurgeableKeys]).toEqual(['7']);
+		expect([...purgeSkippedKeys]).toEqual(['7']);
 
 		// Declaring nothing to purge must not read as declaring a purge: the
 		// takeover check keys on the tag count.
@@ -344,12 +344,12 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
-		const { purge, unpurgeableKeys } = createScopedCacheCollector();
+		const { purge, purgeSkippedKeys } = createScopedCacheCollector();
 
 		purge.skipPurgeFor(7);
 		purge.skipPurgeFor('7');
 
-		expect([...unpurgeableKeys]).toEqual(['7']);
+		expect([...purgeSkippedKeys]).toEqual(['7']);
 	});
 
 	it('scopeTo and purgeBy feed one idempotent tag set', () => {

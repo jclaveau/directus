@@ -1029,19 +1029,19 @@ implements AbstractService<Item> {
 			if (scopedCacheFields.length > 0) {
 				const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
 
-				// A take-over the hook declared inert wrote nothing, so it neither
-				// moved a slice nor counts toward the row/payload mismatch.
 				const changedKeys = liveKeys.filter((key) => {
-					return !scopedCacheCollector.unpurgeableKeys.has(String(key));
+					// A take-over the hook declared inert wrote nothing, so it neither
+					// moved a slice nor counts toward the row/payload mismatch.
+					return !scopedCacheCollector.purgeSkippedKeys.has(String(key));
 				});
 
-				// Nothing written and nothing declared: no entry can have gone stale.
-				// Returning here rather than purging an empty tag set, which would
-				// still take this collection's bare tag and drop its global reads.
 				if (
 					changedKeys.length === 0 &&
 					scopedCacheCollector.tags.length === scopedCacheTagsAtStart
 				) {
+					// Nothing written and nothing declared: no entry can have gone stale.
+					// Returning rather than purging an empty tag set, which would still
+					// take this collection's bare tag and drop its global reads.
 					return results;
 				}
 

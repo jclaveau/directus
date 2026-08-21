@@ -106,7 +106,7 @@ export interface ScopedCacheCollector {
 	/** Canonical keys of tags a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
 	manuallyPurgedKeys: Set<string>;
 	/** Keys a `skipPurgeFor` declared inert, as strings so `7` and `'7'` agree. */
-	unpurgeableKeys: Set<string>;
+	purgeSkippedKeys: Set<string>;
 }
 
 /**
