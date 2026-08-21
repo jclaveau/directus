@@ -176,6 +176,35 @@ sfcRuleTester.run(`no-single-use-const in an SFC`, noSingleUseConst, {
       code: sfc(`const el = ref(null)`, `<b ref="el" />`),
     },
     {
+      // A known limitation, pinned rather than left to be rediscovered: the check
+      // is by name, so an inner local sharing a name the template uses is skipped
+      // too. It fails safe — a missed report, never a wrong one.
+      filename: `Comp.vue`,
+      code: sfc(
+        [
+          `const total = 1`,
+          `function f() { const total = compute(); return use(total) }`,
+        ].join(`\n`),
+        `<b>{{ total }}</b>`,
+      ),
+    },
+    {
+      // `<style> v-bind()` reaches a binding by string, so it is not an identifier
+      // the template walk can see. The declaration marker is what keeps it quiet.
+      filename: `Comp.vue`,
+      code: [
+        `<template>`,
+        `  <b>hi</b>`,
+        `</template>`,
+        `<script setup lang="ts">`,
+        `const colour = pick()`,
+        `</script>`,
+        `<style scoped>`,
+        `.a { color: v-bind(colour) }`,
+        `</style>`,
+      ].join(`\n`),
+    },
+    {
       // One script read, but the template needs the binding: deleting it would leave
       // the markup pointing at nothing.
       filename: `Comp.vue`,
@@ -265,6 +294,15 @@ sfcRuleTester.run(`no-single-caller-function in an SFC`, noSingleCallerFunction,
       // Handed to the template by reference rather than called from it.
       filename: `Comp.vue`,
       code: sfc(`function onPick() {}`, `<b @click="onPick" />`),
+    },
+    {
+      // The name-based skip again: an inner helper whose name the template uses is
+      // skipped even though it is a different function. Same fail-safe direction.
+      filename: `Comp.vue`,
+      code: sfc(
+        `function shown() {}\nfunction f() { function shown() {}; return shown() }`,
+        `<b>{{ shown() }}</b>`,
+      ),
     },
     {
       // Called once from the script, and the template also reaches it.
