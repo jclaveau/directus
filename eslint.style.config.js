@@ -6,6 +6,8 @@ import vue from "eslint-plugin-vue"
 import customArrayElementNewline from './eslint-rules/custom-array-element-newline.js'
 import arrowMultilineBlock from './eslint-rules/arrow-multiline-block.js'
 import stringLiteralsMaxLen from './eslint-rules/string-literals-max-len.js'
+import noSingleUseConst from './eslint-rules/no-single-use-const.js'
+import noSingleCallerFunction from './eslint-rules/no-single-caller-function.js'
 
 export const appGlobals = {
   front: {
@@ -78,6 +80,8 @@ export const eslintBaseConfig = defineConfig([
       'custom-array-element-newline': customArrayElementNewline,
       'arrow-multiline-block': arrowMultilineBlock,
       'string-literals-max-len': stringLiteralsMaxLen,
+      'no-single-use-const': noSingleUseConst,
+      'no-single-caller-function': noSingleCallerFunction,
     } } },
 
     rules: {
@@ -177,6 +181,11 @@ export const eslintBaseConfig = defineConfig([
         code: 85,
         importModule: `@directus/utils`,                            // oneLine lives in packages/utils (api + blackbox both dep on it)
       }],
+      'local/no-single-use-const': [`warn`, {
+        code: 85,
+        tabWidth: 4,
+      }],
+      'local/no-single-caller-function': `warn`,
       'function-call-argument-newline': [`error`, `consistent`],    // https://eslint.org/docs/latest/rules/function-call-argument-newline
       'function-paren-newline': [`error`, `multiline-arguments`],   // https://eslint.org/docs/latest/rules/function-paren-newline
       // 'padding-line-between-statements': [                          // https://eslint.org/docs/latest/rules/padding-line-between-statements#rule-details

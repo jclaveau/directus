@@ -113,6 +113,10 @@ try {
 }
 
 const violations = [];
+// The repo's own rules (`local/*`) are registered as warnings, and a warning is
+// invisible to the severity check below — so nobody, human or model, ever sees them.
+// Collected separately and printed: advice on the added lines, never a gate.
+const advisories = [];
 
 for (const result of parsed) {
 	const rel = relative(process.cwd(), result.filePath);
@@ -120,10 +124,20 @@ for (const result of parsed) {
 	if (!added) continue;
 
 	for (const message of result.messages) {
-		if (message.severity === 2 && message.ruleId && added.has(message.line)) {
+		if (!message.ruleId || !added.has(message.line)) continue;
+
+		if (message.severity === 2) {
 			violations.push(`${rel}:${message.line}  ${message.ruleId}: ${message.message}`);
+		} else if (message.ruleId.startsWith('local/')) {
+			advisories.push(`${rel}:${message.line}  ${message.ruleId}: ${message.message}`);
 		}
 	}
+}
+
+if (advisories.length > 0) {
+	console.log(`\n${advisories.length} added line(s) worth a second look (advice, not a gate):`);
+	for (const entry of advisories) console.log(`  ${entry}`);
+	console.log('');
 }
 
 if (violations.length > 0) {

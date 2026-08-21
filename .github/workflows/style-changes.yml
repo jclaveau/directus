@@ -32,6 +32,11 @@ jobs:
         with:
           build: false
 
+      # The custom rules carry their own exemptions; a broken one goes quiet rather
+      # than loud, so the gate below would pass while enforcing nothing.
+      - name: Test the custom eslint rules
+        run: pnpm lint:rules:test
+
       # eslint max-len (comment width) over added lines only (mirrors `pnpm lint:style:changes`).
       - name: Check changed-line style
         run: node scripts/lint-style-changes.mjs "${{ github.event.pull_request.base.sha }}"
