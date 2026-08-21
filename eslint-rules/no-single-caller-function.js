@@ -3,14 +3,20 @@ export default {
     type: `suggestion`,
     docs: {
       description:
-        `inline a named function with exactly one caller instead of extracting it`,
+        `inline a named function with exactly one caller, unless the name carries `
+        + `domain meaning or fences off cumbersome logic`,
     },
     // No fixer: the body has to be threaded into the call site's expression by hand.
     schema: [],
+    // The two reasons to keep a single-caller function are judgements no rule can
+    // make, so the message states them for the reader deciding, and a kept function
+    // takes an `eslint-disable-line` naming this rule.
     messages: {
       singleCaller:
         `\`{{name}}\` has one caller — inline it there. An extraction with a single `
-        + `call site hides the flow instead of naming a shared step.`,
+        + `call site hides the flow instead of naming a shared step. Keep it only `
+        + `where the name earns its place: it states a real business-domain `
+        + `step, or fences off logic too cumbersome to read at the call site.`,
     },
   },
 
