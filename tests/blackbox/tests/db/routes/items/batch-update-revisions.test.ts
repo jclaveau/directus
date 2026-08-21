@@ -6,33 +6,30 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { collectionTracked } from './batch-update-revisions.seed';
 
-// `updateMany` re-reads the updated rows to snapshot them onto their revisions, and
-// that read carries no ORDER BY. Passing the keys in an order the database is
-// unlikely to answer in — descending, against an ascending primary key — is what
-// makes a positional pairing visible from the outside.
-//
-// The vendor is still free to answer in key order, in which case these assertions
-// hold either way; they can never fail on a correctly paired revision.
+// `updateMany` re-reads the updated rows to snapshot them onto their revisions,
+// and that read carries no ORDER BY. It also sorts the keys with no comparator
+// (`keys.sort()`), which orders integers lexicographically — so a key set that
+// crosses a digit boundary becomes 10, 8, 9 while the read answers 8, 9, 10.
+// The two then disagree on every row, which is what makes a positional pairing
+// visible from the outside. Hence the explicit keys below.
 
 type TrackedRow = { id: number; name: string; status: string | null };
 
-// One round-trip for the three rows, and `CreateItem` falls back to the no-cache
-// instance when the cached one still 403s on a just-seeded collection.
-async function createRows(vendor: Vendor): Promise<TrackedRow[]> {
+const NAMES = ['alpha', 'beta', 'gamma'];
+
+async function createRows(vendor: Vendor, ids: number[]): Promise<TrackedRow[]> {
 	return await CreateItem(vendor, {
 		collection: collectionTracked,
-		item: [{ name: 'alpha' }, { name: 'beta' }, { name: 'gamma' }],
+		item: ids.map((id, index) => ({ id, name: NAMES[index] })),
 	});
 }
 
 describe('batch update revisions', () => {
 	describe('files each revision under the item its snapshot describes', () => {
 		it.each(vendors)('%s', async (vendor) => {
-			const rows = await createRows(vendor);
+			const rows = await createRows(vendor, [8, 9, 10]);
 			const nameByID = new Map(rows.map((row) => [row.id, row.name]));
-
-			// Descending, so the ascending read order cannot line up positionally.
-			const keys = rows.map((row) => row.id).sort((left, right) => right - left);
+			const keys = rows.map((row) => row.id).sort((left, right) => left - right);
 
 			const update = await request(getUrl(vendor))
 				.patch(`/items/${collectionTracked}`)
@@ -64,15 +61,17 @@ describe('batch update revisions', () => {
 
 	describe('reverting one item does not write another item over it', () => {
 		it.each(vendors)('%s', async (vendor) => {
-			const rows = await createRows(vendor);
-			const keys = rows.map((row) => row.id).sort((left, right) => right - left);
+			const rows = await createRows(vendor, [98, 99, 100]);
+			const keys = rows.map((row) => row.id).sort((left, right) => left - right);
 
 			await request(getUrl(vendor))
 				.patch(`/items/${collectionTracked}`)
 				.send({ keys, data: { status: 'archived' } })
 				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
 
-			const target = rows.find((row) => row.id === keys[0])!;
+			// The row whose sorted position moves furthest: lexicographically `100`
+			// leads, so this one is paired with the lowest-numbered snapshot.
+			const target = rows.find((row) => row.id === 100)!;
 
 			const revisions = await request(getUrl(vendor))
 				.get(`/revisions`)
