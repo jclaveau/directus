@@ -1,4 +1,5 @@
 import type { Type } from './fields.js';
+import type { PrimaryKey } from './items.js';
 
 /**
  * A unit of cache scope. A collection-level tag (no `field`) covers every entry that
@@ -49,6 +50,19 @@ export interface ScopedCacheScopeHandle {
  */
 export interface ScopedCachePurgeHandle {
 	purgeBy(tags: ScopedCacheTagInput): void;
+	/**
+	 * This create was swallowed into a row the payload never named AND nothing was
+	 * written, so no entry can have gone stale and the take-over needs no purge —
+	 * neither the coarse fallback nor a slice. Only for a genuinely inert write: a
+	 * take-over that MOVED the row must declare its slices with `purgeBy` instead,
+	 * or the old slice serves stale.
+	 *
+	 * TODO Silent dedup belongs in the service, not in each consumer's hook. If
+	 * scalabus ever grows a first-class "create resolves to an existing row"
+	 * path, it would know the write was inert without being told and this handle
+	 * becomes dead weight — drop it then rather than carrying both.
+	 */
+	skipPurgeFor(key: PrimaryKey): void;
 }
 
 /**
@@ -92,6 +106,8 @@ export interface ScopedCacheCollector {
 	tags: ScopedCacheTag[];
 	/** Canonical keys of tags a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
 	manuallyPurgedKeys: Set<string>;
+	/** Keys a `skipPurgeFor` declared inert, as strings so `7` and `'7'` agree. */
+	purgeSkippedKeys: Set<string>;
 }
 
 /**

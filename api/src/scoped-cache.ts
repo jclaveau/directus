@@ -28,6 +28,7 @@ export function createScopedCacheCollector(): ScopedCacheCollector {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
+	const purgeSkippedKeys = new Set<string>();
 
 	function add(
 		input: ScopedCacheTag | readonly ScopedCacheTag[],
@@ -63,8 +64,16 @@ export function createScopedCacheCollector(): ScopedCacheCollector {
 	return {
 		tags,
 		manuallyPurgedKeys,
+		purgeSkippedKeys,
 		scope: { scopeTo: (input, options) => add(input, options?.manuallyPurged) },
-		purge: { purgeBy: (input) => add(input) },
+		purge: {
+			purgeBy: (input) => add(input),
+			// Deliberately not a tag: the take-over check reads the tag count, and
+			// declaring nothing to purge must not read as declaring a purge.
+			skipPurgeFor: (key) => {
+				purgeSkippedKeys.add(String(key));
+			},
+		},
 	};
 }
 

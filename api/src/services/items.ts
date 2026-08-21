@@ -1028,7 +1028,24 @@ implements AbstractService<Item> {
 
 			if (scopedCacheFields.length > 0) {
 				const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
-				const someRowTakenOver = liveKeys.length > actionPayloads.length;
+
+				const changedKeys = liveKeys.filter((key) => {
+					// A take-over the hook declared inert wrote nothing, so it neither
+					// moved a slice nor counts toward the row/payload mismatch.
+					return !scopedCacheCollector.purgeSkippedKeys.has(String(key));
+				});
+
+				if (
+					changedKeys.length === 0 &&
+					scopedCacheCollector.tags.length === scopedCacheTagsAtStart
+				) {
+					// Nothing written and nothing declared: no entry can have gone stale.
+					// Returning rather than purging an empty tag set, which would still
+					// take this collection's bare tag and drop its global reads.
+					return results;
+				}
+
+				const someRowTakenOver = changedKeys.length > actionPayloads.length;
 
 				const takeoverUndeclared =
 					someRowTakenOver &&
@@ -1036,7 +1053,7 @@ implements AbstractService<Item> {
 
 				scopedCacheTags = takeoverUndeclared
 					? null
-					: await this.snapshotScopedCacheTags(liveKeys);
+					: await this.snapshotScopedCacheTags(changedKeys);
 			}
 
 			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
