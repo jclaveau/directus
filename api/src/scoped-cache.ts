@@ -170,6 +170,81 @@ function scopedCacheCollectionSlicesKey(collection: string): string {
 	return `${env['CACHE_NAMESPACE']}:slices:${collection}`;
 }
 
+/**
+ * The sorted set a `<ns>:tag:<collection>:<field>=<value>` key maps onto, or null
+ * when it has no numeric value to score by — a bare collection tag, a string
+ * slice, or the default `key-per-value` setting.
+ *
+ * `key-per-value` files each value under its own Redis key, answering a purge in
+ * one exact-key SMEMBERS. The key count then grows with the number of distinct
+ * values any cached read pinned, and Redis charges ~100 bytes of overhead per key
+ * before it holds anything — all of it resident, since Valkey has no tiering.
+ *
+ * `sorted-set` files them as `<ns>:tagz:<collection>:<field>`, score = the value,
+ * so a collection's whole numeric axis is one key. A purge becomes ZRANGEBYSCORE
+ * (O(log N + M) rather than O(M)) and a contiguous batch collapses to one range
+ * command instead of a round trip per value.
+ *
+ * Numeric values only: scores are doubles, so a uuid or string slice has no score
+ * to sit at and keeps its own key under either setting.
+ *
+ * A collection name cannot hold a `:`, so the first one after the prefix starts
+ * the field; a field name cannot hold an `=`, so the first one starts the value.
+ */
+function scopedCacheSortedSetSlice(
+	tagKey: string,
+): { key: string; score: number } | null {
+	if (env['CACHE_SCOPED_TAG_INDEX'] !== 'sorted-set') {
+		return null;
+	}
+
+	const prefix = `${env['CACHE_NAMESPACE']}:tag:`;
+
+	if (!tagKey.startsWith(prefix)) {
+		return null;
+	}
+
+	const label = tagKey.slice(prefix.length);
+	const fieldAt = label.indexOf(':');
+
+	if (fieldAt === -1) {
+		return null;
+	}
+
+	const valueAt = label.indexOf('=', fieldAt);
+
+	if (valueAt === -1) {
+		return null;
+	}
+
+	// `canonicalScopedCacheValue` already normalised the spelling, so this reads
+	// the token the key carries rather than re-deriving it. A value that is not a
+	// finite number — a uuid, a string, the null sentinel — has no score.
+	const value = label.slice(valueAt + 1);
+	const score = Number(value);
+
+	if (value === '' || !Number.isFinite(score)) {
+		return null;
+	}
+
+	const collection = label.slice(0, fieldAt);
+	const field = label.slice(fieldAt + 1, valueAt);
+
+	return {
+		key: `${env['CACHE_NAMESPACE']}:tagz:${collection}:${field}`,
+		score,
+	};
+}
+
+/**
+ * A member carries its own score so one cached entry can sit at several values of
+ * the same field: members are unique, so ZADD of the bare key under a second score
+ * would move it rather than add it, silently unfiling the first.
+ */
+function scopedCacheSortedSetMemberKey(member: string): string {
+	return member.slice(member.indexOf('|') + 1);
+}
+
 export function scopedCacheTagKey(tag: ScopedCacheTag): string {
 	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
 	return tag.field === undefined
@@ -308,10 +383,23 @@ export async function tagScopedCacheKeys(
 
 		// `extraSiblings` = other keys written with the entry a purge must also drop
 		// — e.g. the dev-only `${key}__tags` sibling (respond.ts). Empty by default.
-		pipeline.sadd(tagKey, key, `${key}__expires_at`, ...extraSiblings);
+		const entryKeys = [key, `${key}__expires_at`, ...extraSiblings];
+		const sortedSet = scopedCacheSortedSetSlice(tagKey);
+		const indexKey = sortedSet?.key ?? tagKey;
+
+		if (sortedSet === null) {
+			pipeline.sadd(tagKey, ...entryKeys);
+		}
+		else {
+			// One member per entry key at this value's score, so the collection's
+			// whole numeric axis lives in this single key.
+			pipeline.zadd(sortedSet.key, ...entryKeys.flatMap((entryKey) => {
+				return [sortedSet.score, `${sortedSet.score}|${entryKey}`];
+			}));
+		}
 
 		if (ttlSeconds > 0) {
-			pipeline.expire(tagKey, ttlSeconds);
+			pipeline.expire(indexKey, ttlSeconds);
 		}
 
 		// The bare tag is where a collection-wide purge starts, so filing it would
@@ -322,7 +410,9 @@ export async function tagScopedCacheKeys(
 
 		const slicesKey = scopedCacheCollectionSlicesKey(tag.collection);
 
-		pipeline.sadd(slicesKey, tagKey);
+		// Named once for the whole field rather than once per value, which is the
+		// point: a collection-wide purge drops it in one go.
+		pipeline.sadd(slicesKey, indexKey);
 
 		// Same expiry as the tag sets it names, written in the same pipeline, so the
 		// index cannot outlive — or predecease — what it points at.
@@ -396,7 +486,43 @@ async function purgeScopedCacheTagKeys(
 	}
 
 	const redis = useRedis();
-	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
+
+	// A numeric slice lives at one score of its field's sorted set; a collection-wide
+	// purge names that whole set; everything else is its own key. All three answer
+	// with the entry keys they name, so the rest of this does not care which it was.
+	const sortedSetPrefix = `${env['CACHE_NAMESPACE']}:tagz:`;
+	const sortedSetSlices: { key: string; score: number }[] = [];
+	const wholeSortedSets: string[] = [];
+	const plainTagKeys: string[] = [];
+
+	for (const tagKey of tagKeys) {
+		const sortedSet = scopedCacheSortedSetSlice(tagKey);
+
+		if (tagKey.startsWith(sortedSetPrefix)) {
+			wholeSortedSets.push(tagKey);
+		}
+		else if (sortedSet === null) {
+			plainTagKeys.push(tagKey);
+		}
+		else {
+			sortedSetSlices.push(sortedSet);
+		}
+	}
+
+	const memberLists = await Promise.all([
+		...plainTagKeys.map((tagKey) => redis.smembers(tagKey)),
+		...sortedSetSlices.map(async (slice) => {
+			const scored = await redis.zrangebyscore(slice.key, slice.score, slice.score);
+
+			return scored.map(scopedCacheSortedSetMemberKey);
+		}),
+		...wholeSortedSets.map(async (sortedSetKey) => {
+			const scored = await redis.zrange(sortedSetKey, 0, -1);
+
+			return scored.map(scopedCacheSortedSetMemberKey);
+		}),
+	]);
+
 	const members = [...new Set(memberLists.flat())];
 
 	const wasDeleted = await Promise.all(members.map((member) => {
@@ -405,7 +531,17 @@ async function purgeScopedCacheTagKeys(
 
 	// Array form: one key per tag purged, so a spread throws RangeError once
 	// the list is long enough.
-	await redis.del(tagKeys);
+	const droppedKeys = [...plainTagKeys, ...wholeSortedSets];
+
+	if (droppedKeys.length > 0) {
+		await redis.del(droppedKeys);
+	}
+
+	// Only this value's members leave the sorted set — its other scores belong to
+	// slices nobody purged, and dropping the key would unfile them silently.
+	await Promise.all(sortedSetSlices.map((slice) => {
+		return redis.zremrangebyscore(slice.key, slice.score, slice.score);
+	}));
 
 	// Drop the purged slice keys from their collection's index: one pruned only
 	// wholesale keeps naming keys that are gone, and grows without bound. A
@@ -414,10 +550,17 @@ async function purgeScopedCacheTagKeys(
 	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
 	const sliceKeysByCollection = new Map<string, string[]>();
 
-	for (const tagKey of tagKeys) {
-		const label = tagKey.startsWith(tagPrefix)
-			? tagKey.slice(tagPrefix.length)
-			: '';
+	// Only what was actually dropped: a sorted set purged at one score keeps its
+	// other values, so unfiling it here would leave them indexed by nothing.
+	for (const tagKey of droppedKeys) {
+		let label = '';
+
+		if (tagKey.startsWith(tagPrefix)) {
+			label = tagKey.slice(tagPrefix.length);
+		}
+		else if (tagKey.startsWith(sortedSetPrefix)) {
+			label = tagKey.slice(sortedSetPrefix.length);
+		}
 
 		const fieldAt = label.indexOf(':');
 

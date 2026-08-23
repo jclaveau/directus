@@ -38,6 +38,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_NAMESPACE: 'string',
 	CACHE_AUTO_PURGE: 'boolean',
 	CACHE_AUTO_PURGE_MODE: 'string',
+	CACHE_SCOPED_TAG_INDEX: 'string',
 	CACHE_SCHEMA: 'boolean',
 	CACHE_STORE: 'string',
 	CACHE_SKIP_ALLOWED: 'boolean',
