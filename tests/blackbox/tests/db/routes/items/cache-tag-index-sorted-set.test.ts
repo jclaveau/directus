@@ -170,12 +170,13 @@ describe('scoped cache tag index', () => {
 				expect(sibling.headers[cacheStatusHeader]).toBe('HIT');
 			});
 
-			it('drops every slice when a write resolves none', async () => {
+			it('leaves warm slices alone when a write lands on a new value', async () => {
 				await warm(NUMERIC, 'owner_id', ['7', '8']);
 
-				// An insert carries a value no cached read pinned, so no slice can be
-				// resolved and the collection goes wholesale — which for the sorted set
-				// means dropping the one key holding every score.
+				// The inserted row resolves its own slice — `owner_id=9` — which no
+				// cached read pinned, so there is nothing of it to drop. Under the
+				// sorted set that value is a score nobody queries; the risk being
+				// covered is that touching the shared key disturbs its neighbours.
 				await request(url)
 					.post(`/items/${NUMERIC}`)
 					.send({ owner_id: 9, amount: '1' })
@@ -186,8 +187,39 @@ describe('scoped cache tag index', () => {
 					readSlice(NUMERIC, 'owner_id', '8'),
 				]);
 
-				expect(seven.headers[cacheStatusHeader]).toBe('MISS');
-				expect(eight.headers[cacheStatusHeader]).toBe('MISS');
+				expect(seven.headers[cacheStatusHeader]).toBe('HIT');
+				expect(eight.headers[cacheStatusHeader]).toBe('HIT');
+			});
+
+			it('drops an unfiltered read, which pins nothing, on any write', async () => {
+				await request(url)
+					.post('/utils/cache/clear')
+					.set('Authorization', auth);
+
+				// No scope filter, so this one carries the bare collection tag rather
+				// than a slice — the fallback every non-pinned read lands on.
+				const unfiltered = () => {
+					return request(url)
+						.get(`/items/${NUMERIC}`)
+						.set('Authorization', auth);
+				};
+
+				await Promise.all([unfiltered(), readSlice(NUMERIC, 'owner_id', '8')]);
+
+				const [row] = (await readSlice(NUMERIC, 'owner_id', '7')).body.data;
+
+				await request(url)
+					.patch(`/items/${NUMERIC}/${row.id}`)
+					.send({ amount: '77' })
+					.set('Authorization', auth);
+
+				const [bare, sibling] = await Promise.all([
+					unfiltered(),
+					readSlice(NUMERIC, 'owner_id', '8'),
+				]);
+
+				expect(bare.headers[cacheStatusHeader]).toBe('MISS');
+				expect(sibling.headers[cacheStatusHeader]).toBe('HIT');
 			});
 		});
 	});
