@@ -469,6 +469,152 @@ describe('collection slice index', () => {
 	});
 });
 
+// `CACHE_SCOPED_TAG_INDEX=sorted-set` files a numeric slice as one member of its
+// field's sorted set rather than as its own key. The blackbox suite proves the
+// entries a write drops are the same either way; these pin the shape of what
+// reaches Redis, which no behavioural test can see.
+describe('the sorted-set tag index', () => {
+	const sortedPipeline = {
+		sadd: vi.fn().mockReturnThis(),
+		zadd: vi.fn().mockReturnThis(),
+		expire: vi.fn().mockReturnThis(),
+		exec: vi.fn(),
+	};
+
+	beforeEach(() => {
+		env['CACHE_SCOPED_TAG_INDEX'] = 'sorted-set';
+		vi.mocked(useRedis).mockReturnValue({ pipeline: () => sortedPipeline } as any);
+	});
+
+	afterEach(() => {
+		env['CACHE_SCOPED_TAG_INDEX'] = 'key-per-value';
+	});
+
+	it('scores a numeric slice into one set per field', async () => {
+		await tagScopedCacheKeys('entry', [
+			{ collection: 'articles', field: 'author', value: 7, type: 'integer' },
+		]);
+
+		// The member carries its score: members are unique, so filing the bare entry
+		// key under a second value would move it rather than add it.
+		expect(sortedPipeline.zadd).toHaveBeenCalledWith(
+			'ns:tagz:articles:author',
+			7,
+			'7|entry',
+			7,
+			'7|entry__expires_at',
+		);
+
+		expect(sortedPipeline.sadd)
+		.not.toHaveBeenCalledWith(
+			'ns:tag:articles:author=7',
+			'entry',
+			'entry__expires_at',
+		);
+	});
+
+	it('names the set once in the collection index, not once per value', async () => {
+		await tagScopedCacheKeys('entry', [
+			{ collection: 'articles', field: 'author', value: 7, type: 'integer' },
+			{ collection: 'articles', field: 'author', value: 8, type: 'integer' },
+		]);
+
+		expect(sortedPipeline.sadd)
+		.toHaveBeenCalledWith('ns:slices:articles', 'ns:tagz:articles:author');
+
+		expect(sortedPipeline.sadd)
+		.not.toHaveBeenCalledWith('ns:slices:articles', 'ns:tag:articles:author=7');
+	});
+
+	it('expires the set, not a key per value, when a TTL is configured', async () => {
+		env['CACHE_TTL'] = '30s';
+
+		try {
+			await tagScopedCacheKeys('entry', [
+				{ collection: 'articles', field: 'author', value: 7, type: 'integer' },
+			]);
+
+			// Twice the TTL, as the safety net against members orphaned by a crash
+			// between write and purge — on the set that now holds them.
+			expect(sortedPipeline.expire)
+			.toHaveBeenCalledWith('ns:tagz:articles:author', 60);
+		}
+		finally {
+			delete env['CACHE_TTL'];
+		}
+	});
+
+	it('leaves a value with no score in its own key', async () => {
+		await tagScopedCacheKeys('entry', [
+			{ collection: 'articles', field: 'tenant', value: 'acme', type: 'string' },
+		]);
+
+		// A uuid or string has no score to sit at, so the setting cannot apply.
+		expect(sortedPipeline.zadd).not.toHaveBeenCalled();
+
+		expect(sortedPipeline.sadd)
+		.toHaveBeenCalledWith(
+			'ns:tag:articles:tenant=acme',
+			'entry',
+			'entry__expires_at',
+		);
+	});
+
+	it('reads one score, and removes only that score', async () => {
+		const zrangebyscore = vi.fn()
+			.mockResolvedValue(['7|entry', '7|entry__expires_at']);
+		const zremrangebyscore = vi.fn();
+		const del = vi.fn();
+		const cacheDelete = vi.fn().mockResolvedValue(true);
+
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue([]),
+			zrangebyscore,
+			zremrangebyscore,
+			zrange: vi.fn(),
+			del,
+			srem: vi.fn(),
+		} as any);
+
+		await purgeScopedCache(
+			{ delete: cacheDelete } as any,
+			'articles',
+			[{ collection: 'articles', field: 'author', value: 7, type: 'integer' }],
+		);
+
+		expect(zrangebyscore).toHaveBeenCalledWith('ns:tagz:articles:author', 7, 7);
+		expect(cacheDelete).toHaveBeenCalledWith('entry');
+
+		// The set holds every other value of the field, so dropping the key would
+		// unfile slices nobody purged.
+		expect(zremrangebyscore).toHaveBeenCalledWith('ns:tagz:articles:author', 7, 7);
+		expect(del).not.toHaveBeenCalledWith(['ns:tagz:articles:author']);
+	});
+
+	it('drops the whole set when the collection goes wholesale', async () => {
+		const zrange = vi.fn().mockResolvedValue(['7|entry', '8|other']);
+		const del = vi.fn();
+		const cacheDelete = vi.fn().mockResolvedValue(true);
+
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue(['ns:tagz:articles:author']),
+			zrange,
+			zrangebyscore: vi.fn(),
+			zremrangebyscore: vi.fn(),
+			del,
+			srem: vi.fn(),
+		} as any);
+
+		await purgeCollectionScopedCache({ delete: cacheDelete } as any, 'articles');
+
+		expect(zrange).toHaveBeenCalledWith('ns:tagz:articles:author', 0, -1);
+		expect(cacheDelete).toHaveBeenCalledWith('entry');
+		expect(cacheDelete).toHaveBeenCalledWith('other');
+		expect(del)
+		.toHaveBeenCalledWith(expect.arrayContaining(['ns:tagz:articles:author']));
+	});
+});
+
 describe('dropScopedCacheTagIndex', () => {
 	it('scans both namespaces and deletes every index set', async () => {
 		const scan = vi.fn()

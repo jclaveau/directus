@@ -207,6 +207,29 @@ describe('scoped cache tag index', () => {
 				expect(eight.headers[cacheStatusHeader]).toBe('HIT');
 			});
 
+			it('drops every slice when the purge goes collection-wide', async () => {
+				await warm(NUMERIC, 'owner_id', ['7', '8']);
+
+				// A caller handing over rows it cannot resolve takes the fallback no
+				// HTTP write reaches — every slice the collection owns goes. For the
+				// sorted set that is the one key holding every score, dropped whole
+				// rather than at a single score.
+				const purged = await request(url)
+					.post('/tag-index-probe/coarse-purge')
+					.send({ collection: NUMERIC })
+					.set('Authorization', auth);
+
+				expect(purged.statusCode).toBe(200);
+
+				const [seven, eight] = await Promise.all([
+					readSlice(NUMERIC, 'owner_id', '7'),
+					readSlice(NUMERIC, 'owner_id', '8'),
+				]);
+
+				expect(seven.headers[cacheStatusHeader]).toBe('MISS');
+				expect(eight.headers[cacheStatusHeader]).toBe('MISS');
+			});
+
 			it('drops an unfiltered read, which pins nothing, on any write', async () => {
 				await request(url)
 					.post('/utils/cache/clear')
