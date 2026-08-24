@@ -854,6 +854,32 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(clearPendingScopedCachePurges).not.toHaveBeenCalled();
 	});
 
+	it(oneLine`
+		keeps every record while the entry store is still offline — a delete is
+		swallowed there, so draining would report a purge that dropped nothing and
+		throw away the only rows still pointing at those entries
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		vi.mocked(getCache).mockReturnValue({
+			cache: { ...cache, store: { client: { isReady: false } } },
+		} as any);
+
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+
+		expect(clearPendingScopedCachePurges).not.toHaveBeenCalled();
+		expect(cache.delete).not.toHaveBeenCalled();
+
+		// Not a failed retry either: nothing was attempted, so counting an attempt
+		// would spend the budget of a record that never got its chance.
+		expect(countFailedScopedCachePurgeRetry).not.toHaveBeenCalled();
+	});
+
 	// Reported here rather than when the purge failed, because the anomaly stream is
 	// itself Redis-backed: reporting at failure time reports nothing in the one case
 	// worth reporting.

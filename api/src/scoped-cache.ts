@@ -717,6 +717,19 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 		return 0;
 	}
 
+	// The tags and the entries sit behind two different clients — ioredis carries the
+	// tag sets, the response cache is a Keyv over node-redis — and only the first
+	// one's `ready` starts this drain. The store rejects a command issued while it is
+	// offline (`disableOfflineQueue`) and `@keyv/redis` swallows that into
+	// `undefined`, so a drain now would delete no entry, report every purge a success
+	// and clear the records that are the only thing left pointing at them.
+	const storeClient = (cache.store as { client?: { isReady?: boolean } } | undefined)
+		?.client;
+
+	if (storeClient?.isReady === false) {
+		return 0;
+	}
+
 	let cleared = 0;
 
 	for (const target of pending) {
@@ -802,6 +815,20 @@ export function startScopedCachePurgeRecovery(): void {
 	};
 
 	useRedis().on('ready', recover);
+
+	// And again when the response cache's own client comes back: it reconnects on its
+	// own schedule, so the drain above can find it still offline and bail, leaving
+	// this the only thing that finishes those records.
+	void import('./cache.js').then(({ getCache }) => {
+		const { cache } = getCache();
+
+		const storeClient = (cache?.store as {
+			client?: { on?: (event: string, listener: () => void) => void };
+		} | undefined)?.client;
+
+		storeClient?.on?.('ready', recover);
+	});
+
 	recover();
 }
 
