@@ -372,6 +372,10 @@ describe('countScopedCacheTagMembers', () => {
 });
 
 describe('createScopedCacheCollector', () => {
+	// The collector fills a declared tag's missing type from the schema; these cases
+	// name collections it does not carry, so their tags pass through as written.
+	const emptySchema = new SchemaBuilder().build();
+
 	// A uuid key is where a missing type bites hardest: `canonicalScopedCacheValue`
 	// lowercases a `uuid` and leaves an untyped value alone.
 	const notesSchema = new SchemaBuilder()
@@ -383,7 +387,8 @@ describe('createScopedCacheCollector', () => {
 		.build();
 
 	it('records a key whose purge a hook skipped, without adding a tag', () => {
-		const { purge, tags, purgeSkippedKeys } = createScopedCacheCollector();
+		const { purge, tags, purgeSkippedKeys } =
+			createScopedCacheCollector(emptySchema);
 
 		purge.skipPurgeFor(7);
 
@@ -395,7 +400,7 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
-		const { purge, purgeSkippedKeys } = createScopedCacheCollector();
+		const { purge, purgeSkippedKeys } = createScopedCacheCollector(emptySchema);
 
 		purge.skipPurgeFor(7);
 		purge.skipPurgeFor('7');
@@ -404,7 +409,7 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('scopeTo and purgeBy feed one idempotent tag set', () => {
-		const { scope, purge, tags } = createScopedCacheCollector();
+		const { scope, purge, tags } = createScopedCacheCollector(emptySchema);
 		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
 
 		scope.scopeTo(authorSlice);
@@ -414,7 +419,7 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('accepts a batch, deduping within it and against prior tags', () => {
-		const { scope, tags } = createScopedCacheCollector();
+		const { scope, tags } = createScopedCacheCollector(emptySchema);
 		const authorSlice = { collection: 'articles', field: 'author', value: 5 };
 		const authorsTable = { collection: 'authors' };
 
@@ -426,7 +431,7 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('dedups on the canonical tag key — field order and value type collapse', () => {
-		const { scope, purge, tags } = createScopedCacheCollector();
+		const { scope, purge, tags } = createScopedCacheCollector(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', field: 'author', value: 7 });
 		// Same slice: keys in a different order AND the value as a string. A raw JSON
@@ -488,7 +493,7 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('records a manuallyPurged scopeTo tag key (anomaly-exempt)', () => {
-		const { scope, manuallyPurgedKeys } = createScopedCacheCollector();
+		const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
 		const slice = { collection: 'articles', field: 'author', value: 5 };
 
 		scope.scopeTo(slice, { manuallyPurged: true });
@@ -497,7 +502,8 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it('leaves a plain scopeTo / purgeBy out of the manuallyPurged set', () => {
-		const { scope, purge, manuallyPurgedKeys } = createScopedCacheCollector();
+		const { scope, purge, manuallyPurgedKeys } =
+			createScopedCacheCollector(emptySchema);
 
 		scope.scopeTo({ collection: 'articles', field: 'author', value: 5 });
 		purge.purgeBy({ collection: 'authors' });
@@ -626,7 +632,21 @@ describe('dropScopedCacheTagIndex', () => {
 // as load-bearing as what it does: it drops exactly the targets that were recorded,
 // so every slice that was never in doubt stays warm.
 describe('retryPendingScopedCachePurges', () => {
-	const cache = { clear: vi.fn(), delete: vi.fn().mockResolvedValue(true) };
+	// The drain proves the store can still drop an entry by writing one and reading
+	// it back, so every case needs one that round-trips — except the case whose whole
+	// subject is a store that cannot.
+	const probed = new Map<string, unknown>();
+
+	const cache = {
+		clear: vi.fn(),
+		delete: vi.fn().mockResolvedValue(true),
+		set: vi.fn(async (key: string, value: unknown) => {
+			probed.set(key, value);
+			return true;
+		}),
+		get: vi.fn(async (key: string) => probed.get(key)),
+	};
+
 	const redis = { smembers: vi.fn(), del: vi.fn(), scan: vi.fn(), srem: vi.fn() };
 
 	beforeEach(() => {
@@ -857,7 +877,7 @@ describe('retryPendingScopedCachePurges', () => {
 	it(oneLine`
 		drains at boot, where the entry store has simply never dialed — node-redis
 		connects on its first command, so a brand-new client reports neither open nor
-		ready, and reading that as an outage retires the boot trigger entirely
+		ready, and keying on that flag would retire the boot trigger entirely
 	`, async () => {
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'slices',
@@ -890,8 +910,10 @@ describe('retryPendingScopedCachePurges', () => {
 			ids: [7],
 		}]);
 
+		// What an offline store looks like from here: `@keyv/redis` swallows the
+		// rejection, so the write reports success and reads back as nothing.
 		vi.mocked(getCache).mockReturnValue({
-			cache: { ...cache, store: { client: { isReady: false } } },
+			cache: { ...cache, get: vi.fn().mockResolvedValue(undefined) },
 		} as any);
 
 		expect(await retryPendingScopedCachePurges()).toBe(0);
@@ -1009,7 +1031,17 @@ describe('startScopedCachePurgeRecovery', () => {
 		const info = vi.fn();
 		vi.mocked(useLogger).mockReturnValue({ info, warn: vi.fn() } as any);
 		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
-		vi.mocked(getCache).mockReturnValue({ cache: { clear: vi.fn() } } as any);
+
+		// Round-trips, because the drain now proves the store can drop an entry
+		// before it clears the records naming them.
+		vi.mocked(getCache).mockReturnValue({
+			cache: {
+				clear: vi.fn(),
+				set: vi.fn(),
+				get: vi.fn().mockResolvedValue(1),
+				delete: vi.fn(),
+			},
+		} as any);
 
 		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
 			mode: 'namespace',

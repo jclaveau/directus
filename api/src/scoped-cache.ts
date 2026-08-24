@@ -33,7 +33,7 @@ const env = useEnv();
  * are the same idempotent sink. Safe with purging off (then `tags` is unread).
  */
 export function createScopedCacheCollector(
-	schema?: SchemaOverview,
+	schema: SchemaOverview,
 ): ScopedCacheCollector {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
@@ -50,7 +50,7 @@ export function createScopedCacheCollector(
 			return tag;
 		}
 
-		const schemaType = schema?.collections[tag.collection]?.fields[tag.field]?.type;
+		const schemaType = schema.collections[tag.collection]?.fields[tag.field]?.type;
 
 		return schemaType === undefined
 			? tag
@@ -608,7 +608,7 @@ export async function purgeCollectionScopedCache(
 
 	// The expensive mode, and the one nothing else records: every slice of the
 	// collection went, because which slices actually changed was unresolvable.
-	// No tag list: every slice the scan happened to find is derived rather than
+	// No tag list: every slice the index happened to name is derived rather than
 	// chosen, and unbounded. `collection` plus the mode already state the reach.
 	queueCachePurge({
 		purgeId: scopedCachePurgeId,
@@ -696,6 +696,38 @@ export function retryPendingScopedCachePurges(): Promise<number> {
  * collapsed into, since an outage records one slice once per write that touched
  * it and the operator reads the table, not the grouping.
  */
+/**
+ * Whether the response store can actually drop an entry right now.
+ *
+ * Keyv reports a store error by emitting `error` and answering `undefined`, so a
+ * failed `delete` is indistinguishable from a successful one at the call site —
+ * which is what let a drain clear its records while purging nothing. A write read
+ * back is the one answer that cannot be swallowed.
+ *
+ * The probe rides the cache's own namespace and carries a short ttl, so a process
+ * that dies between the write and the delete leaves nothing behind for long.
+ */
+async function scopedCacheStoreDropsEntries(cache: Keyv): Promise<boolean> {
+	const probeKey = '__scoped_cache_recovery_probe';
+
+	try {
+		await cache.set(probeKey, 1, 30_000);
+
+		if (await cache.get(probeKey) !== 1) {
+			return false;
+		}
+
+		// Only once it is known to be there: a store that swallowed the write has
+		// nothing to clean up, and the delete would be swallowed too.
+		await cache.delete(probeKey);
+		return true;
+	}
+	catch {
+		// A store that throws rather than swallowing is just as unusable.
+		return false;
+	}
+}
+
 async function drainPendingScopedCachePurges(): Promise<number> {
 	if (!redisConfigAvailable()) {
 		return 0;
@@ -721,12 +753,15 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	// tag sets, the response cache is a Keyv over node-redis — and only the first
 	// one's `ready` starts this drain. The store rejects a command issued while it is
 	// offline (`disableOfflineQueue`) and `@keyv/redis` swallows that into
-	// `undefined`, so a drain now would delete no entry, report every purge a success
-	// and clear the records that are the only thing left pointing at them.
-	const storeClient = (cache.store as { client?: { isReady?: boolean } } | undefined)
-		?.client;
-
-	if (storeClient?.isReady === false) {
+	// `undefined`, so a drain in that window deletes no entry, reports every purge a
+	// success and clears the records that are the only thing left pointing at them.
+	//
+	// Written and read back rather than asked: `isReady` is false both while the
+	// client is offline AND before it has ever dialed, and node-redis dials on its
+	// first command — so reading it would retire the boot drain, which is the pass
+	// that exists for a process that restarted while Redis was away. A round-trip
+	// answers the question that actually matters, and dials the client on the way.
+	if (await scopedCacheStoreDropsEntries(cache) === false) {
 		return 0;
 	}
 
@@ -881,10 +916,10 @@ async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<voi
  * risk leaving a slice stale; still narrower than nuking the whole namespace.
  *
  * To purge EVERY entry of a collection, pass `null` — it dispatches to
- * `purgeCollectionScopedCache`, which scans `<namespace>:tag:<collection>:*` and
- * drops the bare tag plus every slice key. A bare `[{ collection }]` in the tag
- * list is NOT that: this function deletes exactly the keys it is handed, and a read
- * pinned to a slice (an owner, or its primary key) carries no bare tag, so it
+ * `purgeCollectionScopedCache`, which reads the collection's own slice index and
+ * drops the bare tag plus every slice key it names. A bare `[{ collection }]` in the
+ * tag list is NOT that: this function deletes exactly the keys it is handed, and a
+ * read pinned to a slice (an owner, or its primary key) carries no bare tag, so it
  * survives.
  *
  * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —

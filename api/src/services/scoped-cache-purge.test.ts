@@ -1109,7 +1109,7 @@ describe(oneLine`
 			// it as if an earlier child already declared a slice; a later child that takes
 			// over a row but declares nothing ITSELF must still fall back to coarse — else
 			// the pre-seeded tag reads as this row's declaration and its old slice leaks.
-			const shared = createScopedCacheCollector();
+			const shared = createScopedCacheCollector(schema);
 			shared.purge.purgeBy({ collection: 'siblings', field: 'id', value: 1 });
 
 			// Coarse + hook-tags → purgeScopedCache runs twice and unions results; real
