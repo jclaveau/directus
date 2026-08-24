@@ -1,10 +1,14 @@
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-const env: Record<string, any> = {
-	CACHE_ENABLED: true,
-	CACHE_STATUS_HEADER: 'x-cache-status',
-};
+// Hoisted: cache.ts now imports scoped-cache.js, which reads `useEnv()` at module
+// scope — that runs while the mock factories do, before a plain `const` would exist.
+const env: Record<string, any> = vi.hoisted(() => {
+	return {
+		CACHE_ENABLED: true,
+		CACHE_STATUS_HEADER: 'x-cache-status',
+	};
+});
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
@@ -177,6 +181,20 @@ describe('checkCacheMiddleware', () => {
 	test('HIT emits no tags header when the __tags sibling is empty', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit(undefined);
+
+		const res = makeRes();
+
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		const names = vi.mocked(res.setHeader).mock.calls.map((call) => call[0]);
+		expect(names).not.toContain('X-Scoped-Cache-Tags');
+	});
+
+	// utils.ts reads this sidecar behind `typeof tagged?.tags === 'string'`; without
+	// the same guard a non-string flattens into a garbled header instead of skipping.
+	test('HIT skips the tags header when the sibling is not a string', async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		primeHit(['articles:owner=U1']);
 
 		const res = makeRes();
 

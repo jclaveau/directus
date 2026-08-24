@@ -763,6 +763,29 @@ describe('respond middleware', () => {
 		);
 	});
 
+	// The label keeps the raw NUL (it is the Redis key), so the escaping has to happen
+	// on the way out — `res.setHeader` throws ERR_INVALID_CHAR otherwise.
+	test('escapes a control byte on its way into the header', async () => {
+		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
+		mocks.serializeScopedCacheTags.mockReturnValue('articles:owner=\u0000null');
+
+		const res = makeRes(
+			{ data: { id: 1 } },
+			{
+				scopedCachePurged: [
+					{ collection: 'articles', field: 'owner', value: null },
+				],
+			},
+		);
+
+		await respond(makeReq({ method: 'PATCH' }), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'X-Scoped-Cache-Purged-Tags',
+			'articles:owner=%00null',
+		);
+	});
+
 	test('tag headers stay absent when their envs are unset', async () => {
 		const res = makeRes(
 			{ data: [] },

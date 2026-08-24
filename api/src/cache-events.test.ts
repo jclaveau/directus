@@ -140,7 +140,15 @@ beforeEach(() => {
 		truncate: vi.fn(() => Promise.resolve()),
 		join: vi.fn(() => builder),
 		leftJoin: vi.fn(() => builder),
+		from: vi.fn(() => builder),
 		where: vi.fn(() => builder),
+		whereRaw: vi.fn(() => builder),
+		// Run the sub-builder like knex does at compile time, so a semi-join's own
+		// clauses land on the same spies the outer query's do.
+		whereExists: vi.fn((callback: any) => {
+			callback(builder);
+			return builder;
+		}),
 		whereNull: vi.fn(() => builder),
 		whereNotNull: vi.fn(() => builder),
 		whereNotIn: vi.fn(() => builder),
@@ -1647,7 +1655,7 @@ describe('capture is gated by the runtime flag', () => {
 describe('listCacheEntries', () => {
 	// The number this whole feature exists for: purges beside hits, per request.
 	it('counts the purges that covered each entry, deduped by purge', async () => {
-		rowsByTable['directus_cache_descriptors as d'] = [
+		queryRows = [
 			{
 				cache_key: 'k1',
 				redis_key: 'r1',
@@ -1722,7 +1730,7 @@ describe('listCacheEntries', () => {
 	// to equi-join against. It is the expensive mode, so reading zero for it
 	// inverts the very ranking the column was added to provide.
 	it('counts a coarse purge against every entry of that collection', async () => {
-		rowsByTable['directus_cache_descriptors as d'] = [
+		queryRows = [
 			{
 				cache_key: 'pinned',
 				redis_key: 'r1',
@@ -1763,7 +1771,7 @@ describe('listCacheEntries', () => {
 	});
 
 	it('adds the precise and coarse passes rather than taking one', async () => {
-		rowsByTable['directus_cache_descriptors as d'] = [
+		queryRows = [
 			{
 				cache_key: 'k1',
 				redis_key: 'r1',
@@ -1804,7 +1812,7 @@ describe('listCacheEntries', () => {
 	});
 
 	it('asks for no purge counts when nothing was listed', async () => {
-		rowsByTable['directus_cache_descriptors as d'] = [];
+		queryRows = [];
 
 		await expect(listCacheEntries()).resolves.toEqual([]);
 
@@ -1915,6 +1923,300 @@ describe('listCacheEntries', () => {
 				lastHitAt: null,
 			},
 		]);
+	});
+
+	// The ranking is decided in SQL and the merge must not re-derive it: reading
+	// the order back off the descriptor lookup would re-rank the page by key.
+	it('keeps the order the aggregate returned', async () => {
+		queryRows = [
+			{
+				cache_key: 'k2',
+				redis_key: 'r2',
+				coarse: false,
+				method: 'GET',
+				path: '/items/b',
+				collection: 'b',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/b',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '9',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+			{
+				cache_key: 'k1',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/a',
+				collection: 'a',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/a',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '2',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		const entries = await listCacheEntries();
+
+		expect(entries.map((entry) => [entry.key, entry.hits])).toEqual([
+			['k2', 9],
+			['k1', 2],
+		]);
+
+		expect(builder.orderBy).toHaveBeenCalledWith('hits', 'desc');
+		expect(builder.limit).toHaveBeenCalledWith(200);
+	});
+
+	// Two reads merged by key, so a merge keyed on position instead would hand
+	// each entry the other one's descriptor.
+	it('ranks on the events and pairs each descriptor by key', async () => {
+		rowsByTable['directus_cache_events as e'] = [
+			{
+				cache_key: 'k2',
+				hits: '9',
+				misses: '1',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+			{
+				cache_key: 'k1',
+				hits: '2',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		// Deliberately the other order, and keyed the other way round.
+		rowsByTable['directus_cache_descriptors as d'] = [
+			{
+				cache_key: 'k1',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/a',
+				collection: 'a',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/a',
+				bytes: '10',
+				fill_ms: null,
+				last_filled: new Date(500).toISOString(),
+			},
+			{
+				cache_key: 'k2',
+				redis_key: 'r2',
+				coarse: false,
+				method: 'GET',
+				path: '/items/b',
+				collection: 'b',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/b',
+				bytes: '20',
+				fill_ms: null,
+				last_filled: new Date(500).toISOString(),
+			},
+		];
+
+		const entries = await listCacheEntries();
+
+		expect(entries.map((entry) => [entry.key, entry.hits, entry.path]))
+			.toEqual([
+				['k2', 9, '/items/b'],
+				['k1', 2, '/items/a'],
+			]);
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_events as e');
+		expect(builder.whereIn).toHaveBeenCalledWith('d.cache_key', ['k2', 'k1']);
+	});
+
+	// The descriptor's thirteen columns are dimensions OF the key, so grouping on
+	// them only widened the key; the aggregate needs nothing but the key itself.
+	it('groups the aggregate on the cache key alone', async () => {
+		queryRows = [
+			{
+				cache_key: 'k1',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/a',
+				collection: 'a',
+				user_id: null,
+				user_email: null,
+				query: '{"limit":5}',
+				url: '/items/a?limit=5',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '2',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		await listCacheEntries();
+
+		// The two trailing calls are the tag and collection purge passes.
+		expect(builder.groupBy.mock.calls).toEqual([
+			['e.cache_key'],
+			['et.cache_key'],
+			['et.cache_key'],
+		]);
+	});
+
+	// Excluded as a semi-join rather than as a join column, which is what keeps
+	// the exclusion out of the grouping key.
+	it('excludes never-filled locators through a correlated EXISTS', async () => {
+		queryRows = [
+			{
+				cache_key: 'k1',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/a',
+				collection: 'a',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/a',
+				bytes: '10',
+				last_filled: new Date(500).toISOString(),
+				hits: '2',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				fill_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		await listCacheEntries();
+
+		expect(builder.whereExists).toHaveBeenCalledTimes(1);
+		expect(builder.from).toHaveBeenCalledWith('directus_cache_descriptors as d');
+
+		expect(builder.whereRaw).toHaveBeenCalledWith(
+			'?? = ??',
+			['d.cache_key', 'e.cache_key'],
+		);
+
+		expect(builder.whereNotNull).toHaveBeenCalledWith('d.last_filled');
+	});
+
+	// The two reads are not atomic: a reap between them leaves an aggregated key
+	// with no dimension row, and a record built from it would carry a NaN date.
+	it('drops a key whose descriptor went away between the two reads', async () => {
+		rowsByTable['directus_cache_events as e'] = [
+			{
+				cache_key: 'reaped',
+				hits: '9',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+			{
+				cache_key: 'kept',
+				hits: '2',
+				misses: '0',
+				fills: '1',
+				last_hit_at: null,
+				ttl_ms: null,
+				hit_ms: null,
+				recommended_ttl_ms: null,
+			},
+		];
+
+		rowsByTable['directus_cache_descriptors as d'] = [
+			{
+				cache_key: 'kept',
+				redis_key: 'r1',
+				coarse: false,
+				method: 'GET',
+				path: '/items/a',
+				collection: 'a',
+				user_id: null,
+				user_email: null,
+				query: '{}',
+				url: '/items/a',
+				bytes: '10',
+				fill_ms: null,
+				last_filled: new Date(500).toISOString(),
+			},
+		];
+
+		const entries = await listCacheEntries();
+
+		expect(entries.map((entry) => [entry.key, entry.createdAt]))
+			.toEqual([['kept', 500]]);
+	});
+
+	// Its own default, shorter than the 24h the anomaly and timeseries reads
+	// share, because this one aggregates every event in the window.
+	it('windows the listing over the last ten minutes by default', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+		await listCacheEntries();
+
+		expect(builder.where).toHaveBeenCalledWith(
+			'e.time',
+			'>',
+			new Date(now - 600_000),
+		);
+
+		nowSpy.mockRestore();
+	});
+
+	it('windows the listing over an explicitly asked span', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+		await listCacheEntries(21_600_000);
+
+		expect(builder.where).toHaveBeenCalledWith(
+			'e.time',
+			'>',
+			new Date(now - 21_600_000),
+		);
+
+		nowSpy.mockRestore();
 	});
 
 	it('returns an empty array when not configured', async () => {
@@ -2039,6 +2341,40 @@ describe('listCacheGroupLatencies', () => {
 			'percentile_cont(0.99) WITHIN GROUP (ORDER BY e.duration_ms) '
 			+ 'FILTER (WHERE e.kind = 0) AS hit_p99',
 		);
+	});
+
+	// Its own default, shorter than the 24h the anomaly and timeseries reads share,
+	// because this one runs fifteen ordered-set aggregates over the whole window.
+	it('windows the latencies over the last ten minutes by default', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+		queryRows = [];
+		await listCacheGroupLatencies();
+
+		expect(builder.where).toHaveBeenCalledWith(
+			'e.time',
+			'>',
+			new Date(now - 600_000),
+		);
+
+		nowSpy.mockRestore();
+	});
+
+	it('windows the latencies over an explicitly asked span', async () => {
+		const now = 1_700_000_000_000;
+		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+
+		queryRows = [];
+		await listCacheGroupLatencies(21_600_000);
+
+		expect(builder.where).toHaveBeenCalledWith(
+			'e.time',
+			'>',
+			new Date(now - 21_600_000),
+		);
+
+		nowSpy.mockRestore();
 	});
 
 	it('returns an empty array on a non-Postgres dialect', async () => {

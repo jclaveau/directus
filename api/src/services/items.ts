@@ -33,6 +33,7 @@ import {
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
+	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
@@ -257,60 +258,101 @@ implements AbstractService<Item> {
 	private async purgeScopedCache(
 		tags: ScopedCacheTag[] | null,
 		collector?: Pick<ScopedCacheCollector, 'tags'>,
+		changedCollections: string[] = [],
 	): Promise<void> {
 		const context = this.scopedCachePurgeContext();
 		const hookTags = collector?.tags ?? [];
 
-		if (tags !== null) {
+		// A rule reaching back into this collection leaves its own slices unresolvable
+		// too, so it takes the collection-wide purge — whose reach already covers the
+		// tag purge it would otherwise get alongside.
+		const ownTags = changedCollections.includes(this.collection)
+			? null
+			: tags;
+
+		// Outside scoped mode a purge clears the whole namespace, so one is all it
+		// takes and the fan-out would be that many more flushes to no effect.
+		const otherCollections = scopedCachePurgeEnabled()
+			? changedCollections.filter((changedCollection) => {
+				return changedCollection !== this.collection;
+			})
+			: [];
+
+		if (ownTags !== null && otherCollections.length === 0) {
 			this.scopedCachePurged = await purgeScopedCache(
 				this.cache,
 				this.collection,
-				[...tags, ...hookTags],
+				[...ownTags, ...hookTags],
 				context,
 			);
 
 			return;
 		}
 
-		// A `null` tag set means this collection's own slices are unresolvable → coarse
-		// whole-collection purge (bare tag + every slice). Tags a hook added via
-		// `context.scopedCache` are often for OTHER collections the coarse pass never
-		// reaches, so purge them too — but with `includeCollectionTag: false`, since the
-		// coarse pass already owns this collection's bare tag (else it's purged twice
-		// and doubled in the debug header).
-		//
-		// The two operations share one purge id for the same reason they share one
-		// header: they are one purge. Telemetry counts by that id, so without it an
-		// entry both reach reports two purges for the one mutation that caused them.
+		// Every operation below serves one mutation, so they share one purge id for
+		// the same reason they share one header: they are one purge. Telemetry counts
+		// by that id, so without it an entry several of them reach reports several
+		// purges for the one mutation that caused them. The single-operation case
+		// returns above precisely so it keeps minting its own, being its own purge.
 		const scopedCachePurgeId = randomUUID();
+		const purgedTagSets: (ScopedCacheTag[] | null)[] = [];
 
-		const coarsePurged = await purgeScopedCache(
-			this.cache,
-			this.collection,
-			null,
-			context,
-			{ scopedCachePurgeId },
-		);
+		if (ownTags !== null) {
+			purgedTagSets.push(await purgeScopedCache(
+				this.cache,
+				this.collection,
+				[...ownTags, ...hookTags],
+				context,
+				{ scopedCachePurgeId },
+			));
+		}
+		else {
+			// A `null` tag set means this collection's own slices are unresolvable →
+			// coarse whole-collection purge (bare tag + every slice).
+			purgedTagSets.push(await purgeScopedCache(
+				this.cache,
+				this.collection,
+				null,
+				context,
+				{ scopedCachePurgeId },
+			));
 
-		if (hookTags.length === 0) {
-			this.scopedCachePurged = coarsePurged;
-			return;
+			// Tags a hook added via `context.scopedCache` are often for OTHER collections
+			// the coarse pass never reaches, so purge them too — but with
+			// `includeCollectionTag: false`, since the coarse pass already owns this
+			// collection's bare tag (else it's purged twice and doubled in the header).
+			if (hookTags.length > 0) {
+				purgedTagSets.push(await purgeScopedCache(
+					this.cache,
+					this.collection,
+					hookTags,
+					context,
+					{ includeCollectionTag: false, scopedCachePurgeId },
+				));
+			}
 		}
 
-		const hookPurged = await purgeScopedCache(
-			this.cache,
-			this.collection,
-			hookTags,
-			context,
-			{ includeCollectionTag: false, scopedCachePurgeId },
-		);
+		// A collection the database changed under this mutation. Which of its slices
+		// moved is unresolvable — those rows were never read — and its bare tag indexes
+		// none of them (a read bounded to one value is filed under that slice alone), so
+		// each takes the collection-wide purge rather than a tag that cannot reach it.
+		purgedTagSets.push(...await Promise.all(
+			otherCollections.map((changedCollection) => {
+				return purgeScopedCache(
+					this.cache,
+					changedCollection,
+					null,
+					context,
+					{ scopedCachePurgeId },
+				);
+			}),
+		));
 
-		// Reflect BOTH purges in the dev debug header (coarse ∪ hook); a `null` from
-		// either means the whole namespace was flushed, which already covers everything.
-		this.scopedCachePurged =
-			coarsePurged === null || hookPurged === null
-				? null
-				: [...coarsePurged, ...hookPurged];
+		// Reflect every purge in the dev debug header; a `null` from any of them means
+		// the whole namespace was flushed, which already covers what the others reached.
+		this.scopedCachePurged = purgedTagSets.some((tagSet) => tagSet === null)
+			? null
+			: purgedTagSets.flatMap((tagSet) => tagSet ?? []);
 	}
 
 	private get collectionScopedCacheFields(): string[] {
@@ -1014,15 +1056,35 @@ implements AbstractService<Item> {
 			// OTHER row's key slice is now pinnable, so an undeclared takeover leaves
 			// them stale. Before the key axis the bare tag covered them by accident.
 			const liveKeys = results.filter((key): key is PrimaryKey => key !== null);
-			const someRowTakenOver = liveKeys.length > actionPayloads.length;
+
+			const changedKeys = liveKeys.filter((key) => {
+				// A take-over the hook declared inert wrote nothing, so it neither
+				// moved a slice nor counts toward the row/payload mismatch.
+				return !scopedCacheCollector.purgeSkippedKeys.has(String(key));
+			});
+
+			if (
+				changedKeys.length === 0 &&
+				scopedCacheCollector.tags.length === scopedCacheTagsAtStart
+			) {
+				// Nothing written and nothing declared: no entry can have gone stale.
+				// Returning rather than purging an empty tag set, which would still
+				// take this collection's bare tag and drop its global reads.
+				return results;
+			}
+
+			const someRowTakenOver = changedKeys.length > actionPayloads.length;
 
 			const takeoverUndeclared =
 				someRowTakenOver &&
 				scopedCacheCollector.tags.length === scopedCacheTagsAtStart;
 
+			// No `scopedCacheFields.length > 0` guard: the primary key pins on every
+			// collection, so an undeclared take-over leaves the other rows' key slices
+			// stale even where no scope field is declared.
 			const scopedCacheTags = takeoverUndeclared
 				? null
-				: await this.snapshotScopedCacheTags(liveKeys);
+				: await this.snapshotScopedCacheTags(changedKeys);
 
 			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
 		}
@@ -1670,6 +1732,21 @@ implements AbstractService<Item> {
 
 					const snapshots = await itemsService.readMany(keys);
 
+					// `readMany` applies no ordering, so pairing its rows
+					// with `keys` by position files a revision under one item
+					// holding another item's data, which `revert` would then
+					// write straight back onto the wrong row.
+					const snapshotJsonByKey = new Map<string, string>();
+
+					if (Array.isArray(snapshots)) {
+						for (const snapshot of snapshots) {
+							snapshotJsonByKey.set(
+								String(snapshot[primaryKeyField]),
+								JSON.stringify(snapshot),
+							);
+						}
+					}
+
 					const revisionsService = new RevisionsService({
 						knex: trx,
 						schema: this.schema,
@@ -1683,7 +1760,7 @@ implements AbstractService<Item> {
 								item: keys[index],
 								data:
 									snapshots && Array.isArray(snapshots)
-										? JSON.stringify(snapshots[index])
+										? snapshotJsonByKey.get(String(keys[index]))
 										: JSON.stringify(snapshots),
 								delta: await payloadService.prepareDelta(payloadWithTypeCasting),
 							})),
@@ -2030,7 +2107,14 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.purgeScopedCache(oldScopedCacheTags, scopedCacheCollector);
+			await this.purgeScopedCache(
+				oldScopedCacheTags,
+				scopedCacheCollector,
+				scopedCacheCollectionsChangedByOnDelete(
+					this.schema,
+					this.collection,
+				),
+			);
 		}
 
 		if (opts.emitEvents !== false) {
