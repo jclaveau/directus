@@ -563,6 +563,7 @@ describe('the sorted-set tag index', () => {
 	it('reads one score, and removes only that score', async () => {
 		const zrangebyscore = vi.fn()
 			.mockResolvedValue(['7|entry', '7|entry__expires_at']);
+
 		const zremrangebyscore = vi.fn();
 		const del = vi.fn();
 		const cacheDelete = vi.fn().mockResolvedValue(true);
@@ -610,6 +611,7 @@ describe('the sorted-set tag index', () => {
 		expect(zrange).toHaveBeenCalledWith('ns:tagz:articles:author', 0, -1);
 		expect(cacheDelete).toHaveBeenCalledWith('entry');
 		expect(cacheDelete).toHaveBeenCalledWith('other');
+
 		expect(del)
 		.toHaveBeenCalledWith(expect.arrayContaining(['ns:tagz:articles:author']));
 	});
