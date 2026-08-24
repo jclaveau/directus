@@ -76,6 +76,7 @@ export const DEFAULTS = {
 	CACHE_NAMESPACE: 'scalabus',
 	CACHE_AUTO_PURGE: false,
 	CACHE_AUTO_PURGE_MODE: 'scoped',
+	CACHE_SCOPED_TAG_INDEX: 'key-per-value',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
 	// Default on for the formats a cached endpoint might content-negotiate. Safe
 	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets

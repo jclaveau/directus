@@ -18,6 +18,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/auth/login.test.ts': 25_000,
 	'/tests/db/routes/items/cache-takeover-scope.test.ts': 16_000,
 	'/tests/db/routes/auth/refresh.test.ts': 14_000,
+	// One spawned instance, both CACHE_SCOPED_TAG_INDEX settings flipped on it.
+	'/tests/db/routes/items/cache-tag-index-sorted-set.test.ts': 14_000,
 	'/tests/db/routes/items/cache-update-scope.test.ts': 11_000,
 	'/tests/db/routes/items/cache-delete-scope.test.ts': 11_000,
 	'/tests/db/routes/items/cache-read-scope.test.ts': 11_000,
