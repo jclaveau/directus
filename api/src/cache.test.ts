@@ -49,7 +49,11 @@ vi.mock('./logger/index.js', () => {
 vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 
 // flushCaches() clears the permission cache too; orthogonal to the cache layers.
-vi.mock('./permissions/cache.js', () => ({ clearCache: vi.fn() }));
+// Held, because one case needs it to fail: it is a `@directus/memory` multi cache
+// wired straight to ioredis, so unlike the Keyv tiers it really does reject.
+const clearPermissionCache = vi.hoisted(() => vi.fn());
+
+vi.mock('./permissions/cache.js', () => ({ clearCache: clearPermissionCache }));
 
 // Everything else in the module stays real: only the purge emitter is watched,
 // because recording the purge is the one thing it does that leaves no other
@@ -906,6 +910,25 @@ describe('flushCaches', () => {
 		);
 
 		expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
+	});
+
+	test(oneLine`
+		survives a permission cache that cannot clear — it is a multi cache over
+		ioredis, so it rejects where the Keyv tiers swallow, and the schema apply that
+		called this has already committed: failing it reports a change that landed as
+		one that did not, while leaving exactly the same entries stale
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		clearPermissionCache.mockRejectedValueOnce(
+			new Error('Reached the max retries per request limit (which is 20).'),
+		);
+
+		await expect(flushCaches(true)).resolves.toBeUndefined();
 	});
 
 	// `clearSystemCache` does not await the publish, so this pins that it stays that

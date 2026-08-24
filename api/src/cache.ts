@@ -165,7 +165,26 @@ export function getCache(): {
 
 export async function flushCaches(forced?: boolean): Promise<void> {
 	const { cache } = getCache();
-	await clearSystemCache({ forced });
+
+	// Best-effort, all of it. Every caller here runs AFTER the thing it is flushing
+	// for already happened — a migration recorded its version, a schema diff applied,
+	// a deploy changed the build identity — so nothing below can be undone by
+	// failing, and a caller told "that failed" would be told it about a change that
+	// landed. The tiers that cannot be dropped stay stale either way.
+	//
+	// Deliberately not in `clearSystemCache` itself: `clearCacheTargets` calls that
+	// directly for an operator who asked for a clear, and they deserve to hear it
+	// could not be done.
+	try {
+		// Unlike the Keyv tiers below, the permission cache it clears is a
+		// `@directus/memory` multi cache wired straight to ioredis, so it is the one
+		// call in here that really rejects when Redis is away.
+		await clearSystemCache({ forced });
+	}
+	catch (error: any) {
+		logger.warn(error, `[cache] could not clear the system cache: ${error}`);
+	}
+
 	await cache?.clear();
 
 	// Same reason as the `response` target in `clearCacheTargets`: the scoped-tag
