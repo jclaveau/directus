@@ -472,6 +472,16 @@ describe(oneLine`
 				await assertInstanceAlive();
 
 				mark(`schema apply during the outage: ${applied.status}`);
+
+				if (applied.status !== 204) {
+					mark(`apply body: ${JSON.stringify(applied.body)}`);
+
+					// eslint-disable-next-line no-console
+					console.info(
+						`[recovery] instance log:\n${instanceLog.join('').slice(-6000)}`,
+					);
+				}
+
 				expect(applied.status).toBe(204);
 			}
 			finally {

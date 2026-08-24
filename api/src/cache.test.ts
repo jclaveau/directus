@@ -30,7 +30,15 @@ const redis = vi.hoisted(() => {
 const emitFilter = vi.hoisted(() => vi.fn((_event: string, payload: unknown) => payload));
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
-vi.mock('./bus/index.js', () => ({ useBus: () => ({ subscribe: vi.fn(), publish: vi.fn() }) }));
+// Held rather than built per call: `cache.ts` captures the bus once at module load,
+// so a test that needs the publish to fail has to own the same function it captured.
+const busPublish = vi.hoisted(() => vi.fn());
+
+vi.mock('./bus/index.js', () => {
+	return {
+		useBus: () => ({ subscribe: vi.fn(), publish: busPublish }),
+	};
+});
 
 vi.mock('./logger/index.js', () => {
 	return {
@@ -898,6 +906,27 @@ describe('flushCaches', () => {
 		);
 
 		expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
+	});
+
+	// `clearSystemCache` does not await the publish, so this pins that it stays that
+	// way: awaiting it would hand every caller — the migration runner included — a
+	// rejection during the one outage where the message could not be delivered
+	// anyway, on top of tiers it has already cleared.
+	test(oneLine`
+		survives a bus that cannot publish — the schemaChanged fan-out rides Redis, so
+		it is down in exactly the outage this has to live through, and a lost message
+		is no less lost for failing the caller that already cleared its own tiers
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		busPublish.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		await expect(flushCaches(true)).resolves.toBeUndefined();
+		expect(busPublish).toHaveBeenCalled();
 	});
 
 	test(oneLine`
