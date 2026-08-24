@@ -306,7 +306,7 @@ describe('meta', () => {
 		{ input: 'total_count,filter_count', expected: ['total_count', 'filter_count'] },
 		{ input: ['total_count', 'filter_count'], expected: ['total_count', 'filter_count'] },
 	])('should accept $input', async ({ input, expected }) => {
-		const sanitizedQuery = (await sanitizeQuery({ meta: input }, null as any)) as any;
+		const sanitizedQuery = await sanitizeQuery({ meta: input }, null as any);
 
 		expect(sanitizedQuery.meta).toEqual(expected);
 	});

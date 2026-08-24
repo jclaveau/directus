@@ -424,12 +424,15 @@ describe(oneLine`
 			expect(restrictedAfter.body.data).toHaveLength(1);
 
 			// Every collection the rules reach, each named once: a collection purged
-			// both by its own tags and collection-wide would appear twice.
+			// both by its own tags and collection-wide would appear twice. The deleted
+			// row names its own key slice on top — the primary key pins every
+			// collection, declared scope fields or not.
 			expect(deleted.headers[purgedTagsHeader].split(', ').sort()).toEqual([
 				CHILD,
 				GRANDCHILD,
 				NULLED,
 				PARENT,
+				`${PARENT}:id=${doomedRuleParent}`,
 				SCOPED_CHILD,
 				...(supportsSetDefault
 					? [DEFAULTED]

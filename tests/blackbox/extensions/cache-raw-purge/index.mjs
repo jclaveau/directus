@@ -24,7 +24,7 @@ export default function registerEndpoint(router, { database, scopedCache }) {
 
 		const documentRows = await database(DOCUMENT)
 			.where({ owner })
-			.select('owner');
+			.select('id', 'owner');
 
 		await database(LINE)
 			.where({ owner })
@@ -32,10 +32,12 @@ export default function registerEndpoint(router, { database, scopedCache }) {
 
 		const lineRows = await database(LINE)
 			.where({ owner })
-			.select('owner');
+			.select('id', 'owner');
 
 		// Hand each collection the rows it wrote; the host derives the touched owner
-		// slice from scoped_cache_fields and purges only that (+ the bare tag).
+		// slice from scoped_cache_fields and purges only that (+ the bare tag). The
+		// primary key travels too: every collection pins that slice, so a row without
+		// it leaves its own key unresolvable and the host degrades to collection-wide.
 		await scopedCache.purgeForMutatedRows(DOCUMENT, documentRows);
 		await scopedCache.purgeForMutatedRows(LINE, lineRows);
 

@@ -58,16 +58,26 @@ export function createScopedCacheExtensionHandle(
 				return;
 			}
 
+			// The primary key pins on every collection, declared or not, so a bypassed
+			// write owes its key slices too — a read of that row pinned nothing else.
+			// Deduped, since a project may also list its key as a scope field.
+			const primaryKeyField = collectionSchema?.primary;
+
+			const pinnedFields = primaryKeyField === undefined
+				? scopeFields
+				: [...new Set([primaryKeyField, ...scopeFields])];
+
 			const fieldTypes: Record<string, Type | undefined> = Object.fromEntries(
-				scopeFields.map((field) => [field, collectionSchema?.fields[field]?.type]),
+				pinnedFields.map((field) => [field, collectionSchema?.fields[field]?.type]),
 			);
 
-			// 'coarse': a row missing a scope field yields null → `purgeScopedCache`
+			// 'coarse': a row missing a pinned field yields null → `purgeScopedCache`
 			// does a collection-wide purge (fail-safe), never a silently-stale slice.
 			// With every row resolved it returns the exact touched slices (surgical).
+			// That now covers a row handed over without its primary key.
 			const tags = scopedCacheTagsFromRows(
 				collection,
-				scopeFields,
+				pinnedFields,
 				mutatedRows,
 				'coarse',
 				fieldTypes,

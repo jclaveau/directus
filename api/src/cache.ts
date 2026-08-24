@@ -165,8 +165,46 @@ export function getCache(): {
 
 export async function flushCaches(forced?: boolean): Promise<void> {
 	const { cache } = getCache();
-	await clearSystemCache({ forced });
+
+	// Best-effort, all of it. Every caller here runs AFTER the thing it is flushing
+	// for already happened — a migration recorded its version, a schema diff applied,
+	// a deploy changed the build identity — so nothing below can be undone by
+	// failing, and a caller told "that failed" would be told it about a change that
+	// landed. The tiers that cannot be dropped stay stale either way.
+	//
+	// Deliberately not in `clearSystemCache` itself: `clearCacheTargets` calls that
+	// directly for an operator who asked for a clear, and they deserve to hear it
+	// could not be done.
+	try {
+		// Unlike the Keyv tiers below, the permission cache it clears is a
+		// `@directus/memory` multi cache wired straight to ioredis, so it is the one
+		// call in here that really rejects when Redis is away.
+		await clearSystemCache({ forced });
+	}
+	catch (error: any) {
+		logger.warn(error, `[cache] could not clear the system cache: ${error}`);
+	}
+
 	await cache?.clear();
+
+	// Same reason as the `response` target in `clearCacheTargets`: the scoped-tag
+	// index sits in raw Redis outside the Keyv namespace, so the clear above misses
+	// it. Both callers here — the migration runner and the build-identity self-heal
+	// — mean "the response cache is gone", and leaving the index behind strands tag
+	// SETs pointing at keys that no longer exist until their `ttl*2` self-expiry,
+	// or forever when `CACHE_TTL` is unset and they are deliberately unbounded.
+	//
+	// Never fatal, unlike the `clearCacheTargets` call: `database/migrations/run.ts`
+	// calls this right after recording the version it just applied and does not catch,
+	// so a throw here fails a deploy over a cache the request path already treats as a
+	// MISS while Redis is away. What is left behind self-expires, or goes with the
+	// next flush that reaches Redis.
+	try {
+		await dropScopedCacheTagIndex();
+	}
+	catch (error: any) {
+		logger.warn(error, `[cache] could not drop the scoped-tag index: ${error}`);
+	}
 }
 
 export async function clearSystemCache(opts?: {

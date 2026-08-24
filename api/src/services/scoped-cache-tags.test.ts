@@ -1,6 +1,6 @@
 import { oneLine } from '@directus/utils';
 import { describe, expect, test } from 'vitest';
-import type { SchemaOverview } from '@directus/types';
+import type { Filter, SchemaOverview } from '@directus/types';
 import {
 	canonicalScopedCacheValue,
 	composeScopedCachePaths,
@@ -66,9 +66,82 @@ describe('canonicalScopedCacheValue', () => {
 			.toBe('9007199254740993');
 	});
 
-	test('unknown/undefined type falls back to `String` (owner-id/uuid path)', () => {
+	test(oneLine`
+		uuid: an uppercase spelling and a lowercase one collapse — the DB compares uuid
+		case-insensitively, so both name the same row and must name one slice
+	`, () => {
+		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
+
+		expect(canonicalScopedCacheValue(upper, 'uuid'))
+			.toBe(canonicalScopedCacheValue(upper.toLowerCase(), 'uuid'));
+
+		expect(canonicalScopedCacheValue(upper, 'uuid')).toBe(upper.toLowerCase());
+	});
+
+	test(oneLine`
+		integer: a leading zero, a leading plus and a driver number all collapse — the DB
+		reads them as one key, so they cannot resolve different slices
+	`, () => {
+		for (const spelling of [1, '1', '01', '+1', '0001']) {
+			expect(canonicalScopedCacheValue(spelling, 'integer')).toBe('1');
+		}
+
+		// A signed zero is still zero, and a zero must not be stripped to empty.
+		expect(canonicalScopedCacheValue('-0', 'integer')).toBe('0');
+		expect(canonicalScopedCacheValue('000', 'integer')).toBe('0');
+		expect(canonicalScopedCacheValue('-007', 'integer')).toBe('-7');
+	});
+
+	test(oneLine`
+		bigInteger: a leading-zero spelling collapses without a numeric pass, so
+		precision past MAX_SAFE_INTEGER survives
+	`, () => {
+		expect(canonicalScopedCacheValue('00009007199254740993', 'bigInteger'))
+			.toBe('9007199254740993');
+	});
+
+	test(oneLine`
+		integer: every spelling \`validateKeys\` lets through collapses — it only asks
+		\`Number.isInteger(Number(key))\`, so whitespace, exponent and hex forms reach a
+		tag, and postgres trims whitespace casting text to int, so \` 1\` really is row 1
+	`, () => {
+		for (const spelling of [' 1', '1 ', '1.0']) {
+			expect(canonicalScopedCacheValue(spelling, 'integer')).toBe('1');
+		}
+
+		expect(canonicalScopedCacheValue('1e3', 'integer')).toBe('1000');
+		expect(canonicalScopedCacheValue('0x10', 'integer')).toBe('16');
+	});
+
+	test(oneLine`
+		a non-numeric value on an integer field keeps its string form rather than
+		becoming an empty token
+	`, () => {
+		expect(canonicalScopedCacheValue('', 'integer')).toBe('');
+		expect(canonicalScopedCacheValue('7a', 'integer')).toBe('7a');
+
+		// Not an integer at all: no token can be right, so don't invent one.
+		expect(canonicalScopedCacheValue('1.5', 'integer')).toBe('1.5');
+	});
+
+	test(oneLine`
+		bigInteger past MAX_SAFE_INTEGER keeps its raw spelling — no numeric token can
+		round-trip it, and such a key cannot have matched a row either
+	`, () => {
+		expect(canonicalScopedCacheValue('1e30', 'bigInteger')).toBe('1e30');
+	});
+
+	test(oneLine`
+		string: spelling is NOT normalized — a varchar key really is a distinct value,
+		and the DB would not match the other spelling either
+	`, () => {
+		expect(canonicalScopedCacheValue('01', 'string')).toBe('01');
+		expect(canonicalScopedCacheValue('ABC', 'string')).toBe('ABC');
+	});
+
+	test('unknown/undefined type falls back to `String` (owner-id path)', () => {
 		expect(canonicalScopedCacheValue(42, undefined)).toBe('42');
-		expect(canonicalScopedCacheValue('7c9e-uuid', 'uuid')).toBe('7c9e-uuid');
+		expect(canonicalScopedCacheValue('7c9e-uuid', undefined)).toBe('7c9e-uuid');
 	});
 });
 
@@ -517,6 +590,175 @@ describe('pinnedScopedCacheTagsFromFilter', () => {
 	test('empty / null filter yields no pin', () => {
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], null)).toEqual([]);
 		expect(pinnedScopedCacheTagsFromFilter('slots', ['student'], {})).toEqual([]);
+	});
+});
+
+// The primary key is a pinning axis on every collection, taking no config and no
+// query: `readOne` bounds the read to one key, and only that row's own write can
+// change it. An inserted row carries a different key, so the insert-blindness that
+// bars a value slice elsewhere cannot apply here.
+describe('pinnedScopedCacheTagsFromFilter — implicit primary key', () => {
+	// `slots` declares no scope field here: the pin comes from the key alone.
+	const unscoped = (filter: Filter) => {
+		return pinnedScopedCacheTagsFromFilter(
+			'slots',
+			[],
+			filter,
+			{ id: 'integer' },
+			{},
+			[],
+			'id',
+		);
+	};
+
+	test('_eq on the primary key pins that row, with no scope field declared', () => {
+		expect(unscoped({ id: { _eq: 7 } })).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+		]);
+	});
+
+	test('_in on the primary key pins every listed key (the readMany shape)', () => {
+		expect(unscoped({ _and: [{ id: { _in: [7, 8] } }, {}] })).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'slots', field: 'id', value: 8, type: 'integer' },
+		]);
+	});
+
+	test(oneLine`
+		a filter leaving the key unbound still pins nothing — a list read has no key to
+		pin, so it stays on the bare collection tag
+	`, () => {
+		expect(unscoped({ name: { _eq: 'a' } })).toEqual([]);
+		expect(unscoped({ id: { _gt: 7 } })).toEqual([]);
+		expect(unscoped({})).toEqual([]);
+	});
+
+	test(oneLine`
+		an _or branch that leaves the key unbound drops the pin — a row matching that
+		branch carries a key outside the union
+	`, () => {
+		const filter = { _or: [{ id: { _eq: 7 } }, { name: { _eq: 'a' } }] };
+		expect(unscoped(filter)).toEqual([]);
+	});
+
+	test(oneLine`
+		the key pins alongside a declared scope field bound by the same filter
+	`, () => {
+		const filter = { _and: [{ id: { _eq: 7 } }, { student: { _eq: 'A' } }] };
+
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['student'],
+				filter,
+				{ id: 'integer', student: 'string' },
+				{},
+				[],
+				'id',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'slots', field: 'student', value: 'A', type: 'string' },
+		]);
+	});
+
+	test(oneLine`
+		a project that also lists its key as a scope field gets one tag, not two — the
+		purge side dedups its projection for the same reason
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				['id'],
+				{ id: { _eq: 7 } },
+				{ id: 'integer' },
+				{},
+				[],
+				'id',
+			),
+		).toEqual([
+			{ collection: 'slots', field: 'id', value: 7, type: 'integer' },
+		]);
+	});
+
+	test(oneLine`
+		a caller passing no primary key pins nothing on an unscoped collection — the axis
+		reaches only callers that opt in, so no other pinner gains it silently
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter('slots', [], { id: { _eq: 7 } }),
+		).toEqual([]);
+	});
+
+	test(oneLine`
+		read↔purge symmetry on a uuid key: the URL's uppercase spelling and the driver's
+		lowercase row resolve ONE slice, or a write never purges the read it changed
+	`, () => {
+		const upper = '07D1AF3C-4B4E-4D6E-9C2A-2F1E0B8A5C31';
+
+		const pinned = pinnedScopedCacheTagsFromFilter(
+			'notes',
+			[],
+			{ id: { _eq: upper } },
+			{ id: 'uuid' },
+			{},
+			[],
+			'id',
+		);
+
+		const purged = scopedCacheTagsFromRows(
+			'notes',
+			['id'],
+			[{ id: upper.toLowerCase() }],
+			'coarse',
+			{ id: 'uuid' },
+		);
+
+		expect(serializeScopedCacheTags(pinned))
+			.toBe(serializeScopedCacheTags(purged ?? []));
+	});
+
+	test(oneLine`
+		read↔purge symmetry on an integer key: a padded URL key and the driver's number
+		resolve ONE slice
+	`, () => {
+		const pinned = pinnedScopedCacheTagsFromFilter(
+			'notes',
+			[],
+			{ id: { _eq: '007' } },
+			{ id: 'integer' },
+			{},
+			[],
+			'id',
+		);
+
+		const purged = scopedCacheTagsFromRows(
+			'notes',
+			['id'],
+			[{ id: 7 }],
+			'coarse',
+			{ id: 'integer' },
+		);
+
+		expect(serializeScopedCacheTags(pinned))
+			.toBe(serializeScopedCacheTags(purged ?? []));
+	});
+
+	test(oneLine`
+		a date-typed key is refused like any other unpinnable type — it goes through the
+		same PIN_UNSAFE_SCOPE_TYPES gate
+	`, () => {
+		expect(
+			pinnedScopedCacheTagsFromFilter(
+				'slots',
+				[],
+				{ stamped_at: { _eq: '2026-01-02T03:04:05.000Z' } },
+				{ stamped_at: 'dateTime' },
+				{},
+				[],
+				'stamped_at',
+			),
+		).toEqual([]);
 	});
 });
 

@@ -30,7 +30,15 @@ const redis = vi.hoisted(() => {
 const emitFilter = vi.hoisted(() => vi.fn((_event: string, payload: unknown) => payload));
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
-vi.mock('./bus/index.js', () => ({ useBus: () => ({ subscribe: vi.fn(), publish: vi.fn() }) }));
+// Held rather than built per call: `cache.ts` captures the bus once at module load,
+// so a test that needs the publish to fail has to own the same function it captured.
+const busPublish = vi.hoisted(() => vi.fn());
+
+vi.mock('./bus/index.js', () => {
+	return {
+		useBus: () => ({ subscribe: vi.fn(), publish: busPublish }),
+	};
+});
 
 vi.mock('./logger/index.js', () => {
 	return {
@@ -41,7 +49,11 @@ vi.mock('./logger/index.js', () => {
 vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 
 // flushCaches() clears the permission cache too; orthogonal to the cache layers.
-vi.mock('./permissions/cache.js', () => ({ clearCache: vi.fn() }));
+// Held, because one case needs it to fail: it is a `@directus/memory` multi cache
+// wired straight to ioredis, so unlike the Keyv tiers it really does reject.
+const clearPermissionCache = vi.hoisted(() => vi.fn());
+
+vi.mock('./permissions/cache.js', () => ({ clearCache: clearPermissionCache }));
 
 // Everything else in the module stays real: only the purge emitter is watched,
 // because recording the purge is the one thing it does that leaves no other
@@ -872,5 +884,87 @@ describe('flushCaches', () => {
 		expect(await systemCache.get('system-key')).toBeUndefined();
 		// Else cache-build-identity would re-flush on every boot.
 		expect(await lockCache.get('build-identity')).toBe('fingerprint');
+	});
+
+	test(oneLine`
+		drops the scoped-tag index too — those SETs live in raw redis outside the Keyv
+		namespace, so the response clear misses them and they would linger as pointers
+		to keys that no longer exist
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockResolvedValueOnce(['0', ['scalabus:tag:articles:id=1']]);
+
+		await flushCaches(true);
+
+		expect(redis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'scalabus:tag:*',
+			'COUNT',
+			250,
+		);
+
+		expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
+	});
+
+	test(oneLine`
+		survives a permission cache that cannot clear — it is a multi cache over
+		ioredis, so it rejects where the Keyv tiers swallow, and the schema apply that
+		called this has already committed: failing it reports a change that landed as
+		one that did not, while leaving exactly the same entries stale
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		clearPermissionCache.mockRejectedValueOnce(
+			new Error('Reached the max retries per request limit (which is 20).'),
+		);
+
+		await expect(flushCaches(true)).resolves.toBeUndefined();
+	});
+
+	// `clearSystemCache` does not await the publish, so this pins that it stays that
+	// way: awaiting it would hand every caller — the migration runner included — a
+	// rejection during the one outage where the message could not be delivered
+	// anyway, on top of tiers it has already cleared.
+	test(oneLine`
+		survives a bus that cannot publish — the schemaChanged fan-out rides Redis, so
+		it is down in exactly the outage this has to live through, and a lost message
+		is no less lost for failing the caller that already cleared its own tiers
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		busPublish.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		await expect(flushCaches(true)).resolves.toBeUndefined();
+		expect(busPublish).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		survives an unreachable redis — the migration runner calls this after recording
+		the version it just applied and does not catch, so a throw here fails a deploy
+		over a cache the request path treats as a MISS anyway
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockRejectedValue(new Error('Connection is closed.'));
+
+		await expect(flushCaches(true)).resolves.toBeUndefined();
 	});
 });

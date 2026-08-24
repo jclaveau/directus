@@ -19,6 +19,7 @@ import {
 	tagScopedCacheKeys,
 } from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
+import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
@@ -91,9 +92,17 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const controllerTags = res.locals['scopedCacheTags'];
 
-	const scopedCacheTags = controllerTags?.length
+	// `total_count` drops the query filter and counts the whole collection
+	// (`MetaService.totalCount`), so a response carrying it depends on every row —
+	// including rows the read's own pins never bounded. An insert into another key
+	// slice moves the number, and no pinned tag can express that. Such a response
+	// keeps the bare collection tag beside its pins so any write drops it.
+	const countsWholeCollection =
+		req.sanitizedQuery.meta?.includes(Meta.TOTAL_COUNT) === true;
+
+	const scopedCacheTags = controllerTags?.length && countsWholeCollection === false
 		? controllerTags
-		: collectionFallbackTags;
+		: [...(controllerTags ?? []), ...collectionFallbackTags];
 
 	// No tags AND no collection (/server, /schema, a GraphQL query hitting nothing): a
 	// scoped purge can never target it; caching would orphan a stale entry. Skip it.

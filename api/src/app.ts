@@ -78,7 +78,10 @@ import metricsSchedule from './schedules/metrics.js';
 import retentionSchedule from './schedules/retention.js';
 import telemetrySchedule from './schedules/telemetry.js';
 import tusSchedule from './schedules/tus.js';
-import { assertScopedCacheRedisSupported } from './scoped-cache.js';
+import {
+	assertScopedCacheRedisSupported,
+	startScopedCachePurgeRecovery,
+} from './scoped-cache.js';
 import { systemMcpEnabled } from './system-mcp/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { Url } from './utils/url.js';
@@ -127,6 +130,10 @@ export default async function createApp(): Promise<express.Application> {
 
 	// Extensions + core loaded; heal a redis cache left stale by a code-only deploy.
 	await flushCachesIfBuildChanged(extensionManager);
+
+	// And finish any purge that failed after its mutation committed — a previous
+	// process may have exited while Redis was still unreachable.
+	startScopedCachePurgeRecovery();
 
 	const app = express();
 

@@ -36,6 +36,8 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-nested-write.test.ts',
 			'/tests/db/routes/items/cache-poisoning-read.test.ts',
 			'/tests/db/routes/items/cache-poisoning-write.test.ts',
+			'/tests/db/routes/items/cache-primary-key-scope.test.ts',
+			'/tests/db/routes/items/cache-purge-recovery.test.ts',
 			'/tests/db/routes/items/cache-raw-purge.test.ts',
 			'/tests/db/routes/items/cache-raw-purge-relational.test.ts',
 			'/tests/db/routes/items/cache-read-scope.test.ts',

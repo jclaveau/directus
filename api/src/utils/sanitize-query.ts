@@ -69,7 +69,7 @@ export async function sanitizeQuery(
 	}
 
 	if (rawQuery['meta']) {
-		(query as any).meta = sanitizeMeta(rawQuery['meta']);
+		query.meta = sanitizeMeta(rawQuery['meta']);
 	}
 
 	if (rawQuery['search'] && typeof rawQuery['search'] === 'string') {

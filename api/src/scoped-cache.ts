@@ -10,8 +10,16 @@ import type {
 } from '@directus/types';
 import type Keyv from 'keyv';
 import { resolvedCacheTtl } from './cache-config.js';
-import { queueCachePurge } from './cache-events.js';
+import { queueCacheAnomaly, queueCachePurge } from './cache-events.js';
 import emitter from './emitter.js';
+import { useLogger } from './logger/index.js';
+import {
+	clearPendingScopedCachePurges,
+	countFailedScopedCachePurgeRetry,
+	listPendingScopedCachePurges,
+	recordPendingScopedCachePurge,
+	type PendingScopedCachePurge,
+} from './scoped-cache-pending-purges.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
@@ -24,11 +32,30 @@ const env = useEnv();
  * the service drains `tags` into the read's scope or the mutation's purge tags. Both
  * are the same idempotent sink. Safe with purging off (then `tags` is unread).
  */
-export function createScopedCacheCollector(): ScopedCacheCollector {
+export function createScopedCacheCollector(
+	schema: SchemaOverview,
+): ScopedCacheCollector {
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
 	const purgeSkippedKeys = new Set<string>();
+
+	// A hook names a slice by collection/field/value and rarely knows the column's
+	// type, but the type is what canonicalizes the value: `uuid` lowercases and
+	// `integer` strips a leading zero, so a type-less tag and the schema-typed one
+	// the purge side emits resolve DIFFERENT keys for the SAME row — a pin nothing
+	// ever purges. Fill it from the schema so both sides agree.
+	function withSchemaType(tag: ScopedCacheTag): ScopedCacheTag {
+		if (tag.type !== undefined || tag.field === undefined) {
+			return tag;
+		}
+
+		const schemaType = schema.collections[tag.collection]?.fields[tag.field]?.type;
+
+		return schemaType === undefined
+			? tag
+			: { ...tag, type: schemaType };
+	}
 
 	function add(
 		input: ScopedCacheTag | readonly ScopedCacheTag[],
@@ -38,7 +65,9 @@ export function createScopedCacheCollector(): ScopedCacheCollector {
 			? input
 			: [input];
 
-		for (const tag of batch) {
+		for (const declaredTag of batch) {
+			const tag = withSchemaType(declaredTag);
+
 			// Idempotent: a hook looping over rows that resolve the same slice — or a
 			// batch/upsert parent's shared collector fed by many children — must not
 			// inflate the set. Key on the canonical tag key (the same one the purge side
@@ -140,8 +169,45 @@ export function canonicalScopedCacheValue(
 			: String(ms);
 	}
 
-	// integer/bigInteger keep `String` to preserve precision past MAX_SAFE_INTEGER; they
-	// already collapse (`7` and `'7'` → `'7'`). Only fixed-scale types need the numeric pass.
+	// A uuid is compared case-insensitively by the DB, so both spellings name one row
+	// and must name one slice. Neither side normalizes for us — `validateKeys` accepts
+	// either case without rewriting it — so the token would otherwise be whatever the
+	// caller sent: an iOS client reading `UUID().uuidString` (uppercase) against a
+	// web client writing lowercase would pin and purge different keys → stale HIT.
+	if (type === 'uuid') {
+		return String(value).toLowerCase();
+	}
+
+	// integer/bigInteger normalize the SPELLING but never go through `Number`: past
+	// MAX_SAFE_INTEGER a numeric pass corrupts the value, so leading zeros and a
+	// leading `+` are stripped as string surgery. `01`, `+1`, `0001` and a driver's
+	// `1` are one key to the DB, so they must not resolve different slices. Anything
+	// that isn't a plain integer keeps its string form rather than becoming empty.
+	if (type === 'integer' || type === 'bigInteger') {
+		const raw = String(value).trim();
+		const digits = /^([+-]?)0*(\d+)$/.exec(raw);
+
+		if (digits === null) {
+			// Spellings `validateKeys` still lets through, since it only asks
+			// `Number.isInteger(Number(key))`: `1e3`, `0x10`, `1.0`. Normalize through
+			// `Number` when it round-trips safely; past MAX_SAFE_INTEGER no token can be
+			// right, and such a key cannot have matched a row either, so keep it raw.
+			const num = Number(raw);
+
+			return raw !== '' && Number.isSafeInteger(num)
+				? String(num)
+				: raw;
+		}
+
+		// `-0` is zero; only a non-zero magnitude keeps the sign.
+		const sign = digits[1] === '-' && digits[2] !== '0'
+			? '-'
+			: '';
+
+		return `${sign}${digits[2]}`;
+	}
+
+	// Only fixed-scale types need the numeric pass (`'1.50'` vs `1.5`).
 	if (type === 'decimal' || type === 'float') {
 		const num = Number(value);
 
@@ -350,7 +416,7 @@ export async function countScopedCacheTagMembers(
 	const pipeline = redis.pipeline();
 
 	for (const tag of displayTags) {
-		pipeline.scard(`${env['CACHE_NAMESPACE']}:tag:${tag}`);
+		pipeline.scard(scopedCacheTagKeyFromLabel(tag));
 	}
 
 	const results = await pipeline.exec();
@@ -385,6 +451,21 @@ export async function countScopedCacheTagMembers(
  * was absent; a store that reports nothing leaves the count where it was rather
  * than silently collapsing it to zero.
  */
+// The suffixes a cached response's siblings carry. They ride the same tag set as
+// the payload key, so both the purge (which must not count them as evictions of
+// their own) and the recovery report (which must not name them as stale entries)
+// need the same answer to "whose sidecar is this?".
+const SCOPED_CACHE_SIDECAR_SUFFIXES = ['__expires_at', '__tags'];
+
+function scopedCacheSidecarOwner(member: string): string | null {
+	const suffix = SCOPED_CACHE_SIDECAR_SUFFIXES
+		.find((candidate) => member.endsWith(candidate));
+
+	return suffix === undefined
+		? null
+		: member.slice(0, -suffix.length);
+}
+
 async function purgeScopedCacheTagKeys(
 	cache: Keyv,
 	tagKeys: string[],
@@ -446,10 +527,9 @@ async function purgeScopedCacheTagKeys(
 			return false;
 		}
 
-		const sidecarSuffix = member.lastIndexOf('__');
+		const owner = scopedCacheSidecarOwner(member);
 
-		return sidecarSuffix === -1
-			|| present.has(member.slice(0, sidecarSuffix)) === false;
+		return owner === null || present.has(owner) === false;
 	}).length;
 }
 
@@ -528,7 +608,7 @@ export async function purgeCollectionScopedCache(
 
 	// The expensive mode, and the one nothing else records: every slice of the
 	// collection went, because which slices actually changed was unresolvable.
-	// No tag list: every slice the scan happened to find is derived rather than
+	// No tag list: every slice the index happened to name is derived rather than
 	// chosen, and unbounded. `collection` plus the mode already state the reach.
 	queueCachePurge({
 		purgeId: scopedCachePurgeId,
@@ -542,6 +622,291 @@ export async function purgeCollectionScopedCache(
 }
 
 /**
+ * Run a purge, and on failure record it for a later retry instead of throwing.
+ *
+ * A purge is awaited by its mutation but runs after the transaction, so by the
+ * time it can fail the write is durable. Propagating the error would answer 500
+ * for a write that succeeded, and the client's natural response — retry — turns a
+ * stale cache entry into a duplicate row on any non-idempotent mutation. The
+ * entry is the smaller harm, so the request wins and the purge is finished later.
+ *
+ * Nothing is lost meanwhile: a cache read fails open (`cache.ts` catches and
+ * treats a Redis error as a MISS), so while Redis is unreachable no stale entry
+ * can be SERVED. The recorded purge only has to beat Redis coming back.
+ *
+ * Returns whether the purge ran, so the caller can skip the telemetry that would
+ * otherwise report a purge that did not happen.
+ */
+async function purgeOrRecord(
+	run: () => Promise<void>,
+	pending: PendingScopedCachePurge,
+): Promise<boolean> {
+	try {
+		await run();
+		return true;
+	}
+	catch (error: any) {
+		useLogger().warn(
+			error,
+			`[scoped-cache] purge failed and was recorded for retry: ${error}`,
+		);
+
+		await recordPendingScopedCachePurge(pending, error);
+		return false;
+	}
+}
+
+/**
+ * Rebuild a tag key from the display label a pending purge stored. The label is
+ * namespace-free on purpose, so this resolves against whatever `CACHE_NAMESPACE`
+ * is at retry time rather than the one that was set when the purge failed.
+ */
+function scopedCacheTagKeyFromLabel(label: string): string {
+	return `${env['CACHE_NAMESPACE']}:tag:${label}`;
+}
+
+// The drain in flight, so the next trigger queues behind it rather than beside it.
+let pendingScopedCachePurgeDrain: Promise<number> = Promise.resolve(0);
+
+/**
+ * Finish the purges that failed after their mutation committed. Called at boot
+ * and whenever the shared Redis client reports ready, which are the two moments a
+ * previously unreachable Redis can have come back.
+ *
+ * Serialized, never overlapped: `ready` can fire while a drain is still running,
+ * and two of them read the same rows and report the same stale entry to the
+ * anomaly stream twice. Chaining rather than sharing the in-flight promise, so a
+ * purge recorded mid-drain still gets its own pass instead of being answered by a
+ * run that started before it existed.
+ */
+export function retryPendingScopedCachePurges(): Promise<number> {
+	const drained = pendingScopedCachePurgeDrain
+		.catch(() => 0)
+		.then(() => drainPendingScopedCachePurges());
+
+	pendingScopedCachePurgeDrain = drained;
+
+	return drained;
+}
+
+/**
+ * Retries the recorded targets, never the namespace: a failure records what it
+ * could not drop, so recovery drops exactly that and every other slice stays
+ * warm. Returns how many recorded rows it cleared — not how many targets they
+ * collapsed into, since an outage records one slice once per write that touched
+ * it and the operator reads the table, not the grouping.
+ */
+/**
+ * Whether the response store can actually drop an entry right now.
+ *
+ * Keyv reports a store error by emitting `error` and answering `undefined`, so a
+ * failed `delete` is indistinguishable from a successful one at the call site —
+ * which is what let a drain clear its records while purging nothing. A write read
+ * back is the one answer that cannot be swallowed.
+ *
+ * The probe rides the cache's own namespace and carries a short ttl, so a process
+ * that dies between the write and the delete leaves nothing behind for long.
+ */
+async function scopedCacheStoreDropsEntries(cache: Keyv): Promise<boolean> {
+	const probeKey = '__scoped_cache_recovery_probe';
+
+	try {
+		await cache.set(probeKey, 1, 30_000);
+
+		if (await cache.get(probeKey) !== 1) {
+			return false;
+		}
+
+		// Only once it is known to be there: a store that swallowed the write has
+		// nothing to clean up, and the delete would be swallowed too.
+		await cache.delete(probeKey);
+		return true;
+	}
+	catch {
+		// A store that throws rather than swallowing is just as unusable.
+		return false;
+	}
+}
+
+async function drainPendingScopedCachePurges(): Promise<number> {
+	if (!redisConfigAvailable()) {
+		return 0;
+	}
+
+	const pending = await listPendingScopedCachePurges();
+
+	if (pending.length === 0) {
+		return 0;
+	}
+
+	// Imported lazily so the module graph stays acyclic: `cache.js` imports this
+	// module for `dropScopedCacheTagIndex`, so a static import back would close
+	// the loop. Same reason `cache-config.ts` defers its database import.
+	const { getCache } = await import('./cache.js');
+	const { cache } = getCache();
+
+	if (!cache) {
+		return 0;
+	}
+
+	// The tags and the entries sit behind two different clients — ioredis carries the
+	// tag sets, the response cache is a Keyv over node-redis — and only the first
+	// one's `ready` starts this drain. The store rejects a command issued while it is
+	// offline (`disableOfflineQueue`) and `@keyv/redis` swallows that into
+	// `undefined`, so a drain in that window deletes no entry, reports every purge a
+	// success and clears the records that are the only thing left pointing at them.
+	//
+	// Written and read back rather than asked: `isReady` is false both while the
+	// client is offline AND before it has ever dialed, and node-redis dials on its
+	// first command — so reading it would retire the boot drain, which is the pass
+	// that exists for a process that restarted while Redis was away. A round-trip
+	// answers the question that actually matters, and dials the client on the way.
+	if (await scopedCacheStoreDropsEntries(cache) === false) {
+		return 0;
+	}
+
+	let cleared = 0;
+
+	for (const target of pending) {
+		const tagKeys = target.scopedCacheTags.map(scopedCacheTagKeyFromLabel);
+
+		try {
+			// Guarded on its own: naming the stale entries is best-effort telemetry and
+			// reads Postgres, so its failure must not abort the purge — the purge is
+			// what makes the cache correct again, and a blocked one stays blocked for
+			// every later retry too.
+			try {
+				await reportRecoveredScopedCacheEntries(tagKeys);
+			}
+			catch (error: any) {
+				useLogger().warn(
+					error,
+					`[scoped-cache] could not name the entries a purge left stale: ${error}`,
+				);
+			}
+
+			if (target.mode === 'namespace') {
+				await cache.clear();
+			}
+			else if (target.mode === 'collection') {
+				if (target.collection === null) {
+					// Nothing here can purge it: `collection` mode IS a collection scan and
+					// the column is nullable. Raising drops into the catch below, which
+					// keeps the row and counts the attempt — the safe direction, since the
+					// alternative silently deletes a record whose entries are still stale.
+					throw new Error(
+						`collection-mode pending purge ${target.ids} names no collection`,
+					);
+				}
+
+				await purgeCollectionScopedCache(cache, target.collection);
+			}
+			else {
+				await purgeScopedCacheTagKeys(cache, tagKeys);
+			}
+
+			await clearPendingScopedCachePurges(target.ids);
+			cleared += target.ids.length;
+		}
+		catch (error: any) {
+			// Left in place deliberately — the next ready/boot tries again. A purge is
+			// idempotent, so retrying forever is safe, and giving up would leave the
+			// entry stale with nothing else coming for it.
+			await countFailedScopedCachePurgeRetry(target.ids, error);
+		}
+	}
+
+	return cleared;
+}
+
+/**
+ * Start finishing purges that failed after their mutation committed.
+ *
+ * Two triggers, because there are two ways a recorded purge becomes runnable
+ * again: the process restarted (boot) and the client reconnected (`ready`).
+ * ioredis emits `ready` on the first connect too, so the boot call only matters
+ * when the client was already up before this listener existed.
+ *
+ * Not awaited by the caller — recovery is bounded by how much failed, and a boot
+ * that blocked on it would be held up by the same Redis that is still down.
+ */
+export function startScopedCachePurgeRecovery(): void {
+	if (!redisConfigAvailable()) {
+		return;
+	}
+
+	const logger = useLogger();
+
+	const recover = () => {
+		retryPendingScopedCachePurges()
+			.then((finished) => {
+				if (finished > 0) {
+					logger.info(`[scoped-cache] finished ${finished} pending purge(s)`);
+				}
+			})
+			.catch((error: any) => {
+				logger.warn(error, `[scoped-cache] pending purge retry failed: ${error}`);
+			});
+	};
+
+	useRedis().on('ready', recover);
+
+	// And again when the response cache's own client comes back: it reconnects on its
+	// own schedule, so the drain above can find it still offline and bail, leaving
+	// this the only thing that finishes those records.
+	void import('./cache.js').then(({ getCache }) => {
+		const { cache } = getCache();
+
+		const storeClient = (cache?.store as {
+			client?: { on?: (event: string, listener: () => void) => void };
+		} | undefined)?.client;
+
+		storeClient?.on?.('ready', recover);
+	});
+
+	recover();
+}
+
+/**
+ * Name the entries a failed purge left stale, on the way to finally dropping
+ * them. Emitted HERE rather than at failure time because the anomaly stream is
+ * itself Redis-backed — reporting when the purge failed would report nothing in
+ * the one case worth reporting, a Redis outage.
+ *
+ * Best-effort: an entry with no descriptor (stats were off when it was filled)
+ * is purged all the same, it just cannot be named on the admin page.
+ */
+async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<void> {
+	if (tagKeys.length === 0) {
+		return;
+	}
+
+	const { readCacheDescriptorForRedisKey } = await import('./cache-events.js');
+	const redis = useRedis();
+	const memberLists = await Promise.all(tagKeys.map((key) => redis.smembers(key)));
+
+	// The sidecars ride the same tag set as the entry they belong to, so they are
+	// the same stale entry counted two more times.
+	const members = [...new Set(memberLists.flat())].filter((member) => {
+		return scopedCacheSidecarOwner(member) === null;
+	});
+
+	for (const member of members) {
+		const descriptor = await readCacheDescriptorForRedisKey(member);
+
+		if (descriptor === null) {
+			continue;
+		}
+
+		queueCacheAnomaly({
+			cacheKey: descriptor.cacheKey,
+			reason: 'redis_error',
+			detail: 'served stale until a failed purge was retried',
+		});
+	}
+}
+
+/**
  * Purge cached responses affected by a mutation on `collection`. Outside scoped mode
  * the whole data cache is flushed (legacy `cache.clear()` behavior). In scoped mode
  * the bare collection tag (global reads) is always purged alongside the resolved
@@ -549,6 +914,13 @@ export async function purgeCollectionScopedCache(
  * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
  * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
  * risk leaving a slice stale; still narrower than nuking the whole namespace.
+ *
+ * To purge EVERY entry of a collection, pass `null` — it dispatches to
+ * `purgeCollectionScopedCache`, which reads the collection's own slice index and
+ * drops the bare tag plus every slice key it names. A bare `[{ collection }]` in the
+ * tag list is NOT that: this function deletes exactly the keys it is handed, and a
+ * read pinned to a slice (an owner, or its primary key) carries no bare tag, so it
+ * survives.
  *
  * `includeCollectionTag: false` drops the bare `{ collection }` tag from the purge —
  * for a cancelled mutation nothing in `collection` changed, so only the hook's own
@@ -575,7 +947,14 @@ export async function purgeScopedCache(
 	const startedAt = Date.now();
 
 	if (!scopedCachePurgeEnabled()) {
-		await cache.clear();
+		const cleared = await purgeOrRecord(
+			() => cache.clear(),
+			{ mode: 'namespace', collection: null, scopedCacheTags: [] },
+		);
+
+		if (!cleared) {
+			return null;
+		}
 
 		// Not folded into the `flush` config-event marker, though both mean "the
 		// whole cache went": that marker is a direct, unbuffered INSERT, which is
@@ -603,10 +982,15 @@ export async function purgeScopedCache(
 	if (scopedCacheTags === null) {
 		// Records its own purge — it is the one that knows how many slices the
 		// scan turned up.
-		await purgeCollectionScopedCache(
-			cache,
-			collection,
-			options.scopedCachePurgeId,
+		await purgeOrRecord(
+			() => {
+				return purgeCollectionScopedCache(
+					cache,
+					collection,
+					options.scopedCachePurgeId,
+				);
+			},
+			{ mode: 'collection', collection, scopedCacheTags: [] },
 		);
 
 		return [{ collection }];
@@ -622,7 +1006,22 @@ export async function purgeScopedCache(
 	)) as ScopedCacheTag[];
 
 	const tagKeys = [...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))];
-	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+	let evicted: number | null = null;
+
+	const purged = await purgeOrRecord(
+		async () => {
+			evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+		},
+		{
+			mode: 'slices',
+			collection,
+			scopedCacheTags: resolvedScopedCacheTags.map(scopedCacheTagLabel),
+		},
+	);
+
+	if (!purged) {
+		return resolvedScopedCacheTags;
+	}
 
 	// The tags a mutation actually resolved, in the same display form the entry
 	// sidecar stores — so "this entry carries tag X, and tag X was purged at T"
@@ -711,6 +1110,14 @@ export function scopedCacheTagsFromRows(
  * (one case = its own values; a case that leaves ALL fields unbound → bare). No pinned field → `[]`,
  * and the caller falls back to the bare collection tag. `fieldTypes` canonicalizes a value the way
  * the purge side does and skips date-ish types (not pin-safe, `PIN_UNSAFE_SCOPE_TYPES`).
+ *
+ * `primaryKeyField` joins the declared fields implicitly and always, no config:
+ *   - Every row has a primary key, so this axis always resolves.
+ *   - An inserted row carries a different key, so it can never join a `<pk>._eq`
+ *     or `<pk>._in` read's result set — the insert-blindness that bars a value
+ *     slice elsewhere cannot bite here.
+ *   - The purge side emits the same tag from the keys it already holds, so read and
+ *     write agree without either paying a query for it.
  */
 export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
@@ -719,12 +1126,17 @@ export function pinnedScopedCacheTagsFromFilter(
 	fieldTypes: Record<string, Type | undefined> = {},
 	relatedPrimaryKeys: Record<string, string> = {},
 	scopedCachePaths: ScopedCachePath[] = [],
+	primaryKeyField?: string,
 ): ScopedCacheTag[] {
-	if (!filter || (fields.length === 0 && scopedCachePaths.length === 0)) {
-		return [];
+	const fieldSet = new Set(fields);
+
+	if (primaryKeyField !== undefined) {
+		fieldSet.add(primaryKeyField);
 	}
 
-	const fieldSet = new Set(fields);
+	if (!filter || (fieldSet.size === 0 && scopedCachePaths.length === 0)) {
+		return [];
+	}
 
 	// A relational-path scope field (`enrollment.student.user`) is pinned by walking
 	// the nested filter down its segments to the terminal `_eq`/`_in` (`evalPathsAt`).
