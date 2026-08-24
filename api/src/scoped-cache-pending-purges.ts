@@ -16,9 +16,13 @@ export interface PendingScopedCachePurgeRow extends PendingScopedCachePurge {
 
 /**
  * Record a purge that failed AFTER its mutation committed, so a later drain can
- * finish it. Leaf module on purpose: it reaches only knex, so `scoped-cache.ts`
- * can record a failure without importing the drain that imports it back — the
- * same cycle `scoped-cache-handle.ts` sidesteps.
+ * finish it.
+ *
+ * Its own file for the seam, not for the module graph: `scoped-cache.ts` imports
+ * it statically, so knex is in that graph either way. What the split buys is that
+ * the four functions below are the whole of this feature's database access, which
+ * is what `scoped-cache.test.ts` mocks to drive the drain — folded into
+ * `scoped-cache.ts` those tests would have to mock knex instead.
  *
  * Tags are stored as their display labels, never as Redis keys: a key embeds
  * `CACHE_NAMESPACE`, and a namespace change between the failure and the retry
