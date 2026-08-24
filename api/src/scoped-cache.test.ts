@@ -855,6 +855,30 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
+		drains at boot, where the entry store has simply never dialed — node-redis
+		connects on its first command, so a brand-new client reports neither open nor
+		ready, and reading that as an outage retires the boot trigger entirely
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+
+		vi.mocked(getCache).mockReturnValue({
+			cache: { ...cache, store: { client: { isOpen: false, isReady: false } } },
+		} as any);
+
+		expect(await retryPendingScopedCachePurges()).toBe(1);
+
+		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
+		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
+	});
+
+	it(oneLine`
 		keeps every record while the entry store is still offline — a delete is
 		swallowed there, so draining would report a purge that dropped nothing and
 		throw away the only rows still pointing at those entries

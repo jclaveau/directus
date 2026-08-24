@@ -899,4 +899,20 @@ describe('flushCaches', () => {
 
 		expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
 	});
+
+	test(oneLine`
+		survives an unreachable redis — the migration runner calls this after recording
+		the version it just applied and does not catch, so a throw here fails a deploy
+		over a cache the request path treats as a MISS anyway
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockRejectedValue(new Error('Connection is closed.'));
+
+		await expect(flushCaches(true)).resolves.toBeUndefined();
+	});
 });

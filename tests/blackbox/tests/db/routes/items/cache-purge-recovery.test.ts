@@ -26,6 +26,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const NOTE = 'test_items_recovery_note';
 const PENDING = 'directus_scoped_cache_pending_purges';
 
+// The Redis the stack runs; the proxy below fronts it, and the boot case wants a
+// second instance connected straight to it while the proxied one stays cut off.
+const REDIS_PORT = 6108;
+
 // A failing assertion here reports one header and nothing about the state that
 // produced it, and the instance's own log is only dumped when the process exits — so
 // each step says what it saw while it still can.
@@ -141,7 +145,7 @@ describe(oneLine`
 			[readNote, siblingNote] = notes.map((note: { id: number }) => note.id);
 
 			const proxyPort = await getPort();
-			proxy = createRedisProxy(6108, proxyPort);
+			proxy = createRedisProxy(REDIS_PORT, proxyPort);
 			await proxy.open();
 
 			env[vendor]['CACHE_ENABLED'] = 'true';
@@ -335,5 +339,144 @@ describe(oneLine`
 			expect((await get(readNote)).headers[cacheStatusHeader]).toBe('MISS');
 			expect(await db(PENDING).select('id')).toEqual([]);
 		});
+
+		it(oneLine`
+			finishes a recorded purge at BOOT, with nothing having read through the cache
+			yet — node-redis dials on its first command, so a fresh process finds its
+			response store neither open nor ready, and reading that as an outage retires
+			the boot trigger the recovery is started for
+		`, async () => {
+			await emptyCache();
+			await db(PENDING).delete();
+
+			await cachedRead(readNote);
+
+			await proxy.cut();
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${NOTE}/${readNote}`)
+				.send({ subject: `renamed-${Date.now()}` })
+				.set('Authorization', auth);
+
+			await assertInstanceAlive();
+
+			const recorded = await db(PENDING).select('mode', 'scoped_cache_tag');
+			mark(`recorded before the boot case: ${JSON.stringify(recorded)}`);
+			expect(recorded.length).toBeGreaterThan(0);
+
+			// Straight at Redis rather than through the proxy, so this instance has a
+			// working connection at boot while the one that recorded the purge is still
+			// cut off — otherwise its own reconnect would drain the table and the boot
+			// path would never be the thing under test.
+			const bootEnv = cloneDeep(env[vendor]);
+			bootEnv['REDIS_PORT'] = String(REDIS_PORT);
+			const bootPort = await getPort();
+			bootEnv.PORT = String(bootPort);
+
+			const bootLog: string[] = [];
+
+			const booted = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: bootEnv,
+			});
+
+			booted.stdout?.on('data', (chunk) => bootLog.push(String(chunk)));
+			booted.stderr?.on('data', (chunk) => bootLog.push(String(chunk)));
+
+			try {
+				await awaitDirectusConnection(bootPort);
+
+				// Deliberately no request to this instance: any read would dial its store
+				// itself and hand the drain the connection the boot path is meant to
+				// establish on its own.
+				let drained: Array<Record<string, unknown>> = [];
+
+				for (let attempt = 0; attempt < 60; attempt++) {
+					drained = await db(PENDING).select('mode', 'scoped_cache_tag');
+
+					if (drained.length === 0) {
+						break;
+					}
+
+					await new Promise((resolve) => setTimeout(resolve, 250));
+				}
+
+				mark(`left after the boot drain: ${JSON.stringify(drained)}`);
+
+				if (drained.length > 0) {
+					// eslint-disable-next-line no-console
+					console.info(
+						`[recovery] boot instance log:\n${bootLog.join('').slice(-6000)}`,
+					);
+				}
+
+				expect(drained).toEqual([]);
+
+				// And it purged rather than just clearing the rows: this instance's first
+				// read of the mutated row has to miss.
+				const bootUrl = getUrl(vendor, { ...env, [vendor]: bootEnv });
+
+				const afterBoot = await request(bootUrl)
+					.get(`/items/${NOTE}/${readNote}`)
+					.set('Authorization', auth);
+
+				expect(afterBoot.headers[cacheStatusHeader]).toBe('MISS');
+			}
+			finally {
+				booted.kill();
+				await proxy.open();
+			}
+		}, 90_000);
+
+		it(oneLine`
+			applies a schema diff while Redis is unreachable — the tag index the flush
+			drops lives in raw Redis, and the migration runner calls the same flush right
+			after recording the version it applied, without catching
+		`, async () => {
+			const snapshot = await request(getUrl(vendor, env))
+				.get('/schema/snapshot')
+				.set('Authorization', auth);
+
+			expect(snapshot.status).toBe(200);
+
+			const mutated = cloneDeep(snapshot.body.data);
+
+			// Cloned off a field this suite owns, so the shape is whatever this vendor
+			// really writes and the collection is dropped with the rest in afterAll.
+			const template = mutated.fields
+				.find((field: any) => {
+					return field.collection === NOTE && field.field === 'subject';
+				});
+
+			expect(template).toBeDefined();
+
+			mutated.fields.push({ ...cloneDeep(template), field: 'flush_probe' });
+
+			const diff = await request(getUrl(vendor, env))
+				.post('/schema/diff')
+				.send(mutated)
+				.set('Content-type', 'application/json')
+				.set('Authorization', auth);
+
+			expect(diff.status).toBe(200);
+
+			await proxy.cut();
+
+			try {
+				const applied = await request(getUrl(vendor, env))
+					.post('/schema/apply')
+					.send(diff.body.data)
+					.set('Content-type', 'application/json')
+					.set('Authorization', auth);
+
+				await assertInstanceAlive();
+
+				mark(`schema apply during the outage: ${applied.status}`);
+				expect(applied.status).toBe(204);
+			}
+			finally {
+				await proxy.open();
+			}
+		}, 90_000);
 	});
 });
