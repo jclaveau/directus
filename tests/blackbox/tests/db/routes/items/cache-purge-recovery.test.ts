@@ -277,24 +277,30 @@ describe(oneLine`
 
 			// Reconnect fires `ready`, which drains the record. Poll rather than sleep:
 			// the reconnect backoff and the drain are both async.
-			let status: string | undefined;
+			//
+			// Waiting on the table emptying, never on a MISS: a read whose store is
+			// still offline misses for free, so polling on that exits while the socket
+			// is down and every assertion below then runs before the drain has done
+			// anything at all.
+			let drained: Array<Record<string, unknown>> = [];
 
-			for (let attempt = 0; attempt < 40; attempt++) {
-				status = (await get(readNote)).headers[cacheStatusHeader];
+			for (let attempt = 0; attempt < 80; attempt++) {
+				drained = await db(PENDING).select('mode', 'scoped_cache_tag');
 
-				if (status === 'MISS') {
+				if (drained.length === 0) {
 					break;
 				}
 
 				await new Promise((resolve) => setTimeout(resolve, 250));
 			}
 
+			const status = (await get(readNote)).headers[cacheStatusHeader];
+
 			expect(status).toBe('MISS');
 
 			// The recovery retried the recorded tag, not the namespace: a slice that was
 			// never in doubt is still cached.
 			const sibling = (await get(siblingNote)).headers[cacheStatusHeader];
-			const drained = await db(PENDING).select('mode', 'scoped_cache_tag');
 
 			mark(`after recovery: read=${status} sibling=${sibling}`);
 			mark(`left in the table: ${JSON.stringify(drained)}`);
