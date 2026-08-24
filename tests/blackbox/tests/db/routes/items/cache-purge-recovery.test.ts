@@ -296,8 +296,6 @@ describe(oneLine`
 
 			const status = (await get(readNote)).headers[cacheStatusHeader];
 
-			expect(status).toBe('MISS');
-
 			// The recovery retried the recorded tag, not the namespace: a slice that was
 			// never in doubt is still cached.
 			const sibling = (await get(siblingNote)).headers[cacheStatusHeader];
@@ -305,13 +303,17 @@ describe(oneLine`
 			mark(`after recovery: read=${status} sibling=${sibling}`);
 			mark(`left in the table: ${JSON.stringify(drained)}`);
 
-			if (sibling !== 'HIT') {
+			// Dumped before either assertion, and for either of them: whichever side
+			// fails, what the instance did while draining is the only thing that says
+			// why, and an assertion above this point takes that log with it.
+			if (status !== 'MISS' || sibling !== 'HIT') {
 				const tail = instanceLog.join('').slice(-6000);
 
 				// eslint-disable-next-line no-console
 				console.info(`[recovery] instance log:\n${tail}`);
 			}
 
+			expect(status).toBe('MISS');
 			expect(sibling).toBe('HIT');
 			expect(drained).toEqual([]);
 		}, 60_000);
