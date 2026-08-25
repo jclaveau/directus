@@ -6,6 +6,7 @@ import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
 import { resolvedCacheTtl } from './cache-config.js';
 import getDatabase from './database/index.js';
+import { getHelpers } from './database/helpers/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -2317,21 +2318,13 @@ export async function reapCacheConfigEvents(): Promise<number> {
 		.delete();
 }
 
+// Cached for the process's life: the extension is not installed under a running
+// server, and the answer gates a query on every budget tick.
 async function isTimescale(db: Knex): Promise<boolean> {
-	if (isTimescaleCache !== null) {
-		return isTimescaleCache;
+	if (isTimescaleCache === null) {
+		isTimescaleCache = await getHelpers(db).schema.hasTimescale();
 	}
 
-	if (db.client.config.client !== 'pg') {
-		isTimescaleCache = false;
-		return false;
-	}
-
-	const { rows } = await db.raw(
-		`SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') AS has`,
-	);
-
-	isTimescaleCache = rows[0].has === true;
 	return isTimescaleCache;
 }
 

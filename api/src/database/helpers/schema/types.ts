@@ -162,6 +162,25 @@ export abstract class SchemaHelper extends DatabaseHelper {
 		return null;
 	}
 
+	/**
+	 * Whether the TimescaleDB extension is installed here. False everywhere it
+	 * cannot be: the cache telemetry's chunking, compression and retention are
+	 * gated on this, and the calls behind that gate throw on a database without
+	 * the extension rather than answering no.
+	 */
+	async hasTimescale(): Promise<boolean> {
+		return false;
+	}
+
+	/**
+	 * Whether `table` stores its rows in Timescale chunks. The extension being
+	 * installed does not make a table a hypertable — one created before it
+	 * arrived stayed plain — so this is the other half of the gate above.
+	 */
+	async isHypertable(_table: string): Promise<boolean> {
+		return false;
+	}
+
 	prepQueryParams(queryParams: Sql): Sql {
 		return queryParams;
 	}

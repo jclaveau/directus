@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { down, up } from './20260825A-chunk-every-cache-stats-fact.js';
+import { getHelpers } from '../helpers/index.js';
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
+vi.mock('../helpers/index.js', () => ({ getHelpers: vi.fn() }));
 
 const env: Record<string, unknown> = {};
 
@@ -13,13 +15,11 @@ const everyFact = [
 	PURGE_TAGS,
 ];
 
-const hypertableProbe = 'timescaledb_information.hypertables';
-
 /**
- * Answers both probes per table, so a case can present the combination the
- * guards exist for: the extension installed over a table that stayed plain. A
- * conversion registers the table, the way the catalog would answer once
- * `create_hypertable` returned.
+ * Answers the dialect helper's two probes per table, so a case can present the
+ * combination the guards exist for: the extension installed over a table that
+ * stayed plain. A conversion registers the table, the way the catalog would
+ * answer once `create_hypertable` returned.
  */
 function fakeKnex(
 	client: string,
@@ -28,22 +28,16 @@ function fakeKnex(
 ) {
 	const converted = new Set(hypertables);
 
+	vi.mocked(getHelpers).mockReturnValue({
+		schema: {
+			hasTimescale: async () => client === 'pg' && hasExtension,
+			isHypertable: async (table: string) => converted.has(table),
+		},
+	} as any);
+
 	return {
 		client: { config: { client } },
 		raw: vi.fn(async (sql: string) => {
-			if (sql.includes('pg_extension')) {
-				return { rows: [{ has: hasExtension }] };
-			}
-
-			if (sql.includes(hypertableProbe)) {
-				return {
-					rows: [{
-						has: [...converted]
-							.some((table) => sql.includes(`= '${table}'`)),
-					}],
-				};
-			}
-
 			if (sql.includes('create_hypertable')) {
 				converted.add(PURGE_TAGS);
 			}
@@ -58,8 +52,7 @@ const statementsOf = (knex: any) =>
 
 function actedOn(knex: any, table: string) {
 	return statementsOf(knex)
-		.filter((statement: string) => statement.includes(table))
-		.filter((statement: string) => !statement.includes(hypertableProbe));
+		.filter((statement: string) => statement.includes(table));
 }
 
 beforeEach(() => {
@@ -180,9 +173,7 @@ describe('chunking every cache-stats fact', () => {
 
 		await up(knex);
 
-		expect(statementsOf(knex)).toEqual([
-			expect.stringContaining('pg_extension'),
-		]);
+		expect(knex.raw).not.toHaveBeenCalled();
 	});
 
 	it('does nothing on a non-postgres client', async () => {

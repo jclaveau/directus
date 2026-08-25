@@ -14,6 +14,27 @@ export class SchemaHelperPostgres extends SchemaHelper {
 		return getDefaultIndexName(type, collection, fields, { maxLength: 63 });
 	}
 
+	override async hasTimescale(): Promise<boolean> {
+		const { rows } = await this.knex.raw(
+			`SELECT EXISTS(SELECT 1 FROM pg_extension `
+			+ `WHERE extname = 'timescaledb') AS has`,
+		);
+
+		return rows[0].has === true;
+	}
+
+	override async isHypertable(table: string): Promise<boolean> {
+		// The catalog view only exists with the extension, so the gate above has
+		// to answer first — asking this of a plain Postgres throws.
+		const { rows } = await this.knex.raw(
+			`SELECT EXISTS(SELECT 1 FROM timescaledb_information.hypertables `
+			+ `WHERE hypertable_name = ?) AS has`,
+			[table],
+		);
+
+		return rows[0].has === true;
+	}
+
 	override async getDatabaseSize(): Promise<number | null> {
 		try {
 			const result = await this.knex.select(

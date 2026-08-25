@@ -51,6 +51,14 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
+// The dialect helper answers the Timescale probe; mocking it keeps the whole
+// helper tree — every dialect, each reading the env at import — out of here.
+const mockHasTimescale = vi.hoisted(() => vi.fn(async () => true));
+
+vi.mock('./database/helpers/index.js', () => {
+	return { getHelpers: () => ({ schema: { hasTimescale: mockHasTimescale } }) };
+});
+
 // cache.js reaches this module through scoped-cache.js, so the descriptor reaper
 // imports it dynamically; mocking it keeps that hop out of the unit's way.
 const mockCache = vi.hoisted(() => ({ hasMany: vi.fn() }));
@@ -1399,12 +1407,9 @@ describe('enforceCacheStatsBudget', () => {
 	) {
 		const measured = [...sizes];
 		const chunks = [...oldestChunks];
+		mockHasTimescale.mockResolvedValue(hasTimescale);
 
 		mockDb.raw.mockImplementation(async (sql: string) => {
-			if (sql.includes('pg_extension')) {
-				return { rows: [{ has: hasTimescale }] };
-			}
-
 			if (sql.includes('unnest')) {
 				return { rows: [{ bytes: measured.shift() ?? 0 }] };
 			}

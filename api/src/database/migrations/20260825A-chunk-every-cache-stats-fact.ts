@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { Knex } from 'knex';
 import { getMilliseconds } from '../../utils/get-milliseconds.js';
+import { getHelpers } from '../helpers/index.js';
 
 /**
  * The third one joins the two 20260819A already held: `purge_tags` stayed a
@@ -17,34 +18,6 @@ const cacheStatsFacts = [
 const CHUNK_INTERVAL = '3 hours';
 
 const PURGE_TAGS = 'directus_scoped_cache_purge_tags';
-
-/**
- * Whether the extension is here at all. It being installed does not make a fact
- * table a hypertable — a table created before it arrived stayed plain — so the
- * per-table probe below answers the other half.
- */
-async function hasTimescale(knex: Knex): Promise<boolean> {
-	if (knex.client.config.client !== 'pg') {
-		return false;
-	}
-
-	const { rows } = await knex.raw(
-		`SELECT EXISTS(SELECT 1 FROM pg_extension `
-		+ `WHERE extname = 'timescaledb') AS has`,
-	);
-
-	return rows[0].has === true;
-}
-
-// Assumes the extension: the catalog view it reads does not exist without it.
-async function isHypertable(knex: Knex, table: string): Promise<boolean> {
-	const { rows } = await knex.raw(
-		`SELECT EXISTS(SELECT 1 FROM timescaledb_information.hypertables `
-		+ `WHERE hypertable_name = '${table}') AS has`,
-	);
-
-	return rows[0].has === true;
-}
 
 /**
  * Every fact table chunked, and every chunk an eighth of the day it was.
@@ -70,7 +43,9 @@ async function isHypertable(knex: Knex, table: string): Promise<boolean> {
  * half that does.
  */
 export async function up(knex: Knex): Promise<void> {
-	if (!(await hasTimescale(knex))) {
+	const { schema } = getHelpers(knex);
+
+	if (!(await schema.hasTimescale())) {
 		return;
 	}
 
@@ -86,7 +61,7 @@ export async function up(knex: Knex): Promise<void> {
 	// The rows are pure telemetry, their only reader the cache page's
 	// purge-coverage join, so truncating the table first turns that cost into a
 	// no-op wherever the history is worth less than the deploy window.
-	if (!(await isHypertable(knex, PURGE_TAGS))) {
+	if (!(await schema.isHypertable(PURGE_TAGS))) {
 		await knex.raw(
 			`SELECT create_hypertable('${PURGE_TAGS}', 'time', `
 			+ `chunk_time_interval => INTERVAL '${CHUNK_INTERVAL}', `
@@ -109,7 +84,7 @@ export async function up(knex: Knex): Promise<void> {
 	}
 
 	for (const table of cacheStatsFacts) {
-		if (!(await isHypertable(knex, table))) {
+		if (!(await schema.isHypertable(table))) {
 			continue;
 		}
 
@@ -151,12 +126,14 @@ export async function up(knex: Knex): Promise<void> {
  * rather than aborting on the duplicate.
  */
 export async function down(knex: Knex): Promise<void> {
-	if (!(await hasTimescale(knex))) {
+	const { schema } = getHelpers(knex);
+
+	if (!(await schema.hasTimescale())) {
 		return;
 	}
 
 	for (const table of cacheStatsFacts) {
-		if (!(await isHypertable(knex, table))) {
+		if (!(await schema.isHypertable(table))) {
 			continue;
 		}
 
@@ -165,7 +142,7 @@ export async function down(knex: Knex): Promise<void> {
 		);
 	}
 
-	if (!(await isHypertable(knex, PURGE_TAGS))) {
+	if (!(await schema.isHypertable(PURGE_TAGS))) {
 		return;
 	}
 
