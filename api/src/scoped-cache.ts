@@ -15,7 +15,6 @@ import type {
 	CollectionKey,
 	FieldMap,
 	QueryPath,
-	QueryPathKey,
 } from './permissions/modules/process-ast/types.js';
 import { queueCacheAnomaly, queueCachePurge } from './cache-events.js';
 import emitter from './emitter.js';
@@ -1224,7 +1223,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// A set per collection: the field map carries the same path under both its read
 	// and its other group, and walking one path twice would double every row.
-	const pathsByCollection = new Map<CollectionKey, Set<QueryPathKey>>();
+	const pathsByCollection = new Map<CollectionKey, Set<QueryPath[number]>>();
 
 	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
 		// The root is bounded by its own filter, not by what it embedded, and a
@@ -1233,7 +1232,9 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			continue;
 		}
 
-		const paths = pathsByCollection.get(entry.collection) ?? new Set<QueryPathKey>();
+		const paths = pathsByCollection.get(entry.collection)
+			?? new Set<QueryPath[number]>();
+
 		paths.add(path);
 		pathsByCollection.set(entry.collection, paths);
 	}

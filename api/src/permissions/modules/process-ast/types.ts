@@ -1,8 +1,6 @@
 export type CollectionKey = string;
 export type FieldKey = string;
 export type QueryPath = string[];
-/** A QueryPath in the dot-notation form the field map keys by. */
-export type QueryPathKey = string;
 
 /**
  * Key is dot-notation QueryPath, f.e. `category.created_by`.

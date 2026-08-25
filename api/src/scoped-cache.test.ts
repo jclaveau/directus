@@ -2,7 +2,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import type {
 	CollectionKey,
 	FieldMap,
-	QueryPathKey,
+	QueryPath,
 } from './permissions/modules/process-ast/types.js';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1184,7 +1184,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		.build();
 
 	function fieldMapOf(
-		...paths: [QueryPathKey, CollectionKey][]
+		...paths: [QueryPath[number], CollectionKey][]
 	): FieldMap {
 		return {
 			read: new Map(paths.map(([path, collection]) => {
