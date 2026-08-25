@@ -224,13 +224,13 @@ implements AbstractService<Item> {
 		let query = this.knex.from({ root: this.collection });
 		let prevAlias = 'root';
 
-		resolved.joins.forEach((hop, index) => {
+		resolved.joins.forEach((join, index) => {
 			const alias = `p${index}`;
 
 			query = query.leftJoin(
-				{ [alias]: hop.relatedCollection },
-				`${alias}.${hop.relatedPk}`,
-				`${prevAlias}.${hop.field}`,
+				{ [alias]: join.relatedCollection },
+				`${alias}.${join.relatedPk}`,
+				`${prevAlias}.${join.field}`,
 			);
 
 			prevAlias = alias;
