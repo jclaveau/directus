@@ -7,8 +7,8 @@ import {
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
-	pinnedScopedCacheTagsFromEmbeddedRecords,
-	resolveScopedCacheM2oHops,
+	pinnedScopedCacheTagsFromM2oParents,
+	resolveScopedCacheM2oJoinChain,
 	SCOPED_CACHE_EMBEDDED_PIN_CEILING,
 	dropScopedCacheTagIndex,
 	purgeCollectionScopedCache,
@@ -1157,7 +1157,7 @@ describe('a purge that fails after its mutation committed', () => {
 	});
 });
 
-describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
+describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	// owner <- owned_item <- owned_sub_item, each child naming its parent, so a read
 	// rooted at the sub-item reaches both ancestors through M2O hops only.
 	const schema = new SchemaBuilder()
@@ -1199,7 +1199,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 	`, () => {
 		// Two sub-items under distinct items but ONE owner: the owner tag must not
 		// come out twice, and the item tags must not collapse to one.
-		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -1228,7 +1228,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 	});
 
 	it('leaves the root collection to its own filter', () => {
-		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -1241,7 +1241,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 	it('keeps a collection reached across a to-many hop bare', () => {
 		// An INSERT into `owned_item` creates a row this read would have listed, and
 		// no key tag covers a key that did not exist when the entry was filled.
-		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			schema,
 			'owner',
 			fieldMapOf(['', 'owner'], ['owned_items', 'owned_item']),
@@ -1256,7 +1256,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 	`, () => {
 		// Reached twice: directly by M2O, and back down the owner's to-many. The
 		// weakest path decides, or the read goes stale on an insert.
-		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			fieldMapOf(
@@ -1278,7 +1278,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 	});
 
 	it('skips a row whose parent link is empty, pinning its siblings', () => {
-		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			subItemFieldMap,
@@ -1302,7 +1302,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		// never the payload. Pinning nothing there would list the collection by
 		// nothing at all, and no write to it would ever drop the read.
 		expect(
-			pinnedScopedCacheTagsFromEmbeddedRecords(
+			pinnedScopedCacheTagsFromM2oParents(
 				schema,
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
@@ -1313,7 +1313,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 
 	it('falls back to bare when an embedded row carries no key', () => {
 		// Half a key set pins half the rows and silently serves the rest stale.
-		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			schema,
 			'owned_sub_item',
 			fieldMapOf(['owned_item', 'owned_item']),
@@ -1337,7 +1337,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 			})
 			.build();
 
-		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			a2oSchema,
 			'note',
 			fieldMapOf(['subject:owner', 'owner']),
@@ -1371,7 +1371,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 
 			slicedSchema.collections['owner']!.scopedCacheFields = ['space'];
 
-			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			const pinned = pinnedScopedCacheTagsFromM2oParents(
 				slicedSchema,
 				'owned_item',
 				ownerFieldMap,
@@ -1384,7 +1384,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		});
 
 		it('goes bare when the collection declares no slice to fall back on', () => {
-			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			const pinned = pinnedScopedCacheTagsFromM2oParents(
 				schema,
 				'owned_item',
 				ownerFieldMap,
@@ -1397,7 +1397,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		it('still pins the same set one key below the ceiling', () => {
 			// Non-vacuity: the two cases above degrade because of the COUNT, not
 			// because this shape was never pinnable.
-			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			const pinned = pinnedScopedCacheTagsFromM2oParents(
 				schema,
 				'owned_item',
 				ownerFieldMap,
@@ -1411,7 +1411,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 	});
 });
 
-describe('resolveScopedCacheM2oHops', () => {
+describe('resolveScopedCacheM2oJoinChain', () => {
 	const schema = new SchemaBuilder()
 		.collection('owner', (c) => {
 			c.field('id').id();
@@ -1430,7 +1430,7 @@ describe('resolveScopedCacheM2oHops', () => {
 
 	it('walks a chain of M2O hops to its related keys', () => {
 		expect(
-			resolveScopedCacheM2oHops(schema, 'owned_sub_item', [
+			resolveScopedCacheM2oJoinChain(schema, 'owned_sub_item', [
 				'owned_item',
 				'owner',
 			]),
@@ -1442,13 +1442,13 @@ describe('resolveScopedCacheM2oHops', () => {
 
 	it('stops at a to-many hop', () => {
 		expect(
-			resolveScopedCacheM2oHops(schema, 'owned_item', ['owned_sub_items']),
+			resolveScopedCacheM2oJoinChain(schema, 'owned_item', ['owned_sub_items']),
 		).toBe(null);
 	});
 
 	it('stops at a to-many hop reached after an M2O one', () => {
 		expect(
-			resolveScopedCacheM2oHops(schema, 'owned_sub_item', [
+			resolveScopedCacheM2oJoinChain(schema, 'owned_sub_item', [
 				'owned_item',
 				'owned_sub_items',
 			]),
@@ -1457,11 +1457,11 @@ describe('resolveScopedCacheM2oHops', () => {
 
 	it('stops at a field no relation describes', () => {
 		expect(
-			resolveScopedCacheM2oHops(schema, 'owned_item', ['label']),
+			resolveScopedCacheM2oJoinChain(schema, 'owned_item', ['label']),
 		).toBe(null);
 	});
 
 	it('resolves an empty chain to no hops', () => {
-		expect(resolveScopedCacheM2oHops(schema, 'owned_item', [])).toEqual([]);
+		expect(resolveScopedCacheM2oJoinChain(schema, 'owned_item', [])).toEqual([]);
 	});
 });

@@ -32,10 +32,10 @@ import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
 	createScopedCacheCollector,
-	pinnedScopedCacheTagsFromEmbeddedRecords,
+	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
-	resolveScopedCacheM2oHops,
+	resolveScopedCacheM2oJoinChain,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
@@ -418,7 +418,7 @@ implements AbstractService<Item> {
 			return null;
 		}
 
-		const joins = resolveScopedCacheM2oHops(
+		const joins = resolveScopedCacheM2oJoinChain(
 			this.schema,
 			this.collection,
 			segments.slice(0, -1),
@@ -1119,17 +1119,22 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		const unstrippedRecords = await runAst(ast, this.schema, this.accountability, {
-			knex: this.knex,
-			// `run-ast` injects every level's primary key for the nesting to work and
-			// strips it again before the response. The scope pins each embedded row BY
-			// that key, so it has to read them while they are still on the rows: fetch
-			// unstripped, pin below, then strip here instead.
-			stripNonRequested: false,
-		});
+		const recordsWithTemporaryFields = await runAst(
+			ast,
+			this.schema,
+			this.accountability,
+			{
+				knex: this.knex,
+				// `run-ast` injects every level's primary key for the nesting to work
+				// and strips it again before the response. The scope pins each embedded
+				// row BY that key, so it has to read them while they are still on the
+				// rows: fetch them here, pin below, then strip.
+				stripNonRequested: false,
+			},
+		);
 
 		// TODO when would this happen?
-		if (unstrippedRecords === null) {
+		if (recordsWithTemporaryFields === null) {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
 
@@ -1141,16 +1146,16 @@ implements AbstractService<Item> {
 		};
 
 		let embeddedScopedCachePins:
-			ReturnType<typeof pinnedScopedCacheTagsFromEmbeddedRecords> = new Map();
+			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
 
 		if (scopedCachePurgeEnabled()) {
 			fieldMap = fieldMapFromAst(ast, this.schema);
 
-			embeddedScopedCachePins = pinnedScopedCacheTagsFromEmbeddedRecords(
+			embeddedScopedCachePins = pinnedScopedCacheTagsFromM2oParents(
 				this.schema,
 				this.collection,
 				fieldMap,
-				toArray(unstrippedRecords),
+				toArray(recordsWithTemporaryFields),
 			);
 		}
 
@@ -1158,11 +1163,11 @@ implements AbstractService<Item> {
 		const records = opts?.stripNonRequested !== false
 			? removeTemporaryFields(
 				this.schema,
-				unstrippedRecords,
+				recordsWithTemporaryFields,
 				ast,
 				this.schema.collections[this.collection]!.primary,
 			)
-			: unstrippedRecords;
+			: recordsWithTemporaryFields;
 
 		// An `items.read` hook adds scope tags via `context.scopedCache.scopeTo`, same
 		// channel as `cache.scope`; drained below.

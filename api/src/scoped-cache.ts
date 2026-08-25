@@ -1099,34 +1099,32 @@ export function scopedCacheTagsFromRows(
 	return tags;
 }
 
-export type ScopedCacheM2oHop = {
+export type ScopedCacheM2oJoin = {
 	field: string;
 	relatedCollection: string;
 	relatedPk: string;
 };
 
 /**
- * Walk a dotted path as a chain of M2O hops, from `collection` down.
+ * Resolve a dotted path into the chain of M2O joins it crosses, from `collection`
+ * down. Null on anything that is not an M2O — a to-many hop, an unknown field, or an
+ * A2O, whose relation names no single related collection — and every caller then
+ * degrades to the bare collection tag.
  *
- * A row maps to exactly one parent across an M2O, so the rows such a hop reaches are
- * fully determined by the rows already in hand. Anything else returns null and every
- * caller degrades to the bare collection tag: a to-many hop, an unknown field, or an
- * A2O — whose relation names no single related collection, so the walk stops there
- * without a special case.
- *
- * Shared so the two sides that ask "is this path pinnable?" — a collection's
- * declared scope paths and a read's embedded collections — cannot drift apart on
- * the answer.
+ * A row maps to exactly one parent across an M2O, so what such a join reaches is
+ * fully determined by the rows already in hand. Shared, so the two sides that ask
+ * "is this path pinnable?" cannot drift apart on the answer: a collection's declared
+ * scope paths, and the collections a read embedded.
  */
-export function resolveScopedCacheM2oHops(
+export function resolveScopedCacheM2oJoinChain(
 	schema: SchemaOverview,
-	collection: string,
-	hops: string[],
-): ScopedCacheM2oHop[] | null {
-	const resolved: ScopedCacheM2oHop[] = [];
+	collection: CollectionKey,
+	path: QueryPath,
+): ScopedCacheM2oJoin[] | null {
+	const joins: ScopedCacheM2oJoin[] = [];
 	let current = collection;
 
-	for (const field of hops) {
+	for (const field of path) {
 		const relation = schema.relations.find((rel) => {
 			return rel.collection === current && rel.field === field;
 		});
@@ -1141,11 +1139,11 @@ export function resolveScopedCacheM2oHops(
 			return null;
 		}
 
-		resolved.push({ field, relatedCollection, relatedPk });
+		joins.push({ field, relatedCollection, relatedPk });
 		current = relatedCollection;
 	}
 
-	return resolved;
+	return joins;
 }
 
 /**
@@ -1210,7 +1208,7 @@ function embeddedScopedCacheRowsAtPath(
  * collection absent here keeps the tag it has always carried. Every rung down
  * over-purges, none serves stale.
  */
-export function pinnedScopedCacheTagsFromEmbeddedRecords(
+export function pinnedScopedCacheTagsFromM2oParents(
 	schema: SchemaOverview,
 	rootCollection: CollectionKey,
 	fieldMap: FieldMap,
@@ -1247,7 +1245,7 @@ export function pinnedScopedCacheTagsFromEmbeddedRecords(
 
 		for (const path of paths) {
 			const segments = path.split('.');
-			const hops = resolveScopedCacheM2oHops(schema, rootCollection, segments);
+			const hops = resolveScopedCacheM2oJoinChain(schema, rootCollection, segments);
 
 			if (hops === null) {
 				reachedByM2oOnly = false;
