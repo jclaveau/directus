@@ -11,6 +11,13 @@ import type {
 } from '@directus/types';
 import type Keyv from 'keyv';
 import { resolvedCacheTtl } from './cache-config.js';
+import type { AST } from './types/ast.js';
+import {
+	extractFieldsFromQuery,
+} from './permissions/modules/process-ast/lib/extract-fields-from-query.js';
+import {
+	joinFilterWithCases,
+} from './database/run-ast/lib/apply-query/join-filter-with-cases.js';
 import type {
 	CollectionKey,
 	FieldMap,
@@ -1200,6 +1207,61 @@ function m2oParentRowsAtPathEnd(
 }
 
 /**
+ * The collections a read depends on BEYOND the parent rows it nested, so keying the
+ * pin on those rows would leave the entry alive through a write that changes
+ * what the read returns.
+ *
+ * - The root query filters, sorts, groups or aggregates on a path into it
+ *   (permission cases joined the way the SQL WHERE joins them), so rows the
+ *   response never nested decide which rows come back.
+ * - A nested node carries its own filter, permission cases or field-level case, so a
+ *   parent it references can be withheld and arrive as a null slot — which
+ *   `mergeWithParentItems` writes for a null foreign key too, leaving the two
+ *   indistinguishable once the rows are merged.
+ */
+export function scopedCacheCollectionsBeyondNestedRows(
+	schema: SchemaOverview,
+	ast: AST,
+): Set<CollectionKey> {
+	const beyond = new Set<CollectionKey>();
+
+	const queryFieldMap: FieldMap = { read: new Map(), other: new Map() };
+
+	extractFieldsFromQuery(
+		ast.name,
+		{ ...ast.query, filter: joinFilterWithCases(ast.query.filter, ast.cases) },
+		queryFieldMap,
+		schema,
+	);
+
+	for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
+		beyond.add(entry.collection);
+	}
+
+	const withheldParentsIn = (children: AST['children']): void => {
+		for (const child of children) {
+			if (child.type !== 'm2o') {
+				continue;
+			}
+
+			const hides = child.query.filter !== undefined
+				|| child.cases.length > 0
+				|| child.whenCase.length > 0;
+
+			if (hides) {
+				beyond.add(child.relation.related_collection!);
+			}
+
+			withheldParentsIn(child.children);
+		}
+	};
+
+	withheldParentsIn(ast.children);
+
+	return beyond;
+}
+
+/**
  * Scope a read's NON-root collections off the parent rows it nested — the other
  * half of `pinnedScopedCacheTagsFromFilter`, which bounds the root.
  *
@@ -1209,7 +1271,8 @@ function m2oParentRowsAtPathEnd(
  *   response cannot have nested, so the pin cannot go stale.
  * - its own declared scope slices — past the ceiling. One tag per distinct value.
  * - the bare collection tag — a to-many hop or A2O anywhere on one of its paths, no
- *   parent row nested, or a row missing its key.
+ *   parent row nested, a row missing its key, or the read depending on it
+ *   beyond what it nested (`scopedCacheCollectionsBeyondNestedRows`).
  *
  * Returns the pinned collections only; the bare rung is the caller's default, so a
  * collection absent here keeps the tag it has always carried. Every rung down
@@ -1220,6 +1283,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 	rootCollection: CollectionKey,
 	fieldMap: FieldMap,
 	records: Item[],
+	collectionsBeyondNestedRows: Set<CollectionKey>,
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// A set per collection: the field map carries the same path under both its read
 	// and its other group, and walking one path twice would double every row.
@@ -1229,6 +1293,11 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		// The root is bounded by its own filter, not by what it nested, and a
 		// self-referential relation reaches it again at a path that bounds nothing.
 		if (entry.collection === rootCollection) {
+			continue;
+		}
+
+		// Its parent rows do not bound the read, so only the bare tag covers it.
+		if (collectionsBeyondNestedRows.has(entry.collection)) {
 			continue;
 		}
 
@@ -1273,7 +1342,11 @@ export function pinnedScopedCacheTagsFromM2oParents(
 				break;
 			}
 
-			rows.push(...parentRows);
+			// Pushed one by one: a spread passes an argument per row, and a read
+			// with no limit blows the call-stack cap somewhere past 100k of them.
+			for (const parentRow of parentRows) {
+				rows.push(parentRow);
+			}
 		}
 
 		if (reachedByM2oOnly === false) {

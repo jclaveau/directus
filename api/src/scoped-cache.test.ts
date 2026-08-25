@@ -1,4 +1,6 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import type { Query } from '@directus/types';
+import type { AST, M2ONode } from './types/ast.js';
 import type {
 	CollectionKey,
 	FieldMap,
@@ -13,6 +15,7 @@ import {
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromM2oParents,
 	resolveScopedCacheM2oJoinChainFromPath,
+	scopedCacheCollectionsBeyondNestedRows,
 	SCOPED_CACHE_M2O_PARENT_PIN_CEILING,
 	dropScopedCacheTagIndex,
 	purgeCollectionScopedCache,
@@ -1221,6 +1224,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 					owned_item: { id: 11, name: 'y', owner: { id: 100, space: 's' } },
 				},
 			],
+			new Set<string>(),
 		);
 
 		expect(pinned.get('owned_item')).toEqual([
@@ -1239,6 +1243,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			'owned_sub_item',
 			subItemFieldMap,
 			[{ id: 1, label: 'a', owned_item: { id: 10, owner: { id: 100 } } }],
+			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_sub_item')).toBe(false);
@@ -1252,6 +1257,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			'owner',
 			fieldMapOf(['', 'owner'], ['owned_items', 'owned_item']),
 			[{ id: 100, owned_items: [{ id: 10 }, { id: 11 }] }],
+			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_item')).toBe(false);
@@ -1278,6 +1284,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 					},
 				},
 			],
+			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_item')).toBe(false);
@@ -1292,6 +1299,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				{ id: 1, label: 'a', owned_item: null },
 				{ id: 2, label: 'b', owned_item: { id: 11, owner: { id: 100 } } },
 			],
+			new Set<string>(),
 		);
 
 		expect(pinned.get('owned_item')).toEqual([
@@ -1313,6 +1321,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
 				[{ id: 1, owned_item: null }],
+				new Set<string>(),
 			).has('owned_item'),
 		).toBe(false);
 	});
@@ -1327,6 +1336,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				{ id: 1, owned_item: { id: 10 } },
 				{ id: 2, owned_item: { name: 'y' } },
 			],
+			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_item')).toBe(false);
@@ -1348,9 +1358,26 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			'note',
 			fieldMapOf(['subject:owner', 'owner']),
 			[{ id: 1, 'subject:owner': { id: 100 } }],
+			new Set<string>(),
 		);
 
 		expect(pinned.has('owner')).toBe(false);
+	});
+
+	it(oneLine`
+		keeps a collection bare when the read depends on it beyond the rows it nested
+	`, () => {
+		// The set is what `scopedCacheCollectionsBeyondNestedRows` reports; these
+		// rows pin fine on their own, so the exclusion is what decides here.
+		expect(
+			pinnedScopedCacheTagsFromM2oParents(
+				schema,
+				'owned_sub_item',
+				fieldMapOf(['owned_item', 'owned_item']),
+				[{ id: 1, owned_item: { id: 10 } }],
+				new Set(['owned_item']),
+			).has('owned_item'),
+		).toBe(false);
 	});
 
 	describe('past the ceiling', () => {
@@ -1382,6 +1409,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_item',
 				ownerFieldMap,
 				records,
+				new Set<string>(),
 			);
 
 			expect(pinned.get('owner')).toEqual([
@@ -1395,6 +1423,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_item',
 				ownerFieldMap,
 				records,
+				new Set<string>(),
 			);
 
 			expect(pinned.has('owner')).toBe(false);
@@ -1408,6 +1437,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_item',
 				ownerFieldMap,
 				records.slice(0, SCOPED_CACHE_M2O_PARENT_PIN_CEILING),
+				new Set<string>(),
 			);
 
 			expect(pinned.get('owner')).toHaveLength(
@@ -1473,5 +1503,91 @@ describe('resolveScopedCacheM2oJoinChainFromPath', () => {
 		expect(
 			resolveScopedCacheM2oJoinChainFromPath(schema, 'owned_item', []),
 		).toEqual([]);
+	});
+});
+
+describe('scopedCacheCollectionsBeyondNestedRows', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+		})
+		.build();
+
+	// Only the parts the function reads. The real shape comes from
+	// `getAstFromQuery`, which the blackbox suite exercises end to end; pulling it
+	// in here would drag the Redis KV into a unit test.
+	function astOf(query: Query, ownerNode: Partial<M2ONode> = {}): AST {
+		return {
+			type: 'root',
+			name: 'owned_item',
+			query,
+			cases: [],
+			children: [
+				{
+					type: 'm2o',
+					name: 'owner',
+					fieldKey: 'owner',
+					children: [],
+					query: {},
+					cases: [],
+					whenCase: [],
+					relation: { related_collection: 'owner' },
+					...ownerNode,
+				} as M2ONode,
+			],
+		} as AST;
+	}
+
+	it('names a collection the root query filters on', () => {
+		// Renaming a row this read never nested moves its item INTO the filtered
+		// set, so the response depends on rows beyond the ones it carried.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({ filter: { owner: { name: { _eq: 'alice' } } } }),
+			),
+		]).toContain('owner');
+	});
+
+	it('names a collection the root query sorts on', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({ sort: ['owner.name'] }),
+			),
+		]).toContain('owner');
+	});
+
+	it('names a collection whose nested node carries its own filter', () => {
+		// A parent the deep filter withholds arrives as a null slot, which is what
+		// `mergeWithParentItems` also writes for a null foreign key.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, { query: { filter: { name: { _eq: 'alice' } } } }),
+			),
+		]).toContain('owner');
+	});
+
+	it('names a collection whose nested node carries permission cases', () => {
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, { cases: [{ name: { _eq: 'alice' } }] }),
+			),
+		]).toContain('owner');
+	});
+
+	it('leaves a collection the read only projects', () => {
+		// Non-vacuity: the cases above name `owner` because of the query, not
+		// because every nested collection lands in the set.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(schema, astOf({})),
+		]).not.toContain('owner');
 	});
 });

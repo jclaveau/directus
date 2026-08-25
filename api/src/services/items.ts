@@ -36,6 +36,7 @@ import {
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	resolveScopedCacheM2oJoinChainFromPath,
+	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
@@ -1158,6 +1159,7 @@ implements AbstractService<Item> {
 				this.collection,
 				fieldMap,
 				toArray(recordsWithTemporaryFields),
+				scopedCacheCollectionsBeyondNestedRows(this.schema, ast),
 			);
 		}
 
