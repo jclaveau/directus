@@ -1380,6 +1380,43 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		).toBe(false);
 	});
 
+	it('keeps the root bare where a self-relation reaches it at a real path', () => {
+		// A self-relation is the only way the root is reached at a path the walk
+		// accepts, and those parents are rows the root filter never bounded. The
+		// map carries no `''` entry here, so the skip is what decides — through
+		// `fieldMapFromAst` that entry is always there and would decide first.
+		const selfSchema = new SchemaBuilder()
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('parent').m2o('owned_item');
+			})
+			.build();
+
+		expect(
+			pinnedScopedCacheTagsFromM2oParents(
+				selfSchema,
+				'owned_item',
+				fieldMapOf(['parent', 'owned_item']),
+				[{ id: 1, parent: { id: 2 } }],
+				new Set<string>(),
+			).has('owned_item'),
+		).toBe(false);
+	});
+
+	it('keeps a collection bare when a slot holds the raw key, not a row', () => {
+		// Nothing merged a parent in, so the response cannot answer the path and the
+		// walk refuses to read a key off a number.
+		expect(
+			pinnedScopedCacheTagsFromM2oParents(
+				schema,
+				'owned_sub_item',
+				fieldMapOf(['owned_item', 'owned_item']),
+				[{ id: 1, owned_item: 10 }],
+				new Set<string>(),
+			).has('owned_item'),
+		).toBe(false);
+	});
+
 	describe('past the ceiling', () => {
 		const records = Array.from(
 			{ length: SCOPED_CACHE_M2O_PARENT_PIN_CEILING + 1 },
@@ -1417,6 +1454,72 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			]);
 		});
 
+		it('goes bare when the slices themselves pass the ceiling', () => {
+			// One distinct `space` per row, so the fallback is no smaller than the
+			// key pin it replaced and buys nothing.
+			const slicedSchema = new SchemaBuilder()
+				.collection('owner', (c) => {
+					c.field('id').id();
+					c.field('space').string();
+				})
+				.collection('owned_item', (c) => {
+					c.field('id').id();
+					c.field('owner').m2o('owner');
+				})
+				.build();
+
+			slicedSchema.collections['owner']!.scopedCacheFields = ['space'];
+
+			expect(
+				pinnedScopedCacheTagsFromM2oParents(
+					slicedSchema,
+					'owned_item',
+					ownerFieldMap,
+					records.map((record, index) => {
+						return { ...record, owner: { id: index, space: `s${index}` } };
+					}),
+					new Set<string>(),
+				).has('owner'),
+			).toBe(false);
+		});
+
+		it('reads only the direct columns of a dotted scope field', () => {
+			// `owner.name` names a column on another collection, which the parent row
+			// does not carry — reading it off the row would tag a wrong value.
+			const dottedSchema = new SchemaBuilder()
+				.collection('owner', (c) => {
+					c.field('id').id();
+					c.field('space').string();
+				})
+				.collection('owned_item', (c) => {
+					c.field('id').id();
+					c.field('owner').m2o('owner');
+				})
+				.build();
+
+			dottedSchema.collections['owner']!.scopedCacheFields = [
+				'space',
+				'owner.name',
+			];
+
+			expect(
+				pinnedScopedCacheTagsFromM2oParents(
+					dottedSchema,
+					'owned_item',
+					ownerFieldMap,
+					records,
+					new Set<string>(),
+				).get('owner'),
+			).toEqual([
+				{
+					collection: 'owner',
+					field: 'space',
+					value: 'shared',
+					type: 'string',
+				},
+			]);
+		});
+
 		it('goes bare when the collection declares no slice to fall back on', () => {
 			const pinned = pinnedScopedCacheTagsFromM2oParents(
 				schema,
@@ -1429,7 +1532,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			expect(pinned.has('owner')).toBe(false);
 		});
 
-		it('still pins the same set one key below the ceiling', () => {
+		it('still pins the same set exactly at the ceiling', () => {
 			// Non-vacuity: the two cases above degrade because of the COUNT, not
 			// because this shape was never pinnable.
 			const pinned = pinnedScopedCacheTagsFromM2oParents(
@@ -1464,7 +1567,7 @@ describe('resolveScopedCacheM2oJoinChainFromPath', () => {
 		})
 		.build();
 
-	it('walks a chain of M2O hops to its related keys', () => {
+	it('resolves a path into the chain of joins it crosses', () => {
 		expect(
 			resolveScopedCacheM2oJoinChainFromPath(schema, 'owned_sub_item', [
 				'owned_item',

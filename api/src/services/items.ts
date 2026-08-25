@@ -1136,13 +1136,8 @@ implements AbstractService<Item> {
 			},
 		);
 
-		// TODO when would this happen?
-		if (recordsWithTemporaryFields === null) {
-			throw new ForbiddenError(); // 404 / InvalidPayload ?
-		}
-
-		// Empty rather than optional: the read path below reads it unconditionally, and
-		// a read with cache purging off touches no collection worth listing.
+		// Empty rather than optional: it is assigned and read in two separate guarded
+		// blocks, and a read with purging off lists no collection anyway.
 		let fieldMap: ReturnType<typeof fieldMapFromAst> = {
 			read: new Map(),
 			other: new Map(),
@@ -1151,7 +1146,7 @@ implements AbstractService<Item> {
 		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
 
-		if (scopedCachePurgeEnabled()) {
+		if (recordsWithTemporaryFields !== null && scopedCachePurgeEnabled()) {
 			fieldMap = fieldMapFromAst(ast, this.schema);
 
 			m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
@@ -1163,8 +1158,12 @@ implements AbstractService<Item> {
 			);
 		}
 
-		// GraphQL requires relational keys to be returned regardless
-		const records = opts?.stripNonRequested !== false
+		// GraphQL requires relational keys to be returned regardless. The strip can
+		// answer null where run-ast did not — it returns the row it was handed as soon
+		// as one is null — so the guard below stays on ITS result, where it has always
+		// been, rather than on the rows going in.
+		const records = recordsWithTemporaryFields !== null
+			&& opts?.stripNonRequested !== false
 			? removeTemporaryFields(
 				this.schema,
 				recordsWithTemporaryFields,
@@ -1172,6 +1171,11 @@ implements AbstractService<Item> {
 				this.schema.collections[this.collection]!.primary,
 			)
 			: recordsWithTemporaryFields;
+
+		// TODO when would this happen?
+		if (records === null) {
+			throw new ForbiddenError(); // 404 / InvalidPayload ?
+		}
 
 		// An `items.read` hook adds scope tags via `context.scopedCache.scopeTo`, same
 		// channel as `cache.scope`; drained below.
@@ -1222,12 +1226,7 @@ implements AbstractService<Item> {
 			// embeds rows whose own keys the `<pk>._eq 1` filter never bounded.
 			const rootPaths = new Set<string>();
 
-			const fieldMapEntries = [
-				...fieldMap.read,
-				...fieldMap.other,
-			];
-
-			for (const [path, entry] of fieldMapEntries) {
+			for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
 				if (entry.collection === this.collection) {
 					rootPaths.add(path);
 				}

@@ -1463,6 +1463,59 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(tags).toContainEqual({ collection: 'owned_item' });
 		});
 
+		it(oneLine`
+			pins the parent key the caller never asked for, and still strips it
+		`, async () => {
+			// The pin reads a key `run-ast` injected for the nesting; the response must
+			// not keep it. Requesting `owner.id` would hide a strip that never ran.
+			// The root query names `owner` as a column, so the parent matcher would
+			// claim it — register the root ahead of it.
+			tracker.on.select('owned_item').response([
+				{ id: 1, label: 'a', owner: 100 },
+			]);
+
+			tracker.on.select('owner').response([{ id: 100, space: 's' }]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({ fields: ['label', 'owner.space'] });
+
+			expect(readMeta(result)?.scopedCacheTags).toContainEqual({
+				collection: 'owner',
+				field: 'id',
+				value: 100,
+				type: 'integer',
+			});
+
+			expect(result).toEqual([{ label: 'a', owner: { space: 's' } }]);
+		});
+
+		it('leaves a value-pinned root without its bare tag', async () => {
+			// The bare tag is what any write to the collection drops, so emitting it
+			// beside the root's own slices would undo the root pin entirely.
+			tracker.on.select('owned_item').response([{ id: 1, label: 'a' }]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({
+				fields: ['id', 'label'],
+				filter: { id: { _eq: 1 } },
+			});
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			expect(tags).toContainEqual({
+				collection: 'owned_item',
+				field: 'id',
+				value: 1,
+				type: 'integer',
+			});
+
+			expect(tags).not.toContainEqual({ collection: 'owned_item' });
+		});
+
 		it('keeps a collection it reached across a to-many hop bare', async () => {
 			// The child's query names `owned_item` as its WHERE column, so the parent
 			// matcher would claim it first — register the narrower table ahead of it.

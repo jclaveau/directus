@@ -132,6 +132,34 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			pins a parent key the caller never asked for, without returning it
+		`, async () => {
+			// The key the pin reads is one run-ast injects for the nesting. Asking for
+			// `owner.*` would hide a strip that never ran, so this asks for one column.
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const read = await request(url)
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owner][_eq]': String(nestedOwnerId),
+					fields: 'label,owner.name',
+				})
+				.set('Authorization', auth);
+
+			expect(read.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${OWNER}:id=${nestedOwnerId}(,|$)`),
+			);
+
+			expect(read.body.data).toEqual([
+				{ label: 'a', owner: { name: 'nested-before' } },
+			]);
+		});
+
+		it(oneLine`
 			survives a write to a row of that collection it never nested
 		`, async () => {
 			const url = getUrl(vendor, env);
@@ -154,7 +182,6 @@ describe(oneLine`
 			const written = await request(url)
 				.get(`/items/${OWNER}/${untouchedOwnerId}`)
 				.set('Authorization', auth);
-
 
 			expect(written.body.data.name).toBe('untouched-after');
 

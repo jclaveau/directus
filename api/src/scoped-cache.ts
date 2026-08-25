@@ -232,15 +232,15 @@ export function canonicalScopedCacheValue(
 	return String(value);
 }
 
+/** Each field of a collection mapped to its schema type, or undefined when the
+ * schema does not carry it. What canonicalizes a tag value on both sides. */
+export type FieldTypesByField = Record<string, Type | undefined>;
+
 // Types whose filter value and stored row value are NOT guaranteed to canonicalize to the same
 // token across drivers/timezones: a naive `dateTime`/`timestamp` column comes back as a local
 // `Date` from the driver but as an ISO string (possibly with an explicit `Z`) from a filter, so
 // the epoch-ms canonical can diverge. The read side never pins these — it falls back to the bare
 // collection tag so any write to the collection invalidates the read (over-purge, never stale).
-/** Each field of a collection mapped to its schema type, or undefined when the
- * schema does not carry it. What canonicalizes a tag value on both sides. */
-export type FieldTypesByField = Record<string, Type | undefined>;
-
 const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>(['date', 'dateTime', 'timestamp']);
 
 function isPinnableScopeType(type: Type | undefined): boolean {
@@ -1265,7 +1265,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
  * Scope a read's NON-root collections off the parent rows it nested — the other
  * half of `pinnedScopedCacheTagsFromFilter`, which bounds the root.
  *
- * Per touched collection, the first rung that holds:
+ * Per touched collection, the first of these that holds:
  *
  * - `<pk>=<key>` per parent row — M2O hops only. An INSERT lands a key this
  *   response cannot have nested, so the pin cannot go stale.
@@ -1274,8 +1274,8 @@ export function scopedCacheCollectionsBeyondNestedRows(
  *   parent row nested, a row missing its key, or the read depending on it
  *   beyond what it nested (`scopedCacheCollectionsBeyondNestedRows`).
  *
- * Returns the pinned collections only; the bare rung is the caller's default, so a
- * collection absent here keeps the tag it has always carried. Every rung down
+ * Returns the pinned collections only; the bare tag is the caller's default, so a
+ * collection absent here keeps the tag it has always carried. Each fallback
  * over-purges, none serves stale.
  */
 export function pinnedScopedCacheTagsFromM2oParents(
@@ -1319,7 +1319,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		}
 
 		const rows: Item[] = [];
-		let reachedByM2oOnly = true;
+		let pinnableFromNestedRows = true;
 
 		for (const path of paths) {
 			const segments = path.split('.');
@@ -1331,14 +1331,14 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			);
 
 			if (joins === null) {
-				reachedByM2oOnly = false;
+				pinnableFromNestedRows = false;
 				break;
 			}
 
 			const parentRows = m2oParentRowsAtPathEnd(records, segments);
 
 			if (parentRows === null) {
-				reachedByM2oOnly = false;
+				pinnableFromNestedRows = false;
 				break;
 			}
 
@@ -1349,7 +1349,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			}
 		}
 
-		if (reachedByM2oOnly === false) {
+		if (pinnableFromNestedRows === false) {
 			continue;
 		}
 
