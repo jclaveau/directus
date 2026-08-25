@@ -250,6 +250,13 @@ const CACHE_ENTRY_PURGE_LIMIT = 50;
 // orphan (past a Directus upgrade, or a query combo that stopped being requested).
 const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
 
+// What one dimension-reap pass reads, and how many passes a tick takes. The two
+// dimensions have no time axis to drop by, so their disk is whatever their live
+// row count peaks at — a short cadence over bounded slates keeps that peak near
+// the working set instead of a day's accumulation of orphans.
+const DIMENSION_REAP_BATCH = 5000;
+const DIMENSION_REAP_PASSES = 4;
+
 // Fallback event-retention window if CACHE_STATS_RETENTION is unset/unparsable.
 const DEFAULT_RETENTION = getMilliseconds('30d', 2_592_000_000);
 
@@ -1591,6 +1598,76 @@ export async function evictCacheEntriesForPath(
 }
 
 /**
+ * Nothing in `referencingTable` points at this dimension row's key.
+ *
+ * `NOT EXISTS` rather than the `NOT IN (SELECT DISTINCT …)` it replaces: the
+ * anti-join stops at the first matching row per key instead of hashing every
+ * distinct key of a fact table into `work_mem`, which is what made the sweep
+ * too expensive to run more often than daily.
+ */
+function whereUnreferencedBy(
+	query: Knex.QueryBuilder,
+	referencingTable: string,
+	dimensionTable: string,
+): void {
+	const db = getDatabase();
+
+	query.whereNotExists((referencing: Knex.QueryBuilder) => {
+		referencing
+			.select(db.raw('1'))
+			.from(referencingTable)
+			.whereRaw('??.cache_key = ??.cache_key', [
+				referencingTable,
+				dimensionTable,
+			]);
+	});
+}
+
+/**
+ * Delete a bounded slate of orphan rows from a dimension table.
+ *
+ * - `scopeToOrphans` adds the table's own orphan rule to a SELECT; the keys it
+ *   returns are then named in the DELETE, so no dialect has to support a LIMIT
+ *   inside an IN subquery (MariaDB does not).
+ * - Bounded because these run on a short cadence: a pass costs the same whether
+ *   the table holds a thousand orphans or a million, and the next tick takes the
+ *   rest. A short slate means the table is clean, so the loop stops there.
+ */
+async function reapDimensionOrphans(
+	dimensionTable: string,
+	scopeToOrphans: (query: Knex.QueryBuilder) => void,
+): Promise<number> {
+	const db = getDatabase();
+	let reaped = 0;
+
+	for (let pass = 0; pass < DIMENSION_REAP_PASSES; pass += 1) {
+		const slate = db(dimensionTable)
+			.select('cache_key')
+			.limit(DIMENSION_REAP_BATCH);
+
+		scopeToOrphans(slate);
+
+		const rows: { cache_key: string }[] = await slate;
+
+		if (rows.length === 0) {
+			return reaped;
+		}
+
+		// A tag table holds a row per key per tag, so a slate names fewer keys than
+		// it read; the delete then takes every row each of those keys owns.
+		reaped += await db(dimensionTable)
+			.whereIn('cache_key', [...new Set(rows.map((row) => row.cache_key))])
+			.delete();
+
+		if (rows.length < DIMENSION_REAP_BATCH) {
+			return reaped;
+		}
+	}
+
+	return reaped;
+}
+
+/**
  * Prune descriptor rows whose key stopped appearing — orphans left by a Directus
  * upgrade (new key generation) or a query combo that went quiet. Reproduces the
  * old Redis sidecar's TTL self-cleanup, which the dimension lacks.
@@ -1600,27 +1677,24 @@ export async function reapCacheDescriptors(): Promise<number> {
 		return 0;
 	}
 
-	const db = getDatabase();
 	const cutoff = new Date(Date.now() - DESCRIPTOR_REAP_AFTER);
+	const dimensionTable = 'directus_cache_descriptors';
 
-	// Filled descriptor: an orphan once stale AND no event or anomaly references
-	// it — a re-anomalied dormant key keeps its descriptor for the anomaly join.
-	const filled = await db('directus_cache_descriptors')
-		.where('last_filled', '<', cutoff)
-		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
-		.whereNotIn('cache_key', db('directus_cache_anomalies').distinct('cache_key'))
-		.delete();
+	return reapDimensionOrphans(dimensionTable, (query) => {
+		// One arm per kind of descriptor: a filled one is an orphan once stale past
+		// the window, a locator (last_filled NULL) never matches a cutoff and rides
+		// the orphan rule alone — its events and anomalies age out at their own
+		// retention, so nothing left ⇒ no activity within the window.
+		query.where((byKind: Knex.QueryBuilder) => {
+			byKind
+				.whereNull('last_filled')
+				.orWhere('last_filled', '<', cutoff);
+		});
 
-	// Locators (last_filled NULL) never match the cutoff, so reap them on the orphan
-	// rule alone: no event AND no anomaly still references them (both reaped at their
-	// own retention, so nothing left ⇒ no activity within the retention window).
-	const locators = await db('directus_cache_descriptors')
-		.whereNull('last_filled')
-		.whereNotIn('cache_key', db('directus_cache_events').distinct('cache_key'))
-		.whereNotIn('cache_key', db('directus_cache_anomalies').distinct('cache_key'))
-		.delete();
-
-	return filled + locators;
+		// A re-anomalied dormant key keeps its descriptor for the anomaly join.
+		whereUnreferencedBy(query, 'directus_cache_events', dimensionTable);
+		whereUnreferencedBy(query, 'directus_cache_anomalies', dimensionTable);
+	});
 }
 
 /**
@@ -1668,11 +1742,11 @@ export async function reapScopedCacheEntryTags(): Promise<number> {
 		return 0;
 	}
 
-	const db = getDatabase();
+	const dimensionTable = 'directus_scoped_cache_entry_tags';
 
-	return db('directus_scoped_cache_entry_tags')
-		.whereNotIn('cache_key', db('directus_cache_descriptors').distinct('cache_key'))
-		.delete();
+	return reapDimensionOrphans(dimensionTable, (query) => {
+		whereUnreferencedBy(query, 'directus_cache_descriptors', dimensionTable);
+	});
 }
 
 /**

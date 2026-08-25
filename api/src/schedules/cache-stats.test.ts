@@ -6,6 +6,7 @@ import {
 	reapCacheAnomalies,
 	reapCacheDescriptors,
 	reapCacheEvents,
+	reapScopedCacheEntryTags,
 	refreshCacheStatsFlag,
 	subscribeCacheStatsToggle,
 } from '../cache-events.js';
@@ -24,6 +25,7 @@ beforeEach(() => {
 	vi.mocked(reapCacheDescriptors).mockResolvedValue(0);
 	vi.mocked(reapCacheEvents).mockResolvedValue(0);
 	vi.mocked(reapCacheAnomalies).mockResolvedValue(0);
+	vi.mocked(reapScopedCacheEntryTags).mockResolvedValue(0);
 });
 
 afterEach(() => {
@@ -96,7 +98,7 @@ describe('cache-stats schedule', () => {
 		);
 	});
 
-	it('registers a daily reap for events, descriptors, anomalies', async () => {
+	it('registers a daily reap for the fact tables', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
 
 		await cacheStatsSchedule();
@@ -109,7 +111,51 @@ describe('cache-stats schedule', () => {
 
 		await reap![2](new Date(0));
 		expect(reapCacheEvents).toHaveBeenCalled();
-		expect(reapCacheDescriptors).toHaveBeenCalled();
 		expect(reapCacheAnomalies).toHaveBeenCalled();
+
+		// The dimensions left the daily cycle: their disk is a peak row count, not
+		// a retention window, so waiting a day for it is what let them grow.
+		expect(reapCacheDescriptors).not.toHaveBeenCalled();
+		expect(reapScopedCacheEntryTags).not.toHaveBeenCalled();
+	});
+
+	it('reaps the dimensions on their own short cadence', async () => {
+		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
+
+		await cacheStatsSchedule();
+
+		const reap = vi.mocked(scheduleSynchronizedJob).mock.calls.find(
+			(call) => call[0] === 'cache-stats-dimension-reap',
+		);
+
+		expect(reap).toBeDefined();
+
+		await reap![2](new Date(0));
+		expect(reapCacheDescriptors).toHaveBeenCalled();
+
+		// Descriptors first: a tag row is an orphan once its descriptor is gone, so
+		// this order hands the second reaper the rows the first just orphaned.
+		expect(vi.mocked(reapCacheDescriptors).mock.invocationCallOrder[0]!)
+			.toBeLessThan(
+				vi.mocked(reapScopedCacheEntryTags).mock.invocationCallOrder[0]!,
+			);
+	});
+
+	it('swallows a dimension reap error inside the scheduled job', async () => {
+		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
+		vi.mocked(reapCacheDescriptors).mockRejectedValue(new Error('boom'));
+
+		await cacheStatsSchedule();
+
+		const reap = vi.mocked(scheduleSynchronizedJob).mock.calls.find(
+			(call) => call[0] === 'cache-stats-dimension-reap',
+		);
+
+		// Without this the subscript below throws a TypeError of its own, which
+		// resolves() would read as the rejection never happening.
+		expect(reap).toBeDefined();
+
+		await expect(reap![2](new Date(0))).resolves.toBeUndefined();
+		expect(reapScopedCacheEntryTags).not.toHaveBeenCalled();
 	});
 });

@@ -141,11 +141,24 @@ beforeEach(() => {
 		join: vi.fn(() => builder),
 		leftJoin: vi.fn(() => builder),
 		from: vi.fn(() => builder),
-		where: vi.fn(() => builder),
+		// A grouped `where(callback)` runs its arm the way knex does; every other
+		// form (column, operator, value) just chains.
+		where: vi.fn((first: any) => {
+			if (typeof first === 'function') {
+				first(builder);
+			}
+
+			return builder;
+		}),
+		orWhere: vi.fn(() => builder),
 		whereRaw: vi.fn(() => builder),
 		// Run the sub-builder like knex does at compile time, so a semi-join's own
 		// clauses land on the same spies the outer query's do.
 		whereExists: vi.fn((callback: any) => {
+			callback(builder);
+			return builder;
+		}),
+		whereNotExists: vi.fn((callback: any) => {
 			callback(builder);
 			return builder;
 		}),
@@ -2606,14 +2619,27 @@ describe('reapScopedCachePurgeTags', () => {
 
 describe('reapScopedCacheEntryTags', () => {
 	it('drops tag rows whose entry no longer has a descriptor', async () => {
-		deleteCount = 2;
+		rowsByTable['directus_scoped_cache_entry_tags'] = [
+			{ cache_key: 'a' },
+			{ cache_key: 'a' },
+			{ cache_key: 'b' },
+		];
 
-		expect(await reapScopedCacheEntryTags()).toBe(2);
+		deleteCount = 3;
+
+		expect(await reapScopedCacheEntryTags()).toBe(3);
 		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_entry_tags');
 
 		// Followed out by their descriptor rather than aged out by time: the tags
 		// are a dimension of the entry, not a fact of their own.
-		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
+		expect(builder.whereRaw).toHaveBeenCalledWith(
+			'??.cache_key = ??.cache_key',
+			['directus_cache_descriptors', 'directus_scoped_cache_entry_tags'],
+		);
+
+		// One row per key per tag, so the slate names each key once however many
+		// rows it read for it.
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a', 'b']);
 	});
 
 	it('returns 0 without touching the table when not configured', async () => {
@@ -2628,33 +2654,56 @@ describe('reapCacheDescriptors', () => {
 	it('deletes orphaned descriptors past the reap window', async () => {
 		const now = 1_700_000_000_000;
 		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+		rowsByTable['directus_cache_descriptors'] = [{ cache_key: 'a' }];
 		deleteCount = 3;
 
-		const reaped = await reapCacheDescriptors();
-
-		// Two deletes — filled orphans + locators — each returns deleteCount.
-		expect(reaped).toBe(6);
+		expect(await reapCacheDescriptors()).toBe(3);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
 
 		// Filled: stale past the 90d cutoff (a sign flip would hit live rows)...
-		expect(builder.where).toHaveBeenCalledWith(
+		expect(builder.orWhere).toHaveBeenCalledWith(
 			'last_filled',
 			'<',
 			new Date(now - 7_776_000_000),
 		);
 
-		// ...AND with no event still on file. Both branches (filled + NULL-last_filled
-		// locators) reap only when no event AND no anomaly still references the key.
+		// ...or a locator, which has no fill to be stale. Either kind reaps only
+		// when no event AND no anomaly still references the key.
 		expect(builder.whereNull).toHaveBeenCalledWith('last_filled');
-		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
-		expect(builder.delete).toHaveBeenCalledTimes(2);
 
-		// Anomaly guard is built in BOTH deletes, not just the locator.
-		expect(
-			mockDb.mock.calls.filter((call) => call[0] === 'directus_cache_anomalies'),
-		).toHaveLength(2);
+		for (const fact of ['directus_cache_events', 'directus_cache_anomalies']) {
+			expect(builder.whereRaw).toHaveBeenCalledWith(
+				'??.cache_key = ??.cache_key',
+				[fact, 'directus_cache_descriptors'],
+			);
+		}
+
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a']);
+		expect(builder.delete).toHaveBeenCalledTimes(1);
 
 		nowSpy.mockRestore();
+	});
+
+	it('takes another pass while the slate comes back full', async () => {
+		rowsByTable['directus_cache_descriptors'] = Array.from(
+			{ length: 5000 },
+			(_unused, index) => ({ cache_key: `key-${index}` }),
+		);
+
+		deleteCount = 5000;
+
+		// Four passes then stop: a full slate means more orphans are waiting, and
+		// the next tick takes them rather than this one running unbounded.
+		expect(await reapCacheDescriptors()).toBe(20_000);
+		expect(builder.limit).toHaveBeenCalledWith(5000);
+		expect(builder.delete).toHaveBeenCalledTimes(4);
+	});
+
+	it('deletes nothing when the slate comes back empty', async () => {
+		rowsByTable['directus_cache_descriptors'] = [];
+
+		expect(await reapCacheDescriptors()).toBe(0);
+		expect(builder.delete).not.toHaveBeenCalled();
 	});
 
 	it('returns 0 when not configured', async () => {
