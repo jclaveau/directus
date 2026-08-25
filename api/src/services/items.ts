@@ -23,6 +23,7 @@ import type {
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
@@ -31,8 +32,10 @@ import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
 	createScopedCacheCollector,
+	pinnedScopedCacheTagsFromEmbeddedRecords,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
+	resolveScopedCacheM2oHops,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
@@ -46,8 +49,12 @@ import {
 	joinFilterWithCases,
 } from '../database/run-ast/lib/apply-query/join-filter-with-cases.js';
 import { runAst } from '../database/run-ast/run-ast.js';
+import {
+	removeTemporaryFields,
+} from '../database/run-ast/utils/remove-temporary-fields.js';
 import emitter from '../emitter.js';
 import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
+import type { FieldMap } from '../permissions/modules/process-ast/types.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { collectionsInFieldMap } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
@@ -412,39 +419,21 @@ implements AbstractService<Item> {
 			return null;
 		}
 
-		const joins: {
-			field: string;
-			relatedCollection: string;
-			relatedPk: string;
-		}[] = [];
+		const joins = resolveScopedCacheM2oHops(
+			this.schema,
+			this.collection,
+			segments.slice(0, -1),
+		);
 
-		let collection = this.collection;
-
-		for (let index = 0; index < segments.length - 1; index++) {
-			const field = segments[index]!;
-
-			const relation = this.schema.relations.find((rel) => {
-				return rel.collection === collection && rel.field === field;
-			});
-
-			const relatedCollection = relation?.related_collection;
-
-			const relatedPk = relatedCollection
-				? this.schema.collections[relatedCollection]?.primary
-				: undefined;
-
-			if (!relatedCollection || !relatedPk) {
-				return null;
-			}
-
-			joins.push({ field, relatedCollection, relatedPk });
-			collection = relatedCollection;
+		if (joins === null) {
+			return null;
 		}
 
 		return {
 			segments,
 			joins,
-			terminalCollection: collection,
+			// At least one hop, since a path shorter than two segments returned above.
+			terminalCollection: joins[joins.length - 1]!.relatedCollection,
 			terminalField: segments[segments.length - 1]!,
 		};
 	}
@@ -1131,18 +1120,47 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		const records = await runAst(ast, this.schema, this.accountability, {
+		const unstrippedRecords = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
-			// GraphQL requires relational keys to be returned regardless
-			stripNonRequested: opts?.stripNonRequested !== undefined
-				? opts.stripNonRequested
-				: true,
+			// `run-ast` injects every level's primary key for the nesting to work and
+			// strips it again before the response. The scope pins each embedded row BY
+			// that key, so it has to read them while they are still on the rows: fetch
+			// unstripped, pin below, then strip here instead.
+			stripNonRequested: false,
 		});
 
 		// TODO when would this happen?
-		if (records === null) {
+		if (unstrippedRecords === null) {
 			throw new ForbiddenError(); // 404 / InvalidPayload ?
 		}
+
+		// Empty rather than optional: the read path below reads it unconditionally, and
+		// a read with cache purging off touches no collection worth listing.
+		let scopedCacheFieldMap: FieldMap = { read: new Map(), other: new Map() };
+		let embeddedScopedCachePins = new Map<string, ScopedCacheTag[]>();
+
+		if (scopedCachePurgeEnabled()) {
+			scopedCacheFieldMap = fieldMapFromAst(ast, this.schema);
+
+			embeddedScopedCachePins = pinnedScopedCacheTagsFromEmbeddedRecords(
+				this.schema,
+				this.collection,
+				[...scopedCacheFieldMap.read, ...scopedCacheFieldMap.other].map(
+					([path, entry]) => ({ path, collection: entry.collection }),
+				),
+				toArray(unstrippedRecords),
+			);
+		}
+
+		// GraphQL requires relational keys to be returned regardless
+		const records = opts?.stripNonRequested !== false
+			? removeTemporaryFields(
+				this.schema,
+				unstrippedRecords,
+				ast,
+				this.schema.collections[this.collection]!.primary,
+			)
+			: unstrippedRecords;
 
 		// An `items.read` hook adds scope tags via `context.scopedCache.scopeTo`, same
 		// channel as `cache.scope`; drained below.
@@ -1183,8 +1201,6 @@ implements AbstractService<Item> {
 		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
-			const fieldMap = fieldMapFromAst(ast, this.schema);
-
 			// Self-reference guard: pinning the root to a value slice is sound only while the
 			// filter bounds every row the read returns. A self-referential relation (the root
 			// collection reached again through a nested field) pulls rows the root filter
@@ -1195,7 +1211,12 @@ implements AbstractService<Item> {
 			// embeds rows whose own keys the `<pk>._eq 1` filter never bounded.
 			const rootPaths = new Set<string>();
 
-			for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+			const scopedCacheFieldMapEntries = [
+				...scopedCacheFieldMap.read,
+				...scopedCacheFieldMap.other,
+			];
+
+			for (const [path, entry] of scopedCacheFieldMapEntries) {
 				if (entry.collection === this.collection) {
 					rootPaths.add(path);
 				}
@@ -1221,13 +1242,23 @@ implements AbstractService<Item> {
 					this.schema.collections[this.collection]?.primary,
 				);
 
-			for (const collection of collectionsInFieldMap(fieldMap)) {
+			for (const collection of collectionsInFieldMap(scopedCacheFieldMap)) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
+					continue;
 				}
-				else {
+
+				// A collection the read reached only through M2O hops is pinned by the
+				// keys it embedded; absent from the map, it keeps the bare tag that any
+				// write to it drops.
+				const embeddedPins = embeddedScopedCachePins.get(collection);
+
+				if (embeddedPins === undefined) {
 					scopedCacheTags.push({ collection });
+					continue;
 				}
+
+				scopedCacheTags.push(...embeddedPins);
 			}
 
 			scopedCacheTags = (await emitter.emitFilter(

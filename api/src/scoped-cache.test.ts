@@ -6,6 +6,9 @@ import {
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
+	pinnedScopedCacheTagsFromEmbeddedRecords,
+	resolveScopedCacheM2oHops,
+	SCOPED_CACHE_EMBEDDED_PIN_CEILING,
 	dropScopedCacheTagIndex,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
@@ -1150,5 +1153,308 @@ describe('a purge that fails after its mutation committed', () => {
 
 		expect(recordPendingScopedCachePurge).not.toHaveBeenCalled();
 		expect(queueCachePurge).toHaveBeenCalledOnce();
+	});
+});
+
+describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
+	// owner <- owned_item <- owned_sub_item, each child naming its parent, so a read
+	// rooted at the sub-item reaches both ancestors through M2O hops only.
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('space').string();
+			c.field('owned_items').o2m('owned_item', 'owner');
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('owner').m2o('owner');
+			c.field('owned_sub_items').o2m('owned_sub_item', 'owned_item');
+		})
+		.collection('owned_sub_item', (c) => {
+			c.field('id').id();
+			c.field('label').string();
+			c.field('owned_item').m2o('owned_item');
+		})
+		.build();
+
+	const subItemPaths = [
+		{ path: '', collection: 'owned_sub_item' },
+		{ path: 'owned_item', collection: 'owned_item' },
+		{ path: 'owned_item.owner', collection: 'owner' },
+	];
+
+	it(oneLine`
+		pins each embedded collection by the keys the response carried, deduped
+	`, () => {
+		// Two sub-items under distinct items but ONE owner: the owner tag must not
+		// come out twice, and the item tags must not collapse to one.
+		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			schema,
+			'owned_sub_item',
+			subItemPaths,
+			[
+				{
+					id: 1,
+					label: 'a',
+					owned_item: { id: 10, name: 'x', owner: { id: 100, space: 's' } },
+				},
+				{
+					id: 2,
+					label: 'b',
+					owned_item: { id: 11, name: 'y', owner: { id: 100, space: 's' } },
+				},
+			],
+		);
+
+		expect(pinned.get('owned_item')).toEqual([
+			{ collection: 'owned_item', field: 'id', value: 10, type: 'integer' },
+			{ collection: 'owned_item', field: 'id', value: 11, type: 'integer' },
+		]);
+
+		expect(pinned.get('owner')).toEqual([
+			{ collection: 'owner', field: 'id', value: 100, type: 'integer' },
+		]);
+	});
+
+	it('leaves the root collection to its own filter', () => {
+		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			schema,
+			'owned_sub_item',
+			subItemPaths,
+			[{ id: 1, label: 'a', owned_item: { id: 10, owner: { id: 100 } } }],
+		);
+
+		expect(pinned.has('owned_sub_item')).toBe(false);
+	});
+
+	it('keeps a collection reached across a to-many hop bare', () => {
+		// An INSERT into `owned_item` creates a row this read would have listed, and
+		// no key tag covers a key that did not exist when the entry was filled.
+		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			schema,
+			'owner',
+			[
+				{ path: '', collection: 'owner' },
+				{ path: 'owned_items', collection: 'owned_item' },
+			],
+			[{ id: 100, owned_items: [{ id: 10 }, { id: 11 }] }],
+		);
+
+		expect(pinned.has('owned_item')).toBe(false);
+	});
+
+	it(oneLine`
+		keeps a collection bare when one of its paths crosses a to-many hop
+	`, () => {
+		// Reached twice: directly by M2O, and back down the owner's to-many. The
+		// weakest path decides, or the read goes stale on an insert.
+		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			schema,
+			'owned_sub_item',
+			[
+				{ path: 'owned_item', collection: 'owned_item' },
+				{ path: 'owned_item.owner.owned_items', collection: 'owned_item' },
+			],
+			[
+				{
+					id: 1,
+					owned_item: {
+						id: 10,
+						owner: { id: 100, owned_items: [{ id: 10 }] },
+					},
+				},
+			],
+		);
+
+		expect(pinned.has('owned_item')).toBe(false);
+	});
+
+	it('skips a row whose parent link is empty, pinning its siblings', () => {
+		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			schema,
+			'owned_sub_item',
+			subItemPaths,
+			[
+				{ id: 1, label: 'a', owned_item: null },
+				{ id: 2, label: 'b', owned_item: { id: 11, owner: { id: 100 } } },
+			],
+		);
+
+		expect(pinned.get('owned_item')).toEqual([
+			{ collection: 'owned_item', field: 'id', value: 11, type: 'integer' },
+		]);
+
+		expect(pinned.get('owner')).toEqual([
+			{ collection: 'owner', field: 'id', value: 100, type: 'integer' },
+		]);
+	});
+
+	it('keeps a collection bare when the read embedded no row of it', () => {
+		// A relation the query only filtered or sorted on reaches the field map but
+		// never the payload. Pinning nothing there would list the collection by
+		// nothing at all, and no write to it would ever drop the read.
+		expect(
+			pinnedScopedCacheTagsFromEmbeddedRecords(
+				schema,
+				'owned_sub_item',
+				[{ path: 'owned_item', collection: 'owned_item' }],
+				[{ id: 1, owned_item: null }],
+			).has('owned_item'),
+		).toBe(false);
+	});
+
+	it('falls back to bare when an embedded row carries no key', () => {
+		// Half a key set pins half the rows and silently serves the rest stale.
+		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			schema,
+			'owned_sub_item',
+			[{ path: 'owned_item', collection: 'owned_item' }],
+			[
+				{ id: 1, owned_item: { id: 10 } },
+				{ id: 2, owned_item: { name: 'y' } },
+			],
+		);
+
+		expect(pinned.has('owned_item')).toBe(false);
+	});
+
+	it('keeps an A2O bare — its related collection varies per row', () => {
+		const a2oSchema = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('subject').a2o(['owner']);
+			})
+			.build();
+
+		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+			a2oSchema,
+			'note',
+			[{ path: 'subject:owner', collection: 'owner' }],
+			[{ id: 1, 'subject:owner': { id: 100 } }],
+		);
+
+		expect(pinned.has('owner')).toBe(false);
+	});
+
+	describe('past the ceiling', () => {
+		const records = Array.from(
+			{ length: SCOPED_CACHE_EMBEDDED_PIN_CEILING + 1 },
+			(_unused, index) => {
+				return { id: index, owner: { id: index, space: 'shared' } };
+			},
+		);
+
+		const paths = [{ path: 'owner', collection: 'owner' }];
+
+		it('degrades to the collection\'s own slices, not to bare', () => {
+			const slicedSchema = new SchemaBuilder()
+				.collection('owner', (c) => {
+					c.field('id').id();
+					c.field('space').string();
+				})
+				.collection('owned_item', (c) => {
+					c.field('id').id();
+					c.field('owner').m2o('owner');
+				})
+				.build();
+
+			slicedSchema.collections['owner']!.scopedCacheFields = ['space'];
+
+			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+				slicedSchema,
+				'owned_item',
+				paths,
+				records,
+			);
+
+			expect(pinned.get('owner')).toEqual([
+				{ collection: 'owner', field: 'space', value: 'shared', type: 'string' },
+			]);
+		});
+
+		it('goes bare when the collection declares no slice to fall back on', () => {
+			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+				schema,
+				'owned_item',
+				paths,
+				records,
+			);
+
+			expect(pinned.has('owner')).toBe(false);
+		});
+
+		it('still pins the same set one key below the ceiling', () => {
+			// Non-vacuity: the two cases above degrade because of the COUNT, not
+			// because this shape was never pinnable.
+			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
+				schema,
+				'owned_item',
+				paths,
+				records.slice(0, SCOPED_CACHE_EMBEDDED_PIN_CEILING),
+			);
+
+			expect(pinned.get('owner')).toHaveLength(
+				SCOPED_CACHE_EMBEDDED_PIN_CEILING,
+			);
+		});
+	});
+});
+
+describe('resolveScopedCacheM2oHops', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('owned_items').o2m('owned_item', 'owner');
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+			c.field('owned_sub_items').o2m('owned_sub_item', 'owned_item');
+		})
+		.collection('owned_sub_item', (c) => {
+			c.field('id').id();
+			c.field('owned_item').m2o('owned_item');
+		})
+		.build();
+
+	it('walks a chain of M2O hops to its related keys', () => {
+		expect(
+			resolveScopedCacheM2oHops(schema, 'owned_sub_item', [
+				'owned_item',
+				'owner',
+			]),
+		).toEqual([
+			{ field: 'owned_item', relatedCollection: 'owned_item', relatedPk: 'id' },
+			{ field: 'owner', relatedCollection: 'owner', relatedPk: 'id' },
+		]);
+	});
+
+	it('stops at a to-many hop', () => {
+		expect(
+			resolveScopedCacheM2oHops(schema, 'owned_item', ['owned_sub_items']),
+		).toBe(null);
+	});
+
+	it('stops at a to-many hop reached after an M2O one', () => {
+		expect(
+			resolveScopedCacheM2oHops(schema, 'owned_sub_item', [
+				'owned_item',
+				'owned_sub_items',
+			]),
+		).toBe(null);
+	});
+
+	it('stops at a field no relation describes', () => {
+		expect(
+			resolveScopedCacheM2oHops(schema, 'owned_item', ['label']),
+		).toBe(null);
+	});
+
+	it('resolves an empty chain to no hops', () => {
+		expect(resolveScopedCacheM2oHops(schema, 'owned_item', [])).toEqual([]);
 	});
 });

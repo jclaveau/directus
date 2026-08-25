@@ -1395,4 +1395,102 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(readMeta(result)?.scopedCacheTags).toBeDefined();
 		});
 	});
+
+	describe('the collections a read embedded', () => {
+		const embeddedSchema = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('space').string();
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('label').string();
+				c.field('owner').m2o('owner');
+				c.field('owned_sub_items').o2m('owned_sub_item', 'owned_item');
+			})
+			.collection('owned_sub_item', (c) => {
+				c.field('id').id();
+				c.field('owned_item').m2o('owned_item');
+			})
+			.build();
+
+		// The read path only builds tags — writing them is respond.ts's job — so naming
+		// a Redis config is enough to reach it, with no client involved.
+		beforeEach(() => {
+			env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
+			env['CACHE_STORE'] = 'redis';
+			env['REDIS_ENABLED'] = true;
+			// `run-ast` pages a to-many until a batch comes back short, and an
+			// unset size compares every length as under it — an endless loop.
+			env['RELATIONAL_BATCH_SIZE'] = 250;
+		});
+
+		afterEach(() => {
+			delete env['CACHE_AUTO_PURGE_MODE'];
+			delete env['CACHE_STORE'];
+			delete env['REDIS_ENABLED'];
+			delete env['RELATIONAL_BATCH_SIZE'];
+		});
+
+		it('pins an M2O parent by the key the response embedded', async () => {
+			tracker.on.select('owned_item').response([
+				{ id: 1, label: 'a', owner: 100 },
+			]);
+
+			tracker.on.select('owner').response([{ id: 100, space: 's' }]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: embeddedSchema,
+			}).readByQuery({
+				fields: ['id', 'label', 'owner.id', 'owner.space'],
+			});
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			expect(tags).toContainEqual({
+				collection: 'owner',
+				field: 'id',
+				value: 100,
+				type: 'integer',
+			});
+
+			// The regression this exists for: a bare tag beside the pin would make any
+			// write to any owner drop the read, which is what the pin is here to stop.
+			expect(tags).not.toContainEqual({ collection: 'owner' });
+
+			// The root keeps its bare tag — its filter bounds nothing.
+			expect(tags).toContainEqual({ collection: 'owned_item' });
+		});
+
+		it('keeps a collection it reached across a to-many hop bare', async () => {
+			// The child's query names `owned_item` as its WHERE column, so the parent
+			// matcher would claim it first — register the narrower table ahead of it.
+			tracker.on.select('owned_sub_item').response([
+				{ id: 7, owned_item: 1 },
+			]);
+
+			tracker.on.select('owned_item').response([
+				{ id: 1, label: 'a', owner: 100 },
+			]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: embeddedSchema,
+			}).readByQuery({
+				fields: ['id', 'label', 'owned_sub_items.id'],
+			});
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			expect(tags).toContainEqual({ collection: 'owned_sub_item' });
+
+			expect(tags).not.toContainEqual({
+				collection: 'owned_sub_item',
+				field: 'id',
+				value: 7,
+				type: 'integer',
+			});
+		});
+	});
 });

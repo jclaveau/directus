@@ -1093,6 +1093,243 @@ export function scopedCacheTagsFromRows(
 	return tags;
 }
 
+export type ScopedCacheM2oHop = {
+	field: string;
+	relatedCollection: string;
+	relatedPk: string;
+};
+
+/**
+ * Walk a dotted path as a chain of M2O hops, from `collection` down.
+ *
+ * A row maps to exactly one parent across an M2O, so the rows such a hop reaches are
+ * fully determined by the rows already in hand. Anything else returns null and every
+ * caller degrades to the bare collection tag: a to-many hop, an unknown field, or an
+ * A2O — whose relation names no single related collection, so the walk stops there
+ * without a special case.
+ *
+ * Shared so the two sides that ask "is this path pinnable?" — a collection's
+ * declared scope paths and a read's embedded collections — cannot drift apart on
+ * the answer.
+ */
+export function resolveScopedCacheM2oHops(
+	schema: SchemaOverview,
+	collection: string,
+	hops: string[],
+): ScopedCacheM2oHop[] | null {
+	const resolved: ScopedCacheM2oHop[] = [];
+	let current = collection;
+
+	for (const field of hops) {
+		const relation = schema.relations.find((rel) => {
+			return rel.collection === current && rel.field === field;
+		});
+
+		const relatedCollection = relation?.related_collection;
+
+		const relatedPk = relatedCollection
+			? schema.collections[relatedCollection]?.primary
+			: undefined;
+
+		if (!relatedCollection || !relatedPk) {
+			return null;
+		}
+
+		resolved.push({ field, relatedCollection, relatedPk });
+		current = relatedCollection;
+	}
+
+	return resolved;
+}
+
+/**
+ * How many slices one embedded collection may pin on a single read before the pin
+ * costs more than it saves — every tag is its own Redis set plus a slice-index
+ * member, and the write side deletes them one by one.
+ *
+ * TODO(reviewer): this is the same bound #392 is deciding for the purge fan-out
+ * (https://github.com/jclaveau/directus/issues/392). Sized above a default page of
+ * embedded parents and below an import-sized one; move both to whatever #392
+ * settles on.
+ */
+export const SCOPED_CACHE_EMBEDDED_PIN_CEILING = 250;
+
+/**
+ * The rows a read embedded at one M2O path, in document order. Null when the
+ * response cannot answer — a segment the payload never carried, or an array where
+ * an M2O promised a single row — so the caller keeps the bare tag rather than pin
+ * a set it only half read.
+ */
+function embeddedScopedCacheRowsAtPath(
+	records: Record<string, any>[],
+	segments: string[],
+): Record<string, any>[] | null {
+	let current = records;
+
+	for (const segment of segments) {
+		const next: Record<string, any>[] = [];
+
+		for (const row of current) {
+			const value = row[segment];
+
+			// A row whose parent link is empty embedded nothing to pin, and says
+			// nothing about the rows its siblings reached.
+			if (value === null) {
+				continue;
+			}
+
+			if (typeof value !== 'object' || Array.isArray(value)) {
+				return null;
+			}
+
+			next.push(value);
+		}
+
+		current = next;
+	}
+
+	return current;
+}
+
+/**
+ * Scope a read's NON-root collections off the rows it actually embedded — the other
+ * half of `pinnedScopedCacheTagsFromFilter`, which bounds the root.
+ *
+ * A touched collection reached only through M2O hops is pinned by the primary
+ * keys the response carried, so a later write to one of those rows drops the read
+ * and a write to any other row of that collection does not. Sound for the same
+ * reason the root's key axis is: an INSERT lands a key this response cannot have
+ * embedded, so the insert-blindness that bars a value slice elsewhere cannot bite.
+ *
+ * Anything reached across a to-many hop keeps its bare collection tag. An INSERT
+ * there creates a row the read WOULD have included, and no key-based tag covers a
+ * key that did not exist when the entry was filled. A collection reached BOTH ways
+ * is bare too — the weakest path it was reached by is the one that decides.
+ *
+ * Degradation is a ladder rather than a cliff. Past the ceiling a collection falls
+ * back to its own declared scope slices — one tag per distinct value instead of one
+ * per row, and sound in the way the bare tag is, since an insert carrying an
+ * existing value over-purges — and only then to bare.
+ *
+ * Returns only the collections it could pin, and only with at least one tag. Every
+ * other one keeps the bare tag it has always carried — a read that embedded no row
+ * of a collection has nothing to pin, and dropping the collection from the tag set
+ * entirely would leave it listed by nothing at all.
+ */
+export function pinnedScopedCacheTagsFromEmbeddedRecords(
+	schema: SchemaOverview,
+	rootCollection: string,
+	fieldMapPaths: { path: string; collection: string }[],
+	records: Record<string, any>[],
+): Map<string, ScopedCacheTag[]> {
+	// A set per collection: the field map carries the same path under both its read
+	// and its other group, and walking one path twice would double every row.
+	const pathsByCollection = new Map<string, Set<string>>();
+
+	for (const { path, collection } of fieldMapPaths) {
+		// The root is bounded by its own filter, not by what it embedded, and a
+		// self-referential relation reaches it again at a path that bounds nothing.
+		if (collection === rootCollection) {
+			continue;
+		}
+
+		const paths = pathsByCollection.get(collection) ?? new Set<string>();
+		paths.add(path);
+		pathsByCollection.set(collection, paths);
+	}
+
+	const pinned = new Map<string, ScopedCacheTag[]>();
+
+	for (const [collection, paths] of pathsByCollection) {
+		const primaryKeyField = schema.collections[collection]?.primary;
+		const collectionFields = schema.collections[collection]?.fields ?? {};
+
+		if (primaryKeyField === undefined) {
+			continue;
+		}
+
+		const rows: Record<string, any>[] = [];
+		let reachedByM2oOnly = true;
+
+		for (const path of paths) {
+			const segments = path.split('.');
+			const hops = resolveScopedCacheM2oHops(schema, rootCollection, segments);
+
+			if (hops === null) {
+				reachedByM2oOnly = false;
+				break;
+			}
+
+			const embedded = embeddedScopedCacheRowsAtPath(records, segments);
+
+			if (embedded === null) {
+				reachedByM2oOnly = false;
+				break;
+			}
+
+			rows.push(...embedded);
+		}
+
+		if (reachedByM2oOnly === false) {
+			continue;
+		}
+
+		// Reached, but carrying nothing to pin — a filter-only relation the response
+		// never embedded, or rows whose parent link is empty throughout.
+		if (rows.length === 0) {
+			continue;
+		}
+
+		const keyTags = scopedCacheTagsFromRows(
+			collection,
+			[primaryKeyField],
+			rows,
+			'coarse',
+			{ [primaryKeyField]: collectionFields[primaryKeyField]?.type },
+		);
+
+		if (
+			keyTags !== null &&
+			keyTags.length <= SCOPED_CACHE_EMBEDDED_PIN_CEILING
+		) {
+			pinned.set(collection, keyTags);
+			continue;
+		}
+
+		// Only the direct columns: a dotted scope field names a column on another
+		// collection, which the embedded row does not carry.
+		const sliceFields = (schema.collections[collection]?.scopedCacheFields ?? [])
+			.filter((field) => !field.includes('.'));
+
+		if (sliceFields.length === 0) {
+			continue;
+		}
+
+		const sliceFieldTypes: Record<string, Type | undefined> = {};
+
+		for (const field of sliceFields) {
+			sliceFieldTypes[field] = collectionFields[field]?.type;
+		}
+
+		const sliceTags = scopedCacheTagsFromRows(
+			collection,
+			sliceFields,
+			rows,
+			'coarse',
+			sliceFieldTypes,
+		);
+
+		if (
+			sliceTags !== null &&
+			sliceTags.length <= SCOPED_CACHE_EMBEDDED_PIN_CEILING
+		) {
+			pinned.set(collection, sliceTags);
+		}
+	}
+
+	return pinned;
+}
+
 /**
  * Scope a read's root cache tags off a filter — the read side. A read is soundly scoped to a value
  * slice only when the filter *bounds* it to that value: a future insert with a new scope value must
