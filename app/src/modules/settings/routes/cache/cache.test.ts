@@ -1202,6 +1202,70 @@ describe('CachePage', () => {
 		});
 	});
 
+	// An empty listing has three meanings and the copy used to give one, naming
+	// two env variables a deployment that saw this had already set.
+	function mountWithoutEntries(stats: Record<string, unknown>) {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/stats') {
+				return Promise.resolve({ data: { data: stats } } as never);
+			}
+
+			return Promise.resolve({ data: { data: [] } }) as never;
+		});
+
+		return mount(CachePage, { global });
+	}
+
+	it('names the autokill reason when it emptied the listing', async () => {
+		const wrapper = mountWithoutEntries({
+			configured: true,
+			enabled: false,
+			killedReason: 'autokill: buffer 200000 > 100000',
+			bufferLength: 200_000,
+		});
+
+		await flushPromises();
+
+		// v-info renders its title through a stub here, so the copy carries the
+		// assertion — it is also the half that names the reason.
+		expect(wrapper.text()).toContain(
+			'Collection stopped: autokill: buffer 200000 > 100000',
+		);
+
+		expect(wrapper.text()).not.toContain('CACHE_STATS_ENABLED');
+	});
+
+	it('says the collection is off when an admin turned it off', async () => {
+		const wrapper = mountWithoutEntries({
+			configured: true,
+			enabled: false,
+			killedReason: null,
+			bufferLength: 0,
+		});
+
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('Nothing is being collected');
+		expect(wrapper.text()).not.toContain('CACHE_STATS_ENABLED');
+	});
+
+	it('keeps the env hint for a deployment that never opted in', async () => {
+		const wrapper = mountWithoutEntries({
+			configured: false,
+			enabled: false,
+			killedReason: null,
+			bufferLength: 0,
+		});
+
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('CACHE_STATS_ENABLED');
+
+		// Not the disabled copy: this deployment never opted in, so there is no
+		// toggle to point at and the env hint is the whole answer.
+		expect(wrapper.text()).not.toContain('Collection stopped');
+	});
+
 	it('renders ∞ / tombstone / dash branches for a bare entry', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			if (url === '/utils/cache/latencies') {
