@@ -257,6 +257,36 @@ const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
 const DIMENSION_REAP_BATCH = 5000;
 const DIMENSION_REAP_PASSES = 4;
 
+// The fact tables, oldest-first evictable because their rows sit in chunks that
+// can be dropped whole. CACHE_STATS_MAX_BYTES is held by cutting these.
+const CACHE_STATS_FACTS = [
+	'directus_cache_events',
+	'directus_cache_purges',
+	'directus_scoped_cache_purge_tags',
+];
+
+// Everything the subsystem writes, which is what the budget measures: the facts
+// above plus the dimensions and the two markers, held by their reapers instead.
+const CACHE_STATS_TABLES = [
+	...CACHE_STATS_FACTS,
+	'directus_cache_descriptors',
+	'directus_scoped_cache_entry_tags',
+	'directus_cache_anomalies',
+	'directus_cache_config_events',
+];
+
+// Evict down to this share of the budget, not to the line itself: at the line a
+// tick's own writes put it back over and the ring cuts a chunk every tick.
+const CACHE_STATS_BUDGET_LOW_WATER = 0.9;
+
+// Telemetry the ring will not eat however tight the budget: a burst that filled
+// it within the hour must not answer by deleting the hour that explains it.
+const CACHE_STATS_MIN_RETENTION = getMilliseconds('6h', 21_600_000);
+
+// Chunks one tick may drop. A budget lowered far below what the tables hold
+// walks down over several ticks rather than dropping a fortnight in one.
+const CACHE_STATS_EVICTIONS_PER_TICK = 8;
+
 // Fallback event-retention window if CACHE_STATS_RETENTION is unset/unparsable.
 const DEFAULT_RETENTION = getMilliseconds('30d', 2_592_000_000);
 
@@ -399,7 +429,10 @@ export async function flushCacheEventBuffer(): Promise<void> {
 	const pipe = useRedis().pipeline();
 
 	for (const flat of batch) {
-		// MAXLEN ~ caps stream memory; .call() over xadd() (spread trips its overloads).
+		// MAXLEN ~ caps stream memory by dropping the oldest entry, which is what
+		// the table budget does too — so CACHE_STATS_MAX_BUFFER's autokill guards a
+		// resource that is already bounded, and is the one thing left here that
+		// stops capture. .call() over xadd() (spread trips its overloads).
 		pipe.call(
 			'XADD',
 			streamKey(),
@@ -2232,63 +2265,151 @@ async function isTimescale(db: Knex): Promise<boolean> {
 	return isTimescaleCache;
 }
 
-async function eventsTableBytes(db: Knex): Promise<number> {
-	// Postgres-only cheap per-table size. Other dialects return 0 → the MAX_BYTES
-	// autokill is a no-op there and growth is bounded by the retention reap instead.
+/**
+ * What the whole subsystem occupies, or null where it cannot be measured.
+ *
+ * - Every table it writes, not the one the budget used to name: on the database
+ *   this was measured against, the fact it watched held 407 MB of a 4398 MB
+ *   subsystem, and the largest table of the five was invisible to it.
+ * - `hypertable_size()` for a chunked fact — its rows live in chunks the parent
+ *   relation knows nothing about, so `pg_total_relation_size()` reads near zero
+ *   there — and `pg_total_relation_size()` for everything else.
+ * - null, not zero, when there is no measurement to be had: a non-Postgres
+ *   client or a probe that threw. Zero would read as "far under budget" and let
+ *   the ring below decide it has nothing to do on a table it cannot see.
+ */
+async function cacheStatsBytes(db: Knex): Promise<number | null> {
 	if (db.client.config.client !== 'pg') {
-		return 0;
+		return null;
 	}
 
 	try {
-		// hypertable_size() sums the chunks; pg_total_relation_size() misses them on
-		// the parent. A failed timescale probe (in this try) falls back to plain PG.
-		const query = (await isTimescale(db))
-			? `SELECT hypertable_size('directus_cache_events') AS bytes`
-			: `SELECT pg_total_relation_size('directus_cache_events') AS bytes`;
+		// to_regclass answers null for a table this install never created, and
+		// SUM skips the null rather than failing the whole measurement.
+		const sizeOfEach = (await isTimescale(db))
+			? `CASE WHEN chunked.hypertable_name IS NOT NULL `
+				+ `THEN hypertable_size(named.table_name::regclass) `
+				+ `ELSE pg_total_relation_size(to_regclass(named.table_name)) END`
+			: `pg_total_relation_size(to_regclass(named.table_name))`;
 
-		const { rows } = await db.raw(query);
+		const chunkedJoin = (await isTimescale(db))
+			? `LEFT JOIN timescaledb_information.hypertables AS chunked `
+				+ `ON chunked.hypertable_name = named.table_name`
+			: '';
+
+		const { rows } = await db.raw(
+			`SELECT COALESCE(SUM(${sizeOfEach}), 0) AS bytes `
+			+ `FROM unnest(?::text[]) AS named(table_name) ${chunkedJoin}`,
+			[CACHE_STATS_TABLES],
+		);
+
 		return Number(rows[0].bytes);
 	}
 	catch {
-		return 0;
+		return null;
 	}
 }
 
 /**
- * One-way latch: disable capture (never re-enable) when the table or the
- * buffer outgrows its budget, so a traffic spike or runaway table can't hurt.
- * Only an admin brings it back, after reclaiming space.
+ * Drop the oldest chunk of whichever fact table owns it, and name it for the
+ * log. Null when every remaining chunk is newer than `floor`.
+ *
+ * Oldest across the facts rather than most-of-them-first: they are read
+ * together by time, so a budget that ate one table's history and left another's
+ * would leave the page joining a window that only half exists.
+ */
+async function dropOldestCacheStatsChunk(
+	db: Knex,
+	floor: Date,
+): Promise<string | null> {
+	const { rows } = await db.raw(
+		`SELECT hypertable_name, range_end FROM timescaledb_information.chunks `
+		+ `WHERE hypertable_name = ANY(?) AND range_end <= ? `
+		+ `ORDER BY range_start LIMIT 1`,
+		[CACHE_STATS_FACTS, floor],
+	);
+
+	if (rows.length === 0) {
+		return null;
+	}
+
+	const { hypertable_name: fact, range_end: rangeEnd } = rows[0];
+
+	await db.raw(
+		`SELECT drop_chunks(?::regclass, older_than => ?::timestamptz)`,
+		[fact, rangeEnd],
+	);
+
+	return `${fact} < ${new Date(rangeEnd).toISOString()}`;
+}
+
+/**
+ * Hold the subsystem inside CACHE_STATS_MAX_BYTES by dropping its oldest
+ * telemetry, so capture never has to stop to make room.
+ *
+ * - A chunk drop is the only thing that returns disk here: the row DELETE the
+ *   reapers do leaves the space behind for the table to reuse. So the ring runs
+ *   on the facts, which are chunked, and the dimensions are held by their own
+ *   reaper instead (see reapDimensionOrphans).
+ * - It runs whether capture is on or off. A subsystem that was disabled still
+ *   holds every byte it wrote, and the flag is not what the budget is about.
+ * - Evicting to a low watermark rather than to the line stops the ring cutting
+ *   one chunk per tick for as long as writes keep it at the boundary.
+ * - The floor keeps the newest telemetry whatever the budget says: a burst that
+ *   filled the budget in an hour must not answer by deleting that hour.
+ *
+ * The buffer half below is still a one-way autokill, the last thing here that
+ * can disable capture. Its resource is Redis, where the stream's own MAXLEN
+ * already drops the oldest entry — see the note there.
  */
 export async function enforceCacheStatsBudget(): Promise<void> {
+	const env = useEnv();
+	const maxBytes = parseBytes(String(env['CACHE_STATS_MAX_BYTES'] ?? ''));
+	const db = getDatabase();
+
+	let bytes = maxBytes
+		? await cacheStatsBytes(db)
+		: null;
+
+	if (bytes !== null && bytes > maxBytes) {
+		const logger = useLogger();
+		const floor = new Date(Date.now() - CACHE_STATS_MIN_RETENTION);
+
+		for (let drop = 0; drop < CACHE_STATS_EVICTIONS_PER_TICK; drop += 1) {
+			const dropped = await dropOldestCacheStatsChunk(db, floor);
+
+			if (dropped === null) {
+				logger.warn(
+					`[cache-stats] ${bytes}B over the ${maxBytes}B budget with `
+					+ `nothing evictable left above the retention floor`,
+				);
+
+				break;
+			}
+
+			logger.info(`[cache-stats] evicted ${dropped} to stay inside budget`);
+			bytes = await cacheStatsBytes(db);
+
+			if (bytes === null || bytes <= maxBytes * CACHE_STATS_BUDGET_LOW_WATER) {
+				break;
+			}
+		}
+	}
+
 	if (!cacheStatsActiveFlag) {
 		return;
 	}
 
-	const env = useEnv();
-	const reasons: string[] = [];
-
-	const maxBytes = parseBytes(String(env['CACHE_STATS_MAX_BYTES'] ?? ''));
-
-	if (maxBytes) {
-		const bytes = await eventsTableBytes(getDatabase());
-
-		if (bytes > maxBytes) {
-			reasons.push(`table ${bytes}B > ${maxBytes}B`);
-		}
-	}
-
 	const maxBuffer = Number(env['CACHE_STATS_MAX_BUFFER']) || 0;
 
-	if (maxBuffer > 0) {
-		const length = await useRedis().xlen(streamKey());
-
-		if (length > maxBuffer) {
-			reasons.push(`buffer ${length} > ${maxBuffer}`);
-		}
+	if (maxBuffer === 0) {
+		return;
 	}
 
-	if (reasons.length > 0) {
-		const reason = `autokill: ${reasons.join('; ')}`;
+	const length = await useRedis().xlen(streamKey());
+
+	if (length > maxBuffer) {
+		const reason = `autokill: buffer ${length} > ${maxBuffer}`;
 		await setCacheStatsEnabled(false, reason);
 		useLogger().warn(`[cache-stats] auto-disabled — ${reason}`);
 	}
