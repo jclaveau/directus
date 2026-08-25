@@ -1149,9 +1149,7 @@ implements AbstractService<Item> {
 			embeddedScopedCachePins = pinnedScopedCacheTagsFromEmbeddedRecords(
 				this.schema,
 				this.collection,
-				[...fieldMap.read, ...fieldMap.other].map(
-					([path, entry]) => ({ path, collection: entry.collection }),
-				),
+				fieldMap,
 				toArray(unstrippedRecords),
 			);
 		}

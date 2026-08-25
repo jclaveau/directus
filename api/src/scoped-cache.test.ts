@@ -1,4 +1,5 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import type { FieldMap } from './permissions/modules/process-ast/types.js';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -1178,11 +1179,20 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		})
 		.build();
 
-	const subItemPaths = [
-		{ path: '', collection: 'owned_sub_item' },
-		{ path: 'owned_item', collection: 'owned_item' },
-		{ path: 'owned_item.owner', collection: 'owner' },
-	];
+	function fieldMapOf(...paths: [string, string][]): FieldMap {
+		return {
+			read: new Map(paths.map(([path, collection]) => {
+				return [path, { collection, fields: new Set<string>() }];
+			})),
+			other: new Map(),
+		};
+	}
+
+	const subItemFieldMap = fieldMapOf(
+		['', 'owned_sub_item'],
+		['owned_item', 'owned_item'],
+		['owned_item.owner', 'owner'],
+	);
 
 	it(oneLine`
 		pins each embedded collection by the keys the response carried, deduped
@@ -1192,7 +1202,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 			schema,
 			'owned_sub_item',
-			subItemPaths,
+			subItemFieldMap,
 			[
 				{
 					id: 1,
@@ -1221,7 +1231,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 			schema,
 			'owned_sub_item',
-			subItemPaths,
+			subItemFieldMap,
 			[{ id: 1, label: 'a', owned_item: { id: 10, owner: { id: 100 } } }],
 		);
 
@@ -1234,10 +1244,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 			schema,
 			'owner',
-			[
-				{ path: '', collection: 'owner' },
-				{ path: 'owned_items', collection: 'owned_item' },
-			],
+			fieldMapOf(['', 'owner'], ['owned_items', 'owned_item']),
 			[{ id: 100, owned_items: [{ id: 10 }, { id: 11 }] }],
 		);
 
@@ -1252,10 +1259,10 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 			schema,
 			'owned_sub_item',
-			[
-				{ path: 'owned_item', collection: 'owned_item' },
-				{ path: 'owned_item.owner.owned_items', collection: 'owned_item' },
-			],
+			fieldMapOf(
+				['owned_item', 'owned_item'],
+				['owned_item.owner.owned_items', 'owned_item'],
+			),
 			[
 				{
 					id: 1,
@@ -1274,7 +1281,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 			schema,
 			'owned_sub_item',
-			subItemPaths,
+			subItemFieldMap,
 			[
 				{ id: 1, label: 'a', owned_item: null },
 				{ id: 2, label: 'b', owned_item: { id: 11, owner: { id: 100 } } },
@@ -1298,7 +1305,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 			pinnedScopedCacheTagsFromEmbeddedRecords(
 				schema,
 				'owned_sub_item',
-				[{ path: 'owned_item', collection: 'owned_item' }],
+				fieldMapOf(['owned_item', 'owned_item']),
 				[{ id: 1, owned_item: null }],
 			).has('owned_item'),
 		).toBe(false);
@@ -1309,7 +1316,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 			schema,
 			'owned_sub_item',
-			[{ path: 'owned_item', collection: 'owned_item' }],
+			fieldMapOf(['owned_item', 'owned_item']),
 			[
 				{ id: 1, owned_item: { id: 10 } },
 				{ id: 2, owned_item: { name: 'y' } },
@@ -1333,7 +1340,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 		const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 			a2oSchema,
 			'note',
-			[{ path: 'subject:owner', collection: 'owner' }],
+			fieldMapOf(['subject:owner', 'owner']),
 			[{ id: 1, 'subject:owner': { id: 100 } }],
 		);
 
@@ -1348,7 +1355,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 			},
 		);
 
-		const paths = [{ path: 'owner', collection: 'owner' }];
+		const ownerFieldMap = fieldMapOf(['owner', 'owner']);
 
 		it('degrades to the collection\'s own slices, not to bare', () => {
 			const slicedSchema = new SchemaBuilder()
@@ -1367,7 +1374,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 				slicedSchema,
 				'owned_item',
-				paths,
+				ownerFieldMap,
 				records,
 			);
 
@@ -1380,7 +1387,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 				schema,
 				'owned_item',
-				paths,
+				ownerFieldMap,
 				records,
 			);
 
@@ -1393,7 +1400,7 @@ describe('pinnedScopedCacheTagsFromEmbeddedRecords', () => {
 			const pinned = pinnedScopedCacheTagsFromEmbeddedRecords(
 				schema,
 				'owned_item',
-				paths,
+				ownerFieldMap,
 				records.slice(0, SCOPED_CACHE_EMBEDDED_PIN_CEILING),
 			);
 
