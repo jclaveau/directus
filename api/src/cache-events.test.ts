@@ -51,8 +51,9 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
-// The dialect helper answers the Timescale probe; mocking it keeps the whole
-// helper tree — every dialect, each reading the env at import — out of here.
+// The dialect helper answers the Timescale probe. cache-events.ts imports it
+// dynamically so the tree stays out of every consumer's module graph; mocking
+// it here keeps it out of this one's too.
 const mockHasTimescale = vi.hoisted(() => vi.fn(async () => true));
 
 vi.mock('./database/helpers/index.js', () => {

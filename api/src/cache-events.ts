@@ -6,7 +6,6 @@ import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
 import { resolvedCacheTtl } from './cache-config.js';
 import getDatabase from './database/index.js';
-import { getHelpers } from './database/helpers/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -2318,10 +2317,17 @@ export async function reapCacheConfigEvents(): Promise<number> {
 		.delete();
 }
 
-// Cached for the process's life: the extension is not installed under a running
-// server, and the answer gates a query on every budget tick.
+/**
+ * Cached for the process's life: the extension is not installed under a running
+ * server, and the answer gates a query on every budget tick.
+ *
+ * The helper is imported dynamically because its index pulls every dialect, and
+ * each of those reads the env as it loads — a static import puts that in the
+ * module graph of everything importing this file, before its own mocks run.
+ */
 async function isTimescale(db: Knex): Promise<boolean> {
 	if (isTimescaleCache === null) {
+		const { getHelpers } = await import('./database/helpers/index.js');
 		isTimescaleCache = await getHelpers(db).schema.hasTimescale();
 	}
 
