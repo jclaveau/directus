@@ -54,7 +54,6 @@ import {
 } from '../database/run-ast/utils/remove-temporary-fields.js';
 import emitter from '../emitter.js';
 import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
-import type { FieldMap } from '../permissions/modules/process-ast/types.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { collectionsInFieldMap } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
@@ -1136,16 +1135,21 @@ implements AbstractService<Item> {
 
 		// Empty rather than optional: the read path below reads it unconditionally, and
 		// a read with cache purging off touches no collection worth listing.
-		let scopedCacheFieldMap: FieldMap = { read: new Map(), other: new Map() };
-		let embeddedScopedCachePins = new Map<string, ScopedCacheTag[]>();
+		let fieldMap: ReturnType<typeof fieldMapFromAst> = {
+			read: new Map(),
+			other: new Map(),
+		};
+
+		let embeddedScopedCachePins:
+			ReturnType<typeof pinnedScopedCacheTagsFromEmbeddedRecords> = new Map();
 
 		if (scopedCachePurgeEnabled()) {
-			scopedCacheFieldMap = fieldMapFromAst(ast, this.schema);
+			fieldMap = fieldMapFromAst(ast, this.schema);
 
 			embeddedScopedCachePins = pinnedScopedCacheTagsFromEmbeddedRecords(
 				this.schema,
 				this.collection,
-				[...scopedCacheFieldMap.read, ...scopedCacheFieldMap.other].map(
+				[...fieldMap.read, ...fieldMap.other].map(
 					([path, entry]) => ({ path, collection: entry.collection }),
 				),
 				toArray(unstrippedRecords),
@@ -1211,12 +1215,12 @@ implements AbstractService<Item> {
 			// embeds rows whose own keys the `<pk>._eq 1` filter never bounded.
 			const rootPaths = new Set<string>();
 
-			const scopedCacheFieldMapEntries = [
-				...scopedCacheFieldMap.read,
-				...scopedCacheFieldMap.other,
+			const fieldMapEntries = [
+				...fieldMap.read,
+				...fieldMap.other,
 			];
 
-			for (const [path, entry] of scopedCacheFieldMapEntries) {
+			for (const [path, entry] of fieldMapEntries) {
 				if (entry.collection === this.collection) {
 					rootPaths.add(path);
 				}
@@ -1242,7 +1246,7 @@ implements AbstractService<Item> {
 					this.schema.collections[this.collection]?.primary,
 				);
 
-			for (const collection of collectionsInFieldMap(scopedCacheFieldMap)) {
+			for (const collection of collectionsInFieldMap(fieldMap)) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
 					continue;
