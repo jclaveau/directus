@@ -50,6 +50,12 @@ const env: Record<string, any> = {
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
+
+// cache.js reaches this module through scoped-cache.js, so the descriptor reaper
+// imports it dynamically; mocking it keeps that hop out of the unit's way.
+const mockCache = vi.hoisted(() => ({ hasMany: vi.fn() }));
+const mockGetCache = vi.hoisted(() => vi.fn(() => ({ cache: mockCache })));
+vi.mock('./cache.js', () => ({ getCache: mockGetCache }));
 const mockLogger = { warn: vi.fn(), info: vi.fn() };
 vi.mock('./logger/index.js', () => ({ useLogger: () => mockLogger }));
 
@@ -1457,7 +1463,7 @@ describe('enforceCacheStatsBudget', () => {
 		expect(mockRedis.set).not.toHaveBeenCalledWith('scalabus:stats:enabled', '0');
 
 		expect(mockRedis.set).not.toHaveBeenCalledWith(
-			'scalabus:stats:killed_reason',
+			'scalabus:stats:budget_alert',
 			expect.anything(),
 		);
 	});
@@ -1612,41 +1618,52 @@ describe('enforceCacheStatsBudget', () => {
 		expect(droppedChunks()).toHaveLength(0);
 	});
 
-	it('auto-disables and records the reason when the buffer overflows', async () => {
+	it('raises an alert when the floor leaves nothing to evict', async () => {
 		await armFlag(null);
-		env['CACHE_STATS_MAX_BUFFER'] = 10;
-		mockRedis.xlen.mockResolvedValue(50);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		scriptRing([5000], [[]]);
 
 		await enforceCacheStatsBudget();
 
-		// Redis, not disk: the stream has no chunk to drop, so this half is still
-		// the one-way autokill (its MAXLEN is what actually bounds the memory).
-		expect(cacheStatsActive()).toBe(false);
-		expect(mockRedis.set).toHaveBeenCalledWith('scalabus:stats:enabled', '0');
+		// Said, not acted on: capture keeps running and the admin page carries the
+		// number, because there is no honest eviction left to make.
+		expect(cacheStatsActive()).toBe(true);
 
 		expect(mockRedis.set).toHaveBeenCalledWith(
-			'scalabus:stats:killed_reason',
-			expect.stringContaining('buffer 50 > 10'),
+			'scalabus:stats:budget_alert',
+			expect.stringContaining('5000B over the 1024B budget'),
 		);
 	});
 
-	it('leaves the buffer alone when capture is already off', async () => {
-		await setCacheStatsEnabled(false);
+	it('clears the alert once it is back inside the budget', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		scriptRing([100], []);
+
+		await enforceCacheStatsBudget();
+
+		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:budget_alert');
+	});
+
+	it('never touches the stream length', async () => {
+		await armFlag(null);
 		env['CACHE_STATS_MAX_BUFFER'] = 10;
+		env['CACHE_STATS_MAX_BYTES'] = false;
 		mockRedis.xlen.mockClear();
 
 		await enforceCacheStatsBudget();
 
+		// The stream is ringed by its own MAXLEN at write time; measuring it here
+		// only ever served the autokill that used to read it.
 		expect(mockRedis.xlen).not.toHaveBeenCalled();
 	});
 });
 
 describe('setCacheStatsEnabled', () => {
-	it('enabling flips the flag on and clears the reason', async () => {
+	it('enabling flips the flag on', async () => {
 		await setCacheStatsEnabled(true);
 
 		expect(mockRedis.set).toHaveBeenCalledWith('scalabus:stats:enabled', '1');
-		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:killed_reason');
 		expect(cacheStatsActive()).toBe(true);
 	});
 
@@ -1657,7 +1674,7 @@ describe('setCacheStatsEnabled', () => {
 			enabled: true,
 		});
 
-		await setCacheStatsEnabled(false, 'autokill: x');
+		await setCacheStatsEnabled(false);
 
 		expect(mockBus.publish).toHaveBeenCalledWith('cacheStatsToggled', {
 			enabled: false,
@@ -1689,13 +1706,13 @@ describe('subscribeCacheStatsToggle', () => {
 });
 
 describe('getCacheStatsState', () => {
-	it('reports the reason and buffer length when configured', async () => {
-		mockRedis.get.mockResolvedValue('autokill: buffer 50 > 10');
+	it('reports the budget alert and buffer length when configured', async () => {
+		mockRedis.get.mockResolvedValue('5000B over the 1024B budget');
 		mockRedis.xlen.mockResolvedValue(7);
 
 		await expect(getCacheStatsState()).resolves.toMatchObject({
 			configured: true,
-			killedReason: 'autokill: buffer 50 > 10',
+			budgetAlert: '5000B over the 1024B budget',
 			bufferLength: 7,
 		});
 	});
@@ -1706,7 +1723,7 @@ describe('getCacheStatsState', () => {
 		await expect(getCacheStatsState()).resolves.toEqual({
 			configured: false,
 			enabled: false,
-			killedReason: null,
+			budgetAlert: null,
 			bufferLength: 0,
 			droppedEvents: 0,
 		});
@@ -2801,26 +2818,29 @@ describe('reapScopedCacheEntryTags', () => {
 });
 
 describe('reapCacheDescriptors', () => {
-	it('deletes orphaned descriptors past the reap window', async () => {
-		const now = 1_700_000_000_000;
-		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
-		rowsByTable['directus_cache_descriptors'] = [{ cache_key: 'a' }];
+	beforeEach(() => {
+		mockGetCache.mockReturnValue({ cache: mockCache });
+		mockCache.hasMany.mockResolvedValue([]);
+	});
+
+	it('deletes a descriptor whose cached entry is gone', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'a', redis_key: 'ra' },
+		];
+
+		mockCache.hasMany.mockResolvedValue([false]);
 		deleteCount = 3;
 
 		expect(await reapCacheDescriptors()).toBe(3);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
 
-		// Filled: stale past the 90d cutoff (a sign flip would hit live rows)...
-		expect(builder.orWhere).toHaveBeenCalledWith(
-			'last_filled',
-			'<',
-			new Date(now - 7_776_000_000),
-		);
+		// Asked of Keyv by the key the entry is stored under, not of a raw key this
+		// would have to rebuild through two layers of namespacing.
+		expect(mockCache.hasMany).toHaveBeenCalledWith(['ra']);
+		expect(builder.select).toHaveBeenCalledWith('redis_key');
 
-		// ...or a locator, which has no fill to be stale. Either kind reaps only
-		// when no event AND no anomaly still references the key.
-		expect(builder.whereNull).toHaveBeenCalledWith('last_filled');
-
+		// A live event or anomaly still holds the descriptor: a re-anomalied
+		// dormant key keeps it for the anomaly join.
 		for (const fact of ['directus_cache_events', 'directus_cache_anomalies']) {
 			expect(builder.whereRaw).toHaveBeenCalledWith(
 				'??.cache_key = ??.cache_key',
@@ -2830,8 +2850,45 @@ describe('reapCacheDescriptors', () => {
 
 		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a']);
 		expect(builder.delete).toHaveBeenCalledTimes(1);
+	});
 
-		nowSpy.mockRestore();
+	it('keeps a descriptor whose entry is still cached', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'a', redis_key: 'ra' },
+		];
+
+		mockCache.hasMany.mockResolvedValue([true]);
+
+		// The rest of the orphan rule passed and the entry is still there, which
+		// is the whole reason this test of liveness replaced an age window.
+		expect(await reapCacheDescriptors()).toBe(0);
+		expect(builder.delete).not.toHaveBeenCalled();
+	});
+
+	it('deletes only the keys of the slate whose entries are gone', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'live', redis_key: 'r-live' },
+			{ cache_key: 'gone', redis_key: 'r-gone' },
+			{ cache_key: 'also-live', redis_key: 'r-also-live' },
+		];
+
+		mockCache.hasMany.mockResolvedValue([true, false, true]);
+		deleteCount = 1;
+
+		expect(await reapCacheDescriptors()).toBe(1);
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['gone']);
+	});
+
+	it('treats every entry as gone when there is no cache to ask', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'a', redis_key: 'ra' },
+		];
+
+		mockGetCache.mockReturnValue({ cache: null } as never);
+		deleteCount = 1;
+
+		expect(await reapCacheDescriptors()).toBe(1);
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a']);
 	});
 
 	it('takes another pass while the slate comes back full', async () => {

@@ -167,7 +167,7 @@ let timeseriesToken = 0;
 const statsState = ref<{
 	configured: boolean;
 	enabled: boolean;
-	killedReason: string | null;
+	budgetAlert: string | null;
 	bufferLength: number;
 } | null>(null);
 
@@ -181,9 +181,9 @@ const statsToggling = ref(false);
  * beside the translated fragments instead.
  */
 const statsTooltip = computed(() => {
-	if (statsState.value?.killedReason) {
-		const killed = t('cache_stats_killed', 'Cache stats auto-disabled');
-		return `${killed}: ${statsState.value.killedReason}`;
+	if (statsState.value?.budgetAlert) {
+		const over = t('cache_stats_over_budget', 'Cache stats over budget');
+		return `${over}: ${statsState.value.budgetAlert}`;
 	}
 
 	if (statsState.value?.enabled) {
@@ -200,20 +200,10 @@ const statsTooltip = computed(() => {
 	return t('cache_stats_enable', 'Enable cache stats collection');
 });
 
-// What an empty listing means, which the generic copy could not say: operations
-// read "needs CACHE_STORE=redis and CACHE_STATS_ENABLED" off a deployment that
-// had set both, while the reason capture had stopped sat one hover away on the
-// toggle.
+// What an empty listing means, which the one generic sentence could not say:
+// operations read "needs CACHE_STORE=redis and CACHE_STATS_ENABLED" off a
+// deployment that had set both and where collection was simply switched off.
 const emptyState = computed(() => {
-	if (statsState.value?.killedReason) {
-		return {
-			title: t('cache_stats_killed_title', 'Cache stats auto-disabled'),
-			copy: `${t('cache_stats_killed_copy', 'Collection stopped')}: `
-				+ `${statsState.value.killedReason}. `
-				+ `${t('cache_stats_killed_hint', 'The toggle turns it back on.')}`,
-		};
-	}
-
 	if (statsState.value?.configured && !statsState.value.enabled) {
 		return {
 			title: t('cache_stats_off_title', 'Cache stats are off'),
@@ -1936,7 +1926,7 @@ onUnmounted(() => {
 				rounded
 				icon
 				:secondary="!statsState.enabled"
-				:kind="statsState.killedReason ? 'warning' : undefined"
+				:kind="statsState.budgetAlert ? 'warning' : undefined"
 				:loading="statsToggling"
 				@click="toggleStats"
 			>

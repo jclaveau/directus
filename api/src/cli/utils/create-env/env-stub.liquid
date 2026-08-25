@@ -226,8 +226,9 @@ CACHE_STORE=memory
 # needs TimescaleDB for there to be chunks to drop. ["2gb"]
 # CACHE_STATS_MAX_BYTES="2gb"
 
-# Auto-disable stats collection when the Redis event buffer exceeds this many entries. [100000]
-# CACHE_STATS_MAX_BUFFER=100000
+# Cap the Redis event buffer at this many entries; over it, the oldest entry is
+# dropped. Collection keeps running. [1000000]
+# CACHE_STATS_MAX_BUFFER=1000000
 
 # How long a miss can still be attributed to a just-expired entry (gap-since-expiry lookback). ["1h"]
 # CACHE_STATS_GAP_LOOKBACK="1h"

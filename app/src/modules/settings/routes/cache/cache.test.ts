@@ -1176,7 +1176,7 @@ describe('CachePage', () => {
 						data: {
 							configured: true,
 							enabled: true,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 0,
 						},
 					},
@@ -1216,30 +1216,11 @@ describe('CachePage', () => {
 		return mount(CachePage, { global });
 	}
 
-	it('names the autokill reason when it emptied the listing', async () => {
-		const wrapper = mountWithoutEntries({
-			configured: true,
-			enabled: false,
-			killedReason: 'autokill: buffer 200000 > 100000',
-			bufferLength: 200_000,
-		});
-
-		await flushPromises();
-
-		// v-info renders its title through a stub here, so the copy carries the
-		// assertion — it is also the half that names the reason.
-		expect(wrapper.text()).toContain(
-			'Collection stopped: autokill: buffer 200000 > 100000',
-		);
-
-		expect(wrapper.text()).not.toContain('CACHE_STATS_ENABLED');
-	});
-
 	it('says the collection is off when an admin turned it off', async () => {
 		const wrapper = mountWithoutEntries({
 			configured: true,
 			enabled: false,
-			killedReason: null,
+			budgetAlert: null,
 			bufferLength: 0,
 		});
 
@@ -1253,7 +1234,7 @@ describe('CachePage', () => {
 		const wrapper = mountWithoutEntries({
 			configured: false,
 			enabled: false,
-			killedReason: null,
+			budgetAlert: null,
 			bufferLength: 0,
 		});
 
@@ -1263,7 +1244,7 @@ describe('CachePage', () => {
 
 		// Not the disabled copy: this deployment never opted in, so there is no
 		// toggle to point at and the env hint is the whole answer.
-		expect(wrapper.text()).not.toContain('Collection stopped');
+		expect(wrapper.text()).not.toContain('Nothing is being collected');
 	});
 
 	it('renders ∞ / tombstone / dash branches for a bare entry', async () => {
@@ -1344,7 +1325,7 @@ describe('CachePage', () => {
 						data: {
 							configured: true,
 							enabled: true,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 0,
 						},
 					},
@@ -1379,7 +1360,7 @@ describe('CachePage', () => {
 						data: {
 							configured: false,
 							enabled: false,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 0,
 						},
 					},
@@ -1407,7 +1388,7 @@ describe('CachePage', () => {
 						data: {
 							configured: true,
 							enabled: true,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 7,
 						},
 					},

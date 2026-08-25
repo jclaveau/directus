@@ -194,14 +194,21 @@ export type CacheGroupLatencyRecord = {
 export interface CacheStatsState {
 	configured: boolean;
 	enabled: boolean;
-	killedReason: string | null;
+	// Why the subsystem is over its byte budget and cannot evict its way back,
+	// or null when it is inside it. Not a disabled state — capture runs either
+	// way; the flag above is the only thing that says whether it is collecting.
+	budgetAlert: string | null;
 	bufferLength: number;
 	// Hot-path events dropped when the buffer hit its cap mid-flush (slow Redis).
 	// Lifetime counter — a non-zero value means telemetry went lossy.
 	droppedEvents: number;
 }
 
-const STREAM_HARD_CAP = 1_000_000;
+// The stream's own ring, and the same doctrine the byte budget follows: over the
+// cap, the oldest entry goes, capture does not. CACHE_STATS_MAX_BUFFER used to
+// name the length at which capture was auto-disabled instead — an off switch for
+// a resource Redis was already trimming.
+const DEFAULT_STREAM_CAP = 1_000_000;
 
 // Stream kind → the fact table's integer `kind`: 0 hit, 1 miss, 2 fill (the compute
 // latency of a filled miss). Descriptors ('d') / anomalies ('a') demux elsewhere.
@@ -245,10 +252,6 @@ const DEFAULT_CACHE_LATENCIES_WINDOW = getMilliseconds('10m', 600_000);
 // purges since its fill are unbounded. The newest few answer "was this entry
 // invalidated and kept anyway"; the rest are the same answer repeated.
 const CACHE_ENTRY_PURGE_LIMIT = 50;
-
-// A descriptor with no fill in this window AND no live event or anomaly is an
-// orphan (past a Directus upgrade, or a query combo that stopped being requested).
-const DESCRIPTOR_REAP_AFTER = getMilliseconds('90d', 7_776_000_000);
 
 // What one dimension-reap pass reads, and how many passes a tick takes. The two
 // dimensions have no time axis to drop by, so their disk is whatever their live
@@ -308,7 +311,7 @@ function statsNamespace(): string {
 
 const streamKey = () => `${statsNamespace()}:events`;
 const flagKey = () => `${statsNamespace()}:enabled`;
-const reasonKey = () => `${statsNamespace()}:killed_reason`;
+const budgetAlertKey = () => `${statsNamespace()}:budget_alert`;
 const tombstoneKey = (redisKey: string) => `${statsNamespace()}:tomb:${redisKey}`;
 
 const anomalyThrottleKey = (reason: string, cacheKey: string) =>
@@ -427,18 +430,17 @@ export async function flushCacheEventBuffer(): Promise<void> {
 	cacheEventBuffer = [];
 
 	const pipe = useRedis().pipeline();
+	const cap = Number(useEnv()['CACHE_STATS_MAX_BUFFER']) || DEFAULT_STREAM_CAP;
 
 	for (const flat of batch) {
-		// MAXLEN ~ caps stream memory by dropping the oldest entry, which is what
-		// the table budget does too — so CACHE_STATS_MAX_BUFFER's autokill guards a
-		// resource that is already bounded, and is the one thing left here that
-		// stops capture. .call() over xadd() (spread trips its overloads).
+		// MAXLEN ~ drops the oldest entry once the stream is over its cap.
+		// .call() over xadd() (spread trips its overloads).
 		pipe.call(
 			'XADD',
 			streamKey(),
 			'MAXLEN',
 			'~',
-			String(STREAM_HARD_CAP),
+			String(cap),
 			'*',
 			...flat,
 		);
@@ -1669,6 +1671,7 @@ function whereUnreferencedBy(
 async function reapDimensionOrphans(
 	dimensionTable: string,
 	scopeToOrphans: (query: Knex.QueryBuilder) => void,
+	narrowSlate?: (rows: Record<string, string>[]) => Promise<string[]>,
 ): Promise<number> {
 	const db = getDatabase();
 	let reaped = 0;
@@ -1680,7 +1683,7 @@ async function reapDimensionOrphans(
 
 		scopeToOrphans(slate);
 
-		const rows: { cache_key: string }[] = await slate;
+		const rows: Record<string, string>[] = await slate;
 
 		if (rows.length === 0) {
 			return reaped;
@@ -1688,9 +1691,18 @@ async function reapDimensionOrphans(
 
 		// A tag table holds a row per key per tag, so a slate names fewer keys than
 		// it read; the delete then takes every row each of those keys owns.
-		reaped += await db(dimensionTable)
-			.whereIn('cache_key', [...new Set(rows.map((row) => row.cache_key))])
-			.delete();
+		const keys = [...new Set(narrowSlate
+			? await narrowSlate(rows)
+			: rows.map((row) => row['cache_key']!))];
+
+		// A slate narrowed to nothing is a slate of rows something still needs. The
+		// next pass reads them again and drops them again; the pass cap is what
+		// keeps that from spinning, and the tick after this one moves on.
+		if (keys.length > 0) {
+			reaped += await db(dimensionTable)
+				.whereIn('cache_key', keys)
+				.delete();
+		}
 
 		if (rows.length < DIMENSION_REAP_BATCH) {
 			return reaped;
@@ -1701,33 +1713,70 @@ async function reapDimensionOrphans(
 }
 
 /**
- * Prune descriptor rows whose key stopped appearing — orphans left by a Directus
+ * The slate's keys whose cached entry is gone, which is what makes a descriptor
+ * an orphan: it describes one entry, and it has nothing left to describe once
+ * that entry is out of the cache.
+ *
+ * - `hasMany` is one round-trip of EXISTS for the whole slate and never
+ *   transfers a value, so a slate of descriptors costs about what a single get
+ *   would.
+ * - Keyv owns the key prefixing and this does not rebuild it. The raw key is
+ *   namespaced twice over — `<ns>_response::<ns>_response:<key>` on the
+ *   deployment this was checked against — because the store prefixes what Keyv
+ *   already prefixed, and a version bump moving that would silently turn every
+ *   descriptor into an orphan.
+ * - No cache at all (memory store off, Redis down) ⇒ nothing is live, which is
+ *   the same answer the reaper's other two rules already give.
+ */
+async function cacheKeysWithNoLiveEntry( // eslint-disable-line local/no-single-caller-function -- passed by name to the reaper, where an inline arrow would bury the rule
+	rows: Record<string, string>[],
+): Promise<string[]> {
+	// Dynamic because cache.ts reaches this module through scoped-cache.ts; the
+	// same hop scoped-cache.ts takes to come back the other way.
+	const { getCache } = await import('./cache.js');
+	const { cache } = getCache();
+
+	if (!cache) {
+		return rows.map((row) => row['cache_key']!);
+	}
+
+	const live = await cache.hasMany(rows.map((row) => row['redis_key'] ?? ''));
+
+	return rows
+		.filter((_row, index) => live[index] !== true)
+		.map((row) => row['cache_key']!);
+}
+
+/**
+ * Prune descriptor rows that describe nothing any more: their cached entry is
+ * gone AND no event or anomaly still names the key. Orphans left by a Directus
  * upgrade (new key generation) or a query combo that went quiet. Reproduces the
  * old Redis sidecar's TTL self-cleanup, which the dimension lacks.
+ *
+ * There is no age window in that rule, and there was one — ninety days from the
+ * last fill. A window is a guess at when a descriptor stops being useful, and
+ * the entry it describes answers that exactly.
  */
 export async function reapCacheDescriptors(): Promise<number> {
 	if (!cacheStatsConfigured()) {
 		return 0;
 	}
 
-	const cutoff = new Date(Date.now() - DESCRIPTOR_REAP_AFTER);
 	const dimensionTable = 'directus_cache_descriptors';
 
-	return reapDimensionOrphans(dimensionTable, (query) => {
-		// One arm per kind of descriptor: a filled one is an orphan once stale past
-		// the window, a locator (last_filled NULL) never matches a cutoff and rides
-		// the orphan rule alone — its events and anomalies age out at their own
-		// retention, so nothing left ⇒ no activity within the window.
-		query.where((byKind: Knex.QueryBuilder) => {
-			byKind
-				.whereNull('last_filled')
-				.orWhere('last_filled', '<', cutoff);
-		});
+	return reapDimensionOrphans(
+		dimensionTable,
+		(query) => {
+			// The liveness test below needs the key it is stored under, so the slate
+			// carries it alongside the one the delete names.
+			query.select('redis_key');
 
-		// A re-anomalied dormant key keeps its descriptor for the anomaly join.
-		whereUnreferencedBy(query, 'directus_cache_events', dimensionTable);
-		whereUnreferencedBy(query, 'directus_cache_anomalies', dimensionTable);
-	});
+			// A re-anomalied dormant key keeps its descriptor for the anomaly join.
+			whereUnreferencedBy(query, 'directus_cache_events', dimensionTable);
+			whereUnreferencedBy(query, 'directus_cache_anomalies', dimensionTable);
+		},
+		cacheKeysWithNoLiveEntry,
+	);
 }
 
 /**
@@ -2318,7 +2367,7 @@ async function cacheStatsBytes(db: Knex): Promise<number | null> {
  * together by time, so a budget that ate one table's history and left another's
  * would leave the page joining a window that only half exists.
  */
-async function dropOldestCacheStatsChunk(
+async function dropOldestCacheStatsChunk( // eslint-disable-line local/no-single-caller-function -- two raw statements the eviction loop reads better without
 	db: Knex,
 	floor: Date,
 ): Promise<string | null> {
@@ -2358,61 +2407,58 @@ async function dropOldestCacheStatsChunk(
  * - The floor keeps the newest telemetry whatever the budget says: a burst that
  *   filled the budget in an hour must not answer by deleting that hour.
  *
- * The buffer half below is still a one-way autokill, the last thing here that
- * can disable capture. Its resource is Redis, where the stream's own MAXLEN
- * already drops the oldest entry — see the note there.
+ * Nothing here disables capture any more. When the ring runs out of evictable
+ * chunks and the subsystem is still over, it says so on the state the admin
+ * page reads and keeps collecting; an admin toggling it off is the one thing
+ * that stops it.
  */
 export async function enforceCacheStatsBudget(): Promise<void> {
-	const env = useEnv();
-	const maxBytes = parseBytes(String(env['CACHE_STATS_MAX_BYTES'] ?? ''));
+	const maxBytes = parseBytes(
+		String(useEnv()['CACHE_STATS_MAX_BYTES'] ?? ''),
+	);
+
 	const db = getDatabase();
 
 	let bytes = maxBytes
 		? await cacheStatsBytes(db)
 		: null;
 
-	if (bytes !== null && bytes > maxBytes) {
-		const logger = useLogger();
-		const floor = new Date(Date.now() - CACHE_STATS_MIN_RETENTION);
+	if (bytes === null || bytes <= maxBytes) {
+		await clearCacheStatsBudgetAlert();
+		return;
+	}
 
-		for (let drop = 0; drop < CACHE_STATS_EVICTIONS_PER_TICK; drop += 1) {
-			const dropped = await dropOldestCacheStatsChunk(db, floor);
+	const logger = useLogger();
+	const floor = new Date(Date.now() - CACHE_STATS_MIN_RETENTION);
 
-			if (dropped === null) {
-				logger.warn(
-					`[cache-stats] ${bytes}B over the ${maxBytes}B budget with `
-					+ `nothing evictable left above the retention floor`,
-				);
+	for (let drop = 0; drop < CACHE_STATS_EVICTIONS_PER_TICK; drop += 1) {
+		const dropped = await dropOldestCacheStatsChunk(db, floor);
 
-				break;
-			}
+		if (dropped === null) {
+			const alert = `${bytes}B over the ${maxBytes}B budget, and every `
+				+ `chunk left is newer than the retention floor`;
 
-			logger.info(`[cache-stats] evicted ${dropped} to stay inside budget`);
-			bytes = await cacheStatsBytes(db);
+			logger.warn(`[cache-stats] ${alert}`);
+			await useRedis().set(budgetAlertKey(), alert);
+			return;
+		}
 
-			if (bytes === null || bytes <= maxBytes * CACHE_STATS_BUDGET_LOW_WATER) {
-				break;
-			}
+		logger.info(`[cache-stats] evicted ${dropped} to stay inside budget`);
+		bytes = await cacheStatsBytes(db);
+
+		if (bytes === null || bytes <= maxBytes * CACHE_STATS_BUDGET_LOW_WATER) {
+			await clearCacheStatsBudgetAlert();
+			return;
 		}
 	}
 
-	if (!cacheStatsActiveFlag) {
-		return;
-	}
+	// Still over after a tick's worth of drops, but with chunks left to take: the
+	// next tick continues rather than this one running the table down in one go.
+	await clearCacheStatsBudgetAlert();
+}
 
-	const maxBuffer = Number(env['CACHE_STATS_MAX_BUFFER']) || 0;
-
-	if (maxBuffer === 0) {
-		return;
-	}
-
-	const length = await useRedis().xlen(streamKey());
-
-	if (length > maxBuffer) {
-		const reason = `autokill: buffer ${length} > ${maxBuffer}`;
-		await setCacheStatsEnabled(false, reason);
-		useLogger().warn(`[cache-stats] auto-disabled — ${reason}`);
-	}
+async function clearCacheStatsBudgetAlert(): Promise<void> {
+	await useRedis().del(budgetAlertKey());
 }
 
 // Bus channel that announces a flag change so every node flips at once (the
@@ -2440,29 +2486,20 @@ export function subscribeCacheStatsToggle(): void {
 }
 
 /**
- * Flip the runtime override for every node (bus publish) and this node now.
- * Enabling clears any autokill reason; if still over budget the watchdog re-kills.
+ * Flip the runtime override for every node (bus publish) and this node now. An
+ * admin is the only caller: nothing in here disables capture on its own, so the
+ * flag says what a person asked for and nothing else.
  */
-export async function setCacheStatsEnabled(
-	enabled: boolean,
-	reason?: string,
-): Promise<void> {
+export async function setCacheStatsEnabled(enabled: boolean): Promise<void> {
 	const redis = useRedis();
 
-	if (enabled) {
-		await redis.set(flagKey(), '1');
-		await redis.del(reasonKey());
-		cacheStatsActiveFlag = cacheStatsConfigured();
-	}
-	else {
-		await redis.set(flagKey(), '0');
+	await redis.set(flagKey(), enabled
+		? '1'
+		: '0');
 
-		if (reason) {
-			await redis.set(reasonKey(), reason);
-		}
-
-		cacheStatsActiveFlag = false;
-	}
+	cacheStatsActiveFlag = enabled
+		? cacheStatsConfigured()
+		: false;
 
 	// Announce so the other nodes re-read the key immediately, not on a poll.
 	useBus().publish<CacheStatsToggle>(TOGGLE_CHANNEL, { enabled });
@@ -2473,7 +2510,7 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 		return {
 			configured: false,
 			enabled: false,
-			killedReason: null,
+			budgetAlert: null,
 			bufferLength: 0,
 			droppedEvents: cacheEventBufferDropped,
 		};
@@ -2484,7 +2521,7 @@ export async function getCacheStatsState(): Promise<CacheStatsState> {
 	return {
 		configured: true,
 		enabled: cacheStatsActiveFlag,
-		killedReason: await redis.get(reasonKey()),
+		budgetAlert: await redis.get(budgetAlertKey()),
 		bufferLength: await redis.xlen(streamKey()),
 		droppedEvents: cacheEventBufferDropped,
 	};
