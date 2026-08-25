@@ -28,7 +28,7 @@ export type {
  *     tombstone), effective TTL. Timescale hypertable + retention where present;
  *     a daily app-level reap (CACHE_STATS_RETENTION) bounds it on every dialect.
  *   - `directus_cache_descriptors` — dimension, one row per key: the request
- *     descriptor (method/path/collection/user/query/url/size), upserted on fill.
+ *     descriptor (method/path/collection/user/query/size), upserted on fill.
  *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
  *   - `directus_cache_purges` — one row per purge operation (not per evicted
  *     key), carrying how far it reached and how many entries it took.
@@ -88,8 +88,8 @@ export interface CacheDescriptor {
 	path: string;
 	collection: string | null;
 	userId: string | null;
+	// A GET's query string as sent; a GraphQL read's document and variables.
 	query: string;
-	url: string;
 	bytes: number;
 	fillMs: number;
 	// The scoped cache tags this entry was filled under, in the display form the
@@ -612,7 +612,6 @@ export async function queueCacheDescriptor(entry: CacheDescriptor): Promise<void
 		collection: entry.collection ?? '',
 		userId: entry.userId ?? '',
 		query: entry.query,
-		url: entry.url,
 		bytes: String(entry.bytes),
 		fillMs: String(entry.fillMs),
 		scopedCacheTags: entry.scopedCacheTags.join(','),
@@ -701,7 +700,6 @@ interface CacheDescriptorRow {
 	collection: string | null;
 	user_id: string | null;
 	query: string;
-	url: string;
 	bytes: number;
 	fill_ms: number;
 	last_filled: Date | null; // null = anomaly locator, never filled
@@ -997,7 +995,6 @@ async function persistStreamBatch(
 					? f['userId']
 					: null,
 				query: f['query'] ?? '',
-				url: f['url'] ?? '',
 				bytes: Number(f['bytes'] ?? 0),
 				fill_ms: Number(f['fillMs'] ?? 0),
 				// Empty ts = never filled = a locator: NULL keeps Age honest + non-entry.
@@ -1315,6 +1312,25 @@ export async function readCacheDescriptorForRedisKey(
 }
 
 /**
+ * The URL a descriptor no longer stores. A GET's is its path plus the query
+ * string it carried, which is why `query` holds that string verbatim; a GraphQL
+ * read has none, its document travelling in a POST body.
+ */
+function descriptorUrl(path: string, query: string): string {
+	if (path.startsWith('/graphql')) {
+		return '';
+	}
+
+	// A row written before `query` held the raw string carries the sanitized
+	// JSON reading of it instead, which rebuilds nothing. Those age out.
+	if (query === '' || query.startsWith('{')) {
+		return path;
+	}
+
+	return `${path}?${query}`;
+}
+
+/**
  * Recent cache activity for the admin page: windowed hits (fact) ranked on
  * their own, then paired with the descriptor (dimension, survives retention).
  * Not a live view — an entry evicted or expired inside the window still shows
@@ -1399,7 +1415,6 @@ export async function listCacheEntries(
 				'd.user_id',
 				'u.email as user_email',
 				'd.query',
-				'd.url',
 				'd.bytes',
 				'd.fill_ms',
 				'd.last_filled',
@@ -1468,7 +1483,10 @@ export async function listCacheEntries(
 				? null
 				: { id: userId, email: (row['user_email'] as string | null) ?? null },
 			query: (row['query'] as string) ?? '',
-			url: (row['url'] as string) ?? '',
+			url: descriptorUrl(
+				row['path'] as string,
+				(row['query'] as string) ?? '',
+			),
 			size: Number(row['bytes'] ?? 0),
 			hits: Number(row['hits'] ?? 0),
 			misses: Number(row['misses'] ?? 0),
@@ -1863,19 +1881,19 @@ export async function listCacheAnomalies(
 	const db = getDatabase();
 	const since = new Date(Date.now() - clampCacheStatsWindow(windowMs));
 
-	// Join the descriptor for path/method/query (reaped at 90d, so an inner join never
-	// hides a live 24h-window anomaly) — a (cache_key, reason) pair lands at its node.
+	// Join the descriptor for path/method/query — a (cache_key, reason) pair lands
+	// at its node. The inner join holds because a descriptor outlives its anomalies:
+	// one of them referencing it is itself a reason the reaper keeps it.
 	const rows = await db('directus_cache_anomalies as a')
 		.join('directus_cache_descriptors as d', 'd.cache_key', 'a.cache_key')
 		.where('a.time', '>', since)
-		.groupBy('a.cache_key', 'a.reason', 'd.path', 'd.method', 'd.query', 'd.url')
+		.groupBy('a.cache_key', 'a.reason', 'd.path', 'd.method', 'd.query')
 		.select(
 			'a.cache_key',
 			'a.reason',
 			'd.path',
 			'd.method',
 			'd.query',
-			'd.url',
 			db.raw('COUNT(*) AS count'),
 			db.raw('MAX(a.detail) AS sample'),
 			db.raw('MAX(a.time) AS last_seen'),
@@ -1892,7 +1910,10 @@ export async function listCacheAnomalies(
 			path: row['path'] as string,
 			method: row['method'] as string,
 			query: (row['query'] as string) ?? '',
-			url: (row['url'] as string) ?? '',
+			url: descriptorUrl(
+				row['path'] as string,
+				(row['query'] as string) ?? '',
+			),
 			count: Number(row['count'] ?? 0),
 			sample: (row['sample'] as string | null) || null,
 			lastSeen: new Date(row['last_seen'] as string).getTime(),
