@@ -1162,11 +1162,14 @@ export function resolveScopedCacheM2oJoinChain(
 export const SCOPED_CACHE_EMBEDDED_PIN_CEILING = 250;
 
 /**
- * The rows a read embedded at one M2O path, in document order. Null when the
- * response cannot answer it — a segment it never carried, or an array where an M2O
- * promised one row — so the caller falls back rather than pin a half-read set.
+ * The parent rows sitting at the END of one M2O path, in document order — the set is
+ * replaced at every hop, so the rows passed through on the way out are not returned.
+ *
+ * Null when the response cannot answer the path — a segment it never carried, or an
+ * array where an M2O promised one row — so the caller falls back to the bare tag
+ * rather than pin a set it only half read.
  */
-function embeddedScopedCacheRowsAtPath(
+function m2oParentRowsAtPathEnd(
 	records: Item[],
 	segments: QueryPath,
 ): Item[] | null {
@@ -1257,14 +1260,14 @@ export function pinnedScopedCacheTagsFromM2oParents(
 				break;
 			}
 
-			const embedded = embeddedScopedCacheRowsAtPath(records, segments);
+			const parentRows = m2oParentRowsAtPathEnd(records, segments);
 
-			if (embedded === null) {
+			if (parentRows === null) {
 				reachedByM2oOnly = false;
 				break;
 			}
 
-			rows.push(...embedded);
+			rows.push(...parentRows);
 		}
 
 		if (reachedByM2oOnly === false) {
@@ -1277,6 +1280,10 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			continue;
 		}
 
+		// `coarse`, not `skip`: one row without its key must take the whole
+		// collection down to the bare tag. Skipping it would pin the rows that DID
+		// carry a key and leave that one covered by nothing — stale, where the bare
+		// tag only over-purges.
 		const keyTags = scopedCacheTagsFromRows(
 			collection,
 			[primaryKeyField],
