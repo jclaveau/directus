@@ -1,6 +1,7 @@
 // @ts-check
 
 import eslintJs from '@eslint/js';
+import noSingleCallerFunction from './eslint-rules/no-single-caller-function.js';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import eslintPluginVue from 'eslint-plugin-vue';
 import globals from 'globals';
@@ -31,6 +32,21 @@ export default typescriptEslint.config(
 			'eslint-rules/**',
 			'scripts/lint-style-changes.mjs',
 		],
+	},
+
+	// The style gate's rules, registered but off. A source line that deliberately
+	// keeps what one of them flags carries an `eslint-disable-line local/…`, and
+	// eslint errors on a directive naming a rule it has never heard of — so this
+	// config has to know the name even though only eslint.style.config.js judges it.
+	{
+		plugins: {
+			local: { rules: { 'no-single-caller-function': noSingleCallerFunction } },
+		},
+		rules: { 'local/no-single-caller-function': 'off' },
+		// Off here means every such directive reads as unused to this config. The
+		// style config keeps the rule on and still reports one that stopped being
+		// needed, which is where that signal belongs.
+		linterOptions: { reportUnusedDisableDirectives: 'off' },
 	},
 
 	// Enable recommended rules for JS files
