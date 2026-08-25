@@ -1120,7 +1120,7 @@ export type ScopedCacheM2oJoin = {
  * "is this path pinnable?" cannot drift apart on the answer: a collection's declared
  * scope paths, and the collections a read embedded.
  */
-export function resolveScopedCacheM2oJoinChain(
+export function resolveScopedCacheM2oJoinChainFromPath(
 	schema: SchemaOverview,
 	collection: CollectionKey,
 	path: QueryPath,
@@ -1158,7 +1158,7 @@ export function resolveScopedCacheM2oJoinChain(
  * https://github.com/jclaveau/directus/issues/392 — sized above a default page of
  * embedded parents, below an import-sized one. Move both to whatever #392 settles.
  */
-export const SCOPED_CACHE_EMBEDDED_PIN_CEILING = 250;
+export const SCOPED_CACHE_M2O_PARENT_PIN_CEILING = 250;
 
 /**
  * The parent rows sitting at the END of one M2O path, in document order — the set is
@@ -1254,7 +1254,12 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		for (const path of paths) {
 			const segments = path.split('.');
-			const joins = resolveScopedCacheM2oJoinChain(schema, rootCollection, segments);
+
+			const joins = resolveScopedCacheM2oJoinChainFromPath(
+				schema,
+				rootCollection,
+				segments,
+			);
 
 			if (joins === null) {
 				reachedByM2oOnly = false;
@@ -1295,7 +1300,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		if (
 			keyTags !== null &&
-			keyTags.length <= SCOPED_CACHE_EMBEDDED_PIN_CEILING
+			keyTags.length <= SCOPED_CACHE_M2O_PARENT_PIN_CEILING
 		) {
 			pinned.set(collection, keyTags);
 			continue;
@@ -1326,7 +1331,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		if (
 			sliceTags !== null &&
-			sliceTags.length <= SCOPED_CACHE_EMBEDDED_PIN_CEILING
+			sliceTags.length <= SCOPED_CACHE_M2O_PARENT_PIN_CEILING
 		) {
 			pinned.set(collection, sliceTags);
 		}

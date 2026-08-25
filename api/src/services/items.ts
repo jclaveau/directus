@@ -35,7 +35,7 @@ import {
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
-	resolveScopedCacheM2oJoinChain,
+	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
@@ -420,7 +420,7 @@ implements AbstractService<Item> {
 			return null;
 		}
 
-		const joins = resolveScopedCacheM2oJoinChain(
+		const joins = resolveScopedCacheM2oJoinChainFromPath(
 			this.schema,
 			this.collection,
 			segments.slice(0, -1),

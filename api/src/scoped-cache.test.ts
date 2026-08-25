@@ -12,8 +12,8 @@ import {
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromM2oParents,
-	resolveScopedCacheM2oJoinChain,
-	SCOPED_CACHE_EMBEDDED_PIN_CEILING,
+	resolveScopedCacheM2oJoinChainFromPath,
+	SCOPED_CACHE_M2O_PARENT_PIN_CEILING,
 	dropScopedCacheTagIndex,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
@@ -1355,7 +1355,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 
 	describe('past the ceiling', () => {
 		const records = Array.from(
-			{ length: SCOPED_CACHE_EMBEDDED_PIN_CEILING + 1 },
+			{ length: SCOPED_CACHE_M2O_PARENT_PIN_CEILING + 1 },
 			(_unused, index) => {
 				return { id: index, owner: { id: index, space: 'shared' } };
 			},
@@ -1407,17 +1407,17 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				schema,
 				'owned_item',
 				ownerFieldMap,
-				records.slice(0, SCOPED_CACHE_EMBEDDED_PIN_CEILING),
+				records.slice(0, SCOPED_CACHE_M2O_PARENT_PIN_CEILING),
 			);
 
 			expect(pinned.get('owner')).toHaveLength(
-				SCOPED_CACHE_EMBEDDED_PIN_CEILING,
+				SCOPED_CACHE_M2O_PARENT_PIN_CEILING,
 			);
 		});
 	});
 });
 
-describe('resolveScopedCacheM2oJoinChain', () => {
+describe('resolveScopedCacheM2oJoinChainFromPath', () => {
 	const schema = new SchemaBuilder()
 		.collection('owner', (c) => {
 			c.field('id').id();
@@ -1436,7 +1436,7 @@ describe('resolveScopedCacheM2oJoinChain', () => {
 
 	it('walks a chain of M2O hops to its related keys', () => {
 		expect(
-			resolveScopedCacheM2oJoinChain(schema, 'owned_sub_item', [
+			resolveScopedCacheM2oJoinChainFromPath(schema, 'owned_sub_item', [
 				'owned_item',
 				'owner',
 			]),
@@ -1448,13 +1448,15 @@ describe('resolveScopedCacheM2oJoinChain', () => {
 
 	it('stops at a to-many hop', () => {
 		expect(
-			resolveScopedCacheM2oJoinChain(schema, 'owned_item', ['owned_sub_items']),
+			resolveScopedCacheM2oJoinChainFromPath(schema, 'owned_item', [
+				'owned_sub_items',
+			]),
 		).toBe(null);
 	});
 
 	it('stops at a to-many hop reached after an M2O one', () => {
 		expect(
-			resolveScopedCacheM2oJoinChain(schema, 'owned_sub_item', [
+			resolveScopedCacheM2oJoinChainFromPath(schema, 'owned_sub_item', [
 				'owned_item',
 				'owned_sub_items',
 			]),
@@ -1463,11 +1465,13 @@ describe('resolveScopedCacheM2oJoinChain', () => {
 
 	it('stops at a field no relation describes', () => {
 		expect(
-			resolveScopedCacheM2oJoinChain(schema, 'owned_item', ['label']),
+			resolveScopedCacheM2oJoinChainFromPath(schema, 'owned_item', ['label']),
 		).toBe(null);
 	});
 
 	it('resolves an empty chain to no hops', () => {
-		expect(resolveScopedCacheM2oJoinChain(schema, 'owned_item', [])).toEqual([]);
+		expect(
+			resolveScopedCacheM2oJoinChainFromPath(schema, 'owned_item', []),
+		).toEqual([]);
 	});
 });
