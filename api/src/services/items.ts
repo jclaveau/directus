@@ -40,6 +40,7 @@ import {
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
+	type ScopedCacheM2oJoin,
 } from '../scoped-cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
@@ -408,7 +409,7 @@ implements AbstractService<Item> {
 	// tag. The terminal is a plain column on the last collection (scalar or fk).
 	private resolveScopedCachePath(path: string): {
 		segments: string[];
-		joins: { field: string; relatedCollection: string; relatedPk: string }[];
+		joins: ScopedCacheM2oJoin[];
 		terminalCollection: string;
 		terminalField: string;
 	} | null {
