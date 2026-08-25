@@ -1396,8 +1396,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 		});
 	});
 
-	describe('the collections a read embedded', () => {
-		const embeddedSchema = new SchemaBuilder()
+	describe('the nested collections of a read', () => {
+		const nestedSchema = new SchemaBuilder()
 			.collection('owner', (c) => {
 				c.field('id').id();
 				c.field('space').string();
@@ -1432,7 +1432,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			delete env['RELATIONAL_BATCH_SIZE'];
 		});
 
-		it('pins an M2O parent by the key the response embedded', async () => {
+		it('pins an M2O parent by the key the response nested', async () => {
 			tracker.on.select('owned_item').response([
 				{ id: 1, label: 'a', owner: 100 },
 			]);
@@ -1441,7 +1441,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			const result = await new ItemsService('owned_item', {
 				knex: db,
-				schema: embeddedSchema,
+				schema: nestedSchema,
 			}).readByQuery({
 				fields: ['id', 'label', 'owner.id', 'owner.space'],
 			});
@@ -1476,7 +1476,7 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			const result = await new ItemsService('owned_item', {
 				knex: db,
-				schema: embeddedSchema,
+				schema: nestedSchema,
 			}).readByQuery({
 				fields: ['id', 'label', 'owned_sub_items.id'],
 			});

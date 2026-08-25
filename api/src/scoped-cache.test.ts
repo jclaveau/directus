@@ -1201,7 +1201,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	);
 
 	it(oneLine`
-		pins each embedded collection by the keys the response carried, deduped
+		pins each nested collection by the parent keys the response carried, deduped
 	`, () => {
 		// Two sub-items under distinct items but ONE owner: the owner tag must not
 		// come out twice, and the item tags must not collapse to one.
@@ -1303,7 +1303,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		]);
 	});
 
-	it('keeps a collection bare when the read embedded no row of it', () => {
+	it('keeps a collection bare when the read nested no row of it', () => {
 		// A relation the query only filtered or sorted on reaches the field map but
 		// never the payload. Pinning nothing there would list the collection by
 		// nothing at all, and no write to it would ever drop the read.
@@ -1317,7 +1317,7 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		).toBe(false);
 	});
 
-	it('falls back to bare when an embedded row carries no key', () => {
+	it('falls back to bare when a parent row carries no key', () => {
 		// Half a key set pins half the rows and silently serves the rest stale.
 		const pinned = pinnedScopedCacheTagsFromM2oParents(
 			schema,

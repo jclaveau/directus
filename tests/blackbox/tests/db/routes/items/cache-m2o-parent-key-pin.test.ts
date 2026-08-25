@@ -15,14 +15,14 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// A read reaching a collection through M2O hops only is pinned by the keys it
-// actually embedded, so a write to one of THOSE rows drops it and a write to any
-// other row of the same collection leaves it alone (#361). Before that, every
+// A read reaching a collection through M2O hops only is pinned by the keys of the
+// parent rows it nested, so a write to one of THOSE rows drops it and a write to
+// any other row of the same collection leaves it alone (#361). Before that, every
 // touched collection carried a bare tag, and the entry lived exactly as long as the
 // fastest-writing collection anywhere in its field graph.
 //
-// The to-many direction is the complement and stays bare —
-// cache-embedded-pin.test.ts guards it.
+// The to-many direction is the complement and stays bare. On this branch only the
+// unit case in items.test.ts guards it; the blackbox counterpart arrives with #381.
 
 const OWNER = 'keyed_owner';
 const OWNED_ITEM = 'keyed_owned_item';
@@ -30,7 +30,7 @@ const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
 describe(oneLine`
-	a read pins the collections it embedded by their keys (#361)
+	a read pins its nested collections by their parent keys (#361)
 `, () => {
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
@@ -42,10 +42,10 @@ describe(oneLine`
 		env[vendor]['CACHE_STORE'] = 'redis';
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
-		env[vendor]['CACHE_NAMESPACE'] = `directus-embedded-key-pin-${vendor}`;
+		env[vendor]['CACHE_NAMESPACE'] = `directus-m2o-parent-key-pin-${vendor}`;
 
 		let instance: ChildProcess;
-		let embeddedOwnerId: number;
+		let nestedOwnerId: number;
 		let untouchedOwnerId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -71,15 +71,15 @@ describe(oneLine`
 
 			const owners = await CreateItem(vendor, {
 				collection: OWNER,
-				item: [{ name: 'embedded-before' }, { name: 'untouched-before' }],
+				item: [{ name: 'nested-before' }, { name: 'untouched-before' }],
 			});
 
-			embeddedOwnerId = owners[0].id;
+			nestedOwnerId = owners[0].id;
 			untouchedOwnerId = owners[1].id;
 
 			await CreateItem(vendor, {
 				collection: OWNED_ITEM,
-				item: [{ label: 'a', owner: embeddedOwnerId }],
+				item: [{ label: 'a', owner: nestedOwnerId }],
 			});
 
 			const port = await getPort();
@@ -100,20 +100,20 @@ describe(oneLine`
 			await DeleteCollection(vendor, { collection: OWNER });
 		});
 
-		// Bounded to the one owner, so the response embeds that row and no other. The
+		// Bounded to the one owner, so the response nests that row and no other. The
 		// root itself stays bare — its filter binds no scope field of its own.
-		function readItemsOfEmbeddedOwner() {
+		function readItemsOfNestedOwner() {
 			return request(getUrl(vendor, env))
 				.get(`/items/${OWNED_ITEM}`)
 				.query({
-					'filter[owner][_eq]': String(embeddedOwnerId),
+					'filter[owner][_eq]': String(nestedOwnerId),
 					fields: '*,owner.*',
 				})
 				.set('Authorization', auth);
 		}
 
 		it(oneLine`
-			pins the embedded owner by its key, leaving the collection unbounded
+			pins the nested owner by its key, leaving the collection unbounded
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -121,10 +121,10 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			const read = await readItemsOfEmbeddedOwner();
+			const read = await readItemsOfNestedOwner();
 			const tags = read.headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${OWNER}:id=${embeddedOwnerId}(,|$)`));
+			expect(tags).toMatch(new RegExp(`(^|, )${OWNER}:id=${nestedOwnerId}(,|$)`));
 
 			// The bare tag is what a write to ANY row of the collection drops, so its
 			// absence is the whole point — a key pin beside it would buy nothing.
@@ -132,7 +132,7 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			survives a write to a row of that collection it never embedded
+			survives a write to a row of that collection it never nested
 		`, async () => {
 			const url = getUrl(vendor, env);
 
@@ -140,9 +140,9 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			const warm = await readItemsOfEmbeddedOwner();
+			const warm = await readItemsOfNestedOwner();
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
-			expect(warm.body.data[0].owner.name).toBe('embedded-before');
+			expect(warm.body.data[0].owner.name).toBe('nested-before');
 
 			await request(url)
 				.patch(`/items/${OWNER}/${untouchedOwnerId}`)
@@ -158,30 +158,30 @@ describe(oneLine`
 
 			expect(written.body.data.name).toBe('untouched-after');
 
-			const refetched = await readItemsOfEmbeddedOwner();
+			const refetched = await readItemsOfNestedOwner();
 
 			expect(refetched.headers[cacheStatusHeader]).toBe('HIT');
 		});
 
-		it('is dropped by a write to the row it did embed', async () => {
+		it('is dropped by a write to the row it did nest', async () => {
 			const url = getUrl(vendor, env);
 
 			await request(url)
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			const warm = await readItemsOfEmbeddedOwner();
-			expect(warm.body.data[0].owner.name).toBe('embedded-before');
+			const warm = await readItemsOfNestedOwner();
+			expect(warm.body.data[0].owner.name).toBe('nested-before');
 
 			await request(url)
-				.patch(`/items/${OWNER}/${embeddedOwnerId}`)
-				.send({ name: 'embedded-after' })
+				.patch(`/items/${OWNER}/${nestedOwnerId}`)
+				.send({ name: 'nested-after' })
 				.set('Authorization', auth);
 
-			const refetched = await readItemsOfEmbeddedOwner();
+			const refetched = await readItemsOfNestedOwner();
 
 			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
-			expect(refetched.body.data[0].owner.name).toBe('embedded-after');
+			expect(refetched.body.data[0].owner.name).toBe('nested-after');
 		});
 	});
 });

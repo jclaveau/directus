@@ -1118,7 +1118,7 @@ export type ScopedCacheM2oJoin = {
  * A row maps to exactly one parent across an M2O, so what such a join reaches is
  * fully determined by the rows already in hand. Shared, so the two sides that ask
  * "is this path pinnable?" cannot drift apart on the answer: a collection's declared
- * scope paths, and the collections a read embedded.
+ * scope paths, and the nested collections of a read.
  */
 export function resolveScopedCacheM2oJoinChainFromPath(
 	schema: SchemaOverview,
@@ -1151,12 +1151,12 @@ export function resolveScopedCacheM2oJoinChainFromPath(
 }
 
 /**
- * How many slices one embedded collection may pin on a single read. Every tag costs
+ * How many slices one nested collection may pin on a single read. Every tag costs
  * a Redis set plus a slice-index member, and the write side deletes them one by one.
  *
  * TODO(reviewer): same bound as the purge fan-out in
  * https://github.com/jclaveau/directus/issues/392 — sized above a default page of
- * embedded parents, below an import-sized one. Move both to whatever #392 settles.
+ * nested parents, below an import-sized one. Move both to whatever #392 settles.
  */
 export const SCOPED_CACHE_M2O_PARENT_PIN_CEILING = 250;
 
@@ -1180,7 +1180,7 @@ function m2oParentRowsAtPathEnd(
 		for (const row of current) {
 			const value = row[segment];
 
-			// A row whose parent link is empty embedded nothing to pin, and says
+			// A row whose parent link is empty carries no parent to pin, and says
 			// nothing about the rows its siblings reached.
 			if (value === null) {
 				continue;
@@ -1200,16 +1200,16 @@ function m2oParentRowsAtPathEnd(
 }
 
 /**
- * Scope a read's NON-root collections off the rows it embedded — the other half of
- * `pinnedScopedCacheTagsFromFilter`, which bounds the root.
+ * Scope a read's NON-root collections off the parent rows it nested — the other
+ * half of `pinnedScopedCacheTagsFromFilter`, which bounds the root.
  *
  * Per touched collection, the first rung that holds:
  *
- * - `<pk>=<key>` per embedded row — M2O hops only. An INSERT lands a key this
- *   response cannot have embedded, so the pin cannot go stale.
+ * - `<pk>=<key>` per parent row — M2O hops only. An INSERT lands a key this
+ *   response cannot have nested, so the pin cannot go stale.
  * - its own declared scope slices — past the ceiling. One tag per distinct value.
  * - the bare collection tag — a to-many hop or A2O anywhere on one of its paths, no
- *   row embedded, or a row missing its key.
+ *   parent row nested, or a row missing its key.
  *
  * Returns the pinned collections only; the bare rung is the caller's default, so a
  * collection absent here keeps the tag it has always carried. Every rung down
@@ -1226,7 +1226,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 	const pathsByCollection = new Map<CollectionKey, Set<QueryPath[number]>>();
 
 	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
-		// The root is bounded by its own filter, not by what it embedded, and a
+		// The root is bounded by its own filter, not by what it nested, and a
 		// self-referential relation reaches it again at a path that bounds nothing.
 		if (entry.collection === rootCollection) {
 			continue;
@@ -1281,7 +1281,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		}
 
 		// Reached, but carrying nothing to pin — a filter-only relation the response
-		// never embedded, or rows whose parent link is empty throughout.
+		// never nested, or rows whose parent link is empty throughout.
 		if (rows.length === 0) {
 			continue;
 		}
@@ -1307,7 +1307,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		}
 
 		// Only the direct columns: a dotted scope field names a column on another
-		// collection, which the embedded row does not carry.
+		// collection, which the parent row does not carry.
 		const sliceFields = (schema.collections[collection]?.scopedCacheFields ?? [])
 			.filter((field) => !field.includes('.'));
 

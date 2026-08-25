@@ -1128,7 +1128,7 @@ implements AbstractService<Item> {
 			{
 				knex: this.knex,
 				// `run-ast` injects every level's primary key for the nesting to work
-				// and strips it again before the response. The scope pins each embedded
+				// and strips it again before the response. The scope pins each parent
 				// row BY that key, so it has to read them while they are still on the
 				// rows: fetch them here, pin below, then strip.
 				stripNonRequested: false,
@@ -1147,13 +1147,13 @@ implements AbstractService<Item> {
 			other: new Map(),
 		};
 
-		let embeddedScopedCachePins:
+		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
 
 		if (scopedCachePurgeEnabled()) {
 			fieldMap = fieldMapFromAst(ast, this.schema);
 
-			embeddedScopedCachePins = pinnedScopedCacheTagsFromM2oParents(
+			m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
 				this.schema,
 				this.collection,
 				fieldMap,
@@ -1258,16 +1258,16 @@ implements AbstractService<Item> {
 				}
 
 				// A collection the read reached only through M2O hops is pinned by the
-				// keys it embedded; absent from the map, it keeps the bare tag that any
+				// keys it nested; absent from the map, it keeps the bare tag that any
 				// write to it drops.
-				const embeddedPins = embeddedScopedCachePins.get(collection);
+				const parentPins = m2oParentPins.get(collection);
 
-				if (embeddedPins === undefined) {
+				if (parentPins === undefined) {
 					scopedCacheTags.push({ collection });
 					continue;
 				}
 
-				scopedCacheTags.push(...embeddedPins);
+				scopedCacheTags.push(...parentPins);
 			}
 
 			scopedCacheTags = (await emitter.emitFilter(
