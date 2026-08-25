@@ -14,7 +14,7 @@ const cacheStatsFacts = [
 	'directus_scoped_cache_purge_tags',
 ];
 
-const CHUNK_INTERVAL = '6 hours';
+const CHUNK_INTERVAL = '3 hours';
 
 const PURGE_TAGS = 'directus_scoped_cache_purge_tags';
 
@@ -47,15 +47,18 @@ async function isHypertable(knex: Knex, table: string): Promise<boolean> {
 }
 
 /**
- * Every fact table chunked, and every chunk a quarter of the day it was.
+ * Every fact table chunked, and every chunk an eighth of the day it was.
  *
  * - The chunk a fact is currently writing cannot be compressed, `now()` being
  *   inside its range, so the raw head is whatever a chunk takes before it
  *   closes. On the one-day chunks 20260819A left, that head measured 170 MB of
  *   events plus 275 MB of purge tags plus 25 MB of purges: 470 MB of a budget
  *   that no compression policy can reach.
- * - Six hours rather than one: the head shrinks with the interval and the chunk
- *   count grows with it, and fourteen days already holds 56 chunks a fact here.
+ * - Three hours because the window this is sized for is three days: an interval
+ *   near a twenty-fourth of the window keeps the head small enough to leave the
+ *   budget for history, and gives the eviction ring something small to cut. The
+ *   head is the term that grows with traffic and cannot be compressed away, so
+ *   it is the one worth shortening before the traffic arrives.
  * - `compress_after` keeps the two hours 20260819A reasoned about. It counts
  *   from a chunk's CLOSE, so it does not shorten with the interval, and it
  *   still clears CACHE_STATS_GAP_LOOKBACK's late arrivals.

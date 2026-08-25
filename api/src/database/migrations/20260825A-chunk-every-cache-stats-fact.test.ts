@@ -67,14 +67,14 @@ beforeEach(() => {
 });
 
 describe('chunking every cache-stats fact', () => {
-	it('puts all three facts on six-hour chunks', async () => {
+	it('puts all three facts on three-hour chunks', async () => {
 		const knex = fakeKnex('pg', true);
 
 		await up(knex);
 
 		for (const table of everyFact) {
 			expect(statementsOf(knex)).toContain(
-				`SELECT set_chunk_time_interval('${table}', INTERVAL '6 hours')`,
+				`SELECT set_chunk_time_interval('${table}', INTERVAL '3 hours')`,
 			);
 		}
 	});
@@ -91,7 +91,7 @@ describe('chunking every cache-stats fact', () => {
 		// it the conversion refuses a table that is not empty.
 		expect(statementsOf(knex)).toContain(
 			`SELECT create_hypertable('${PURGE_TAGS}', 'time', `
-			+ `chunk_time_interval => INTERVAL '6 hours', `
+			+ `chunk_time_interval => INTERVAL '3 hours', `
 			+ `migrate_data => true, if_not_exists => true)`,
 		);
 
@@ -146,7 +146,7 @@ describe('chunking every cache-stats fact', () => {
 		await up(knex);
 
 		// compress_after counts from a chunk's close, not from each row, so it
-		// stays where 20260819A put it while the chunks get four times shorter.
+		// stays where 20260819A put it while the chunks get eight times shorter.
 		for (const table of everyFact) {
 			expect(statementsOf(knex)).toContain(
 				`SELECT add_compression_policy('${table}', `
