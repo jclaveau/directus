@@ -40,6 +40,7 @@ import {
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
+	type FieldTypesByField,
 	type ScopedCacheM2oJoin,
 } from '../scoped-cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
@@ -438,9 +439,9 @@ implements AbstractService<Item> {
 		};
 	}
 
-	private get collectionScopedCacheFieldTypes(): Record<string, Type | undefined> {
+	private get collectionScopedCacheFieldTypes(): FieldTypesByField {
 		const rootFields = this.schema.collections[this.collection]?.fields ?? {};
-		const types: Record<string, Type | undefined> = {};
+		const types: FieldTypesByField = {};
 
 		// The primary key pins implicitly on every collection, so its type travels with
 		// the declared ones — both sides canonicalize the key the same way.

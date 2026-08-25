@@ -1,5 +1,9 @@
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { FieldMap } from './permissions/modules/process-ast/types.js';
+import type {
+	CollectionKey,
+	FieldMap,
+	QueryPathKey,
+} from './permissions/modules/process-ast/types.js';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -1179,7 +1183,9 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 		})
 		.build();
 
-	function fieldMapOf(...paths: [string, string][]): FieldMap {
+	function fieldMapOf(
+		...paths: [QueryPathKey, CollectionKey][]
+	): FieldMap {
 		return {
 			read: new Map(paths.map(([path, collection]) => {
 				return [path, { collection, fields: new Set<string>() }];

@@ -15,6 +15,7 @@ import type {
 	CollectionKey,
 	FieldMap,
 	QueryPath,
+	QueryPathKey,
 } from './permissions/modules/process-ast/types.js';
 import { queueCacheAnomaly, queueCachePurge } from './cache-events.js';
 import emitter from './emitter.js';
@@ -230,6 +231,10 @@ export function canonicalScopedCacheValue(
 // `Date` from the driver but as an ISO string (possibly with an explicit `Z`) from a filter, so
 // the epoch-ms canonical can diverge. The read side never pins these — it falls back to the bare
 // collection tag so any write to the collection invalidates the read (over-purge, never stale).
+/** Each field of a collection mapped to its schema type, or undefined when the
+ * schema does not carry it. What canonicalizes a tag value on both sides. */
+export type FieldTypesByField = Record<string, Type | undefined>;
+
 const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>(['date', 'dateTime', 'timestamp']);
 
 function isPinnableScopeType(type: Type | undefined): boolean {
@@ -1066,7 +1071,7 @@ export function scopedCacheTagsFromRows(
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'coarse' | 'skip',
-	fieldTypes: Record<string, Type | undefined> = {},
+	fieldTypes: FieldTypesByField = {},
 ): ScopedCacheTag[] | null {
 	const tags: ScopedCacheTag[] = [];
 
@@ -1216,7 +1221,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// A set per collection: the field map carries the same path under both its read
 	// and its other group, and walking one path twice would double every row.
-	const pathsByCollection = new Map<CollectionKey, Set<string>>();
+	const pathsByCollection = new Map<CollectionKey, Set<QueryPathKey>>();
 
 	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
 		// The root is bounded by its own filter, not by what it embedded, and a
@@ -1225,7 +1230,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			continue;
 		}
 
-		const paths = pathsByCollection.get(entry.collection) ?? new Set<string>();
+		const paths = pathsByCollection.get(entry.collection) ?? new Set<QueryPathKey>();
 		paths.add(path);
 		pathsByCollection.set(entry.collection, paths);
 	}
@@ -1245,9 +1250,9 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		for (const path of paths) {
 			const segments = path.split('.');
-			const hops = resolveScopedCacheM2oJoinChain(schema, rootCollection, segments);
+			const joins = resolveScopedCacheM2oJoinChain(schema, rootCollection, segments);
 
-			if (hops === null) {
+			if (joins === null) {
 				reachedByM2oOnly = false;
 				break;
 			}
@@ -1297,7 +1302,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			continue;
 		}
 
-		const sliceFieldTypes: Record<string, Type | undefined> = {};
+		const sliceFieldTypes: FieldTypesByField = {};
 
 		for (const field of sliceFields) {
 			sliceFieldTypes[field] = collectionFields[field]?.type;
@@ -1352,7 +1357,7 @@ export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
 	fields: string[],
 	filter: Filter | null | undefined,
-	fieldTypes: Record<string, Type | undefined> = {},
+	fieldTypes: FieldTypesByField = {},
 	relatedPrimaryKeys: Record<string, string> = {},
 	scopedCachePaths: ScopedCachePath[] = [],
 	primaryKeyField?: string,
