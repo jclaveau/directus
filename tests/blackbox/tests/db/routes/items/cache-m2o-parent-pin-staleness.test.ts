@@ -320,6 +320,7 @@ describe(oneLine`
 			// one level below the node the deep filter names.
 			expect(warm.body.data[0].owner.company.id)
 				.toBe(grandparentMatchedCompanyId);
+
 			expect(warm.body.data[1].owner).not.toBe(null);
 			expect(warm.body.data[1].owner.company).toBe(null);
 
