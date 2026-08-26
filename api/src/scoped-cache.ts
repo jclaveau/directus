@@ -1064,11 +1064,16 @@ export async function purgeScopedCache(
  * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*. `'coarse'`
  *   returns `null` so the caller can fall back to a collection-wide purge rather than leave a
  *   slice stale; `'skip'` best-effort skips just that row's contribution.
- * - The `'coarse'` path only triggers for a caller feeding *unprojected* rows (e.g. a raw payload).
- *   The sole production caller (`snapshotScopedCacheTags`) reads rows via an explicit projected
- *   `select`, so every field key is always present and it never returns `null` there — an
- *   update/delete/create snapshot always resolves. A create whose committed rows can't be trusted
- *   is caught upstream by the row-count check (`someRowTakenOver`), not here.
+ * - The `'coarse'` path triggers for a caller feeding *unprojected* rows. The purge
+ *   side (`snapshotScopedCacheTags`) reads rows via an explicit projected `select`,
+ *   so every field key is always present and it never returns `null` there — an
+ *   update/delete/create snapshot always resolves. A create whose committed rows
+ *   can't be trusted is caught upstream by the row-count check
+ *   (`someRowTakenOver`), not here.
+ * - The read side (`pinnedScopedCacheTagsFromM2oParents`) is the caller that
+ *   depends on the `null`: one parent row missing its key has to take its whole
+ *   collection down to the bare tag, since pinning the rest would leave that row
+ *   covered by nothing.
  * - `fieldTypes`: each field's schema type, so the tag value canonicalizes the same way the read
  *   side's filter value does.
  */
