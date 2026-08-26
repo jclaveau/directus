@@ -25,9 +25,8 @@ const env = vi.hoisted(() => ({}) as Record<string, unknown>);
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 beforeEach(() => {
-	env['CACHE_STATS_FLUSH_SCHEDULE'] = '*/10 * * * * *';
-	env['CACHE_STATS_REAP_SCHEDULE'] = '0 3 * * *';
-	env['CACHE_STATS_DIMENSION_REAP_SCHEDULE'] = '*/10 * * * *';
+	env['CACHE_STATS_DRAIN_SCHEDULE'] = '*/10 * * * * *';
+	env['CACHE_STATS_RETENTION_SCHEDULE'] = '*/10 * * * *';
 	vi.mocked(validateCron).mockReturnValue(true);
 	vi.mocked(refreshCacheStatsFlag).mockResolvedValue();
 	vi.mocked(drainCacheEvents).mockResolvedValue(0);
@@ -60,15 +59,14 @@ describe('cache-stats schedule', () => {
 		// Named, because an unparseable rule takes the whole pipeline down with it
 		// and the variable that did it is the only useful thing to say.
 		expect(mockLogger.warn).toHaveBeenCalledWith(
-			expect.stringContaining('CACHE_STATS_FLUSH_SCHEDULE'),
+			expect.stringContaining('CACHE_STATS_DRAIN_SCHEDULE'),
 		);
 	});
 
 	it('takes each schedule from its own variable', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
-		env['CACHE_STATS_FLUSH_SCHEDULE'] = '*/30 * * * * *';
-		env['CACHE_STATS_REAP_SCHEDULE'] = '0 4 * * *';
-		env['CACHE_STATS_DIMENSION_REAP_SCHEDULE'] = '*/5 * * * *';
+		env['CACHE_STATS_DRAIN_SCHEDULE'] = '*/30 * * * * *';
+		env['CACHE_STATS_RETENTION_SCHEDULE'] = '*/5 * * * *';
 
 		await cacheStatsSchedule();
 
@@ -77,8 +75,7 @@ describe('cache-stats schedule', () => {
 
 		expect(registered).toEqual([
 			['cache-stats', '*/30 * * * * *'],
-			['cache-stats-reap', '0 4 * * *'],
-			['cache-stats-dimension-reap', '*/5 * * * *'],
+			['cache-stats-reap', '*/5 * * * *'],
 		]);
 	});
 
@@ -132,7 +129,7 @@ describe('cache-stats schedule', () => {
 		);
 	});
 
-	it('registers a daily reap for the fact tables', async () => {
+	it('reaps the facts, then the dimensions they orphan', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
 
 		await cacheStatsSchedule();
@@ -147,42 +144,36 @@ describe('cache-stats schedule', () => {
 		expect(reapCacheEvents).toHaveBeenCalled();
 		expect(reapCacheAnomalies).toHaveBeenCalled();
 
-		// The dimensions left the daily cycle: their disk is a peak row count, not
-		// a retention window, so waiting a day for it is what let them grow.
-		expect(reapCacheDescriptors).not.toHaveBeenCalled();
-		expect(reapScopedCacheEntryTags).not.toHaveBeenCalled();
+		// The order is the rule: a fact aging out is what orphans a descriptor,
+		// and a descriptor going is what orphans its entry tags. On two jobs at two
+		// cadences each link waited for the next tick of the one behind it.
+		const order = (job: any) => vi.mocked(job).mock.invocationCallOrder[0]!;
+
+		expect(order(reapCacheEvents)).toBeLessThan(order(reapCacheDescriptors));
+
+		expect(order(reapCacheDescriptors))
+			.toBeLessThan(order(reapScopedCacheEntryTags));
 	});
 
-	it('reaps the dimensions on their own short cadence', async () => {
+	it('registers one reap job, not two', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
 
 		await cacheStatsSchedule();
 
-		const reap = vi.mocked(scheduleSynchronizedJob).mock.calls.find(
-			(call) => call[0] === 'cache-stats-dimension-reap',
-		);
+		const names = vi.mocked(scheduleSynchronizedJob).mock.calls
+			.map(([name]) => name);
 
-		expect(reap).toBeDefined();
-
-		await reap![2](new Date(0));
-		expect(reapCacheDescriptors).toHaveBeenCalled();
-
-		// Descriptors first: a tag row is an orphan once its descriptor is gone, so
-		// this order hands the second reaper the rows the first just orphaned.
-		expect(vi.mocked(reapCacheDescriptors).mock.invocationCallOrder[0]!)
-			.toBeLessThan(
-				vi.mocked(reapScopedCacheEntryTags).mock.invocationCallOrder[0]!,
-			);
+		expect(names).toEqual(['cache-stats', 'cache-stats-reap']);
 	});
 
-	it('swallows a dimension reap error inside the scheduled job', async () => {
+	it('swallows a reap error inside the scheduled job', async () => {
 		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
-		vi.mocked(reapCacheDescriptors).mockRejectedValue(new Error('boom'));
+		vi.mocked(reapCacheEvents).mockRejectedValue(new Error('boom'));
 
 		await cacheStatsSchedule();
 
 		const reap = vi.mocked(scheduleSynchronizedJob).mock.calls.find(
-			(call) => call[0] === 'cache-stats-dimension-reap',
+			(call) => call[0] === 'cache-stats-reap',
 		);
 
 		// Without this the subscript below throws a TypeError of its own, which

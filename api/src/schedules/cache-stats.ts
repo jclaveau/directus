@@ -30,14 +30,16 @@ export default async function schedule(): Promise<boolean> {
 	const env = useEnv();
 	const logger = useLogger();
 
-	// Every ten seconds by default: low enough staleness for tuning, cheap for one
-	// node to drain a batch, and the cadence the byte budget is measured on.
-	const flushSchedule = String(env['CACHE_STATS_FLUSH_SCHEDULE']);
+	// Every ten seconds by default. Two things ride this tick: the buffered
+	// events are moved out of the Redis stream into the fact tables, and the byte
+	// budget is measured over those tables and evicted down to. Ten seconds is
+	// low enough staleness for tuning and cheap for one node to drain a batch.
+	const drainSchedule = String(env['CACHE_STATS_DRAIN_SCHEDULE']);
 
-	if (!validateCron(flushSchedule)) {
+	if (!validateCron(drainSchedule)) {
 		logger.warn(
-			`[cache-stats] CACHE_STATS_FLUSH_SCHEDULE is not a cron rule `
-			+ `(${flushSchedule}) — the pipeline stays off`,
+			`[cache-stats] CACHE_STATS_DRAIN_SCHEDULE is not a cron rule `
+			+ `(${drainSchedule}) — the pipeline stays off`,
 		);
 
 		return false;
@@ -52,62 +54,43 @@ export default async function schedule(): Promise<boolean> {
 	// the pipeline resolves, the last tick is still lost (telemetry is lossy anyway).
 	process.once('SIGTERM', () => void flushCacheEventBuffer());
 
-	scheduleSynchronizedJob('cache-stats', flushSchedule, async () => {
+	scheduleSynchronizedJob('cache-stats', drainSchedule, async () => {
 		try {
 			await drainCacheEvents();
 			await enforceCacheStatsBudget();
 		}
 		catch (err: any) {
-			logger.warn(err, `[cache-stats] flush/enforce failed. ${err.message}`);
+			logger.warn(err, `[cache-stats] drain/enforce failed. ${err.message}`);
 		}
 	});
 
-	// Daily by default: prune fact + anomaly rows past CACHE_STATS_RETENTION, the
-	// cross-dialect bound where no chunk-drop reclaims them.
-	const reapSchedule = String(env['CACHE_STATS_REAP_SCHEDULE']);
+	// One sweep for everything retention leaves behind, in the order the rules
+	// depend on each other: the facts age out on CACHE_STATS_RETENTION, which is
+	// what turns a descriptor into an orphan, which is what turns its entry tags
+	// into orphans. Two jobs on two cadences would have raced that chain.
+	//
+	// Every ten minutes rather than nightly because half of it is not a retention
+	// window at all: the dimensions have no time axis to drop by, so nothing
+	// reclaims their disk and what they settle at is their peak live row count.
+	// The fact half costs nothing at this cadence — it deletes only what aged out
+	// since the last pass — and it spreads what used to be a 3AM spike.
+	const retentionSchedule = String(env['CACHE_STATS_RETENTION_SCHEDULE']);
 
-	if (validateCron(reapSchedule)) {
-		scheduleSynchronizedJob('cache-stats-reap', reapSchedule, async () => {
+	if (validateCron(retentionSchedule)) {
+		scheduleSynchronizedJob('cache-stats-reap', retentionSchedule, async () => {
 			try {
 				await reapCacheEvents();
 				await reapCacheAnomalies();
 				await reapCachePurges();
 				await reapScopedCachePurgeTags();
 				await reapCacheConfigEvents();
+				await reapCacheDescriptors();
+				await reapScopedCacheEntryTags();
 			}
 			catch (err: any) {
 				logger.warn(err, `[cache-stats] reap failed. ${err.message}`);
 			}
 		});
-	}
-
-	// Every ten minutes by default for the two dimensions, which the fact
-	// retention leaves behind: they have no time axis to drop by, so a DELETE
-	// never returns their disk and the size they settle at is their peak live row
-	// count. Cheap because each pass takes a bounded slate through an index.
-	const dimensionReapSchedule = String(
-		env['CACHE_STATS_DIMENSION_REAP_SCHEDULE'],
-	);
-
-	if (validateCron(dimensionReapSchedule)) {
-		scheduleSynchronizedJob(
-			'cache-stats-dimension-reap',
-			dimensionReapSchedule,
-			async () => {
-				try {
-					// Descriptors first: the tags follow their entry's descriptor out,
-					// so the same tick that orphans one hands the next reaper its rows.
-					await reapCacheDescriptors();
-					await reapScopedCacheEntryTags();
-				}
-				catch (err: any) {
-					logger.warn(
-						err,
-						`[cache-stats] dimension reap failed. ${err.message}`,
-					);
-				}
-			},
-		);
 	}
 
 	return true;

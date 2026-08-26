@@ -221,17 +221,14 @@ CACHE_STORE=memory
 # How long cache-telemetry rows are kept; a daily reap prunes older ones (bounds table growth on every DB). ["30d"]
 # CACHE_STATS_RETENTION="30d"
 
-# When the buffered events are drained into the tables and the byte budget
-# is measured. ["*/10 * * * * *"]
-# CACHE_STATS_FLUSH_SCHEDULE="*/10 * * * * *"
+# When buffered events are moved from Redis into the tables, and with them when
+# the byte budget is measured and evicted down to. ["*/10 * * * * *"]
+# CACHE_STATS_DRAIN_SCHEDULE="*/10 * * * * *"
 
-# When rows past CACHE_STATS_RETENTION are pruned from the fact tables. ["0 3 * * *"]
-# CACHE_STATS_REAP_SCHEDULE="0 3 * * *"
-
-# When descriptors and entry tags whose entry is gone are pruned. Runs often:
-# they have no time axis to drop by, so their size is their peak live row
-# count. ["*/10 * * * *"]
-# CACHE_STATS_DIMENSION_REAP_SCHEDULE="*/10 * * * *"
+# When rows past CACHE_STATS_RETENTION are pruned, along with the descriptors
+# and entry tags left behind. Runs often: those two have no time axis to drop
+# by, so their size is their peak live row count. ["*/10 * * * *"]
+# CACHE_STATS_RETENTION_SCHEDULE="*/10 * * * *"
 
 # Drop the oldest cache telemetry once its tables outgrow this together.
 # Collection keeps running; the history shortens instead. Postgres only, and

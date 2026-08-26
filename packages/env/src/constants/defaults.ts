@@ -104,9 +104,8 @@ export const DEFAULTS = {
 	// and `MAX_BUFFER` (Redis-buffer stall guard).
 	CACHE_STATS_ENABLED: false,
 	CACHE_STATS_RETENTION: '30d',
-	CACHE_STATS_FLUSH_SCHEDULE: '*/10 * * * * *', // every ten seconds
-	CACHE_STATS_REAP_SCHEDULE: '0 3 * * *', // once a day at 3AM
-	CACHE_STATS_DIMENSION_REAP_SCHEDULE: '*/10 * * * *', // every ten minutes
+	CACHE_STATS_DRAIN_SCHEDULE: '*/10 * * * * *', // every ten seconds
+	CACHE_STATS_RETENTION_SCHEDULE: '*/10 * * * *', // every ten minutes
 	CACHE_STATS_MAX_BYTES: '2gb',
 	CACHE_STATS_MAX_BUFFER: 1_000_000,
 	CACHE_STATS_GAP_LOOKBACK: '1h',

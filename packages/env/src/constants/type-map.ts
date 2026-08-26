@@ -45,6 +45,11 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_BUILD_ID: 'string',
 	CACHE_STATS_ENABLED: 'boolean',
 	CACHE_STATS_RETENTION: 'string',
+	// Declared, or an untyped cron falls to guessType(): json for a plain rule and
+	// array for one with a comma in it, both surviving only because String() puts
+	// them back together.
+	CACHE_STATS_DRAIN_SCHEDULE: 'string',
+	CACHE_STATS_RETENTION_SCHEDULE: 'string',
 	CACHE_STATS_MAX_BYTES: 'string',
 	CACHE_STATS_MAX_BUFFER: 'number',
 	CACHE_STATS_GAP_LOOKBACK: 'string',
