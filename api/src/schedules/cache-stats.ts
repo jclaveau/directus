@@ -13,20 +13,9 @@ import {
 	refreshCacheStatsFlag,
 	subscribeCacheStatsToggle,
 } from '../cache-events.js';
+import { useEnv } from '@directus/env';
 import { useLogger } from '../logger/index.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
-
-// Every 10s: low enough staleness for tuning, cheap for one node to flush a batch.
-const FLUSH_CRON = '*/10 * * * * *';
-
-// Daily: prune fact + anomaly rows past CACHE_STATS_RETENTION (cross-dialect bound).
-const REAP_CRON = '0 3 * * *';
-
-// Every 10 minutes for the two dimensions, which the fact retention leaves behind:
-// they have no time axis to drop by, so a DELETE never returns their disk and the
-// size they settle at is their peak live row count. Cheap now that each pass takes
-// a bounded slate through an index (see reapDimensionOrphans).
-const DIMENSION_REAP_CRON = '*/10 * * * *';
 
 /**
  * Boot the cache-stats pipeline. The flush + budget watchdog run on a single node
@@ -38,11 +27,21 @@ export default async function schedule(): Promise<boolean> {
 		return false;
 	}
 
-	if (!validateCron(FLUSH_CRON)) {
+	const env = useEnv();
+	const logger = useLogger();
+
+	// Every ten seconds by default: low enough staleness for tuning, cheap for one
+	// node to drain a batch, and the cadence the byte budget is measured on.
+	const flushSchedule = String(env['CACHE_STATS_FLUSH_SCHEDULE']);
+
+	if (!validateCron(flushSchedule)) {
+		logger.warn(
+			`[cache-stats] CACHE_STATS_FLUSH_SCHEDULE is not a cron rule `
+			+ `(${flushSchedule}) — the pipeline stays off`,
+		);
+
 		return false;
 	}
-
-	const logger = useLogger();
 
 	// Prime the gate from the durable key, then take live updates off the bus
 	// (event-driven — no per-node poll). Boot-read covers a missed publish.
@@ -53,7 +52,7 @@ export default async function schedule(): Promise<boolean> {
 	// the pipeline resolves, the last tick is still lost (telemetry is lossy anyway).
 	process.once('SIGTERM', () => void flushCacheEventBuffer());
 
-	scheduleSynchronizedJob('cache-stats', FLUSH_CRON, async () => {
+	scheduleSynchronizedJob('cache-stats', flushSchedule, async () => {
 		try {
 			await drainCacheEvents();
 			await enforceCacheStatsBudget();
@@ -63,8 +62,12 @@ export default async function schedule(): Promise<boolean> {
 		}
 	});
 
-	if (validateCron(REAP_CRON)) {
-		scheduleSynchronizedJob('cache-stats-reap', REAP_CRON, async () => {
+	// Daily by default: prune fact + anomaly rows past CACHE_STATS_RETENTION, the
+	// cross-dialect bound where no chunk-drop reclaims them.
+	const reapSchedule = String(env['CACHE_STATS_REAP_SCHEDULE']);
+
+	if (validateCron(reapSchedule)) {
+		scheduleSynchronizedJob('cache-stats-reap', reapSchedule, async () => {
 			try {
 				await reapCacheEvents();
 				await reapCacheAnomalies();
@@ -78,10 +81,18 @@ export default async function schedule(): Promise<boolean> {
 		});
 	}
 
-	if (validateCron(DIMENSION_REAP_CRON)) {
+	// Every ten minutes by default for the two dimensions, which the fact
+	// retention leaves behind: they have no time axis to drop by, so a DELETE
+	// never returns their disk and the size they settle at is their peak live row
+	// count. Cheap because each pass takes a bounded slate through an index.
+	const dimensionReapSchedule = String(
+		env['CACHE_STATS_DIMENSION_REAP_SCHEDULE'],
+	);
+
+	if (validateCron(dimensionReapSchedule)) {
 		scheduleSynchronizedJob(
 			'cache-stats-dimension-reap',
-			DIMENSION_REAP_CRON,
+			dimensionReapSchedule,
 			async () => {
 				try {
 					// Descriptors first: the tags follow their entry's descriptor out,

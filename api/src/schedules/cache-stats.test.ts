@@ -15,9 +15,19 @@ import cacheStatsSchedule from './cache-stats.js';
 
 vi.mock('../cache-events.js');
 vi.mock('../utils/schedule.js');
-vi.mock('../logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
+
+const mockLogger = vi.hoisted(() => ({ warn: vi.fn() }));
+vi.mock('../logger/index.js', () => ({ useLogger: () => mockLogger }));
+
+// Hoisted: the automocked '../utils/schedule.js' loads the real module to build
+// its shape, and that reads the env before a plain const would exist.
+const env = vi.hoisted(() => ({}) as Record<string, unknown>);
+vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 beforeEach(() => {
+	env['CACHE_STATS_FLUSH_SCHEDULE'] = '*/10 * * * * *';
+	env['CACHE_STATS_REAP_SCHEDULE'] = '0 3 * * *';
+	env['CACHE_STATS_DIMENSION_REAP_SCHEDULE'] = '*/10 * * * *';
 	vi.mocked(validateCron).mockReturnValue(true);
 	vi.mocked(refreshCacheStatsFlag).mockResolvedValue();
 	vi.mocked(drainCacheEvents).mockResolvedValue(0);
@@ -46,6 +56,30 @@ describe('cache-stats schedule', () => {
 
 		expect(await cacheStatsSchedule()).toBe(false);
 		expect(scheduleSynchronizedJob).not.toHaveBeenCalled();
+
+		// Named, because an unparseable rule takes the whole pipeline down with it
+		// and the variable that did it is the only useful thing to say.
+		expect(mockLogger.warn).toHaveBeenCalledWith(
+			expect.stringContaining('CACHE_STATS_FLUSH_SCHEDULE'),
+		);
+	});
+
+	it('takes each schedule from its own variable', async () => {
+		vi.mocked(cacheStatsConfigured).mockReturnValue(true);
+		env['CACHE_STATS_FLUSH_SCHEDULE'] = '*/30 * * * * *';
+		env['CACHE_STATS_REAP_SCHEDULE'] = '0 4 * * *';
+		env['CACHE_STATS_DIMENSION_REAP_SCHEDULE'] = '*/5 * * * *';
+
+		await cacheStatsSchedule();
+
+		const registered = vi.mocked(scheduleSynchronizedJob).mock.calls
+			.map(([name, rule]) => [name, rule]);
+
+		expect(registered).toEqual([
+			['cache-stats', '*/30 * * * * *'],
+			['cache-stats-reap', '0 4 * * *'],
+			['cache-stats-dimension-reap', '*/5 * * * *'],
+		]);
 	});
 
 	it('primes from the key then subscribes to the bus for live toggles', async () => {
