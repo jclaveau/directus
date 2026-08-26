@@ -33,6 +33,8 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// broke a different one.
 			'/tests/db/routes/items/cache-cancel-write.test.ts',
 			'/tests/db/routes/items/cache-delete-scope.test.ts',
+			'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts',
+			'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts',
 			'/tests/db/routes/items/cache-nested-write.test.ts',
 			'/tests/db/routes/items/cache-poisoning-read.test.ts',
 			'/tests/db/routes/items/cache-poisoning-write.test.ts',

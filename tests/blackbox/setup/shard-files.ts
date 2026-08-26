@@ -25,6 +25,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/cache-cancel-write.test.ts': 11_000,
 	'/tests/db/routes/items/cache-poisoning-write.test.ts': 11_000,
 	'/tests/db/routes/items/cache-primary-key-scope.test.ts': 11_000,
+	'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts': 13_000,
+	'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts': 13_000,
 	'/tests/db/routes/items/cache-purge-recovery.test.ts': 20_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
 	// The `after` chain. The auth files spend their time waiting, not querying,
