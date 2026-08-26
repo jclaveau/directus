@@ -300,7 +300,6 @@ const ANOMALY_THROTTLE_MS = getMilliseconds('1m', 60_000);
 // Refreshed from Redis so a live toggle/autokill flips capture without a
 // restart. Seeded false; the schedule primes it before the first request.
 let cacheStatsActiveFlag = false;
-let isTimescaleCache: boolean | null = null;
 
 // Single-flight latch for the drain (see drainCacheEvents).
 let cacheEventDrainInProgress = false;
@@ -2318,101 +2317,6 @@ export async function reapCacheConfigEvents(): Promise<number> {
 }
 
 /**
- * Cached for the process's life: the extension is not installed under a running
- * server, and the answer gates a query on every budget tick.
- *
- * The helper is imported dynamically because its index pulls every dialect, and
- * each of those reads the env as it loads — a static import puts that in the
- * module graph of everything importing this file, before its own mocks run.
- */
-async function isTimescale(db: Knex): Promise<boolean> {
-	if (isTimescaleCache === null) {
-		const { getHelpers } = await import('./database/helpers/index.js');
-		isTimescaleCache = await getHelpers(db).schema.hasTimescale();
-	}
-
-	return isTimescaleCache;
-}
-
-/**
- * What the whole subsystem occupies, or null where it cannot be measured.
- *
- * - Every table it writes, not the one the budget used to name: on the database
- *   this was measured against, the fact it watched held 407 MB of a 4398 MB
- *   subsystem, and the largest table of the five was invisible to it.
- * - `hypertable_size()` for a chunked fact — its rows live in chunks the parent
- *   relation knows nothing about, so `pg_total_relation_size()` reads near zero
- *   there — and `pg_total_relation_size()` for everything else.
- * - null, not zero, when there is no measurement to be had: a non-Postgres
- *   client or a probe that threw. Zero would read as "far under budget" and let
- *   the ring below decide it has nothing to do on a table it cannot see.
- */
-async function cacheStatsBytes(db: Knex): Promise<number | null> {
-	if (db.client.config.client !== 'pg') {
-		return null;
-	}
-
-	try {
-		// to_regclass answers null for a table this install never created, and
-		// SUM skips the null rather than failing the whole measurement.
-		const sizeOfEach = (await isTimescale(db))
-			? `CASE WHEN chunked.hypertable_name IS NOT NULL `
-				+ `THEN hypertable_size(named.table_name::regclass) `
-				+ `ELSE pg_total_relation_size(to_regclass(named.table_name)) END`
-			: `pg_total_relation_size(to_regclass(named.table_name))`;
-
-		const chunkedJoin = (await isTimescale(db))
-			? `LEFT JOIN timescaledb_information.hypertables AS chunked `
-				+ `ON chunked.hypertable_name = named.table_name`
-			: '';
-
-		const { rows } = await db.raw(
-			`SELECT COALESCE(SUM(${sizeOfEach}), 0) AS bytes `
-			+ `FROM unnest(?::text[]) AS named(table_name) ${chunkedJoin}`,
-			[CACHE_STATS_TABLES],
-		);
-
-		return Number(rows[0].bytes);
-	}
-	catch {
-		return null;
-	}
-}
-
-/**
- * Drop the oldest chunk of whichever fact table owns it, and name it for the
- * log. Null when every remaining chunk is newer than `floor`.
- *
- * Oldest across the facts rather than most-of-them-first: they are read
- * together by time, so a budget that ate one table's history and left another's
- * would leave the page joining a window that only half exists.
- */
-async function dropOldestCacheStatsChunk( // eslint-disable-line local/no-single-caller-function -- two raw statements the eviction loop reads better without
-	db: Knex,
-	floor: Date,
-): Promise<string | null> {
-	const { rows } = await db.raw(
-		`SELECT hypertable_name, range_end FROM timescaledb_information.chunks `
-		+ `WHERE hypertable_name = ANY(?) AND range_end <= ? `
-		+ `ORDER BY range_start LIMIT 1`,
-		[CACHE_STATS_FACTS, floor],
-	);
-
-	if (rows.length === 0) {
-		return null;
-	}
-
-	const { hypertable_name: fact, range_end: rangeEnd } = rows[0];
-
-	await db.raw(
-		`SELECT drop_chunks(?::regclass, older_than => ?::timestamptz)`,
-		[fact, rangeEnd],
-	);
-
-	return `${fact} < ${new Date(rangeEnd).toISOString()}`;
-}
-
-/**
  * Hold the subsystem inside CACHE_STATS_MAX_BYTES by dropping its oldest
  * telemetry, so capture never has to stop to make room.
  *
@@ -2420,6 +2324,10 @@ async function dropOldestCacheStatsChunk( // eslint-disable-line local/no-single
  *   reapers do leaves the space behind for the table to reuse. So the ring runs
  *   on the facts, which are chunked, and the dimensions are held by their own
  *   reaper instead (see reapDimensionOrphans).
+ * - Which tables those are is this module's business; measuring them and cutting
+ *   a chunk is the database's, so both go to the dialect helper by name. It has
+ *   no idea they are cache telemetry, and the budget has no idea what a
+ *   hypertable is.
  * - It runs whether capture is on or off. A subsystem that was disabled still
  *   holds every byte it wrote, and the flag is not what the budget is about.
  * - Evicting to a low watermark rather than to the line stops the ring cutting
@@ -2437,10 +2345,14 @@ export async function enforceCacheStatsBudget(): Promise<void> {
 		String(useEnv()['CACHE_STATS_MAX_BYTES'] ?? ''),
 	);
 
-	const db = getDatabase();
+	// Dynamic because the helper index pulls every dialect, and each of those
+	// reads the env as it loads — a static import puts that in the module graph
+	// of everything importing this file, before its own mocks run.
+	const { getHelpers } = await import('./database/helpers/index.js');
+	const { schema } = getHelpers(getDatabase());
 
 	let bytes = maxBytes
-		? await cacheStatsBytes(db)
+		? await schema.getTablesSize(CACHE_STATS_TABLES)
 		: null;
 
 	if (bytes === null || bytes <= maxBytes) {
@@ -2452,7 +2364,7 @@ export async function enforceCacheStatsBudget(): Promise<void> {
 	const floor = new Date(Date.now() - CACHE_STATS_MIN_RETENTION);
 
 	for (let drop = 0; drop < CACHE_STATS_EVICTIONS_PER_TICK; drop += 1) {
-		const dropped = await dropOldestCacheStatsChunk(db, floor);
+		const dropped = await schema.dropOldestChunk(CACHE_STATS_FACTS, floor);
 
 		if (dropped === null) {
 			const alert = `${bytes}B over the ${maxBytes}B budget, and every `
@@ -2463,8 +2375,12 @@ export async function enforceCacheStatsBudget(): Promise<void> {
 			return;
 		}
 
-		logger.info(`[cache-stats] evicted ${dropped} to stay inside budget`);
-		bytes = await cacheStatsBytes(db);
+		logger.info(
+			`[cache-stats] evicted ${dropped.table} < `
+			+ `${dropped.upTo.toISOString()} to stay inside budget`,
+		);
+
+		bytes = await schema.getTablesSize(CACHE_STATS_TABLES);
 
 		if (bytes === null || bytes <= maxBytes * CACHE_STATS_BUDGET_LOW_WATER) {
 			await clearCacheStatsBudgetAlert();

@@ -51,13 +51,20 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
-// The dialect helper answers the Timescale probe. cache-events.ts imports it
-// dynamically so the tree stays out of every consumer's module graph; mocking
-// it here keeps it out of this one's too.
-const mockHasTimescale = vi.hoisted(() => vi.fn(async () => true));
+// The dialect helper measures the tables and cuts the chunks. cache-events.ts
+// imports it dynamically so the tree stays out of every consumer's module
+// graph; mocking it here keeps it out of this one's too.
+const mockSchema = vi.hoisted(() => {
+	return {
+		getTablesSize: vi.fn(async () => null as number | null),
+		dropOldestChunk: vi.fn(
+			async () => null as { table: string; upTo: Date } | null,
+		),
+	};
+});
 
 vi.mock('./database/helpers/index.js', () => {
-	return { getHelpers: () => ({ schema: { hasTimescale: mockHasTimescale } }) };
+	return { getHelpers: () => ({ schema: mockSchema }) };
 });
 
 // cache.js reaches this module through scoped-cache.js, so the descriptor reaper
@@ -1398,67 +1405,59 @@ describe('drainCacheEvents', () => {
 describe('enforceCacheStatsBudget', () => {
 	const HOUR = 3_600_000;
 
-	// Answer each of the ring's queries by what it asks for rather than by call
-	// order: the timescale probe is cached for the module's life, so an order the
-	// first test in the file sets would decide every later one.
+	// The helper is the seam now: the sizes it reports in turn, and the chunks it
+	// says it dropped. What SQL any of that becomes is the dialect's own test.
 	function scriptRing(
-		sizes: number[],
-		oldestChunks: any[][],
-		hasTimescale = true,
+		sizes: (number | null)[],
+		drops: ({ table: string; upTo: Date } | null)[],
 	) {
 		const measured = [...sizes];
-		const chunks = [...oldestChunks];
-		mockHasTimescale.mockResolvedValue(hasTimescale);
+		const cuts = [...drops];
 
-		mockDb.raw.mockImplementation(async (sql: string) => {
-			if (sql.includes('unnest')) {
-				return { rows: [{ bytes: measured.shift() ?? 0 }] };
-			}
+		mockSchema.getTablesSize.mockImplementation(async () => {
+			return measured.length > 0
+				? measured.shift()!
+				: 0;
+		});
 
-			if (sql.includes('timescaledb_information.chunks')) {
-				return { rows: chunks.shift() ?? [] };
-			}
-
-			return { rows: [] };
+		mockSchema.dropOldestChunk.mockImplementation(async () => {
+			return cuts.length > 0
+				? cuts.shift()!
+				: null;
 		});
 	}
 
-	function oldestChunk(fact: string, ageMs: number) {
-		return [{
-			hypertable_name: fact,
-			range_end: new Date(Date.now() - ageMs),
-		}];
+	function chunkOf(table: string, ageMs: number) {
+		return { table, upTo: new Date(Date.now() - ageMs) };
 	}
 
-	function droppedChunks() {
-		return mockDb.raw.mock.calls
-			.filter(([sql]: [string]) => sql.includes('drop_chunks'));
-	}
+	const droppedChunks = () => mockSchema.dropOldestChunk.mock.calls;
 
 	it('drops the oldest chunk when the subsystem is over budget', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		const rangeEnd = new Date(Date.now() - 48 * HOUR);
-
-		scriptRing(
-			[5000, 100],
-			[[{ hypertable_name: 'directus_cache_purges', range_end: rangeEnd }]],
-		);
+		scriptRing([5000, 100], [chunkOf('directus_cache_purges', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
 		expect(droppedChunks()).toHaveLength(1);
 
-		expect(mockDb.raw).toHaveBeenCalledWith(
-			expect.stringContaining('drop_chunks'),
-			['directus_cache_purges', rangeEnd],
+		// The facts, not every table it measures: the dimensions have no chunk to
+		// cut, and are held by their reaper instead.
+		expect(mockSchema.dropOldestChunk).toHaveBeenCalledWith(
+			[
+				'directus_cache_events',
+				'directus_cache_purges',
+				'directus_scoped_cache_purge_tags',
+			],
+			expect.any(Date),
 		);
 	});
 
 	it('never disables capture to stay inside the byte budget', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		scriptRing([5000, 100], [oldestChunk('directus_cache_events', 48 * HOUR)]);
+		scriptRing([5000, 100], [chunkOf('directus_cache_events', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
@@ -1476,7 +1475,7 @@ describe('enforceCacheStatsBudget', () => {
 	it('evicts while capture is off — the bytes are there either way', async () => {
 		await setCacheStatsEnabled(false);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		scriptRing([5000, 100], [oldestChunk('directus_cache_events', 48 * HOUR)]);
+		scriptRing([5000, 100], [chunkOf('directus_cache_events', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
@@ -1490,8 +1489,8 @@ describe('enforceCacheStatsBudget', () => {
 		// 1000 is already under the 1024 budget and still over the 921 watermark:
 		// stopping at the line would leave the next tick cutting another chunk.
 		scriptRing([5000, 1000, 900], [
-			oldestChunk('directus_cache_events', 48 * HOUR),
-			oldestChunk('directus_cache_events', 47 * HOUR),
+			chunkOf('directus_cache_events', 48 * HOUR),
+			chunkOf('directus_cache_events', 47 * HOUR),
 		]);
 
 		await enforceCacheStatsBudget();
@@ -1503,23 +1502,20 @@ describe('enforceCacheStatsBudget', () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
 
-		// No chunk old enough to drop: over budget is not a licence to delete the
+		// Nothing old enough to drop: over budget is not a licence to delete the
 		// hour that would explain the burst which filled it.
-		scriptRing([5000], [[]]);
+		scriptRing([5000], [null]);
 
 		await enforceCacheStatsBudget();
 
-		expect(droppedChunks()).toHaveLength(0);
 		expect(cacheStatsActive()).toBe(true);
 
-		const [, bindings] = mockDb.raw.mock.calls.find(
-			([sql]: [string]) => sql.includes('timescaledb_information.chunks'),
-		)!;
+		const [, floor] = mockSchema.dropOldestChunk.mock.calls[0]!;
 
-		expect(Date.now() - (bindings[1] as Date).getTime())
+		expect(Date.now() - (floor as Date).getTime())
 			.toBeGreaterThanOrEqual(6 * HOUR);
 
-		expect(Date.now() - (bindings[1] as Date).getTime())
+		expect(Date.now() - (floor as Date).getTime())
 			.toBeLessThan(6 * HOUR + 1000);
 	});
 
@@ -1533,7 +1529,7 @@ describe('enforceCacheStatsBudget', () => {
 			Array.from({ length: 20 }, () => 5000),
 			Array.from(
 				{ length: 20 },
-				() => oldestChunk('directus_cache_events', 48 * HOUR),
+				() => chunkOf('directus_cache_events', 48 * HOUR),
 			),
 		);
 
@@ -1549,13 +1545,9 @@ describe('enforceCacheStatsBudget', () => {
 
 		await enforceCacheStatsBudget();
 
-		const [sql, bindings] = mockDb.raw.mock.calls.find(
-			([statement]: [string]) => statement.includes('unnest'),
-		)!;
-
 		// The budget used to name directus_cache_events alone, which on the
 		// database this was measured against was under a tenth of the footprint.
-		expect(bindings[0]).toEqual([
+		expect(mockSchema.getTablesSize).toHaveBeenCalledWith([
 			'directus_cache_events',
 			'directus_cache_purges',
 			'directus_scoped_cache_purge_tags',
@@ -1564,32 +1556,6 @@ describe('enforceCacheStatsBudget', () => {
 			'directus_cache_anomalies',
 			'directus_cache_config_events',
 		]);
-
-		// A chunked fact keeps its rows in chunks the parent knows nothing about,
-		// so only hypertable_size() sees them; the plain tables need the other.
-		expect(sql).toContain('hypertable_size');
-		expect(sql).toContain('pg_total_relation_size');
-	});
-
-	it('measures by relation size alone on plain postgres', async () => {
-		// isTimescale caches for the module's life, so only a fresh import can
-		// reach the branch a Timescale-shaped test above already decided.
-		vi.resetModules();
-		const fresh = await import('./cache-events.js');
-
-		mockRedis.get.mockResolvedValueOnce(null);
-		await fresh.refreshCacheStatsFlag();
-
-		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		scriptRing([100], [], false);
-
-		await fresh.enforceCacheStatsBudget();
-
-		const [sql] = mockDb.raw.mock.calls.find(
-			([statement]: [string]) => statement.includes('unnest'),
-		)!;
-
-		expect(sql).not.toContain('hypertable_size');
 	});
 
 	it('does not measure at all when no byte budget is set', async () => {
@@ -1599,25 +1565,18 @@ describe('enforceCacheStatsBudget', () => {
 
 		await enforceCacheStatsBudget();
 
-		expect(mockDb.raw).not.toHaveBeenCalled();
+		expect(mockSchema.getTablesSize).not.toHaveBeenCalled();
 	});
 
-	it('skips the ring on a non-postgres client', async () => {
+	it('evicts nothing where the size cannot be measured', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		mockDb.client = { config: { client: 'sqlite3' } };
 
-		await enforceCacheStatsBudget();
-
-		expect(mockDb.raw).not.toHaveBeenCalled();
-	});
-
-	it('evicts nothing when the size probe rejects', async () => {
-		// An unmeasurable subsystem must not read as an empty one: dropping chunks
-		// on a size of zero would cut history to answer a number nobody has.
-		mockDb.raw.mockRejectedValue(new Error('boom'));
-		await armFlag(null);
-		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		// null is what a dialect with no cheap measure answers, and what the
+		// Postgres one answers when its probe throws. An unmeasurable subsystem
+		// must not read as an empty one — zero would look far under budget and
+		// cut history to answer a number nobody has.
+		scriptRing([null], [chunkOf('directus_cache_events', 48 * HOUR)]);
 
 		await expect(enforceCacheStatsBudget()).resolves.toBeUndefined();
 		expect(droppedChunks()).toHaveLength(0);
@@ -1626,7 +1585,7 @@ describe('enforceCacheStatsBudget', () => {
 	it('raises an alert when the floor leaves nothing to evict', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		scriptRing([5000], [[]]);
+		scriptRing([5000], [null]);
 
 		await enforceCacheStatsBudget();
 
