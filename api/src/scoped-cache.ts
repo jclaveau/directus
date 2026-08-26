@@ -3,6 +3,7 @@ import type {
 	EventContext,
 	Filter,
 	Item,
+	Query,
 	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
@@ -1216,13 +1217,15 @@ function m2oParentRowsAtPathEnd(
  * pin on those rows would leave the entry alive through a write that changes
  * what the read returns.
  *
- * - The root query filters, sorts, groups or aggregates on a path into it
- *   (permission cases joined the way the SQL WHERE joins them), so rows the
- *   response never nested decide which rows come back.
- * - A nested node carries its own filter, permission cases or field-level case, so a
- *   parent it references can be withheld and arrive as a null slot — which
- *   `mergeWithParentItems` writes for a null foreign key too, leaving the two
- *   indistinguishable once the rows are merged.
+ * - A query filters, sorts, groups or aggregates on a path into it (permission cases
+ *   joined the way the SQL WHERE joins them), so rows the response never nested
+ *   decide which rows come back. Read off EVERY node's query, not only the root's: a
+ *   nested node's filter withholds parents, and which ones it withholds is
+ *   decided by every collection that filter reads — each of them one the
+ *   response may have nested only in part.
+ * - A nested node carries a field-level case, so a parent it references can be
+ *   withheld and arrive as a null slot — which `mergeWithParentItems` writes for
+ *   a null foreign key too, leaving the two indistinguishable once merged.
  */
 export function scopedCacheCollectionsBeyondNestedRows(
 	schema: SchemaOverview,
@@ -1230,38 +1233,50 @@ export function scopedCacheCollectionsBeyondNestedRows(
 ): Set<CollectionKey> {
 	const beyond = new Set<CollectionKey>();
 
-	const queryFieldMap: FieldMap = { read: new Map(), other: new Map() };
+	const addCollectionsQueriedBy = (
+		collection: CollectionKey,
+		query: Query,
+		cases: Filter[],
+	): void => {
+		const queryFieldMap: FieldMap = { read: new Map(), other: new Map() };
 
-	extractFieldsFromQuery(
-		ast.name,
-		{ ...ast.query, filter: joinFilterWithCases(ast.query.filter, ast.cases) },
-		queryFieldMap,
-		schema,
-	);
+		extractFieldsFromQuery(
+			collection,
+			{ ...query, filter: joinFilterWithCases(query.filter, cases) },
+			queryFieldMap,
+			schema,
+		);
 
-	for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
-		beyond.add(entry.collection);
-	}
+		for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
+			beyond.add(entry.collection);
+		}
+	};
 
-	const withheldParentsIn = (children: AST['children']): void => {
+	addCollectionsQueriedBy(ast.name, ast.query, ast.cases);
+
+	const addWhatNestedM2oNodesDependOn = (children: AST['children']): void => {
 		for (const child of children) {
 			if (child.type !== 'm2o') {
 				continue;
 			}
 
-			const hides = child.query.filter !== undefined
-				|| child.cases.length > 0
-				|| child.whenCase.length > 0;
+			addCollectionsQueriedBy(
+				child.relation.related_collection!,
+				child.query,
+				child.cases,
+			);
 
-			if (hides) {
+			// Not a filter, so nothing above reads it: the case decides per ROW
+			// whether this parent is shown at all.
+			if (child.whenCase.length > 0) {
 				beyond.add(child.relation.related_collection!);
 			}
 
-			withheldParentsIn(child.children);
+			addWhatNestedM2oNodesDependOn(child.children);
 		}
 	};
 
-	withheldParentsIn(ast.children);
+	addWhatNestedM2oNodesDependOn(ast.children);
 
 	return beyond;
 }
