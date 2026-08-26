@@ -13,6 +13,11 @@ import type { Knex } from 'knex';
  * though it is the one table written whether collection is on or off: the
  * prefix says which subsystem owns the table, not when the table is written.
  * It is budgeted, reaped and read with the others.
+ *
+ * The two tag tables keep `scoped` in the leaf, because it is true of every row
+ * they hold: each one is a single scoped-cache tag, and a purge that dropped no
+ * tag contributes none. The subsystem prefix says who owns them; `scoped` says
+ * what they are about, and the second is not implied by the first.
  */
 const RENAMES: [from: string, to: string][] = [
 	['directus_cache_events', 'directus_cache_stats_events'],
@@ -20,8 +25,8 @@ const RENAMES: [from: string, to: string][] = [
 	['directus_cache_anomalies', 'directus_cache_stats_anomalies'],
 	['directus_cache_config_events', 'directus_cache_stats_config_events'],
 	['directus_cache_purges', 'directus_cache_stats_purges'],
-	['directus_scoped_cache_purge_tags', 'directus_cache_stats_purge_tags'],
-	['directus_scoped_cache_entry_tags', 'directus_cache_stats_entry_tags'],
+	['directus_scoped_cache_purge_tags', 'directus_cache_stats_scoped_purge_tags'],
+	['directus_scoped_cache_entry_tags', 'directus_cache_stats_scoped_entry_tags'],
 ];
 
 /**

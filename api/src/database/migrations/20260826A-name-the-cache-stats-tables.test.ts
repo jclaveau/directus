@@ -11,8 +11,12 @@ const OLD_NAMES = [
 	'directus_scoped_cache_entry_tags',
 ];
 
+// `scoped` survives in the leaf of the two tag tables, so the new name is not a
+// blanket substitution of the old prefix.
 const NEW_NAMES = OLD_NAMES.map((name) => {
-	return name.replace(/^directus_(scoped_)?cache_/, 'directus_cache_stats_');
+	return name
+		.replace(/^directus_scoped_cache_/, 'directus_cache_stats_scoped_')
+		.replace(/^directus_cache_(?!stats_)/, 'directus_cache_stats_');
 });
 
 // `present` is the set of tables the database holds; renaming moves a name from
@@ -46,7 +50,7 @@ describe('naming the cache-stats tables', () => {
 		// the telemetry is the whole reason there were two prefixes.
 		expect(knex.schema.renameTable).toHaveBeenCalledWith(
 			'directus_scoped_cache_purge_tags',
-			'directus_cache_stats_purge_tags',
+			'directus_cache_stats_scoped_purge_tags',
 		);
 	});
 

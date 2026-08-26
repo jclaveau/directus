@@ -3676,7 +3676,7 @@ describe('App Caching Tests', () => {
 
 			// A second tag of the same collection on the same entry, so the coarse
 			// join has two rows through which to reach one purge.
-			await db('directus_cache_stats_entry_tags').insert({
+			await db('directus_cache_stats_scoped_entry_tags').insert({
 				cache_key: entry.key,
 				scoped_cache_tag: `${collectionFirst}:decoy=1`,
 				collection: collectionFirst,
@@ -3687,7 +3687,7 @@ describe('App Caching Tests', () => {
 			const expired = randomUUID();
 			const now = Date.now();
 
-			await db('directus_cache_stats_purge_tags').insert([
+			await db('directus_cache_stats_scoped_purge_tags').insert([
 				// The purge that covered it: one tag-less row naming the collection,
 				// which is all a collection-wide purge knows about its own reach.
 				{
@@ -3729,11 +3729,11 @@ describe('App Caching Tests', () => {
 			expect(after).toBeDefined();
 			expect(after.purges).toBe(1);
 
-			await db('directus_cache_stats_purge_tags')
+			await db('directus_cache_stats_scoped_purge_tags')
 				.whereIn('purge_id', [covering, elsewhere, expired])
 				.delete();
 
-			await db('directus_cache_stats_entry_tags')
+			await db('directus_cache_stats_scoped_entry_tags')
 				.where({
 					cache_key: entry.key,
 					scoped_cache_tag: `${collectionFirst}:decoy=1`,

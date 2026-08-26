@@ -144,14 +144,14 @@ data:
     note: $t:directus_collection.directus_cache_stats_purges
     accountability: null
 
-  - collection: directus_cache_stats_entry_tags
+  - collection: directus_cache_stats_scoped_entry_tags
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_stats_entry_tags
+    note: $t:directus_collection.directus_cache_stats_scoped_entry_tags
     accountability: null
 
-  - collection: directus_cache_stats_purge_tags
+  - collection: directus_cache_stats_scoped_purge_tags
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_stats_purge_tags
+    note: $t:directus_collection.directus_cache_stats_scoped_purge_tags
     accountability: null

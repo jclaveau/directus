@@ -266,7 +266,7 @@ const DIMENSION_REAP_PASSES = 4;
 const CACHE_STATS_FACTS = [
 	'directus_cache_stats_events',
 	'directus_cache_stats_purges',
-	'directus_cache_stats_purge_tags',
+	'directus_cache_stats_scoped_purge_tags',
 ];
 
 // Everything the subsystem writes, which is what the budget measures: the facts
@@ -274,7 +274,7 @@ const CACHE_STATS_FACTS = [
 const CACHE_STATS_TABLES = [
 	...CACHE_STATS_FACTS,
 	'directus_cache_stats_descriptors',
-	'directus_cache_stats_entry_tags',
+	'directus_cache_stats_scoped_entry_tags',
 	'directus_cache_stats_anomalies',
 	'directus_cache_stats_config_events',
 ];
@@ -1080,7 +1080,7 @@ async function persistStreamBatch(
 
 			if (purgedScopedCacheTags.length > 0) {
 				await trx.batchInsert(
-					'directus_cache_stats_purge_tags',
+					'directus_cache_stats_scoped_purge_tags',
 					purgedScopedCacheTags,
 					FLUSH_BATCH,
 				);
@@ -1089,7 +1089,7 @@ async function persistStreamBatch(
 			// Replaced, not merged: a refill under a narrower scope must not leave
 			// the old tags behind claiming coverage the entry no longer has.
 			if (entryScopedCacheTags.size > 0) {
-				await trx('directus_cache_stats_entry_tags')
+				await trx('directus_cache_stats_scoped_entry_tags')
 					.whereIn('cache_key', [...entryScopedCacheTags.keys()])
 					.delete();
 
@@ -1102,7 +1102,7 @@ async function persistStreamBatch(
 
 				if (rows.length > 0) {
 					await trx.batchInsert(
-						'directus_cache_stats_entry_tags',
+						'directus_cache_stats_scoped_entry_tags',
 						rows,
 						FLUSH_BATCH,
 					);
@@ -1152,9 +1152,9 @@ function scopedCachePurgeCoverage(
 	since: Date,
 ): Knex.QueryBuilder {
 	if (reach === 'tag') {
-		return db('directus_cache_stats_entry_tags as et')
+		return db('directus_cache_stats_scoped_entry_tags as et')
 			.join(
-				'directus_cache_stats_purge_tags as pt',
+				'directus_cache_stats_scoped_purge_tags as pt',
 				'pt.scoped_cache_tag',
 				'et.scoped_cache_tag',
 			)
@@ -1162,9 +1162,9 @@ function scopedCachePurgeCoverage(
 			.whereIn('et.cache_key', cacheKeys);
 	}
 
-	return db('directus_cache_stats_purge_tags as pt')
+	return db('directus_cache_stats_scoped_purge_tags as pt')
 		.join(
-			'directus_cache_stats_entry_tags as et',
+			'directus_cache_stats_scoped_entry_tags as et',
 			'et.collection',
 			'pt.collection',
 		)
@@ -1832,7 +1832,7 @@ export async function reapScopedCachePurgeTags(): Promise<number> {
 
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_cache_stats_purge_tags')
+	return getDatabase()('directus_cache_stats_scoped_purge_tags')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -1847,7 +1847,7 @@ export async function reapScopedCacheEntryTags(): Promise<number> {
 		return 0;
 	}
 
-	const dimensionTable = 'directus_cache_stats_entry_tags';
+	const dimensionTable = 'directus_cache_stats_scoped_entry_tags';
 
 	return reapDimensionOrphans(dimensionTable, (query) => {
 		whereUnreferencedBy(query, 'directus_cache_stats_descriptors', dimensionTable);
@@ -2498,8 +2498,8 @@ export async function truncateCacheEvents(): Promise<void> {
 	// they would count against entries whose own history was just cleared —
 	// purges without hits, on a window that reports no traffic at all.
 	await db('directus_cache_stats_purges').truncate();
-	await db('directus_cache_stats_purge_tags').truncate();
-	await db('directus_cache_stats_entry_tags').truncate();
+	await db('directus_cache_stats_scoped_purge_tags').truncate();
+	await db('directus_cache_stats_scoped_entry_tags').truncate();
 
 	// Full reset: also drop the Redis transients tied to those rows — else buffered
 	// events drain back in and a held throttle slot suppresses the next sample.
