@@ -115,43 +115,43 @@ data:
   - collection: directus_extensions
     note: $t:directus_collection.directus_extensions
 
-  - collection: directus_cache_descriptors
+  - collection: directus_cache_stats_descriptors
     icon: memory
-    note: $t:directus_collection.directus_cache_descriptors
+    note: $t:directus_collection.directus_cache_stats_descriptors
     accountability: null
 
-  - collection: directus_cache_events
+  - collection: directus_cache_stats_events
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_events
+    note: $t:directus_collection.directus_cache_stats_events
     accountability: null
 
-  - collection: directus_cache_anomalies
+  - collection: directus_cache_stats_anomalies
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_anomalies
+    note: $t:directus_collection.directus_cache_stats_anomalies
     accountability: null
 
-  - collection: directus_cache_config_events
+  - collection: directus_cache_stats_config_events
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_config_events
+    note: $t:directus_collection.directus_cache_stats_config_events
     accountability: null
 
-  - collection: directus_cache_purges
+  - collection: directus_cache_stats_purges
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_cache_purges
+    note: $t:directus_collection.directus_cache_stats_purges
     accountability: null
 
-  - collection: directus_scoped_cache_entry_tags
+  - collection: directus_cache_stats_entry_tags
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_scoped_cache_entry_tags
+    note: $t:directus_collection.directus_cache_stats_entry_tags
     accountability: null
 
-  - collection: directus_scoped_cache_purge_tags
+  - collection: directus_cache_stats_purge_tags
     hidden: true
     icon: memory
-    note: $t:directus_collection.directus_scoped_cache_purge_tags
+    note: $t:directus_collection.directus_cache_stats_purge_tags
     accountability: null

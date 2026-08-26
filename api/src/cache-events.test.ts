@@ -766,7 +766,7 @@ describe('drainCacheEvents', () => {
 		expect(drained).toBe(3);
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_events',
+			'directus_cache_stats_events',
 			[
 				{
 					time: new Date(1000),
@@ -790,7 +790,7 @@ describe('drainCacheEvents', () => {
 			500,
 		);
 
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
 
 		expect(builder.insert).toHaveBeenCalledWith([
 			{
@@ -903,7 +903,7 @@ describe('drainCacheEvents', () => {
 		expect(drained).toBe(1);
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_anomalies',
+			'directus_cache_stats_anomalies',
 			[
 				{
 					time: new Date(4000),
@@ -948,7 +948,7 @@ describe('drainCacheEvents', () => {
 		await drainCacheEvents();
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_purges',
+			'directus_cache_stats_purges',
 			[
 				{
 					time: new Date(6000),
@@ -975,7 +975,7 @@ describe('drainCacheEvents', () => {
 		// Each tag becomes its own row, carrying the purge's id so an entry covered
 		// by two of them still counts the purge once.
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_scoped_cache_purge_tags',
+			'directus_cache_stats_purge_tags',
 			[
 				{
 					purge_id: 'p-1',
@@ -1003,7 +1003,7 @@ describe('drainCacheEvents', () => {
 
 		// And none of it leaked into the hit/miss fact table beside it.
 		expect(mockDb.batchInsert).not.toHaveBeenCalledWith(
-			'directus_cache_events',
+			'directus_cache_stats_events',
 			expect.anything(),
 			expect.anything(),
 		);
@@ -1034,7 +1034,7 @@ describe('drainCacheEvents', () => {
 		// collection, and enumerating derived slices is the unbounded fan-out this
 		// table exists to avoid.
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_scoped_cache_purge_tags',
+			'directus_cache_stats_purge_tags',
 			[
 				{
 					purge_id: 'p-coarse',
@@ -1062,7 +1062,7 @@ describe('drainCacheEvents', () => {
 		await drainCacheEvents();
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_scoped_cache_entry_tags',
+			'directus_cache_stats_entry_tags',
 			[
 				{
 					cache_key: 'k1',
@@ -1098,7 +1098,7 @@ describe('drainCacheEvents', () => {
 		expect(builder.delete).toHaveBeenCalled();
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_scoped_cache_entry_tags',
+			'directus_cache_stats_entry_tags',
 			[
 				{ cache_key: 'k1', scoped_cache_tag: 'a', collection: 'a' },
 				{ cache_key: 'k1', scoped_cache_tag: 'a:owner=7', collection: 'a' },
@@ -1120,7 +1120,7 @@ describe('drainCacheEvents', () => {
 		await drainCacheEvents();
 
 		expect(mockDb.batchInsert).not.toHaveBeenCalledWith(
-			'directus_scoped_cache_entry_tags',
+			'directus_cache_stats_entry_tags',
 			expect.anything(),
 			expect.anything(),
 		);
@@ -1139,7 +1139,7 @@ describe('drainCacheEvents', () => {
 		await drainCacheEvents();
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_events',
+			'directus_cache_stats_events',
 			[
 				{
 					time: new Date(6000),
@@ -1174,7 +1174,7 @@ describe('drainCacheEvents', () => {
 		await drainCacheEvents();
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_events',
+			'directus_cache_stats_events',
 			[
 				{
 					time: new Date(5000),
@@ -1393,7 +1393,7 @@ describe('drainCacheEvents', () => {
 		expect(await drainCacheEvents()).toBe(1);
 
 		expect(mockDb.batchInsert).toHaveBeenCalledWith(
-			'directus_cache_events',
+			'directus_cache_stats_events',
 			[expect.objectContaining({ cache_key: 'kp' })],
 			500,
 		);
@@ -1436,7 +1436,7 @@ describe('enforceCacheStatsBudget', () => {
 	it('drops the oldest chunk when the subsystem is over budget', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		scriptRing([5000, 100], [chunkOf('directus_cache_purges', 48 * HOUR)]);
+		scriptRing([5000, 100], [chunkOf('directus_cache_stats_purges', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
@@ -1446,9 +1446,9 @@ describe('enforceCacheStatsBudget', () => {
 		// cut, and are held by their reaper instead.
 		expect(mockSchema.dropOldestChunk).toHaveBeenCalledWith(
 			[
-				'directus_cache_events',
-				'directus_cache_purges',
-				'directus_scoped_cache_purge_tags',
+				'directus_cache_stats_events',
+				'directus_cache_stats_purges',
+				'directus_cache_stats_scoped_purge_tags',
 			],
 			expect.any(Date),
 		);
@@ -1457,7 +1457,7 @@ describe('enforceCacheStatsBudget', () => {
 	it('never disables capture to stay inside the byte budget', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		scriptRing([5000, 100], [chunkOf('directus_cache_events', 48 * HOUR)]);
+		scriptRing([5000, 100], [chunkOf('directus_cache_stats_events', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
@@ -1475,7 +1475,7 @@ describe('enforceCacheStatsBudget', () => {
 	it('evicts while capture is off — the bytes are there either way', async () => {
 		await setCacheStatsEnabled(false);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		scriptRing([5000, 100], [chunkOf('directus_cache_events', 48 * HOUR)]);
+		scriptRing([5000, 100], [chunkOf('directus_cache_stats_events', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
@@ -1489,8 +1489,8 @@ describe('enforceCacheStatsBudget', () => {
 		// 1000 is already under the 1024 budget and still over the 921 watermark:
 		// stopping at the line would leave the next tick cutting another chunk.
 		scriptRing([5000, 1000, 900], [
-			chunkOf('directus_cache_events', 48 * HOUR),
-			chunkOf('directus_cache_events', 47 * HOUR),
+			chunkOf('directus_cache_stats_events', 48 * HOUR),
+			chunkOf('directus_cache_stats_events', 47 * HOUR),
 		]);
 
 		await enforceCacheStatsBudget();
@@ -1529,7 +1529,7 @@ describe('enforceCacheStatsBudget', () => {
 			Array.from({ length: 20 }, () => 5000),
 			Array.from(
 				{ length: 20 },
-				() => chunkOf('directus_cache_events', 48 * HOUR),
+				() => chunkOf('directus_cache_stats_events', 48 * HOUR),
 			),
 		);
 
@@ -1545,16 +1545,16 @@ describe('enforceCacheStatsBudget', () => {
 
 		await enforceCacheStatsBudget();
 
-		// The budget used to name directus_cache_events alone, which on the
+		// The budget used to name directus_cache_stats_events alone, which on the
 		// database this was measured against was under a tenth of the footprint.
 		expect(mockSchema.getTablesSize).toHaveBeenCalledWith([
-			'directus_cache_events',
-			'directus_cache_purges',
-			'directus_scoped_cache_purge_tags',
-			'directus_cache_descriptors',
-			'directus_scoped_cache_entry_tags',
-			'directus_cache_anomalies',
-			'directus_cache_config_events',
+			'directus_cache_stats_events',
+			'directus_cache_stats_purges',
+			'directus_cache_stats_scoped_purge_tags',
+			'directus_cache_stats_descriptors',
+			'directus_cache_stats_scoped_entry_tags',
+			'directus_cache_stats_anomalies',
+			'directus_cache_stats_config_events',
 		]);
 	});
 
@@ -1576,7 +1576,7 @@ describe('enforceCacheStatsBudget', () => {
 		// Postgres one answers when its probe throws. An unmeasurable subsystem
 		// must not read as an empty one — zero would look far under budget and
 		// cut history to answer a number nobody has.
-		scriptRing([null], [chunkOf('directus_cache_events', 48 * HOUR)]);
+		scriptRing([null], [chunkOf('directus_cache_stats_events', 48 * HOUR)]);
 
 		await expect(enforceCacheStatsBudget()).resolves.toBeUndefined();
 		expect(droppedChunks()).toHaveLength(0);
@@ -1698,15 +1698,15 @@ describe('truncateCacheEvents', () => {
 	it('truncates every telemetry table, purges included', async () => {
 		await truncateCacheEvents();
 
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_events');
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_events');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_anomalies');
 
 		// Left behind, purges would count against entries whose own history was
 		// just cleared — purges without hits, on a window reporting no traffic.
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_purges');
-		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_purge_tags');
-		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_entry_tags');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_purges');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_purge_tags');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_entry_tags');
 		expect(builder.truncate).toHaveBeenCalledTimes(6);
 	});
 
@@ -1848,13 +1848,13 @@ describe('listCacheEntries', () => {
 
 		// k1 was covered three times; k2 has no row at all, which must read as 0
 		// rather than as missing.
-		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_entry_tags as et'] = [
 			{ cache_key: 'k1', purges: '3' },
 		];
 
 		const entries = await listCacheEntries();
 
-		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_entry_tags as et');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_entry_tags as et');
 
 		// COUNT(DISTINCT purge_id), so a purge covering two of an entry's tags is
 		// one purge and not two.
@@ -1901,16 +1901,16 @@ describe('listCacheEntries', () => {
 
 		// No precise match at all — a pinned entry carries only its slice tag, and
 		// the coarse purge recorded no slice tags.
-		rowsByTable['directus_scoped_cache_entry_tags as et'] = [];
+		rowsByTable['directus_cache_stats_entry_tags as et'] = [];
 
 		// The coarse pass, joined on collection rather than on tag.
-		rowsByTable['directus_scoped_cache_purge_tags as pt'] = [
+		rowsByTable['directus_cache_stats_purge_tags as pt'] = [
 			{ cache_key: 'pinned', purges: '2' },
 		];
 
 		const entries = await listCacheEntries();
 
-		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_purge_tags as pt');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_purge_tags as pt');
 		expect(entries[0]!.purges).toBe(2);
 	});
 
@@ -1942,11 +1942,11 @@ describe('listCacheEntries', () => {
 
 		// A purge is only ever tag-bearing or collection-bearing, never both, so
 		// the two passes cannot double-count one purge and simply add.
-		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_entry_tags as et'] = [
 			{ cache_key: 'k1', purges: '3' },
 		];
 
-		rowsByTable['directus_scoped_cache_purge_tags as pt'] = [
+		rowsByTable['directus_cache_stats_purge_tags as pt'] = [
 			{ cache_key: 'k1', purges: '4' },
 		];
 
@@ -1962,7 +1962,7 @@ describe('listCacheEntries', () => {
 
 		// An empty `whereIn` would scan the whole join for rows nothing can use.
 		expect(mockDb)
-			.not.toHaveBeenCalledWith('directus_scoped_cache_entry_tags as et');
+			.not.toHaveBeenCalledWith('directus_cache_stats_entry_tags as et');
 	});
 
 	it('maps descriptor + windowed hit rows to entry records', async () => {
@@ -2013,7 +2013,7 @@ describe('listCacheEntries', () => {
 
 		const entries = await listCacheEntries();
 
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors as d');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors as d');
 		// Never-filled locators are excluded from the entries listing.
 		expect(builder.whereNotNull).toHaveBeenCalledWith('d.last_filled');
 
@@ -2134,7 +2134,7 @@ describe('listCacheEntries', () => {
 	// Two reads merged by key, so a merge keyed on position instead would hand
 	// each entry the other one's descriptor.
 	it('ranks on the events and pairs each descriptor by key', async () => {
-		rowsByTable['directus_cache_events as e'] = [
+		rowsByTable['directus_cache_stats_events as e'] = [
 			{
 				cache_key: 'k2',
 				hits: '9',
@@ -2158,7 +2158,7 @@ describe('listCacheEntries', () => {
 		];
 
 		// Deliberately the other order, and keyed the other way round.
-		rowsByTable['directus_cache_descriptors as d'] = [
+		rowsByTable['directus_cache_stats_descriptors as d'] = [
 			{
 				cache_key: 'k1',
 				redis_key: 'r1',
@@ -2199,7 +2199,7 @@ describe('listCacheEntries', () => {
 				['k1', 2, '/items/a'],
 			]);
 
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_events as e');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_events as e');
 		expect(builder.whereIn).toHaveBeenCalledWith('d.cache_key', ['k2', 'k1']);
 	});
 
@@ -2271,7 +2271,8 @@ describe('listCacheEntries', () => {
 		await listCacheEntries();
 
 		expect(builder.whereExists).toHaveBeenCalledTimes(1);
-		expect(builder.from).toHaveBeenCalledWith('directus_cache_descriptors as d');
+		expect(builder.from)
+			.toHaveBeenCalledWith('directus_cache_stats_descriptors as d');
 
 		expect(builder.whereRaw).toHaveBeenCalledWith(
 			'?? = ??',
@@ -2284,7 +2285,7 @@ describe('listCacheEntries', () => {
 	// The two reads are not atomic: a reap between them leaves an aggregated key
 	// with no dimension row, and a record built from it would carry a NaN date.
 	it('drops a key whose descriptor went away between the two reads', async () => {
-		rowsByTable['directus_cache_events as e'] = [
+		rowsByTable['directus_cache_stats_events as e'] = [
 			{
 				cache_key: 'reaped',
 				hits: '9',
@@ -2307,7 +2308,7 @@ describe('listCacheEntries', () => {
 			},
 		];
 
-		rowsByTable['directus_cache_descriptors as d'] = [
+		rowsByTable['directus_cache_stats_descriptors as d'] = [
 			{
 				cache_key: 'kept',
 				redis_key: 'r1',
@@ -2418,7 +2419,7 @@ describe('listCacheGroupLatencies', () => {
 
 		const latencies = await listCacheGroupLatencies();
 
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors as d');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors as d');
 		// Kind 1 is a bare miss count with no timing, so it never reaches a
 		// percentile; events with no timing and never-filled locators are out too.
 		expect(builder.whereIn).toHaveBeenCalledWith('e.kind', [0, 2, 3, 4]);
@@ -2524,7 +2525,7 @@ describe('listCacheGroupLatencies', () => {
 	it('returns an empty array on a non-Postgres dialect', async () => {
 		mockDb.client = { config: { client: 'sqlite3' } };
 		expect(await listCacheGroupLatencies()).toEqual([]);
-		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_descriptors as d');
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_stats_descriptors as d');
 	});
 
 	it('returns an empty array when not configured', async () => {
@@ -2585,10 +2586,10 @@ describe('listCacheAnomalies', () => {
 
 		const rows = await listCacheAnomalies();
 
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies as a');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_anomalies as a');
 
 		expect(builder.join).toHaveBeenCalledWith(
-			'directus_cache_descriptors as d',
+			'directus_cache_stats_descriptors as d',
 			'd.cache_key',
 			'a.cache_key',
 		);
@@ -2621,7 +2622,7 @@ describe('reapCacheAnomalies', () => {
 		deleteCount = 5;
 
 		expect(await reapCacheAnomalies()).toBe(5);
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_anomalies');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_anomalies');
 		expect(builder.delete).toHaveBeenCalled();
 	});
 });
@@ -2631,7 +2632,7 @@ describe('reapCachePurges', () => {
 		deleteCount = 4;
 
 		expect(await reapCachePurges()).toBe(4);
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_purges');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_purges');
 		expect(builder.delete).toHaveBeenCalled();
 	});
 
@@ -2641,7 +2642,7 @@ describe('reapCachePurges', () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 
 		expect(await reapCachePurges()).toBe(0);
-		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_purges');
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_stats_purges');
 	});
 });
 
@@ -2738,20 +2739,20 @@ describe('reapScopedCachePurgeTags', () => {
 		deleteCount = 7;
 
 		expect(await reapScopedCachePurgeTags()).toBe(7);
-		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_purge_tags');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_purge_tags');
 	});
 
 	it('returns 0 without touching the table when not configured', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 
 		expect(await reapScopedCachePurgeTags()).toBe(0);
-		expect(mockDb).not.toHaveBeenCalledWith('directus_scoped_cache_purge_tags');
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_stats_purge_tags');
 	});
 });
 
 describe('reapScopedCacheEntryTags', () => {
 	it('drops tag rows whose entry no longer has a descriptor', async () => {
-		rowsByTable['directus_scoped_cache_entry_tags'] = [
+		rowsByTable['directus_cache_stats_entry_tags'] = [
 			{ cache_key: 'a' },
 			{ cache_key: 'a' },
 			{ cache_key: 'b' },
@@ -2760,13 +2761,13 @@ describe('reapScopedCacheEntryTags', () => {
 		deleteCount = 3;
 
 		expect(await reapScopedCacheEntryTags()).toBe(3);
-		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_entry_tags');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_entry_tags');
 
 		// Followed out by their descriptor rather than aged out by time: the tags
 		// are a dimension of the entry, not a fact of their own.
 		expect(builder.whereRaw).toHaveBeenCalledWith(
 			'??.cache_key = ??.cache_key',
-			['directus_cache_descriptors', 'directus_scoped_cache_entry_tags'],
+			['directus_cache_stats_descriptors', 'directus_cache_stats_entry_tags'],
 		);
 
 		// One row per key per tag, so the slate names each key once however many
@@ -2778,7 +2779,7 @@ describe('reapScopedCacheEntryTags', () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 
 		expect(await reapScopedCacheEntryTags()).toBe(0);
-		expect(mockDb).not.toHaveBeenCalledWith('directus_scoped_cache_entry_tags');
+		expect(mockDb).not.toHaveBeenCalledWith('directus_cache_stats_entry_tags');
 	});
 });
 
@@ -2789,7 +2790,7 @@ describe('reapCacheDescriptors', () => {
 	});
 
 	it('deletes a descriptor whose cached entry is gone', async () => {
-		rowsByTable['directus_cache_descriptors'] = [
+		rowsByTable['directus_cache_stats_descriptors'] = [
 			{ cache_key: 'a', redis_key: 'ra' },
 		];
 
@@ -2797,7 +2798,7 @@ describe('reapCacheDescriptors', () => {
 		deleteCount = 3;
 
 		expect(await reapCacheDescriptors()).toBe(3);
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
 
 		// Asked of Keyv by the key the entry is stored under, not of a raw key this
 		// would have to rebuild through two layers of namespacing.
@@ -2806,10 +2807,15 @@ describe('reapCacheDescriptors', () => {
 
 		// A live event or anomaly still holds the descriptor: a re-anomalied
 		// dormant key keeps it for the anomaly join.
-		for (const fact of ['directus_cache_events', 'directus_cache_anomalies']) {
+		const facts = [
+			'directus_cache_stats_events',
+			'directus_cache_stats_anomalies',
+		];
+
+		for (const fact of facts) {
 			expect(builder.whereRaw).toHaveBeenCalledWith(
 				'??.cache_key = ??.cache_key',
-				[fact, 'directus_cache_descriptors'],
+				[fact, 'directus_cache_stats_descriptors'],
 			);
 		}
 
@@ -2818,7 +2824,7 @@ describe('reapCacheDescriptors', () => {
 	});
 
 	it('keeps a descriptor whose entry is still cached', async () => {
-		rowsByTable['directus_cache_descriptors'] = [
+		rowsByTable['directus_cache_stats_descriptors'] = [
 			{ cache_key: 'a', redis_key: 'ra' },
 		];
 
@@ -2831,7 +2837,7 @@ describe('reapCacheDescriptors', () => {
 	});
 
 	it('deletes only the keys of the slate whose entries are gone', async () => {
-		rowsByTable['directus_cache_descriptors'] = [
+		rowsByTable['directus_cache_stats_descriptors'] = [
 			{ cache_key: 'live', redis_key: 'r-live' },
 			{ cache_key: 'gone', redis_key: 'r-gone' },
 			{ cache_key: 'also-live', redis_key: 'r-also-live' },
@@ -2845,7 +2851,7 @@ describe('reapCacheDescriptors', () => {
 	});
 
 	it('treats every entry as gone when there is no cache to ask', async () => {
-		rowsByTable['directus_cache_descriptors'] = [
+		rowsByTable['directus_cache_stats_descriptors'] = [
 			{ cache_key: 'a', redis_key: 'ra' },
 		];
 
@@ -2857,7 +2863,7 @@ describe('reapCacheDescriptors', () => {
 	});
 
 	it('takes another pass while the slate comes back full', async () => {
-		rowsByTable['directus_cache_descriptors'] = Array.from(
+		rowsByTable['directus_cache_stats_descriptors'] = Array.from(
 			{ length: 5000 },
 			(_unused, index) => ({ cache_key: `key-${index}` }),
 		);
@@ -2872,7 +2878,7 @@ describe('reapCacheDescriptors', () => {
 	});
 
 	it('deletes nothing when the slate comes back empty', async () => {
-		rowsByTable['directus_cache_descriptors'] = [];
+		rowsByTable['directus_cache_stats_descriptors'] = [];
 
 		expect(await reapCacheDescriptors()).toBe(0);
 		expect(builder.delete).not.toHaveBeenCalled();
@@ -2893,7 +2899,7 @@ describe('reapCacheEvents', () => {
 		const reaped = await reapCacheEvents();
 
 		expect(reaped).toBe(7);
-		expect(mockDb).toHaveBeenCalledWith('directus_cache_events');
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_events');
 
 		// default CACHE_STATS_RETENTION = 30d; cutoff is now - 30d, not now + 30d.
 		expect(builder.where).toHaveBeenCalledWith(
@@ -3039,7 +3045,7 @@ describe('listPurgesCoveringEntry', () => {
 	// under, or it names none and its collection is its reach — so the merge, the
 	// ordering across them and the cap are this function's own work.
 	it('merges both reaches into one list, newest first', async () => {
-		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_entry_tags as et'] = [
 			{
 				purge_id: 'p-old',
 				time: new Date(1_000).toISOString(),
@@ -3050,7 +3056,7 @@ describe('listPurgesCoveringEntry', () => {
 			},
 		];
 
-		rowsByTable['directus_scoped_cache_purge_tags as pt'] = [
+		rowsByTable['directus_cache_stats_purge_tags as pt'] = [
 			{
 				purge_id: 'p-new',
 				time: new Date(9_000).toISOString(),
@@ -3094,7 +3100,7 @@ describe('listPurgesCoveringEntry', () => {
 		// both carries both — so the join answers the same purge twice, differing
 		// only in which tag matched. The listing counts it once
 		// (`COUNT(DISTINCT purge_id)`), and this has to agree with that.
-		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_entry_tags as et'] = [
 			{
 				purge_id: 'p-wide',
 				time: new Date(4_000).toISOString(),
@@ -3135,7 +3141,7 @@ describe('listPurgesCoveringEntry', () => {
 	// one included. Missing it would answer "nothing purged this" about the most
 	// total invalidation there is.
 	it('names a namespace clear, which no tag or collection joins', async () => {
-		rowsByTable['directus_cache_purges as p'] = [
+		rowsByTable['directus_cache_stats_purges as p'] = [
 			{
 				purge_id: 'p-clear',
 				time: new Date(6_000).toISOString(),
@@ -3145,7 +3151,7 @@ describe('listPurgesCoveringEntry', () => {
 			},
 		];
 
-		rowsByTable['directus_scoped_cache_entry_tags as et'] = [
+		rowsByTable['directus_cache_stats_entry_tags as et'] = [
 			{
 				purge_id: 'p-tagged',
 				time: new Date(2_000).toISOString(),
@@ -3189,7 +3195,7 @@ describe('listPurgesCoveringEntry', () => {
 		// Not merely empty: no query was built at all.
 		expect(mockDb)
 			.not
-			.toHaveBeenCalledWith('directus_scoped_cache_entry_tags as et');
+			.toHaveBeenCalledWith('directus_cache_stats_entry_tags as et');
 	});
 });
 

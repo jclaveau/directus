@@ -113,15 +113,15 @@ describe('readCacheTimeseries', () => {
 		// Buckets are 0-based elapsed-since-`since`; the `now`-edge bucket (== buckets)
 		// folds into the last slot, accumulating onto whatever's already there.
 		rowsByTable = {
-			directus_cache_events: [
+			directus_cache_stats_events: [
 				{ bucket: 0, hits: 5, misses: 1, fills: 3, ttl_ms: 30000 },
 				{ bucket: 2, hits: 9, misses: 4, fills: 2, ttl_ms: 60000 },
 				{ bucket: 3, hits: 1, misses: 2, fills: 1, ttl_ms: null },
 			],
-			directus_cache_anomalies: [
+			directus_cache_stats_anomalies: [
 				{ bucket: 2, count: 2 },
 			],
-			directus_cache_config_events: [
+			directus_cache_stats_config_events: [
 				{ time: new Date(NOW - 1000), kind: 'flush', detail: 'response' },
 			],
 		};
@@ -157,7 +157,7 @@ describe('readCacheTimeseries', () => {
 
 	it('counts purges, the coarse subset, and what they evicted', async () => {
 		rowsByTable = {
-			directus_cache_purges: [
+			directus_cache_stats_purges: [
 				// Four purges in the oldest bucket, one of them wider than its own
 				// mutation, together taking 40 entries with them.
 				{ bucket: 0, count: 4, coarse: 1, evicted: 40 },
@@ -189,7 +189,7 @@ describe('readCacheTimeseries', () => {
 		// A window with traffic but no mutation plots zero, not a gap: the series is
 		// a count, and a gap would read as "not measured".
 		rowsByTable = {
-			directus_cache_events: [
+			directus_cache_stats_events: [
 				{ bucket: 0, hits: 5, misses: 1, fills: 3, ttl_ms: 30000 },
 			],
 		};
@@ -205,11 +205,11 @@ describe('readCacheTimeseries', () => {
 
 	it('plots how long purges took, blank where none was timed', async () => {
 		rowsByTable = {
-			directus_cache_purges: [
+			directus_cache_stats_purges: [
 				{ bucket: 0, count: 3, coarse: 0, evicted: 9 },
 				{ bucket: 2, count: 1, coarse: 0, evicted: 2 },
 			],
-			'directus_cache_purges:latency': [
+			'directus_cache_stats_purges:latency': [
 				{ bucket: 0, purge_p50: 30, purge_p95: 48, purge_p99: 49.6 },
 				// A bucket whose purges carry no duration at all: `percentile_cont`
 				// over nothing but NULLs is NULL, and it has to stay a gap. A zero
@@ -238,7 +238,7 @@ describe('readCacheTimeseries', () => {
 
 	it('maps latency percentiles into buckets, null when unsampled', async () => {
 		rowsByTable = {
-			'directus_cache_events:latency': [
+			'directus_cache_stats_events:latency': [
 				{
 					bucket: 0,
 					hit_p50: 2,
@@ -306,11 +306,11 @@ describe('readCacheTimeseries', () => {
 		env['CACHE_STATS_ENABLED'] = false;
 
 		rowsByTable = {
-			directus_cache_config_events: [
+			directus_cache_stats_config_events: [
 				{ time: new Date(NOW - 5000), kind: 'ttl_change', detail: '45s' },
 			],
 			// Never queried in this path — present to prove they're skipped.
-			directus_cache_events: [{ bucket: 0, hits: 99, misses: 0, ttl_ms: 1 }],
+			directus_cache_stats_events: [{ bucket: 0, hits: 99, misses: 0, ttl_ms: 1 }],
 		};
 
 		const result = await readCacheTimeseries(120_000, 4);
@@ -330,7 +330,7 @@ describe('readCacheTimeseries', () => {
 		env['CACHE_TTL'] = '10m';
 
 		rowsByTable = {
-			directus_cache_events: [
+			directus_cache_stats_events: [
 				{ bucket: 0, hits: 3, misses: 0, fills: 0, ttl_ms: 600_000 },
 			],
 		};
@@ -348,14 +348,14 @@ describe('readCacheTimeseries', () => {
 		const bucketSec = 60;
 
 		rowsByTable = {
-			directus_cache_config_events: [
+			directus_cache_stats_config_events: [
 				// A clear, mid-window: detail null hands the TTL back to env, so the
 				// series must step DOWN here rather than hold the 24h it replaced.
 				{ time: new Date(NOW - bucketSec * 1000), kind: 'ttl_change', detail: null },
 			],
 			// The window opened on a 24h override set before it began.
-			'directus_cache_config_events:prior': [{ detail: '24h' }],
-			directus_cache_events: [
+			'directus_cache_stats_config_events:prior': [{ detail: '24h' }],
+			directus_cache_stats_events: [
 				// Entries stamped at 24h are still being served after the clear — the
 				// conflation this series exists to end: `ttlMs` stays high, the TTL drops.
 				{ bucket: 2, hits: 4, misses: 0, fills: 0, ttl_ms: 86_400_000 },
@@ -379,7 +379,7 @@ describe('recordCacheConfigEvent', () => {
 		await recordCacheConfigEvent('ttl_change', '30s');
 
 		expect(insertSpy).toHaveBeenCalledWith(
-			'directus_cache_config_events',
+			'directus_cache_stats_config_events',
 			expect.objectContaining({ kind: 'ttl_change', detail: '30s' }),
 		);
 	});
@@ -389,7 +389,7 @@ describe('reapCacheConfigEvents', () => {
 	it('deletes rows past the retention cutoff', async () => {
 		const deleted = await reapCacheConfigEvents();
 
-		expect(deleteSpy).toHaveBeenCalledWith('directus_cache_config_events');
+		expect(deleteSpy).toHaveBeenCalledWith('directus_cache_stats_config_events');
 		expect(deleted).toBe(3);
 	});
 });

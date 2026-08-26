@@ -1,6 +1,6 @@
-# directus_cache_descriptors — the per-key cache-entry dimension (telemetry).
+# directus_cache_stats_descriptors — the per-key cache-entry dimension (telemetry).
 # Read-only: rows are written by the cache-stats flusher, not through the app.
-table: directus_cache_descriptors
+table: directus_cache_stats_descriptors
 
 fields:
   - field: cache_key
