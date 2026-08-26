@@ -1611,15 +1611,31 @@ describe('resolveScopedCacheM2oJoinChainFromPath', () => {
 
 describe('scopedCacheCollectionsBeyondNestedRows', () => {
 	const schema = new SchemaBuilder()
+		.collection('company', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
 		.collection('owner', (c) => {
 			c.field('id').id();
 			c.field('name').string();
+			c.field('company').m2o('company');
 		})
 		.collection('owned_item', (c) => {
 			c.field('id').id();
 			c.field('owner').m2o('owner');
 		})
 		.build();
+
+	const companyNode = {
+		type: 'm2o',
+		name: 'company',
+		fieldKey: 'company',
+		children: [],
+		query: {},
+		cases: [],
+		whenCase: [],
+		relation: { related_collection: 'company' },
+	} as unknown as M2ONode;
 
 	// Only the parts the function reads. The real shape comes from
 	// `getAstFromQuery`, which the blackbox suite exercises end to end; pulling it
@@ -1686,11 +1702,63 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 		]).toContain('owner');
 	});
 
+	it('names a collection whose nested node carries a field-level case', () => {
+		// A `whenCase` withholds the field for the rows the case excludes, and
+		// `mergeWithParentItems` writes those slots null like any hidden parent.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, { whenCase: [0] }),
+			),
+		]).toContain('owner');
+	});
+
+	it('names a collection a nested node\'s own filter reads', () => {
+		// The filter withholds `owner`, but WHICH owners it withholds is decided
+		// by company rows — including ones the response never nested.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, {
+					children: [companyNode],
+					query: { filter: { company: { name: { _eq: 'acme' } } } },
+				}),
+			),
+		]).toContain('company');
+	});
+
+	it('names a collection withheld two hops down', () => {
+		// The walk has to recurse: the node carrying the filter is the grandchild,
+		// not the child the root nested.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, {
+					children: [{
+						...companyNode,
+						query: { filter: { name: { _eq: 'acme' } } },
+					}],
+				}),
+			),
+		]).toContain('company');
+	});
+
 	it('leaves a collection the read only projects', () => {
 		// Non-vacuity: the cases above name `owner` because of the query, not
 		// because every nested collection lands in the set.
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(schema, astOf({})),
 		]).not.toContain('owner');
+	});
+
+	it('leaves a grandchild the read only projects', () => {
+		// Non-vacuity for the two cases above: nesting `company` is not itself
+		// what puts it in the set.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, { children: [companyNode] }),
+			),
+		]).not.toContain('company');
 	});
 });
