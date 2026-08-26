@@ -2271,6 +2271,7 @@ describe('listCacheEntries', () => {
 		await listCacheEntries();
 
 		expect(builder.whereExists).toHaveBeenCalledTimes(1);
+
 		expect(builder.from)
 			.toHaveBeenCalledWith('directus_cache_stats_descriptors as d');
 
