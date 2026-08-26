@@ -50,7 +50,30 @@ const env: Record<string, any> = {
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js');
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
-vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
+
+// The dialect helper measures the tables and cuts the chunks. cache-events.ts
+// imports it dynamically so the tree stays out of every consumer's module
+// graph; mocking it here keeps it out of this one's too.
+const mockSchema = vi.hoisted(() => {
+	return {
+		getTablesSize: vi.fn(async () => null as number | null),
+		dropOldestChunk: vi.fn(
+			async () => null as { table: string; upTo: Date } | null,
+		),
+	};
+});
+
+vi.mock('./database/helpers/index.js', () => {
+	return { getHelpers: () => ({ schema: mockSchema }) };
+});
+
+// cache.js reaches this module through scoped-cache.js, so the descriptor reaper
+// imports it dynamically; mocking it keeps that hop out of the unit's way.
+const mockCache = vi.hoisted(() => ({ hasMany: vi.fn() }));
+const mockGetCache = vi.hoisted(() => vi.fn(() => ({ cache: mockCache })));
+vi.mock('./cache.js', () => ({ getCache: mockGetCache }));
+const mockLogger = { warn: vi.fn(), info: vi.fn() };
+vi.mock('./logger/index.js', () => ({ useLogger: () => mockLogger }));
 
 const mockBus = { publish: vi.fn(), subscribe: vi.fn() };
 vi.mock('./bus/index.js', () => ({ useBus: () => mockBus }));
@@ -141,11 +164,24 @@ beforeEach(() => {
 		join: vi.fn(() => builder),
 		leftJoin: vi.fn(() => builder),
 		from: vi.fn(() => builder),
-		where: vi.fn(() => builder),
+		// A grouped `where(callback)` runs its arm the way knex does; every other
+		// form (column, operator, value) just chains.
+		where: vi.fn((first: any) => {
+			if (typeof first === 'function') {
+				first(builder);
+			}
+
+			return builder;
+		}),
+		orWhere: vi.fn(() => builder),
 		whereRaw: vi.fn(() => builder),
 		// Run the sub-builder like knex does at compile time, so a semi-join's own
 		// clauses land on the same spies the outer query's do.
 		whereExists: vi.fn((callback: any) => {
+			callback(builder);
+			return builder;
+		}),
+		whereNotExists: vi.fn((callback: any) => {
 			callback(builder);
 			return builder;
 		}),
@@ -766,7 +802,6 @@ describe('drainCacheEvents', () => {
 				collection: 'a',
 				user_id: 'u1',
 				query: '{}',
-				url: '/items/a',
 				bytes: 42,
 				fill_ms: 240,
 				last_filled: new Date(3000),
@@ -1368,122 +1403,231 @@ describe('drainCacheEvents', () => {
 });
 
 describe('enforceCacheStatsBudget', () => {
-	it('auto-disables and records the reason when the buffer overflows', async () => {
+	const HOUR = 3_600_000;
+
+	// The helper is the seam now: the sizes it reports in turn, and the chunks it
+	// says it dropped. What SQL any of that becomes is the dialect's own test.
+	function scriptRing(
+		sizes: (number | null)[],
+		drops: ({ table: string; upTo: Date } | null)[],
+	) {
+		const measured = [...sizes];
+		const cuts = [...drops];
+
+		mockSchema.getTablesSize.mockImplementation(async () => {
+			return measured.length > 0
+				? measured.shift()!
+				: 0;
+		});
+
+		mockSchema.dropOldestChunk.mockImplementation(async () => {
+			return cuts.length > 0
+				? cuts.shift()!
+				: null;
+		});
+	}
+
+	function chunkOf(table: string, ageMs: number) {
+		return { table, upTo: new Date(Date.now() - ageMs) };
+	}
+
+	const droppedChunks = () => mockSchema.dropOldestChunk.mock.calls;
+
+	it('drops the oldest chunk when the subsystem is over budget', async () => {
 		await armFlag(null);
-		env['CACHE_STATS_MAX_BUFFER'] = 10;
-		mockRedis.xlen.mockResolvedValue(50);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		scriptRing([5000, 100], [chunkOf('directus_cache_purges', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
-		expect(cacheStatsActive()).toBe(false);
-		expect(mockRedis.set).toHaveBeenCalledWith('scalabus:stats:enabled', '0');
+		expect(droppedChunks()).toHaveLength(1);
 
-		expect(mockRedis.set).toHaveBeenCalledWith(
-			'scalabus:stats:killed_reason',
-			expect.stringContaining('buffer 50 > 10'),
+		// The facts, not every table it measures: the dimensions have no chunk to
+		// cut, and are held by their reaper instead.
+		expect(mockSchema.dropOldestChunk).toHaveBeenCalledWith(
+			[
+				'directus_cache_events',
+				'directus_cache_purges',
+				'directus_scoped_cache_purge_tags',
+			],
+			expect.any(Date),
 		);
 	});
 
-	it('auto-disables when the table outgrows the byte budget', async () => {
+	it('never disables capture to stay inside the byte budget', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		mockRedis.xlen.mockResolvedValue(0);
-
-		mockDb.raw
-			.mockResolvedValueOnce({ rows: [{ has: true }] })
-			.mockResolvedValueOnce({ rows: [{ bytes: 5000 }] });
+		scriptRing([5000, 100], [chunkOf('directus_cache_events', 48 * HOUR)]);
 
 		await enforceCacheStatsBudget();
 
-		expect(cacheStatsActive()).toBe(false);
+		// The whole point of the ring: the history shortens, the capture does not
+		// stop, and no admin has to come back and turn it on again.
+		expect(cacheStatsActive()).toBe(true);
+		expect(mockRedis.set).not.toHaveBeenCalledWith('scalabus:stats:enabled', '0');
 
-		expect(mockRedis.set).toHaveBeenCalledWith(
-			'scalabus:stats:killed_reason',
-			expect.stringContaining('table 5000B'),
-		);
-
-		// Timescale present → size comes from hypertable_size (sums the chunks), not the
-		// parent-only pg_total_relation_size.
-		expect(mockDb.raw).toHaveBeenNthCalledWith(
-			1,
-			expect.stringContaining('pg_extension'),
-		);
-
-		expect(mockDb.raw).toHaveBeenNthCalledWith(
-			2,
-			expect.stringContaining('hypertable_size'),
+		expect(mockRedis.set).not.toHaveBeenCalledWith(
+			'scalabus:stats:budget_alert',
+			expect.anything(),
 		);
 	});
 
-	it('reads the size from pg_total_relation_size on plain postgres', async () => {
-		// isTimescale caches per module; a fresh import gives a null cache so the
-		// non-Timescale branch runs regardless of the Timescale test above.
-		vi.resetModules();
-		const fresh = await import('./cache-events.js');
-
-		mockRedis.get.mockResolvedValueOnce(null);
-		await fresh.refreshCacheStatsFlag();
-
+	it('evicts while capture is off — the bytes are there either way', async () => {
+		await setCacheStatsEnabled(false);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		mockRedis.xlen.mockResolvedValue(0);
+		scriptRing([5000, 100], [chunkOf('directus_cache_events', 48 * HOUR)]);
 
-		mockDb.raw
-			.mockResolvedValueOnce({ rows: [{ has: false }] })
-			.mockResolvedValueOnce({ rows: [{ bytes: 5000 }] });
+		await enforceCacheStatsBudget();
 
-		await fresh.enforceCacheStatsBudget();
-
-		expect(mockDb.raw).toHaveBeenNthCalledWith(
-			2,
-			expect.stringContaining('pg_total_relation_size'),
-		);
+		expect(droppedChunks()).toHaveLength(1);
 	});
 
-	it('skips the size check on a non-postgres client', async () => {
+	it('evicts down to the low watermark, not back to the line', async () => {
 		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		mockRedis.xlen.mockResolvedValue(0);
-		mockDb.client = { config: { client: 'sqlite3' } };
+
+		// 1000 is already under the 1024 budget and still over the 921 watermark:
+		// stopping at the line would leave the next tick cutting another chunk.
+		scriptRing([5000, 1000, 900], [
+			chunkOf('directus_cache_events', 48 * HOUR),
+			chunkOf('directus_cache_events', 47 * HOUR),
+		]);
+
+		await enforceCacheStatsBudget();
+
+		expect(droppedChunks()).toHaveLength(2);
+	});
+
+	it('keeps telemetry newer than the retention floor', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+
+		// Nothing old enough to drop: over budget is not a licence to delete the
+		// hour that would explain the burst which filled it.
+		scriptRing([5000], [null]);
 
 		await enforceCacheStatsBudget();
 
 		expect(cacheStatsActive()).toBe(true);
-		expect(mockDb.raw).not.toHaveBeenCalled(); // non-pg → the size query never runs
+
+		const [, floor] = mockSchema.dropOldestChunk.mock.calls[0]!;
+
+		expect(Date.now() - (floor as Date).getTime())
+			.toBeGreaterThanOrEqual(6 * HOUR);
+
+		expect(Date.now() - (floor as Date).getTime())
+			.toBeLessThan(6 * HOUR + 1000);
 	});
 
-	it('stays active when a cold table-size probe rejects', async () => {
-		// Fresh module → isTimescaleCache null, so the probe runs (not just the size
-		// query); its rejection is the path under test, masked by the module cache.
-		vi.resetModules();
-		const fresh = await import('./cache-events.js');
-
-		mockRedis.get.mockResolvedValueOnce(null);
-		await fresh.refreshCacheStatsFlag();
-
+	it('bounds how many chunks one tick may drop', async () => {
+		await armFlag(null);
 		env['CACHE_STATS_MAX_BYTES'] = '1kb';
-		mockRedis.xlen.mockResolvedValue(0);
-		mockDb.raw.mockRejectedValue(new Error('boom')); // rejects the probe AND the size query
 
-		await expect(fresh.enforceCacheStatsBudget()).resolves.toBeUndefined();
-		expect(fresh.cacheStatsActive()).toBe(true);
+		// Never comes back under: a budget lowered far below what the tables hold
+		// walks down over several ticks instead of dropping everything at once.
+		scriptRing(
+			Array.from({ length: 20 }, () => 5000),
+			Array.from(
+				{ length: 20 },
+				() => chunkOf('directus_cache_events', 48 * HOUR),
+			),
+		);
+
+		await enforceCacheStatsBudget();
+
+		expect(droppedChunks()).toHaveLength(8);
 	});
 
-	it('does nothing when already disabled (one-way latch)', async () => {
-		await setCacheStatsEnabled(false);
+	it('measures every table of the subsystem, not just the events fact', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		scriptRing([100], []);
+
+		await enforceCacheStatsBudget();
+
+		// The budget used to name directus_cache_events alone, which on the
+		// database this was measured against was under a tenth of the footprint.
+		expect(mockSchema.getTablesSize).toHaveBeenCalledWith([
+			'directus_cache_events',
+			'directus_cache_purges',
+			'directus_scoped_cache_purge_tags',
+			'directus_cache_descriptors',
+			'directus_scoped_cache_entry_tags',
+			'directus_cache_anomalies',
+			'directus_cache_config_events',
+		]);
+	});
+
+	it('does not measure at all when no byte budget is set', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BYTES'] = false;
+		scriptRing([100], []);
+
+		await enforceCacheStatsBudget();
+
+		expect(mockSchema.getTablesSize).not.toHaveBeenCalled();
+	});
+
+	it('evicts nothing where the size cannot be measured', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+
+		// null is what a dialect with no cheap measure answers, and what the
+		// Postgres one answers when its probe throws. An unmeasurable subsystem
+		// must not read as an empty one — zero would look far under budget and
+		// cut history to answer a number nobody has.
+		scriptRing([null], [chunkOf('directus_cache_events', 48 * HOUR)]);
+
+		await expect(enforceCacheStatsBudget()).resolves.toBeUndefined();
+		expect(droppedChunks()).toHaveLength(0);
+	});
+
+	it('raises an alert when the floor leaves nothing to evict', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		scriptRing([5000], [null]);
+
+		await enforceCacheStatsBudget();
+
+		// Said, not acted on: capture keeps running and the admin page carries the
+		// number, because there is no honest eviction left to make.
+		expect(cacheStatsActive()).toBe(true);
+
+		expect(mockRedis.set).toHaveBeenCalledWith(
+			'scalabus:stats:budget_alert',
+			expect.stringContaining('5000B over the 1024B budget'),
+		);
+	});
+
+	it('clears the alert once it is back inside the budget', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BYTES'] = '1kb';
+		scriptRing([100], []);
+
+		await enforceCacheStatsBudget();
+
+		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:budget_alert');
+	});
+
+	it('never touches the stream length', async () => {
+		await armFlag(null);
+		env['CACHE_STATS_MAX_BUFFER'] = 10;
+		env['CACHE_STATS_MAX_BYTES'] = false;
 		mockRedis.xlen.mockClear();
 
 		await enforceCacheStatsBudget();
 
+		// The stream is ringed by its own MAXLEN at write time; measuring it here
+		// only ever served the autokill that used to read it.
 		expect(mockRedis.xlen).not.toHaveBeenCalled();
 	});
 });
 
 describe('setCacheStatsEnabled', () => {
-	it('enabling flips the flag on and clears the reason', async () => {
+	it('enabling flips the flag on', async () => {
 		await setCacheStatsEnabled(true);
 
 		expect(mockRedis.set).toHaveBeenCalledWith('scalabus:stats:enabled', '1');
-		expect(mockRedis.del).toHaveBeenCalledWith('scalabus:stats:killed_reason');
 		expect(cacheStatsActive()).toBe(true);
 	});
 
@@ -1494,7 +1638,7 @@ describe('setCacheStatsEnabled', () => {
 			enabled: true,
 		});
 
-		await setCacheStatsEnabled(false, 'autokill: x');
+		await setCacheStatsEnabled(false);
 
 		expect(mockBus.publish).toHaveBeenCalledWith('cacheStatsToggled', {
 			enabled: false,
@@ -1526,13 +1670,13 @@ describe('subscribeCacheStatsToggle', () => {
 });
 
 describe('getCacheStatsState', () => {
-	it('reports the reason and buffer length when configured', async () => {
-		mockRedis.get.mockResolvedValue('autokill: buffer 50 > 10');
+	it('reports the budget alert and buffer length when configured', async () => {
+		mockRedis.get.mockResolvedValue('5000B over the 1024B budget');
 		mockRedis.xlen.mockResolvedValue(7);
 
 		await expect(getCacheStatsState()).resolves.toMatchObject({
 			configured: true,
-			killedReason: 'autokill: buffer 50 > 10',
+			budgetAlert: '5000B over the 1024B budget',
 			bufferLength: 7,
 		});
 	});
@@ -1543,7 +1687,7 @@ describe('getCacheStatsState', () => {
 		await expect(getCacheStatsState()).resolves.toEqual({
 			configured: false,
 			enabled: false,
-			killedReason: null,
+			budgetAlert: null,
 			bufferLength: 0,
 			droppedEvents: 0,
 		});
@@ -1832,8 +1976,7 @@ describe('listCacheEntries', () => {
 				collection: 'a',
 				user_id: 'u1',
 				user_email: 'alice@corp.io',
-				query: '{"limit":5}',
-				url: '/items/a?limit=5',
+				query: 'limit=5',
 				bytes: '42',
 				last_filled: new Date(1000).toISOString(),
 				hits: '3',
@@ -1885,7 +2028,7 @@ describe('listCacheEntries', () => {
 				path: '/items/a',
 				collection: 'a',
 				user: { id: 'u1', email: 'alice@corp.io' },
-				query: '{"limit":5}',
+				query: 'limit=5',
 				url: '/items/a?limit=5',
 				size: 42,
 				hits: 3,
@@ -1909,7 +2052,9 @@ describe('listCacheEntries', () => {
 				collection: null,
 				user: null,
 				query: '{}',
-				url: '',
+				// A GET that carried no query string is its path, and a row whose
+				// query is still the old sanitized JSON cannot say more than that.
+				url: '/items/b',
 				size: 0,
 				hits: 0,
 				misses: 0,
@@ -2071,8 +2216,7 @@ describe('listCacheEntries', () => {
 				collection: 'a',
 				user_id: null,
 				user_email: null,
-				query: '{"limit":5}',
-				url: '/items/a?limit=5',
+				query: 'limit=5',
 				bytes: '10',
 				last_filled: new Date(500).toISOString(),
 				hits: '2',
@@ -2432,8 +2576,7 @@ describe('listCacheAnomalies', () => {
 				reason: 'value_too_large',
 				path: '/items/big',
 				method: 'GET',
-				query: '{"limit":5}',
-				url: '/items/big?limit=5',
+				query: 'limit=5',
 				count: '4',
 				sample: '2048B',
 				last_seen: new Date(2000).toISOString(),
@@ -2456,7 +2599,9 @@ describe('listCacheAnomalies', () => {
 				reason: 'value_too_large',
 				path: '/items/big',
 				method: 'GET',
-				query: '{"limit":5}',
+				query: 'limit=5',
+				// Rebuilt from path + query rather than read from a column that
+				// stored the path a second time.
 				url: '/items/big?limit=5',
 				count: 4,
 				sample: '2048B',
@@ -2606,14 +2751,27 @@ describe('reapScopedCachePurgeTags', () => {
 
 describe('reapScopedCacheEntryTags', () => {
 	it('drops tag rows whose entry no longer has a descriptor', async () => {
-		deleteCount = 2;
+		rowsByTable['directus_scoped_cache_entry_tags'] = [
+			{ cache_key: 'a' },
+			{ cache_key: 'a' },
+			{ cache_key: 'b' },
+		];
 
-		expect(await reapScopedCacheEntryTags()).toBe(2);
+		deleteCount = 3;
+
+		expect(await reapScopedCacheEntryTags()).toBe(3);
 		expect(mockDb).toHaveBeenCalledWith('directus_scoped_cache_entry_tags');
 
 		// Followed out by their descriptor rather than aged out by time: the tags
 		// are a dimension of the entry, not a fact of their own.
-		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
+		expect(builder.whereRaw).toHaveBeenCalledWith(
+			'??.cache_key = ??.cache_key',
+			['directus_cache_descriptors', 'directus_scoped_cache_entry_tags'],
+		);
+
+		// One row per key per tag, so the slate names each key once however many
+		// rows it read for it.
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a', 'b']);
 	});
 
 	it('returns 0 without touching the table when not configured', async () => {
@@ -2625,36 +2783,99 @@ describe('reapScopedCacheEntryTags', () => {
 });
 
 describe('reapCacheDescriptors', () => {
-	it('deletes orphaned descriptors past the reap window', async () => {
-		const now = 1_700_000_000_000;
-		const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+	beforeEach(() => {
+		mockGetCache.mockReturnValue({ cache: mockCache });
+		mockCache.hasMany.mockResolvedValue([]);
+	});
+
+	it('deletes a descriptor whose cached entry is gone', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'a', redis_key: 'ra' },
+		];
+
+		mockCache.hasMany.mockResolvedValue([false]);
 		deleteCount = 3;
 
-		const reaped = await reapCacheDescriptors();
-
-		// Two deletes — filled orphans + locators — each returns deleteCount.
-		expect(reaped).toBe(6);
+		expect(await reapCacheDescriptors()).toBe(3);
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_descriptors');
 
-		// Filled: stale past the 90d cutoff (a sign flip would hit live rows)...
-		expect(builder.where).toHaveBeenCalledWith(
-			'last_filled',
-			'<',
-			new Date(now - 7_776_000_000),
+		// Asked of Keyv by the key the entry is stored under, not of a raw key this
+		// would have to rebuild through two layers of namespacing.
+		expect(mockCache.hasMany).toHaveBeenCalledWith(['ra']);
+		expect(builder.select).toHaveBeenCalledWith('redis_key');
+
+		// A live event or anomaly still holds the descriptor: a re-anomalied
+		// dormant key keeps it for the anomaly join.
+		for (const fact of ['directus_cache_events', 'directus_cache_anomalies']) {
+			expect(builder.whereRaw).toHaveBeenCalledWith(
+				'??.cache_key = ??.cache_key',
+				[fact, 'directus_cache_descriptors'],
+			);
+		}
+
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a']);
+		expect(builder.delete).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps a descriptor whose entry is still cached', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'a', redis_key: 'ra' },
+		];
+
+		mockCache.hasMany.mockResolvedValue([true]);
+
+		// The rest of the orphan rule passed and the entry is still there, which
+		// is the whole reason this test of liveness replaced an age window.
+		expect(await reapCacheDescriptors()).toBe(0);
+		expect(builder.delete).not.toHaveBeenCalled();
+	});
+
+	it('deletes only the keys of the slate whose entries are gone', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'live', redis_key: 'r-live' },
+			{ cache_key: 'gone', redis_key: 'r-gone' },
+			{ cache_key: 'also-live', redis_key: 'r-also-live' },
+		];
+
+		mockCache.hasMany.mockResolvedValue([true, false, true]);
+		deleteCount = 1;
+
+		expect(await reapCacheDescriptors()).toBe(1);
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['gone']);
+	});
+
+	it('treats every entry as gone when there is no cache to ask', async () => {
+		rowsByTable['directus_cache_descriptors'] = [
+			{ cache_key: 'a', redis_key: 'ra' },
+		];
+
+		mockGetCache.mockReturnValue({ cache: null } as never);
+		deleteCount = 1;
+
+		expect(await reapCacheDescriptors()).toBe(1);
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['a']);
+	});
+
+	it('takes another pass while the slate comes back full', async () => {
+		rowsByTable['directus_cache_descriptors'] = Array.from(
+			{ length: 5000 },
+			(_unused, index) => ({ cache_key: `key-${index}` }),
 		);
 
-		// ...AND with no event still on file. Both branches (filled + NULL-last_filled
-		// locators) reap only when no event AND no anomaly still references the key.
-		expect(builder.whereNull).toHaveBeenCalledWith('last_filled');
-		expect(builder.whereNotIn).toHaveBeenCalledWith('cache_key', expect.anything());
-		expect(builder.delete).toHaveBeenCalledTimes(2);
+		deleteCount = 5000;
 
-		// Anomaly guard is built in BOTH deletes, not just the locator.
-		expect(
-			mockDb.mock.calls.filter((call) => call[0] === 'directus_cache_anomalies'),
-		).toHaveLength(2);
+		// Four passes then stop: a full slate means more orphans are waiting, and
+		// the next tick takes them rather than this one running unbounded.
+		expect(await reapCacheDescriptors()).toBe(20_000);
+		expect(builder.limit).toHaveBeenCalledWith(5000);
+		expect(builder.delete).toHaveBeenCalledTimes(4);
+	});
 
-		nowSpy.mockRestore();
+	it('deletes nothing when the slate comes back empty', async () => {
+		rowsByTable['directus_cache_descriptors'] = [];
+
+		expect(await reapCacheDescriptors()).toBe(0);
+		expect(builder.delete).not.toHaveBeenCalled();
 	});
 
 	it('returns 0 when not configured', async () => {

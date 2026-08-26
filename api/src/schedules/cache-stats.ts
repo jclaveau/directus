@@ -13,15 +13,9 @@ import {
 	refreshCacheStatsFlag,
 	subscribeCacheStatsToggle,
 } from '../cache-events.js';
+import { useEnv } from '@directus/env';
 import { useLogger } from '../logger/index.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
-
-// Every 10s: low enough staleness for tuning, cheap for one node to flush a batch.
-const FLUSH_CRON = '*/10 * * * * *';
-
-// Daily: prune fact + anomaly rows past CACHE_STATS_RETENTION (cross-dialect bound)
-// and the orphaned descriptors left behind (they have no retention of their own).
-const REAP_CRON = '0 3 * * *';
 
 /**
  * Boot the cache-stats pipeline. The flush + budget watchdog run on a single node
@@ -33,11 +27,23 @@ export default async function schedule(): Promise<boolean> {
 		return false;
 	}
 
-	if (!validateCron(FLUSH_CRON)) {
+	const env = useEnv();
+	const logger = useLogger();
+
+	// Every ten seconds by default. Two things ride this tick: the buffered
+	// events are moved out of the Redis stream into the fact tables, and the byte
+	// budget is measured over those tables and evicted down to. Ten seconds is
+	// low enough staleness for tuning and cheap for one node to drain a batch.
+	const drainSchedule = String(env['CACHE_STATS_DRAIN_SCHEDULE']);
+
+	if (!validateCron(drainSchedule)) {
+		logger.warn(
+			`[cache-stats] CACHE_STATS_DRAIN_SCHEDULE is not a cron rule `
+			+ `(${drainSchedule}) — the pipeline stays off`,
+		);
+
 		return false;
 	}
-
-	const logger = useLogger();
 
 	// Prime the gate from the durable key, then take live updates off the bus
 	// (event-driven — no per-node poll). Boot-read covers a missed publish.
@@ -48,26 +54,38 @@ export default async function schedule(): Promise<boolean> {
 	// the pipeline resolves, the last tick is still lost (telemetry is lossy anyway).
 	process.once('SIGTERM', () => void flushCacheEventBuffer());
 
-	scheduleSynchronizedJob('cache-stats', FLUSH_CRON, async () => {
+	scheduleSynchronizedJob('cache-stats', drainSchedule, async () => {
 		try {
 			await drainCacheEvents();
 			await enforceCacheStatsBudget();
 		}
 		catch (err: any) {
-			logger.warn(err, `[cache-stats] flush/enforce failed. ${err.message}`);
+			logger.warn(err, `[cache-stats] drain/enforce failed. ${err.message}`);
 		}
 	});
 
-	if (validateCron(REAP_CRON)) {
-		scheduleSynchronizedJob('cache-stats-reap', REAP_CRON, async () => {
+	// One sweep for everything retention leaves behind, in the order the rules
+	// depend on each other: the facts age out on CACHE_STATS_RETENTION, which is
+	// what turns a descriptor into an orphan, which is what turns its entry tags
+	// into orphans. Two jobs on two cadences would have raced that chain.
+	//
+	// Every ten minutes rather than nightly because half of it is not a retention
+	// window at all: the dimensions have no time axis to drop by, so nothing
+	// reclaims their disk and what they settle at is their peak live row count.
+	// The fact half costs nothing at this cadence — it deletes only what aged out
+	// since the last pass — and it spreads what used to be a 3AM spike.
+	const retentionSchedule = String(env['CACHE_STATS_RETENTION_SCHEDULE']);
+
+	if (validateCron(retentionSchedule)) {
+		scheduleSynchronizedJob('cache-stats-reap', retentionSchedule, async () => {
 			try {
 				await reapCacheEvents();
-				await reapCacheDescriptors();
 				await reapCacheAnomalies();
 				await reapCachePurges();
 				await reapScopedCachePurgeTags();
-				await reapScopedCacheEntryTags();
 				await reapCacheConfigEvents();
+				await reapCacheDescriptors();
+				await reapScopedCacheEntryTags();
 			}
 			catch (err: any) {
 				logger.warn(err, `[cache-stats] reap failed. ${err.message}`);

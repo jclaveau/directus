@@ -167,31 +167,61 @@ let timeseriesToken = 0;
 const statsState = ref<{
 	configured: boolean;
 	enabled: boolean;
-	killedReason: string | null;
+	budgetAlert: string | null;
 	bufferLength: number;
 } | null>(null);
 
 const statsToggling = ref(false);
 
+/**
+ * A `{placeholder}` inside a fallback message is dropped, not filled: the
+ * compiler resolves it against a catalog entry this app never adds, so it
+ * renders as nothing whether or not the named argument is passed. That is how
+ * the one place naming an autokill came to print the colon and stop. Values go
+ * beside the translated fragments instead.
+ */
 const statsTooltip = computed(() => {
-	if (statsState.value?.killedReason) {
-		return t('cache_stats_killed', 'Cache stats auto-disabled: {reason}', {
-			reason: statsState.value.killedReason,
-		});
+	if (statsState.value?.budgetAlert) {
+		const over = t('cache_stats_over_budget', 'Cache stats over budget');
+		return `${over}: ${statsState.value.budgetAlert}`;
 	}
 
 	if (statsState.value?.enabled) {
 		const base = t('cache_stats_disable', 'Disable cache stats collection');
 
 		// Surface the un-flushed Redis buffer backlog (watchdog territory).
+		const buffered = t('cache_stats_buffered', 'buffered');
+
 		return statsState.value.bufferLength > 0
-			? `${base} · ${t('cache_stats_buffered', '{count} buffered', {
-				count: statsState.value.bufferLength,
-			})}`
+			? `${base} · ${statsState.value.bufferLength} ${buffered}`
 			: base;
 	}
 
 	return t('cache_stats_enable', 'Enable cache stats collection');
+});
+
+// What an empty listing means, which the one generic sentence could not say:
+// operations read "needs CACHE_STORE=redis and CACHE_STATS_ENABLED" off a
+// deployment that had set both and where collection was simply switched off.
+const emptyState = computed(() => {
+	if (statsState.value?.configured && !statsState.value.enabled) {
+		return {
+			title: t('cache_stats_off_title', 'Cache stats are off'),
+			copy: t(
+				'cache_stats_off_copy',
+				'Nothing is being collected. The toggle above turns collection on.',
+			),
+		};
+	}
+
+	return {
+		title: t('no_cached_entries', 'No cached entries'),
+		copy: t(
+			'no_cached_entries_copy',
+			'Nothing is cached yet, or cache stats are off. '
+				+ 'Needs CACHE_STORE=redis and CACHE_STATS_ENABLED.',
+		),
+	};
 });
 
 const selectedEntry = ref<CacheEntry | null>(null);
@@ -1896,7 +1926,7 @@ onUnmounted(() => {
 				rounded
 				icon
 				:secondary="!statsState.enabled"
-				:kind="statsState.killedReason ? 'warning' : undefined"
+				:kind="statsState.budgetAlert ? 'warning' : undefined"
 				:loading="statsToggling"
 				@click="toggleStats"
 			>
@@ -2111,17 +2141,11 @@ onUnmounted(() => {
 
 			<v-info
 				v-if="!loading && groups.length === 0"
-				:title="t('no_cached_entries', 'No cached entries')"
+				:title="emptyState.title"
 				icon="database"
 				center
 			>
-				{{
-					t(
-						'no_cached_entries_copy',
-						'Nothing is cached yet, or cache stats are off. '
-							+ 'Needs CACHE_STORE=redis and CACHE_STATS_ENABLED.',
-					)
-				}}
+				{{ emptyState.copy }}
 			</v-info>
 
 			<div v-if="groups.length > 0" class="tree-controls">
