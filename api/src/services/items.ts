@@ -1119,13 +1119,15 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		// Empty rather than optional: they are filled from inside the read below and
-		// read after it, and a read with purging off lists no collection anyway.
-		let fieldMap: ReturnType<typeof fieldMapFromAst> = {
-			read: new Map(),
-			other: new Map(),
-		};
+		// Derived from the AST alone, so it must not hang on the read handing rows
+		// back: `run-ast` returns early on an empty result and never reaches the
+		// callback, and an empty map here drops every collection's tag. A read with
+		// purging off lists no collection anyway.
+		const fieldMap = scopedCachePurgeEnabled()
+			? fieldMapFromAst(ast, this.schema)
+			: { read: new Map(), other: new Map() };
 
+		// The pins DO depend on the rows, so this one is filled from inside the read.
 		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
 
@@ -1137,13 +1139,13 @@ implements AbstractService<Item> {
 				: true,
 			// `run-ast` injects every level's primary key for the nesting to work and
 			// strips it again before the response. The scope pins each parent row BY
-			// that key, so it reads them from the one place they still exist.
+			// that key, so it reads them from the one place they still exist. Not
+			// called for an empty result, which needs no pin: with no row nested,
+			// the bare tag is already what each collection deserves.
 			onRowsWithTemporaryFields: (rows) => {
 				if (scopedCachePurgeEnabled() === false) {
 					return;
 				}
-
-				fieldMap = fieldMapFromAst(ast, this.schema);
 
 				m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
 					this.schema,
