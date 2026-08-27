@@ -172,8 +172,14 @@ export async function runAst(
 		// fields
 		// The field allowed flags injected in `getDBQuery` are already removed while processing the nested nodes in
 		// the previous step.
-		if (options?.nested !== true && options?.stripNonRequested !== false) {
-			items = removeTemporaryFields(schema, items, originalAST, primaryKeyField);
+		if (options?.nested !== true) {
+			// The last point at which those injected fields are still on the rows.
+			// Non-null: an empty or absent result returned above.
+			options?.onRowsWithTemporaryFields?.(items);
+
+			if (options?.stripNonRequested !== false) {
+				items = removeTemporaryFields(schema, items, originalAST, primaryKeyField);
+			}
 		}
 
 		return items;

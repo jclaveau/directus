@@ -2,6 +2,8 @@ import { useEnv } from '@directus/env';
 import type {
 	EventContext,
 	Filter,
+	Item,
+	Query,
 	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
@@ -10,6 +12,18 @@ import type {
 } from '@directus/types';
 import type Keyv from 'keyv';
 import { resolvedCacheTtl } from './cache-config.js';
+import type { AST } from './types/ast.js';
+import {
+	extractFieldsFromQuery,
+} from './permissions/modules/process-ast/lib/extract-fields-from-query.js';
+import {
+	joinFilterWithCases,
+} from './database/run-ast/lib/apply-query/join-filter-with-cases.js';
+import type {
+	CollectionKey,
+	FieldMap,
+	QueryPath,
+} from './permissions/modules/process-ast/types.js';
 import { queueCacheAnomaly, queueCachePurge } from './cache-events.js';
 import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
@@ -219,6 +233,10 @@ export function canonicalScopedCacheValue(
 	return String(value);
 }
 
+/** Each field of a collection mapped to its schema type, or undefined when the
+ * schema does not carry it. What canonicalizes a tag value on both sides. */
+export type FieldTypesByField = Record<string, Type | undefined>;
+
 // Types whose filter value and stored row value are NOT guaranteed to canonicalize to the same
 // token across drivers/timezones: a naive `dateTime`/`timestamp` column comes back as a local
 // `Date` from the driver but as an ISO string (possibly with an explicit `Z`) from a filter, so
@@ -332,12 +350,22 @@ export function scopedCacheCollectionsChangedByOnDelete(
 }
 
 /**
+ * How much longer a tag set lives than the entries it indexes. Every write that
+ * files a key into the set re-`EXPIRE`s it, so at 1 it would already outlive its
+ * newest member; the doubling is slack, not arithmetic — for an entry orphaned by
+ * a crash between the write and its purge, and for siblings written outside this
+ * pipeline. A tag set holds keys, not payloads, so the slack is nearly free.
+ */
+const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
+
+/**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the
- * payload key and its `__expires_at` sibling are tagged. When a cache TTL is set, each tag
- * set self-expires at twice that TTL as a safety net against members orphaned by a crash
- * between write and purge; with no TTL (`CACHE_TTL` unset) the cached entries never expire
- * either, so the tag sets are left unbounded to match — a normal purge still drains them.
+ * payload key and its `__expires_at` sibling are tagged. When a cache TTL is set,
+ * each tag set self-expires at `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as a
+ * net for members orphaned by a crash between write and purge; with no TTL
+ * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
+ * left unbounded to match — a normal purge still drains them.
  */
 export async function tagScopedCacheKeys(
 	key: string,
@@ -359,7 +387,10 @@ export async function tagScopedCacheKeys(
 	}
 
 	const redis = useRedis();
-	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000) * 2;
+
+	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000)
+		* SCOPED_CACHE_TAG_TTL_FACTOR;
+
 	const pipeline = redis.pipeline();
 	const filedKeys = new Set<string>();
 
@@ -1047,11 +1078,16 @@ export async function purgeScopedCache(
  * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*. `'coarse'`
  *   returns `null` so the caller can fall back to a collection-wide purge rather than leave a
  *   slice stale; `'skip'` best-effort skips just that row's contribution.
- * - The `'coarse'` path only triggers for a caller feeding *unprojected* rows (e.g. a raw payload).
- *   The sole production caller (`snapshotScopedCacheTags`) reads rows via an explicit projected
- *   `select`, so every field key is always present and it never returns `null` there — an
- *   update/delete/create snapshot always resolves. A create whose committed rows can't be trusted
- *   is caught upstream by the row-count check (`someRowTakenOver`), not here.
+ * - The `'coarse'` path triggers for a caller feeding *unprojected* rows. The purge
+ *   side (`snapshotScopedCacheTags`) reads rows via an explicit projected `select`,
+ *   so every field key is always present and it never returns `null` there — an
+ *   update/delete/create snapshot always resolves. A create whose committed rows
+ *   can't be trusted is caught upstream by the row-count check
+ *   (`someRowTakenOver`), not here.
+ * - The read side (`pinnedScopedCacheTagsFromM2oParents`) is the caller that
+ *   depends on the `null`: one parent row missing its key has to take its whole
+ *   collection down to the bare tag, since pinning the rest would leave that row
+ *   covered by nothing.
  * - `fieldTypes`: each field's schema type, so the tag value canonicalizes the same way the read
  *   side's filter value does.
  */
@@ -1060,7 +1096,7 @@ export function scopedCacheTagsFromRows(
 	fields: string[],
 	rows: Record<string, any>[],
 	onUnresolvable: 'coarse' | 'skip',
-	fieldTypes: Record<string, Type | undefined> = {},
+	fieldTypes: FieldTypesByField = {},
 ): ScopedCacheTag[] | null {
 	const tags: ScopedCacheTag[] = [];
 
@@ -1093,6 +1129,338 @@ export function scopedCacheTagsFromRows(
 	return tags;
 }
 
+export type ScopedCacheM2oJoin = {
+	field: string;
+	relatedCollection: string;
+	relatedPk: string;
+};
+
+/**
+ * Resolve a dotted path into the chain of M2O joins it crosses, from `collection`
+ * down. Null on anything that is not an M2O — a to-many hop, an unknown field, or an
+ * A2O, whose relation names no single related collection — and every caller then
+ * degrades to the bare collection tag.
+ *
+ * A row maps to exactly one parent across an M2O, so what such a join reaches is
+ * fully determined by the rows already in hand. Shared, so the two sides that ask
+ * "is this path pinnable?" cannot drift apart on the answer: a collection's declared
+ * scope paths, and the nested collections of a read.
+ */
+export function resolveScopedCacheM2oJoinChainFromPath(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	path: QueryPath,
+): ScopedCacheM2oJoin[] | null {
+	const joins: ScopedCacheM2oJoin[] = [];
+	let current = collection;
+
+	for (const field of path) {
+		const relation = schema.relations.find((rel) => {
+			return rel.collection === current && rel.field === field;
+		});
+
+		const relatedCollection = relation?.related_collection;
+
+		const relatedPk = relatedCollection
+			? schema.collections[relatedCollection]?.primary
+			: undefined;
+
+		if (!relatedCollection || !relatedPk) {
+			return null;
+		}
+
+		joins.push({ field, relatedCollection, relatedPk });
+		current = relatedCollection;
+	}
+
+	return joins;
+}
+
+/**
+ * How many slices one nested collection may pin on a single read. Every tag costs
+ * a Redis set plus a slice-index member, and the write side deletes them one by one.
+ *
+ * Sized above a default page of nested parents (the default `limit` is 100), below
+ * an import-sized one. NOT the bound
+ * https://github.com/jclaveau/directus/issues/392 is deciding, though both coarsen
+ * rather than fan out and both fail toward over-purge:
+ *
+ * - #392 bounds what a WRITE emits, forced by Postgres's 65 535 bind parameters,
+ *   and picks its number from the purge crossover. Above it a whole collection's
+ *   cache goes.
+ * - This bounds what a READ attaches. Nothing structural forces it, and a read
+ *   never purges — so the crossover #392 measures does not apply. Above it this
+ *   one response loses its pin and is still cached.
+ *
+ * Operator-tunable because the right number is deployment-specific — it weighs
+ * Redis memory against the hit ratio the pin buys, and a pin costs a tag set plus a
+ * member of the collection's slice index (130 B measured, on a TTL every write
+ * refreshes). No setting of it can serve a stale row.
+ */
+export function scopedCacheMaxPinsPerCollection(): number {
+	return env['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] as number;
+}
+
+/**
+ * The parent rows sitting at the END of one M2O path, in document order — the set is
+ * replaced at every hop, so the rows passed through on the way out are not returned.
+ *
+ * Null when the response cannot answer the path — a segment it never carried, or an
+ * array where an M2O promised one row — so the caller falls back to the bare tag
+ * rather than pin a set it only half read.
+ */
+function m2oParentRowsAtPathEnd(
+	records: Item[],
+	segments: QueryPath,
+): Item[] | null {
+	let current = records;
+
+	for (const segment of segments) {
+		const next: Item[] = [];
+
+		for (const row of current) {
+			const value = row[segment];
+
+			// A row whose parent link is empty carries no parent to pin, and says
+			// nothing about the rows its siblings reached.
+			if (value === null) {
+				continue;
+			}
+
+			if (typeof value !== 'object' || Array.isArray(value)) {
+				return null;
+			}
+
+			next.push(value);
+		}
+
+		current = next;
+	}
+
+	return current;
+}
+
+/**
+ * The collections a read depends on BEYOND the parent rows it nested, so keying the
+ * pin on those rows would leave the entry alive through a write that changes
+ * what the read returns.
+ *
+ * - A query filters, sorts, groups or aggregates on a path into it (permission cases
+ *   joined the way the SQL WHERE joins them), so rows the response never nested
+ *   decide which rows come back. Read off EVERY node's query, not only the root's: a
+ *   nested node's filter withholds parents, and which ones it withholds is
+ *   decided by every collection that filter reads — each of them one the
+ *   response may have nested only in part.
+ * - A nested node carries a field-level case, so a parent it references can be
+ *   withheld and arrive as a null slot — which `mergeWithParentItems` writes for
+ *   a null foreign key too, leaving the two indistinguishable once merged.
+ */
+export function scopedCacheCollectionsBeyondNestedRows(
+	schema: SchemaOverview,
+	ast: AST,
+): Set<CollectionKey> {
+	const beyond = new Set<CollectionKey>();
+
+	const addCollectionsQueriedBy = (
+		collection: CollectionKey,
+		query: Query,
+		cases: Filter[],
+	): void => {
+		const queryFieldMap: FieldMap = { read: new Map(), other: new Map() };
+
+		extractFieldsFromQuery(
+			collection,
+			{ ...query, filter: joinFilterWithCases(query.filter, cases) },
+			queryFieldMap,
+			schema,
+		);
+
+		for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
+			beyond.add(entry.collection);
+		}
+	};
+
+	addCollectionsQueriedBy(ast.name, ast.query, ast.cases);
+
+	const addWhatNestedM2oNodesDependOn = (children: AST['children']): void => {
+		for (const child of children) {
+			if (child.type !== 'm2o') {
+				continue;
+			}
+
+			addCollectionsQueriedBy(
+				child.relation.related_collection!,
+				child.query,
+				child.cases,
+			);
+
+			// Not a filter, so nothing above reads it: the case decides per ROW
+			// whether this parent is shown at all.
+			if (child.whenCase.length > 0) {
+				beyond.add(child.relation.related_collection!);
+			}
+
+			addWhatNestedM2oNodesDependOn(child.children);
+		}
+	};
+
+	addWhatNestedM2oNodesDependOn(ast.children);
+
+	return beyond;
+}
+
+/**
+ * Scope a read's NON-root collections off the parent rows it nested — the other
+ * half of `pinnedScopedCacheTagsFromFilter`, which bounds the root.
+ *
+ * Per touched collection, the first of these that holds:
+ *
+ * - `<pk>=<key>` per parent row — M2O hops only. An INSERT lands a key this
+ *   response cannot have nested, so the pin cannot go stale.
+ * - its own declared scope slices — past the ceiling. One tag per distinct value.
+ * - the bare collection tag — a to-many hop or A2O anywhere on one of its paths, no
+ *   parent row nested, a row missing its key, or the read depending on it
+ *   beyond what it nested (`scopedCacheCollectionsBeyondNestedRows`).
+ *
+ * Returns the pinned collections only; the bare tag is the caller's default, so a
+ * collection absent here keeps the tag it has always carried. Each fallback
+ * over-purges, none serves stale.
+ */
+export function pinnedScopedCacheTagsFromM2oParents(
+	schema: SchemaOverview,
+	rootCollection: CollectionKey,
+	fieldMap: FieldMap,
+	records: Item[],
+	collectionsBeyondNestedRows: Set<CollectionKey>,
+): Map<CollectionKey, ScopedCacheTag[]> {
+	// A set per collection: the field map carries the same path under both its read
+	// and its other group, and walking one path twice would double every row.
+	const pathsByCollection = new Map<CollectionKey, Set<QueryPath[number]>>();
+
+	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+		// The root is bounded by its own filter, not by what it nested, and a
+		// self-referential relation reaches it again at a path that bounds nothing.
+		if (entry.collection === rootCollection) {
+			continue;
+		}
+
+		// Its parent rows do not bound the read, so only the bare tag covers it.
+		if (collectionsBeyondNestedRows.has(entry.collection)) {
+			continue;
+		}
+
+		const paths = pathsByCollection.get(entry.collection)
+			?? new Set<QueryPath[number]>();
+
+		paths.add(path);
+		pathsByCollection.set(entry.collection, paths);
+	}
+
+	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
+
+	for (const [collection, paths] of pathsByCollection) {
+		const primaryKeyField = schema.collections[collection]?.primary;
+		const collectionFields = schema.collections[collection]?.fields ?? {};
+
+		if (primaryKeyField === undefined) {
+			continue;
+		}
+
+		const rows: Item[] = [];
+		let pinnableFromNestedRows = true;
+
+		for (const path of paths) {
+			const segments = path.split('.');
+
+			const joins = resolveScopedCacheM2oJoinChainFromPath(
+				schema,
+				rootCollection,
+				segments,
+			);
+
+			if (joins === null) {
+				pinnableFromNestedRows = false;
+				break;
+			}
+
+			const parentRows = m2oParentRowsAtPathEnd(records, segments);
+
+			if (parentRows === null) {
+				pinnableFromNestedRows = false;
+				break;
+			}
+
+			// Pushed one by one: a spread passes an argument per row, and a read
+			// with no limit blows the call-stack cap somewhere past 100k of them.
+			for (const parentRow of parentRows) {
+				rows.push(parentRow);
+			}
+		}
+
+		if (pinnableFromNestedRows === false) {
+			continue;
+		}
+
+		// Reached, but carrying nothing to pin — a filter-only relation the response
+		// never nested, or rows whose parent link is empty throughout.
+		if (rows.length === 0) {
+			continue;
+		}
+
+		// `coarse`, not `skip`: one row without its key must take the whole
+		// collection down to the bare tag. Skipping it would pin the rows that DID
+		// carry a key and leave that one covered by nothing — stale, where the bare
+		// tag only over-purges.
+		const keyTags = scopedCacheTagsFromRows(
+			collection,
+			[primaryKeyField],
+			rows,
+			'coarse',
+			{ [primaryKeyField]: collectionFields[primaryKeyField]?.type },
+		);
+
+		if (
+			keyTags !== null &&
+			keyTags.length <= scopedCacheMaxPinsPerCollection()
+		) {
+			pinned.set(collection, keyTags);
+			continue;
+		}
+
+		// Only the direct columns: a dotted scope field names a column on another
+		// collection, which the parent row does not carry.
+		const sliceFields = (schema.collections[collection]?.scopedCacheFields ?? [])
+			.filter((field) => !field.includes('.'));
+
+		if (sliceFields.length === 0) {
+			continue;
+		}
+
+		const sliceFieldTypes: FieldTypesByField = {};
+
+		for (const field of sliceFields) {
+			sliceFieldTypes[field] = collectionFields[field]?.type;
+		}
+
+		const sliceTags = scopedCacheTagsFromRows(
+			collection,
+			sliceFields,
+			rows,
+			'coarse',
+			sliceFieldTypes,
+		);
+
+		if (
+			sliceTags !== null &&
+			sliceTags.length <= scopedCacheMaxPinsPerCollection()
+		) {
+			pinned.set(collection, sliceTags);
+		}
+	}
+
+	return pinned;
+}
+
 /**
  * Scope a read's root cache tags off a filter — the read side. A read is soundly scoped to a value
  * slice only when the filter *bounds* it to that value: a future insert with a new scope value must
@@ -1123,7 +1491,7 @@ export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
 	fields: string[],
 	filter: Filter | null | undefined,
-	fieldTypes: Record<string, Type | undefined> = {},
+	fieldTypes: FieldTypesByField = {},
 	relatedPrimaryKeys: Record<string, string> = {},
 	scopedCachePaths: ScopedCachePath[] = [],
 	primaryKeyField?: string,

@@ -28,6 +28,8 @@ const env = vi.hoisted<Record<string, any>>(() => {
 		CACHE_AUTO_PURGE: true,
 		CACHE_AUTO_PURGE_IGNORE_LIST: [],
 		CACHE_NAMESPACE: 'scalabus',
+		// `useEnv` merges defaults.ts, so the real one always carries this.
+		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
 		MAX_BATCH_MUTATION: 100000,
 		// The Integration Tests' nested-relation path dynamically loads notifications -> mail, which
 		// resolves this at import time.
@@ -1393,6 +1395,180 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const result = await service.readByQuery({ fields: ['*'] });
 
 			expect(readMeta(result)?.scopedCacheTags).toBeDefined();
+		});
+	});
+
+	describe('the nested collections of a read', () => {
+		const nestedSchema = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('space').string();
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('label').string();
+				c.field('owner').m2o('owner');
+				c.field('owned_sub_items').o2m('owned_sub_item', 'owned_item');
+			})
+			.collection('owned_sub_item', (c) => {
+				c.field('id').id();
+				c.field('owned_item').m2o('owned_item');
+			})
+			.build();
+
+		// The read path only builds tags — writing them is respond.ts's job — so naming
+		// a Redis config is enough to reach it, with no client involved.
+		beforeEach(() => {
+			env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
+			env['CACHE_STORE'] = 'redis';
+			env['REDIS_ENABLED'] = true;
+			// `run-ast` pages a to-many until a batch comes back short, and an
+			// unset size compares every length as under it — an endless loop.
+			env['RELATIONAL_BATCH_SIZE'] = 250;
+		});
+
+		afterEach(() => {
+			delete env['CACHE_AUTO_PURGE_MODE'];
+			delete env['CACHE_STORE'];
+			delete env['REDIS_ENABLED'];
+			delete env['RELATIONAL_BATCH_SIZE'];
+		});
+
+		it('tags every collection it read, even when no row came back', async () => {
+			// `run-ast` returns early on an empty result, before the hook the pins are
+			// read from. The field map does not come from that hook — it is derived
+			// from the AST — and a read matching nothing must still be purgeable.
+			tracker.on.select('owned_item').response([]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({
+				fields: ['label', 'owner.space'],
+			});
+
+			expect(result).toEqual([]);
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			// Nothing was nested, so nothing is pinned — but both collections the read
+			// touched have to carry the tag a write to them drops.
+			expect(tags).toContainEqual({ collection: 'owned_item' });
+			expect(tags).toContainEqual({ collection: 'owner' });
+		});
+
+		it('pins an M2O parent by the key the response nested', async () => {
+			tracker.on.select('owned_item').response([
+				{ id: 1, label: 'a', owner: 100 },
+			]);
+
+			tracker.on.select('owner').response([{ id: 100, space: 's' }]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({
+				fields: ['id', 'label', 'owner.id', 'owner.space'],
+			});
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			expect(tags).toContainEqual({
+				collection: 'owner',
+				field: 'id',
+				value: 100,
+				type: 'integer',
+			});
+
+			// The regression this exists for: a bare tag beside the pin would make any
+			// write to any owner drop the read, which is what the pin is here to stop.
+			expect(tags).not.toContainEqual({ collection: 'owner' });
+
+			// The root keeps its bare tag — its filter bounds nothing.
+			expect(tags).toContainEqual({ collection: 'owned_item' });
+		});
+
+		it(oneLine`
+			pins the parent key the caller never asked for, and still strips it
+		`, async () => {
+			// The pin reads a key `run-ast` injected for the nesting; the response must
+			// not keep it. Requesting `owner.id` would hide a strip that never ran.
+			// The root query names `owner` as a column, so the parent matcher would
+			// claim it — register the root ahead of it.
+			tracker.on.select('owned_item').response([
+				{ id: 1, label: 'a', owner: 100 },
+			]);
+
+			tracker.on.select('owner').response([{ id: 100, space: 's' }]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({ fields: ['label', 'owner.space'] });
+
+			expect(readMeta(result)?.scopedCacheTags).toContainEqual({
+				collection: 'owner',
+				field: 'id',
+				value: 100,
+				type: 'integer',
+			});
+
+			expect(result).toEqual([{ label: 'a', owner: { space: 's' } }]);
+		});
+
+		it('leaves a value-pinned root without its bare tag', async () => {
+			// The bare tag is what any write to the collection drops, so emitting it
+			// beside the root's own slices would undo the root pin entirely.
+			tracker.on.select('owned_item').response([{ id: 1, label: 'a' }]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({
+				fields: ['id', 'label'],
+				filter: { id: { _eq: 1 } },
+			});
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			expect(tags).toContainEqual({
+				collection: 'owned_item',
+				field: 'id',
+				value: 1,
+				type: 'integer',
+			});
+
+			expect(tags).not.toContainEqual({ collection: 'owned_item' });
+		});
+
+		it('keeps a collection it reached across a to-many hop bare', async () => {
+			// The child's query names `owned_item` as its WHERE column, so the parent
+			// matcher would claim it first — register the narrower table ahead of it.
+			tracker.on.select('owned_sub_item').response([
+				{ id: 7, owned_item: 1 },
+			]);
+
+			tracker.on.select('owned_item').response([
+				{ id: 1, label: 'a', owner: 100 },
+			]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({
+				fields: ['id', 'label', 'owned_sub_items.id'],
+			});
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			expect(tags).toContainEqual({ collection: 'owned_sub_item' });
+
+			expect(tags).not.toContainEqual({
+				collection: 'owned_sub_item',
+				field: 'id',
+				value: 7,
+				type: 'integer',
+			});
 		});
 	});
 });

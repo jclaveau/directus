@@ -33,6 +33,8 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// broke a different one.
 			'/tests/db/routes/items/cache-cancel-write.test.ts',
 			'/tests/db/routes/items/cache-delete-scope.test.ts',
+			'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts',
+			'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts',
 			'/tests/db/routes/items/cache-nested-write.test.ts',
 			'/tests/db/routes/items/cache-poisoning-read.test.ts',
 			'/tests/db/routes/items/cache-poisoning-write.test.ts',
@@ -55,6 +57,11 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// WebSocket subscriptions starve under the parallel pool's load; run this
 			// (split out of m2o.test.ts) sequentially like the other WS suites (#277).
 			'/tests/db/routes/items/m2o-max-batch-mutation.test.ts',
+			// `no-relation` subscribes to the artists collection over a WebSocket, and
+			// this file writes `batch-N` rows into that same collection. Left in the
+			// parallel middle its creates reach the subscriber's queue, and
+			// `getMessages(1)` returns a row the assertion never asked for.
+			'/tests/db/routes/items/batch-insert.test.ts',
 			'/tests/db/routes/permissions/cache-purge.test.ts',
 			'/tests/db/routes/flows/webhook.test.ts',
 			'/tests/db/app/cache.test.ts',

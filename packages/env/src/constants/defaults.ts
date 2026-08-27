@@ -77,6 +77,7 @@ export const DEFAULTS = {
 	CACHE_AUTO_PURGE: false,
 	CACHE_AUTO_PURGE_MODE: 'scoped',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'directus_activity,directus_presets',
+	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
 	// Default on for the formats a cached endpoint might content-negotiate. Safe
 	// because browsers/SDKs collapse to json (only an explicit text/csv etc. gets
 	// its own bucket). Deliberately NOT xml/html: browsers send them high-q in

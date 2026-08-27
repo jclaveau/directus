@@ -23,6 +23,7 @@ import type {
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
+import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
@@ -31,12 +32,17 @@ import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
 	createScopedCacheCollector,
+	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
+	resolveScopedCacheM2oJoinChainFromPath,
+	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
+	type FieldTypesByField,
+	type ScopedCacheM2oJoin,
 } from '../scoped-cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
@@ -218,13 +224,13 @@ implements AbstractService<Item> {
 		let query = this.knex.from({ root: this.collection });
 		let prevAlias = 'root';
 
-		resolved.joins.forEach((hop, index) => {
+		resolved.joins.forEach((join, index) => {
 			const alias = `p${index}`;
 
 			query = query.leftJoin(
-				{ [alias]: hop.relatedCollection },
-				`${alias}.${hop.relatedPk}`,
-				`${prevAlias}.${hop.field}`,
+				{ [alias]: join.relatedCollection },
+				`${alias}.${join.relatedPk}`,
+				`${prevAlias}.${join.field}`,
 			);
 
 			prevAlias = alias;
@@ -402,7 +408,7 @@ implements AbstractService<Item> {
 	// tag. The terminal is a plain column on the last collection (scalar or fk).
 	private resolveScopedCachePath(path: string): {
 		segments: string[];
-		joins: { field: string; relatedCollection: string; relatedPk: string }[];
+		joins: ScopedCacheM2oJoin[];
 		terminalCollection: string;
 		terminalField: string;
 	} | null {
@@ -412,46 +418,28 @@ implements AbstractService<Item> {
 			return null;
 		}
 
-		const joins: {
-			field: string;
-			relatedCollection: string;
-			relatedPk: string;
-		}[] = [];
+		const joins = resolveScopedCacheM2oJoinChainFromPath(
+			this.schema,
+			this.collection,
+			segments.slice(0, -1),
+		);
 
-		let collection = this.collection;
-
-		for (let index = 0; index < segments.length - 1; index++) {
-			const field = segments[index]!;
-
-			const relation = this.schema.relations.find((rel) => {
-				return rel.collection === collection && rel.field === field;
-			});
-
-			const relatedCollection = relation?.related_collection;
-
-			const relatedPk = relatedCollection
-				? this.schema.collections[relatedCollection]?.primary
-				: undefined;
-
-			if (!relatedCollection || !relatedPk) {
-				return null;
-			}
-
-			joins.push({ field, relatedCollection, relatedPk });
-			collection = relatedCollection;
+		if (joins === null) {
+			return null;
 		}
 
 		return {
 			segments,
 			joins,
-			terminalCollection: collection,
+			// At least one hop, since a path shorter than two segments returned above.
+			terminalCollection: joins[joins.length - 1]!.relatedCollection,
 			terminalField: segments[segments.length - 1]!,
 		};
 	}
 
-	private get collectionScopedCacheFieldTypes(): Record<string, Type | undefined> {
+	private get collectionScopedCacheFieldTypes(): FieldTypesByField {
 		const rootFields = this.schema.collections[this.collection]?.fields ?? {};
-		const types: Record<string, Type | undefined> = {};
+		const types: FieldTypesByField = {};
 
 		// The primary key pins implicitly on every collection, so its type travels with
 		// the declared ones — both sides canonicalize the key the same way.
@@ -1131,12 +1119,42 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
+		// Derived from the AST alone, so it must not hang on the read handing rows
+		// back: `run-ast` returns early on an empty result and never reaches the
+		// callback, and an empty map here drops every collection's tag. A read with
+		// purging off lists no collection anyway.
+		const fieldMap = scopedCachePurgeEnabled()
+			? fieldMapFromAst(ast, this.schema)
+			: { read: new Map(), other: new Map() };
+
+		// The pins DO depend on the rows, so this one is filled from inside the read.
+		let m2oParentPins:
+			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
+
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
 			// GraphQL requires relational keys to be returned regardless
 			stripNonRequested: opts?.stripNonRequested !== undefined
 				? opts.stripNonRequested
 				: true,
+			// `run-ast` injects every level's primary key for the nesting to work and
+			// strips it again before the response. The scope pins each parent row BY
+			// that key, so it reads them from the one place they still exist. Not
+			// called for an empty result, which needs no pin: with no row nested,
+			// the bare tag is already what each collection deserves.
+			onRowsWithTemporaryFields: (rows) => {
+				if (scopedCachePurgeEnabled() === false) {
+					return;
+				}
+
+				m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
+					this.schema,
+					this.collection,
+					fieldMap,
+					toArray(rows),
+					scopedCacheCollectionsBeyondNestedRows(this.schema, ast),
+				);
+			},
 		});
 
 		// TODO when would this happen?
@@ -1183,8 +1201,6 @@ implements AbstractService<Item> {
 		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
-			const fieldMap = fieldMapFromAst(ast, this.schema);
-
 			// Self-reference guard: pinning the root to a value slice is sound only while the
 			// filter bounds every row the read returns. A self-referential relation (the root
 			// collection reached again through a nested field) pulls rows the root filter
@@ -1224,10 +1240,20 @@ implements AbstractService<Item> {
 			for (const collection of collectionsInFieldMap(fieldMap)) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
+					continue;
 				}
-				else {
+
+				// A collection the read reached only through M2O hops is pinned by the
+				// keys it nested; absent from the map, it keeps the bare tag that any
+				// write to it drops.
+				const parentPins = m2oParentPins.get(collection);
+
+				if (parentPins === undefined) {
 					scopedCacheTags.push({ collection });
+					continue;
 				}
+
+				scopedCacheTags.push(...parentPins);
 			}
 
 			scopedCacheTags = (await emitter.emitFilter(

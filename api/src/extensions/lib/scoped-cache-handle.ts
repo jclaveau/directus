@@ -1,11 +1,11 @@
 import type {
 	ApiExtensionContext,
 	ScopedCacheExtensionHandle,
-	Type,
 } from '@directus/types';
 import { getCache } from '../../cache.js';
 import {
 	composeScopedCachePaths,
+	type FieldTypesByField,
 	purgeScopedCache,
 	scopedCachePurgeEnabled,
 	scopedCacheTagsFromRows,
@@ -67,7 +67,7 @@ export function createScopedCacheExtensionHandle(
 				? scopeFields
 				: [...new Set([primaryKeyField, ...scopeFields])];
 
-			const fieldTypes: Record<string, Type | undefined> = Object.fromEntries(
+			const fieldTypes: FieldTypesByField = Object.fromEntries(
 				pinnedFields.map((field) => [field, collectionSchema?.fields[field]?.type]),
 			);
 
