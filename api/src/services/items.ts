@@ -52,9 +52,6 @@ import {
 	joinFilterWithCases,
 } from '../database/run-ast/lib/apply-query/join-filter-with-cases.js';
 import { runAst } from '../database/run-ast/run-ast.js';
-import {
-	removeTemporaryFields,
-} from '../database/run-ast/utils/remove-temporary-fields.js';
 import emitter from '../emitter.js';
 import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
@@ -1122,22 +1119,8 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		const recordsWithTemporaryFields = await runAst(
-			ast,
-			this.schema,
-			this.accountability,
-			{
-				knex: this.knex,
-				// `run-ast` injects every level's primary key for the nesting to work
-				// and strips it again before the response. The scope pins each parent
-				// row BY that key, so it has to read them while they are still on the
-				// rows: fetch them here, pin below, then strip.
-				stripNonRequested: false,
-			},
-		);
-
-		// Empty rather than optional: it is assigned and read in two separate guarded
-		// blocks, and a read with purging off lists no collection anyway.
+		// Empty rather than optional: they are filled from inside the read below and
+		// read after it, and a read with purging off lists no collection anyway.
 		let fieldMap: ReturnType<typeof fieldMapFromAst> = {
 			read: new Map(),
 			other: new Map(),
@@ -1146,31 +1129,31 @@ implements AbstractService<Item> {
 		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
 
-		if (recordsWithTemporaryFields !== null && scopedCachePurgeEnabled()) {
-			fieldMap = fieldMapFromAst(ast, this.schema);
+		const records = await runAst(ast, this.schema, this.accountability, {
+			knex: this.knex,
+			// GraphQL requires relational keys to be returned regardless
+			stripNonRequested: opts?.stripNonRequested !== undefined
+				? opts.stripNonRequested
+				: true,
+			// `run-ast` injects every level's primary key for the nesting to work and
+			// strips it again before the response. The scope pins each parent row BY
+			// that key, so it reads them from the one place they still exist.
+			onRowsWithTemporaryFields: (rows) => {
+				if (scopedCachePurgeEnabled() === false) {
+					return;
+				}
 
-			m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
-				this.schema,
-				this.collection,
-				fieldMap,
-				toArray(recordsWithTemporaryFields),
-				scopedCacheCollectionsBeyondNestedRows(this.schema, ast),
-			);
-		}
+				fieldMap = fieldMapFromAst(ast, this.schema);
 
-		// GraphQL requires relational keys to be returned regardless. The strip can
-		// answer null where run-ast did not — it returns the row it was handed as soon
-		// as one is null — so the guard below stays on ITS result, where it has always
-		// been, rather than on the rows going in.
-		const records = recordsWithTemporaryFields !== null
-			&& opts?.stripNonRequested !== false
-			? removeTemporaryFields(
-				this.schema,
-				recordsWithTemporaryFields,
-				ast,
-				this.schema.collections[this.collection]!.primary,
-			)
-			: recordsWithTemporaryFields;
+				m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
+					this.schema,
+					this.collection,
+					fieldMap,
+					toArray(rows),
+					scopedCacheCollectionsBeyondNestedRows(this.schema, ast),
+				);
+			},
+		});
 
 		// TODO when would this happen?
 		if (records === null) {
