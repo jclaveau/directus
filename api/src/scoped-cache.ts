@@ -350,12 +350,22 @@ export function scopedCacheCollectionsChangedByOnDelete(
 }
 
 /**
+ * How much longer a tag set lives than the entries it indexes. Every write that
+ * files a key into the set re-`EXPIRE`s it, so at 1 it would already outlive its
+ * newest member; the doubling is slack, not arithmetic — for an entry orphaned by
+ * a crash between the write and its purge, and for siblings written outside this
+ * pipeline. A tag set holds keys, not payloads, so the slack is nearly free.
+ */
+const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
+
+/**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both the
- * payload key and its `__expires_at` sibling are tagged. When a cache TTL is set, each tag
- * set self-expires at twice that TTL as a safety net against members orphaned by a crash
- * between write and purge; with no TTL (`CACHE_TTL` unset) the cached entries never expire
- * either, so the tag sets are left unbounded to match — a normal purge still drains them.
+ * payload key and its `__expires_at` sibling are tagged. When a cache TTL is set,
+ * each tag set self-expires at `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as a
+ * net for members orphaned by a crash between write and purge; with no TTL
+ * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
+ * left unbounded to match — a normal purge still drains them.
  */
 export async function tagScopedCacheKeys(
 	key: string,
@@ -377,7 +387,10 @@ export async function tagScopedCacheKeys(
 	}
 
 	const redis = useRedis();
-	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000) * 2;
+
+	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000)
+		* SCOPED_CACHE_TAG_TTL_FACTOR;
+
 	const pipeline = redis.pipeline();
 	const filedKeys = new Set<string>();
 
