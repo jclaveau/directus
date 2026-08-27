@@ -1432,6 +1432,29 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			delete env['RELATIONAL_BATCH_SIZE'];
 		});
 
+		it('tags every collection it read, even when no row came back', async () => {
+			// `run-ast` returns early on an empty result, before the hook the pins are
+			// read from. The field map does not come from that hook — it is derived
+			// from the AST — and a read matching nothing must still be purgeable.
+			tracker.on.select('owned_item').response([]);
+
+			const result = await new ItemsService('owned_item', {
+				knex: db,
+				schema: nestedSchema,
+			}).readByQuery({
+				fields: ['label', 'owner.space'],
+			});
+
+			expect(result).toEqual([]);
+
+			const tags = readMeta(result)?.scopedCacheTags;
+
+			// Nothing was nested, so nothing is pinned — but both collections the read
+			// touched have to carry the tag a write to them drops.
+			expect(tags).toContainEqual({ collection: 'owned_item' });
+			expect(tags).toContainEqual({ collection: 'owner' });
+		});
+
 		it('pins an M2O parent by the key the response nested', async () => {
 			tracker.on.select('owned_item').response([
 				{ id: 1, label: 'a', owner: 100 },

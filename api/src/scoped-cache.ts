@@ -1167,9 +1167,20 @@ export function resolveScopedCacheM2oJoinChainFromPath(
  * How many slices one nested collection may pin on a single read. Every tag costs
  * a Redis set plus a slice-index member, and the write side deletes them one by one.
  *
- * TODO(reviewer): same bound as the purge fan-out in
- * https://github.com/jclaveau/directus/issues/392 — sized above a default page of
- * nested parents, below an import-sized one. Move both to whatever #392 settles.
+ * Sized above a default page of nested parents (the default `limit` is 100), below
+ * an import-sized one. NOT the bound
+ * https://github.com/jclaveau/directus/issues/392 is deciding, though both coarsen
+ * rather than fan out and both fail toward over-purge:
+ *
+ * - #392 bounds what a WRITE emits, forced by Postgres's 65 535 bind parameters,
+ *   and picks its number from the purge crossover. Above it a whole collection's
+ *   cache goes.
+ * - This bounds what a READ attaches. Nothing structural forces it, and a read
+ *   never purges — so the crossover #392 measures does not apply. Above it this
+ *   one response loses its pin and is still cached.
+ *
+ * A read-side basis would weigh Redis memory against the hit ratio the pin buys:
+ * measured at 130 B per slice-index member, on a TTL refreshed by every write.
  */
 export const SCOPED_CACHE_M2O_PARENT_PIN_CEILING = 250;
 

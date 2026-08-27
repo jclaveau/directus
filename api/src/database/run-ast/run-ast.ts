@@ -174,9 +174,8 @@ export async function runAst(
 		// the previous step.
 		if (options?.nested !== true) {
 			// The last point at which those injected fields are still on the rows.
-			if (items !== null) {
-				options?.onRowsWithTemporaryFields?.(items);
-			}
+			// Non-null: an empty or absent result returned above.
+			options?.onRowsWithTemporaryFields?.(items);
 
 			if (options?.stripNonRequested !== false) {
 				items = removeTemporaryFields(schema, items, originalAST, primaryKeyField);
