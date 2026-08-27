@@ -16,7 +16,6 @@ import {
 	pinnedScopedCacheTagsFromM2oParents,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
-	SCOPED_CACHE_M2O_PARENT_PIN_CEILING,
 	dropScopedCacheTagIndex,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
@@ -50,6 +49,8 @@ const env = vi.hoisted(() => {
 		CACHE_AUTO_PURGE_MODE: 'scoped',
 		CACHE_STORE: 'redis',
 		CACHE_NAMESPACE: 'ns',
+		// `useEnv` merges defaults.ts, so the real one always carries this.
+		CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
 	} as Record<string, any>;
 });
 
@@ -1418,8 +1419,20 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 	});
 
 	describe('past the ceiling', () => {
+		// Set low rather than built past the shipped default: it keeps the fixtures
+		// readable, and it only degrades if the ceiling is read from the env at all.
+		const ceiling = 3;
+
+		beforeEach(() => {
+			env['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] = ceiling;
+		});
+
+		afterEach(() => {
+			env['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] = 250;
+		});
+
 		const records = Array.from(
-			{ length: SCOPED_CACHE_M2O_PARENT_PIN_CEILING + 1 },
+			{ length: ceiling + 1 },
 			(_unused, index) => {
 				return { id: index, owner: { id: index, space: 'shared' } };
 			},
@@ -1539,13 +1552,11 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				schema,
 				'owned_item',
 				ownerFieldMap,
-				records.slice(0, SCOPED_CACHE_M2O_PARENT_PIN_CEILING),
+				records.slice(0, ceiling),
 				new Set<string>(),
 			);
 
-			expect(pinned.get('owner')).toHaveLength(
-				SCOPED_CACHE_M2O_PARENT_PIN_CEILING,
-			);
+			expect(pinned.get('owner')).toHaveLength(ceiling);
 		});
 	});
 });

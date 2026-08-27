@@ -182,6 +182,12 @@ CACHE_ENABLED=false
 # List of collections that prevent cache purging when `CACHE_AUTO_PURGE` is enabled. ["directus_activity,directus_presets"]
 # CACHE_AUTO_PURGE_IGNORE_LIST="directus_activity,directus_presets"
 
+# How many keys one collection may be pinned by on a single scoped read. Over it
+# the read falls back to that collection's declared scope slices, then to its bare
+# tag — more purging, never staler. Each pin costs a Redis set and a member of the
+# collection's slice index, so raise it for hit ratio and lower it for memory. [250]
+# CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
+
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,
 # normalized primary tag) is ALWAYS keyed — no config needed.

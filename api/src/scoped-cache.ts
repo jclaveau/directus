@@ -1179,10 +1179,14 @@ export function resolveScopedCacheM2oJoinChainFromPath(
  *   never purges — so the crossover #392 measures does not apply. Above it this
  *   one response loses its pin and is still cached.
  *
- * A read-side basis would weigh Redis memory against the hit ratio the pin buys:
- * measured at 130 B per slice-index member, on a TTL refreshed by every write.
+ * Operator-tunable because the right number is deployment-specific — it weighs
+ * Redis memory against the hit ratio the pin buys, and a pin costs a tag set plus a
+ * member of the collection's slice index (130 B measured, on a TTL every write
+ * refreshes). No setting of it can serve a stale row.
  */
-export const SCOPED_CACHE_M2O_PARENT_PIN_CEILING = 250;
+export function scopedCacheMaxPinsPerCollection(): number {
+	return env['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] as number;
+}
 
 /**
  * The parent rows sitting at the END of one M2O path, in document order — the set is
@@ -1404,7 +1408,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		if (
 			keyTags !== null &&
-			keyTags.length <= SCOPED_CACHE_M2O_PARENT_PIN_CEILING
+			keyTags.length <= scopedCacheMaxPinsPerCollection()
 		) {
 			pinned.set(collection, keyTags);
 			continue;
@@ -1435,7 +1439,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		if (
 			sliceTags !== null &&
-			sliceTags.length <= SCOPED_CACHE_M2O_PARENT_PIN_CEILING
+			sliceTags.length <= scopedCacheMaxPinsPerCollection()
 		) {
 			pinned.set(collection, sliceTags);
 		}
