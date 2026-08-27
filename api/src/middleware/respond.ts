@@ -253,13 +253,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 						path: req.originalUrl.split('?')[0]!,
 						collection: req.collection ?? null,
 						userId: req.accountability?.user ?? null,
+						// The query string as sent, not the sanitized reading of it: the
+						// URL is rebuilt from this, so it has to be what was there.
+						// A GraphQL read is a POST and has no query string, so it
+						// keeps carrying its document and variables instead.
 						query: isGraphQlRequest
 							? JSON.stringify(getGraphqlQueryAndVariables(req))
-							: JSON.stringify(req.sanitizedQuery ?? {}),
-						// A GraphQL read is a POST — not a GET URL, so leave it blank.
-						url: isGraphQlRequest
-							? ''
-							: req.originalUrl,
+							: req.originalUrl.split('?')[1] ?? '',
 						bytes: size,
 						fillMs,
 						// The scoped cache tags the key was just indexed under, so a

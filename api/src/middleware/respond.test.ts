@@ -221,7 +221,8 @@ describe('respond middleware', () => {
 				method: 'GET',
 				path: '/items/articles',
 				collection: 'articles',
-				url: '/items/articles',
+				// The query string as sent, so the URL rebuilds from path + query.
+				query: '',
 				// cap off: bytes still comes from one serialization
 				bytes: Buffer.byteLength(JSON.stringify({ data: [{ id: 1 }] }), 'utf8'),
 			}),
@@ -236,6 +237,21 @@ describe('respond middleware', () => {
 			expect.any(Number),
 			'fill',
 			'cache-hash',
+		);
+
+		await respond(
+			makeReq({ originalUrl: '/items/articles?limit=5&fields=id' }),
+			res,
+			next,
+		);
+
+		// Path and query split at the '?' and nothing else: joined back they are
+		// the URL as sent, which is why neither is normalized on the way in.
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({
+				path: '/items/articles',
+				query: 'limit=5&fields=id',
+			}),
 		);
 	});
 
@@ -268,9 +284,10 @@ describe('respond middleware', () => {
 
 		await respond(makeReq({ method: 'POST', originalUrl: '/graphql' }), res, next);
 
+		// A GraphQL read has no query string to keep; its document and variables
+		// travel in the POST body and go in the same column instead.
 		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
 			expect.objectContaining({
-				url: '',
 				query: JSON.stringify({ query: '{ me }', variables: {} }),
 			}),
 		);

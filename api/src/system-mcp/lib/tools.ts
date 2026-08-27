@@ -334,9 +334,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				properties: {
 					configured: { type: 'boolean' },
 					enabled: { type: 'boolean' },
-					killedReason: {
+					budgetAlert: {
 						type: ['string', 'null'],
-						description: 'What stopped collection, where it stopped by itself.',
+						description: 'Why the telemetry is over its byte budget and '
+							+ 'cannot evict its way back. Collection keeps running.',
 					},
 					bufferLength: { type: 'number' },
 					droppedEvents: {

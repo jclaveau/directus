@@ -221,11 +221,23 @@ CACHE_STORE=memory
 # How long cache-telemetry rows are kept; a daily reap prunes older ones (bounds table growth on every DB). ["30d"]
 # CACHE_STATS_RETENTION="30d"
 
-# Auto-disable stats collection when the directus_cache_events table grows past this size (Postgres only). ["2gb"]
+# When buffered events are moved from Redis into the tables, and with them when
+# the byte budget is measured and evicted down to. ["*/10 * * * * *"]
+# CACHE_STATS_DRAIN_SCHEDULE="*/10 * * * * *"
+
+# When rows past CACHE_STATS_RETENTION are pruned, along with the descriptors
+# and entry tags left behind. Runs often: those two have no time axis to drop
+# by, so their size is their peak live row count. ["*/10 * * * *"]
+# CACHE_STATS_RETENTION_SCHEDULE="*/10 * * * *"
+
+# Drop the oldest cache telemetry once its tables outgrow this together.
+# Collection keeps running; the history shortens instead. Postgres only, and
+# needs TimescaleDB for there to be chunks to drop. ["2gb"]
 # CACHE_STATS_MAX_BYTES="2gb"
 
-# Auto-disable stats collection when the Redis event buffer exceeds this many entries. [100000]
-# CACHE_STATS_MAX_BUFFER=100000
+# Cap the Redis event buffer at this many entries; over it, the oldest entry is
+# dropped. Collection keeps running. [1000000]
+# CACHE_STATS_MAX_BUFFER=1000000
 
 # How long a miss can still be attributed to a just-expired entry (gap-since-expiry lookback). ["1h"]
 # CACHE_STATS_GAP_LOOKBACK="1h"

@@ -162,6 +162,47 @@ export abstract class SchemaHelper extends DatabaseHelper {
 		return null;
 	}
 
+	/**
+	 * Whether the TimescaleDB extension is installed here. False everywhere it
+	 * cannot be: the cache telemetry's chunking, compression and retention are
+	 * gated on this, and the calls behind that gate throw on a database without
+	 * the extension rather than answering no.
+	 */
+	async hasTimescale(): Promise<boolean> {
+		return false;
+	}
+
+	/**
+	 * Whether `table` stores its rows in Timescale chunks. The extension being
+	 * installed does not make a table a hypertable — one created before it
+	 * arrived stayed plain — so this is the other half of the gate above.
+	 */
+	async isHypertable(_table: string): Promise<boolean> {
+		return false;
+	}
+
+	/**
+	 * What `tables` occupy together, in bytes, or null where there is no cheap
+	 * measure to be had. Null rather than zero: a caller sizing them against a
+	 * budget must be able to tell "nothing there" from "cannot see".
+	 */
+	async getTablesSize(_tables: string[]): Promise<number | null> {
+		return null;
+	}
+
+	/**
+	 * Drop the oldest time chunk among `tables`, if its range ends no later than
+	 * `olderThan`, and say which table it came from and where it ended. Null when
+	 * nothing is that old, or where rows are not stored in chunks at all — on a
+	 * plain table there is nothing whose disk a drop would return.
+	 */
+	async dropOldestChunk(
+		_tables: string[],
+		_olderThan: Date,
+	): Promise<{ table: string; upTo: Date } | null> {
+		return null;
+	}
+
 	prepQueryParams(queryParams: Sql): Sql {
 		return queryParams;
 	}

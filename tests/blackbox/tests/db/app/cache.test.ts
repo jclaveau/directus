@@ -2857,7 +2857,6 @@ describe('App Caching Tests', () => {
 				collection: null,
 				user_id: null,
 				query: '{}',
-				url: path,
 				bytes: 0,
 				fill_ms: 0,
 				last_filled: now,

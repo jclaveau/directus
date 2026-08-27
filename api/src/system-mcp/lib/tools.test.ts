@@ -584,7 +584,7 @@ test('Every declared output property is one the tool actually answers', () => {
 		read_cache_stats_state: {
 			configured: true,
 			enabled: true,
-			killedReason: null,
+			budgetAlert: null,
 			bufferLength: 0,
 			droppedEvents: 0,
 		},

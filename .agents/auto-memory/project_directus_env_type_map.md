@@ -19,6 +19,15 @@ possible — an env var missing from the map is a gap to close, not the norm.
   genuinely `unknown → domain` still needs narrowing at consumption (a `switch`/typeof guard, not a cast — see
   [[feedback_ts_as_cast_smell]], [[feedback_trust_typed_boundary_no_recast]]).
 
+**Read this file BEFORE adding an env var, not after review.** It was already written when
+`CACHE_STATS_DRAIN_SCHEDULE`/`CACHE_STATS_RETENTION_SCHEDULE` went in unregistered on PR #396 and jean had to
+say it again ("memorize and apply: every env var should be typed if possible"). Nothing here is auto-loaded —
+`AGENTS.md` does not import the index — so a var added without grepping this directory misses the rule every
+time. See [[feedback_read_project_memory_index_first]].
+
+**Do not comment the rule at the entry.** A `// declared because …` note beside one key argues a general rule
+at its least useful place; no other entry in the map carries one. jean removed it on sight.
+
 **How to apply.**
 - Adding/touching an env var → add a `KEY: '<EnvType>'` line, grouped with its siblings. Even a plain string gets
   `'string'` for explicitness (e.g. `CACHE_STORE: 'string'` — its siblings `CACHE_STATUS_HEADER`/`CACHE_TAGS_HEADER` were
@@ -34,6 +43,12 @@ number branch, so `'0'` falls through to `'json'` → `tryJson('0')` → **numbe
 `get-cache-headers.ts` gates on `Number.isInteger(env['CACHE_CONTROL_S_MAXAGE'])` → `Number.isInteger('0')` is `false` →
 the s-maxage header silently never emits. So it MUST be `'number'`. Before registering, read the consumer and pick the
 type it expects; a leading-`0` numeric default or a `Number.isInteger`/arithmetic consumer is the tell.
+
+**Cron rules are `'string'`, and untyped they are worse than they look.** `guessType` sends a plain rule
+(`0 3 * * *`) down the `json` path — `tryJson` hands the string back unparsed — and a rule carrying a comma
+(`0 3,15 * * *`) down the **array** path, arriving as `["0 3", "15 * * *"]`. Both survive a consumer that does
+`String(env[...])` only because `String()` rejoins an array with commas. The upstream `_SCHEDULE` family
+(`METRICS_SCHEDULE`, `RETENTION_SCHEDULE`, `TUS_CLEANUP_SCHEDULE`) sat undeclared like that until PR #396.
 
 **Some vars can't be typed at all — leave them out.** `CACHE_VALUE_MAX_SIZE` is dual: `false` (disabled) OR a size
 string like `'8kb'`, and `respond.ts` keys off `!== false`. `'string'` breaks the disabled default (`false`→`'false'`,

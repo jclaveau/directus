@@ -1176,7 +1176,7 @@ describe('CachePage', () => {
 						data: {
 							configured: true,
 							enabled: true,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 0,
 						},
 					},
@@ -1200,6 +1200,51 @@ describe('CachePage', () => {
 		expect(api.patch).toHaveBeenCalledWith('/utils/cache/stats', {
 			enabled: false,
 		});
+	});
+
+	// An empty listing has three meanings and the copy used to give one, naming
+	// two env variables a deployment that saw this had already set.
+	function mountWithoutEntries(stats: Record<string, unknown>) {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			if (url === '/utils/cache/stats') {
+				return Promise.resolve({ data: { data: stats } } as never);
+			}
+
+			return Promise.resolve({ data: { data: [] } }) as never;
+		});
+
+		return mount(CachePage, { global });
+	}
+
+	it('says the collection is off when an admin turned it off', async () => {
+		const wrapper = mountWithoutEntries({
+			configured: true,
+			enabled: false,
+			budgetAlert: null,
+			bufferLength: 0,
+		});
+
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('Nothing is being collected');
+		expect(wrapper.text()).not.toContain('CACHE_STATS_ENABLED');
+	});
+
+	it('keeps the env hint for a deployment that never opted in', async () => {
+		const wrapper = mountWithoutEntries({
+			configured: false,
+			enabled: false,
+			budgetAlert: null,
+			bufferLength: 0,
+		});
+
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('CACHE_STATS_ENABLED');
+
+		// Not the disabled copy: this deployment never opted in, so there is no
+		// toggle to point at and the env hint is the whole answer.
+		expect(wrapper.text()).not.toContain('Nothing is being collected');
 	});
 
 	it('renders ∞ / tombstone / dash branches for a bare entry', async () => {
@@ -1280,7 +1325,7 @@ describe('CachePage', () => {
 						data: {
 							configured: true,
 							enabled: true,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 0,
 						},
 					},
@@ -1315,7 +1360,7 @@ describe('CachePage', () => {
 						data: {
 							configured: false,
 							enabled: false,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 0,
 						},
 					},
@@ -1343,7 +1388,7 @@ describe('CachePage', () => {
 						data: {
 							configured: true,
 							enabled: true,
-							killedReason: null,
+							budgetAlert: null,
 							bufferLength: 7,
 						},
 					},

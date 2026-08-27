@@ -524,7 +524,7 @@ describe('Services / Utils', () => {
 			const state = {
 				configured: true,
 				enabled: true,
-				killedReason: null,
+				budgetAlert: null,
 				bufferLength: 0,
 			};
 
