@@ -20,7 +20,9 @@ import {
 	findRelatedCollection,
 } from './permissions/modules/process-ast/utils/find-related-collection.js';
 import { parseFilterKey } from './utils/parse-filter-key.js';
-import { getRelationInfo } from './utils/get-relation-info.js';
+import {
+	expandRelatedKeyFilters,
+} from './utils/expand-related-key-filters.js';
 import {
 	joinFilterWithCases,
 } from './database/run-ast/lib/apply-query/join-filter-with-cases.js';
@@ -1475,17 +1477,14 @@ function scopedCacheFilterKeyingByAlias(
 			continue;
 		}
 
-		// A leaf carrying no operator is an `_eq`, which is how `getOperation`
-		// reads it — `{ id: 7 }` and `{ id: { _eq: 7 } }` compile identically. An
-		// array is left alone: no operator takes a bare list.
-		const conditions = isPlainFilterNode(value)
-			? value as Record<string, unknown>
-			: { _eq: value };
-
-		if (Array.isArray(value)) {
+		// Shorthands are gone by now (`expandRelatedKeyFilters`), so a leaf that is
+		// still not a node carries nothing this walk can read.
+		if (isPlainFilterNode(value) === false) {
 			parts.push(new Map([[alias, KEYING_UNKEYED]]));
 			continue;
 		}
+
+		const conditions = value as Record<string, unknown>;
 
 		// An A2O path carries its collection scope in the key itself
 		// (`item:articles`), which is how `add-join` picks the table to join.
@@ -1495,40 +1494,11 @@ function scopedCacheFilterKeyingByAlias(
 		const relatedCollection = pathScope
 			?? findRelatedCollection(collection, fieldName, schema);
 
-		const { relationType } = getRelationInfo(
-			schema.relations,
-			collection,
-			fieldName,
-		);
-
-		// `{ rel: { _eq: 7 } }` and `{ rel: 7 }` mean opposite things by direction,
-		// and only the relation says which. Across an M2O the foreign key is a
-		// column of THIS collection, so nothing is joined and no row of the related
-		// one is read. Across a to-many alias there is no such column, so
-		// `getColumnPath` appends the RELATED primary key and joins it — which is
-		// why the same spelling has to be answered on the far side. Synthesizing
-		// that key here rather than special-casing it keeps this walk and
-		// `getColumnPath` reading one shape.
-		const shorthandNamesRelatedKey =
-			relationType === 'o2m' && hopsAcrossRelation(conditions) === false;
-
-		const relatedPrimaryKey = relatedCollection === null
-			? undefined
-			: schema.collections[relatedCollection]?.primary;
-
-		if (
-			relatedCollection !== null &&
-			(
-				hopsAcrossRelation(conditions) ||
-				(shorthandNamesRelatedKey && relatedPrimaryKey !== undefined)
-			)
-		) {
+		if (relatedCollection !== null && hopsAcrossRelation(conditions)) {
 			parts.push(scopedCacheFilterKeyingByAlias(
 				schema,
 				relatedCollection,
-				shorthandNamesRelatedKey
-					? { [relatedPrimaryKey!]: conditions } as Filter
-					: conditions as Filter,
+				conditions as Filter,
 				alias === ''
 					? key
 					: `${alias}.${key}`,
@@ -1643,10 +1613,13 @@ export function scopedCacheFilterKeyingByCollection(
 
 		const collectionByAlias = new Map<string, CollectionKey>();
 
+		// One shape for the walk to read: a bare leaf becomes `_eq`, and an
+		// operator on a to-many alias becomes one on the related key, the way
+		// `getColumnPath` resolves it when it builds the join.
 		const keyingByAlias = scopedCacheFilterKeyingByAlias(
 			schema,
 			collection,
-			filter,
+			expandRelatedKeyFilters(schema, collection, filter),
 			'',
 			collectionByAlias,
 		);

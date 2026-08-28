@@ -329,17 +329,14 @@ describe(oneLine`
 		`, async () => {
 			await clearCache();
 
-			const read = () => {
-				return request(getUrl(vendor, env))
-					.get(`/items/${OWNED_ITEM}`)
-					.query({
-						'filter[categories][_eq]': String(junctionRowId),
-						fields: 'id,label',
-					})
-					.set('Authorization', auth);
-			};
+			const warm = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[categories][_eq]': String(junctionRowId),
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
 
-			const warm = await read();
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
 
 			expect(warm.headers[cacheTagsHeader]).toMatch(
@@ -348,6 +345,40 @@ describe(oneLine`
 
 			expect(warm.headers[cacheTagsHeader])
 				.not.toMatch(new RegExp(`(^|, )${JUNCTION}(,|$)`));
+		});
+
+		it(oneLine`
+			bare-tags a to-many alias filtered by an operator that names no row
+		`, async () => {
+			// `_gt` and its siblings join the collection but name no row, so the
+			// bare tag is the only honest answer. Before the filter was
+			// normalized these carried NO tag at all — the field map never named
+			// the collection — and no write to it could drop the entry.
+			await clearCache();
+
+			const readUnbounded = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[owned_sub_items][_gt]': '0',
+						fields: 'id,label,owner',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await readUnbounded();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+			expect(warm.body.data).toHaveLength(1);
+
+			expect(warm.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNED_SUB_ITEM}/${untouchedSubItemId}`)
+				.send({ note: 'unbounded-operator-write' })
+				.set('Authorization', auth);
+
+			expect((await readUnbounded()).headers[cacheStatusHeader]).toBe('MISS');
 		});
 
 		it('leaves a filter on a non-key column bare', async () => {

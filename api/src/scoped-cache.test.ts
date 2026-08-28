@@ -2042,6 +2042,26 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			.toEqual({ kind: 'keyed', keys: new Set([7]) });
 	});
 
+	it('leaves the AST filter as written, so permissions see what they saw', () => {
+		// The expansion feeds this analysis only. `extractFieldsFromQuery` drives
+		// `validatePathPermissions`, so rewriting the AST filter would start
+		// naming collections a shorthand does not name today and change which
+		// permissions a query requires.
+		const filter = { owned_sub_items: { _eq: 7 } };
+		const query = { filter };
+
+		scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query,
+			cases: [],
+			children: [],
+		} as unknown as AST);
+
+		expect(filter).toEqual({ owned_sub_items: { _eq: 7 } });
+		expect(query.filter).toBe(filter);
+	});
+
 	it('reads a nested node filter against the node collection, not the root', () => {
 		expect(scopedCacheFilterKeyingByCollection(schema, {
 			type: 'root',
