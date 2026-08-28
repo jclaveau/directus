@@ -5,6 +5,19 @@ import { SchemaHelper, type SortRecord } from '../types.js';
 
 const env = useEnv();
 
+/**
+ * Whether the extension is installed, per connection.
+ *
+ * Uncached, the probe answered 26 times over one cursus registration while the size query it
+ * gates ran 13 — the guard cost twice what it guarded (measured 2026-08-28). Keyed on the knex
+ * instance rather than held in the module, so it is not process-global state shared by every
+ * caller and a second connection answers for itself.
+ *
+ * An extension installed while the process runs is not seen until it restarts. Installing one
+ * is a migration, which is a deploy, so that window closes on its own.
+ */
+const timescalePresence = new WeakMap<Knex, boolean>();
+
 export class SchemaHelperPostgres extends SchemaHelper {
 	override generateIndexName(
 		type: 'unique' | 'foreign' | 'index',
@@ -15,15 +28,21 @@ export class SchemaHelperPostgres extends SchemaHelper {
 	}
 
 	override async hasTimescale(): Promise<boolean> {
-		// Uncached: one EXISTS over a catalog table costs far less than the size
-		// query it gates, and a cache here would be process-global state in a
-		// helper every caller shares.
+		const answered = timescalePresence.get(this.knex);
+
+		if (answered !== undefined) {
+			return answered;
+		}
+
 		const { rows } = await this.knex.raw(
 			`SELECT EXISTS(SELECT 1 FROM pg_extension `
 			+ `WHERE extname = 'timescaledb') AS has`,
 		);
 
-		return rows[0].has === true;
+		const present = rows[0].has === true;
+		timescalePresence.set(this.knex, present);
+
+		return present;
 	}
 
 	override async isHypertable(table: string): Promise<boolean> {
