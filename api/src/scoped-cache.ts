@@ -17,6 +17,10 @@ import {
 	extractFieldsFromQuery,
 } from './permissions/modules/process-ast/lib/extract-fields-from-query.js';
 import {
+	findRelatedCollection,
+} from './permissions/modules/process-ast/utils/find-related-collection.js';
+import { parseFilterKey } from './utils/parse-filter-key.js';
+import {
 	joinFilterWithCases,
 } from './database/run-ast/lib/apply-query/join-filter-with-cases.js';
 import type {
@@ -1255,16 +1259,534 @@ function m2oParentRowsAtPathEnd(
 }
 
 /**
+ * What a read's filters say about the rows of ONE collection they join to.
+ *
+ * - `keyed` — every condition that reaches the collection names its rows by
+ *   primary key, so no other row of it can change what the read returns and
+ *   `<collection>:<pk>=<key>` is the whole dependency.
+ * - `unkeyed` — something reaches it by anything else: another column, an
+ *   operator other than `_eq`/`_in`, or a hop THROUGH it to a further
+ *   collection, which reads the foreign key of every row that could be joined.
+ *   A write to any of its rows can then change the result, so only the bare
+ *   collection tag covers it.
+ * - `absent` — no condition reaches it, and it owes the filters nothing.
+ */
+export type ScopedCacheFilterKeying =
+	| { kind: 'keyed'; keys: Set<unknown> }
+	| { kind: 'unkeyed' }
+	| { kind: 'absent' };
+
+const KEYING_UNKEYED: ScopedCacheFilterKeying = { kind: 'unkeyed' };
+const KEYING_ABSENT: ScopedCacheFilterKeying = { kind: 'absent' };
+
+function keyedKeysAcross(parts: ScopedCacheFilterKeying[]): Set<unknown> {
+	const keys = new Set<unknown>();
+
+	for (const part of parts) {
+		if (part.kind !== 'keyed') {
+			continue;
+		}
+
+		for (const key of part.keys) {
+			keys.add(key);
+		}
+	}
+
+	return keys;
+}
+
+/**
+ * Conjunction. Every condition here describes the SAME joined row, so one of them
+ * naming that row's key pins it whatever the others go on to read off it:
+ * `{ _and: [{ course: { id: { _eq: 7 } } }, { course: { name: { _eq: 'x' } } }] }`
+ * compiles to one join alias, and only course 7 can satisfy it.
+ */
+function keyingOfEveryCondition(
+	parts: ScopedCacheFilterKeying[],
+): ScopedCacheFilterKeying {
+	const keys = keyedKeysAcross(parts);
+
+	if (keys.size > 0) {
+		return { kind: 'keyed', keys };
+	}
+
+	if (parts.some((part) => part.kind === 'unkeyed')) {
+		return KEYING_UNKEYED;
+	}
+
+	return KEYING_ABSENT;
+}
+
+/**
+ * Disjunction. A row coming back through an unkeyed branch was reached through
+ * rows the filter never named, so one such branch takes the whole disjunction
+ * down; otherwise the keys are the union, since a row satisfies some branch. A
+ * branch that never mentions the collection contributes `absent`, not a
+ * fallback — it reads none of its rows.
+ */
+function keyingOfAnyCondition(
+	parts: ScopedCacheFilterKeying[],
+): ScopedCacheFilterKeying {
+	if (parts.some((part) => part.kind === 'unkeyed')) {
+		return KEYING_UNKEYED;
+	}
+
+	const keys = keyedKeysAcross(parts);
+
+	if (keys.size > 0) {
+		return { kind: 'keyed', keys };
+	}
+
+	return KEYING_ABSENT;
+}
+
+/**
+ * One entry per join alias — the dotted path prefix that reaches it. The alias is
+ * the unit the whole analysis works in, because `add-join` caches one join per
+ * path: two conditions under the same path read one row, two paths to the same
+ * collection read two independent rows.
+ */
+type ScopedCacheKeyingByAlias = Map<string, ScopedCacheFilterKeying>;
+
+function combineKeyingByAlias(
+	parts: ScopedCacheKeyingByAlias[],
+	combine: (keyings: ScopedCacheFilterKeying[]) => ScopedCacheFilterKeying,
+): ScopedCacheKeyingByAlias {
+	const aliases = new Set<string>();
+
+	for (const part of parts) {
+		for (const alias of part.keys()) {
+			aliases.add(alias);
+		}
+	}
+
+	const combined: ScopedCacheKeyingByAlias = new Map();
+
+	for (const alias of aliases) {
+		const atAlias = parts.map((part) => part.get(alias) ?? KEYING_ABSENT);
+		combined.set(alias, combine(atAlias));
+	}
+
+	return combined;
+}
+
+/**
+ * A condition sits under a relational key either to hop across it — a further
+ * field, or a nested grouping — or to compare its foreign key column in place
+ * (`{ course: { _eq: 7 } }`, which compiles to `note.course = ?` and joins
+ * nothing). Only the first reads the related collection.
+ */
+function hopsAcrossRelation(value: Record<string, unknown>): boolean {
+	return Object.keys(value).some((key) => {
+		return (
+			key.startsWith('_') === false ||
+			['_and', '_or', '_some', '_none'].includes(key)
+		);
+	});
+}
+
+/**
+ * Walk one filter and report, per join alias, what it says about the rows it
+ * reaches. `collectionByAlias` is filled as the walk crosses relations, so the
+ * caller can fold aliases back onto the collections they name.
+ *
+ * Every hop is followed, not only the M2O ones
+ * `resolveScopedCacheM2oJoinChainFromPath` accepts: what a hop reaches at its FAR
+ * end is named by the key the condition
+ * gives, whichever direction the relation runs. `filter/index.ts` joins O2M, M2M
+ * and A2O the same way it joins M2O, and `_some`/`_none` push the same condition
+ * into a subquery over the same one row.
+ */
+function scopedCacheFilterKeyingByAlias(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	filter: Filter,
+	alias: string,
+	collectionByAlias: Map<string, CollectionKey>,
+): ScopedCacheKeyingByAlias {
+	collectionByAlias.set(alias, collection);
+
+	const parts: ScopedCacheKeyingByAlias[] = [];
+
+	// Anything the analysis cannot read is treated as reading every row of every
+	// collection under it. `_not` is the live case: `applyFilter` drops it on the
+	// floor rather than compiling it, so over-purging here costs nothing and
+	// leaves no shape that silently pins what it should not.
+	const unkeyEverythingUnder = (node: Filter): void => {
+		const swept = scopedCacheFilterKeyingByAlias(
+			schema,
+			collection,
+			node,
+			alias,
+			collectionByAlias,
+		);
+
+		for (const sweptAlias of swept.keys()) {
+			parts.push(new Map([[sweptAlias, KEYING_UNKEYED]]));
+		}
+
+		parts.push(new Map([[alias, KEYING_UNKEYED]]));
+	};
+
+	for (const [key, value] of Object.entries(filter)) {
+		if ((key === '_and' || key === '_or') && Array.isArray(value)) {
+			parts.push(combineKeyingByAlias(
+				value.map((branch) => {
+					return scopedCacheFilterKeyingByAlias(
+						schema,
+						collection,
+						branch as Filter,
+						alias,
+						collectionByAlias,
+					);
+				}),
+				key === '_and'
+					? keyingOfEveryCondition
+					: keyingOfAnyCondition,
+			));
+
+			continue;
+		}
+
+		// Quantifiers over a to-many hop the caller already crossed: the condition
+		// inside still names one row of the same collection, at the same alias.
+		if ((key === '_some' || key === '_none') && isPlainFilterNode(value)) {
+			parts.push(scopedCacheFilterKeyingByAlias(
+				schema,
+				collection,
+				value as Filter,
+				alias,
+				collectionByAlias,
+			));
+
+			continue;
+		}
+
+		if (key.startsWith('_')) {
+			if (isPlainFilterNode(value)) {
+				unkeyEverythingUnder(value as Filter);
+			}
+			else {
+				parts.push(new Map([[alias, KEYING_UNKEYED]]));
+			}
+
+			continue;
+		}
+
+		if (isPlainFilterNode(value) === false) {
+			parts.push(new Map([[alias, KEYING_UNKEYED]]));
+			continue;
+		}
+
+		const conditions = value as Record<string, unknown>;
+
+		// An A2O path carries its collection scope in the key itself
+		// (`item:articles`), which is how `add-join` picks the table to join.
+		const [pathField, pathScope] = key.split(':') as [string, string?];
+		const { fieldName, functionName } = parseFilterKey(pathField);
+
+		const relatedCollection = pathScope
+			?? findRelatedCollection(collection, fieldName, schema);
+
+		if (relatedCollection !== null && hopsAcrossRelation(conditions)) {
+			parts.push(scopedCacheFilterKeyingByAlias(
+				schema,
+				relatedCollection,
+				conditions as Filter,
+				alias === ''
+					? key
+					: `${alias}.${key}`,
+				collectionByAlias,
+			));
+
+			// Crossing the relation reads the foreign key of every row of THIS
+			// collection that could be joined, so the hop itself names none of
+			// them. A sibling condition naming this alias's key still wins, by
+			// the conjunction rule: they describe one row.
+			parts.push(new Map([[alias, KEYING_UNKEYED]]));
+
+			continue;
+		}
+
+		parts.push(new Map([[
+			alias,
+			keyingOfColumnConditions(
+				schema,
+				collection,
+				fieldName,
+				functionName,
+				conditions,
+			),
+		]]));
+	}
+
+	return combineKeyingByAlias(parts, keyingOfEveryCondition);
+}
+
+function isPlainFilterNode(value: unknown): boolean {
+	return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * What one column's conditions say about the rows they can match. Only the
+ * primary key under `_eq`/`_in` names them: any other column matches rows by a
+ * value a write can move onto a row this read never saw, and any other operator
+ * describes rows by what they are NOT. A function key (`year(created_on)`)
+ * reads the column through a transform, so it names nothing either.
+ *
+ * An empty `_in` matches no row and so depends on none, but it is reported
+ * unkeyed rather than as an empty key set: pinning a collection to nothing would
+ * drop its tag altogether, and a bare tag is the cheaper way to be right about a
+ * query that returns nothing.
+ */
+function keyingOfColumnConditions(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	fieldName: string,
+	functionName: string | undefined,
+	conditions: Record<string, unknown>,
+): ScopedCacheFilterKeying {
+	const primaryKeyField = schema.collections[collection]?.primary;
+
+	if (functionName !== undefined || fieldName !== primaryKeyField) {
+		return KEYING_UNKEYED;
+	}
+
+	const keyType = schema.collections[collection]?.fields[fieldName]?.type;
+
+	if (!isPinnableScopeType(keyType)) {
+		return KEYING_UNKEYED;
+	}
+
+	if ('_eq' in conditions) {
+		return { kind: 'keyed', keys: new Set([conditions['_eq']]) };
+	}
+
+	if ('_in' in conditions && Array.isArray(conditions['_in'])) {
+		const keys = new Set<unknown>(conditions['_in']);
+
+		if (keys.size > 0) {
+			return { kind: 'keyed', keys };
+		}
+	}
+
+	return KEYING_UNKEYED;
+}
+
+/**
+ * What every filter a read carries says about each collection it joins to — the
+ * root query's, and every nested node's, each with the permission cases folded in
+ * the way the SQL WHERE folds them.
+ *
+ * Aliases are folded back onto collections by the disjunction rule: two paths to
+ * one collection join two independent rows, so one unkeyed path leaves every row
+ * of that collection able to change the result, and otherwise the keys are the
+ * union of what each path named. Each node folds its own aliases, since alias
+ * `''` means a different collection in every one of them.
+ *
+ * Shared by the two sides that must agree on it — the tags a keyed collection
+ * pins, and the collections that consequently need NOT fall back to the bare tag
+ * — so neither can drift from the other's answer.
+ */
+export function scopedCacheFilterKeyingByCollection(
+	schema: SchemaOverview,
+	ast: AST,
+): Map<CollectionKey, ScopedCacheFilterKeying> {
+	const keyingByCollection = new Map<CollectionKey, ScopedCacheFilterKeying>();
+
+	const readKeyingOf = (
+		collection: CollectionKey,
+		query: Query,
+		cases: Filter[],
+	): void => {
+		const filter = joinFilterWithCases(query.filter, cases);
+
+		if (!filter) {
+			return;
+		}
+
+		const collectionByAlias = new Map<string, CollectionKey>();
+
+		const keyingByAlias = scopedCacheFilterKeyingByAlias(
+			schema,
+			collection,
+			filter,
+			'',
+			collectionByAlias,
+		);
+
+		for (const [alias, keying] of keyingByAlias) {
+			const aliasCollection = collectionByAlias.get(alias);
+
+			if (aliasCollection === undefined) {
+				continue;
+			}
+
+			const known = keyingByCollection.get(aliasCollection) ?? KEYING_ABSENT;
+
+			keyingByCollection.set(
+				aliasCollection,
+				keyingOfAnyCondition([known, keying]),
+			);
+		}
+	};
+
+	readKeyingOf(ast.name, ast.query, ast.cases);
+
+	const readKeyingOfChildren = (children: AST['children']): void => {
+		for (const child of children) {
+			if (child.type === 'field') {
+				continue;
+			}
+
+			if (child.type === 'functionField') {
+				readKeyingOf(child.relatedCollection, child.query, child.cases);
+				continue;
+			}
+
+			// An A2O node holds one query, one case set and one child list PER
+			// related collection, since each is a different table to join.
+			if (child.type === 'a2o') {
+				for (const name of child.names) {
+					readKeyingOf(name, child.query[name] ?? {}, child.cases[name] ?? []);
+					readKeyingOfChildren(child.children[name] ?? []);
+				}
+
+				continue;
+			}
+
+			readKeyingOf(child.name, child.query, child.cases);
+			readKeyingOfChildren(child.children);
+		}
+	};
+
+	readKeyingOfChildren(ast.children);
+
+	return keyingByCollection;
+}
+
+/**
+ * Scope a read's joined collections off the keys its filters named — the third
+ * pinner beside `pinnedScopedCacheTagsFromFilter`, which bounds the root off the
+ * same filter, and `pinnedScopedCacheTagsFromM2oParents`, which pins the nested
+ * ones off the rows they carried.
+ *
+ * A collection reached ONLY through a filter is nested nowhere, so neither of
+ * those two can say anything about it and it has always fallen through to the
+ * bare tag — one write anywhere in it dropping every read that merely joined it.
+ * When the filter named its rows by key, the read depends on those rows and no
+ * others, so `<collection>:<pk>=<key>` is exactly right and the write side
+ * already emits it: `snapshotScopedCacheTags` writes the key slice of every
+ * mutated row of every collection, declared scope fields or not.
+ *
+ * The root is left out: its own filter bounds it through
+ * `pinnedScopedCacheTagsFromFilter`, under a self-reference guard this analysis
+ * does not reproduce.
+ *
+ * Past the per-collection ceiling the pin is dropped rather than trimmed — a
+ * partial key set would leave the rows it omits covered by nothing.
+ */
+export function pinnedScopedCacheTagsFromKeyedFilters(
+	schema: SchemaOverview,
+	rootCollection: CollectionKey,
+	keyingByCollection: Map<CollectionKey, ScopedCacheFilterKeying>,
+): Map<CollectionKey, ScopedCacheTag[]> {
+	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
+
+	for (const [collection, keying] of keyingByCollection) {
+		if (collection === rootCollection || keying.kind !== 'keyed') {
+			continue;
+		}
+
+		const primaryKeyField = schema.collections[collection]?.primary;
+
+		if (primaryKeyField === undefined) {
+			continue;
+		}
+
+		if (keying.keys.size > scopedCacheMaxPinsPerCollection()) {
+			continue;
+		}
+
+		const type = schema.collections[collection]?.fields[primaryKeyField]?.type;
+		const tags: ScopedCacheTag[] = [];
+
+		// Deduped on the canonical token, not the raw value, so `7` and `'7'`
+		// collapse to the one slice the write side emits for that row.
+		const seen = new Set<string>();
+
+		for (const value of keying.keys) {
+			const token = canonicalScopedCacheValue(value, type);
+
+			if (seen.has(token)) {
+				continue;
+			}
+
+			seen.add(token);
+			tags.push({ collection, field: primaryKeyField, value, type });
+		}
+
+		pinned.set(collection, tags);
+	}
+
+	return pinned;
+}
+
+/**
+ * The collections the read NESTS — every one that has a node of its own in the
+ * AST, whichever direction its relation runs.
+ *
+ * A nested collection is depended on for the rows it CARRIED, not only for the
+ * ones a filter named: `mergeWithParentItems` writes what the nested query
+ * returned, so an insert that joins it changes the response. Only
+ * `pinnedScopedCacheTagsFromM2oParents` can name that half, and it declines a
+ * to-many or A2O hop. Naming them here lets the caller keep such a collection
+ * bare even when its filter named keys — those keys cover the filter's half of
+ * the dependency and say nothing about the nested one.
+ */
+export function scopedCacheNestedCollections(ast: AST): Set<CollectionKey> {
+	const nested = new Set<CollectionKey>();
+
+	const addNestedBy = (children: AST['children']): void => {
+		for (const child of children) {
+			if (child.type === 'field' || child.type === 'functionField') {
+				continue;
+			}
+
+			if (child.type === 'a2o') {
+				for (const name of child.names) {
+					nested.add(name);
+					addNestedBy(child.children[name] ?? []);
+				}
+
+				continue;
+			}
+
+			nested.add(child.name);
+			addNestedBy(child.children);
+		}
+	};
+
+	addNestedBy(ast.children);
+
+	return nested;
+}
+
+/**
  * The collections a read depends on BEYOND the parent rows it nested, so keying the
  * pin on those rows would leave the entry alive through a write that changes
  * what the read returns.
  *
- * - A query filters, sorts, groups or aggregates on a path into it (permission cases
- *   joined the way the SQL WHERE joins them), so rows the response never nested
- *   decide which rows come back. Read off EVERY node's query, not only the root's: a
- *   nested node's filter withholds parents, and which ones it withholds is
- *   decided by every collection that filter reads — each of them one the
- *   response may have nested only in part.
+ * - A query sorts, groups or aggregates on a path into it, so rows the response
+ *   never nested decide which rows come back, named by nothing.
+ * - A query FILTERS on a path into it that names no key (`keyingByCollection`),
+ *   same reason. A filter that does name keys is the one case that survives:
+ *   the rows it reaches are exactly those keys, which
+ *   `pinnedScopedCacheTagsFromKeyedFilters` pins alongside whatever the response
+ *   nested. Read off EVERY node's query, not only the root's: a nested node's
+ *   filter withholds parents, and which ones it withholds is decided by every
+ *   collection that filter reads — each of them one the response may have nested
+ *   only in part.
  * - A nested node carries a field-level case, so a parent it references can be
  *   withheld and arrive as a null slot — which `mergeWithParentItems` writes for
  *   a null foreign key too, leaving the two indistinguishable once merged.
@@ -1274,6 +1796,10 @@ export function scopedCacheCollectionsBeyondNestedRows(
 	ast: AST,
 ): Set<CollectionKey> {
 	const beyond = new Set<CollectionKey>();
+
+	// The same analysis `pinnedScopedCacheTagsFromKeyedFilters` pins from, run off
+	// the same AST — so what this one exempts is exactly what that one covers.
+	const keyingByCollection = scopedCacheFilterKeyingByCollection(schema, ast);
 
 	const addCollectionsQueriedBy = (
 		collection: CollectionKey,
@@ -1289,7 +1815,51 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			schema,
 		);
 
+		// `extractPathsFromQuery` files filter and sort under one group, so the
+		// filter's own paths are extracted again on their own to tell which of
+		// these collections a sort — which names no key, ever — put here.
+		const sortedGroupedFieldMap: FieldMap = { read: new Map(), other: new Map() };
+
+		// Assigned only when set: `exactOptionalPropertyTypes` separates an absent
+		// key from one holding `undefined`, and `Query` declares these optional.
+		const sortedGroupedQuery: Query = {};
+
+		if (query.sort) {
+			sortedGroupedQuery.sort = query.sort;
+		}
+
+		if (query.group) {
+			sortedGroupedQuery.group = query.group;
+		}
+
+		if (query.aggregate) {
+			sortedGroupedQuery.aggregate = query.aggregate;
+		}
+
+		extractFieldsFromQuery(
+			collection,
+			sortedGroupedQuery,
+			sortedGroupedFieldMap,
+			schema,
+		);
+
+		const sortedOrGrouped = new Set<CollectionKey>();
+
+		for (const [, entry] of [
+			...sortedGroupedFieldMap.read,
+			...sortedGroupedFieldMap.other,
+		]) {
+			sortedOrGrouped.add(entry.collection);
+		}
+
 		for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
+			const keyedByFilter =
+				keyingByCollection.get(entry.collection)?.kind === 'keyed';
+
+			if (keyedByFilter && !sortedOrGrouped.has(entry.collection)) {
+				continue;
+			}
+
 			beyond.add(entry.collection);
 		}
 	};

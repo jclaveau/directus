@@ -31,12 +31,15 @@ import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
 	createScopedCacheCollector,
+	pinnedScopedCacheTagsFromKeyedFilters,
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
+	scopedCacheFilterKeyingByCollection,
+	scopedCacheNestedCollections,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
@@ -1159,6 +1162,16 @@ implements AbstractService<Item> {
 			? fieldMapFromAst(ast, this.schema)
 			: { read: new Map(), other: new Map() };
 
+		// A collection this read's filters name by primary key depends on those
+		// rows and no others, so it is pinned even when no row of it was nested.
+		const keyedFilterPins = pinnedScopedCacheTagsFromKeyedFilters(
+			this.schema,
+			this.collection,
+			scopedCachePurgeEnabled()
+				? scopedCacheFilterKeyingByCollection(this.schema, ast)
+				: new Map(),
+		);
+
 		// The pins DO depend on the rows, so this one is filled from inside the read.
 		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
@@ -1233,6 +1246,8 @@ implements AbstractService<Item> {
 		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
+			const nestedCollections = scopedCacheNestedCollections(ast);
+
 			// Self-reference guard: pinning the root to a value slice is sound only while the
 			// filter bounds every row the read returns. A self-referential relation (the root
 			// collection reached again through a nested field) pulls rows the root filter
@@ -1275,17 +1290,43 @@ implements AbstractService<Item> {
 					continue;
 				}
 
-				// A collection the read reached only through M2O hops is pinned by the
-				// keys it nested; absent from the map, it keeps the bare tag that any
-				// write to it drops.
-				const parentPins = m2oParentPins.get(collection);
-
-				if (parentPins === undefined) {
+				// A collection the response NESTED is depended on for the rows it
+				// carried, which only the parent-key pin can name. Where that pin
+				// declined — a to-many or A2O hop, or no row to read a key from —
+				// the filter's keys cover one half of the dependency and say
+				// nothing about the other, so the bare tag is the honest answer.
+				if (
+					nestedCollections.has(collection) &&
+					!m2oParentPins.has(collection)
+				) {
 					scopedCacheTags.push({ collection });
 					continue;
 				}
 
-				scopedCacheTags.push(...parentPins);
+				// A collection the read reached only through M2O hops is pinned by the
+				// keys it nested, and one a filter reached by key is pinned by the keys
+				// that filter named. Both may hold at once — a collection nested AND
+				// filtered depends on the union, since the filter reaches rows the
+				// response never carried and vice versa. Named by neither, it keeps the
+				// bare tag that any write to it drops.
+				//
+				// Keyed by tag so a slice both sides name is carried once: the tag
+				// index dedups on that key, but the header and its count do not.
+				const pins = new Map<string, ScopedCacheTag>();
+
+				for (const pin of [
+					...m2oParentPins.get(collection) ?? [],
+					...keyedFilterPins.get(collection) ?? [],
+				]) {
+					pins.set(scopedCacheTagKey(pin), pin);
+				}
+
+				if (pins.size === 0) {
+					scopedCacheTags.push({ collection });
+					continue;
+				}
+
+				scopedCacheTags.push(...pins.values());
 			}
 
 			scopedCacheTags = (await emitter.emitFilter(

@@ -1,6 +1,6 @@
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Query } from '@directus/types';
-import type { AST, M2ONode } from './types/ast.js';
+import type { Filter, Query } from '@directus/types';
+import type { A2MNode, AST, M2ONode, O2MNode } from './types/ast.js';
 import type {
 	CollectionKey,
 	FieldMap,
@@ -13,9 +13,14 @@ import {
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
+	pinnedScopedCacheTagsFromKeyedFilters,
 	pinnedScopedCacheTagsFromM2oParents,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
+	scopedCacheFilterKeyingByCollection,
+	scopedCacheMaxPinsPerCollection,
+	scopedCacheNestedCollections,
+	type ScopedCacheFilterKeying,
 	dropScopedCacheTagIndex,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
@@ -1684,6 +1689,31 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 		]).toContain('owner');
 	});
 
+	it('spares a collection the root filter names by key', () => {
+		// The rows it reaches are exactly that key, which
+		// `pinnedScopedCacheTagsFromKeyedFilters` pins; nothing forces bare.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({ filter: { owner: { id: { _eq: 7 } } } }),
+			),
+		]).not.toContain('owner');
+	});
+
+	it('names a collection keyed by the filter but also sorted on', () => {
+		// The sort reaches rows the key never named, so the key does not cover
+		// what this read depends on.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({
+					filter: { owner: { id: { _eq: 7 } } },
+					sort: ['owner.name'],
+				}),
+			),
+		]).toContain('owner');
+	});
+
 	it('names a collection the root query sorts on', () => {
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(
@@ -1771,5 +1801,378 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 				astOf({}, { children: [companyNode] }),
 			),
 		]).not.toContain('company');
+	});
+});
+
+describe('scopedCacheFilterKeyingByCollection', () => {
+	const schema = new SchemaBuilder()
+		.collection('company', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('company').m2o('company');
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('label').string();
+			c.field('owner').m2o('owner');
+			c.field('owned_sub_items').o2m('owned_sub_item', 'owned_item');
+			c.field('categories').m2m('category');
+		})
+		.collection('owned_sub_item', (c) => {
+			c.field('id').id();
+			c.field('owned_item').m2o('owned_item');
+		})
+		.collection('category', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.build();
+
+	function keyingOf(query: Query, cases: Filter[] = []) {
+		return scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query,
+			cases,
+			children: [],
+		} as AST);
+	}
+
+	// The SQL each of these compiles to is pinned by
+	// `apply-query/filter/related-key-join.test.ts`, which is what makes the
+	// key the whole dependency rather than a guess about the planner.
+	it('keys an M2O whose terminal is the related primary key', () => {
+		expect(keyingOf({ filter: { owner: { id: { _eq: 7 } } } }).get('owner'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys every value an `_in` lists', () => {
+		expect(keyingOf({ filter: { owner: { id: { _in: [7, 8] } } } }).get('owner'))
+			.toEqual({ kind: 'keyed', keys: new Set([7, 8]) });
+	});
+
+	it('keys a to-many hop, whose far row the key names just as narrowly', () => {
+		expect(keyingOf({ filter: { owned_sub_items: { id: { _eq: 7 } } } })
+			.get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys through `_some`, which pushes the key into a subquery', () => {
+		expect(keyingOf({
+			filter: { owned_sub_items: { _some: { id: { _eq: 7 } } } },
+		}).get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys through `_none`, which negates on that one row alone', () => {
+		expect(keyingOf({
+			filter: { owned_sub_items: { _none: { id: { _eq: 7 } } } },
+		}).get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys the far side of an M2M and leaves its junction unkeyed', () => {
+		const keying = keyingOf({
+			filter: { categories: { category_id: { id: { _eq: 7 } } } },
+		});
+
+		expect(keying.get('category'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+
+		expect(keying.get('owned_item_category_junction'))
+			.toEqual({ kind: 'unkeyed' });
+	});
+
+	it('leaves a non-key column unkeyed, since a write can move a row into it', () => {
+		expect(keyingOf({ filter: { owner: { name: { _eq: 'alice' } } } }).get('owner'))
+			.toEqual({ kind: 'unkeyed' });
+	});
+
+	it('leaves an operator other than `_eq`/`_in` unkeyed', () => {
+		expect(keyingOf({ filter: { owner: { id: { _neq: 7 } } } }).get('owner'))
+			.toEqual({ kind: 'unkeyed' });
+	});
+
+	it('leaves an empty `_in` unkeyed rather than pinned to nothing', () => {
+		expect(keyingOf({ filter: { owner: { id: { _in: [] } } } }).get('owner'))
+			.toEqual({ kind: 'unkeyed' });
+	});
+
+	it('leaves a collection hopped THROUGH unkeyed, keying only the far end', () => {
+		const keying = keyingOf({
+			filter: { owner: { company: { id: { _eq: 3 } } } },
+		});
+
+		// Reaching the company reads the `company` column of every owner that
+		// could be joined, so no owner row is named.
+		expect(keying.get('owner')).toEqual({ kind: 'unkeyed' });
+
+		expect(keying.get('company'))
+			.toEqual({ kind: 'keyed', keys: new Set([3]) });
+	});
+
+	it(oneLine`
+		reports nothing for a foreign key compared in place, which joins nothing
+	`, () => {
+		expect(keyingOf({ filter: { owner: { _eq: 7 } } }).get('owner'))
+			.toBe(undefined);
+	});
+
+	it('keeps the key when a sibling condition reads the same joined row', () => {
+		// One join alias, so only owner 7 can satisfy both.
+		expect(keyingOf({
+			filter: {
+				_and: [
+					{ owner: { id: { _eq: 7 } } },
+					{ owner: { name: { _eq: 'alice' } } },
+				],
+			},
+		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('drops the key when a SECOND path reaches the collection unkeyed', () => {
+		// Two aliases, two independent joined rows: renaming any owner moves an
+		// item into the second path's result.
+		expect(keyingOf({
+			filter: {
+				_and: [
+					{ owner: { id: { _eq: 7 } } },
+					{
+						owned_sub_items: {
+							owned_item: { owner: { name: { _eq: 'alice' } } },
+						},
+					},
+				],
+			},
+		}).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('unions the keys an `_or` names across its branches', () => {
+		expect(keyingOf({
+			filter: {
+				_or: [
+					{ owner: { id: { _eq: 7 } } },
+					{ owner: { id: { _in: [8, 9] } } },
+				],
+			},
+		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7, 8, 9]) });
+	});
+
+	it('drops the key when any `_or` branch reaches the collection unkeyed', () => {
+		expect(keyingOf({
+			filter: {
+				_or: [
+					{ owner: { id: { _eq: 7 } } },
+					{ owner: { name: { _eq: 'alice' } } },
+				],
+			},
+		}).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('keeps the key when an `_or` branch never mentions the collection', () => {
+		// A row coming back through the second branch reads no owner at all.
+		expect(keyingOf({
+			filter: {
+				_or: [
+					{ owner: { id: { _eq: 7 } } },
+					{ label: { _eq: 'loose' } },
+				],
+			},
+		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('leaves everything under a `_not` unkeyed, which applyFilter drops', () => {
+		expect(keyingOf({
+			filter: { _not: { owner: { id: { _eq: 7 } } } } as Filter,
+		}).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('folds the permission cases in the way the SQL WHERE folds them', () => {
+		expect(keyingOf({}, [{ owner: { id: { _eq: 7 } } }]).get('owner'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('reads a nested node filter against the node collection, not the root', () => {
+		expect(scopedCacheFilterKeyingByCollection(schema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children: [
+				{
+					type: 'm2o',
+					name: 'owner',
+					fieldKey: 'owner',
+					children: [],
+					query: { filter: { company: { id: { _eq: 3 } } } },
+					cases: [],
+					whenCase: [],
+					relation: { related_collection: 'owner' },
+				} as unknown as M2ONode,
+			],
+		} as AST).get('company')).toEqual({ kind: 'keyed', keys: new Set([3]) });
+	});
+});
+
+describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
+	const schema = new SchemaBuilder()
+		.collection('owner', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.collection('owned_item', (c) => {
+			c.field('id').id();
+			c.field('owner').m2o('owner');
+		})
+		.build();
+
+	function pinsFor(
+		keying: Map<CollectionKey, ScopedCacheFilterKeying>,
+	) {
+		return pinnedScopedCacheTagsFromKeyedFilters(schema, 'owned_item', keying);
+	}
+
+	it('pins one primary-key tag per key the filter named', () => {
+		expect(pinsFor(
+			new Map([['owner', { kind: 'keyed', keys: new Set([7, 8]) }]]),
+		).get('owner')).toEqual([
+			{ collection: 'owner', field: 'id', value: 7, type: 'integer' },
+			{ collection: 'owner', field: 'id', value: 8, type: 'integer' },
+		]);
+	});
+
+	it('pins nothing for a collection the filter left unkeyed', () => {
+		expect(pinsFor(new Map([['owner', { kind: 'unkeyed' }]])).has('owner'))
+			.toBe(false);
+	});
+
+	it('leaves the root out, since its own filter already bounds it', () => {
+		const pins = pinsFor(new Map([
+			['owned_item', { kind: 'keyed', keys: new Set([1]) }],
+			['owner', { kind: 'keyed', keys: new Set([7]) }],
+		]));
+
+		expect(pins.has('owned_item')).toBe(false);
+		expect(pins.has('owner')).toBe(true);
+	});
+
+	it('collapses keys the write side cannot tell apart', () => {
+		// `7` and `'7'` canonicalize to one token, which is the one slice a
+		// write to that row emits.
+		expect(pinsFor(
+			new Map([['owner', { kind: 'keyed', keys: new Set([7, '7']) }]]),
+		).get('owner')).toEqual([
+			{ collection: 'owner', field: 'id', value: 7, type: 'integer' },
+		]);
+	});
+
+	it('drops the pin whole past the ceiling, never trimmed', () => {
+		// A trimmed key set would leave the rows it omits covered by nothing.
+		expect(pinsFor(new Map([['owner', {
+			kind: 'keyed',
+			keys: new Set(Array.from(
+				{ length: scopedCacheMaxPinsPerCollection() + 1 },
+				(_, index) => index,
+			)),
+		}]])).has('owner')).toBe(false);
+	});
+
+	it('pins a collection no relation of the schema describes as nothing', () => {
+		expect(pinsFor(
+			new Map([['absent_collection', { kind: 'keyed', keys: new Set([1]) }]]),
+		).has('absent_collection')).toBe(false);
+	});
+});
+
+describe('scopedCacheNestedCollections', () => {
+	function astNesting(children: AST['children']): AST {
+		return {
+			type: 'root',
+			name: 'owned_item',
+			query: {},
+			cases: [],
+			children,
+		} as AST;
+	}
+
+	it('names an M2O node the read nests', () => {
+		expect([...scopedCacheNestedCollections(astNesting([
+			{
+				type: 'm2o',
+				name: 'owner',
+				fieldKey: 'owner',
+				children: [],
+				query: {},
+				cases: [],
+				whenCase: [],
+				relation: { related_collection: 'owner' },
+			} as unknown as M2ONode,
+		]))]).toEqual(['owner']);
+	});
+
+	it('names a to-many node, which no parent-key pin can cover', () => {
+		expect([...scopedCacheNestedCollections(astNesting([
+			{
+				type: 'o2m',
+				name: 'owned_sub_item',
+				fieldKey: 'owned_sub_items',
+				children: [],
+				query: {},
+				cases: [],
+				whenCase: [],
+				relation: { collection: 'owned_sub_item' },
+			} as unknown as O2MNode,
+		]))]).toEqual(['owned_sub_item']);
+	});
+
+	it('names every collection an A2O node can resolve to', () => {
+		expect([...scopedCacheNestedCollections(astNesting([
+			{
+				type: 'a2o',
+				names: ['owner', 'company'],
+				fieldKey: 'subject',
+				children: { owner: [], company: [] },
+				query: { owner: {}, company: {} },
+				cases: { owner: [], company: [] },
+				whenCase: [],
+				relation: {},
+			} as unknown as A2MNode,
+		]))]).toEqual(['owner', 'company']);
+	});
+
+	it('names a collection nested under another nested node', () => {
+		expect([...scopedCacheNestedCollections(astNesting([
+			{
+				type: 'm2o',
+				name: 'owner',
+				fieldKey: 'owner',
+				query: {},
+				cases: [],
+				whenCase: [],
+				relation: { related_collection: 'owner' },
+				children: [
+					{
+						type: 'm2o',
+						name: 'company',
+						fieldKey: 'company',
+						children: [],
+						query: {},
+						cases: [],
+						whenCase: [],
+						relation: { related_collection: 'company' },
+					} as unknown as M2ONode,
+				],
+			} as unknown as M2ONode,
+		]))]).toEqual(['owner', 'company']);
+	});
+
+	it('names nothing for a read that nests no collection', () => {
+		expect([...scopedCacheNestedCollections(astNesting([
+			{ type: 'field', name: 'label', fieldKey: 'label' },
+		] as unknown as AST['children']))]).toEqual([]);
 	});
 });
