@@ -53,7 +53,11 @@ function compile(filter: any) {
 
 	applyFilter(db, schema, queryBuilder, filter, 'owned_item', {}, [], []);
 
-	return queryBuilder.toSQL();
+	// Only the query, not `toSQL()`'s per-call `__knexQueryUid`, so two
+	// spellings of one query can be compared for equality.
+	const { sql, bindings } = queryBuilder.toSQL();
+
+	return { sql, bindings };
 }
 
 describe('a filter terminating on a related primary key', () => {
@@ -77,6 +81,30 @@ describe('a filter terminating on a related primary key', () => {
 		expect(compile({ owned_sub_items: { id: { _eq: 7 } } })).toMatchObject({
 			sql: 'select * left join "owned_sub_item" as "a1" '
 				+ 'on "owned_item"."id" = "a1"."owned_item" where "a1"."id" = ?',
+			bindings: [7],
+		});
+	});
+
+	test('compiles every to-many spelling to one identical query', () => {
+		// `getOperation` reads a bare leaf as `_eq`, and `getColumnPath` appends
+		// the related primary key to a top-level alias field, so these four are
+		// one query. The scope analysis has to reach one answer for all of them.
+		const longhand = compile({ owned_sub_items: { id: { _eq: 7 } } });
+
+		for (const filter of [
+			{ owned_sub_items: { id: 7 } },
+			{ owned_sub_items: { _eq: 7 } },
+			{ owned_sub_items: 7 },
+		]) {
+			expect(compile(filter)).toEqual(longhand);
+		}
+	});
+
+	test('appends the junction key for an M2M spelled on the alias', () => {
+		expect(compile({ categories: { _eq: 7 } })).toMatchObject({
+			sql: 'select * left join "owned_item_category_junction" as "a1" '
+				+ 'on "owned_item"."id" = "a1"."owned_item_id" '
+				+ 'where "a1"."id" = ?',
 			bindings: [7],
 		});
 	});
@@ -153,6 +181,17 @@ describe('a filter that does NOT terminate on a related primary key', () => {
 	test('compares the foreign key in place, joining nothing', () => {
 		// No join, so the read depends on no row of `owner` at all.
 		expect(compile({ owner: { _eq: 7 } })).toMatchObject({
+			sql: 'select * where "owned_item"."owner" = ?',
+			bindings: [7],
+		});
+	});
+
+	test('compares the foreign key in place for an M2O bare value too', () => {
+		// The mirror of the to-many spellings: here the column is local, so the
+		// related collection is never read whichever way it is written.
+		expect(compile({ owner: 7 })).toEqual(compile({ owner: { _eq: 7 } }));
+
+		expect(compile({ owner: 7 })).toMatchObject({
 			sql: 'select * where "owned_item"."owner" = ?',
 			bindings: [7],
 		});

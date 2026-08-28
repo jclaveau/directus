@@ -1,6 +1,7 @@
 import config, { getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
+	CreateFieldM2M,
 	CreateFieldM2O,
 	CreateFieldO2M,
 	CreateItem,
@@ -25,6 +26,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const OWNER = 'keyed_filter_owner';
 const OWNED_ITEM = 'keyed_filter_owned_item';
 const OWNED_SUB_ITEM = 'keyed_filter_owned_sub_item';
+const CATEGORY = 'keyed_filter_category';
+const JUNCTION = `${OWNED_ITEM}_${CATEGORY}_junction`;
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
@@ -48,6 +51,7 @@ describe(oneLine`
 		let untouchedOwnerId: number;
 		let ownedItemId: number;
 		let filteredSubItemId: number;
+		let junctionRowId: number;
 		let untouchedSubItemId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -65,6 +69,10 @@ describe(oneLine`
 					{
 						collection: OWNED_SUB_ITEM,
 						fields: [{ field: 'note', type: 'string', meta: {} }],
+					},
+					{
+						collection: CATEGORY,
+						fields: [{ field: 'name', type: 'string', meta: {} }],
 					},
 				],
 			});
@@ -108,6 +116,29 @@ describe(oneLine`
 			filteredSubItemId = subItems[0].id;
 			untouchedSubItemId = subItems[1].id;
 
+			await CreateFieldM2M(vendor, {
+				collection: OWNED_ITEM,
+				field: 'categories',
+				otherCollection: CATEGORY,
+				otherField: 'owned_items',
+				junctionCollection: JUNCTION,
+			});
+
+			const categories = await CreateItem(vendor, {
+				collection: CATEGORY,
+				item: [{ name: 'c1' }],
+			});
+
+			const junctionRows = await CreateItem(vendor, {
+				collection: JUNCTION,
+				item: [{
+					[`${OWNED_ITEM}_id`]: ownedItemId,
+					[`${CATEGORY}_id`]: categories[0].id,
+				}],
+			});
+
+			junctionRowId = junctionRows[0].id;
+
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
@@ -122,6 +153,8 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			await DeleteCollection(vendor, { collection: JUNCTION });
+			await DeleteCollection(vendor, { collection: CATEGORY });
 			await DeleteCollection(vendor, { collection: OWNED_SUB_ITEM });
 			await DeleteCollection(vendor, { collection: OWNED_ITEM });
 			await DeleteCollection(vendor, { collection: OWNER });
@@ -205,6 +238,116 @@ describe(oneLine`
 			);
 
 			expect(tags).not.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
+		});
+
+		it(oneLine`
+			pins a to-many written on the alias, the spelling REST preserves
+		`, async () => {
+			// `parseFilter` normalizes a bare leaf to `_eq` but does NOT expand
+			// `{rel: {_eq: X}}` into `{rel: {id: {_eq: X}}}`, so this shorthand
+			// arrives at the service as written. `getColumnPath` appends the
+			// related key and compiles it to the same join as the longhand.
+			await clearCache();
+
+			const read = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[owned_sub_items][_eq]': String(filteredSubItemId),
+						fields: 'id,label,owner',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await read();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+			expect(warm.body.data).toHaveLength(1);
+
+			expect(warm.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=${filteredSubItemId}(,|$)`),
+			);
+
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNED_SUB_ITEM}/${untouchedSubItemId}`)
+				.send({ note: 'shorthand-untouched' })
+				.set('Authorization', auth);
+
+			expect((await read()).headers[cacheStatusHeader]).toBe('HIT');
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNED_SUB_ITEM}/${filteredSubItemId}`)
+				.send({ note: 'shorthand-named' })
+				.set('Authorization', auth);
+
+			expect((await read()).headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			tags no owner at all for an M2O shorthand, which joins nothing
+		`, async () => {
+			// The mirror of the to-many shorthand: `owned_item.owner` is a column
+			// of the row itself, so the read never looks at the owner table and
+			// a write there cannot change what it returns.
+			await clearCache();
+
+			const read = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[owner][_eq]': String(filteredOwnerId),
+						fields: 'id,label,owner',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await read();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+			expect(warm.body.data).toHaveLength(1);
+
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNER}(:|,|$)`));
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNER}/${filteredOwnerId}`)
+				.send({ name: 'm2o-shorthand-write' })
+				.set('Authorization', auth);
+
+			// Non-vacuity: the write landed, and the entry still stands.
+			const written = await request(getUrl(vendor, env))
+				.get(`/items/${OWNER}/${filteredOwnerId}`)
+				.set('Authorization', auth);
+
+			expect(written.body.data.name).toBe('m2o-shorthand-write');
+			expect((await read()).headers[cacheStatusHeader]).toBe('HIT');
+		});
+
+		it(oneLine`
+			pins the junction an M2M shorthand names, as getColumnPath resolves it
+		`, async () => {
+			await clearCache();
+
+			const read = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[categories][_eq]': String(junctionRowId),
+						fields: 'id,label',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await read();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(warm.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${JUNCTION}:id=${junctionRowId}(,|$)`),
+			);
+
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${JUNCTION}(,|$)`));
 		});
 
 		it('leaves a filter on a non-key column bare', async () => {
