@@ -5,16 +5,37 @@ on:
     branches:
       # release branches only — build a committed `<branch>-dist` for each *-hhh-dev line
       - '*-hhh-dev'
+  # `dist-release` builds the same `<branch>-dist` for a PR's own head, so a consumer
+  # can install the branch before it merges. Rebuilt on every push while the label is on.
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - labeled
   # manual retry handle: a lost/timed-out push run can be replayed without a commit
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   create-release:
     name: Create Release
+    # A push to a release line always builds. A PR builds only while it carries the
+    # label, and only from this repo: a fork's `pull_request` token is read-only, so
+    # the push at the end would fail after doing all the work.
+    if: >-
+      github.event_name != 'pull_request' ||
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(github.event.pull_request.labels.*.name, 'dist-release'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          # A `pull_request` checkout lands on the merge commit, whose dist would carry
+          # a merge nobody asked for. `<branch>-dist` means the branch, so take its head.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Configure Git
         run: |
@@ -23,11 +44,15 @@ jobs:
 
       - name: Create new branch if it doesn't exist
         id: create_branch
+        # Named from the event rather than the checkout: taking the PR's head sha
+        # above leaves HEAD detached, so `rev-parse --abbrev-ref` would read `HEAD`.
+        env:
+          SOURCE_BRANCH: >-
+            ${{ github.event.pull_request.head.ref || github.ref_name }}
         run: |
-          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          DIST_BRANCH="${CURRENT_BRANCH}-dist"
-          git push origin --delete ${DIST_BRANCH} || true
-          git checkout -b ${DIST_BRANCH}
+          DIST_BRANCH="${SOURCE_BRANCH}-dist"
+          git push origin --delete "${DIST_BRANCH}" || true
+          git checkout -b "${DIST_BRANCH}"
         shell: bash
 
       - name: Prepare
