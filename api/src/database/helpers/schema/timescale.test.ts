@@ -29,6 +29,27 @@ function makeKnex(has: boolean, rows: Record<string, unknown>[] = []) {
 
 
 describe('the Timescale probes', () => {
+	it('ask the catalog once per connection, and once more for a second one', async () => {
+		const knex = makeKnex(true);
+
+		expect(await new SchemaHelperPostgres(knex).hasTimescale()).toBe(true);
+		// A fresh helper over the same connection: callers build one per call, so the
+		// answer has to outlive the helper or the probe runs on every one of them.
+		expect(await new SchemaHelperPostgres(knex).hasTimescale()).toBe(true);
+
+		const probes = vi.mocked(knex.raw).mock.calls
+			.filter(([sql]) => String(sql).includes(`extname = 'timescaledb'`));
+
+		expect(probes, 'the second helper has to reuse the first answer').toHaveLength(1);
+
+		const otherKnex = makeKnex(false);
+
+		expect(await new SchemaHelperPostgres(otherKnex).hasTimescale()).toBe(false);
+
+		expect(vi.mocked(otherKnex.raw).mock.calls, 'another connection answers for itself')
+			.toHaveLength(1);
+	});
+
 	it('read the extension out of the catalog on postgres', async () => {
 		const knex = makeKnex(true);
 
