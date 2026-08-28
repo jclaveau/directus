@@ -191,18 +191,14 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
-		it('pins the M2O it filtered on by key, and drops its bare tag', async () => {
+		it('tags the M2O it filtered on not at all, bare or keyed', async () => {
+			// The widest outcome available: the filter is answered by this row's
+			// own foreign key column, so no write to the owner collection can
+			// change what comes back and no tag of any shape is needed.
 			await clearCache();
 
-			const tags = (await readItemsOfFilteredOwner()).headers[cacheTagsHeader];
-
-			expect(tags).toMatch(
-				new RegExp(`(^|, )${OWNER}:id=${filteredOwnerId}(,|$)`),
-			);
-
-			// The bare tag is what a write to ANY row of the collection drops, so
-			// its absence is the whole point of the change.
-			expect(tags).not.toMatch(new RegExp(`(^|, )${OWNER}(,|$)`));
+			expect((await readItemsOfFilteredOwner()).headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNER}(:|,|$)`));
 		});
 
 		it(oneLine`
@@ -381,6 +377,37 @@ describe(oneLine`
 			expect((await readUnbounded()).headers[cacheStatusHeader]).toBe('MISS');
 		});
 
+		it(oneLine`
+			tags the M2O it filtered by key not at all, and survives writing it
+		`, async () => {
+			// `owned_item.owner = X` is answered by the row's own column. Behind
+			// an enforced constraint the owner cannot be deleted without writing
+			// this row too, so no owner write can change what comes back.
+			await clearCache();
+
+			const warm = await readItemsOfFilteredOwner();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+			expect(warm.body.data).toHaveLength(1);
+
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNER}(:|,|$)`));
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNER}/${filteredOwnerId}`)
+				.send({ name: 'independent-write' })
+				.set('Authorization', auth);
+
+			// Non-vacuity: the write landed, and the entry still stands.
+			const written = await request(getUrl(vendor, env))
+				.get(`/items/${OWNER}/${filteredOwnerId}`)
+				.set('Authorization', auth);
+
+			expect(written.body.data.name).toBe('independent-write');
+
+			expect((await readItemsOfFilteredOwner()).headers[cacheStatusHeader])
+				.toBe('HIT');
+		});
+
 		it('leaves a filter on a non-key column bare', async () => {
 			// The control: renaming any owner moves an item into this result, so
 			// no key names what the read depends on.
@@ -423,22 +450,6 @@ describe(oneLine`
 			const refetched = await readItemsOfFilteredOwner();
 
 			expect(refetched.headers[cacheStatusHeader]).toBe('HIT');
-		});
-
-		it('is dropped by a write to the row its filter did name', async () => {
-			await clearCache();
-
-			const warm = await readItemsOfFilteredOwner();
-			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
-
-			await request(getUrl(vendor, env))
-				.patch(`/items/${OWNER}/${filteredOwnerId}`)
-				.send({ name: 'filtered-after' })
-				.set('Authorization', auth);
-
-			const refetched = await readItemsOfFilteredOwner();
-
-			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
 		});
 
 		it('survives a write to a to-many row its filter never named', async () => {
