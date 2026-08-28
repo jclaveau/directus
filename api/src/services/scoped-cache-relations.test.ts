@@ -238,17 +238,23 @@ describe('scoped cache read tagging across relation types', () => {
 	});
 
 	// A relational path used only in filter/sort (never selected) still tags the
-	// related collection: the read's result set depends on that collection, so a
-	// write to it must invalidate.
-	it('deep filter on a relation (not selected) tags the related collection', async () => {
+	// related collection — EXCEPT where the filter is answered by the near row's
+	// own foreign key column, which is the case below.
+	it(oneLine`
+		deep filter terminating on an M2O key tags no related collection
+	`, async () => {
+		// `cities.country = 1` reads a column the city already holds, and behind
+		// the constraint the country cannot be deleted without writing the city.
+		// So no write to `countries` can change this result.
 		const tags = await taggedForQuery('cities', m2o, {
 			fields: ['id'],
 			filter: { country: { id: { _eq: 1 } } },
 		});
 
-		expect(tags).toEqual(['cities', 'countries']);
+		expect(tags).toEqual(['cities']);
 	});
 
+	// The contrast: a sort reads rows no key named, so the collection stays tagged.
 	it('sort on a relational path (not selected) tags the related collection', async () => {
 		const tags = await taggedForQuery('cities', m2o, {
 			fields: ['id'],
@@ -272,17 +278,20 @@ describe('scoped cache read tagging across relation types', () => {
 		).toEqual(['cities', 'continents', 'countries']);
 	});
 
-	// A filter nested two relations deep (nothing beyond the root selected) still tags the
-	// whole chain — proves the query walker, not just the field walker, recurses past hop one.
+	// A filter nested two relations deep still walks the whole chain — proves the
+	// query walker, not just the field walker, recurses past hop one. The LEAF drops
+	// out for the same reason as above: the last hop is answered by the country's own
+	// `continent` column. The collection hopped THROUGH keeps its tag, because which
+	// country a city points at, and that country's column, both decide the result.
 	it(oneLine`
-		deep filter two relations down tags every collection on the path
+		deep filter two relations down tags the path but not its leaf
 	`, async () => {
 		const tags = await taggedForQuery('cities', m2oChain, {
 			fields: ['id'],
 			filter: { country: { continent: { id: { _eq: 1 } } } },
 		});
 
-		expect(tags).toEqual(['cities', 'continents', 'countries']);
+		expect(tags).toEqual(['cities', 'countries']);
 	});
 
 	it('mixed chain o2m→m2o: tags every collection across the type change', async () => {
