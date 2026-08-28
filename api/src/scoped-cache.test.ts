@@ -1955,6 +1955,30 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			.toEqual({ kind: 'unkeyed' });
 	});
 
+	it(oneLine`
+		leaves a to-many a function key counts unkeyed, whatever total it names
+	`, () => {
+		// `count(owned_sub_items) = 7` reads EVERY sub-item of every candidate
+		// row to reach its total. The number it compares against is a
+		// cardinality, not a row key, so reading it as one would pin the read to
+		// a row the filter never named and leave an insert unable to drop it.
+		expect(keyingOf({
+			filter: { 'count(owned_sub_items)': { _eq: 7 } } as Filter,
+		}).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it(oneLine`
+		still reports the to-many a function key counts, so it keeps a bare tag
+	`, () => {
+		// Non-vacuity for the case above: unkeyed is the answer because the
+		// collection IS reached, not because the walk lost sight of it.
+		for (const operator of ['_eq', '_gt'] as const) {
+			expect([...keyingOf({
+				filter: { 'count(owned_sub_items)': { [operator]: 7 } } as Filter,
+			}).keys()]).toContain('owned_sub_item');
+		}
+	});
+
 	it('keys through `_some`, which pushes the key into a subquery', () => {
 		expect(keyingOf({
 			filter: { owned_sub_items: { _some: { id: { _eq: 7 } } } },
