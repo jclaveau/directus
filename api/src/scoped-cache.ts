@@ -23,6 +23,10 @@ import { parseFilterKey } from './utils/parse-filter-key.js';
 import {
 	expandRelatedKeyFilters,
 } from './utils/expand-related-key-filters.js';
+import {
+	hopsAcrossRelation,
+	isFilterNode,
+} from './utils/filter-shape.js';
 import { getRelationInfo } from './utils/get-relation-info.js';
 import {
 	joinFilterWithCases,
@@ -1386,22 +1390,6 @@ function combineKeyingByAlias(
 }
 
 /**
- * Whether the conditions under a relational key name a further field, or a
- * nested grouping, rather than applying to the key itself.
- *
- * Answering the key itself does NOT settle which table it lands on — that is
- * `shorthandNamesRelatedKey`'s job, and the two directions disagree.
- */
-function hopsAcrossRelation(value: Record<string, unknown>): boolean {
-	return Object.keys(value).some((key) => {
-		return (
-			key.startsWith('_') === false ||
-			['_and', '_or', '_some', '_none'].includes(key)
-		);
-	});
-}
-
-/**
  * The keys an M2O hop names when its conditions are answered by the near row's own
  * foreign key column, so no row of the related collection is depended on — or null
  * when the far row does have to be read.
@@ -1531,7 +1519,7 @@ function scopedCacheFilterKeyingByAlias(
 
 		// Quantifiers over a to-many hop the caller already crossed: the condition
 		// inside still names one row of the same collection, at the same alias.
-		if ((key === '_some' || key === '_none') && isPlainFilterNode(value)) {
+		if ((key === '_some' || key === '_none') && isFilterNode(value)) {
 			parts.push(scopedCacheFilterKeyingByAlias(
 				schema,
 				collection,
@@ -1544,7 +1532,7 @@ function scopedCacheFilterKeyingByAlias(
 		}
 
 		if (key.startsWith('_')) {
-			if (isPlainFilterNode(value)) {
+			if (isFilterNode(value)) {
 				unkeyEverythingUnder(value as Filter);
 			}
 			else {
@@ -1556,7 +1544,7 @@ function scopedCacheFilterKeyingByAlias(
 
 		// Shorthands are gone by now (`expandRelatedKeyFilters`), so a leaf that is
 		// still not a node carries nothing this walk can read.
-		if (isPlainFilterNode(value) === false) {
+		if (isFilterNode(value) === false) {
 			parts.push(new Map([[alias, KEYING_UNKEYED]]));
 			continue;
 		}
@@ -1644,10 +1632,6 @@ function scopedCacheFilterKeyingByAlias(
 	}
 
 	return combineKeyingByAlias(parts, keyingOfEveryCondition);
-}
-
-function isPlainFilterNode(value: unknown): boolean {
-	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 /**
@@ -1920,12 +1904,12 @@ export function scopedCacheNestedCollections(ast: AST): Set<CollectionKey> {
 export function scopedCacheCollectionsBeyondNestedRows(
 	schema: SchemaOverview,
 	ast: AST,
+	// The same analysis `pinnedScopedCacheTagsFromKeyedFilters` pins from, so
+	// what this one exempts is exactly what that one covers. A caller holding it
+	// already passes it rather than paying for a second walk of the AST.
+	keyingByCollection = scopedCacheFilterKeyingByCollection(schema, ast),
 ): Set<CollectionKey> {
 	const beyond = new Set<CollectionKey>();
-
-	// The same analysis `pinnedScopedCacheTagsFromKeyedFilters` pins from, run off
-	// the same AST — so what this one exempts is exactly what that one covers.
-	const keyingByCollection = scopedCacheFilterKeyingByCollection(schema, ast);
 
 	const addCollectionsQueriedBy = (
 		collection: CollectionKey,

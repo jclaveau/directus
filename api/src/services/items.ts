@@ -1132,9 +1132,11 @@ implements AbstractService<Item> {
 
 		// A collection this read's filters name by primary key depends on those
 		// rows and no others, so it is pinned even when no row of it was nested.
-		const filterKeying = scopedCachePurgeEnabled()
-			? scopedCacheFilterKeyingByCollection(this.schema, ast)
-			: new Map();
+		const filterKeying:
+			ReturnType<typeof scopedCacheFilterKeyingByCollection> =
+			scopedCachePurgeEnabled()
+				? scopedCacheFilterKeyingByCollection(this.schema, ast)
+				: new Map();
 
 		const keyedFilterPins = pinnedScopedCacheTagsFromKeyedFilters(
 			this.schema,
@@ -1145,7 +1147,7 @@ implements AbstractService<Item> {
 		// Read before the query runs: `run-ast` fills the pins from inside it, and
 		// the tag loop below needs the same answer.
 		const beyondNestedRows = scopedCachePurgeEnabled()
-			? scopedCacheCollectionsBeyondNestedRows(this.schema, ast)
+			? scopedCacheCollectionsBeyondNestedRows(this.schema, ast, filterKeying)
 			: new Set<string>();
 
 		// The pins DO depend on the rows, so this one is filled from inside the read.
