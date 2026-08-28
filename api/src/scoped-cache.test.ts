@@ -1845,14 +1845,62 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 	// The SQL each of these compiles to is pinned by
 	// `apply-query/filter/related-key-join.test.ts`, which is what makes the
 	// key the whole dependency rather than a guess about the planner.
-	it('keys an M2O whose terminal is the related primary key', () => {
+	it('needs no tag for an M2O terminating on the related primary key', () => {
+		// `owned_item.owner = 7` is answered by the row's own column, and behind
+		// an enforced constraint the owner cannot vanish without writing it.
 		expect(keyingOf({ filter: { owner: { id: { _eq: 7 } } } }).get('owner'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'independent', keys: new Set([7]) });
 	});
 
-	it('keys every value an `_in` lists', () => {
+	it('needs no tag for an M2O whichever operator its key carries', () => {
 		expect(keyingOf({ filter: { owner: { id: { _in: [7, 8] } } } }).get('owner'))
-			.toEqual({ kind: 'keyed', keys: new Set([7, 8]) });
+			.toEqual({ kind: 'independent', keys: new Set([7, 8]) });
+
+		expect(keyingOf({ filter: { owner: { id: { _gt: 7 } } } }).get('owner'))
+			.toEqual({ kind: 'independent', keys: new Set() });
+	});
+
+	it('keys the M2O again when a sibling reads another of its columns', () => {
+		// `id` is answered by this row's own column, but `name` is not: that one
+		// reads the owner row, so the read depends on it after all. One alias is
+		// one joined row, so the key still pins which.
+		expect(keyingOf({
+			filter: { owner: { id: { _eq: 7 }, name: { _eq: 'alice' } } },
+		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys the M2O again when the condition reaches past its key', () => {
+		expect(keyingOf({
+			filter: { owner: { company: { id: { _eq: 3 } } } },
+		}).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('keys the M2O again once the relation carries no constraint', () => {
+		// Without one the owner can be deleted behind this row's back, leaving a
+		// foreign key that no longer joins and a result that changed with
+		// nothing written on this side.
+		const unconstrained = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		for (const relation of unconstrained.relations) {
+			relation.schema = null;
+		}
+
+		expect(scopedCacheFilterKeyingByCollection(unconstrained, {
+			type: 'root',
+			name: 'owned_item',
+			query: { filter: { owner: { id: { _eq: 7 } } } },
+			cases: [],
+			children: [],
+		} as AST).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
 	});
 
 	it('keys a to-many hop, whose far row the key names just as narrowly', () => {
@@ -1926,8 +1974,10 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			filter: { categories: { category_id: { id: { _eq: 7 } } } },
 		});
 
+		// The junction's own `category_id` answers the far key, so only the
+		// junction is depended on — and it is depended on wholesale.
 		expect(keying.get('category'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'independent', keys: new Set([7]) });
 
 		expect(keying.get('owned_item_category_junction'))
 			.toEqual({ kind: 'unkeyed' });
@@ -1938,13 +1988,15 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			.toEqual({ kind: 'unkeyed' });
 	});
 
-	it('leaves an operator other than `_eq`/`_in` unkeyed', () => {
-		expect(keyingOf({ filter: { owner: { id: { _neq: 7 } } } }).get('owner'))
+	it('leaves an operator other than `_eq`/`_in` unkeyed across a to-many', () => {
+		expect(keyingOf({ filter: { owned_sub_items: { id: { _neq: 7 } } } })
+			.get('owned_sub_item'))
 			.toEqual({ kind: 'unkeyed' });
 	});
 
 	it('leaves an empty `_in` unkeyed rather than pinned to nothing', () => {
-		expect(keyingOf({ filter: { owner: { id: { _in: [] } } } }).get('owner'))
+		expect(keyingOf({ filter: { owned_sub_items: { id: { _in: [] } } } })
+			.get('owned_sub_item'))
 			.toEqual({ kind: 'unkeyed' });
 	});
 
@@ -1958,7 +2010,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		expect(keying.get('owner')).toEqual({ kind: 'unkeyed' });
 
 		expect(keying.get('company'))
-			.toEqual({ kind: 'keyed', keys: new Set([3]) });
+			.toEqual({ kind: 'independent', keys: new Set([3]) });
 	});
 
 	it(oneLine`
@@ -2005,7 +2057,8 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 					{ owner: { id: { _in: [8, 9] } } },
 				],
 			},
-		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7, 8, 9]) });
+		}).get('owner'))
+			.toEqual({ kind: 'independent', keys: new Set([7, 8, 9]) });
 	});
 
 	it('drops the key when any `_or` branch reaches the collection unkeyed', () => {
@@ -2028,7 +2081,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 					{ label: { _eq: 'loose' } },
 				],
 			},
-		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
+		}).get('owner')).toEqual({ kind: 'independent', keys: new Set([7]) });
 	});
 
 	it('leaves everything under a `_not` unkeyed, which applyFilter drops', () => {
@@ -2039,7 +2092,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 
 	it('folds the permission cases in the way the SQL WHERE folds them', () => {
 		expect(keyingOf({}, [{ owner: { id: { _eq: 7 } } }]).get('owner'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'independent', keys: new Set([7]) });
 	});
 
 	it('leaves the AST filter as written, so permissions see what they saw', () => {
@@ -2080,7 +2133,8 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 					relation: { related_collection: 'owner' },
 				} as unknown as M2ONode,
 			],
-		} as AST).get('company')).toEqual({ kind: 'keyed', keys: new Set([3]) });
+		} as AST).get('company'))
+			.toEqual({ kind: 'independent', keys: new Set([3]) });
 	});
 });
 

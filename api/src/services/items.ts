@@ -1142,6 +1142,12 @@ implements AbstractService<Item> {
 			filterKeying,
 		);
 
+		// Read before the query runs: `run-ast` fills the pins from inside it, and
+		// the tag loop below needs the same answer.
+		const beyondNestedRows = scopedCachePurgeEnabled()
+			? scopedCacheCollectionsBeyondNestedRows(this.schema, ast)
+			: new Set<string>();
+
 		// The pins DO depend on the rows, so this one is filled from inside the read.
 		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
@@ -1167,7 +1173,7 @@ implements AbstractService<Item> {
 					this.collection,
 					fieldMap,
 					toArray(rows),
-					scopedCacheCollectionsBeyondNestedRows(this.schema, ast),
+					beyondNestedRows,
 				);
 			},
 		});
@@ -1269,6 +1275,20 @@ implements AbstractService<Item> {
 			for (const collection of taggedCollections) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
+					continue;
+				}
+
+				// Named by an M2O filter the near row's own column answers, reached
+				// no other way: no write to it can change what this read returns,
+				// so it needs no tag at all — not even a bare one. Nested, sorted
+				// or grouped on, it is depended on for more than that key and
+				// falls through to the tags below.
+				if (
+					collection !== this.collection &&
+					filterKeying.get(collection)?.kind === 'independent' &&
+					!nestedCollections.has(collection) &&
+					!beyondNestedRows.has(collection)
+				) {
 					continue;
 				}
 

@@ -23,6 +23,7 @@ import { parseFilterKey } from './utils/parse-filter-key.js';
 import {
 	expandRelatedKeyFilters,
 } from './utils/expand-related-key-filters.js';
+import { getRelationInfo } from './utils/get-relation-info.js';
 import {
 	joinFilterWithCases,
 } from './database/run-ast/lib/apply-query/join-filter-with-cases.js';
@@ -1258,21 +1259,32 @@ function m2oParentRowsAtPathEnd(
  *   collection, which reads the foreign key of every row that could be joined.
  *   A write to any of its rows can then change the result, so only the bare
  *   collection tag covers it.
+ * - `independent` — a condition reaches it, and the read still depends on none of
+ *   its rows. Only an M2O path terminating on the related primary key qualifies,
+ *   and only behind an enforced foreign key: the condition is answered by the
+ *   near row's own column, and every way the far row can disappear writes the
+ *   near row too (`CASCADE`/`SET NULL`/`SET DEFAULT`), or is refused
+ *   (`RESTRICT`/`NO ACTION`). The near collection's own tag then covers it, so
+ *   this collection needs no tag at all — not even a bare one.
  * - `absent` — no condition reaches it, and it owes the filters nothing.
  */
 export type ScopedCacheFilterKeying =
 	| { kind: 'keyed'; keys: Set<unknown> }
 	| { kind: 'unkeyed' }
+	| { kind: 'independent'; keys: Set<unknown> }
 	| { kind: 'absent' };
 
 const KEYING_UNKEYED: ScopedCacheFilterKeying = { kind: 'unkeyed' };
+
 const KEYING_ABSENT: ScopedCacheFilterKeying = { kind: 'absent' };
 
 function keyedKeysAcross(parts: ScopedCacheFilterKeying[]): Set<unknown> {
 	const keys = new Set<unknown>();
 
 	for (const part of parts) {
-		if (part.kind !== 'keyed') {
+		// `independent` carries its keys too: it needs no tag of its own, but a
+		// sibling reading the same joined row still does, and that key pins it.
+		if (part.kind !== 'keyed' && part.kind !== 'independent') {
 			continue;
 		}
 
@@ -1295,12 +1307,20 @@ function keyingOfEveryCondition(
 ): ScopedCacheFilterKeying {
 	const keys = keyedKeysAcross(parts);
 
-	if (keys.size > 0) {
+	// A sibling that DOES read the joined row pulls the alias back to needing a
+	// tag — pinned by the key if one was named, bare otherwise.
+	if (parts.some((part) => part.kind === 'unkeyed')) {
+		return keys.size > 0
+			? { kind: 'keyed', keys }
+			: KEYING_UNKEYED;
+	}
+
+	if (parts.some((part) => part.kind === 'keyed')) {
 		return { kind: 'keyed', keys };
 	}
 
-	if (parts.some((part) => part.kind === 'unkeyed')) {
-		return KEYING_UNKEYED;
+	if (parts.some((part) => part.kind === 'independent')) {
+		return { kind: 'independent', keys };
 	}
 
 	return KEYING_ABSENT;
@@ -1322,8 +1342,14 @@ function keyingOfAnyCondition(
 
 	const keys = keyedKeysAcross(parts);
 
-	if (keys.size > 0) {
+	// One branch needing a tag makes the whole disjunction need one; the keys the
+	// independent branches named are unioned in, since a row may arrive by either.
+	if (parts.some((part) => part.kind === 'keyed')) {
 		return { kind: 'keyed', keys };
+	}
+
+	if (parts.some((part) => part.kind === 'independent')) {
+		return { kind: 'independent', keys };
 	}
 
 	return KEYING_ABSENT;
@@ -1373,6 +1399,71 @@ function hopsAcrossRelation(value: Record<string, unknown>): boolean {
 			['_and', '_or', '_some', '_none'].includes(key)
 		);
 	});
+}
+
+/**
+ * The keys an M2O hop names when its conditions are answered by the near row's own
+ * foreign key column, so no row of the related collection is depended on — or null
+ * when the far row does have to be read.
+ *
+ * Three things have to hold. The relation must be an M2O, so the column is on this
+ * side. The conditions must name the related primary key and nothing else — a
+ * sibling on any other column has to read the far row. And the relation must carry
+ * a database constraint (`relation.schema`): without one a far row can be deleted
+ * behind the near row's back, leaving a foreign key that no longer joins, and the
+ * result changes with nothing written on this side.
+ */
+function nearRowAnswerKeys(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	fieldName: string,
+	conditions: Record<string, unknown>,
+): Set<unknown> | null {
+	const { relation, relationType } = getRelationInfo(
+		schema.relations,
+		collection,
+		fieldName,
+	);
+
+	if (relationType !== 'm2o' || !relation?.schema || !relation.related_collection) {
+		return null;
+	}
+
+	const relatedPrimaryKey = schema.collections[relation.related_collection]?.primary;
+	const named = Object.keys(conditions);
+
+	if (relatedPrimaryKey === undefined || named.length !== 1) {
+		return null;
+	}
+
+	if (named[0] !== relatedPrimaryKey) {
+		return null;
+	}
+
+	// Only operators below it: a further hop reaches past the key.
+	const terminal = conditions[relatedPrimaryKey];
+
+	if (terminal === null || typeof terminal !== 'object' || Array.isArray(terminal)) {
+		return null;
+	}
+
+	const operators = terminal as Record<string, unknown>;
+
+	if (!Object.keys(operators).every((child) => child.startsWith('_'))) {
+		return null;
+	}
+
+	// The keys it named, so a sibling that DOES have to read the far row can pin
+	// it. Empty for an operator that names no row.
+	if ('_eq' in operators) {
+		return new Set([operators['_eq']]);
+	}
+
+	if ('_in' in operators && Array.isArray(operators['_in'])) {
+		return new Set(operators['_in']);
+	}
+
+	return new Set();
 }
 
 /**
@@ -1481,13 +1572,39 @@ function scopedCacheFilterKeyingByAlias(
 			?? findRelatedCollection(collection, fieldName, schema);
 
 		if (relatedCollection !== null && hopsAcrossRelation(conditions)) {
+			const childAlias = alias === ''
+				? key
+				: `${alias}.${key}`;
+
+			// An M2O ending on the related primary key is answered by the near
+			// row's own foreign key column — the join only re-reads the value it
+			// already holds. Behind an enforced constraint the far row cannot
+			// vanish without writing the near row, so the near collection's tag
+			// covers it and this one needs none.
+			const nearRowKeys = nearRowAnswerKeys(
+				schema,
+				collection,
+				fieldName,
+				conditions,
+			);
+
+			if (nearRowKeys !== null) {
+				collectionByAlias.set(childAlias, relatedCollection);
+
+				parts.push(new Map([[
+					childAlias,
+					{ kind: 'independent', keys: nearRowKeys } as ScopedCacheFilterKeying,
+				]]));
+
+				parts.push(new Map([[alias, KEYING_UNKEYED]]));
+				continue;
+			}
+
 			parts.push(scopedCacheFilterKeyingByAlias(
 				schema,
 				relatedCollection,
 				conditions as Filter,
-				alias === ''
-					? key
-					: `${alias}.${key}`,
+				childAlias,
 				collectionByAlias,
 			));
 
@@ -1848,10 +1965,10 @@ export function scopedCacheCollectionsBeyondNestedRows(
 		}
 
 		for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
-			const keyedByFilter =
-				keyingByCollection.get(entry.collection)?.kind === 'keyed';
+			const kind = keyingByCollection.get(entry.collection)?.kind;
+			const namedByFilter = kind === 'keyed' || kind === 'independent';
 
-			if (keyedByFilter && !sortedOrGrouped.has(entry.collection)) {
+			if (namedByFilter && !sortedOrGrouped.has(entry.collection)) {
 				continue;
 			}
 
