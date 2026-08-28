@@ -1132,12 +1132,14 @@ implements AbstractService<Item> {
 
 		// A collection this read's filters name by primary key depends on those
 		// rows and no others, so it is pinned even when no row of it was nested.
+		const filterKeying = scopedCachePurgeEnabled()
+			? scopedCacheFilterKeyingByCollection(this.schema, ast)
+			: new Map();
+
 		const keyedFilterPins = pinnedScopedCacheTagsFromKeyedFilters(
 			this.schema,
 			this.collection,
-			scopedCachePurgeEnabled()
-				? scopedCacheFilterKeyingByCollection(this.schema, ast)
-				: new Map(),
+			filterKeying,
 		);
 
 		// The pins DO depend on the rows, so this one is filled from inside the read.
@@ -1253,13 +1255,15 @@ implements AbstractService<Item> {
 				);
 
 			// A filter reaching a collection only through an operator on the
-			// relational key itself (`{ rel: { _eq: X } }`) leaves it out of the
-			// field map: `flattenFilter` stops at the `_`-prefixed key, so the
-			// path never reaches the related context. The join is real, so a key
-			// named there has to be tagged from the keying rather than dropped.
+			// relational key itself (`{ rel: { _gt: X } }`) leaves it out of the
+			// field map: `flattenFilter` stops at the `_`-prefixed key, so the path
+			// never reaches the related context. The join is real either way, so the
+			// collections come from the keying too — whether it named keys there or
+			// not. Without this such a read carries NO tag for a table it joins,
+			// and no write to that table can drop it.
 			const taggedCollections = new Set([
 				...collectionsInFieldMap(fieldMap),
-				...keyedFilterPins.keys(),
+				...filterKeying.keys(),
 			]);
 
 			for (const collection of taggedCollections) {
