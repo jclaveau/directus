@@ -588,5 +588,112 @@ describe(oneLine`
 			expect(refetchedCount.headers[cacheStatusHeader]).toBe('MISS');
 			expect(refetchedCount.body.data).toEqual([]);
 		});
+
+		it('is dropped by DELETING the to-many row its filter named', async () => {
+			// Every other purge here is driven by a PATCH or a POST. A delete is
+			// the write the keyed pin has to survive being right about: the row
+			// it named stops existing, and the slice the write side emits for it
+			// is the only thing that can drop the entry.
+			await clearCache();
+
+			const doomedSubItem = await request(getUrl(vendor, env))
+				.post(`/items/${OWNED_SUB_ITEM}`)
+				.send({ note: 'doomed', owned_item: ownedItemId })
+				.set('Authorization', auth);
+
+			const doomedSubItemId = doomedSubItem.body.data.id;
+
+			const readDoomed = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[owned_sub_items][id][_eq]': String(doomedSubItemId),
+						fields: 'id,label',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await readDoomed();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+			expect(warm.body.data).toHaveLength(1);
+
+			expect(warm.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=${doomedSubItemId}(,|$)`),
+			);
+
+			await request(getUrl(vendor, env))
+				.delete(`/items/${OWNED_SUB_ITEM}/${doomedSubItemId}`)
+				.set('Authorization', auth);
+
+			const refetched = await readDoomed();
+
+			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
+			expect(refetched.body.data).toEqual([]);
+		});
+
+		it(oneLine`
+			is dropped by DELETING the M2O it tagged not at all
+		`, async () => {
+			// The load-bearing case for tagging an M2O filter NOTHING. The claim
+			// is that the far row cannot disappear without writing the near one:
+			// `on_delete` is SET NULL here, so deleting the owner rewrites the
+			// item's foreign key and the item's own collection covers it. If that
+			// were wrong this read would still be served with a row that no
+			// longer matches.
+			await clearCache();
+
+			const doomedOwner = await request(getUrl(vendor, env))
+				.post(`/items/${OWNER}`)
+				.send({ name: 'doomed-owner' })
+				.set('Authorization', auth);
+
+			const doomedOwnerId = doomedOwner.body.data.id;
+
+			const orphanedItem = await request(getUrl(vendor, env))
+				.post(`/items/${OWNED_ITEM}`)
+				.send({ label: 'orphaned', owner: doomedOwnerId })
+				.set('Authorization', auth);
+
+			const orphanedItemId = orphanedItem.body.data.id;
+
+			const readOfDoomedOwner = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[owner][id][_eq]': String(doomedOwnerId),
+						fields: 'id,label',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await readOfDoomedOwner();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(warm.body.data).toEqual([
+				{ id: orphanedItemId, label: 'orphaned' },
+			]);
+
+			// The whole point: the owner carries no tag of any shape here.
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNER}(:|,|$)`));
+
+			await request(getUrl(vendor, env))
+				.delete(`/items/${OWNER}/${doomedOwnerId}`)
+				.set('Authorization', auth);
+
+			// Non-vacuity: the delete landed and SET NULL rewrote the item,
+			// rather than the database refusing it.
+			const orphaned = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}/${orphanedItemId}`)
+				.query({ fields: 'id,owner' })
+				.set('Authorization', auth);
+
+			expect(orphaned.body.data).toEqual({ id: orphanedItemId, owner: null });
+
+			const refetched = await readOfDoomedOwner();
+
+			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
+			expect(refetched.body.data).toEqual([]);
+		});
 	});
 });

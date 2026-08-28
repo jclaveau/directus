@@ -1400,6 +1400,11 @@ function combineKeyingByAlias(
  * a database constraint (`relation.schema`): without one a far row can be deleted
  * behind the near row's back, leaving a foreign key that no longer joins, and the
  * result changes with nothing written on this side.
+ *
+ * The constraint is taken to be enforced for the rows already there. A Postgres
+ * foreign key added `NOT VALID` reports as a constraint while tolerating the
+ * orphans that predate it, and would make this verdict wrong — Directus creates
+ * no such constraint, and the schema snapshot does not carry its validity.
  */
 function nearRowAnswerKeys(
 	schema: SchemaOverview,
@@ -1556,6 +1561,14 @@ function scopedCacheFilterKeyingByAlias(
 		const [pathField, pathScope] = key.split(':') as [string, string?];
 		const { fieldName, functionName } = parseFilterKey(pathField);
 
+		// The scope is request text naming the table to join, so one naming no
+		// collection of this schema joins nothing — reporting it would put a
+		// collection that cannot exist in the response's tag header.
+		if (pathScope !== undefined && schema.collections[pathScope] === undefined) {
+			parts.push(new Map([[alias, KEYING_UNKEYED]]));
+			continue;
+		}
+
 		const relatedCollection = pathScope
 			?? findRelatedCollection(collection, fieldName, schema);
 
@@ -1577,7 +1590,6 @@ function scopedCacheFilterKeyingByAlias(
 		}
 
 		if (relatedCollection !== null && hopsAcrossRelation(conditions)) {
-
 			// An M2O ending on the related primary key is answered by the near
 			// row's own foreign key column — the join only re-reads the value it
 			// already holds. Behind an enforced constraint the far row cannot

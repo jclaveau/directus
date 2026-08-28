@@ -1967,16 +1967,22 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		}).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
 	});
 
-	it(oneLine`
-		still reports the to-many a function key counts, so it keeps a bare tag
-	`, () => {
-		// Non-vacuity for the case above: unkeyed is the answer because the
-		// collection IS reached, not because the walk lost sight of it.
-		for (const operator of ['_eq', '_gt'] as const) {
-			expect([...keyingOf({
-				filter: { 'count(owned_sub_items)': { [operator]: 7 } } as Filter,
-			}).keys()]).toContain('owned_sub_item');
-		}
+	// Non-vacuity for the case above: unkeyed is the answer because the
+	// collection IS reached, not because the walk lost sight of it.
+	it.each(['_eq', '_gt'])(oneLine`
+		still reports the to-many a %s function key counts, keeping a bare tag
+	`, (operator) => {
+		expect([...keyingOf({
+			filter: { 'count(owned_sub_items)': { [operator]: 7 } } as Filter,
+		}).keys()]).toContain('owned_sub_item');
+	});
+
+	it('reports nothing for an A2O scope naming no collection of the schema', () => {
+		// The scope is request text picking the table to join. One that names
+		// nothing joins nothing, and must not reach the response's tag header.
+		expect([...keyingOf({
+			filter: { categories: { 'category_id:nonexistent': { id: { _eq: 7 } } } },
+		}).keys()].sort()).toEqual(['owned_item', 'owned_item_category_junction']);
 	});
 
 	it('keys through `_some`, which pushes the key into a subquery', () => {
