@@ -11,7 +11,15 @@ export function removeTemporaryFields(
 	primaryKeyField: string,
 	parentItem?: Item,
 ): null | Item | Item[] {
-	const rawItems = cloneDeep(toArray(rawItem));
+	// One copy for the whole tree: both recursive calls below pass the item they
+	// descend from, so an undefined parentItem is the entry. Copying inside the
+	// recursion copied every subtree again per level of nesting — a node at depth
+	// d was copied d+1 times, which dominated a deep read: 22.4s of a 63s CPU
+	// profile under load, enough event-loop lag for pm2 to cull the worker.
+	const rawItems = parentItem === undefined
+		? cloneDeep(toArray(rawItem))
+		: toArray(rawItem);
+
 	const items: Item[] = [];
 
 	if (ast.type === 'a2o') {
