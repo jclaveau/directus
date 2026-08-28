@@ -10,7 +10,6 @@ import {
 	collectionDisciplines,
 	collectionSegments,
 	collectionUnits,
-	junctionUnitContents,
 } from './shared-nested-row.seed';
 
 // Directus resolves a related row once and hands the same object to every
@@ -33,7 +32,6 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 	const localCollectionUnits = `${collectionUnits}_${pkType}`;
 	const localCollectionDisciplines = `${collectionDisciplines}_${pkType}`;
 	const localCollectionSegments = `${collectionSegments}_${pkType}`;
-	const localJunctionContents = `${junctionUnitContents}_${pkType}`;
 
 	describe(`pkType: ${pkType}`, () => {
 		describe('GET /:collection with a row reached from several parents', () => {
@@ -85,11 +83,16 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 				expect(response.statusCode).toEqual(200);
 				expect(response.body.data).toHaveLength(units.length);
 
-				const expectedSegments = segments.map((segment) => segment.id);
+				// uuid keys do not come back in creation order, so compare as sets
+				const expectedSegments = segments
+					.map((segment) => String(segment.id))
+					.sort();
 
 				for (const unit of response.body.data) {
 					expect(unit.discipline.id).toEqual(discipline.id);
-					expect(unit.discipline.segments).toEqual(expectedSegments);
+
+					expect(unit.discipline.segments.map(String).sort())
+						.toEqual(expectedSegments);
 				}
 			});
 		});
@@ -150,25 +153,19 @@ describe.each(PRIMARY_KEY_TYPES)('/items', (pkType) => {
 					item: withKey({ discipline: discipline.id }, pkType, 'segment'),
 				});
 
+				const entry = {
+					collection: localCollectionDisciplines,
+					item: String(discipline.id),
+				};
+
 				const unit = await CreateItem(vendor, {
 					collection: localCollectionUnits,
-					item: withKey({}, pkType, 'unit'),
+					item: withKey(
+						{ contents: { create: [entry, entry], update: [], delete: [] } },
+						pkType,
+						'unit',
+					),
 				});
-
-				for (const index of [0, 1]) {
-					await CreateItem(vendor, {
-						collection: localJunctionContents,
-						item: withKey(
-							{
-								[`${localCollectionUnits}_id`]: unit.id,
-								collection: localCollectionDisciplines,
-								item: String(discipline.id),
-							},
-							pkType,
-							`content-${index}`,
-						),
-					});
-				}
 
 				// Action
 				const response = await request(getUrl(vendor))
