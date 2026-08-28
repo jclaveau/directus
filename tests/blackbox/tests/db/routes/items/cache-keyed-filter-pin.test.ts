@@ -528,5 +528,65 @@ describe(oneLine`
 			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
 			expect(refetched.body.data[0].owned_sub_items).toHaveLength(3);
 		});
+
+		it(oneLine`
+			bare-tags a to-many a filter counts, whatever total it matched
+		`, async () => {
+			// `count(owned_sub_items)` reads EVERY sub-item of every candidate row
+			// to reach its total, so no key names what the read depends on. The
+			// total it is compared against is a cardinality, not a row key: an
+			// insert nobody named changes the count and moves the row out.
+			await clearCache();
+
+			const countedItem = await request(getUrl(vendor, env))
+				.post(`/items/${OWNED_ITEM}`)
+				.send({ label: 'counted', owner: filteredOwnerId })
+				.set('Authorization', auth);
+
+			const countedItemId = countedItem.body.data.id;
+
+			await request(getUrl(vendor, env))
+				.post(`/items/${OWNED_SUB_ITEM}`)
+				.send({ note: 'counted-first', owned_item: countedItemId })
+				.set('Authorization', auth);
+
+			// The label narrows the result to this row alone, so the totals the
+			// other tests left behind cannot decide what comes back.
+			const readCountedItems = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[count(owned_sub_items)][_eq]': '1',
+						'filter[label][_eq]': 'counted',
+						fields: 'id,label',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await readCountedItems();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(warm.body.data).toEqual([
+				{ id: countedItemId, label: 'counted' },
+			]);
+
+			expect(warm.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
+
+			// The total is not a key, so the sub-item whose id happens to equal
+			// it is pinned by nothing.
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=1(,|$)`));
+
+			await request(getUrl(vendor, env))
+				.post(`/items/${OWNED_SUB_ITEM}`)
+				.send({ note: 'counted-second', owned_item: countedItemId })
+				.set('Authorization', auth);
+
+			const refetchedCount = await readCountedItems();
+
+			expect(refetchedCount.headers[cacheStatusHeader]).toBe('MISS');
+			expect(refetchedCount.body.data).toEqual([]);
+		});
 	});
 });

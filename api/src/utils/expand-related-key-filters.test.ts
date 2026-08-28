@@ -97,6 +97,14 @@ describe('expandRelatedKeyFilters', () => {
 			.toEqual({ owner: { name: { _eq: 'alice' } } });
 	});
 
+	it('leaves a function key alone, which reads every related row', () => {
+		// `count(owned_sub_items) = 1` compares a cardinality, not a row key.
+		// Moving the operator onto the related primary key would read it as
+		// `owned_sub_items.id = 1` and name a row the filter never named.
+		expect(expand({ 'count(owned_sub_items)': { _eq: 1 } }))
+			.toEqual({ 'count(owned_sub_items)': { _eq: 1 } });
+	});
+
 	it('leaves a field no relation describes alone', () => {
 		expect(expand({ nonexistent: { _eq: 1 } }))
 			.toEqual({ nonexistent: { _eq: 1 } });

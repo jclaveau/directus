@@ -1585,10 +1585,24 @@ function scopedCacheFilterKeyingByAlias(
 		const relatedCollection = pathScope
 			?? findRelatedCollection(collection, fieldName, schema);
 
+		const childAlias = alias === ''
+			? key
+			: `${alias}.${key}`;
+
+		// A function key reads the related rows through a transform: `count`
+		// totals every one of them, so the value it is compared against is a
+		// cardinality rather than a key. The hop is joined all the same, so the
+		// collection is reported — wholesale, which is the bare tag.
+		if (relatedCollection !== null && functionName !== undefined) {
+			collectionByAlias.set(childAlias, relatedCollection);
+
+			parts.push(new Map([[childAlias, KEYING_UNKEYED]]));
+			parts.push(new Map([[alias, KEYING_UNKEYED]]));
+
+			continue;
+		}
+
 		if (relatedCollection !== null && hopsAcrossRelation(conditions)) {
-			const childAlias = alias === ''
-				? key
-				: `${alias}.${key}`;
 
 			// An M2O ending on the related primary key is answered by the near
 			// row's own foreign key column — the join only re-reads the value it

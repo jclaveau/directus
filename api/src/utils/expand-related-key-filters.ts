@@ -62,7 +62,7 @@ export function expandRelatedKeyFilters(
 			: { _eq: value };
 
 		const [pathField, pathScope] = key.split(':') as [string, string?];
-		const { fieldName } = parseFilterKey(pathField);
+		const { fieldName, functionName } = parseFilterKey(pathField);
 
 		const { relation, relationType } = getRelationInfo(
 			schema.relations,
@@ -107,7 +107,14 @@ export function expandRelatedKeyFilters(
 
 		const relatedPrimaryKey = schema.collections[relatedCollection]?.primary;
 
-		if (relationType !== 'o2m' || relatedPrimaryKey === undefined) {
+		// A function key reads the related rows through a transform rather than
+		// naming one: `count(items)` compares a total, and moving that total onto
+		// the related key would read it as an id the filter never named.
+		if (
+			functionName !== undefined ||
+			relationType !== 'o2m' ||
+			relatedPrimaryKey === undefined
+		) {
 			expanded[key] = conditions;
 			continue;
 		}
