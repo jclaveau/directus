@@ -11,11 +11,13 @@ export function removeTemporaryFields(
 	primaryKeyField: string,
 	parentItem?: Item,
 ): null | Item | Item[] {
-	// One copy for the whole tree: both recursive calls below pass the item they
-	// descend from, so an undefined parentItem is the entry. Copying inside the
-	// recursion copied every subtree again per level of nesting — a node at depth
-	// d was copied d+1 times, which dominated a deep read: 22.4s of a 63s CPU
-	// profile under load, enough event-loop lag for pm2 to cull the worker.
+	// One copy for the whole tree, taken at the entry — both recursive calls below
+	// pass the item they descend from, so an undefined parentItem is the entry.
+	// Copying inside the recursion copied every subtree again per level of nesting
+	// (a node at depth d copied d+1 times), which dominated a deep read: 22.4s of a
+	// 63s CPU profile under load. The copy is for the caller, whose rows must come
+	// back untouched; the walk below reads without writing, so a row reached from
+	// several parents answers the same for each of them.
 	const rawItems = parentItem === undefined
 		? cloneDeep(toArray(rawItem))
 		: toArray(rawItem);
@@ -45,24 +47,25 @@ export function removeTemporaryFields(
 
 			if (rawItem === null || rawItem === undefined) return rawItem;
 
-			let item = rawItem;
+			const nestedItems: Item = {};
 
 			for (const nestedNode of nestedCollectionNodes[relatedCollection]!) {
-				item[nestedNode.fieldKey] = removeTemporaryFields(
+				nestedItems[nestedNode.fieldKey] = removeTemporaryFields(
 					schema,
-					item[nestedNode.fieldKey],
+					rawItem[nestedNode.fieldKey],
 					nestedNode,
 					schema.collections[nestedNode.relation.collection]!.primary,
-					item,
+					rawItem,
 				);
 			}
 
 			const fieldsWithFunctionsApplied = fields[relatedCollection]!.map((field) => applyFunctionToColumnName(field));
 
-			item =
-				fields[relatedCollection]!.length > 0 ? pick(rawItem, fieldsWithFunctionsApplied) : rawItem[primaryKeyField];
-
-			items.push(item);
+			items.push(
+				fields[relatedCollection]!.length > 0
+					? { ...pick(rawItem, fieldsWithFunctionsApplied), ...nestedItems }
+					: rawItem[primaryKeyField],
+			);
 		}
 	} else {
 		const fields: string[] = [];
@@ -95,25 +98,30 @@ export function removeTemporaryFields(
 		for (const rawItem of rawItems) {
 			if (rawItem === null || rawItem === undefined) return rawItem;
 
-			let item = rawItem;
+			const nestedItems: Item = {};
 
 			for (const nestedNode of nestedCollectionNodes) {
-				item[nestedNode.fieldKey] = removeTemporaryFields(
+				nestedItems[nestedNode.fieldKey] = removeTemporaryFields(
 					schema,
-					item[nestedNode.fieldKey],
+					rawItem[nestedNode.fieldKey],
 					nestedNode,
 					nestedNode.type === 'm2o'
 						? schema.collections[nestedNode.relation.related_collection!]!.primary
 						: schema.collections[nestedNode.relation.collection]!.primary,
-					item,
+					rawItem,
 				);
 			}
 
 			const fieldsWithFunctionsApplied = fields.map((field) => applyFunctionToColumnName(field));
 
-			item = fields.length > 0 ? pick(rawItem, fieldsWithFunctionsApplied, aliasFields) : rawItem[primaryKeyField];
-
-			items.push(item);
+			items.push(
+				fields.length > 0
+					? {
+						...pick(rawItem, fieldsWithFunctionsApplied, aliasFields),
+						...nestedItems,
+					}
+					: rawItem[primaryKeyField],
+			);
 		}
 	}
 
