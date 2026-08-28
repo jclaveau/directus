@@ -1,6 +1,7 @@
 import {
 	CreateCollection,
 	CreateField,
+	CreateFieldM2A,
 	CreateFieldM2O,
 	CreateFieldO2M,
 	DeleteCollection,
@@ -12,6 +13,7 @@ import { expect, it } from 'vitest';
 export const collectionUnits = 'test_items_shared_nested_units';
 export const collectionDisciplines = 'test_items_shared_nested_disciplines';
 export const collectionSegments = 'test_items_shared_nested_segments';
+export const junctionUnitContents = 'test_items_shared_nested_unit_contents';
 
 export const seedDBStructure = () => {
 	it.each(vendors)(
@@ -23,6 +25,9 @@ export const seedDBStructure = () => {
 					const localCollectionDisciplines = `${collectionDisciplines}_${pkType}`;
 					const localCollectionSegments = `${collectionSegments}_${pkType}`;
 
+					const localJunctionContents = `${junctionUnitContents}_${pkType}`;
+
+					await DeleteCollection(vendor, { collection: localJunctionContents });
 					await DeleteCollection(vendor, { collection: localCollectionUnits });
 					await DeleteCollection(vendor, { collection: localCollectionSegments });
 					await DeleteCollection(vendor, { collection: localCollectionDisciplines });
@@ -74,6 +79,16 @@ export const seedDBStructure = () => {
 						collection: localCollectionUnits,
 						field: 'discipline',
 						otherCollection: localCollectionDisciplines,
+						primaryKeyType: pkType,
+					});
+
+					// The any-to-one side of the projection: its own branch of the walk,
+					// with the same shape and the same exits.
+					await CreateFieldM2A(vendor, {
+						collection: localCollectionUnits,
+						field: 'contents',
+						junctionCollection: localJunctionContents,
+						relatedCollections: [localCollectionDisciplines],
 						primaryKeyType: pkType,
 					});
 

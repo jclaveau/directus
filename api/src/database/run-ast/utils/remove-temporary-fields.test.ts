@@ -376,9 +376,8 @@ describe('an empty relation', () => {
 
 	test('comes back as null from the a2o branch', () => {
 		const parent = { collection: 'unit' } as Item;
-		const empty = null as unknown as Item;
 
-		const item = removeTemporaryFields(plainSchema, empty, {
+		const item = removeTemporaryFields(plainSchema, null as unknown as Item, {
 			type: 'a2o',
 			name: 'item',
 			fieldKey: 'item',
