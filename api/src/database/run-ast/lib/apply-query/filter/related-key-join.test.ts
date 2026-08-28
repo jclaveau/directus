@@ -62,7 +62,7 @@ function compile(filter: any) {
 
 describe('a filter terminating on a related primary key', () => {
 	test('joins the related collection and matches the one row named', () => {
-		expect(compile({ owner: { id: { _eq: 7 } } })).toMatchObject({
+		expect(compile({ owner: { id: { _eq: 7 } } })).toEqual({
 			sql: 'select * left join "owner" as "a1" '
 				+ 'on "owned_item"."owner" = "a1"."id" where "a1"."id" = ?',
 			bindings: [7],
@@ -70,7 +70,7 @@ describe('a filter terminating on a related primary key', () => {
 	});
 
 	test('matches exactly the rows an `_in` lists', () => {
-		expect(compile({ owner: { id: { _in: [7, 8] } } })).toMatchObject({
+		expect(compile({ owner: { id: { _in: [7, 8] } } })).toEqual({
 			sql: 'select * left join "owner" as "a1" '
 				+ 'on "owned_item"."owner" = "a1"."id" where "a1"."id" in (?, ?)',
 			bindings: [7, 8],
@@ -78,7 +78,7 @@ describe('a filter terminating on a related primary key', () => {
 	});
 
 	test('joins a to-many relation the same way', () => {
-		expect(compile({ owned_sub_items: { id: { _eq: 7 } } })).toMatchObject({
+		expect(compile({ owned_sub_items: { id: { _eq: 7 } } })).toEqual({
 			sql: 'select * left join "owned_sub_item" as "a1" '
 				+ 'on "owned_item"."id" = "a1"."owned_item" where "a1"."id" = ?',
 			bindings: [7],
@@ -101,7 +101,7 @@ describe('a filter terminating on a related primary key', () => {
 	});
 
 	test('appends the junction key for an M2M spelled on the alias', () => {
-		expect(compile({ categories: { _eq: 7 } })).toMatchObject({
+		expect(compile({ categories: { _eq: 7 } })).toEqual({
 			sql: 'select * left join "owned_item_category_junction" as "a1" '
 				+ 'on "owned_item"."id" = "a1"."owned_item_id" '
 				+ 'where "a1"."id" = ?',
@@ -111,7 +111,7 @@ describe('a filter terminating on a related primary key', () => {
 
 	test('reaches the same one row through `_some`', () => {
 		expect(compile({ owned_sub_items: { _some: { id: { _eq: 7 } } } }))
-			.toMatchObject({
+			.toEqual({
 				sql: 'select * left join "owned_sub_item" as "a1" '
 					+ 'on "owned_item"."id" = "a1"."owned_item" '
 					+ 'where "owned_item"."id" in ('
@@ -125,7 +125,7 @@ describe('a filter terminating on a related primary key', () => {
 
 	test('negates over the same one row through `_none`', () => {
 		expect(compile({ owned_sub_items: { _none: { id: { _eq: 7 } } } }))
-			.toMatchObject({
+			.toEqual({
 				sql: 'select * left join "owned_sub_item" as "a1" '
 					+ 'on "owned_item"."id" = "a1"."owned_item" '
 					+ 'where "owned_item"."id" not in ('
@@ -139,7 +139,7 @@ describe('a filter terminating on a related primary key', () => {
 
 	test('crosses an M2M junction to key the far collection', () => {
 		expect(compile({ categories: { category_id: { id: { _eq: 7 } } } }))
-			.toMatchObject({
+			.toEqual({
 				sql: 'select * '
 					+ 'left join "owned_item_category_junction" as "a1" '
 					+ 'on "owned_item"."id" = "a1"."owned_item_id" '
@@ -180,7 +180,7 @@ describe('a filter terminating on a related primary key', () => {
 describe('a filter that does NOT terminate on a related primary key', () => {
 	test('compares the foreign key in place, joining nothing', () => {
 		// No join, so the read depends on no row of `owner` at all.
-		expect(compile({ owner: { _eq: 7 } })).toMatchObject({
+		expect(compile({ owner: { _eq: 7 } })).toEqual({
 			sql: 'select * where "owned_item"."owner" = ?',
 			bindings: [7],
 		});
@@ -191,14 +191,14 @@ describe('a filter that does NOT terminate on a related primary key', () => {
 		// related collection is never read whichever way it is written.
 		expect(compile({ owner: 7 })).toEqual(compile({ owner: { _eq: 7 } }));
 
-		expect(compile({ owner: 7 })).toMatchObject({
+		expect(compile({ owner: 7 })).toEqual({
 			sql: 'select * where "owned_item"."owner" = ?',
 			bindings: [7],
 		});
 	});
 
 	test('joins on a non-key column, which any row can come to match', () => {
-		expect(compile({ owner: { name: { _eq: 'alice' } } })).toMatchObject({
+		expect(compile({ owner: { name: { _eq: 'alice' } } })).toEqual({
 			sql: 'select * left join "owner" as "a1" '
 				+ 'on "owned_item"."owner" = "a1"."id" where "a1"."name" = ?',
 			bindings: ['alice'],
@@ -208,7 +208,7 @@ describe('a filter that does NOT terminate on a related primary key', () => {
 	test('drops a `_not` entirely, compiling no condition at all', () => {
 		// Upstream `applyFilter` has no `_not` branch: `getFilterPath` stops at
 		// the operator and the clause is skipped.
-		expect(compile({ _not: { owner: { id: { _eq: 7 } } } })).toMatchObject({
+		expect(compile({ _not: { owner: { id: { _eq: 7 } } } })).toEqual({
 			sql: 'select *',
 			bindings: [],
 		});
