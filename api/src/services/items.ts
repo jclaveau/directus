@@ -1284,7 +1284,17 @@ implements AbstractService<Item> {
 					this.schema.collections[this.collection]?.primary,
 				);
 
-			for (const collection of collectionsInFieldMap(fieldMap)) {
+			// A filter reaching a collection only through an operator on the
+			// relational key itself (`{ rel: { _eq: X } }`) leaves it out of the
+			// field map: `flattenFilter` stops at the `_`-prefixed key, so the
+			// path never reaches the related context. The join is real, so a key
+			// named there has to be tagged from the keying rather than dropped.
+			const taggedCollections = new Set([
+				...collectionsInFieldMap(fieldMap),
+				...keyedFilterPins.keys(),
+			]);
+
+			for (const collection of taggedCollections) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
 					continue;

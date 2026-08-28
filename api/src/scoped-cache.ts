@@ -20,6 +20,7 @@ import {
 	findRelatedCollection,
 } from './permissions/modules/process-ast/utils/find-related-collection.js';
 import { parseFilterKey } from './utils/parse-filter-key.js';
+import { getRelationInfo } from './utils/get-relation-info.js';
 import {
 	joinFilterWithCases,
 } from './database/run-ast/lib/apply-query/join-filter-with-cases.js';
@@ -1371,10 +1372,11 @@ function combineKeyingByAlias(
 }
 
 /**
- * A condition sits under a relational key either to hop across it — a further
- * field, or a nested grouping — or to compare its foreign key column in place
- * (`{ course: { _eq: 7 } }`, which compiles to `note.course = ?` and joins
- * nothing). Only the first reads the related collection.
+ * Whether the conditions under a relational key name a further field, or a
+ * nested grouping, rather than applying to the key itself.
+ *
+ * Answering the key itself does NOT settle which table it lands on — that is
+ * `shorthandNamesRelatedKey`'s job, and the two directions disagree.
  */
 function hopsAcrossRelation(value: Record<string, unknown>): boolean {
 	return Object.keys(value).some((key) => {
@@ -1473,12 +1475,17 @@ function scopedCacheFilterKeyingByAlias(
 			continue;
 		}
 
-		if (isPlainFilterNode(value) === false) {
+		// A leaf carrying no operator is an `_eq`, which is how `getOperation`
+		// reads it — `{ id: 7 }` and `{ id: { _eq: 7 } }` compile identically. An
+		// array is left alone: no operator takes a bare list.
+		const conditions = isPlainFilterNode(value)
+			? value as Record<string, unknown>
+			: { _eq: value };
+
+		if (Array.isArray(value)) {
 			parts.push(new Map([[alias, KEYING_UNKEYED]]));
 			continue;
 		}
-
-		const conditions = value as Record<string, unknown>;
 
 		// An A2O path carries its collection scope in the key itself
 		// (`item:articles`), which is how `add-join` picks the table to join.
@@ -1488,11 +1495,40 @@ function scopedCacheFilterKeyingByAlias(
 		const relatedCollection = pathScope
 			?? findRelatedCollection(collection, fieldName, schema);
 
-		if (relatedCollection !== null && hopsAcrossRelation(conditions)) {
+		const { relationType } = getRelationInfo(
+			schema.relations,
+			collection,
+			fieldName,
+		);
+
+		// `{ rel: { _eq: 7 } }` and `{ rel: 7 }` mean opposite things by direction,
+		// and only the relation says which. Across an M2O the foreign key is a
+		// column of THIS collection, so nothing is joined and no row of the related
+		// one is read. Across a to-many alias there is no such column, so
+		// `getColumnPath` appends the RELATED primary key and joins it — which is
+		// why the same spelling has to be answered on the far side. Synthesizing
+		// that key here rather than special-casing it keeps this walk and
+		// `getColumnPath` reading one shape.
+		const shorthandNamesRelatedKey =
+			relationType === 'o2m' && hopsAcrossRelation(conditions) === false;
+
+		const relatedPrimaryKey = relatedCollection === null
+			? undefined
+			: schema.collections[relatedCollection]?.primary;
+
+		if (
+			relatedCollection !== null &&
+			(
+				hopsAcrossRelation(conditions) ||
+				(shorthandNamesRelatedKey && relatedPrimaryKey !== undefined)
+			)
+		) {
 			parts.push(scopedCacheFilterKeyingByAlias(
 				schema,
 				relatedCollection,
-				conditions as Filter,
+				shorthandNamesRelatedKey
+					? { [relatedPrimaryKey!]: conditions } as Filter
+					: conditions as Filter,
 				alias === ''
 					? key
 					: `${alias}.${key}`,

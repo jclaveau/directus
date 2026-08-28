@@ -1861,6 +1861,52 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			.toEqual({ kind: 'keyed', keys: new Set([7]) });
 	});
 
+	// The four spellings below compile to ONE query — `getOperation` reads a bare
+	// leaf as `_eq`, and `getColumnPath` appends the related primary key to a
+	// to-many alias — so they have to reach one keying. Their SQL equality is
+	// asserted in `apply-query/filter/related-key-join.test.ts`.
+	it('keys a to-many written with a bare key value', () => {
+		expect(keyingOf({ filter: { owned_sub_items: { id: 7 } } as unknown as Filter })
+			.get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys a to-many written as an operator on the alias', () => {
+		expect(keyingOf({ filter: { owned_sub_items: { _eq: 7 } } })
+			.get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys a to-many written as a bare value on the alias', () => {
+		// Cast through `unknown`: `Filter` models a leaf as an operator object,
+		// while `getOperation` accepts the bare value these two pass.
+		expect(keyingOf({ filter: { owned_sub_items: 7 } as unknown as Filter })
+			.get('owned_sub_item'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('keys the junction an M2M shorthand names, as `getColumnPath` does', () => {
+		expect(keyingOf({ filter: { categories: { _eq: 7 } } })
+			.get('owned_item_category_junction'))
+			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+	});
+
+	it('reports nothing for an M2O shorthand, which joins no related row', () => {
+		// The mirror of the above: across an M2O the foreign key is a column of
+		// THIS collection, so the related one is never read.
+		expect(keyingOf({ filter: { owner: 3 } as unknown as Filter }).get('owner'))
+			.toBe(undefined);
+
+		expect(keyingOf({ filter: { owner: { _eq: 3 } } }).get('owner'))
+			.toBe(undefined);
+	});
+
+	it('leaves a to-many shorthand unkeyed on an operator that names no row', () => {
+		expect(keyingOf({ filter: { owned_sub_items: { _gt: 7 } } })
+			.get('owned_sub_item'))
+			.toEqual({ kind: 'unkeyed' });
+	});
+
 	it('keys through `_some`, which pushes the key into a subquery', () => {
 		expect(keyingOf({
 			filter: { owned_sub_items: { _some: { id: { _eq: 7 } } } },
