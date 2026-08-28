@@ -1,10 +1,7 @@
 import type { Filter, SchemaOverview } from '@directus/types';
 import { getRelationInfo } from './get-relation-info.js';
+import { hopsAcrossRelation, isFilterNode } from './filter-shape.js';
 import { parseFilterKey } from './parse-filter-key.js';
-
-function isFilterNode(value: unknown): boolean {
-	return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 /**
  * Rewrite a filter into the one shape the SQL builder ends up reading, so a
@@ -86,16 +83,8 @@ export function expandRelatedKeyFilters(
 			continue;
 		}
 
-		// A further field, or a nested grouping, means the path carries on rather
-		// than ending on this alias — so there is no related key to append.
-		const carriesOn = Object.keys(conditions).some((child) => {
-			return (
-				child.startsWith('_') === false ||
-				['_and', '_or', '_some', '_none'].includes(child)
-			);
-		});
-
-		if (carriesOn) {
+		// A path that carries on past this alias has no related key to append.
+		if (hopsAcrossRelation(conditions)) {
 			expanded[key] = expandRelatedKeyFilters(
 				schema,
 				relatedCollection,
