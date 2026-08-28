@@ -196,3 +196,203 @@ describe('a nested row shared by several parents', () => {
 		expect(rows[0]!['discipline']).toBe(rows[1]!['discipline']);
 	});
 });
+
+// The a2o branch takes the same shape and picks its projection from the parent's
+// collection field, so it is only reached through the recursion — with a
+// parentItem in hand and no copy of its own.
+describe('an a2o node', () => {
+	const a2oSchema = new SchemaBuilder()
+		.collection('comment', (c) => {
+			c.field('id').id();
+			c.field('body').string();
+		})
+		.collection('tag', (c) => {
+			c.field('id').id();
+		})
+		.build();
+
+	const a2oAst = {
+		type: 'a2o',
+		name: 'item',
+		fieldKey: 'item',
+		names: ['comment'],
+		query: {},
+		whenCase: [],
+		cases: [],
+		relation: { meta: { one_collection_field: 'collection' } },
+		children: {
+			comment: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [], alias: false },
+				{
+					type: 'o2m',
+					name: 'tag',
+					fieldKey: 'tags',
+					parentKey: 'id',
+					relatedKey: 'id',
+					relation: { collection: 'tag' },
+					query: {},
+					whenCase: [],
+					cases: [],
+					children: [],
+				},
+			],
+		},
+	} as unknown as AST;
+
+	const parentItem = { collection: 'comment' } as Item;
+
+	test('keeps only the fields the parent collection asked for', () => {
+		const rows: Item[] = [{ id: 5, body: 'dropped', tags: [{ id: 1 }] }];
+
+		const items = removeTemporaryFields(a2oSchema, rows, a2oAst, 'id', parentItem);
+
+		expect(items).toEqual([{ id: 5, tags: [1] }]);
+	});
+
+	test('answers the same for a row reached twice', () => {
+		const shared = { id: 5, body: 'dropped', tags: [{ id: 1 }, { id: 2 }] };
+
+		const items = removeTemporaryFields(
+			a2oSchema,
+			[shared, shared],
+			a2oAst,
+			'id',
+			parentItem,
+		) as Item[];
+
+		expect(items[1]).toEqual(items[0]);
+		expect(items[1]!['tags']).toEqual([1, 2]);
+	});
+
+	test('leaves the row it was given untouched', () => {
+		const shared = { id: 5, body: 'dropped', tags: [{ id: 1 }, { id: 2 }] };
+
+		removeTemporaryFields(a2oSchema, [shared, shared], a2oAst, 'id', parentItem);
+
+		expect(shared.tags).toEqual([{ id: 1 }, { id: 2 }]);
+	});
+});
+
+// The projection's other inputs, unchanged by the walk above but sharing its exits.
+describe('what the projection is built from', () => {
+	const plainSchema = new SchemaBuilder()
+		.collection('unit', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+		})
+		.build();
+
+	test('keeps an alias field, which is picked but never counted as a field', () => {
+		const ast = {
+			type: 'root',
+			name: 'unit',
+			query: {},
+			cases: [],
+			children: [
+				{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [], alias: false },
+				{
+					type: 'field',
+					name: 'name',
+					fieldKey: 'renamed',
+					whenCase: [],
+					alias: true,
+				},
+			],
+		} as unknown as AST;
+
+		const rows: Item[] = [{ id: 1, renamed: 'kept', dropped: 'gone' }];
+
+		expect(removeTemporaryFields(plainSchema, rows, ast, 'id'))
+			.toEqual([{ id: 1, renamed: 'kept' }]);
+	});
+
+	test('keeps the aggregate fields a query asked for', () => {
+		const ast = {
+			type: 'root',
+			name: 'unit',
+			query: { aggregate: { count: ['*'] } },
+			cases: [],
+			children: [],
+		} as unknown as AST;
+
+		const rows: Item[] = [{ count: 12, dropped: 'gone' }];
+
+		const items = removeTemporaryFields(plainSchema, rows, ast, 'id');
+
+		expect(items).toEqual([{ count: 12 }]);
+	});
+
+	test('collapses an a2o row to its key when nothing was asked of it', () => {
+		const a2oSchema = new SchemaBuilder()
+			.collection('comment', (c) => {
+				c.field('id').id();
+			})
+			.build();
+
+		const ast = {
+			type: 'a2o',
+			name: 'item',
+			fieldKey: 'item',
+			names: ['comment'],
+			query: {},
+			whenCase: [],
+			cases: [],
+			relation: { meta: { one_collection_field: 'collection' } },
+			children: { comment: [] },
+		} as unknown as AST;
+
+		const rows: Item[] = [{ id: 9, body: 'gone' }];
+		const parent = { collection: 'comment' } as Item;
+
+		expect(removeTemporaryFields(a2oSchema, rows, ast, 'id', parent)).toEqual([9]);
+	});
+});
+
+// A relation with nothing on the other side arrives as null, and the walk hands
+// it straight back rather than projecting it. Both branches do this.
+describe('an empty relation', () => {
+	const plainSchema = new SchemaBuilder()
+		.collection('unit', (c) => {
+			c.field('id').id();
+		})
+		.build();
+
+	const rootAst = {
+		type: 'root',
+		name: 'unit',
+		query: {},
+		cases: [],
+		children: [
+			{ type: 'field', name: 'id', fieldKey: 'id', whenCase: [], alias: false },
+		],
+	} as unknown as AST;
+
+	test('comes back as null from the flat branch', () => {
+		const empty = null as unknown as Item;
+		const item = removeTemporaryFields(plainSchema, empty, rootAst, 'id');
+
+		expect(item).toBeNull();
+	});
+
+	test('comes back as null from the a2o branch', () => {
+		const a2oAst = {
+			type: 'a2o',
+			name: 'item',
+			fieldKey: 'item',
+			names: ['unit'],
+			query: {},
+			whenCase: [],
+			cases: [],
+			relation: { meta: { one_collection_field: 'collection' } },
+			children: { unit: [] },
+		} as unknown as AST;
+
+		const parent = { collection: 'unit' } as Item;
+
+		const empty = null as unknown as Item;
+
+		const item = removeTemporaryFields(plainSchema, empty, a2oAst, 'id', parent);
+
+		expect(item).toBeNull();
+	});
+});
