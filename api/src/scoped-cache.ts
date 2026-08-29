@@ -2246,6 +2246,87 @@ export function pinnedScopedCacheTagsFromM2oParents(
 }
 
 /**
+ * The collection a relational path ends at, walking an M2O into its one related row
+ * and an O2M into its children alike. Null on an A2O or unknown field, whose target
+ * is not a single collection.
+ */
+function scopedCacheCollectionAtPathEnd(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	segments: QueryPath,
+): CollectionKey | null {
+	let current = collection;
+
+	for (const field of segments) {
+		const { relation, relationType } = getRelationInfo(
+			schema.relations,
+			current,
+			field,
+		);
+
+		let related: string | null | undefined = null;
+
+		if (relationType === 'm2o') {
+			related = relation?.related_collection;
+		}
+		else if (relationType === 'o2m') {
+			related = relation?.collection;
+		}
+
+		if (!related) {
+			return null;
+		}
+
+		current = related;
+	}
+
+	return current;
+}
+
+/**
+ * Every row a relational path reaches, in document order, descending an M2O into its
+ * one related row and an O2M into each of its children — so a deep O2M prefix still
+ * yields the parent rows the pin keys on. Null when the response cannot answer the
+ * path: a segment it never carried, or a scalar where a relation was expected.
+ */
+function scopedCacheRowsAtPathEnd(
+	records: Item[],
+	segments: QueryPath,
+): Item[] | null {
+	let current = records;
+
+	for (const segment of segments) {
+		const next: Item[] = [];
+
+		for (const row of current) {
+			const value = row[segment];
+
+			if (value === null || value === undefined) {
+				continue;
+			}
+
+			if (Array.isArray(value)) {
+				for (const element of value) {
+					if (element !== null && typeof element === 'object') {
+						next.push(element);
+					}
+				}
+			}
+			else if (typeof value === 'object') {
+				next.push(value);
+			}
+			else {
+				return null;
+			}
+		}
+
+		current = next;
+	}
+
+	return current;
+}
+
+/**
  * The to-many twin of `pinnedScopedCacheTagsFromM2oParents`. A read that EMBEDS a
  * to-many child set depends on every child WHERE `child.<fk> = parent.pk`, so it
  * pins each such collection by that reverse fk = the parent's key — one tag per
@@ -2257,11 +2338,11 @@ export function pinnedScopedCacheTagsFromM2oParents(
  * injection, no response strip, no deep chain. The read never needs the child's fk
  * value: it equals the parent pk by definition of the O2M join.
  *
- * Pins only where the parent rows are in reach AND the write will match: the last
- * hop is O2M, its prefix is a pure-M2O chain whose rows carry their key, and the
- * reverse fk is a declared flat scope field (else the purge emits no matching tag).
- * An O2M nested under another to-many (parent rows sit in an array the M2O walker
- * declines to enter) keeps the bare tag — conservative, never stale.
+ * Pins where the parent rows are in reach AND the write will match: the last hop is
+ * O2M whose reverse fk is a flat scope field (else the purge emits no match), and
+ * the prefix descends to parent rows carrying their key — through a to-many too,
+ * so a deep pivot under an all-O2M chain slices. Past the per-collection pin ceiling
+ * it falls back to the bare tag; an A2O anywhere on the path keeps it bare.
  */
 export function pinnedScopedCacheTagsFromO2mChildren(
 	schema: SchemaOverview,
@@ -2301,25 +2382,22 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 
 		const prefix = segments.slice(0, -1);
 
-		// The collection the to-many hangs off: the root at top level, else the M2O
-		// chain's tail. A non-M2O prefix leaves the parent rows inside an array, out of
-		// reach — bare.
+		// The collection the to-many hangs off: the root at top level, else the tail
+		// of the prefix — through a to-many hop too, so a deep pivot resolves.
 		let parentCollection = rootCollection;
 
 		if (prefix.length > 0) {
-			const prefixJoins = resolveScopedCacheM2oJoinChainFromPath(
+			const resolved = scopedCacheCollectionAtPathEnd(
 				schema,
 				rootCollection,
 				prefix,
 			);
 
-			const lastJoin = prefixJoins?.[prefixJoins.length - 1];
-
-			if (lastJoin === undefined) {
+			if (resolved === null) {
 				continue;
 			}
 
-			parentCollection = lastJoin.relatedCollection;
+			parentCollection = resolved;
 		}
 
 		const { relation, relationType } = getRelationInfo(
@@ -2357,7 +2435,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 
 		const parentRows = prefix.length === 0
 			? records
-			: m2oParentRowsAtPathEnd(records, prefix);
+			: scopedCacheRowsAtPathEnd(records, prefix);
 
 		if (parentRows === null) {
 			continue;

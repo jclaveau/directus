@@ -218,7 +218,7 @@ describe(oneLine`
 			expect(tags).not.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
 		});
 
-		it('leaves an O2M nested under another to-many bare', async () => {
+		it('slices an O2M nested under another to-many by its parent fk', async () => {
 			const tags = (await request(getUrl(vendor, env))
 				.get(`/items/${PARENT}`)
 				.query({
@@ -227,11 +227,14 @@ describe(oneLine`
 				})
 				.set('Authorization', auth)).headers[cacheTagsHeader];
 
-			expect(tags).toMatch(new RegExp(`(^|, )${GRANDCHILD}(,|$)`));
+			// The prefix descends the `children` array to reach the child pks the
+			// grandchild is keyed by, so a deep pivot slices instead of falling bare.
+			expect(tags).toMatch(
+				new RegExp(`(^|, )${GRANDCHILD}:child=${ownedChildId}(,|$)`),
+			);
 
-			expect(tags).not.toMatch(new RegExp(`(^|, )${GRANDCHILD}:`));
+			expect(tags).not.toMatch(new RegExp(`(^|, )${GRANDCHILD}(,|$)`));
 
-			// The nearer child still slices — the decline is the deeper hop, not blanket.
 			expect(tags).toMatch(
 				new RegExp(`(^|, )${CHILD}:parent=${ownedParentId}(,|$)`),
 			);
