@@ -40,6 +40,7 @@ import {
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheFilterKeyingByCollection,
 	scopedCacheNestedCollections,
+	scopedCacheOwnershipNestedPkPaths,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
@@ -1137,10 +1138,38 @@ implements AbstractService<Item> {
 				)
 				: query;
 
+		// Nest the ownership ancestors so the scope pins them by key, not a bare tag a
+		// `fields: ['*']` read would over-purge on; stripped from the response below.
+		const injectedOwnershipPaths = scopedCachePurgeEnabled()
+			? scopedCacheOwnershipNestedPkPaths(this.schema, this.collection)
+					.filter((path) => {
+						const ancestorPath = path.split('.').slice(0, -1);
+
+						// The caller already nests past this prefix — its rows come back
+						// on their own, so neither inject nor strip it.
+						return !(updatedQuery.fields ?? []).some((field) => {
+							const segments = field.split('.');
+
+							return (
+								segments.length > ancestorPath.length &&
+								ancestorPath.every((seg, at) => segments[at] === seg)
+							);
+						});
+					})
+			: [];
+
 		let ast = await getAstFromQuery(
 			{
 				collection: this.collection,
-				query: updatedQuery,
+				query: injectedOwnershipPaths.length > 0
+					? {
+						...updatedQuery,
+						fields: [
+							...(updatedQuery.fields ?? ['*']),
+							...injectedOwnershipPaths,
+						],
+					}
+					: updatedQuery,
 				accountability: this.accountability,
 			},
 			{
@@ -1181,6 +1210,22 @@ implements AbstractService<Item> {
 		const beyondNestedRows = scopedCachePurgeEnabled()
 			? scopedCacheCollectionsBeyondNestedRows(this.schema, ast, filterKeying)
 			: new Set<string>();
+
+		// A permission-gated ancestor is marked beyond, but we injected its rows to pin
+		// by key, and a permission change flushes the cache — so the key can't go stale.
+		for (const path of injectedOwnershipPaths) {
+			const joins = resolveScopedCacheM2oJoinChainFromPath(
+				this.schema,
+				this.collection,
+				path.split('.').slice(0, -1),
+			);
+
+			const ancestor = joins?.[joins.length - 1]?.relatedCollection;
+
+			if (ancestor) {
+				beyondNestedRows.delete(ancestor);
+			}
+		}
 
 		// The pins DO depend on the rows, so this one is filled from inside the read.
 		let m2oParentPins:
@@ -1417,6 +1462,16 @@ implements AbstractService<Item> {
 					schema: this.schema,
 					accountability: this.accountability,
 				},
+			);
+		}
+
+		if (injectedOwnershipPaths.length > 0) {
+			stripInjectedOwnershipNesting(
+				filteredRecords as Item[],
+				injectedOwnershipPaths,
+				updatedQuery,
+				this.schema,
+				this.collection,
 			);
 		}
 
@@ -2332,5 +2387,89 @@ implements AbstractService<Item> {
 		}
 
 		return await this.createOne(data, opts);
+	}
+}
+
+// Recursive undo of the injected nesting — kept out of its one caller by choice.
+// eslint-disable-next-line local/no-single-caller-function
+function stripInjectedOwnershipNesting(
+	records: AnyItem[],
+	injectedPaths: string[],
+	query: Query,
+	schema: SchemaOverview,
+	rootCollection: string,
+): void {
+	const fields = query.fields ?? ['*'];
+
+	const nestedPrefixes = new Set<string>();
+	const leavesByPrefix = new Map<string, Set<string>>();
+
+	for (const field of fields) {
+		const segments = field.split('.');
+
+		for (let end = 1; end < segments.length; end++) {
+			nestedPrefixes.add(segments.slice(0, end).join('.'));
+		}
+
+		const parentPrefix = segments.slice(0, -1).join('.');
+		const leaves = leavesByPrefix.get(parentPrefix) ?? new Set<string>();
+		leaves.add(segments[segments.length - 1]!);
+		leavesByPrefix.set(parentPrefix, leaves);
+	}
+
+	const surfacesAsScalar = (prefix: string, field: string): boolean => {
+		const leaves = leavesByPrefix.get(prefix);
+		return leaves !== undefined && (leaves.has('*') || leaves.has(field));
+	};
+
+	const collapse = (
+		node: Record<string, any>,
+		collection: string,
+		segments: string[],
+		index: number,
+		prefix: string,
+	): void => {
+		if (node === null || typeof node !== 'object' || index >= segments.length - 1) {
+			return;
+		}
+
+		const field = segments[index]!;
+
+		const childPrefix = prefix === ''
+			? field
+			: `${prefix}.${field}`;
+
+		const childCollection = schema.relations.find(
+			(candidate) =>
+				candidate.collection === collection && candidate.field === field,
+		)?.related_collection;
+
+		const child = node[field];
+
+		if (!childCollection || child === null || typeof child !== 'object') {
+			return;
+		}
+
+		if (nestedPrefixes.has(childPrefix)) {
+			collapse(child, childCollection, segments, index + 1, childPrefix);
+			return;
+		}
+
+		const childPrimaryKey = schema.collections[childCollection]?.primary;
+
+		if (childPrimaryKey && surfacesAsScalar(prefix, field)) {
+			node[field] = child[childPrimaryKey];
+		}
+		else {
+			delete node[field];
+		}
+	};
+
+	for (const path of injectedPaths) {
+		const segments = path.split('.');
+
+		for (const record of records) {
+			collapse(record, rootCollection, segments, 0, '');
+		}
 	}
 }
