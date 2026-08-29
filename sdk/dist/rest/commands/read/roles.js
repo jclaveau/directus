@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/roles`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/roles/${t}`,params:n??{},method:`GET`}),r=e=>()=>({path:`/roles/me`,params:e??{},method:`GET`});export{n as readRole,t as readRoles,r as readRolesMe};
+//# sourceMappingURL=roles.js.map

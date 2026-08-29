@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>{let i={};return Array.isArray(t)?(e.throwIfEmpty(t,`keysOrQuery cannot be empty`),i={keys:t}):(e.throwIfEmpty(Object.keys(t),`keysOrQuery cannot be empty`),i={query:t}),i.data=n,{path:`/comments`,params:r??{},body:JSON.stringify(i),method:`PATCH`}},n=(t,n,r)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/comments/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updateComment=n,exports.updateComments=t;
+//# sourceMappingURL=comments.cjs.map

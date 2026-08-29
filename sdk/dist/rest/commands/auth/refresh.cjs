@@ -1,0 +1,2 @@
+const e=(e={})=>()=>{let t={mode:e.mode??`cookie`};return t.mode===`json`&&e.refresh_token&&(t.refresh_token=e.refresh_token),{path:`/auth/refresh`,method:`POST`,body:JSON.stringify(t)}};exports.refresh=e;
+//# sourceMappingURL=refresh.cjs.map

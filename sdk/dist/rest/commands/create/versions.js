@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/versions`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/versions`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createContentVersion,e as createContentVersions};
+//# sourceMappingURL=versions.js.map

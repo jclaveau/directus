@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/permissions`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/permissions`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createPermission=t,exports.createPermissions=e;
+//# sourceMappingURL=permissions.cjs.map
