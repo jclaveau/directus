@@ -1189,6 +1189,70 @@ export function resolveScopedCacheM2oJoinChainFromPath(
 }
 
 /**
+ * Field paths to inject so a read's ownership ANCESTORS — the collections its
+ * scope chain crosses toward the owner — come back as rows and pin by key, not
+ * the bare tag a read that nested none of them (`fields: ['*']`) over-purges on.
+ *
+ * Walks the same flat-field M2O chain `composeScopedCachePaths` does: each
+ * collection names its parent, so ownership composes hop by hop. A path per
+ * intermediate ancestor, ending at that ancestor's own pk so it carries its key
+ * in the response (run-ast's linking pk is temporary and stripped). The terminal
+ * owner — no scope of its own — is the value slice's root, left un-nested.
+ */
+export function scopedCacheOwnershipNestedPkPaths(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+): string[] {
+	const paths = new Set<string>();
+
+	const walk = (current: string, prefix: string, visited: Set<string>): void => {
+		if (visited.has(current)) {
+			return;
+		}
+
+		const seen = new Set(visited).add(current);
+
+		for (const field of schema.collections[current]?.scopedCacheFields ?? []) {
+			if (field.includes('.')) {
+				continue;
+			}
+
+			const target = schema.relations.find((rel) => {
+				return rel.collection === current && rel.field === field;
+			})?.related_collection;
+
+			const targetPk = target
+				? schema.collections[target]?.primary
+				: undefined;
+
+			const targetHasScope =
+				(schema.collections[target ?? '']?.scopedCacheFields ?? []).length > 0;
+
+			if (!target || !targetPk || !targetHasScope) {
+				continue;
+			}
+
+			const targetPrefix = prefix === ''
+				? field
+				: `${prefix}.${field}`;
+
+			paths.add(`${targetPrefix}.${targetPk}`);
+			walk(target, targetPrefix, seen);
+		}
+	};
+
+	walk(collection, '', new Set());
+
+	// A chain of only direct-fk ancestors is already pinned from the read row's own
+	// columns; nest only to reach one two-plus hops out, that no column carries.
+	const nested = [...paths];
+
+	return nested.some((path) => path.split('.').length > 2)
+		? nested
+		: [];
+}
+
+/**
  * How many slices one nested collection may pin on a single read. Every tag costs
  * a Redis set plus a slice-index member, and the write side deletes them one by one.
  *
