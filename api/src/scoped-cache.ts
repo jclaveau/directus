@@ -2246,6 +2246,182 @@ export function pinnedScopedCacheTagsFromM2oParents(
 }
 
 /**
+ * The to-many twin of `pinnedScopedCacheTagsFromM2oParents`. A read that EMBEDS a
+ * to-many child set depends on every child WHERE `child.<fk> = parent.pk`, so it
+ * pins each such collection by that reverse fk = the parent's key — one tag per
+ * surfaced parent row. A write to a child of another parent no longer evicts it.
+ *
+ * The purge side already emits the identical `<child>:<fk>=<value>` shallow tag
+ * from the mutated row's own fk column (the flat scope-field branch of
+ * `snapshotScopedCacheTags`), so read and write agree by construction — no field
+ * injection, no response strip, no deep chain. The read never needs the child's fk
+ * value: it equals the parent pk by definition of the O2M join.
+ *
+ * Pins only where the parent rows are in reach AND the write will match: the last
+ * hop is O2M, its prefix is a pure-M2O chain whose rows carry their key, and the
+ * reverse fk is a declared flat scope field (else the purge emits no matching tag).
+ * An O2M nested under another to-many (parent rows sit in an array the M2O walker
+ * declines to enter) keeps the bare tag — conservative, never stale.
+ */
+export function pinnedScopedCacheTagsFromO2mChildren(
+	schema: SchemaOverview,
+	rootCollection: CollectionKey,
+	fieldMap: FieldMap,
+	records: Item[],
+	collectionsBeyondNestedRows: Set<CollectionKey>,
+): Map<CollectionKey, ScopedCacheTag[]> {
+	// One bucket per child collection: it can be nested under several paths, and
+	// every parent key it is keyed by must be gathered before the cap so no path
+	// masks another. `conflicted` drops a collection reached by two reverse fks —
+	// mixing their keys under one field would pin the wrong slice.
+	const keyingByChild = new Map<CollectionKey, {
+		reverseFk: string;
+		fieldType: string | undefined;
+		rows: Item[];
+		conflicted: boolean;
+	}>();
+
+	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
+		const childCollection = entry.collection;
+
+		if (childCollection === rootCollection) {
+			continue;
+		}
+
+		if (collectionsBeyondNestedRows.has(childCollection)) {
+			continue;
+		}
+
+		const segments = path.split('.');
+		const aliasField = segments[segments.length - 1];
+
+		if (aliasField === undefined) {
+			continue;
+		}
+
+		const prefix = segments.slice(0, -1);
+
+		// The collection the to-many hangs off: the root at top level, else the M2O
+		// chain's tail. A non-M2O prefix leaves the parent rows inside an array, out of
+		// reach — bare.
+		let parentCollection = rootCollection;
+
+		if (prefix.length > 0) {
+			const prefixJoins = resolveScopedCacheM2oJoinChainFromPath(
+				schema,
+				rootCollection,
+				prefix,
+			);
+
+			const lastJoin = prefixJoins?.[prefixJoins.length - 1];
+
+			if (lastJoin === undefined) {
+				continue;
+			}
+
+			parentCollection = lastJoin.relatedCollection;
+		}
+
+		const { relation, relationType } = getRelationInfo(
+			schema.relations,
+			parentCollection,
+			aliasField,
+		);
+
+		if (
+			relationType !== 'o2m' ||
+			!relation ||
+			relation.collection !== childCollection
+		) {
+			continue;
+		}
+
+		const reverseFk = relation.field;
+		const parentPkField = schema.collections[parentCollection]?.primary;
+
+		if (parentPkField === undefined) {
+			continue;
+		}
+
+		// The purge side emits `<child>:<fk>=<value>` only when the fk is a declared
+		// flat scope field; otherwise a child write emits just its pk slice, which an
+		// INSERT of a new child never carries — so this pin would serve stale. Pin
+		// only when the matching shallow tag is guaranteed on the write.
+		if (
+			!(schema.collections[childCollection]?.scopedCacheFields ?? [])
+				.filter((field) => !field.includes('.'))
+				.includes(reverseFk)
+		) {
+			continue;
+		}
+
+		const parentRows = prefix.length === 0
+			? records
+			: m2oParentRowsAtPathEnd(records, prefix);
+
+		if (parentRows === null) {
+			continue;
+		}
+
+		// The child's own fk column type, so the pinned value canonicalizes the way
+		// the purge side does the mutated row's fk — or the two tag strings diverge.
+		const fieldType = schema.collections[childCollection]?.fields[reverseFk]?.type;
+
+		const keying = keyingByChild.get(childCollection) ?? {
+			reverseFk,
+			fieldType,
+			rows: [],
+			conflicted: false,
+		};
+
+		if (keying.reverseFk !== reverseFk) {
+			keying.conflicted = true;
+			keyingByChild.set(childCollection, keying);
+			continue;
+		}
+
+		for (const parentRow of parentRows) {
+			// Carry the parent key under the child's fk name so `scopedCacheTagsFromRows`
+			// reads it as that field's value. A surfaced parent without its key leaves
+			// part of the set unpinned; one such row takes the whole collection to the
+			// bare tag (the `coarse` mode returns null on a missing field).
+			keying.rows.push(
+				parentPkField in parentRow
+					? { [reverseFk]: parentRow[parentPkField] }
+					: {},
+			);
+		}
+
+		keyingByChild.set(childCollection, keying);
+	}
+
+	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
+
+	for (const [collection, keying] of keyingByChild) {
+		if (keying.conflicted || keying.rows.length === 0) {
+			continue;
+		}
+
+		const keyTags = scopedCacheTagsFromRows(
+			collection,
+			[keying.reverseFk],
+			keying.rows,
+			'coarse',
+			{ [keying.reverseFk]: keying.fieldType },
+		);
+
+		if (
+			keyTags !== null &&
+			keyTags.length <= scopedCacheMaxPinsPerCollection()
+		) {
+			pinned.set(collection, keyTags);
+		}
+	}
+
+	return pinned;
+}
+
+/**
  * Scope a read's root cache tags off a filter — the read side. A read is soundly scoped to a value
  * slice only when the filter *bounds* it to that value: a future insert with a new scope value must
  * be excluded by the same filter, or the read would silently miss it. Tags come from `_eq`/`_in` on
