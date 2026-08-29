@@ -34,6 +34,7 @@ import {
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromKeyedFilters,
 	pinnedScopedCacheTagsFromM2oParents,
+	pinnedScopedCacheTagsFromO2mChildren,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	resolveScopedCacheM2oJoinChainFromPath,
@@ -1199,6 +1200,9 @@ implements AbstractService<Item> {
 		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
 
+		let o2mChildPins:
+			ReturnType<typeof pinnedScopedCacheTagsFromO2mChildren> = new Map();
+
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
 			// GraphQL requires relational keys to be returned regardless
@@ -1216,6 +1220,14 @@ implements AbstractService<Item> {
 				}
 
 				m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
+					this.schema,
+					this.collection,
+					fieldMap,
+					toArray(rows),
+					beyondNestedRows,
+				);
+
+				o2mChildPins = pinnedScopedCacheTagsFromO2mChildren(
 					this.schema,
 					this.collection,
 					fieldMap,
@@ -1340,13 +1352,15 @@ implements AbstractService<Item> {
 				}
 
 				// A collection the response NESTED is depended on for the rows it
-				// carried, which only the parent-key pin can name. Where that pin
-				// declined — a to-many or A2O hop, or no row to read a key from —
-				// the filter's keys cover one half of the dependency and say
+				// carried, which only a parent-key pin can name — the M2O ancestor's
+				// key, or the O2M child's parent-fk key. Where BOTH declined — an A2O
+				// hop, an O2M nested under another to-many, or no row to read a key
+				// from — the filter's keys cover one half of the dependency and say
 				// nothing about the other, so the bare tag is the honest answer.
 				if (
 					nestedCollections.has(collection) &&
-					!m2oParentPins.has(collection)
+					!m2oParentPins.has(collection) &&
+					!o2mChildPins.has(collection)
 				) {
 					scopedCacheTags.push({ collection });
 					continue;
@@ -1365,6 +1379,7 @@ implements AbstractService<Item> {
 
 				for (const pin of [
 					...m2oParentPins.get(collection) ?? [],
+					...o2mChildPins.get(collection) ?? [],
 					...keyedFilterPins.get(collection) ?? [],
 				]) {
 					pins.set(scopedCacheTagKey(pin), pin);
