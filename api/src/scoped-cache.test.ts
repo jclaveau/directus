@@ -1849,15 +1849,15 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		// `owned_item.owner = 7` is answered by the row's own column, and behind
 		// an enforced constraint the owner cannot vanish without writing it.
 		expect(keyingOf({ filter: { owner: { id: { _eq: 7 } } } }).get('owner'))
-			.toEqual({ kind: 'independent', keys: new Set([7]) });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([7]) });
 	});
 
 	it('needs no tag for an M2O whichever operator its key carries', () => {
 		expect(keyingOf({ filter: { owner: { id: { _in: [7, 8] } } } }).get('owner'))
-			.toEqual({ kind: 'independent', keys: new Set([7, 8]) });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([7, 8]) });
 
 		expect(keyingOf({ filter: { owner: { id: { _gt: 7 } } } }).get('owner'))
-			.toEqual({ kind: 'independent', keys: new Set() });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set() });
 	});
 
 	it('keys the M2O again when a sibling reads another of its columns', () => {
@@ -1866,7 +1866,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		// one joined row, so the key still pins which.
 		expect(keyingOf({
 			filter: { owner: { id: { _eq: 7 }, name: { _eq: 'alice' } } },
-		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
+		}).get('owner')).toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	it('keys the M2O again when the condition reaches past its key', () => {
@@ -1900,13 +1900,17 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			query: { filter: { owner: { id: { _eq: 7 } } } },
 			cases: [],
 			children: [],
-		} as AST).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
+		} as AST).get('owner')).toEqual({
+			kind: 'keyed',
+			field: 'id',
+			keys: new Set([7]),
+		});
 	});
 
 	it('keys a to-many hop, whose far row the key names just as narrowly', () => {
 		expect(keyingOf({ filter: { owned_sub_items: { id: { _eq: 7 } } } })
 			.get('owned_sub_item'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	// The four spellings below compile to ONE query — `getOperation` reads a bare
@@ -1916,13 +1920,13 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 	it('keys a to-many written with a bare key value', () => {
 		expect(keyingOf({ filter: { owned_sub_items: { id: 7 } } as unknown as Filter })
 			.get('owned_sub_item'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	it('keys a to-many written as an operator on the alias', () => {
 		expect(keyingOf({ filter: { owned_sub_items: { _eq: 7 } } })
 			.get('owned_sub_item'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	it('keys a to-many written as a bare value on the alias', () => {
@@ -1930,13 +1934,49 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		// while `getOperation` accepts the bare value these two pass.
 		expect(keyingOf({ filter: { owned_sub_items: 7 } as unknown as Filter })
 			.get('owned_sub_item'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	it('keys the junction an M2M shorthand names, as `getColumnPath` does', () => {
 		expect(keyingOf({ filter: { categories: { _eq: 7 } } })
 			.get('owned_item_category_junction'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
+	});
+
+	it('keys a related collection by the scoped field a filter names', () => {
+		// `name` is no key, but as a scoped field the filter bounds owner to that
+		// value, and the write side emits `owner:name=<value>` — so it pins by name.
+		const scopedSchema = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		scopedSchema.collections['owner']!.scopedCacheFields = ['name'];
+
+		expect(scopedCacheFilterKeyingByCollection(scopedSchema, {
+			type: 'root',
+			name: 'owned_item',
+			query: { filter: { owner: { name: { _eq: 'alice' } } } },
+			cases: [],
+			children: [],
+		} as AST).get('owner')).toEqual({
+			kind: 'keyed',
+			field: 'name',
+			keys: new Set(['alice']),
+		});
+	});
+
+	it('leaves a related collection unkeyed on a non-scoped, non-key field', () => {
+		// The same filter where `name` is neither the pk nor a scoped field names no
+		// pinnable slice, so the owner stays unkeyed (bare).
+		expect(keyingOf({ filter: { owner: { name: { _eq: 'alice' } } } })
+			.get('owner')).toEqual({ kind: 'unkeyed' });
 	});
 
 	it('reports nothing for an M2O shorthand, which joins no related row', () => {
@@ -1989,14 +2029,14 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		expect(keyingOf({
 			filter: { owned_sub_items: { _some: { id: { _eq: 7 } } } },
 		}).get('owned_sub_item'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	it('keys through `_none`, which negates on that one row alone', () => {
 		expect(keyingOf({
 			filter: { owned_sub_items: { _none: { id: { _eq: 7 } } } },
 		}).get('owned_sub_item'))
-			.toEqual({ kind: 'keyed', keys: new Set([7]) });
+			.toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	it('keys the far side of an M2M and leaves its junction unkeyed', () => {
@@ -2007,7 +2047,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		// The junction's own `category_id` answers the far key, so only the
 		// junction is depended on — and it is depended on wholesale.
 		expect(keying.get('category'))
-			.toEqual({ kind: 'independent', keys: new Set([7]) });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([7]) });
 
 		expect(keying.get('owned_item_category_junction'))
 			.toEqual({ kind: 'unkeyed' });
@@ -2040,7 +2080,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		expect(keying.get('owner')).toEqual({ kind: 'unkeyed' });
 
 		expect(keying.get('company'))
-			.toEqual({ kind: 'independent', keys: new Set([3]) });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([3]) });
 	});
 
 	it(oneLine`
@@ -2059,7 +2099,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 					{ owner: { name: { _eq: 'alice' } } },
 				],
 			},
-		}).get('owner')).toEqual({ kind: 'keyed', keys: new Set([7]) });
+		}).get('owner')).toEqual({ kind: 'keyed', field: 'id', keys: new Set([7]) });
 	});
 
 	it('drops the key when a SECOND path reaches the collection unkeyed', () => {
@@ -2088,7 +2128,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 				],
 			},
 		}).get('owner'))
-			.toEqual({ kind: 'independent', keys: new Set([7, 8, 9]) });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([7, 8, 9]) });
 	});
 
 	it('drops the key when any `_or` branch reaches the collection unkeyed', () => {
@@ -2111,7 +2151,11 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 					{ label: { _eq: 'loose' } },
 				],
 			},
-		}).get('owner')).toEqual({ kind: 'independent', keys: new Set([7]) });
+		}).get('owner')).toEqual({
+			kind: 'independent',
+			field: 'id',
+			keys: new Set([7]),
+		});
 	});
 
 	it('leaves everything under a `_not` unkeyed, which applyFilter drops', () => {
@@ -2122,7 +2166,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 
 	it('folds the permission cases in the way the SQL WHERE folds them', () => {
 		expect(keyingOf({}, [{ owner: { id: { _eq: 7 } } }]).get('owner'))
-			.toEqual({ kind: 'independent', keys: new Set([7]) });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([7]) });
 	});
 
 	it('leaves the AST filter as written, so permissions see what they saw', () => {
@@ -2164,7 +2208,7 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 				} as unknown as M2ONode,
 			],
 		} as AST).get('company'))
-			.toEqual({ kind: 'independent', keys: new Set([3]) });
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([3]) });
 	});
 });
 
@@ -2188,7 +2232,7 @@ describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
 
 	it('pins one primary-key tag per key the filter named', () => {
 		expect(pinsFor(
-			new Map([['owner', { kind: 'keyed', keys: new Set([7, 8]) }]]),
+			new Map([['owner', { kind: 'keyed', field: 'id', keys: new Set([7, 8]) }]]),
 		).get('owner')).toEqual([
 			{ collection: 'owner', field: 'id', value: 7, type: 'integer' },
 			{ collection: 'owner', field: 'id', value: 8, type: 'integer' },
@@ -2202,8 +2246,8 @@ describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
 
 	it('leaves the root out, since its own filter already bounds it', () => {
 		const pins = pinsFor(new Map([
-			['owned_item', { kind: 'keyed', keys: new Set([1]) }],
-			['owner', { kind: 'keyed', keys: new Set([7]) }],
+			['owned_item', { kind: 'keyed', field: 'id', keys: new Set([1]) }],
+			['owner', { kind: 'keyed', field: 'id', keys: new Set([7]) }],
 		]));
 
 		expect(pins.has('owned_item')).toBe(false);
@@ -2214,7 +2258,7 @@ describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
 		// `7` and `'7'` canonicalize to one token, which is the one slice a
 		// write to that row emits.
 		expect(pinsFor(
-			new Map([['owner', { kind: 'keyed', keys: new Set([7, '7']) }]]),
+			new Map([['owner', { kind: 'keyed', field: 'id', keys: new Set([7, '7']) }]]),
 		).get('owner')).toEqual([
 			{ collection: 'owner', field: 'id', value: 7, type: 'integer' },
 		]);
@@ -2233,7 +2277,11 @@ describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
 
 	it('pins a collection no relation of the schema describes as nothing', () => {
 		expect(pinsFor(
-			new Map([['absent_collection', { kind: 'keyed', keys: new Set([1]) }]]),
+			new Map([['absent_collection', {
+				kind: 'keyed',
+				field: 'id',
+				keys: new Set([1]),
+			}]]),
 		).has('absent_collection')).toBe(false);
 	});
 });

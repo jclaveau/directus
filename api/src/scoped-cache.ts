@@ -1351,31 +1351,46 @@ function m2oParentRowsAtPathEnd(
  * - `absent` — no condition reaches it, and it owes the filters nothing.
  */
 export type ScopedCacheFilterKeying =
-	| { kind: 'keyed'; keys: Set<unknown> }
+	| { kind: 'keyed'; field: string; keys: Set<unknown> }
 	| { kind: 'unkeyed' }
-	| { kind: 'independent'; keys: Set<unknown> }
+	| { kind: 'independent'; field: string; keys: Set<unknown> }
 	| { kind: 'absent' };
 
 const KEYING_UNKEYED: ScopedCacheFilterKeying = { kind: 'unkeyed' };
 
 const KEYING_ABSENT: ScopedCacheFilterKeying = { kind: 'absent' };
 
-function keyedKeysAcross(parts: ScopedCacheFilterKeying[]): Set<unknown> {
+// The keys of every keyed/independent part with the one field they all key by — or
+// 'conflict' when parts key DIFFERENT fields (their keys are not one slice axis, so
+// nothing pins the alias), or null when none keyed. `independent` carries its keys
+// too: it needs no tag of its own, but a sibling reading the same joined row does.
+function keyedAxisAcross(
+	parts: ScopedCacheFilterKeying[],
+): { field: string; keys: Set<unknown> } | 'conflict' | null {
+	let field: string | undefined;
 	const keys = new Set<unknown>();
 
 	for (const part of parts) {
-		// `independent` carries its keys too: it needs no tag of its own, but a
-		// sibling reading the same joined row still does, and that key pins it.
 		if (part.kind !== 'keyed' && part.kind !== 'independent') {
 			continue;
 		}
+
+		if (field !== undefined && field !== part.field) {
+			return 'conflict';
+		}
+
+		field = part.field;
 
 		for (const key of part.keys) {
 			keys.add(key);
 		}
 	}
 
-	return keys;
+	if (field === undefined) {
+		return null;
+	}
+
+	return { field, keys };
 }
 
 /**
@@ -1387,22 +1402,27 @@ function keyedKeysAcross(parts: ScopedCacheFilterKeying[]): Set<unknown> {
 function keyingOfEveryCondition(
 	parts: ScopedCacheFilterKeying[],
 ): ScopedCacheFilterKeying {
-	const keys = keyedKeysAcross(parts);
+	const axis = keyedAxisAcross(parts);
+
+	// Parts keying different fields name no single slice — the alias falls bare.
+	if (axis === 'conflict') {
+		return KEYING_UNKEYED;
+	}
 
 	// A sibling that DOES read the joined row pulls the alias back to needing a
 	// tag — pinned by the key if one was named, bare otherwise.
 	if (parts.some((part) => part.kind === 'unkeyed')) {
-		return keys.size > 0
-			? { kind: 'keyed', keys }
-			: KEYING_UNKEYED;
+		return axis === null
+			? KEYING_UNKEYED
+			: { kind: 'keyed', field: axis.field, keys: axis.keys };
 	}
 
-	if (parts.some((part) => part.kind === 'keyed')) {
-		return { kind: 'keyed', keys };
+	if (axis !== null && parts.some((part) => part.kind === 'keyed')) {
+		return { kind: 'keyed', field: axis.field, keys: axis.keys };
 	}
 
-	if (parts.some((part) => part.kind === 'independent')) {
-		return { kind: 'independent', keys };
+	if (axis !== null && parts.some((part) => part.kind === 'independent')) {
+		return { kind: 'independent', field: axis.field, keys: axis.keys };
 	}
 
 	return KEYING_ABSENT;
@@ -1422,16 +1442,21 @@ function keyingOfAnyCondition(
 		return KEYING_UNKEYED;
 	}
 
-	const keys = keyedKeysAcross(parts);
+	const axis = keyedAxisAcross(parts);
+
+	// Branches keying different fields name no single slice — the disjunction bares.
+	if (axis === 'conflict') {
+		return KEYING_UNKEYED;
+	}
 
 	// One branch needing a tag makes the whole disjunction need one; the keys the
 	// independent branches named are unioned in, since a row may arrive by either.
-	if (parts.some((part) => part.kind === 'keyed')) {
-		return { kind: 'keyed', keys };
+	if (axis !== null && parts.some((part) => part.kind === 'keyed')) {
+		return { kind: 'keyed', field: axis.field, keys: axis.keys };
 	}
 
-	if (parts.some((part) => part.kind === 'independent')) {
-		return { kind: 'independent', keys };
+	if (axis !== null && parts.some((part) => part.kind === 'independent')) {
+		return { kind: 'independent', field: axis.field, keys: axis.keys };
 	}
 
 	return KEYING_ABSENT;
@@ -1683,9 +1708,17 @@ function scopedCacheFilterKeyingByAlias(
 			if (nearRowKeys !== null) {
 				collectionByAlias.set(childAlias, relatedCollection);
 
+				// Keyed on the related pk — the only field `nearRowAnswerKeys` answers.
+				const relatedPrimaryKey =
+					schema.collections[relatedCollection]?.primary ?? '';
+
 				parts.push(new Map([[
 					childAlias,
-					{ kind: 'independent', keys: nearRowKeys } as ScopedCacheFilterKeying,
+					{
+						kind: 'independent',
+						field: relatedPrimaryKey,
+						keys: nearRowKeys,
+					} as ScopedCacheFilterKeying,
 				]]));
 
 				parts.push(new Map([[alias, KEYING_UNKEYED]]));
@@ -1745,7 +1778,18 @@ function keyingOfColumnConditions(
 ): ScopedCacheFilterKeying {
 	const primaryKeyField = schema.collections[collection]?.primary;
 
-	if (functionName !== undefined || fieldName !== primaryKeyField) {
+	// The pk, or a flat scoped_cache_field: a filter naming either by value bounds the
+	// collection to that value, and the write side emits the same slice — the pk slice
+	// always, a scoped field's slice from the flat-scope-field branch — so read and
+	// write agree. An INSERT can match a scoped-field value (not a pk one), and the
+	// write emits that field's slice on create, so the pin still catches it.
+	const scopedFlatFields = (schema.collections[collection]?.scopedCacheFields ?? [])
+		.filter((field) => !field.includes('.'));
+
+	const pinnable = fieldName === primaryKeyField
+		|| scopedFlatFields.includes(fieldName);
+
+	if (functionName !== undefined || !pinnable) {
 		return KEYING_UNKEYED;
 	}
 
@@ -1756,14 +1800,18 @@ function keyingOfColumnConditions(
 	}
 
 	if ('_eq' in conditions) {
-		return { kind: 'keyed', keys: new Set([conditions['_eq']]) };
+		return {
+			kind: 'keyed',
+			field: fieldName,
+			keys: new Set([conditions['_eq']]),
+		};
 	}
 
 	if ('_in' in conditions && Array.isArray(conditions['_in'])) {
 		const keys = new Set<unknown>(conditions['_in']);
 
 		if (keys.size > 0) {
-			return { kind: 'keyed', keys };
+			return { kind: 'keyed', field: fieldName, keys };
 		}
 	}
 
@@ -1898,9 +1946,11 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 			continue;
 		}
 
-		const primaryKeyField = schema.collections[collection]?.primary;
+		const type = schema.collections[collection]?.fields[keying.field]?.type;
 
-		if (primaryKeyField === undefined) {
+		// The collection is absent from the schema, or its keyed field is — no field to
+		// canonicalize a value against, so it pins nothing (a bare tag never named it).
+		if (type === undefined) {
 			continue;
 		}
 
@@ -1908,7 +1958,6 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 			continue;
 		}
 
-		const type = schema.collections[collection]?.fields[primaryKeyField]?.type;
 		const tags: ScopedCacheTag[] = [];
 
 		// Deduped on the canonical token, not the raw value, so `7` and `'7'`
@@ -1923,7 +1972,7 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 			}
 
 			seen.add(token);
-			tags.push({ collection, field: primaryKeyField, value, type });
+			tags.push({ collection, field: keying.field, value, type });
 		}
 
 		pinned.set(collection, tags);
