@@ -2155,19 +2155,43 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		for (const path of paths) {
 			const segments = path.split('.');
+			const lastField = segments[segments.length - 1];
 
-			const joins = resolveScopedCacheM2oJoinChainFromPath(
+			// A pure-M2O path resolves directly. A path that crosses a to-many still
+			// pins its end collection when the LAST hop is M2O — an M2O parent reached
+			// through an o2m child (a junction) — by descending the arrays for the
+			// surfaced rows. A last hop that is O2M is the o2m child pinner's, left bare.
+			let parentRows: Item[] | null;
+
+			if (resolveScopedCacheM2oJoinChainFromPath(
 				schema,
 				rootCollection,
 				segments,
-			);
-
-			if (joins === null) {
-				pinnableFromNestedRows = false;
-				break;
+			) !== null) {
+				parentRows = m2oParentRowsAtPathEnd(records, segments);
 			}
+			else {
+				const parentCollection = scopedCacheCollectionAtPathEnd(
+					schema,
+					rootCollection,
+					segments.slice(0, -1),
+				);
 
-			const parentRows = m2oParentRowsAtPathEnd(records, segments);
+				if (
+					parentCollection === null ||
+					lastField === undefined ||
+					getRelationInfo(
+						schema.relations,
+						parentCollection,
+						lastField,
+					).relationType !== 'm2o'
+				) {
+					pinnableFromNestedRows = false;
+					break;
+				}
+
+				parentRows = scopedCacheRowsAtPathEnd(records, segments);
+			}
 
 			if (parentRows === null) {
 				pinnableFromNestedRows = false;
