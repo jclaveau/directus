@@ -2155,6 +2155,41 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			.toEqual({ kind: 'independent', field: 'id', keys: new Set([3]) });
 	});
 
+	it('keys the collection hopped THROUGH when its fk is a scoped field', () => {
+		// The crossing is answered by the near row's own `company` fk column; as a
+		// scoped field the filter bounds the owner to that value and the write emits
+		// `owner:company=3`, so it pins the near collection instead of leaving it bare.
+		const scopedSchema = new SchemaBuilder()
+			.collection('company', (c) => {
+				c.field('id').id();
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('company').m2o('company');
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		scopedSchema.collections['owner']!.scopedCacheFields = ['company'];
+
+		const keying = scopedCacheFilterKeyingByCollection(scopedSchema, {
+			type: 'root',
+			name: 'owned_item',
+			query: { filter: { owner: { company: { id: { _eq: 3 } } } } },
+			cases: [],
+			children: [],
+		} as AST);
+
+		expect(keying.get('owner'))
+			.toEqual({ kind: 'keyed', field: 'company', keys: new Set([3]) });
+
+		expect(keying.get('company'))
+			.toEqual({ kind: 'independent', field: 'id', keys: new Set([3]) });
+	});
+
 	it(oneLine`
 		reports nothing for a foreign key compared in place, which joins nothing
 	`, () => {
