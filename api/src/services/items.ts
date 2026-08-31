@@ -1363,6 +1363,14 @@ implements AbstractService<Item> {
 				...filterKeying.keys(),
 			]);
 
+			// Rows the response actually carried. A keyed filter bounds the JOINED rows,
+			// not necessarily the fetched ones — a declined O2M/A2O path nests rows no
+			// filter bounded — so it cannot stand in for a parent-key pin below. A
+			// filter-only collection is absent here, so its keyed slice is sound.
+			const collectionsFetchedAsRows = new Set(
+				[...fieldMap.read].map(([, entry]) => entry.collection),
+			);
+
 			for (const collection of taggedCollections) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
@@ -1388,11 +1396,18 @@ implements AbstractService<Item> {
 				// key, or the O2M child's parent-fk key. Where BOTH declined — an A2O
 				// hop, an O2M nested under another to-many, or no row to read a key
 				// from — the filter's keys cover one half of the dependency and say
-				// nothing about the other, so the bare tag is the honest answer.
+				// nothing about the other, so the bare tag is the honest answer. The
+				// exception is a collection reached ONLY through a filter that keyed it
+				// (nowhere fetched): the join reads only rows that key bounds, so its
+				// keyed slice covers the whole dependency and stands in for the pin.
 				if (
 					nestedCollections.has(collection) &&
 					!m2oParentPins.has(collection) &&
-					!o2mChildPins.has(collection)
+					!o2mChildPins.has(collection) &&
+					!(
+						keyedFilterPins.has(collection) &&
+						!collectionsFetchedAsRows.has(collection)
+					)
 				) {
 					scopedCacheTags.push({ collection });
 					continue;

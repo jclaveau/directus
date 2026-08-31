@@ -1721,7 +1721,16 @@ function scopedCacheFilterKeyingByAlias(
 					} as ScopedCacheFilterKeying,
 				]]));
 
-				parts.push(new Map([[alias, KEYING_UNKEYED]]));
+				// The near row's foreign-key column holds that same value; when it is a
+				// flat scope field (or the pk) the read is bounded by it and the write
+				// emits the matching slice, so pin the near collection rather than bare.
+				parts.push(new Map([[
+					alias,
+					isScopedCacheKeyableField(schema, collection, fieldName)
+						? { kind: 'keyed', field: fieldName, keys: nearRowKeys }
+						: KEYING_UNKEYED,
+				]]));
+
 				continue;
 			}
 
@@ -1769,6 +1778,33 @@ function scopedCacheFilterKeyingByAlias(
  * drop its tag altogether, and a bare tag is the cheaper way to be right about a
  * query that returns nothing.
  */
+// The pk, or a flat scoped_cache_field, of a pin-safe type: a filter naming it by
+// value bounds the collection to that value, and the write side emits the same
+// slice — the pk slice always, a scoped field's from the flat-scope-field branch —
+// so read and write agree. An INSERT can match a scoped-field value (not a pk one),
+// and the write emits that field's slice on create, so the pin still catches it.
+// Shared by the two analyses that key off it: a plain column condition, and the near
+// row of an M2O crossing whose foreign key IS this field.
+function isScopedCacheKeyableField(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	fieldName: string,
+): boolean {
+	const scopedFlatFields = (schema.collections[collection]?.scopedCacheFields ?? [])
+		.filter((field) => !field.includes('.'));
+
+	if (
+		fieldName !== schema.collections[collection]?.primary
+		&& !scopedFlatFields.includes(fieldName)
+	) {
+		return false;
+	}
+
+	const keyType = schema.collections[collection]?.fields[fieldName]?.type;
+
+	return isPinnableScopeType(keyType);
+}
+
 function keyingOfColumnConditions(
 	schema: SchemaOverview,
 	collection: CollectionKey,
@@ -1776,26 +1812,10 @@ function keyingOfColumnConditions(
 	functionName: string | undefined,
 	conditions: Record<string, unknown>,
 ): ScopedCacheFilterKeying {
-	const primaryKeyField = schema.collections[collection]?.primary;
-
-	// The pk, or a flat scoped_cache_field: a filter naming either by value bounds the
-	// collection to that value, and the write side emits the same slice — the pk slice
-	// always, a scoped field's slice from the flat-scope-field branch — so read and
-	// write agree. An INSERT can match a scoped-field value (not a pk one), and the
-	// write emits that field's slice on create, so the pin still catches it.
-	const scopedFlatFields = (schema.collections[collection]?.scopedCacheFields ?? [])
-		.filter((field) => !field.includes('.'));
-
-	const pinnable = fieldName === primaryKeyField
-		|| scopedFlatFields.includes(fieldName);
-
-	if (functionName !== undefined || !pinnable) {
-		return KEYING_UNKEYED;
-	}
-
-	const keyType = schema.collections[collection]?.fields[fieldName]?.type;
-
-	if (!isPinnableScopeType(keyType)) {
+	if (
+		functionName !== undefined
+		|| !isScopedCacheKeyableField(schema, collection, fieldName)
+	) {
 		return KEYING_UNKEYED;
 	}
 
