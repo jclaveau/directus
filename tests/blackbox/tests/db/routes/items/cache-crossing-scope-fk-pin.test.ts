@@ -2,6 +2,7 @@ import config, { getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
 	CreateFieldM2O,
+	CreateFieldO2M,
 	CreateItem,
 	DeleteCollection,
 } from '@common/functions';
@@ -49,6 +50,8 @@ describe(oneLine`
 		let boundAccountId: number;
 		let otherAccountId: number;
 		let boundProfileId: number;
+		let membershipId: number;
+		let fetchedProfileId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 		beforeAll(async () => {
@@ -90,6 +93,15 @@ describe(oneLine`
 				otherCollection: PROFILE,
 			});
 
+			// An o2m whose reverse fk is NOT a scope field of the profile, so the child
+			// pinner declines it: fetching through it nests unbounded profile rows.
+			await CreateFieldO2M(vendor, {
+				collection: MEMBERSHIP,
+				field: 'profiles',
+				otherCollection: PROFILE,
+				otherField: 'membership_ref',
+			});
+
 			const accounts = await CreateItem(vendor, {
 				collection: ACCOUNT,
 				item: [{ name: 'bound' }, { name: 'other' }],
@@ -109,10 +121,26 @@ describe(oneLine`
 
 			boundProfileId = profiles[0].id;
 
-			await CreateItem(vendor, {
+			const memberships = await CreateItem(vendor, {
 				collection: MEMBERSHIP,
 				item: [{ name: 'm', profile: boundProfileId }],
 			});
+
+			membershipId = memberships[0].id;
+
+			// A profile of the OTHER account, reachable through the declined o2m — the
+			// row a keyed `account=bound` slice would wrongly exclude, so the read must
+			// keep the bare tag when it fetches profile rows.
+			const fetchedProfiles = await CreateItem(vendor, {
+				collection: PROFILE,
+				item: [{
+					label: 'fetched',
+					account: otherAccountId,
+					membership_ref: membershipId,
+				}],
+			});
+
+			fetchedProfileId = fetchedProfiles[0].id;
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -141,6 +169,18 @@ describe(oneLine`
 				.query({
 					'filter[profile][account][_eq]': String(boundAccountId),
 					fields: '*',
+				})
+				.set('Authorization', auth);
+		}
+
+		// Fetches profile rows through the declined o2m AND keys profile:account: the
+		// collection is both nested and filtered, so the guard must keep it bare.
+		function readMembershipWithProfiles() {
+			return request(getUrl(vendor, env))
+				.get(`/items/${MEMBERSHIP}`)
+				.query({
+					'filter[profile][account][_eq]': String(boundAccountId),
+					fields: '*,profiles.*',
 				})
 				.set('Authorization', auth);
 		}
@@ -272,6 +312,35 @@ describe(oneLine`
 				.set('Authorization', auth);
 
 			expect((await readMembershipsOfBoundAccount())
+				.headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			keeps the bare tag when it also fetches the collection it keyed
+		`, async () => {
+			// The keyed slice bounds the FILTERED rows, but this read also nests
+			// profile rows through the declined o2m, which the filter never bounded —
+			// so the bare tag must win, or a write to a fetched row would leave it stale.
+			await clearCache();
+
+			const tags = (await readMembershipWithProfiles())
+				.headers[cacheTagsHeader];
+
+			expect(tags).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+
+			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}:account=`));
+
+			// Non-vacuity: a write to the fetched OTHER-account profile — a row a keyed
+			// `account=bound` slice would not name — still drops the read.
+			expect((await readMembershipWithProfiles())
+				.headers[cacheStatusHeader]).toBe('HIT');
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${PROFILE}/${fetchedProfileId}`)
+				.send({ label: 'fetched2' })
+				.set('Authorization', auth);
+
+			expect((await readMembershipWithProfiles())
 				.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
