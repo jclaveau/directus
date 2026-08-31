@@ -893,14 +893,28 @@ describe(oneLine`
 			expect(sorted.headers[cacheTagsHeader])
 				.toMatch(new RegExp(`(^|, )${OWNER}(,|$)`));
 
-		});
 
-		// `group` and `aggregate` sit in the same set as `sort` and take the same
-		// three-line path through `scopedCacheCollectionsBeyondNestedRows`, so the
-		// sort above is what proves that set. They are not asserted separately
-		// because `groupBy=owner.name&aggregate[count]=id` answers 500 on this
-		// fork — grouping across a relation, unrelated to the pins here, and worth
-		// its own issue rather than a skipped case in this file.
+			// The `group` arm of the same set. Grouping ACROSS a relation
+			// (`groupBy=owner.name`) answers 500 on this fork for reasons that have
+			// nothing to do with these pins, so the scalar spelling is what runs
+			// here — it still reaches the branch, which is a query-shape question,
+			// not a question about which column was named.
+			await clearCache();
+
+			const grouped = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owner][id][_eq]': String(filteredOwnerId),
+					groupBy: 'label',
+					'aggregate[count]': 'id',
+				})
+				.set('Authorization', auth);
+
+			// Status and tags together: the cache status header is set on the way
+			// through, so on its own it says nothing about the read succeeding.
+			expect(grouped.status).toBe(200);
+			expect(grouped.headers[cacheStatusHeader]).toBe('MISS');
+		});
 
 		it('pins every key an `_in` lists, each of them once', async () => {
 			await clearCache();

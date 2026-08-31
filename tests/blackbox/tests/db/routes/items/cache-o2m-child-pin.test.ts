@@ -22,6 +22,8 @@ const ROOT = 'o2m_root';
 const PARENT = 'o2m_parent';
 const CHILD = 'o2m_child';
 const GRANDCHILD = 'o2m_grandchild';
+const CONFLICT_PARENT = 'o2m_conflict_parent';
+const CONFLICT_CHILD = 'o2m_conflict_child';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
@@ -42,6 +44,9 @@ describe(oneLine`
 
 		let instance: ChildProcess;
 		let rootId: number;
+		let mainlessRootId: number;
+		let conflictParentId: number;
+		let conflictChildId: number;
 		let ownedParentId: number;
 		let siblingParentId: number;
 		let ownedChildId: number;
@@ -62,6 +67,18 @@ describe(oneLine`
 					{
 						collection: CHILD,
 						meta: { scoped_cache_fields: ['parent'] },
+						fields: [{ field: 'body', type: 'string', meta: {} }],
+					},
+					{
+						collection: CONFLICT_PARENT,
+						fields: [{ field: 'name', type: 'string', meta: {} }],
+					},
+					{
+						collection: CONFLICT_CHILD,
+						// Both fks declared, so each alias clears the "the write side
+						// emits this shallow tag" gate on its own and the refusal below
+						// is about the disagreement, not about the gate.
+						meta: { scoped_cache_fields: ['parent', 'alt_parent'] },
 						fields: [{ field: 'body', type: 'string', meta: {} }],
 					},
 					{
@@ -86,6 +103,24 @@ describe(oneLine`
 				field: 'children',
 				otherCollection: CHILD,
 				otherField: 'parent',
+			});
+
+			// Two aliases onto ONE child collection, over different fks — on their own
+			// pair of collections, because `fields: '*,children.*'` splices every alias
+			// of the collection it reads and a second one here would join every test
+			// above. One read reaching both leaves the pin two disagreeing answers.
+			await CreateFieldO2M(vendor, {
+				collection: CONFLICT_PARENT,
+				field: 'children',
+				otherCollection: CONFLICT_CHILD,
+				otherField: 'parent',
+			});
+
+			await CreateFieldO2M(vendor, {
+				collection: CONFLICT_PARENT,
+				field: 'alt_children',
+				otherCollection: CONFLICT_CHILD,
+				otherField: 'alt_parent',
 			});
 
 			// A second to-many hop: `grandchildren` sits under `children`, so its prefix
@@ -123,10 +158,30 @@ describe(oneLine`
 
 			const roots = await CreateItem(vendor, {
 				collection: ROOT,
-				item: [{ name: 'root', main: ownedParentId }],
+				item: [
+					{ name: 'root', main: ownedParentId },
+					// No `main` at all: a read descending that prefix finds null where a
+					// relation was expected and surfaces no parent row.
+					{ name: 'root-without-main', main: null },
+				],
 			});
 
 			rootId = roots[0].id;
+			mainlessRootId = roots[1].id;
+
+			const conflictParents = await CreateItem(vendor, {
+				collection: CONFLICT_PARENT,
+				item: [{ name: 'conflict-parent' }],
+			});
+
+			conflictParentId = conflictParents[0].id;
+
+			const conflictChildren = await CreateItem(vendor, {
+				collection: CONFLICT_CHILD,
+				item: [{ body: 'reached by both aliases', parent: conflictParentId }],
+			});
+
+			conflictChildId = conflictChildren[0].id;
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -142,6 +197,8 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			await DeleteCollection(vendor, { collection: CONFLICT_CHILD });
+			await DeleteCollection(vendor, { collection: CONFLICT_PARENT });
 			await DeleteCollection(vendor, { collection: GRANDCHILD });
 			await DeleteCollection(vendor, { collection: CHILD });
 			await DeleteCollection(vendor, { collection: ROOT });
@@ -276,6 +333,85 @@ describe(oneLine`
 			await updateChild(ownedChildId, 'owned child touched');
 
 			expect((await readParent()).headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			leaves the child bare when the prefix surfaces no parent row
+		`, async () => {
+			// The root carries no `main`, so descending that prefix finds null where
+			// a relation was expected and yields no parent to key on. Pinning the
+			// child to nothing would drop its tag, so it stays bare and any write to
+			// the collection still evicts.
+			await clearCache();
+
+			const readMainless = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${ROOT}`)
+					.query({
+						'filter[id][_eq]': String(mainlessRootId),
+						fields: 'id,main.children.id',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await readMainless();
+			expect(warm.status).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+			expect(warm.body.data).toEqual([{ id: mainlessRootId, main: null }]);
+
+			expect(warm.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
+
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${CHILD}:parent=`));
+
+			// Bare means a child of ANY parent evicts it, including the sibling's.
+			expect((await readMainless()).headers[cacheStatusHeader]).toBe('HIT');
+
+			await updateChild(siblingChildId, 'sibling touched for mainless root');
+
+			expect((await readMainless()).headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			leaves the child bare when two aliases disagree on its fk
+		`, async () => {
+			// `children` keys the child on `parent` and `alt_children` keys it on
+			// `alt_parent`. One read reaching both leaves one collection with two
+			// answers, and a pin that picked either would leave the rows the other
+			// names covered by nothing.
+			await clearCache();
+
+			const readBothAliases = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${CONFLICT_PARENT}`)
+					.query({
+						'filter[id][_eq]': String(conflictParentId),
+						fields: 'id,children.id,alt_children.id',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await readBothAliases();
+			expect(warm.status).toBe(200);
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(warm.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${CONFLICT_CHILD}(,|$)`));
+
+			expect(warm.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${CONFLICT_CHILD}:(alt_)?parent=`));
+
+			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('HIT');
+
+			// Bare: this child is under only ONE of the two aliases, and a write to it
+			// evicts all the same.
+			await request(getUrl(vendor, env))
+				.patch(`/items/${CONFLICT_CHILD}/${conflictChildId}`)
+				.send({ body: 'touched under one alias' })
+				.set('Authorization', auth);
+
+			expect((await readBothAliases()).headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });
