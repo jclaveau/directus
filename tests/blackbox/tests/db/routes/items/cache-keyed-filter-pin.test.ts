@@ -1,6 +1,7 @@
 import config, { getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
+	CreateFieldM2A,
 	CreateFieldM2M,
 	CreateFieldM2O,
 	CreateFieldO2M,
@@ -28,6 +29,10 @@ const OWNED_ITEM = 'keyed_filter_owned_item';
 const OWNED_SUB_ITEM = 'keyed_filter_owned_sub_item';
 const CATEGORY = 'keyed_filter_category';
 const JUNCTION = `${OWNED_ITEM}_${CATEGORY}_junction`;
+// A second collection, so the shapes below can carry two paths to one collection
+// and an A2O hop without changing what `fields=*` splices into the reads above.
+const PAGE = 'keyed_filter_page';
+const BLOCK_JUNCTION = `${PAGE}_blocks_junction`;
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
@@ -45,6 +50,9 @@ describe(oneLine`
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-keyed-filter-pin-${vendor}`;
+		// Low enough that a handful of keys crosses it. Every other read here names
+		// one key and nests at most three rows, so none of them reach it.
+		env[vendor]['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] = '5';
 
 		let instance: ChildProcess;
 		let filteredOwnerId: number;
@@ -53,6 +61,9 @@ describe(oneLine`
 		let filteredSubItemId: number;
 		let junctionRowId: number;
 		let untouchedSubItemId: number;
+		let categoryId: number;
+		let pageId: number;
+		let reviewerId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 		beforeAll(async () => {
@@ -73,6 +84,10 @@ describe(oneLine`
 					{
 						collection: CATEGORY,
 						fields: [{ field: 'name', type: 'string', meta: {} }],
+					},
+					{
+						collection: PAGE,
+						fields: [{ field: 'title', type: 'string', meta: {} }],
 					},
 				],
 			});
@@ -124,9 +139,60 @@ describe(oneLine`
 				junctionCollection: JUNCTION,
 			});
 
+			// Two M2O paths from one collection to OWNER: one read names a key
+			// through `owner` and reads a column through `reviewer`, which is two
+			// joined rows of the same collection rather than one.
+			await CreateFieldM2O(vendor, {
+				collection: PAGE,
+				field: 'owner',
+				otherCollection: OWNER,
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: PAGE,
+				field: 'reviewer',
+				otherCollection: OWNER,
+			});
+
+			await CreateFieldM2A(vendor, {
+				collection: PAGE,
+				field: 'blocks',
+				relatedCollections: [CATEGORY],
+				junctionCollection: BLOCK_JUNCTION,
+			});
+
 			const categories = await CreateItem(vendor, {
 				collection: CATEGORY,
 				item: [{ name: 'c1' }],
+			});
+
+			categoryId = categories[0].id;
+
+			const reviewers = await CreateItem(vendor, {
+				collection: OWNER,
+				item: [{ name: 'reviewer-before' }],
+			});
+
+			reviewerId = reviewers[0].id;
+
+			const pages = await CreateItem(vendor, {
+				collection: PAGE,
+				item: [{
+					title: 'p1',
+					owner: filteredOwnerId,
+					reviewer: reviewerId,
+				}],
+			});
+
+			pageId = pages[0].id;
+
+			await CreateItem(vendor, {
+				collection: BLOCK_JUNCTION,
+				item: [{
+					[`${BLOCK_JUNCTION}_id`]: pageId,
+					item: String(categoryId),
+					collection: CATEGORY,
+				}],
 			});
 
 			const junctionRows = await CreateItem(vendor, {
@@ -153,6 +219,8 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
+			await DeleteCollection(vendor, { collection: BLOCK_JUNCTION });
+			await DeleteCollection(vendor, { collection: PAGE });
 			await DeleteCollection(vendor, { collection: JUNCTION });
 			await DeleteCollection(vendor, { collection: CATEGORY });
 			await DeleteCollection(vendor, { collection: OWNED_SUB_ITEM });
@@ -527,6 +595,24 @@ describe(oneLine`
 
 			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
 			expect(refetched.body.data[0].owned_sub_items).toHaveLength(3);
+
+			// The same holds when the key is named by the NESTED node's own filter
+			// rather than the root's: `deep` withholds sub-items, and which ones it
+			// withholds is decided by rows the response never carried.
+			await clearCache();
+
+			const deepRead = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'deep[owned_sub_items][_filter][id][_eq]': String(filteredSubItemId),
+					fields: 'id,owned_sub_items.id',
+				})
+				.set('Authorization', auth);
+
+			expect(deepRead.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(deepRead.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
 		});
 
 		it(oneLine`
@@ -587,6 +673,21 @@ describe(oneLine`
 
 			expect(refetchedCount.headers[cacheStatusHeader]).toBe('MISS');
 			expect(refetchedCount.body.data).toEqual([]);
+
+			// Counting in `fields` rather than in the filter reads the same rows,
+			// so the collection is tagged there too — and wholesale, since a total
+			// names none of them.
+			await clearCache();
+
+			const counted = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({ fields: 'id,count(owned_sub_items)' })
+				.set('Authorization', auth);
+
+			expect(counted.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(counted.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
 		});
 
 		it('is dropped by DELETING the to-many row its filter named', async () => {
@@ -694,6 +795,313 @@ describe(oneLine`
 
 			expect(refetched.headers[cacheStatusHeader]).toBe('MISS');
 			expect(refetched.body.data).toEqual([]);
+		});
+
+		it(oneLine`
+			unions the keys a disjunction names, giving up on an unkeyed branch
+		`, async () => {
+			// A row arriving through a branch that named no key was reached through
+			// rows the filter never named, so one such branch takes the whole
+			// disjunction down. With every branch keyed, a row may arrive by either,
+			// so the pin is the union.
+			await clearCache();
+
+			const unioned = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[_or][0][owned_sub_items][id][_eq]': String(filteredSubItemId),
+					'filter[_or][1][owned_sub_items][id][_eq]': String(untouchedSubItemId),
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(unioned.headers[cacheStatusHeader]).toBe('MISS');
+
+			for (const key of [filteredSubItemId, untouchedSubItemId]) {
+				expect(unioned.headers[cacheTagsHeader]).toMatch(
+					new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=${key}(,|$)`),
+				);
+			}
+
+			expect(unioned.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
+
+			await clearCache();
+
+			const givenUp = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[_or][0][owned_sub_items][id][_eq]': String(filteredSubItemId),
+					'filter[_or][1][owned_sub_items][note][_eq]': 'untouched-before',
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(givenUp.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
+		});
+
+		// Two branches of the analysis are deliberately absent here, because no
+		// HTTP read can reach them — `validate-query` rejects both before the
+		// service runs, so they are unit-tested instead:
+		//
+		// - `_not`, whose object value falls to `validateFilterPrimitive` and is
+		//   refused as "has to be a string, number, or boolean". The walk's
+		//   `unkeyEverythingUnder` arm is then reachable only through a permission
+		//   case, which bypasses query validation.
+		// - an empty `_in`, refused by `validateList` as "has to be an array of
+		//   values". The REST spelling `_in=` is NOT that shape: `parse-filter`
+		//   sends it through `toArray`, which yields `['']` — one key, not none.
+
+		it(oneLine`
+			tags an M2O it keyed once something else reads the row
+		`, async () => {
+			// The two ways out of tagging an M2O filter nothing. A sibling reading
+			// another of its columns has to read the far row after all — one alias
+			// is one joined row, so the key still says which. A sort reads rows no
+			// key named, so the collection goes back to bare.
+			await clearCache();
+
+			const sibling = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owner][id][_eq]': String(filteredOwnerId),
+					'filter[owner][name][_eq]': 'independent-write',
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(sibling.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(sibling.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${OWNER}:id=${filteredOwnerId}(,|$)`),
+			);
+
+			await clearCache();
+
+			const sorted = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owner][id][_eq]': String(filteredOwnerId),
+					sort: 'owner.name',
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(sorted.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(sorted.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNER}(,|$)`));
+
+		});
+
+		// `group` and `aggregate` sit in the same set as `sort` and take the same
+		// three-line path through `scopedCacheCollectionsBeyondNestedRows`, so the
+		// sort above is what proves that set. They are not asserted separately
+		// because `groupBy=owner.name&aggregate[count]=id` answers 500 on this
+		// fork — grouping across a relation, unrelated to the pins here, and worth
+		// its own issue rather than a skipped case in this file.
+
+		it('pins every key an `_in` lists, each of them once', async () => {
+			await clearCache();
+
+			const readListed = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${OWNED_ITEM}`)
+					.query({
+						'filter[owned_sub_items][id][_in]':
+							`${filteredSubItemId},${untouchedSubItemId},${untouchedSubItemId}`,
+						fields: 'id,label',
+					})
+					.set('Authorization', auth);
+			};
+
+			const warm = await readListed();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			const listedTags = warm.headers[cacheTagsHeader].split(', ');
+
+			for (const key of [filteredSubItemId, untouchedSubItemId]) {
+				// Named twice in the list, carried once: the tag is deduped on the
+				// token the write side emits for that row.
+				expect(listedTags.filter((tag: string) => {
+					return tag === `${OWNED_SUB_ITEM}:id=${key}`;
+				})).toHaveLength(1);
+			}
+
+			// The SECOND key of the list, which an `_eq` pin would never have named.
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNED_SUB_ITEM}/${untouchedSubItemId}`)
+				.send({ note: 'in-list-write' })
+				.set('Authorization', auth);
+
+			expect((await readListed()).headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it('drops the pin whole past the ceiling, never trimmed', async () => {
+			// A partial key set would leave the rows it omits covered by nothing, so
+			// past `CACHE_SCOPED_MAX_PINS_PER_COLLECTION` the collection falls back
+			// to the bare tag that any write to it drops.
+			await clearCache();
+
+			const overCeiling = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owned_sub_items][id][_in]': '1,2,3,4,5,6,7',
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(overCeiling.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(overCeiling.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}(,|$)`));
+
+			expect(overCeiling.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=`));
+
+			// Under it, the same shape still pins.
+			await clearCache();
+
+			const underCeiling = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owned_sub_items][id][_in]': '1,2,3',
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(underCeiling.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=`));
+		});
+
+		it(oneLine`
+			keys through a quantifier, which names one row of the same hop
+		`, async () => {
+			// `_some` and `_none` push the condition into a subquery over the row the
+			// caller already crossed to, so the key names it just as narrowly — and
+			// for `_none`, a row that has to NOT be there is depended on all the same.
+			await clearCache();
+
+			const some = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owned_sub_items][_some][id][_eq]': String(filteredSubItemId),
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(some.headers[cacheStatusHeader]).toBe('MISS');
+			expect(some.body.data).toHaveLength(1);
+
+			expect(some.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=${filteredSubItemId}(,|$)`),
+			);
+
+			await clearCache();
+
+			const none = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_ITEM}`)
+				.query({
+					'filter[owned_sub_items][_none][id][_eq]': String(filteredSubItemId),
+					fields: 'id,label',
+				})
+				.set('Authorization', auth);
+
+			expect(none.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(none.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${OWNED_SUB_ITEM}:id=${filteredSubItemId}(,|$)`),
+			);
+		});
+
+		it(oneLine`
+			tags a collection it hopped THROUGH, and not the leaf it keyed
+		`, async () => {
+			// Two hops from the sub-item: reaching the owner reads the `owner` column
+			// of every item that could be joined, so no item row is named and the
+			// middle collection stays bare. The leaf is answered by that column, so
+			// it needs no tag at all.
+			await clearCache();
+
+			const throughItem = await request(getUrl(vendor, env))
+				.get(`/items/${OWNED_SUB_ITEM}`)
+				.query({
+					'filter[owned_item][owner][id][_eq]': String(filteredOwnerId),
+					fields: 'id,note',
+				})
+				.set('Authorization', auth);
+
+			expect(throughItem.headers[cacheStatusHeader]).toBe('MISS');
+			expect(throughItem.body.data.length).toBeGreaterThan(0);
+
+			expect(throughItem.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNED_ITEM}(,|$)`));
+
+			expect(throughItem.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNER}(:|,|$)`));
+		});
+
+		it('gives up on a collection two paths reach, one of them unkeyed', async () => {
+			// `owner` and `reviewer` join two independent rows of one collection. The
+			// keyed path says nothing about the row the unkeyed one reads, so the
+			// collection goes back to the bare tag rather than to their union.
+			await clearCache();
+
+			const twoPaths = await request(getUrl(vendor, env))
+				.get(`/items/${PAGE}`)
+				.query({
+					'filter[owner][id][_eq]': String(filteredOwnerId),
+					'filter[reviewer][name][_eq]': 'reviewer-before',
+					fields: 'id,title',
+				})
+				.set('Authorization', auth);
+
+			expect(twoPaths.headers[cacheStatusHeader]).toBe('MISS');
+			expect(twoPaths.body.data).toEqual([{ id: pageId, title: 'p1' }]);
+
+			expect(twoPaths.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${OWNER}(,|$)`));
+
+			expect(twoPaths.headers[cacheTagsHeader])
+				.not.toMatch(new RegExp(`(^|, )${OWNER}:id=`));
+		});
+
+		it('keys the collection an A2O scope names, and nests it bare', async () => {
+			// An A2O carries the table to join in the key itself, which is how the
+			// walk knows which collection the far key belongs to. Unlike the M2O
+			// case there is no constraint behind it — a polymorphic column cannot
+			// carry one — so the far row IS depended on, and the key pins it.
+			await clearCache();
+
+			const scoped = await request(getUrl(vendor, env))
+				.get(`/items/${PAGE}`)
+				.query({
+					[`filter[blocks][item:${CATEGORY}][id][_eq]`]: String(categoryId),
+					fields: 'id,title',
+				})
+				.set('Authorization', auth);
+
+			expect(scoped.headers[cacheStatusHeader]).toBe('MISS');
+			expect(scoped.body.data).toEqual([{ id: pageId, title: 'p1' }]);
+
+			expect(scoped.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${CATEGORY}:id=${categoryId}(,|$)`),
+			);
+
+			// Nesting the A2O instead reads every block the page carries, which no
+			// parent-key pin can name across that hop.
+			await clearCache();
+
+			const nested = await request(getUrl(vendor, env))
+				.get(`/items/${PAGE}`)
+				.query({ fields: `id,blocks.item:${CATEGORY}.id` })
+				.set('Authorization', auth);
+
+			expect(nested.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(nested.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${CATEGORY}(,|$)`));
 		});
 	});
 });
