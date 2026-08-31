@@ -266,10 +266,10 @@ describe(oneLine`
 			expect((await readMembershipsOfBoundAccount())
 				.headers[cacheStatusHeader]).toBe('HIT');
 
-			await CreateItem(vendor, {
-				collection: PROFILE,
-				item: [{ label: 'inserted', account: boundAccountId }],
-			});
+			await request(getUrl(vendor, env))
+				.post(`/items/${PROFILE}`)
+				.send({ label: 'inserted', account: boundAccountId })
+				.set('Authorization', auth);
 
 			expect((await readMembershipsOfBoundAccount())
 				.headers[cacheStatusHeader]).toBe('MISS');
