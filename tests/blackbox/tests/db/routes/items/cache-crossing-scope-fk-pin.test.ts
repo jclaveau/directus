@@ -343,5 +343,54 @@ describe(oneLine`
 			expect((await readMembershipWithProfiles())
 				.headers[cacheStatusHeader]).toBe('MISS');
 		});
+
+		it(oneLine`
+			unions the scope-field slices an _or of crossings names
+		`, async () => {
+			await clearCache();
+
+			const tags = (await request(getUrl(vendor, env))
+				.get(`/items/${MEMBERSHIP}`)
+				.query({
+					'filter[_or][0][profile][account][_eq]': String(boundAccountId),
+					'filter[_or][1][profile][account][_eq]': String(otherAccountId),
+					fields: 'id,name',
+				})
+				.set('Authorization', auth))
+				.headers[cacheTagsHeader];
+
+			expect(tags).toMatch(
+				new RegExp(`(^|, )${PROFILE}:account=${boundAccountId}(,|$)`),
+			);
+
+			expect(tags).toMatch(
+				new RegExp(`(^|, )${PROFILE}:account=${otherAccountId}(,|$)`),
+			);
+
+			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+		});
+
+		it(oneLine`
+			bares the near collection when an _or branch leaves it unbounded
+		`, async () => {
+			// One branch keys profile:account, the other filters profile by a non-key
+			// column — a row matching it carries any account, so the pin cannot hold
+			// and bare wins (an _or is sound only when every branch is covered).
+			await clearCache();
+
+			const tags = (await request(getUrl(vendor, env))
+				.get(`/items/${MEMBERSHIP}`)
+				.query({
+					'filter[_or][0][profile][account][_eq]': String(boundAccountId),
+					'filter[_or][1][profile][label][_eq]': 'nomatch',
+					fields: 'id,name',
+				})
+				.set('Authorization', auth))
+				.headers[cacheTagsHeader];
+
+			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}:account=`));
+
+			expect(tags).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+		});
 	});
 });
