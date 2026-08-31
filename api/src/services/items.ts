@@ -2422,7 +2422,7 @@ implements AbstractService<Item> {
 
 // Recursive undo of the injected nesting — kept out of its one caller by choice.
 // eslint-disable-next-line local/no-single-caller-function
-function stripInjectedOwnershipNesting(
+export function stripInjectedOwnershipNesting(
 	records: AnyItem[],
 	injectedPaths: string[],
 	query: Query,
