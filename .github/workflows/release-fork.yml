@@ -18,6 +18,16 @@ on:
 permissions:
   contents: write
 
+# The dist branch is rebuilt by deleting and recreating it, so two runs for one
+# branch race: the older one recreates what the newer just pushed and the newer
+# is rejected. A PR pushed twice in quick succession does exactly that, and the
+# older build is superseded anyway — cancel it. Pushes to a release line queue
+# instead, since each of those is a build somebody asked for.
+concurrency:
+  group: >-
+    release-fork-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   create-release:
     name: Create Release
