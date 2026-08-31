@@ -168,7 +168,7 @@ describe(oneLine`
 				.get(`/items/${MEMBERSHIP}`)
 				.query({
 					'filter[profile][account][_eq]': String(boundAccountId),
-					fields: '*',
+					fields: 'id,name',
 				})
 				.set('Authorization', auth);
 		}
@@ -180,7 +180,7 @@ describe(oneLine`
 				.get(`/items/${MEMBERSHIP}`)
 				.query({
 					'filter[profile][account][_eq]': String(boundAccountId),
-					fields: '*,profiles.*',
+					fields: 'id,name,profiles.*',
 				})
 				.set('Authorization', auth);
 		}
@@ -227,7 +227,7 @@ describe(oneLine`
 				.query({
 					'filter[profile][account][_in]':
 						`${boundAccountId},${otherAccountId}`,
-					fields: '*',
+					fields: 'id,name',
 				})
 				.set('Authorization', auth))
 				.headers[cacheTagsHeader];
@@ -254,7 +254,7 @@ describe(oneLine`
 				.get(`/items/${MEMBERSHIP}`)
 				.query({
 					'filter[profile][reviewer][_eq]': String(otherAccountId),
-					fields: '*',
+					fields: 'id,name',
 				})
 				.set('Authorization', auth))
 				.headers[cacheTagsHeader];
