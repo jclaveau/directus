@@ -14,7 +14,9 @@ import {
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromKeyedFilters,
+	scopedCacheOwnershipNestedPkPaths,
 	pinnedScopedCacheTagsFromM2oParents,
+	pinnedScopedCacheTagsFromO2mChildren,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheFilterKeyingByCollection,
@@ -1802,6 +1804,28 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 			),
 		]).not.toContain('company');
 	});
+
+	it('keeps a filtered collection when a group reads it too', () => {
+		// Grouping reads rows no key named, exactly as a sort does, so a filter
+		// that named keys no longer exempts the collection.
+		expect([...scopedCacheCollectionsBeyondNestedRows(
+			schema,
+			astOf({
+				filter: { owner: { id: { _eq: 1 } } },
+				group: ['owner.name'],
+			}),
+		)]).toContain('owner');
+	});
+
+	it('keeps a filtered collection when an aggregate reads it too', () => {
+		expect([...scopedCacheCollectionsBeyondNestedRows(
+			schema,
+			astOf({
+				filter: { owner: { id: { _eq: 1 } } },
+				aggregate: { count: ['owner.name'] },
+			}),
+		)]).toContain('owner');
+	});
 });
 
 describe('scopedCacheFilterKeyingByCollection', () => {
@@ -2025,6 +2049,54 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		}).keys()].sort()).toEqual(['owned_item', 'owned_item_category_junction']);
 	});
 
+	it('leaves a key unkeyed when its type cannot be pinned', () => {
+		// A date-like key is not safe to slice on, so even the primary key under
+		// `_eq` reports unkeyed and the collection keeps its bare tag.
+		const dated = new SchemaBuilder()
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owned_sub_items').o2m('owned_sub_item', 'owned_item');
+			})
+			.collection('owned_sub_item', (c) => {
+				c.field('id').id();
+				c.field('owned_item').m2o('owned_item');
+			})
+			.build();
+
+		dated.collections['owned_sub_item']!.fields['id']!.type = 'dateTime';
+
+		expect(scopedCacheFilterKeyingByCollection(dated, {
+			type: 'root',
+			name: 'owned_item',
+			query: { filter: { owned_sub_items: { id: { _eq: 7 } } } },
+			cases: [],
+			children: [],
+		} as unknown as AST).get('owned_sub_item')).toEqual({ kind: 'unkeyed' });
+	});
+
+	it('keys the M2O again when its key carries more than operators', () => {
+		// A further field under the related key reaches past it, so the near row's
+		// own column no longer answers the condition and the far row is read after
+		// all. The key still says which row that is, so it is keyed, not bare.
+		expect(keyingOf({
+			filter: {
+				owner: { id: { _eq: 7, deeper: { name: { _eq: 'x' } } } },
+			} as unknown as Filter,
+		}).get('owner')).toEqual({
+			kind: 'keyed',
+			field: 'id',
+			keys: new Set([7]),
+		});
+	});
+
+	it('reads nothing from an operator carrying no node', () => {
+		// `_and` with a scalar is not a shape the walk can read, and anything it
+		// cannot read is treated as reading every row under it.
+		expect(keyingOf({
+			filter: { owner: { _and: 5 } } as unknown as Filter,
+		}).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
 	it('keys through `_some`, which pushes the key into a subquery', () => {
 		expect(keyingOf({
 			filter: { owned_sub_items: { _some: { id: { _eq: 7 } } } },
@@ -2209,6 +2281,221 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 			],
 		} as AST).get('company'))
 			.toEqual({ kind: 'independent', field: 'id', keys: new Set([3]) });
+	});
+});
+
+describe('scopedCacheOwnershipNestedPkPaths', () => {
+	it('stops where the ownership chain loops back on itself', () => {
+		// `member` owns through `team` and `team` back through `member`. The walk
+		// has to stop at the repeat rather than following the loop forever, and
+		// the two-hop path it did find is what makes nesting worth it at all: a
+		// one-hop chain is already pinned from the read row's own columns.
+		const cyclic = new SchemaBuilder()
+			.collection('member', (c) => {
+				c.field('id').id();
+				c.field('team').m2o('team');
+			})
+			.collection('team', (c) => {
+				c.field('id').id();
+				c.field('lead').m2o('member');
+			})
+			.build();
+
+		cyclic.collections['member']!.scopedCacheFields = ['team'];
+		cyclic.collections['team']!.scopedCacheFields = ['lead'];
+
+		expect(scopedCacheOwnershipNestedPkPaths(cyclic, 'member'))
+			.toEqual(['team.id', 'team.lead.id']);
+	});
+
+	it('nests nothing when every ancestor is one hop out', () => {
+		// The control for the case above: a single hop is answered by the read
+		// row's own foreign key, so there is nothing to nest for.
+		const flat = new SchemaBuilder()
+			.collection('member', (c) => {
+				c.field('id').id();
+				c.field('team').m2o('team');
+			})
+			.collection('team', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		flat.collections['member']!.scopedCacheFields = ['team'];
+		flat.collections['team']!.scopedCacheFields = ['name'];
+
+		expect(scopedCacheOwnershipNestedPkPaths(flat, 'member')).toEqual([]);
+	});
+});
+
+describe('pinnedScopedCacheTagsFromO2mChildren', () => {
+	// `child` hangs off `parent` twice, over two different fks, so one read can
+	// reach it by two names. `grandchild` sits a second to-many hop down, and
+	// `root` reaches the parent through an M2O so a prefix has something to walk.
+	const schema = new SchemaBuilder()
+		.collection('parent', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('children').o2m('child', 'parent');
+			c.field('alt_children').o2m('child', 'alt_parent');
+		})
+		.collection('child', (c) => {
+			c.field('id').id();
+			c.field('body').string();
+			c.field('parent').m2o('parent');
+			c.field('alt_parent').m2o('parent');
+			c.field('grandchildren').o2m('grandchild', 'child');
+		})
+		.collection('grandchild', (c) => {
+			c.field('id').id();
+			c.field('child').m2o('child');
+		})
+		.collection('root', (c) => {
+			c.field('id').id();
+			c.field('main').m2o('parent');
+		})
+		.build();
+
+	// The pin only applies where the write side emits the matching shallow tag,
+	// which is what declaring the fk as a flat scope field promises.
+	schema.collections['child']!.scopedCacheFields = ['parent', 'alt_parent'];
+	schema.collections['grandchild']!.scopedCacheFields = ['child'];
+
+	function fieldMapOf(
+		...paths: [QueryPath[number], CollectionKey][]
+	): FieldMap {
+		return {
+			read: new Map(paths.map(([path, collection]) => {
+				return [path, { collection, fields: new Set<string>() }];
+			})),
+			other: new Map(),
+		};
+	}
+
+	function pinnedFor(
+		rootCollection: CollectionKey,
+		fieldMap: FieldMap,
+		records: Item[],
+		beyond = new Set<CollectionKey>(),
+	) {
+		return pinnedScopedCacheTagsFromO2mChildren(
+			schema,
+			rootCollection,
+			fieldMap,
+			records,
+			beyond,
+		);
+	}
+
+	it('pins the child by the key of every parent row the read surfaced', () => {
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children', 'child']),
+			[{ id: 1, name: 'a' }, { id: 2, name: 'b' }],
+		).get('child')).toEqual([
+			{ collection: 'child', field: 'parent', value: 1, type: 'integer' },
+			{ collection: 'child', field: 'parent', value: 2, type: 'integer' },
+		]);
+	});
+
+	it('walks an M2O prefix to the parent the to-many hangs off', () => {
+		expect(pinnedFor(
+			'root',
+			fieldMapOf(['main.children', 'child']),
+			[{ id: 9, main: { id: 1, name: 'a' } }],
+		).get('child')).toEqual([
+			{ collection: 'child', field: 'parent', value: 1, type: 'integer' },
+		]);
+	});
+
+	it('walks a to-many prefix into every row it carried', () => {
+		// A deep pivot: the prefix is itself an O2M, so each child row surfaced
+		// under it is a parent of the grandchildren.
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children.grandchildren', 'grandchild']),
+			[{ id: 1, children: [{ id: 10 }, { id: 11 }] }],
+		).get('grandchild')).toEqual([
+			{ collection: 'grandchild', field: 'child', value: 10, type: 'integer' },
+			{ collection: 'grandchild', field: 'child', value: 11, type: 'integer' },
+		]);
+	});
+
+	it('declines a prefix that names no relation', () => {
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['name.children', 'child']),
+			[{ id: 1, name: 'a' }],
+		).has('child')).toBe(false);
+	});
+
+	it('declines a prefix the response answered with a scalar', () => {
+		// `main` came back as the foreign key rather than the nested row, so the
+		// walk cannot reach the parent it would key on.
+		expect(pinnedFor(
+			'root',
+			fieldMapOf(['main.children', 'child']),
+			[{ id: 9, main: 1 }],
+		).has('child')).toBe(false);
+	});
+
+	it('declines when the prefix surfaced no row at all', () => {
+		// A null foreign key is skipped rather than treated as a parent, and with
+		// none left the collection is pinned by nothing.
+		expect(pinnedFor(
+			'root',
+			fieldMapOf(['main.children', 'child']),
+			[{ id: 9, main: null }],
+		).has('child')).toBe(false);
+	});
+
+	it('declines a child two paths key on different foreign keys', () => {
+		// `children` keys on `parent`, `alt_children` on `alt_parent`. Mixing them
+		// under one field would pin the wrong slice.
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children', 'child'], ['alt_children', 'child']),
+			[{ id: 1, name: 'a' }],
+		).has('child')).toBe(false);
+	});
+
+	it('declines when a surfaced parent row carries no key', () => {
+		// One keyless row leaves part of the set unpinned, which takes the whole
+		// collection to the bare tag rather than a partial pin.
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children', 'child']),
+			[{ id: 1, name: 'a' }, { name: 'no key' }],
+		).has('child')).toBe(false);
+	});
+
+	it('leaves the root collection alone', () => {
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['', 'parent']),
+			[{ id: 1, name: 'a' }],
+		).has('parent')).toBe(false);
+	});
+
+	it('declines a collection the read depends on beyond its nested rows', () => {
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children', 'child']),
+			[{ id: 1, name: 'a' }],
+			new Set(['child']),
+		).has('child')).toBe(false);
+	});
+
+	it('drops the pin whole past the ceiling, never trimmed', () => {
+		expect(pinnedFor(
+			'parent',
+			fieldMapOf(['children', 'child']),
+			Array.from(
+				{ length: scopedCacheMaxPinsPerCollection() + 1 },
+				(_, at) => ({ id: at + 1, name: `p${at}` }),
+			),
+		).has('child')).toBe(false);
 	});
 });
 
