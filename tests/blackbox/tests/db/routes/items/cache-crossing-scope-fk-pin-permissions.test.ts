@@ -15,13 +15,13 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// The scope-fk crossing must key the near collection when the crossing comes from a
-// permission CASE, not only an explicit query filter: this read sends no filter, and
-// the policy's `profile.account = $CURRENT_USER` reaches the keying via
-// `joinFilterWithCases`. The real planner cursus shape — a per-user policy on an
-// owner column that is itself an M2O onto directus_users.
+// The crossing keying must fire when the crossing comes from a permission CASE,
+// not only an explicit query filter: this read sends no filter, and the policy's
+// `profile.account = <id>` reaches the keying via `joinFilterWithCases`. A policy
+// writes `$CURRENT_USER`, but the keying resolves it to a concrete id first, so a
+// concrete-id case on a custom owner collection exercises the same case path.
 
-const ACCOUNT = 'directus_users';
+const ACCOUNT = 'crossing_fk_perm_account';
 const PROFILE = 'crossing_fk_perm_profile';
 const MEMBERSHIP = 'crossing_fk_perm_membership';
 const cacheTagsHeader = 'x-scoped-cache-tags';
@@ -41,7 +41,7 @@ describe(oneLine`
 		env[vendor]['CACHE_NAMESPACE'] = `directus-crossing-perm-${vendor}`;
 
 		let instance: ChildProcess;
-		let userId: string;
+		let boundAccountId: number;
 		const userToken = `crossing-perm-${vendor}-00000000000000000000`;
 		const admin = `Bearer ${USER.ADMIN.TOKEN}`;
 		const asUser = `Bearer ${userToken}`;
@@ -49,6 +49,10 @@ describe(oneLine`
 		beforeAll(async () => {
 			await CreateCollections(vendor, {
 				collections: [
+					{
+						collection: ACCOUNT,
+						fields: [{ field: 'name', type: 'string', meta: {} }],
+					},
 					{
 						collection: PROFILE,
 						meta: { scoped_cache_fields: ['account'] },
@@ -73,6 +77,23 @@ describe(oneLine`
 				otherCollection: PROFILE,
 			});
 
+			const accounts = await CreateItem(vendor, {
+				collection: ACCOUNT,
+				item: [{ name: 'bound' }, { name: 'other' }],
+			});
+
+			boundAccountId = accounts[0].id;
+
+			const profiles = await CreateItem(vendor, {
+				collection: PROFILE,
+				item: [{ label: 'p', account: boundAccountId }],
+			});
+
+			await CreateItem(vendor, {
+				collection: MEMBERSHIP,
+				item: [{ name: 'm', profile: profiles[0].id }],
+			});
+
 			const userResponse = await request(getUrl(vendor, env))
 				.post('/users')
 				.set('Authorization', admin)
@@ -88,10 +109,10 @@ describe(oneLine`
 									create: [
 										{
 											policy: '+',
-											// The per-user case that crosses the M2O onto the
-											// scope-field fk — no explicit query filter is sent.
+											// The case that crosses the M2O onto the scope-field
+											// fk — no explicit query filter is sent by the read.
 											permissions: {
-												profile: { account: { _eq: '$CURRENT_USER' } },
+												profile: { account: { _eq: boundAccountId } },
 											},
 											validation: null,
 											fields: ['*'],
@@ -106,6 +127,15 @@ describe(oneLine`
 											fields: ['*'],
 											presets: null,
 											collection: PROFILE,
+											action: 'read',
+										},
+										{
+											policy: '+',
+											permissions: { id: { _nnull: true } },
+											validation: null,
+											fields: ['*'],
+											presets: null,
+											collection: ACCOUNT,
 											action: 'read',
 										},
 									],
@@ -125,18 +155,6 @@ describe(oneLine`
 				);
 			}
 
-			userId = userResponse.body.data.id;
-
-			const profiles = await CreateItem(vendor, {
-				collection: PROFILE,
-				item: [{ label: 'p', account: userId }],
-			});
-
-			await CreateItem(vendor, {
-				collection: MEMBERSHIP,
-				item: [{ name: 'm', profile: profiles[0].id }],
-			});
-
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
@@ -149,10 +167,11 @@ describe(oneLine`
 		}, 60_000);
 
 		afterAll(async () => {
-			instance.kill();
+			instance?.kill();
 
 			await DeleteCollection(vendor, { collection: MEMBERSHIP });
 			await DeleteCollection(vendor, { collection: PROFILE });
+			await DeleteCollection(vendor, { collection: ACCOUNT });
 		});
 
 		it(oneLine`
@@ -169,7 +188,7 @@ describe(oneLine`
 				.headers[cacheTagsHeader];
 
 			expect(tags).toMatch(
-				new RegExp(`(^|, )${PROFILE}:account=${userId}(,|$)`),
+				new RegExp(`(^|, )${PROFILE}:account=${boundAccountId}(,|$)`),
 			);
 
 			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
