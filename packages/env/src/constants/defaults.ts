@@ -123,6 +123,8 @@ export const DEFAULTS = {
 	EXTENSIONS_ROLLDOWN: false,
 
 	MIGRATIONS_PATH: './migrations',
+	MIGRATIONS_WAIT_TIMEOUT: '5m',
+	MIGRATIONS_WAIT_INTERVAL: '2s',
 
 	EMAIL_FROM: 'no-reply@example.com',
 	EMAIL_VERIFY_SETUP: true,

@@ -214,6 +214,8 @@ export const DIRECTUS_VARIABLES = [
 
 	// migrations
 	'MIGRATIONS_PATH',
+	'MIGRATIONS_WAIT_TIMEOUT',
+	'MIGRATIONS_WAIT_INTERVAL',
 
 	// synchronization
 	'SYNCHRONIZATION_STORE',

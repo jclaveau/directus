@@ -14,6 +14,7 @@ import createApp from './app.js';
 import getDatabase from './database/index.js';
 import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
+import { watchOutstandingMigrations } from './outstanding-migrations.js';
 import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
@@ -169,6 +170,8 @@ export async function startServer(): Promise<void> {
 	// deliberately NOT handled — by then the state that threw is unknown, and Node's
 	// own guidance is to exit.
 	process.on('unhandledRejection', reportUnhandledRejection);
+
+	void watchOutstandingMigrations();
 
 	const server = await createServer();
 
