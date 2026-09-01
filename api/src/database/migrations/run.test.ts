@@ -1,8 +1,19 @@
 import type { Knex } from 'knex';
 import knex from 'knex';
 import { createTracker, MockClient, Tracker } from 'knex-mock-client';
-import type { MockedFunction } from 'vitest';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	type MockedFunction,
+	vi,
+} from 'vitest';
 import run from './run.js';
 
 describe('run', () => {
@@ -208,6 +219,192 @@ describe('run', () => {
 			if (result instanceof Error) {
 				expect(result.message).not.toContain('Migration keys collide!');
 			}
+		});
+	});
+
+	describe('transaction scopes', () => {
+		let directory: string;
+		let databaseFile: string;
+
+		beforeEach(async () => {
+			directory = await mkdtemp(join(tmpdir(), 'directus-migrations-'));
+			databaseFile = join(directory, 'probe.sqlite');
+		});
+
+		afterEach(async () => {
+			vi.doUnmock('fs-extra');
+			vi.doUnmock('@directus/env');
+			vi.doUnmock('../../cache.js');
+			vi.resetModules();
+			await rm(directory, { recursive: true, force: true });
+		});
+
+		/**
+		 * The runner reads its own directory and `MIGRATIONS_PATH`, then imports
+		 * each file by absolute path. Emptying the first and pointing the second
+		 * at a temp directory lets a test drive real migration modules through a
+		 * real driver, so what follows asserts on what the database ended up
+		 * holding rather than on calls to a mock.
+		 */
+		async function runFixtures(files: Record<string, string>) {
+			for (const [name, source] of Object.entries(files)) {
+				await writeFile(join(directory, name), source);
+			}
+
+			vi.resetModules();
+
+			vi.doMock('fs-extra', () => {
+				return {
+					default: {
+						readdir: vi.fn(async (target: string) => {
+							if (target === directory) {
+								return Object.keys(files);
+							}
+
+							return [];
+						}),
+						pathExists: vi.fn(async (target: string) => target === directory),
+					},
+				};
+			});
+
+			vi.doMock('@directus/env', () => {
+				return { useEnv: () => ({ MIGRATIONS_PATH: directory }) };
+			});
+
+			vi.doMock('../../cache.js', () => {
+				return { flushCaches: vi.fn() };
+			});
+
+			const database = knex.default({
+				client: 'sqlite3',
+				connection: { filename: databaseFile },
+				useNullAsDefault: true,
+				pool: { min: 1, max: 1 },
+			});
+
+			await database.schema.createTable('directus_migrations', (table) => {
+				table.string('version');
+				table.string('name');
+				table.timestamp('timestamp').defaultTo(database.fn.now());
+			});
+
+			const { default: runFresh } = await import('./run.js');
+			const error = await runFresh(database, 'latest', false).catch((e: Error) => e);
+
+			const applied = await database
+				.select('version')
+				.from('directus_migrations')
+				.orderBy('version');
+
+			const hasTable = (name: string) => database.schema.hasTable(name);
+
+			const tables = {
+				first: await hasTable('probe_first'),
+				second: await hasTable('probe_second'),
+				inTransaction: await hasTable('probe_in_transaction'),
+				outsideTransaction: await hasTable('probe_outside_transaction'),
+			};
+
+			await database.destroy();
+
+			return { error, applied: applied.map(({ version }) => version), tables };
+		}
+
+		function scopedTo(scope: string, body: string) {
+			return `export const transactionScope = '${scope}';\n${body}`;
+		}
+
+		const createsFirst = `export async function up(knex) {
+			await knex.schema.createTable('probe_first', (t) => t.integer('id'));
+		}`;
+
+		const createsSecond = `export async function up(knex) {
+			await knex.schema.createTable('probe_second', (t) => t.integer('id'));
+		}`;
+
+		// Names its table after the connection it was handed, so a scope meant to
+		// run outside the run's transaction cannot pass by receiving one anyway.
+		const recordsItsConnection = `export async function up(knex) {
+			const kind = knex.isTransaction ? 'in' : 'outside';
+			await knex.schema.createTable(\`probe_\${kind}_transaction\`, (t) => {
+				t.integer('id');
+			});
+		}`;
+
+		const throws = `export async function up() {
+			throw new Error('migration failed');
+		}`;
+
+		it('applies every pending migration and records each version', async () => {
+			const { error, applied, tables } = await runFixtures({
+				'20990101A-first.js': createsFirst,
+				'20990102A-second.js': createsSecond,
+			});
+
+			expect(error).toBeUndefined();
+			expect(applied).toEqual(['20990101A', '20990102A']);
+			expect(tables.first).toBe(true);
+			expect(tables.second).toBe(true);
+		});
+
+		it('runs a migration declaring no scope inside the transaction', async () => {
+			const { error, applied, tables } = await runFixtures({
+				'20990101A-first.js': recordsItsConnection,
+			});
+
+			expect(error).toBeUndefined();
+			expect(applied).toEqual(['20990101A']);
+			expect(tables.inTransaction).toBe(true);
+			expect(tables.outsideTransaction).toBe(false);
+		});
+
+		it('rolls back an earlier migration when a later one fails', async () => {
+			const { error, applied, tables } = await runFixtures({
+				'20990101A-first.js': createsFirst,
+				'20990102A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(applied).toEqual([]);
+			expect(tables.first).toBe(false);
+		});
+
+		it('keeps an "own" migration when a later one fails', async () => {
+			const { error, applied, tables } = await runFixtures({
+				'20990101A-first.js': scopedTo('own', recordsItsConnection),
+				'20990102A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(applied).toEqual(['20990101A']);
+			expect(tables.inTransaction).toBe(true);
+			expect(tables.outsideTransaction).toBe(false);
+		});
+
+		it('runs a "none" migration outside any transaction', async () => {
+			const { error, applied, tables } = await runFixtures({
+				'20990101A-first.js': scopedTo('none', recordsItsConnection),
+				'20990102A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(applied).toEqual(['20990101A']);
+			expect(tables.outsideTransaction).toBe(true);
+			expect(tables.inTransaction).toBe(false);
+		});
+
+		it('commits the open segment before an escaping migration', async () => {
+			const { error, applied, tables } = await runFixtures({
+				'20990101A-first.js': createsFirst,
+				'20990102A-second.js': scopedTo('own', createsSecond),
+				'20990103A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(applied).toEqual(['20990101A', '20990102A']);
+			expect(tables.first).toBe(true);
+			expect(tables.second).toBe(true);
 		});
 	});
 });

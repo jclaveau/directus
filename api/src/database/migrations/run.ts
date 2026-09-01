@@ -8,10 +8,16 @@ import { fileURLToPath } from 'node:url';
 import path from 'path';
 import { flushCaches } from '../../cache.js';
 import { useLogger } from '../../logger/index.js';
-import type { Migration } from '../../types/index.js';
+import type { Migration, MigrationTransactionScope } from '../../types/index.js';
 import getModuleDefault from '../../utils/get-module-default.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+type MigrationModule = {
+	up: (knex: Knex) => Promise<void>;
+	down: (knex: Knex) => Promise<void>;
+	transactionScope?: MigrationTransactionScope;
+};
 
 export default async function run(database: Knex, direction: 'up' | 'down' | 'latest', log = true): Promise<void> {
 	const env = useEnv();
@@ -78,7 +84,8 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 
 		if (!currentVersion) {
 			nextVersion = migrations[0];
-		} else {
+		}
+		else {
 			nextVersion = migrations.find((migration) => {
 				return migration.version! > currentVersion.version && migration.completed === false;
 			});
@@ -88,18 +95,20 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			throw Error('Nothing to upgrade');
 		}
 
-		const { up } = await import(`file://${nextVersion.file}`);
-
-		if (!up) {
-			logger.warn(`Couldn't find the "up" function from migration ${nextVersion.file}`);
-		}
+		const migrationModule = await loadMigration(nextVersion.file);
 
 		if (log) {
 			logger.info(`Applying ${nextVersion.name}...`);
 		}
 
-		await up(database);
-		await database.insert({ version: nextVersion.version, name: nextVersion.name }).into('directus_migrations');
+		if ((migrationModule.transactionScope ?? 'batch') === 'none') {
+			await applyUp(migrationModule, nextVersion, database);
+		}
+		else {
+			await database.transaction(async (trx) => {
+				await applyUp(migrationModule, nextVersion, trx);
+			});
+		}
 
 		await flushCaches(true);
 	}
@@ -117,9 +126,9 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			throw new Error("Couldn't find migration");
 		}
 
-		const { down } = await import(`file://${migration.file}`);
+		const migrationModule = await loadMigration(migration.file);
 
-		if (!down) {
+		if (!migrationModule.down) {
 			logger.warn(`Couldn't find the "down" function from migration ${migration.file}`);
 		}
 
@@ -127,35 +136,101 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			logger.info(`Undoing ${migration.name}...`);
 		}
 
-		await down(database);
-		await database('directus_migrations').delete().where({ version: migration.version });
+		async function revert(connection: Knex) {
+			await migrationModule.down(connection);
+
+			await connection('directus_migrations')
+				.delete()
+				.where({ version: migration!.version });
+		}
+
+		if ((migrationModule.transactionScope ?? 'batch') === 'none') {
+			await revert(database);
+		}
+		else {
+			await database.transaction(revert);
+		}
 
 		await flushCaches(true);
 	}
 
 	async function latest() {
-		let needsCacheFlush = false;
+		const pending = migrations.filter((migration) => migration.completed === false);
 
-		for (const migration of migrations) {
-			if (migration.completed === false) {
-				needsCacheFlush = true;
-				const { up } = getModuleDefault(await import(`file://${migration.file}`));
+		if (pending.length === 0) {
+			return;
+		}
 
-				if (!up) {
-					logger.warn(`Couldn't find the "up" function from migration ${migration.file}`);
+		let batch: Knex.Transaction | undefined;
+
+		try {
+			for (const migration of pending) {
+				const migrationModule = await loadMigration(migration.file);
+				const scope = migrationModule.transactionScope ?? 'batch';
+
+				if (scope !== 'batch' && batch) {
+					// An escaping migration has to see everything before it, so the
+					// open segment commits here and stops being able to roll back.
+					await batch.commit();
+					batch = undefined;
+
+					logger.warn(
+						`${migration.name} declares transactionScope "${scope}", so the`
+							+ ` migrations applied before it in this run are now committed`
+							+ ` and will not roll back if a later one fails.`,
+					);
 				}
 
 				if (log) {
 					logger.info(`Applying ${migration.name}...`);
 				}
 
-				await up(database);
-				await database.insert({ version: migration.version, name: migration.name }).into('directus_migrations');
+				if (scope === 'none') {
+					await applyUp(migrationModule, migration, database);
+				}
+				else if (scope === 'own') {
+					await database.transaction(async (trx) => {
+						await applyUp(migrationModule, migration, trx);
+					});
+				}
+				else {
+					batch ??= await database.transaction();
+					await applyUp(migrationModule, migration, batch);
+				}
 			}
+
+			await batch?.commit();
+		}
+		catch (error) {
+			if (batch && !batch.isCompleted()) {
+				await batch.rollback();
+			}
+
+			throw error;
 		}
 
-		if (needsCacheFlush) {
-			await flushCaches(true);
+		await flushCaches(true);
+	}
+
+	async function loadMigration(file: string): Promise<MigrationModule> {
+		return getModuleDefault<MigrationModule>(await import(`file://${file}`));
+	}
+
+	async function applyUp(
+		migrationModule: MigrationModule,
+		migration: ReturnType<typeof parseFilePath>,
+		connection: Knex,
+	) {
+		if (!migrationModule.up) {
+			logger.warn(
+				`Couldn't find the "up" function from migration ${migration.file}`,
+			);
 		}
+
+		await migrationModule.up(connection);
+
+		await connection
+			.insert({ version: migration.version, name: migration.name })
+			.into('directus_migrations');
 	}
 }
