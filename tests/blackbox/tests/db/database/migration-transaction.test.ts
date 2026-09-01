@@ -24,6 +24,13 @@ export async function down(knex) {
 }
 `;
 
+const TRANSACTIONAL_DDL: Vendor[] = [
+	'postgres',
+	'postgres10',
+	'sqlite3',
+	'cockroachdb',
+];
+
 const THROWS = `export async function up() {
 	throw new Error('blackbox migration failure');
 }
@@ -85,12 +92,14 @@ describe('database migrations', () => {
 				.whereIn('version', ['20990101A', '20990102A'])
 				.select('version');
 
-			// MariaDB has no transactional DDL — every statement implicit-commits
-			// either side of itself — so the table survives there. The version row
-			// still rolls back, which is what stops the runner believing the
-			// migration was applied.
-			expect(await connection.schema.hasTable('blackbox_migration_probe'))
-				.toBe(vendor === 'maria');
+			// Only engines with transactional DDL can take the table back; MySQL and
+			// MariaDB implicit-commit either side of every DDL statement. The version
+			// row rolls back everywhere, and that is the half which stops the runner
+			// believing the migration was applied.
+			if (TRANSACTIONAL_DDL.includes(vendor)) {
+				expect(await connection.schema.hasTable('blackbox_migration_probe'))
+					.toBe(false);
+			}
 
 			expect(applied).toEqual([]);
 		});
