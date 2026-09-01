@@ -2084,52 +2084,70 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			schema,
 		);
 
-		// `extractPathsFromQuery` files filter and sort under one group, so the
-		// filter's own paths are extracted again on their own to tell which of
-		// these collections a sort — which names no key, ever — put here.
-		const sortedGroupedFieldMap: FieldMap = { read: new Map(), other: new Map() };
+		// `extractPathsFromQuery` files filter and sort under one group, so sort and
+		// group/aggregate paths are extracted on their own — apart from each other —
+		// to tell, per collection, which of these query shapes reached it.
+		const sortedFieldMap: FieldMap = { read: new Map(), other: new Map() };
+		const groupedFieldMap: FieldMap = { read: new Map(), other: new Map() };
 
 		// Assigned only when set: `exactOptionalPropertyTypes` separates an absent
 		// key from one holding `undefined`, and `Query` declares these optional.
-		const sortedGroupedQuery: Query = {};
+		const sortedQuery: Query = {};
 
 		if (query.sort) {
-			sortedGroupedQuery.sort = query.sort;
+			sortedQuery.sort = query.sort;
 		}
 
+		extractFieldsFromQuery(collection, sortedQuery, sortedFieldMap, schema);
+
+		const groupedQuery: Query = {};
+
 		if (query.group) {
-			sortedGroupedQuery.group = query.group;
+			groupedQuery.group = query.group;
 		}
 
 		if (query.aggregate) {
-			sortedGroupedQuery.aggregate = query.aggregate;
+			groupedQuery.aggregate = query.aggregate;
 		}
 
-		extractFieldsFromQuery(
-			collection,
-			sortedGroupedQuery,
-			sortedGroupedFieldMap,
-			schema,
-		);
+		extractFieldsFromQuery(collection, groupedQuery, groupedFieldMap, schema);
 
-		const sortedOrGrouped = new Set<CollectionKey>();
+		const sorted = new Set<CollectionKey>();
+
+		for (const [, entry] of [...sortedFieldMap.read, ...sortedFieldMap.other]) {
+			sorted.add(entry.collection);
+		}
+
+		const groupedOrAggregated = new Set<CollectionKey>();
 
 		for (const [, entry] of [
-			...sortedGroupedFieldMap.read,
-			...sortedGroupedFieldMap.other,
+			...groupedFieldMap.read,
+			...groupedFieldMap.other,
 		]) {
-			sortedOrGrouped.add(entry.collection);
+			groupedOrAggregated.add(entry.collection);
 		}
 
 		for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
-			const kind = keyingByCollection.get(entry.collection)?.kind;
+			const collection = entry.collection;
+			const kind = keyingByCollection.get(collection)?.kind;
 			const namedByFilter = kind === 'keyed' || kind === 'independent';
 
-			if (namedByFilter && !sortedOrGrouped.has(entry.collection)) {
+			// A sort only reorders a collection's rows; a per-slice pin catches the
+			// reorder because a write to the collection emits its slice. So a sort
+			// costs the bare tag only where NO covering slice exists. A group or
+			// aggregate collapses rows across slices and always crosses.
+			const hasCoveringSlice =
+				(schema.collections[collection]?.scopedCacheFields ?? []).length > 0;
+
+			const crossesMembership =
+				groupedOrAggregated.has(collection) ||
+				(sorted.has(collection) && !hasCoveringSlice);
+
+			if (namedByFilter && !crossesMembership) {
 				continue;
 			}
 
-			beyond.add(entry.collection);
+			beyond.add(collection);
 		}
 	};
 

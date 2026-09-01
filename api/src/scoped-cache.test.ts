@@ -1716,6 +1716,70 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 		]).toContain('owner');
 	});
 
+	it('a covering slice spares a sort-reached filter-keyed collection', () => {
+		// A write to the collection emits its scope slice, dropping this read, so
+		// the slice already catches the reorder — the sort need not cost it a bare tag.
+		const slicedSchema = new SchemaBuilder()
+			.collection('company', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('company').m2o('company');
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		slicedSchema.collections['owner']!.scopedCacheFields = ['name'];
+
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				slicedSchema,
+				astOf({
+					filter: { owner: { id: { _eq: 7 } } },
+					sort: ['owner.name'],
+				}),
+			),
+		]).not.toContain('owner');
+	});
+
+	it('a group crosses a scope-sliced filter-keyed collection even so', () => {
+		// A group collapses rows across slices, so the covering slice cannot stand
+		// in the way it does for a sort — it falls back to the bare tag.
+		const slicedSchema = new SchemaBuilder()
+			.collection('company', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+				c.field('company').m2o('company');
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		slicedSchema.collections['owner']!.scopedCacheFields = ['name'];
+
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				slicedSchema,
+				astOf({
+					filter: { owner: { id: { _eq: 7 } } },
+					group: ['owner.name'],
+				}),
+			),
+		]).toContain('owner');
+	});
+
 	it('names a collection the root query sorts on', () => {
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(

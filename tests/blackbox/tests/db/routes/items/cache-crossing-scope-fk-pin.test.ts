@@ -392,5 +392,42 @@ describe(oneLine`
 
 			expect(tags).toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
 		});
+
+		it(oneLine`
+			keeps the near collection pinned when a sort crosses onto its scope slice
+		`, async () => {
+			// A write to any profile emits its account slice, catching the reorder.
+			await clearCache();
+
+			const readSorted = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${MEMBERSHIP}`)
+					.query({
+						'filter[profile][account][_eq]': String(boundAccountId),
+						sort: 'profile.label',
+						fields: 'id,name',
+					})
+					.set('Authorization', auth);
+			};
+
+			const tags = (await readSorted()).headers[cacheTagsHeader];
+
+			expect(tags).toMatch(
+				new RegExp(`(^|, )${PROFILE}:account=${boundAccountId}(,|$)`),
+			);
+
+			expect(tags).not.toMatch(new RegExp(`(^|, )${PROFILE}(,|$)`));
+
+			// Non-vacuity: the slice pin actually drops the read when an in-slice
+			// profile is written — a named-but-inert pin would stay HIT here.
+			expect((await readSorted()).headers[cacheStatusHeader]).toBe('HIT');
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${PROFILE}/${boundProfileId}`)
+				.send({ label: 'reordered' })
+				.set('Authorization', auth);
+
+			expect((await readSorted()).headers[cacheStatusHeader]).toBe('MISS');
+		});
 	});
 });
