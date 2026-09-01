@@ -8,10 +8,25 @@ import { fileURLToPath } from 'node:url';
 import path from 'path';
 import { flushCaches } from '../../cache.js';
 import { useLogger } from '../../logger/index.js';
+import type { DatabaseClient } from '@directus/types';
 import type { Migration, MigrationTransactionScope } from '../../types/index.js';
+import { getDatabaseClient } from '../index.js';
 import getModuleDefault from '../../utils/get-module-default.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Only Postgres both rolls DDL back and tolerates the runner holding a transaction
+ * open across a whole run.
+ *
+ * SQLite cannot: its alter-table rebuild runs under an outer transaction as a
+ * savepoint, and the rebuild invalidates it — `20240204A-marketplace` leaves a
+ * savepoint the next migration fails to release. MySQL-family DDL implicit-commits
+ * either side of every statement, so a wrap there buys nothing to begin with.
+ *
+ * Everywhere else the runner behaves exactly as it always did.
+ */
+const TRANSACTIONAL_CLIENTS: DatabaseClient[] = ['postgres', 'cockroachdb'];
 
 type MigrationModule = {
 	up: (knex: Knex) => Promise<void>;
@@ -101,13 +116,13 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			logger.info(`Applying ${nextVersion.name}...`);
 		}
 
-		if ((migrationModule.transactionScope ?? 'batch') === 'none') {
-			await applyUp(migrationModule, nextVersion, database);
-		}
-		else {
+		if (wrapsInTransaction(migrationModule)) {
 			await database.transaction(async (trx) => {
 				await applyUp(migrationModule, nextVersion, trx);
 			});
+		}
+		else {
+			await applyUp(migrationModule, nextVersion, database);
 		}
 
 		await flushCaches(true);
@@ -144,11 +159,11 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 				.where({ version: migration!.version });
 		}
 
-		if ((migrationModule.transactionScope ?? 'batch') === 'none') {
-			await revert(database);
+		if (wrapsInTransaction(migrationModule)) {
+			await database.transaction(revert);
 		}
 		else {
-			await database.transaction(revert);
+			await revert(database);
 		}
 
 		await flushCaches(true);
@@ -161,12 +176,17 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			return;
 		}
 
+		const batches = clientWrapsMigrations();
+
 		let batch: Knex.Transaction | undefined;
 
 		try {
 			for (const migration of pending) {
 				const migrationModule = await loadMigration(migration.file);
-				const scope = migrationModule.transactionScope ?? 'batch';
+
+				const scope = batches
+					? migrationModule.transactionScope ?? 'batch'
+					: 'none';
 
 				if (scope !== 'batch' && batch) {
 					// An escaping migration has to see everything before it, so the
@@ -210,6 +230,26 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 		}
 
 		await flushCaches(true);
+	}
+
+	function wrapsInTransaction(migrationModule: MigrationModule): boolean {
+		if (!clientWrapsMigrations()) {
+			return false;
+		}
+
+		return (migrationModule.transactionScope ?? 'batch') !== 'none';
+	}
+
+	function clientWrapsMigrations(): boolean {
+		try {
+			return TRANSACTIONAL_CLIENTS.includes(getDatabaseClient(database));
+		}
+		catch {
+			// `getDatabaseClient` throws on a connection it cannot name. Whatever that
+			// is, it has not been shown to survive a run-long transaction, so it runs
+			// the way it did before this guard existed.
+			return false;
+		}
 	}
 
 	async function loadMigration(file: string): Promise<MigrationModule> {

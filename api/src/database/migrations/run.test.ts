@@ -225,8 +225,10 @@ describe('run', () => {
 	describe('transaction scopes', () => {
 		let directory: string;
 		let databaseFile: string;
+		let client: string;
 
 		beforeEach(async () => {
+			client = 'postgres';
 			directory = await mkdtemp(join(tmpdir(), 'directus-migrations-'));
 			databaseFile = join(directory, 'probe.sqlite');
 		});
@@ -235,6 +237,7 @@ describe('run', () => {
 			vi.doUnmock('fs-extra');
 			vi.doUnmock('@directus/env');
 			vi.doUnmock('../../cache.js');
+			vi.doUnmock('../index.js');
 			vi.resetModules();
 			await rm(directory, { recursive: true, force: true });
 		});
@@ -274,6 +277,14 @@ describe('run', () => {
 
 			vi.doMock('../../cache.js', () => {
 				return { flushCaches: vi.fn() };
+			});
+
+			vi.doMock('../index.js', () => {
+				// The suite drives a real sqlite file because it is the only engine a unit
+				// test can open, but sqlite is not one the runner wraps. Naming the client
+				// keeps these cases about the batching logic rather than the dialect gate,
+				// which has its own case below.
+				return { getDatabaseClient: () => client };
 			});
 
 			const database = knex.default({
@@ -394,6 +405,21 @@ describe('run', () => {
 			expect(tables.inTransaction).toBe(false);
 		});
 
+		it('leaves a client it does not wrap exactly as it was', async () => {
+			// SQLite's alter-table rebuild cannot survive an outer transaction, and
+			// MySQL-family DDL implicit-commits, so neither is wrapped at all.
+			client = 'sqlite3';
+
+			const { error, applied, tables } = await runFixtures({
+				'20990101A-first.js': createsFirst,
+				'20990102A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(applied).toEqual(['20990101A']);
+			expect(tables.first).toBe(true);
+		});
+
 		it('commits the open segment before an escaping migration', async () => {
 			const { error, applied, tables } = await runFixtures({
 				'20990101A-first.js': createsFirst,
@@ -406,5 +432,38 @@ describe('run', () => {
 			expect(tables.first).toBe(true);
 			expect(tables.second).toBe(true);
 		});
+	});
+
+	describe('the migration set this build ships', () => {
+		let directory: string;
+
+		afterEach(async () => {
+			await rm(directory, { recursive: true, force: true });
+		});
+
+		// Applies every core migration to an empty database through the real runner.
+		// Nothing smaller catches a migration that only misbehaves under whatever the
+		// runner wraps around it: `20240204A-marketplace` opens a transaction of its
+		// own, which an outer one turns into a savepoint that SQLite's alter-table
+		// rebuild then invalidates, and the run dies on the migration after it.
+		it('applies to a fresh sqlite database', async () => {
+			directory = await mkdtemp(join(tmpdir(), 'directus-migration-set-'));
+
+			const database = knex.default({
+				client: 'sqlite3',
+				connection: { filename: join(directory, 'probe.sqlite') },
+				useNullAsDefault: true,
+				pool: { min: 1, max: 1 },
+			});
+
+			const { default: installDatabase } = await import('../seeds/run.js');
+			await installDatabase(database);
+
+			const error = await run(database, 'latest', false).catch((e: Error) => e);
+
+			await database.destroy();
+
+			expect(error).toBeUndefined();
+		}, 120_000);
 	});
 });
