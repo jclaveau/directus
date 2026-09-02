@@ -1905,7 +1905,7 @@ onUnmounted(() => {
 			<search-input
 				v-model="search"
 				v-model:filter="filter"
-				collection="directus_cache_descriptors"
+				collection="directus_cache_stats_descriptors"
 			/>
 
 			<v-button

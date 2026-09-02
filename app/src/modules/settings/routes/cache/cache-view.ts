@@ -101,7 +101,7 @@ export type CacheAnomalyReason =
 	| 'redis_error';
 
 // Normalised to its descriptor: path/method/query come from the referenced
-// directus_cache_descriptors row, so it drops into the tree at the same node.
+// directus_cache_stats_descriptors row, so it drops into the tree at the same node.
 export interface CacheAnomaly {
 	cacheKey: string;
 	reason: CacheAnomalyReason;

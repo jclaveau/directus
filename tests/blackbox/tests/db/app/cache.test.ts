@@ -2842,15 +2842,15 @@ describe('App Caching Tests', () => {
 			const path = `/items/ttl_probe_${vendor}`;
 			const now = new Date();
 
-			await db('directus_cache_events')
+			await db('directus_cache_stats_events')
 				.where({ cache_key: key })
 				.delete();
 
-			await db('directus_cache_descriptors')
+			await db('directus_cache_stats_descriptors')
 				.where({ cache_key: key })
 				.delete();
 
-			await db('directus_cache_descriptors').insert({
+			await db('directus_cache_stats_descriptors').insert({
 				cache_key: key,
 				method: 'GET',
 				path,
@@ -2889,7 +2889,7 @@ describe('App Caching Tests', () => {
 				});
 			}
 
-			await db('directus_cache_events').insert(events);
+			await db('directus_cache_stats_events').insert(events);
 
 			const listed = await request(url).get('/utils/cache')
 				.set('Authorization', auth);
@@ -2907,11 +2907,11 @@ describe('App Caching Tests', () => {
 				expect(row.recommendedTtlMs).toBeNull();
 			}
 
-			await db('directus_cache_events')
+			await db('directus_cache_stats_events')
 				.where({ cache_key: key })
 				.delete();
 
-			await db('directus_cache_descriptors')
+			await db('directus_cache_stats_descriptors')
 				.where({ cache_key: key })
 				.delete();
 		}, 40000);
@@ -3271,9 +3271,10 @@ describe('App Caching Tests', () => {
 		The timeseries buckets hits, misses, anomalies and ttl by time — the now-edge
 		events land in the LAST bucket, not dropped (Postgres only)
 	`, () => {
-		// Seed directus_cache_events / _anomalies directly at chosen times so the SQL
-		// bucketing is asserted on controlled inputs — the capture path can't stamp a
-		// `time`. The query filters by time only (no cache_key), so clear the window
+		// Seed directus_cache_stats_events / _anomalies directly at chosen times so
+		// the SQL bucketing is asserted on controlled inputs — the capture path
+		// can't stamp a `time`. The query filters by time only (no cache_key), so
+		// clear the window
 		// first, leaving just these rows. Regression guard for the off-by-one that put
 		// the `now` edge one slot past the array: all recent traffic lives in that edge,
 		// so the whole graph read back empty (hits/misses/ttl curve all zero).
@@ -3323,10 +3324,10 @@ describe('App Caching Tests', () => {
 			const windowStart = new Date(now - windowMs);
 
 			await Promise.all([
-				db('directus_cache_events')
+				db('directus_cache_stats_events')
 					.where('time', '>', windowStart)
 					.delete(),
-				db('directus_cache_anomalies')
+				db('directus_cache_stats_anomalies')
 					.where('time', '>', windowStart)
 					.delete(),
 			]);
@@ -3358,8 +3359,8 @@ describe('App Caching Tests', () => {
 			}
 
 			await Promise.all([
-				db('directus_cache_events').insert(events),
-				db('directus_cache_anomalies').insert({
+				db('directus_cache_stats_events').insert(events),
+				db('directus_cache_stats_anomalies').insert({
 					time: edgeTime,
 					cache_key: key,
 					reason: 'value_too_large',
@@ -3454,10 +3455,10 @@ describe('App Caching Tests', () => {
 
 			// Cleanup
 			await Promise.all([
-				db('directus_cache_events')
+				db('directus_cache_stats_events')
 					.where({ cache_key: key })
 					.delete(),
-				db('directus_cache_anomalies')
+				db('directus_cache_stats_anomalies')
 					.where({ cache_key: key })
 					.delete(),
 			]);
@@ -3468,10 +3469,10 @@ describe('App Caching Tests', () => {
 		The timeseries counts purge operations apart from what they evicted, splits
 		out the coarse ones, and times them (Postgres only)
 	`, () => {
-		// Seeded straight into directus_cache_purges so the mode, the eviction count
-		// and the duration are chosen rather than whatever a mutation happened to do.
-		// What is under test here is the SQL: the CASE that isolates the two coarse
-		// modes, a SUM over a column left NULL where the size is unknowable, and
+		// Seeded straight into directus_cache_stats_purges so the mode, the eviction
+		// count and the duration are chosen rather than whatever a mutation happened
+		// to do. What is under test here is the SQL: the CASE that isolates the two
+		// coarse modes, a SUM over a column left NULL where the size is unknowable, and
 		// percentile_cont over the durations.
 		it.each(vendors)('%s', async (vendor) => {
 			const env = envs[vendor].envRedis;
@@ -3519,7 +3520,7 @@ describe('App Caching Tests', () => {
 
 			// Every other block in this file mutates, and a mutation purges — so the
 			// window is cleared first, these counts being exact.
-			await db('directus_cache_purges')
+			await db('directus_cache_stats_purges')
 				.where('time', '>', new Date(now - windowMs))
 				.delete();
 
@@ -3541,7 +3542,7 @@ describe('App Caching Tests', () => {
 			// in between redelivers the batch and writes each purge again, verbatim.
 			// One purge is duplicated here: every figure below must be unmoved by it,
 			// or a single crash permanently doubles a bucket.
-			await db('directus_cache_purges').insert([
+			await db('directus_cache_stats_purges').insert([
 				...rowsToSeed,
 				rowsToSeed[0]!,
 			]);
@@ -3613,7 +3614,7 @@ describe('App Caching Tests', () => {
 				expect(sumOf('purgedEntries')).toBe(52);
 			}
 
-			await db('directus_cache_purges')
+			await db('directus_cache_stats_purges')
 				.whereIn('purge_id', seeded)
 				.delete();
 		}, 60000);
@@ -3675,7 +3676,7 @@ describe('App Caching Tests', () => {
 
 			// A second tag of the same collection on the same entry, so the coarse
 			// join has two rows through which to reach one purge.
-			await db('directus_scoped_cache_entry_tags').insert({
+			await db('directus_cache_stats_scoped_entry_tags').insert({
 				cache_key: entry.key,
 				scoped_cache_tag: `${collectionFirst}:decoy=1`,
 				collection: collectionFirst,
@@ -3686,7 +3687,7 @@ describe('App Caching Tests', () => {
 			const expired = randomUUID();
 			const now = Date.now();
 
-			await db('directus_scoped_cache_purge_tags').insert([
+			await db('directus_cache_stats_scoped_purge_tags').insert([
 				// The purge that covered it: one tag-less row naming the collection,
 				// which is all a collection-wide purge knows about its own reach.
 				{
@@ -3728,11 +3729,11 @@ describe('App Caching Tests', () => {
 			expect(after).toBeDefined();
 			expect(after.purges).toBe(1);
 
-			await db('directus_scoped_cache_purge_tags')
+			await db('directus_cache_stats_scoped_purge_tags')
 				.whereIn('purge_id', [covering, elsewhere, expired])
 				.delete();
 
-			await db('directus_scoped_cache_entry_tags')
+			await db('directus_cache_stats_scoped_entry_tags')
 				.where({
 					cache_key: entry.key,
 					scoped_cache_tag: `${collectionFirst}:decoy=1`,

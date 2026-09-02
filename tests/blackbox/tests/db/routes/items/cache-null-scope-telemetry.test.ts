@@ -18,7 +18,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // batched with it — hits, misses, fills, purges — behind a warning nobody reads.
 
 const COLLECTION = 'test_items_null_scope_telemetry';
-const PURGE_TAGS = 'directus_scoped_cache_purge_tags';
+const PURGE_TAGS = 'directus_cache_stats_scoped_purge_tags';
 
 describe(oneLine`
 	a purge whose scope value is null persists its attribution instead of taking the

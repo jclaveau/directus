@@ -258,6 +258,6 @@ data:
     one_collection: directus_flows
 
   ### Cache
-  - many_collection: directus_cache_descriptors
+  - many_collection: directus_cache_stats_descriptors
     many_field: user_id
     one_collection: directus_users

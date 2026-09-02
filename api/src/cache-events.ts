@@ -23,18 +23,19 @@ export type {
  * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
  * hit/miss never touches the DB on the hot path:
  *
- *   - `directus_cache_events` — lean fact, one row per hit/miss: cache key +
+ *   - `directus_cache_stats_events` — lean fact, one row per hit/miss: cache key +
  *     age-at-hit (shorten signal), gap-since-expiry (lengthen signal, from a
  *     tombstone), effective TTL. Timescale hypertable + retention where present;
  *     a daily app-level reap (CACHE_STATS_RETENTION) bounds it on every dialect.
- *   - `directus_cache_descriptors` — dimension, one row per key: the request
+ *   - `directus_cache_stats_descriptors` — dimension, one row per key: the request
  *     descriptor (method/path/collection/user/query/size), upserted on fill.
- *   - `directus_cache_anomalies` — silent not-cached / redis-error events.
- *   - `directus_cache_purges` — one row per purge operation (not per evicted
+ *   - `directus_cache_stats_anomalies` — silent not-cached / redis-error events.
+ *   - `directus_cache_stats_purges` — one row per purge operation (not per evicted
  *     key), carrying how far it reached and how many entries it took.
  *
- * Eight stream kinds. Latency facts in `directus_cache_events` (numeric `kind`, all
- * carrying duration_ms): `h` hit (0), `f` fill (2) a cached miss's compute, `x`
+ * Eight stream kinds. Latency facts in `directus_cache_stats_events` (numeric
+ * `kind`, all carrying duration_ms): `h` hit (0), `f` fill (2) a cached miss's
+ * compute, `x`
  * anomaly-miss (3) a flagged-uncacheable miss, `o` other-miss (4) a silently-skipped
  * miss — the "Misses" curve pools 2/3/4. `m` miss (1, cache.ts) is the count only.
  * `d` descriptor + `a` anomaly + `p` purge demux to the other tables. Capture is
@@ -263,19 +264,19 @@ const DIMENSION_REAP_PASSES = 4;
 // The fact tables, oldest-first evictable because their rows sit in chunks that
 // can be dropped whole. CACHE_STATS_MAX_BYTES is held by cutting these.
 const CACHE_STATS_FACTS = [
-	'directus_cache_events',
-	'directus_cache_purges',
-	'directus_scoped_cache_purge_tags',
+	'directus_cache_stats_events',
+	'directus_cache_stats_purges',
+	'directus_cache_stats_scoped_purge_tags',
 ];
 
 // Everything the subsystem writes, which is what the budget measures: the facts
 // above plus the dimensions and the two markers, held by their reapers instead.
 const CACHE_STATS_TABLES = [
 	...CACHE_STATS_FACTS,
-	'directus_cache_descriptors',
-	'directus_scoped_cache_entry_tags',
-	'directus_cache_anomalies',
-	'directus_cache_config_events',
+	'directus_cache_stats_descriptors',
+	'directus_cache_stats_scoped_entry_tags',
+	'directus_cache_stats_anomalies',
+	'directus_cache_stats_config_events',
 ];
 
 // Evict down to this share of the budget, not to the line itself: at the line a
@@ -1046,11 +1047,11 @@ async function persistStreamBatch(
 		// the fact events persisted while descriptors/anomalies are dropped.
 		await db.transaction(async (trx) => {
 			if (events.length > 0) {
-				await trx.batchInsert('directus_cache_events', events, FLUSH_BATCH);
+				await trx.batchInsert('directus_cache_stats_events', events, FLUSH_BATCH);
 			}
 
 			if (descriptors.size > 0) {
-				await trx('directus_cache_descriptors')
+				await trx('directus_cache_stats_descriptors')
 					.insert([...descriptors.values()])
 					.onConflict('cache_key')
 					.merge();
@@ -1059,23 +1060,27 @@ async function persistStreamBatch(
 			// After real fills, so a locator only creates a row when none exists yet;
 			// its zeros must never overwrite a cached entry's bytes/coarse/fill_ms.
 			if (locators.size > 0) {
-				await trx('directus_cache_descriptors')
+				await trx('directus_cache_stats_descriptors')
 					.insert([...locators.values()])
 					.onConflict('cache_key')
 					.ignore();
 			}
 
 			if (anomalies.length > 0) {
-				await trx.batchInsert('directus_cache_anomalies', anomalies, FLUSH_BATCH);
+				await trx.batchInsert(
+					'directus_cache_stats_anomalies',
+					anomalies,
+					FLUSH_BATCH,
+				);
 			}
 
 			if (purges.length > 0) {
-				await trx.batchInsert('directus_cache_purges', purges, FLUSH_BATCH);
+				await trx.batchInsert('directus_cache_stats_purges', purges, FLUSH_BATCH);
 			}
 
 			if (purgedScopedCacheTags.length > 0) {
 				await trx.batchInsert(
-					'directus_scoped_cache_purge_tags',
+					'directus_cache_stats_scoped_purge_tags',
 					purgedScopedCacheTags,
 					FLUSH_BATCH,
 				);
@@ -1084,7 +1089,7 @@ async function persistStreamBatch(
 			// Replaced, not merged: a refill under a narrower scope must not leave
 			// the old tags behind claiming coverage the entry no longer has.
 			if (entryScopedCacheTags.size > 0) {
-				await trx('directus_scoped_cache_entry_tags')
+				await trx('directus_cache_stats_scoped_entry_tags')
 					.whereIn('cache_key', [...entryScopedCacheTags.keys()])
 					.delete();
 
@@ -1097,7 +1102,7 @@ async function persistStreamBatch(
 
 				if (rows.length > 0) {
 					await trx.batchInsert(
-						'directus_scoped_cache_entry_tags',
+						'directus_cache_stats_scoped_entry_tags',
 						rows,
 						FLUSH_BATCH,
 					);
@@ -1147,9 +1152,9 @@ function scopedCachePurgeCoverage(
 	since: Date,
 ): Knex.QueryBuilder {
 	if (reach === 'tag') {
-		return db('directus_scoped_cache_entry_tags as et')
+		return db('directus_cache_stats_scoped_entry_tags as et')
 			.join(
-				'directus_scoped_cache_purge_tags as pt',
+				'directus_cache_stats_scoped_purge_tags as pt',
 				'pt.scoped_cache_tag',
 				'et.scoped_cache_tag',
 			)
@@ -1157,9 +1162,9 @@ function scopedCachePurgeCoverage(
 			.whereIn('et.cache_key', cacheKeys);
 	}
 
-	return db('directus_scoped_cache_purge_tags as pt')
+	return db('directus_cache_stats_scoped_purge_tags as pt')
 		.join(
-			'directus_scoped_cache_entry_tags as et',
+			'directus_cache_stats_scoped_entry_tags as et',
 			'et.collection',
 			'pt.collection',
 		)
@@ -1203,7 +1208,7 @@ export async function listPurgesCoveringEntry(
 
 	for (const reach of SCOPED_CACHE_PURGE_REACHES) {
 		rows.push(...await scopedCachePurgeCoverage(db, reach, [cacheKey], since)
-			.join('directus_cache_purges as p', 'p.purge_id', 'pt.purge_id')
+			.join('directus_cache_stats_purges as p', 'p.purge_id', 'pt.purge_id')
 			.distinct(
 				'p.purge_id',
 				'p.time',
@@ -1225,7 +1230,7 @@ export async function listPurgesCoveringEntry(
 	// straight from the purges table, which is the only trace it leaves. Not
 	// counted in the listing's `purges`: that column attributes a purge to the
 	// scope it named, and a clear named none.
-	rows.push(...await db('directus_cache_purges as p')
+	rows.push(...await db('directus_cache_stats_purges as p')
 		.where('p.mode', 'namespace')
 		.where('p.time', '>', since)
 		.select('p.purge_id', 'p.time', 'p.mode', 'p.collection', 'p.evicted')
@@ -1290,11 +1295,11 @@ export async function readCacheDescriptorForRedisKey(
 
 	const db = getDatabase();
 
-	const byIdentity = await db('directus_cache_descriptors')
+	const byIdentity = await db('directus_cache_stats_descriptors')
 		.where('cache_key', redisKey)
 		.first('cache_key', 'last_filled');
 
-	const found = byIdentity ?? await db('directus_cache_descriptors')
+	const found = byIdentity ?? await db('directus_cache_stats_descriptors')
 		.where('redis_key', redisKey)
 		.first('cache_key', 'last_filled');
 
@@ -1376,14 +1381,14 @@ export async function listCacheEntries(
 	// dimensions OF that key, so carrying them through the aggregate widens the
 	// grouping key for nothing. Measured on production it is ~10% cheaper and
 	// spills the same 125 MB — the event row count drives the spill, not the width.
-	const eventAggregateRows = await db('directus_cache_events as e')
+	const eventAggregateRows = await db('directus_cache_stats_events as e')
 		.where('e.time', '>', since)
 		// Anomaly locators (never filled) resolve as anomaly rows, not cache entries.
 		// A semi-join, so excluding them adds no column to the grouping key.
 		.whereExists((filledDescriptor) => {
 			filledDescriptor
 				.select(db.raw('1'))
-				.from('directus_cache_descriptors as d')
+				.from('directus_cache_stats_descriptors as d')
 				.whereRaw('?? = ??', ['d.cache_key', 'e.cache_key'])
 				.whereNotNull('d.last_filled');
 		})
@@ -1401,7 +1406,7 @@ export async function listCacheEntries(
 	// reach the aggregate above.
 	const descriptorRows = listedKeys.length === 0
 		? []
-		: await db('directus_cache_descriptors as d')
+		: await db('directus_cache_stats_descriptors as d')
 			.leftJoin('directus_users as u', 'u.id', 'd.user_id')
 			.whereIn('d.cache_key', listedKeys)
 			.select(
@@ -1564,8 +1569,8 @@ export async function listCacheGroupLatencies(
 		});
 	});
 
-	const rows = await db('directus_cache_descriptors as d')
-		.join('directus_cache_events as e', 'e.cache_key', 'd.cache_key')
+	const rows = await db('directus_cache_stats_descriptors as d')
+		.join('directus_cache_stats_events as e', 'e.cache_key', 'd.cache_key')
 		.where('e.time', '>', since)
 		.whereIn('e.kind', [0, 2, 3, 4])
 		.whereNotNull('e.duration_ms')
@@ -1640,7 +1645,7 @@ export async function evictCacheEntriesForPath(
 		return 0;
 	}
 
-	const keys = await getDatabase()('directus_cache_descriptors')
+	const keys = await getDatabase()('directus_cache_stats_descriptors')
 		.where({ path })
 		.pluck('redis_key');
 
@@ -1779,7 +1784,7 @@ export async function reapCacheDescriptors(): Promise<number> {
 		return 0;
 	}
 
-	const dimensionTable = 'directus_cache_descriptors';
+	const dimensionTable = 'directus_cache_stats_descriptors';
 
 	return reapDimensionOrphans(
 		dimensionTable,
@@ -1789,8 +1794,8 @@ export async function reapCacheDescriptors(): Promise<number> {
 			query.select('redis_key');
 
 			// A re-anomalied dormant key keeps its descriptor for the anomaly join.
-			whereUnreferencedBy(query, 'directus_cache_events', dimensionTable);
-			whereUnreferencedBy(query, 'directus_cache_anomalies', dimensionTable);
+			whereUnreferencedBy(query, 'directus_cache_stats_events', dimensionTable);
+			whereUnreferencedBy(query, 'directus_cache_stats_anomalies', dimensionTable);
 		},
 		cacheKeysWithNoLiveEntry,
 	);
@@ -1798,9 +1803,10 @@ export async function reapCacheDescriptors(): Promise<number> {
 
 /**
  * Prune fact rows past the retention window. The cross-dialect bound on
- * `directus_cache_events` growth: Timescale's own retention policy only covers the
- * hypertable path, so plain PG / MySQL / SQLite rely on this daily sweep (and it's
- * a harmless belt on Timescale, where chunk-drop already reclaims older rows).
+ * `directus_cache_stats_events` growth: Timescale's own retention policy only
+ * covers the hypertable path, so plain PG / MySQL / SQLite rely on this daily
+ * sweep (and it's a harmless belt on Timescale, where chunk-drop already
+ * reclaims older rows).
  */
 export async function reapCacheEvents(): Promise<number> {
 	if (!cacheStatsConfigured()) {
@@ -1809,7 +1815,7 @@ export async function reapCacheEvents(): Promise<number> {
 
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_cache_events')
+	return getDatabase()('directus_cache_stats_events')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -1826,7 +1832,7 @@ export async function reapScopedCachePurgeTags(): Promise<number> {
 
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_scoped_cache_purge_tags')
+	return getDatabase()('directus_cache_stats_scoped_purge_tags')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -1841,10 +1847,10 @@ export async function reapScopedCacheEntryTags(): Promise<number> {
 		return 0;
 	}
 
-	const dimensionTable = 'directus_scoped_cache_entry_tags';
+	const dimensionTable = 'directus_cache_stats_scoped_entry_tags';
 
 	return reapDimensionOrphans(dimensionTable, (query) => {
-		whereUnreferencedBy(query, 'directus_cache_descriptors', dimensionTable);
+		whereUnreferencedBy(query, 'directus_cache_stats_descriptors', dimensionTable);
 	});
 }
 
@@ -1860,7 +1866,7 @@ export async function reapCachePurges(): Promise<number> {
 
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_cache_purges')
+	return getDatabase()('directus_cache_stats_purges')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -1883,8 +1889,8 @@ export async function listCacheAnomalies(
 	// Join the descriptor for path/method/query — a (cache_key, reason) pair lands
 	// at its node. The inner join holds because a descriptor outlives its anomalies:
 	// one of them referencing it is itself a reason the reaper keeps it.
-	const rows = await db('directus_cache_anomalies as a')
-		.join('directus_cache_descriptors as d', 'd.cache_key', 'a.cache_key')
+	const rows = await db('directus_cache_stats_anomalies as a')
+		.join('directus_cache_stats_descriptors as d', 'd.cache_key', 'a.cache_key')
 		.where('a.time', '>', since)
 		.groupBy('a.cache_key', 'a.reason', 'd.path', 'd.method', 'd.query')
 		.select(
@@ -1928,7 +1934,7 @@ export async function reapCacheAnomalies(): Promise<number> {
 
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_cache_anomalies')
+	return getDatabase()('directus_cache_stats_anomalies')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -1951,7 +1957,7 @@ export async function recordCacheConfigEvent(
 	kind: CacheConfigEvent['kind'],
 	detail: string | null,
 ): Promise<void> {
-	await getDatabase()('directus_cache_config_events').insert({
+	await getDatabase()('directus_cache_stats_config_events').insert({
 		time: new Date(),
 		kind,
 		detail,
@@ -2040,7 +2046,7 @@ export async function readCacheTimeseries(
 	const sinceMs = anchorMs - (bucketCount - 1) * bucketMs;
 	const since = new Date(sinceMs);
 
-	const markerRows = await db('directus_cache_config_events')
+	const markerRows = await db('directus_cache_stats_config_events')
 		.where('time', '>', since)
 		.orderBy('time', 'asc')
 		.select('time', 'kind', 'detail');
@@ -2105,7 +2111,7 @@ export async function readCacheTimeseries(
 	// comes from the last change before it. Without that lookup every window would
 	// start unknown and the chart would back-fill its lead with a later value — the
 	// exact conflation this series exists to stop (#343).
-	const priorChange = await db('directus_cache_config_events')
+	const priorChange = await db('directus_cache_stats_config_events')
 		.where('kind', 'ttl_change')
 		.andWhere('time', '<=', since)
 		.orderBy('time', 'desc')
@@ -2145,7 +2151,7 @@ export async function readCacheTimeseries(
 
 	const bucketExpr = 'floor(extract(epoch from (time - ?::timestamptz)) / ?)';
 
-	const eventRows = await db('directus_cache_events')
+	const eventRows = await db('directus_cache_stats_events')
 		.where('time', '>', since)
 		.groupByRaw('1')
 		.select(
@@ -2167,7 +2173,7 @@ export async function readCacheTimeseries(
 			: base;
 	};
 
-	const latencyRows = await db('directus_cache_events')
+	const latencyRows = await db('directus_cache_stats_events')
 		.where('time', '>', since)
 		.whereIn('kind', [0, 2, 3, 4])
 		.whereNotNull('duration_ms')
@@ -2191,7 +2197,7 @@ export async function readCacheTimeseries(
 			db.raw(`${pct(0.99)} AS both_p99`),
 		);
 
-	const anomalyRows = await db('directus_cache_anomalies')
+	const anomalyRows = await db('directus_cache_stats_anomalies')
 		.where('time', '>', since)
 		.groupByRaw('1')
 		.select(
@@ -2205,7 +2211,7 @@ export async function readCacheTimeseries(
 	// eviction total. A purge carries an id, and a redelivery repeats it verbatim,
 	// so reading DISTINCT rows collapses the copies before anything is summed.
 	// (The events fact has no id and cannot do this — hence the id here.)
-	const distinctPurges = db('directus_cache_purges')
+	const distinctPurges = db('directus_cache_stats_purges')
 		.where('time', '>', since)
 		.distinct('purge_id', 'time', 'mode', 'evicted', 'duration_ms')
 		.as('p');
@@ -2311,7 +2317,7 @@ export async function readCacheTimeseries(
 export async function reapCacheConfigEvents(): Promise<number> {
 	const cutoff = new Date(Date.now() - retentionMs());
 
-	return getDatabase()('directus_cache_config_events')
+	return getDatabase()('directus_cache_stats_config_events')
 		.where('time', '<', cutoff)
 		.delete();
 }
@@ -2485,15 +2491,15 @@ async function deleteStatsKeysByPattern(
 // Drop all gathered telemetry — the fast way to reclaim space after autokill.
 export async function truncateCacheEvents(): Promise<void> {
 	const db = getDatabase();
-	await db('directus_cache_events').truncate();
-	await db('directus_cache_descriptors').truncate();
-	await db('directus_cache_anomalies').truncate();
+	await db('directus_cache_stats_events').truncate();
+	await db('directus_cache_stats_descriptors').truncate();
+	await db('directus_cache_stats_anomalies').truncate();
 	// Purges are telemetry of the same class, so they go with it. Left behind,
 	// they would count against entries whose own history was just cleared —
 	// purges without hits, on a window that reports no traffic at all.
-	await db('directus_cache_purges').truncate();
-	await db('directus_scoped_cache_purge_tags').truncate();
-	await db('directus_scoped_cache_entry_tags').truncate();
+	await db('directus_cache_stats_purges').truncate();
+	await db('directus_cache_stats_scoped_purge_tags').truncate();
+	await db('directus_cache_stats_scoped_entry_tags').truncate();
 
 	// Full reset: also drop the Redis transients tied to those rows — else buffered
 	// events drain back in and a held throttle slot suppresses the next sample.
