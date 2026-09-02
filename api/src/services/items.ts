@@ -40,6 +40,7 @@ import {
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheFilterKeyingByCollection,
+	scopedCacheAncestorSliceCandidates,
 	scopedCacheNestedCollections,
 	scopedCacheOwnershipNestedPkPaths,
 	scopedCacheTagKey,
@@ -1371,6 +1372,63 @@ implements AbstractService<Item> {
 				[...fieldMap.read].map(([, entry]) => entry.collection),
 			);
 
+			// Prefer, over a would-be-bare collection tag, the nearest slice to an
+			// ancestor its ownership chain reaches that is pinned in this read: a write to
+			// the collection purges that same key (every hop is an ownership edge), so the
+			// slice invalidates the read where the bare tag only over-purged.
+			const ancestorSliceTagsFor = (collection: string): ScopedCacheTag[] => {
+				const pinsOf = (ancestor: string): ScopedCacheTag[] => {
+					if (ancestor === this.collection) {
+						return rootScopedCacheTags;
+					}
+
+					return [
+						...m2oParentPins.get(ancestor) ?? [],
+						...keyedFilterPins.get(ancestor) ?? [],
+					];
+				};
+
+				for (
+					const candidate of scopedCacheAncestorSliceCandidates(
+						this.schema,
+						collection,
+					)
+				) {
+					const matched = pinsOf(candidate.ancestor).filter((pin) => {
+						return pin.field === candidate.terminalField;
+					});
+
+					if (matched.length > 0) {
+						return matched.map((pin) => {
+							return {
+								collection,
+								field: candidate.field,
+								value: pin.value,
+								type: pin.type,
+							};
+						});
+					}
+				}
+
+				return [];
+			};
+
+			const pushAncestorSliceOrBare = (collection: string): void => {
+				// Only a collection demoted to bare by `beyond` (a sort/injection reached
+				// it, but its ownership is intact) may take an ancestor slice. A collection
+				// bared for soundness — conflicting o2m aliases, an undecidable key — must
+				// stay bare, or the slice covers rows the ambiguity left it unable to name.
+				const ancestorSliceTags = beyondNestedRows.has(collection)
+					? ancestorSliceTagsFor(collection)
+					: [];
+
+				scopedCacheTags.push(
+					...(ancestorSliceTags.length > 0
+						? ancestorSliceTags
+						: [{ collection }]),
+				);
+			};
+
 			for (const collection of taggedCollections) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
@@ -1409,7 +1467,7 @@ implements AbstractService<Item> {
 						!collectionsFetchedAsRows.has(collection)
 					)
 				) {
-					scopedCacheTags.push({ collection });
+					pushAncestorSliceOrBare(collection);
 					continue;
 				}
 
@@ -1433,7 +1491,7 @@ implements AbstractService<Item> {
 				}
 
 				if (pins.size === 0) {
-					scopedCacheTags.push({ collection });
+					pushAncestorSliceOrBare(collection);
 					continue;
 				}
 

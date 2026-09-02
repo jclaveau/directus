@@ -14,6 +14,7 @@ import {
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromKeyedFilters,
+	scopedCacheAncestorSliceCandidates,
 	scopedCacheOwnershipNestedPkPaths,
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromO2mChildren,
@@ -2425,6 +2426,96 @@ describe('scopedCacheOwnershipNestedPkPaths', () => {
 		flat.collections['team']!.scopedCacheFields = ['name'];
 
 		expect(scopedCacheOwnershipNestedPkPaths(flat, 'member')).toEqual([]);
+	});
+});
+
+describe('scopedCacheAncestorSliceCandidates', () => {
+	it('lists the ownership slices to pin a collection by, nearest first', () => {
+		// Own parent fk first, then one composed path per deeper ancestor, so a
+		// caller prefers the nearest ancestor a read actually pinned.
+		const schema = new SchemaBuilder()
+			.collection('teaching_unit', (c) => {
+				c.field('id').id();
+				c.field('discipline').m2o('discipline');
+			})
+			.collection('discipline', (c) => {
+				c.field('id').id();
+				c.field('enrollment').m2o('enrollment');
+			})
+			.collection('enrollment', (c) => {
+				c.field('id').id();
+				c.field('student').m2o('student');
+			})
+			.collection('student', (c) => {
+				c.field('id').id();
+				c.field('user').m2o('user');
+			})
+			.collection('user', (c) => {
+				c.field('id').id();
+			})
+			.build();
+
+		schema.collections['teaching_unit']!.scopedCacheFields = ['discipline'];
+		schema.collections['discipline']!.scopedCacheFields = ['enrollment'];
+		schema.collections['enrollment']!.scopedCacheFields = ['student'];
+		schema.collections['student']!.scopedCacheFields = ['user'];
+
+		expect(scopedCacheAncestorSliceCandidates(schema, 'teaching_unit'))
+			.toEqual([
+				{ field: 'discipline', ancestor: 'discipline', terminalField: 'id' },
+				{
+					field: 'discipline.enrollment',
+					ancestor: 'discipline',
+					terminalField: 'enrollment',
+				},
+				{
+					field: 'discipline.enrollment.student',
+					ancestor: 'enrollment',
+					terminalField: 'student',
+				},
+				{
+					field: 'discipline.enrollment.student.user',
+					ancestor: 'student',
+					terminalField: 'user',
+				},
+			]);
+	});
+
+	it('offers no candidate for a collection with no ownership', () => {
+		const schema = new SchemaBuilder()
+			.collection('config', (c) => {
+				c.field('id').id();
+				c.field('label').string();
+			})
+			.build();
+
+		expect(scopedCacheAncestorSliceCandidates(schema, 'config')).toEqual([]);
+	});
+
+	it('never crosses a relation that is not a scope field', () => {
+		// Fail-safe gate: a plain fk names no candidate, so a slice can only ride an
+		// ownership hop a write to the collection actually purges.
+		const schema = new SchemaBuilder()
+			.collection('doc', (c) => {
+				c.field('id').id();
+				c.field('folder').m2o('folder');
+				c.field('label').m2o('label');
+			})
+			.collection('folder', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('label', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.build();
+
+		schema.collections['doc']!.scopedCacheFields = ['folder'];
+
+		expect(scopedCacheAncestorSliceCandidates(schema, 'doc')).toEqual([
+			{ field: 'folder', ancestor: 'folder', terminalField: 'id' },
+		]);
 	});
 });
 

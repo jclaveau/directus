@@ -2927,3 +2927,74 @@ export function composeScopedCachePaths(
 
 	return composed;
 }
+
+/**
+ * The paths a read can pin a would-be-bare nested collection BY, instead of the bare
+ * tag, when an ancestor its ownership chain crosses is itself pinned in the read —
+ * nearest first. Every row the collection surfaced belongs to that ancestor's slice,
+ * so a per-slice pin stands in for the whole-collection tag.
+ *
+ * Every hop is a scoped-cache ownership edge (`scopedCacheFields`), so a write to
+ * the near collection purges every key a candidate names — the invariant keeping the
+ * slice sound. `field` is the dotted key the matching pin's value slices on — the
+ * same key `composeScopedCachePaths` hands the purge, so read pin and purge agree;
+ * `ancestor` is the collection that key reaches; `terminalField` is the field on it
+ * a pin must name for the candidate to apply.
+ *
+ * Two shapes, both ownership-covered:
+ * - a flat parent fk (`discipline`) reaching the 1-hop ancestor by its own key, and
+ * - a composed relational path (`discipline.enrollment.student.user`) reaching a
+ *   deeper ancestor's scope field.
+ */
+export function scopedCacheAncestorSliceCandidates(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+): Array<{ field: string; ancestor: CollectionKey; terminalField: string }> {
+	const candidates: Array<{
+		field: string;
+		ancestor: CollectionKey;
+		terminalField: string;
+	}> = [];
+
+	for (const field of schema.collections[collection]?.scopedCacheFields ?? []) {
+		if (field.includes('.')) {
+			continue;
+		}
+
+		const target = schema.relations.find((rel) => {
+			return rel.collection === collection && rel.field === field;
+		})?.related_collection;
+
+		const targetPk = target
+			? schema.collections[target]?.primary
+			: undefined;
+
+		if (!target || !targetPk) {
+			continue;
+		}
+
+		candidates.push({ field, ancestor: target, terminalField: targetPk });
+	}
+
+	for (const path of composeScopedCachePaths(schema, collection)) {
+		const terminalField = path.segments[path.segments.length - 1];
+
+		const joins = resolveScopedCacheM2oJoinChainFromPath(
+			schema,
+			collection,
+			path.segments.slice(0, -1),
+		);
+
+		const ancestor = joins?.[joins.length - 1]?.relatedCollection;
+
+		if (!ancestor || terminalField === undefined) {
+			continue;
+		}
+
+		candidates.push({ field: path.field, ancestor, terminalField });
+	}
+
+	return candidates.sort((a, b) => {
+		return a.field.split('.').length - b.field.split('.').length;
+	});
+}
