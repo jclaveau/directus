@@ -14,7 +14,7 @@ import emitter from '../emitter.js';
 import { readMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
-import { ItemsService } from './items.js';
+import { ItemsService, stripInjectedOwnershipNesting } from './items.js';
 
 // Mirrors scoped-cache-purge.test.ts: force auto-purge on so shouldClearCache() routes to a
 // truthy cache, mock the database client to postgres, and stub the scoped-cache module so the
@@ -1570,5 +1570,92 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				type: 'integer',
 			});
 		});
+	});
+});
+
+
+describe('stripInjectedOwnershipNesting', () => {
+	// The ownership pin injects the ancestor key paths a read did not ask for, so
+	// the response comes back carrying nesting the caller never requested. This
+	// puts each injected branch back to whatever the caller's own `fields` asked
+	// for — the foreign key where it named the field, nothing where it did not.
+	const schema = new SchemaBuilder()
+		.collection('member', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('team').m2o('team');
+		})
+		.collection('team', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('lead').m2o('member');
+		})
+		.build();
+
+	function stripped(fields: string[], injected: string[], record: any) {
+		const records = [record];
+
+		stripInjectedOwnershipNesting(
+			records,
+			injected,
+			{ fields },
+			schema,
+			'member',
+		);
+
+		return records[0];
+	}
+
+	it('collapses an injected branch to the key the caller asked for', () => {
+		// `*` names `team` as a scalar, so the row it was expanded into goes back
+		// to being the foreign key it started as.
+		expect(stripped(['*'], ['team.lead.id'], {
+			id: 1,
+			name: 'm',
+			team: { id: 5, name: 't', lead: { id: 9 } },
+		})).toEqual({ id: 1, name: 'm', team: 5 });
+	});
+
+	it('removes an injected branch the caller never named', () => {
+		expect(stripped(['id'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, lead: { id: 9 } },
+		})).toEqual({ id: 1 });
+	});
+
+	it('descends a prefix the caller did ask for, stripping below it', () => {
+		// `team.name` keeps `team` nested, so the strip has to walk INTO it and
+		// take out only the hop the injection added underneath.
+		expect(stripped(['team.name'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, name: 't', lead: { id: 9, name: 'x' } },
+		})).toEqual({ id: 1, team: { id: 5, name: 't' } });
+	});
+
+	it('collapses a deeper hop the caller named with a wildcard', () => {
+		expect(stripped(['team.*'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, name: 't', lead: { id: 9, name: 'x' } },
+		})).toEqual({ id: 1, team: { id: 5, name: 't', lead: 9 } });
+	});
+
+	it('leaves a path that ends on the row itself alone', () => {
+		// One segment names no hop to collapse.
+		expect(stripped(['*'], ['team'], {
+			id: 1,
+			team: { id: 5, name: 't' },
+		})).toEqual({ id: 1, team: { id: 5, name: 't' } });
+	});
+
+	it('leaves a branch the response answered with null', () => {
+		expect(stripped(['*'], ['team.lead.id'], { id: 1, team: null }))
+			.toEqual({ id: 1, team: null });
+	});
+
+	it('leaves a path no relation describes', () => {
+		expect(stripped(['*'], ['nonexistent.id'], {
+			id: 1,
+			nonexistent: { id: 5 },
+		})).toEqual({ id: 1, nonexistent: { id: 5 } });
 	});
 });

@@ -31,12 +31,18 @@ import { getCache } from '../cache.js';
 import {
 	composeScopedCachePaths,
 	createScopedCacheCollector,
+	pinnedScopedCacheTagsFromKeyedFilters,
 	pinnedScopedCacheTagsFromM2oParents,
+	pinnedScopedCacheTagsFromO2mChildren,
 	pinnedScopedCacheTagsFromFilter,
 	purgeScopedCache,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
+	scopedCacheFilterKeyingByCollection,
+	scopedCacheAncestorSliceCandidates,
+	scopedCacheNestedCollections,
+	scopedCacheOwnershipNestedPkPaths,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	scopedCachePurgeEnabled,
@@ -1134,10 +1140,38 @@ implements AbstractService<Item> {
 				)
 				: query;
 
+		// Nest the ownership ancestors so the scope pins them by key, not a bare tag a
+		// `fields: ['*']` read would over-purge on; stripped from the response below.
+		const injectedOwnershipPaths = scopedCachePurgeEnabled()
+			? scopedCacheOwnershipNestedPkPaths(this.schema, this.collection)
+					.filter((path) => {
+						const ancestorPath = path.split('.').slice(0, -1);
+
+						// The caller already nests past this prefix — its rows come back
+						// on their own, so neither inject nor strip it.
+						return !(updatedQuery.fields ?? []).some((field) => {
+							const segments = field.split('.');
+
+							return (
+								segments.length > ancestorPath.length &&
+								ancestorPath.every((seg, at) => segments[at] === seg)
+							);
+						});
+					})
+			: [];
+
 		let ast = await getAstFromQuery(
 			{
 				collection: this.collection,
-				query: updatedQuery,
+				query: injectedOwnershipPaths.length > 0
+					? {
+						...updatedQuery,
+						fields: [
+							...(updatedQuery.fields ?? ['*']),
+							...injectedOwnershipPaths,
+						],
+					}
+					: updatedQuery,
 				accountability: this.accountability,
 			},
 			{
@@ -1159,9 +1193,52 @@ implements AbstractService<Item> {
 			? fieldMapFromAst(ast, this.schema)
 			: { read: new Map(), other: new Map() };
 
+		// A collection this read's filters name by primary key depends on those
+		// rows and no others, so it is pinned even when no row of it was nested.
+		const filterKeying:
+			ReturnType<typeof scopedCacheFilterKeyingByCollection> =
+			scopedCachePurgeEnabled()
+				? scopedCacheFilterKeyingByCollection(this.schema, ast)
+				: new Map();
+
+		const keyedFilterPins = pinnedScopedCacheTagsFromKeyedFilters(
+			this.schema,
+			this.collection,
+			filterKeying,
+		);
+
+		// Read before the query runs: `run-ast` fills the pins from inside it, and
+		// the tag loop below needs the same answer.
+		const beyondNestedRows = scopedCachePurgeEnabled()
+			? scopedCacheCollectionsBeyondNestedRows(this.schema, ast, filterKeying)
+			: new Set<string>();
+
+		// A permission-gated ancestor is marked beyond, but we injected its rows to pin
+		// by key, and a permission change flushes the cache — so the key can't go stale.
+		for (const path of injectedOwnershipPaths) {
+			const joins = resolveScopedCacheM2oJoinChainFromPath(
+				this.schema,
+				this.collection,
+				path.split('.').slice(0, -1),
+			);
+
+			const ancestor = joins?.[joins.length - 1]?.relatedCollection;
+
+			if (ancestor) {
+				beyondNestedRows.delete(ancestor);
+			}
+		}
+
 		// The pins DO depend on the rows, so this one is filled from inside the read.
 		let m2oParentPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
+
+		let o2mChildPins:
+			ReturnType<typeof pinnedScopedCacheTagsFromO2mChildren> = new Map();
+
+		// Collections reached by two disagreeing reverse fks: no single ownership
+		// slice covers them, so they stay bare even when an ancestor is pinned.
+		const o2mConflicted = new Set<string>();
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
@@ -1184,7 +1261,16 @@ implements AbstractService<Item> {
 					this.collection,
 					fieldMap,
 					toArray(rows),
-					scopedCacheCollectionsBeyondNestedRows(this.schema, ast),
+					beyondNestedRows,
+				);
+
+				o2mChildPins = pinnedScopedCacheTagsFromO2mChildren(
+					this.schema,
+					this.collection,
+					fieldMap,
+					toArray(rows),
+					beyondNestedRows,
+					o2mConflicted,
 				);
 			},
 		});
@@ -1233,6 +1319,8 @@ implements AbstractService<Item> {
 		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
 
 		if (scopedCachePurgeEnabled()) {
+			const nestedCollections = scopedCacheNestedCollections(ast);
+
 			// Self-reference guard: pinning the root to a value slice is sound only while the
 			// filter bounds every row the read returns. A self-referential relation (the root
 			// collection reached again through a nested field) pulls rows the root filter
@@ -1269,23 +1357,150 @@ implements AbstractService<Item> {
 					this.schema.collections[this.collection]?.primary,
 				);
 
-			for (const collection of collectionsInFieldMap(fieldMap)) {
+			// A filter reaching a collection only through an operator on the
+			// relational key itself (`{ rel: { _gt: X } }`) leaves it out of the
+			// field map: `flattenFilter` stops at the `_`-prefixed key, so the path
+			// never reaches the related context. The join is real either way, so the
+			// collections come from the keying too — whether it named keys there or
+			// not. Without this such a read carries NO tag for a table it joins,
+			// and no write to that table can drop it.
+			const taggedCollections = new Set([
+				...collectionsInFieldMap(fieldMap),
+				...filterKeying.keys(),
+			]);
+
+			// Rows the response actually carried. A keyed filter bounds the JOINED rows,
+			// not necessarily the fetched ones — a declined O2M/A2O path nests rows no
+			// filter bounded — so it cannot stand in for a parent-key pin below. A
+			// filter-only collection is absent here, so its keyed slice is sound.
+			const collectionsFetchedAsRows = new Set(
+				[...fieldMap.read].map(([, entry]) => entry.collection),
+			);
+
+			// Prefer, over a would-be-bare collection tag, the nearest slice to an
+			// ancestor its ownership chain reaches that is pinned in this read: a write to
+			// the collection purges that same key (every hop is an ownership edge), so the
+			// slice invalidates the read where the bare tag only over-purged.
+			const ancestorSliceTagsFor = (collection: string): ScopedCacheTag[] => {
+				const pinsOf = (ancestor: string): ScopedCacheTag[] => {
+					if (ancestor === this.collection) {
+						return rootScopedCacheTags;
+					}
+
+					return [
+						...m2oParentPins.get(ancestor) ?? [],
+						...keyedFilterPins.get(ancestor) ?? [],
+					];
+				};
+
+				for (
+					const candidate of scopedCacheAncestorSliceCandidates(
+						this.schema,
+						collection,
+					)
+				) {
+					const matched = pinsOf(candidate.ancestor).filter((pin) => {
+						return pin.field === candidate.terminalField;
+					});
+
+					if (matched.length > 0) {
+						return matched.map((pin) => {
+							return {
+								collection,
+								field: candidate.field,
+								value: pin.value,
+								type: pin.type,
+							};
+						});
+					}
+				}
+
+				return [];
+			};
+
+			const pushAncestorSliceOrBare = (collection: string): void => {
+				// A would-be-bare collection takes its ancestor slice unless it was reached
+				// by two disagreeing reverse fks: only that o2m conflict leaves rows no
+				// single ownership slice can name. Every other bare is soundly covered by
+				// the owner's slice the whole read is bounded to.
+				const ancestorSliceTags = o2mConflicted.has(collection)
+					? []
+					: ancestorSliceTagsFor(collection);
+
+				scopedCacheTags.push(
+					...(ancestorSliceTags.length > 0
+						? ancestorSliceTags
+						: [{ collection }]),
+				);
+			};
+
+			for (const collection of taggedCollections) {
 				if (collection === this.collection && rootScopedCacheTags.length > 0) {
 					scopedCacheTags.push(...rootScopedCacheTags);
 					continue;
 				}
 
-				// A collection the read reached only through M2O hops is pinned by the
-				// keys it nested; absent from the map, it keeps the bare tag that any
-				// write to it drops.
-				const parentPins = m2oParentPins.get(collection);
-
-				if (parentPins === undefined) {
-					scopedCacheTags.push({ collection });
+				// Named by an M2O filter the near row's own column answers, reached
+				// no other way: no write to it can change what this read returns,
+				// so it needs no tag at all — not even a bare one. Nested, sorted
+				// or grouped on, it is depended on for more than that key and
+				// falls through to the tags below.
+				if (
+					collection !== this.collection &&
+					filterKeying.get(collection)?.kind === 'independent' &&
+					!nestedCollections.has(collection) &&
+					!beyondNestedRows.has(collection)
+				) {
 					continue;
 				}
 
-				scopedCacheTags.push(...parentPins);
+				// A collection the response NESTED is depended on for the rows it
+				// carried, which only a parent-key pin can name — the M2O ancestor's
+				// key, or the O2M child's parent-fk key. Where BOTH declined — an A2O
+				// hop, an O2M nested under another to-many, or no row to read a key
+				// from — the filter's keys cover one half of the dependency and say
+				// nothing about the other, so the bare tag is the honest answer. The
+				// exception is a collection reached ONLY through a filter that keyed it
+				// (nowhere fetched): the join reads only rows that key bounds, so its
+				// keyed slice covers the whole dependency and stands in for the pin.
+				if (
+					nestedCollections.has(collection) &&
+					!m2oParentPins.has(collection) &&
+					!o2mChildPins.has(collection) &&
+					!(
+						keyedFilterPins.has(collection) &&
+						!collectionsFetchedAsRows.has(collection)
+					)
+				) {
+					pushAncestorSliceOrBare(collection);
+					continue;
+				}
+
+				// A collection the read reached only through M2O hops is pinned by the
+				// keys it nested, and one a filter reached by key is pinned by the keys
+				// that filter named. Both may hold at once — a collection nested AND
+				// filtered depends on the union, since the filter reaches rows the
+				// response never carried and vice versa. Named by neither, it keeps the
+				// bare tag that any write to it drops.
+				//
+				// Keyed by tag so a slice both sides name is carried once: the tag
+				// index dedups on that key, but the header and its count do not.
+				const pins = new Map<string, ScopedCacheTag>();
+
+				for (const pin of [
+					...m2oParentPins.get(collection) ?? [],
+					...o2mChildPins.get(collection) ?? [],
+					...keyedFilterPins.get(collection) ?? [],
+				]) {
+					pins.set(scopedCacheTagKey(pin), pin);
+				}
+
+				if (pins.size === 0) {
+					pushAncestorSliceOrBare(collection);
+					continue;
+				}
+
+				scopedCacheTags.push(...pins.values());
 			}
 
 			scopedCacheTags = (await emitter.emitFilter(
@@ -1340,6 +1555,16 @@ implements AbstractService<Item> {
 					schema: this.schema,
 					accountability: this.accountability,
 				},
+			);
+		}
+
+		if (injectedOwnershipPaths.length > 0) {
+			stripInjectedOwnershipNesting(
+				filteredRecords as Item[],
+				injectedOwnershipPaths,
+				updatedQuery,
+				this.schema,
+				this.collection,
 			);
 		}
 
@@ -2255,5 +2480,89 @@ implements AbstractService<Item> {
 		}
 
 		return await this.createOne(data, opts);
+	}
+}
+
+// Recursive undo of the injected nesting — kept out of its one caller by choice.
+// eslint-disable-next-line local/no-single-caller-function
+export function stripInjectedOwnershipNesting(
+	records: AnyItem[],
+	injectedPaths: string[],
+	query: Query,
+	schema: SchemaOverview,
+	rootCollection: string,
+): void {
+	const fields = query.fields ?? ['*'];
+
+	const nestedPrefixes = new Set<string>();
+	const leavesByPrefix = new Map<string, Set<string>>();
+
+	for (const field of fields) {
+		const segments = field.split('.');
+
+		for (let end = 1; end < segments.length; end++) {
+			nestedPrefixes.add(segments.slice(0, end).join('.'));
+		}
+
+		const parentPrefix = segments.slice(0, -1).join('.');
+		const leaves = leavesByPrefix.get(parentPrefix) ?? new Set<string>();
+		leaves.add(segments[segments.length - 1]!);
+		leavesByPrefix.set(parentPrefix, leaves);
+	}
+
+	const surfacesAsScalar = (prefix: string, field: string): boolean => {
+		const leaves = leavesByPrefix.get(prefix);
+		return leaves !== undefined && (leaves.has('*') || leaves.has(field));
+	};
+
+	const collapse = (
+		node: Record<string, any>,
+		collection: string,
+		segments: string[],
+		index: number,
+		prefix: string,
+	): void => {
+		if (node === null || typeof node !== 'object' || index >= segments.length - 1) {
+			return;
+		}
+
+		const field = segments[index]!;
+
+		const childPrefix = prefix === ''
+			? field
+			: `${prefix}.${field}`;
+
+		const childCollection = schema.relations.find(
+			(candidate) =>
+				candidate.collection === collection && candidate.field === field,
+		)?.related_collection;
+
+		const child = node[field];
+
+		if (!childCollection || child === null || typeof child !== 'object') {
+			return;
+		}
+
+		if (nestedPrefixes.has(childPrefix)) {
+			collapse(child, childCollection, segments, index + 1, childPrefix);
+			return;
+		}
+
+		const childPrimaryKey = schema.collections[childCollection]?.primary;
+
+		if (childPrimaryKey && surfacesAsScalar(prefix, field)) {
+			node[field] = child[childPrimaryKey];
+		}
+		else {
+			delete node[field];
+		}
+	};
+
+	for (const path of injectedPaths) {
+		const segments = path.split('.');
+
+		for (const record of records) {
+			collapse(record, rootCollection, segments, 0, '');
+		}
 	}
 }
