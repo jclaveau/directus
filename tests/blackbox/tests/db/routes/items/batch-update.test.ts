@@ -99,6 +99,27 @@ describe('batch update through an array body', () => {
 			]);
 		});
 
+		it('treats a payload naming only the key as no change', async () => {
+			const rows = await seedRows(vendor, ['pk-only']);
+
+			const response = await request(getUrl(vendor))
+				.patch(`/items/${collectionBatched}`)
+				.send({ keys: [rows[0]!.id], data: { id: rows[0]!.id } })
+				.set('Authorization', AUTH);
+
+			// The primary key is not a change to the row, so nothing is left to
+			// write and the update is skipped rather than issued — the echo is the
+			// empty list, not the row.
+			expect(response.statusCode).toEqual(200);
+			expect(response.body.data).toEqual([]);
+
+			const after = await readRows(vendor, [rows[0]!.id]);
+
+			expect(after).toEqual([
+				{ id: rows[0]!.id, name: 'pk-only', status: 'before' },
+			]);
+		});
+
 		it('refuses the whole batch when one element misses its key', async () => {
 			const rows = await seedRows(vendor, ['keyed', 'keyless-neighbour']);
 
