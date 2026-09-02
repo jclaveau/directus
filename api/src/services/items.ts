@@ -1353,6 +1353,13 @@ implements AbstractService<Item> {
 			);
 		}
 
+		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
+		// listener's return verbatim, and the cast above asserts rather than checks)
+		// makes this throw `Object.defineProperty called on non-object`. That is a
+		// 500 raised inside whatever transaction was reading — a write snapshotting
+		// its rows for revisions takes the whole update down with it. The write path
+		// validates its own filter returns (`payloadAfterHooks === null`); this one
+		// does not. Covered as it stands by read-hook-null.test.ts.
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
 			scopedCacheUnautopurgeableTags,
@@ -1804,6 +1811,11 @@ implements AbstractService<Item> {
 					// with `keys` by position files a revision under one item
 					// holding another item's data, which `revert` would then
 					// write straight back onto the wrong row.
+					//
+					// `snapshots` is always an array: a read hook can return
+					// anything, but `withMeta` rejects a non-object before
+					// `readByQuery` returns (see the TODO there), so this guard
+					// and the ternary below it cannot currently fire.
 					const snapshotJsonByKey = new Map<string, string>();
 
 					if (Array.isArray(snapshots)) {

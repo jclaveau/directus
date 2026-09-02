@@ -6,15 +6,19 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { collectionReadHookNull } from './read-hook-null.seed';
 
-// `readByQuery` returns whatever the `items.read` filter hook handed back, cast
-// with an unchecked `as Item[]` — emitFilter propagates a listener's return value
-// verbatim and only ignores `undefined`. So a null return makes every read of that
-// collection resolve to null, including the one updateMany runs to snapshot its rows
-// for their revisions. The `Array.isArray(snapshots)` guard there is what keeps that
-// from throwing inside the write's transaction.
+// emitFilter propagates an `items.read` listener's return value verbatim, and
+// `readByQuery` casts it with an unchecked `as Item[]` — so a hook returning null
+// looks like it should make reads resolve to null. It does not: the last thing
+// `readByQuery` does is `withMeta(...)`, whose `Object.defineProperty` refuses a
+// non-object, so the read throws instead of answering.
 //
-// The read-null-hook extension supplies exactly that, scoped to this collection and
-// to rows carrying the marker name.
+// That matters most where a read runs inside somebody else's transaction. The
+// snapshot `updateMany` takes for its revisions is one, and this pins what happens
+// there: the request fails and the write rolls back, rather than the update landing
+// with a corrupted revision beside it.
+//
+// The read-null-hook extension supplies the hook, scoped to this collection and to
+// rows carrying the marker name so every other read here answers normally.
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 const MARKER = 'read-returns-null';
@@ -59,31 +63,34 @@ async function revisionsFor(vendor: Vendor, id: number) {
 
 describe('an items.read hook returning null', () => {
 	describe.each(vendors)('%s', (vendor) => {
-		it('does not break the update that snapshots its rows', async () => {
+		it('fails the update that snapshots its rows, and rolls it back', async () => {
 			const row = await createRow(vendor, 'starts-readable');
 
 			// Renaming it to the marker is what arms the hook: the snapshot read
 			// runs after the update, inside the transaction, so it sees the new
-			// name and answers null.
+			// name and the hook answers null for it.
 			const response = await renameViaBatch(vendor, row.id, MARKER);
 
-			// The write survived the null snapshot rather than throwing mid
-			// transaction — the response is empty only because the hook nulled the
-			// read the controller uses to echo it.
-			expect(response.statusCode).toEqual(200);
-			expect(response.body.data).toBeNull();
+			// `withMeta` refuses the null before the caller ever sees it, and the
+			// throw is not caught anywhere between there and the request.
+			expect(response.statusCode).toEqual(500);
 
-			// The row really was written, read back where the hook does not apply.
-			const revisions = await revisionsFor(vendor, row.id);
-			expect(revisions.length).toBeGreaterThan(0);
+			// The rename was inside the transaction the snapshot ran in, so it went
+			// back with it. Reading the row is safe: it never took the marker name,
+			// so the hook does not fire for it.
+			const after = await request(getUrl(vendor))
+				.get(`/items/${collectionReadHookNull}/${row.id}`)
+				.query({ fields: 'id,name' })
+				.set('Authorization', AUTH);
 
-			// And the null arm is what produced this revision: a snapshot that
-			// resolved would have filed the row's own fields here, the way the
-			// control below does. Nothing but the null read yields an empty one.
-			expect(revisions.at(-1)!.data).toBeNull();
+			expect(after.statusCode).toEqual(200);
+			expect(after.body.data).toEqual({ id: row.id, name: 'starts-readable' });
+
+			// No revision either — the whole block was rolled back.
+			expect(await revisionsFor(vendor, row.id)).toEqual([]);
 		});
 
-		it('leaves a row without the marker reading normally', async () => {
+		it('leaves a row without the marker writing and reading normally', async () => {
 			const row = await createRow(vendor, 'stays-readable');
 
 			// The control: same collection, same route, no marker — so the hook
