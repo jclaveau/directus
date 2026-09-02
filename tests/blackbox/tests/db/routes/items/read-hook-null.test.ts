@@ -66,6 +66,10 @@ describe('an items.read hook returning null', () => {
 		it('fails the update that snapshots its rows, and rolls it back', async () => {
 			const row = await createRow(vendor, 'starts-readable');
 
+			// Creating the row already filed a revision of its own, so the check
+			// below is that the failed update added none — not that there are none.
+			const revisionsBefore = await revisionsFor(vendor, row.id);
+
 			// Renaming it to the marker is what arms the hook: the snapshot read
 			// runs after the update, inside the transaction, so it sees the new
 			// name and the hook answers null for it.
@@ -86,8 +90,9 @@ describe('an items.read hook returning null', () => {
 			expect(after.statusCode).toEqual(200);
 			expect(after.body.data).toEqual({ id: row.id, name: 'starts-readable' });
 
-			// No revision either — the whole block was rolled back.
-			expect(await revisionsFor(vendor, row.id)).toEqual([]);
+			// And no revision was added — the block that writes them is the one
+			// that threw, and it went back with the rest of the transaction.
+			expect(await revisionsFor(vendor, row.id)).toEqual(revisionsBefore);
 		});
 
 		it('leaves a row without the marker writing and reading normally', async () => {
