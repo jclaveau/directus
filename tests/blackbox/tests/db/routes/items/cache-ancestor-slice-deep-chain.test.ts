@@ -158,16 +158,13 @@ describe(oneLine`
 		];
 
 		function readConfig() {
-			const filter = ownerPath.reduceRight<Record<string, unknown>>(
-				(acc, key) => ({ [key]: acc }),
-				{ _eq: ownedOwnerId },
-			);
+			const ownerKey = `filter[${ownerPath.join('][')}][_eq]`;
 
 			return request(getUrl(vendor, env))
 				.get(`/items/${CONFIG}`)
 				.query({
 					fields: '*,range.slots.part.course.unit.discipline.student.name',
-					filter: JSON.stringify(filter),
+					[ownerKey]: String(ownedOwnerId),
 				})
 				.set('Authorization', auth);
 		}
@@ -186,7 +183,19 @@ describe(oneLine`
 		}
 
 		it('slices a beyond ancestor by its ownership chain', async () => {
-			const tags = (await readConfig()).headers[cacheTagsHeader];
+			const res = await readConfig();
+
+			if (!res.headers[cacheTagsHeader]) {
+				// eslint-disable-next-line no-console
+				console.warn(
+					`DEEPCHAIN_DIAG status=${res.status} `
+						+ `body=${JSON.stringify(res.body).slice(0, 600)} `
+						+ `tagsHdr=${res.headers[cacheTagsHeader]} `
+						+ `ownedOwnerId=${ownedOwnerId}`,
+				);
+			}
+
+			const tags = res.headers[cacheTagsHeader];
 
 			expect(tags).toMatch(new RegExp(
 				`(^|, )${UNIT}:discipline.student.owner=${ownedOwnerId}(,|$)`,
