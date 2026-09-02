@@ -185,19 +185,7 @@ describe(oneLine`
 		}
 
 		it('slices a beyond ancestor by its ownership chain', async () => {
-			const res = await readConfig();
-
-			if (!res.headers[cacheTagsHeader]) {
-				// eslint-disable-next-line no-console
-				console.warn(
-					`DEEPCHAIN_DIAG status=${res.status} `
-						+ `body=${JSON.stringify(res.body).slice(0, 600)} `
-						+ `tagsHdr=${res.headers[cacheTagsHeader]} `
-						+ `ownedOwnerId=${ownedOwnerId}`,
-				);
-			}
-
-			const tags = res.headers[cacheTagsHeader];
+			const tags = (await readConfig()).headers[cacheTagsHeader];
 
 			expect(tags).toMatch(new RegExp(
 				`(^|, )${UNIT}:discipline.student.owner=${ownedOwnerId}(,|$)`,
