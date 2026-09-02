@@ -143,8 +143,11 @@ describe('nested upsert through the array shape', () => {
 				{ id: child!.id, name: 'moved', parent: receiver.id },
 			]);
 
-			// Sending the same key again short-circuits: already this parent's child,
-			// so it is neither rewritten nor duplicated.
+			// Sending the same key again is idempotent. processO2M short-circuits on
+			// a child already pointing at this parent, but that is a skipped lookup
+			// rather than a visible difference: without the short-circuit the child
+			// would be upserted with nothing but its own key, which changes no field
+			// either. So this pins the outcome, not the shortcut.
 			await writeChildren(vendor, receiver.id, [child!.id]);
 
 			expect(await readChildrenOf(vendor, receiver.id)).toEqual([

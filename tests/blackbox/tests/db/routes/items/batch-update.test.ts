@@ -8,10 +8,13 @@ import { collectionBatched } from './batch-update.seed';
 
 // `PATCH /items/<collection>` has three bodies and they reach three different
 // methods: `{ keys, data }` is `updateMany`, `{ query, data }` is `updateByQuery`,
-// and a bare array is `updateBatch` (controllers/items.ts:191-200). Only the array
-// carries per-row data, so it is the one that loops `updateOne` instead of sharing
-// one payload across every key — and it was the only one of the three with no
-// blackbox witness at all.
+// and a bare array is `updateBatch`. Only the array carries per-row data, so it is
+// the one that loops `updateOne` instead of sharing one payload across every key —
+// and it was the only one of the three with no blackbox witness at all.
+//
+// The no-change case below deliberately uses the `{ keys, data }` body instead: it
+// is the shape that echoes back whatever `updateMany` reports, which is how an
+// update that was skipped entirely becomes visible.
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
