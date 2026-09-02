@@ -46,6 +46,31 @@ describe('policy updates run the user-count integrity check', () => {
 			expect(response.body.data.app_access).toBe(true);
 		});
 
+		it('runs the check once for a whole batch, not once per row', async () => {
+			const [first, second] = await Promise.all([
+				createDetachedPolicy(),
+				createDetachedPolicy(),
+			]);
+
+			// An array body reaches updateBatch, which drives updateOne per row and
+			// collects each row's flags through `onRequireUserIntegrityCheck` rather
+			// than letting it validate — so the count is checked once, after the
+			// loop, on the batch's own transaction.
+			const response = await request(getUrl(vendor))
+				.patch('/policies')
+				.send([
+					{ id: first.id, app_access: true },
+					{ id: second.id, app_access: true },
+				])
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+
+			expect(response.body.data.map((policy: { app_access: boolean }) => {
+				return policy.app_access;
+			})).toEqual([true, true]);
+		});
+
 		it('revokes admin access through the checked update path', async () => {
 			const policy = await createDetachedPolicy();
 
