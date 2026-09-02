@@ -12,6 +12,11 @@ import { collectionChildren, collectionParents } from './nested-upsert.seed';
 // shape — `{ children: [ … ] }` — goes to `upsertMany`, which loops `upsertOne` one
 // row at a time. These pin what that loop decides per row (create vs update, the
 // key it returns, the order it writes in) before the loop is replaced by a batch.
+//
+// The second block covers the guard that decides which shape is even a change:
+// `updateMany` treats an alterations object carrying no item as changing nothing and
+// skips the whole transaction, while a bare array never counts as empty because for
+// an o2m it deselects every child.
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -176,6 +181,50 @@ describe('nested upsert through the array shape', () => {
 			for (const orphan of orphans.body.data as Row[]) {
 				expect(orphan.parent).toBeNull();
 			}
+		});
+	});
+});
+
+describe('the alterations shape decides whether anything changed', () => {
+	describe.each(vendors)('%s', (vendor) => {
+		it('treats an alterations object with no item as no change', async () => {
+			const parent = await createParent(vendor, 'no-change');
+
+			await writeChildren(vendor, parent.id, [{ name: 'kept' }]);
+
+			// The batch route echoes the rows updateMany reports, so an update it
+			// skips entirely comes back as an empty list rather than the parent.
+			const response = await request(getUrl(vendor))
+				.patch(`/items/${collectionParents}`)
+				.send({
+					keys: [parent.id],
+					data: { children: { create: [], update: [], delete: [] } },
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+			expect(response.body.data).toEqual([]);
+
+			// Skipped, not applied: the child an empty array would have deselected
+			// is still attached.
+			expect(await readChildrenOf(vendor, parent.id)).toHaveLength(1);
+		});
+
+		it('refuses an alterations object carrying an unknown operation', async () => {
+			const parent = await createParent(vendor, 'unknown-operation');
+
+			const response = await request(getUrl(vendor))
+				.patch(`/items/${collectionParents}`)
+				.send({
+					keys: [parent.id],
+					data: { children: { create: [], replace: [{ name: 'nope' }] } },
+				})
+				.set('Authorization', AUTH);
+
+			// An unknown key means the value is not an alterations object, so it is
+			// not treated as "no change" — it reaches the nested write and is
+			// rejected there.
+			expect(response.statusCode).toEqual(400);
 		});
 	});
 });
