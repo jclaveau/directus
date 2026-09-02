@@ -56,6 +56,15 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/schema/timezone/timezone-changed-node-tz-america.test.ts': 7_000,
 	'/tests/db/schema/timezone/timezone-changed-node-tz-asia.test.ts': 7_000,
 	'/tests/db/routes/flows/webhook.test.ts': 6_000,
+	// These run in well under a second, which the source-size fallback does not
+	// guess anywhere near: it reads them as 4-10 s and moves real work off
+	// whichever shard they land on. Measured over the postgres runs of
+	// 2026-09-03, worst of each.
+	'/tests/db/routes/items/nested-upsert.test.ts': 1_600,
+	'/tests/db/routes/items/db-error-translation.test.ts': 600,
+	'/tests/db/routes/items/batch-update.test.ts': 500,
+	'/tests/db/routes/permissions/policy-user-integrity.test.ts': 400,
+	'/tests/db/routes/items/read-hook-null.test.ts': 200,
 };
 
 function fileWeight(file: string): number {
