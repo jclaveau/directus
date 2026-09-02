@@ -23,7 +23,6 @@ const ACCOUNT = 'composed_account';
 const ENTRY = 'composed_entry';
 
 const purgedTagsHeader = 'x-scoped-cache-purged-tags';
-const statusHeader = 'x-cache-status';
 
 describe(oneLine`
 	a collection scoped through two composed hops purges both derived slices
@@ -38,7 +37,6 @@ describe(oneLine`
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-composed-path-${vendor}`;
 		env[vendor]['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
-		env[vendor]['CACHE_STATUS_HEADER'] = statusHeader;
 
 		let instance: ChildProcess;
 		let entryId: number;
