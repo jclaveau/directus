@@ -1342,6 +1342,25 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			expect(key).toBe(1);
 		});
 
+		it('upsertMany returns one key per payload, in input order', async () => {
+			tracker.on.select('test').response([{ id: 1 }]);
+			tracker.on.update('test').response(1);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			// Nothing over HTTP reads this array back — a nested write consumes it
+			// inside processO2M — so the index alignment it promises to that caller
+			// has no blackbox witness. The keys are deliberately out of order so a
+			// rewrite that groups or sorts the payloads is caught here.
+			const keys = await service.upsertMany([
+				{ id: 3, name: 'c' },
+				{ id: 1, name: 'a' },
+				{ id: 2, name: 'b' },
+			]);
+
+			expect(keys).toEqual([3, 1, 2]);
+		});
+
 		it('updateMany translates a DB error raised by the UPDATE', async () => {
 			tracker.on.update('test').simulateError('boom');
 
