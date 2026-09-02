@@ -52,6 +52,9 @@ async function revisionsFor(vendor: Vendor, id: number) {
 				],
 			}),
 			fields: 'id,data',
+			// `at(-1)` below means the newest, so the order has to be asked for
+			// rather than inherited from however the rows come back.
+			sort: 'id',
 			limit: -1,
 		})
 		.set('Authorization', AUTH);
