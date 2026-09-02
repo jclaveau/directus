@@ -86,3 +86,27 @@ Extends #203's collection-level invalidation to **per-value** slices. Branch
 - **CI:** a PR into `v11.10.1-hhh-dev` runs **no full suite** — `check.yml`/blackbox gate on
   `base: main`; only CodeQL `Analyze` fires. Validate locally: worktree + install
   ([[reference_agent_worktree_no_node_modules]]).
+
+## Bare-tag purge ≠ collection-wide purge (the trap #358 exposed)
+
+A read whose root pin resolves is tagged with its slices **instead of** the bare collection
+tag — `readByQuery` pushes one or the other, never both. So:
+
+- `purgeScopedCache(cache, coll, null)` → `purgeCollectionScopedCache`, which SCANs
+  `<namespace>:tag:<coll>:*` and drops the bare key **plus every slice key**. This is how
+  you purge everything in a collection, and every fail-safe path uses it.
+- Putting a bare `[{ collection }]` in the tag list is NOT that: `purgeScopedCache` maps the
+  tags it is handed to exact keys and DELs those, so a slice-pinned entry survives.
+
+An ordinary mutation is safe because the bare tag travels *with* the resolved slices
+(`[{collection}, ...tags]`), so list reads and keyed reads both drop. The only bare-only
+purges are `purgeScopedCache(cache, coll, [])`, reached when nothing resolved — no keys
+mutated, or `purgeForMutatedRows(coll, [])` — where not dropping keyed entries is correct.
+
+**Extension-facing gap:** `purgeBy` takes tags and `purgeForMutatedRows` is row-based, so an
+extension has no way to say "drop everything for collection X" except by handing over rows
+missing a pinned field and leaning on the coarse fail-safe. Noted, not filed.
+
+Every in-repo `purgeBy` caller passes `result.getMeta().scopedCacheTags` from a real lookup
+read rather than hand-building a tag, which is why they all gained the key slices for free
+([[feedback_reuse_source_of_truth_combiner]]).

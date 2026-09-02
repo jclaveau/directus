@@ -51,3 +51,24 @@ titles grow unbounded AND soft-wrap in the review pane.
 
 Related: [[feedback_avoid_review_pane_soft_wrap]] (the origin), [[reference_eslint_maxlen_quirks]],
 [[feedback_no_coverage_in_test_names]].
+
+**`pnpm lint:style:changes` passes VACUOUSLY outside CI.** With no base ref it prints
+`lint:style:changes: no base ref, skipping` and exits 0 — a green that checked nothing
+([[reference_gate_can_pass_vacuously]]). The base comes from the first argv or
+`$LINEWIDTH_BASE`. Run it as
+`node scripts/lint-style-changes.mjs origin/v11.10.1-hhh-dev` and require the real
+`✓ no added lines breaking style` line before believing it. In a worktree this works
+fine (node_modules is symlinked to the main tree).
+
+## 2026-08-21 (#373)
+
+- **`.claude/hooks/*.mjs` is NOT exempt.** `isToolingPath` covers `eslint-rules/`, `scripts/`
+  and `*.config.*` only, so hook scripts face the 85-col rules and the base config, where
+  `no-console` is an ERROR — print with `process.stdout.write`.
+- **The gate now prints `local/*` warnings as advice** above the verdict, on added lines,
+  without touching the exit code (`severity === 2` still decides). Before that the custom
+  rules ran on every changed line and their output was discarded.
+- **`.claude/hooks/eslint.mjs`** runs a second report-only pass with the style config after
+  its `--fix` pass, scoped by `git diff --unified=0 HEAD -- <file>`. Hooks register at
+  SessionStart, so a change there only takes effect next session.
+

@@ -12,3 +12,16 @@ A blackbox endpoint extension (`tests/blackbox/extensions/<name>/index.mjs`) tha
 **Fix:** declare the pkg in `tests/blackbox/package.json` deps (`"@directus/env": "workspace:*"`) + `pnpm install` (updates lockfile) so pnpm links it into `tests/blackbox/node_modules`. Verify with `cd tests/blackbox && node -e "import('@directus/env')"`.
 
 **Note:** extensions normally get Directus internals via the CONTEXT arg (`{ services, env, getSchema }`), not imports — importing an internal pkg is the unusual path and needs the dep declared. See [[reference_directus_env_casting]], [[project_directus_db_connection_priority]].
+
+**Mount path = the extension's own name.** An endpoint extension in
+`tests/blackbox/extensions/<name>/` serves at `/<name>/…` — `/update-paths-probe/silent`,
+not `/update-paths/silent`. Getting it wrong returns 404, which a status-returning route
+surfaces as a clean assertion mismatch rather than a crash.
+
+**Extension type matters for the build.** `"type": "hook"` / `"endpoint"` run the `.mjs`
+source as-is; `"type": "bundle"` expects built `app`/`api` entries that nothing in this
+suite produces. Two extensions cannot share module state, so when a hook must report to a
+test, have it write rows into a seeded log collection and read that back over the API.
+
+Both apply on top of [[reference_blackbox_extensions_are_global]]: react only to your own
+collections and swallow your own failures, or you take unrelated shards down.

@@ -45,3 +45,45 @@ metadata:
 upload, `codecov/patch` can show a premature low % (PR #225 saw 33% → 77% → 100% as app then blackbox then
 the added unit test landed). Judge patch only after ALL shards are green and codecov recomputes. See
 [[project_directus_codecov_flags]], [[reference_reformatting_inflates_patch_coverage]].
+
+**Contention flakes are broader than one file (2026-08-19).** Three *distinct* tests
+each failed once and passed on rerun of the identical commit, each on a different
+shard, within a few hours: `common/assets/concurrency.test.ts` (autocannon `-c 100`),
+`db/routes/items/no-relation.test.ts` (WebSocket subscription `toMatchObject`), and
+`db/routes/collections/crud.test.ts` (`Verify schema action hook run`, expected 13 to
+be 14). Different test + different shard + green on rerun = the harness.
+
+`vitest.config.ts` sets `poolOptions.forks.maxForks: 6` and the `common` sequential
+list is empty, so up to six files run in parallel against one Directus instance on a
+4-core runner. `concurrency.test.ts` fires 100 concurrent connections into that and
+fails on a single timeout — filed as **issue #367** (options: sequential list, lower
+`-c`, or an error budget; plus log the autocannon result when `hasErrors` flips, since
+`timeouts` vs `non2xx` is currently parsed and discarded).
+
+Attribution method that worked: iterate the last ~25 runs of the workflow, read the
+same job's conclusion, establish the baseline, THEN rerun the identical commit
+([[feedback_ci_attribute_via_base_sha]]).
+
+**2026-08-22 (#388): the seed-403 race now has the fallback on structure too.**
+`CreateItem` already retried against `getNoCacheUrl` on a 403; `CreateCollection`,
+`CreateCollections` and `CreateField` did not — and `CreateField` is where it kept
+failing (`test_slice_index_sliced.parent`, 403 FORBIDDEN, twice on the SAME shard, then
+`afterAll` tripping on `instance.kill()` of an undefined instance). All three take the
+same fallback now. Note the signature: `getNoCacheUrl(vendor)` takes **only** the vendor,
+no `env` arg.
+
+Still true that adding blackbox test FILES aggravates the race — #388 added three
+collections and that is why it surfaced there. If it recurs on a branch that adds files,
+suspect churn before suspecting the diff.
+
+**Fourth signature, 2026-08-25 (#393):** `collections/crud.test.ts > Verify schema action hook run > postgres` — `expected 13 to be 14`. It counts rows in `tests_extensions_log` keyed `action-verify-schema/test_collections_crud*`, so one async hook write had not landed when the read ran. Cleared on a `--failed` rerun with no code change; observed 1 fail in 5 shard runs on that PR. Not the WS/seed-403/EADDRINUSE ones. Second instance supporting the note above that ADDING blackbox test files aggravates these — #393 added two.
+
+**Fifth signature — two files sharing a seeded collection, one of them subscribed
+(2026-08-27).** `no-relation.test.ts` opens a WS subscription on the artists collection
+and asserts the create event; `batch-insert.test.ts` imports `collectionArtists` from
+`no-relation.seed` and writes `batch-N` rows into it. Both ran in the parallel pool, so
+`getMessages(1)` returned the other file's row:
+`- "name": "one-artist-…"` / `+ "name": "batch-0-…"`. **Red twice running, so not a load
+flake** — reruns will not clear it. Fixed by putting the WRITER in the `after` chain.
+When a WS assertion sees a plausible row that is not its own, look for a sibling file
+importing the same seed, not at the transport.

@@ -110,3 +110,11 @@ nothing. Codecov folds its impacted-file list behind a `<details>`, so compute t
 locally: `vitest run --coverage --coverage.reporter=json --coverage.include='<file>'`,
 then intersect `coverage-final.json` (`statementMap` + `s[id]===0`) with the PR's added
 lines from `git diff -U0 <base>...HEAD`. That named the exact 36 api + 40 app lines.
+
+**`codecov/patch` goes red transiently — never judge it before every flag reports.**
+Seen twice on PR #358 (2026-08-17): the aggregate `codecov/patch` status flips to
+**fail** while `Unit Tests (api)`, `Unit Tests (rest)` and the blackbox shards are still
+running, because it is computed from whatever flags have uploaded so far — and a diff
+living in the api + blackbox flags looks uncovered until those two land. Both times it
+turned green with no code change once all flags reported. Check
+`gh pr checks <N> --json name,bucket` for `pending` rows before chasing uncovered lines.
