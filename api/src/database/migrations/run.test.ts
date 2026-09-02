@@ -249,7 +249,10 @@ describe('run', () => {
 		 * real driver, so what follows asserts on what the database ended up
 		 * holding rather than on calls to a mock.
 		 */
-		async function runFixtures(files: Record<string, string>) {
+		async function runFixtures(
+			files: Record<string, string>,
+			options: { direction?: 'up' | 'down' | 'latest'; completed?: string[] } = {},
+		) {
 			for (const [name, source] of Object.entries(files)) {
 				await writeFile(join(directory, name), source);
 			}
@@ -300,8 +303,19 @@ describe('run', () => {
 				table.timestamp('timestamp').defaultTo(database.fn.now());
 			});
 
+			for (const version of options.completed ?? []) {
+				await database
+					.insert({ version, name: version })
+					.into('directus_migrations');
+			}
+
 			const { default: runFresh } = await import('./run.js');
-			const error = await runFresh(database, 'latest', false).catch((e: Error) => e);
+
+			const error = await runFresh(
+				database,
+				options.direction ?? 'latest',
+				false,
+			).catch((e: Error) => e);
 
 			const applied = await database
 				.select('version')
@@ -403,6 +417,44 @@ describe('run', () => {
 			expect(applied).toEqual(['20990101A']);
 			expect(tables.outsideTransaction).toBe(true);
 			expect(tables.inTransaction).toBe(false);
+		});
+
+		it('runs a single "up" inside the transaction as well', async () => {
+			const { error, applied, tables } = await runFixtures(
+				{ '20990101A-first.js': recordsItsConnection },
+				{ direction: 'up' },
+			);
+
+			expect(error).toBeUndefined();
+			expect(applied).toEqual(['20990101A']);
+			expect(tables.inTransaction).toBe(true);
+			expect(tables.outsideTransaction).toBe(false);
+		});
+
+		it('records no version when a single "up" fails', async () => {
+			const { error, applied } = await runFixtures(
+				{ '20990101A-boom.js': throws },
+				{ direction: 'up' },
+			);
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(applied).toEqual([]);
+		});
+
+		it('runs a single "down" inside the transaction', async () => {
+			const { error, applied, tables } = await runFixtures(
+				{
+					'20990101A-first.js': `export async function up() {}\n${
+						recordsItsConnection.replace('function up(', 'function down(')
+					}`,
+				},
+				{ direction: 'down', completed: ['20990101A'] },
+			);
+
+			expect(error).toBeUndefined();
+			expect(applied).toEqual([]);
+			expect(tables.inTransaction).toBe(true);
+			expect(tables.outsideTransaction).toBe(false);
 		});
 
 		it('leaves a client it does not wrap exactly as it was', async () => {
