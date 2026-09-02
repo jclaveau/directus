@@ -232,8 +232,11 @@ describe('run', () => {
 
 		beforeEach(async () => {
 			client = 'postgres';
-			flushCaches.mockClear();
-			warn.mockClear();
+			// `mockClear` would keep a rejection set by one case and leak it into the
+			// next; the runner also `.catch()`es the result, so it has to be a promise.
+			flushCaches.mockReset();
+			flushCaches.mockResolvedValue(undefined);
+			warn.mockReset();
 			directory = await mkdtemp(join(tmpdir(), 'directus-migrations-'));
 			databaseFile = join(directory, 'probe.sqlite');
 		});
@@ -499,6 +502,18 @@ describe('run', () => {
 
 			expect((error as Error).message).toBe('migration failed');
 			expect(flushCaches).not.toHaveBeenCalled();
+		});
+
+		it('reports the migration failure even when the flush fails', async () => {
+			flushCaches.mockRejectedValue(new Error('redis is down'));
+
+			const { error } = await runFixtures({
+				'20990101A-first.js': scopedTo('own', createsFirst),
+				'20990102A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(flushCaches).toHaveBeenCalled();
 		});
 
 		it('warns which migration broke the all-or-nothing chain', async () => {

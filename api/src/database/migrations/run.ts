@@ -227,7 +227,6 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			}
 
 			await batch?.commit();
-			committed = committed || batch !== undefined;
 		}
 		catch (error) {
 			if (batch && !batch.isCompleted()) {
@@ -236,9 +235,13 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 
 			// An escape commits everything before it, so a later failure can still
 			// leave schema changes live. Skipping the flush there would leave every
-			// process reading a schema the database no longer has.
+			// process reading a schema the database no longer has — but the migration
+			// failure is what the operator needs, so a failing flush must not replace
+			// it on the way out.
 			if (committed) {
-				await flushCaches(true);
+				await flushCaches(true).catch((flushError: unknown) => {
+					logger.error(flushError, 'Could not flush caches after a failed run');
+				});
 			}
 
 			throw error;

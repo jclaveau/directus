@@ -52,7 +52,9 @@ export function stopWatchingOutstandingMigrations(): void {
  * restart landing while migrations are outstanding, with nothing watching.
  */
 export async function watchOutstandingMigrations(): Promise<void> {
-	if (watching) {
+	if (watching || stopped) {
+		// Returning before the hold matters: flipping health to unknown with no
+		// loop left to clear it would strand the instance unhealthy for good.
 		return;
 	}
 

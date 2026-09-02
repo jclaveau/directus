@@ -180,4 +180,16 @@ describe('outstanding migrations', () => {
 
 		expect(outstandingMigrations).toHaveBeenCalledTimes(1);
 	});
+
+	it('refuses to restart after a stop rather than stranding health', async () => {
+		outstandingMigrations.mockResolvedValue(['20990101A']);
+
+		const module = await loadWatch();
+		module.stopWatchingOutstandingMigrations();
+		module.watchOutstandingMigrations();
+		await vi.advanceTimersByTimeAsync(20000);
+
+		expect(outstandingMigrations).not.toHaveBeenCalled();
+		expect(module.outstandingMigrationsHoldingHealth()).toEqual([]);
+	});
 });
