@@ -14,7 +14,11 @@ import createApp from './app.js';
 import getDatabase from './database/index.js';
 import emitter from './emitter.js';
 import { useLogger } from './logger/index.js';
-import { watchOutstandingMigrations } from './outstanding-migrations.js';
+import {
+	holdHealthForOutstandingMigrations,
+	stopWatchingOutstandingMigrations,
+	watchOutstandingMigrations,
+} from './outstanding-migrations.js';
 import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
@@ -131,6 +135,7 @@ export async function createServer(): Promise<http.Server> {
 		}
 
 		SERVER_ONLINE = false;
+		stopWatchingOutstandingMigrations();
 	}
 
 	async function onSignal() {
@@ -171,9 +176,14 @@ export async function startServer(): Promise<void> {
 	// own guidance is to exit.
 	process.on('unhandledRejection', reportUnhandledRejection);
 
-	void watchOutstandingMigrations();
+	// Held before anything can serve; the polling only starts once `createServer`
+	// has validated the connection, so a database that is simply down reports its
+	// own fatal error instead of a retry warning every tick.
+	holdHealthForOutstandingMigrations();
 
 	const server = await createServer();
+
+	void watchOutstandingMigrations();
 
 	const host = env['HOST'] as string;
 	const path = env['UNIX_SOCKET_PATH'] as string | undefined;

@@ -1,6 +1,7 @@
 import { parseJSON } from '@directus/utils';
 import type { Knex } from 'knex';
 import { useLogger } from '../../logger/index.js';
+import type { MigrationTransactionScope } from '../../types/index.js';
 
 /**
  * Runs unwrapped: it updates each field row on its own, logging and
@@ -11,7 +12,7 @@ import { useLogger } from '../../logger/index.js';
  * here reaches, so this keeps the migration exactly as it has always run
  * rather than rewriting logic that cannot be exercised.
  */
-export const transactionScope = 'none';
+export const transactionScope: MigrationTransactionScope = 'none';
 
 export async function up(knex: Knex): Promise<void> {
 	const logger = useLogger();

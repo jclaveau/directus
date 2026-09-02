@@ -11,6 +11,7 @@ import { getSchema } from '../../utils/get-schema.js';
 import type { Accountability, Permission } from '@directus/types';
 import { getSchemaInspector } from '../index.js';
 import { mergePermissions } from '../../permissions/utils/merge-permissions.js';
+import type { MigrationTransactionScope } from '../../types/index.js';
 
 /**
  * Runs unwrapped: it drops a foreign key that may not exist, logging and
@@ -21,7 +22,7 @@ import { mergePermissions } from '../../permissions/utils/merge-permissions.js';
  * here reaches, so this keeps the migration exactly as it has always run
  * rather than rewriting logic that cannot be exercised.
  */
-export const transactionScope = 'none';
+export const transactionScope: MigrationTransactionScope = 'none';
 
 type RoleAccess = {
 	app_access: boolean;

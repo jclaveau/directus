@@ -227,8 +227,13 @@ describe('run', () => {
 		let databaseFile: string;
 		let client: string;
 
+		const flushCaches = vi.fn();
+		const warn = vi.fn();
+
 		beforeEach(async () => {
 			client = 'postgres';
+			flushCaches.mockClear();
+			warn.mockClear();
 			directory = await mkdtemp(join(tmpdir(), 'directus-migrations-'));
 			databaseFile = join(directory, 'probe.sqlite');
 		});
@@ -238,6 +243,7 @@ describe('run', () => {
 			vi.doUnmock('@directus/env');
 			vi.doUnmock('../../cache.js');
 			vi.doUnmock('../index.js');
+			vi.doUnmock('../../logger/index.js');
 			vi.resetModules();
 			await rm(directory, { recursive: true, force: true });
 		});
@@ -279,7 +285,15 @@ describe('run', () => {
 			});
 
 			vi.doMock('../../cache.js', () => {
-				return { flushCaches: vi.fn() };
+				return { flushCaches };
+			});
+
+			vi.doMock('../../logger/index.js', () => {
+				return {
+					useLogger: () => {
+						return { info: vi.fn(), warn, error: vi.fn() };
+					},
+				};
 			});
 
 			vi.doMock('../index.js', () => {
@@ -455,6 +469,55 @@ describe('run', () => {
 			expect(applied).toEqual([]);
 			expect(tables.inTransaction).toBe(true);
 			expect(tables.outsideTransaction).toBe(false);
+		});
+
+		it('refuses a migration declaring an unknown scope, naming it', async () => {
+			const { error, applied } = await runFixtures({
+				'20990101A-first.js': scopedTo('nonne', createsFirst),
+			});
+
+			expect((error as Error).message).toContain('20990101A-first.js');
+			expect((error as Error).message).toContain('nonne');
+			expect(applied).toEqual([]);
+		});
+
+		it('flushes caches when an escape committed before a failure', async () => {
+			const { error } = await runFixtures({
+				'20990101A-first.js': scopedTo('own', createsFirst),
+				'20990102A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(flushCaches).toHaveBeenCalled();
+		});
+
+		it('does not flush when the whole run rolled back', async () => {
+			const { error } = await runFixtures({
+				'20990101A-first.js': createsFirst,
+				'20990102A-boom.js': throws,
+			});
+
+			expect((error as Error).message).toBe('migration failed');
+			expect(flushCaches).not.toHaveBeenCalled();
+		});
+
+		it('warns which migration broke the all-or-nothing chain', async () => {
+			await runFixtures({
+				'20990101A-first.js': createsFirst,
+				'20990102A-second.js': scopedTo('own', createsSecond),
+			});
+
+			expect(warn).toHaveBeenCalledWith(
+				expect.stringContaining('transactionScope "own"'),
+			);
+		});
+
+		it('does not warn when the run opened no segment to commit', async () => {
+			await runFixtures({
+				'20990101A-first.js': scopedTo('own', createsFirst),
+			});
+
+			expect(warn).not.toHaveBeenCalled();
 		});
 
 		it('leaves a client it does not wrap exactly as it was', async () => {

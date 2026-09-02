@@ -12,7 +12,7 @@ vi.mock('./database', () => ({
 	isInstalled: vi.fn(),
 	validateDatabaseConnection: vi.fn(),
 	validateDatabaseExtensions: vi.fn(),
-	validateMigrations: vi.fn(),
+	outstandingMigrationsOrExit: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('./telemetry/index.js');

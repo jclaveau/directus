@@ -186,6 +186,19 @@ describe('validateMigrations', () => {
 		expect(await validateMigrations()).toBe(false);
 	});
 
+	it('exits once, sharing the boot contract with the caller', async () => {
+		state.selectFails = true;
+
+		const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+			throw new Error('exited');
+		});
+
+		const { outstandingMigrationsOrExit } = await loadDatabase();
+
+		await expect(outstandingMigrationsOrExit()).rejects.toThrow('exited');
+		expect(exit).toHaveBeenCalledWith(1);
+	});
+
 	it('exits when the database cannot be read', async () => {
 		state.selectFails = true;
 

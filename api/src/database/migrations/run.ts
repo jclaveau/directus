@@ -116,7 +116,7 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			logger.info(`Applying ${nextVersion.name}...`);
 		}
 
-		if (wrapsInTransaction(migrationModule)) {
+		if (wrapsInTransaction(migrationModule, nextVersion.file)) {
 			await database.transaction(async (trx) => {
 				await applyUp(migrationModule, nextVersion, trx);
 			});
@@ -159,7 +159,7 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 				.where({ version: migration!.version });
 		}
 
-		if (wrapsInTransaction(migrationModule)) {
+		if (wrapsInTransaction(migrationModule, migration.file)) {
 			await database.transaction(revert);
 		}
 		else {
@@ -179,13 +179,16 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 		const batches = clientWrapsMigrations();
 
 		let batch: Knex.Transaction | undefined;
+		let committed = false;
 
 		try {
 			for (const migration of pending) {
 				const migrationModule = await loadMigration(migration.file);
 
+				const declared = declaredScope(migrationModule, migration.file);
+
 				const scope = batches
-					? migrationModule.transactionScope ?? 'batch'
+					? declared
 					: 'none';
 
 				if (scope !== 'batch' && batch) {
@@ -193,6 +196,7 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 					// open segment commits here and stops being able to roll back.
 					await batch.commit();
 					batch = undefined;
+					committed = true;
 
 					logger.warn(
 						`${migration.name} declares transactionScope "${scope}", so the`
@@ -207,11 +211,14 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 
 				if (scope === 'none') {
 					await applyUp(migrationModule, migration, database);
+					committed = true;
 				}
 				else if (scope === 'own') {
 					await database.transaction(async (trx) => {
 						await applyUp(migrationModule, migration, trx);
 					});
+
+					committed = true;
 				}
 				else {
 					batch ??= await database.transaction();
@@ -220,10 +227,18 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 			}
 
 			await batch?.commit();
+			committed = committed || batch !== undefined;
 		}
 		catch (error) {
 			if (batch && !batch.isCompleted()) {
 				await batch.rollback();
+			}
+
+			// An escape commits everything before it, so a later failure can still
+			// leave schema changes live. Skipping the flush there would leave every
+			// process reading a schema the database no longer has.
+			if (committed) {
+				await flushCaches(true);
 			}
 
 			throw error;
@@ -232,12 +247,37 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 		await flushCaches(true);
 	}
 
-	function wrapsInTransaction(migrationModule: MigrationModule): boolean {
+	function wrapsInTransaction(
+		migrationModule: MigrationModule,
+		file: string,
+	): boolean {
 		if (!clientWrapsMigrations()) {
 			return false;
 		}
 
-		return (migrationModule.transactionScope ?? 'batch') !== 'none';
+		return declaredScope(migrationModule, file) !== 'none';
+	}
+
+	/**
+	 * A migration is loaded through `import()`, so its exports reach us as `any` and
+	 * the type on `transactionScope` proves nothing. An unknown value would otherwise
+	 * fall through to the batch branch — wrapping the very migrations that declared
+	 * they must not be.
+	 */
+	function declaredScope(
+		migrationModule: MigrationModule,
+		file: string,
+	): MigrationTransactionScope {
+		const scope = migrationModule.transactionScope ?? 'batch';
+
+		if (scope !== 'batch' && scope !== 'own' && scope !== 'none') {
+			throw new Error(
+				`Migration ${file} declares an unknown transactionScope "${scope}".`
+					+ ` Expected "batch", "own" or "none".`,
+			);
+		}
+
+		return scope;
 	}
 
 	function clientWrapsMigrations(): boolean {

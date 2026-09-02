@@ -137,4 +137,47 @@ describe('outstanding migrations', () => {
 			expect.stringContaining('the database could not be read'),
 		);
 	});
+
+	it('holds health without touching the database', async () => {
+		const module = await loadWatch();
+		module.holdHealthForOutstandingMigrations();
+
+		expect(module.outstandingMigrationsHoldingHealth()).toBeUndefined();
+		expect(outstandingMigrations).not.toHaveBeenCalled();
+	});
+
+	it('names the budget it actually used when giving up', async () => {
+		env['MIGRATIONS_WAIT_TIMEOUT'] = '';
+		outstandingMigrations.mockResolvedValue(['20990101A']);
+
+		const module = await loadWatch();
+		module.watchOutstandingMigrations();
+		await vi.advanceTimersByTimeAsync(400000);
+
+		expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('300000ms'));
+	});
+
+	it('ignores a second start rather than running two loops', async () => {
+		outstandingMigrations.mockResolvedValue(['20990101A']);
+
+		const module = await loadWatch();
+		module.watchOutstandingMigrations();
+		module.watchOutstandingMigrations();
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(outstandingMigrations).toHaveBeenCalledTimes(1);
+	});
+
+	it('stops polling once shutdown has been signalled', async () => {
+		outstandingMigrations.mockResolvedValue(['20990101A']);
+
+		const module = await loadWatch();
+		module.watchOutstandingMigrations();
+		await vi.advanceTimersByTimeAsync(0);
+
+		module.stopWatchingOutstandingMigrations();
+		await vi.advanceTimersByTimeAsync(20000);
+
+		expect(outstandingMigrations).toHaveBeenCalledTimes(1);
+	});
 });

@@ -2,6 +2,7 @@ import { createInspector } from '@directus/schema';
 import type { Knex } from 'knex';
 import { useLogger } from '../../logger/index.js';
 import { getDatabaseClient } from '../index.js';
+import type { MigrationTransactionScope } from '../../types/index.js';
 
 /**
  * Runs unwrapped: it drops foreign keys and indexes that may not exist,
@@ -12,7 +13,7 @@ import { getDatabaseClient } from '../index.js';
  * here reaches, so this keeps the migration exactly as it has always run
  * rather than rewriting logic that cannot be exercised.
  */
-export const transactionScope = 'none';
+export const transactionScope: MigrationTransactionScope = 'none';
 
 /**
  * Things to keep in mind:

@@ -341,17 +341,28 @@ export async function outstandingMigrations(): Promise<string[]> {
 	}) as string[];
 }
 
-export async function validateMigrations(): Promise<boolean> {
+/**
+ * The outstanding versions under the boot contract: a database that cannot be
+ * read at all is fatal here, because nothing is going to retry and nothing
+ * should serve. The watch calls `outstandingMigrations` directly instead,
+ * precisely so that it can.
+ */
+// eslint-disable-next-line local/no-single-caller-function -- also called by app.ts
+export async function outstandingMigrationsOrExit(): Promise<string[]> {
 	const logger = useLogger();
 
 	try {
-		return (await outstandingMigrations()).length === 0;
+		return await outstandingMigrations();
 	}
 	catch (error: any) {
 		logger.error(`Can't read the applied migrations from the database`);
 		logger.error(error);
 		throw process.exit(1);
 	}
+}
+
+export async function validateMigrations(): Promise<boolean> {
+	return (await outstandingMigrationsOrExit()).length === 0;
 }
 
 /**
