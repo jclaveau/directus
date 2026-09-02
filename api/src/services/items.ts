@@ -19,7 +19,6 @@ import type {
 	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
-	Type,
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -189,64 +188,97 @@ implements AbstractService<Item> {
 			tags.push(...flatTags);
 		}
 
-		for (const { field } of paths) {
-			const pathTags = await this.snapshotScopedCachePathTags(
-				field,
-				keys,
-				fieldTypes[field],
-			);
-
-			tags.push(...pathTags);
-		}
+		tags.push(...(await this.snapshotScopedCachePathTags(paths, keys, fieldTypes)));
 
 		return tags;
 	}
 
 	/**
-	 * Resolve a path scope field to its terminal value per mutated row via its M2O
+	 * Resolve every path scope field to its terminal value per mutated row via its M2O
 	 * join chain, then reuse the row-tag builder for canonicalization + dedup. The
-	 * mutated row carries only the first-hop fk, so the ancestor join recovers the
-	 * SAME terminal the read side pinned — the identical `field=<path>` slice.
+	 * mutated row carries only the first-hop fk, so the ancestor joins recover the
+	 * SAME terminals the read side pinned — the identical `field=<path>` slices.
+	 *
+	 * One query for every path, not one per path: composition derives the paths by
+	 * extending each other (`teaching_unit.discipline`, then
+	 * `teaching_unit.discipline.enrollment`), so a join keyed by the segments leading
+	 * to it is shared and each further path costs at most one more join. On
+	 * `student_course` that turns four round trips into one, per snapshot, and a
+	 * mutation snapshots twice.
 	 */
 	private async snapshotScopedCachePathTags(
-		path: string,
+		paths: ScopedCachePath[],
 		keys: PrimaryKey[],
-		terminalType: Type | undefined,
+		fieldTypes: FieldTypesByField,
 	): Promise<ScopedCacheTag[]> {
-		const resolved = this.resolveScopedCachePath(path);
+		const primaryKeyField = this.schema.collections[this.collection]!.primary;
+		const aliasByLeadingSegments = new Map<string, string>();
+		const terminalRefByPath: { field: string; terminalRef: string }[] = [];
 
-		if (!resolved) {
+		let query = this.knex.from({ root: this.collection });
+
+		for (const { field } of paths) {
+			const resolved = this.resolveScopedCachePath(field);
+
+			if (!resolved) {
+				continue;
+			}
+
+			let leadingSegments = '';
+			let prevAlias = 'root';
+
+			for (const join of resolved.joins) {
+				leadingSegments = `${leadingSegments}.${join.field}`;
+
+				let alias = aliasByLeadingSegments.get(leadingSegments);
+
+				if (alias === undefined) {
+					alias = `p${aliasByLeadingSegments.size}`;
+					aliasByLeadingSegments.set(leadingSegments, alias);
+
+					query = query.leftJoin(
+						{ [alias]: join.relatedCollection },
+						`${alias}.${join.relatedPk}`,
+						`${prevAlias}.${join.field}`,
+					);
+				}
+
+				prevAlias = alias;
+			}
+
+			terminalRefByPath.push({
+				field,
+				terminalRef: `${prevAlias}.${resolved.terminalField}`,
+			});
+		}
+
+		if (terminalRefByPath.length === 0) {
 			return [];
 		}
 
-		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-
-		let query = this.knex.from({ root: this.collection });
-		let prevAlias = 'root';
-
-		resolved.joins.forEach((join, index) => {
-			const alias = `p${index}`;
-
-			query = query.leftJoin(
-				{ [alias]: join.relatedCollection },
-				`${alias}.${join.relatedPk}`,
-				`${prevAlias}.${join.field}`,
-			);
-
-			prevAlias = alias;
-		});
-
+		// Positional column names: a path spells its own name with dots, and two paths
+		// ending on the same terminal field would collide under that name.
 		const rows = await query
-			.select(this.knex.ref(`${prevAlias}.${resolved.terminalField}`).as('value'))
+			.select(
+				terminalRefByPath.map(({ terminalRef }, index) => {
+					return this.knex.ref(terminalRef).as(`value${index}`);
+				}),
+			)
 			.whereIn(`root.${primaryKeyField}`, keys);
 
-		return scopedCacheTagsFromRows(
-			this.collection,
-			[path],
-			rows.map((row) => ({ [path]: row.value })),
-			'skip',
-			{ [path]: terminalType },
-		);
+		const tags: ScopedCacheTag[] = [];
+
+		terminalRefByPath.forEach(({ field }, index) => {
+			tags.push(...scopedCacheTagsFromRows(
+				this.collection,
+				[field],
+				rows.map((row) => ({ [field]: row[`value${index}`] })),
+				'skip',
+				{ [field]: fieldTypes[field] },
+			));
+		});
+
+		return tags;
 	}
 
 	/**

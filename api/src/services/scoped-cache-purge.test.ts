@@ -1289,3 +1289,516 @@ describe(oneLine`
 		});
 	});
 });
+
+// Composition extends each path with one more hop, so `student_course` ends up with
+// three of them off the same chain. They resolve in ONE query with the hops shared,
+// which is what these pin: the count, the shape, and that the tags did not change.
+const composedChainSchema = new SchemaBuilder()
+	.collection('student_course', (c) => {
+		c.field('id').id();
+		c.field('name').string();
+		c.field('teaching_unit').m2o('student_teaching_unit');
+	})
+	.collection('student_teaching_unit', (c) => {
+		c.field('id').id();
+		c.field('discipline').m2o('student_discipline');
+	})
+	.collection('student_discipline', (c) => {
+		c.field('id').id();
+		c.field('enrollment').m2o('student_enrollment');
+	})
+	.collection('student_enrollment', (c) => {
+		c.field('id').id();
+		c.field('student').string();
+	})
+	.build();
+
+const composedChain = composedChainSchema.collections;
+
+composedChain['student_course']!.scopedCacheFields = ['teaching_unit'];
+composedChain['student_teaching_unit']!.scopedCacheFields = ['discipline'];
+composedChain['student_discipline']!.scopedCacheFields = ['enrollment'];
+composedChain['student_enrollment']!.scopedCacheFields = ['student'];
+
+// Two chains landing on a terminal carrying the same NAME on both sides. Keying the
+// projected columns by the terminal field would collapse them onto one value.
+const sharedTerminalNameSchema = new SchemaBuilder()
+	.collection('note', (c) => {
+		c.field('id').id();
+		c.field('left_ref').m2o('left_holder');
+		c.field('right_ref').m2o('right_holder');
+	})
+	.collection('left_holder', (c) => {
+		c.field('id').id();
+		c.field('owner').string();
+	})
+	.collection('right_holder', (c) => {
+		c.field('id').id();
+		c.field('owner').string();
+	})
+	.build();
+
+const sharedTerminalName = sharedTerminalNameSchema.collections;
+
+sharedTerminalName['note']!.scopedCacheFields = ['left_ref', 'right_ref'];
+sharedTerminalName['left_holder']!.scopedCacheFields = ['owner'];
+sharedTerminalName['right_holder']!.scopedCacheFields = ['owner'];
+
+describe('scoped cache path snapshot (one query for every path)', () => {
+	let db: MockedFunction<Knex>;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = vi.mocked(knex.default({ client: MockClient }));
+		tracker = createTracker(db);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		purgeScopedCache.mockClear();
+	});
+
+	const joinedSelects = () => {
+		return tracker.history.select.filter(({ sql }) => sql.includes('left join'));
+	};
+
+	it(oneLine`
+		resolves three composed paths in a single joined query per snapshot, sharing the
+		hops the shorter paths already walked
+	`, async () => {
+		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
+
+		tracker.on.select('student_course')
+			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+
+		tracker.on.update('student_course').response(1);
+		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
+
+		tracker.on.select('student_course')
+			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+
+		await new ItemsService(
+			'student_course',
+			{ knex: db, schema: composedChainSchema },
+		).updateMany([1], { name: 'renamed' });
+
+		// One per snapshot, and updateMany snapshots the old row then the committed one.
+		expect(joinedSelects()).toHaveLength(2);
+
+		// Three hops for three paths, not the 1 + 2 + 3 a query per path would walk.
+		expect(joinedSelects()[0]!.sql.match(/left join/g)).toHaveLength(3);
+	});
+
+	it(oneLine`
+		emits the same slice per composed path as the per-path queries did, for the old
+		row and the committed one
+	`, async () => {
+		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
+
+		tracker.on.select('student_course')
+			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+
+		tracker.on.update('student_course').response(1);
+		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 11 }]);
+
+		// Every terminal differs from the old row's, so a column read off the wrong path
+		// would surface as a wrong value rather than passing on a shared one.
+		tracker.on.select('student_course')
+			.responseOnce([{ value0: 21, value1: 31, value2: 'B' }]);
+
+		await new ItemsService(
+			'student_course',
+			{ knex: db, schema: composedChainSchema },
+		).updateMany([1], { teaching_unit: 11 });
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'student_course',
+			[
+				{ collection: 'student_course', field: 'id', value: 1, type: 'integer' },
+				{
+					collection: 'student_course',
+					field: 'teaching_unit',
+					value: 10,
+					type: 'integer',
+				},
+				{
+					collection: 'student_course',
+					field: 'teaching_unit.discipline',
+					value: 20,
+					type: 'integer',
+				},
+				{
+					collection: 'student_course',
+					field: 'teaching_unit.discipline.enrollment',
+					value: 30,
+					type: 'integer',
+				},
+				{
+					collection: 'student_course',
+					field: 'teaching_unit.discipline.enrollment.student',
+					value: 'A',
+					type: 'string',
+				},
+				{ collection: 'student_course', field: 'id', value: 1, type: 'integer' },
+				{
+					collection: 'student_course',
+					field: 'teaching_unit',
+					value: 11,
+					type: 'integer',
+				},
+				{
+					collection: 'student_course',
+					field: 'teaching_unit.discipline',
+					value: 21,
+					type: 'integer',
+				},
+				{
+					collection: 'student_course',
+					field: 'teaching_unit.discipline.enrollment',
+					value: 31,
+					type: 'integer',
+				},
+				{
+					collection: 'student_course',
+					field: 'teaching_unit.discipline.enrollment.student',
+					value: 'B',
+					type: 'string',
+				},
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
+		keeps two paths apart when their terminal fields share a name, instead of
+		collapsing them onto one slice
+	`, async () => {
+		tracker.on.select('note').responseOnce([{ id: 1, left_ref: 7, right_ref: 8 }]);
+
+		tracker.on.select('note')
+			.responseOnce([{ value0: 'left-owner', value1: 'right-owner' }]);
+
+		tracker.on.delete('note').response(1);
+
+		await new ItemsService('note', { knex: db, schema: sharedTerminalNameSchema })
+			.deleteMany([1]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'note',
+			[
+				{ collection: 'note', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'note', field: 'left_ref', value: 7, type: 'integer' },
+				{ collection: 'note', field: 'right_ref', value: 8, type: 'integer' },
+				{
+					collection: 'note',
+					field: 'left_ref.owner',
+					value: 'left-owner',
+					type: 'string',
+				},
+				{
+					collection: 'note',
+					field: 'right_ref.owner',
+					value: 'right-owner',
+					type: 'string',
+				},
+			],
+			expect.anything(),
+		);
+	});
+});
+
+// A path whose first hop names no relation: collectionScopedCachePaths drops it
+// before the snapshot runs, so one bad declaration must not cost its sibling.
+const unresolvablePathSchema = new SchemaBuilder()
+	.collection('note', (c) => {
+		c.field('id').id();
+		c.field('holder').m2o('holder');
+	})
+	.collection('holder', (c) => {
+		c.field('id').id();
+		c.field('owner').string();
+	})
+	.build();
+
+const unresolvablePath = unresolvablePathSchema.collections;
+
+unresolvablePath['note']!.scopedCacheFields = ['ghost.owner', 'holder'];
+unresolvablePath['holder']!.scopedCacheFields = ['owner'];
+
+describe('scoped cache path snapshot — rows and paths it has to survive', () => {
+	let db: MockedFunction<Knex>;
+	let tracker: Tracker;
+
+	beforeAll(() => {
+		db = vi.mocked(knex.default({ client: MockClient }));
+		tracker = createTracker(db);
+	});
+
+	afterEach(() => {
+		tracker.reset();
+		purgeScopedCache.mockClear();
+	});
+
+	it(oneLine`
+		emits each mutated row's own terminal when several keys are written at once,
+		reading every path off that row rather than the first one
+	`, async () => {
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10 },
+			{ id: 2, teaching_unit: 20 },
+		]);
+
+		tracker.on.select('student_course').responseOnce([
+			{ value0: 11, value1: 12, value2: 'A' },
+			{ value0: 21, value1: 22, value2: 'B' },
+		]);
+
+		tracker.on.delete('student_course').response(2);
+
+		await new ItemsService(
+			'student_course',
+			{ knex: db, schema: composedChainSchema },
+		).deleteMany([1, 2]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			`student_course`,
+			[
+				{
+					collection: `student_course`,
+					field: `id`,
+					value: 1,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `id`,
+					value: 2,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit`,
+					value: 10,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit`,
+					value: 20,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline`,
+					value: 11,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline`,
+					value: 21,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment`,
+					value: 12,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment`,
+					value: 22,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment.student`,
+					value: `A`,
+					type: `string`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment.student`,
+					value: `B`,
+					type: `string`,
+				},
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
+		keeps a row whose join chain resolves to nothing, as the null slice the read side
+		pins, and collapses two such rows onto one tag
+	`, async () => {
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10 },
+			{ id: 2, teaching_unit: null },
+			{ id: 3, teaching_unit: null },
+		]);
+
+		tracker.on.select('student_course').responseOnce([
+			{ value0: 11, value1: 12, value2: 'A' },
+			{ value0: null, value1: null, value2: null },
+			{ value0: null, value1: null, value2: null },
+		]);
+
+		tracker.on.delete('student_course').response(3);
+
+		await new ItemsService(
+			'student_course',
+			{ knex: db, schema: composedChainSchema },
+		).deleteMany([1, 2, 3]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			`student_course`,
+			[
+				{
+					collection: `student_course`,
+					field: `id`,
+					value: 1,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `id`,
+					value: 2,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `id`,
+					value: 3,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit`,
+					value: 10,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit`,
+					value: null,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline`,
+					value: 11,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline`,
+					value: null,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment`,
+					value: 12,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment`,
+					value: null,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment.student`,
+					value: `A`,
+					type: `string`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit.discipline.enrollment.student`,
+					value: null,
+					type: `string`,
+				},
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
+		leaves out a path the schema cannot resolve, and still emits its sibling's slice
+	`, async () => {
+		tracker.on.select('note').responseOnce([{ id: 1, holder: 7 }]);
+		tracker.on.select('note').responseOnce([{ value0: 'owner-a' }]);
+		tracker.on.delete('note').response(1);
+
+		await new ItemsService(
+			'note',
+			{ knex: db, schema: unresolvablePathSchema },
+		).deleteMany([1]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			`note`,
+			[
+				{
+					collection: `note`,
+					field: `id`,
+					value: 1,
+					type: `integer`,
+				},
+				{
+					collection: `note`,
+					field: `holder`,
+					value: 7,
+					type: `integer`,
+				},
+				{
+					collection: `note`,
+					field: `holder.owner`,
+					value: `owner-a`,
+					type: `string`,
+				},
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
+		emits no path slice when the joined query matches no row, leaving the key slices
+		the caller already resolved
+	`, async () => {
+		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
+		tracker.on.select('student_course').responseOnce([]);
+		tracker.on.delete('student_course').response(1);
+
+		await new ItemsService(
+			'student_course',
+			{ knex: db, schema: composedChainSchema },
+		).deleteMany([1]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			`student_course`,
+			[
+				{
+					collection: `student_course`,
+					field: `id`,
+					value: 1,
+					type: `integer`,
+				},
+				{
+					collection: `student_course`,
+					field: `teaching_unit`,
+					value: 10,
+					type: `integer`,
+				},
+			],
+			expect.anything(),
+		);
+	});
+});
