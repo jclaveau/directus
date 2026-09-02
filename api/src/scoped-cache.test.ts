@@ -2660,6 +2660,38 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		).has('child')).toBe(false);
 	});
 
+	it('reports a two-fk-conflicted child in conflictedOut', () => {
+		// The signal the ancestor-slice reads to keep this child bare: no single
+		// ownership slice covers rows reached by two disagreeing reverse fks.
+		const conflicted = new Set<CollectionKey>();
+
+		pinnedScopedCacheTagsFromO2mChildren(
+			schema,
+			'parent',
+			fieldMapOf(['children', 'child'], ['alt_children', 'child']),
+			[{ id: 1, name: 'a' }],
+			new Set(),
+			conflicted,
+		);
+
+		expect([...conflicted]).toEqual(['child']);
+	});
+
+	it('leaves conflictedOut empty for a child keyed on one fk', () => {
+		const conflicted = new Set<CollectionKey>();
+
+		pinnedScopedCacheTagsFromO2mChildren(
+			schema,
+			'parent',
+			fieldMapOf(['children', 'child']),
+			[{ id: 1, name: 'a' }],
+			new Set(),
+			conflicted,
+		);
+
+		expect([...conflicted]).toEqual([]);
+	});
+
 	it('leaves the root collection alone', () => {
 		expect(pinnedFor(
 			'parent',
