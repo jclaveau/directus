@@ -2461,6 +2461,9 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	fieldMap: FieldMap,
 	records: Item[],
 	collectionsBeyondNestedRows: Set<CollectionKey>,
+	// Populated with the collections reached by two disagreeing reverse fks — the
+	// case a single ownership slice can't cover, so the caller must leave bare.
+	conflictedOut?: Set<CollectionKey>,
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// One bucket per child collection: it can be nested under several paths, and
 	// every parent key it is keyed by must be gathered before the cap so no path
@@ -2587,6 +2590,10 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
 
 	for (const [collection, keying] of keyingByChild) {
+		if (keying.conflicted && conflictedOut) {
+			conflictedOut.add(collection);
+		}
+
 		if (keying.conflicted || keying.rows.length === 0) {
 			continue;
 		}

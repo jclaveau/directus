@@ -1236,6 +1236,10 @@ implements AbstractService<Item> {
 		let o2mChildPins:
 			ReturnType<typeof pinnedScopedCacheTagsFromO2mChildren> = new Map();
 
+		// Collections reached by two disagreeing reverse fks: no single ownership
+		// slice covers them, so they stay bare even when an ancestor is pinned.
+		const o2mConflicted = new Set<string>();
+
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
 			// GraphQL requires relational keys to be returned regardless
@@ -1266,6 +1270,7 @@ implements AbstractService<Item> {
 					fieldMap,
 					toArray(rows),
 					beyondNestedRows,
+					o2mConflicted,
 				);
 			},
 		});
@@ -1414,13 +1419,13 @@ implements AbstractService<Item> {
 			};
 
 			const pushAncestorSliceOrBare = (collection: string): void => {
-				// Only a collection demoted to bare by `beyond` (a sort/injection reached
-				// it, but its ownership is intact) may take an ancestor slice. A collection
-				// bared for soundness — conflicting o2m aliases, an undecidable key — must
-				// stay bare, or the slice covers rows the ambiguity left it unable to name.
-				const ancestorSliceTags = beyondNestedRows.has(collection)
-					? ancestorSliceTagsFor(collection)
-					: [];
+				// A would-be-bare collection takes its ancestor slice unless it was reached
+				// by two disagreeing reverse fks: only that o2m conflict leaves rows no
+				// single ownership slice can name. Every other bare is soundly covered by
+				// the owner's slice the whole read is bounded to.
+				const ancestorSliceTags = o2mConflicted.has(collection)
+					? []
+					: ancestorSliceTagsFor(collection);
 
 				scopedCacheTags.push(
 					...(ancestorSliceTags.length > 0
