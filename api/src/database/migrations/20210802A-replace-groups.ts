@@ -1,6 +1,18 @@
 import { parseJSON } from '@directus/utils';
 import type { Knex } from 'knex';
 import { useLogger } from '../../logger/index.js';
+import type { MigrationTransactionScope } from '../../types/index.js';
+
+/**
+ * Runs unwrapped: it updates each field row on its own, logging and
+ * continuing when one will not take.
+ * Postgres aborts a whole transaction on any error, so inside the run's those
+ * catches would stop protecting anything and merely hide the abort until a
+ * later statement failed. The paths only fire on an upgrade, which no test
+ * here reaches, so this keeps the migration exactly as it has always run
+ * rather than rewriting logic that cannot be exercised.
+ */
+export const transactionScope: MigrationTransactionScope = 'none';
 
 export async function up(knex: Knex): Promise<void> {
 	const logger = useLogger();

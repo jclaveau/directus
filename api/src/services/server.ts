@@ -13,6 +13,7 @@ import { useLogger } from '../logger/index.js';
 import getMailer from '../mailer.js';
 import { rateLimiterGlobal } from '../middleware/rate-limiter-global.js';
 import { rateLimiter } from '../middleware/rate-limiter-ip.js';
+import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js';
 import { SERVER_ONLINE } from '../server.js';
 import { getStorage } from '../storage/index.js';
 import { getAllowedLogLevels } from '../utils/get-allowed-log-levels.js';
@@ -197,6 +198,23 @@ export class ServerService {
 
 			// No need to continue checking if parent status is already error
 			if (data.status === 'error') break;
+		}
+
+		// After the logging loop so a red health poll does not re-log the same line on
+		// every probe; the watch logs the reading once per check instead.
+		const outstanding = outstandingMigrationsHoldingHealth();
+
+		if (outstanding === undefined || outstanding.length > 0) {
+			data.status = 'error';
+
+			data.checks['migrations'] = [
+				{
+					componentType: 'datastore',
+					status: 'error',
+					observedValue: outstanding?.join(', ') ?? 'unknown',
+					output: 'Database migrations have not all been run',
+				},
+			];
 		}
 
 		if (this.accountability?.admin !== true) {

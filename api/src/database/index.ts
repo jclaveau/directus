@@ -292,9 +292,19 @@ export async function isInstalled(): Promise<boolean> {
 	return await inspector.hasTable('directus_collections');
 }
 
-export async function validateMigrations(): Promise<boolean> {
-	const database = getDatabase();
+/**
+ * The versions this build ships that the database has not recorded yet.
+ *
+ * Reading the migration files is fatal: a build without its migrations directory
+ * is a broken artifact, and retrying cannot mend it. Reading `directus_migrations`
+ * is not — it throws to the caller, so the boot watch can ride out a database that
+ * is briefly unreachable while another service is mid-migration.
+ */
+// eslint-disable-next-line local/no-single-caller-function -- 3 call sites
+export async function outstandingMigrations(): Promise<string[]> {
 	const logger = useLogger();
+
+	let requiredVersions: (string | undefined)[];
 
 	try {
 		let migrationFiles = await fse.readdir(path.join(__dirname, 'migrations'));
@@ -312,18 +322,47 @@ export async function validateMigrations(): Promise<boolean> {
 
 		migrationFiles.push(...customMigrationFiles);
 
-		const requiredVersions = migrationFiles.map((filePath) => filePath.split('-')[0]);
-
-		const completedVersions = (await database.select('version').from('directus_migrations')).map(
-			({ version }) => version,
-		);
-
-		return requiredVersions.every((version) => completedVersions.includes(version));
-	} catch (error: any) {
+		requiredVersions = migrationFiles.map((filePath) => filePath.split('-')[0]);
+	}
+	catch (error: any) {
 		logger.error(`Database migrations cannot be found`);
 		logger.error(error);
 		throw process.exit(1);
 	}
+
+	const completed = await getDatabase()
+		.select('version')
+		.from('directus_migrations');
+
+	const completedVersions = completed.map(({ version }) => version);
+
+	return requiredVersions.filter((version) => {
+		return completedVersions.includes(version) === false;
+	}) as string[];
+}
+
+/**
+ * The outstanding versions under the boot contract: a database that cannot be
+ * read at all is fatal here, because nothing is going to retry and nothing
+ * should serve. The watch calls `outstandingMigrations` directly instead,
+ * precisely so that it can.
+ */
+// eslint-disable-next-line local/no-single-caller-function -- also called by app.ts
+export async function outstandingMigrationsOrExit(): Promise<string[]> {
+	const logger = useLogger();
+
+	try {
+		return await outstandingMigrations();
+	}
+	catch (error: any) {
+		logger.error(`Can't read the applied migrations from the database`);
+		logger.error(error);
+		throw process.exit(1);
+	}
+}
+
+export async function validateMigrations(): Promise<boolean> {
+	return (await outstandingMigrationsOrExit()).length === 0;
 }
 
 /**

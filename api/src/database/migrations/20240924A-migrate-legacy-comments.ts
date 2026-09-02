@@ -3,14 +3,20 @@ import type { Knex } from 'knex';
 import { randomUUID } from 'node:crypto';
 
 export async function up(knex: Knex): Promise<void> {
-	// remove foreign key constraint for projects already migrated to retentions-p1
-	try {
-		await knex.schema.alterTable('directus_comments', (table) => {
-			table.dropForeign('collection');
+	// remove foreign key constraint for projects already migrated to retentions-p1.
+	// Its own transaction, so that on a database where the constraint was never
+	// created the failure rolls back just this statement: bare, the error would
+	// abort whatever transaction the runner has open around the migration, and the
+	// catch below would hide that until some later statement failed instead.
+	await knex
+		.transaction(async (trx) => {
+			await trx.schema.alterTable('directus_comments', (table) => {
+				table.dropForeign('collection');
+			});
+		})
+		.catch(() => {
+			// ignore
 		});
-	} catch {
-		// ignore
-	}
 
 	const rowsLimit = 50;
 	let hasMore = true;

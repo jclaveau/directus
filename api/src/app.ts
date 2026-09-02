@@ -51,7 +51,7 @@ import {
 	isInstalled,
 	validateDatabaseConnection,
 	validateDatabaseExtensions,
-	validateMigrations,
+	outstandingMigrationsOrExit,
 } from './database/index.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { initCacheConfig } from './cache-config.js';
@@ -101,8 +101,12 @@ export default async function createApp(): Promise<express.Application> {
 		process.exit(1);
 	}
 
-	if ((await validateMigrations()) === false) {
-		logger.warn(`Database migrations have not all been run`);
+	const outstanding = await outstandingMigrationsOrExit();
+
+	if (outstanding.length > 0) {
+		logger.warn(
+			`Database migrations have not all been run: ${outstanding.join(', ')}`,
+		);
 	}
 
 	if (!env['SECRET']) {
