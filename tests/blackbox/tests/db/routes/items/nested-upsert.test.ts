@@ -17,6 +17,11 @@ import { collectionChildren, collectionParents } from './nested-upsert.seed';
 // `updateMany` treats an alterations object carrying no item as changing nothing and
 // skips the whole transaction, while a bare array never counts as empty because for
 // an o2m it deselects every child.
+//
+// The third block reaches `upsertMany` through an endpoint extension, which is the
+// only way to call it as its own caller never does: with no mutation tracker, and
+// with the returned keys actually read. `processO2M` consumes those keys internally,
+// so nothing else can check that they line up with the payloads.
 
 const AUTH = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -225,6 +230,62 @@ describe('the alterations shape decides whether anything changed', () => {
 			// not treated as "no change" — it reaches the nested write and is
 			// rejected there.
 			expect(response.statusCode).toEqual(400);
+		});
+	});
+});
+
+describe('upsertMany called the way processO2M never calls it', () => {
+	describe.each(vendors)('%s', (vendor) => {
+		it('returns one key per payload, in input order', async () => {
+			const parent = await createParent(vendor, 'probe-order');
+
+			await writeChildren(vendor, parent.id, [
+				{ name: 'one' },
+				{ name: 'two' },
+				{ name: 'three' },
+			]);
+
+			const children = await readChildrenOf(vendor, parent.id);
+
+			// Deliberately not the order they were written in: a call that grouped
+			// or sorted its payloads would return the keys in a different order and
+			// mis-pair every child with its data.
+			const response = await request(getUrl(vendor))
+				.post('/nested-upsert-probe/upsert-many')
+				.send({
+					payloads: [
+						{ id: children[2]!.id, name: 'third-first' },
+						{ id: children[0]!.id, name: 'first-second' },
+						{ id: children[1]!.id, name: 'second-third' },
+					],
+				})
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+
+			expect(response.body.keys).toEqual([
+				children[2]!.id,
+				children[0]!.id,
+				children[1]!.id,
+			]);
+
+			// Each payload landed on the row its own key named, not on the row at
+			// its position.
+			expect(await readChildrenOf(vendor, parent.id)).toEqual([
+				{ id: children[0]!.id, name: 'first-second', parent: parent.id },
+				{ id: children[1]!.id, name: 'second-third', parent: parent.id },
+				{ id: children[2]!.id, name: 'third-first', parent: parent.id },
+			]);
+		});
+
+		it('accepts no payloads at all', async () => {
+			const response = await request(getUrl(vendor))
+				.post('/nested-upsert-probe/upsert-many')
+				.send({ payloads: [] })
+				.set('Authorization', AUTH);
+
+			expect(response.statusCode).toEqual(200);
+			expect(response.body.keys).toEqual([]);
 		});
 	});
 });

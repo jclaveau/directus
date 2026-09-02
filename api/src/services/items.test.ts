@@ -1348,10 +1348,10 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
 
-			// Nothing over HTTP reads this array back — a nested write consumes it
-			// inside processO2M — so the index alignment it promises to that caller
-			// has no blackbox witness. The keys are deliberately out of order so a
-			// rewrite that groups or sorts the payloads is caught here.
+			// nested-upsert.test.ts drives the same contract through an endpoint
+			// extension, since no ordinary route returns these keys; this pins it
+			// without a server. The keys are deliberately out of order so a rewrite
+			// that groups or sorts the payloads is caught either way.
 			const keys = await service.upsertMany([
 				{ id: 3, name: 'c' },
 				{ id: 1, name: 'a' },
