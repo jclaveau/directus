@@ -145,7 +145,7 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await (service as any).snapshotScopedCacheTags([1])).toEqual([]);
+		expect(await service.scopedCache.snapshot([1])).toEqual([]);
 	});
 
 	test('resolves the key slice on a collection it does know', async () => {
@@ -155,7 +155,7 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await (service as any).snapshotScopedCacheTags([1])).toEqual([
+		expect(await service.scopedCache.snapshot([1])).toEqual([
 			{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
 		]);
 	});
