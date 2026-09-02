@@ -43,3 +43,28 @@ Statements that can never run in a PG/Timescale transaction (measured, TS 2.29.2
 same transaction, and `CALL`ing a procedure containing `COMMIT`.
 
 See [[project_directus_health_holds_on_outstanding_migrations]].
+
+**Checklist for a NEW migration under this runner** (worked through for #398's
+`20260826A-name-the-cache-stats-tables`, which renames 7 cache-stats tables and is safe as
+plain `batch`):
+
+- **Does it swallow an error?** A caught-and-ignored failure is the one thing that breaks
+  the batch: on Postgres it leaves `25P02` and kills every migration after it. This is why
+  five core migrations carry `transactionScope: 'none'`. A migration that guards with
+  `hasTable` instead of catching is fine.
+- **Are the guards reading the right connection?** `applyUp(module, migration, batch)`
+  hands the batch transaction in as `knex`, so `knex.schema.hasTable` sees renames made
+  earlier in the same run. On a separate connection the guard would read a stale catalog.
+- **Is any statement refused inside a transaction?** `CREATE INDEX CONCURRENTLY`,
+  `refresh_continuous_aggregate`, `reorder_chunk`. Plain DDL — including
+  `ALTER TABLE … RENAME`, metadata-only — is transactional on Postgres.
+- **How long is the lock held?** This is the real cost of `batch`: an `ACCESS EXCLUSIVE`
+  taken by a rename is held until the END OF THE WHOLE RUN, not the end of that migration.
+  The API writes cache-stats telemetry to those very tables and does not itself migrate
+  ([[project_directus_planner_deploy_shape]]), so live writes queue behind it. `'own'`
+  shrinks the window to the migration while keeping it atomic.
+
+**Unmeasured, reasoned only:** renaming a *TimescaleDB hypertable* inside a transaction.
+Policies and continuous aggregates bind by `hypertable_id` rather than by name, so the
+rename should carry them, but the statement itself was never probed in a transaction —
+other Timescale DDL was ([[project_directus_cache_stats_table_roles]]).
