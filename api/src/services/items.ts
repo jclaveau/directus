@@ -269,15 +269,13 @@ implements AbstractService<Item> {
 		const tags: ScopedCacheTag[] = [];
 
 		terminalRefByPath.forEach(({ field }, index) => {
-			// 'skip' drops an unresolvable row rather than asking for a coarse purge,
-			// so it never hands back the null the 'coarse' callers have to propagate.
-			tags.push(...(scopedCacheTagsFromRows(
+			tags.push(...scopedCacheTagsFromRows(
 				this.collection,
 				[field],
 				rows.map((row) => ({ [field]: row[`value${index}`] })),
 				'skip',
 				{ [field]: fieldTypes[field] },
-			) ?? []));
+			));
 		});
 
 		return tags;

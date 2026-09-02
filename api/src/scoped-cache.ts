@@ -1095,6 +1095,20 @@ export function scopedCacheTagsFromRows(
 	collection: string,
 	fields: string[],
 	rows: Record<string, any>[],
+	onUnresolvable: 'skip',
+	fieldTypes?: FieldTypesByField,
+): ScopedCacheTag[];
+export function scopedCacheTagsFromRows(
+	collection: string,
+	fields: string[],
+	rows: Record<string, any>[],
+	onUnresolvable: 'coarse',
+	fieldTypes?: FieldTypesByField,
+): ScopedCacheTag[] | null;
+export function scopedCacheTagsFromRows(
+	collection: string,
+	fields: string[],
+	rows: Record<string, any>[],
 	onUnresolvable: 'coarse' | 'skip',
 	fieldTypes: FieldTypesByField = {},
 ): ScopedCacheTag[] | null {

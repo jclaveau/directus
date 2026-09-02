@@ -1509,8 +1509,8 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 	});
 });
 
-// A path whose first hop names no relation: resolveScopedCachePath gives up on it
-// while its sibling resolves, so one bad declaration must not drop the other.
+// A path whose first hop names no relation: collectionScopedCachePaths drops it
+// before the snapshot runs, so one bad declaration must not cost its sibling.
 const unresolvablePathSchema = new SchemaBuilder()
 	.collection('note', (c) => {
 		c.field('id').id();
@@ -1730,7 +1730,7 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 	});
 
 	it(oneLine`
-		skips a path whose join chain cannot be resolved and still emits the sibling one
+		leaves out a path the schema cannot resolve, and still emits its sibling's slice
 	`, async () => {
 		tracker.on.select('note').responseOnce([{ id: 1, holder: 7 }]);
 		tracker.on.select('note').responseOnce([{ value0: 'owner-a' }]);
