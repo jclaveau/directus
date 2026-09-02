@@ -46,6 +46,8 @@ describe(oneLine`
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-ancestor-slice-deep-chain-${vendor}`;
+		// The suite default is 5; this fixture ownership filter is eight hops deep.
+		env[vendor]['MAX_RELATIONAL_DEPTH'] = '15';
 
 		let instance: ChildProcess;
 		let ownedOwnerId: number;
