@@ -181,6 +181,16 @@ implements AbstractService<Item> {
 
 			// A flat field is always projected, so 'coarse' only nulls on a caller
 			// feeding unprojected rows — never here; propagate it regardless.
+			//
+			// Which leaves this return, and the `=== null` arms in the three
+			// callers, unreachable today. They stay on purpose:
+			// - null is the fail-safe: scope unresolvable, so purge coarsely.
+			// - it is unreachable only because the select above projects exactly
+			//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
+			//   two lists together.
+			// - so a later edit to either side makes it reachable again, and
+			//   without the arms the purge would silently narrow rather than
+			//   widen: a stale cache instead of a slow one.
 			if (flatTags === null) {
 				return null;
 			}
