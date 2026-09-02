@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/operations`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/operations`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createOperation,e as createOperations};
+//# sourceMappingURL=operations.js.map

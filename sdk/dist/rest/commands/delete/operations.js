@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=t=>()=>(e(t,`Keys cannot be empty`),{path:`/operations`,body:JSON.stringify(t),method:`DELETE`}),n=t=>()=>(e(t,`Key cannot be empty`),{path:`/operations/${t}`,method:`DELETE`});export{n as deleteOperation,t as deleteOperations};
+//# sourceMappingURL=operations.js.map

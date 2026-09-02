@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/flows`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/flows`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createFlow,e as createFlows};
+//# sourceMappingURL=flows.js.map

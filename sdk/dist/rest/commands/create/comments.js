@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/comments`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/comments`,params:t??{},body:JSON.stringify(e),method:`POST`});export{t as createComment,e as createComments};
+//# sourceMappingURL=comments.js.map

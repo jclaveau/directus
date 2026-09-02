@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r)=>()=>(e(t,`Keys cannot be empty`),{path:`/presets`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/presets`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e(String(t),`Key cannot be empty`),{path:`/presets/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});export{r as updatePreset,t as updatePresets,n as updatePresetsBatch};
+//# sourceMappingURL=presets.js.map
