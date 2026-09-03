@@ -2364,9 +2364,13 @@ export async function enforceCacheStatsBudget(): Promise<void> {
 	const { getHelpers } = await import('./database/helpers/index.js');
 	const { schema } = getHelpers(getDatabase());
 
-	let bytes = maxBytes
-		? await schema.getTablesSize(CACHE_STATS_TABLES)
-		: null;
+	// No budget configured, or one that does not parse: nothing to enforce.
+	if (!maxBytes) {
+		await clearCacheStatsBudgetAlert();
+		return;
+	}
+
+	let bytes = await schema.getTablesSize(CACHE_STATS_TABLES);
 
 	if (bytes === null || bytes <= maxBytes) {
 		await clearCacheStatsBudgetAlert();

@@ -307,6 +307,16 @@ implements AbstractService<Item> {
 		collector?: Pick<ScopedCacheCollector, 'tags'>,
 		changedCollections: string[] = [],
 	): Promise<void> {
+		// Callers reach here through `shouldClearCache`, which already rules out a
+		// null cache — but it narrows `this.cache`, and a mutable field does not
+		// carry that narrowing across the awaits below. Read it once. With no cache
+		// there is nothing to purge either way.
+		const cache = this.cache;
+
+		if (cache === null) {
+			return;
+		}
+
 		const context = this.scopedCachePurgeContext();
 		const hookTags = collector?.tags ?? [];
 
@@ -327,7 +337,7 @@ implements AbstractService<Item> {
 
 		if (ownTags !== null && otherCollections.length === 0) {
 			this.scopedCachePurged = await purgeScopedCache(
-				this.cache,
+				cache,
 				this.collection,
 				[...ownTags, ...hookTags],
 				context,
@@ -346,7 +356,7 @@ implements AbstractService<Item> {
 
 		if (ownTags !== null) {
 			purgedTagSets.push(await purgeScopedCache(
-				this.cache,
+				cache,
 				this.collection,
 				[...ownTags, ...hookTags],
 				context,
@@ -357,7 +367,7 @@ implements AbstractService<Item> {
 			// A `null` tag set means this collection's own slices are unresolvable →
 			// coarse whole-collection purge (bare tag + every slice).
 			purgedTagSets.push(await purgeScopedCache(
-				this.cache,
+				cache,
 				this.collection,
 				null,
 				context,
@@ -370,7 +380,7 @@ implements AbstractService<Item> {
 			// collection's bare tag (else it's purged twice and doubled in the header).
 			if (hookTags.length > 0) {
 				purgedTagSets.push(await purgeScopedCache(
-					this.cache,
+					cache,
 					this.collection,
 					hookTags,
 					context,
@@ -386,7 +396,7 @@ implements AbstractService<Item> {
 		purgedTagSets.push(...await Promise.all(
 			otherCollections.map((changedCollection) => {
 				return purgeScopedCache(
-					this.cache,
+					cache,
 					changedCollection,
 					null,
 					context,
@@ -1456,7 +1466,9 @@ implements AbstractService<Item> {
 		// Pre-update scope values for every row this batch touches (old ∪ new on purge,
 		// like updateMany).
 		const batchKeys = data
-			.map((item) => item[primaryKeyField])
+			// The schema says this column holds the primary key; indexing by a runtime
+			// field name cannot tell TypeScript that.
+			.map((item) => item[primaryKeyField] as PrimaryKey | undefined)
 			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
@@ -1957,7 +1969,9 @@ implements AbstractService<Item> {
 		// pure-insert payload has no key (or points at no row yet), so it contributes nothing
 		// here; its new slice is picked up from the committed rows below (old ∪ new).
 		const inputKeys = payloads
-			.map((payload) => payload[primaryKeyField])
+			// The schema says this column holds the primary key; indexing by a runtime
+			// field name cannot tell TypeScript that.
+			.map((payload) => payload[primaryKeyField] as PrimaryKey | undefined)
 			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(inputKeys);
