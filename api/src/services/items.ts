@@ -88,6 +88,14 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 	}
 }
 
+/**
+ * A value read out of a payload by a runtime field name is `any` as far as the
+ * compiler knows. This proves it is a primary key rather than asserting it.
+ */
+function isPrimaryKey(value: unknown): value is PrimaryKey {
+	return typeof value === 'string' || typeof value === 'number';
+}
+
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
 implements AbstractService<Item> {
 	collection: Collection;
@@ -1473,11 +1481,13 @@ implements AbstractService<Item> {
 
 		// Pre-update scope values for every row this batch touches (old ∪ new on purge,
 		// like updateMany).
-		const batchKeys = data
-			// The schema says this column holds the primary key; indexing by a runtime
-			// field name cannot tell TypeScript that.
-			.map((item) => item[primaryKeyField] as PrimaryKey | undefined)
-			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
+		const batchKeys = data.flatMap((item) => {
+			const key = item[primaryKeyField];
+
+			return isPrimaryKey(key)
+				? [key]
+				: [];
+		});
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
 
@@ -1976,11 +1986,13 @@ implements AbstractService<Item> {
 		// Old scope values for the update subset — any payload carrying an existing key. A
 		// pure-insert payload has no key (or points at no row yet), so it contributes nothing
 		// here; its new slice is picked up from the committed rows below (old ∪ new).
-		const inputKeys = payloads
-			// The schema says this column holds the primary key; indexing by a runtime
-			// field name cannot tell TypeScript that.
-			.map((payload) => payload[primaryKeyField] as PrimaryKey | undefined)
-			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
+		const inputKeys = payloads.flatMap((payload) => {
+			const key = payload[primaryKeyField];
+
+			return isPrimaryKey(key)
+				? [key]
+				: [];
+		});
 
 		const oldScopedCacheTags = await this.snapshotScopedCacheTags(inputKeys);
 
