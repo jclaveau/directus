@@ -150,10 +150,7 @@ test('Each windowed read documents the default it actually takes', () => {
 		allSystemMcpTools()
 			.filter((tool) => 'window' in tool.inputSchema.properties)
 			.map((tool) => {
-				const window = tool.inputSchema.properties['window'] as
-					{ description: string };
-
-				return [tool.name, window.description];
+				return [tool.name, tool.inputSchema.properties['window']!.description];
 			}),
 	);
 
