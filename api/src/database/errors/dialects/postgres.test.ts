@@ -12,9 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { extractError, getPoolExhaustedError } from './postgres.js';
 import type { PostgresError } from './types.js';
 
-function pgError(
-	overrides: { [K in keyof PostgresError]?: PostgresError[K] | undefined },
-): PostgresError {
+function pgError(overrides: Partial<PostgresError>): PostgresError {
 	return {
 		message: '',
 		length: 0,
