@@ -830,8 +830,20 @@ export class ItemScopedCacheService {
 				return false;
 			}
 
+			// A declared flat scope field auto-purges; a dotted one only when its path
+			// resolves to an M2O chain — a to-many hop makes the write drop it → stale.
 			return (
-				!collectionSchema?.scopedCacheFields?.includes(tag.field) &&
+				!(
+					collectionSchema?.scopedCacheFields?.includes(tag.field) &&
+					(
+						!tag.field.includes('.') ||
+						resolveScopedCacheM2oJoinChainFromPath(
+							this.schema,
+							tag.collection,
+							tag.field.split('.').slice(0, -1),
+						) !== null
+					)
+				) &&
 				!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
 			);
 		});

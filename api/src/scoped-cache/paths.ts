@@ -297,7 +297,8 @@ function keyingOfAnyCondition(
 
 	const axis = keyedAxisAcross(parts);
 
-	// Branches keying different fields name no single slice — the disjunction bares.
+	// Branches keying different fields name no single slice, so this bares — a
+	// deliberate over-purge: root's evalOr unions multi-field ORs, one axis can't.
 	if (axis === 'conflict') {
 		return KEYING_UNKEYED;
 	}

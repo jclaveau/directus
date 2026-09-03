@@ -1243,6 +1243,20 @@ implements AbstractService<Item> {
 		const changedFields = Object.keys(payloadAfterHooks ?? {}).filter((field) => !changesNothing(field));
 
 		if (changedFields.length === 0) {
+			// A hook declared a purge for this update; the declaration stands even though
+			// nothing changes, so drain it here as the cancel path does.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheCollector,
+					[],
+					{ includeCollectionTag: false },
+				);
+			}
+
 			// An empty payload, a PK-only update, or a filter hook that cleared every field to an
 			// empty alterations object leaves nothing to change — skip the transaction,
 			// activity/revision rows and integrity checks.
@@ -1563,18 +1577,24 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Re-snapshot the committed rows for their new scope values (covers both the
-			// inserts and the moved updates). Reading by returned key also captures a row a
-			// create hook took over — whatever's stored is what gets purged. No
-			// `someRowTakenOver` row-count guard is needed here (unlike createMany): upsertMany
-			// resolves values off `primaryKeys` returned by upsertOne, so every committed row is
-			// already re-read rather than trusted from the input payload count.
+			// New scope values for every committed row (inserts + moved updates), re-read
+			// by returned key so a hook's take-over shows as whatever is now stored.
 			const newScopedCacheTags = await this.scopedCache.snapshot(
 				primaryKeys.filter((key): key is PrimaryKey => key !== null && key !== undefined),
 			);
 
+			// A no-PK payload is insert-shaped: upsertOne routes it to createOne, where a
+			// hook can take it over, returning an existing row's key (a slice move).
+			const someInsertShapedKey = payloads.some((payload, index) => {
+				return payload[primaryKeyField] == null && primaryKeys[index] != null;
+			});
+
+			// The moved row's OLD slice was never snapshotted (not in inputKeys), so an
+			// old ∪ new purge leaks it → coarse, unless the hook declared purgeBy.
 			const scopedCacheTags =
-				oldScopedCacheTags === null || newScopedCacheTags === null
+				(someInsertShapedKey && scopedCacheCollector.tags.length === 0) ||
+				oldScopedCacheTags === null ||
+				newScopedCacheTags === null
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 

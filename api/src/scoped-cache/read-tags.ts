@@ -71,9 +71,9 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 
 		const type = schema.collections[collection]?.fields[keying.field]?.type;
 
-		// The collection is absent from the schema, or its keyed field is — no field to
-		// canonicalize a value against, so it pins nothing (a bare tag never named it).
-		if (type === undefined) {
+		// No field to canonicalize against (collection/field absent), or a date-ish type
+		// the write canonicalizes differently — pin nothing; the bare tag covers it.
+		if (type === undefined || !isPinnableScopeType(type)) {
 			continue;
 		}
 
