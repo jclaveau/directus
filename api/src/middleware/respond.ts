@@ -90,8 +90,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		? [{ collection: req.collection }]
 		: [];
 
-	const controllerTags = res.locals['scopedCacheTags'] as
-		ScopedCacheTag[] | undefined;
+	const controllerTags = res.locals['scopedCacheTags'];
 
 	// `total_count` drops the query filter and counts the whole collection
 	// (`MetaService.totalCount`), so a response carrying it depends on every row —

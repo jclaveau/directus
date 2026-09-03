@@ -2,7 +2,12 @@
  * Custom properties on the req object in express
  */
 
-import { Accountability, Query, SchemaOverview } from '@directus/types';
+import {
+	Accountability,
+	Query,
+	SchemaOverview,
+	ScopedCacheTag,
+} from '@directus/types';
 
 export {};
 
@@ -16,6 +21,10 @@ declare global {
 
 			accountability?: Accountability;
 			singleton?: boolean;
+		}
+
+		export interface Locals {
+			scopedCacheTags?: ScopedCacheTag[] | undefined;
 		}
 	}
 }
