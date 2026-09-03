@@ -8,22 +8,25 @@ import { sanitizeQuery } from './sanitize-query.js';
 // By the time this gate runs, sanitizeQuery has resolved `$NOW` to a Date; static
 // dates stay strings. So the signal is a Date in the resolved query, not `'$NOW'`.
 
+// `sanitizeQuery` resolves `$NOW` to a Date before these run, which is the whole
+// subject here — but `Filter` types its values as string | number, so each Date
+// below has to be spelled as the shape the type admits.
 test('a resolved $NOW (Date) makes the query uncachable', () => {
 	expect(
-		queryCachable({ filter: { created_on: { _gte: new Date() } } }),
+		queryCachable({ filter: { created_on: { _gte: new Date() as unknown as string } } }),
 	).toBe(false);
 
 	expect(
-		queryCachable({ filter: { _and: [{ created_on: { _gte: new Date() } }] } }),
+		queryCachable({ filter: { _and: [{ created_on: { _gte: new Date() as unknown as string } }] } }),
 	).toBe(false);
 
 	// $NOW inside an _in array.
-	expect(queryCachable({ filter: { at: { _in: [new Date(), 'x'] } } })).toBe(false);
+	expect(queryCachable({ filter: { at: { _in: [new Date() as unknown as string, 'x'] } } })).toBe(false);
 });
 
 test('a resolved $NOW inside deep._filter makes the query uncachable', () => {
 	expect(
-		queryCachable({ deep: { author: { _filter: { at: { _gte: new Date() } } } } }),
+		queryCachable({ deep: { author: { _filter: { at: { _gte: new Date() as unknown as string } } } } }),
 	).toBe(false);
 });
 

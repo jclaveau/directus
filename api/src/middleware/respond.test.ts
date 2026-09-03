@@ -135,7 +135,11 @@ function makeRes(payload: any, locals: Record<string, any> = {}) {
 	} as unknown as Response;
 }
 
-function makeReq(overrides: Partial<Request> = {}) {
+function makeReq(
+	// Written by hand, so an absent field is spelled as an explicit `undefined`
+	// rather than a missing key.
+	overrides: { [K in keyof Request]?: Request[K] | undefined } = {},
+) {
 	return {
 		method: 'GET',
 		originalUrl: '/items/articles',
