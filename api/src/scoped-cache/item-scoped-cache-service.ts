@@ -58,7 +58,8 @@ export type ScopedCacheReadInputs = {
  * Stateless read-side metadata for a collection's scoped cache. Derives the flat
  * fields, dotted paths, terminal types and related primary keys the snapshot and
  * read-tag assembly consume. Every member is a pure function of (collection,
- * schema), both fixed for the owning ItemsService, so the getters can memoize later.
+ * schema), both fixed for the owning ItemsService, so the getters memoize on
+ * first access.
  */
 export class ItemScopedCacheService {
 	private collection: string;
@@ -66,6 +67,12 @@ export class ItemScopedCacheService {
 	private knex: Knex;
 	private cache: Keyv<any> | null;
 	private accountability: Accountability | null;
+
+	private fieldsMemo?: string[];
+	private flatFieldsMemo?: string[];
+	private pathsMemo?: ScopedCachePath[];
+	private fieldTypesMemo?: FieldTypesByField;
+	private relatedPksMemo?: Record<string, string>;
 
 	constructor(
 		collection: string,
@@ -82,19 +89,25 @@ export class ItemScopedCacheService {
 	}
 
 	get fields(): string[] {
-		return this.schema.collections[this.collection]?.scopedCacheFields ?? [];
+		return this.fieldsMemo ??=
+			this.schema.collections[this.collection]?.scopedCacheFields ?? [];
 	}
 
 	// Direct-column scope fields (no dot): they project into the snapshot SELECT and
 	// feed the pinner's flat + one-hop logic. Dotted paths are handled separately.
 	get flatFields(): string[] {
-		return this.fields.filter((field) => !field.includes('.'));
+		return this.flatFieldsMemo ??=
+			this.fields.filter((field) => !field.includes('.'));
 	}
 
 	// The multi-hop paths this collection pins by: explicit dotted entries PLUS paths
 	// auto-derived from local scope fields (see `composeScopedCachePaths`). Each is
 	// re-resolved so a to-many/unknown hop drops it → bare tag both sides. Deduped.
 	get paths(): ScopedCachePath[] {
+		if (this.pathsMemo) {
+			return this.pathsMemo;
+		}
+
 		const byField = new Map<string, ScopedCachePath>();
 
 		const addPath = (field: string) => {
@@ -119,7 +132,7 @@ export class ItemScopedCacheService {
 			addPath(field);
 		}
 
-		return [...byField.values()];
+		return this.pathsMemo = [...byField.values()];
 	}
 
 	// Resolve a dotted scope field into the M2O join chain reaching its terminal.
@@ -158,6 +171,10 @@ export class ItemScopedCacheService {
 	}
 
 	get fieldTypes(): FieldTypesByField {
+		if (this.fieldTypesMemo) {
+			return this.fieldTypesMemo;
+		}
+
 		const rootFields = this.schema.collections[this.collection]?.fields ?? {};
 		const types: FieldTypesByField = {};
 
@@ -184,13 +201,17 @@ export class ItemScopedCacheService {
 			types[field] = terminal?.fields[resolved.terminalField]?.type;
 		}
 
-		return types;
+		return this.fieldTypesMemo = types;
 	}
 
 	// A scope field's related primary key, so the read side can unwrap the
 	// `{ fk: { <pk>: { _eq } } }` shape queries/permissions use — for a flat one-hop
 	// relation, and for a path whose terminal is itself an M2O (`{ user: { id } }`).
 	get relatedPks(): Record<string, string> {
+		if (this.relatedPksMemo) {
+			return this.relatedPksMemo;
+		}
+
 		const map: Record<string, string> = {};
 
 		const addRelatedPk = (
@@ -223,7 +244,7 @@ export class ItemScopedCacheService {
 			}
 		}
 
-		return map;
+		return this.relatedPksMemo = map;
 	}
 
 	/**
