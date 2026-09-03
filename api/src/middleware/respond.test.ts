@@ -136,9 +136,12 @@ function makeRes(payload: any, locals: Record<string, any> = {}) {
 }
 
 function makeReq(
-	// Written by hand, so an absent field is spelled as an explicit `undefined`
-	// rather than a missing key.
-	overrides: { [K in keyof Request]?: Request[K] | undefined } = {},
+	// `collection` is defaulted below, and the only way to spread a default away is
+	// to pass the key with `undefined` — which `Partial` forbids under
+	// `exactOptionalPropertyTypes`. Only this field is ever cleared that way.
+	overrides: Omit<Partial<Request>, 'collection'> & {
+		collection?: string | undefined;
+	} = {},
 ) {
 	return {
 		method: 'GET',
