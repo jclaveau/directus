@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { useEnv } from '@directus/env';
 import { parse as parseBytes } from 'bytes';
+import type {
+	CacheConfigEvent,
+	CachePurgeMode,
+	CacheTimeseries,
+	CacheTimeseriesBucket,
+} from '@directus/types';
 import type { Knex } from 'knex';
 import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
@@ -12,12 +18,13 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 
 // The timeseries wire types live in @directus/types so the app chart shares them.
+// Re-exported for consumers; the import above is what binds them in this file.
 export type {
 	CacheConfigEvent,
 	CachePurgeMode,
 	CacheTimeseries,
 	CacheTimeseriesBucket,
-} from '@directus/types';
+};
 
 /**
  * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
