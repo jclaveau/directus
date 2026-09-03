@@ -483,6 +483,53 @@ describe('Integration Tests', () => {
 
 				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
 			});
+
+			it('returns the keys in the order the caller sent the rows', async () => {
+				// Adjacent rows carrying the same change merge into one group, and the
+				// group is then applied by a single `WHERE id IN (…)`. The keys still
+				// belong to the caller's rows, so they come back in the caller's order.
+				const keys = await service.updateBatch([
+					{ id: 5, name: 'same' },
+					{ id: 3, name: 'same' },
+					{ id: 4, name: 'other' },
+				]);
+
+				expect(keys).toEqual([5, 3, 4]);
+			});
+
+			it(oneLine`
+				returns a key for a row that writes nothing, alongside one that writes
+			`, async () => {
+				// `{ id: 1 }` carries only the primary key, so it is a no-op — but it is
+				// still a row the caller asked to update, and the REST layer reads every
+				// returned key back into the response body. Dropping it would silently
+				// omit that item from a PATCH response.
+				const keys = await service.updateBatch([
+					{ id: 1 },
+					{ id: 2, name: 'written' },
+				]);
+
+				expect(keys).toEqual([1, 2]);
+			});
+
+			it('snapshots the same rows before and after the write', async () => {
+				// The pre-update capture covers the rows that are actually written; the
+				// post-update one has to cover the same set or it re-reads rows nothing
+				// touched and purges their slices — the exact scope-path query the batch
+				// paths are trying to shed.
+				const snapshot = vi.spyOn(service as never, 'snapshotScopedCacheTags');
+
+				await service.updateBatch([
+					{ id: 1 },
+					{ id: 2, name: 'written' },
+				]);
+
+				expect(snapshot).toHaveBeenCalledTimes(2);
+				expect(snapshot.mock.calls[0]![0]).toEqual([2]);
+				expect(snapshot.mock.calls[1]![0]).toEqual([2]);
+
+				snapshot.mockRestore();
+			});
 		});
 
 		describe('updateMany', () => {

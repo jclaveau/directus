@@ -1478,9 +1478,6 @@ implements AbstractService<Item> {
 	/**
 	 * Update many items by primary key, setting all items to the same change.
 	 */
-	/**
-	 * Update many items by primary key, setting all items to the same change.
-	 */
 	async updateMany(
 		keys: PrimaryKey[],
 		data: Partial<Item>,
@@ -1505,13 +1502,8 @@ implements AbstractService<Item> {
 	 * or one whose every field is an alterations object carrying no item. Decided
 	 * before the transaction opens, so a no-op update costs no round trip.
 	 */
-	private groupChangesNothing(group: UpdateGroup<Item>): boolean {
+	private groupChangesNothing(group: UpdateGroup<Item>, aliases: string[]): boolean {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-
-		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
-			.filter((field) => field.alias === true)
-			.map((field) => field.field);
-
 		const payloadAfterHooks = group.data as Partial<AnyItem>;
 
 		const isEmptyAlterations = (value: unknown): boolean => {
@@ -1718,16 +1710,19 @@ implements AbstractService<Item> {
 			}
 		}
 
+		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
+			.filter((field) => field.alias === true)
+			.map((field) => field.field);
+
 		const writingGroups = mergedGroups.filter((group) => {
-			return !this.groupChangesNothing(group);
+			return !this.groupChangesNothing(group, aliases);
 		});
 
 		// Capture the scope values these rows hold before the update so an update that
 		// moves a row to a new scope value purges both slices (old ∪ new).
 		// Empty when the collection isn't scoped.
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(
-			writingGroups.flatMap((group) => group.keys),
-		);
+		const writtenKeys = writingGroups.flatMap((group) => group.keys);
+		const oldScopedCacheTags = await this.snapshotScopedCacheTags(writtenKeys);
 
 		if (writingGroups.length === 0) {
 			// Nothing is written — every group was a no-op, or the per-row filter
@@ -1753,7 +1748,6 @@ implements AbstractService<Item> {
 		}
 
 		const applied: UpdateGroup<Item>[] = [];
-		const updated: PrimaryKey[] = [];
 
 		// One transaction around every group, so a failure anywhere rolls the whole
 		// update back and the integrity check below sees the finished state once
@@ -1777,7 +1771,6 @@ implements AbstractService<Item> {
 				);
 
 				applied.push(result);
-				updated.push(...result.keys);
 			}
 
 			if (userIntegrityCheckFlags) {
@@ -1801,7 +1794,7 @@ implements AbstractService<Item> {
 			// holds only when this call owns the transaction; from a hook it shares the
 			// caller's and this purge runs pre-commit —
 			// https://github.com/jclaveau/directus/issues/363
-			const newScopedCacheTags = await this.snapshotScopedCacheTags(keys);
+			const newScopedCacheTags = await this.snapshotScopedCacheTags(writtenKeys);
 
 			const scopedCacheTags =
 				oldScopedCacheTags === null || newScopedCacheTags === null
@@ -1858,16 +1851,24 @@ implements AbstractService<Item> {
 			);
 		}
 
-		return updated;
+		// Every row the per-row filter let through, in the order the caller sent it —
+		// a row whose change turned out to be a no-op included. The REST layer reads
+		// these keys back to build the response body, so dropping a no-op row would
+		// omit an item the caller named from its own PATCH response.
+		//
+		// A row the per-row filter cancelled is absent rather than null: without
+		// `allowFilterCancel` this returns `PrimaryKey[]`, which cannot carry one.
+		// Only the whole-update cancel above is index-aligned with the input.
+		return mergedGroups.flatMap((group) => group.keys);
 	}
 
 	/**
 	 * Apply one group's change to the rows it names, in its own transaction.
 	 *
 	 * The `items.update` events belong to the whole update and are emitted by
-	 * `updateGroups` around the loop, never here. Returns what was written — the
-	 * payload after presets, and the keys it reached — or null when the group
-	 * turned out to change nothing.
+	 * `updateGroups` around the loop, never here. Returns what was written: the
+	 * payload after presets, and the keys it reached. A group that changes nothing
+	 * never gets here — `updateGroups` filters those out before the transaction.
 	 */
 	private async applyUpdateGroup(
 		group: UpdateGroup<Item>,
@@ -1877,7 +1878,9 @@ implements AbstractService<Item> {
 		const { ActivityService } = await import('./activity.js');
 		const { RevisionsService } = await import('./revisions.js');
 
-		const keys = group.keys;
+		// Sorted for the work below only. `group.keys` stays in the caller's row order,
+		// which is what `updateGroups` returns and what the per-row action events walk.
+		const keys = [...group.keys].sort();
 		const data = group.data;
 		const payloadAfterHooks = group.data as Partial<AnyItem>;
 
@@ -1887,10 +1890,6 @@ implements AbstractService<Item> {
 		const aliases = Object.values(this.schema.collections[this.collection]!.fields)
 			.filter((field) => field.alias === true)
 			.map((field) => field.field);
-
-
-		// Sort keys to ensure that the order is maintained
-		keys.sort();
 
 		if (this.accountability) {
 			await validateAccess(
@@ -2089,7 +2088,7 @@ implements AbstractService<Item> {
 			}
 		}, opts.mutationTracker.snapshot());
 
-		return { data: payloadWithPresets, keys };
+		return { data: payloadWithPresets, keys: group.keys };
 	}
 
 	/**

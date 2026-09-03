@@ -192,5 +192,29 @@ describe('grouped update events', () => {
 				expect(row.name).not.toEqual('rewritten');
 			}
 		});
+
+		it('answers with every row the caller named, no-op rows included', async () => {
+			const rows = await createRows(vendor, ['noop-one', 'noop-two']);
+			const [untouched, written] = rows as [GroupedRow, GroupedRow];
+
+			// The first element carries nothing but its primary key, so it writes
+			// nothing — but the caller still named it, and the response body is built
+			// by reading back the keys the update returns.
+			const update = await request(getUrl(vendor))
+				.patch(`/items/${collectionGrouped}`)
+				.query({ fields: 'id,name,status', sort: 'id' })
+				.send([
+					{ id: untouched.id },
+					{ id: written.id, status: 'archived' },
+				])
+				.set('Authorization', AUTH);
+
+			expect(update.statusCode).toEqual(200);
+
+			expect(update.body.data).toEqual([
+				{ id: untouched.id, name: 'noop-one', status: null },
+				{ id: written.id, name: 'noop-two', status: 'archived' },
+			]);
+		});
 	});
 });
