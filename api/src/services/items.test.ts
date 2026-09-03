@@ -69,6 +69,15 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 // which snapshot was filed under which item.
 const revisionWrites = vi.hoisted<any[][]>(() => []);
 
+// Every re-parenting of an existing revision, so a test can assert which revisions
+// were filed under which root.
+const revisionParentWrites = vi.hoisted<{ keys: any; data: any }[]>(() => []);
+
+// Revision ids run across the whole call rather than restarting per batch, so a
+// nested write's revision cannot share an id with the root it is filed under —
+// which is the only thing that makes that pairing assertable.
+const revisionIds = vi.hoisted(() => ({ issued: 0 }));
+
 // The revision path dynamically imports these; stub them so the activity/revision write loop
 // (incl. the `snapshots && Array.isArray(snapshots)` ternary) runs without a full system schema.
 vi.mock('./activity.js', () => {
@@ -86,10 +95,11 @@ vi.mock('./revisions.js', () => {
 		RevisionsService: class {
 			createMany = vi.fn(async (rows: any[]) => {
 				revisionWrites.push(rows);
-				return rows.map((_, i) => i + 1);
+				return rows.map(() => ++revisionIds.issued);
 			});
 
-			updateMany = vi.fn(async () => {
+			updateMany = vi.fn(async (keys: any, data: any) => {
+				revisionParentWrites.push({ keys, data });
 				return [];
 			});
 		},
@@ -899,6 +909,8 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	afterEach(() => {
 		tracker.reset();
 		revisionWrites.length = 0;
+		revisionParentWrites.length = 0;
+		revisionIds.issued = 0;
 		vi.clearAllMocks();
 	});
 
@@ -1060,6 +1072,88 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 
 			expect(revisionWrites[0]).toMatchObject([
 				{ item: 1, data: '{"id":1,"name":"after"}' },
+			]);
+		});
+
+		it('hands every revision id to onRevisionCreate', async () => {
+			const accountabilitySchema = new SchemaBuilder()
+				.collection('tracked', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.build();
+
+			accountabilitySchema.collections['tracked']!.accountability = 'all';
+
+			const service = new ItemsService('tracked', {
+				knex: db,
+				schema: accountabilitySchema,
+				accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+			});
+
+			tracker.on.update('tracked').response(2);
+
+			tracker.on.select('tracked').response([
+				{ id: 1, name: 'after' },
+				{ id: 2, name: 'after' },
+			]);
+
+			// Only a caller inside the process passes this — it is how a nested write
+			// hands its revisions up to the update that contains it, so no route can
+			// reach it.
+			const reported: unknown[] = [];
+
+			await service.updateMany([1, 2], { name: 'after' }, {
+				onRevisionCreate: (id) => reported.push(id),
+			});
+
+			// One per revision the writer created, in the order it created them.
+			expect(reported).toEqual([1, 2]);
+		});
+
+		it('files nested revisions under the first item', async () => {
+			const nestedSchema = new SchemaBuilder()
+				.collection('tracked_parent', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.collection('tracked_child', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+					c.field('owner').m2o('tracked_parent');
+				})
+				.build();
+
+			nestedSchema.collections['tracked_parent']!.accountability = 'all';
+			nestedSchema.collections['tracked_child']!.accountability = 'all';
+
+			const service = new ItemsService('tracked_child', {
+				knex: db,
+				schema: nestedSchema,
+				accountability: { user: 'u1', role: 'r1', admin: true, app: true } as any,
+			});
+
+			tracker.on.insert('tracked_parent').response([1]);
+			tracker.on.select('tracked_parent').response([{ id: 1, name: 'owner' }]);
+			tracker.on.update('tracked_child').response(2);
+
+			tracker.on.select('tracked_child').response([
+				{ id: 1, name: 'after' },
+				{ id: 2, name: 'after' },
+			]);
+
+			// The nested owner is written once for the whole call, so its revision
+			// cannot belong to every updated row. The first row is treated as the
+			// root and the nested revisions are filed under it.
+			await service.updateMany([1, 2], {
+				name: 'after',
+				owner: { name: 'owner' },
+			});
+
+			// The owner's revision is issued first, then the two child revisions, so
+			// the nested id and the root it is filed under are distinguishable.
+			expect(revisionParentWrites).toEqual([
+				{ keys: [1], data: { parent: 2 } },
 			]);
 		});
 
@@ -1340,6 +1434,52 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			const key = await service.upsertOne({ id: 1, name: 'y' });
 
 			expect(key).toBe(1);
+		});
+
+		it('updateBatch refuses a payload that is not a list', async () => {
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			// A list is the whole contract of updateBatch, and it is checked before a
+			// transaction opens. Only a caller inside the process can get this wrong:
+			// the controller reaches updateBatch precisely because the body IS an array.
+			await expect(service.updateBatch('not a list' as any)).rejects.toThrow(
+				/array of items/,
+			);
+		});
+
+		it('updateMany answers a null per key when a filter cancels', async () => {
+			const filterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue(null);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			// Index-aligned like the cancelled create above: three keys in, three
+			// nulls out, so a caller can still tell which of its keys went nowhere.
+			const result = await service.updateMany([1, 2, 3], { name: 'y' }, {
+				allowFilterCancel: true,
+			});
+
+			expect(result).toEqual([null, null, null]);
+
+			filterSpy.mockRestore();
+		});
+
+		it('upsertMany returns one key per payload, in input order', async () => {
+			tracker.on.select('test').response([{ id: 1 }]);
+			tracker.on.update('test').response(1);
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			// nested-upsert.test.ts drives the same contract through an endpoint
+			// extension, since no ordinary route returns these keys; this pins it
+			// without a server. The keys are deliberately out of order so a rewrite
+			// that groups or sorts the payloads is caught either way.
+			const keys = await service.upsertMany([
+				{ id: 3, name: 'c' },
+				{ id: 1, name: 'a' },
+				{ id: 2, name: 'b' },
+			]);
+
+			expect(keys).toEqual([3, 1, 2]);
 		});
 
 		it('updateMany translates a DB error raised by the UPDATE', async () => {

@@ -35,6 +35,41 @@ describe('translateDatabaseError', () => {
 		});
 	});
 
+	describe('duplicate raised by an UPDATE -> RECORD_NOT_UNIQUE', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// Setup: two rows that do not collide yet.
+			const taken = `dup-update-taken-${randomUUID()}`;
+
+			const [first, second] = await Promise.all([
+				request(getUrl(vendor))
+					.post(`/items/${collectionUnique}`)
+					.send({ code: taken })
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`),
+				request(getUrl(vendor))
+					.post(`/items/${collectionUnique}`)
+					.send({ code: `dup-update-free-${randomUUID()}` })
+					.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`),
+			]);
+
+			expect(first.statusCode).toBe(200);
+			expect(second.statusCode).toBe(200);
+
+			// Action: move the second row onto the first's value. The constraint is
+			// db-level with no app validation, so the duplicate reaches the database
+			// through the UPDATE rather than the INSERT the case above covers.
+			const collision = await request(getUrl(vendor))
+				.patch(`/items/${collectionUnique}/${second.body.data.id}`)
+				.send({ code: taken })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`);
+
+			// Assert
+			expect(collision.statusCode).toBe(400);
+			expect(collision.body.errors[0].extensions.code).toBe('RECORD_NOT_UNIQUE');
+			expect(collision.body.errors[0].extensions.collection).toBe(collectionUnique);
+			expect(collision.body.errors[0].extensions.field).toBe('code');
+		});
+	});
+
 	describe('alter to NOT NULL over a null row -> CONTAINS_NULL_VALUES', () => {
 		it.each(vendors)('%s', async (vendor) => {
 			// Setup: a row whose `label` is null

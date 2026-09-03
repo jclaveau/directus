@@ -181,6 +181,16 @@ implements AbstractService<Item> {
 
 			// A flat field is always projected, so 'coarse' only nulls on a caller
 			// feeding unprojected rows — never here; propagate it regardless.
+			//
+			// Which leaves this return, and the `=== null` arms in the three
+			// callers, unreachable today. They stay on purpose:
+			// - null is the fail-safe: scope unresolvable, so purge coarsely.
+			// - it is unreachable only because the select above projects exactly
+			//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
+			//   two lists together.
+			// - so a later edit to either side makes it reachable again, and
+			//   without the arms the purge would silently narrow rather than
+			//   widen: a stale cache instead of a slow one.
 			if (flatTags === null) {
 				return null;
 			}
@@ -1343,6 +1353,13 @@ implements AbstractService<Item> {
 			);
 		}
 
+		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
+		// listener's return verbatim, and the cast above asserts rather than checks)
+		// makes this throw `Object.defineProperty called on non-object`. That is a
+		// 500 raised inside whatever transaction was reading — a write snapshotting
+		// its rows for revisions takes the whole update down with it. The write path
+		// validates its own filter returns (`payloadAfterHooks === null`); this one
+		// does not. Covered as it stands by read-hook-null.test.ts.
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
 			scopedCacheUnautopurgeableTags,
@@ -1794,6 +1811,11 @@ implements AbstractService<Item> {
 					// with `keys` by position files a revision under one item
 					// holding another item's data, which `revert` would then
 					// write straight back onto the wrong row.
+					//
+					// `snapshots` is always an array: a read hook can return
+					// anything, but `withMeta` rejects a non-object before
+					// `readByQuery` returns (see the TODO there), so this guard
+					// and the ternary below it cannot currently fire.
 					const snapshotJsonByKey = new Map<string, string>();
 
 					if (Array.isArray(snapshots)) {
