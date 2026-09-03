@@ -86,7 +86,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// A custom read controller (e.g. /settings) may set `payload` with no tags
 	// (ItemsService reads set them; a hand-written one often does not). Fall back to
 	// the bare collection tag so a mutation there still purges it (settings reask).
-	const collectionFallbackTags = req.collection
+	const collectionFallbackTags: ScopedCacheTag[] = req.collection
 		? [{ collection: req.collection }]
 		: [];
 

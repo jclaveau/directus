@@ -73,7 +73,7 @@ export interface CachePurge {
 	 * pass for the tags a hook declared, and an entry both reach must count one
 	 * purge, not two.
 	 */
-	purgeId?: string;
+	purgeId?: string | undefined;
 	collection: string | null; // null on a namespace-wide clear
 	mode: CachePurgeMode;
 	// The scoped cache tags this purge actually dropped, in the display form

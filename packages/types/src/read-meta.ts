@@ -10,9 +10,11 @@ import type { PrimaryKey } from './items.js';
  */
 export interface ScopedCacheTag {
 	collection: string;
-	field?: string;
+	// Built by resolving a field off a payload, so an absent one arrives as an
+	// explicit `undefined` rather than a missing key.
+	field?: string | undefined;
 	value?: unknown;
-	type?: Type;
+	type?: Type | undefined;
 }
 
 /** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
