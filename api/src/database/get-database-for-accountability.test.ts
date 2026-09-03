@@ -49,6 +49,10 @@ function applicationNameOf(db: any): string | undefined {
 	return db.__knexConfig.connection.application_name;
 }
 
+function connectionStringOf(db: any): string {
+	return db.__knexConfig.connection;
+}
+
 beforeEach(() => {
 	vi.resetModules();
 	knexInstances.length = 0;
@@ -292,9 +296,7 @@ test('A pool built from a connection string keeps the string', async () => {
 
 	const { default: getDatabase } = await import('./index.js');
 
-	expect((getDatabase() as unknown as {
-		__knexConfig: { connection: string };
-	}).__knexConfig.connection)
+	expect(connectionStringOf(getDatabase()))
 		.toBe('postgres://u:p@localhost:5432/directus');
 });
 
