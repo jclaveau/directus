@@ -177,8 +177,8 @@ describe(oneLine`
 		}
 
 		it(oneLine`
-			serves a sibling nested child's fresh label after a write,
-			not the cached slice's stale one
+			tags the nested case-keyed child bare, not by the case's pk slice,
+			then serves a sibling child's fresh label after a write
 		`, async () => {
 			await request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -191,6 +191,12 @@ describe(oneLine`
 			// child B genuinely changes what this read returns.
 			expect(warm.body.data[0].children).toHaveLength(2);
 
+			// PRIMARY (RED on buggy): warm read must carry the bare `child` tag, not
+			// the case's `child:id=<childAId>` slice a sibling write can't purge.
+			const tags = warm.headers[cacheTagsHeader];
+			expect(tags).toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
+			expect(tags).not.toMatch(new RegExp(`(^|, )${CHILD}:id=`));
+
 			await request(getUrl(vendor, env))
 				.patch(`/items/${CHILD}/${childBId}`)
 				.send({ label: freshLabel })
@@ -202,25 +208,8 @@ describe(oneLine`
 				(row: { id: number; label: string }) => row.id === childBId,
 			);
 
-			// RED on buggy code: the read stayed cached under `child:id=<childAId>`,
-			// which the child B write never purged, so the stale old label is served.
+			// Secondary: the bare tag lets the child B write purge this read.
 			expect(childBRow.label).toBe(freshLabel);
-		});
-
-		it(oneLine`
-			tags the nested case-keyed child bare, not by the case's pk slice
-		`, async () => {
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', admin);
-
-			const tags = (await readAsUser()).headers[cacheTagsHeader];
-
-			// Fixed: a bare `child` tag every child write drops. Buggy: only
-			// `child:id=<childAId>`, the case's slice, which a sibling write misses.
-			expect(tags).toMatch(new RegExp(`(^|, )${CHILD}(,|$)`));
-
-			expect(tags).not.toMatch(new RegExp(`(^|, )${CHILD}:id=`));
 		});
 	});
 });

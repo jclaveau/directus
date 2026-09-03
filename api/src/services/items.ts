@@ -111,6 +111,7 @@ implements AbstractService<Item> {
 		this.schema = options.schema;
 		this.cache = getCache().cache;
 		this.nested = options.nested ?? [];
+
 		this.scopedCache = new ItemScopedCacheService(
 			this.collection,
 			this.schema,

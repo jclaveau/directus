@@ -220,6 +220,11 @@ describe(oneLine`
 			expect(warm.body.data[0].discipline.notes[0].id).toBe(conflictNoteId);
 			expect(warm.body.data[0].discipline.notes[0].body).toBe('conflict note');
 
+			// PRIMARY (RED on buggy): the fix forces the bare `note` tag; buggy
+			// carries only `note:id=<pinnedNoteId>` a reverse-fk write can't purge.
+			expect(warm.headers[cacheTagsHeader])
+				.toMatch(new RegExp(`(^|, )${NOTE}(,|$)`));
+
 			expect((await readEnrollment()).headers[cacheStatusHeader]).toBe('HIT');
 
 			await request(getUrl(vendor, env))
@@ -227,24 +232,11 @@ describe(oneLine`
 				.send({ body: 'conflict note rewritten' })
 				.set('Authorization', auth);
 
-			// HARD RED: tagged only `note:id=<pinnedNote>`, so the write to N_c never
-			// purges it and the re-read serves the pre-write body.
+			// Secondary: a bare-tagged read is purged by the N_c write.
 			const after = await readEnrollment();
 
 			expect(after.body.data[0].discipline.notes[0].body)
 				.toBe('conflict note rewritten');
-		});
-
-		it(oneLine`
-			carries a tag that a write to the reverse-fk-nested note would catch
-		`, async () => {
-			// The conflicted note should be left bare, or at least carry the slice a
-			// write to N_c emits; currently only the m2o slice `note:id=N_pin` → RED.
-			const tags = (await readEnrollment()).headers[cacheTagsHeader];
-
-			expect(tags).toMatch(new RegExp(
-				`(^|, )${NOTE}(,|$)|(^|, )${NOTE}:id=${conflictNoteId}(,|$)`,
-			));
 		});
 	});
 });

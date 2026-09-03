@@ -161,33 +161,29 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
-		// HARD RED assertion: a write to the attachment must show on the next read of
-		// the report that nested it.
 		it(oneLine`
-			a write to the nested attachment evicts the report read that carried it
+			does not stamp the nested attachment with the report owner's slice value,
+			then evicts the report read on a write to that attachment
 		`, async () => {
 			await clearCache();
 
-			expect((await readReport()).headers[cacheStatusHeader]).toBe('MISS');
+			const warm = await readReport();
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			// PRIMARY (RED until fixed): the attachment reaches `owner` by its own
+			// `uploaded_by` fk (K2), so the read must not stamp K (pinnedOwnerId).
+			expect(warm.headers[cacheTagsHeader]).not.toMatch(
+				new RegExp(`${ATTACHMENT}:uploaded_by=${pinnedOwnerId}(,|$)`),
+			);
+
 			expect((await readReport()).headers[cacheStatusHeader]).toBe('HIT');
 
 			await updateAttachment('a corrected draft');
 
 			const after = await readReport();
 
+			// Secondary: a sound tag lets the attachment write purge this read.
 			expect(after.body.data[0].attachments[0].body).toBe('a corrected draft');
-		});
-
-		// Secondary: the fixed read carries a bare `attachment` tag or `uploaded_by=K2`
-		// — never the report owner's value K the attachment never belonged to.
-		it(oneLine`
-			does not stamp the nested attachment with the report owner's slice value
-		`, async () => {
-			const tags = (await readReport()).headers[cacheTagsHeader];
-
-			expect(tags).not.toMatch(
-				new RegExp(`${ATTACHMENT}:uploaded_by=${pinnedOwnerId}(,|$)`),
-			);
 		});
 	});
 });
