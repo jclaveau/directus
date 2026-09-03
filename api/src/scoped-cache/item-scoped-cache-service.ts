@@ -407,6 +407,45 @@ export class ItemScopedCacheService {
 	}
 
 	/**
+	 * Slices a delete vacates through a DIRECT self-relation whose `on_delete`
+	 * rewrites the fk (SET NULL / SET DEFAULT). Deleting key X leaves surviving
+	 * children with `<field> = X` rewritten to null, so a read pinned to
+	 * `<field>=X` would go stale. Emitted only for a self-relation field the
+	 * collection scopes on (else no read pins it). Keyed by the deleted keys.
+	 */
+	vacatedSelfRelationTags(deletedKeys: PrimaryKey[]): ScopedCacheTag[] {
+		if (!scopedCachePurgeEnabled() || deletedKeys.length === 0) {
+			return [];
+		}
+
+		const tags: ScopedCacheTag[] = [];
+
+		for (const relation of this.schema.relations) {
+			const rule = relation.schema?.on_delete;
+
+			if (
+				relation.collection !== this.collection ||
+				relation.related_collection !== this.collection ||
+				!this.flatFields.includes(relation.field) ||
+				(rule !== 'SET NULL' && rule !== 'SET DEFAULT')
+			) {
+				continue;
+			}
+
+			for (const key of deletedKeys) {
+				tags.push({
+					collection: this.collection,
+					field: relation.field,
+					value: key,
+					type: this.fieldTypes[relation.field],
+				});
+			}
+		}
+
+		return tags;
+	}
+
+	/**
 	 * Event context handed to the `cache.purge` filter so extensions can resolve their
 	 * own tags.
 	 */
@@ -445,14 +484,23 @@ export class ItemScopedCacheService {
 			: [];
 
 		if (ownTags !== null && otherCollections.length === 0) {
+			const ownAndHookTags = [...ownTags, ...hookTags];
+
+			if (includeCollectionTag) {
+				return purgeScopedCache(
+					this.cache,
+					this.collection,
+					ownAndHookTags,
+					context,
+				);
+			}
+
 			return purgeScopedCache(
 				this.cache,
 				this.collection,
-				[...ownTags, ...hookTags],
+				ownAndHookTags,
 				context,
-				includeCollectionTag
-					? undefined
-					: { includeCollectionTag: false },
+				{ includeCollectionTag: false },
 			);
 		}
 

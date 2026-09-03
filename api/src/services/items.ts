@@ -1765,8 +1765,15 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
+			// A direct self-relation SET NULL/DEFAULT rewrites survivors' fk, vacating
+			// their `<field>=<deletedKey>` slice; add those to the precise purge.
+			const vacatedSelfSlices =
+				this.scopedCache.vacatedSelfRelationTags(keysAfterHooks);
+
 			this.scopedCachePurged = await this.scopedCache.purge(
-				oldScopedCacheTags,
+				oldScopedCacheTags === null
+					? null
+					: [...oldScopedCacheTags, ...vacatedSelfSlices],
 				scopedCacheCollector,
 				scopedCacheCollectionsChangedByOnDelete(
 					this.schema,

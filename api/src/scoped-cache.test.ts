@@ -293,8 +293,8 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 		.toEqual(['node']);
 	});
 
-	// Deliberate, and the reason is cost: those rows survive in their slices, and
-	// finding which ones moved means scanning by an unindexed foreign key per delete.
+	// Left out here on purpose: the delete purges those survivors' vacated slices
+	// precisely via vacatedSelfRelationTags, not through this walk's coarse fan-out.
 	it('leaves itself out when a self-relation only nulls the foreign key', () => {
 		const schema = { relations: [nullifyRelation('node', 'node')] } as any;
 
@@ -1717,9 +1717,9 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 		]).toContain('owner');
 	});
 
-	it('a covering slice spares a sort-reached filter-keyed collection', () => {
-		// A write to the collection emits its scope slice, dropping this read, so
-		// the slice already catches the reorder — the sort need not cost it a bare tag.
+	it('a sorted independent collection crosses despite a covering slice', () => {
+		// An `independent` collection is skipped in readTags (no slice pin), so its
+		// scope fields don't catch the reorder — the sort needs the bare tag.
 		const slicedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -1746,7 +1746,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 					sort: ['owner.name'],
 				}),
 			),
-		]).not.toContain('owner');
+		].sort()).toEqual(['owned_item', 'owner']);
 	});
 
 	it('a group crosses a scope-sliced filter-keyed collection even so', () => {

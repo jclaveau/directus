@@ -79,10 +79,10 @@ function scopedCacheCollectionSlicesKey(collection: string): string {
  *   - a rule reaching back into `collection` reports it like any other: the rows
  *     the database changes there are ones the caller never named, so the snapshot
  *     taken from its keys does not cover them.
- *   - a DIRECT self-relation that only rewrites a foreign key reports the
- *     collection itself: the surviving children left a slice no snapshot names, and
- *     finding them means scanning an unindexed fk — so the delete takes the coarse
- *     whole-collection purge (`ownTags = null`) rather than leave them stale.
+ *   - a DIRECT self-relation that only rewrites a foreign key is left out: the
+ *     surviving children stay in place carrying a slice this walk cannot name. The
+ *     delete purges those vacated slices precisely instead — see the collaborator's
+ *     `vacatedSelfRelationTags`, unioned into the delete's snapshot.
  */
 export function scopedCacheCollectionsChangedByOnDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
@@ -110,6 +110,16 @@ export function scopedCacheCollectionsChangedByOnDelete(
 				// NO ACTION and RESTRICT make the database refuse the delete
 				// instead, so they leave nothing to purge.
 				|| ['CASCADE', 'SET NULL', 'SET DEFAULT'].includes(onDeleteRule) === false
+			) {
+				continue;
+			}
+
+			// Only a DIRECT self-relation is exempt, and only when it rewrites
+			// rather than deletes: its survivors are handled by vacatedSelfRelationTags.
+			if (
+				parentCollection === collection
+				&& childCollection === collection
+				&& onDeleteRule !== 'CASCADE'
 			) {
 				continue;
 			}
