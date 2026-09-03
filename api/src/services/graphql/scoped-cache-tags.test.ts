@@ -116,7 +116,7 @@ describe('GraphQLService scoped cache tags', () => {
 		await expect(
 			gql.execute({
 				query: '',
-			document: {} as any,
+				document: {} as any,
 				variables: {},
 				operationName: null,
 				contextValue: {},
