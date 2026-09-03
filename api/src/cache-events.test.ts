@@ -401,6 +401,7 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 		await queueCacheDescriptor({
 			cacheKey: 'shorthash',
 			redisKey: longRedisKey,
+			coarse: false,
 			method: 'GET',
 			path: '/x',
 			collection: null,
@@ -1507,12 +1508,13 @@ describe('enforceCacheStatsBudget', () => {
 
 		expect(cacheStatsActive()).toBe(true);
 
-		const [, floor] = mockSchema.dropOldestChunk.mock.calls[0]!;
+		const [, floor] = mockSchema.dropOldestChunk.mock.calls[0]! as
+			unknown as [unknown, Date];
 
-		expect(Date.now() - (floor as Date).getTime())
+		expect(Date.now() - floor.getTime())
 			.toBeGreaterThanOrEqual(6 * HOUR);
 
-		expect(Date.now() - (floor as Date).getTime())
+		expect(Date.now() - floor.getTime())
 			.toBeLessThan(6 * HOUR + 1000);
 	});
 

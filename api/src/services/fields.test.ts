@@ -1,3 +1,4 @@
+import type { Column } from '@directus/schema';
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, RawField } from '@directus/types';
@@ -99,7 +100,12 @@ describe('Services / Fields', () => {
 	describe('readAll', () => {
 		it('tags the result with directus_fields', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
-			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
+
+			// `columnInfo` is overloaded on its argument; the caller under test takes the
+			// array form, but a spy resolves against the single-column signature.
+			vi.spyOn(FieldsService.prototype, 'columnInfo')
+				.mockResolvedValue([] as unknown as Column);
+
 			tracker.on.select('directus_fields').response([]);
 
 			const service = new FieldsService({ knex: db, schema });

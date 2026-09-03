@@ -32,7 +32,10 @@ export class PermissionsService extends ItemsService {
 		}
 	}
 
-	override async readByQuery(query: Query, opts?: QueryOptions): Promise<Partial<Item>[]> {
+	override async readByQuery(
+		query: Query,
+		opts?: QueryOptions,
+	): Promise<Partial<Item>[]> {
 		const result = (await super.readByQuery(query, opts)) as Permission[];
 
 		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache

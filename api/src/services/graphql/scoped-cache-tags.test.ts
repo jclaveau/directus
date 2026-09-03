@@ -93,6 +93,7 @@ describe('GraphQLService scoped cache tags', () => {
 		gql.scopedCacheTags.push({ collection: 'articles' }, { collection: 'users' });
 
 		const result = await gql.execute({
+			query: '',
 			document: {} as any,
 			variables: {},
 			operationName: null,
@@ -114,7 +115,8 @@ describe('GraphQLService scoped cache tags', () => {
 
 		await expect(
 			gql.execute({
-				document: {} as any,
+				query: '',
+			document: {} as any,
 				variables: {},
 				operationName: null,
 				contextValue: {},
@@ -132,6 +134,7 @@ describe('GraphQLService scoped cache tags', () => {
 		});
 
 		const result = await gql.execute({
+			query: '',
 			document: {} as any,
 			variables: {},
 			operationName: null,

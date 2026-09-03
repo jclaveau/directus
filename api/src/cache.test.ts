@@ -677,7 +677,9 @@ describe('scoped cache purging', () => {
 		test(oneLine`
 			cache.purge filter augments the purge set (extension-resolved tags get dropped)
 		`, async () => {
-			emitFilter.mockImplementation(async (_event: string, tags: ScopedCacheTag[]) => {
+			emitFilter.mockImplementation(async (..._args: unknown[]) => {
+				const tags = _args[1] as ScopedCacheTag[];
+
 				return [...tags, { collection: 'slots', field: 'owner', value: 'B' }];
 			});
 

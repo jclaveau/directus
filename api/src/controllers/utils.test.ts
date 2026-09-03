@@ -21,7 +21,7 @@ const { default: router } = await import('./utils.js');
 function handlerFor(path: string) {
 	const layer = router.stack.find((entry: any) => entry.route?.path === path);
 
-	return layer!.route.stack[0].handle;
+	return layer!.route!.stack[0]!.handle;
 }
 
 describe('utils controller /cache/latencies', () => {

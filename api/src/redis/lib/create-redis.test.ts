@@ -30,7 +30,8 @@ function retryStrategyFor(env: Record<string, unknown>): RetryStrategy {
 	vi.mocked(useEnv).mockReturnValue(env);
 	createRedis();
 
-	const [first, second] = vi.mocked(Redis).mock.calls.at(-1)!;
+	const [first, second] = vi.mocked(Redis).mock.calls.at(-1)! as
+		unknown as [unknown, unknown];
 
 	const options = env['REDIS']
 		? second

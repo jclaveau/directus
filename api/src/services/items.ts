@@ -1380,7 +1380,11 @@ implements AbstractService<Item> {
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	async readOne(key: PrimaryKey, query: Query = {}, opts?: QueryOptions): Promise<Item> {
+	async readOne(
+		key: PrimaryKey,
+		query: Query = {},
+		opts?: QueryOptions,
+	): Promise<Item> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
@@ -1405,7 +1409,11 @@ implements AbstractService<Item> {
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	async readMany(keys: PrimaryKey[], query: Query = {}, opts?: QueryOptions): Promise<Item[]> {
+	async readMany(
+		keys: PrimaryKey[],
+		query: Query = {},
+		opts?: QueryOptions,
+	): Promise<Item[]> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 

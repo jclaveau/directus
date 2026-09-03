@@ -292,7 +292,9 @@ test('A pool built from a connection string keeps the string', async () => {
 
 	const { default: getDatabase } = await import('./index.js');
 
-	expect(getDatabase().__knexConfig.connection)
+	expect((getDatabase() as unknown as {
+		__knexConfig: { connection: string };
+	}).__knexConfig.connection)
 		.toBe('postgres://u:p@localhost:5432/directus');
 });
 

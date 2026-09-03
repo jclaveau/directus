@@ -150,7 +150,10 @@ test('Each windowed read documents the default it actually takes', () => {
 		allSystemMcpTools()
 			.filter((tool) => 'window' in tool.inputSchema.properties)
 			.map((tool) => {
-				return [tool.name, tool.inputSchema.properties['window'].description];
+				const window = tool.inputSchema.properties['window'] as
+					{ description: string };
+
+				return [tool.name, window.description];
 			}),
 	);
 
@@ -498,6 +501,7 @@ test('Every declared output property is one the tool actually answers', () => {
 			{
 				key: 'hash',
 				redisKey: 'scalabus:key',
+				purges: 0,
 				coarse: false,
 				method: 'GET',
 				path: '/items/articles',
@@ -569,6 +573,12 @@ test('Every declared output property is one the tool actually answers', () => {
 					misses: 3,
 					fills: 4,
 					anomalies: 5,
+					purges: 0,
+					coarsePurges: 0,
+					purgedEntries: 0,
+					purgeP50: null,
+					purgeP95: null,
+					purgeP99: null,
 					ttlMs: 6,
 					effectiveTtlMs: 7,
 					hitP50: 1, hitP95: 2, hitP99: 3,

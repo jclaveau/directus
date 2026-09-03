@@ -128,7 +128,12 @@ test('Sets accountability to payload contents if valid token is passed', async (
 	const next = vi.fn();
 
 	vi.mocked(fetchRolesTree).mockResolvedValue([roleID]);
-	vi.mocked(fetchGlobalAccess).mockResolvedValue({ app: appAccess, admin: adminAccess });
+
+	vi.mocked(fetchGlobalAccess).mockResolvedValue({
+		app: appAccess,
+		admin: adminAccess,
+		grantedDbConnections: [],
+	});
 
 	await handler(req, res, next);
 
@@ -138,6 +143,9 @@ test('Sets accountability to payload contents if valid token is passed', async (
 		roles: [roleID],
 		app: appAccess,
 		admin: adminAccess,
+		// `getAccountabilityForRole` spreads the whole global-access object in, so
+		// this rides along with `app` and `admin`.
+		grantedDbConnections: [],
 		share,
 		ip: '127.0.0.1',
 		userAgent: 'fake-user-agent',
@@ -169,6 +177,9 @@ test('Sets accountability to payload contents if valid token is passed', async (
 		roles: [roleID],
 		app: appAccess,
 		admin: adminAccess,
+		// `getAccountabilityForRole` spreads the whole global-access object in, so
+		// this rides along with `app` and `admin`.
+		grantedDbConnections: [],
 		share,
 		ip: '127.0.0.1',
 		userAgent: 'fake-user-agent',
@@ -222,6 +233,7 @@ test('Sets accountability to user information when static token is used', async 
 		roles: [testUser.role],
 		app: testUser.app_access,
 		admin: testUser.admin_access,
+		grantedDbConnections: [],
 		ip: '127.0.0.1',
 		userAgent: 'fake-user-agent',
 		origin: 'fake-origin',
@@ -236,7 +248,12 @@ test('Sets accountability to user information when static token is used', async 
 	} as unknown as Knex);
 
 	vi.mocked(fetchRolesTree).mockResolvedValue([testUser.role]);
-	vi.mocked(fetchGlobalAccess).mockResolvedValue({ app: testUser.app_access, admin: testUser.admin_access });
+
+	vi.mocked(fetchGlobalAccess).mockResolvedValue({
+		app: testUser.app_access,
+		admin: testUser.admin_access,
+		grantedDbConnections: [],
+	});
 
 	await handler(req, res, next);
 
@@ -258,7 +275,11 @@ test('Sets accountability to user information when static token is used', async 
 	expectedAccountability.admin = false;
 	expectedAccountability.app = true;
 
-	vi.mocked(fetchGlobalAccess).mockResolvedValue({ app: true, admin: false });
+	vi.mocked(fetchGlobalAccess).mockResolvedValue({
+		app: true,
+		admin: false,
+		grantedDbConnections: [],
+	});
 
 	await handler(req, res, next);
 	expect(req.accountability).toEqual(expectedAccountability);

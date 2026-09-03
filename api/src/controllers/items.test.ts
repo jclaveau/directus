@@ -75,7 +75,7 @@ function handlerFor(method: string, path: string) {
 		(l: any) => l.route && l.route.path === path && l.route.methods[method],
 	);
 
-	const sub = layer!.route.stack;
+	const sub = layer!.route!.stack;
 	// collectionExists / validateBatch / mergeContentVersions / respond are stubbed vi.fn()s; only the
 	// asyncHandler-wrapped route handler stringifies to the `Promise.resolve(fn(...))` wrapper.
 	return sub.find((s: any) => /Promise\.resolve\(fn/.test(s.handle.toString()))!.handle;
@@ -383,14 +383,14 @@ describe('items controller', () => {
 		test('deleteMany via body.keys', async () => {
 			deleteMany.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: { keys: [3] } });
-			await handler()(req, undefined, vi.fn());
+			await handler()(req, undefined as unknown as Response, vi.fn());
 			expect(deleteMany).toHaveBeenCalledWith([3], { allowFilterCancel: true });
 		});
 
 		test('deleteByQuery default branch', async () => {
 			deleteByQuery.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: { query: {} } });
-			await handler()(req, undefined, vi.fn());
+			await handler()(req, undefined as unknown as Response, vi.fn());
 			expect(deleteByQuery).toHaveBeenCalledOnce();
 		});
 	});
