@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { Redis } from 'ioredis';
+import { Redis, type RedisOptions } from 'ioredis';
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { useLogger } from '../../logger/index.js';
@@ -30,14 +30,17 @@ function retryStrategyFor(env: Record<string, unknown>): RetryStrategy {
 	vi.mocked(useEnv).mockReturnValue(env);
 	createRedis();
 
-	const [first, second] = vi.mocked(Redis).mock.calls.at(-1)! as
-		unknown as [unknown, unknown];
+	// `Redis`'s constructor is overloaded seven ways, and `ConstructorParameters`
+	// resolves to the last overload alone — so the recorded arguments infer as an
+	// empty tuple however the mock is typed. The call is one of the two shapes
+	// `createRedis` builds: `(url, options)` or `(options)`.
+	const call = vi.mocked(Redis).mock.calls.at(-1)! as unknown as unknown[];
 
-	const options = env['REDIS']
-		? second
-		: first;
+	const options = (env['REDIS']
+		? call[1]
+		: call[0]) as RedisOptions;
 
-	return (options as { retryStrategy: RetryStrategy }).retryStrategy;
+	return options.retryStrategy as RetryStrategy;
 }
 
 describe('createRedis', () => {
