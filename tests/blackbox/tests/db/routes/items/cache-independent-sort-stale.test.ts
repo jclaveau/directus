@@ -39,8 +39,7 @@ describe(oneLine`
 		env[vendor]['CACHE_STORE'] = 'redis';
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
-		env[vendor]['CACHE_NAMESPACE'] =
-			`directus-independent-sort-stale-${vendor}`;
+		env[vendor]['CACHE_NAMESPACE'] = `directus-indep-sort-${vendor}`;
 
 		let instance: ChildProcess;
 		let alphaChildId: number;

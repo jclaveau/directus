@@ -230,6 +230,7 @@ describe(oneLine`
 			// HARD RED: tagged only `note:id=<pinnedNote>`, so the write to N_c never
 			// purges it and the re-read serves the pre-write body.
 			const after = await readEnrollment();
+
 			expect(after.body.data[0].discipline.notes[0].body)
 				.toBe('conflict note rewritten');
 		});

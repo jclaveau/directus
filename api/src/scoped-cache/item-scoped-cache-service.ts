@@ -613,7 +613,7 @@ export class ItemScopedCacheService {
 		// filter bounded — so it cannot stand in for a parent-key pin below. A
 		// filter-only collection is absent here, so its keyed slice is sound.
 		const collectionsFetchedAsRows = new Set(
-			[...fieldMap.read].map(([, entry]) => entry.collection),
+			[...fieldMap.other].map(([, entry]) => entry.collection),
 		);
 
 		// Prefer, over a would-be-bare collection tag, the nearest slice to an
@@ -676,6 +676,13 @@ export class ItemScopedCacheService {
 		for (const collection of taggedCollections) {
 			if (collection === this.collection && rootScopedCacheTags.length > 0) {
 				tags.push(...rootScopedCacheTags);
+				continue;
+			}
+
+			// Conflicted reverse fks: a branch's M2O/keyed pin misses the rows nested
+			// through the conflict, so only the bare tag is sound.
+			if (o2mConflicted.has(collection)) {
+				tags.push({ collection });
 				continue;
 			}
 

@@ -239,8 +239,10 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			// reorder because a write to the collection emits its slice. So a sort
 			// costs the bare tag only where NO covering slice exists. A group or
 			// aggregate collapses rows across slices and always crosses.
+			// `independent` is skipped in readTags, so its scope fields pin nothing.
 			const hasCoveringSlice =
-				(schema.collections[collection]?.scopedCacheFields ?? []).length > 0;
+				(schema.collections[collection]?.scopedCacheFields ?? []).length > 0
+				&& kind !== 'independent';
 
 			const crossesMembership =
 				groupedOrAggregated.has(collection) ||
