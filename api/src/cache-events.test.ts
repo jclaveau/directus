@@ -57,8 +57,12 @@ vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 const mockSchema = vi.hoisted(() => {
 	return {
 		getTablesSize: vi.fn(async () => null as number | null),
+		// Same parameters as the real helper, so what a call recorded is typed.
 		dropOldestChunk: vi.fn(
-			async () => null as { table: string; upTo: Date } | null,
+			async (
+				_tables: string[],
+				_olderThan: Date,
+			) => null as { table: string; upTo: Date } | null,
 		),
 	};
 });
@@ -1508,8 +1512,7 @@ describe('enforceCacheStatsBudget', () => {
 
 		expect(cacheStatsActive()).toBe(true);
 
-		const [, floor] = mockSchema.dropOldestChunk.mock.calls[0]! as
-			unknown as [unknown, Date];
+		const [, floor] = mockSchema.dropOldestChunk.mock.calls[0]!;
 
 		expect(Date.now() - floor.getTime())
 			.toBeGreaterThanOrEqual(6 * HOUR);
