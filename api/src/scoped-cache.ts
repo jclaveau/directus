@@ -133,8 +133,9 @@ export function createScopedCacheCollector(
 }
 
 /**
- * Whether scoped (tag-based) cache purging is active. Requires the opt-in mode AND a Redis cache
- * store, since the tag→keys index lives in Redis sets. Any other config falls back to full flush.
+ * Whether scoped (tag-based) cache purging is active. Requires the opt-in mode AND a
+ * Redis cache store, since the tag→keys index lives in Redis sets. Any other config
+ * falls back to full flush.
  */
 export function scopedCachePurgeEnabled(): boolean {
 	return (
@@ -145,11 +146,11 @@ export function scopedCachePurgeEnabled(): boolean {
 }
 
 /**
- * Fail fast at startup: scoped cache purging drives Redis SCAN + multi-key DEL over a single
- * node, so it only works on a standalone client. A cluster client would silently under-purge
- * (keys on other nodes never scanned) and leave stale slices. `useRedis()` always builds a
- * standalone `Redis` in core, so this only bites a custom override — surface it at boot rather
- * than as a mid-request stale HIT.
+ * Fail fast at startup: scoped cache purging drives Redis SCAN + multi-key DEL over
+ * a single node, so it only works on a standalone client. A cluster client would
+ * silently under-purge (keys on other nodes never scanned) and leave stale slices.
+ * `useRedis()` always builds a standalone `Redis` in core, so this only bites a
+ * custom override — surface it at boot rather than as a mid-request stale HIT.
  */
 export function assertScopedCacheRedisSupported(): void {
 	if (scopedCachePurgeEnabled() && useRedis().isCluster) {
@@ -161,12 +162,13 @@ export function assertScopedCacheRedisSupported(): void {
 	}
 }
 
-// Canonicalize a scope value to a driver-stable token so a REST/GraphQL filter value and the
-// native DB row value resolve the SAME slice. `String()` alone collapses the common case (number
-// 7 vs string "7"), but diverges for non-string scalars — a boolean is `true` from a parsed filter
-// but `1`/`0` (mysql/sqlite) or `'t'` (pg) from a stored row; a datetime is an ISO string from a
-// filter but a `Date` from the driver; a decimal is `1.5` vs `'1.50'`. NULL gets a null-byte
-// sentinel rather than String(null)='null', so it can't collide with a literal "null" value.
+// Canonicalize a scope value to a driver-stable token so a REST/GraphQL filter value
+// and the native DB row value resolve the SAME slice. `String()` alone collapses the
+// common case (number 7 vs string "7"), but diverges for non-string scalars — a
+// boolean is `true` from a parsed filter but `1`/`0` (mysql/sqlite) or `'t'` (pg)
+// from a stored row; a datetime is an ISO string from a filter but a `Date` from the
+// driver; a decimal is `1.5` vs `'1.50'`. NULL gets a null-byte sentinel rather than
+// String(null)='null', so it can't collide with a literal "null" value.
 export function canonicalScopedCacheValue(
 	value: unknown,
 	type: Type | undefined,
@@ -184,7 +186,8 @@ export function canonicalScopedCacheValue(
 			: 'false';
 	}
 
-	// `time` has no date component, so it stays a plain string (both sides give `HH:MM:SS`).
+	// `time` has no date component, so it stays a plain string (both sides give
+	// `HH:MM:SS`).
 	if (type === 'date' || type === 'dateTime' || type === 'timestamp') {
 		const ms = value instanceof Date
 			? value.getTime()
@@ -249,11 +252,12 @@ export function canonicalScopedCacheValue(
  * schema does not carry it. What canonicalizes a tag value on both sides. */
 export type FieldTypesByField = Record<string, Type | undefined>;
 
-// Types whose filter value and stored row value are NOT guaranteed to canonicalize to the same
-// token across drivers/timezones: a naive `dateTime`/`timestamp` column comes back as a local
-// `Date` from the driver but as an ISO string (possibly with an explicit `Z`) from a filter, so
-// the epoch-ms canonical can diverge. The read side never pins these — it falls back to the bare
-// collection tag so any write to the collection invalidates the read (over-purge, never stale).
+// Types whose filter value and stored row value are NOT guaranteed to canonicalize
+// to the same token across drivers/timezones: a naive `dateTime`/`timestamp` column
+// comes back as a local `Date` from the driver but as an ISO string (possibly with
+// an explicit `Z`) from a filter, so the epoch-ms canonical can diverge. The read
+// side never pins these — it falls back to the bare collection tag so any write to
+// the collection invalidates the read (over-purge, never stale).
 const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>(['date', 'dateTime', 'timestamp']);
 
 function isPinnableScopeType(type: Type | undefined): boolean {
@@ -372,10 +376,10 @@ const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
 
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
- * mutation can drop just the matching entries instead of the whole namespace. Both the
- * payload key and its `__expires_at` sibling are tagged. When a cache TTL is set,
- * each tag set self-expires at `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as a
- * net for members orphaned by a crash between write and purge; with no TTL
+ * mutation can drop just the matching entries instead of the whole namespace. Both
+ * the payload key and its `__expires_at` sibling are tagged. When a cache TTL is
+ * set, each tag set self-expires at `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as
+ * a net for members orphaned by a crash between write and purge; with no TTL
  * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
  * left unbounded to match — a normal purge still drains them.
  */
@@ -473,26 +477,27 @@ export async function countScopedCacheTagMembers(
 }
 
 /**
- * Delete the cache entries a set of tag keys point to, then drop the tag sets. Shared by
- * the scoped purge (specific value slices) and the collection-wide fallback (every slice).
+ * Delete the cache entries a set of tag keys point to, then drop the tag sets.
+ * Shared by the scoped purge (specific value slices) and the collection-wide
+ * fallback (every slice).
  *
- * Returns how many cache ENTRIES it actually deleted, which is neither how many
- * keys it deleted nor how many the tag sets named.
+ * Returns how many cache ENTRIES it actually deleted, which is neither how many keys
+ * it deleted nor how many the tag sets named.
  *
- * Not the key count, because a tag set holds each entry alongside its
- * `__expires_at` sibling and any extra sibling (`__tags`), so counting members
- * would report every entry twice over. A sidecar is recognisable by its base key
- * being in the set beside it — the `sadd` writes them together — which stays
- * right as siblings are added.
+ * Not the key count, because a tag set holds each entry alongside its `__expires_at`
+ * sibling and any extra sibling (`__tags`), so counting members would report every
+ * entry twice over. A sidecar is recognisable by its base key being in the set
+ * beside it — the `sadd` writes them together — which stays right as siblings are
+ * added.
  *
- * Not the membership count either, because nothing ever SREMs: a member that
- * expired by TTL stays named by the set until the set itself is dropped here. On
- * the workload this fork exists for — per-user keys, so high cardinality, TTLs
- * shorter than the gap between mutations — most of a set can be entries that were
- * already gone, and counting them would inflate every purge figure on the page.
- * So the store's own answer decides. Only an explicit `false` is evidence the key
- * was absent; a store that reports nothing leaves the count where it was rather
- * than silently collapsing it to zero.
+ * Not the membership count either, because nothing ever SREMs: a member that expired
+ * by TTL stays named by the set until the set itself is dropped here. On the
+ * workload this fork exists for — per-user keys, so high cardinality, TTLs shorter
+ * than the gap between mutations — most of a set can be entries that were already
+ * gone, and counting them would inflate every purge figure on the page. So the
+ * store's own answer decides. Only an explicit `false` is evidence the key was
+ * absent; a store that reports nothing leaves the count where it was rather than
+ * silently collapsing it to zero.
  */
 // The suffixes a cached response's siblings carry. They ride the same tag set as
 // the payload key, so both the purge (which must not count them as evictions of
@@ -513,14 +518,16 @@ async function purgeScopedCacheTagKeys(
 	cache: Keyv,
 	tagKeys: string[],
 ): Promise<number> {
-	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty collection
-	// scan) can leave nothing to purge.
+	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty
+	// collection scan) can leave nothing to purge.
 	if (tagKeys.length === 0) {
 		return 0;
 	}
 
 	const redis = useRedis();
-	const memberLists = await Promise.all(tagKeys.map((tagKey) => redis.smembers(tagKey)));
+	const memberLists = await Promise.all(
+		tagKeys.map((tagKey) => redis.smembers(tagKey)),
+	);
 	const members = [...new Set(memberLists.flat())];
 
 	const wasDeleted = await Promise.all(members.map((member) => {
@@ -577,10 +584,10 @@ async function purgeScopedCacheTagKeys(
 }
 
 /**
- * Cursor-scan every Redis key matching `match`. A single-node SCAN only covers the whole
- * keyspace on a standalone client; a cluster would miss keys on other nodes. Scoped mode is
- * refused on a cluster at startup (`assertScopedCacheRedisSupported`), so the client here is
- * always standalone.
+ * Cursor-scan every Redis key matching `match`. A single-node SCAN only covers the
+ * whole keyspace on a standalone client; a cluster would miss keys on other nodes.
+ * Scoped mode is refused on a cluster at startup
+ * (`assertScopedCacheRedisSupported`), so the client here is always standalone.
  */
 async function scanScopedCacheTagKeys(match: string): Promise<string[]> {
 	const redis = useRedis();
@@ -624,11 +631,11 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 }
 
 /**
- * Purge every cached read of `collection` — its bare collection tag plus all its value
- * slices — without full-flushing the namespace. The fallback when a mutation's scope
- * values are unresolvable (e.g. an upsert mixing inserts and updates): which slices
- * changed is unknown, but only reads touching THIS collection can be stale, so scope the
- * flush to its tag sets and spare every other collection's entries.
+ * Purge every cached read of `collection` — its bare collection tag plus all its
+ * value slices — without full-flushing the namespace. The fallback when a mutation's
+ * scope values are unresolvable (e.g. an upsert mixing inserts and updates): which
+ * slices changed is unknown, but only reads touching THIS collection can be stale,
+ * so scope the flush to its tag sets and spare every other collection's entries.
  */
 export async function purgeCollectionScopedCache(
 	cache: Keyv,
@@ -955,8 +962,8 @@ async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<voi
  * the bare collection tag (global reads) is always purged alongside the resolved
  * `scopedCacheTags` (the owner/partition slices the mutation touched), leaving every
  * other slice untouched. A `null` `scopedCacheTags` means "values couldn't be
- * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather than
- * risk leaving a slice stale; still narrower than nuking the whole namespace.
+ * resolved" → fall back to a collection-wide purge (bare tag + every slice) rather
+ * than risk leaving a slice stale; still narrower than nuking the whole namespace.
  *
  * To purge EVERY entry of a collection, pass `null` — it dispatches to
  * `purgeCollectionScopedCache`, which reads the collection's own slice index and
@@ -1085,23 +1092,23 @@ export async function purgeScopedCache(
 }
 
 /**
- * Build scoped cache tags from the distinct scope values present across `rows` — the purge side.
+ * Build scoped cache tags from the distinct scope values present across `rows` — the
+ * purge side.
  *
- * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*. `'coarse'`
- *   returns `null` so the caller can fall back to a collection-wide purge rather than leave a
- *   slice stale; `'skip'` best-effort skips just that row's contribution.
- * - The `'coarse'` path triggers for a caller feeding *unprojected* rows. The purge
- *   side (`snapshotScopedCacheTags`) reads rows via an explicit projected `select`,
- *   so every field key is always present and it never returns `null` there — an
- *   update/delete/create snapshot always resolves. A create whose committed rows
- *   can't be trusted is caught upstream by the row-count check
- *   (`someRowTakenOver`), not here.
- * - The read side (`pinnedScopedCacheTagsFromM2oParents`) is the caller that
- *   depends on the `null`: one parent row missing its key has to take its whole
- *   collection down to the bare tag, since pinning the rest would leave that row
- *   covered by nothing.
- * - `fieldTypes`: each field's schema type, so the tag value canonicalizes the same way the read
- *   side's filter value does.
+ * - `onUnresolvable`: what to do when a row is missing a scoped-cache-field *key*.
+ * `'coarse'` returns `null` so the caller can fall back to a collection-wide purge
+ * rather than leave a slice stale; `'skip'` best-effort skips just that row's
+ * contribution. - The `'coarse'` path triggers for a caller feeding *unprojected*
+ * rows. The purge side (`snapshotScopedCacheTags`) reads rows via an explicit
+ * projected `select`, so every field key is always present and it never returns
+ * `null` there — an update/delete/create snapshot always resolves. A create whose
+ * committed rows can't be trusted is caught upstream by the row-count check
+ * (`someRowTakenOver`), not here. - The read side
+ * (`pinnedScopedCacheTagsFromM2oParents`) is the caller that depends on the `null`:
+ * one parent row missing its key has to take its whole collection down to the bare
+ * tag, since pinning the rest would leave that row covered by nothing. -
+ * `fieldTypes`: each field's schema type, so the tag value canonicalizes the same
+ * way the read side's filter value does.
  */
 export function scopedCacheTagsFromRows(
 	collection: string,
@@ -1127,8 +1134,9 @@ export function scopedCacheTagsFromRows(
 	const tags: ScopedCacheTag[] = [];
 
 	for (const field of fields) {
-		// Dedup on the canonical token, not the raw value, so `7` and `'7'` (or a boolean
-		// stored as `1`/`'t'`) collapse to one tag instead of emitting redundant slices.
+		// Dedup on the canonical token, not the raw value, so `7` and `'7'` (or a
+		// boolean stored as `1`/`'t'`) collapse to one tag instead of emitting redundant
+		// slices.
 		const seen = new Set<string>();
 
 		for (const row of rows) {
@@ -2618,30 +2626,32 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 }
 
 /**
- * Scope a read's root cache tags off a filter — the read side. A read is soundly scoped to a value
- * slice only when the filter *bounds* it to that value: a future insert with a new scope value must
- * be excluded by the same filter, or the read would silently miss it. Tags come from `_eq`/`_in` on
- * a scoped field (flat or relational `{ fk: { <pk>: … } }`). Each node reports its tags plus whether
- * it *covers* every row it matches (i.e. binds a pinnable field on that row), combined by operator:
- *   - `_and`/root union a field's values and are covered if ANY conjunct is (a row satisfies every
- *     conjunct); the value union over-approximates the intersection — over-purges, never stale.
- *   - `_or` is sound only when EVERY branch is covered (else a row matching an uncovered branch
- *     carries no pinned tag → stale); then its tags are the union across branches — a matching row
- *     satisfies one branch, whose covering tag lies in that union. This holds across *different*
- *     fields too: `{ _or: [{ owner }, { dept }] }` pins both, purged if a write touches either.
- * This is what scopes a permission-isolated read: the caller passes
- * `joinFilterWithCases(query.filter, ast.cases)`, whose `{ _or: cases }` is unioned by that rule
- * (one case = its own values; a case that leaves ALL fields unbound → bare). No pinned field → `[]`,
- * and the caller falls back to the bare collection tag. `fieldTypes` canonicalizes a value the way
- * the purge side does and skips date-ish types (not pin-safe, `PIN_UNSAFE_SCOPE_TYPES`).
+ * Scope a read's root cache tags off a filter — the read side. A read is soundly
+ * scoped to a value slice only when the filter *bounds* it to that value: a future
+ * insert with a new scope value must be excluded by the same filter, or the read
+ * would silently miss it. Tags come from `_eq`/`_in` on a scoped field (flat or
+ * relational `{ fk: { <pk>: … } }`). Each node reports its tags plus whether it
+ * *covers* every row it matches (i.e. binds a pinnable field on that row), combined
+ * by operator: - `_and`/root union a field's values and are covered if ANY conjunct
+ * is (a row satisfies every conjunct); the value union over-approximates the
+ * intersection — over-purges, never stale. - `_or` is sound only when EVERY branch
+ * is covered (else a row matching an uncovered branch carries no pinned tag →
+ * stale); then its tags are the union across branches — a matching row satisfies one
+ * branch, whose covering tag lies in that union. This holds across *different*
+ * fields too: `{ _or: [{ owner }, { dept }] }` pins both, purged if a write touches
+ * either. This is what scopes a permission-isolated read: the caller passes
+ * `joinFilterWithCases(query.filter, ast.cases)`, whose `{ _or: cases }` is unioned
+ * by that rule (one case = its own values; a case that leaves ALL fields unbound →
+ * bare). No pinned field → `[]`, and the caller falls back to the bare collection
+ * tag. `fieldTypes` canonicalizes a value the way the purge side does and skips
+ * date-ish types (not pin-safe, `PIN_UNSAFE_SCOPE_TYPES`).
  *
- * `primaryKeyField` joins the declared fields implicitly and always, no config:
- *   - Every row has a primary key, so this axis always resolves.
- *   - An inserted row carries a different key, so it can never join a `<pk>._eq`
- *     or `<pk>._in` read's result set — the insert-blindness that bars a value
- *     slice elsewhere cannot bite here.
- *   - The purge side emits the same tag from the keys it already holds, so read and
- *     write agree without either paying a query for it.
+ * `primaryKeyField` joins the declared fields implicitly and always, no config: -
+ * Every row has a primary key, so this axis always resolves. - An inserted row
+ * carries a different key, so it can never join a `<pk>._eq` or `<pk>._in` read's
+ * result set — the insert-blindness that bars a value slice elsewhere cannot bite
+ * here. - The purge side emits the same tag from the keys it already holds, so read
+ * and write agree without either paying a query for it.
  */
 export function pinnedScopedCacheTagsFromFilter(
 	collection: string,
@@ -2679,8 +2689,9 @@ export function pinnedScopedCacheTagsFromFilter(
 		pathsByHead.set(head, group);
 	}
 
-	// A node's pinned tags plus whether it *covers* every row it matches — a leaf that bound a
-	// pinnable field covers its rows; an uncovered node's rows carry no pinned tag (would be stale).
+	// A node's pinned tags plus whether it *covers* every row it matches — a leaf that
+	// bound a pinnable field covers its rows; an uncovered node's rows carry no pinned
+	// tag (would be stale).
 	type Eval = { tags: Map<string, Set<unknown>>; covered: boolean };
 
 	// Union `source`'s values into `target` in place (shared by AND and OR).
@@ -2699,8 +2710,9 @@ export function pinnedScopedCacheTagsFromFilter(
 		}
 	}
 
-	// A single `_eq`/`_in` (or relational `{ fk: { <pk>: { _eq | _in } } }`) leaf → its value set.
-	// Covered iff it bound a pinnable scope field; a non-scope/date/non-`_eq`/`_in` key covers nothing.
+	// A single `_eq`/`_in` (or relational `{ fk: { <pk>: { _eq | _in } } }`) leaf →
+	// its value set. Covered iff it bound a pinnable scope field; a
+	// non-scope/date/non-`_eq`/`_in` key covers nothing.
 	function evalLeaf(field: string, value: unknown): Eval {
 		const tags = new Map<string, Set<unknown>>();
 
@@ -2722,8 +2734,9 @@ export function pinnedScopedCacheTagsFromFilter(
 			tags.set(field, new Set(ops['_in']));
 		}
 		else {
-			// Relational: a filter on the related PK bounds the fk to the value the write side
-			// stores. Only the related PK is sound — a non-PK attribute wouldn't determine it.
+			// Relational: a filter on the related PK bounds the fk to the value the write
+			// side stores. Only the related PK is sound — a non-PK attribute wouldn't
+			// determine it.
 			const relatedPrimaryKey = relatedPrimaryKeys[field];
 
 			const inner = relatedPrimaryKey === undefined
@@ -2822,9 +2835,10 @@ export function pinnedScopedCacheTagsFromFilter(
 		return { tags, covered: tags.size > 0 };
 	}
 
-	// OR: a row matches at least one branch. Sound to pin only when EVERY branch covers its own rows
-	// (else a row matching an uncovered branch carries no pinned tag → stale); then the tags are the
-	// union across branches — a matching row's covering tag lies in it, across different fields too.
+	// OR: a row matches at least one branch. Sound to pin only when EVERY branch
+	// covers its own rows (else a row matching an uncovered branch carries no pinned
+	// tag → stale); then the tags are the union across branches — a matching row's
+	// covering tag lies in it, across different fields too.
 	function evalOr(branches: Eval[]): Eval {
 		if (branches.length === 0 || !branches.every((branch) => branch.covered)) {
 			return { tags: new Map<string, Set<unknown>>(), covered: false };
@@ -2839,8 +2853,9 @@ export function pinnedScopedCacheTagsFromFilter(
 		return { tags, covered: true };
 	}
 
-	// Every key at an object level is AND-combined (the root and `_and` share this): a row satisfies
-	// every conjunct, so tags union and the node is covered if ANY conjunct covers the row.
+	// Every key at an object level is AND-combined (the root and `_and` share this): a
+	// row satisfies every conjunct, so tags union and the node is covered if ANY
+	// conjunct covers the row.
 	function evalNode(node: Filter): Eval {
 		const result: Eval = { tags: new Map<string, Set<unknown>>(), covered: false };
 
