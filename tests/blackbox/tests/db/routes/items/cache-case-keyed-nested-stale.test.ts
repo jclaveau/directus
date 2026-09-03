@@ -126,7 +126,9 @@ describe(oneLine`
 										},
 										{
 											policy: '+',
-											permissions: { id: { _nnull: true } },
+											// Unconditional: a row case here folds onto the nested
+											// child disjunctively and un-keys the parent case's pin.
+											permissions: {},
 											validation: null,
 											fields: ['*'],
 											presets: null,

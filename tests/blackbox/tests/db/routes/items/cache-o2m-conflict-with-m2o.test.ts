@@ -16,15 +16,13 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// RED until fixed: the `o2mConflicted` guard is consulted ONLY inside
-// `pushAncestorSliceOrBare` (item-scoped-cache-service.ts ~665), reached ONLY when
-// a nested collection has no m2o/o2m/keyed pin (~705-716). A collection reached in
-// one read BOTH by two disagreeing O2M reverse fks (conflicted → should be bare)
-// AND by a genuine M2O elsewhere (so `m2oParentPins.has(coll)` is true) skips that
-// branch and takes the union branch (~721-736), which never checks o2mConflicted.
-// The rows nested via the two conflicting reverse fks then go UNTAGGED: the read
-// carries only the M2O slice (`note:id=<pinnedNote>`), a write to a note reached by
-// a reverse fk emits a tag that never matches it, and the stale read stays a HIT.
+// RED until fixed. A note reached by two disagreeing O2M reverse fks is
+// `o2mConflicted` (should be bare), yet is also KEYED by filter and never nested, so
+// it skips the nested-bare branch (~759) for the union branch (~781) — which emits
+// its keyed slice `note:id=<pinnedNote>` and no bare tag. The fix forces bare on
+// `o2mConflicted` first (~731). Filters, not nesting: a nested conflicted note can't
+// reach the union branch, since `pinnedScopedCacheTagsFromM2oParents` drops any
+// collection carrying an o2m-terminal path, so it is never m2o-pinned.
 const ENROLLMENT = 'o2m_m2o_enrollment';
 const NOTE = 'o2m_m2o_note';
 const DISCIPLINE = 'o2m_m2o_discipline';
@@ -53,7 +51,6 @@ describe(oneLine`
 		let disciplineId: number;
 		let teachingUnitId: number;
 		let pinnedNoteId: number;
-		let conflictNoteId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 		beforeAll(async () => {
@@ -84,8 +81,8 @@ describe(oneLine`
 				],
 			});
 
-			// The genuine m2o path that makes `m2oParentPins.has(note)` true, pinning
-			// `note:id=<pinnedNote>` and steering the note into the union branch.
+			// The genuine m2o `pinned_note`; filtered by pk it joins the read beside
+			// the two o2m paths, and note's keyed `note:id` pin unions across all three.
 			await CreateFieldM2O(vendor, {
 				collection: ENROLLMENT,
 				field: 'pinned_note',
@@ -108,8 +105,8 @@ describe(oneLine`
 				otherField: 'teaching_unit_id',
 			});
 
-			// Both reached from the root by an M2O, so the O2M under each nests off a
-			// single surfaced parent row the pinner can descend.
+			// Reached from the root by an M2O each, so the filter can cross
+			// `discipline.notes` and `teaching_unit.notes` — the two conflicting fks.
 			await CreateFieldM2O(vendor, {
 				collection: ENROLLMENT,
 				field: 'discipline',
@@ -136,19 +133,18 @@ describe(oneLine`
 
 			teachingUnitId = teachingUnits[0].id;
 
-			// N_pin is only the m2o `pinned_note`; N_c is only reachable via
-			// `discipline.notes` (its `discipline_id`), a different id, never the pinned
-			// one — the row the conflicting reverse fk nests and the write later touches.
+			// One note the read reaches three ways: the m2o `pinned_note` and both o2m
+			// reverse fks, so it is keyed by pk while the two fks disagree → conflicted.
 			const notes = await CreateItem(vendor, {
 				collection: NOTE,
-				item: [
-					{ body: 'pinned note' },
-					{ body: 'conflict note', discipline_id: disciplineId },
-				],
+				item: [{
+					body: 'pinned note',
+					discipline_id: disciplineId,
+					teaching_unit_id: teachingUnitId,
+				}],
 			});
 
 			pinnedNoteId = notes[0].id;
-			conflictNoteId = notes[1].id;
 
 			const enrollments = await CreateItem(vendor, {
 				collection: ENROLLMENT,
@@ -176,7 +172,7 @@ describe(oneLine`
 		}, 60_000);
 
 		afterAll(async () => {
-			instance.kill();
+			instance?.kill();
 
 			await DeleteCollection(vendor, { collection: ENROLLMENT });
 			await DeleteCollection(vendor, { collection: NOTE });
@@ -184,18 +180,20 @@ describe(oneLine`
 			await DeleteCollection(vendor, { collection: TEACHING_UNIT });
 		});
 
-		// One read reaches the note three ways: the `pinned_note` M2O, the
-		// `discipline.notes` O2M (reverse fk `discipline_id`) and the
-		// `teaching_unit.notes` O2M (reverse fk `teaching_unit_id`).
+		// The note is reached ONLY through filters — keyed by pk via the m2o and both
+		// o2m reverse fks — never nested, so it pins by pk yet the o2m paths conflict.
 		function readEnrollment() {
 			return request(getUrl(vendor, env))
 				.get(`/items/${ENROLLMENT}`)
 				.query({
-					'filter[id][_eq]': String(enrollmentId),
-					fields: oneLine`
-						id,pinned_note.id,discipline.notes.id,discipline.notes.body,
-						teaching_unit.notes.id
-					`.replace(/\s+/g, ''),
+					filter: JSON.stringify({
+						_and: [
+							{ pinned_note: { id: { _eq: pinnedNoteId } } },
+							{ discipline: { notes: { id: { _eq: pinnedNoteId } } } },
+							{ teaching_unit: { notes: { id: { _eq: pinnedNoteId } } } },
+						],
+					}),
+					fields: 'id',
 				})
 				.set('Authorization', auth);
 		}
@@ -207,8 +205,8 @@ describe(oneLine`
 		}
 
 		it(oneLine`
-			serves a stale HIT after a write to a note nested only through a
-			conflicting reverse fk
+			tags a conflicted, keyed note only by its pk slice, missing the bare tag
+			a reverse-fk write needs
 		`, async () => {
 			await clearCache();
 
@@ -216,9 +214,8 @@ describe(oneLine`
 			expect(warm.status).toBe(200);
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
 
-			// Non-vacuity: the conflict note really is nested with its old body.
-			expect(warm.body.data[0].discipline.notes[0].id).toBe(conflictNoteId);
-			expect(warm.body.data[0].discipline.notes[0].body).toBe('conflict note');
+			// Non-vacuity: the filter really matched the enrollment.
+			expect(warm.body.data[0].id).toBe(enrollmentId);
 
 			// PRIMARY (RED on buggy): the fix forces the bare `note` tag; buggy
 			// carries only `note:id=<pinnedNoteId>` a reverse-fk write can't purge.
@@ -228,15 +225,12 @@ describe(oneLine`
 			expect((await readEnrollment()).headers[cacheStatusHeader]).toBe('HIT');
 
 			await request(getUrl(vendor, env))
-				.patch(`/items/${NOTE}/${conflictNoteId}`)
-				.send({ body: 'conflict note rewritten' })
+				.patch(`/items/${NOTE}/${pinnedNoteId}`)
+				.send({ body: 'rewritten' })
 				.set('Authorization', auth);
 
-			// Secondary: a bare-tagged read is purged by the N_c write.
-			const after = await readEnrollment();
-
-			expect(after.body.data[0].discipline.notes[0].body)
-				.toBe('conflict note rewritten');
+			// Secondary: the note's own pk slice purges this read on the fix.
+			expect((await readEnrollment()).headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });

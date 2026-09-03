@@ -674,10 +674,9 @@ export class ItemScopedCacheService {
 					return rootScopedCacheTags;
 				}
 
-				return [
-					...m2oParentPins.get(ancestor) ?? [],
-					...keyedFilterPins.get(ancestor) ?? [],
-				];
+				// A filter bound covers these rows too; an m2oParentPins value names an
+				// ancestor reached via ANOTHER path, so its slice would serve a stale hit.
+				return keyedFilterPins.get(ancestor) ?? [];
 			};
 
 			for (
