@@ -59,6 +59,7 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
+import { isPrimaryKey } from '../utils/is-primary-key.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { PayloadService } from './payload.js';
@@ -86,14 +87,6 @@ async function emitActionEvents(actionEvents: ActionEventParams[], opts: Mutatio
 		// an un-awaited rejection (e.g. from a bypassEmitAction handler) doesn't go unhandled.
 		emitting.catch(() => {});
 	}
-}
-
-/**
- * A value read out of a payload by a runtime field name is `any` as far as the
- * compiler knows. This proves it is a primary key rather than asserting it.
- */
-function isPrimaryKey(value: unknown): value is PrimaryKey {
-	return typeof value === 'string' || typeof value === 'number';
 }
 
 export class ItemsService<Item extends AnyItem = AnyItem, Collection extends string = string>
