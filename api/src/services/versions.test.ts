@@ -3,7 +3,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { readResult } from '../__utils__/read-result.js';
+import { withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 import { VersionsService } from './versions.js';
 
@@ -37,7 +37,7 @@ describe('Services / Versions', () => {
 
 			const readOne = vi
 				.spyOn(ItemsService.prototype, 'readOne')
-				.mockResolvedValue(readResult(version));
+				.mockResolvedValue(withMeta(version, { scopedCacheTags: [] }));
 
 			const service = new VersionsService({ knex: db, schema });
 

@@ -2,7 +2,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import knex, { type Knex } from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { readResult } from '../../__utils__/read-result.js';
+import { withMeta } from '../../utils/read-meta.js';
 import { ItemsService } from '../../services/items.js';
 import { _fetchShareInfo } from './fetch-share-info.js';
 
@@ -40,7 +40,7 @@ describe('fetchShareInfo', () => {
 
 		const readOne = vi
 			.spyOn(ItemsService.prototype, 'readOne')
-			.mockResolvedValue(readResult(share));
+			.mockResolvedValue(withMeta(share, { scopedCacheTags: [] }));
 
 		const info = await _fetchShareInfo('share-1', { knex: db, schema });
 

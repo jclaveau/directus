@@ -1,9 +1,9 @@
 import type { Accountability } from '@directus/types';
-import { readResult } from '../__utils__/read-result.js';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCache } from '../cache.js';
+import { withMeta } from '../utils/read-meta.js';
 import { CommentsService } from './comments.js';
 import { ItemsService } from './items.js';
 import { NotificationsService } from './notifications.js';
@@ -92,23 +92,23 @@ describe('Services / Comments', () => {
 		const service = new CommentsService({ knex: db, schema, accountability });
 
 		vi.mocked(UsersService.prototype.readOne)
-			.mockResolvedValueOnce(readResult({
+			.mockResolvedValueOnce(withMeta({
 				id: senderUuid,
 				first_name: 'Sam',
 				last_name: 'Sender',
 				email: 'sam@x.com',
-			}))
-			.mockResolvedValueOnce(readResult({
+			}, { scopedCacheTags: [] }))
+			.mockResolvedValueOnce(withMeta({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
 				role: { id: null },
-			}));
+			}, { scopedCacheTags: [] }));
 
-		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(readResult([
+		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(withMeta([
 			{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' },
-		]));
+		], { scopedCacheTags: [] }));
 
 		const result = await service.createMany([
 			{

@@ -1,5 +1,4 @@
 import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
-import { readResult } from '../__utils__/read-result.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -8,6 +7,7 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { verifyJWT } from '../utils/jwt.js';
+import { withMeta } from '../utils/read-meta.js';
 import { ItemsService, MailService, UsersService } from './index.js';
 import { SettingsService } from './settings.js';
 
@@ -521,10 +521,9 @@ describe('Integration Tests', () => {
 
 		describe('registerUser', () => {
 			it('should reject when public registration is disabled (users.ts L464)', async () => {
-				vi.spyOn(SettingsService.prototype, 'readSingleton')
-					.mockResolvedValueOnce(readResult({
-					public_registration: false,
-				}));
+				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce(
+					withMeta({ public_registration: false }, { scopedCacheTags: [] }),
+				);
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
 
@@ -533,11 +532,14 @@ describe('Integration Tests', () => {
 			});
 
 			it('should reject when the email fails the configured email filter (users.ts L489)', async () => {
-				vi.spyOn(SettingsService.prototype, 'readSingleton')
-					.mockResolvedValueOnce(readResult({
-					public_registration: true,
-					public_registration_email_filter: { email: { _ends_with: '@allowed.com' } },
-				}));
+				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce(
+					withMeta({
+						public_registration: true,
+						public_registration_email_filter: {
+							email: { _ends_with: '@allowed.com' },
+						},
+					}, { scopedCacheTags: [] }),
+				);
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
 

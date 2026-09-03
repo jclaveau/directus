@@ -4,7 +4,7 @@ import type { Accountability } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { readResult } from '../__utils__/read-result.js';
+import { withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 import type { EmailOptions } from './mail/index.js';
 import { SharesService } from './shares.js';
@@ -62,10 +62,15 @@ describe('Services / Shares', () => {
 		it('mails every invitee a link naming the sender', async () => {
 			const readOne = vi.spyOn(ItemsService.prototype, 'readOne');
 
-			readOne.mockResolvedValueOnce(readResult({ collection: 'articles' }));
+			readOne.mockResolvedValueOnce(
+				withMeta({ collection: 'articles' }, { scopedCacheTags: [] }),
+			);
 
 			readOne.mockResolvedValueOnce(
-				readResult({ first_name: 'Ada', last_name: 'Lovelace' }),
+				withMeta(
+					{ first_name: 'Ada', last_name: 'Lovelace' },
+					{ scopedCacheTags: [] },
+				),
 			);
 
 			const service = new SharesService({

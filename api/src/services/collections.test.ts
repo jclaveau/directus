@@ -5,7 +5,7 @@ import type { Knex } from 'knex';
 import knex from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { readResult } from '../__utils__/read-result.js';
+import { withMeta } from '../utils/read-meta.js';
 import { CollectionsService } from './collections.js';
 import { ItemsService } from './items.js';
 
@@ -132,7 +132,7 @@ describe('Services / Collections', () => {
 		it('merges the system collections into the meta rows', async () => {
 			const readByQuery = vi
 				.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(readResult([]));
+				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
 
 			const service = new CollectionsService({ knex: db, schema });
 			const collections = await service.readByQuery();

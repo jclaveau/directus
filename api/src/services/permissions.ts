@@ -1,5 +1,4 @@
 import { ForbiddenError } from '@directus/errors';
-import { withoutMeta } from '../utils/read-meta.js';
 import type {
 	AbstractServiceOptions,
 	Item,
@@ -18,7 +17,7 @@ import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { withAppMinimalPermissions } from '../permissions/lib/with-app-minimal-permissions.js';
 import type { ValidateAccessOptions } from '../permissions/modules/validate-access/validate-access.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
-import { readMeta, withMeta } from '../utils/read-meta.js';
+import { withMeta, withoutMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 
 export class PermissionsService extends ItemsService {
@@ -38,13 +37,17 @@ export class PermissionsService extends ItemsService {
 		query: Query,
 		opts?: QueryOptions,
 	): Promise<WithMeta<Partial<Item>[]>> {
-		const result = withoutMeta(await super.readByQuery(query, opts)) as Permission[];
+		const result = await super.readByQuery(query, opts);
 
 		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache
 		// tag rider across.
 		return withMeta(
-			withAppMinimalPermissions(this.accountability, result, query.filter) as Partial<Item>[],
-			readMeta(result) ?? { scopedCacheTags: [] },
+			withAppMinimalPermissions(
+				this.accountability,
+				withoutMeta(result) as Permission[],
+				query.filter,
+			) as Partial<Item>[],
+			result.getMeta(),
 		);
 	}
 

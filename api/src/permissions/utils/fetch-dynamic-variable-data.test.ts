@@ -1,9 +1,9 @@
 import type { Accountability } from '@directus/types';
-import { readResult } from '../../__utils__/read-result.js';
 import { beforeEach, test, vi, expect } from 'vitest';
 import { PoliciesService } from '../../services/policies.js';
 import { UsersService } from '../../services/users.js';
 import { RolesService } from '../../services/roles.js';
+import { withMeta } from '../../utils/read-meta.js';
 import type { Context } from '../types.js';
 import { fetchDynamicVariableData } from './fetch-dynamic-variable-data.js';
 import type { DynamicVariableContext } from './extract-required-dynamic-variable-context.js';
@@ -28,7 +28,7 @@ beforeEach(() => {
 });
 
 test('Returns filter context for current user', async () => {
-	const user = {};
+	const user = withMeta({}, { scopedCacheTags: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(['email']),
@@ -37,7 +37,7 @@ test('Returns filter context for current user', async () => {
 		$CURRENT_POLICIES: new Set(),
 	};
 
-	vi.mocked(UsersService.prototype.readOne).mockResolvedValue(readResult(user));
+	vi.mocked(UsersService.prototype.readOne).mockResolvedValue(user);
 
 	const res = await fetchDynamicVariableData(
 		{
@@ -53,7 +53,7 @@ test('Returns filter context for current user', async () => {
 });
 
 test('Returns filter context for current role', async () => {
-	const role = {};
+	const role = withMeta({}, { scopedCacheTags: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),
@@ -62,7 +62,7 @@ test('Returns filter context for current role', async () => {
 		$CURRENT_POLICIES: new Set(),
 	};
 
-	vi.mocked(RolesService.prototype.readOne).mockResolvedValue(readResult(role));
+	vi.mocked(RolesService.prototype.readOne).mockResolvedValue(role);
 
 	const res = await fetchDynamicVariableData(
 		{
@@ -78,7 +78,7 @@ test('Returns filter context for current role', async () => {
 });
 
 test('Returns filter context for current policies', async () => {
-	const policies: any[] = [];
+	const policies = withMeta([] as any[], { scopedCacheTags: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),
@@ -87,8 +87,7 @@ test('Returns filter context for current policies', async () => {
 		$CURRENT_POLICIES: new Set(['name']),
 	};
 
-	vi.mocked(PoliciesService.prototype.readMany)
-		.mockResolvedValue(readResult(policies));
+	vi.mocked(PoliciesService.prototype.readMany).mockResolvedValue(policies);
 
 	const res = await fetchDynamicVariableData(
 		{

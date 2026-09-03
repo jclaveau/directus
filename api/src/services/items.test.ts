@@ -12,8 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mocked
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { purgeScopedCache } from '../scoped-cache.js';
-import { readMeta } from '../utils/read-meta.js';
-import { readResult } from '../__utils__/read-result.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
@@ -178,7 +177,9 @@ describe('Integration Tests', () => {
 
 		describe('readOne', () => {
 			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
-				service.readByQuery = vi.fn(async () => readResult([]));
+				service.readByQuery = vi.fn(async () => {
+					return withMeta([], { scopedCacheTags: [] });
+				});
 
 				const error = await service.readOne(999).catch((err) => err);
 

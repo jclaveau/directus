@@ -1,5 +1,4 @@
 import { ForbiddenError } from '@directus/errors';
-import { readResult } from '../__utils__/read-result.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, RawField } from '@directus/types';
 import knex from 'knex';
@@ -7,7 +6,7 @@ import { MockClient, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Knex } from 'knex';
 import type { Tracker } from 'knex-mock-client';
-import { readMeta } from '../utils/read-meta.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { FieldsService } from './fields.js';
 import { ItemsService } from './items.js';
 
@@ -100,7 +99,7 @@ describe('Services / Fields', () => {
 	describe('readAll', () => {
 		it('tags the result with directus_fields', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(readResult([]));
+				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 
@@ -117,7 +116,7 @@ describe('Services / Fields', () => {
 		it('reads only the field rows of the given collection', async () => {
 			const readByQuery = vi
 				.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(readResult([]));
+				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 

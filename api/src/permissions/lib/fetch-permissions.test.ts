@@ -1,7 +1,7 @@
 import type { Accountability, Permission } from '@directus/types';
-import { readResult } from '../../__utils__/read-result.js';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { PermissionsService } from '../../services/permissions.js';
+import { withMeta } from '../../utils/read-meta.js';
 import type { Context } from '../types.js';
 import { fetchDynamicVariableData } from '../utils/fetch-dynamic-variable-data.js';
 import { processPermissions } from '../utils/process-permissions.js';
@@ -26,17 +26,16 @@ beforeEach(() => {
 });
 
 test('Returns permissions read through service sorted by the order of policies', async () => {
-	const permissions: Permission[] = [
+	const permissions = withMeta([
 		{ policy: 'policy-2' },
 		{ policy: 'policy-1' },
 		{ policy: 'policy-1' },
-	] as Permission[];
+	] as Permission[], { scopedCacheTags: [] });
 
 	const policies = ['policy-1', 'policy-2'] as string[];
 	const collections = [] as string[];
 
-	vi.mocked(PermissionsService.prototype.readByQuery)
-		.mockResolvedValue(readResult(permissions));
+	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
 
 	const res = await fetchPermissions({ action: 'read', policies, collections }, {} as Context);
 
@@ -51,12 +50,15 @@ test('Returns permissions read through service sorted by the order of policies',
 });
 
 test('Returns all action permissions if action is undefined', async () => {
-	const permissions: Permission[] = [{ policy: 'policy-1' }] as Permission[];
+	const permissions = withMeta(
+		[{ policy: 'policy-1' }] as Permission[],
+		{ scopedCacheTags: [] },
+	);
+
 	const policies = [] as string[];
 	const collections = [] as string[];
 
-	vi.mocked(PermissionsService.prototype.readByQuery)
-		.mockResolvedValue(readResult(permissions));
+	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
 
 	const res = await fetchPermissions({ policies, collections }, {} as Context);
 
@@ -71,11 +73,14 @@ test('Returns all action permissions if action is undefined', async () => {
 });
 
 test('Fetches for all collections when collections filter is undefined', async () => {
-	const permissions: Permission[] = [{ policy: 'policy-1' }] as Permission[];
+	const permissions = withMeta(
+		[{ policy: 'policy-1' }] as Permission[],
+		{ scopedCacheTags: [] },
+	);
+
 	const policies = [] as string[];
 
-	vi.mocked(PermissionsService.prototype.readByQuery)
-		.mockResolvedValue(readResult(permissions));
+	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
 
 	const res = await fetchPermissions({ action: 'read', policies }, {} as Context);
 
@@ -90,11 +95,13 @@ test('Fetches for all collections when collections filter is undefined', async (
 });
 
 test('Adds minimal permissions if accountability is passed', async () => {
-	const permissions: Permission[] = [{ policy: 'policy-1' }] as Permission[];
-	const accountability = {} as unknown as Accountability;
+	const permissions = withMeta(
+		[{ policy: 'policy-1' }] as Permission[],
+		{ scopedCacheTags: [] },
+	);
 
-	vi.mocked(PermissionsService.prototype.readByQuery)
-		.mockResolvedValue(readResult(permissions));
+	const accountability = {} as unknown as Accountability;
+	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
 
 	const res = await fetchPermissions({ accountability, policies: [], action: 'read' }, {} as Context);
 
@@ -106,11 +113,13 @@ test('Adds minimal permissions if accountability is passed', async () => {
 });
 
 test('Injects dynamic variables by calling process permissions', async () => {
-	const permissions: Permission[] = [{ policy: 'policy-1' }] as Permission[];
-	const accountability = {} as unknown as Accountability;
+	const permissions = withMeta(
+		[{ policy: 'policy-1' }] as Permission[],
+		{ scopedCacheTags: [] },
+	);
 
-	vi.mocked(PermissionsService.prototype.readByQuery)
-		.mockResolvedValue(readResult(permissions));
+	const accountability = {} as unknown as Accountability;
+	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
 
 	const res = await fetchPermissions({ accountability, policies: ['policy-1'], action: 'read' }, {} as Context);
 

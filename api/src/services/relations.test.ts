@@ -1,5 +1,4 @@
 import { ForbiddenError } from '@directus/errors';
-import { readResult } from '../__utils__/read-result.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability } from '@directus/types';
 import knex from 'knex';
@@ -8,7 +7,7 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
-import { readMeta } from '../utils/read-meta.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 import { RelationsService } from './relations.js';
 
@@ -93,7 +92,7 @@ describe('Services / Relations', () => {
 	describe('readAll', () => {
 		it('tags the result with directus_relations', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(readResult([]));
+				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 
@@ -111,13 +110,13 @@ describe('Services / Relations', () => {
 			vi.mocked(validateAccess).mockResolvedValue(undefined);
 			vi.mocked(fetchAllowedFields).mockResolvedValue(['related']);
 
-			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue(readResult([
+			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue(withMeta([
 				{
 					many_collection: 'test',
 					many_field: 'related',
 					one_collection: 'related',
 				},
-			]));
+			], { scopedCacheTags: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([
 				{
@@ -156,7 +155,7 @@ describe('Services / Relations', () => {
 
 		it('should throw ForbiddenError when no relation is found', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery')
-				.mockResolvedValue(readResult([]));
+				.mockResolvedValue(withMeta([], { scopedCacheTags: [] }));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 
