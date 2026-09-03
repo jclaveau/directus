@@ -85,17 +85,22 @@ describe('an items.read hook returning null', () => {
 			// The rename was inside the transaction the snapshot ran in, so it went
 			// back with it. Reading the row is safe: it never took the marker name,
 			// so the hook does not fire for it.
-			const after = await request(getUrl(vendor))
-				.get(`/items/${collectionReadHookNull}/${row.id}`)
-				.query({ fields: 'id,name' })
-				.set('Authorization', AUTH);
+			// The row and its revisions are two independent reads of the same
+			// rolled-back write.
+			const [after, revisionsAfter] = await Promise.all([
+				request(getUrl(vendor))
+					.get(`/items/${collectionReadHookNull}/${row.id}`)
+					.query({ fields: 'id,name' })
+					.set('Authorization', AUTH),
+				revisionsFor(vendor, row.id),
+			]);
 
 			expect(after.statusCode).toEqual(200);
 			expect(after.body.data).toEqual({ id: row.id, name: 'starts-readable' });
 
 			// And no revision was added — the block that writes them is the one
 			// that threw, and it went back with the rest of the transaction.
-			expect(await revisionsFor(vendor, row.id)).toEqual(revisionsBefore);
+			expect(revisionsAfter).toEqual(revisionsBefore);
 		});
 
 		it('leaves a row without the marker writing and reading normally', async () => {

@@ -14,6 +14,8 @@ export const seedDBStructure = () => {
 		'%s',
 		async (vendor) => {
 			try {
+				// Chained, not parallel: the child holds the FK, so dropping the
+				// parent while it still points at one errors.
 				await DeleteCollection(vendor, { collection: collectionChildren });
 				await DeleteCollection(vendor, { collection: collectionParents });
 

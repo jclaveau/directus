@@ -137,9 +137,14 @@ describe('nested upsert through the array shape', () => {
 			// A bare key, not an object: the child is reparented onto the receiver.
 			await writeChildren(vendor, receiver.id, [child!.id]);
 
-			expect(await readChildrenOf(vendor, donor.id)).toEqual([]);
+			const [donorChildren, receiverChildren] = await Promise.all([
+				readChildrenOf(vendor, donor.id),
+				readChildrenOf(vendor, receiver.id),
+			]);
 
-			expect(await readChildrenOf(vendor, receiver.id)).toEqual([
+			expect(donorChildren).toEqual([]);
+
+			expect(receiverChildren).toEqual([
 				{ id: child!.id, name: 'moved', parent: receiver.id },
 			]);
 
@@ -169,19 +174,24 @@ describe('nested upsert through the array shape', () => {
 			// An empty array is not a no-op: it deselects every child.
 			await writeChildren(vendor, parent.id, []);
 
-			expect(await readChildrenOf(vendor, parent.id)).toEqual([]);
+			// Deselected, not deleted — the second read looks the rows up by the
+			// keys they had, where the first only asks who still points at the
+			// parent. Neither depends on the other.
+			const [detached, orphans] = await Promise.all([
+				readChildrenOf(vendor, parent.id),
+				request(getUrl(vendor))
+					.get(`/items/${collectionChildren}`)
+					.query({
+						filter: JSON.stringify({
+							id: { _in: before.map((child) => child.id) },
+						}),
+						fields: 'id,parent',
+						limit: -1,
+					})
+					.set('Authorization', AUTH),
+			]);
 
-			// Deselected, not deleted — the rows survive with a null parent.
-			const orphans = await request(getUrl(vendor))
-				.get(`/items/${collectionChildren}`)
-				.query({
-					filter: JSON.stringify({
-						id: { _in: before.map((child) => child.id) },
-					}),
-					fields: 'id,parent',
-					limit: -1,
-				})
-				.set('Authorization', AUTH);
+			expect(detached).toEqual([]);
 
 			expect(orphans.statusCode).toEqual(200);
 			expect(orphans.body.data).toHaveLength(2);
