@@ -22,6 +22,7 @@ export function createScopedCacheCollector(
 	const seen = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
 	const purgeSkippedKeys = new Set<string>();
+	const takenOverKeys = new Set<string>();
 
 	// A hook names a slice by collection/field/value and rarely knows the column's
 	// type, but the type is what canonicalizes the value: `uuid` lowercases and
@@ -77,6 +78,7 @@ export function createScopedCacheCollector(
 		tags,
 		manuallyPurgedKeys,
 		purgeSkippedKeys,
+		takenOverKeys,
 		scope: { scopeTo: (input, options) => add(input, options?.manuallyPurged) },
 		purge: {
 			purgeBy: (input) => add(input),

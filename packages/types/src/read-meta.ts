@@ -118,6 +118,11 @@ export interface ScopedCacheCollector {
 	manuallyPurgedKeys: Set<string>;
 	/** Keys a `skipPurgeFor` declared inert, as strings so `7` and `'7'` agree. */
 	purgeSkippedKeys: Set<string>;
+	/**
+	 * Keys a create-filter take-over returned instead of inserting, as
+	 * `collection:key` so a shared collector's children can't collide on `1`.
+	 */
+	takenOverKeys: Set<string>;
 }
 
 /**
