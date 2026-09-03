@@ -11,7 +11,6 @@ import type { CacheFlushTarget } from './cache.js';
 import type { ApiCollection, RawCollection } from './collection.js';
 import type { ActionHandler } from './events.js';
 import type { ApiOutput, ExtensionManager, ExtensionSettings } from './extensions/index.js';
-import type { WithMeta } from './read-meta.js';
 import type { Field, Type, RawField } from './fields.js';
 import type { BusboyFileStream, File } from './files.js';
 import type { FlowRaw } from './flows.js';
@@ -491,19 +490,19 @@ export interface AbstractService<T extends Item = Item> {
 	/**
 	 * Get items by query.
 	 */
-	readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<T[]>>;
+	readByQuery(query: Query, opts?: QueryOptions): Promise<T[]>;
 	/**
 	 * Get single item by primary key.
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	readOne(key: PrimaryKey, query?: Query, opts?: QueryOptions): Promise<WithMeta<T>>;
+	readOne(key: PrimaryKey, query?: Query, opts?: QueryOptions): Promise<T>;
 	/**
 	 * Get multiple items by primary keys.
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	readMany(keys: PrimaryKey[], query?: Query, opts?: QueryOptions): Promise<WithMeta<T[]>>;
+	readMany(keys: PrimaryKey[], query?: Query, opts?: QueryOptions): Promise<T[]>;
 	/**
 	 * Update multiple items by query.
 	 *
