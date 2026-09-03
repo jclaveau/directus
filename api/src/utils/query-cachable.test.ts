@@ -1,3 +1,4 @@
+import type { Query } from '@directus/types';
 import { expect, test, vi } from 'vitest';
 import { queryCachable } from './query-cachable.js';
 
@@ -8,27 +9,39 @@ import { sanitizeQuery } from './sanitize-query.js';
 // By the time this gate runs, sanitizeQuery has resolved `$NOW` to a Date; static
 // dates stay strings. So the signal is a Date in the resolved query, not `'$NOW'`.
 
-const resolvedNow = new Date() as unknown as string;
+const resolvedNow = new Date();
 
-// `sanitizeQuery` resolves `$NOW` to a Date before these run, which is the whole
-// subject here — but `Filter` types its values as string | number, so each Date
-// below has to be spelled as the shape the type admits.
+// `Query` models a request as it arrives, where a comparison value is a string or
+// a number and a Date cannot occur. `sanitizeQuery` resolves `$NOW` into one
+// before this gate runs, so what the gate actually receives is a stage later than
+// the type describes. The end-to-end cases at the bottom pin that resolution;
+// these feed its result straight in.
+function resolved(query: Record<string, unknown>): Query {
+	return query as Query;
+}
+
 test('a resolved $NOW (Date) makes the query uncachable', () => {
 	expect(
-		queryCachable({ filter: { created_on: { _gte: resolvedNow } } }),
+		queryCachable(resolved({ filter: { created_on: { _gte: resolvedNow } } })),
 	).toBe(false);
 
 	expect(
-		queryCachable({ filter: { _and: [{ created_on: { _gte: resolvedNow } }] } }),
+		queryCachable(resolved({
+			filter: { _and: [{ created_on: { _gte: resolvedNow } }] },
+		})),
 	).toBe(false);
 
 	// $NOW inside an _in array.
-	expect(queryCachable({ filter: { at: { _in: [resolvedNow, 'x'] } } })).toBe(false);
+	expect(
+		queryCachable(resolved({ filter: { at: { _in: [resolvedNow, 'x'] } } })),
+	).toBe(false);
 });
 
 test('a resolved $NOW inside deep._filter makes the query uncachable', () => {
 	expect(
-		queryCachable({ deep: { author: { _filter: { at: { _gte: resolvedNow } } } } }),
+		queryCachable(resolved({
+			deep: { author: { _filter: { at: { _gte: resolvedNow } } } },
+		})),
 	).toBe(false);
 });
 
