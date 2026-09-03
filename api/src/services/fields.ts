@@ -79,8 +79,8 @@ export class FieldsService {
 		this.schemaCache = localSchemaCache;
 	}
 
-	async columnInfo(collection?: string): Promise<Column[]>;
 	async columnInfo(collection: string, field: string): Promise<Column>;
+	async columnInfo(collection?: string): Promise<Column[]>;
 	async columnInfo(collection?: string, field?: string): Promise<Column | Column[]> {
 		const schemaCacheIsEnabled = Boolean(env['CACHE_SCHEMA']);
 

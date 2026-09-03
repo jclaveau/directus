@@ -1,4 +1,3 @@
-import type { Column } from '@directus/schema';
 import { ForbiddenError } from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, RawField } from '@directus/types';
@@ -101,10 +100,7 @@ describe('Services / Fields', () => {
 		it('tags the result with directus_fields', async () => {
 			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
 
-			// `columnInfo` is overloaded on its argument; the caller under test takes the
-			// array form, but a spy resolves against the single-column signature.
-			vi.spyOn(FieldsService.prototype, 'columnInfo')
-				.mockResolvedValue([] as unknown as Column);
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 
 			tracker.on.select('directus_fields').response([]);
 
