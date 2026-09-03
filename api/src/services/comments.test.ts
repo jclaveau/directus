@@ -120,14 +120,14 @@ describe('Services / Comments', () => {
 
 		const [notification] = vi.mocked(NotificationsService.prototype.createOne).mock.calls[0]!;
 
-		expect(notification['recipient']).toBe(mentionUuid);
-		expect(notification['sender']).toBe(senderUuid);
-		expect(notification['collection']).toBe('articles');
-		expect(notification['item']).toBe('42');
+		expect(notification.recipient).toBe(mentionUuid);
+		expect(notification.sender).toBe(senderUuid);
+		expect(notification.collection).toBe('articles');
+		expect(notification.item).toBe('42');
 
 		// line 137: the raw @<uuid> mention is replaced by the <em>userName</em> preview
-		expect(notification['message']).toContain('<em>Jane Doe</em>');
-		expect(notification['message']).not.toContain(`@${mentionUuid}`);
+		expect(notification.message).toContain('<em>Jane Doe</em>');
+		expect(notification.message).not.toContain(`@${mentionUuid}`);
 	});
 
 	it('should early-continue without sending a notification when there are no mentions (lines 68-70)', async () => {
