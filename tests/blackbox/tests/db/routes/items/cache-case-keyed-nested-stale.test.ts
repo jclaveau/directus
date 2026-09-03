@@ -170,11 +170,15 @@ describe(oneLine`
 			await DeleteCollection(vendor, { collection: PARENT });
 		});
 
-		// Both tests read the same nested shape as the gated user.
+		// `_sort: []` drops the o2m default sort, whose path would land the child in
+		// fieldMap.read and let the buggy fetchedAsRows (from read) bare the slice.
 		function readAsUser() {
 			return request(getUrl(vendor, env))
 				.get(`/items/${PARENT}`)
-				.query({ fields: 'id,children.id,children.label' })
+				.query({
+					fields: 'id,children.id,children.label',
+					deep: JSON.stringify({ children: { _sort: [] } }),
+				})
 				.set('Authorization', asUser);
 		}
 
