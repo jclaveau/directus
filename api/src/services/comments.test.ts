@@ -1,4 +1,5 @@
 import type { Accountability } from '@directus/types';
+import { readResult } from '../__utils__/read-result.js';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,7 +41,10 @@ vi.mock('../permissions/modules/validate-access/validate-access.js', () => ({
 
 vi.mock('./notifications.js', () => {
 	const NotificationsService = vi.fn();
-	NotificationsService.prototype.createOne = vi.fn().mockResolvedValue('notification-id');
+
+	NotificationsService.prototype.createOne = vi.fn()
+		.mockResolvedValue('notification-id');
+
 	return { NotificationsService };
 });
 
@@ -82,28 +86,29 @@ describe('Services / Comments', () => {
 	});
 
 	it('should expand a valid @mention into its user preview in the notification message (line 137)', async () => {
-		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['comment-pk-1']);
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-1']);
 
 		const service = new CommentsService({ knex: db, schema, accountability });
 
 		vi.mocked(UsersService.prototype.readOne)
-			.mockResolvedValueOnce({
+			.mockResolvedValueOnce(readResult({
 				id: senderUuid,
 				first_name: 'Sam',
 				last_name: 'Sender',
 				email: 'sam@x.com',
-			})
-			.mockResolvedValueOnce({
+			}))
+			.mockResolvedValueOnce(readResult({
 				id: mentionUuid,
 				first_name: 'Jane',
 				last_name: 'Doe',
 				email: 'jane@x.com',
 				role: { id: null },
-			});
+			}));
 
-		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue([
+		vi.mocked(UsersService.prototype.readByQuery).mockResolvedValue(readResult([
 			{ id: mentionUuid, first_name: 'Jane', last_name: 'Doe', email: 'jane@x.com' },
-		]);
+		]));
 
 		const result = await service.createMany([
 			{
@@ -131,7 +136,8 @@ describe('Services / Comments', () => {
 	});
 
 	it('should early-continue without sending a notification when there are no mentions (lines 68-70)', async () => {
-		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany').mockResolvedValue(['comment-pk-2']);
+		const superCreateManySpy = vi.spyOn(ItemsService.prototype, 'createMany')
+			.mockResolvedValue(['comment-pk-2']);
 
 		const service = new CommentsService({ knex: db, schema, accountability });
 

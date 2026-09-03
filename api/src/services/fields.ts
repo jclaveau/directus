@@ -5,6 +5,7 @@ import {
 	REGEX_BETWEEN_PARENS,
 } from '@directus/constants';
 import { useEnv } from '@directus/env';
+import { withoutMeta } from '../utils/read-meta.js';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import type { Column, SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
@@ -132,14 +133,17 @@ export class FieldsService {
 		});
 
 		if (collection) {
-			fields = (await nonAuthorizedItemsService.readByQuery({
+			fields = withoutMeta(await nonAuthorizedItemsService.readByQuery({
 				filter: { collection: { _eq: collection } },
 				limit: -1,
 			})) as FieldMeta[];
 
 			fields.push(...systemFieldRows.filter((fieldMeta) => fieldMeta.collection === collection));
 		} else {
-			fields = (await nonAuthorizedItemsService.readByQuery({ limit: -1 })) as FieldMeta[];
+			fields = withoutMeta(
+				await nonAuthorizedItemsService.readByQuery({ limit: -1 }),
+			) as FieldMeta[];
+
 			fields.push(...systemFieldRows);
 		}
 

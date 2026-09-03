@@ -1,4 +1,5 @@
 import type { Accountability } from '@directus/types';
+import { readResult } from '../../__utils__/read-result.js';
 import { beforeEach, test, vi, expect } from 'vitest';
 import { PoliciesService } from '../../services/policies.js';
 import { UsersService } from '../../services/users.js';
@@ -36,7 +37,7 @@ test('Returns filter context for current user', async () => {
 		$CURRENT_POLICIES: new Set(),
 	};
 
-	vi.mocked(UsersService.prototype.readOne).mockResolvedValue(user);
+	vi.mocked(UsersService.prototype.readOne).mockResolvedValue(readResult(user));
 
 	const res = await fetchDynamicVariableData(
 		{
@@ -61,7 +62,7 @@ test('Returns filter context for current role', async () => {
 		$CURRENT_POLICIES: new Set(),
 	};
 
-	vi.mocked(RolesService.prototype.readOne).mockResolvedValue(role);
+	vi.mocked(RolesService.prototype.readOne).mockResolvedValue(readResult(role));
 
 	const res = await fetchDynamicVariableData(
 		{
@@ -86,7 +87,8 @@ test('Returns filter context for current policies', async () => {
 		$CURRENT_POLICIES: new Set(['name']),
 	};
 
-	vi.mocked(PoliciesService.prototype.readMany).mockResolvedValue(policies);
+	vi.mocked(PoliciesService.prototype.readMany)
+		.mockResolvedValue(readResult(policies));
 
 	const res = await fetchDynamicVariableData(
 		{

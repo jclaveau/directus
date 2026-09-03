@@ -1,4 +1,5 @@
 import { ForbiddenError } from '@directus/errors';
+import { withoutMeta } from '../utils/read-meta.js';
 import type {
 	AbstractServiceOptions,
 	Item,
@@ -8,6 +9,7 @@ import type {
 	PrimaryKey,
 	Query,
 	QueryOptions,
+	WithMeta,
 } from '@directus/types';
 import { uniq } from 'lodash-es';
 import { clearSystemCache } from '../cache.js';
@@ -35,8 +37,8 @@ export class PermissionsService extends ItemsService {
 	override async readByQuery(
 		query: Query,
 		opts?: QueryOptions,
-	): Promise<Partial<Item>[]> {
-		const result = (await super.readByQuery(query, opts)) as Permission[];
+	): Promise<WithMeta<Partial<Item>[]>> {
+		const result = withoutMeta(await super.readByQuery(query, opts)) as Permission[];
 
 		// withAppMinimalPermissions returns a fresh array, so carry the read's scoped cache
 		// tag rider across.

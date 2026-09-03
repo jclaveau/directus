@@ -1,4 +1,5 @@
 import { ForbiddenError } from '@directus/errors';
+import { readResult } from '../__utils__/read-result.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability } from '@directus/types';
 import knex from 'knex';
@@ -91,7 +92,9 @@ describe('Services / Relations', () => {
 
 	describe('readAll', () => {
 		it('tags the result with directus_relations', async () => {
-			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(readResult([]));
+
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 
 			const service = new RelationsService({ knex: db, schema });
@@ -108,13 +111,13 @@ describe('Services / Relations', () => {
 			vi.mocked(validateAccess).mockResolvedValue(undefined);
 			vi.mocked(fetchAllowedFields).mockResolvedValue(['related']);
 
-			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([
+			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue(readResult([
 				{
 					many_collection: 'test',
 					many_field: 'related',
 					one_collection: 'related',
 				},
-			]);
+			]));
 
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([
 				{
@@ -152,7 +155,9 @@ describe('Services / Relations', () => {
 		});
 
 		it('should throw ForbiddenError when no relation is found', async () => {
-			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(readResult([]));
+
 			vi.spyOn(RelationsService.prototype, 'foreignKeys').mockResolvedValue([]);
 
 			const service = new RelationsService({ knex: db, schema, accountability: admin });

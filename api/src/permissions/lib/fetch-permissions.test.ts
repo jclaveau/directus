@@ -1,4 +1,5 @@
 import type { Accountability, Permission } from '@directus/types';
+import { readResult } from '../../__utils__/read-result.js';
 import { beforeEach, expect, test, vi } from 'vitest';
 import { PermissionsService } from '../../services/permissions.js';
 import type { Context } from '../types.js';
@@ -34,7 +35,8 @@ test('Returns permissions read through service sorted by the order of policies',
 	const policies = ['policy-1', 'policy-2'] as string[];
 	const collections = [] as string[];
 
-	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
+	vi.mocked(PermissionsService.prototype.readByQuery)
+		.mockResolvedValue(readResult(permissions));
 
 	const res = await fetchPermissions({ action: 'read', policies, collections }, {} as Context);
 
@@ -53,7 +55,8 @@ test('Returns all action permissions if action is undefined', async () => {
 	const policies = [] as string[];
 	const collections = [] as string[];
 
-	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
+	vi.mocked(PermissionsService.prototype.readByQuery)
+		.mockResolvedValue(readResult(permissions));
 
 	const res = await fetchPermissions({ policies, collections }, {} as Context);
 
@@ -71,7 +74,8 @@ test('Fetches for all collections when collections filter is undefined', async (
 	const permissions: Permission[] = [{ policy: 'policy-1' }] as Permission[];
 	const policies = [] as string[];
 
-	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
+	vi.mocked(PermissionsService.prototype.readByQuery)
+		.mockResolvedValue(readResult(permissions));
 
 	const res = await fetchPermissions({ action: 'read', policies }, {} as Context);
 
@@ -88,7 +92,9 @@ test('Fetches for all collections when collections filter is undefined', async (
 test('Adds minimal permissions if accountability is passed', async () => {
 	const permissions: Permission[] = [{ policy: 'policy-1' }] as Permission[];
 	const accountability = {} as unknown as Accountability;
-	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
+
+	vi.mocked(PermissionsService.prototype.readByQuery)
+		.mockResolvedValue(readResult(permissions));
 
 	const res = await fetchPermissions({ accountability, policies: [], action: 'read' }, {} as Context);
 
@@ -102,7 +108,9 @@ test('Adds minimal permissions if accountability is passed', async () => {
 test('Injects dynamic variables by calling process permissions', async () => {
 	const permissions: Permission[] = [{ policy: 'policy-1' }] as Permission[];
 	const accountability = {} as unknown as Accountability;
-	vi.mocked(PermissionsService.prototype.readByQuery).mockResolvedValue(permissions);
+
+	vi.mocked(PermissionsService.prototype.readByQuery)
+		.mockResolvedValue(readResult(permissions));
 
 	const res = await fetchPermissions({ accountability, policies: ['policy-1'], action: 'read' }, {} as Context);
 

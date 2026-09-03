@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { withoutMeta } from '../utils/read-meta.js';
 import {
 	ForbiddenError,
 	InvalidPayloadError,
@@ -424,7 +425,7 @@ export class ExportService {
 				const href = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'files', savedFile).toString();
 
 				const message = `
-Hello ${userName(user)},
+Hello ${userName(withoutMeta(user))},
 
 Your export of ${collection} is ready. <a href="${href}">Click here to view.</a>
 `;

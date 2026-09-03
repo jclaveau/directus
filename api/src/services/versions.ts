@@ -1,4 +1,5 @@
 import { Action } from '@directus/constants';
+import { withoutMeta } from '../utils/read-meta.js';
 import { ForbiddenError, InvalidPayloadError, UnprocessableContentError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
@@ -276,7 +277,9 @@ export class VersionsService extends ItemsService {
 	}
 
 	async promote(version: PrimaryKey, mainHash: string, fields?: string[]) {
-		const { collection, item, delta } = (await this.readOne(version)) as ContentVersion;
+		const { collection, item, delta } = withoutMeta(
+			await this.readOne(version),
+		) as ContentVersion;
 
 		// will throw an error if the accountability does not have permission to update the item
 		if (this.accountability) {

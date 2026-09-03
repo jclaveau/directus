@@ -1,4 +1,5 @@
 import { ForbiddenError } from '@directus/errors';
+import { readResult } from '../__utils__/read-result.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, RawField } from '@directus/types';
 import knex from 'knex';
@@ -98,7 +99,8 @@ describe('Services / Fields', () => {
 	// stubbed columnInfo into readOne (which needs the real one to throw).
 	describe('readAll', () => {
 		it('tags the result with directus_fields', async () => {
-			vi.spyOn(ItemsService.prototype, 'readByQuery').mockResolvedValue([]);
+			vi.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(readResult([]));
 
 			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
 

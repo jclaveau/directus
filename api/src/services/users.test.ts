@@ -1,4 +1,5 @@
 import { ForbiddenError, InvalidPayloadError, RecordNotUniqueError } from '@directus/errors';
+import { readResult } from '../__utils__/read-result.js';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
@@ -66,8 +67,11 @@ describe('Integration Tests', () => {
 			schema,
 		});
 
-		const superCreateOneSpy = vi.spyOn(ItemsService.prototype, 'createOne').mockResolvedValue('user-id-1');
-		const superUpdateManySpy = vi.spyOn(ItemsService.prototype, 'updateMany').mockResolvedValue(['user-id-2']);
+		const superCreateOneSpy = vi.spyOn(ItemsService.prototype, 'createOne')
+			.mockResolvedValue('user-id-1');
+
+		const superUpdateManySpy = vi.spyOn(ItemsService.prototype, 'updateMany')
+			.mockResolvedValue(['user-id-2']);
 
 		const checkUniqueEmailsSpy = vi
 			.spyOn(UsersService.prototype as any, 'checkUniqueEmails')
@@ -318,7 +322,8 @@ describe('Integration Tests', () => {
 			vi.spyOn(UsersService.prototype as any, 'inviteUrl').mockImplementation(() => vi.fn());
 
 			it('should invite new users', async () => {
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce(undefined);
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(undefined);
 
 				const service = new UsersService({
 					knex: db,
@@ -395,7 +400,8 @@ describe('Integration Tests', () => {
 				};
 
 				// mock an invited user with different role
-				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce(mockUser);
+				vi.spyOn(UsersService.prototype as any, 'getUserByEmail')
+					.mockResolvedValueOnce(mockUser);
 
 				const promise = service.inviteUser('user@example.com', 'invite-role', null);
 				await expect(promise).resolves.not.toThrow();
@@ -461,7 +467,8 @@ describe('Integration Tests', () => {
 					hash: 'some-hash',
 				} as any);
 
-				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy').mockResolvedValue(undefined);
+				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy')
+					.mockResolvedValue(undefined);
 
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
 					id: 'user-id-reset-1',
@@ -482,7 +489,8 @@ describe('Integration Tests', () => {
 					hash: 'mismatching-hash',
 				} as any);
 
-				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy').mockResolvedValue(undefined);
+				vi.spyOn(UsersService.prototype as any, 'checkPasswordPolicy')
+					.mockResolvedValue(undefined);
 
 				vi.spyOn(UsersService.prototype as any, 'getUserByEmail').mockResolvedValueOnce({
 					id: 'user-id-reset-2',
@@ -513,9 +521,10 @@ describe('Integration Tests', () => {
 
 		describe('registerUser', () => {
 			it('should reject when public registration is disabled (users.ts L464)', async () => {
-				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce({
+				vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(readResult({
 					public_registration: false,
-				});
+				}));
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
 
@@ -524,10 +533,11 @@ describe('Integration Tests', () => {
 			});
 
 			it('should reject when the email fails the configured email filter (users.ts L489)', async () => {
-				vi.spyOn(SettingsService.prototype, 'readSingleton').mockResolvedValueOnce({
+				vi.spyOn(SettingsService.prototype, 'readSingleton')
+					.mockResolvedValueOnce(readResult({
 					public_registration: true,
 					public_registration_email_filter: { email: { _ends_with: '@allowed.com' } },
-				});
+				}));
 
 				const promise = service.registerUser({ email: 'user@example.com', password: 'new-password' });
 

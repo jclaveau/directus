@@ -19,6 +19,7 @@ import type {
 	ScopedCacheCollector,
 	ScopedCachePath,
 	ScopedCacheTag,
+	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { toArray } from '@directus/utils';
@@ -1135,7 +1136,7 @@ implements AbstractService<Item> {
 	/**
 	 * Get items by query.
 	 */
-	async readByQuery(query: Query, opts?: QueryOptions): Promise<Item[]> {
+	async readByQuery(query: Query, opts?: QueryOptions): Promise<WithMeta<Item[]>> {
 		const updatedQuery =
 			opts?.emitEvents !== false
 				? await emitter.emitFilter(
@@ -1385,7 +1386,7 @@ implements AbstractService<Item> {
 		key: PrimaryKey,
 		query: Query = {},
 		opts?: QueryOptions,
-	): Promise<Item> {
+	): Promise<WithMeta<Item>> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
@@ -1414,7 +1415,7 @@ implements AbstractService<Item> {
 		keys: PrimaryKey[],
 		query: Query = {},
 		opts?: QueryOptions,
-	): Promise<Item[]> {
+	): Promise<WithMeta<Item[]>> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
@@ -2250,7 +2251,7 @@ implements AbstractService<Item> {
 	/**
 	 * Read/treat collection as singleton.
 	 */
-	async readSingleton(query: Query, opts?: QueryOptions): Promise<Partial<Item>> {
+	async readSingleton(query: Query, opts?: QueryOptions): Promise<WithMeta<Partial<Item>>> {
 		query = clone(query);
 
 		query.limit = 1;

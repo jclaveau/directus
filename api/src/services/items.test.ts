@@ -12,6 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type Mocked
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
 import { readMeta } from '../utils/read-meta.js';
+import { readResult } from '../__utils__/read-result.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
@@ -176,7 +177,7 @@ describe('Integration Tests', () => {
 
 		describe('readOne', () => {
 			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
-				service.readByQuery = vi.fn(async () => []);
+				service.readByQuery = vi.fn(async () => readResult([]));
 
 				const error = await service.readOne(999).catch((err) => err);
 
@@ -558,7 +559,8 @@ describe('Integration Tests', () => {
 
 			it('should skip when a filter hook strips the only changed field down to the primary key', async () => {
 				// the decision is made on the post-hook payload, so a hook can turn a write into a no-op
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1 });
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter')
+					.mockResolvedValue({ id: 1 });
 
 				const keys = await service.updateMany([1], { name: 'changed' });
 
@@ -570,7 +572,8 @@ describe('Integration Tests', () => {
 
 			it('should write when a filter hook adds a real field to a would-be no-op payload', async () => {
 				// the inverse: a PK-only payload that a hook enriches must no longer be skipped
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1, name: 'added' });
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter')
+					.mockResolvedValue({ id: 1, name: 'added' });
 
 				await service.updateMany([1], { id: 1 });
 
