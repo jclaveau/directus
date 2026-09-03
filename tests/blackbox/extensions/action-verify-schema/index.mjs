@@ -2,7 +2,7 @@ export default function registerHooks({ action }) {
 	const logsCollection = 'tests_extensions_log';
 
 	action('collections.create', collectionsCallback);
-	action('collections.update', collectionsCallback);
+	action('collections.update.one', collectionsCallback);
 	action('collections.delete', collectionsCallback);
 	action('fields.create', fieldsCallback);
 	action('fields.update', fieldsCallback);
@@ -25,12 +25,18 @@ export default function registerHooks({ action }) {
 				}
 
 				break;
-			case 'collections.update':
-				if (!data.keys[0].startsWith('test_collections_crud')) break;
+			// The grouped `collections.update` carries every group at once; this hook is
+			// per-collection work, so it reads the per-row event, whose payload is the
+			// row itself with its key merged in.
+			case 'collections.update.one':
+				if (!data.payload.collection.startsWith('test_collections_crud')) {
+					break;
+				}
 
-				key += `/${data.keys[0]}/${data.event}`;
 
-				if (data.payload.note === schema.collections[data.keys[0]].note) {
+				key += `/${data.payload.collection}/${data.event}`;
+
+				if (data.payload.note === schema.collections[data.payload.collection].note) {
 					await database(logsCollection).insert({ key, value: '1' });
 				} else {
 					await database(logsCollection).insert({ key, value: '0' });

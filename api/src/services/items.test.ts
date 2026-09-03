@@ -463,9 +463,72 @@ describe('Integration Tests', () => {
 
 		describe('updateBatch', () => {
 			it('should validate user count if requested', async () => {
-				await service.updateBatch([{ id: 1 }], { userIntegrityCheckFlags: UserIntegrityCheckFlag.All });
+				await service.updateBatch(
+					[{ id: 1, name: 'test' }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
 
 				expect(validateUserCountIntegrity).toHaveBeenCalled();
+			});
+
+			it('should not validate user count when every row is a no-op', async () => {
+				// `{ id: 1 }` carries nothing but the primary key, so nothing is written and
+				// the user count cannot have moved. `updateBatch` used to run the check
+				// anyway, unlike `updateMany`; going through `updateGroups` settles both on
+				// the latter — no write, no check.
+				await service.updateBatch(
+					[{ id: 1 }],
+					{ userIntegrityCheckFlags: UserIntegrityCheckFlag.All },
+				);
+
+				expect(validateUserCountIntegrity).not.toHaveBeenCalled();
+			});
+
+			it('returns the keys in the order the caller sent the rows', async () => {
+				// Adjacent rows carrying the same change merge into one group, and the
+				// group is then applied by a single `WHERE id IN (…)`. The keys still
+				// belong to the caller's rows, so they come back in the caller's order.
+				const keys = await service.updateBatch([
+					{ id: 5, name: 'same' },
+					{ id: 3, name: 'same' },
+					{ id: 4, name: 'other' },
+				]);
+
+				expect(keys).toEqual([5, 3, 4]);
+			});
+
+			it(oneLine`
+				returns a key for a row that writes nothing, alongside one that writes
+			`, async () => {
+				// `{ id: 1 }` carries only the primary key, so it is a no-op — but it is
+				// still a row the caller asked to update, and the REST layer reads every
+				// returned key back into the response body. Dropping it would silently
+				// omit that item from a PATCH response.
+				const keys = await service.updateBatch([
+					{ id: 1 },
+					{ id: 2, name: 'written' },
+				]);
+
+				expect(keys).toEqual([1, 2]);
+			});
+
+			it('snapshots the same rows before and after the write', async () => {
+				// The pre-update capture covers the rows that are actually written; the
+				// post-update one has to cover the same set or it re-reads rows nothing
+				// touched and purges their slices — the exact scope-path query the batch
+				// paths are trying to shed.
+				const snapshot = vi.spyOn(service as never, 'snapshotScopedCacheTags');
+
+				await service.updateBatch([
+					{ id: 1 },
+					{ id: 2, name: 'written' },
+				]);
+
+				expect(snapshot).toHaveBeenCalledTimes(2);
+				expect(snapshot.mock.calls[0]![0]).toEqual([2]);
+				expect(snapshot.mock.calls[1]![0]).toEqual([2]);
+
+				snapshot.mockRestore();
 			});
 		});
 
@@ -558,7 +621,7 @@ describe('Integration Tests', () => {
 
 			it('should skip when a filter hook strips the only changed field down to the primary key', async () => {
 				// the decision is made on the post-hook payload, so a hook can turn a write into a no-op
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1 });
+				const emitFilterSpy = stubUpdateFilter([{ data: { id: 1 }, keys: [1] }]);
 
 				const keys = await service.updateMany([1], { name: 'changed' });
 
@@ -570,7 +633,9 @@ describe('Integration Tests', () => {
 
 			it('should write when a filter hook adds a real field to a would-be no-op payload', async () => {
 				// the inverse: a PK-only payload that a hook enriches must no longer be skipped
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1, name: 'added' });
+				const emitFilterSpy = stubUpdateFilter([
+					{ data: { id: 1, name: 'added' }, keys: [1] },
+				]);
 
 				await service.updateMany([1], { id: 1 });
 
@@ -869,6 +934,34 @@ describe('Integration Tests', () => {
 		});
 	});
 });
+
+// The filter is emitted with an array of names (global and collection-scoped),
+// so tests that care which event fired compare against the whole set.
+function eventNames(event: unknown): string[] {
+	const names = Array.isArray(event)
+		? event
+		: [event];
+
+	return names.map((name) => String(name));
+}
+
+function updateEvents(spy: MockedFunction<any>, suffix: string) {
+	return spy.mock.calls.filter((call) => {
+		return eventNames(call[0]).includes(suffix);
+	});
+}
+
+// `updateMany` emits the grouped `items.update` and then `items.update.one` per row,
+// so a stub standing in for a hook has to answer the shape each one expects.
+function stubUpdateFilter(groups: unknown) {
+	return vi
+		.spyOn(emitter, 'emitFilter')
+		.mockImplementation(async (event, payload) => {
+			return eventNames(event).includes('items.update.one')
+				? payload
+				: groups;
+		});
+}
 
 describe('ItemsService — system collections, uuid PKs, revisions, singletons', () => {
 	const shapesSchema = new SchemaBuilder()
@@ -1233,6 +1326,31 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 			]);
 		});
 
+		it('emits neither update event when emitEvents is off', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			const service = new ItemsService('test', { knex: db, schema: shapesSchema });
+
+			const keys = await service.updateMany(
+				[1],
+				{ name: 'quiet' },
+				{ emitEvents: false },
+			);
+
+			// The write still lands; only the announcing is suppressed — for the grouped
+			// event and the per-row one alike.
+			expect(keys).toEqual([1]);
+			expect(tracker.history.update).toHaveLength(1);
+			expect(updateEvents(filterSpy, 'items.update')).toHaveLength(0);
+			expect(updateEvents(filterSpy, 'items.update.one')).toHaveLength(0);
+			expect(updateEvents(actionSpy, 'items.update')).toHaveLength(0);
+			expect(updateEvents(actionSpy, 'items.update.one')).toHaveLength(0);
+		});
+
 		it('pairs snapshots when the keys cross a digit boundary', async () => {
 			const accountabilitySchema = new SchemaBuilder()
 				.collection('tracked', (c) => {
@@ -1274,6 +1392,98 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				[8, 'eight'],
 				[9, 'nine'],
 			]);
+		});
+	});
+
+	describe('items.update.one fires per row alongside the grouped event', () => {
+		const trackedService = () => {
+			return new ItemsService('test', { knex: db, schema: shapesSchema });
+		};
+
+		it('emits the grouped event once and the per-row event per key', async () => {
+			tracker.on.update('test').response(3);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+			const actionSpy = vi.spyOn(emitter, 'emitAction');
+
+			await trackedService().updateMany([1, 2, 3], { name: 'after' });
+
+			expect(updateEvents(filterSpy, 'items.update')).toHaveLength(1);
+			expect(updateEvents(filterSpy, 'items.update.one')).toHaveLength(3);
+			expect(updateEvents(actionSpy, 'items.update')).toHaveLength(1);
+			expect(updateEvents(actionSpy, 'items.update.one')).toHaveLength(3);
+
+			// With nothing rewritten the group stays whole, so the write is the single
+			// `WHERE id IN (…)` it was before the events were grouped.
+			expect(tracker.history.update).toHaveLength(1);
+		});
+
+		it('hands each row its own key merged into the payload', async () => {
+			tracker.on.update('test').response(2);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter');
+
+			await trackedService().updateMany([1, 2], { name: 'after' });
+
+			const payloads = updateEvents(filterSpy, 'items.update.one')
+				.map((call) => call[1]);
+
+			expect(payloads).toEqual([
+				{ id: 1, name: 'after' },
+				{ id: 2, name: 'after' },
+			]);
+		});
+
+		it('cancels one row without touching its siblings', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (event, payload: any) => {
+					if (!eventNames(event).includes('items.update.one')) {
+						return payload;
+					}
+
+					return payload.id === 1
+						? null
+						: payload;
+				},
+			);
+
+			const keys = await trackedService().updateMany([1, 2], { name: 'after' });
+
+			expect(keys).toEqual([2]);
+
+			filterSpy.mockRestore();
+		});
+
+		it('splits a group when a per-row hook rewrites one row', async () => {
+			tracker.on.update('test').response(1);
+			tracker.on.select('test').response([{ id: 1 }, { id: 2 }, { id: 3 }]);
+
+			const filterSpy = vi.spyOn(emitter, 'emitFilter').mockImplementation(
+				async (event, payload: any) => {
+					if (!eventNames(event).includes('items.update.one')) {
+						return payload;
+					}
+
+					return payload.id === 2
+						? { ...payload, name: 'rewritten' }
+						: payload;
+				},
+			);
+
+			await trackedService().updateMany([1, 2, 3], { name: 'after' });
+
+			// Rows 1 and 3 no longer sit next to each other, so they cannot merge:
+			// three statements rather than one `WHERE id IN (1, 2, 3)`.
+			const updates = tracker.history.update;
+
+			expect(updates).toHaveLength(3);
+
+			filterSpy.mockRestore();
 		});
 	});
 
