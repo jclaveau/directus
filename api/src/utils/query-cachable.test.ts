@@ -13,36 +13,28 @@ const resolvedNow = new Date();
 
 // `Query` models a request as it arrives, where a comparison value is a string or
 // a number and a Date cannot occur. `sanitizeQuery` resolves `$NOW` into one
-// before this gate runs, so what the gate actually receives is a stage later than
-// the type describes. The end-to-end cases at the bottom pin that resolution;
-// these feed its result straight in.
-function resolved(query: Record<string, unknown>): Query {
-	return query as Query;
-}
+// before this gate runs, so these are a stage later than the type describes —
+// which is the single cast below, once, for all four shapes. The end-to-end cases
+// at the bottom pin the resolution itself.
+const resolvedQueries = {
+	topLevel: { filter: { created_on: { _gte: resolvedNow } } },
+	insideAnd: { filter: { _and: [{ created_on: { _gte: resolvedNow } }] } },
+	insideIn: { filter: { at: { _in: [resolvedNow, 'x'] } } },
+	insideDeepFilter: {
+		deep: { author: { _filter: { at: { _gte: resolvedNow } } } },
+	},
+} as unknown as Record<string, Query>;
 
 test('a resolved $NOW (Date) makes the query uncachable', () => {
-	expect(
-		queryCachable(resolved({ filter: { created_on: { _gte: resolvedNow } } })),
-	).toBe(false);
-
-	expect(
-		queryCachable(resolved({
-			filter: { _and: [{ created_on: { _gte: resolvedNow } }] },
-		})),
-	).toBe(false);
+	expect(queryCachable(resolvedQueries['topLevel'])).toBe(false);
+	expect(queryCachable(resolvedQueries['insideAnd'])).toBe(false);
 
 	// $NOW inside an _in array.
-	expect(
-		queryCachable(resolved({ filter: { at: { _in: [resolvedNow, 'x'] } } })),
-	).toBe(false);
+	expect(queryCachable(resolvedQueries['insideIn'])).toBe(false);
 });
 
 test('a resolved $NOW inside deep._filter makes the query uncachable', () => {
-	expect(
-		queryCachable(resolved({
-			deep: { author: { _filter: { at: { _gte: resolvedNow } } } },
-		})),
-	).toBe(false);
+	expect(queryCachable(resolvedQueries['insideDeepFilter'])).toBe(false);
 });
 
 test('a query with only static dates / ids is cachable', () => {
