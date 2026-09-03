@@ -1,3 +1,4 @@
+import type { Knex } from 'knex';
 import { beforeEach, expect, test, vi } from 'vitest';
 import {
 	createDefaultAccountability,
@@ -41,16 +42,44 @@ vi.mock('../metrics/index.js', () => ({ useMetrics: () => undefined }));
 
 vi.mock('../utils/node-id.js', () => ({ nodeId: 'testnode' }));
 
-function connectedDatabaseOf(db: any): string {
-	return db.__knexConfig.connection.database;
+// knex keeps the config it resolved on `__knexConfig`, which its published types
+// do not declare. This is the one place that reaches for it; everything below
+// takes a plain `Knex`.
+// A pool is built either from discrete settings or from a connection string, so
+// the resolved value is one or the other.
+type ResolvedConnection = string | {
+	database?: string;
+	application_name?: string;
+};
+
+function connectionOf(db: Knex): ResolvedConnection {
+	return (db as unknown as {
+		__knexConfig: { connection: ResolvedConnection };
+	}).__knexConfig.connection;
 }
 
-function applicationNameOf(db: any): string | undefined {
-	return db.__knexConfig.connection.application_name;
+function connectedDatabaseOf(db: Knex): string | undefined {
+	const connection = connectionOf(db);
+
+	return typeof connection === 'string'
+		? undefined
+		: connection.database;
 }
 
-function connectionStringOf(db: any): string {
-	return db.__knexConfig.connection;
+function applicationNameOf(db: Knex): string | undefined {
+	const connection = connectionOf(db);
+
+	return typeof connection === 'string'
+		? undefined
+		: connection.application_name;
+}
+
+function connectionStringOf(db: Knex): string | undefined {
+	const connection = connectionOf(db);
+
+	return typeof connection === 'string'
+		? connection
+		: undefined;
 }
 
 beforeEach(() => {
