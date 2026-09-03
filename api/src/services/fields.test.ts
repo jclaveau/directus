@@ -113,5 +113,23 @@ describe('Services / Fields', () => {
 				{ collection: 'directus_fields' },
 			]);
 		});
+
+		it('reads only the field rows of the given collection', async () => {
+			const readByQuery = vi
+				.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(readResult([]));
+
+			vi.spyOn(FieldsService.prototype, 'columnInfo').mockResolvedValue([]);
+
+			tracker.on.select('directus_fields').response([]);
+
+			const service = new FieldsService({ knex: db, schema });
+			await service.readAll('test');
+
+			expect(readByQuery).toHaveBeenCalledWith({
+				filter: { collection: { _eq: 'test' } },
+				limit: -1,
+			});
+		});
 	});
 });

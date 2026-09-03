@@ -11,6 +11,7 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
+import { purgeScopedCache } from '../scoped-cache.js';
 import { readMeta } from '../utils/read-meta.js';
 import { readResult } from '../__utils__/read-result.js';
 import { transaction } from '../utils/transaction.js';
@@ -1713,5 +1714,42 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				type: 'integer',
 			});
 		});
+	});
+});
+
+describe('Services / Items / purgeScopedCache', () => {
+	let db: Knex;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+	});
+
+	// Public callers reach the purge through `shouldClearCache`, which already rules a
+	// null cache out — so the guard below it is only reachable from the method itself.
+	it('skips the purge when the service has no cache', async () => {
+		const service = new ItemsService('test', { knex: db, schema });
+
+		service.cache = null;
+
+		await service['purgeScopedCache']([{ collection: 'test' }]);
+
+		expect(purgeScopedCache).not.toHaveBeenCalled();
+	});
+
+	it('purges the collection when the service has a cache', async () => {
+		const service = new ItemsService('test', { knex: db, schema });
+
+		await service['purgeScopedCache']([{ collection: 'test' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			service.cache,
+			'test',
+			[{ collection: 'test' }],
+			expect.anything(),
+		);
 	});
 });

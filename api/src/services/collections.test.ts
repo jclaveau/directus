@@ -5,7 +5,9 @@ import type { Knex } from 'knex';
 import knex from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { readResult } from '../__utils__/read-result.js';
 import { CollectionsService } from './collections.js';
+import { ItemsService } from './items.js';
 
 vi.mock('directus/version', () => ({ version: '0.0.0' }));
 
@@ -18,7 +20,7 @@ vi.mock('../database/helpers/index.js', () => ({
 }));
 
 vi.mock('@directus/schema', () => ({
-	createInspector: vi.fn().mockReturnValue({}),
+	createInspector: () => ({ tableInfo: async () => [] }),
 }));
 
 const schema = new SchemaBuilder()
@@ -123,6 +125,23 @@ describe('Services / Collections', () => {
 
 			await expect(service.deleteMany(['x'])).rejects.toThrowError(ForbiddenError);
 			await expect(service.deleteMany(['x'])).rejects.toThrowError(`'test-user' can't delete many collections`);
+		});
+	});
+
+	describe('readByQuery', () => {
+		it('merges the system collections into the meta rows', async () => {
+			const readByQuery = vi
+				.spyOn(ItemsService.prototype, 'readByQuery')
+				.mockResolvedValue(readResult([]));
+
+			const service = new CollectionsService({ knex: db, schema });
+			const collections = await service.readByQuery();
+
+			expect(readByQuery).toHaveBeenCalledWith({ limit: -1 });
+
+			const names = collections.map(({ collection }) => collection);
+
+			expect(names).toContain('directus_collections');
 		});
 	});
 
