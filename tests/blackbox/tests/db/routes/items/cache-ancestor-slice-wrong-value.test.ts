@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // would-be-bare nested collection with an ancestor's pinned VALUE whenever that
 // ancestor is pinned ANYWHERE in the read — never checking the collection reaches
 // that ancestor by the path that pinned it. Here `owner` is pinned to the report's
-// owner (K) by the root filter, but the nested `attachment` reaches `owner` through
+// owner (K) by nesting `for_owner`, and `attachment` reaches `owner` through
 // its own `uploaded_by` fk, which points at a DIFFERENT owner (K2). The read is
 // stamped `attachment:uploaded_by=K`; a write to the K2 attachment purges
 // `uploaded_by=K2`, never K, so the read serves a stale HIT.
@@ -136,14 +136,14 @@ describe(oneLine`
 			await DeleteCollection(vendor, { collection: OWNER });
 		});
 
-		// Pins `owner` to the report's owner (K) via the root filter, while nesting
-		// the attachment whose real `uploaded_by` is K2.
+		// Nests `for_owner` so m2oParentPins keys `owner` to the report's owner (K),
+		// while the nested attachment's real `uploaded_by` is K2.
 		function readReport() {
 			return request(getUrl(vendor, env))
 				.get(`/items/${REPORT}`)
 				.query({
 					'filter[for_owner][id][_eq]': String(pinnedOwnerId),
-					fields: '*,attachments.*',
+					fields: '*,for_owner.*,attachments.*',
 				})
 				.set('Authorization', auth);
 		}
@@ -173,7 +173,7 @@ describe(oneLine`
 			// PRIMARY (RED until fixed): the attachment reaches `owner` by its own
 			// `uploaded_by` fk (K2), so the read must not stamp K (pinnedOwnerId).
 			expect(warm.headers[cacheTagsHeader]).not.toMatch(
-				new RegExp(`${ATTACHMENT}:uploaded_by=${pinnedOwnerId}(,|$)`),
+				new RegExp(`(^|, )${ATTACHMENT}:uploaded_by=${pinnedOwnerId}(,|$)`),
 			);
 
 			expect((await readReport()).headers[cacheStatusHeader]).toBe('HIT');
