@@ -29,7 +29,6 @@ import {
 	pinnedScopedCacheTagsFromKeyedFilters,
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromO2mChildren,
-	purgeScopedCache,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
@@ -1193,11 +1192,10 @@ implements AbstractService<Item> {
 				scopedCacheCollector.tags.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
-				this.scopedCachePurged = await purgeScopedCache(
-					this.cache,
-					this.collection,
-					scopedCacheCollector.tags,
-					this.scopedCache.purgeContext(),
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheCollector,
+					[],
 					{ includeCollectionTag: false },
 				);
 			}
@@ -1685,11 +1683,10 @@ implements AbstractService<Item> {
 				scopedCacheCollector.tags.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
-				this.scopedCachePurged = await purgeScopedCache(
-					this.cache,
-					this.collection,
-					scopedCacheCollector.tags,
-					this.scopedCache.purgeContext(),
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheCollector,
+					[],
 					{ includeCollectionTag: false },
 				);
 			}

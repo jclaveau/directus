@@ -422,6 +422,9 @@ export class ItemScopedCacheService {
 		tags: ScopedCacheTag[] | null,
 		collector?: Pick<ScopedCacheCollector, 'tags'>,
 		changedCollections: string[] = [],
+		// `false` leaves this collection's bare tag warm (a filter-cancel wrote nothing,
+		// so its global reads stay), purging only the tags a hook declared.
+		{ includeCollectionTag = true }: { includeCollectionTag?: boolean } = {},
 	): Promise<ScopedCacheTag[] | null> {
 		const context = this.purgeContext();
 		const hookTags = collector?.tags ?? [];
@@ -447,6 +450,9 @@ export class ItemScopedCacheService {
 				this.collection,
 				[...ownTags, ...hookTags],
 				context,
+				includeCollectionTag
+					? undefined
+					: { includeCollectionTag: false },
 			);
 		}
 
