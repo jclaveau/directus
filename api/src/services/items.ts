@@ -1592,8 +1592,9 @@ implements AbstractService<Item> {
 			// slice was never snapshotted (the key wasn't in `inputKeys`), so an old ∪ new
 			// purge leaks it → coarse, unless the hook declared its own purgeBy.
 			const someRowTakenOver = primaryKeys.some((key) => {
-				return key != null
-					&& scopedCacheCollector.takenOverKeys.has(`${this.collection}:${String(key)}`);
+				return key != null && scopedCacheCollector.takenOverKeys.has(
+					`${this.collection}:${String(key)}`,
+				);
 			});
 
 			const scopedCacheTags =
