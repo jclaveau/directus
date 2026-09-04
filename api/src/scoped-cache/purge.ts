@@ -224,24 +224,16 @@ const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
 const SCOPED_CACHE_EPOCH_TTL_SECONDS = 24 * 60 * 60;
 
 /**
- * Index a freshly-cached response key under every tag its data came from, so a later
- * mutation can drop just the matching entries instead of the whole namespace. Both
- * the payload key and its `__expires_at` sibling are tagged. When a cache TTL is
- * set, each tag set self-expires at `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as
- * a net for members orphaned by a crash between write and purge; with no TTL
- * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
- * left unbounded to match — a normal purge still drains them.
- */
-/**
  * File a key under a tag set and give that set an expiry that only ever moves OUT.
  *
  * A bare `EXPIRE` overwrites, and a tag set is SHARED by every entry pinned to that
  * slice: lower `CACHE_TTL` at runtime and one short-lived write cuts short the set
- * indexing an entry cached for an hour, leaving that entry unreachable to every purge
- * for the rest of its life. Redis 7 says this in one word (`EXPIRE … GT`) but the
- * stack ships Redis 6 (tests/blackbox/docker-compose.yml), where that flag is an
- * error — and an error here now throws, skipping the fill. So the comparison runs as
- * a script: atomic, one pipeline slot, and the same on both majors.
+ * indexing an entry cached for an hour, leaving that entry unreachable to every
+ * purge for the rest of its life. Redis 7 has `EXPIRE … GT`, but GT reads a key
+ * carrying no TTL as infinite: it refuses the very first expiry a fresh tag set
+ * needs, and cannot tell that set from one deliberately left unbounded. So the
+ * comparison runs as a script — atomic, one pipeline slot, and `EXISTS` telling
+ * those two apart.
  *
  * A set that already carries NO expiry outlives every entry by construction, so it
  * keeps none — only a freshly created set takes one unconditionally.
@@ -261,6 +253,15 @@ end
 return 0
 `;
 
+/**
+ * Index a freshly-cached response key under every tag its data came from, so a later
+ * mutation can drop just the matching entries instead of the whole namespace. Both
+ * the payload key and its `__expires_at` sibling are tagged. When a cache TTL is
+ * set, each tag set self-expires at `SCOPED_CACHE_TAG_TTL_FACTOR` times that TTL, as
+ * a net for members orphaned by a crash between write and purge; with no TTL
+ * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
+ * left unbounded to match — a normal purge still drains them.
+ */
 export async function tagScopedCacheKeys(
 	key: string,
 	scopedCacheTags: Iterable<ScopedCacheTag>,
