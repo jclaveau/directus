@@ -1,5 +1,4 @@
 import { useEnv } from '@directus/env';
-import { withoutMeta } from '../utils/read-meta.js';
 import { ErrorCode, ForbiddenError, InvalidPayloadError, isDirectusError } from '@directus/errors';
 import type { AbstractServiceOptions, Accountability, Comment, MutationOptions, PrimaryKey } from '@directus/types';
 import { uniq } from 'lodash-es';
@@ -143,9 +142,9 @@ export class CommentsService extends ItemsService {
 					const href = new Url(env['PUBLIC_URL'] as string).addPath('admin', 'content', collection, itemKey).toString();
 
 					const message = `
-Hello ${userName(withoutMeta(user))},
+Hello ${userName(user)},
 
-${userName(withoutMeta(sender))} has mentioned you in a comment:
+${userName(sender)} has mentioned you in a comment:
 
 ${comment}
 

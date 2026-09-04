@@ -1,5 +1,4 @@
 import { useEnv } from '@directus/env';
-import { withoutMeta } from '../utils/read-meta.js';
 import { ForbiddenError, InvalidCredentialsError } from '@directus/errors';
 import type { AbstractServiceOptions, Item, LoginResult, MutationOptions, PrimaryKey } from '@directus/types';
 import argon2 from 'argon2';
@@ -158,7 +157,7 @@ export class SharesService extends ItemsService {
 			fields: ['first_name', 'last_name', 'email', 'id'],
 		});
 
-		const senderName = userName(withoutMeta(userInfo));
+		const senderName = userName(userInfo);
 
 		const message = `
 Hello!
@@ -178,7 +177,7 @@ ${senderName} has invited you to view an item in ${share['collection']}.
 						},
 					},
 					to: email,
-					subject: `${userName(withoutMeta(userInfo))} has shared an item with you`,
+					subject: `${userName(userInfo)} has shared an item with you`,
 				})
 				.catch((error) => {
 					logger.error(error, `Could not send share notification mail`);
