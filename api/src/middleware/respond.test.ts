@@ -431,6 +431,27 @@ describe('respond middleware', () => {
 		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
 	});
 
+	test(oneLine`
+		a refused tag index leaves NO value cached: an untagged entry is unreachable to
+		every purge and would serve stale for its whole TTL
+	`, async () => {
+		vi.mocked(tagScopedCacheKeys).mockRejectedValueOnce(new Error('OOM'));
+		const res = makeRes({ data: [] });
+		const req = makeReq();
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(warn).toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'redis_error',
+			'OOM',
+		);
+	});
+
 	test('caching failure is caught and logged, not thrown', async () => {
 		vi.mocked(setCacheValue).mockRejectedValueOnce(new Error('boom'));
 		const res = makeRes({ data: [] });

@@ -25,6 +25,7 @@ const CANCEL_READ = 'p_unauto_read';
 const CANCEL_DEP = 'p_unauto_dep';
 const MANUAL_READ = 'p_manual_read';
 const MANUAL_DEP = 'p_manual_dep';
+const SCOPE_HOOK_READ = 'p_unauto_scope_hook';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -83,6 +84,14 @@ describe(oneLine`
 							{ field: 'title', type: 'string', meta: {} },
 						],
 					},
+					{
+						collection: SCOPE_HOOK_READ,
+						meta: { scoped_cache_fields: ['space'] },
+						fields: [
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'title', type: 'string', meta: {} },
+						],
+					},
 				],
 			});
 
@@ -101,6 +110,10 @@ describe(oneLine`
 				}),
 				CreateItem(vendor, {
 					collection: MANUAL_READ,
+					item: [{ space: 'z', title: 't' }],
+				}),
+				CreateItem(vendor, {
+					collection: SCOPE_HOOK_READ,
 					item: [{ space: 'z', title: 't' }],
 				}),
 			]);
@@ -126,6 +139,7 @@ describe(oneLine`
 				DeleteCollection(vendor, { collection: CANCEL_DEP }),
 				DeleteCollection(vendor, { collection: MANUAL_READ }),
 				DeleteCollection(vendor, { collection: MANUAL_DEP }),
+				DeleteCollection(vendor, { collection: SCOPE_HOOK_READ }),
 			]);
 		});
 
@@ -211,6 +225,25 @@ describe(oneLine`
 			// The author's own purgeBy reproduced the tag → the read is invalidated.
 			const purged = await readSlice(MANUAL_READ, 'z');
 			expect(purged.headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			an unautopurgeable tag appended by a cache.scope hook cancels caching too —
+			the audit reads both hook channels, not just the collector (#428)
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const first = await readSlice(SCOPE_HOOK_READ, 'z');
+			const second = await readSlice(SCOPE_HOOK_READ, 'z');
+
+			// RED until fixed: auditing only the collector let this tag through, so the
+			// second read HIT an entry no write can ever purge.
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(second.headers[cacheStatusHeader]).toBe('MISS');
 		});
 	});
 });

@@ -365,6 +365,39 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		updateBatch keeps its own autoPurgeCache:false when the caller passes true, so
+		the batch purges once after the commit, not once per forked child
+	`, async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.update('test').response(1);
+
+		// The caller's opts are spread FIRST so this `true` cannot reach the children:
+		// a child purge runs inside the transaction, dropping the slices before the
+		// rows it read are committed — the window a concurrent read refills as stale.
+		await service().updateBatch(
+			[{ id: 1, name: 'renamed' }, { id: 2, name: 'other' }],
+			{ autoPurgeCache: true },
+		);
+
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		// The one call is the deferred parent's: old ∪ new over BOTH batched rows.
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
 		updateBatch falls back to a coarse purge (null) when a batched row is missing the
 		scope field
 	`, async () => {

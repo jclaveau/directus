@@ -597,6 +597,29 @@ describe('collection slice index', () => {
 	});
 });
 
+describe('tagScopedCacheKeys', () => {
+	it(oneLine`
+		throws the command error a pipeline REPLIED with, so its caller can skip
+		writing an entry that would be indexed under nothing
+	`, async () => {
+		const refused = new Error('OOM command not allowed when used memory > maxmemory');
+
+		vi.mocked(useRedis).mockReturnValue({
+			pipeline: () => ({
+				sadd: vi.fn().mockReturnThis(),
+				expire: vi.fn().mockReturnThis(),
+				// ioredis reports a refused command in the reply array and only REJECTS
+				// on a connection-level failure, so an ignored reply reads as success.
+				exec: vi.fn().mockResolvedValue([[null, 1], [refused, null]]),
+			}),
+		} as any);
+
+		await expect(tagScopedCacheKeys('entry', [
+			{ collection: 'articles', field: 'author', value: 7 },
+		])).rejects.toBe(refused);
+	});
+});
+
 describe('dropScopedCacheTagIndex', () => {
 	it('scans both namespaces and deletes every index set', async () => {
 		const scan = vi.fn()

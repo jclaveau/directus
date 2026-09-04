@@ -12,6 +12,7 @@ const CANCEL_READ = 'p_unauto_read';
 const CANCEL_DEP = 'p_unauto_dep';
 const MANUAL_READ = 'p_manual_read';
 const MANUAL_DEP = 'p_manual_dep';
+const SCOPE_HOOK_READ = 'p_unauto_scope_hook';
 
 // A custom slice on `ghost`, a field neither dependency is scoped on — so it's
 // unautopurgeable by the dependency's own auto-purge.
@@ -35,5 +36,13 @@ export default function registerHooks({ filter }) {
 	filter(`${MANUAL_DEP}.items.update`, (payload, _meta, context) => {
 		context.scopedCache?.purgeBy(customTag(MANUAL_DEP));
 		return payload;
+	});
+
+	// The OTHER door into the same audit: `cache.scope` returns the tag list itself,
+	// so a tag appended here never passes through the collector `scopeTo` fills.
+	filter('cache.scope', (tags, meta) => {
+		return meta.collection === SCOPE_HOOK_READ
+			? [...tags, customTag(SCOPE_HOOK_READ)]
+			: tags;
 	});
 }
