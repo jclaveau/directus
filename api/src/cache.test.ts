@@ -9,10 +9,13 @@ const mockEnv = vi.hoisted(() => ({ current: {} as Record<string, any> }));
 const env = mockEnv.current;
 
 const redis = vi.hoisted(() => {
-	const pipeline = { sadd: vi.fn(), expire: vi.fn(), exec: vi.fn() };
-	// chainable pipeline
-	pipeline.sadd.mockReturnValue(pipeline);
-	pipeline.expire.mockReturnValue(pipeline);
+	const pipeline = {
+		sadd: vi.fn(),
+		expire: vi.fn(),
+		eval: vi.fn(),
+		incr: vi.fn(),
+		exec: vi.fn(),
+	};
 
 	return {
 		isCluster: false,
@@ -80,6 +83,7 @@ const {
 	assertScopedCacheRedisSupported,
 	purgeScopedCache,
 	scopedCachePurgeEnabled,
+	scopedCacheTagExpiryScript,
 	tagScopedCacheKeys,
 } = await import('./scoped-cache.js');
 
@@ -93,6 +97,15 @@ function setEnv(values: Record<string, unknown>) {
 
 afterEach(() => {
 	vi.clearAllMocks();
+});
+
+// `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
+// per test: chainable, and `exec` resolving because the epoch bump hangs its own
+// `.catch` off the returned promise.
+beforeEach(() => {
+	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
+	redis._pipeline.expire.mockReturnValue(redis._pipeline);
+	redis._pipeline.exec.mockResolvedValue([]);
 });
 
 describe('getRedisConnection', () => {
@@ -213,22 +226,24 @@ describe('scoped cache purging', () => {
 				{ collection: 'directus_users' },
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
-				'resp-key',
-				'resp-key__expires_at',
-			);
-
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:directus_users',
-				'resp-key',
-				'resp-key__expires_at',
-			);
-
-			// 2 × CACHE_TTL (5m = 300s) = 600s
-			expect(redis._pipeline.expire).toHaveBeenCalledWith(
+			// The members ride the script, which files them and moves the set's
+			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
 				'scalabus:tag:articles',
 				600,
+				'resp-key',
+				'resp-key__expires_at',
+			);
+
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
+				'scalabus:tag:directus_users',
+				600,
+				'resp-key',
+				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.exec).toHaveBeenCalledOnce();
@@ -240,14 +255,20 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
 				'scalabus:tag:slots:student=A',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
 				'scalabus:tag:slots:student=7',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -259,8 +280,11 @@ describe('scoped cache purging', () => {
 			]);
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
 				'scalabus:tag:slots:student=\x00null',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -278,16 +302,22 @@ describe('scoped cache purging', () => {
 			]);
 
 			// One tag set, plus the one index entry filing it under its collection.
-			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.eval).toHaveBeenCalledTimes(2);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
 				'scalabus:tag:slots:student=7',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
 				'scalabus:slices:slots',
+				600,
 				'scalabus:tag:slots:student=7',
 			);
 		});
@@ -299,7 +329,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			// The tag set and its index entry, once each — not once per duplicate.
-			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.eval).toHaveBeenCalledTimes(2);
 		});
 
 		test('no-op when no tags', async () => {
@@ -318,8 +348,11 @@ describe('scoped cache purging', () => {
 				'resp-key__tags',
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.eval).toHaveBeenCalledWith(
+				scopedCacheTagExpiryScript,
+				1,
 				'scalabus:tag:articles',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 				'resp-key__tags',
