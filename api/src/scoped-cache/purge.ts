@@ -134,22 +134,36 @@ async function bumpScopedCacheEpochs(
 	// trading every entry it was about to drop for the one racing fill the counter
 	// would have refused.
 	try {
-		const redis = useRedis();
-		const pipeline = redis.pipeline();
-
-		for (const name of names) {
-			pipeline.incr(scopedCacheEpochKey(name));
-
-			pipeline.expire(
-				scopedCacheEpochKey(name),
-				SCOPED_CACHE_EPOCH_TTL_SECONDS,
-			);
-		}
-
+		const pipeline = useRedis().pipeline();
+		appendScopedCacheEpochBumps(pipeline, names);
 		await pipeline.exec();
 	}
 	catch {
 		// See above: the sweep behind this is what makes the cache correct.
+	}
+}
+
+/**
+ * Queue the bumps onto a pipeline the caller is already sending, so a purge pays no
+ * round trip of its own for them. Redis runs a pipeline's commands in the order they
+ * were queued, so a sweep appended after these still reads its members AFTER the
+ * counters moved — which is the ordering the guard rests on.
+ */
+function appendScopedCacheEpochBumps(
+	pipeline: ReturnType<ReturnType<typeof useRedis>['pipeline']>,
+	collections: Iterable<string>,
+): void {
+	if (!scopedCachePurgeEnabled() || !redisConfigAvailable()) {
+		return;
+	}
+
+	for (const name of new Set(collections)) {
+		pipeline.incr(scopedCacheEpochKey(name));
+
+		pipeline.expire(
+			scopedCacheEpochKey(name),
+			SCOPED_CACHE_EPOCH_TTL_SECONDS,
+		);
 	}
 }
 
@@ -464,21 +478,35 @@ async function purgeScopedCacheTagKeys(
 
 	const redis = useRedis();
 
-	// BEFORE the sweep, never after: a read still in flight holds tags this purge
-	// cannot see yet, and it decides whether to cache by re-reading these counters.
-	// Bumped first, every such fill either reads the new value and declines, or had
-	// already filed its tags — in which case the sweep below reaches its entry.
-	await bumpScopedCacheEpochs(
+	// One pipeline for the counters and the members. The bumps come first because a
+	// read still in flight holds tags this purge cannot see yet, and it decides
+	// whether to cache by re-reading these counters: bumped first, every such fill
+	// either reads the new value and declines, or had already filed its tags — in
+	// which case the sweep reaches its entry. `SUNION` then dedupes server-side,
+	// where a per-tag `SMEMBERS` sent every copy of a key filed under several tags
+	// back over the wire.
+	const pipeline = redis.pipeline();
+
+	appendScopedCacheEpochBumps(
+		pipeline,
 		tagKeys
 			.map(scopedCacheCollectionOfTagKey)
 			.filter((collection): collection is string => collection !== null),
 	);
 
-	const memberLists = await Promise.all(
-		tagKeys.map((tagKey) => redis.smembers(tagKey)),
-	);
+	pipeline.sunion(tagKeys);
 
-	const members = [...new Set(memberLists.flat())];
+	const results = await pipeline.exec();
+	const memberResult = results?.[results.length - 1];
+
+	// The bumps are best effort; the member read is the sweep itself. A refusal there
+	// has to reach the caller, which records the purge for retry rather than leaving
+	// entries no one will come back for.
+	if (memberResult?.[0]) {
+		throw memberResult[0];
+	}
+
+	const members = (memberResult?.[1] ?? []) as string[];
 
 	const wasDeleted = await Promise.all(members.map((member) => {
 		return cache.delete(member);
