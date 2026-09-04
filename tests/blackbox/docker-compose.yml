@@ -130,7 +130,7 @@ services:
       - 6107:26257
 
   redis:
-    image: redis:6-alpine
+    image: redis:7-alpine
     ports:
       - 6108:6379
 

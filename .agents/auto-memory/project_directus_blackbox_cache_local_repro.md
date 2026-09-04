@@ -7,7 +7,7 @@ metadata:
 
 The blackbox harness is hard to run locally (dep drift), but a scoped-cache HIT/MISS bug reproduces with a single hand-run server:
 
-1. `docker run -d --name dbg-redis -p 6399:6379 public.ecr.aws/docker/library/redis:6-alpine` (ECR mirror dodges Docker Hub timeouts).
+1. `docker run -d --name dbg-redis -p 6399:6379 public.ecr.aws/docker/library/redis:7-alpine` (ECR mirror dodges Docker Hub timeouts).
 2. `node api/dist/cli/run.js bootstrap` then `start` with env: `DB_CLIENT=sqlite3 DB_FILENAME=/tmp/x.db`, `CACHE_ENABLED=true CACHE_STORE=redis CACHE_AUTO_PURGE=true CACHE_AUTO_PURGE_MODE=scoped`, `REDIS_HOST/PORT=6399`, `CACHE_STATUS_HEADER=x-cache-status`, `CACHE_NAMESPACE=dbg`, `STORAGE_LOCATIONS=local`.
 3. login → create collection via `/collections` (needs `schema:{},meta:{},fields:[{id pk autoinc}]`) → `GET` → `POST` → `GET`, read `x-cache-status`.
 4. **Smoking gun**: `redis-cli -p 6399 keys 'dbg:tag:*'` — empty tag sets = the read never tagged ⇒ scoped purge has nothing to drop ⇒ stale HIT. Cache value lives at `dbg::dbg:<hash>` (Keyv double-namespace); tag-set members are the raw response key.

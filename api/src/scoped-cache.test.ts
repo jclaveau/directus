@@ -9,6 +9,7 @@ import type {
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	canonicalScopedCacheValue,
 	countScopedCacheTagMembers,
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
@@ -29,6 +30,7 @@ import {
 	purgeScopedCache,
 	retryPendingScopedCachePurges,
 	scopedCacheCollectionsChangedByOnDelete,
+	scopedCacheTagExpiryScript,
 	scopedCacheTagKey,
 	startScopedCachePurgeRecovery,
 	tagScopedCacheKeys,
@@ -142,6 +144,27 @@ describe('the tag display form', () => {
 			{ collection: 'articles' },
 			{ collection: 'articles', field: 'author', value: 7 },
 		])).toBe('articles, articles:author=7');
+	});
+
+	// MySQL/MariaDB (`utf8mb4_*_ci`) and MSSQL (`*_CI_AS`) compare strings
+	// case-insensitively, so `_eq: 'Acme'` MATCHES a row stored as `acme`: the read
+	// pins `tenant=Acme` while the write to that row emits `tenant=acme`, the purge
+	// misses, and the entry serves stale for its whole TTL — the same failure the
+	// `uuid` branch already folds away. On a case-sensitive vendor the folding merges
+	// two slices into one instead: an over-purge, never a stale hit.
+	it('folds a string slice to one case, as a case-insensitive vendor does', () => {
+		expect(scopedCacheTagLabel({
+			collection: 'orgs',
+			field: 'tenant',
+			value: 'Acme',
+			type: 'string',
+		})).toBe('orgs:tenant=acme');
+
+		expect(canonicalScopedCacheValue('ACME', 'string'))
+		.toBe(canonicalScopedCacheValue('acme', 'string'));
+
+		// `text` is the same column class one size up, and non-ASCII folds too.
+		expect(canonicalScopedCacheValue('Ünïcode Ç', 'text')).toBe('ünïcode ç');
 	});
 
 	// countScopedCacheTagMembers rebuilds the Redis key from this string and the
@@ -293,8 +316,8 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 		.toEqual(['node']);
 	});
 
-	// Deliberate, and the reason is cost: those rows survive in their slices, and
-	// finding which ones moved means scanning by an unindexed foreign key per delete.
+	// Left out here on purpose: the delete purges those survivors' vacated slices
+	// precisely via vacatedSelfRelationTags, not through this walk's coarse fan-out.
 	it('leaves itself out when a self-relation only nulls the foreign key', () => {
 		const schema = { relations: [nullifyRelation('node', 'node')] } as any;
 
@@ -594,6 +617,86 @@ describe('collection slice index', () => {
 		// An index pruned only wholesale keeps naming keys that are gone.
 		expect(srem)
 		.toHaveBeenCalledWith('ns:slices:articles', ['ns:tag:articles:author=7']);
+	});
+});
+
+describe('tagScopedCacheKeys', () => {
+	it(oneLine`
+		throws the command error a pipeline REPLIED with, so its caller can skip
+		writing an entry that would be indexed under nothing
+	`, async () => {
+		const refused = new Error(
+			'OOM command not allowed when used memory > maxmemory',
+		);
+
+		vi.mocked(useRedis).mockReturnValue({
+			pipeline: () => {
+				return {
+					sadd: vi.fn().mockReturnThis(),
+					expire: vi.fn().mockReturnThis(),
+					// ioredis reports a refused command in the reply array and only
+					// REJECTS on a connection-level failure, so an ignored reply
+					// reads as success.
+					exec: vi.fn().mockResolvedValue([[null, 1], [refused, null]]),
+				};
+			},
+		} as any);
+
+		await expect(tagScopedCacheKeys('entry', [
+			{ collection: 'articles', field: 'author', value: 7 },
+		])).rejects.toBe(refused);
+	});
+
+	it(oneLine`
+		only ever extends a tag set's expiry, so a later write carrying a shorter TTL
+		cannot outlive-orphan the entries an earlier one indexed
+	`, async () => {
+		const evalCommand = vi.fn().mockReturnThis();
+		const expire = vi.fn().mockReturnThis();
+		env['CACHE_TTL'] = '30m';
+
+		vi.mocked(useRedis).mockReturnValue({
+			pipeline: () => {
+				return {
+					sadd: vi.fn().mockReturnThis(),
+					expire,
+					eval: evalCommand,
+					exec: vi.fn().mockResolvedValue([]),
+				};
+			},
+		} as any);
+
+		try {
+			await tagScopedCacheKeys('entry', [
+				{ collection: 'articles', field: 'author', value: 7 },
+			]);
+		}
+		finally {
+			delete env['CACHE_TTL'];
+		}
+
+		// A tag set is SHARED by every entry pinned to that slice, and a bare EXPIRE
+		// overwrites: lower CACHE_TTL at runtime and one short write cuts short the
+		// set indexing an entry cached for an hour, which no purge can then reach.
+		expect(expire).not.toHaveBeenCalled();
+
+		expect(evalCommand).toHaveBeenCalledWith(
+			scopedCacheTagExpiryScript,
+			1,
+			'ns:tag:articles:author=7',
+			3600,
+			'entry',
+			'entry__expires_at',
+		);
+
+		// The collection's slice index files under the same rule.
+		expect(evalCommand).toHaveBeenCalledWith(
+			scopedCacheTagExpiryScript,
+			1,
+			'ns:slices:articles',
+			3600,
+			'ns:tag:articles:author=7',
+		);
 	});
 });
 
@@ -1717,9 +1820,9 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 		]).toContain('owner');
 	});
 
-	it('a covering slice spares a sort-reached filter-keyed collection', () => {
-		// A write to the collection emits its scope slice, dropping this read, so
-		// the slice already catches the reorder — the sort need not cost it a bare tag.
+	it('a sorted independent collection crosses despite a covering slice', () => {
+		// An `independent` collection is skipped in readTags (no slice pin), so its
+		// scope fields don't catch the reorder — the sort needs the bare tag.
 		const slicedSchema = new SchemaBuilder()
 			.collection('company', (c) => {
 				c.field('id').id();
@@ -1746,7 +1849,7 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 					sort: ['owner.name'],
 				}),
 			),
-		]).not.toContain('owner');
+		].sort()).toEqual(['owned_item', 'owner']);
 	});
 
 	it('a group crosses a scope-sliced filter-keyed collection even so', () => {

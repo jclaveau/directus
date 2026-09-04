@@ -113,6 +113,9 @@ export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'unautopurgeable_scope'
 	| 'value_too_large'
+	// A purge landed between this read's query and its fill, so the rows it holds
+	// are already superseded and its tags missed that purge's sweep.
+	| 'inflight_purge'
 	| 'redis_error';
 
 export interface CacheAnomaly {

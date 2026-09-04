@@ -365,6 +365,39 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		updateBatch keeps its own autoPurgeCache:false when the caller passes true, so
+		the batch purges once after the commit, not once per forked child
+	`, async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.update('test').response(1);
+
+		// The caller's opts are spread FIRST so this `true` cannot reach the children:
+		// a child purge runs inside the transaction, dropping the slices before the
+		// rows it read are committed — the window a concurrent read refills as stale.
+		await service().updateBatch(
+			[{ id: 1, name: 'renamed' }, { id: 2, name: 'other' }],
+			{ autoPurgeCache: true },
+		);
+
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		// The one call is the deferred parent's: old ∪ new over BOTH batched rows.
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
 		updateBatch falls back to a coarse purge (null) when a batched row is missing the
 		scope field
 	`, async () => {
@@ -1030,6 +1063,39 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', declareThenCancel);
+			}
+		});
+
+		it(oneLine`
+			a delete hook that declares a slice then cancels (null) purges only
+			that slice — includeCollectionTag:false keeps the cancelled
+			collection's bare tag warm, since nothing in it was deleted
+		`, async () => {
+			// deleteMany snapshots rows AFTER the filter, so a cancel returns
+			// before any select — only the hook-declared slice is purged.
+			const declareThenCancel = async (_keys: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return null; // cancel the delete
+			};
+
+			emitter.onFilter('test.items.delete', declareThenCancel);
+
+			try {
+				await service().deleteMany([1], { allowFilterCancel: true });
+
+				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[authorsDependency],
+					expect.anything(),
+					{ includeCollectionTag: false },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.delete', declareThenCancel);
 			}
 		});
 

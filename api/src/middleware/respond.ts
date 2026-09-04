@@ -16,6 +16,7 @@ import {
 	scopedCachePurgeEnabled,
 	serializeScopedCacheTags,
 	scopedCacheTagLabel,
+	readScopedCacheEpochs,
 	tagScopedCacheKeys,
 } from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
@@ -140,6 +141,23 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
 
+	// A purge that landed while this read was in flight dropped tag sets this entry is
+	// not in yet: caching it now would store rows the write already replaced, under an
+	// index that purge has already deleted. Captured before the query, compared here.
+	const capturedEpochs = res.locals['scopedCacheEpochs'] as
+		| Record<string, string | null>
+		| undefined;
+
+	const currentEpochs = cacheableRequest && cache && capturedEpochs
+		? await readScopedCacheEpochs(Object.keys(capturedEpochs))
+		: {};
+
+	const racedCollection = Object.entries(capturedEpochs ?? {}).find(
+		([collection, captured]) => {
+			return currentEpochs[collection] !== captured;
+		},
+	)?.[0];
+
 	let filled = false;
 
 	if (
@@ -149,6 +167,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
 		dynamicQueryFilter === false &&
+		racedCollection === undefined &&
 		(await permissionsCachable(
 			req.collection,
 			{
@@ -167,6 +186,19 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			const ttlMs = getMilliseconds(resolvedCacheTtl());
 			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
 
+			// Index BEFORE the value exists. The two writes are not atomic, and the
+			// failure modes are not symmetric: a tag naming a key that was never
+			// written costs one miss on the purge's `del`, while a value written
+			// under no tag is unreachable to every purge and serves stale for its
+			// whole TTL. So tag first and let a throw here skip the value entirely.
+			await tagScopedCacheKeys(
+				redisKey,
+				scopedCacheTags,
+				env['CACHE_TAGS_HEADER']
+					? [`${redisKey}__tags`]
+					: [],
+			);
+
 			await setCacheValue(cache, redisKey, res.locals['payload'], ttlMs);
 
 			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
@@ -178,16 +210,38 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				ttlMs: ttlMs ?? null,
 			}, ttlMs);
 
+			// The check before the fill cannot see a purge that started after it: that
+			// purge's sweep read the tag sets before this key was filed, or deleted
+			// the key between the two writes above, and either way the value just
+			// written outlives it. Re-reading the counters here catches every such
+			// interleaving, because a purge bumps them BEFORE it sweeps.
+			if (capturedEpochs) {
+				const epochsAfterFill = await readScopedCacheEpochs(
+					Object.keys(capturedEpochs),
+				);
+
+				const sweptDuringFill = Object.entries(capturedEpochs).find(
+					([collection, captured]) => {
+						return epochsAfterFill[collection] !== captured;
+					},
+				)?.[0];
+
+				if (sweptDuringFill !== undefined) {
+					await cache.delete(redisKey);
+					await cache.delete(`${redisKey}__expires_at`);
+
+					if (cacheStatsActive()) {
+						void reportCacheAnomaly(
+							req,
+							'inflight_purge',
+							sweptDuringFill,
+						).catch(() => {});
+					}
+				}
+			}
+
 			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
 			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
-
-			await tagScopedCacheKeys(
-				redisKey,
-				scopedCacheTags,
-				env['CACHE_TAGS_HEADER']
-					? [`${redisKey}__tags`]
-					: [],
-			);
 
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.
@@ -314,6 +368,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 		else if (orphansInScopedMode) {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
+		}
+		else if (racedCollection !== undefined) {
+			void reportCacheAnomaly(
+				req,
+				'inflight_purge',
+				racedCollection,
+			).catch(() => {});
 		}
 		else if (unautopurgeableScope) {
 			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same tag.
