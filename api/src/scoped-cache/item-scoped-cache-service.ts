@@ -276,7 +276,6 @@ export class ItemScopedCacheService {
 			return [];
 		}
 
-		const flatFields = this.flatFields;
 		const fieldTypes = this.fieldTypes;
 
 		const tags: ScopedCacheTag[] = keys.map((key) => {
@@ -288,61 +287,44 @@ export class ItemScopedCacheService {
 			};
 		});
 
-		if (flatFields.length > 0) {
-			const rows = await this.knex
-				// Deduped: a project that also lists its primary key in
-				// `scoped_cache_fields` would otherwise project the column twice.
-				.select([...new Set([primaryKeyField, ...flatFields])])
-				.from(this.collection)
-				.whereIn(primaryKeyField, keys);
+		const valueSliceTags = await this.snapshotValueSliceTags(keys, fieldTypes);
 
-			const flatTags = scopedCacheTagsFromRows(
-				this.collection,
-				flatFields,
-				rows,
-				'coarse',
-				fieldTypes,
-			);
-
-			// A flat field is always projected, so 'coarse' only nulls on a caller
-			// feeding unprojected rows — never here; propagate it regardless.
-			if (flatTags === null) {
-				return null;
-			}
-
-			tags.push(...flatTags);
+		if (valueSliceTags === null) {
+			return null;
 		}
 
-		tags.push(...(await this.snapshotPathTags(this.paths, keys, fieldTypes)));
+		tags.push(...valueSliceTags);
 
 		return tags;
 	}
 
 	/**
-	 * Resolve every path scope field to its terminal value per mutated row via its M2O
-	 * join chain, then reuse the row-tag builder for canonicalization + dedup. The
-	 * mutated row carries only the first-hop fk, so the ancestor joins recover the
-	 * SAME terminals the read side pinned — the identical `field=<path>` slices.
+	 * Every value slice the mutated rows sit in right now: the flat columns the
+	 * collection scopes on, plus the terminal value each path scope resolves to
+	 * through its M2O join chain. The mutated row carries only the first-hop fk, so
+	 * the ancestor joins recover the SAME terminals the read side pinned — the
+	 * identical `field=<path>` slices.
 	 *
-	 * One query for every path, not one per path: composition derives the paths by
-	 * extending each other (`teaching_unit.discipline`, then
-	 * `teaching_unit.discipline.enrollment`), so a join keyed by the segments leading
-	 * to it is shared and each further path costs at most one more join. On
-	 * `student_course` that turns four round trips into one, per snapshot, and a
-	 * mutation snapshots twice.
+	 * One query for all of it, not one per path and one more for the flat columns.
+	 * The joins already select FROM the mutated collection, so its own columns ride
+	 * along, and composition derives the paths by extending each other
+	 * (`teaching_unit.discipline`, then `teaching_unit.discipline.enrollment`) so a
+	 * join keyed by the segments leading to it is shared and each further path costs
+	 * at most one more join. A M2O join cannot multiply the rows it is read from, so
+	 * the flat columns read the same as they did on their own query.
 	 */
-	private async snapshotPathTags(
-		paths: ScopedCachePath[],
+	private async snapshotValueSliceTags(
 		keys: PrimaryKey[],
 		fieldTypes: FieldTypesByField,
-	): Promise<ScopedCacheTag[]> {
+	): Promise<ScopedCacheTag[] | null> {
+		const flatFields = this.flatFields;
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		const aliasByLeadingSegments = new Map<string, string>();
 		const terminalRefByPath: { field: string; terminalRef: string }[] = [];
 
 		let query = this.knex.from({ root: this.collection });
 
-		for (const { field } of paths) {
+		for (const { field } of this.paths) {
 			const resolved = this.resolvePath(field);
 
 			if (!resolved) {
@@ -377,21 +359,44 @@ export class ItemScopedCacheService {
 			});
 		}
 
-		if (terminalRefByPath.length === 0) {
+		if (flatFields.length === 0 && terminalRefByPath.length === 0) {
 			return [];
 		}
 
-		// Positional column names: a path spells its own name with dots, and two paths
-		// ending on the same terminal field would collide under that name.
+		// Positional column names for the paths: a path spells its own name with dots,
+		// and two paths ending on the same terminal field would collide under it.
 		const rows = await query
-			.select(
-				terminalRefByPath.map(({ terminalRef }, index) => {
+			.select([
+				// Deduped: a project that also lists its primary key in
+				// `scoped_cache_fields` would otherwise project the column twice.
+				...[...new Set([primaryKeyField, ...flatFields])].map((field) => {
+					return this.knex.ref(`root.${field}`).as(field);
+				}),
+				...terminalRefByPath.map(({ terminalRef }, index) => {
 					return this.knex.ref(terminalRef).as(`value${index}`);
 				}),
-			)
+			])
 			.whereIn(`root.${primaryKeyField}`, keys);
 
 		const tags: ScopedCacheTag[] = [];
+
+		if (flatFields.length > 0) {
+			const flatTags = scopedCacheTagsFromRows(
+				this.collection,
+				flatFields,
+				rows,
+				'coarse',
+				fieldTypes,
+			);
+
+			// A flat field is always projected, so 'coarse' only nulls on a caller
+			// feeding unprojected rows — never here; propagate it regardless.
+			if (flatTags === null) {
+				return null;
+			}
+
+			tags.push(...flatTags);
+		}
 
 		terminalRefByPath.forEach(({ field }, index) => {
 			tags.push(...scopedCacheTagsFromRows(

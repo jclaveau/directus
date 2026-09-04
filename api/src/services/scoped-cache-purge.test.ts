@@ -1432,16 +1432,15 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		resolves three composed paths in a single joined query per snapshot, sharing the
 		hops the shorter paths already walked
 	`, async () => {
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
-
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+		]);
 
 		tracker.on.update('student_course').response(1);
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
 
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+		]);
 
 		await new ItemsService(
 			'student_course',
@@ -1459,18 +1458,17 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		emits the same slice per composed path as the per-path queries did, for the old
 		row and the committed one
 	`, async () => {
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
-
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+		]);
 
 		tracker.on.update('student_course').response(1);
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 11 }]);
 
 		// Every terminal differs from the old row's, so a column read off the wrong path
 		// would surface as a wrong value rather than passing on a shared one.
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 21, value1: 31, value2: 'B' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 11, value0: 21, value1: 31, value2: 'B' },
+		]);
 
 		await new ItemsService(
 			'student_course',
@@ -1540,10 +1538,13 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		keeps two paths apart when their terminal fields share a name, instead of
 		collapsing them onto one slice
 	`, async () => {
-		tracker.on.select('note').responseOnce([{ id: 1, left_ref: 7, right_ref: 8 }]);
-
-		tracker.on.select('note')
-			.responseOnce([{ value0: 'left-owner', value1: 'right-owner' }]);
+		tracker.on.select('note').responseOnce([{
+			id: 1,
+			left_ref: 7,
+			right_ref: 8,
+			value0: 'left-owner',
+			value1: 'right-owner',
+		}]);
 
 		tracker.on.delete('note').response(1);
 
@@ -1612,13 +1613,8 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		reading every path off that row rather than the first one
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10 },
-			{ id: 2, teaching_unit: 20 },
-		]);
-
-		tracker.on.select('student_course').responseOnce([
-			{ value0: 11, value1: 12, value2: 'A' },
-			{ value0: 21, value1: 22, value2: 'B' },
+			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
+			{ id: 2, teaching_unit: 20, value0: 21, value1: 22, value2: 'B' },
 		]);
 
 		tracker.on.delete('student_course').response(2);
@@ -1702,15 +1698,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		pins, and collapses two such rows onto one tag
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10 },
-			{ id: 2, teaching_unit: null },
-			{ id: 3, teaching_unit: null },
-		]);
-
-		tracker.on.select('student_course').responseOnce([
-			{ value0: 11, value1: 12, value2: 'A' },
-			{ value0: null, value1: null, value2: null },
-			{ value0: null, value1: null, value2: null },
+			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
+			{ id: 2, teaching_unit: null, value0: null, value1: null, value2: null },
+			{ id: 3, teaching_unit: null, value0: null, value1: null, value2: null },
 		]);
 
 		tracker.on.delete('student_course').response(3);
@@ -1798,8 +1788,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 	it(oneLine`
 		leaves out a path the schema cannot resolve, and still emits its sibling's slice
 	`, async () => {
-		tracker.on.select('note').responseOnce([{ id: 1, holder: 7 }]);
-		tracker.on.select('note').responseOnce([{ value0: 'owner-a' }]);
+		tracker.on.select('note')
+			.responseOnce([{ id: 1, holder: 7, value0: 'owner-a' }]);
+
 		tracker.on.delete('note').response(1);
 
 		await new ItemsService(
@@ -1835,10 +1826,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 	});
 
 	it(oneLine`
-		emits no path slice when the joined query matches no row, leaving the key slices
-		the caller already resolved
+		emits no value slice at all when the snapshot query matches no row, leaving the
+		key slices the caller already resolved
 	`, async () => {
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
 		tracker.on.select('student_course').responseOnce([]);
 		tracker.on.delete('student_course').response(1);
 
@@ -1847,6 +1837,8 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			{ knex: db, schema: composedChainSchema },
 		).deleteMany([1]);
 
+		// One query carries the flat columns and the path terminals both, so a row can
+		// no longer be present for one and absent for the other.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			`student_course`,
@@ -1855,12 +1847,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 					collection: `student_course`,
 					field: `id`,
 					value: 1,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 10,
 					type: `integer`,
 				},
 			],
