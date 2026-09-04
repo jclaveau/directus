@@ -42,45 +42,15 @@ vi.mock('../metrics/index.js', () => ({ useMetrics: () => undefined }));
 
 vi.mock('../utils/node-id.js', () => ({ nodeId: 'testnode' }));
 
-// knex keeps the config it resolved on `__knexConfig`, which its published types
-// do not declare. This is the one place that reaches for it; everything below
-// takes a plain `Knex`.
-// A pool is built either from discrete settings or from a connection string, so
-// the resolved value is one or the other.
-type ResolvedConnection = string | {
-	database?: string;
-	application_name?: string;
+// knex parks the config it resolved on `__knexConfig`, which its published types do
+// not declare — so a test that wants to see which pool it built has to say so.
+// A pool built from discrete settings resolves to an object, one built from a
+// connection string keeps the string; each test casts to the form it set up.
+type KnexWithSettings = Knex & {
+	__knexConfig: { connection: { database?: string; application_name?: string } };
 };
 
-function connectionOf(db: Knex): ResolvedConnection {
-	return (db as unknown as {
-		__knexConfig: { connection: ResolvedConnection };
-	}).__knexConfig.connection;
-}
-
-function connectedDatabaseOf(db: Knex): string | undefined {
-	const connection = connectionOf(db);
-
-	return typeof connection === 'string'
-		? undefined
-		: connection.database;
-}
-
-function applicationNameOf(db: Knex): string | undefined {
-	const connection = connectionOf(db);
-
-	return typeof connection === 'string'
-		? undefined
-		: connection.application_name;
-}
-
-function connectionStringOf(db: Knex): string | undefined {
-	const connection = connectionOf(db);
-
-	return typeof connection === 'string'
-		? connection
-		: undefined;
-}
+type KnexWithConnectionString = Knex & { __knexConfig: { connection: string } };
 
 beforeEach(() => {
 	vi.resetModules();
@@ -107,9 +77,9 @@ test('Uses the highest-priority granted connection', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = createDefaultAccountability({ grantedDbConnections: ['premium'] });
-	const db = getDatabaseForAccountability(acc);
+	const db = getDatabaseForAccountability(acc) as KnexWithSettings;
 
-	expect(connectedDatabaseOf(db)).toBe('directus_premium');
+	expect(db.__knexConfig.connection.database).toBe('directus_premium');
 	// second call returns the cached instance, not a freshly built one
 	expect(getDatabaseForAccountability(acc)).toBe(db);
 });
@@ -157,15 +127,13 @@ test('Reads DB_CONNECTIONS as a CSV string (e.g. when set at runtime)', async ()
 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	expect(
-		connectedDatabaseOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({
-					grantedDbConnections: ['replica_a', 'premium'],
-				}),
-			),
-		),
-	).toBe('directus_premium');
+	const db = getDatabaseForAccountability(
+		createDefaultAccountability({
+			grantedDbConnections: ['replica_a', 'premium'],
+		}),
+	) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus_premium');
 });
 
 test('Picks the higher priority regardless of grant order', async () => {
@@ -176,23 +144,24 @@ test('Picks the higher priority regardless of grant order', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	// replica_a (10) listed first is a decoy for the higher premium (100)
-	expect(
-		connectedDatabaseOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({
-					grantedDbConnections: ['replica_a', 'premium'],
-				}),
-			),
-		),
-	).toBe('directus_premium');
+	const db = getDatabaseForAccountability(
+		createDefaultAccountability({
+			grantedDbConnections: ['replica_a', 'premium'],
+		}),
+	) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus_premium');
 });
 
 test('Falls back to the base pool when nothing is granted', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
 	const acc = createDefaultAccountability({ grantedDbConnections: [] });
-	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
-	expect(connectedDatabaseOf(getDatabaseForAccountability(null))).toBe('directus');
+	const granted = getDatabaseForAccountability(acc) as KnexWithSettings;
+	const anonymous = getDatabaseForAccountability(null) as KnexWithSettings;
+
+	expect(granted.__knexConfig.connection.database).toBe('directus');
+	expect(anonymous.__knexConfig.connection.database).toBe('directus');
 });
 
 test('A share token (no granted connections) uses the base pool', async () => {
@@ -201,7 +170,9 @@ test('A share token (no granted connections) uses the base pool', async () => {
 	// A share-token accountability never runs global-access, so grantedDbConnections
 	// is undefined — it must resolve to the base pool, not throw or misroute.
 	const acc = createDefaultAccountability({ share: 'a-share-id' });
-	expect(connectedDatabaseOf(getDatabaseForAccountability(acc))).toBe('directus');
+	const db = getDatabaseForAccountability(acc) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus');
 });
 
 test('A public share routes to the configured share pool', async () => {
@@ -211,26 +182,25 @@ test('A public share routes to the configured share pool', async () => {
 
 	// A share lands on the dedicated share pool, off the base pool …
 	const share = createDefaultAccountability({ share: 'a-share-id' });
+	const shareDb = getDatabaseForAccountability(share) as KnexWithSettings;
 
-	expect(connectedDatabaseOf(getDatabaseForAccountability(share))).toBe(
-		'directus_premium',
-	);
+	expect(shareDb.__knexConfig.connection.database).toBe('directus_premium');
 
 	// … while a non-share request is unaffected (the override is share-gated).
 	const authed = createDefaultAccountability({});
-	expect(connectedDatabaseOf(getDatabaseForAccountability(authed))).toBe('directus');
+	const authedDb = getDatabaseForAccountability(authed) as KnexWithSettings;
+
+	expect(authedDb.__knexConfig.connection.database).toBe('directus');
 });
 
 test('Falls back when the granted connection is not configured', async () => {
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	expect(
-		connectedDatabaseOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({ grantedDbConnections: ['ghost_pool'] }),
-			),
-		),
-	).toBe('directus');
+	const db = getDatabaseForAccountability(
+		createDefaultAccountability({ grantedDbConnections: ['ghost_pool'] }),
+	) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus');
 });
 
 test('A granted connection at equal priority outranks the base pool', async () => {
@@ -240,13 +210,11 @@ test('A granted connection at equal priority outranks the base pool', async () =
 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	expect(
-		connectedDatabaseOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({ grantedDbConnections: ['premium'] }),
-			),
-		),
-	).toBe('directus_premium');
+	const db = getDatabaseForAccountability(
+		createDefaultAccountability({ grantedDbConnections: ['premium'] }),
+	) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus_premium');
 });
 
 test('Two grants tied at base priority break by name, base excluded', async () => {
@@ -259,15 +227,13 @@ test('Two grants tied at base priority break by name, base excluded', async () =
 
 	// premium, replica_a and the base pool all tie at 0; base is the floor, and
 	// premium < replica_a by name, so premium wins.
-	expect(
-		connectedDatabaseOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({
-					grantedDbConnections: ['replica_a', 'premium'],
-				}),
-			),
-		),
-	).toBe('directus_premium');
+	const db = getDatabaseForAccountability(
+		createDefaultAccountability({
+			grantedDbConnections: ['replica_a', 'premium'],
+		}),
+	) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus_premium');
 });
 
 test('Lets a policy grant the base pool by its configured name', async () => {
@@ -275,30 +241,30 @@ test('Lets a policy grant the base pool by its configured name', async () => {
 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	expect(
-		connectedDatabaseOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({ grantedDbConnections: ['primary'] }),
-			),
-		),
-	).toBe('directus');
+	const db = getDatabaseForAccountability(
+		createDefaultAccountability({ grantedDbConnections: ['primary'] }),
+	) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus');
 });
 
 test('Every pool announces which pool it is', async () => {
 	const { default: getDatabase, getDatabaseForAccountability } =
 		await import('./index.js');
 
-	expect(applicationNameOf(getDatabase())).toBe('directus:testnode:base');
+	const base = getDatabase() as KnexWithSettings;
+
+	expect(base.__knexConfig.connection.application_name)
+		.toBe('directus:testnode:base');
 
 	// pgbouncer prints this per client, so a connection is traceable back to the
 	// process and the pool it came from without guessing from an address.
-	expect(
-		applicationNameOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({ grantedDbConnections: ['premium'] }),
-			),
-		),
-	).toBe('directus:testnode:premium');
+	const premium = getDatabaseForAccountability(
+		createDefaultAccountability({ grantedDbConnections: ['premium'] }),
+	) as KnexWithSettings;
+
+	expect(premium.__knexConfig.connection.application_name)
+		.toBe('directus:testnode:premium');
 });
 
 test('A configured application name wins, under the driver\'s own key', async () => {
@@ -306,7 +272,9 @@ test('A configured application name wins, under the driver\'s own key', async ()
 
 	const { default: getDatabase } = await import('./index.js');
 
-	expect(applicationNameOf(getDatabase())).toBe('reporting');
+	const db = getDatabase() as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.application_name).toBe('reporting');
 });
 
 test('A pool that cannot carry the parameter is not given one', async () => {
@@ -317,7 +285,9 @@ test('A pool that cannot carry the parameter is not given one', async () => {
 
 	const { default: getDatabase } = await import('./index.js');
 
-	expect(applicationNameOf(getDatabase())).toBeUndefined();
+	const db = getDatabase() as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.application_name).toBeUndefined();
 });
 
 test('A pool built from a connection string keeps the string', async () => {
@@ -325,7 +295,9 @@ test('A pool built from a connection string keeps the string', async () => {
 
 	const { default: getDatabase } = await import('./index.js');
 
-	expect(connectionStringOf(getDatabase()))
+	const db = getDatabase() as KnexWithConnectionString;
+
+	expect(db.__knexConfig.connection)
 		.toBe('postgres://u:p@localhost:5432/directus');
 });
 
@@ -337,11 +309,9 @@ test('Base priority can outrank a lower-priority granted pool', async () => {
 
 	const { getDatabaseForAccountability } = await import('./index.js');
 
-	expect(
-		connectedDatabaseOf(
-			getDatabaseForAccountability(
-				createDefaultAccountability({ grantedDbConnections: ['replica_a'] }),
-			),
-		),
-	).toBe('directus');
+	const db = getDatabaseForAccountability(
+		createDefaultAccountability({ grantedDbConnections: ['replica_a'] }),
+	) as KnexWithSettings;
+
+	expect(db.__knexConfig.connection.database).toBe('directus');
 });
