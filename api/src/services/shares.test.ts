@@ -42,7 +42,7 @@ beforeAll(() => {
 
 afterEach(() => {
 	tracker.reset();
-	vi.clearAllMocks();
+	vi.restoreAllMocks();
 });
 
 describe('Services / Shares', () => {
@@ -57,8 +57,6 @@ describe('Services / Shares', () => {
 			);
 		});
 
-		// Last, since the `readOne` spy survives clearAllMocks and would otherwise
-		// answer the reads of any test appended after it.
 		it('mails every invitee a link naming the sender', async () => {
 			const readOne = vi.spyOn(ItemsService.prototype, 'readOne');
 
