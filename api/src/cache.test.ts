@@ -14,6 +14,7 @@ const redis = vi.hoisted(() => {
 		expire: vi.fn(),
 		eval: vi.fn(),
 		incr: vi.fn(),
+		sunion: vi.fn(),
 		exec: vi.fn(),
 	};
 
@@ -25,6 +26,9 @@ const redis = vi.hoisted(() => {
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
+		// The keys each queued SUNION asked for, in order, so `exec` answers the one
+		// belonging to it rather than the newest — a purge sends other pipelines too.
+		_sunionQueue: [] as string[][],
 	};
 });
 
@@ -102,10 +106,28 @@ afterEach(() => {
 // `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
 // per test: chainable, and `exec` resolving because the epoch bump hangs its own
 // `.catch` off the returned promise.
+//
+// A purge reads its members with one `SUNION` over every tag key, queued on that
+// same pipeline. The double answers it as the union of the per-key `smembers` a
+// case arms, which is what the command does — so a case still says which tag sets
+// hold what, and still sees the purge ask for them.
 beforeEach(() => {
 	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
 	redis._pipeline.expire.mockReturnValue(redis._pipeline);
-	redis._pipeline.exec.mockResolvedValue([]);
+	redis._sunionQueue.length = 0;
+
+	redis._pipeline.sunion.mockImplementation((keys: string[]) => {
+		redis._sunionQueue.push(keys);
+		return redis._pipeline;
+	});
+
+	redis._pipeline.exec.mockImplementation(async () => {
+		const memberLists = await Promise.all(
+			(redis._sunionQueue.shift() ?? []).map((key) => redis.smembers(key)),
+		);
+
+		return [[null, [...new Set(memberLists.flat())]]];
+	});
 });
 
 describe('getRedisConnection', () => {
@@ -615,6 +637,14 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
 
 			expect(redis.del).toHaveBeenCalledWith([
+				'scalabus:tag:articles',
+				'scalabus:tag:articles:author=1',
+				'scalabus:tag:articles:author=2',
+			]);
+
+			// One command for every tag set the purge sweeps, not one per set: the
+			// members are deduped where they are read instead of over the wire.
+			expect(redis._pipeline.sunion).toHaveBeenCalledExactlyOnceWith([
 				'scalabus:tag:articles',
 				'scalabus:tag:articles:author=1',
 				'scalabus:tag:articles:author=2',

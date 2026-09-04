@@ -188,7 +188,15 @@ implements AbstractService<Item> {
 
 		// We read the IDs of the items based on the query, and then run `updateMany`. `updateMany` does it's own
 		// permissions check for the keys, so we don't have to make this an authenticated read
-		const items = await itemsService.readByQuery(readQuery);
+		//
+		// No response is built from these keys, so the purge counters this read would
+		// capture are read by nobody. Every other `readByQuery` keeps capturing them:
+		// a missed capture costs staleness, and only a call site that owns the whole
+		// round trip can know its rows never reach the cache.
+		const items = await itemsService.readByQuery(readQuery, {
+			skipScopedCacheEpochs: true,
+		});
+
 		return items.map((item: AnyItem) => item[primaryKeyField]).filter((pk) => pk);
 	}
 
@@ -830,11 +838,13 @@ implements AbstractService<Item> {
 		// Before the query, so it predates any purge racing this read. The collections
 		// are the ones its tags will name, both known already: the field map is built
 		// off the AST and the keying off the filter.
-		const scopedCacheEpochs = await readScopedCacheEpochs([
-			this.collection,
-			...collectionsInFieldMap(fieldMap),
-			...filterKeying.keys(),
-		]);
+		const scopedCacheEpochs = opts?.skipScopedCacheEpochs === true
+			? {}
+			: await readScopedCacheEpochs([
+				this.collection,
+				...collectionsInFieldMap(fieldMap),
+				...filterKeying.keys(),
+			]);
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
