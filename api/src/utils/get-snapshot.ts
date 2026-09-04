@@ -9,12 +9,20 @@ import type {
 } from '@directus/types';
 import { version } from 'directus/version';
 import type { Knex } from 'knex';
-import { fromPairs, isArray, isPlainObject, mapValues, omit, sortBy, toPairs } from 'lodash-es';
 import getDatabase, { getDatabaseClient } from '../database/index.js';
 import { CollectionsService } from '../services/collections.js';
 import { FieldsService } from '../services/fields.js';
 import { RelationsService } from '../services/relations.js';
 import { getSchema } from './get-schema.js';
+import {
+	fromPairs,
+	isArray,
+	isPlainObject,
+	mapValues,
+	omit,
+	sortBy,
+	toPairs,
+} from './lodash-es-used.js';
 import { sanitizeCollection, sanitizeField, sanitizeRelation } from './sanitize-schema.js';
 
 export async function getSnapshot(options?: { database?: Knex; schema?: SchemaOverview }): Promise<Snapshot> {

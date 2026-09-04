@@ -15,9 +15,9 @@ import { extractMetadata } from '../files/lib/extract-metadata.js';
 import { ItemsService } from '../index.js';
 import { TusDataStore } from './data-store.js';
 import { getTusLocker } from './lockers.js';
-import { pick } from 'lodash-es';
 import emitter from '../../emitter.js';
 import getDatabase from '../../database/index.js';
+import { pick } from '../../utils/lodash-es-used.js';
 
 type Context = {
 	schema: SchemaOverview;

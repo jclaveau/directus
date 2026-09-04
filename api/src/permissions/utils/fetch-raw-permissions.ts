@@ -1,6 +1,6 @@
 import type { Accountability, Filter, Permission, PermissionsAction } from '@directus/types';
+import { sortBy } from '../../utils/lodash-es-used.js';
 import { withoutMeta } from '../../utils/read-meta.js';
-import { sortBy } from 'lodash-es';
 import { withAppMinimalPermissions } from '../lib/with-app-minimal-permissions.js';
 import type { Context } from '../types.js';
 import { withCache } from './with-cache.js';

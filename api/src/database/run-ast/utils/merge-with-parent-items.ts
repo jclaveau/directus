@@ -1,8 +1,8 @@
 import { useEnv } from '@directus/env';
 import type { Item, PrimaryKey, SchemaOverview } from '@directus/types';
 import { toArray } from '@directus/utils';
-import { clone, isArray } from 'lodash-es';
 import type { NestedCollectionNode } from '../../../types/ast.js';
+import { clone, isArray } from '../../../utils/lodash-es-used.js';
 
 export function mergeWithParentItems(
 	schema: SchemaOverview,

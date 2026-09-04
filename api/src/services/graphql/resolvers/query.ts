@@ -1,7 +1,7 @@
 import type { Item, Query } from '@directus/types';
 import { parseFilterFunctionPath } from '@directus/utils';
 import type { GraphQLResolveInfo } from 'graphql';
-import { omit } from 'lodash-es';
+import { omit } from '../../../utils/lodash-es-used.js';
 import { mergeVersionsRaw, mergeVersionsRecursive } from '../../../utils/merge-version-data.js';
 import { VersionsService } from '../../versions.js';
 import type { GraphQLService } from '../index.js';

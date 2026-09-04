@@ -3,7 +3,6 @@ import type { AbstractServiceOptions, Accountability, SchemaOverview } from '@di
 import { toArray, toBoolean } from '@directus/utils';
 import { version } from 'directus/version';
 import type { Knex } from 'knex';
-import { merge } from 'lodash-es';
 import { Readable } from 'node:stream';
 import { performance } from 'perf_hooks';
 import { getCache } from '../cache.js';
@@ -17,6 +16,7 @@ import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js
 import { SERVER_ONLINE } from '../server.js';
 import { getStorage } from '../storage/index.js';
 import { getAllowedLogLevels } from '../utils/get-allowed-log-levels.js';
+import { merge } from '../utils/lodash-es-used.js';
 import { SettingsService } from './settings.js';
 
 const env = useEnv();

@@ -1,6 +1,5 @@
 import { processChunk, toBoolean } from '@directus/utils';
 import type { Knex } from 'knex';
-import { omit } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import { useLogger } from '../../logger/index.js';
 import { fetchPermissions } from '../../permissions/lib/fetch-permissions.js';
@@ -12,6 +11,7 @@ import type { Accountability, Permission } from '@directus/types';
 import { getSchemaInspector } from '../index.js';
 import { mergePermissions } from '../../permissions/utils/merge-permissions.js';
 import type { MigrationTransactionScope } from '../../types/index.js';
+import { omit } from '../../utils/lodash-es-used.js';
 
 /**
  * Runs unwrapped: it drops a foreign key that may not exist, logging and

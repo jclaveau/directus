@@ -11,12 +11,12 @@ import type {
 	Query,
 } from '@directus/types';
 import Joi from 'joi';
-import { assign, pick } from 'lodash-es';
 import objectHash from 'object-hash';
 import { getCache } from '../cache.js';
 import emitter from '../emitter.js';
 import { purgeScopedCache } from '../scoped-cache.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { assign, pick } from '../utils/lodash-es-used.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { ActivityService } from './activity.js';
 import { ItemsService } from './items.js';

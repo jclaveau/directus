@@ -17,7 +17,6 @@ import type {
 	TransformationSet,
 } from '@directus/types';
 import type { Knex } from 'knex';
-import { clamp } from 'lodash-es';
 import { contentType } from 'mime-types';
 import type { Readable } from 'node:stream';
 import hash from 'object-hash';
@@ -30,6 +29,7 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { getStorage } from '../storage/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { isValidUuid } from '../utils/is-valid-uuid.js';
+import { clamp } from '../utils/lodash-es-used.js';
 import * as TransformationUtils from '../utils/transformations.js';
 import { FilesService } from './files.js';
 import { getSharpInstance } from './files/lib/get-sharp-instance.js';

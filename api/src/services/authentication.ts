@@ -9,7 +9,6 @@ import {
 import type { AbstractServiceOptions, Accountability, LoginResult, SchemaOverview } from '@directus/types';
 import jwt from 'jsonwebtoken';
 import type { Knex } from 'knex';
-import { clone, cloneDeep } from 'lodash-es';
 import type { StringValue } from 'ms';
 import { performance } from 'perf_hooks';
 import { getAuthProvider } from '../auth.js';
@@ -22,6 +21,7 @@ import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
 import type { DirectusTokenPayload, Session, User } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
+import { clone, cloneDeep } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
 import { ActivityService } from './activity.js';
 import { SettingsService } from './settings.js';

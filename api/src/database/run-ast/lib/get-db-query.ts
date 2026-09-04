@@ -1,12 +1,12 @@
 import { useEnv } from '@directus/env';
 import type { Filter, Permission, Query } from '@directus/types';
 import type { Knex } from 'knex';
-import { cloneDeep } from 'lodash-es';
 import type { Context } from '../../../permissions/types.js';
 import type { FieldNode, FunctionFieldNode, O2MNode } from '../../../types/ast.js';
 import { applySort, type ColumnSortRecord } from './apply-query/sort.js';
 import { getCollectionFromAlias } from '../../../utils/get-collection-from-alias.js';
 import type { AliasMap } from '../../../utils/get-column-path.js';
+import { cloneDeep } from '../../../utils/lodash-es-used.js';
 import { getColumn } from '../utils/get-column.js';
 import { getHelpers } from '../../helpers/index.js';
 import { applyCaseWhen } from '../utils/apply-case-when.js';

@@ -1,11 +1,11 @@
 import { RouteNotFoundError } from '@directus/errors';
-import { format } from 'date-fns';
 import { Router } from 'express';
 import { respond } from '../middleware/respond.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache.js';
 import { ServerService } from '../services/server.js';
 import { SpecificationService } from '../services/specifications.js';
 import asyncHandler from '../utils/async-handler.js';
+import { format } from '../utils/date-fns-used.js';
 
 const router = Router();
 

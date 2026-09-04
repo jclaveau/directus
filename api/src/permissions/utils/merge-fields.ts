@@ -1,4 +1,4 @@
-import { intersection, union } from 'lodash-es';
+import { intersection, union } from '../../utils/lodash-es-used.js';
 
 export function mergeFields(fieldsA: string[] | null, fieldsB: string[] | null, strategy: 'and' | 'or') {
 	if (fieldsA === null) fieldsA = [];

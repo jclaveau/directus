@@ -12,7 +12,6 @@ import type {
 } from '@directus/types';
 import { getRelation } from '@directus/utils';
 import type { Knex } from 'knex';
-import { cloneDeep, mergeWith } from 'lodash-es';
 import hash from 'object-hash';
 import type {
 	OpenAPIObject,
@@ -28,6 +27,7 @@ import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { fetchAllowedFieldMap } from '../permissions/modules/fetch-allowed-field-map/fetch-allowed-field-map.js';
 import { getRelationType } from '../utils/get-relation-type.js';
+import { cloneDeep, mergeWith } from '../utils/lodash-es-used.js';
 import { reduceSchema } from '../utils/reduce-schema.js';
 import { GraphQLService } from './graphql/index.js';
 
