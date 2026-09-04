@@ -217,7 +217,18 @@ export async function tagScopedCacheKeys(
 		}
 	}
 
-	await pipeline.exec();
+	// ioredis resolves `[[err, result], …]` and only REJECTS on a connection-level
+	// failure: a per-command refusal (maxmemory/noeviction on the `sadd`, a
+	// WRONGTYPE) resolves as an entry error. Swallowing it would leave the entry
+	// its caller is about to write indexed under nothing, so no purge could ever
+	// reach it — surface it and let the caller skip the write.
+	const results = await pipeline.exec();
+
+	const failed = results?.find(([error]) => error !== null);
+
+	if (failed) {
+		throw failed[0];
+	}
 }
 
 /**

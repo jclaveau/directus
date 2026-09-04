@@ -460,7 +460,8 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		expect(warn).toHaveBeenCalled();
-		// tagging is skipped once the set throws, but the response still flushes
+		// The tag index is written first, so a failed value write leaves a tag naming
+		// a key that never landed — one wasted `del` on the next purge, nothing stale.
 		expect(res.json).toHaveBeenCalled();
 
 		// the failed write also surfaces as a redis_error anomaly carrying the message

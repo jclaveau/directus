@@ -167,6 +167,19 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			const ttlMs = getMilliseconds(resolvedCacheTtl());
 			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
 
+			// Index BEFORE the value exists. The two writes are not atomic, and the
+			// failure modes are not symmetric: a tag naming a key that was never
+			// written costs one miss on the purge's `del`, while a value written
+			// under no tag is unreachable to every purge and serves stale for its
+			// whole TTL. So tag first and let a throw here skip the value entirely.
+			await tagScopedCacheKeys(
+				redisKey,
+				scopedCacheTags,
+				env['CACHE_TAGS_HEADER']
+					? [`${redisKey}__tags`]
+					: [],
+			);
+
 			await setCacheValue(cache, redisKey, res.locals['payload'], ttlMs);
 
 			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
@@ -180,14 +193,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
 			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
-
-			await tagScopedCacheKeys(
-				redisKey,
-				scopedCacheTags,
-				env['CACHE_TAGS_HEADER']
-					? [`${redisKey}__tags`]
-					: [],
-			);
 
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.

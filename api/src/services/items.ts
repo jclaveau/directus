@@ -1064,8 +1064,8 @@ implements AbstractService<Item> {
 					}
 
 					const combinedOpts: MutationOptions = {
-						autoPurgeCache: false,
 						...opts,
+						autoPurgeCache: false,
 						scopedCacheCollector,
 						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
 					};
@@ -1725,8 +1725,11 @@ implements AbstractService<Item> {
 
 		// Capture the scope values of the rows about to be deleted; after the delete
 		// they're gone and can't be read, so a later purge couldn't tell which slices to
-		// drop.
-		const oldScopedCacheTags = await this.scopedCache.snapshot(keysAfterHooks);
+		// drop. Off `keys`, not the filter's return: the statement below, the access
+		// check and the activity rows all target `keys`, so a hook that returned a
+		// REWRITTEN array (rather than null to cancel) would otherwise purge rows that
+		// survive and leave the deleted ones cached.
+		const oldScopedCacheTags = await this.scopedCache.snapshot(keys);
 
 		if (this.accountability) {
 			await validateAccess(
@@ -1795,7 +1798,7 @@ implements AbstractService<Item> {
 			// A direct self-relation SET NULL/DEFAULT rewrites survivors' fk, vacating
 			// their `<field>=<deletedKey>` slice; add those to the precise purge.
 			const vacatedSelfSlices =
-				this.scopedCache.vacatedSelfRelationTags(keysAfterHooks);
+				this.scopedCache.vacatedSelfRelationTags(keys);
 
 			this.scopedCachePurged = await this.scopedCache.purge(
 				oldScopedCacheTags === null

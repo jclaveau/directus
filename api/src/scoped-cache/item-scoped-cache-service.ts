@@ -709,9 +709,17 @@ export class ItemScopedCacheService {
 			// by two disagreeing reverse fks: only that o2m conflict leaves rows no
 			// single ownership slice can name. Every other bare is soundly covered by
 			// the owner's slice the whole read is bounded to.
-			const ancestorSliceTags = o2mConflicted.has(collection)
-				? []
-				: ancestorSliceTagsFor(collection);
+			//
+			// The ROOT is the other exception. It only reaches here with an empty
+			// `rootScopedCacheTags` — the self-reference guard above, or a filter that
+			// bound no slice — and both mean the read carries rows no owner slice
+			// covers: a self-referential hop nests a parent from any slice, an unbound
+			// filter spans the collection. Slicing it there would serve the stale hit
+			// the guard exists to prevent.
+			const ancestorSliceTags =
+				o2mConflicted.has(collection) || collection === this.collection
+					? []
+					: ancestorSliceTagsFor(collection);
 
 			tags.push(
 				...(ancestorSliceTags.length > 0
@@ -796,6 +804,11 @@ export class ItemScopedCacheService {
 			tags.push(...pins.values());
 		}
 
+		// Keys of what the pinners computed: sound by construction, so the audit below
+		// examines only what a HOOK added — and a hook re-stating a computed tag is
+		// not flagged for it.
+		const computedTagKeys = new Set(tags.map(scopedCacheTagKey));
+
 		tags = (await emitter.emitFilter(
 			'cache.scope',
 			tags,
@@ -813,11 +826,25 @@ export class ItemScopedCacheService {
 		// Fold in tags an `items.read` hook added via `context.scopedCache.scopeTo`.
 		tags.push(...scopedCacheCollector.tags);
 
-		// A scopeTo tag on a field its collection isn't scoped on can't be reproduced
-		// by that collection's auto-purge — the read would go stale — unless the hook
+		// A hook tag on a field its collection isn't scoped on can't be reproduced by
+		// that collection's auto-purge — the read would go stale — unless the hook
 		// marked it `manuallyPurged` (it reproduces the tag via its own purgeBy). List
 		// them so respond.ts leaves the read uncached + names them in the anomaly.
-		unautopurgeable = scopedCacheCollector.tags.filter((tag) => {
+		//
+		// Both hook channels are audited: `scopeTo` through the collector, and
+		// whatever `cache.scope` returned beyond the computed set. Auditing only the
+		// collector let the same unpurgeable tag through the other door.
+		const hookAddedTags = new Map<string, ScopedCacheTag>();
+
+		for (const tag of tags) {
+			const tagKey = scopedCacheTagKey(tag);
+
+			if (!computedTagKeys.has(tagKey)) {
+				hookAddedTags.set(tagKey, tag);
+			}
+		}
+
+		unautopurgeable = [...hookAddedTags.values()].filter((tag) => {
 			if (tag.field === undefined) {
 				return false;
 			}
