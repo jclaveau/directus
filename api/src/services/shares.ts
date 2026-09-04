@@ -157,12 +157,10 @@ export class SharesService extends ItemsService {
 			fields: ['first_name', 'last_name', 'email', 'id'],
 		});
 
-		const senderName = userName(userInfo);
-
 		const message = `
 Hello!
 
-${senderName} has invited you to view an item in ${share['collection']}.
+${userName(userInfo)} has invited you to view an item in ${share['collection']}.
 
 [Open](${new Url(env['PUBLIC_URL'] as string).addPath('admin', 'shared', payload.share).toString()})
 `;

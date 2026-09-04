@@ -158,16 +158,12 @@ export interface ReadMeta {
 export type WithMeta<T> = T & { getMeta(): ReadMeta };
 
 /**
- * A value that may or may not carry the rider, for a consumer that neither needs
- * the meta nor minds it. The rider is invisible at runtime, so a read result and a
- * hand-built object behave identically there; this says so in the type instead of
- * making every caller strip it first.
+ * A value that may or may not carry the rider, for a consumer that neither needs the
+ * meta nor minds it.
  *
- * Note what it gives up. `Partial<X>` is a weak type, and TypeScript refuses a
- * source that shares no property with a weak target — which is what catches a row
- * from the wrong collection. Declaring `getMeta` here supplies that shared
- * property for EVERY read result, so `WithMeta<Permission>` also satisfies a
- * `MaybeWithMeta<Partial<User>>`. Use it where the consumer is genuinely
- * shape-agnostic, not to quiet a mismatch worth hearing about.
+ * It costs a check: TypeScript refuses a source sharing no property with a weak
+ * target (all-optional, e.g. `Partial<User>`), which is what catches a row from the
+ * wrong collection. Declaring `getMeta` supplies that shared property for every read
+ * result, so `WithMeta<Permission>` satisfies `MaybeWithMeta<Partial<User>>` too.
  */
 export type MaybeWithMeta<T> = T & { getMeta?(): ReadMeta };
