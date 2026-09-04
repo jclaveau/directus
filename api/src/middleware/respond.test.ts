@@ -120,6 +120,7 @@ vi.mock('../services/import-export.js', () => {
 });
 
 import { setCacheValue } from '../cache.js';
+import { getCacheKey } from '../utils/get-cache-key.js';
 import { respond } from './respond.js';
 
 const next = vi.fn();
@@ -183,15 +184,17 @@ describe('respond middleware', () => {
 			expect.any(Number),
 		);
 
-		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
-			mockCache,
+		// Written straight through the store, not through `setCacheValue`: three
+		// numbers do not repay a compression pass on every fill and a second on
+		// every hit.
+		expect(mockCache.set).toHaveBeenCalledWith(
 			'cache-key__expires_at',
 			{
 				exp: expect.any(Number),
 				createdAt: expect.any(Number),
 				ttlMs: expect.any(Number),
 			},
-			// The sibling now carries an explicit ttl so it tracks the live override,
+			// The sibling carries an explicit ttl so it tracks the live override,
 			// not the response cache's construction-time Keyv default.
 			expect.any(Number),
 		);
@@ -203,6 +206,31 @@ describe('respond middleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
+	});
+
+	test(oneLine`
+		takes the cache key the middleware already built for the lookup that missed,
+		rather than rebuilding it — each build runs a policy ip-access lookup
+	`, async () => {
+		await respond(makeReq(), makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [{ collection: 'articles' }],
+				httpRequestCacheKey: {
+					redisKey: 'middleware-key',
+					cacheKey: 'middleware-hash',
+				},
+			},
+		), next);
+
+		expect(vi.mocked(getCacheKey)).not.toHaveBeenCalled();
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
+			mockCache,
+			'middleware-key',
+			{ data: [{ id: 1 }] },
+			expect.any(Number),
+		);
 	});
 
 	test('a fill with stats active captures the descriptor + tombstone', async () => {
@@ -434,13 +462,10 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
-		a purge that landed while the read was in flight leaves NO entry cached — the
-		rows predate it, so the entry would be born stale and survive that purge
+		names the collection whose purge raced the fill, so a read serving rows a write
+		already replaced is attributable rather than silent
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
-
-		// Read back at fill time: the counter moved, so a purge dropped this
-		// collection's tags after the SQL snapshot the payload came from.
 		mocks.readScopedCacheEpochs.mockResolvedValue({ articles: '8' });
 
 		const res = makeRes({ data: [] }, {
@@ -450,7 +475,12 @@ describe('respond middleware', () => {
 
 		await respond(makeReq(), res, next);
 
-		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.anything(),
+			'inflight_purge',
+			'articles',
+		);
+
 		expect(res.json).toHaveBeenCalled();
 	});
 
@@ -460,10 +490,10 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
-		// Unmoved when the fill was decided, moved by the time both writes landed.
-		mocks.readScopedCacheEpochs
-			.mockResolvedValueOnce({ articles: '7' })
-			.mockResolvedValueOnce({ articles: '8' });
+		// Moved by the time the writes landed. There is one reading now, taken after
+		// them: a check before the fill could only spare the racing fill its own undo,
+		// and this is the one that decides.
+		mocks.readScopedCacheEpochs.mockResolvedValue({ articles: '8' });
 
 		const res = makeRes({ data: [] }, {
 			scopedCacheTags: [{ collection: 'articles' }],

@@ -143,20 +143,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	// A purge that landed while this read was in flight dropped tag sets this entry is
 	// not in yet: caching it now would store rows the write already replaced, under an
-	// index that purge has already deleted. Captured before the query, compared here.
+	// index that purge has already deleted. Captured before the query, compared once
+	// the fill is written — the comparison AFTER the write is the one that closes the
+	// window, so checking here too would only spare the rare racing fill its own
+	// undo, at the price of a round trip on every miss.
 	const capturedEpochs = res.locals['scopedCacheEpochs'] as
 		| Record<string, string | null>
 		| undefined;
-
-	const currentEpochs = cacheableRequest && cache && capturedEpochs
-		? await readScopedCacheEpochs(Object.keys(capturedEpochs))
-		: {};
-
-	const racedCollection = Object.entries(capturedEpochs ?? {}).find(
-		([collection, captured]) => {
-			return currentEpochs[collection] !== captured;
-		},
-	)?.[0];
 
 	let filled = false;
 
@@ -167,7 +160,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
 		dynamicQueryFilter === false &&
-		racedCollection === undefined &&
 		(await permissionsCachable(
 			req.collection,
 			{
@@ -179,7 +171,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	) {
 		filled = true;
 
-		const { redisKey, cacheKey } = await getCacheKey(req);
+		// Built by the cache middleware for the lookup that missed. It returns early
+		// without one for a request it never looks up (a skip rule, the cache off),
+		// which is the only path that still pays for its own.
+		const { redisKey, cacheKey } = res.locals['httpRequestCacheKey']
+			?? await getCacheKey(req);
 
 		try {
 			const now = Date.now();
@@ -199,16 +195,25 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					: [],
 			);
 
-			await setCacheValue(cache, redisKey, res.locals['payload'], ttlMs);
+			// Handed over together rather than awaited in turn: node-redis corks its
+			// socket and drains the whole queue per tick, so the pair costs one round
+			// trip. Neither reads the other's answer, and a sidecar left behind by a
+			// failed payload write is an orphan its own TTL collects.
+			await Promise.all([
+				setCacheValue(cache, redisKey, res.locals['payload'], ttlMs),
 
-			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
-			// `ttlMs` explicitly so it tracks the live override, not the Keyv default
-			// TTL frozen at the response cache's construction.
-			await setCacheValue(cache, `${redisKey}__expires_at`, {
-				exp: expiresAt,
-				createdAt: now,
-				ttlMs: ttlMs ?? null,
-			}, ttlMs);
+				// Enriched so a HIT reads age/TTL off this sibling — no extra read.
+				// Pass `ttlMs` explicitly so it tracks the live override, not the Keyv
+				// default TTL frozen at the response cache's construction. Stored raw:
+				// three numbers do not repay a snappy pass on every fill and a second
+				// one on every hit, and `decompress` sniffs the Buffer rather than the
+				// setting, so a reader takes it either way.
+				cache.set(`${redisKey}__expires_at`, {
+					exp: expiresAt,
+					createdAt: now,
+					ttlMs: ttlMs ?? null,
+				}, ttlMs),
+			]);
 
 			// The check before the fill cannot see a purge that started after it: that
 			// purge's sweep read the tag sets before this key was filed, or deleted
@@ -368,13 +373,6 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 		else if (orphansInScopedMode) {
 			void reportCacheAnomaly(req, 'missing_scope').catch(() => {});
-		}
-		else if (racedCollection !== undefined) {
-			void reportCacheAnomaly(
-				req,
-				'inflight_purge',
-				racedCollection,
-			).catch(() => {});
 		}
 		else if (unautopurgeableScope) {
 			// Dedup: aggregation (esp. GraphQL, many reads) can repeat the same tag.

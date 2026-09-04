@@ -38,6 +38,12 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 	const { redisKey, cacheKey } = await getCacheKey(req);
 
+	// `respond` needs the same key on a miss, and building it re-runs the policy
+	// ip-access lookup. `sanitizeQuery` runs before this middleware, so nothing the
+	// key is derived from moves between here and there. One identity, spelled twice:
+	// what Redis is keyed by, and the fixed-length one the stats tables carry.
+	res.locals['httpRequestCacheKey'] = { redisKey, cacheKey };
+
 	let cachedData;
 
 	try {
