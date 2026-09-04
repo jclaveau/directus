@@ -98,7 +98,12 @@ export async function readScopedCacheEpochs(
 	// `*` rides along so a wholesale flush invalidates an in-flight read too.
 	const names = [...new Set([...collections, '*'])];
 
-	const values = await useRedis().mget(names.map(scopedCacheEpochKey));
+	// A read that cannot reach the counters still has to answer. Capturing nothing
+	// leaves the fill unguarded, exactly as it is with no redis at all — the same
+	// trade the response cache makes everywhere else.
+	const values = await useRedis()
+		.mget(names.map(scopedCacheEpochKey))
+		.catch((): (string | null)[] => []);
 
 	return Object.fromEntries(
 		names.map((name, index) => [name, values[index] ?? null]),
@@ -124,17 +129,28 @@ async function bumpScopedCacheEpochs(
 		return;
 	}
 
-	const redis = useRedis();
-	const pipeline = redis.pipeline();
+	// Best effort, and the whole of it: this runs BEFORE the sweep, so letting a
+	// client that cannot take the command through would abort the purge itself —
+	// trading every entry it was about to drop for the one racing fill the counter
+	// would have refused.
+	try {
+		const redis = useRedis();
+		const pipeline = redis.pipeline();
 
-	for (const name of names) {
-		pipeline.incr(scopedCacheEpochKey(name));
-		pipeline.expire(scopedCacheEpochKey(name), SCOPED_CACHE_EPOCH_TTL_SECONDS);
+		for (const name of names) {
+			pipeline.incr(scopedCacheEpochKey(name));
+
+			pipeline.expire(
+				scopedCacheEpochKey(name),
+				SCOPED_CACHE_EPOCH_TTL_SECONDS,
+			);
+		}
+
+		await pipeline.exec();
 	}
-
-	// Best effort: a counter that failed to move only costs the fill it would have
-	// refused, and the purge itself has already dropped what it names.
-	await pipeline.exec().catch(() => undefined);
+	catch {
+		// See above: the sweep behind this is what makes the cache correct.
+	}
 }
 
 function scopedCacheCollectionSlicesKey(collection: string): string {
