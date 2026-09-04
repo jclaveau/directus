@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=()=>()=>({path:`/collections`,method:`GET`}),n=t=>()=>(e.throwIfEmpty(t,`Collection cannot be empty`),{path:`/collections/${t}`,method:`GET`});exports.readCollection=n,exports.readCollections=t;
+//# sourceMappingURL=collections.cjs.map

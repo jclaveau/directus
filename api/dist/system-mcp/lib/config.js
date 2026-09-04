@@ -1,0 +1,50 @@
+import { useEnv } from "@directus/env";
+
+//#region src/system-mcp/lib/config.ts
+/**
+* Whether this deployment serves the system MCP endpoint. Off by default:
+* it is a new externally reachable surface, so it is opened deliberately or not
+* at all.
+*/
+function systemMcpEnabled() {
+	return useEnv()["SYSTEM_MCP_ENABLED"] === true;
+}
+function isSystemMcpToolGroup(value) {
+	return value === "processes" || value === "cache";
+}
+/**
+* Which subsystems this deployment exposes tools for. A group left out is not
+* listed and cannot be called — an agent given the processes tools has no way to
+* reach the cache ones.
+*/
+function systemMcpToolGroups() {
+	const configured = useEnv()["SYSTEM_MCP_TOOLS"];
+	if (Array.isArray(configured) === false) return [];
+	return configured.map((group) => String(group).trim()).filter(isSystemMcpToolGroup);
+}
+/**
+* Whether a browser at `origin` may call the endpoint.
+*
+* The transport spec requires the `Origin` header to be validated, because DNS
+* rebinding defeats CORS: the attacker's name resolves to this host, so the
+* browser believes it is same-origin and never sends a preflight. A request
+* carrying no `Origin` is not from a browser — that is the agent case, and it
+* is the one this endpoint exists for.
+*
+* Empty by default, so no browser origin is accepted until one is named. Kept
+* separate from `CORS_ORIGIN` on purpose: opening the Data Studio to an origin
+* should not also hand it the diagnostics — which means a browser needs both,
+* this one to get past here and `CORS_ORIGIN` to be allowed to read the answer.
+*/
+function systemMcpAllowsOrigin(origin) {
+	if (origin === void 0) return true;
+	const configured = useEnv()["SYSTEM_MCP_ALLOWED_ORIGINS"];
+	if (Array.isArray(configured) === false) return false;
+	const wanted = origin.toLowerCase();
+	return configured.map((allowed) => {
+		return String(allowed).trim().toLowerCase();
+	}).includes(wanted);
+}
+
+//#endregion
+export { systemMcpAllowsOrigin, systemMcpEnabled, systemMcpToolGroups };
