@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { useEnv } from '@directus/env';
 import { parse as parseBytes } from 'bytes';
+import type {
+	CacheConfigEvent,
+	CachePurgeMode,
+	CacheTimeseries,
+	CacheTimeseriesBucket,
+} from '@directus/types';
 import type { Knex } from 'knex';
 import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
@@ -12,12 +18,13 @@ import { getMilliseconds } from './utils/get-milliseconds.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 
 // The timeseries wire types live in @directus/types so the app chart shares them.
+// Re-exported for consumers; the import above is what binds them in this file.
 export type {
 	CacheConfigEvent,
 	CachePurgeMode,
 	CacheTimeseries,
 	CacheTimeseriesBucket,
-} from '@directus/types';
+};
 
 /**
  * Cache telemetry buffered in a Redis Stream and drained to three PG tables so a
@@ -66,7 +73,7 @@ export interface CachePurge {
 	 * pass for the tags a hook declared, and an entry both reach must count one
 	 * purge, not two.
 	 */
-	purgeId?: string;
+	purgeId?: string | undefined;
 	collection: string | null; // null on a namespace-wide clear
 	mode: CachePurgeMode;
 	// The scoped cache tags this purge actually dropped, in the display form
@@ -2357,9 +2364,13 @@ export async function enforceCacheStatsBudget(): Promise<void> {
 	const { getHelpers } = await import('./database/helpers/index.js');
 	const { schema } = getHelpers(getDatabase());
 
-	let bytes = maxBytes
-		? await schema.getTablesSize(CACHE_STATS_TABLES)
-		: null;
+	// No budget configured, or one that does not parse: nothing to enforce.
+	if (!maxBytes) {
+		await clearCacheStatsBudgetAlert();
+		return;
+	}
+
+	let bytes = await schema.getTablesSize(CACHE_STATS_TABLES);
 
 	if (bytes === null || bytes <= maxBytes) {
 		await clearCacheStatsBudgetAlert();

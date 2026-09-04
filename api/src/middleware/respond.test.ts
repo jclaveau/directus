@@ -135,7 +135,14 @@ function makeRes(payload: any, locals: Record<string, any> = {}) {
 	} as unknown as Response;
 }
 
-function makeReq(overrides: Partial<Request> = {}) {
+function makeReq(
+	// `collection` is defaulted below, and the only way to spread a default away is
+	// to pass the key with `undefined` — which `Partial` forbids under
+	// `exactOptionalPropertyTypes`. Only this field is ever cleared that way.
+	overrides: Omit<Partial<Request>, 'collection'> & {
+		collection?: string | undefined;
+	} = {},
+) {
 	return {
 		method: 'GET',
 		originalUrl: '/items/articles',

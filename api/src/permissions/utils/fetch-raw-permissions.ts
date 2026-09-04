@@ -1,4 +1,5 @@
 import type { Accountability, Filter, Permission, PermissionsAction } from '@directus/types';
+import { withoutMeta } from '../../utils/read-meta.js';
 import { sortBy } from 'lodash-es';
 import { withAppMinimalPermissions } from '../lib/with-app-minimal-permissions.js';
 import type { Context } from '../types.js';
@@ -40,7 +41,7 @@ export async function _fetchRawPermissions(options: FetchRawPermissionsOptions, 
 		filter._and.push({ collection: { _in: options.collections } });
 	}
 
-	let permissions = (await permissionsService.readByQuery({
+	let permissions = withoutMeta(await permissionsService.readByQuery({
 		filter,
 		limit: -1,
 	})) as Permission[];

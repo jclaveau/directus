@@ -12,7 +12,7 @@ import { UsersService } from './users.js';
 const env = useEnv();
 const logger = useLogger();
 
-export class NotificationsService extends ItemsService {
+export class NotificationsService extends ItemsService<Notification> {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_notifications', options);
 	}

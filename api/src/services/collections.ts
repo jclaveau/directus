@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { withoutMeta } from '../utils/read-meta.js';
 import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import type { SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
@@ -301,7 +302,7 @@ export class CollectionsService {
 
 		let tablesInDatabase = await this.schemaInspector.tableInfo();
 
-		let meta = (await collectionsItemsService.readByQuery({
+		let meta = withoutMeta(await collectionsItemsService.readByQuery({
 			limit: -1,
 		})) as BaseCollectionMeta[];
 

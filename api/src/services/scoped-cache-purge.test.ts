@@ -498,7 +498,7 @@ describe(oneLine`
 	`, async () => {
 		// Nothing was written, so no entry can have gone stale — and an empty tag
 		// array is not "nothing": it still resolves to this collection's bare tag.
-		const takeOver = async (payload: any, _meta: any, ctx: any) => {
+		const takeOver = async (_payload: any, _meta: any, ctx: any) => {
 			ctx.scopedCache.skipPurgeFor(99);
 			return 99;
 		};

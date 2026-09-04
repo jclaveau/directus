@@ -10,9 +10,11 @@ import type { PrimaryKey } from './items.js';
  */
 export interface ScopedCacheTag {
 	collection: string;
-	field?: string;
+	// Built by resolving a field off a payload, so an absent one arrives as an
+	// explicit `undefined` rather than a missing key.
+	field?: string | undefined;
 	value?: unknown;
-	type?: Type;
+	type?: Type | undefined;
 }
 
 /** One tag, or a batch (e.g. `result.getMeta().scopedCacheTags`). */
@@ -154,3 +156,14 @@ export interface ReadMeta {
  * value without polluting the payload — invisible to `JSON.stringify`, enumeration, and the wire.
  */
 export type WithMeta<T> = T & { getMeta(): ReadMeta };
+
+/**
+ * A value that may or may not carry the rider, for a consumer that neither needs the
+ * meta nor minds it.
+ *
+ * It costs a check: TypeScript refuses a source sharing no property with a weak
+ * target (all-optional, e.g. `Partial<User>`), which is what catches a row from the
+ * wrong collection. Declaring `getMeta` supplies that shared property for every read
+ * result, so `WithMeta<Permission>` satisfies `MaybeWithMeta<Partial<User>>` too.
+ */
+export type MaybeWithMeta<T> = T & { getMeta?(): ReadMeta };

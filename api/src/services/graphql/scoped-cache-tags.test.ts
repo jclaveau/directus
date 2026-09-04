@@ -93,9 +93,10 @@ describe('GraphQLService scoped cache tags', () => {
 		gql.scopedCacheTags.push({ collection: 'articles' }, { collection: 'users' });
 
 		const result = await gql.execute({
+			query: '',
 			document: {} as any,
 			variables: {},
-			operationName: undefined,
+			operationName: null,
 			contextValue: {},
 		});
 
@@ -114,9 +115,10 @@ describe('GraphQLService scoped cache tags', () => {
 
 		await expect(
 			gql.execute({
+				query: '',
 				document: {} as any,
 				variables: {},
-				operationName: undefined,
+				operationName: null,
 				contextValue: {},
 			}),
 		).rejects.toBeInstanceOf(GraphQLExecutionError);
@@ -132,9 +134,10 @@ describe('GraphQLService scoped cache tags', () => {
 		});
 
 		const result = await gql.execute({
+			query: '',
 			document: {} as any,
 			variables: {},
-			operationName: undefined,
+			operationName: null,
 			contextValue: {},
 		});
 

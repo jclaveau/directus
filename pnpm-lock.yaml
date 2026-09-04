@@ -306,6 +306,9 @@ catalogs:
     '@types/papaparse':
       specifier: 5.5.2
       version: 5.5.2
+    '@types/pg':
+      specifier: 8.23.1
+      version: 8.23.1
     '@types/proxy-addr':
       specifier: 2.0.3
       version: 2.0.3
@@ -1392,6 +1395,9 @@ importers:
       '@types/papaparse':
         specifier: 'catalog:'
         version: 5.5.2
+      '@types/pg':
+        specifier: 'catalog:'
+        version: 8.23.1
       '@types/proxy-addr':
         specifier: 'catalog:'
         version: 2.0.3
@@ -6955,6 +6961,9 @@ packages:
 
   '@types/papaparse@5.5.2':
     resolution: {integrity: sha512-gFnFp/JMzLHCwRf7tQHrNnfhN4eYBVYYI897CGX4MY1tzY9l2aLkVyx2IlKZ/SAqDbB3I1AOZW5gTMGGsqWliA==}
+
+  '@types/pg@8.23.1':
+    resolution: {integrity: sha512-fKVHpikPdg4GKks3JuLEhvwSyvwzF23hnabPy6DD8ljVbC7+6J5dQzdv4arV6jqq57djnMgs1HKBxX4P8aBI3A==}
 
   '@types/proxy-addr@2.0.3':
     resolution: {integrity: sha512-TgAHHO4tNG3HgLTUhB+hM4iwW6JUNeQHCLnF1DjaDA9c69PN+IasoFu2MYDhubFc+ZIw5c5t9DMtjvrD6R3Egg==}
@@ -18361,6 +18370,12 @@ snapshots:
     dependencies:
       '@types/node': 22.19.21
 
+  '@types/pg@8.23.1':
+    dependencies:
+      '@types/node': 26.0.0
+      pg-protocol: 1.15.0
+      pg-types: 2.2.0
+
   '@types/proxy-addr@2.0.3':
     dependencies:
       '@types/node': 22.19.21
@@ -23043,16 +23058,14 @@ snapshots:
 
   pg-connection-string@2.6.2: {}
 
-  pg-int8@1.0.1:
-    optional: true
+  pg-int8@1.0.1: {}
 
   pg-pool@3.14.0(pg@8.22.0):
     dependencies:
       pg: 8.22.0
     optional: true
 
-  pg-protocol@1.15.0:
-    optional: true
+  pg-protocol@1.15.0: {}
 
   pg-types@2.2.0:
     dependencies:
@@ -23061,7 +23074,6 @@ snapshots:
       postgres-bytea: 1.0.1
       postgres-date: 1.0.7
       postgres-interval: 1.2.0
-    optional: true
 
   pg@8.22.0:
     dependencies:
@@ -23463,19 +23475,15 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  postgres-array@2.0.0:
-    optional: true
+  postgres-array@2.0.0: {}
 
-  postgres-bytea@1.0.1:
-    optional: true
+  postgres-bytea@1.0.1: {}
 
-  postgres-date@1.0.7:
-    optional: true
+  postgres-date@1.0.7: {}
 
   postgres-interval@1.2.0:
     dependencies:
       xtend: 4.0.2
-    optional: true
 
   potpack@1.0.2: {}
 

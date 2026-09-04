@@ -27,7 +27,11 @@ const redis = vi.hoisted(() => {
 
 // Passthrough filter by default; individual tests override to assert extension
 // augmentation.
-const emitFilter = vi.hoisted(() => vi.fn((_event: string, payload: unknown) => payload));
+// The only filter the code under test emits is `cache.purge`, whose payload is
+// the tag list, so the stand-in says so rather than taking an `unknown`.
+const emitFilter = vi.hoisted(() => {
+	return vi.fn(async (_event: string, payload: ScopedCacheTag[]) => payload);
+});
 
 vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
 // Held rather than built per call: `cache.ts` captures the bus once at module load,
@@ -160,7 +164,9 @@ describe('scoped cache purging', () => {
 			CACHE_AUTO_PURGE_MODE: 'scoped',
 		});
 
-		emitFilter.mockImplementation(async (_event: string, payload: unknown) => payload);
+		emitFilter.mockImplementation(
+			async (_event: string, payload: ScopedCacheTag[]) => payload,
+		);
 	});
 
 	describe('scopedCachePurgeEnabled', () => {

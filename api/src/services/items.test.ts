@@ -11,7 +11,8 @@ import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockedFunction } from 'vitest';
 import { getDatabaseClient } from '../database/index.js';
 import emitter from '../emitter.js';
-import { readMeta } from '../utils/read-meta.js';
+import { purgeScopedCache } from '../scoped-cache.js';
+import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { ItemsService } from './items.js';
@@ -176,7 +177,9 @@ describe('Integration Tests', () => {
 
 		describe('readOne', () => {
 			it('throws a ForbiddenError with a reason when the item is not found or not accessible', async () => {
-				service.readByQuery = vi.fn(async () => []);
+				service.readByQuery = vi.fn(async () => {
+					return withMeta([], { scopedCacheTags: [] });
+				});
 
 				const error = await service.readOne(999).catch((err) => err);
 
@@ -558,7 +561,8 @@ describe('Integration Tests', () => {
 
 			it('should skip when a filter hook strips the only changed field down to the primary key', async () => {
 				// the decision is made on the post-hook payload, so a hook can turn a write into a no-op
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1 });
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter')
+					.mockResolvedValue({ id: 1 });
 
 				const keys = await service.updateMany([1], { name: 'changed' });
 
@@ -570,7 +574,8 @@ describe('Integration Tests', () => {
 
 			it('should write when a filter hook adds a real field to a would-be no-op payload', async () => {
 				// the inverse: a PK-only payload that a hook enriches must no longer be skipped
-				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter').mockResolvedValue({ id: 1, name: 'added' });
+				const emitFilterSpy = vi.spyOn(emitter, 'emitFilter')
+					.mockResolvedValue({ id: 1, name: 'added' });
 
 				await service.updateMany([1], { id: 1 });
 
@@ -1710,5 +1715,42 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 				type: 'integer',
 			});
 		});
+	});
+});
+
+describe('Services / Items / purgeScopedCache', () => {
+	let db: Knex;
+
+	beforeAll(() => {
+		db = knex.default({ client: MockClient });
+	});
+
+	beforeEach(() => {
+		vi.mocked(purgeScopedCache).mockClear();
+	});
+
+	// Public callers reach the purge through `shouldClearCache`, which already rules a
+	// null cache out — so the guard below it is only reachable from the method itself.
+	it('skips the purge when the service has no cache', async () => {
+		const service = new ItemsService('test', { knex: db, schema });
+
+		service.cache = null;
+
+		await service['purgeScopedCache']([{ collection: 'test' }]);
+
+		expect(purgeScopedCache).not.toHaveBeenCalled();
+	});
+
+	it('purges the collection when the service has a cache', async () => {
+		const service = new ItemsService('test', { knex: db, schema });
+
+		await service['purgeScopedCache']([{ collection: 'test' }]);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			service.cache,
+			'test',
+			[{ collection: 'test' }],
+			expect.anything(),
+		);
 	});
 });
