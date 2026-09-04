@@ -35,7 +35,10 @@ import {
 	scopedCacheFilterKeyingByCollection,
 	scopedCacheOwnershipNestedPkPaths,
 	scopedCachePurgeEnabled,
+	readScopedCacheEpochs,
 } from '../scoped-cache.js';
+import { collectionsInFieldMap }
+	from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import {
 	ItemScopedCacheService,
 } from '../scoped-cache/item-scoped-cache-service.js';
@@ -824,6 +827,15 @@ implements AbstractService<Item> {
 		// slice covers them, so they stay bare even when an ancestor is pinned.
 		const o2mConflicted = new Set<string>();
 
+		// Before the query, so it predates any purge racing this read. The collections
+		// are the ones its tags will name, both known already: the field map is built
+		// off the AST and the keying off the filter.
+		const scopedCacheEpochs = await readScopedCacheEpochs([
+			this.collection,
+			...collectionsInFieldMap(fieldMap),
+			...filterKeying.keys(),
+		]);
+
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
 			// GraphQL requires relational keys to be returned regardless
@@ -944,6 +956,7 @@ implements AbstractService<Item> {
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
 			scopedCacheUnautopurgeableTags,
+			scopedCacheEpochs,
 		});
 	}
 

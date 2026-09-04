@@ -136,6 +136,16 @@ export function canonicalScopedCacheValue(
 		return String(value).toLowerCase();
 	}
 
+	// A `_ci` collation — MySQL/MariaDB's default, MSSQL's default — matches `Acme`
+	// to a stored `acme`, so the two spellings name one row and must name one slice,
+	// for the same reason `uuid` folds above: the read would pin `tenant=Acme` while
+	// the write emits `tenant=acme`, and the purge would miss. On a case-SENSITIVE
+	// vendor this merges two real slices into one instead — an over-purge, never a
+	// stale hit. Locale-invariant so the token cannot depend on the server's locale.
+	if (type === 'string' || type === 'text') {
+		return String(value).toLowerCase();
+	}
+
 	// integer/bigInteger normalize the SPELLING but never go through `Number`: past
 	// MAX_SAFE_INTEGER a numeric pass corrupts the value, so leading zeros and a
 	// leading `+` are stripped as string surgery. `01`, `+1`, `0001` and a driver's

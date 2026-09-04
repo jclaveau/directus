@@ -24,6 +24,8 @@ router.use(
 		res.locals['scopedCacheUnautopurgeableTags'] =
 			gqlMeta?.scopedCacheUnautopurgeableTags;
 
+		res.locals['scopedCacheEpochs'] = gqlMeta?.scopedCacheEpochs;
+
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;
 		}
@@ -49,6 +51,8 @@ router.use(
 
 		res.locals['scopedCacheUnautopurgeableTags'] =
 			gqlMeta?.scopedCacheUnautopurgeableTags;
+
+		res.locals['scopedCacheEpochs'] = gqlMeta?.scopedCacheEpochs;
 
 		if (res.locals['payload']?.errors?.length > 0) {
 			res.locals['cache'] = false;

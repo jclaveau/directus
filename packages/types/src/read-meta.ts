@@ -152,6 +152,15 @@ export interface ReadMeta {
 	 * lists them as the `unautopurgeable_scope` anomaly detail. Non-empty ⟺ flagged.
 	 */
 	scopedCacheUnautopurgeableTags?: ScopedCacheTag[];
+
+	/**
+	 * The purge counters of the collections this read depends on, captured BEFORE its
+	 * query ran. `respond` re-reads them at fill time: a counter that moved means a
+	 * purge landed while the read was in flight, so the rows it holds are already
+	 * superseded and the entry it would write could never be invalidated — its tags
+	 * were not in the index for that purge to find.
+	 */
+	scopedCacheEpochs?: Record<string, string | null>;
 }
 
 /**

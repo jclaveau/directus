@@ -65,6 +65,78 @@ export function assertScopedCacheRedisSupported(): void {
 
 // The slice tag keys a collection currently owns, so a collection-wide purge reads
 // them instead of walking the whole keyspace to find them again.
+/**
+ * A per-collection purge counter, bumped every time that collection's tags are
+ * dropped. `*` is the wholesale entry, bumped by a flush that names no collection.
+ */
+function scopedCacheEpochKey(collection: string): string {
+	return `${env['CACHE_NAMESPACE']}:epoch:${collection}`;
+}
+
+/**
+ * Read the purge counters of the collections a read depends on.
+ *
+ * A read's tags reach the index only in `respond`, long after the rows were fetched:
+ * a purge landing in between finds nothing to drop, and the fill then stores rows it
+ * already superseded — stale for the whole TTL, and (its tag sets having just been
+ * deleted) unreachable to every later purge. Comparing the counter captured before
+ * the query against the one at fill time is what closes that window.
+ */
+export async function readScopedCacheEpochs(
+	collections: Iterable<string>,
+): Promise<Record<string, string | null>> {
+	// Every read pays this round trip, so it is skipped wherever its answer cannot
+	// matter: nothing is filled with the response cache off.
+	if (
+		!env['CACHE_ENABLED'] ||
+		!scopedCachePurgeEnabled() ||
+		!redisConfigAvailable()
+	) {
+		return {};
+	}
+
+	// `*` rides along so a wholesale flush invalidates an in-flight read too.
+	const names = [...new Set([...collections, '*'])];
+
+	const values = await useRedis().mget(names.map(scopedCacheEpochKey));
+
+	return Object.fromEntries(
+		names.map((name, index) => [name, values[index] ?? null]),
+	);
+}
+
+/**
+ * Bump the counters of the collections a purge just dropped tags for. Expiring, so
+ * a collection nothing writes to stops costing a key; a read whose counter expired
+ * between capture and fill reads `null` on both sides and caches, which is right —
+ * nothing purged it in between.
+ */
+async function bumpScopedCacheEpochs(
+	collections: Iterable<string>,
+): Promise<void> {
+	if (!scopedCachePurgeEnabled() || !redisConfigAvailable()) {
+		return;
+	}
+
+	const names = [...new Set(collections)];
+
+	if (names.length === 0) {
+		return;
+	}
+
+	const redis = useRedis();
+	const pipeline = redis.pipeline();
+
+	for (const name of names) {
+		pipeline.incr(scopedCacheEpochKey(name));
+		pipeline.expire(scopedCacheEpochKey(name), SCOPED_CACHE_EPOCH_TTL_SECONDS);
+	}
+
+	// Best effort: a counter that failed to move only costs the fill it would have
+	// refused, and the purge itself has already dropped what it names.
+	await pipeline.exec().catch(() => undefined);
+}
+
 function scopedCacheCollectionSlicesKey(collection: string): string {
 	return `${env['CACHE_NAMESPACE']}:slices:${collection}`;
 }
@@ -147,6 +219,10 @@ export function scopedCacheCollectionsChangedByOnDelete(
  */
 const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
 
+// Long enough that no read outlives its own capture, short enough that a
+// collection nobody writes to stops holding a key.
+const SCOPED_CACHE_EPOCH_TTL_SECONDS = 24 * 60 * 60;
+
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both
@@ -156,6 +232,35 @@ const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
  * (`CACHE_TTL` unset) the cached entries never expire either, so the tag sets are
  * left unbounded to match — a normal purge still drains them.
  */
+/**
+ * File a key under a tag set and give that set an expiry that only ever moves OUT.
+ *
+ * A bare `EXPIRE` overwrites, and a tag set is SHARED by every entry pinned to that
+ * slice: lower `CACHE_TTL` at runtime and one short-lived write cuts short the set
+ * indexing an entry cached for an hour, leaving that entry unreachable to every purge
+ * for the rest of its life. Redis 7 says this in one word (`EXPIRE … GT`) but the
+ * stack ships Redis 6 (tests/blackbox/docker-compose.yml), where that flag is an
+ * error — and an error here now throws, skipping the fill. So the comparison runs as
+ * a script: atomic, one pipeline slot, and the same on both majors.
+ *
+ * A set that already carries NO expiry outlives every entry by construction, so it
+ * keeps none — only a freshly created set takes one unconditionally.
+ */
+export const scopedCacheTagExpiryScript = `
+local existed = redis.call('EXISTS', KEYS[1])
+redis.call('SADD', KEYS[1], unpack(ARGV, 2))
+local want = tonumber(ARGV[1])
+if existed == 0 then
+	redis.call('EXPIRE', KEYS[1], want)
+	return 1
+end
+local ttl = redis.call('TTL', KEYS[1])
+if ttl >= 0 and ttl < want then
+	redis.call('EXPIRE', KEYS[1], want)
+end
+return 0
+`;
+
 export async function tagScopedCacheKeys(
 	key: string,
 	scopedCacheTags: Iterable<ScopedCacheTag>,
@@ -194,10 +299,19 @@ export async function tagScopedCacheKeys(
 
 		// `extraSiblings` = other keys written with the entry a purge must also drop
 		// — e.g. the dev-only `${key}__tags` sibling (respond.ts). Empty by default.
-		pipeline.sadd(tagKey, key, `${key}__expires_at`, ...extraSiblings);
+		const members = [key, `${key}__expires_at`, ...extraSiblings];
 
 		if (ttlSeconds > 0) {
-			pipeline.expire(tagKey, ttlSeconds);
+			pipeline.eval(
+				scopedCacheTagExpiryScript,
+				1,
+				tagKey,
+				ttlSeconds,
+				...members,
+			);
+		}
+		else {
+			pipeline.sadd(tagKey, ...members);
 		}
 
 		// The bare tag is where a collection-wide purge starts, so filing it would
@@ -208,12 +322,19 @@ export async function tagScopedCacheKeys(
 
 		const slicesKey = scopedCacheCollectionSlicesKey(tag.collection);
 
-		pipeline.sadd(slicesKey, tagKey);
-
 		// Same expiry as the tag sets it names, written in the same pipeline, so the
 		// index cannot outlive — or predecease — what it points at.
 		if (ttlSeconds > 0) {
-			pipeline.expire(slicesKey, ttlSeconds);
+			pipeline.eval(
+				scopedCacheTagExpiryScript,
+				1,
+				slicesKey,
+				ttlSeconds,
+				tagKey,
+			);
+		}
+		else {
+			pipeline.sadd(slicesKey, tagKey);
 		}
 	}
 
@@ -298,6 +419,22 @@ function scopedCacheSidecarOwner(member: string): string | null {
 		: member.slice(0, -suffix.length);
 }
 
+/** The collection a tag key names, bare tag or value slice alike. */
+function scopedCacheCollectionOfTagKey(tagKey: string): string | null {
+	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
+
+	if (!tagKey.startsWith(tagPrefix)) {
+		return null;
+	}
+
+	const label = tagKey.slice(tagPrefix.length);
+	const fieldAt = label.indexOf(':');
+
+	return fieldAt === -1
+		? label
+		: label.slice(0, fieldAt);
+}
+
 async function purgeScopedCacheTagKeys(
 	cache: Keyv,
 	tagKeys: string[],
@@ -309,6 +446,16 @@ async function purgeScopedCacheTagKeys(
 	}
 
 	const redis = useRedis();
+
+	// BEFORE the sweep, never after: a read still in flight holds tags this purge
+	// cannot see yet, and it decides whether to cache by re-reading these counters.
+	// Bumped first, every such fill either reads the new value and declines, or had
+	// already filed its tags — in which case the sweep below reaches its entry.
+	await bumpScopedCacheEpochs(
+		tagKeys
+			.map(scopedCacheCollectionOfTagKey)
+			.filter((collection): collection is string => collection !== null),
+	);
 
 	const memberLists = await Promise.all(
 		tagKeys.map((tagKey) => redis.smembers(tagKey)),
@@ -414,6 +561,9 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 
 	// Array form: this list is a whole-keyspace scan, so it is the longest of them.
 	await useRedis().del(tagKeys);
+
+	// Names no collection, so it moves the wholesale counter every read reads.
+	await bumpScopedCacheEpochs(['*']);
 }
 
 /**
@@ -429,6 +579,8 @@ export async function purgeCollectionScopedCache(
 	scopedCachePurgeId?: string,
 ): Promise<void> {
 	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
+
+	await bumpScopedCacheEpochs([collection]);
 
 	// Read off the index each slice files itself into, rather than walking the whole
 	// keyspace for keys that a collection owning none can never yield.
