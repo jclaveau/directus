@@ -49,11 +49,16 @@ const decoyChunkSize = 4_000;
 // the window.
 const readHoldMs = 400;
 
+// Measured on a runner: the sweep answers ~1.8s after the decoys are planted, and
+// its DEL is the last thing it does. Leads are spread across that, starting late
+// enough that the counters were already bumped — a read that captured before the
+// bump is undone by the guard and never reaches the assertion anyway.
+
 // Reads fired at staggered offsets into the sweep, so one of them lands in the
 // window window
 // wherever the runner's real delete phase happens to start and end. Each carries a
 // distinct `limit`, so each is its own cache entry rather than overwriting the last.
-const readLeadsMs = [150, 300, 450, 600, 750];
+const readLeadsMs = [300, 500, 700, 900, 1100];
 
 const startedAt = Date.now();
 
@@ -79,7 +84,11 @@ describe(oneLine`
 		env[vendor]['CACHE_NAMESPACE'] = namespace;
 		env[vendor]['CACHE_RACE_READ_HOLD_MS'] = String(readHoldMs);
 
-		let instance: ChildProcess;
+		// The instance that sweeps, and the one that reads while it does. Same Redis,
+		// same database, separate event loops — which is the whole point.
+		let sweeperInstance: ChildProcess;
+		let readerInstance: ChildProcess;
+		const readerEnv = cloneDeep(env);
 		let rowId: string;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 		const heldSliceKey = `${namespace}:tag:${COLLECTION}:slot=${HELD_SLOT}`;
@@ -104,12 +113,21 @@ describe(oneLine`
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
-			instance = spawn('node', [paths.cli, 'start'], {
+			sweeperInstance = spawn('node', [paths.cli, 'start'], {
 				cwd: paths.cwd,
 				env: env[vendor],
 			});
 
+			const readerPort = await getPort();
+			readerEnv[vendor].PORT = String(readerPort);
+
+			readerInstance = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: readerEnv[vendor],
+			});
+
 			await awaitDirectusConnection(port);
+			await awaitDirectusConnection(readerPort);
 
 			const seeded = await request(getUrl(vendor, env))
 				.get(`/items/${COLLECTION}`)
@@ -117,10 +135,11 @@ describe(oneLine`
 				.set('Authorization', auth);
 
 			rowId = seeded.body.data[0].id;
-		}, 60_000);
+		}, 120_000);
 
 		afterAll(async () => {
-			instance?.kill();
+			sweeperInstance?.kill();
+			readerInstance?.kill();
 
 			await redisCommand(REDIS_PORT, ['DEL', heldSliceKey]).catch(() => '');
 
@@ -128,7 +147,7 @@ describe(oneLine`
 		});
 
 		function readHeld(limit: number) {
-			return request(getUrl(vendor, env))
+			return request(getUrl(vendor, readerEnv))
 				.get(`/items/${COLLECTION}`)
 				.query({ 'filter[slot][_eq]': HELD_SLOT, limit })
 				.set('Authorization', auth);
