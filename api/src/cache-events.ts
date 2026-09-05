@@ -107,11 +107,15 @@ export interface CacheDescriptor {
 //   - missing_scope: scoped mode, response has no scope tag (can't be purged).
 //   - unautopurgeable_scope: a read hook scoped TO a tag no write auto-purges (a
 //     value slice on a non-scoped field) without `manuallyPurged` — left uncached.
+//   - unguarded_scope: a read hook scoped TO a collection whose purge counter the
+//     read never captured, so an in-flight purge of it cannot be detected — left
+//     uncached rather than stored with no way to notice it went stale.
 //   - value_too_large: payload over CACHE_VALUE_MAX_SIZE.
 //   - redis_error: a Redis write failed.
 export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'unautopurgeable_scope'
+	| 'unguarded_scope'
 	| 'value_too_large'
 	// A purge landed between this read's query and its fill, so the rows it holds
 	// are already superseded and its tags missed that purge's sweep.

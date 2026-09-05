@@ -35,6 +35,7 @@ import {
 	scopedCacheFilterKeyingByCollection,
 	scopedCacheOwnershipNestedPkPaths,
 	scopedCachePurgeEnabled,
+	scopedCacheTagKey,
 	readScopedCacheEpochs,
 } from '../scoped-cache.js';
 import { collectionsInFieldMap }
@@ -838,7 +839,8 @@ implements AbstractService<Item> {
 		// Before the query, so it predates any purge racing this read. The collections
 		// are the ones its tags will name, both known already: the field map is built
 		// off the AST and the keying off the filter.
-		const scopedCacheEpochs = opts?.skipScopedCacheEpochs === true
+		const scopedCacheEpochs: Record<string, string | null>
+			= opts?.skipScopedCacheEpochs === true
 			? {}
 			: await readScopedCacheEpochs([
 				this.collection,
@@ -961,6 +963,43 @@ implements AbstractService<Item> {
 				this.schema,
 				this.collection,
 			);
+		}
+
+		// A `scopeTo` names a collection the capture above could not know about, and
+		// hands over the counter its own dependent read took beforehand. Folded in
+		// here rather than at declaration time so the read's own capture always wins:
+		// it is the earlier of the two, and only the earlier one shows a purge moved.
+		for (const [collection, epoch] of Object.entries(
+			scopedCacheCollector.epochs,
+		)) {
+			if (collection in scopedCacheEpochs === false) {
+				scopedCacheEpochs[collection] = epoch;
+			}
+		}
+
+		// A `manuallyPurged` tag names a collection whose invalidation its author
+		// owns, and that flag predates this guard — refusing to cache it now would
+		// retract a documented capability. Its counter is captured HERE instead:
+		// after the rows, so it can only catch a purge landing before the fill, not
+		// one that landed during the read. More than the nothing it had, less than
+		// what handing `epochs` over buys — which is how such a hook closes the rest.
+		const lateGuardedCollections = [
+			...new Set(
+				scopedCacheTags
+					.filter((tag) => {
+						return scopedCacheCollector.manuallyPurgedKeys
+							.has(scopedCacheTagKey(tag));
+					})
+					.map((tag) => tag.collection),
+			),
+		].filter((collection) => collection in scopedCacheEpochs === false);
+
+		if (lateGuardedCollections.length > 0) {
+			const lateEpochs = await readScopedCacheEpochs(lateGuardedCollections);
+
+			for (const collection of lateGuardedCollections) {
+				scopedCacheEpochs[collection] = lateEpochs[collection] ?? null;
+			}
 		}
 
 		return withMeta(filteredRecords as Item[], {

@@ -284,6 +284,58 @@ return 0
 `;
 
 /**
+ * Read a set of tag sets, drop them, and prune the slice index that names them — as
+ * one step, so no other client can act between any two of those.
+ *
+ * The counter bumps ride along at the top, before anything is read, which is the
+ * ordering `respond`'s post-fill comparison rests on: a read still in flight
+ * either sees the new counter and declines, or had already filed its tags and is
+ * swept here.
+ *
+ * Members are gathered with a `SMEMBERS` per key and deduped in Lua rather than
+ * by `SUNION`, for two reasons: the union has to be built before the sets are
+ * dropped anyway, and `unpack`ing an unbounded key list into one call overflows
+ * Lua's stack (`LUAI_MAXCSTACK`) on a collection with enough slices.
+ *
+ * KEYS are the tag sets. ARGV is the epoch TTL, how many epoch keys follow, those
+ * keys, and then `sliceIndexKey, tagKey` pairs for the prunings.
+ */
+export const scopedCacheSweepScript = `
+local epochTtl = tonumber(ARGV[1])
+local epochCount = tonumber(ARGV[2])
+
+for i = 1, epochCount do
+	local epochKey = ARGV[2 + i]
+	redis.call('INCR', epochKey)
+	redis.call('EXPIRE', epochKey, epochTtl)
+end
+
+local seen = {}
+local members = {}
+
+for i = 1, #KEYS do
+	local batch = redis.call('SMEMBERS', KEYS[i])
+
+	for j = 1, #batch do
+		local member = batch[j]
+
+		if not seen[member] then
+			seen[member] = true
+			members[#members + 1] = member
+		end
+	end
+
+	redis.call('DEL', KEYS[i])
+end
+
+for i = 3 + epochCount, #ARGV, 2 do
+	redis.call('SREM', ARGV[i], ARGV[i + 1])
+end
+
+return members
+`;
+
+/**
  * Index a freshly-cached response key under every tag its data came from, so a later
  * mutation can drop just the matching entries instead of the whole namespace. Both
  * the payload key and its `__expires_at` sibling are tagged. When a cache TTL is
@@ -478,50 +530,12 @@ async function purgeScopedCacheTagKeys(
 
 	const redis = useRedis();
 
-	// One pipeline for the counters and the members. The bumps come first because a
-	// read still in flight holds tags this purge cannot see yet, and it decides
-	// whether to cache by re-reading these counters: bumped first, every such fill
-	// either reads the new value and declines, or had already filed its tags — in
-	// which case the sweep reaches its entry. `SUNION` then dedupes server-side,
-	// where a per-tag `SMEMBERS` sent every copy of a key filed under several tags
-	// back over the wire.
-	const pipeline = redis.pipeline();
-
-	appendScopedCacheEpochBumps(
-		pipeline,
-		tagKeys
-			.map(scopedCacheCollectionOfTagKey)
-			.filter((collection): collection is string => collection !== null),
-	);
-
-	pipeline.sunion(tagKeys);
-
-	const results = await pipeline.exec();
-	const memberResult = results?.[results.length - 1];
-
-	// The bumps are best effort; the member read is the sweep itself. A refusal there
-	// has to reach the caller, which records the purge for retry rather than leaving
-	// entries no one will come back for.
-	if (memberResult?.[0]) {
-		throw memberResult[0];
-	}
-
-	const members = (memberResult?.[1] ?? []) as string[];
-
-	const wasDeleted = await Promise.all(members.map((member) => {
-		return cache.delete(member);
-	}));
-
-	// Array form: one key per tag purged, so a spread throws RangeError once
-	// the list is long enough.
-	await redis.del(tagKeys);
-
-	// Drop the purged slice keys from their collection's index: one pruned only
-	// wholesale keeps naming keys that are gone, and grows without bound. A
-	// collection name cannot hold a `:`, so the first one after the prefix is
-	// where the field starts.
+	// Collect the slice-index prunings before the sweep runs, so the script can do
+	// them in the same step. A collection name cannot hold a `:`, so the first one
+	// after the prefix is where the field starts; a bare collection tag has none and
+	// is not in any slice index.
 	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
-	const sliceKeysByCollection = new Map<string, string[]>();
+	const sliceIndexPrunings: string[] = [];
 
 	for (const tagKey of tagKeys) {
 		const label = tagKey.startsWith(tagPrefix)
@@ -534,18 +548,43 @@ async function purgeScopedCacheTagKeys(
 			continue;
 		}
 
-		const collection = label.slice(0, fieldAt);
-
-		sliceKeysByCollection.set(collection, [
-			...sliceKeysByCollection.get(collection) ?? [],
+		sliceIndexPrunings.push(
+			scopedCacheCollectionSlicesKey(label.slice(0, fieldAt)),
 			tagKey,
-		]);
+		);
 	}
 
-	// One member per slice the collection owns, so the array form: a spread
-	// throws RangeError once the list is long enough.
-	await Promise.all([...sliceKeysByCollection].map(([collection, sliceKeys]) => {
-		return redis.srem(scopedCacheCollectionSlicesKey(collection), sliceKeys);
+	const epochKeys = scopedCachePurgeEnabled() && redisConfigAvailable()
+		? [
+			...new Set(
+				tagKeys
+					.map(scopedCacheCollectionOfTagKey)
+					.filter((collection): collection is string => collection !== null),
+			),
+		].map(scopedCacheEpochKey)
+		: [];
+
+	// One atomic step, not a pipeline: a pipeline only fixes the ORDER its own
+	// commands run in, and any other client's command may still land between two of
+	// them. A read filing its tags between the member read and the DEL below used to
+	// have the set it had just written to deleted underneath it — leaving a correct
+	// entry indexed by nothing, which no later purge could reach and which the
+	// counter guard cannot catch, since that read captured after the bump and is
+	// right to cache. Inside a script the interleaving cannot exist: a concurrent
+	// SADD either precedes the whole sweep (its key is a member, and its entry is
+	// deleted below) or follows it (its set is new, and the next purge finds it).
+	const members = await redis.eval(
+		scopedCacheSweepScript,
+		tagKeys.length,
+		...tagKeys,
+		String(SCOPED_CACHE_EPOCH_TTL_SECONDS),
+		String(epochKeys.length),
+		...epochKeys,
+		...sliceIndexPrunings,
+	) as string[];
+
+	const wasDeleted = await Promise.all(members.map((member) => {
+		return cache.delete(member);
 	}));
 
 	const present = new Set(members);
@@ -595,6 +634,15 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 		return;
 	}
 
+	// BEFORE the scan, like every other sweep: a read that captured the counter
+	// earlier and files its tags between the DEL below and a bump made after it
+	// would compare equal, keep its entry, and leave it indexed by a set this
+	// function just deleted — reachable to no later purge. Bumping first is what
+	// makes such a read decline. Unconditional, so a flush finding no tag set still
+	// invalidates the reads in flight across the `cache.clear()` that preceded it.
+	// Names no collection, so it moves the wholesale counter every read captures.
+	await bumpScopedCacheEpochs(['*']);
+
 	const tagKeys = [
 		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`),
 		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:slices:*`),
@@ -606,9 +654,6 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 
 	// Array form: this list is a whole-keyspace scan, so it is the longest of them.
 	await useRedis().del(tagKeys);
-
-	// Names no collection, so it moves the wholesale counter every read reads.
-	await bumpScopedCacheEpochs(['*']);
 }
 
 /**
@@ -883,6 +928,22 @@ export function startScopedCachePurgeRecovery(): void {
 	};
 
 	useRedis().on('ready', recover);
+
+	// A purge can also fail with the link UP — `OOM command not allowed` under
+	// maxmemory/noeviction, a WRONGTYPE, a LOADING replica — and then no `ready`
+	// will ever fire again, leaving the recorded rows (and the stale entries they
+	// name) until the next reconnect or a restart. A timer is the only trigger that
+	// does not assume the failure was the connection. Unref'd so it cannot hold the
+	// process open, and cheap when idle: the drain leaves after one indexed lookup
+	// with nothing pending.
+	const retryInterval = getMilliseconds(
+		env['CACHE_SCOPED_PURGE_RETRY_INTERVAL'],
+		0,
+	);
+
+	if (retryInterval > 0) {
+		setInterval(recover, retryInterval).unref();
+	}
 
 	// And again when the response cache's own client comes back: it reconnects on its
 	// own schedule, so the drain above can find it still offline and bail, leaving

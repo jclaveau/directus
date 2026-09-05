@@ -86,6 +86,87 @@ describe('GraphQLService scoped cache tags', () => {
 		]);
 	});
 
+	test(oneLine`
+		read() keeps the EARLIEST purge counter per collection, so a purge landing
+		between two roots is still visible to the post-fill comparison
+	`, async () => {
+		const gql = makeService({ collections: { articles: { singleton: false } } });
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 1 }], {
+					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheEpochs: { articles: '7', users: '3', '*': '1' },
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		// A later root reading `8` where the first read `7` means a purge of
+		// `articles` landed between them. Keeping the later value would compare equal
+		// at fill time and cache the response the purge invalidated.
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 2 }], {
+					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheEpochs: { articles: '8', files: null, '*': '2' },
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		expect(gql.scopedCacheEpochs).toEqual({
+			articles: '7',
+			users: '3',
+			files: null,
+			'*': '1',
+		});
+	});
+
+	test(oneLine`
+		read() tolerates a child read that carries no counters, leaving the aggregate
+		untouched rather than undefined
+	`, async () => {
+		const gql = makeService({ collections: { articles: { singleton: false } } });
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 1 }], {
+					scopedCacheTags: [{ collection: 'articles' }],
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		expect(gql.scopedCacheEpochs).toEqual({});
+	});
+
+	test(oneLine`
+		execute() stamps the merged counters onto its result, so respond can compare
+		them after the fill — without them a /graphql entry is filled unguarded
+	`, async () => {
+		const gql = makeService({});
+		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);
+
+		gql.scopedCacheEpochs['articles'] = '7';
+		gql.scopedCacheEpochs['*'] = '1';
+
+		const result = await gql.execute({
+			document: {} as any,
+			variables: {},
+			operationName: undefined,
+			contextValue: {},
+		});
+
+		expect(readMeta(result)?.scopedCacheEpochs).toEqual({
+			articles: '7',
+			'*': '1',
+		});
+	});
+
 	test('execute() stamps the unioned tags onto its result via getMeta()', async () => {
 		const gql = makeService({});
 		vi.spyOn(gql, 'getSchema').mockResolvedValue({} as any);

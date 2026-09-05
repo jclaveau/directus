@@ -21,6 +21,7 @@ export function createScopedCacheCollector(
 	const tags: ScopedCacheTag[] = [];
 	const seen = new Set<string>();
 	const manuallyPurgedKeys = new Set<string>();
+	const epochs: Record<string, string | null> = {};
 	const purgeSkippedKeys = new Set<string>();
 	const takenOverKeys = new Set<string>();
 
@@ -44,7 +45,14 @@ export function createScopedCacheCollector(
 	function add(
 		input: ScopedCacheTag | readonly ScopedCacheTag[],
 		manuallyPurged = false,
+		declaredEpochs?: Record<string, string | null>,
 	): void {
+		for (const [collection, epoch] of Object.entries(declaredEpochs ?? {})) {
+			if (collection in epochs === false) {
+				epochs[collection] = epoch;
+			}
+		}
+
 		const batch = Array.isArray(input)
 			? input
 			: [input];
@@ -79,7 +87,12 @@ export function createScopedCacheCollector(
 		manuallyPurgedKeys,
 		purgeSkippedKeys,
 		takenOverKeys,
-		scope: { scopeTo: (input, options) => add(input, options?.manuallyPurged) },
+		epochs,
+		scope: {
+			scopeTo: (input, options) => {
+				add(input, options?.manuallyPurged, options?.epochs);
+			},
+		},
 		purge: {
 			purgeBy: (input) => add(input),
 			// Deliberately not a tag: the take-over check reads the tag count, and

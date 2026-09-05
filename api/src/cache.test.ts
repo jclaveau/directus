@@ -23,12 +23,10 @@ const redis = vi.hoisted(() => {
 		smembers: vi.fn(),
 		del: vi.fn(),
 		srem: vi.fn(),
+		eval: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
-		// The keys each queued SUNION asked for, in order, so `exec` answers the one
-		// belonging to it rather than the newest — a purge sends other pipelines too.
-		_sunionQueue: [] as string[][],
 	};
 });
 
@@ -114,20 +112,31 @@ afterEach(() => {
 beforeEach(() => {
 	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
 	redis._pipeline.expire.mockReturnValue(redis._pipeline);
-	redis._sunionQueue.length = 0;
+	redis._pipeline.exec.mockResolvedValue([]);
 
-	redis._pipeline.sunion.mockImplementation((keys: string[]) => {
-		redis._sunionQueue.push(keys);
-		return redis._pipeline;
-	});
+	// The sweep is one script, so the double runs what the script runs: read each tag
+	// set, drop them all, prune the slice index. It reads through `redis.smembers` and
+	// writes through `redis.del`/`redis.srem` so a case still arms which set holds
+	// what, and still sees the sweep ask for and drop exactly those.
+	redis.eval.mockImplementation(
+		async (_script: string, numKeys: number, ...args: string[]) => {
+			const tagKeys = args.slice(0, numKeys);
+			const trailing = args.slice(numKeys);
+			const prunings = trailing.slice(2 + Number(trailing[1]));
 
-	redis._pipeline.exec.mockImplementation(async () => {
-		const memberLists = await Promise.all(
-			(redis._sunionQueue.shift() ?? []).map((key) => redis.smembers(key)),
-		);
+			const memberLists = await Promise.all(
+				tagKeys.map((key) => redis.smembers(key)),
+			);
 
-		return [[null, [...new Set(memberLists.flat())]]];
-	});
+			await redis.del(tagKeys);
+
+			for (let at = 0; at < prunings.length; at += 2) {
+				await redis.srem(prunings[at], prunings[at + 1]);
+			}
+
+			return [...new Set(memberLists.flat())];
+		},
+	);
 });
 
 describe('getRedisConnection', () => {
@@ -642,9 +651,15 @@ describe('scoped cache purging', () => {
 				'scalabus:tag:articles:author=2',
 			]);
 
-			// One command for every tag set the purge sweeps, not one per set: the
-			// members are deduped where they are read instead of over the wire.
-			expect(redis._pipeline.sunion).toHaveBeenCalledExactlyOnceWith([
+			// ONE command for every tag set the purge sweeps, and it is a script: a
+			// pipeline only orders its own commands, so another client could file a
+			// key into a set between the read and the drop and have that set deleted
+			// under it.
+			expect(redis.eval).toHaveBeenCalledOnce();
+
+			expect(redis.eval.mock.calls[0]?.slice(0, 5)).toEqual([
+				expect.stringContaining('SMEMBERS'),
+				3,
 				'scalabus:tag:articles',
 				'scalabus:tag:articles:author=1',
 				'scalabus:tag:articles:author=2',
@@ -670,14 +685,18 @@ describe('scoped cache purging', () => {
 				'scalabus:tag:articles:author=2',
 			]);
 
-			// The index is pruned by the same purge: left naming keys it just dropped,
-			// it would grow without bound and inflate every count taken off it.
+			// The index is pruned by the same purge — and inside the same script, so a
+			// slice re-added while the sweep ran cannot be pruned after the fact.
+			// Left naming keys it just dropped, it would grow without bound and
+			// inflate every count taken off it.
 			expect(redis.srem).toHaveBeenCalledWith(
 				'scalabus:slices:articles',
-				[
-					'scalabus:tag:articles:author=1',
-					'scalabus:tag:articles:author=2',
-				],
+				'scalabus:tag:articles:author=1',
+			);
+
+			expect(redis.srem).toHaveBeenCalledWith(
+				'scalabus:slices:articles',
+				'scalabus:tag:articles:author=2',
 			);
 		});
 

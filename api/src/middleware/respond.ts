@@ -151,6 +151,22 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		| Record<string, string | null>
 		| undefined;
 
+	// A read hook's `scopeTo` can name ANY collection, and it runs after the capture
+	// above was taken — so the tag it adds names a collection no counter covers, and
+	// a purge of it landing mid-read passes the comparison below unnoticed. There is
+	// no capturing it late: the check needs a value from BEFORE the query. Refuse the
+	// fill instead. `*` rides every capture, so its presence is what says the guard
+	// ran at all — without it (no redis, purging off, a read that opted out) nothing
+	// here is guarded anyway and this must not refuse the whole cache.
+	const unguardedScopeCollections = capturedEpochs === undefined
+		|| '*' in capturedEpochs === false
+		? []
+		: [...new Set(scopedCacheTags.map((tag) => tag.collection))].filter(
+			(collection) => collection in capturedEpochs === false,
+		);
+
+	const unguardedScope = unguardedScopeCollections.length > 0;
+
 	let filled = false;
 
 	if (
@@ -159,6 +175,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
+		unguardedScope === false &&
 		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,
@@ -386,6 +403,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 			void reportCacheAnomaly(req, 'unautopurgeable_scope', detail).catch(() => {});
 		}
+		else if (unguardedScope) {
+			void reportCacheAnomaly(
+				req,
+				'unguarded_scope',
+				unguardedScopeCollections.join(', '),
+			).catch(() => {});
+		}
 	}
 
 	// Every cacheable-by-method request reaching here was a miss (hits are served
@@ -399,7 +423,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		);
 
 		const anomalous =
-			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope;
+			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope
+			|| unguardedScope;
 
 		queueMissLatency(
 			missMs,
