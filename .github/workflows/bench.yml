@@ -1,0 +1,103 @@
+name: Bench
+
+# Dispatch-only. Benchmarks are noisy on shared runners and slow, so they run when
+# someone asks for a number, against whatever commit that number is about.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit, branch or tag to measure (default: the dispatched ref)'
+        required: false
+        type: string
+      reps:
+        description: 'Measured boots, on top of one discarded warm-up'
+        required: false
+        default: '7'
+        type: string
+
+permissions:
+  contents: read
+
+# One measurement per ref at a time — two on the same runner pool would measure each
+# other. Queue rather than cancel: a dispatched bench was asked for on purpose.
+concurrency:
+  group: bench-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+env:
+  DB_CLIENT: pg
+  DB_HOST: 127.0.0.1
+  DB_PORT: '6100'
+  DB_DATABASE: directus
+  DB_USER: postgres
+  DB_PASSWORD: secret
+  CACHE_ENABLED: 'true'
+  CACHE_STORE: redis
+  REDIS: redis://127.0.0.1:6108
+  KEY: bench-key
+  SECRET: bench-secret
+  ADMIN_EMAIL: admin@example.com
+  ADMIN_PASSWORD: bench
+  TELEMETRY: 'false'
+
+jobs:
+  startup:
+    name: Startup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Name the commit under measurement
+        id: measured
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse --short=10 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      # The same bundle the blackbox suite runs and production starts, rather than the
+      # workspace build — a benchmark of a shape nobody deploys measures nothing.
+      - name: Deploy the production bundle
+        run: pnpm --filter directus deploy --legacy --prod dist
+
+      # An empty extensions directory rather than none: a missing one makes every boot
+      # log a resolution failure, and the retry is measured time.
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/extensions
+          node dist/cli bootstrap
+        env:
+          EXTENSIONS_PATH: tests/perf/extensions
+
+      - name: Measure startup
+        run: pnpm --filter tests-perf bench
+        env:
+          EXTENSIONS_PATH: tests/perf/extensions
+          PERF_REPS: ${{ inputs.reps }}
+          GITHUB_SHA: ${{ steps.measured.outputs.sha }}
+
+      - name: Write the summary
+        if: always()
+        run: |
+          if [ -f tests/perf/results/startup.md ]; then
+            cat tests/perf/results/startup.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Startup — no result" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "The measurement did not finish. See the job log." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-startup-${{ steps.measured.outputs.short }}
+          path: tests/perf/results/
+          if-no-files-found: warn
