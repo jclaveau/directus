@@ -48,6 +48,19 @@ export class GraphQLService {
 	 */
 	scopedCacheUnautopurgeableTags: ScopedCacheTag[];
 
+	/**
+	 * The scoped cache purge counters this request's reads captured, merged across
+	 * every root. A `/graphql` response is ONE cached entry assembled from several
+	 * reads, and `respond` compares these after the fill to detect a purge that
+	 * landed while they were running — so an entry the aggregate never mentions is
+	 * filled with no such check at all.
+	 *
+	 * First capture wins per collection: root 3 reading `E+1` where root 1 read `E`
+	 * means a purge landed between them, and only the earlier value makes the
+	 * post-fill comparison notice.
+	 */
+	scopedCacheEpochs: Record<string, string | null>;
+
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
@@ -55,6 +68,7 @@ export class GraphQLService {
 		this.scope = options.scope;
 		this.scopedCacheTags = [];
 		this.scopedCacheUnautopurgeableTags = [];
+		this.scopedCacheEpochs = {};
 	}
 
 	/**
@@ -107,6 +121,7 @@ export class GraphQLService {
 		return withMeta(formattedResult, {
 			scopedCacheTags: this.scopedCacheTags,
 			scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
+			scopedCacheEpochs: this.scopedCacheEpochs,
 		});
 	}
 
@@ -140,6 +155,14 @@ export class GraphQLService {
 		this.scopedCacheUnautopurgeableTags.push(
 			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
 		);
+
+		for (const [collection, epoch] of Object.entries(
+			resultMeta?.scopedCacheEpochs ?? {},
+		)) {
+			if (collection in this.scopedCacheEpochs === false) {
+				this.scopedCacheEpochs[collection] = epoch;
+			}
+		}
 
 		return result;
 	}
