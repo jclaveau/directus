@@ -2,9 +2,9 @@ import type { DeepPartial, Relation, SchemaOverview } from '@directus/types';
 import { RELATION_DEFAULTS } from './defaults.js';
 import { ok as assert } from 'node:assert/strict';
 import type { SchemaBuilder } from './builder.js';
-import { merge } from 'lodash-es';
 import { CollectionBuilder } from './collection.js';
 import { FieldBuilder } from './field.js';
+import { merge } from './lodash-es-used.js';
 
 export type InitialRelationOverview = Pick<Relation, 'collection' | 'field'> & { _kind: 'initial' };
 export type FinalRelationOverview = Relation & { _kind: 'finished'; _type: 'o2m' | 'm2o' | 'a2o' };

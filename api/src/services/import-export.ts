@@ -42,7 +42,7 @@ import { FilesService } from './files.js';
 import { NotificationsService } from './notifications.js';
 import { UsersService } from './users.js';
 import { parseFields } from '../database/get-ast-from-query/lib/parse-fields.js';
-import { set } from 'lodash-es';
+import { set } from '../utils/lodash-es-used.js';
 
 const env = useEnv();
 const logger = useLogger();

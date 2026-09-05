@@ -6,9 +6,9 @@ import type {
 	SchemaComposer,
 } from 'graphql-compose';
 import { GraphQLJSON, ObjectTypeComposer } from 'graphql-compose';
-import { mapKeys, pick } from 'lodash-es';
 import { GENERATE_SPECIAL } from '../../../constants.js';
 import { getGraphQLType } from '../../../utils/get-graphql-type.js';
+import { mapKeys, pick } from '../../../utils/lodash-es-used.js';
 import type { GQLScope } from '@directus/types';
 import { SYSTEM_DENY_LIST, type InconsistentFields, type Schema } from './index.js';
 

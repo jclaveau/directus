@@ -2,7 +2,7 @@ import { ForbiddenError } from '@directus/errors';
 import type { Accountability, Filter, Item, PermissionsAction } from '@directus/types';
 import { parseFilter, validatePayload } from '@directus/utils';
 import { FailedValidationError, joiValidationErrorItemToErrorExtensions } from '@directus/validation';
-import { assign, difference, uniq } from 'lodash-es';
+import { assign, difference, uniq } from '../../../utils/lodash-es-used.js';
 import { fetchPermissions } from '../../lib/fetch-permissions.js';
 import { fetchPolicies } from '../../lib/fetch-policies.js';
 import type { Context } from '../../types.js';

@@ -25,7 +25,6 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import { getCache } from '../cache.js';
 import {
@@ -61,6 +60,15 @@ import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import { isPrimaryKey } from '../utils/is-primary-key.js';
+import {
+	assign,
+	clone,
+	cloneDeep,
+	isPlainObject,
+	omit,
+	pick,
+	without,
+} from '../utils/lodash-es-used.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { PayloadService } from './payload.js';

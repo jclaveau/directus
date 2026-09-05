@@ -13,7 +13,6 @@ import type {
 import { toArray } from '@directus/utils';
 import type { AxiosResponse } from 'axios';
 import encodeURL from 'encodeurl';
-import { clone, cloneDeep } from 'lodash-es';
 import { extension } from 'mime-types';
 import type { Readable } from 'node:stream';
 import { PassThrough as PassThroughStream, Transform as TransformStream } from 'node:stream';
@@ -26,6 +25,7 @@ import { useLogger } from '../logger/index.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { getAxios } from '../request/index.js';
 import { getStorage } from '../storage/index.js';
+import { clone, cloneDeep } from '../utils/lodash-es-used.js';
 import { extractMetadata } from './files/lib/extract-metadata.js';
 import { ItemsService } from './items.js';
 

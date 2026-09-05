@@ -5,7 +5,6 @@ import cookieParser from 'cookie-parser';
 import type { Request, RequestHandler, Response } from 'express';
 import express from 'express';
 import type { ServerResponse } from 'http';
-import { merge } from 'lodash-es';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'path';
@@ -84,6 +83,7 @@ import {
 } from './scoped-cache.js';
 import { systemMcpEnabled } from './system-mcp/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
+import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';
 import { validateStorage } from './utils/validate-storage.js';
 

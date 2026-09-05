@@ -1,11 +1,11 @@
 import { useEnv } from '@directus/env';
-import { merge } from 'lodash-es';
 import type { IRateLimiterOptions, IRateLimiterStoreOptions, RateLimiterAbstract } from 'rate-limiter-flexible';
 import { RateLimiterMemory, RateLimiterRedis, RateLimiterRes } from 'rate-limiter-flexible';
 import {
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
+import { merge } from './utils/lodash-es-used.js';
 
 import { createRequire } from 'node:module';
 

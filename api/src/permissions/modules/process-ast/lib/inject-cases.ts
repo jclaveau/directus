@@ -1,7 +1,7 @@
 import type { Permission } from '@directus/types';
 import type { AST, FieldNode, FunctionFieldNode, NestedCollectionNode } from '../../../../types/ast.js';
+import { uniq } from '../../../../utils/lodash-es-used.js';
 import { getUnaliasedFieldKey } from '../../../utils/get-unaliased-field-key.js';
-import { uniq } from 'lodash-es';
 import { getCases } from './get-cases.js';
 
 /**

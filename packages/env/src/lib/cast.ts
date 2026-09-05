@@ -1,8 +1,8 @@
 import { toArray, toBoolean } from '@directus/utils';
-import { toNumber, toString } from 'lodash-es';
 import { getDefaultType } from '../utils/get-default-type.js';
 import { guessType } from '../utils/guess-type.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
+import { toNumber, toString } from '../utils/lodash-es-used.js';
 import { tryJson } from '../utils/try-json.js';
 
 export const cast = (value: unknown, key?: string): unknown => {

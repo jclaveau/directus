@@ -14,7 +14,6 @@ import type {
 } from '@directus/types';
 import { applyOptionsData, deepMap, getRedactedString, isValidJSON, parseJSON, toArray } from '@directus/utils';
 import type { Knex } from 'knex';
-import { pick } from 'lodash-es';
 import { get } from 'micromustache';
 import { useBus } from './bus/index.js';
 import getDatabase from './database/index.js';
@@ -34,6 +33,7 @@ import { constructFlowTree } from './utils/construct-flow-tree.js';
 import { getSchema } from './utils/get-schema.js';
 import { getService } from './utils/get-service.js';
 import { JobQueue } from './utils/job-queue.js';
+import { pick } from './utils/lodash-es-used.js';
 import { redactObject } from './utils/redact-object.js';
 import { scheduleSynchronizedJob, validateCron } from './utils/schedule.js';
 

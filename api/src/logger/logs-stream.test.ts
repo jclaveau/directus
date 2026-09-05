@@ -1,7 +1,7 @@
-import { omit } from 'lodash-es';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, test, vi } from 'vitest';
 import { useBus } from '../bus/index.js';
+import { omit } from '../utils/lodash-es-used.js';
 import { LogsStream } from './logs-stream.js';
 
 vi.mock('../bus/index.js', () => ({

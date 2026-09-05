@@ -1,13 +1,13 @@
 import { useEnv } from '@directus/env';
 import { REDACTED_TEXT, toArray, toBoolean } from '@directus/utils';
 import type { Request, RequestHandler } from 'express';
-import { merge } from 'lodash-es';
 import { URL } from 'node:url';
 import { levels, multistream, pino, type Logger, type LoggerOptions } from 'pino';
 import { pinoHttp, stdSerializers, type AutoLoggingOptions } from 'pino-http';
 import { httpPrintFactory } from 'pino-http-print';
 import { build as pinoPretty } from 'pino-pretty';
 import { getConfigFromEnv } from '../utils/get-config-from-env.js';
+import { merge } from '../utils/lodash-es-used.js';
 import { LogsStream } from './logs-stream.js';
 import { redactHeaders } from './redact-headers.js';
 import { redactQuery } from './redact-query.js';

@@ -1,10 +1,10 @@
 import type { AbstractServiceOptions, Accountability, Query, SchemaOverview } from '@directus/types';
 import type { Knex } from 'knex';
-import { isArray } from 'lodash-es';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import getDatabase from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
+import { isArray } from '../utils/lodash-es-used.js';
 
 export class MetaService {
 	knex: Knex;

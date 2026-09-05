@@ -17,7 +17,6 @@ import type {
 import { addFieldFlag } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { chunk, groupBy, merge, omit } from 'lodash-es';
 import { clearSystemCache, getCache } from '../cache.js';
 import { ALIAS_TYPES } from '../constants.js';
 import type { Helpers } from '../database/helpers/index.js';
@@ -28,6 +27,7 @@ import { fetchAllowedCollections } from '../permissions/modules/fetch-allowed-co
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import type { Collection } from '../types/index.js';
 import { getSchema } from '../utils/get-schema.js';
+import { chunk, groupBy, merge, omit } from '../utils/lodash-es-used.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
 import { FieldsService } from './fields.js';

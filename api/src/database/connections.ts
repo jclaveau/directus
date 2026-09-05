@@ -1,8 +1,8 @@
 import { useEnv } from '@directus/env';
 import type { Accountability } from '@directus/types';
 import type { Knex } from 'knex';
-import { merge } from 'lodash-es';
 import { getConfigFromEnv } from '../utils/get-config-from-env.js';
+import { merge } from '../utils/lodash-es-used.js';
 import getDatabase, { constructDatabase } from './index.js';
 
 // One knex per named connection, built lazily and memoized for the process

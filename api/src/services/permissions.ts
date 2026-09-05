@@ -10,13 +10,13 @@ import type {
 	QueryOptions,
 	WithMeta,
 } from '@directus/types';
-import { uniq } from 'lodash-es';
 import { clearSystemCache } from '../cache.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { withAppMinimalPermissions } from '../permissions/lib/with-app-minimal-permissions.js';
 import type { ValidateAccessOptions } from '../permissions/modules/validate-access/validate-access.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { uniq } from '../utils/lodash-es-used.js';
 import { withMeta, withoutMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 
