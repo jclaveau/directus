@@ -37,7 +37,29 @@ type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
  * custom unautopurgeable one in separate calls if only one is manuallyPurged.
  */
 export interface ScopedCacheScopeHandle {
-	scopeTo(tags: ScopedCacheTagInput, options?: { manuallyPurged?: boolean }): void;
+	scopeTo(
+		tags: ScopedCacheTagInput,
+		options?: {
+			manuallyPurged?: boolean;
+			/**
+			 * The purge counters the read these tags came from captured BEFORE its own
+			 * query — `result.getMeta()?.scopedCacheEpochs` of the dependent read.
+			 *
+			 * The host captures the counters of the collections it can name up front,
+			 * and a hook's tag arrives long after that, on a collection nothing
+			 * captured: a purge of it landing mid-read would then pass the post-fill
+			 * comparison unnoticed and the response would be stored already stale.
+			 * There is no capturing it late — the check needs a value from before the
+			 * data was read — so a scoped-to collection with no counter leaves the
+			 * response uncached (an `unguarded_scope` anomaly).
+			 *
+			 * Handing the dependent read's own capture over is what keeps it cacheable,
+			 * and it is the right value by construction: that read took it before the
+			 * rows these tags describe were fetched.
+			 */
+			epochs?: Record<string, string | null>;
+		},
+	): void;
 }
 
 /**
@@ -116,6 +138,13 @@ export interface ScopedCacheCollector {
 	tags: ScopedCacheTag[];
 	/** Canonical keys of tags a `scopeTo` marked `manuallyPurged` (anomaly-exempt). */
 	manuallyPurgedKeys: Set<string>;
+	/**
+	 * Purge counters handed over with a `scopeTo`, merged into the read's own so
+	 * `respond` can compare a hook-declared collection after the fill. First one
+	 * wins per collection: two dependent reads of the same collection straddling a
+	 * purge must be judged on the earlier value, the only one that shows it moved.
+	 */
+	epochs: Record<string, string | null>;
 	/** Keys a `skipPurgeFor` declared inert, as strings so `7` and `'7'` agree. */
 	purgeSkippedKeys: Set<string>;
 	/**

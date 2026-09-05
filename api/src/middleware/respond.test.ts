@@ -525,6 +525,71 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
+		refuses to cache a response scoped to a collection the capture never covered —
+		a hook's scopeTo runs after it, so no counter can show a purge of that
+		collection landed mid-read
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.readScopedCacheEpochs.mockResolvedValue({ articles: '7', '*': '1' });
+
+		await respond(makeReq(), makeRes({ data: [] }, {
+			scopedCacheTags: [
+				{ collection: 'articles' },
+				{ collection: 'authors' },
+			],
+			scopedCacheEpochs: { articles: '7', '*': '1' },
+		}), next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.anything(),
+			'unguarded_scope',
+			'authors',
+		);
+	});
+
+	test(oneLine`
+		caches the same response once the foreign collection's counter was handed over,
+		so declaring a cross-collection dependency stays a cacheable thing to do
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		mocks.readScopedCacheEpochs.mockResolvedValue({
+			articles: '7',
+			authors: '4',
+			'*': '1',
+		});
+
+		await respond(makeReq(), makeRes({ data: [] }, {
+			scopedCacheTags: [
+				{ collection: 'articles' },
+				{ collection: 'authors' },
+			],
+			scopedCacheEpochs: { articles: '7', authors: '4', '*': '1' },
+		}), next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		leaves a response alone when no capture ran at all — with no wholesale entry
+		there is no guard to be outside of, and refusing would take the whole cache
+		down wherever the counters are off
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.readScopedCacheEpochs.mockResolvedValue({});
+
+		await respond(makeReq(), makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'authors' }],
+			scopedCacheEpochs: {},
+		}), next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+	});
+
+	test(oneLine`
 		a refused tag index leaves NO value cached: an untagged entry is unreachable to
 		every purge and would serve stale for its whole TTL
 	`, async () => {
