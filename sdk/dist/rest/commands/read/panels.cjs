@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/panels`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/panels/${t}`,params:n??{},method:`GET`});exports.readPanel=n,exports.readPanels=t;
+//# sourceMappingURL=panels.cjs.map

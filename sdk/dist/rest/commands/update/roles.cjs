@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/roles`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/roles`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/roles/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updateRole=r,exports.updateRoles=t,exports.updateRolesBatch=n;
+//# sourceMappingURL=roles.cjs.map

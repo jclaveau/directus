@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/users`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/users/${t}`,params:n??{},method:`GET`}),r=e=>()=>({path:`/users/me`,params:e??{},method:`GET`});export{r as readMe,n as readUser,t as readUsers};
+//# sourceMappingURL=users.js.map

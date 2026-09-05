@@ -1,49 +1,49 @@
 {
-	"name": "@directus/update-check",
-	"version": "13.0.2",
-	"description": "Check if an update for Directus is available",
-	"homepage": "https://directus.io",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/directus/directus.git",
-		"directory": "packages/update-check"
-	},
-	"funding": "https://github.com/directus/directus?sponsor=1",
-	"license": "MIT",
-	"author": "Rijk van Zanten <rijkvanzanten@me.com>",
-	"type": "module",
-	"exports": {
-		".": "./dist/index.js",
-		"./package.json": "./package.json"
-	},
-	"main": "dist/index.js",
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "pnpm run '/^bundle|typecheck$/'",
-		"bundle": "tsdown src/index.ts --dts",
-		"test": "vitest run",
-		"test:coverage": "vitest run --coverage",
-		"typecheck": "tsc --noEmit"
-	},
-	"dependencies": {
-		"axios": "catalog:",
-		"axios-cache-interceptor": "catalog:",
-		"boxen": "catalog:",
-		"chalk": "catalog:",
-		"find-cache-directory": "catalog:",
-		"semver": "catalog:"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "catalog:",
-		"@npm/types": "catalog:",
-		"@types/node": "catalog:",
-		"@types/semver": "catalog:",
-		"@vitest/coverage-v8": "catalog:",
-		"strip-ansi": "catalog:",
-		"tsdown": "catalog:",
-		"typescript": "catalog:",
-		"vitest": "catalog:"
-	}
+  "name": "@directus/update-check",
+  "version": "13.0.2",
+  "description": "Check if an update for Directus is available",
+  "homepage": "https://directus.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/directus/directus.git",
+    "directory": "packages/update-check"
+  },
+  "funding": "https://github.com/directus/directus?sponsor=1",
+  "license": "MIT",
+  "author": "Rijk van Zanten <rijkvanzanten@me.com>",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "axios": "1.18.0",
+    "axios-cache-interceptor": "1.12.0",
+    "boxen": "8.0.1",
+    "chalk": "5.6.2",
+    "find-cache-directory": "6.0.0",
+    "semver": "7.8.5"
+  },
+  "devDependencies": {
+    "@directus/tsconfig": "4.0.0",
+    "@npm/types": "2.1.0",
+    "@types/node": "22.19.21",
+    "@types/semver": "7.7.1",
+    "@vitest/coverage-v8": "3.2.6",
+    "strip-ansi": "7.2.0",
+    "tsdown": "0.15.11",
+    "typescript": "5.8.3",
+    "vitest": "3.2.6"
+  },
+  "scripts": {
+    "build": "pnpm run '/^bundle|typecheck$/'",
+    "bundle": "tsdown src/index.ts --dts",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  }
 }

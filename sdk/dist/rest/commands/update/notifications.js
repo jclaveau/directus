@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r)=>()=>(e(t,`Keys cannot be empty`),{path:`/notifications`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/notifications`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e(t,`Key cannot be empty`),{path:`/notifications/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});export{r as updateNotification,t as updateNotifications,n as updateNotificationsBatch};
+//# sourceMappingURL=notifications.js.map

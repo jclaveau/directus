@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/dashboards`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/dashboards/${t}`,params:n??{},method:`GET`});export{n as readDashboard,t as readDashboards};
+//# sourceMappingURL=dashboards.js.map

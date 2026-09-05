@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n,r)=>()=>(e(t,`Keys cannot be empty`),{path:`/flows`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/flows`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e(t,`Key cannot be empty`),{path:`/flows/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});export{r as updateFlow,t as updateFlows,n as updateFlowsBatch};
+//# sourceMappingURL=flows.js.map
