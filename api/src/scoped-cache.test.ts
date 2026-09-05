@@ -752,6 +752,50 @@ describe('dropScopedCacheTagIndex', () => {
 		]);
 	});
 
+	it(oneLine`
+		bumps the wholesale counter BEFORE the scan, so a read filing its tags across
+		the flush declines instead of keeping an entry the DEL orphaned
+	`, async () => {
+		const calls: string[] = [];
+
+		const pipeline = {
+			incr: (key: string) => {
+				calls.push(`incr ${key}`);
+				return pipeline;
+			},
+			expire: () => pipeline,
+			exec: async () => {
+				calls.push('exec');
+				return [];
+			},
+		};
+
+		vi.mocked(useRedis).mockReturnValue({
+			scan: async () => {
+				calls.push('scan');
+				return ['0', ['ns:tag:articles']];
+			},
+			del: async () => {
+				calls.push('del');
+				return 1;
+			},
+			pipeline: () => pipeline,
+		} as any);
+
+		await dropScopedCacheTagIndex();
+
+		// The whole guard rests on a purge moving the counters before it sweeps. A
+		// bump made after the DEL leaves the window this closes: a read that captured
+		// earlier compares equal and keeps an entry indexed by a set that is gone.
+		expect(calls).toEqual([
+			'incr ns:epoch:*',
+			'exec',
+			'scan',
+			'scan',
+			'del',
+		]);
+	});
+
 	it('no-ops (never DELs an empty list) when nothing matches', async () => {
 		const scan = vi.fn().mockResolvedValue(['0', []]);
 		const del = vi.fn();

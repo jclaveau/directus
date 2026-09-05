@@ -595,6 +595,15 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 		return;
 	}
 
+	// BEFORE the scan, like every other sweep: a read that captured the counter
+	// earlier and files its tags between the DEL below and a bump made after it
+	// would compare equal, keep its entry, and leave it indexed by a set this
+	// function just deleted — reachable to no later purge. Bumping first is what
+	// makes such a read decline. Unconditional, so a flush finding no tag set still
+	// invalidates the reads in flight across the `cache.clear()` that preceded it.
+	// Names no collection, so it moves the wholesale counter every read captures.
+	await bumpScopedCacheEpochs(['*']);
+
 	const tagKeys = [
 		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`),
 		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:slices:*`),
@@ -606,9 +615,6 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 
 	// Array form: this list is a whole-keyspace scan, so it is the longest of them.
 	await useRedis().del(tagKeys);
-
-	// Names no collection, so it moves the wholesale counter every read reads.
-	await bumpScopedCacheEpochs(['*']);
 }
 
 /**
