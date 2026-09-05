@@ -442,6 +442,39 @@ describe('createScopedCacheCollector', () => {
 		expect(tags).toEqual([]);
 	});
 
+	it(oneLine`
+		keeps the EARLIEST counter a scopeTo handed over per collection — a second
+		dependent read straddling a purge must not overwrite the value that shows it
+	`, () => {
+		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+
+		scope.scopeTo(
+			{ collection: 'authors' },
+			{ epochs: { authors: '4', '*': '1' } },
+		);
+
+		// Read again after a purge of `authors` landed: keeping `9` would compare
+		// equal at fill time and cache the response that purge invalidated.
+		scope.scopeTo(
+			{ collection: 'authors' },
+			{ epochs: { authors: '9', files: null } },
+		);
+
+		expect(epochs).toEqual({ authors: '4', '*': '1', files: null });
+	});
+
+	it(oneLine`
+		leaves the counters empty for a scopeTo that handed none over, so respond can
+		tell a declared collection apart from a guarded one
+	`, () => {
+		const { scope, epochs, tags } = createScopedCacheCollector(emptySchema);
+
+		scope.scopeTo({ collection: 'authors' });
+
+		expect(epochs).toEqual({});
+		expect(tags).toEqual([{ collection: 'authors' }]);
+	});
+
 	it('keys skipped purges as strings, so a numeric and a string id agree', () => {
 		const { purge, purgeSkippedKeys } = createScopedCacheCollector(emptySchema);
 
