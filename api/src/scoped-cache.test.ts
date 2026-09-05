@@ -624,7 +624,8 @@ describe('collection slice index', () => {
 			scan,
 			del: vi.fn(),
 			srem: vi.fn(),
-			pipeline: () => redisPipelineDouble(async () => []),
+			eval: vi.fn().mockResolvedValue([]),
+			pipeline: () => redisPipelineDouble(),
 		} as any);
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
@@ -634,13 +635,14 @@ describe('collection slice index', () => {
 	});
 
 	it('drops a purged slice key from its collection index', async () => {
-		const srem = vi.fn();
+		const sweep = redisSweepDouble(async () => []);
 
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockResolvedValue([]),
 			del: vi.fn(),
-			srem,
-			pipeline: () => redisPipelineDouble(async () => []),
+			srem: vi.fn(),
+			eval: sweep.eval,
+			pipeline: () => redisPipelineDouble(),
 		} as any);
 
 		await purgeScopedCache(
@@ -649,31 +651,56 @@ describe('collection slice index', () => {
 			[{ collection: 'articles', field: 'author', value: 7 }],
 		);
 
-		// An index pruned only wholesale keeps naming keys that are gone.
-		expect(srem)
-		.toHaveBeenCalledWith('ns:slices:articles', ['ns:tag:articles:author=7']);
+		// An index pruned only wholesale keeps naming keys that are gone — and pruned
+		// in the same step that drops them, or a slice re-added while the sweep ran
+		// is dropped from the index after the fact.
+		expect(sweep.pruned)
+			.toEqual([['ns:slices:articles', 'ns:tag:articles:author=7']]);
 	});
 });
 
-// A purge queues its epoch bumps and its `sunion` member read on ONE pipeline and
-// reads back only the last reply, so a double has to answer `exec` — and a closed
-// connection now surfaces by rejecting there rather than on a bare `smembers`.
-function redisPipelineDouble(sunion: (keys: string[]) => Promise<string[]>) {
-	const replies: Promise<unknown>[] = [];
-
+// The pipeline a purge still sends carries only its epoch bumps; the sweep itself is
+// one script, doubled by `redisSweepDouble` below.
+function redisPipelineDouble() {
 	const chain = {
 		incr: () => chain,
 		expire: () => chain,
-		sunion: (keys: string[]) => {
-			replies.push(sunion(keys));
-			return chain;
-		},
-		exec: async () => {
-			return (await Promise.all(replies)).map((reply) => [null, reply]);
-		},
+		exec: async () => [],
 	};
 
 	return chain;
+}
+
+/**
+ * Stand in for the sweep script: read each tag set, drop them all, prune the slice
+ * index. `members` is what the sets between them hold, and the recorded `swept` and
+ * `pruned` are what a case asserts the sweep asked for — the script does those
+ * inside Redis, so there is no command of its own to spy on.
+ */
+function redisSweepDouble(members: () => Promise<string[]>) {
+	const swept: string[][] = [];
+	const pruned: [string, string][] = [];
+
+	return {
+		swept,
+		pruned,
+		eval: vi.fn(async (
+			_script: string,
+			numKeys: number,
+			...args: string[]
+		) => {
+			swept.push(args.slice(0, numKeys));
+
+			const trailing = args.slice(numKeys);
+			const prunings = trailing.slice(2 + Number(trailing[1]));
+
+			for (let at = 0; at < prunings.length; at += 2) {
+				pruned.push([prunings[at]!, prunings[at + 1]!]);
+			}
+
+			return members();
+		}),
+	};
 }
 
 describe('tagScopedCacheKeys', () => {
@@ -870,20 +897,28 @@ describe('retryPendingScopedCachePurges', () => {
 		get: vi.fn(async (key: string) => probed.get(key)),
 	};
 
+	// `sweepMembers` is what the tag sets between them hold; the sweep script reads
+	// them inside Redis, so the double is where a case says so and where it sees
+	// which sets the sweep asked for.
+	const sweep = redisSweepDouble(() => redis.sweepMembers());
+
 	const redis = {
-		sunion: vi.fn(),
+		sweepMembers: vi.fn(),
 		smembers: vi.fn(),
 		del: vi.fn(),
 		scan: vi.fn(),
 		srem: vi.fn(),
-		pipeline: () => redisPipelineDouble(redis.sunion),
+		eval: sweep.eval,
+		pipeline: () => redisPipelineDouble(),
 	};
 
 	beforeEach(() => {
 		vi.mocked(getCache).mockReturnValue({ cache } as any);
 		vi.mocked(useRedis).mockReturnValue(redis as any);
 		redis.smembers.mockResolvedValue([]);
-		redis.sunion.mockResolvedValue([]);
+		redis.sweepMembers.mockResolvedValue([]);
+		sweep.swept.length = 0;
+		sweep.pruned.length = 0;
 		redis.scan.mockResolvedValue(['0', []]);
 
 		// The shape a deployment with CACHE_STATS off returns for every entry, so a
@@ -902,16 +937,16 @@ describe('retryPendingScopedCachePurges', () => {
 			ids: [7],
 		}]);
 
-		redis.sunion.mockResolvedValue(['ns:entry-a']);
+		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
 
 		// The label was recorded under `ns`; the process now runs under `other`.
 		env['CACHE_NAMESPACE'] = 'other';
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(redis.sunion).toHaveBeenCalledWith(['other:tag:articles:id=1']);
+		expect(sweep.swept).toEqual([['other:tag:articles:id=1']]);
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
-		expect(redis.del).toHaveBeenCalledWith(['other:tag:articles:id=1']);
+		expect(sweep.swept).toEqual([['other:tag:articles:id=1']]);
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
 
@@ -936,8 +971,7 @@ describe('retryPendingScopedCachePurges', () => {
 
 		expect(redis.smembers).toHaveBeenCalledWith('ns:slices:articles');
 
-		expect(redis.del)
-			.toHaveBeenCalledWith(['ns:tag:articles', 'ns:tag:articles:id=1']);
+		expect(sweep.swept).toEqual([['ns:tag:articles', 'ns:tag:articles:id=1']]);
 
 		expect(cache.clear).not.toHaveBeenCalled();
 	});
@@ -953,7 +987,7 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(cache.clear).toHaveBeenCalledOnce();
-		expect(redis.del).not.toHaveBeenCalled();
+		expect(sweep.swept).toEqual([]);
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
 
@@ -978,10 +1012,10 @@ describe('retryPendingScopedCachePurges', () => {
 
 		const closed = new Error('Connection is closed.');
 
-		// Fails the DEL rather than the SMEMBERS: the report reads members too, and its
-		// own guard swallows a failure there, so injecting it earlier would prove
-		// nothing about the purge.
-		redis.del.mockRejectedValueOnce(closed);
+		// Fails the sweep itself rather than the slice-index read: the report reads
+		// members too, and its own guard swallows a failure there, so injecting it
+		// earlier would prove nothing about the purge.
+		sweep.eval.mockRejectedValueOnce(closed);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
@@ -1001,7 +1035,7 @@ describe('retryPendingScopedCachePurges', () => {
 			ids: [7],
 		}]);
 
-		redis.sunion.mockResolvedValue(['ns:entry-a']);
+		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
 
 		vi.mocked(readCacheDescriptorForRedisKey)
 			.mockRejectedValue(new Error('relation does not exist'));
@@ -1065,7 +1099,7 @@ describe('retryPendingScopedCachePurges', () => {
 			rows = [];
 		});
 
-		redis.sunion.mockResolvedValue(['ns:entry-a']);
+		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
 		redis.smembers.mockResolvedValue(['ns:entry-a']);
 
 		vi.mocked(readCacheDescriptorForRedisKey)
@@ -1118,7 +1152,7 @@ describe('retryPendingScopedCachePurges', () => {
 			ids: [7],
 		}]);
 
-		redis.sunion.mockResolvedValue(['ns:entry-a']);
+		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
 
 		vi.mocked(getCache).mockReturnValue({
 			cache: { ...cache, store: { client: { isOpen: false, isReady: false } } },
@@ -1178,9 +1212,9 @@ describe('retryPendingScopedCachePurges', () => {
 			'ns:entry-a__tags',
 		];
 
-		redis.sunion.mockResolvedValue(staleMembers);
+		redis.sweepMembers.mockResolvedValue(staleMembers);
 		// The recovery report reads the members again to name them; the purge's own
-		// read is the `sunion` above.
+		// read is the `sweepMembers` above.
 		redis.smembers.mockResolvedValue(staleMembers);
 
 		vi.mocked(readCacheDescriptorForRedisKey)
@@ -1208,7 +1242,7 @@ describe('retryPendingScopedCachePurges', () => {
 			ids: [7],
 		}]);
 
-		redis.sunion.mockResolvedValue(['ns:entry-a']);
+		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
 		vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue(null);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
@@ -1309,7 +1343,8 @@ describe('a purge that fails after its mutation committed', () => {
 			del: vi.fn(),
 			scan: vi.fn().mockResolvedValue(['0', []]),
 			srem: vi.fn(),
-			pipeline: () => redisPipelineDouble(async () => []),
+			eval: vi.fn().mockResolvedValue([]),
+			pipeline: () => redisPipelineDouble(),
 		} as any);
 
 		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, tags) => tags);
@@ -1321,11 +1356,8 @@ describe('a purge that fails after its mutation committed', () => {
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockRejectedValue(closed),
-			pipeline: () => {
-				return redisPipelineDouble(async () => {
-					throw closed;
-				});
-			},
+			eval: vi.fn().mockRejectedValue(closed),
+			pipeline: () => redisPipelineDouble(),
 		} as any);
 
 		const purged = await purgeScopedCache(cache as any, 'articles', [
@@ -1357,11 +1389,8 @@ describe('a purge that fails after its mutation committed', () => {
 	`, async () => {
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockRejectedValue(closed),
-			pipeline: () => {
-				return redisPipelineDouble(async () => {
-					throw closed;
-				});
-			},
+			eval: vi.fn().mockRejectedValue(closed),
+			pipeline: () => redisPipelineDouble(),
 		} as any);
 
 		expect(await purgeScopedCache(cache as any, 'articles', null))
