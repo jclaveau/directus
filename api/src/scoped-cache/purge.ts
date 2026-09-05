@@ -890,6 +890,22 @@ export function startScopedCachePurgeRecovery(): void {
 
 	useRedis().on('ready', recover);
 
+	// A purge can also fail with the link UP — `OOM command not allowed` under
+	// maxmemory/noeviction, a WRONGTYPE, a LOADING replica — and then no `ready`
+	// will ever fire again, leaving the recorded rows (and the stale entries they
+	// name) until the next reconnect or a restart. A timer is the only trigger that
+	// does not assume the failure was the connection. Unref'd so it cannot hold the
+	// process open, and cheap when idle: the drain leaves after one indexed lookup
+	// with nothing pending.
+	const retryInterval = getMilliseconds(
+		env['CACHE_SCOPED_PURGE_RETRY_INTERVAL'],
+		0,
+	);
+
+	if (retryInterval > 0) {
+		setInterval(recover, retryInterval).unref();
+	}
+
 	// And again when the response cache's own client comes back: it reconnects on its
 	// own schedule, so the drain above can find it still offline and bail, leaving
 	// this the only thing that finishes those records.
