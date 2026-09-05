@@ -11,10 +11,19 @@
 
 const COLLECTION = 'gql_inflight_purge';
 
+// Only the read that asks for this slice is raced. The control read asks for the
+// other one, so it is unaffected by test order — and by how many times the read
+// path emits this filter for one request.
+const RACED_SLOT = 'race';
+
 let alreadyFired = false;
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${COLLECTION}.items.read`, async (payload, _meta, context) => {
+	filter(`${COLLECTION}.items.read`, async (payload, meta, context) => {
+		if (meta?.query?.filter?.slot?._eq !== RACED_SLOT) {
+			return payload;
+		}
+
 		// Set before the await so the mutation's own reads cannot re-enter, and so
 		// the test's second read runs against an untouched hook.
 		if (alreadyFired) {

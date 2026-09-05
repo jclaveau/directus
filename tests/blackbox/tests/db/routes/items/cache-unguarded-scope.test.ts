@@ -58,7 +58,10 @@ describe(oneLine`
 				].map((collection) => {
 					return {
 						collection,
-						fields: [{ field: 'label', type: 'string', meta: {} }],
+						fields: [
+							{ field: 'label', type: 'string', meta: {} },
+							{ field: 'slot', type: 'string', meta: {} },
+						],
 					};
 				}),
 			});
@@ -71,7 +74,7 @@ describe(oneLine`
 			].map((collection) => {
 				return CreateItem(vendor, {
 					collection,
-					item: [{ label: 'v1' }],
+					item: [{ label: 'v1', slot: 'race' }],
 				});
 			}));
 
@@ -100,6 +103,10 @@ describe(oneLine`
 		function read(collection: string) {
 			return request(getUrl(vendor, env))
 				.get(`/items/${collection}`)
+				// The hook writes only for this slice, so the write cannot depend on
+				// which test runs first, nor on how many times the read path emits
+				// its filter for one request.
+				.query({ 'filter[slot][_eq]': 'race' })
 				.set('Authorization', auth);
 		}
 
@@ -116,11 +123,11 @@ describe(oneLine`
 		`, async () => {
 			await clearCache();
 
-			// Enriched before the hook's own write, so this body carries the old
-			// dependency value by construction — it just must not be stored.
+			// Not asserted on: the read path may emit its filter more than once for one
+			// request, so which side of the hook's write this enrichment landed on is
+			// not the subject. What must not happen is it being STORED.
 			const warm = await read(UNGUARDED_READ);
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
-			expect(warm.body.data[0].dep_label).toBe('v1');
 
 			const after = await read(UNGUARDED_READ);
 

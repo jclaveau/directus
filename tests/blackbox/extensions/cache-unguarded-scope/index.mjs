@@ -15,6 +15,7 @@ const UNGUARDED_READ = 'unguarded_read';
 const UNGUARDED_DEP = 'unguarded_dep';
 const GUARDED_READ = 'guarded_read';
 const GUARDED_DEP = 'guarded_dep';
+const RACED_SLOT = 'race';
 
 let alreadyFired = false;
 
@@ -26,7 +27,7 @@ function depService(services, context, collection) {
 }
 
 export default function registerHooks({ filter }, { services }) {
-	filter(`${UNGUARDED_READ}.items.read`, async (records, _meta, context) => {
+	filter(`${UNGUARDED_READ}.items.read`, async (records, meta, context) => {
 		const dep = await depService(services, context, UNGUARDED_DEP)
 			.readByQuery({ fields: ['id', 'label'], limit: 1 }, { emitEvents: false });
 
@@ -40,9 +41,10 @@ export default function registerHooks({ filter }, { services }) {
 		// counter, so nothing can tell whether the write below beat the fill.
 		context.scopedCache?.scopeTo({ collection: UNGUARDED_DEP });
 
-		// The in-flight write, once. It commits after the enrichment above read the
-		// old value and before respond stores it — the window, made deterministic.
-		if (alreadyFired) {
+		// The in-flight write, once, and only for the read that asks to be raced —
+		// so it cannot depend on which test runs first, nor on how many times the
+		// read path emits this filter for one request.
+		if (alreadyFired || meta?.query?.filter?.slot?._eq !== RACED_SLOT) {
 			return records;
 		}
 

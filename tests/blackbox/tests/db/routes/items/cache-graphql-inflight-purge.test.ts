@@ -55,7 +55,10 @@ describe(oneLine`
 
 			await CreateItem(vendor, {
 				collection: COLLECTION,
-				item: [{ slot: 'a', label: 'v1' }],
+				item: [
+					{ slot: 'race', label: 'v1' },
+					{ slot: 'calm', label: 'c1' },
+				],
 			});
 
 			const port = await getPort();
@@ -75,51 +78,55 @@ describe(oneLine`
 			await DeleteCollection(vendor, { collection: COLLECTION });
 		});
 
-		function graphqlReadSlotA() {
+		function graphqlReadSlot(slot: string) {
 			return request(getUrl(vendor, env))
 				.post('/graphql')
 				.send({
-					query: `{ ${COLLECTION}(filter: { slot: { _eq: "a" } }) { id label } }`,
+					query: `{ ${COLLECTION}(
+						filter: { slot: { _eq: "${slot}" } }
+					) { id label } }`,
 				})
 				.set('Authorization', auth);
 		}
+
+		function clearCache() {
+			return request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+		}
+
+		it(oneLine`
+			caches an unraced GraphQL read, so the counters it now carries have not made
+			every /graphql response uncacheable — and so the miss below means something
+		`, async () => {
+			await clearCache();
+
+			// A slice the hook is not watching, so this holds whatever the test order
+			// is: nothing writes during either read.
+			const first = await graphqlReadSlot('calm');
+			const second = await graphqlReadSlot('calm');
+
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(second.headers[cacheStatusHeader]).toBe('HIT');
+			expect(second.body.data[COLLECTION][0].label).toBe('c1');
+		});
 
 		it(oneLine`
 			refuses to cache the GraphQL read the in-flight write already invalidated,
 			so the next read reflects that write
 		`, async () => {
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
+			await clearCache();
 
-			// Carries the pre-write rows by construction: the hook runs after the
-			// fetch, so this body is allowed to be `v1` — it just must not be stored.
-			const warm = await graphqlReadSlotA();
+			// Not asserted on: the read path may emit its filter more than once for
+			// one request, so which side of the hook's write this body landed on is
+			// not the subject. What must not happen is it being STORED.
+			const warm = await graphqlReadSlot('race');
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
-			expect(warm.body.data[COLLECTION][0].label).toBe('v1');
 
-			const after = await graphqlReadSlotA();
+			const after = await graphqlReadSlot('race');
 
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
 			expect(after.body.data[COLLECTION][0].label).toBe('v2');
-		});
-
-		it(oneLine`
-			caches a GraphQL read no write raced, so the counters it now carries have
-			not made every /graphql response uncacheable
-		`, async () => {
-			await request(getUrl(vendor, env))
-				.post('/utils/cache/clear')
-				.set('Authorization', auth);
-
-			// The hook fires once per process and already has, so nothing writes
-			// during either of these — the ordinary cacheable path.
-			const first = await graphqlReadSlotA();
-			const second = await graphqlReadSlotA();
-
-			expect(first.headers[cacheStatusHeader]).toBe('MISS');
-			expect(second.headers[cacheStatusHeader]).toBe('HIT');
-			expect(second.body.data[COLLECTION][0].label).toBe('v2');
 		});
 	});
 });
