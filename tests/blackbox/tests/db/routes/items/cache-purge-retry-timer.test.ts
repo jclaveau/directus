@@ -7,12 +7,12 @@ import {
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
+import { redisCommand } from '@utils/redis-command';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
 import knex from 'knex';
 import { cloneDeep } from 'lodash-es';
-import net from 'node:net';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -33,31 +33,6 @@ const NOTE = 'retry_timer_note';
 const PENDING = 'directus_scoped_cache_pending_purges';
 const REDIS_PORT = 6108;
 const cacheStatusHeader = 'x-cache-status';
-
-// Redis speaks its own protocol over a plain socket, and one inline command per
-// connection is all this test needs — enough to plant the WRONGTYPE and to clear it
-// again, without a client library the blackbox suite does not otherwise carry.
-function redisInlineCommand(command: string): Promise<string> {
-	return new Promise((resolve, reject) => {
-		const socket = net.createConnection(
-			{ host: '127.0.0.1', port: REDIS_PORT },
-			() => socket.write(`${command}\r\n`),
-		);
-
-		let reply = '';
-
-		socket.on('data', (chunk) => {
-			reply += chunk.toString();
-
-			if (reply.includes('\r\n')) {
-				socket.end();
-				resolve(reply.trim());
-			}
-		});
-
-		socket.on('error', reject);
-	});
-}
 
 describe(oneLine`
 	a purge that fails with the connection still up is finished by the retry timer,
@@ -112,7 +87,9 @@ describe(oneLine`
 		afterAll(async () => {
 			instance?.kill();
 
-			await redisInlineCommand(`DEL ${namespace}:tag:${NOTE}`).catch(() => '');
+			await redisCommand(REDIS_PORT, ['DEL', `${namespace}:tag:${NOTE}`])
+				.catch(() => '');
+
 			await db(PENDING).delete();
 			await db.destroy();
 
@@ -147,8 +124,9 @@ describe(oneLine`
 			// The refusal: a SET over the collection's bare tag leaves a string where
 			// the sweep expects a set. Every other command still works, and the
 			// connection is never dropped — so nothing will emit `ready`.
-			expect(await redisInlineCommand(`SET ${namespace}:tag:${NOTE} x`))
-				.toBe('+OK');
+			expect(
+				await redisCommand(REDIS_PORT, ['SET', `${namespace}:tag:${NOTE}`, 'x']),
+			).toBe('+OK');
 
 			const write = await request(url)
 				.patch(`/items/${NOTE}/${cached.body.data[0].id}`)
@@ -167,7 +145,8 @@ describe(oneLine`
 			expect(stale.headers[cacheStatusHeader]).toBe('HIT');
 			expect(stale.body.data[0].label).toBe('v1');
 
-			expect(await redisInlineCommand(`DEL ${namespace}:tag:${NOTE}`)).toBe(':1');
+			expect(await redisCommand(REDIS_PORT, ['DEL', `${namespace}:tag:${NOTE}`]))
+				.toBe(':1');
 
 			// The timer is the only thing that can fire now: the link never dropped,
 			// so no `ready` is coming, and nothing else writes to this collection.
