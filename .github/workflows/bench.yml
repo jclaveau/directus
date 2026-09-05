@@ -1,27 +1,39 @@
 name: Bench
 
-# Dispatch-only. Benchmarks are noisy on shared runners and slow, so they run when
-# someone asks for a number, against whatever commit that number is about.
 on:
+  # Benchmarks are slow and every run costs several runner-minutes, so the automatic
+  # trigger waits for Check rather than racing it — a machine running two jobs at once
+  # measures neither.
+  workflow_run:
+    workflows: [Check]
+    types: [completed]
+
+  # Measure an arbitrary ref on demand: a tag, an old commit, a branch nobody pushed to
+  # today.
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Commit, branch or tag to measure (default: the dispatched ref)'
+        description: 'Commit, branch or tag to measure'
+        required: false
+        type: string
+      baseline:
+        description: 'Commit to measure it against (default: the ref before it)'
         required: false
         type: string
       reps:
-        description: 'Measured boots, on top of one discarded warm-up'
+        description: 'Measured boots per arm'
         required: false
         default: '7'
         type: string
 
 permissions:
   contents: read
+  statuses: write
 
 # One measurement per ref at a time — two on the same runner pool would measure each
-# other. Queue rather than cancel: a dispatched bench was asked for on purpose.
+# other. Queue rather than cancel: a bench that was asked for was asked for on purpose.
 concurrency:
-  group: bench-${{ inputs.ref || github.ref }}
+  group: bench-${{ inputs.ref || github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -39,22 +51,56 @@ env:
   ADMIN_EMAIL: admin@example.com
   ADMIN_PASSWORD: bench
   TELEMETRY: 'false'
+  EXTENSIONS_PATH: tests/perf/extensions
 
 jobs:
   startup:
     name: Startup
+    # Two workflows in this repo are named Check (check.yml and blackbox-pr.yml) and
+    # `workflows:` matches on the name, so gate on the event that reached the one we
+    # mean. A failed Check means the commit does not run; there is nothing to measure.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref || github.ref }}
+          ref: ${{ inputs.ref || github.event.workflow_run.head_sha }}
+          # Deep enough to reach a merge base with the trunk; a shallow clone has no
+          # commit to compare against.
+          fetch-depth: 0
 
-      - name: Name the commit under measurement
-        id: measured
+      # Both arms are measured in the same job, minutes apart on one machine. A shared
+      # runner's absolute numbers belong to the runner — the same bundle has measured
+      # 4.5 s and 6.5 s depending on what else was running — so only the ratio between
+      # two arms taken together says anything about the diff.
+      - name: Choose the commits to compare
+        id: commits
+        env:
+          EXPLICIT_BASELINE: ${{ inputs.baseline }}
         run: |
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          echo "short=$(git rev-parse --short=10 HEAD)" >> "$GITHUB_OUTPUT"
+          head_sha=$(git rev-parse HEAD)
+
+          if [ -n "$EXPLICIT_BASELINE" ]; then
+            baseline_sha=$(git rev-parse "$EXPLICIT_BASELINE")
+          else
+            # On a branch, what the diff is against; on the trunk, the commit before.
+            baseline_sha=$(git merge-base HEAD origin/${{ github.event.repository.default_branch }})
+
+            if [ "$baseline_sha" = "$head_sha" ]; then
+              baseline_sha=$(git rev-parse HEAD~1)
+            fi
+          fi
+
+          {
+            echo "head=$head_sha"
+            echo "head_short=$(git rev-parse --short=10 "$head_sha")"
+            echo "baseline=$baseline_sha"
+            echo "baseline_short=$(git rev-parse --short=10 "$baseline_sha")"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Prepare
         uses: ./.github/actions/prepare
@@ -62,26 +108,40 @@ jobs:
       - name: Start database and cache
         run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
 
-      # The same bundle the blackbox suite runs and production starts, rather than the
-      # workspace build — a benchmark of a shape nobody deploys measures nothing.
-      - name: Deploy the production bundle
-        run: pnpm --filter directus deploy --legacy --prod dist
+      # The bundle `pnpm --filter directus deploy` produces, which the blackbox suite
+      # runs and production starts — not the workspace build. A benchmark of a shape
+      # nobody deploys measures nothing.
+      - name: Build the head bundle
+        run: |
+          pnpm --filter directus deploy --legacy --prod dist
+          mv dist dist-head
+
+      - name: Build the baseline bundle
+        run: |
+          git worktree add ../baseline ${{ steps.commits.outputs.baseline }}
+          cd ../baseline
+          pnpm install
+          pnpm run build
+          pnpm --filter directus deploy --legacy --prod dist
+        env:
+          npm_config_workspace_concurrency: 2
+          NODE_OPTIONS: --max_old_space_size=6144
 
       # An empty extensions directory rather than none: a missing one makes every boot
       # log a resolution failure, and the retry is measured time.
       - name: Bootstrap the database
         run: |
           mkdir -p tests/perf/extensions
-          node dist/cli bootstrap
-        env:
-          EXTENSIONS_PATH: tests/perf/extensions
+          node dist-head/cli bootstrap
 
       - name: Measure startup
         run: pnpm --filter tests-perf bench
         env:
-          EXTENSIONS_PATH: tests/perf/extensions
-          PERF_REPS: ${{ inputs.reps }}
-          GITHUB_SHA: ${{ steps.measured.outputs.sha }}
+          PERF_CLI: ${{ github.workspace }}/dist-head/cli
+          PERF_CLI_BASELINE: ${{ github.workspace }}/../baseline/dist/cli
+          PERF_REPS: ${{ inputs.reps || '7' }}
+          GITHUB_SHA: ${{ steps.commits.outputs.head }}
+          PERF_BASELINE_SHA: ${{ steps.commits.outputs.baseline }}
 
       - name: Write the summary
         if: always()
@@ -89,15 +149,38 @@ jobs:
           if [ -f tests/perf/results/startup.md ]; then
             cat tests/perf/results/startup.md >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "### Startup — no result" >> "$GITHUB_STEP_SUMMARY"
-            echo "" >> "$GITHUB_STEP_SUMMARY"
-            echo "The measurement did not finish. See the job log." >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo "### Startup — no result"
+              echo ""
+              echo "The measurement did not finish. See the job log."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # A workflow_run job does not appear in the commit's own check list, so without
+      # this the number would exist only inside a run nobody opens.
+      - name: Report on the commit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f tests/perf/results/startup.status.txt ]; then
+            description=$(cat tests/perf/results/startup.status.txt)
+            state=success
+          else
+            description='the measurement did not finish'
+            state=failure
+          fi
+
+          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+            -f state="$state" \
+            -f context='Bench / startup' \
+            -f description="$description" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Upload the results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bench-startup-${{ steps.measured.outputs.short }}
+          name: bench-startup-${{ steps.commits.outputs.head_short }}
           path: tests/perf/results/
           if-no-files-found: warn

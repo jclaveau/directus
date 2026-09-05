@@ -15,15 +15,20 @@ import { expect, test } from 'vitest';
  * the shape a deploy's first worker sees, and the only shape that is the same every
  * time. A warm cache skips the build-identity flush, and that path alone pulls ~480
  * modules, which swamps anything a code change does.
+ *
+ * With PERF_CLI_BASELINE set, a second bundle is measured alternately with the first
+ * and the two are reported as a ratio. On a shared runner that is the only figure
+ * worth reading: the same bundle has measured 4.5 s and 6.5 s on one machine
+ * depending on what else was running, so an absolute number belongs to the machine,
+ * while a ratio taken minutes apart on it belongs to the diff.
  */
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 // `pnpm --filter directus deploy --legacy --prod dist` at the repo root, the same
 // bundle the blackbox suite runs, so this measures what production actually starts.
-// PERF_CLI points it at a bundle built elsewhere, which is how two commits get
-// compared without rebuilding between the arms.
 const cli = process.env['PERF_CLI'] ?? join(root, 'dist', 'cli');
+const baselineCli = process.env['PERF_CLI_BASELINE'];
 
 const reps = Number(process.env['PERF_REPS'] ?? 7);
 const defaultOutput = join(root, 'tests', 'perf', 'results');
@@ -38,15 +43,26 @@ const serverEnv = {
 	TELEMETRY: 'false',
 };
 
-async function timeOneBoot(rep: number): Promise<number> {
-	const port = basePort + rep;
+type Arm = { name: string; cli: string; samples: number[] };
 
-	const server = spawn('node', [cli, 'start'], {
+type Summary = {
+	name: string;
+	samples: number[];
+	min: number;
+	median: number;
+	p95: number;
+	max: number;
+};
+
+async function timeOneBoot(arm: Arm, attempt: number): Promise<number> {
+	const port = basePort + attempt;
+
+	const server = spawn('node', [arm.cli, 'start'], {
 		env: {
 			...serverEnv,
 			PORT: String(port),
 			PUBLIC_URL: `http://127.0.0.1:${port}`,
-			CACHE_NAMESPACE: `perf-${process.pid}-${rep}`,
+			CACHE_NAMESPACE: `perf-${process.pid}-${attempt}`,
 		},
 	});
 
@@ -64,7 +80,9 @@ async function timeOneBoot(rep: number): Promise<number> {
 
 	while (ready === null) {
 		if (exited) {
-			throw new Error(`The server exited during boot ${rep}:\n${output}`);
+			throw new Error(
+				`The ${arm.name} server exited during boot ${attempt}:\n${output}`,
+			);
 		}
 
 		try {
@@ -89,33 +107,69 @@ async function timeOneBoot(rep: number): Promise<number> {
 	return Math.round(ready - started);
 }
 
-function percentile(sorted: number[], fraction: number): number {
-	return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]!;
+function summarise({ name, samples }: Arm): Summary {
+	const sorted = [...samples].sort((a, b) => a - b);
+
+	const at = (fraction: number) =>
+		sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]!;
+
+	return {
+		name,
+		samples,
+		min: sorted[0]!,
+		median: at(0.5),
+		p95: at(0.95),
+		max: sorted[sorted.length - 1]!,
+	};
+}
+
+function row(summary: Summary): string {
+	return `| ${summary.name} | ${summary.min} ms | **${summary.median} ms**`
+		+ ` | ${summary.p95} ms | ${summary.max} ms |`;
 }
 
 test('the API answers its first request', async () => {
-	// Discarded: the first boot of a run pays for a cold page cache that no later one
-	// does, and it would drag the median of a short series.
-	await timeOneBoot(0);
+	const arms: Arm[] = [{ name: 'head', cli, samples: [] }];
 
-	const samples: number[] = [];
-
-	for (let rep = 1; rep <= reps; rep++) {
-		samples.push(await timeOneBoot(rep));
+	if (baselineCli) {
+		arms.push({ name: 'baseline', cli: baselineCli, samples: [] });
 	}
 
-	const sorted = [...samples].sort((a, b) => a - b);
+	let attempt = 0;
+
+	// Discarded: the first boot of a bundle pays for a cold page cache that no later
+	// one does, and it would drag the median of a short series.
+	for (const arm of arms) {
+		await timeOneBoot(arm, attempt++);
+	}
+
+	// Alternating rather than one arm then the other: whatever else the machine is
+	// doing drifts over minutes, and alternating spreads that drift across both arms
+	// instead of handing all of it to whichever went second.
+	for (let rep = 0; rep < reps; rep++) {
+		for (const arm of arms) {
+			arm.samples.push(await timeOneBoot(arm, attempt++));
+		}
+	}
+
+	const summaries = arms.map(summarise);
+	const [head, baseline] = summaries;
+
+	const comparison = baseline
+		? {
+				deltaMs: head!.median - baseline.median,
+				ratio: Number((head!.median / baseline.median).toFixed(4)),
+			}
+		: null;
 
 	const result = {
 		commit: process.env['GITHUB_SHA'] ?? 'local',
+		baselineCommit: process.env['PERF_BASELINE_SHA'] ?? null,
 		node: process.version,
 		measuredAt: new Date().toISOString(),
 		reps,
-		samples,
-		min: sorted[0]!,
-		median: percentile(sorted, 0.5),
-		p95: percentile(sorted, 0.95),
-		max: sorted[sorted.length - 1]!,
+		arms: summaries,
+		comparison,
 	};
 
 	await mkdir(outputDir, { recursive: true });
@@ -125,25 +179,58 @@ test('the API answers its first request', async () => {
 		`${JSON.stringify(result, null, 2)}\n`,
 	);
 
+	const verdict: string[] = [];
+
+	if (comparison) {
+		const sign = comparison.deltaMs >= 0
+			? '+'
+			: '';
+
+		const percent = ((comparison.ratio - 1) * 100).toFixed(1);
+		const against = (result.baselineCommit ?? 'baseline').slice(0, 10);
+
+		verdict.push(
+			'',
+			`**${sign}${comparison.deltaMs} ms** (${percent}%) against \`${against}\`.`,
+		);
+	}
+
 	await writeFile(
 		join(outputDir, 'startup.md'),
 		[
-			'### Startup — spawn to first answered request',
+			`### Startup — spawn to first answered request`,
 			'',
-			'| commit | reps | min | median | p95 | max |',
-			'| --- | ---: | ---: | ---: | ---: | ---: |',
-			`| \`${result.commit.slice(0, 10)}\` | ${reps} | ${result.min} ms`
-				+ ` | **${result.median} ms** | ${result.p95} ms | ${result.max} ms |`,
+			`Measured commit \`${result.commit.slice(0, 10)}\`.`,
 			'',
-			`Samples: ${samples.join(', ')} ms. Node ${result.node}.`,
+			'| arm | min | median | p95 | max |',
+			'| --- | ---: | ---: | ---: | ---: |',
+			...summaries.map(row),
+			...verdict,
 			'',
-			'Each repetition is a cold boot in its own cache namespace, after one',
-			'discarded warm-up. A repetition is one worker, and PM2 starts them one',
-			'at a time.',
+			`${reps} measured boots per arm, alternating, one discarded warm-up each.`,
+			`Every boot is cold: its own cache namespace. Node ${result.node}.`,
+			'',
+			...summaries.map((s) => `\`${s.name}\`: ${s.samples.join(', ')} ms.`),
 			'',
 		].join('\n'),
 	);
 
-	expect(samples).toHaveLength(reps);
-	expect(sorted[0]).toBeGreaterThan(0);
+	// One line for whoever is reading a commit rather than a run: CI copies it into
+	// the commit status verbatim, so it has to stand alone.
+	let status = `startup ${head!.median} ms`;
+
+	if (comparison) {
+		const sign = comparison.deltaMs >= 0
+			? '+'
+			: '';
+
+		status += ` (${sign}${comparison.deltaMs} ms vs baseline)`;
+	}
+
+	await writeFile(join(outputDir, 'startup.status.txt'), `${status}\n`);
+
+	for (const arm of arms) {
+		expect(arm.samples).toHaveLength(reps);
+		expect(Math.min(...arm.samples)).toBeGreaterThan(0);
+	}
 });
