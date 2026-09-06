@@ -156,6 +156,71 @@ describe('build', () => {
 		60_000,
 	);
 
+	test(
+		'builds a bundle extension from its manifest',
+		async () => {
+			const extensionPath = `${TEST_PREFIX}-bundle-${Date.now()}`;
+			const root = resolve(origCwd, extensionPath);
+
+			await fse.outputFile(
+				resolve(root, 'src', 'hook.js'),
+				'export default () => undefined;\n',
+			);
+
+			await fse.outputJson(resolve(root, 'package.json'), {
+				name: 'a-bundle',
+				version: '0.0.0',
+				type: 'module',
+				'directus:extension': {
+					type: 'bundle',
+					host: '^11.0.0',
+					path: { app: 'dist/app.js', api: 'dist/api.js' },
+					entries: [{ type: 'hook', name: 'a-hook', source: 'src/hook.js' }],
+				},
+			});
+
+			process.chdir(root);
+
+			try {
+				await build({});
+			}
+			finally {
+				process.chdir(origCwd);
+			}
+
+			expect(fse.pathExistsSync(resolve(root, 'dist', 'api.js'))).toBe(true);
+			expect(fse.pathExistsSync(resolve(root, 'dist', 'app.js'))).toBe(true);
+		},
+		30_000,
+	);
+
+	test(
+		'builds a bundle extension from explicit entries',
+		async () => {
+			const extensionPath = `${TEST_PREFIX}-bundle-flags-${Date.now()}`;
+			const root = resolve(origCwd, extensionPath);
+
+			await fse.outputFile(
+				resolve(root, 'src', 'hook.js'),
+				'export default () => undefined;\n',
+			);
+
+			await build({
+				type: 'bundle',
+				input: JSON.stringify([
+					{ type: 'hook', name: 'a-hook', source: `./${extensionPath}/src/hook.js` },
+				]),
+				output: JSON.stringify({
+					app: `${extensionPath}/dist/app.js`,
+					api: `${extensionPath}/dist/api.js`,
+				}),
+			});
+
+			expect(fse.pathExistsSync(resolve(root, 'dist', 'api.js'))).toBe(true);
+		},
+		30_000,
+	);
+
 	test('leaves the sdk out of the app-only packages', () => {
 		// the list is the app shared deps minus the sdk, derived by name. Lose that
 		// filter and every api extension importing defineHook gets warned about the
