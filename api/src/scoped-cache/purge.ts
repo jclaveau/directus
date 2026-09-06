@@ -285,31 +285,19 @@ return 0
 
 /**
  * Read a set of tag sets, drop them, and prune the slice index that names them — as
- * one step, so no other client can act between any two of those.
+ * one step, so no other client can act between any two of those. A read filing its
+ * key into one of those sets between the read and the drop would otherwise have that
+ * set deleted underneath it, leaving a correct entry indexed by nothing.
  *
- * The counter bumps ride along at the top, before anything is read, which is the
- * ordering `respond`'s post-fill comparison rests on: a read still in flight
- * either sees the new counter and declines, or had already filed its tags and is
- * swept here.
+ * Members are gathered with a `SMEMBERS` per key and deduped in Lua rather than by
+ * `SUNION`: the union has to be built before the sets are dropped anyway, and
+ * `unpack`ing a key list into one call overflows Lua's stack.
  *
- * Members are gathered with a `SMEMBERS` per key and deduped in Lua rather than
- * by `SUNION`, for two reasons: the union has to be built before the sets are
- * dropped anyway, and `unpack`ing an unbounded key list into one call overflows
- * Lua's stack (`LUAI_MAXCSTACK`) on a collection with enough slices.
- *
- * KEYS are the tag sets. ARGV is the epoch TTL, how many epoch keys follow, those
- * keys, and then `sliceIndexKey, tagKey` pairs for the prunings.
+ * KEYS are the tag sets; ARGV is `sliceIndexKey, tagKey` pairs for the prunings. The
+ * counter bumps are NOT in here — they are one pipeline of their own, sent first, so
+ * they still land when the sweep behind them is refused.
  */
 export const scopedCacheSweepScript = `
-local epochTtl = tonumber(ARGV[1])
-local epochCount = tonumber(ARGV[2])
-
-for i = 1, epochCount do
-	local epochKey = ARGV[2 + i]
-	redis.call('INCR', epochKey)
-	redis.call('EXPIRE', epochKey, epochTtl)
-end
-
 local seen = {}
 local members = {}
 
@@ -328,12 +316,28 @@ for i = 1, #KEYS do
 	redis.call('DEL', KEYS[i])
 end
 
-for i = 3 + epochCount, #ARGV, 2 do
+for i = 1, #ARGV, 2 do
 	redis.call('SREM', ARGV[i], ARGV[i + 1])
 end
 
 return members
 `;
+
+/**
+ * How many tag sets one sweep call carries.
+ *
+ * Two bounds, same number. A key list is spread into the `eval` call, and a spread
+ * long enough throws `RangeError` before Redis is reached
+ * (https://github.com/jclaveau/directus/issues/397) — measured between 125k and 200k
+ * arguments, and stack-dependent, so the cap has to be well under any runner's.
+ * And a script blocks the whole server while it runs, so the batch also bounds how
+ * long one purge can hold Redis away from everything else.
+ *
+ * Chunking costs the race nothing: each chunk is atomic on its own, and a fill into
+ * a set in a later chunk is read and swept by that chunk, while a fill into a set
+ * already swept makes a fresh set the next purge finds.
+ */
+const SCOPED_CACHE_SWEEP_CHUNK_KEYS = 500;
 
 /**
  * Index a freshly-cached response key under every tag its data came from, so a later
@@ -518,24 +522,15 @@ function scopedCacheCollectionOfTagKey(tagKey: string): string | null {
 		: label.slice(0, fieldAt);
 }
 
-async function purgeScopedCacheTagKeys(
-	cache: Keyv,
-	tagKeys: string[],
-): Promise<number> {
-	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty
-	// collection scan) can leave nothing to purge.
-	if (tagKeys.length === 0) {
-		return 0;
-	}
-
-	const redis = useRedis();
-
-	// Collect the slice-index prunings before the sweep runs, so the script can do
-	// them in the same step. A collection name cannot hold a `:`, so the first one
-	// after the prefix is where the field starts; a bare collection tag has none and
-	// is not in any slice index.
+/**
+ * The `sliceIndexKey, tagKey` pairs a batch of tag keys has to prune, flat, in the
+ * shape the sweep script reads them. A collection name cannot hold a `:`, so the
+ * first one after the prefix is where the field starts; a bare collection tag has
+ * none and is in no slice index.
+ */
+function sliceIndexPruningsOf(tagKeys: readonly string[]): string[] {
 	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
-	const sliceIndexPrunings: string[] = [];
+	const prunings: string[] = [];
 
 	for (const tagKey of tagKeys) {
 		const label = tagKey.startsWith(tagPrefix)
@@ -548,40 +543,67 @@ async function purgeScopedCacheTagKeys(
 			continue;
 		}
 
-		sliceIndexPrunings.push(
+		prunings.push(
 			scopedCacheCollectionSlicesKey(label.slice(0, fieldAt)),
 			tagKey,
 		);
 	}
 
-	const epochKeys = scopedCachePurgeEnabled() && redisConfigAvailable()
-		? [
-			...new Set(
-				tagKeys
-					.map(scopedCacheCollectionOfTagKey)
-					.filter((collection): collection is string => collection !== null),
-			),
-		].map(scopedCacheEpochKey)
-		: [];
+	return prunings;
+}
 
-	// One atomic step, not a pipeline: a pipeline only fixes the ORDER its own
-	// commands run in, and any other client's command may still land between two of
-	// them. A read filing its tags between the member read and the DEL below used to
-	// have the set it had just written to deleted underneath it — leaving a correct
-	// entry indexed by nothing, which no later purge could reach and which the
-	// counter guard cannot catch, since that read captured after the bump and is
-	// right to cache. Inside a script the interleaving cannot exist: a concurrent
-	// SADD either precedes the whole sweep (its key is a member, and its entry is
-	// deleted below) or follows it (its set is new, and the next purge finds it).
-	const members = await redis.eval(
-		scopedCacheSweepScript,
-		tagKeys.length,
-		...tagKeys,
-		String(SCOPED_CACHE_EPOCH_TTL_SECONDS),
-		String(epochKeys.length),
-		...epochKeys,
-		...sliceIndexPrunings,
-	) as string[];
+async function purgeScopedCacheTagKeys(
+	cache: Keyv,
+	tagKeys: string[],
+): Promise<number> {
+	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty
+	// collection scan) can leave nothing to purge.
+	if (tagKeys.length === 0) {
+		return 0;
+	}
+
+	const redis = useRedis();
+
+	// Before anything is read, and in a pipeline of its own rather than inside the
+	// script: a sweep that is refused still has to leave the counters moved, so a
+	// read in flight declines instead of caching under an index this purge was about
+	// to drop and will drop on retry.
+	await bumpScopedCacheEpochs(
+		tagKeys
+			.map(scopedCacheCollectionOfTagKey)
+			.filter((collection): collection is string => collection !== null),
+	);
+
+	const members: string[] = [];
+	const seenMembers = new Set<string>();
+
+	for (
+		let at = 0;
+		at < tagKeys.length;
+		at += SCOPED_CACHE_SWEEP_CHUNK_KEYS
+	) {
+		const batch = tagKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS);
+
+		// One atomic step per batch, not a pipeline: a pipeline only fixes the ORDER
+		// its own commands run in, and any other client's command may still land
+		// between two of them. Inside a script the interleaving cannot exist — a
+		// concurrent SADD either precedes the whole batch (its key is a member, and
+		// its entry is deleted below) or follows it (its set is new, and the next
+		// purge finds it).
+		const swept = await redis.eval(
+			scopedCacheSweepScript,
+			batch.length,
+			...batch,
+			...sliceIndexPruningsOf(batch),
+		) as string[];
+
+		for (const member of swept) {
+			if (seenMembers.has(member) === false) {
+				seenMembers.add(member);
+				members.push(member);
+			}
+		}
+	}
 
 	const wasDeleted = await Promise.all(members.map((member) => {
 		return cache.delete(member);
@@ -670,6 +692,10 @@ export async function purgeCollectionScopedCache(
 ): Promise<void> {
 	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
 
+	// Not the sweep's own bump repeated: this one has to precede the slice-index
+	// read below, which the sweep never sees. A read filing a NEW slice between that
+	// read and the sweep is missed by this purge either way — bumped first, it
+	// declines to cache instead of surviving under a slice nothing swept.
 	await bumpScopedCacheEpochs([collection]);
 
 	// Read off the index each slice files itself into, rather than walking the whole

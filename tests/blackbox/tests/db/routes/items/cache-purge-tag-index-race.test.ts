@@ -165,6 +165,16 @@ describe(oneLine`
 		 * reads filled. The sweep is the write's own purge of the held slice; the
 		 * decoys are what make its delete phase long enough to aim at.
 		 */
+		/**
+		 * The narrowest thing that has to stay true for any of this to witness
+		 * anything: the sweep has to still be running when the aimed reads file their
+		 * tags. A faster runner, or a cheaper sweep, closes the window before the
+		 * first lead lands — every entry is then filed after the DEL, correctly
+		 * reachable, and the assertions below pass without having tested the race.
+		 * So the sweep's own duration is asserted, not just measured.
+		 */
+		const sweepMustOutlastMs = readLeadsMs[0]! + readHoldMs;
+
 		async function fillDuringSweep(label: string): Promise<number[]> {
 			for (let sent = 0; sent < decoyMemberCount; sent += decoyChunkSize) {
 				await redisCommand(REDIS_PORT, ['SADD', heldSliceKey, ...Array.from(
@@ -186,13 +196,22 @@ describe(oneLine`
 				return index + 1;
 			});
 
+			const sweepStartedAt = Date.now();
+
 			const [sweepResponse, limits] = await Promise.all([
 				writeHeldLabel(label),
 				Promise.all(held),
 			]);
 
+			const sweepMs = Date.now() - sweepStartedAt;
+
 			expect(sweepResponse.status).toBe(200);
-			mark(`sweep answered, ${limits.length} reads filled during it`);
+			mark(`sweep answered in ${sweepMs}ms, ${limits.length} reads filled`);
+
+			// Not a timing tolerance — a calibration check. Below this the decoys are
+			// no longer buying a window the reads can be aimed into, and a green says
+			// nothing about the race. Raise `decoyMemberCount` if this ever trips.
+			expect(sweepMs).toBeGreaterThan(sweepMustOutlastMs);
 
 			return limits;
 		}

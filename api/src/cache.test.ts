@@ -121,8 +121,7 @@ beforeEach(() => {
 	redis.eval.mockImplementation(
 		async (_script: string, numKeys: number, ...args: string[]) => {
 			const tagKeys = args.slice(0, numKeys);
-			const trailing = args.slice(numKeys);
-			const prunings = trailing.slice(2 + Number(trailing[1]));
+			const prunings = args.slice(numKeys);
 
 			const memberLists = await Promise.all(
 				tagKeys.map((key) => redis.smembers(key)),

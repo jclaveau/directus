@@ -634,6 +634,51 @@ describe('collection slice index', () => {
 		expect(scan).not.toHaveBeenCalled();
 	});
 
+	it(oneLine`
+		bumps the counter BEFORE reading the slice index — a read filing a new slice
+		between that read and the sweep is missed by this purge, and the bump is what
+		makes it decline instead of surviving under a slice nothing swept
+	`, async () => {
+		const calls: string[] = [];
+
+		const pipeline = {
+			incr: (key: string) => {
+				calls.push(`incr ${key}`);
+				return pipeline;
+			},
+			expire: () => pipeline,
+			exec: async () => {
+				calls.push('exec');
+				return [];
+			},
+		};
+
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: async (key: string) => {
+				calls.push(`smembers ${key}`);
+				return [];
+			},
+			del: vi.fn(),
+			srem: vi.fn(),
+			eval: async () => {
+				calls.push('eval');
+				return [];
+			},
+			pipeline: () => pipeline,
+		} as any);
+
+		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
+
+		expect(calls).toEqual([
+			'incr ns:epoch:articles',
+			'exec',
+			'smembers ns:slices:articles',
+			'incr ns:epoch:articles',
+			'exec',
+			'eval',
+		]);
+	});
+
 	it('drops a purged slice key from its collection index', async () => {
 		const sweep = redisSweepDouble(async () => []);
 
@@ -691,8 +736,7 @@ function redisSweepDouble(members: () => Promise<string[]>) {
 		) => {
 			swept.push(args.slice(0, numKeys));
 
-			const trailing = args.slice(numKeys);
-			const prunings = trailing.slice(2 + Number(trailing[1]));
+			const prunings = args.slice(numKeys);
 
 			for (let at = 0; at < prunings.length; at += 2) {
 				pruned.push([prunings[at]!, prunings[at + 1]!]);
@@ -854,6 +898,80 @@ describe('dropScopedCacheTagIndex', () => {
 			'scan',
 			'del',
 		]);
+	});
+
+	it(oneLine`
+		sweeps a long tag list in bounded batches — the whole list is spread into the
+		script call, and a spread long enough throws RangeError before Redis is
+		reached (#397), taking a purge that can then never complete on retry
+	`, async () => {
+		const sweep = redisSweepDouble(async () => []);
+
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue([]),
+			del: vi.fn(),
+			srem: vi.fn(),
+			eval: sweep.eval,
+			pipeline: () => redisPipelineDouble(),
+		} as any);
+
+		// One slice per key, which is what a per-user-scoped collection accumulates.
+		await purgeScopedCache(
+			{ delete: vi.fn() } as any,
+			'articles',
+			Array.from({ length: 1_201 }, (_unused, index) => {
+				return {
+					collection: 'articles',
+					field: 'author',
+					value: index,
+				};
+			}),
+		);
+
+		// 1201 slices + the bare collection tag the purge always prepends.
+		expect(sweep.swept.flat()).toHaveLength(1_202);
+		expect(sweep.swept).toHaveLength(3);
+
+		for (const batch of sweep.swept) {
+			expect(batch.length).toBeLessThanOrEqual(500);
+		}
+
+		// Every key still swept exactly once: batching must not drop or repeat one.
+		expect(new Set(sweep.swept.flat()).size).toBe(1_202);
+	});
+
+	it(oneLine`
+		moves the counters even when the sweep behind them is refused, so a read in
+		flight declines rather than caching under an index the retry will drop
+	`, async () => {
+		const bumped: string[] = [];
+
+		const pipeline = {
+			incr: (key: string) => {
+				bumped.push(key);
+				return pipeline;
+			},
+			expire: () => pipeline,
+			exec: async () => [],
+		};
+
+		vi.mocked(useRedis).mockReturnValue({
+			smembers: vi.fn().mockResolvedValue([]),
+			del: vi.fn(),
+			srem: vi.fn(),
+			eval: vi.fn().mockRejectedValue(new Error('Connection is closed.')),
+			pipeline: () => pipeline,
+		} as any);
+
+		await purgeScopedCache(
+			{ delete: vi.fn() } as any,
+			'articles',
+			[{ collection: 'articles', field: 'author', value: 7 }],
+		);
+
+		// The bumps are their own pipeline, sent before the script — inside it they
+		// would have gone down with the refusal.
+		expect(bumped).toEqual(['ns:epoch:articles']);
 	});
 
 	it('no-ops (never DELs an empty list) when nothing matches', async () => {
