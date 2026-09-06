@@ -37,6 +37,10 @@ program
 		'-e, --external <deps>',
 		'comma-separated dependencies the api entry resolves at runtime, not bundled',
 	)
+	.option(
+		'--preserve-modules',
+		'emit the api entrypoint as one file per module, to read rather than to run',
+	)
 	.option('-w, --watch', 'watch and rebuild on changes')
 	.option('--no-minify', 'disable minification')
 	.option('--sourcemap', 'include source maps in output')

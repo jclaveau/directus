@@ -52,7 +52,7 @@ describe('build', () => {
 		30_000,
 	);
 
-	/** Scaffolds an endpoint extension, builds it, and returns what landed in dist. */
+	/** Scaffolds an endpoint extension, builds it, and returns its dist directory. */
 	async function buildEndpoint(
 		source: string | null,
 		options: Parameters<typeof build>[0] = {},
@@ -88,14 +88,15 @@ describe('build', () => {
 			process.chdir(origCwd);
 		}
 
-		return fse.readFile(resolve(origCwd, extensionPath, 'dist', 'index.js'), 'utf8');
+		return resolve(origCwd, extensionPath, 'dist');
 	}
 
 	test(
 		'carries the define helper without the schemas that share its package',
 		async () => {
 			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-			const bundle = await buildEndpoint(null);
+			const dist = await buildEndpoint(null);
+			const bundle = await fse.readFile(resolve(dist, 'index.js'), 'utf8');
 
 			// nothing about a plain endpoint is worth a warning
 			expect(warn).not.toHaveBeenCalled();
@@ -120,7 +121,7 @@ describe('build', () => {
 		async () => {
 			// DatabaseClients is a string array. websockets.js sits in the same package
 			// and pulls zod, which used to arrive alongside it — 264 KB.
-			const bundle = await buildEndpoint(
+			const dist = await buildEndpoint(
 				[
 					"import { DatabaseClients } from '@directus/types';",
 					'',
@@ -128,6 +129,8 @@ describe('build', () => {
 					'',
 				].join('\n'),
 			);
+
+			const bundle = await fse.readFile(resolve(dist, 'index.js'), 'utf8');
 
 			expect(bundle).not.toContain('@directus/types');
 
@@ -147,8 +150,15 @@ describe('build', () => {
 				'',
 			].join('\n');
 
-			const bundled = await buildEndpoint(source);
-			const externalized = await buildEndpoint(source, { external: 'fs-extra' });
+			const bundledDist = await buildEndpoint(source);
+			const externalizedDist = await buildEndpoint(source, { external: 'fs-extra' });
+
+			const bundled = await fse.readFile(resolve(bundledDist, 'index.js'), 'utf8');
+
+			const externalized = await fse.readFile(
+				resolve(externalizedDist, 'index.js'),
+				'utf8',
+			);
 
 			expect(bundled).not.toContain('from "fs-extra"');
 			expect(externalized).toContain('from "fs-extra"');
@@ -325,6 +335,92 @@ describe('build', () => {
 			}
 			finally {
 				info.mockRestore();
+			}
+		},
+		30_000,
+	);
+
+	test(
+		'spreads the api entrypoint over one file per module',
+		async () => {
+			const dist = await buildEndpoint(
+				[
+					"import { DatabaseClients } from '@directus/types';",
+					'',
+					'export default () => DatabaseClients.length;',
+					'',
+				].join('\n'),
+				{ preserveModules: true },
+			);
+
+			const entry = await fse.readFile(resolve(dist, 'index.js'), 'utf8');
+
+			// the manifest names one entrypoint, so that file keeps its name and reaches
+			// the rest of the tree by relative import instead of swallowing it
+			expect(fse.pathExistsSync(resolve(dist, 'index.js'))).toBe(true);
+			expect(entry).toMatch(/^import .* from "\.\.?\//m);
+
+			const emitted = (await fse.readdir(dist, { recursive: true })) as string[];
+			const modules = emitted.filter((file) => file.endsWith('.js'));
+
+			expect(modules.length).toBeGreaterThan(1);
+		},
+		30_000,
+	);
+
+	test(
+		'warns that a spread-out build is for reading',
+		async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+			try {
+				await buildEndpoint(null, { preserveModules: true });
+
+				expect(warn).toHaveBeenCalledWith(
+					expect.stringContaining('0.4 ms per module'),
+				);
+			}
+			finally {
+				warn.mockRestore();
+			}
+		},
+		30_000,
+	);
+
+	test(
+		'refuses to spread a sandboxed extension out',
+		async () => {
+			const extensionPath = `${TEST_PREFIX}-sandboxed-${Date.now()}`;
+
+			await create('endpoint', extensionPath, {
+				language: 'typescript',
+				install: false,
+			});
+
+			const manifestPath = resolve(origCwd, extensionPath, 'package.json');
+			const manifest = await fse.readJson(manifestPath);
+
+			manifest['directus:extension'].sandbox = {
+				enabled: true,
+				requestedScopes: {},
+			};
+
+			await fse.writeJson(manifestPath, manifest);
+
+			const exit = vi.spyOn(process, 'exit').mockImplementation(() => {
+				throw new Error('exited');
+			});
+
+			process.chdir(resolve(origCwd, extensionPath));
+
+			// the sandbox reads the entrypoint as a string and takes no import but
+			// "directus:api", so the rest of the tree could never be reached
+			try {
+				await expect(build({ preserveModules: true })).rejects.toThrow('exited');
+			}
+			finally {
+				process.chdir(origCwd);
+				exit.mockRestore();
 			}
 		},
 		30_000,
