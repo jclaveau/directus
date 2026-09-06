@@ -84,6 +84,14 @@ describe(oneLine`
 		env[vendor]['CACHE_NAMESPACE'] = namespace;
 		env[vendor]['CACHE_RACE_READ_HOLD_MS'] = String(readHoldMs);
 
+		// These two instances have no business finishing anyone else's failed purges.
+		// The pending-purge table is shared by every instance in the shard while the
+		// labels in it are namespace-free, so a drain here would rebuild them against
+		// THIS namespace, purge nothing, and clear records that belong to the test
+		// next door — which is one candidate for the retry-timer test failing beside
+		// this one. Nothing in here ever records a pending purge, so it loses nothing.
+		env[vendor]['CACHE_SCOPED_PURGE_RETRY_INTERVAL'] = '0';
+
 		// The instance that sweeps, and the one that reads while it does. Same Redis,
 		// same database, separate event loops — which is the whole point.
 		let sweeperInstance: ChildProcess;
