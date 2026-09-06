@@ -7,17 +7,23 @@ on:
   workflow_run:
     workflows: [Check]
     types: [completed]
+    # `ci-dialect-*` and `*-dist` are regenerated from the trunk on every push to it,
+    # so each trunk commit produced three Check runs and, before this, three identical
+    # benchmarks of the same content. Their branches carry no diff of their own.
+    branches-ignore:
+      - ci-dialect-*
+      - '*-dist'
 
   # Measure an arbitrary ref on demand: a tag, an old commit, a branch nobody pushed to
   # today.
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Commit, branch or tag to measure'
+        description: 'Branch, tag, or FULL 40-char commit to measure'
         required: false
         type: string
       baseline:
-        description: 'Commit to measure it against (default: the ref before it)'
+        description: 'What to measure it against (default: the ref before it)'
         required: false
         type: string
       reps:
@@ -65,10 +71,13 @@ jobs:
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     steps:
+      # An abbreviated sha is not a ref: actions/checkout looks a bare one up as a
+      # branch and then a tag, and fails with "could not be found". Fetch everything
+      # and resolve it below instead of rejecting it.
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.ref || github.event.workflow_run.head_sha }}
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
           # Deep enough to reach a merge base with the trunk; a shallow clone has no
           # commit to compare against.
           fetch-depth: 0
@@ -80,8 +89,13 @@ jobs:
       - name: Choose the commits to compare
         id: commits
         env:
+          EXPLICIT_REF: ${{ inputs.ref }}
           EXPLICIT_BASELINE: ${{ inputs.baseline }}
         run: |
+          if [ -n "$EXPLICIT_REF" ]; then
+            git checkout --detach "$EXPLICIT_REF"
+          fi
+
           head_sha=$(git rev-parse HEAD)
 
           if [ -n "$EXPLICIT_BASELINE" ]; then
@@ -140,7 +154,7 @@ jobs:
           PERF_CLI: ${{ github.workspace }}/dist-head/cli
           PERF_CLI_BASELINE: ${{ github.workspace }}/../baseline/dist/cli
           PERF_REPS: ${{ inputs.reps || '7' }}
-          GITHUB_SHA: ${{ steps.commits.outputs.head }}
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
           PERF_BASELINE_SHA: ${{ steps.commits.outputs.baseline }}
 
       - name: Write the summary
@@ -158,8 +172,11 @@ jobs:
 
       # A workflow_run job does not appear in the commit's own check list, so without
       # this the number would exist only inside a run nobody opens.
+      #
+      # Not always(): that fires on cancellation too, and a bench someone stopped would
+      # then mark the commit as failed on its way out.
       - name: Report on the commit
-        if: always()
+        if: '!cancelled()'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

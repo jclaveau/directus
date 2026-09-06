@@ -163,7 +163,10 @@ test('the API answers its first request', async () => {
 		: null;
 
 	const result = {
-		commit: process.env['GITHUB_SHA'] ?? 'local',
+		// Not GITHUB_SHA: it is reserved, and the runner overwrites a step-level
+		// override with its own value — on a workflow_run that is the default
+		// branch's head, not the commit being measured.
+		commit: process.env['PERF_HEAD_SHA'] ?? 'local',
 		baselineCommit: process.env['PERF_BASELINE_SHA'] ?? null,
 		node: process.version,
 		measuredAt: new Date().toISOString(),
