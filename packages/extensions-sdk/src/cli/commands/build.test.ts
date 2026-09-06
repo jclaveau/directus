@@ -240,6 +240,37 @@ describe('build', () => {
 	});
 
 	test(
+		'builds a hybrid extension from explicit entrypoints',
+		async () => {
+			const extensionPath = `${TEST_PREFIX}-hybrid-flags-${Date.now()}`;
+			const root = resolve(origCwd, extensionPath);
+
+			for (const side of ['app', 'api']) {
+				await fse.outputFile(
+					resolve(root, 'src', `${side}.js`),
+					'export default {};\n',
+				);
+			}
+
+			await build({
+				type: 'operation',
+				input: JSON.stringify({
+					app: `${extensionPath}/src/app.js`,
+					api: `${extensionPath}/src/api.js`,
+				}),
+				output: JSON.stringify({
+					app: `${extensionPath}/dist/app.js`,
+					api: `${extensionPath}/dist/api.js`,
+				}),
+			});
+
+			expect(fse.pathExistsSync(resolve(root, 'dist', 'api.js'))).toBe(true);
+			expect(fse.pathExistsSync(resolve(root, 'dist', 'app.js'))).toBe(true);
+		},
+		30_000,
+	);
+
+	test(
 		'says an app-only extension has nowhere to put an external',
 		async () => {
 			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);

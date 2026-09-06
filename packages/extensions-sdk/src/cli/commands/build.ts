@@ -601,7 +601,8 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 								`${chalk.blue('--preserve-modules')} builds for reading,`,
 								`not for running:`,
 								`node links every module on its own, which costs about`,
-								`${chalk.bold('0.4 ms per module')} at every boot.`,
+								`${chalk.bold('0.4 ms per module')} at every boot,`,
+								`and a sandboxed extension cannot load it at all.`,
 								`Deploy the bundled build.`,
 							].join(' '),
 						});
@@ -648,6 +649,16 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 async function watchExtension(config: RolldownConfig | RolldownConfig[]) {
 	const configs = Array.isArray(config) ? config : [config];
 	const userConfig = await loadConfig();
+
+	// the build path says this on every build; a watch rebuilds all day and said it
+	// on none of them
+	if (configs.some((c) => c.outputOptions.preserveModules)) {
+		log(
+			`${chalk.blue('--preserve-modules')} builds for reading, not for running.`
+			+ ` Deploy the bundled build.`,
+			'warn',
+		);
+	}
 
 	const spinner = ora(chalk.bold('Building Directus extension...'));
 
