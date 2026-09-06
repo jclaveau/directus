@@ -1,6 +1,6 @@
 import fse from 'fs-extra';
 import { resolve } from 'node:path';
-import { afterAll, afterEach, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
 import { create } from '../index.js';
 import build from './build.js';
 
@@ -47,6 +47,126 @@ describe('build', () => {
 
 			for (const file of dist) {
 				expect(fse.pathExistsSync(resolve(origCwd, extensionPath, 'dist', file))).toBe(true);
+			}
+		},
+		30_000,
+	);
+
+	/** Scaffolds an endpoint extension, builds it, and returns what landed in dist. */
+	async function buildEndpoint(
+		source: string | null,
+		options: Parameters<typeof build>[0] = {},
+	) {
+		const random = Math.random().toString(36);
+		const extensionPath = `${TEST_PREFIX}-endpoint-${Date.now()}-${random.slice(2)}`;
+
+		// Installing would fetch the published sdk from the registry and bundle that
+		// instead of this working copy, so the scaffold is pointed at the workspace.
+		await create('endpoint', extensionPath, {
+			language: 'typescript',
+			install: false,
+		});
+
+		await fse.ensureSymlink(
+			origCwd,
+			resolve(origCwd, extensionPath, 'node_modules', '@directus', 'extensions-sdk'),
+			'dir',
+		);
+
+		if (source !== null) {
+			const entrypoint = resolve(origCwd, extensionPath, 'src', 'index.ts');
+
+			await fse.writeFile(entrypoint, source);
+		}
+
+		process.chdir(resolve(origCwd, extensionPath));
+
+		try {
+			await build(options);
+		}
+		finally {
+			process.chdir(origCwd);
+		}
+
+		return fse.readFile(resolve(origCwd, extensionPath, 'dist', 'index.js'), 'utf8');
+	}
+
+	test(
+		'carries the define helper without the schemas that share its package',
+		async () => {
+			const bundle = await buildEndpoint(null);
+
+			// defineEndpoint is an identity function. It used to arrive with every
+			// zod-backed manifest schema attached — 125 KB — because the two were
+			// emitted into one module that declared no sideEffects.
+			expect(bundle).not.toContain('ZodError');
+			expect(bundle.length).toBeLessThan(5_000);
+		},
+		30_000,
+	);
+
+	test(
+		'carries a type package value without the schemas that share it',
+		async () => {
+			// DatabaseClients is a string array. websockets.js sits in the same package
+			// and pulls zod, which used to arrive alongside it — 264 KB.
+			const bundle = await buildEndpoint(
+				[
+					"import { DatabaseClients } from '@directus/types';",
+					'',
+					'export default () => DatabaseClients.length;',
+					'',
+				].join('\n'),
+			);
+
+			expect(bundle).not.toContain('ZodError');
+			expect(bundle.length).toBeLessThan(5_000);
+		},
+		30_000,
+	);
+
+	test(
+		'leaves an external dependency to be resolved at runtime',
+		async () => {
+			const source = [
+				"import fse from 'fs-extra';",
+				'',
+				"export default () => fse.pathExistsSync('.');",
+				'',
+			].join('\n');
+
+			const bundled = await buildEndpoint(source);
+			const externalized = await buildEndpoint(source, { external: 'fs-extra' });
+
+			expect(bundled).not.toContain('from "fs-extra"');
+			expect(externalized).toContain('from "fs-extra"');
+		},
+		60_000,
+	);
+
+	test(
+		'warns when an api entrypoint reaches an app-only package',
+		async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+			const source = [
+				"import { ref } from 'vue';",
+				'',
+				'export default () => ref(1);',
+				'',
+			].join('\n');
+
+			try {
+				await buildEndpoint(source);
+
+				expect(warn).toHaveBeenCalledWith(expect.stringContaining('vue'));
+
+				expect(warn).toHaveBeenCalledWith(
+					expect.stringContaining('Every worker parses that at boot'),
+				);
+			}
+			finally {
+				warn.mockRestore();
 			}
 		},
 		30_000,

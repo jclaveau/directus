@@ -33,6 +33,21 @@ import generateBundleEntrypoint from './helpers/generate-bundle-entrypoint.js';
 import loadConfig from './helpers/load-config.js';
 import { validateSplitEntrypointOption } from './helpers/validate-cli-options.js';
 
+/**
+ * Packages that only mean something in a browser. An api entrypoint reaching one
+ * drags the whole front-end into a bundle every worker parses at boot — one
+ * extension in the wild grew a 13.6 MB api entry out of two such imports, and
+ * nothing said so at build time.
+ */
+const APP_ONLY_PACKAGES = [
+	'vue',
+	'vue-router',
+	'vue-i18n',
+	'pinia',
+	'@directus/themes',
+	'@directus/composables',
+];
+
 // Workaround for https://github.com/rollup/plugins/issues/1329
 const virtual = virtualDefault as unknown as typeof virtualDefault.default;
 const terser = terserDefault as unknown as typeof terserDefault.default;
@@ -41,6 +56,7 @@ type BuildOptions = {
 	type?: string;
 	input?: string;
 	output?: string;
+	external?: string;
 	watch?: boolean;
 	minify?: boolean;
 	sourcemap?: boolean;
@@ -50,6 +66,11 @@ export default async function build(options: BuildOptions): Promise<void> {
 	const watch = options.watch ?? false;
 	const sourcemap = options.sourcemap ?? false;
 	const minify = options.minify ?? false;
+
+	const external = (options.external ?? '')
+		.split(',')
+		.map((dep) => dep.trim())
+		.filter((dep) => dep.length > 0);
 
 	if (!options.type && !options.input && !options.output) {
 		const packagePath = path.resolve('package.json');
@@ -91,6 +112,7 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: extensionOptions.path.app,
 				outputApi: extensionOptions.path.api,
 				format,
+				external,
 				watch,
 				sourcemap,
 				minify,
@@ -102,6 +124,7 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: extensionOptions.path.app,
 				outputApi: extensionOptions.path.api,
 				format,
+				external,
 				watch,
 				sourcemap,
 				minify,
@@ -112,6 +135,7 @@ export default async function build(options: BuildOptions): Promise<void> {
 				input: extensionOptions.source,
 				output: extensionOptions.path,
 				format,
+				external,
 				watch,
 				sourcemap,
 				minify,
@@ -183,6 +207,7 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: splitOutput.app,
 				outputApi: splitOutput.api,
 				format: 'esm',
+				external,
 				watch,
 				sourcemap,
 				minify,
@@ -219,6 +244,7 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: splitOutput.app,
 				outputApi: splitOutput.api,
 				format: 'esm',
+				external,
 				watch,
 				sourcemap,
 				minify,
@@ -229,6 +255,7 @@ export default async function build(options: BuildOptions): Promise<void> {
 				input,
 				output,
 				format: 'esm',
+				external,
 				watch,
 				sourcemap,
 				minify,
@@ -242,6 +269,7 @@ async function buildAppOrApiExtension({
 	input,
 	output,
 	format,
+	external,
 	watch,
 	sourcemap,
 	minify,
@@ -250,6 +278,7 @@ async function buildAppOrApiExtension({
 	input: string;
 	output: string;
 	format: Format;
+	external: string[];
 	watch: boolean;
 	sourcemap: boolean;
 	minify: boolean;
@@ -268,7 +297,7 @@ async function buildAppOrApiExtension({
 
 	const mode = isIn(type, APP_EXTENSION_TYPES) ? 'browser' : 'node';
 
-	const inputOptions = getRollupOptions({ mode, input, minify, config });
+	const inputOptions = getRollupOptions({ mode, input, minify, external, config });
 	const outputOptions = getRollupOutputOptions({ mode, output, format, sourcemap });
 
 	if (watch) {
@@ -284,6 +313,7 @@ async function buildHybridExtension({
 	outputApp,
 	outputApi,
 	format,
+	external,
 	watch,
 	sourcemap,
 	minify,
@@ -293,6 +323,7 @@ async function buildHybridExtension({
 	outputApp: string;
 	outputApi: string;
 	format: Format;
+	external: string[];
 	watch: boolean;
 	sourcemap: boolean;
 	minify: boolean;
@@ -323,6 +354,7 @@ async function buildHybridExtension({
 		mode: 'browser',
 		input: inputApp,
 		minify,
+		external,
 		config,
 	});
 
@@ -330,6 +362,7 @@ async function buildHybridExtension({
 		mode: 'node',
 		input: inputApi,
 		minify,
+		external,
 		config,
 	});
 
@@ -353,6 +386,7 @@ async function buildBundleExtension({
 	outputApp,
 	outputApi,
 	format,
+	external,
 	watch,
 	sourcemap,
 	minify,
@@ -361,6 +395,7 @@ async function buildBundleExtension({
 	outputApp: string;
 	outputApi: string;
 	format: Format;
+	external: string[];
 	watch: boolean;
 	sourcemap: boolean;
 	minify: boolean;
@@ -395,6 +430,7 @@ async function buildBundleExtension({
 		mode: 'browser',
 		input: { entry: entrypointApp },
 		minify,
+		external,
 		config,
 	});
 
@@ -402,6 +438,7 @@ async function buildBundleExtension({
 		mode: 'node',
 		input: { entry: entrypointApi },
 		minify,
+		external,
 		config,
 	});
 
@@ -424,14 +461,53 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 	const configs = Array.isArray(config) ? config : [config];
 
 	const spinner = ora(chalk.bold('Building Directus extension...')).start();
+	const reports: { level: 'info' | 'warn'; message: string }[] = [];
 
 	const result = await Promise.all(
 		configs.map(async (c) => {
 			try {
 				const bundle = await rolldown(c.inputOptions);
 
-				await bundle.write(c.outputOptions);
+				const { output } = await bundle.write(c.outputOptions);
 				await bundle.close();
+
+				// what a worker will parse at every boot, and whether any of it is the app's
+				if (c.inputOptions.platform === 'node') {
+					const moduleIds = output.flatMap((chunk) => {
+						if (chunk.type !== 'chunk') {
+							return [];
+						}
+
+						const ids = Object.keys(chunk.modules);
+
+						return ids.map((id) => id.replaceAll('\\', '/'));
+					});
+
+					const appOnly = APP_ONLY_PACKAGES.filter((pkg) => {
+						return moduleIds.some((id) => id.includes(`node_modules/${pkg}/`));
+					});
+
+					const { size } = fse.statSync(c.outputOptions.file!);
+					const weight = chalk.bold(`${(size / 1e6).toFixed(2)} MB`);
+
+					reports.push({
+						level: 'info',
+						message: `API bundle: ${weight}, ${moduleIds.length} modules`,
+					});
+
+					if (appOnly.length > 0) {
+						reports.push({
+							level: 'warn',
+							message: [
+								`The API entrypoint pulls in ${chalk.bold(appOnly.join(', '))}.`,
+								`Every worker parses that at boot without ever serving the app —`,
+								`move those imports to the app entrypoint, make them`,
+								`${chalk.blue('import type')}, or exclude them with`,
+								`${chalk.blue('--external')}.`,
+							].join(' '),
+						});
+					}
+				}
 			} catch (error) {
 				return formatRollupError(error as RollupError);
 			}
@@ -450,6 +526,10 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 		process.exit(1);
 	} else {
 		spinner.succeed(chalk.bold('Done'));
+
+		for (const report of reports) {
+			log(report.message, report.level);
+		}
 	}
 }
 
@@ -513,11 +593,13 @@ function getRollupOptions({
 	mode,
 	input,
 	minify,
+	external,
 	config,
 }: {
 	mode: InputOptions['platform'];
 	input: string | Record<string, string>;
 	minify: boolean;
+	external: string[];
 	config: Config;
 }): InputOptions {
 	const plugins = config.plugins ?? [];
@@ -532,7 +614,15 @@ function getRollupOptions({
 				: {}),
 		},
 		input: typeof input !== 'string' ? 'entry' : input,
-		external: [...(mode === 'browser' ? APP_SHARED_DEPS : API_SHARED_DEPS)],
+		// the shared deps the host guarantees, plus whatever the author has said they
+		// will resolve at runtime themselves
+		external: [
+			...(mode === 'browser'
+				? APP_SHARED_DEPS
+				: API_SHARED_DEPS),
+			...external,
+			...(config.external ?? []),
+		],
 		platform: mode!, // TODO why is undefined possible (and triggering an error) only during extensions-sdk's build?
 		// match upstream: only app (browser) extensions are pinned to production; node extensions keep the real env
 		// rolldown 1.1+ moved `define` under `transform`
