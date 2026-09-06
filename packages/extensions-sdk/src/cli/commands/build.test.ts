@@ -99,6 +99,10 @@ describe('build', () => {
 			// defineEndpoint is an identity function. It used to arrive with every
 			// zod-backed manifest schema attached — 125 KB — because the two were
 			// emitted into one module that declared no sideEffects.
+			// an unbuilt workspace leaves the import unresolved, and a bundle that never
+			// carried the helper trivially passes the two assertions below
+			expect(bundle).not.toContain('@directus/extensions-sdk');
+
 			expect(bundle).not.toContain('ZodError');
 			expect(bundle.length).toBeLessThan(5_000);
 		},
@@ -118,6 +122,8 @@ describe('build', () => {
 					'',
 				].join('\n'),
 			);
+
+			expect(bundle).not.toContain('@directus/types');
 
 			expect(bundle).not.toContain('ZodError');
 			expect(bundle.length).toBeLessThan(5_000);
@@ -142,6 +148,77 @@ describe('build', () => {
 			expect(externalized).toContain('from "fs-extra"');
 		},
 		60_000,
+	);
+
+	test(
+		'leaves the app entrypoint bundled when a dependency is externalized',
+		async () => {
+			const extensionPath = `${TEST_PREFIX}-operation-${Date.now()}`;
+
+			await create('operation', extensionPath, {
+				language: 'typescript',
+				install: false,
+			});
+
+			await fse.ensureSymlink(
+				origCwd,
+				resolve(
+					origCwd,
+					extensionPath,
+					'node_modules',
+					'@directus',
+					'extensions-sdk',
+				),
+				'dir',
+			);
+
+			const source = [
+				"import { DatabaseClients } from '@directus/types';",
+				'',
+				'export default { id: 1, handler: () => DatabaseClients.length };',
+				'',
+			].join('\n');
+
+			await fse.writeFile(resolve(origCwd, extensionPath, 'src', 'api.ts'), source);
+			await fse.writeFile(resolve(origCwd, extensionPath, 'src', 'app.ts'), source);
+
+			process.chdir(resolve(origCwd, extensionPath));
+
+			try {
+				await build({ external: '@directus/types' });
+			}
+			finally {
+				process.chdir(origCwd);
+			}
+
+			const dist = resolve(origCwd, extensionPath, 'dist');
+			const api = await fse.readFile(resolve(dist, 'api.js'), 'utf8');
+			const app = await fse.readFile(resolve(dist, 'app.js'), 'utf8');
+
+			// the host resolves nothing for the app beyond its own shared deps, so a bare
+			// specifier left in app.js is a request the browser answers with a 404
+			expect(api).toContain('@directus/types');
+			expect(app).not.toContain('@directus/types');
+		},
+		60_000,
+	);
+
+	test(
+		'reports a small bundle in the unit it fits',
+		async () => {
+			const info = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+			try {
+				await buildEndpoint(null);
+
+				// an endpoint that scaffolds to a few hundred bytes reads as 0.00 MB
+				expect(info).toHaveBeenCalledWith(expect.stringMatching(/API bundle: .*KB/));
+			}
+			finally {
+				info.mockRestore();
+			}
+		},
+		30_000,
 	);
 
 	test(

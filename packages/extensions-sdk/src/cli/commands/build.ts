@@ -40,10 +40,8 @@ import { validateSplitEntrypointOption } from './helpers/validate-cli-options.js
  * nothing said so at build time.
  */
 const APP_ONLY_PACKAGES = [
-	'vue',
-	'vue-router',
-	'vue-i18n',
-	'pinia',
+	// the sdk is the one shared dep an api entrypoint is meant to reach
+	...APP_SHARED_DEPS.filter((dep) => dep !== '@directus/extensions-sdk'),
 	'@directus/themes',
 	'@directus/composables',
 ];
@@ -473,11 +471,13 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 
 				// what a worker will parse at every boot, and whether any of it is the app's
 				if (c.inputOptions.platform === 'node') {
-					const moduleIds = output.flatMap((chunk) => {
-						if (chunk.type !== 'chunk') {
-							return [];
-						}
+					const chunks = output.flatMap((chunk) => {
+						return chunk.type === 'chunk'
+							? [chunk]
+							: [];
+					});
 
+					const moduleIds = chunks.flatMap((chunk) => {
 						const ids = Object.keys(chunk.modules);
 
 						return ids.map((id) => id.replaceAll('\\', '/'));
@@ -487,12 +487,23 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 						return moduleIds.some((id) => id.includes(`node_modules/${pkg}/`));
 					});
 
-					const { size } = fse.statSync(c.outputOptions.file!);
-					const weight = chalk.bold(`${(size / 1e6).toFixed(2)} MB`);
+					const bytes = chunks.reduce((total, chunk) => {
+						return total + Buffer.byteLength(chunk.code);
+					}, 0);
+
+					const weight = chalk.bold(
+						bytes < 1e6
+							? `${(bytes / 1e3).toFixed(1)} KB`
+							: `${(bytes / 1e6).toFixed(2)} MB`,
+					);
+
+					const plural = moduleIds.length === 1
+						? ''
+						: 's';
 
 					reports.push({
 						level: 'info',
-						message: `API bundle: ${weight}, ${moduleIds.length} modules`,
+						message: `API bundle: ${weight}, ${moduleIds.length} module${plural}`,
 					});
 
 					if (appOnly.length > 0) {
@@ -614,15 +625,12 @@ function getRollupOptions({
 				: {}),
 		},
 		input: typeof input !== 'string' ? 'entry' : input,
-		// the shared deps the host guarantees, plus whatever the author has said they
-		// will resolve at runtime themselves
-		external: [
-			...(mode === 'browser'
-				? APP_SHARED_DEPS
-				: API_SHARED_DEPS),
-			...external,
-			...(config.external ?? []),
-		],
+		// the app is downloaded by a browser that resolves nothing beyond the shared
+		// deps the host guarantees, so what the author externalizes stays on the api
+		// side — a bare specifier left in app.js is a request answered with a 404
+		external: mode === 'browser'
+			? APP_SHARED_DEPS
+			: [...API_SHARED_DEPS, ...external, ...(config.external ?? [])],
 		platform: mode!, // TODO why is undefined possible (and triggering an error) only during extensions-sdk's build?
 		// match upstream: only app (browser) extensions are pinned to production; node extensions keep the real env
 		// rolldown 1.1+ moved `define` under `transform`

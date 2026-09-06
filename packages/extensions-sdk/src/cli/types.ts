@@ -6,9 +6,10 @@ export type LanguageShort = 'js' | 'ts';
 
 export type Config = {
 	/**
-	 * Dependencies to leave out of the bundle and resolve at runtime instead. A
+	 * Dependencies the api entrypoint resolves at runtime instead of bundling. A
 	 * string matches an import specifier exactly, so reach a package's subpaths
-	 * with a regular expression.
+	 * with a regular expression. The app entrypoint ignores these: a browser
+	 * resolves nothing but the shared deps the host guarantees.
 	 */
 	external?: (string | RegExp)[];
 	plugins?: Plugin[];

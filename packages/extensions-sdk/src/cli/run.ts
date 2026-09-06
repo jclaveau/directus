@@ -35,7 +35,7 @@ program
 	.option('-f, --force', '[DEPRECATED]')
 	.option(
 		'-e, --external <deps>',
-		'comma-separated dependencies to leave out of the bundle and resolve at runtime',
+		'comma-separated dependencies the api entry resolves at runtime, not bundled',
 	)
 	.option('-w, --watch', 'watch and rebuild on changes')
 	.option('--no-minify', 'disable minification')
