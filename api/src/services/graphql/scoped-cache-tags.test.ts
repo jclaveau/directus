@@ -126,6 +126,70 @@ describe('GraphQLService scoped cache tags', () => {
 	});
 
 	test(oneLine`
+		keeps the earliest counter even when it ARRIVES second — graphql-js resolves
+		root fields in parallel, so the first result back is not the first capture
+	`, async () => {
+		const gql = makeService({ collections: { articles: { singleton: false } } });
+
+		// The later capture resolves first. Keeping it would compare equal at fill
+		// time and cache a response the purge between the two already invalidated.
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 1 }], {
+					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheEpochs: { articles: '9', '*': '4' },
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 2 }], {
+					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheEpochs: { articles: '2', '*': '4' },
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		expect(gql.scopedCacheEpochs).toEqual({ articles: '2', '*': '4' });
+	});
+
+	test(oneLine`
+		an absent counter beats any count — the collection had none when that read
+		took its reading, so a number later on proves a purge created it in between
+	`, async () => {
+		const gql = makeService({ collections: { articles: { singleton: false } } });
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 1 }], {
+					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheEpochs: { articles: '3' },
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		vi.mocked(getService).mockReturnValueOnce({
+			readByQuery: async () => {
+				return withMeta([{ id: 2 }], {
+					scopedCacheTags: [{ collection: 'articles' }],
+					scopedCacheEpochs: { articles: null },
+				});
+			},
+		} as any);
+
+		await gql.read('articles', {});
+
+		expect(gql.scopedCacheEpochs).toEqual({ articles: null });
+	});
+
+	test(oneLine`
 		read() tolerates a child read that carries no counters, leaving the aggregate
 		untouched rather than undefined
 	`, async () => {

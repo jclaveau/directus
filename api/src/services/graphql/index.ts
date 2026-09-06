@@ -15,6 +15,7 @@ import type { Knex } from 'knex';
 import getDatabase from '../../database/index.js';
 import { getService } from '../../utils/get-service.js';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
+import { earlierScopedCacheEpoch } from '../../scoped-cache.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
 import { generateSchema } from './schema/index.js';
@@ -55,9 +56,11 @@ export class GraphQLService {
 	 * landed while they were running — so an entry the aggregate never mentions is
 	 * filled with no such check at all.
 	 *
-	 * First capture wins per collection: root 3 reading `E+1` where root 1 read `E`
-	 * means a purge landed between them, and only the earlier value makes the
-	 * post-fill comparison notice.
+	 * The EARLIEST capture wins per collection: a root reading `E+1` where another
+	 * read `E` means a purge landed between them, and only the earlier value makes
+	 * the post-fill comparison notice. By capture, not by arrival — graphql-js
+	 * resolves root fields in parallel, so the first result back is not the first
+	 * counter taken.
 	 */
 	scopedCacheEpochs: Record<string, string | null>;
 
@@ -159,9 +162,9 @@ export class GraphQLService {
 		for (const [collection, epoch] of Object.entries(
 			resultMeta?.scopedCacheEpochs ?? {},
 		)) {
-			if (collection in this.scopedCacheEpochs === false) {
-				this.scopedCacheEpochs[collection] = epoch;
-			}
+			this.scopedCacheEpochs[collection] = collection in this.scopedCacheEpochs
+				? earlierScopedCacheEpoch(this.scopedCacheEpochs[collection], epoch)
+				: epoch;
 		}
 
 		return result;

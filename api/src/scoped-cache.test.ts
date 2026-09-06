@@ -464,6 +464,31 @@ describe('createScopedCacheCollector', () => {
 	});
 
 	it(oneLine`
+		keeps the earliest counter when a LATER one is declared first — a hook fanning
+		its lookups out with allSettled hands them over in completion order, which is
+		not the order they were taken in
+	`, () => {
+		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+
+		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '9' } });
+		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '2' } });
+
+		expect(epochs).toEqual({ authors: '2' });
+	});
+
+	it(oneLine`
+		an absent counter beats any count — that lookup found the collection with no
+		counter at all, so a number beside it proves a purge created one in between
+	`, () => {
+		const { scope, epochs } = createScopedCacheCollector(emptySchema);
+
+		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: '4' } });
+		scope.scopeTo({ collection: 'authors' }, { epochs: { authors: null } });
+
+		expect(epochs).toEqual({ authors: null });
+	});
+
+	it(oneLine`
 		leaves the counters empty for a scopeTo that handed none over, so respond can
 		tell a declared collection apart from a guarded one
 	`, () => {

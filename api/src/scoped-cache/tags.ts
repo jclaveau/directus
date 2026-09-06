@@ -9,6 +9,42 @@ import type {
 const env = useEnv();
 
 /**
+ * Of two readings of one collection's purge counter, the one taken EARLIER.
+ *
+ * Merging captures cannot be "whichever arrived first". Reads that contribute them
+ * run concurrently — GraphQL resolves its root fields in parallel, and a hook can
+ * fan its dependency lookups out with `allSettled` — so arrival order is not capture
+ * order. Keep the later of two and a purge that landed between them compares equal
+ * at fill time and the response is cached already stale, which is the whole thing
+ * the counters exist to catch.
+ *
+ * Absent beats every count: a counter that did not exist yet is the earliest reading
+ * there is, and any number later on proves a purge created it in between. A value
+ * that will not parse is treated the same way — `INCR` cannot produce one, so it
+ * means something is wrong, and the direction that fails toward not caching is the
+ * one to take.
+ */
+export function earlierScopedCacheEpoch(
+	left: string | null | undefined,
+	right: string | null | undefined,
+): string | null {
+	if (left === null || left === undefined || right === null || right === undefined) {
+		return null;
+	}
+
+	const leftCount = Number(left);
+	const rightCount = Number(right);
+
+	if (Number.isNaN(leftCount) || Number.isNaN(rightCount)) {
+		return null;
+	}
+
+	return leftCount <= rightCount
+		? left
+		: right;
+}
+
+/**
  * A per-operation collector backing the `context.scopedCache` hook handle. The
  * service wires ONE of `scope`/`purge` as `context.scopedCache` per the filter event
  * (read → `scope.scopeTo`, mutation → `purge.purgeBy`); the hook pushes via it and
@@ -48,9 +84,9 @@ export function createScopedCacheCollector(
 		declaredEpochs?: Record<string, string | null>,
 	): void {
 		for (const [collection, epoch] of Object.entries(declaredEpochs ?? {})) {
-			if (collection in epochs === false) {
-				epochs[collection] = epoch;
-			}
+			epochs[collection] = collection in epochs
+				? earlierScopedCacheEpoch(epochs[collection], epoch)
+				: epoch;
 		}
 
 		const batch = Array.isArray(input)

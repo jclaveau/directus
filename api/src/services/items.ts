@@ -966,8 +966,10 @@ implements AbstractService<Item> {
 
 		// A `scopeTo` names a collection the capture above could not know about, and
 		// hands over the counter its own dependent read took beforehand. Folded in
-		// here rather than at declaration time so the read's own capture always wins:
-		// it is the earlier of the two, and only the earlier one shows a purge moved.
+		// here rather than at declaration time so the read's own capture always wins.
+		// Not the same rule the collector uses to merge two DECLARED counters, and it
+		// does not need to be: this one was taken before the query, so it is earlier
+		// than anything a hook could hand over, with no comparison required.
 		for (const [collection, epoch] of Object.entries(
 			scopedCacheCollector.epochs,
 		)) {
