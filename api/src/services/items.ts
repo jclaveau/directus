@@ -35,7 +35,6 @@ import {
 	scopedCacheFilterKeyingByCollection,
 	scopedCacheOwnershipNestedPkPaths,
 	scopedCachePurgeEnabled,
-	scopedCacheTagKey,
 	readScopedCacheEpochs,
 } from '../scoped-cache.js';
 import { collectionsInFieldMap }
@@ -974,31 +973,6 @@ implements AbstractService<Item> {
 		)) {
 			if (collection in scopedCacheEpochs === false) {
 				scopedCacheEpochs[collection] = epoch;
-			}
-		}
-
-		// A `manuallyPurged` tag names a collection whose invalidation its author
-		// owns, and that flag predates this guard — refusing to cache it now would
-		// retract a documented capability. Its counter is captured HERE instead:
-		// after the rows, so it can only catch a purge landing before the fill, not
-		// one that landed during the read. More than the nothing it had, less than
-		// what handing `epochs` over buys — which is how such a hook closes the rest.
-		const lateGuardedCollections = [
-			...new Set(
-				scopedCacheTags
-					.filter((tag) => {
-						return scopedCacheCollector.manuallyPurgedKeys
-							.has(scopedCacheTagKey(tag));
-					})
-					.map((tag) => tag.collection),
-			),
-		].filter((collection) => collection in scopedCacheEpochs === false);
-
-		if (lateGuardedCollections.length > 0) {
-			const lateEpochs = await readScopedCacheEpochs(lateGuardedCollections);
-
-			for (const collection of lateGuardedCollections) {
-				scopedCacheEpochs[collection] = lateEpochs[collection] ?? null;
 			}
 		}
 

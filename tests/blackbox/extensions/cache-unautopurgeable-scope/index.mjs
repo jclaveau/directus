@@ -5,20 +5,26 @@
 // marks it `manuallyPurged`, asserting it reproduces the tag via its own purgeBy.
 //
 //   - CANCEL_READ: unautopurgeable scopeTo, no flag → the read is never cached.
-//   - MANUAL_READ: same tag with `manuallyPurged: true`, plus a matching purgeBy on
-//     the dep's update → cached AND correctly invalidated (valid custom pairing).
+//   - MANUAL_READ: same tag with `manuallyPurged: true` AND the dependency's own
+//     purge counters, plus a matching purgeBy on the dep's update → cached AND
+//     correctly invalidated (valid custom pairing).
+//   - MANUAL_BARE_READ: the same flag with NO counters → still not cached. The flag
+//     says a WRITE reproduces the tag; it says nothing about a purge that already
+//     landed while the read was running, and there is no taking that counter after
+//     the rows are read.
 
 const CANCEL_READ = 'p_unauto_read';
 const CANCEL_DEP = 'p_unauto_dep';
 const MANUAL_READ = 'p_manual_read';
 const MANUAL_DEP = 'p_manual_dep';
 const SCOPE_HOOK_READ = 'p_unauto_scope_hook';
+const MANUAL_BARE_READ = 'p_manual_bare_read';
 
 // A custom slice on `ghost`, a field neither dependency is scoped on — so it's
 // unautopurgeable by the dependency's own auto-purge.
 const customTag = (collection) => ({ collection, field: 'ghost', value: 'g' });
 
-export default function registerHooks({ filter }) {
+export default function registerHooks({ filter }, { services }) {
 	// No `manuallyPurged` → the read carries an unautopurgeable tag → not cacheable.
 	filter(`${CANCEL_READ}.items.read`, (records, _meta, context) => {
 		context.scopedCache?.scopeTo(customTag(CANCEL_DEP));
@@ -26,7 +32,31 @@ export default function registerHooks({ filter }) {
 	});
 
 	// `manuallyPurged: true` → the author owns reproduction, so the read is cached.
-	filter(`${MANUAL_READ}.items.read`, (records, _meta, context) => {
+	//
+	// The counters ride along too, and the two answer different questions:
+	// `manuallyPurged` says a WRITE to MANUAL_DEP will reproduce this custom slice,
+	// `epochs` says whether a purge of MANUAL_DEP already landed while this read was
+	// running. Without them the response is left uncached whatever the flag says, so
+	// the dependency is read here for the one thing that read takes before it runs —
+	// its own counters.
+	filter(`${MANUAL_READ}.items.read`, async (records, _meta, context) => {
+		const dependency = await new services.ItemsService(MANUAL_DEP, {
+			schema: context.schema,
+			accountability: context.accountability,
+			knex: context.database,
+		}).readByQuery({ fields: ['id'], limit: 1 }, { emitEvents: false });
+
+		context.scopedCache?.scopeTo(customTag(MANUAL_DEP), {
+			manuallyPurged: true,
+			epochs: dependency.getMeta?.()?.scopedCacheEpochs,
+		});
+
+		return records;
+	});
+
+	// `manuallyPurged` alone, no counters — the case that used to be let through on a
+	// counter read AFTER the rows, which could not see a purge that landed before it.
+	filter(`${MANUAL_BARE_READ}.items.read`, (records, _meta, context) => {
 		context.scopedCache?.scopeTo(customTag(MANUAL_DEP), { manuallyPurged: true });
 		return records;
 	});

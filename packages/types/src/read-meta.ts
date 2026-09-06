@@ -35,6 +35,11 @@ type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
  * `unautopurgeable_scope` anomaly) rather than served stale. True opts out of that.
  * Applies to every tag in the SAME call — pass a reproducible framework tag and a
  * custom unautopurgeable one in separate calls if only one is manuallyPurged.
+ *
+ * It does NOT stand in for `epochs`, and the two answer different questions: this
+ * one says a WRITE will reproduce the tag, `epochs` says whether a purge already
+ * landed while this read was running. A tag naming a collection with no counter
+ * is left uncached whatever this flag says — see `epochs` below.
  */
 export interface ScopedCacheScopeHandle {
 	scopeTo(

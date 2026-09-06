@@ -26,6 +26,7 @@ const CANCEL_DEP = 'p_unauto_dep';
 const MANUAL_READ = 'p_manual_read';
 const MANUAL_DEP = 'p_manual_dep';
 const SCOPE_HOOK_READ = 'p_unauto_scope_hook';
+const MANUAL_BARE_READ = 'p_manual_bare_read';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -92,6 +93,14 @@ describe(oneLine`
 							{ field: 'title', type: 'string', meta: {} },
 						],
 					},
+					{
+						collection: MANUAL_BARE_READ,
+						meta: { scoped_cache_fields: ['space'] },
+						fields: [
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'title', type: 'string', meta: {} },
+						],
+					},
 				],
 			});
 
@@ -114,6 +123,10 @@ describe(oneLine`
 				}),
 				CreateItem(vendor, {
 					collection: SCOPE_HOOK_READ,
+					item: [{ space: 'z', title: 't' }],
+				}),
+				CreateItem(vendor, {
+					collection: MANUAL_BARE_READ,
 					item: [{ space: 'z', title: 't' }],
 				}),
 			]);
@@ -140,6 +153,7 @@ describe(oneLine`
 				DeleteCollection(vendor, { collection: MANUAL_READ }),
 				DeleteCollection(vendor, { collection: MANUAL_DEP }),
 				DeleteCollection(vendor, { collection: SCOPE_HOOK_READ }),
+				DeleteCollection(vendor, { collection: MANUAL_BARE_READ }),
 			]);
 		});
 
@@ -195,6 +209,22 @@ describe(oneLine`
 
 			// GraphQLService must aggregate the unautopurgeable flag across its reads,
 			// else the /graphql entry would cache (HIT on the second) and serve stale.
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(second.headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			manuallyPurged alone is not enough — with no counters for the collection it
+			names, the read stays uncached, because that flag speaks about what a WRITE
+			will do and never about a purge that already landed mid-read
+		`, async () => {
+			await request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const first = await readSlice(MANUAL_BARE_READ, 'z');
+			const second = await readSlice(MANUAL_BARE_READ, 'z');
+
 			expect(first.headers[cacheStatusHeader]).toBe('MISS');
 			expect(second.headers[cacheStatusHeader]).toBe('MISS');
 		});
