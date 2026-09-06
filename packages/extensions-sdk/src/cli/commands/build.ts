@@ -39,7 +39,7 @@ import { validateSplitEntrypointOption } from './helpers/validate-cli-options.js
  * extension in the wild grew a 13.6 MB api entry out of two such imports, and
  * nothing said so at build time.
  */
-const APP_ONLY_PACKAGES = [
+export const APP_ONLY_PACKAGES = [
 	// the sdk is the one shared dep an api entrypoint is meant to reach
 	...APP_SHARED_DEPS.filter((dep) => dep !== '@directus/extensions-sdk'),
 	'@directus/themes',
@@ -294,6 +294,17 @@ async function buildAppOrApiExtension({
 	const config = await loadConfig();
 
 	const mode = isIn(type, APP_EXTENSION_TYPES) ? 'browser' : 'node';
+	const externalCount = external.length + (config.external?.length ?? 0);
+
+	// a browser resolves nothing but the host's shared deps, and this extension has
+	// no api entrypoint to carry the rest, so the list would go nowhere
+	if (mode === 'browser' && externalCount > 0) {
+		log(
+			`${chalk.blue('--external')} is ignored for a ${chalk.bold(type)} extension:`
+			+ ` it only has an app entrypoint.`,
+			'warn',
+		);
+	}
 
 	const inputOptions = getRollupOptions({ mode, input, minify, external, config });
 	const outputOptions = getRollupOutputOptions({ mode, output, format, sourcemap });
@@ -487,15 +498,25 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 						return moduleIds.some((id) => id.includes(`node_modules/${pkg}/`));
 					});
 
+					// what landed, not what was generated: rolldown appends the sourcemap
+					// comment on write, so the emitted string is short of the file
+					const outDir = c.outputOptions.dir
+						?? path.dirname(c.outputOptions.file ?? '.');
+
 					const bytes = chunks.reduce((total, chunk) => {
-						return total + Buffer.byteLength(chunk.code);
+						return total + fse.statSync(path.resolve(outDir, chunk.fileName)).size;
 					}, 0);
 
-					const weight = chalk.bold(
-						bytes < 1e6
-							? `${(bytes / 1e3).toFixed(1)} KB`
-							: `${(bytes / 1e6).toFixed(2)} MB`,
-					);
+					let size = `${bytes} B`;
+
+					if (bytes >= 1e6) {
+						size = `${(bytes / 1e6).toFixed(2)} MB`;
+					}
+					else if (bytes >= 1e3) {
+						size = `${(bytes / 1e3).toFixed(1)} KB`;
+					}
+
+					const weight = chalk.bold(size);
 
 					const plural = moduleIds.length === 1
 						? ''
@@ -629,7 +650,7 @@ function getRollupOptions({
 		// deps the host guarantees, so what the author externalizes stays on the api
 		// side — a bare specifier left in app.js is a request answered with a 404
 		external: mode === 'browser'
-			? APP_SHARED_DEPS
+			? [...APP_SHARED_DEPS]
 			: [...API_SHARED_DEPS, ...external, ...(config.external ?? [])],
 		platform: mode!, // TODO why is undefined possible (and triggering an error) only during extensions-sdk's build?
 		// match upstream: only app (browser) extensions are pinned to production; node extensions keep the real env

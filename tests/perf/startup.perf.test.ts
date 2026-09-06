@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
@@ -46,12 +46,38 @@ const extensionsDir = process.env['PERF_EXTENSIONS_PATH']
 const extensionCount = Number(process.env['PERF_EXTENSIONS'] ?? 8);
 const extensionKb = Number(process.env['PERF_EXTENSION_KB'] ?? 500);
 
+// `length < NaN` is false, so a mistyped knob would quietly generate one-line
+// extensions and report a boot that measured nothing in particular
+const knobs = [
+	['PERF_EXTENSIONS', extensionCount],
+	['PERF_EXTENSION_KB', extensionKb],
+] as const;
+
+for (const [name, value] of knobs) {
+	if (!Number.isFinite(value) || value < 0) {
+		throw new Error(`${name} has to be a number, not ${String(value)}`);
+	}
+}
+
 /**
  * A hook whose body is the size of a real one. What a boot pays for an extension is
  * mostly parsing it, so filler that has to be parsed is the honest shape — and it is
  * generated fresh so a leftover directory from another run cannot skew an arm.
  */
 async function writeExtensions(): Promise<string[]> {
+	const existing = await readdir(extensionsDir).catch(() => []);
+
+	// PERF_EXTENSIONS_PATH invites being pointed at a real extensions directory, and
+	// this deletes what it finds, so it only ever deletes what it wrote
+	const foreign = existing.filter((entry) => !/^perf-hook-\d+$/.test(entry));
+
+	if (foreign.length > 0) {
+		throw new Error(
+			`${extensionsDir} holds extensions this bench did not write`
+			+ ` (${foreign.join(', ')}); point PERF_EXTENSIONS_PATH somewhere else.`,
+		);
+	}
+
 	await rm(extensionsDir, { recursive: true, force: true });
 	await mkdir(extensionsDir, { recursive: true });
 
@@ -62,12 +88,18 @@ async function writeExtensions(): Promise<string[]> {
 		const dir = join(extensionsDir, name);
 		const lines = ['export default () => undefined;'];
 
-		while (lines.join('\n').length < extensionKb * 1024) {
+		// joining the whole array to measure it is quadratic: 4.5 s for one 500 KB
+		// extension, and this runs once per extension before a single boot is timed
+		let length = lines[0]!.length;
+
+		while (length < extensionKb * 1024) {
 			const fn = lines.length;
 
-			lines.push(
-				`export function fn${fn}_${index}(value) { return value + ${fn}; }`,
-			);
+			const line =
+				`export function fn${fn}_${index}(value) { return value + ${fn}; }`;
+
+			lines.push(line);
+			length += line.length + 1;
 		}
 
 		await mkdir(dir, { recursive: true });
@@ -165,7 +197,10 @@ async function timeOneBoot(
 	}
 
 	server.kill('SIGTERM');
-	await new Promise((r) => server.on('exit', r));
+
+	// 'close' rather than 'exit': the output is read below, and only 'close' waits for
+	// the child's stdio to drain
+	await new Promise((r) => server.on('close', r));
 
 	return { ms: Math.round(ready - started), output };
 }

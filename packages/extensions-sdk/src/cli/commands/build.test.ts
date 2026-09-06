@@ -2,7 +2,7 @@ import fse from 'fs-extra';
 import { resolve } from 'node:path';
 import { afterAll, afterEach, describe, expect, test, vi } from 'vitest';
 import { create } from '../index.js';
-import build from './build.js';
+import build, { APP_ONLY_PACKAGES } from './build.js';
 
 // directus-extension.test.ts already builds extensions end-to-end, but it shells out
 // (`execa node ../cli.js build`), so build.ts runs in a child process and is invisible
@@ -94,15 +94,21 @@ describe('build', () => {
 	test(
 		'carries the define helper without the schemas that share its package',
 		async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 			const bundle = await buildEndpoint(null);
 
-			// defineEndpoint is an identity function. It used to arrive with every
-			// zod-backed manifest schema attached — 125 KB — because the two were
-			// emitted into one module that declared no sideEffects.
+			// nothing about a plain endpoint is worth a warning
+			expect(warn).not.toHaveBeenCalled();
+
+			warn.mockRestore();
+
 			// an unbuilt workspace leaves the import unresolved, and a bundle that never
 			// carried the helper trivially passes the two assertions below
 			expect(bundle).not.toContain('@directus/extensions-sdk');
 
+			// defineEndpoint is an identity function. It used to arrive with every
+			// zod-backed manifest schema attached — 125 KB — because the two were
+			// emitted into one module that declared no sideEffects.
 			expect(bundle).not.toContain('ZodError');
 			expect(bundle.length).toBeLessThan(5_000);
 		},
@@ -148,6 +154,42 @@ describe('build', () => {
 			expect(externalized).toContain('from "fs-extra"');
 		},
 		60_000,
+	);
+
+	test('leaves the sdk out of the app-only packages', () => {
+		// the list is the app shared deps minus the sdk, derived by name. Lose that
+		// filter and every api extension importing defineHook gets warned about the
+		// one package it is supposed to import.
+		expect(APP_ONLY_PACKAGES).toContain('vue');
+		expect(APP_ONLY_PACKAGES).not.toContain('@directus/extensions-sdk');
+	});
+
+	test(
+		'says an app-only extension has nowhere to put an external',
+		async () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+			const extensionPath = `${TEST_PREFIX}-interface-${Date.now()}`;
+			const entrypoint = resolve(origCwd, extensionPath, 'index.js');
+
+			await fse.outputFile(entrypoint, 'export default {};\n');
+
+			try {
+				await build({
+					type: 'interface',
+					input: entrypoint,
+					output: resolve(origCwd, extensionPath, 'dist', 'index.js'),
+					external: '@directus/types',
+				});
+
+				expect(warn).toHaveBeenCalledWith(
+					expect.stringContaining('only has an app entrypoint'),
+				);
+			}
+			finally {
+				warn.mockRestore();
+			}
+		},
+		30_000,
 	);
 
 	test(
@@ -211,8 +253,10 @@ describe('build', () => {
 			try {
 				await buildEndpoint(null);
 
-				// an endpoint that scaffolds to a few hundred bytes reads as 0.00 MB
-				expect(info).toHaveBeenCalledWith(expect.stringMatching(/API bundle: .*KB/));
+				// an endpoint that scaffolds to a few hundred bytes read as 0.00 MB
+				expect(info).toHaveBeenCalledWith(
+					expect.stringMatching(/API bundle: .*\d+ B,/),
+				);
 			}
 			finally {
 				info.mockRestore();
