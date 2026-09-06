@@ -85,6 +85,14 @@ export class ExtensionManager {
 	 */
 	private isLoaded = false;
 
+	/**
+	 * Whether a load has already happened in this process. A reload has to bypass
+	 * the ESM module cache to pick a changed file up, but the very first load has
+	 * nothing to bypass — and the cache-busting query it would use also makes
+	 * Node's own compile cache miss every time.
+	 */
+	private hasLoadedBefore = false;
+
 	// folder:Extension
 	private localExtensions: Map<string, Extension> = new Map();
 
@@ -286,6 +294,8 @@ export class ExtensionManager {
 		}
 
 		await Promise.all([this.registerInternalOperations(), this.registerApiExtensions()]);
+
+		this.hasLoadedBefore = true;
 
 		if (env['SERVE_APP']) {
 			await this.generateExtensionBundle();
@@ -655,7 +665,7 @@ export class ExtensionManager {
 				const hookPath = path.resolve(hook.path, hook.entrypoint);
 
 				const hookInstance: HookConfig | { default: HookConfig } = await importFileUrl(hookPath, import.meta.url, {
-					fresh: true,
+					fresh: this.hasLoadedBefore,
 				});
 
 				const config = getModuleDefault(hookInstance);
@@ -684,7 +694,7 @@ export class ExtensionManager {
 					endpointPath,
 					import.meta.url,
 					{
-						fresh: true,
+						fresh: this.hasLoadedBefore,
 					},
 				);
 
@@ -714,7 +724,7 @@ export class ExtensionManager {
 					operationPath,
 					import.meta.url,
 					{
-						fresh: true,
+						fresh: this.hasLoadedBefore,
 					},
 				);
 
@@ -754,7 +764,7 @@ export class ExtensionManager {
 				bundlePath,
 				import.meta.url,
 				{
-					fresh: true,
+					fresh: this.hasLoadedBefore,
 				},
 			);
 

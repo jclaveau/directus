@@ -33,6 +33,10 @@ program
 	.option('-o, --output <file>', 'specify the output file instead of reading from package manifest')
 	.option('-l, --language <language>', '[DEPRECATED]')
 	.option('-f, --force', '[DEPRECATED]')
+	.option(
+		'-e, --external <deps>',
+		'comma-separated dependencies the api entry resolves at runtime, not bundled',
+	)
 	.option('-w, --watch', 'watch and rebuild on changes')
 	.option('--no-minify', 'disable minification')
 	.option('--sourcemap', 'include source maps in output')
