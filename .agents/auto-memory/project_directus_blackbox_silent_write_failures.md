@@ -2,6 +2,7 @@
 name: project_directus_blackbox_silent_write_failures
 description: blackbox seed helpers used to swallow failed writes so seed-database.test.ts went green over a broken schema — dataOrThrow now refuses non-2xx; the four latent defects that surfaced when it was switched on
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

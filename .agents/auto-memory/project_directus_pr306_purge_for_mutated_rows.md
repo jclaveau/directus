@@ -2,6 +2,7 @@
 name: project_directus_pr306_purge_for_mutated_rows
 description: PR #306 (#304) context.scopedCache.purgeForMutatedRows — out-of-band scoped-cache purge for raw writes, context-injected (not host import), relational fail-safe; merged; #307 read-side parked, #308 seed-retry follow-up
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_keyv_raw_key_shape
 description: a response-cache entry's RAW redis key is namespaced twice (`<ns>_response::<ns>_response:<hash>`) — never rebuild it by hand, ask Keyv (has/hasMany)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

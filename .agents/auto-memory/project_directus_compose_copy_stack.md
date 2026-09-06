@@ -4,6 +4,7 @@ description:
   How hhh-main is composed conflict-free — isolated upstream-draft PRs stay clean for upstream; a parallel
   hhh-main-root/stacked copy tree resolves overlaps once; compose consumes the copies. SSH deploy key + CLA inject.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_two_eslint_configs
 description: directus fork has TWO eslint configs (correctness + style-gate) checked by SEPARATE CI jobs; the style gate alone misses correctness-rule failures — run both locally before push
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

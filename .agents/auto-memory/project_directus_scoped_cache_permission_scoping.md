@@ -2,6 +2,7 @@
 name: project_directus_scoped_cache_permission_scoping
 description: Scoped-cache follow-ups — #205 write-side post-hook fix (landed) + permission-aware read scoping (branch A)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

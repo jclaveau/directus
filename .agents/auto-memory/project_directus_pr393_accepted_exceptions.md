@@ -2,6 +2,7 @@
 name: project_directus_pr393_accepted_exceptions
 description: PR #393 "pin a read's nested collections by their parent keys" (fixes #361) — the vocabulary jean imposed, the settled naming/type calls, and the review defects already fixed; do NOT re-raise
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

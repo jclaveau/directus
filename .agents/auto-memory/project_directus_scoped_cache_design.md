@@ -2,6 +2,7 @@
 name: project_directus_scoped_cache_design
 description: Directus scoped (tag-based) cache invalidation — design record for PR #203 (getMeta rider, rejected alternatives, override audit, blackbox label gating)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

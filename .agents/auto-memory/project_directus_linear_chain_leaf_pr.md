@@ -4,6 +4,7 @@ description:
   The v11.10.1 feat stack moved from a compose-tree to a single linear PR chain; hhh-dev is now maintained by merging
   the leaf PR, not by recomposing. compose-hhh-v11 cron is disabled.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

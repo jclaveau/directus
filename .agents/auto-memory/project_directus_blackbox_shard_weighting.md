@@ -2,6 +2,7 @@
 name: project_directus_blackbox_shard_weighting
 description: How the blackbox shard packer weights files (ms hints, else SOURCE BYTES) and why rebalancing it does not move wall clock — maxForks 6 plus a 53s run-to-run noise band
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

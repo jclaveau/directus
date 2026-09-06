@@ -2,6 +2,7 @@
 name: project_directus_pr350_accepted_exceptions
 description: "PR #350 system MCP endpoint — MERGED 2026-08-13; decisions settled across five review rounds, do NOT re-raise them when reading /system-mcp or the cache purge-coverage code"
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

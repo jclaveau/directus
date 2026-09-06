@@ -2,6 +2,7 @@
 name: project_directus_cache_vary_order
 description: PR #289 — CACHE_VARY_CONTENT_TYPES list order is SIGNIFICANT (not sorted); it must mirror the endpoint's own req.accepts() priority. Settled, don't re-raise "why not sort".
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

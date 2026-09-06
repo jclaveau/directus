@@ -4,6 +4,7 @@ description:
   In the Directus PR-flow context on this fork, do NOT ask before running pnpm install / pnpm build / workspace builds.
   The global ask-before-install rule is overridden here.
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

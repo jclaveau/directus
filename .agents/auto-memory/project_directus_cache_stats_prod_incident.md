@@ -2,6 +2,7 @@
 name: project_directus_cache_stats_prod_incident
 description: measured 2026-08 production cache-stats telemetry loss on hiphiphip — the 0x00 escaping drops (483 batches / 75k events) AND the far bigger 55h autokill blackout (~2.2M events); corrects #372's wrong "since #370" causality
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

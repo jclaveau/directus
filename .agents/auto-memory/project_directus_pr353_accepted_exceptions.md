@@ -2,6 +2,7 @@
 name: project_directus_pr353_accepted_exceptions
 description: the cache-purge telemetry (merged PR #353) — decisions already settled with jean, the naming in force, and the two UX questions still open; do NOT re-raise the settled ones
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

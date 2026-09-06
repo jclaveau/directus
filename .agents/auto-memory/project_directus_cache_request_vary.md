@@ -2,6 +2,7 @@
 name: project_directus_cache_request_vary
 description: PR #289 (MERGED) — response cache key now folds request content-negotiation dimensions (language/content-type/headers); architecture + accepted decisions so a fresh review doesn't re-litigate. Closes #283.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

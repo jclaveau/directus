@@ -2,6 +2,7 @@
 name: project_directus_fk_error_translation
 description: PR #287/#288 (MERGED) — enriched InvalidForeignKeyError translation (constraint/relatedCollection/reason/operation, collection:pk, dev-only raw msg); architecture + accepted exceptions (do NOT re-raise in a fresh review)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

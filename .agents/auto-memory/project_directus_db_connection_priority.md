@@ -2,6 +2,7 @@
 name: project_directus_db_connection_priority
 description: PR #213 — prioritize DB access by a policy granting ranked connections; DatabasePoolExhaustedError; settled design decisions (don't re-litigate)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

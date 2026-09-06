@@ -2,6 +2,7 @@
 name: project_directus_blackbox_m2m_nested_and_cancel
 description: bb test-design for cache-hook witnesses — real M2M nested-parent-update fires the junction's items.create (not a flat pivot POST), the scoped-instance pattern, REST cancel via allowFilterCancel, and per-file collection-name uniqueness
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

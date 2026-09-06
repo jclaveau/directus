@@ -2,6 +2,7 @@
 name: reference_directus_rest_batch_delete
 description: Directus REST batch-delete matrix — items YES (array/keys/query body), schema (collections/fields/relations) NO (single-target only); collections DO have batch CREATE
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

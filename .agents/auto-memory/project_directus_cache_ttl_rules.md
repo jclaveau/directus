@@ -2,6 +2,7 @@
 name: project_directus_cache_ttl_rules
 description: PR #279 (PARKED draft) — per-path/method/query-shape cache TTL rules replacing the single global CACHE_TTL; architecture + accepted design decisions so a fresh review doesn't re-litigate the descriptor-table-vs-rules-store call
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

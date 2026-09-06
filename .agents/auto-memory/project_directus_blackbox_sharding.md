@@ -2,6 +2,7 @@
 name: project_directus_blackbox_sharding
 description: Blackbox test sharding — vendor×shard matrix, the per-shard completion barrier, how the after-chain is distributed, measured per-file weights, and why build-caching HURTS
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_api_build_needs_copyfiles
 description: running `tsdown` alone in api/ wipes dist's copied .yaml/.liquid/.md assets (it cleans by default), and bootstrap then dies with a misleading `SQLITE_ERROR: no such table: directus_migrations`
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

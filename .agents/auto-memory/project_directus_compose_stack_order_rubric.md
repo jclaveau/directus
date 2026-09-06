@@ -4,6 +4,7 @@ description:
   How to order the upstream-draft PR copies in the hhh-main compose stack (root→leaf) and which PRs are tree roots — the
   ranking rubric driving the rebased hhh-main-stacked tree and compose's auto-proposal.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_scoped_cache_patch_coverage_parked
 description: RESOLVED 2026-07-01 — PR #205 codecov/patch driven to ~99% in-branch (target bumped 90→95); no longer parked
 metadata:
+  author: Jean Claveau
   type: project
 ---
 
