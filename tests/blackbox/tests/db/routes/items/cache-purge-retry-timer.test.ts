@@ -157,6 +157,15 @@ describe(oneLine`
 
 				served = await readSlotA();
 
+				// The two failures this can end in are indistinguishable from the
+				// header alone: a drain that never ran, and one that cleared the record
+				// without dropping the entry. The record count separates them.
+				// eslint-disable-next-line no-console
+				console.info(oneLine`
+					[retry-timer] ${attempt} ${served.headers[cacheStatusHeader]}
+					pending=${(await db(PENDING).select('id')).length}
+				`);
+
 				if (served.headers[cacheStatusHeader] === 'MISS') {
 					break;
 				}
