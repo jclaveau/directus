@@ -13,6 +13,20 @@ get:
     Admin only, and served only where PROCESSES_REPORT_ENABLED is on —
     elsewhere the path is absent rather than refusing.
   operationId: list-processes
+  parameters:
+    - name: details
+      in: query
+      required: false
+      description: >
+        Which halves to report, comma-separated. Narrows what
+        PROCESSES_REPORT_DETAILS names and can never widen it, so asking for a
+        half this deployment does not report answers without it rather than
+        with it. Omitted means everything the deployment reports. The resolved
+        environment is most of the answer by size, so a caller that only needs
+        the supervisor's view should ask for "stats" alone.
+      schema:
+        type: string
+        example: stats
   responses:
     '200':
       content:
