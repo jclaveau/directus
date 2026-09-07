@@ -687,6 +687,18 @@ test('list_processes with no argument still asks the parser', async () => {
 	expect(service.readProcesses).toHaveBeenCalledWith(['stats', 'env']);
 });
 
+// A deployment reporting one half advertising both invites a call that answers
+// with strictly less than asking for nothing at all, and says nothing about why.
+test('list_processes advertises only the halves this node reports', () => {
+	processes.details.mockReturnValue(['stats']);
+
+	const details = findSystemMcpTool('list_processes')!
+		.inputSchema
+		.properties['details'];
+
+	expect(details?.['items']).toEqual({ type: 'string', enum: ['stats'] });
+});
+
 test('list_processes advertises the halves as an enum, not free text', () => {
 	const details = findSystemMcpTool('list_processes')!
 		.inputSchema

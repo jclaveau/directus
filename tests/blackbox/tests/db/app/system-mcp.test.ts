@@ -792,6 +792,15 @@ describe('System MCP Tests', () => {
 				.find((parameter: { name: string }) => parameter.name === 'window');
 
 			expect(windowParam.schema.type).toBe('string');
+
+			// Same for the halves parameter: a query parameter absent from the spec
+			// is one no generated client can reach.
+			const detailsParam = paths['/utils/processes'].get.parameters
+				.find((parameter: { name: string }) => parameter.name === 'details');
+
+			expect(detailsParam.in).toBe('query');
+			expect(detailsParam.required).toBe(false);
+			expect(detailsParam.schema.type).toBe('string');
 		});
 	});
 
