@@ -453,9 +453,13 @@ onUnmounted(() => {
 		</template>
 
 		<template #sidebar>
+			<!-- The same intervals the cache page offers. The charts need a second
+				 sample before they draw anything, so the short ones are what make
+				 them fill while you watch: the report is a live snapshot with no
+				 history behind it. -->
 			<auto-refresh
 				v-model="refreshInterval"
-				:intervals="[null, 5, 10, 30, 60, 300]"
+				:intervals="[null, 1, 3, 5, 10, 30, 60, 300]"
 				@refresh="load"
 			/>
 		</template>
