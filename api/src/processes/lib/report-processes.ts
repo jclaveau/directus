@@ -42,16 +42,6 @@ function runtimeStats(): ProcessRuntimeStats {
 	};
 }
 
-/**
- * One process per replica attaches the container-wide `pm2 list`; the others would
- * only publish a copy of it. Instance 0 is the deterministic choice, and when it
- * is the one that is down the collector falls back to the self-reports rather
- * than claiming the replica has no supervisor.
- */
-function shouldReportSupervisor(): boolean {
-	return supervisorAvailable() && instanceNumber() === 0;
-}
-
 async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 	// A node reports only what it is itself configured to report, however it was
 	// asked — the requester's list narrows this one, it never widens it.
@@ -80,7 +70,14 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 				? resolveReportedEnv()
 				: null,
 		},
-		supervisor: carries('stats') && shouldReportSupervisor()
+		// Every supervised process attaches the container-wide `pm2 list` and the
+		// collector keeps one copy per replica. Electing a single reporter by
+		// instance number looked cheaper, but PM2 keeps counting up as the
+		// autoscaler releases and adds workers: a pool that has scaled even once
+		// can hold instances 2 and 3 and no 0, and the elected reporter then never
+		// exists. That lost the CPU readings for good on exactly the services that
+		// autoscale — the ones the page is for.
+		supervisor: carries('stats')
 			? await readSupervisedProcesses()
 			: null,
 	};

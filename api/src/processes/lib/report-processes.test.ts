@@ -163,7 +163,7 @@ test('A node configured for neither half still says where it is', async () => {
 	expect(message.self.pid).toBe(process.pid);
 });
 
-test('Instance zero is the one that attaches the container-wide list', async () => {
+test('A supervised process attaches the container-wide list', async () => {
 	supervisor.available.mockReturnValue(true);
 	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
 	process.env['NODE_APP_INSTANCE'] = '0';
@@ -174,21 +174,35 @@ test('Instance zero is the one that attaches the container-wide list', async () 
 	expect(message.supervisor).toHaveLength(1);
 });
 
-test('Every other instance answers for itself alone', async () => {
+// The list used to come from instance 0 alone. PM2 keeps counting up as the
+// autoscaler releases and adds workers, so a pool can hold instances 2 and 3 and
+// no 0 — and the elected reporter then never existed, which lost every CPU
+// reading for good on the services that autoscale.
+test('A pool whose instance zero is gone still reports its list', async () => {
 	supervisor.available.mockReturnValue(true);
-	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
-	process.env['NODE_APP_INSTANCE'] = '1';
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 3, name: 'directus' }]);
+	process.env['NODE_APP_INSTANCE'] = '2';
 
 	const message = await query();
 
 	expect(message.supervised).toBe(true);
+	expect(message.supervisor).toHaveLength(1);
+});
+
+test('An unsupervised process has no list to attach', async () => {
+	supervisor.available.mockReturnValue(false);
+	supervisor.read.mockResolvedValue(null);
+	process.env['NODE_APP_INSTANCE'] = '1';
+
+	const message = await query();
+
+	expect(message.supervised).toBe(false);
 	expect(message.supervisor).toBeNull();
-	expect(supervisor.read).not.toHaveBeenCalled();
 });
 
 test('The list is not read where stats were not asked for', async () => {
 	supervisor.available.mockReturnValue(true);
-	process.env['NODE_APP_INSTANCE'] = '0';
+	process.env['NODE_APP_INSTANCE'] = '2';
 	config.details.mockReturnValue(['env']);
 
 	const message = await query();
