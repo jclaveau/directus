@@ -7,6 +7,7 @@ import type {
 	PgBouncerDetail,
 	PgBouncerReport,
 	PrimaryKey,
+	ProcessDetail,
 	ProcessesReport,
 	SchemaOverview,
 } from '@directus/types';
@@ -454,10 +455,10 @@ export class UtilsService {
 		await truncateCacheEvents();
 	}
 
-	async readProcesses(): Promise<ProcessesReport> {
+	async readProcesses(details?: ProcessDetail[]): Promise<ProcessesReport> {
 		this.assertAdmin('inspect the running processes');
 
-		return collectProcesses();
+		return collectProcesses(details);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {

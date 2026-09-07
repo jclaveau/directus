@@ -50,6 +50,15 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 	const details = query.details.filter((detail) => allowed.includes(detail));
 	const carries = (detail: ProcessDetail) => details.includes(detail);
 
+	// The supervisor's list is how a replica is enumerated, not a half of one
+	// process: without it a worker crash-looping too fast to answer disappears
+	// from the tree, and a healthy PM2 replica reports itself `unavailable`. So it
+	// follows what this node is configured to report and not what one request
+	// asked for — a caller narrows what is said about each process, it cannot
+	// remove the spine they are listed on. The size this parameter exists to save
+	// is the env, which is per process and stays narrowable.
+	const reportsSupervisor = allowed.includes('stats');
+
 	const message: ProcessesReportMessage = {
 		requestId: query.requestId,
 		service: processesServiceName(),
@@ -78,10 +87,10 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 		// can hold instances 2 and 3 and no 0, and the elected reporter then never
 		// exists. That lost the CPU readings for good on exactly the services that
 		// autoscale — the ones the page is for.
-		supervisor: carries('stats')
+		supervisor: reportsSupervisor
 			? await readSupervisedProcesses()
 			: null,
-		capacity: carries('stats')
+		capacity: reportsSupervisor
 			? await hostCapacity()
 			: null,
 	};

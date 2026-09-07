@@ -292,3 +292,31 @@ test('A replica no process measured reports no capacity', () => {
 
 	expect(tree[0]?.replicas[0]?.capacity).toBeNull();
 });
+
+test('A caller asking for one half asks the nodes for that alone', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	const report = await collectProcesses(['stats']);
+
+	// The nodes are asked, not filtered afterwards: the env never crosses the bus,
+	// which is where the size of this report actually comes from.
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: ['stats'],
+	});
+
+	expect(report.details).toEqual(['stats']);
+});
+
+test('A caller asking for nothing gets the configured halves', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	const report = await collectProcesses();
+
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: ['stats', 'env'],
+	});
+
+	expect(report.details).toEqual(['stats', 'env']);
+});

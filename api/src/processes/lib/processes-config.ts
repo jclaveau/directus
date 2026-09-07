@@ -34,6 +34,36 @@ export function reportedProcessDetails(): ProcessDetail[] {
 }
 
 /**
+ * What one request asked for, narrowed to what this deployment reports at all.
+ * Absent means the configured set, so a caller that says nothing still gets what
+ * it always got.
+ *
+ * Narrowing only: a request can ask for less than `PROCESSES_REPORT_DETAILS`,
+ * never for more. The env of every process is by far the larger half of the
+ * report — a tree of a few processes runs to a hundred kilobytes with it — and
+ * it is worth reading only when comparing configuration between replicas.
+ */
+export function requestedProcessDetails(requested: unknown): ProcessDetail[] {
+	const reported = reportedProcessDetails();
+
+	const asked = typeof requested === 'string'
+		? requested.split(',')
+		: requested;
+
+	if (Array.isArray(asked) === false) {
+		return reported;
+	}
+
+	const wanted = asked
+		.map((detail) => String(detail).trim())
+		.filter(isProcessDetail);
+
+	return wanted.length === 0
+		? reported
+		: reported.filter((detail) => wanted.includes(detail));
+}
+
+/**
  * The deployment unit this process reports itself under — the top level of the
  * tree. Falls back to the platform's own service name, then to the PM2 app name
  * (PM2 exports it as `name`), so an unconfigured deployment still groups sanely.

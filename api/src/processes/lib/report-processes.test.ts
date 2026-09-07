@@ -221,3 +221,33 @@ test('A node that cannot answer says so in the log, not on the bus', async () =>
 
 	expect(logger.warn.mock.calls[0]![1]).toContain('Could not report this process');
 });
+
+// A caller narrowing to the env half must not be able to take the supervisor's
+// list with it: without that list the replica reports itself `unavailable` and a
+// process too dead to answer is dropped from the tree entirely — a caller would
+// be manufacturing an outage that is not there.
+test('A request for the env half alone still carries the supervisor', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 3, name: 'directus' }]);
+	config.details.mockReturnValue(['stats', 'env']);
+
+	const message = await query(['env']);
+
+	expect(message.supervisor).toHaveLength(1);
+	expect(message.capacity).not.toBeNull();
+
+	// The half that was narrowed away is the one that goes, and only it.
+	expect(message.self.runtime).toBeNull();
+	expect(message.self.env).not.toBeNull();
+});
+
+test('A node not reporting stats attaches no list, however asked', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
+	config.details.mockReturnValue(['env']);
+
+	const message = await query(['stats', 'env']);
+
+	expect(message.supervisor).toBeNull();
+	expect(message.capacity).toBeNull();
+});
