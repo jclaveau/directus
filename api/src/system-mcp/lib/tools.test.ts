@@ -450,6 +450,7 @@ test('Every declared output property is one the tool actually answers', () => {
 						{
 							replicaId: 'replica-a',
 							hostname: 'host-a',
+							capacity: { memoryBytes: 2_147_483_648, cpuCores: 2 },
 							supervisor: 'pm2',
 							processes: [
 								{

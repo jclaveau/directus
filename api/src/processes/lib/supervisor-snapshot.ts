@@ -4,12 +4,15 @@ import pm2 from 'pm2';
 import { useLogger } from '../../logger/index.js';
 
 /**
- * PM2 sets `PM2_HOME` in every process it supervises; its absence is how local
- * dev and CI runs — which start the process directly — are told apart from a
- * supervised deployment. Same probe the metrics aggregator uses.
+ * Whether a PM2 daemon supervises this process. `PM2_HOME` alone does not say
+ * so: an image can export it and still start the server directly — the Backend
+ * container does exactly that — which reported a broken supervisor where there
+ * is none at all. PM2 injects `pm_id` into the processes it spawns and nothing
+ * else does, so the pair is the honest probe.
  */
 export function supervisorAvailable(): boolean {
-	return 'PM2_HOME' in process.env;
+	return 'PM2_HOME' in process.env
+		&& /^\d+$/.test(process.env['pm_id'] ?? '');
 }
 
 const listApps = promisify(pm2.list.bind(pm2));
