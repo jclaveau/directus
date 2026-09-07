@@ -726,19 +726,7 @@ export class ItemScopedCacheService {
 				return [];
 			}
 
-			const paths = [...fieldMap.read, ...fieldMap.other]
-				.filter(([, entry]) => entry.collection === collection)
-				.map(([path]) => path);
-
-			const everyHopIsToOne = paths.length > 0 && paths.every((path) => {
-				return path === '' || resolveScopedCacheM2oJoinChainFromPath(
-					this.schema,
-					this.collection,
-					path.split('.'),
-				) !== null;
-			});
-
-			return everyHopIsToOne ? own : [];
+			return own;
 		};
 
 		const pushAncestorSliceOrBare = (collection: string): void => {
