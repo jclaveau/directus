@@ -31,6 +31,7 @@ import {
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheAncestorSliceCandidates,
 	scopedCacheNestedCollections,
+	scopedCachePinsForKeyedField,
 	scopedCachePurgeEnabled,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
@@ -681,7 +682,22 @@ export class ItemScopedCacheService {
 
 				// A filter bound covers these rows too; an m2oParentPins value names an
 				// ancestor reached via ANOTHER path, so its slice would serve a stale hit.
-				return keyedFilterPins.get(ancestor) ?? [];
+				const keyed = keyedFilterPins.get(ancestor);
+
+				if (keyed !== undefined) {
+					return keyed;
+				}
+
+				// An `independent` ancestor is pinned by nothing of its own — it needs no
+				// tag, the near row's covers it — yet it still carries the keys the filter
+				// named it by, and a descendant's slice is built from exactly those. Every
+				// ownership chain ends on one (`student.user` → `directus_users.id`), so
+				// reading only the keyed map drops that last hop and bares the chain.
+				const keying = filterKeying.get(ancestor);
+
+				return keying?.kind === 'independent'
+					? scopedCachePinsForKeyedField(this.schema, ancestor, keying) ?? []
+					: [];
 			};
 
 			for (
