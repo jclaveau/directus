@@ -13,6 +13,22 @@ const clipboard = vi.hoisted(() => {
 	return { copyToClipboard: vi.fn() };
 });
 
+const apex = vi.hoisted(() => {
+	return { render: vi.fn(), updateOptions: vi.fn(), destroy: vi.fn() };
+});
+
+// jsdom has no layout, so the charts are stubbed down to the calls the page makes
+// — that each renders once and updates thereafter is the behaviour worth pinning.
+vi.mock('apexcharts', () => {
+	return {
+		default: class {
+			render = apex.render;
+			updateOptions = apex.updateOptions;
+			destroy = apex.destroy;
+		},
+	};
+});
+
 vi.mock('@/composables/use-clipboard', () => {
 	return {
 		useClipboard: () => {
@@ -169,6 +185,9 @@ beforeEach(() => {
 	localStorage.clear();
 	clipboard.copyToClipboard.mockClear();
 	vi.mocked(api.get).mockReset();
+	apex.render.mockClear();
+	apex.updateOptions.mockClear();
+	apex.destroy.mockClear();
 });
 
 describe('the tree', () => {
@@ -432,5 +451,63 @@ describe('the env panel', () => {
 		const [copied] = clipboard.copyToClipboard.mock.calls.at(-1)!;
 
 		expect(JSON.parse(copied as string)).toEqual(ENV);
+	});
+});
+
+describe('the cpu and memory charts', () => {
+	test('shows what the supervisor measured, a dash where it did not', async () => {
+		const wrapper = await mountLoaded();
+		const rows = wrapper.findAll('.process-row');
+
+		expect(rows[0]?.find('.cpu').text()).toBe('cpu 2%');
+		expect(rows[1]?.find('.cpu').text()).toBe('cpu —');
+	});
+
+	test('rounds the share of a core PM2 reports', async () => {
+		const data = report();
+		const process = data.services[0]!.replicas[0]!.processes[0]!;
+
+		process.supervisor!.cpuPercent = 87.6;
+
+		const wrapper = await mountLoaded(data);
+
+		expect(wrapper.findAll('.process-row')[0]?.find('.cpu').text()).toBe('cpu 88%');
+	});
+
+	// One reading is a point, not a line, so a first load draws nothing. The page
+	// offers no in-body way to refresh, which is why the accumulation itself is
+	// pinned on appendProcessSample rather than here.
+	test('stays hidden until a second sample gives it something to draw', async () => {
+		const wrapper = await mountLoaded();
+
+		expect(wrapper.find('.charts').attributes('style')).toBe('display: none;');
+	});
+
+	test('builds both charts on the first load', async () => {
+		await mountLoaded();
+
+		expect(apex.render).toHaveBeenCalledTimes(2);
+		expect(apex.updateOptions).not.toHaveBeenCalled();
+	});
+
+	// ApexCharts attaches outside Vue's tree, so nothing else would clean it up.
+	test('destroys both charts when the page goes away', async () => {
+		const wrapper = await mountLoaded();
+
+		wrapper.unmount();
+
+		expect(apex.destroy).toHaveBeenCalledTimes(2);
+	});
+
+	test('says why the cpu chart is empty when no supervisor answered', async () => {
+		const data = report();
+
+		for (const process of data.services[0]!.replicas[0]!.processes) {
+			process.supervisor = null;
+		}
+
+		const wrapper = await mountLoaded(data);
+
+		expect(wrapper.text()).toContain('CPU is measured by the PM2 daemon');
 	});
 });

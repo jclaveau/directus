@@ -9,14 +9,20 @@ import type { HeaderRaw, Sort } from '@/components/v-table/types';
 import type { ProcessNode, ProcessReplica, ProcessesReport, ResolvedEnvVariable }
 	from '@directus/types';
 import { useLocalStorage } from '@vueuse/core';
-import { computed, onMounted, ref } from 'vue';
+import ApexCharts, { type ApexOptions } from 'apexcharts';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
 import {
+	appendProcessSample,
+	chartSeries,
+	cpuPercent,
 	filterEnvVariables,
+	hasMetric,
 	isNearMemoryCap,
 	memoryCapRatio,
 	processTotals,
+	type ProcessSample,
 } from './processes-view';
 
 defineOptions({ name: 'SettingsProcesses' });
@@ -30,6 +36,7 @@ const report = ref<ProcessesReport | null>(null);
 const refreshInterval = ref<number | null>(null);
 const expanded = ref<Record<string, boolean>>({});
 const envSearch = ref<Record<string, string>>({});
+const samples = ref<ProcessSample[]>([]);
 
 // How the resolved env reads: a resizable table, or the two shapes it is
 // actually pasted into — a .env file and JSON. Kept per user, like the cache
@@ -173,6 +180,20 @@ function formatMemory(node: ProcessNode): string {
 		: `${formatFilesize(used)} / ${formatFilesize(cap)}`;
 }
 
+/**
+ * PM2 measures CPU as a share of one core, so a worker saturating a core reads
+ * 100 however many cores the container has. Only the supervisor sees it — a
+ * process cannot time its own scheduling — so it is absent wherever the daemon
+ * did not answer.
+ */
+function formatCpu(node: ProcessNode): string {
+	const cpu = cpuPercent(node);
+
+	return cpu === null
+		? '—'
+		: `${Math.round(cpu)}%`;
+}
+
 function memoryPercent(node: ProcessNode): string | null {
 	const ratio = memoryCapRatio(node);
 
@@ -204,6 +225,101 @@ function copyRaw(key: string, node: ProcessNode): void {
 	});
 }
 
+const cpuChartEl = ref<HTMLElement | null>(null);
+const memoryChartEl = ref<HTMLElement | null>(null);
+let cpuChart: ApexCharts | null = null;
+let memoryChart: ApexCharts | null = null;
+
+const chartsCarryCpu = computed(() => hasMetric(samples.value, 'cpuPercent'));
+
+function themeVar(name: string, fallback: string): string {
+	const value = getComputedStyle(document.documentElement)
+		.getPropertyValue(name)
+		.trim();
+
+	return value || fallback;
+}
+
+/**
+ * One line per process, over the samples taken while the page was open. The
+ * series are built from every sample rather than from the latest report, so a
+ * worker the autoscaler has since released keeps the history it earned instead
+ * of vanishing from the chart it is the explanation for.
+ */
+function chartOptions(
+	metric: 'cpuPercent' | 'memoryBytes',
+	axis: string,
+	format: (value: number) => string,
+): ApexOptions {
+	return {
+		chart: {
+			type: 'line',
+			height: 220,
+			animations: { enabled: false },
+			toolbar: { show: false },
+			fontFamily: 'var(--theme--fonts--sans--font-family)',
+		},
+		stroke: { width: 2, curve: 'straight' },
+		markers: { size: 0 },
+		dataLabels: { enabled: false },
+		legend: { show: true, position: 'top', horizontalAlign: 'left' },
+		grid: { borderColor: themeVar('--theme--border-color-subdued', '#e4eaf1') },
+		xaxis: {
+			type: 'datetime',
+			categories: samples.value.map((sample) => sample.at),
+			labels: { datetimeUTC: false },
+		},
+		yaxis: {
+			title: { text: axis },
+			min: 0,
+			forceNiceScale: true,
+			labels: { formatter: format },
+		},
+		tooltip: { y: { formatter: format } },
+		series: chartSeries(samples.value, metric),
+	};
+}
+
+function cpuChartOptions(): ApexOptions {
+	return chartOptions(
+		'cpuPercent',
+		t('processes_cpu_axis', 'CPU (% of a core)'),
+		(value) => `${Math.round(value)}%`,
+	);
+}
+
+function memoryChartOptions(): ApexOptions {
+	return chartOptions(
+		'memoryBytes',
+		t('processes_memory_axis', 'Memory'),
+		(value) => formatFilesize(value),
+	);
+}
+
+async function renderCharts(): Promise<void> {
+	if (cpuChartEl.value !== null) {
+		if (cpuChart === null) {
+			cpuChart = new ApexCharts(cpuChartEl.value, cpuChartOptions());
+			await cpuChart.render();
+		}
+		else {
+			await cpuChart.updateOptions(cpuChartOptions(), true, false);
+		}
+	}
+
+	if (memoryChartEl.value === null) {
+		return;
+	}
+
+	if (memoryChart === null) {
+		memoryChart = new ApexCharts(memoryChartEl.value, memoryChartOptions());
+		await memoryChart.render();
+		return;
+	}
+
+	await memoryChart.updateOptions(memoryChartOptions(), true, false);
+}
+
 async function load(): Promise<void> {
 	loading.value = true;
 	error.value = null;
@@ -211,6 +327,9 @@ async function load(): Promise<void> {
 	try {
 		const response = await api.get('/utils/processes');
 		report.value = response.data.data;
+		samples.value = appendProcessSample(samples.value, response.data.data);
+
+		await renderCharts();
 	}
 	catch (err: any) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
@@ -222,6 +341,13 @@ async function load(): Promise<void> {
 }
 
 onMounted(load);
+
+// ApexCharts attaches to the DOM outside Vue's tree, so leaving the page without
+// this leaks both charts and their resize listeners.
+onUnmounted(() => {
+	cpuChart?.destroy();
+	memoryChart?.destroy();
+});
 </script>
 
 <template>
@@ -284,6 +410,31 @@ onMounted(load);
 				<span>{{ totals.replicas }} replicas</span>
 			</div>
 
+			<div v-show="samples.length > 1" class="charts">
+				<div class="chart">
+					<h3 class="chart-title">
+						{{ t('processes_cpu_chart', 'CPU per process') }}
+					</h3>
+
+					<v-notice v-if="!chartsCarryCpu" type="info">
+						{{ t(
+							'processes_cpu_needs_supervisor',
+							'CPU is measured by the PM2 daemon; no replica reporting one has '
+								+ 'answered, so only memory is plotted.',
+						) }}
+					</v-notice>
+
+					<div v-show="chartsCarryCpu" ref="cpuChartEl" />
+				</div>
+
+				<div class="chart">
+					<h3 class="chart-title">
+						{{ t('processes_memory_chart', 'Memory per process') }}
+					</h3>
+					<div ref="memoryChartEl" />
+				</div>
+			</div>
+
 			<v-progress-linear v-if="loading && !report" indeterminate />
 
 			<div
@@ -330,6 +481,9 @@ onMounted(load);
 							</span>
 							<span class="status">{{ statusLabel(node) }}</span>
 							<span class="pid">pid {{ node.pid ?? '—' }}</span>
+							<span class="cpu">
+								{{ t('processes_cpu', 'cpu') }} {{ formatCpu(node) }}
+							</span>
 							<span class="memory">
 								{{ formatMemory(node) }}
 								<template v-if="memoryPercent(node)">
@@ -523,8 +677,22 @@ onMounted(load);
 	flex-shrink: 0;
 }
 
-.process-row .memory {
+.process-row .memory,
+.process-row .cpu {
 	flex-shrink: 0;
+}
+
+.charts {
+	margin-block-end: 24px;
+}
+
+.chart {
+	margin-block-end: 20px;
+}
+
+.chart-title {
+	font-weight: 600;
+	margin-block-end: 8px;
 }
 
 .detail {

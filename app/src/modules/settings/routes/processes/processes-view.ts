@@ -69,3 +69,100 @@ export function processTotals(report: ProcessesReport): {
 		),
 	};
 }
+
+/** One process's readings at one moment, under the name the charts plot it by. */
+export interface ProcessReading {
+	label: string;
+	cpuPercent: number | null;
+	memoryBytes: number | null;
+}
+
+export interface ProcessSample {
+	at: number;
+	readings: ProcessReading[];
+}
+
+/** How many readings the charts keep; at 5s that is the last ten minutes. */
+export const PROCESS_SAMPLE_LIMIT = 120;
+
+/**
+ * What a chart calls a process. Not the pid: PM2 gives a restarted worker a new
+ * one, which would break a single worker's line into two. The slot it occupies
+ * survives the restart, and the service name keeps two deployments apart.
+ */
+export function processLabel(service: string, node: ProcessNode): string {
+	const slot = node.instance ?? node.pmId ?? node.pid;
+
+	return slot === null
+		? service
+		: `${service} #${slot}`;
+}
+
+/** What the supervisor measured, or nothing — a self-report cannot see its CPU. */
+export function cpuPercent(node: ProcessNode): number | null {
+	return node.supervisor?.cpuPercent ?? null;
+}
+
+/** The supervisor's figure where there is one, else what the process measured. */
+export function memoryBytes(node: ProcessNode): number | null {
+	return node.supervisor?.memoryBytes ?? node.runtime?.rssBytes ?? null;
+}
+
+/**
+ * Append one reading per process, dropping the oldest once the buffer is full.
+ * The samples live only as long as the page is open — nothing persists them, so
+ * the charts cover the visit rather than pretending to a history they don't have.
+ */
+export function appendProcessSample(
+	samples: ProcessSample[],
+	report: ProcessesReport,
+): ProcessSample[] {
+	const readings = report.services.flatMap((service) => {
+		return service.replicas.flatMap((replica) => {
+			return replica.processes.map((node) => {
+				return {
+					label: processLabel(service.service, node),
+					cpuPercent: cpuPercent(node),
+					memoryBytes: memoryBytes(node),
+				};
+			});
+		});
+	});
+
+	return [...samples, { at: report.collectedAt, readings }]
+		.slice(-PROCESS_SAMPLE_LIMIT);
+}
+
+/**
+ * One line per process, over every sample taken. A process absent from a sample
+ * plots as a gap rather than as zero: it was not measured then, which is not the
+ * same as having been idle.
+ */
+export function chartSeries(
+	samples: ProcessSample[],
+	metric: 'cpuPercent' | 'memoryBytes',
+): { name: string; data: (number | null)[] }[] {
+	const labels = [...new Set(samples.flatMap((sample) => {
+		return sample.readings.map((reading) => reading.label);
+	}))].sort();
+
+	return labels.map((label) => {
+		return {
+			name: label,
+			data: samples.map((sample) => {
+				return sample.readings.find((reading) => reading.label === label)
+					?.[metric] ?? null;
+			}),
+		};
+	});
+}
+
+/** Whether any sample carries the metric at all, so an empty chart stays hidden. */
+export function hasMetric(
+	samples: ProcessSample[],
+	metric: 'cpuPercent' | 'memoryBytes',
+): boolean {
+	return samples.some((sample) => {
+		return sample.readings.some((reading) => reading[metric] !== null);
+	});
+}
