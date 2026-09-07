@@ -709,6 +709,38 @@ export class ItemScopedCacheService {
 			return [];
 		};
 
+		// The collection's OWN keyed pin, which is path-aware by construction: that
+		// keying came from a filter condition on this collection's own column, so it
+		// names the rows the read carries. An ANCESTOR's keys cannot stand in for it —
+		// they may have been pinned through a hop this collection never takes, which is
+		// the wrong-owner stale hit `cache-ancestor-slice-wrong-value` forbids.
+		//
+		// Only when every hop reaching it is to-one. A to-many filter matches roots
+		// holding ONE such child while the read nests them all, so the key covers none
+		// of the others — the reason a fetched-as-rows collection distrusts this pin in
+		// the first place.
+		const ownKeyedSliceFor = (collection: string): ScopedCacheTag[] => {
+			const own = keyedFilterPins.get(collection) ?? [];
+
+			if (own.length === 0) {
+				return [];
+			}
+
+			const paths = [...fieldMap.read, ...fieldMap.other]
+				.filter(([, entry]) => entry.collection === collection)
+				.map(([path]) => path);
+
+			const everyHopIsToOne = paths.length > 0 && paths.every((path) => {
+				return path === '' || resolveScopedCacheM2oJoinChainFromPath(
+					this.schema,
+					this.collection,
+					path.split('.'),
+				) !== null;
+			});
+
+			return everyHopIsToOne ? own : [];
+		};
+
 		const pushAncestorSliceOrBare = (collection: string): void => {
 			// A would-be-bare collection takes its ancestor slice unless it was reached
 			// by two disagreeing reverse fks: only that o2m conflict leaves rows no
@@ -726,11 +758,11 @@ export class ItemScopedCacheService {
 					? []
 					: ancestorSliceTagsFor(collection);
 
-			tags.push(
-				...(ancestorSliceTags.length > 0
-					? ancestorSliceTags
-					: [{ collection }]),
-			);
+			const sliceTags = ancestorSliceTags.length > 0
+				? ancestorSliceTags
+				: ownKeyedSliceFor(collection);
+
+			tags.push(...(sliceTags.length > 0 ? sliceTags : [{ collection }]));
 		};
 
 		for (const collection of taggedCollections) {
