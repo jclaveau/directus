@@ -220,10 +220,15 @@ describe('Processes Report Tests', () => {
 		vendor: Vendor,
 		key: keyof EnvTypes,
 		token: string,
+		details?: string,
 	) {
-		return request(getUrl(vendor, envs[vendor][key]))
+		const call = request(getUrl(vendor, envs[vendor][key]))
 			.get('/utils/processes')
 			.set('Authorization', `Bearer ${token}`);
+
+		return details === undefined
+			? call
+			: call.query({ details });
 	}
 
 	function serviceNamed(
@@ -517,6 +522,76 @@ describe('Processes Report Tests', () => {
 			expect(node.pid).toBeGreaterThan(0);
 			expect(node.runtime).toBeNull();
 			expect(node.env).toBeNull();
+		});
+	});
+
+	describe('Narrows the report to the halves a request asks for', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const full = await readReport(vendor, 'envReplicaA', USER.ADMIN.TOKEN);
+
+			const statsOnly = await readReport(
+				vendor,
+				'envReplicaA',
+				USER.ADMIN.TOKEN,
+				'stats',
+			);
+
+			expect(full.statusCode).toBe(200);
+			expect(statsOnly.statusCode).toBe(200);
+
+			const whole: ProcessesReport = full.body.data;
+			const narrowed: ProcessesReport = statsOnly.body.data;
+
+			// Same deployment, same node, one half of the answer: the witness is the
+			// env being there without the parameter and absent with it.
+			expect(whole.details).toEqual(['stats', 'env']);
+			expect(narrowed.details).toEqual(['stats']);
+
+			// Replicas are sorted by id, so this is `${vendor}-a` in both answers.
+			const before = soleProcessOf(whole, services[vendor].shared);
+			const after = soleProcessOf(narrowed, services[vendor].shared);
+
+			expect(before.env!.length).toBeGreaterThan(0);
+			expect(after.env).toBeNull();
+
+			// The half that was asked for is untouched, so this is a narrowing and
+			// not simply a smaller answer.
+			expect(after.runtime!.rssBytes).toBeGreaterThan(0);
+			expect(after.pid).toBe(before.pid);
+		});
+	});
+
+	describe('Refuses to widen past what a node reports', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			// The instance is configured for stats alone; asking for the env must not
+			// produce it, or the request parameter would be a way around the config.
+			const response = await readReport(
+				vendor,
+				'envStatsOnly',
+				USER.ADMIN.TOKEN,
+				'env',
+			);
+
+			expect(response.statusCode).toBe(200);
+
+			const report: ProcessesReport = response.body.data;
+
+			expect(report.details).toEqual([]);
+			expect(soleProcessOf(report, services[vendor].stats).env).toBeNull();
+		});
+	});
+
+	describe('Reads an unknown half as no preference at all', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await readReport(
+				vendor,
+				'envReplicaA',
+				USER.ADMIN.TOKEN,
+				'secrets',
+			);
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.data.details).toEqual(['stats', 'env']);
 		});
 	});
 

@@ -1,4 +1,5 @@
 import type {
+	ProcessDetail,
 	ProcessNode,
 	ProcessReplica,
 	ProcessService,
@@ -157,9 +158,11 @@ export function buildProcessesTree(
  * answerable at all. Without Redis the bus is local, and the report says so
  * instead of presenting one replica as the whole deployment.
  */
-export async function collectProcesses(): Promise<ProcessesReport> {
+export async function collectProcesses(
+	requested?: ProcessDetail[],
+): Promise<ProcessesReport> {
 	const bus = useBus();
-	const details = reportedProcessDetails();
+	const details = requested ?? reportedProcessDetails();
 	const collectedForMs = processesCollectTimeoutMs();
 	const requestId = randomUUID();
 	const reports: ProcessesReportMessage[] = [];

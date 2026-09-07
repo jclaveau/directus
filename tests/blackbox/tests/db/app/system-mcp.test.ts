@@ -425,6 +425,50 @@ describe('System MCP Tests', () => {
 		});
 	});
 
+	describe('Answers the processes tool with the halves asked for', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await callTool(vendor, 'list_processes', {
+				details: ['stats'],
+			});
+
+			expect(response.statusCode).toBe(200);
+			expect(response.body.result.isError).toBeUndefined();
+
+			const report = JSON.parse(response.body.result.content[0].text);
+
+			expect(report.details).toEqual(['stats']);
+
+			// The env is most of this answer by size, and an agent that did not ask
+			// for it should not be made to read it.
+			for (const service of report.services) {
+				for (const replica of service.replicas) {
+					for (const node of replica.processes) {
+						expect(node.env).toBeNull();
+						expect(node.runtime.rssBytes).toBeGreaterThan(0);
+					}
+				}
+			}
+		});
+	});
+
+	describe('Advertises the halves the processes tool takes', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await call(vendor, {
+				jsonrpc: '2.0',
+				id: 11,
+				method: 'tools/list',
+			});
+
+			expect(response.statusCode).toBe(200);
+
+			const tool = response.body.result.tools
+				.find((listed: { name: string }) => listed.name === 'list_processes');
+
+			expect(tool.inputSchema.properties.details.items.enum)
+				.toEqual(['stats', 'env']);
+		});
+	});
+
 	// "Servers MUST provide structured results that conform to this schema",
 	// and SHOULD "also return the serialized JSON in a TextContent block".
 	// https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
