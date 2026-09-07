@@ -238,6 +238,19 @@ describe('Processes Report Tests', () => {
 		return report.services.find((service) => service.service === name);
 	}
 
+	function processOfReplica(
+		report: ProcessesReport,
+		name: string,
+		replicaId: string,
+	): ProcessNode {
+		const replica = serviceNamed(report, name)
+			?.replicas.find((candidate) => candidate.replicaId === replicaId);
+
+		expect(replica, `${name} has no replica ${replicaId}`).toBeDefined();
+
+		return replica!.processes[0]!;
+	}
+
 	function soleProcessOf(report: ProcessesReport, name: string): ProcessNode {
 		return serviceNamed(report, name)!.replicas[0]!.processes[0]!;
 	}
@@ -547,9 +560,20 @@ describe('Processes Report Tests', () => {
 			expect(whole.details).toEqual(['stats', 'env']);
 			expect(narrowed.details).toEqual(['stats']);
 
-			// Replicas are sorted by id, so this is `${vendor}-a` in both answers.
-			const before = soleProcessOf(whole, services[vendor].shared);
-			const after = soleProcessOf(narrowed, services[vendor].shared);
+			// By id, not by position: each answer is its own collection window, and a
+			// replica that missed one would silently shift the index and compare two
+			// different processes.
+			const before = processOfReplica(
+				whole,
+				services[vendor].shared,
+				`${vendor}-a`,
+			);
+
+			const after = processOfReplica(
+				narrowed,
+				services[vendor].shared,
+				`${vendor}-a`,
+			);
 
 			expect(before.env!.length).toBeGreaterThan(0);
 			expect(after.env).toBeNull();

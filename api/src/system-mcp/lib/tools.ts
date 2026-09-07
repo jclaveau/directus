@@ -113,7 +113,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 							+ ' "stats" alone leaves out the resolved environment, which is'
 							+ ' most of the answer by size and is worth reading only when'
 							+ ' comparing configuration between replicas.',
-						items: { type: 'string', enum: ['stats', 'env'] },
+						// The halves this deployment reports, not both by rote: an enum
+						// naming one it does not would invite a call that answers with
+						// strictly less than asking for nothing at all.
+						items: { type: 'string', enum: reportedProcessDetails() },
 					},
 				},
 			},
