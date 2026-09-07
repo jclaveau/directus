@@ -320,7 +320,8 @@ describe(oneLine`
 			const second = await readSlice(SCOPE_HOOK_READ, 'z');
 
 			// RED until fixed: auditing only the collector let this tag through, so the
-			// second read HIT an entry no write can ever purge.
+			// second read HIT an entry no write can ever purge. The tag names a foreign
+			// collection so nothing else on the response makes the entry reachable.
 			expect(first.headers[cacheStatusHeader]).toBe('MISS');
 			expect(second.headers[cacheStatusHeader]).toBe('MISS');
 		});

@@ -82,10 +82,12 @@ export default function registerHooks({ filter }, { services }) {
 	});
 
 	// The OTHER door into the same audit: `cache.scope` returns the tag list itself,
-	// so a tag appended here never passes through the collector `scopeTo` fills.
+	// so a tag appended here never passes through the collector `scopeTo` fills. The
+	// tag names CANCEL_DEP, a collection nothing on this response covers — on the
+	// read's own collection its computed slice would already make it purgeable.
 	filter('cache.scope', (tags, meta) => {
 		return meta.collection === SCOPE_HOOK_READ
-			? [...tags, customTag(SCOPE_HOOK_READ)]
+			? [...tags, customTag(CANCEL_DEP)]
 			: tags;
 	});
 }
