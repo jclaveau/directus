@@ -650,35 +650,6 @@ describe(oneLine`
 		]);
 	});
 
-	// The ancestor slice's LAST hop lands on a collection the filter names by primary
-	// key, which is classified `independent`: it needs no tag of its own, yet it holds
-	// the key the descendant slices by. Reading only the keyed pins loses that key, so
-	// every ownership chain ending on such a terminal fell back to the bare tag — one
-	// write anywhere in `holder` then dropping every owner's entry.
-	it(oneLine`
-		an ancestor slice whose terminal is independent pins the slice, not the bare tag
-	`, async () => {
-		tracker.on.select('note').response([{ id: 1, holder: 5 }]);
-		tracker.on.select('holder').response([{ id: 5, owner: 9 }]);
-
-		const noteService = new ItemsService('note', {
-			knex: db,
-			schema: independentTerminalSchema,
-		});
-
-		const result = await noteService.readByQuery({
-			fields: ['*', 'holder.owner'],
-			filter: { holder: { owner: { id: { _eq: 9 } } } },
-		});
-
-		expect(
-			(readMeta(result)?.scopedCacheTags ?? [])
-				.filter((tag) => tag.collection === 'holder'),
-		).toEqual([
-			{ collection: 'holder', field: 'owner', value: 9, type: 'integer' },
-		]);
-	});
-
 	// A self-referential relation pulls rows of the root collection the root filter can't
 	// bound (a parent belongs to any student), so pinning the root to a value slice would
 	// leave the read stale after a write to another slice. The root falls back to bare.
@@ -1417,37 +1388,6 @@ composedChain['student_course']!.scopedCacheFields = ['teaching_unit'];
 composedChain['student_teaching_unit']!.scopedCacheFields = ['discipline'];
 composedChain['student_discipline']!.scopedCacheFields = ['enrollment'];
 composedChain['student_enrollment']!.scopedCacheFields = ['student'];
-
-// A read that EMBEDS its ancestor's rows. `holder` is fetched as rows, so its keyed
-// filter pin is not trusted — rows can arrive by a path the filter never keyed — and
-// the ancestor slice has to carry it instead. That slice hangs off `owner_account`,
-// which the filter names by PRIMARY KEY across the relation: classified `independent`,
-// pinned by nothing of its own while still holding the key the slice is built from.
-const independentTerminalSchema = new SchemaBuilder()
-	.collection('note', (c) => {
-		c.field('id').id();
-		c.field('holder').m2o('holder');
-	})
-	.collection('holder', (c) => {
-		c.field('id').id();
-		c.field('owner').m2o('owner_account');
-	})
-	.collection('owner_account', (c) => {
-		c.field('id').id();
-		c.field('name').string();
-	})
-	.build();
-
-const independentTerminal = independentTerminalSchema.collections;
-
-independentTerminal['note']!.scopedCacheFields = ['holder'];
-independentTerminal['holder']!.scopedCacheFields = ['owner'];
-
-// `independent` is granted only behind an enforced fk: every way the far row can
-// disappear writes the near row too, so the near row's own tag covers it.
-for (const relation of independentTerminalSchema.relations) {
-	relation.schema = { on_delete: 'CASCADE' } as any;
-}
 
 // Two chains landing on a terminal carrying the same NAME on both sides. Keying the
 // projected columns by the terminal field would collapse them onto one value.

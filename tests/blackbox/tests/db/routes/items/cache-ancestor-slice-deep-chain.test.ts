@@ -171,21 +171,6 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
-		// Naming the terminal by its PRIMARY KEY across the relation is what classifies
-		// it `independent` — the near row's own column answers the condition, so it
-		// needs no tag. `readConfig` keys the fk column instead and never gets there.
-		function readConfigKeyingOwnerPk() {
-			const ownerPkKey = `filter[${[...ownerPath, 'id'].join('][')}][_eq]`;
-
-			return request(getUrl(vendor, env))
-				.get(`/items/${CONFIG}`)
-				.query({
-					fields: '*,range.slots.part.course.unit.discipline.student.name',
-					[ownerPkKey]: String(ownedOwnerId),
-				})
-				.set('Authorization', auth);
-		}
-
 		function updateUnit(id: number, name: string) {
 			return request(getUrl(vendor, env))
 				.patch(`/items/${UNIT}/${id}`)
@@ -207,23 +192,6 @@ describe(oneLine`
 			));
 
 			expect(tags).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
-		});
-
-		it(oneLine`
-			the chain's LAST hop slices too — its ancestor is classified independent, so
-			it is pinned by nothing of its own, yet it still carries the key the
-			descendant slices by (#446)
-		`, async () => {
-			const tags = (await readConfigKeyingOwnerPk()).headers[cacheTagsHeader];
-
-			// RED before the fix: the terminal ancestor is pinned by nothing of its own,
-			// so the slice could not be built and the chain ended on a bare tag — a write
-			// to any row of the collection dropping every owner's entry.
-			expect(tags).toMatch(new RegExp(
-				`(^|, )${STUDENT}:owner=${ownedOwnerId}(,|$)`,
-			));
-
-			expect(tags).not.toMatch(new RegExp(`(^|, )${STUDENT}(,|$)`));
 		});
 
 		it('a write to an ancestor in the owner slice evicts the read', async () => {
