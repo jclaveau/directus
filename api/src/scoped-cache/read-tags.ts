@@ -69,56 +69,39 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 			continue;
 		}
 
-		const tags = scopedCachePinsForKeyedField(schema, collection, keying);
+		const type = schema.collections[collection]?.fields[keying.field]?.type;
 
-		if (tags !== null) {
-			pinned.set(collection, tags);
-		}
-	}
-
-	return pinned;
-}
-
-/**
- * The slices a filter naming rows of `collection` by `keying.field` pins, or
- * `null` when nothing can be pinned and the bare tag has to cover them: no field
- * to canonicalize against, a date-ish type the write canonicalizes differently,
- * or more keys than the per-collection ceiling (a partial key set would leave
- * the rows it omits covered by nothing).
- */
-export function scopedCachePinsForKeyedField(
-	schema: SchemaOverview,
-	collection: CollectionKey,
-	keying: { field: string; keys: Set<unknown> },
-): ScopedCacheTag[] | null {
-	const type = schema.collections[collection]?.fields[keying.field]?.type;
-
-	if (type === undefined || !isPinnableScopeType(type)) {
-		return null;
-	}
-
-	if (keying.keys.size > scopedCacheMaxPinsPerCollection()) {
-		return null;
-	}
-
-	const tags: ScopedCacheTag[] = [];
-
-	// Deduped on the canonical token, not the raw value, so `7` and `'7'`
-	// collapse to the one slice the write side emits for that row.
-	const seen = new Set<string>();
-
-	for (const value of keying.keys) {
-		const token = canonicalScopedCacheValue(value, type);
-
-		if (seen.has(token)) {
+		// No field to canonicalize against (collection/field absent), or a date-ish type
+		// the write canonicalizes differently — pin nothing; the bare tag covers it.
+		if (type === undefined || !isPinnableScopeType(type)) {
 			continue;
 		}
 
-		seen.add(token);
-		tags.push({ collection, field: keying.field, value, type });
+		if (keying.keys.size > scopedCacheMaxPinsPerCollection()) {
+			continue;
+		}
+
+		const tags: ScopedCacheTag[] = [];
+
+		// Deduped on the canonical token, not the raw value, so `7` and `'7'`
+		// collapse to the one slice the write side emits for that row.
+		const seen = new Set<string>();
+
+		for (const value of keying.keys) {
+			const token = canonicalScopedCacheValue(value, type);
+
+			if (seen.has(token)) {
+				continue;
+			}
+
+			seen.add(token);
+			tags.push({ collection, field: keying.field, value, type });
+		}
+
+		pinned.set(collection, tags);
 	}
 
-	return tags;
+	return pinned;
 }
 
 /**
