@@ -12,6 +12,10 @@
 //     says a WRITE reproduces the tag; it says nothing about a purge that already
 //     landed while the read was running, and there is no taking that counter after
 //     the rows are read.
+//   - COVERED_READ: the same unreproducible tag, but on a collection the response
+//     already carries a reproducible tag for → cached. A write to that collection
+//     purges the entry through the OTHER tag, so no staleness is possible and the
+//     audit has nothing to cancel.
 
 const CANCEL_READ = 'p_unauto_read';
 const CANCEL_DEP = 'p_unauto_dep';
@@ -19,6 +23,7 @@ const MANUAL_READ = 'p_manual_read';
 const MANUAL_DEP = 'p_manual_dep';
 const SCOPE_HOOK_READ = 'p_unauto_scope_hook';
 const MANUAL_BARE_READ = 'p_manual_bare_read';
+const COVERED_READ = 'p_unauto_covered';
 
 // A custom slice on `ghost`, a field neither dependency is scoped on — so it's
 // unautopurgeable by the dependency's own auto-purge.
@@ -66,6 +71,14 @@ export default function registerHooks({ filter }, { services }) {
 	filter(`${MANUAL_DEP}.items.update`, (payload, _meta, context) => {
 		context.scopedCache?.purgeBy(customTag(MANUAL_DEP));
 		return payload;
+	});
+
+	// The unreproducible tag names the read's OWN collection, whose computed
+	// `space` slice is already on the response — so a write reaches this entry
+	// through that tag and the finer one is harmless freight.
+	filter(`${COVERED_READ}.items.read`, (records, _meta, context) => {
+		context.scopedCache?.scopeTo(customTag(COVERED_READ));
+		return records;
 	});
 
 	// The OTHER door into the same audit: `cache.scope` returns the tag list itself,

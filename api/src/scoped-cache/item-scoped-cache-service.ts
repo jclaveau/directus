@@ -849,9 +849,12 @@ export class ItemScopedCacheService {
 			}
 		}
 
-		unautopurgeable = [...hookAddedTags.values()].filter((tag) => {
+		// Whether a WRITE to this tag's collection reproduces it, and so drops any
+		// entry filed under it.
+		const reproducedByAWrite = (tag: ScopedCacheTag): boolean => {
+			// The bare collection tag is what every write to it emits.
 			if (tag.field === undefined) {
-				return false;
+				return true;
 			}
 
 			const collectionSchema = this.schema.collections[tag.collection];
@@ -859,23 +862,42 @@ export class ItemScopedCacheService {
 			// Every collection auto-purges its primary-key slice, so a hook pinning
 			// a foreign row by its key needs no `manuallyPurged` claim.
 			if (tag.field === collectionSchema?.primary) {
-				return false;
+				return true;
 			}
 
 			// A declared flat scope field auto-purges; a dotted one only when its path
 			// resolves to an M2O chain — a to-many hop makes the write drop it → stale.
+			// The write side derives its tags from `scopedCacheFields` alone, so a path
+			// it does not name is never emitted however the read arrived at it.
 			return (
-				!(
-					collectionSchema?.scopedCacheFields?.includes(tag.field) &&
-					(
-						!tag.field.includes('.') ||
-						resolveScopedCacheM2oJoinChainFromPath(
-							this.schema,
-							tag.collection,
-							tag.field.split('.').slice(0, -1),
-						) !== null
-					)
-				) &&
+				collectionSchema?.scopedCacheFields?.includes(tag.field) === true &&
+				(
+					!tag.field.includes('.') ||
+					resolveScopedCacheM2oJoinChainFromPath(
+						this.schema,
+						tag.collection,
+						tag.field.split('.').slice(0, -1),
+					) !== null
+				)
+			);
+		};
+
+		// Per COLLECTION, not per tag: purging is a union, so an entry filed under
+		// several tags of one collection goes as soon as a write reproduces any ONE of
+		// them. A finer tag no write emits — an ownership-ancestor path a read derived
+		// for itself, say — is then harmless freight beside a reproducible sibling,
+		// and refusing to cache over it costs the response for nothing.
+		//
+		// Computed tags count as cover: what matters is that the ENTRY is reachable
+		// from a write to that collection, not which channel put the tag there.
+		const collectionsAWriteReaches = new Set(
+			tags.filter(reproducedByAWrite).map((tag) => tag.collection),
+		);
+
+		unautopurgeable = [...hookAddedTags.values()].filter((tag) => {
+			return (
+				reproducedByAWrite(tag) === false &&
+				collectionsAWriteReaches.has(tag.collection) === false &&
 				!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
 			);
 		});

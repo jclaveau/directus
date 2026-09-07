@@ -19,6 +19,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //     reads, no write between, both MISS).
 //   - MANUAL: same tag with manuallyPurged → cached (second read HIT); and a
 //     matching purgeBy on the dep's update invalidates it (post-write MISS).
+//   - COVERED: the same unreproducible tag on a collection the response already
+//     carries a reproducible tag for → cached, and a write to that collection still
+//     purges it through the other tag. The audit is per collection, not per tag.
 // The cache-unautopurgeable-scope extension hosts the hooks.
 
 const CANCEL_READ = 'p_unauto_read';
@@ -27,6 +30,7 @@ const MANUAL_READ = 'p_manual_read';
 const MANUAL_DEP = 'p_manual_dep';
 const SCOPE_HOOK_READ = 'p_unauto_scope_hook';
 const MANUAL_BARE_READ = 'p_manual_bare_read';
+const COVERED_READ = 'p_unauto_covered';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -46,6 +50,7 @@ describe(oneLine`
 
 		let instance: ChildProcess;
 		let manualDep: number;
+		let covered: number;
 
 		beforeAll(async () => {
 			// Seed on the default instance BEFORE the scoped instance spawns. All scoped
@@ -101,10 +106,18 @@ describe(oneLine`
 							{ field: 'title', type: 'string', meta: {} },
 						],
 					},
+					{
+						collection: COVERED_READ,
+						meta: { scoped_cache_fields: ['space'] },
+						fields: [
+							{ field: 'space', type: 'string', meta: {} },
+							{ field: 'title', type: 'string', meta: {} },
+						],
+					},
 				],
 			});
 
-			const [, , manualDeps] = await Promise.all([
+			const [, , manualDeps, , , , covereds] = await Promise.all([
 				CreateItem(vendor, {
 					collection: CANCEL_DEP,
 					item: [{ space: 'd', val: 'orig' }],
@@ -129,9 +142,14 @@ describe(oneLine`
 					collection: MANUAL_BARE_READ,
 					item: [{ space: 'z', title: 't' }],
 				}),
+				CreateItem(vendor, {
+					collection: COVERED_READ,
+					item: [{ space: 'z', title: 't' }],
+				}),
 			]);
 
 			manualDep = manualDeps[0].id;
+			covered = covereds[0].id;
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -154,6 +172,7 @@ describe(oneLine`
 				DeleteCollection(vendor, { collection: MANUAL_DEP }),
 				DeleteCollection(vendor, { collection: SCOPE_HOOK_READ }),
 				DeleteCollection(vendor, { collection: MANUAL_BARE_READ }),
+				DeleteCollection(vendor, { collection: COVERED_READ }),
 			]);
 		});
 
@@ -254,6 +273,36 @@ describe(oneLine`
 
 			// The author's own purgeBy reproduced the tag → the read is invalidated.
 			const purged = await readSlice(MANUAL_READ, 'z');
+			expect(purged.headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it(oneLine`
+			an unreproducible tag on a collection the response is already sliced on does
+			NOT cancel caching — a write to that collection purges the entry through the
+			other tag, so the audit is per collection, not per tag
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const first = await readSlice(COVERED_READ, 'z');
+			const cached = await readSlice(COVERED_READ, 'z');
+
+			// RED before the fix: the `ghost` tag was flagged on its own and the response
+			// was never stored, costing the cache every ownership-ancestor read.
+			expect(first.headers[cacheStatusHeader]).toBe('MISS');
+			expect(cached.headers[cacheStatusHeader]).toBe('HIT');
+
+			await request(url)
+				.patch(`/items/${COVERED_READ}/${covered}`)
+				.send({ title: 'changed' })
+				.set('Authorization', auth);
+
+			// The soundness half: the entry is indexed under BOTH tags, so the write's
+			// own `space` purge reaches it and nothing goes stale.
+			const purged = await readSlice(COVERED_READ, 'z');
 			expect(purged.headers[cacheStatusHeader]).toBe('MISS');
 		});
 

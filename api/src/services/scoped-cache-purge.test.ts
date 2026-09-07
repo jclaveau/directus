@@ -763,9 +763,12 @@ describe(oneLine`
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
-			// `test` is scoped on `student`, not `ghost` — this slice tag is orphaned.
+			// A FOREIGN collection, so nothing else on this response covers it: `other`
+			// is scoped on no `ghost` field, and no other tag names `other` either, so
+			// no write reaches this entry through it. On the read's OWN collection the
+			// same tag would be harmless freight beside its computed slice.
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo({ collection: 'test', field: 'ghost', value: 'g' });
+				ctx.scopedCache.scopeTo({ collection: 'other', field: 'ghost', value: 'g' });
 				return payload;
 			};
 
@@ -775,7 +778,7 @@ describe(oneLine`
 				const result = await service().readByQuery({});
 
 				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
-					{ collection: 'test', field: 'ghost', value: 'g' },
+					{ collection: 'other', field: 'ghost', value: 'g' },
 				]);
 			}
 			finally {
@@ -791,7 +794,7 @@ describe(oneLine`
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo(
-					{ collection: 'test', field: 'ghost', value: 'g' },
+					{ collection: 'other', field: 'ghost', value: 'g' },
 					{ manuallyPurged: true },
 				);
 
