@@ -15,13 +15,16 @@ import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
 import {
 	appendProcessSample,
+	capacitySeries,
 	chartSeries,
 	cpuPercent,
 	filterEnvVariables,
 	hasMetric,
 	isNearMemoryCap,
+	latestSample,
 	memoryCapRatio,
 	processTotals,
+	shareOfCapacity,
 	type ProcessSample,
 } from './processes-view';
 
@@ -225,10 +228,28 @@ function copyRaw(key: string, node: ProcessNode): void {
 	});
 }
 
+const usageChartEl = ref<HTMLElement | null>(null);
 const cpuChartEl = ref<HTMLElement | null>(null);
 const memoryChartEl = ref<HTMLElement | null>(null);
+let usageChart: ApexCharts | null = null;
 let cpuChart: ApexCharts | null = null;
 let memoryChart: ApexCharts | null = null;
+
+/** The latest totals, as the figures a percentage on its own does not carry. */
+const usage = computed(() => {
+	const sample = latestSample(samples.value);
+
+	if (sample === null) {
+		return null;
+	}
+
+	return {
+		memory: sample.memory,
+		cpu: sample.cpu,
+		memoryShare: shareOfCapacity(sample.memory),
+		cpuShare: shareOfCapacity(sample.cpu),
+	};
+});
 
 const chartsCarryCpu = computed(() => hasMetric(samples.value, 'cpuPercent'));
 
@@ -280,6 +301,48 @@ function chartOptions(
 	};
 }
 
+/**
+ * The deployment against what it is allowed to use. Both lines are percentages
+ * of their own ceiling — the cgroup's memory cap and CPU quota — so the axis is
+ * pinned to 100 rather than scaled to the data: a chart that rescales to the
+ * peak hides how much headroom is left, which is the one thing it is for.
+ */
+function usageChartOptions(): ApexOptions {
+	return {
+		chart: {
+			type: 'area',
+			height: 220,
+			animations: { enabled: false },
+			toolbar: { show: false },
+			fontFamily: 'var(--theme--fonts--sans--font-family)',
+		},
+		colors: [
+			themeVar('--theme--primary', '#6644ff'),
+			themeVar('--theme--warning', '#ffa439'),
+		],
+		fill: { type: 'solid', opacity: 0.12 },
+		stroke: { width: 2, curve: 'straight' },
+		markers: { size: 0 },
+		dataLabels: { enabled: false },
+		legend: { show: true, position: 'top', horizontalAlign: 'left' },
+		grid: { borderColor: themeVar('--theme--border-color-subdued', '#e4eaf1') },
+		xaxis: {
+			type: 'datetime',
+			categories: samples.value.map((sample) => sample.at),
+			labels: { datetimeUTC: false },
+		},
+		yaxis: {
+			title: { text: t('processes_of_capacity', '% of what is allowed') },
+			min: 0,
+			max: 100,
+			tickAmount: 4,
+			labels: { formatter: (value: number) => `${Math.round(value)}%` },
+		},
+		tooltip: { y: { formatter: (value: number) => `${value.toFixed(1)}%` } },
+		series: capacitySeries(samples.value),
+	};
+}
+
 function cpuChartOptions(): ApexOptions {
 	return chartOptions(
 		'cpuPercent',
@@ -297,6 +360,16 @@ function memoryChartOptions(): ApexOptions {
 }
 
 async function renderCharts(): Promise<void> {
+	if (usageChartEl.value !== null) {
+		if (usageChart === null) {
+			usageChart = new ApexCharts(usageChartEl.value, usageChartOptions());
+			await usageChart.render();
+		}
+		else {
+			await usageChart.updateOptions(usageChartOptions(), true, false);
+		}
+	}
+
 	if (cpuChartEl.value !== null) {
 		if (cpuChart === null) {
 			cpuChart = new ApexCharts(cpuChartEl.value, cpuChartOptions());
@@ -345,6 +418,7 @@ onMounted(load);
 // ApexCharts attaches to the DOM outside Vue's tree, so leaving the page without
 // this leaks both charts and their resize listeners.
 onUnmounted(() => {
+	usageChart?.destroy();
 	cpuChart?.destroy();
 	memoryChart?.destroy();
 });
@@ -411,6 +485,54 @@ onUnmounted(() => {
 			</div>
 
 			<div v-show="samples.length > 1" class="charts">
+				<div class="chart">
+					<h3 class="chart-title">
+						{{ t('processes_usage_chart', 'Deployment against its limits') }}
+					</h3>
+
+					<div v-if="usage" class="usage-figures">
+						<span>
+							{{ t('processes_usage_memory', 'Memory') }}
+							{{ usage.memory.used === null
+								? '—'
+								: formatFilesize(usage.memory.used) }}
+							<template v-if="usage.memory.capacity">
+								/ {{ formatFilesize(usage.memory.capacity) }}
+							</template>
+							<template v-if="usage.memoryShare !== null">
+								({{ usage.memoryShare.toFixed(1) }}%)
+							</template>
+						</span>
+
+						<span>
+							{{ t('processes_usage_cpu', 'CPU') }}
+							{{ usage.cpu.used === null
+								? '—'
+								: usage.cpu.used.toFixed(2) }}
+							<template v-if="usage.cpu.capacity">
+								/ {{ usage.cpu.capacity }}
+								{{ t('processes_cores', 'cores') }}
+							</template>
+							<template v-if="usage.cpuShare !== null">
+								({{ usage.cpuShare.toFixed(1) }}%)
+							</template>
+						</span>
+					</div>
+
+					<v-notice
+						v-if="usage && usage.memory.capacity === null"
+						type="info"
+					>
+						{{ t(
+							'processes_no_capacity',
+							'No replica reported what its container may use, so usage is '
+								+ 'shown without a ceiling to be a share of.',
+						) }}
+					</v-notice>
+
+					<div ref="usageChartEl" />
+				</div>
+
 				<div class="chart">
 					<h3 class="chart-title">
 						{{ t('processes_cpu_chart', 'CPU per process') }}
@@ -693,6 +815,14 @@ onUnmounted(() => {
 .chart-title {
 	font-weight: 600;
 	margin-block-end: 8px;
+}
+
+.usage-figures {
+	display: flex;
+	gap: 20px;
+	color: var(--theme--foreground-subdued);
+	margin-block-end: 8px;
+	font-family: var(--theme--fonts--monospace--font-family);
 }
 
 .detail {

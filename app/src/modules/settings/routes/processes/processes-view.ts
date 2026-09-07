@@ -77,9 +77,18 @@ export interface ProcessReading {
 	memoryBytes: number | null;
 }
 
+/** A total and the ceiling it is a share of, in the unit the chart plots. */
+export interface UsageAgainstCapacity {
+	used: number | null;
+	capacity: number | null;
+}
+
 export interface ProcessSample {
 	at: number;
 	readings: ProcessReading[];
+	/** The whole deployment at that moment: every process, every replica. */
+	memory: UsageAgainstCapacity;
+	cpu: UsageAgainstCapacity;
 }
 
 /** How many readings the charts keep; at 5s that is the last ten minutes. */
@@ -109,9 +118,40 @@ export function memoryBytes(node: ProcessNode): number | null {
 }
 
 /**
- * Append one reading per process, dropping the oldest once the buffer is full.
- * The samples live only as long as the page is open — nothing persists them, so
- * the charts cover the visit rather than pretending to a history they don't have.
+ * Adds what was measured and leaves the rest out. A total over readings that are
+ * partly absent is not the deployment's usage, so `null` in means `null` out
+ * rather than a sum that silently counts the missing ones as zero.
+ */
+function total(values: (number | null)[]): number | null {
+	const measured = values.filter((value): value is number => value !== null);
+
+	return measured.length === 0
+		? null
+		: measured.reduce((sum, value) => sum + value, 0);
+}
+
+/** What every replica of the deployment is allowed to use, added up. */
+function fleetCapacity(report: ProcessesReport): {
+	memoryBytes: number | null;
+	cpuCores: number | null;
+} {
+	const replicas = report.services.flatMap((service) => service.replicas);
+
+	return {
+		memoryBytes: total(replicas.map((replica) => {
+			return replica.capacity?.memoryBytes ?? null;
+		})),
+		cpuCores: total(replicas.map((replica) => {
+			return replica.capacity?.cpuCores ?? null;
+		})),
+	};
+}
+
+/**
+ * Append one reading per process plus the deployment's totals, dropping the
+ * oldest once the buffer is full. The samples live only as long as the page is
+ * open — nothing persists them, so the charts cover the visit rather than
+ * pretending to a history they don't have.
  */
 export function appendProcessSample(
 	samples: ProcessSample[],
@@ -129,8 +169,61 @@ export function appendProcessSample(
 		});
 	});
 
-	return [...samples, { at: report.collectedAt, readings }]
+	const capacity = fleetCapacity(report);
+	const busy = total(readings.map((reading) => reading.cpuPercent));
+
+	return [...samples, {
+		at: report.collectedAt,
+		readings,
+		memory: {
+			used: total(readings.map((reading) => reading.memoryBytes)),
+			capacity: capacity.memoryBytes,
+		},
+		// PM2 measures a process against one core, so a sum of its percentages is
+		// a count of cores once divided by a hundred — directly comparable to the
+		// quota the cgroup grants.
+		cpu: {
+			used: busy === null
+				? null
+				: busy / 100,
+			capacity: capacity.cpuCores,
+		},
+	}]
 		.slice(-PROCESS_SAMPLE_LIMIT);
+}
+
+/** A reading as a percentage of its ceiling, `null` unless both are known. */
+export function shareOfCapacity(usage: UsageAgainstCapacity): number | null {
+	if (usage.used === null || !usage.capacity) {
+		return null;
+	}
+
+	return (usage.used / usage.capacity) * 100;
+}
+
+/**
+ * The deployment against its limits: two lines on one axis, because a percentage
+ * of a ceiling is the only thing bytes and cores can be compared in.
+ */
+export function capacitySeries(samples: ProcessSample[]): {
+	name: string;
+	data: (number | null)[];
+}[] {
+	return [
+		{
+			name: 'Memory',
+			data: samples.map((sample) => shareOfCapacity(sample.memory)),
+		},
+		{
+			name: 'CPU',
+			data: samples.map((sample) => shareOfCapacity(sample.cpu)),
+		},
+	];
+}
+
+/** The newest sample, for the absolute figures a percentage does not carry. */
+export function latestSample(samples: ProcessSample[]): ProcessSample | null {
+	return samples.at(-1) ?? null;
 }
 
 /**

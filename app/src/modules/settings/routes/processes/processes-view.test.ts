@@ -1,19 +1,23 @@
 import type {
 	ProcessNode,
+	ProcessReplica,
 	ProcessesReport,
 	ResolvedEnvVariable,
 } from '@directus/types';
 import { describe, expect, test } from 'vitest';
 import {
 	appendProcessSample,
+	capacitySeries,
 	chartSeries,
 	filterEnvVariables,
 	hasMetric,
 	isNearMemoryCap,
 	memoryCapRatio,
+	latestSample,
 	PROCESS_SAMPLE_LIMIT,
 	processLabel,
 	processTotals,
+	shareOfCapacity,
 	type ProcessSample,
 } from './processes-view';
 
@@ -213,7 +217,11 @@ describe('processTotals', () => {
 });
 
 /** A report of one service holding the processes given, as the page receives it. */
-function reportOf(processes: ProcessNode[], collectedAt = 1): ProcessesReport {
+function reportOf(
+	processes: ProcessNode[],
+	collectedAt = 1,
+	capacity: ProcessReplica['capacity'] = null,
+): ProcessesReport {
 	return {
 		collectedAt,
 		collectedForMs: 750,
@@ -223,7 +231,13 @@ function reportOf(processes: ProcessNode[], collectedAt = 1): ProcessesReport {
 			{
 				service: 'api',
 				replicas: [
-					{ replicaId: 'a', hostname: 'a', supervisor: 'pm2', processes },
+					{
+						replicaId: 'a',
+						hostname: 'a',
+						supervisor: 'pm2',
+						capacity,
+						processes,
+					},
 				],
 			},
 		],
@@ -268,6 +282,8 @@ describe('appendProcessSample', () => {
 				{ label: 'api #0', cpuPercent: 40, memoryBytes: 10 },
 				{ label: 'api #1', cpuPercent: 12, memoryBytes: 20 },
 			],
+			memory: { used: 30, capacity: null },
+			cpu: { used: 0.52, capacity: null },
 		}]);
 	});
 
@@ -362,5 +378,77 @@ describe('hasMetric', () => {
 		], 2));
 
 		expect(hasMetric(samples, 'cpuPercent')).toBe(true);
+	});
+});
+
+describe('the deployment against its limits', () => {
+	const capacity = { memoryBytes: 1_000, cpuCores: 4 };
+
+	test('adds every process up and holds it against the ceiling', () => {
+		const samples = appendProcessSample([], reportOf([
+			node({
+				instance: 0,
+				supervisor: supervisor({ cpuPercent: 100, memoryBytes: 200 }),
+			}),
+			node({
+				instance: 1,
+				supervisor: supervisor({ cpuPercent: 300, memoryBytes: 300 }),
+			}),
+		], 1, capacity));
+
+		expect(samples[0]?.memory).toEqual({ used: 500, capacity: 1_000 });
+		expect(samples[0]?.cpu).toEqual({ used: 4, capacity: 4 });
+
+		expect(capacitySeries(samples)).toEqual([
+			{ name: 'Memory', data: [50] },
+			{ name: 'CPU', data: [100] },
+		]);
+	});
+
+	test('adds the capacity of every replica, not just the first', () => {
+		const report = reportOf([node()], 1, capacity);
+		const [service] = report.services;
+
+		service!.replicas.push({ ...service!.replicas[0]!, replicaId: 'b' });
+
+		expect(appendProcessSample([], report)[0]?.memory.capacity).toBe(2_000);
+	});
+
+	// A ceiling nobody reported is not a ceiling of zero, and dividing by it
+	// would draw a full bar over a deployment that is barely working.
+	test('plots no share at all where the ceiling is unknown', () => {
+		const samples = appendProcessSample([], reportOf([
+			node({ supervisor: supervisor({ cpuPercent: 10, memoryBytes: 10 }) }),
+		]));
+
+		expect(capacitySeries(samples)).toEqual([
+			{ name: 'Memory', data: [null] },
+			{ name: 'CPU', data: [null] },
+		]);
+	});
+
+	test('reads a zero ceiling as no ceiling rather than dividing by it', () => {
+		expect(shareOfCapacity({ used: 5, capacity: 0 })).toBeNull();
+		expect(shareOfCapacity({ used: null, capacity: 10 })).toBeNull();
+	});
+
+	// Counting an unmeasured process as zero would report the deployment using
+	// less than it does, which is the wrong way for a limits chart to be wrong.
+	test('totals only what was measured', () => {
+		const samples = appendProcessSample([], reportOf([
+			node({ instance: 0, supervisor: supervisor({ memoryBytes: 400 }) }),
+			node({ instance: 1, supervisor: null, runtime: null }),
+		], 1, capacity));
+
+		expect(samples[0]?.memory.used).toBe(400);
+		expect(samples[0]?.cpu.used).toBeNull();
+	});
+
+	test('hands back the newest sample for the figures beside the chart', () => {
+		let samples = appendProcessSample([], reportOf([node()], 1, capacity));
+		samples = appendProcessSample(samples, reportOf([node()], 2, capacity));
+
+		expect(latestSample(samples)?.at).toBe(2);
+		expect(latestSample([])).toBeNull();
 	});
 });

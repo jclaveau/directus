@@ -16,6 +16,7 @@ import {
 	reportedProcessDetails,
 } from './processes-config.js';
 import { resolveReportedEnv } from './redact-env.js';
+import { hostCapacity } from './host-capacity.js';
 import {
 	readSupervisedProcesses,
 	supervisorAvailable,
@@ -79,6 +80,9 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 		// autoscale — the ones the page is for.
 		supervisor: carries('stats')
 			? await readSupervisedProcesses()
+			: null,
+		capacity: carries('stats')
+			? await hostCapacity()
 			: null,
 	};
 

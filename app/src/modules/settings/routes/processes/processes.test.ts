@@ -78,6 +78,7 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 						replicaId: 'runner-1',
 						hostname: 'runner-1',
 						supervisor: 'pm2',
+						capacity: { memoryBytes: 1_000_000_000, cpuCores: 2 },
 						processes: [
 							{
 								nodeId: 'aaa',
@@ -483,20 +484,20 @@ describe('the cpu and memory charts', () => {
 		expect(wrapper.find('.charts').attributes('style')).toBe('display: none;');
 	});
 
-	test('builds both charts on the first load', async () => {
+	test('builds all three charts on the first load', async () => {
 		await mountLoaded();
 
-		expect(apex.render).toHaveBeenCalledTimes(2);
+		expect(apex.render).toHaveBeenCalledTimes(3);
 		expect(apex.updateOptions).not.toHaveBeenCalled();
 	});
 
 	// ApexCharts attaches outside Vue's tree, so nothing else would clean it up.
-	test('destroys both charts when the page goes away', async () => {
+	test('destroys every chart when the page goes away', async () => {
 		const wrapper = await mountLoaded();
 
 		wrapper.unmount();
 
-		expect(apex.destroy).toHaveBeenCalledTimes(2);
+		expect(apex.destroy).toHaveBeenCalledTimes(3);
 	});
 
 	test('says why the cpu chart is empty when no supervisor answered', async () => {
@@ -509,5 +510,33 @@ describe('the cpu and memory charts', () => {
 		const wrapper = await mountLoaded(data);
 
 		expect(wrapper.text()).toContain('CPU is measured by the PM2 daemon');
+	});
+});
+
+describe('the deployment chart', () => {
+	test('shows the totals against what the container may use', async () => {
+		const wrapper = await mountLoaded();
+		const figures = wrapper.find('.usage-figures').text();
+
+		// 350 MB of the replica's 1 GB, and PM2's 2% of one core out of the two
+		expect(figures).toContain('350.0 MB');
+		expect(figures).toContain('1.0 GB');
+		expect(figures).toContain('35.0%');
+		expect(figures).toContain('0.02');
+		expect(figures).toContain('2 cores');
+		expect(figures).toContain('1.0%');
+	});
+
+	// A ceiling nobody reported is not a ceiling of zero: saying so is better
+	// than drawing a bar against a number the page invented.
+	test('says when no replica reported a ceiling', async () => {
+		const data = report();
+
+		data.services[0]!.replicas[0]!.capacity = null;
+
+		const wrapper = await mountLoaded(data);
+
+		expect(wrapper.text())
+			.toContain('No replica reported what its container may use');
 	});
 });
