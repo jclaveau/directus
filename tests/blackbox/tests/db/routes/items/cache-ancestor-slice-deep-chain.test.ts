@@ -194,6 +194,23 @@ describe(oneLine`
 			expect(tags).not.toMatch(new RegExp(`(^|, )${UNIT}(,|$)`));
 		});
 
+		it(oneLine`
+			the chain's LAST hop slices too — its ancestor is classified independent, so
+			it is pinned by nothing of its own, yet it still carries the key the
+			descendant slices by (#446)
+		`, async () => {
+			const tags = (await readConfig()).headers[cacheTagsHeader];
+
+			// RED before the fix: the terminal ancestor contributes no keyed pin, so the
+			// slice could not be built and every ownership chain ended on a bare tag —
+			// a write to any row of the collection dropping every owner's entry.
+			expect(tags).toMatch(new RegExp(
+				`(^|, )${STUDENT}:owner=${ownedOwnerId}(,|$)`,
+			));
+
+			expect(tags).not.toMatch(new RegExp(`(^|, )${STUDENT}(,|$)`));
+		});
+
 		it('a write to an ancestor in the owner slice evicts the read', async () => {
 			await clearCache();
 
