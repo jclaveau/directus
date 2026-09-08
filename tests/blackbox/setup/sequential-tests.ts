@@ -43,6 +43,12 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-raw-purge.test.ts',
 			'/tests/db/routes/items/cache-raw-purge-relational.test.ts',
 			'/tests/db/routes/items/cache-read-scope.test.ts',
+			// Spawns an instance and builds a relation on a collection it has just
+			// created. Left in the parallel middle that create-then-relate gap is
+			// wide enough to lose: under a shard that packed it beside heavier
+			// company it read back `Collection "..." doesn't exist` from its own
+			// seed. Sixteen of its siblings already run here for the same reason.
+			'/tests/db/routes/items/cache-slice-index.test.ts',
 			'/tests/db/routes/items/cache-takeover-scope.test.ts',
 			'/tests/db/routes/items/cache-unautopurgeable-scope.test.ts',
 			'/tests/db/routes/items/cache-update-scope.test.ts',
