@@ -1,5 +1,5 @@
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Filter, Query } from '@directus/types';
+import type { Filter, Item, Query } from '@directus/types';
 import type { A2MNode, AST, M2ONode, O2MNode } from './types/ast.js';
 import type {
 	CollectionKey,
@@ -3177,6 +3177,7 @@ describe('pinnedScopedCacheTagsFromKeyedFilters', () => {
 		// A trimmed key set would leave the rows it omits covered by nothing.
 		expect(pinsFor(new Map([['owner', {
 			kind: 'keyed',
+			field: 'id',
 			keys: new Set(Array.from(
 				{ length: scopedCacheMaxPinsPerCollection() + 1 },
 				(_, index) => index,

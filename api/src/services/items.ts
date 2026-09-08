@@ -22,7 +22,6 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { randomUUID } from 'node:crypto';
 import { getCache } from '../cache.js';
 import {
 	createScopedCacheCollector,
@@ -937,7 +936,7 @@ implements AbstractService<Item> {
 				o2mChildPins,
 				o2mConflicted,
 				beyondNestedRows,
-				filteredRecords,
+				filteredRecords: filteredRecords as Item[],
 				collector: scopedCacheCollector,
 			});
 

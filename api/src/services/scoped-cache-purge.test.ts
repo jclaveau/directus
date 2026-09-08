@@ -1,5 +1,6 @@
 import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
+import type { MutationOptions } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import {
@@ -376,7 +377,10 @@ describe(oneLine`
 		// rows it read are committed — the window a concurrent read refills as stale.
 		await service().updateBatch(
 			[{ id: 1, name: 'renamed' }, { id: 2, name: 'other' }],
-			{ autoPurgeCache: true },
+			// `autoPurgeCache` is typed `false | undefined` — only turning it OFF
+			// means anything. Passing the forbidden `true` is the point: even then
+			// it must not reach the children.
+			{ autoPurgeCache: true } as unknown as MutationOptions,
 		);
 
 		expect(purgeScopedCache).toHaveBeenCalledTimes(1);

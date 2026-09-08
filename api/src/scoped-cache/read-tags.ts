@@ -20,6 +20,7 @@ import type {
 	SchemaOverview,
 	ScopedCachePath,
 	ScopedCacheTag,
+	Type,
 } from '@directus/types';
 import {
 	ScopedCacheFilterKeying,
@@ -576,7 +577,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	// mixing their keys under one field would pin the wrong slice.
 	const keyingByChild = new Map<CollectionKey, {
 		reverseFk: string;
-		fieldType: string | undefined;
+		fieldType: Type | undefined;
 		rows: Item[];
 		conflicted: boolean;
 	}>();

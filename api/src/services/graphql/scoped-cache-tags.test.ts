@@ -220,8 +220,9 @@ describe('GraphQLService scoped cache tags', () => {
 
 		const result = await gql.execute({
 			document: {} as any,
+			query: null,
 			variables: {},
-			operationName: undefined,
+			operationName: null,
 			contextValue: {},
 		});
 
