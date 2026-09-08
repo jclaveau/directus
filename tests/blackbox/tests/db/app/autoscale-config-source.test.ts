@@ -4,6 +4,7 @@ import {
 	decisionsOf,
 	neverExceeded,
 	poolSize,
+	restartsOf,
 	sizesOver,
 	startAutoscaler,
 	startPool,
@@ -118,7 +119,14 @@ describe('The autoscaler takes live configuration from Redis', () => {
 				PM2_AUTOSCALE_WARMUP_SECONDS: '8',
 			});
 
-			expect(await sizesOver(rig, 20_000)).toEqual([1]);
+			// Everything a size this arm did not expect could have come from:
+			// the decision that took it, and the restarts that would explain a
+			// size the autoscaler never asked for.
+			expect({
+				sizes: await sizesOver(rig, 20_000),
+				decisions: decisionsOf(rig),
+				restarts: restartsOf(rig),
+			}).toEqual({ sizes: [1], decisions: [], restarts: 0 });
 		}, 90_000);
 
 		it('picks up a stored threshold without being restarted', async () => {

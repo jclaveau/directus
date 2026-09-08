@@ -138,7 +138,7 @@ export async function waitForRestart(rig: Rig, timeoutMs: number): Promise<boole
 	const deadline = Date.now() + timeoutMs;
 
 	while (Date.now() < deadline) {
-		if (restartCount(rig) > 0) {
+		if (restartsOf(rig) > 0) {
 			return true;
 		}
 
@@ -148,7 +148,15 @@ export async function waitForRestart(rig: Rig, timeoutMs: number): Promise<boole
 	return false;
 }
 
-function restartCount(rig: Rig): number {
+/**
+ * Restarts the supervisor has recorded for the pool.
+ *
+ * A pool briefly holds two entries for one worker it is replacing, so a size an
+ * arm did not expect is either a scale or a restart — and an assertion that
+ * reports only the size cannot say which, on a runner where neither
+ * reproduces.
+ */
+export function restartsOf(rig: Rig): number {
 	return listWorkers(rig)
 		.reduce((total, worker) => total + (worker.pm2_env?.restart_time ?? 0), 0);
 }
