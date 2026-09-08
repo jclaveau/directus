@@ -1,3 +1,9 @@
+/** One online worker, averaged over the window the legacy rule reads. */
+export interface LegacyWorkerSample {
+	cpuPercent: number;
+	memoryMegabytes: number;
+}
+
 /** What the pool looked like when the sample was taken. */
 export interface PoolSample {
 	/** CPU percent per worker of the managed app that has reported ready. */
@@ -26,6 +32,16 @@ export interface PoolSample {
 	now: number;
 	lastScaleUpAt: number;
 	lastScaleDownAt: number;
+	/**
+	 * Every online worker, unfiltered by warm-up and averaged over the last
+	 * thirty samples, which is what the `legacy` strategy reads instead of
+	 * `cpuPercents`. Collected on every tick whichever strategy is running, so
+	 * a switch to `legacy` mid-incident decides on a full window rather than
+	 * on its first reading.
+	 */
+	legacyWorkers: LegacyWorkerSample[];
+	/** Free memory of the host, which is the `legacy` strategy's brake on adding. */
+	freeMemoryMegabytes: number;
 }
 
 /**
@@ -40,8 +56,19 @@ export interface PoolSample {
  */
 export type AutoscaleSignal = 'average' | 'max';
 
+/**
+ * Which rule decides the pool size.
+ *
+ * `legacy` reproduces the `pm2-autoscale` module this replaces, so a defect in
+ * the rule below can be reverted fleet-wide with one Redis write instead of a
+ * redeploy. It reads the maximum CPU to grow and the average to shrink, over a
+ * thirty-sample window, and knows nothing of warm-ups, restarts or prewarming.
+ */
+export type AutoscaleStrategy = 'scalabus' | 'legacy';
+
 export interface AutoscaleConfig {
 	enabled: boolean;
+	strategy: AutoscaleStrategy;
 	/** The pm2 app this scales. Anything else the daemon runs is left alone. */
 	appName: string;
 	signal: AutoscaleSignal;

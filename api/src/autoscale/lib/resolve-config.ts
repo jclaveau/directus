@@ -7,6 +7,7 @@ import {
 	numberOr,
 	sanitizeConfig,
 	signalOr,
+	strategyOr,
 } from './sanitize-config.js';
 
 /**
@@ -24,6 +25,7 @@ function envConfig(): AutoscaleConfig {
 
 	return {
 		enabled: env['PM2_AUTOSCALE_ENABLED'] !== false,
+		strategy: strategyOr(env['PM2_AUTOSCALE_STRATEGY'], 'scalabus'),
 		appName: String(env['PM2_AUTOSCALE_APP_NAME'] ?? 'api'),
 		signal: signalOr(env['PM2_AUTOSCALE_SIGNAL'], 'average'),
 		scaleCpuThreshold: numberOr(
@@ -91,6 +93,9 @@ function withOverride(
 		}
 		else if (field === 'signal') {
 			Object.assign(merged, { [field]: signalOr(value, base.signal) });
+		}
+		else if (field === 'strategy') {
+			Object.assign(merged, { [field]: strategyOr(value, base.strategy) });
 		}
 		else if (typeof current === 'string' && typeof value === 'string') {
 			Object.assign(merged, { [field]: value });

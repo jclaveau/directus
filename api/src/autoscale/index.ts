@@ -1,6 +1,8 @@
+import { freemem } from 'node:os';
 import { useLogger } from '../logger/index.js';
 import { initProcessReports } from '../processes/index.js';
 import { decide } from './lib/decide.js';
+import { LegacySamples } from './lib/legacy-samples.js';
 import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
@@ -84,6 +86,11 @@ export async function runAutoscaler(): Promise<void> {
 	let restartsByWorker: Map<number, number> | null = null;
 	let lastRestartAt: number | null = null;
 
+	// Fed on every tick whichever strategy is running, so switching to
+	// `legacy` during an incident decides on a full window rather than on the
+	// single reading it happens to switch on.
+	const legacySamples = new LegacySamples();
+
 	for (;;) {
 		// A tick that throws is a tick that was skipped, never the end of the
 		// autoscaler: it would leave the pool frozen at whatever size the
@@ -111,6 +118,21 @@ export async function runAutoscaler(): Promise<void> {
 			}
 
 			restartsByWorker = reading.restartsByWorker;
+			const observed = legacySamples.observe(reading.onlineWorkers);
+
+			// The module paces itself off the pool's membership rather than off
+			// the scales it asked for, so a worker the supervisor replaced
+			// re-arms the cooldowns exactly as one it added would.
+			if (config.strategy === 'legacy') {
+				if (observed.appeared) {
+					lastScaleUpAt = Date.now();
+				}
+
+				if (observed.vanished) {
+					lastScaleDownAt = Date.now();
+				}
+			}
+
 			const now = Date.now();
 
 			const secondsSinceRestart = lastRestartAt === null
@@ -125,6 +147,7 @@ export async function runAutoscaler(): Promise<void> {
 			// before the autoscaler arrived, and prewarm would hand it a batch
 			// of workers to crash.
 			const readyToPrewarm = config.enabled
+				&& config.strategy !== 'legacy'
 				&& workers > 0
 				&& churning === false
 				&& carriesRestarts === false
@@ -146,12 +169,22 @@ export async function runAutoscaler(): Promise<void> {
 					now,
 					lastScaleUpAt,
 					lastScaleDownAt,
+					legacyWorkers: observed.workers,
+					freeMemoryMegabytes: Math.round(freemem() / 1_048_576),
 				}, config);
 
 				if (decision.workers !== null) {
+					// The readings the rule that decided actually looked at: the
+					// two strategies filter the pool differently, and a line
+					// printing the other one's list reads as a decision taken on
+					// no numbers at all.
+					const read = config.strategy === 'legacy'
+						? observed.workers.map((worker) => worker.cpuPercent)
+						: cpuPercents;
+
 					logger.info(
 						`[autoscale] ${config.appName} ${workers} -> ${decision.workers} `
-						+ `workers: ${decision.reason}. cpu: ${cpuPercents.join(',')}. `
+						+ `workers: ${decision.reason}. cpu: ${read.join(',')}. `
 						+ `restarts: ${[...reading.restartsByWorker.values()].join(',')}`,
 					);
 

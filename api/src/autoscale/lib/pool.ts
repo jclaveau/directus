@@ -21,6 +21,12 @@ export interface PoolReading {
 	/** Workers serving, but still inside their warm-up. */
 	warmingWorkers: number;
 	/**
+	 * Every serving worker, whatever its age, with the numbers the `legacy`
+	 * strategy reads: its own CPU percent and RSS, keyed by the pid rather
+	 * than the pm id because that is what changes when a worker is replaced.
+	 */
+	onlineWorkers: OnlineWorker[];
+	/**
 	 * Restarts the supervisor has counted, per worker.
 	 *
 	 * Per worker rather than summed: releasing a worker takes its restarts out
@@ -28,6 +34,12 @@ export interface PoolReading {
 	 * and the restart goes unseen.
 	 */
 	restartsByWorker: Map<number, number>;
+}
+
+export interface OnlineWorker {
+	pid: number;
+	cpuPercent: number;
+	memoryBytes: number;
 }
 
 /**
@@ -71,6 +83,7 @@ export async function readPool(
 	const workers = (await list()).filter((app) => app.name === appName);
 	const matureSince = Date.now() - warmupSeconds * 1000;
 	const cpuPercents: number[] = [];
+	const onlineWorkers: OnlineWorker[] = [];
 	const restartsByWorker = new Map<number, number>();
 	let pendingWorkers = 0;
 	let warmingWorkers = 0;
@@ -86,6 +99,12 @@ export async function readPool(
 			pendingWorkers += 1;
 		}
 		else if (env?.status === 'online') {
+			onlineWorkers.push({
+				pid: worker.pid ?? 0,
+				cpuPercent: worker.monit?.cpu ?? 0,
+				memoryBytes: worker.monit?.memory ?? 0,
+			});
+
 			if ((env.pm_uptime ?? 0) > matureSince) {
 				warmingWorkers += 1;
 			}
@@ -95,7 +114,13 @@ export async function readPool(
 		}
 	}
 
-	return { cpuPercents, pendingWorkers, warmingWorkers, restartsByWorker };
+	return {
+		cpuPercents,
+		pendingWorkers,
+		warmingWorkers,
+		onlineWorkers,
+		restartsByWorker,
+	};
 }
 
 /**

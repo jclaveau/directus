@@ -5,13 +5,22 @@ function statistic(cpuPercents: number[], config: AutoscaleConfig): number {
 		return Math.max(...cpuPercents);
 	}
 
-	const total = cpuPercents.reduce((sum, percent) => sum + percent, 0);
-
-	return Math.round(total / cpuPercents.length);
+	return average(cpuPercents);
 }
 
 function secondsSince(instant: number, now: number): number {
 	return (now - instant) / 1000;
+}
+
+/** Seconds since `instant`, rounded the way the `legacy` strategy rounds them. */
+function wholeSecondsSince(instant: number, now: number): number {
+	return Math.round((now - instant) / 1000);
+}
+
+function average(values: number[]): number {
+	return Math.round(
+		values.reduce((sum, value) => sum + value, 0) / values.length,
+	);
 }
 
 /**
@@ -19,20 +28,110 @@ function secondsSince(instant: number, now: number): number {
  *
  * Pure, so the rule can be exercised without a supervisor: everything it
  * reads arrives in the sample, including the clock.
- *
- * Scaling up and scaling down are asked independently. Upstream
- * pm2-autoscale nests the release test in the `else` of the scale-up test,
- * so a pool whose signal sits above the threshold cannot shrink even once
- * it has run out of ceiling — it can only stop growing.
  */
 export function decide(sample: PoolSample, config: AutoscaleConfig): Decision {
-	const workers = sample.cpuPercents.length
-		+ sample.pendingWorkers
-		+ sample.warmingWorkers;
-
 	if (config.enabled === false) {
 		return { workers: null, reason: 'autoscaling is disabled' };
 	}
+
+	return config.strategy === 'legacy'
+		? decideLegacy(sample, config)
+		: decideScalabus(sample, config);
+}
+
+/**
+ * The rule of the `pm2-autoscale` module this replaces, so reverting to it
+ * costs one Redis write rather than a redeploy.
+ *
+ * Reproduced from its 1.4.0 sources down to the comparisons that look like
+ * slips — a rounded second, a strict `>` on both cooldowns, `>=` to grow and
+ * `<` to shrink — because the point of having it is that it decides what
+ * production already decided, and anything tidied is a difference nobody
+ * asked for at the moment they most need there to be none.
+ *
+ * The release test sits in the `else` of the growth test, so a pool whose
+ * hottest worker clears the threshold cannot shrink even once it has run out
+ * of ceiling. Its counterpart above is asked independently.
+ *
+ * Two knowing departures, both from the loop rather than the rule: the
+ * cooldown clocks start when the autoscaler does rather than at zero, so the
+ * first release waits one full cooldown instead of firing on the first tick;
+ * and the configuration comes from this autoscaler's own chain, which has no
+ * `max_workers: 'max'` and clamps what it is given.
+ */
+function decideLegacy(sample: PoolSample, config: AutoscaleConfig): Decision {
+	const workers = sample.legacyWorkers.length;
+
+	if (workers === 0) {
+		return { workers: null, reason: 'no workers of that app' };
+	}
+
+	const cpuPercents = sample.legacyWorkers.map((worker) => worker.cpuPercent);
+	const maxCpu = Math.max(...cpuPercents);
+	const averageCpu = average(cpuPercents);
+
+	if (maxCpu >= config.scaleCpuThreshold && workers < config.maxWorkers) {
+		const perWorker = average(
+			sample.legacyWorkers.map((worker) => worker.memoryMegabytes),
+		);
+
+		if (sample.freeMemoryMegabytes - perWorker <= 0) {
+			return {
+				workers: null,
+				reason: `${sample.freeMemoryMegabytes}MB free will not hold `
+					+ `another ${perWorker}MB worker`,
+			};
+		}
+
+		const waited = wholeSecondsSince(sample.lastScaleUpAt, sample.now);
+
+		if (waited <= config.minSecondsToScaleUp) {
+			return {
+				workers: null,
+				reason: `max cpu ${maxCpu}% needs a worker, `
+					+ `${config.minSecondsToScaleUp - waited}s of settling left`,
+			};
+		}
+
+		// `+1` against everything the supervisor holds, which is what the
+		// module asks for. Counting only the online workers would answer a
+		// pool with one still launching by scaling to the size it already has.
+		return {
+			workers: workers + sample.pendingWorkers + 1,
+			reason: `max cpu ${maxCpu}% >= ${config.scaleCpuThreshold}%`,
+		};
+	}
+
+	if (averageCpu < config.releaseCpuThreshold && workers > config.minWorkers) {
+		const waited = wholeSecondsSince(sample.lastScaleDownAt, sample.now);
+
+		if (waited <= config.minSecondsToScaleDown) {
+			return {
+				workers: null,
+				reason: `average cpu ${averageCpu}% releases a worker, `
+					+ `${config.minSecondsToScaleDown - waited}s of cooldown left`,
+			};
+		}
+
+		return {
+			workers: workers - 1,
+			reason: `average cpu ${averageCpu}% < ${config.releaseCpuThreshold}%`,
+		};
+	}
+
+	return {
+		workers: null,
+		reason: `max cpu ${maxCpu}%, average ${averageCpu}%, is within the band`,
+	};
+}
+
+function decideScalabus(
+	sample: PoolSample,
+	config: AutoscaleConfig,
+): Decision {
+	const workers = sample.cpuPercents.length
+		+ sample.pendingWorkers
+		+ sample.warmingWorkers;
 
 	// A pool with nothing in it is not a pool below its floor: the app is
 	// gone, or has not started yet, and pm2 answers a scale on a name it does

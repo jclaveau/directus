@@ -1,4 +1,8 @@
-import type { AutoscaleConfig, AutoscaleSignal } from '../types.js';
+import type {
+	AutoscaleConfig,
+	AutoscaleSignal,
+	AutoscaleStrategy,
+} from '../types.js';
 
 /**
  * The most workers this will scale to whatever it is asked for.
@@ -24,6 +28,8 @@ export const AUTOSCALE_DEFAULTS = {
 
 const SIGNALS: AutoscaleSignal[] = ['average', 'max'];
 
+const STRATEGIES: AutoscaleStrategy[] = ['scalabus', 'legacy'];
+
 /** A finite, non-negative number, or the fallback for anything else. */
 export function numberOr(value: unknown, fallback: number): number {
 	const parsed = Number(value);
@@ -39,6 +45,15 @@ export function signalOr(
 ): AutoscaleSignal {
 	return SIGNALS.includes(value as AutoscaleSignal)
 		? value as AutoscaleSignal
+		: fallback;
+}
+
+export function strategyOr(
+	value: unknown,
+	fallback: AutoscaleStrategy,
+): AutoscaleStrategy {
+	return STRATEGIES.includes(value as AutoscaleStrategy)
+		? value as AutoscaleStrategy
 		: fallback;
 }
 
@@ -119,6 +134,16 @@ export function sanitizeConfig(config: AutoscaleConfig): {
 
 	if (sane.signal !== config.signal) {
 		corrections.push(`signal ${String(config.signal)} -> ${sane.signal}`);
+	}
+
+	// A misspelled strategy falls back to this autoscaler's own rule rather
+	// than to the module's: the operator reaching for `legacy` is reverting an
+	// incident, and a typo silently leaving them on a rule they believe they
+	// have left is worse than one that says so and holds.
+	sane.strategy = strategyOr(config.strategy, 'scalabus');
+
+	if (sane.strategy !== config.strategy) {
+		corrections.push(`strategy ${String(config.strategy)} -> ${sane.strategy}`);
 	}
 
 	return { config: sane, corrections };

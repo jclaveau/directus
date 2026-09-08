@@ -8,6 +8,7 @@ import {
 
 const base: AutoscaleConfig = {
 	enabled: true,
+	strategy: 'scalabus',
 	appName: 'api',
 	signal: 'average',
 	scaleCpuThreshold: 60,
@@ -145,5 +146,28 @@ describe('values that are not numbers at all', () => {
 
 		expect(config.signal).toBe('average');
 		expect(corrections).toEqual(['signal nonsense -> average']);
+	});
+
+	// An operator reaching for the module's rule is reverting an incident, so
+	// a typo has to say so rather than leave them on the rule they believe
+	// they have just left.
+	test('an unknown strategy falls back to this autoscaler own rule', () => {
+		const { config, corrections } = sanitizeConfig({
+			...base,
+			strategy: 'lgeacy' as never,
+		});
+
+		expect(config.strategy).toBe('scalabus');
+		expect(corrections).toEqual(['strategy lgeacy -> scalabus']);
+	});
+
+	test('the module rule is selectable by name', () => {
+		const { config, corrections } = sanitizeConfig({
+			...base,
+			strategy: 'legacy',
+		});
+
+		expect(config.strategy).toBe('legacy');
+		expect(corrections).toEqual([]);
 	});
 });

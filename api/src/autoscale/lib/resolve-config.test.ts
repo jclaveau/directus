@@ -53,6 +53,21 @@ test('reads the override laid over the env chain', async () => {
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
 });
 
+// The rollback path: reverting to the rule production already ran is a write
+// to one key, which is the whole reason the strategy is a configuration field
+// rather than a build.
+test('switches strategy from the override', async () => {
+	const resolveConfig = await freshResolver();
+
+	await expect(resolveConfig()).resolves.toMatchObject({
+		strategy: 'scalabus',
+	});
+
+	get.mockResolvedValue(JSON.stringify({ strategy: 'legacy' }));
+
+	await expect(resolveConfig()).resolves.toMatchObject({ strategy: 'legacy' });
+});
+
 // Reverting to the env chain sounds like the safe answer and is not. An
 // operator who has just raised the ceiling to survive a spike would have it
 // dropped back by a blip, and the ceiling is corrected with no cooldown — the

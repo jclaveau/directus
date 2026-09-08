@@ -53,6 +53,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// 2026-09-08.
 	'/tests/db/app/autoscale-ramp.test.ts': 175_000,
 	'/tests/db/app/autoscale-config-source.test.ts': 70_000,
+	// One ramp, one hold, and a churning pool watched either side of the
+	// switch. Estimated from the arms it borrows; to be measured.
+	'/tests/db/app/autoscale-legacy.test.ts': 120_000,
 	// Spawns two processes and asks one question of them.
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
