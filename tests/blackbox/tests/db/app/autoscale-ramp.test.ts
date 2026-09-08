@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import {
 	heldAt,
+	neverExceeded,
 	poolSize,
 	startAutoscaler,
 	startPool,
@@ -128,7 +129,74 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 			PM2_AUTOSCALE_WARMUP_SECONDS: '30',
 		});
 
-		expect(await heldAt(rig, 1, 25_000)).toBe(true);
+		expect(await neverExceeded(rig, 1, 25_000)).toBe(1);
+	}, 90_000);
+
+	// A floor above the ceiling used to make the pool grow and shrink on
+	// alternate ticks, forever: neither bound waits for a cooldown, so each
+	// correction immediately provoked the other. The ceiling is what the box
+	// holds, so it is the one that wins.
+	it('settles at the ceiling when the floor is set above it', async () => {
+		const rig = startPool({ appName: 'autoscale-inverted', instances: 1 });
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			PM2_AUTOSCALE_MIN_WORKERS: '3',
+			PM2_AUTOSCALE_MAX_WORKERS: '2',
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
+		});
+
+		expect(await poolSize(rig, 2, 60_000)).toBe(2);
+
+		// And stays there. A flapping pool passes the line above on its way
+		// through two and fails this one.
+		expect(await heldAt(rig, 2, 15_000)).toBe(true);
+	}, 120_000);
+
+	// An env var the type map cannot cast arrives as NaN, and NaN satisfies
+	// neither threshold comparison: the pool would stop scaling in both
+	// directions and log nothing about why.
+	it('falls back to a default when an env value is not a number', async () => {
+		const rig = startPool({ appName: 'autoscale-nan', instances: 3 });
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: 'forty',
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '3',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '2',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
+		});
+
+		// The default release threshold is 40 and the pool is idle, so it
+		// drains. Left as NaN it would sit at three forever.
+		expect(await poolSize(rig, 1, 60_000)).toBe(1);
+	}, 120_000);
+
+	// Prewarm runs before the decision does, so it used to hand a batch of
+	// workers to an app that was already crash-looping.
+	it('does not prewarm a pool that is restarting', async () => {
+		const rig = startPool({
+			appName: 'autoscale-prewarm-crash',
+			instances: 1,
+			crashAfterMs: 3_000,
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			PM2_AUTOSCALE_PREWARM: '3',
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '3',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '30',
+		});
+
+		expect(await neverExceeded(rig, 1, 25_000)).toBe(1);
 	}, 90_000);
 
 	// The first version of this scaled an app it could not see back up to the

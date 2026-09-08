@@ -169,6 +169,30 @@ export async function poolSize(
 	return size;
 }
 
+/**
+ * Whether the pool stayed at or under `size` for the window.
+ *
+ * What an arm asserting "this must not grow" actually claims. Exact equality
+ * would additionally claim the count never dips, and a worker being restarted
+ * is briefly a worker the supervisor is between states on.
+ */
+export async function neverExceeded(
+	rig: Rig,
+	size: number,
+	windowMs: number,
+): Promise<number> {
+	const deadline = Date.now() + windowMs;
+	let peak = countWorkers(rig);
+
+	while (Date.now() < deadline) {
+		peak = Math.max(peak, countWorkers(rig));
+
+		await sleep(250);
+	}
+
+	return peak;
+}
+
 /** Whether the pool ever left `size` over the window — what "held" means. */
 export async function heldAt(
 	rig: Rig,

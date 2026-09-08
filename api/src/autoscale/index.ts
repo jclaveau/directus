@@ -4,6 +4,7 @@ import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
 	readPool,
+	restarted,
 	scaleTo,
 } from './lib/pool.js';
 import { resolveConfig } from './lib/resolve-config.js';
@@ -63,7 +64,7 @@ export async function runAutoscaler(): Promise<void> {
 	let lastScaleUpAt = Date.now();
 	let lastScaleDownAt = Date.now();
 	let prewarmed = false;
-	let restarts: number | null = null;
+	let restartsByWorker: Map<number, number> | null = null;
 	let lastRestartAt: number | null = null;
 
 	for (;;) {
@@ -79,28 +80,52 @@ export async function runAutoscaler(): Promise<void> {
 
 			// The first sample sets the baseline: whatever the supervisor has
 			// counted before the autoscaler started is not a restart it saw.
-			if (restarts !== null && reading.restarts > restarts) {
+			if (
+				restartsByWorker !== null
+				&& restarted(restartsByWorker, reading.restartsByWorker)
+			) {
 				lastRestartAt = Date.now();
 			}
 
-			restarts = reading.restarts;
+			restartsByWorker = reading.restartsByWorker;
+			const now = Date.now();
 
-			if (config.enabled && workers > 0 && prewarmed === false) {
+			const secondsSinceRestart = lastRestartAt === null
+				? null
+				: (now - lastRestartAt) / 1000;
+
+			const churning = secondsSinceRestart !== null
+				&& secondsSinceRestart < config.warmupSeconds;
+
+			// A worker already carrying a restart says the pool was churning
+			// before the autoscaler could watch it churn. The first sample is
+			// only a baseline, so an observed restart cannot exist yet, and
+			// prewarm runs on that very tick — an app crash-looping when the
+			// autoscaler starts would be handed a batch of workers to crash.
+			// A pool fresh out of a deploy, which is the one prewarm is for,
+			// carries no restarts at all.
+			const carriesRestarts = [...reading.restartsByWorker.values()]
+				.some((count) => count > 0);
+
+			const readyToPrewarm = config.enabled
+				&& workers > 0
+				&& churning === false
+				&& carriesRestarts === false
+				&& prewarmed === false;
+
+			if (readyToPrewarm) {
 				prewarmed = true;
 				await prewarm(config, workers);
 				lastScaleUpAt = Date.now();
 				lastScaleDownAt = Date.now();
 			}
 			else if (config.enabled) {
-				const now = Date.now();
 
 				const decision = decide({
 					cpuPercents,
 					pendingWorkers,
 					warmingWorkers,
-					secondsSinceRestart: lastRestartAt === null
-						? null
-						: (now - lastRestartAt) / 1000,
+					secondsSinceRestart,
 					now,
 					lastScaleUpAt,
 					lastScaleDownAt,
@@ -110,7 +135,7 @@ export async function runAutoscaler(): Promise<void> {
 					logger.info(
 						`[autoscale] ${config.appName} ${workers} -> ${decision.workers} `
 						+ `workers: ${decision.reason}. cpu: ${cpuPercents.join(',')}. `
-						+ `restarts: ${reading.restarts}`,
+						+ `restarts: ${[...reading.restartsByWorker.values()].join(',')}`,
 					);
 
 					await scaleTo(config.appName, decision.workers);

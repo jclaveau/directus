@@ -20,8 +20,14 @@ export interface PoolReading {
 	pendingWorkers: number;
 	/** Workers serving, but still inside their warm-up. */
 	warmingWorkers: number;
-	/** Restarts the supervisor has counted across the app's workers. */
-	restarts: number;
+	/**
+	 * Restarts the supervisor has counted, per worker.
+	 *
+	 * Per worker rather than summed: releasing a worker takes its restarts out
+	 * of a total, so a release landing on the same tick as a restart nets flat
+	 * and the restart goes unseen.
+	 */
+	restartsByWorker: Map<number, number>;
 }
 
 /**
@@ -33,6 +39,22 @@ interface SupervisedWorkerEnv {
 	status?: string;
 	restart_time?: number;
 	pm_uptime?: number;
+}
+
+/** Workers whose restart count is higher than it was in `before`. */
+export function restarted(
+	before: Map<number, number>,
+	after: Map<number, number>,
+): boolean {
+	for (const [pmId, restarts] of after) {
+		const previous = before.get(pmId);
+
+		if (previous !== undefined && restarts > previous) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /**
@@ -49,13 +71,16 @@ export async function readPool(
 	const workers = (await list()).filter((app) => app.name === appName);
 	const matureSince = Date.now() - warmupSeconds * 1000;
 	const cpuPercents: number[] = [];
+	const restartsByWorker = new Map<number, number>();
 	let pendingWorkers = 0;
 	let warmingWorkers = 0;
-	let restarts = 0;
 
 	for (const worker of workers) {
 		const env = worker.pm2_env as SupervisedWorkerEnv | undefined;
-		restarts += env?.restart_time ?? 0;
+
+		if (worker.pm_id !== undefined) {
+			restartsByWorker.set(worker.pm_id, env?.restart_time ?? 0);
+		}
 
 		if (env?.status === 'launching') {
 			pendingWorkers += 1;
@@ -70,7 +95,7 @@ export async function readPool(
 		}
 	}
 
-	return { cpuPercents, pendingWorkers, warmingWorkers, restarts };
+	return { cpuPercents, pendingWorkers, warmingWorkers, restartsByWorker };
 }
 
 /**
@@ -88,15 +113,18 @@ interface ScalableSupervisor {
 /**
  * Resizes the app to an absolute worker count.
  *
- * pm2 answers a scale to the size it already has with an error; the pool is
- * where it was asked to be, so it is reported as nothing to do.
+ * pm2 answers a scale to the size it already has by calling back with an
+ * error, and the only thing distinguishing it from a real failure is the
+ * wording. Matched loosely: the pool is already where it was asked to be, so
+ * treating it as a failure would log one a second while nothing is wrong,
+ * and a reworded message should cost a stray log line rather than silence.
  */
 export async function scaleTo(appName: string, workers: number): Promise<void> {
 	const supervisor = pm2 as unknown as ScalableSupervisor;
 
 	await new Promise<void>((resolve, reject) => {
 		supervisor.scale(appName, workers, (error) => {
-			if (error && error.message !== 'Same process number') {
+			if (error && /same process number/i.test(error.message) === false) {
 				reject(error);
 			}
 			else {

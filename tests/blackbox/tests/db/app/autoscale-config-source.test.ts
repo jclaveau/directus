@@ -2,6 +2,7 @@ import Redis from 'ioredis';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
 	heldAt,
+	neverExceeded,
 	poolSize,
 	startAutoscaler,
 	startPool,
@@ -138,5 +139,22 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			// that keeps growing would mean the override was still applied.
 			expect(await heldAt(rig, 2, 15_000)).toBe(true);
 		}, 90_000);
+
+		// The override is a hand-edited JSON document written during an
+		// incident, so it is exactly where a zero too many arrives. Obeyed
+		// literally it would ask pm2 for more workers than the box holds —
+		// the failure this autoscaler exists to stop, arriving through its
+		// own configuration.
+		it('clamps an override asking past the ceiling to the ceiling', async () => {
+			await redis.set(
+				configKey(namespace),
+				JSON.stringify({ minWorkers: 10_000 }),
+			);
+
+			// Three, because the env ceiling is three: the floor was applied,
+			// so the override was read, and it was read as three.
+			expect(await poolSize(rig, 3, 60_000)).toBe(3);
+			expect(await neverExceeded(rig, 3, 10_000)).toBe(3);
+		}, 120_000);
 	});
 });
