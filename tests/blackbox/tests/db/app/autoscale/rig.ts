@@ -110,6 +110,25 @@ export function startAutoscaler(rig: Rig, env: Record<string, string>): void {
 	rig.autoscaler = autoscaler;
 }
 
+/**
+ * Takes the supervisor away from under the autoscaler and brings it back.
+ *
+ * What a `pm2 update`, an OOM or the planner's nightly restart does to the
+ * daemon a running autoscaler is already connected to. The pool comes back at
+ * the size the ecosystem declares, not the size it had.
+ */
+export function restartSupervisor(rig: Rig): void {
+	execFileSync(pm2Bin, ['kill'], {
+		env: { ...process.env, PM2_HOME: rig.pm2Home },
+		stdio: 'pipe',
+	});
+
+	execFileSync(pm2Bin, ['start', join(rig.pm2Home, 'ecosystem.config.cjs')], {
+		env: { ...process.env, PM2_HOME: rig.pm2Home },
+		stdio: 'pipe',
+	});
+}
+
 export function stopRig(rig: Rig): void {
 	rig.autoscaler?.kill('SIGTERM');
 
