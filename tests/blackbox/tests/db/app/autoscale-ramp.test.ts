@@ -6,6 +6,7 @@ import {
 	startAutoscaler,
 	startPool,
 	stopRig,
+	waitForRestart,
 	type Rig,
 } from './autoscale/rig';
 
@@ -110,27 +111,39 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 	// worker to thirty-two on 2026-09-08, every restart's boot CPU buying
 	// another worker that died the same way.
 	it('does not grow while its workers keep restarting', async () => {
+		// Only instance 0 crashes, so instance 1 stays up long enough to be
+		// past its warm-up and report a real CPU. Without a mature worker the
+		// pool reports nothing, and an arm asserting it did not grow would
+		// pass on the warm-up freeze without ever reaching the restart one.
 		const rig = startPool({
 			appName: 'autoscale-crash-loop',
-			instances: 1,
+			instances: 2,
 			busyMs: 20,
 			idleMs: 80,
 			crashAfterMs: 3_000,
+			crashOnlyInstance: '0',
 		});
 
 		rigs.push(rig);
+
+		// Started beside a pool that has not crashed yet, the autoscaler sees
+		// a calm pool — correctly — and adds a worker before the first crash.
+		expect(await waitForRestart(rig, 30_000)).toBe(true);
 
 		startAutoscaler(rig, {
 			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '5',
 			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
-			PM2_AUTOSCALE_MAX_WORKERS: '3',
+			PM2_AUTOSCALE_MAX_WORKERS: '4',
 			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
-			PM2_AUTOSCALE_WARMUP_SECONDS: '30',
+			// Longer than the crash interval, so each restart re-arms the
+			// freeze before the last one lapses, and short enough that the
+			// healthy worker is mature and asking to be scaled the whole time.
+			PM2_AUTOSCALE_WARMUP_SECONDS: '5',
 		});
 
-		expect(await neverExceeded(rig, 1, 25_000)).toBe(1);
-	}, 90_000);
+		expect(await neverExceeded(rig, 2, 25_000)).toBe(2);
+	}, 120_000);
 
 	// A floor above the ceiling used to make the pool grow and shrink on
 	// alternate ticks, forever: neither bound waits for a cooldown, so each
@@ -187,6 +200,8 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 
 		rigs.push(rig);
 
+		expect(await waitForRestart(rig, 30_000)).toBe(true);
+
 		startAutoscaler(rig, {
 			PM2_AUTOSCALE_PREWARM: '3',
 			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
@@ -197,7 +212,7 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 		});
 
 		expect(await neverExceeded(rig, 1, 25_000)).toBe(1);
-	}, 90_000);
+	}, 120_000);
 
 	// The first version of this scaled an app it could not see back up to the
 	// floor, pm2 answered `App not found`, and the rejection ended the process.

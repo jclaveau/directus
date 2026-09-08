@@ -33,8 +33,10 @@ export interface PoolOptions {
 	 */
 	busyMs?: number;
 	idleMs?: number;
-	/** Milliseconds each worker serves before aborting, so pm2 restarts it. */
+	/** Milliseconds a worker serves before aborting, so pm2 restarts it. */
 	crashAfterMs?: number;
+	/** Which worker crashes, by pm2 instance number. Unset means all of them. */
+	crashOnlyInstance?: string;
 }
 
 /**
@@ -69,6 +71,9 @@ export function startPool(options: PoolOptions): Rig {
 						BB_BUSY_MS: String(options.busyMs ?? 0),
 						BB_IDLE_MS: String(options.idleMs ?? 100),
 						BB_CRASH_AFTER_MS: String(options.crashAfterMs ?? 0),
+						...options.crashOnlyInstance === undefined
+							? {}
+							: { BB_CRASH_ONLY_INSTANCE: options.crashOnlyInstance },
 					},
 				},
 			],
@@ -119,14 +124,40 @@ export function stopRig(rig: Rig): void {
 
 interface ListedProcess {
 	name: string;
-	pm2_env?: { status?: string };
+	pm2_env?: { status?: string; restart_time?: number };
+}
+
+/**
+ * Waits until the supervisor has recorded a restart of this app.
+ *
+ * An arm about a churning pool has to start the autoscaler against one that is
+ * already churning. Started beside a pool that has not crashed yet, it sees a
+ * calm pool — correctly — and acts on it before the first crash lands.
+ */
+export async function waitForRestart(rig: Rig, timeoutMs: number): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+
+	while (Date.now() < deadline) {
+		if (restartCount(rig) > 0) {
+			return true;
+		}
+
+		await sleep(250);
+	}
+
+	return false;
+}
+
+function restartCount(rig: Rig): number {
+	return listWorkers(rig)
+		.reduce((total, worker) => total + (worker.pm2_env?.restart_time ?? 0), 0);
 }
 
 /**
  * Workers of the managed app the daemon currently holds, whether serving yet
  * or not.
  */
-export function countWorkers(rig: Rig): number {
+function listWorkers(rig: Rig): ListedProcess[] {
 	// pm2 jlist prints a large JSON document; the default 1 MB buffer cuts it
 	// off mid-object.
 	const listed = JSON.parse(execFileSync(pm2Bin, ['jlist'], {
@@ -135,8 +166,11 @@ export function countWorkers(rig: Rig): number {
 		maxBuffer: 32 * 1024 * 1024,
 	})) as ListedProcess[];
 
-	return listed
-		.filter((worker) => worker.name === rig.appName)
+	return listed.filter((worker) => worker.name === rig.appName);
+}
+
+export function countWorkers(rig: Rig): number {
+	return listWorkers(rig)
 		.filter((worker) => worker.pm2_env?.status !== 'stopped')
 		.length;
 }

@@ -78,12 +78,18 @@ export async function runAutoscaler(): Promise<void> {
 			const { cpuPercents, pendingWorkers, warmingWorkers } = reading;
 			const workers = cpuPercents.length + pendingWorkers + warmingWorkers;
 
-			// The first sample sets the baseline: whatever the supervisor has
-			// counted before the autoscaler started is not a restart it saw.
-			if (
-				restartsByWorker !== null
-				&& restarted(restartsByWorker, reading.restartsByWorker)
-			) {
+			const carriesRestarts = [...reading.restartsByWorker.values()]
+				.some((count) => count > 0);
+
+			// The first sample is a baseline, so no rise can be read from it —
+			// and an autoscaler that starts against a pool already carrying
+			// restarts would otherwise spend a whole crash cycle believing the
+			// pool is calm. Meeting one counts as meeting it mid-churn.
+			const churnObserved = restartsByWorker === null
+				? carriesRestarts
+				: restarted(restartsByWorker, reading.restartsByWorker);
+
+			if (churnObserved) {
 				lastRestartAt = Date.now();
 			}
 
@@ -97,16 +103,10 @@ export async function runAutoscaler(): Promise<void> {
 			const churning = secondsSinceRestart !== null
 				&& secondsSinceRestart < config.warmupSeconds;
 
-			// A worker already carrying a restart says the pool was churning
-			// before the autoscaler could watch it churn. The first sample is
-			// only a baseline, so an observed restart cannot exist yet, and
-			// prewarm runs on that very tick — an app crash-looping when the
-			// autoscaler starts would be handed a batch of workers to crash.
-			// A pool fresh out of a deploy, which is the one prewarm is for,
-			// carries no restarts at all.
-			const carriesRestarts = [...reading.restartsByWorker.values()]
-				.some((count) => count > 0);
-
+			// A pool fresh out of a deploy, which is the one prewarm exists for,
+			// carries no restarts at all. One that does was crash-looping
+			// before the autoscaler arrived, and prewarm would hand it a batch
+			// of workers to crash.
 			const readyToPrewarm = config.enabled
 				&& workers > 0
 				&& churning === false

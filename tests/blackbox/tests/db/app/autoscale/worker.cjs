@@ -17,7 +17,16 @@ const crashAfterMs = Number(process.env['BB_CRASH_AFTER_MS'] ?? 0);
 // supervisor records is a worker killed by a signal and restarted, and that is
 // the whole of what the autoscaler reads — so this reproduces the observable
 // without spending a runner's memory to get there.
-if (crashAfterMs > 0) {
+// Which worker crashes, by pm2's own instance number. Unset means all of them.
+// A pool where every worker is dying has no worker mature enough to report a
+// CPU, so nothing there can tell the restart freeze from the warm-up freeze.
+const crashInstance = process.env['BB_CRASH_ONLY_INSTANCE'];
+
+const crashes = crashAfterMs > 0
+	&& (crashInstance === undefined
+		|| crashInstance === process.env['NODE_APP_INSTANCE']);
+
+if (crashes) {
 	setTimeout(() => process.abort(), crashAfterMs);
 }
 
