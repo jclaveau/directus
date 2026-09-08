@@ -48,6 +48,10 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Two spawned instances, and one case holds a pool saturated for six seconds.
 	'/tests/db/app/pgbouncer.test.ts': 40_000,
 	'/tests/db/app/system-mcp.test.ts': 50_000,
+	// A pm2 daemon per arm, and each assertion is a pool settling or a window
+	// spent proving it did not move.
+	'/tests/db/app/autoscale-ramp.test.ts': 75_000,
+	'/tests/db/app/autoscale-config-source.test.ts': 90_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,

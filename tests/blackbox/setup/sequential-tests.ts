@@ -68,6 +68,10 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/app/processes.test.ts',
 			'/tests/db/app/pgbouncer.test.ts',
 			'/tests/db/app/system-mcp.test.ts',
+			// A pm2 daemon each, and their decisions read a CPU duty cycle the
+			// parallel middle would distort into any number the assertion asks for.
+			'/tests/db/app/autoscale-ramp.test.ts',
+			'/tests/db/app/autoscale-config-source.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 		],
 		// If specified, only run these tests sequentially

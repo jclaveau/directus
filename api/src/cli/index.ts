@@ -36,6 +36,17 @@ export async function createCli(): Promise<Command> {
 
 	program.command('init').description('Create a new Directus Project').action(init);
 
+	// Imported on use: the autoscaler pulls in pm2, which every process loading the
+	// CLI would otherwise carry resident for a command only one of them runs.
+	program
+		.command('autoscale')
+		.description('Resize the API worker pool to match its load')
+		.action(async () => {
+			const { runAutoscaler } = await import('../autoscale/index.js');
+
+			await runAutoscaler();
+		});
+
 	// Security
 	const securityCommand = program.command('security');
 	securityCommand.command('key:generate').description('Generate the app key').action(keyGenerate);
