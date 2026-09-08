@@ -14,16 +14,15 @@ export function disconnectFromSupervisor(): void {
 
 /** What one sample of the managed app's workers says about it. */
 export interface PoolReading {
-	/** CPU percent of each worker serving for longer than the warm-up. */
-	cpuPercents: number[];
 	/** Workers the supervisor has started that have not reported ready yet. */
 	pendingWorkers: number;
 	/** Workers serving, but still inside their warm-up. */
 	warmingWorkers: number;
 	/**
-	 * Every serving worker, whatever its age, with the numbers the `legacy`
-	 * strategy reads: its own CPU percent and RSS, keyed by the pid rather
-	 * than the pm id because that is what changes when a worker is replaced.
+	 * Every serving worker, whatever its age, keyed by the pid rather than the
+	 * pm id because that is what changes when a worker is replaced. Raw: what
+	 * the rules decide on is these readings averaged over a window, which is
+	 * `PoolSamples`.
 	 */
 	onlineWorkers: OnlineWorker[];
 	/**
@@ -40,6 +39,8 @@ export interface OnlineWorker {
 	pid: number;
 	cpuPercent: number;
 	memoryBytes: number;
+	/** Serving for longer than the warm-up, so its numbers are its load. */
+	mature: boolean;
 }
 
 /**
@@ -82,7 +83,6 @@ export async function readPool(
 ): Promise<PoolReading> {
 	const workers = (await list()).filter((app) => app.name === appName);
 	const matureSince = Date.now() - warmupSeconds * 1000;
-	const cpuPercents: number[] = [];
 	const onlineWorkers: OnlineWorker[] = [];
 	const restartsByWorker = new Map<number, number>();
 	let pendingWorkers = 0;
@@ -99,23 +99,22 @@ export async function readPool(
 			pendingWorkers += 1;
 		}
 		else if (env?.status === 'online') {
+			const mature = (env.pm_uptime ?? 0) <= matureSince;
+
 			onlineWorkers.push({
 				pid: worker.pid ?? 0,
 				cpuPercent: worker.monit?.cpu ?? 0,
 				memoryBytes: worker.monit?.memory ?? 0,
+				mature,
 			});
 
-			if ((env.pm_uptime ?? 0) > matureSince) {
+			if (mature === false) {
 				warmingWorkers += 1;
-			}
-			else {
-				cpuPercents.push(worker.monit?.cpu ?? 0);
 			}
 		}
 	}
 
 	return {
-		cpuPercents,
 		pendingWorkers,
 		warmingWorkers,
 		onlineWorkers,

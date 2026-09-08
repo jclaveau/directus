@@ -28,6 +28,10 @@ function envConfig(): AutoscaleConfig {
 		strategy: strategyOr(env['PM2_AUTOSCALE_STRATEGY'], 'scalabus'),
 		appName: String(env['PM2_AUTOSCALE_APP_NAME'] ?? 'api'),
 		signal: signalOr(env['PM2_AUTOSCALE_SIGNAL'], 'average'),
+		sampleWindow: numberOr(
+			env['PM2_AUTOSCALE_SAMPLE_WINDOW'],
+			AUTOSCALE_DEFAULTS.sampleWindow,
+		),
 		scaleCpuThreshold: numberOr(
 			env['PM2_AUTOSCALE_SCALE_CPU_THRESHOLD'],
 			AUTOSCALE_DEFAULTS.scaleCpuThreshold,

@@ -2,7 +2,7 @@ import { freemem } from 'node:os';
 import { useLogger } from '../logger/index.js';
 import { initProcessReports } from '../processes/index.js';
 import { decide } from './lib/decide.js';
-import { LegacySamples } from './lib/legacy-samples.js';
+import { PoolSamples } from './lib/pool-samples.js';
 import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
@@ -11,6 +11,7 @@ import {
 	scaleTo,
 } from './lib/pool.js';
 import { resolveConfig } from './lib/resolve-config.js';
+import { LEGACY_SAMPLE_WINDOW } from './lib/sanitize-config.js';
 import type { AutoscaleConfig } from './types.js';
 
 /**
@@ -86,10 +87,10 @@ export async function runAutoscaler(): Promise<void> {
 	let restartsByWorker: Map<number, number> | null = null;
 	let lastRestartAt: number | null = null;
 
-	// Fed on every tick whichever strategy is running, so switching to
-	// `legacy` during an incident decides on a full window rather than on the
-	// single reading it happens to switch on.
-	const legacySamples = new LegacySamples();
+	// Fed on every tick whichever strategy is running, so switching strategy
+	// during an incident decides on a full window rather than on the single
+	// reading it happens to switch on.
+	const samples = new PoolSamples();
 
 	for (;;) {
 		// A tick that throws is a tick that was skipped, never the end of the
@@ -99,8 +100,8 @@ export async function runAutoscaler(): Promise<void> {
 		try {
 			const config = await resolveConfig();
 			const reading = await readPool(config.appName, config.warmupSeconds);
-			const { cpuPercents, pendingWorkers, warmingWorkers } = reading;
-			const workers = cpuPercents.length + pendingWorkers + warmingWorkers;
+			const { onlineWorkers, pendingWorkers, warmingWorkers } = reading;
+			const workers = onlineWorkers.length + pendingWorkers;
 
 			const carriesRestarts = [...reading.restartsByWorker.values()]
 				.some((count) => count > 0);
@@ -118,7 +119,22 @@ export async function runAutoscaler(): Promise<void> {
 			}
 
 			restartsByWorker = reading.restartsByWorker;
-			const observed = legacySamples.observe(reading.onlineWorkers);
+			const observed = samples.observe(onlineWorkers);
+
+			// Warm-up samples are dropped here rather than averaged back in: a
+			// worker held out of the statistic while it booted would otherwise
+			// carry that boot into the window for as long again once warm.
+			const smoothed = samples.averaged(config.sampleWindow, true);
+			const legacy = samples.averaged(LEGACY_SAMPLE_WINDOW, false);
+
+			const cpuPercents = onlineWorkers
+				.filter((worker) => worker.mature)
+				.map((worker) => smoothed.get(worker.pid)?.cpuPercent ?? 0);
+
+			const legacyWorkers = onlineWorkers.map((worker) => {
+				return legacy.get(worker.pid)
+					?? { cpuPercent: worker.cpuPercent, memoryMegabytes: 0 };
+			});
 
 			// The module paces itself off the pool's membership rather than off
 			// the scales it asked for, so a worker the supervisor replaced
@@ -169,7 +185,7 @@ export async function runAutoscaler(): Promise<void> {
 					now,
 					lastScaleUpAt,
 					lastScaleDownAt,
-					legacyWorkers: observed.workers,
+					legacyWorkers,
 					freeMemoryMegabytes: Math.round(freemem() / 1_048_576),
 				}, config);
 
@@ -179,7 +195,7 @@ export async function runAutoscaler(): Promise<void> {
 					// printing the other one's list reads as a decision taken on
 					// no numbers at all.
 					const read = config.strategy === 'legacy'
-						? observed.workers.map((worker) => worker.cpuPercent)
+						? legacyWorkers.map((worker) => worker.cpuPercent)
 						: cpuPercents;
 
 					logger.info(

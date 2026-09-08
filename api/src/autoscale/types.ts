@@ -72,6 +72,16 @@ export interface AutoscaleConfig {
 	/** The pm2 app this scales. Anything else the daemon runs is left alone. */
 	appName: string;
 	signal: AutoscaleSignal;
+	/**
+	 * How many of the last per-second readings a worker's CPU is averaged over.
+	 *
+	 * A supervisor samples processes that spend their time in bursts, so a
+	 * single reading is as much sampling as load — and acted on alone it buys a
+	 * worker for one busy second, or gives one back during a lull in a pool that
+	 * is genuinely loaded. The `legacy` strategy is fixed at the module's own
+	 * thirty; this is the same protection at a fraction of the latency.
+	 */
+	sampleWindow: number;
 	scaleCpuThreshold: number;
 	releaseCpuThreshold: number;
 	minWorkers: number;

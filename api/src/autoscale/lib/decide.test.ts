@@ -7,6 +7,7 @@ const config: AutoscaleConfig = {
 	strategy: 'legacy',
 	appName: 'api',
 	signal: 'average',
+	sampleWindow: 5,
 	scaleCpuThreshold: 60,
 	releaseCpuThreshold: 40,
 	minWorkers: 1,
