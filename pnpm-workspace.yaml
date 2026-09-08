@@ -42,6 +42,7 @@ catalog:
   '@fullcalendar/list': 6.1.21
   '@fullcalendar/timegrid': 6.1.21
   '@godaddy/terminus': 4.12.1
+  '@hono/node-server': 1.19.17
   '@google-cloud/storage': 7.21.0
   '@histoire/plugin-vue': 0.17.17
   '@joeattardi/emoji-button': 4.6.4
@@ -189,6 +190,7 @@ catalog:
   graphql-ws: 6.0.8
   happy-dom: 18.0.1
   helmet: 8.2.0
+  hono: 4.13.7
   histoire: 0.17.17
   html-entities: 2.6.0
   icc: 3.0.0

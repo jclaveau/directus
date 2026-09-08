@@ -205,6 +205,7 @@ export const DEFAULTS = {
 	PRESSURE_LIMITER_RETRY_AFTER: false,
 
 	REQUEST_TIMING_ENABLED: false,
+	HONO_ROUTES: '',
 
 	METRICS_ENABLED: false,
 	METRICS_SERVICES: 'database,cache,redis,storage',

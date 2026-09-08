@@ -57,6 +57,7 @@ import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { initCacheConfig } from './cache-config.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
+import { honoDelegated, honoPing } from './hono/index.js';
 import { getFlowManager } from './flows.js';
 import { createExpressLogger, useLogger } from './logger/index.js';
 import authenticate from './middleware/authenticate.js';
@@ -314,7 +315,12 @@ export default async function createApp(): Promise<express.Application> {
 
 	useRateLimiterWhenCharging('every-request');
 
-	app.get('/server/ping', (_req, res) => res.send('pong'));
+	if (honoDelegated('/server/ping')) {
+		app.use('/server/ping', await honoPing());
+	}
+	else {
+		app.get('/server/ping', (_req, res) => res.send('pong'));
+	}
 
 	app.use(authenticate);
 

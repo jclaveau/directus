@@ -111,6 +111,9 @@ catalogs:
     '@histoire/plugin-vue':
       specifier: 0.17.17
       version: 0.17.17
+    '@hono/node-server':
+      specifier: 1.19.17
+      version: 1.19.17
     '@joeattardi/emoji-button':
       specifier: 4.6.4
       version: 4.6.4
@@ -546,6 +549,9 @@ catalogs:
     histoire:
       specifier: 0.17.17
       version: 0.17.17
+    hono:
+      specifier: 4.13.7
+      version: 4.13.7
     html-entities:
       specifier: 2.6.0
       version: 2.6.0
@@ -1025,6 +1031,9 @@ importers:
       '@godaddy/terminus':
         specifier: 'catalog:'
         version: 4.12.1
+      '@hono/node-server':
+        specifier: 'catalog:'
+        version: 1.19.17(hono@4.13.7)
       '@rollup/plugin-alias':
         specifier: 'catalog:'
         version: 6.0.0(rollup@4.62.2)
@@ -1136,6 +1145,9 @@ importers:
       helmet:
         specifier: 'catalog:'
         version: 8.2.0
+      hono:
+        specifier: 'catalog:'
+        version: 4.13.7
       icc:
         specifier: 'catalog:'
         version: 3.0.0
@@ -4642,6 +4654,12 @@ packages:
 
   '@histoire/vendors@0.17.17':
     resolution: {integrity: sha512-QZvmffdoJlLuYftPIkOU5Q2FPAdG2JjMuQ5jF7NmEl0n1XnmbMqtRkdYTZ4eF6CO1KLZ0Zyf6gBQvoT1uWNcjA==}
+
+  '@hono/node-server@1.19.17':
+    resolution: {integrity: sha512-dSneS5qhiauZWGDCeK4o695Xd9nUNjviSZCMQrj10eetr8Uln1ucn6bbphOM6UynAMMtNIzZNSpL9vnASJwrPQ==}
+    engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -9644,6 +9662,10 @@ packages:
     hasBin: true
     peerDependencies:
       vite: ^2.9.0 || ^3.0.0 || ^4.0.0 || ^5.0.0
+
+  hono@4.13.7:
+    resolution: {integrity: sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ==}
+    engines: {node: '>=16.9.0'}
 
   hookable@5.5.3:
     resolution: {integrity: sha512-Yc+BQe8SvoXH1643Qez1zqLRmbA5rCL+sSmk6TVos0LWVfNIB7PGncdlId77WzLGSIB5KaWgTaNTs2lNVEI6VQ==}
@@ -15718,6 +15740,10 @@ snapshots:
 
   '@histoire/vendors@0.17.17': {}
 
+  '@hono/node-server@1.19.17(hono@4.13.7)':
+    dependencies:
+      hono: 4.13.7
+
   '@humanfs/core@0.19.2':
     dependencies:
       '@humanfs/types': 0.15.0
@@ -21298,6 +21324,8 @@ snapshots:
       - supports-color
       - terser
       - utf-8-validate
+
+  hono@4.13.7: {}
 
   hookable@5.5.3: {}
 

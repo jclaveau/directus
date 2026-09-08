@@ -110,6 +110,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	REQUEST_TIMING_ENABLED: 'boolean',
 	REQUEST_TIMING_HEADER: 'string',
+	HONO_ROUTES: 'array',
 
 	SYSTEM_MCP_ENABLED: 'boolean',
 	SYSTEM_MCP_TOOLS: 'array',

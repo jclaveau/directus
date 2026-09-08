@@ -18,12 +18,13 @@ import { DEFAULTS } from './defaults.js';
 const CHANGED_BY_DECLARING: Record<string, string> = {
 	// Ports are compared and concatenated as strings.
 	PORT: 'number(8055) -> string("8055")',
-	// Every consumer of these four reads them through toArray().
+	// Every consumer of these reads them through toArray().
 	STORAGE_LOCATIONS: 'string("local") -> array(["local"])',
 	CACHE_VARY_REQUEST_HEADERS: 'string("") -> array([])',
 	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: 'string("") -> array([])',
 	SYSTEM_MCP_ALLOWED_ORIGINS: 'string("") -> array([])',
 	PGBOUNCER_CONNECTIONS: 'string("") -> array([])',
+	HONO_ROUTES: 'string("") -> array([])',
 	FILES_MIME_TYPE_ALLOW_LIST: 'string("*/*") -> array(["*/*"])',
 	// cors documents string or array for this option.
 	CORS_EXPOSED_HEADERS: 'string("Content-Range") -> array(["Content-Range"])',
