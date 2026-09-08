@@ -1,6 +1,7 @@
 import { freemem } from 'node:os';
 import { useLogger } from '../logger/index.js';
 import { initProcessReports } from '../processes/index.js';
+import { reportUnhandledRejection } from '../utils/report-unhandled-rejection.js';
 import { decide } from './lib/decide.js';
 import { PoolSamples } from './lib/pool-samples.js';
 import {
@@ -54,6 +55,14 @@ async function prewarm(
  */
 export async function runAutoscaler(): Promise<void> {
 	const logger = useLogger();
+
+	// This command outlives the pool it manages, so it takes the guard the server
+	// process takes and for the same reason: Node ends a process on a rejection
+	// nothing awaited, and an unreachable Redis produces them from the bus
+	// subscriber and from commands its own caller has already given up on. An
+	// autoscaler that exits leaves the pool at whatever size the outage caught it
+	// at, and its supervisor restarts it into the same outage.
+	process.on('unhandledRejection', reportUnhandledRejection);
 
 	await connectToSupervisor();
 

@@ -62,18 +62,22 @@ function startProxy(port: number): Promise<Proxy> {
 
 /** Drops what is connected and refuses what tries to connect after. */
 async function cutProxy(proxy: Proxy): Promise<void> {
+	// Closing stops the server accepting at once, and it is done before the
+	// sockets are dropped: a client reconnecting in between would otherwise be
+	// accepted onto a server that then waits forever for it to end.
+	const closed = new Promise<void>((resolve) => {
+		proxy.server.close(() => {
+			resolve();
+		});
+	});
+
 	for (const socket of proxy.live) {
 		socket.destroy();
 	}
 
 	proxy.live.clear();
 
-	// After the sockets, because `close` waits out the connections it holds.
-	await new Promise<void>((resolve) => {
-		proxy.server.close(() => {
-			resolve();
-		});
-	});
+	await closed;
 }
 
 function restoreProxy(proxy: Proxy, port: number): Promise<void> {
@@ -190,7 +194,9 @@ describe('The autoscaler decides through a Redis outage', () => {
 				.toBe(true);
 
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
-		}, 180_000);
+			// Three waits of a minute apiece, and a runner slow enough to need
+			// them is the runner this arm has to survive.
+		}, 240_000);
 
 		it('takes a new override once Redis answers again', async () => {
 			await redis.set(

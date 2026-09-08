@@ -169,9 +169,11 @@ export async function createServer(): Promise<http.Server> {
 }
 
 export async function startServer(): Promise<void> {
-	// Registered here rather than in `createApp`, so it covers the server process and
-	// not the unit suite or a CLI command, where swallowing a rejection would hide a
-	// failure from the run that should have reported it. `uncaughtException` is
+	// Registered here rather than in `createApp`, so it covers the process that
+	// serves and not the unit suite or a command that runs once, where swallowing a
+	// rejection would hide a failure from the run that should have reported it. The
+	// autoscaler registers it too: what earns the guard is outliving a background
+	// dependency, not being a server. `uncaughtException` is
 	// deliberately NOT handled — by then the state that threw is unknown, and Node's
 	// own guidance is to exit.
 	process.on('unhandledRejection', reportUnhandledRejection);
