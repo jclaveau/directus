@@ -27,7 +27,6 @@ import nodeResolveDefault from '@rollup/plugin-node-resolve';
 import virtualDefault from '@rollup/plugin-virtual';
 import chokidar, { FSWatcher } from 'chokidar';
 import express, { Router } from 'express';
-import ivm from 'isolated-vm';
 import { readFile, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import { dirname, join } from 'node:path';
@@ -47,6 +46,7 @@ import getModuleDefault from '../utils/get-module-default.js';
 import { getSchema } from '../utils/get-schema.js';
 import { importFileUrl } from '../utils/import-file-url.js';
 import { JobQueue } from '../utils/job-queue.js';
+import { loadIsolatedVm } from '../utils/load-isolated-vm.js';
 import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import { getExtensionsPath } from './lib/get-extensions-path.js';
@@ -570,6 +570,8 @@ export class ExtensionManager {
 		);
 
 		const extensionCode = await readFile(entrypointPath, 'utf-8');
+
+		const ivm = await loadIsolatedVm();
 
 		const isolate = new ivm.Isolate({
 			memoryLimit: sandboxMemory,
