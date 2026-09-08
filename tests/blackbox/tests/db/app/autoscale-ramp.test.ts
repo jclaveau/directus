@@ -95,10 +95,13 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
-			// Both short, so holding is the threshold's doing and not a
-			// cooldown or a warm-up that has not run out yet.
+			// No add cooldown, so holding is the threshold's doing. The warm-up
+			// is not short for the same reason: a worker's CPU percent is
+			// cumulative over its short life, so one just out of a two-second
+			// warm-up still reads mostly as the second it spent starting — on a
+			// loaded runner, near 100%, which clears this threshold outright.
 			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
-			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '8',
 		});
 
 		expect(await sizesOver(rig, 20_000)).toEqual([1]);

@@ -83,7 +83,11 @@ describe('The autoscaler can be reverted to the module rule it replaces', () => 
 			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
-			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+			// The module has no warm-up, so its own cooldown is what keeps a
+			// worker's boot out of the decision: a CPU percent cumulative over a
+			// two-second life reads near 100% on a loaded runner, and by the
+			// time an add is allowed the thirty-sample mean has diluted it away.
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '8',
 		});
 
 		expect(await sizesOver(rig, 20_000)).toEqual([1]);

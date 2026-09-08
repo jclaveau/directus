@@ -67,9 +67,12 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
 			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
-			// Short, so a pool that holds is holding on the threshold in play
-			// rather than on the warm-up freeze.
-			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
+			// Long enough that the pool is reporting its load rather than its
+			// boot: a worker's CPU percent is cumulative over its short life, so
+			// one just out of a two-second warm-up still reads mostly as the
+			// second it spent starting — on a loaded runner, near 100%, which
+			// clears any threshold an arm like this sets out of reach.
+			PM2_AUTOSCALE_WARMUP_SECONDS: '8',
 		});
 
 		// The same override grows the pool in the arms below; here it is
@@ -107,12 +110,15 @@ describe('The autoscaler takes live configuration from Redis', () => {
 				PM2_AUTOSCALE_MIN_WORKERS: '1',
 				PM2_AUTOSCALE_MAX_WORKERS: '3',
 				PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
-				// Short, so a pool that holds is holding on the threshold in play
-				// rather than on the warm-up freeze.
-				PM2_AUTOSCALE_WARMUP_SECONDS: '2',
+				// Long enough that the pool is reporting its load rather than its
+				// boot: a worker's CPU percent is cumulative over its short life, so
+				// one just out of a two-second warm-up still reads mostly as the
+				// second it spent starting — on a loaded runner, near 100%, which
+				// clears any threshold an arm like this sets out of reach.
+				PM2_AUTOSCALE_WARMUP_SECONDS: '8',
 			});
 
-			expect(await sizesOver(rig, 15_000)).toEqual([1]);
+			expect(await sizesOver(rig, 20_000)).toEqual([1]);
 		}, 90_000);
 
 		it('picks up a stored threshold without being restarted', async () => {
