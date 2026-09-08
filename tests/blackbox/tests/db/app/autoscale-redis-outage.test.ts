@@ -17,11 +17,6 @@ import {
 // pool frozen at the size the incident caught it at.
 const REDIS_PORT = 6108;
 
-// A hop of this suite's own in front of the shared Redis, so one autoscaler's
-// connection can be cut without touching the instance the other suites are
-// using.
-const PROXY_PORT = 6109;
-
 // Nothing listens here, which is the Redis that is unreachable from the first
 // tick rather than one lost part-way through.
 const DEAD_PORT = 6110;
@@ -33,9 +28,20 @@ function configKey(namespace: string): string {
 interface Proxy {
 	server: Server;
 	live: Set<Socket>;
+	/** The port the hop took, which the autoscaler is pointed at. */
+	port: number;
 }
 
-function startProxy(port: number): Promise<Proxy> {
+/**
+ * A TCP hop of this suite's own in front of the shared Redis, so one
+ * autoscaler's connection can be cut without touching the instance the other
+ * suites are using.
+ *
+ * On a port the kernel picks rather than one this file chose: a runner is a
+ * shared machine, and a hop that cannot take the port it wanted is a suite that
+ * fails for a reason that has nothing to do with autoscaling.
+ */
+function startProxy(): Promise<Proxy> {
 	const live = new Set<Socket>();
 
 	const server = createServer((client) => {
@@ -53,36 +59,45 @@ function startProxy(port: number): Promise<Proxy> {
 		}
 	});
 
-	return new Promise((resolve) => {
-		server.listen(port, '127.0.0.1', () => {
-			resolve({ server, live });
+	return new Promise((resolve, reject) => {
+		// Listening is what fails when the port is taken, and it fails by event:
+		// unhandled, the promise never settles and the arm dies of its timeout
+		// with nothing to say.
+		server.once('error', reject);
+
+		server.listen(0, '127.0.0.1', () => {
+			const address = server.address();
+
+			if (address === null || typeof address === 'string') {
+				reject(new Error('the hop did not take a TCP port'));
+
+				return;
+			}
+
+			resolve({ server, live, port: address.port });
 		});
 	});
 }
 
 /** Drops what is connected and refuses what tries to connect after. */
-async function cutProxy(proxy: Proxy): Promise<void> {
-	// Closing stops the server accepting at once, and it is done before the
-	// sockets are dropped: a client reconnecting in between would otherwise be
-	// accepted onto a server that then waits forever for it to end.
-	const closed = new Promise<void>((resolve) => {
-		proxy.server.close(() => {
-			resolve();
-		});
-	});
+function cutProxy(proxy: Proxy): void {
+	// `close` stops the server accepting as it is called, which is the whole of
+	// what a cut needs; its callback waits out the connections still open, and
+	// waiting on that is a way for this to hang rather than fail.
+	proxy.server.close();
 
 	for (const socket of proxy.live) {
 		socket.destroy();
 	}
 
 	proxy.live.clear();
-
-	await closed;
 }
 
-function restoreProxy(proxy: Proxy, port: number): Promise<void> {
-	return new Promise((resolve) => {
-		proxy.server.listen(port, '127.0.0.1', () => {
+function restoreProxy(proxy: Proxy): Promise<void> {
+	return new Promise((resolve, reject) => {
+		proxy.server.once('error', reject);
+
+		proxy.server.listen(proxy.port, '127.0.0.1', () => {
 			resolve();
 		});
 	});
@@ -129,7 +144,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 		}
 
 		for (const proxy of proxies) {
-			await cutProxy(proxy);
+			cutProxy(proxy);
 		}
 
 		redis.disconnect();
@@ -150,7 +165,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 3 }),
 			);
 
-			proxy = await startProxy(PROXY_PORT);
+			proxy = await startProxy();
 			proxies.push(proxy);
 
 			rig = startPool({
@@ -165,7 +180,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 			startAutoscaler(rig, {
 				REDIS_ENABLED: 'true',
 				REDIS_HOST: '127.0.0.1',
-				REDIS_PORT: String(PROXY_PORT),
+				REDIS_PORT: String(proxy.port),
 				CACHE_NAMESPACE: namespace,
 				PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
 				PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
@@ -185,7 +200,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 
 			expect(await poolSize(rig, 2, 60_000)).toBe(2);
 
-			await cutProxy(proxy);
+			cutProxy(proxy);
 
 			// The warning is the loop reporting a tick it completed without
 			// Redis; the third worker is that tick acting on the ceiling only
@@ -204,7 +219,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 2 }),
 			);
 
-			await restoreProxy(proxy, PROXY_PORT);
+			await restoreProxy(proxy);
 
 			expect(await poolSize(rig, 2, 90_000)).toBe(2);
 		}, 120_000);
