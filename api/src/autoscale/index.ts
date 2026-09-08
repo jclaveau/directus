@@ -63,6 +63,8 @@ export async function runAutoscaler(): Promise<void> {
 	let lastScaleUpAt = Date.now();
 	let lastScaleDownAt = Date.now();
 	let prewarmed = false;
+	let restarts: number | null = null;
+	let lastRestartAt: number | null = null;
 
 	for (;;) {
 		// A tick that throws is a tick that was skipped, never the end of the
@@ -71,8 +73,17 @@ export async function runAutoscaler(): Promise<void> {
 		// module this replaces took production down.
 		try {
 			const config = await resolveConfig();
-			const { cpuPercents, pendingWorkers } = await readPool(config.appName);
-			const workers = cpuPercents.length + pendingWorkers;
+			const reading = await readPool(config.appName, config.warmupSeconds);
+			const { cpuPercents, pendingWorkers, warmingWorkers } = reading;
+			const workers = cpuPercents.length + pendingWorkers + warmingWorkers;
+
+			// The first sample sets the baseline: whatever the supervisor has
+			// counted before the autoscaler started is not a restart it saw.
+			if (restarts !== null && reading.restarts > restarts) {
+				lastRestartAt = Date.now();
+			}
+
+			restarts = reading.restarts;
 
 			if (config.enabled && workers > 0 && prewarmed === false) {
 				prewarmed = true;
@@ -81,10 +92,16 @@ export async function runAutoscaler(): Promise<void> {
 				lastScaleDownAt = Date.now();
 			}
 			else if (config.enabled) {
+				const now = Date.now();
+
 				const decision = decide({
 					cpuPercents,
 					pendingWorkers,
-					now: Date.now(),
+					warmingWorkers,
+					secondsSinceRestart: lastRestartAt === null
+						? null
+						: (now - lastRestartAt) / 1000,
+					now,
 					lastScaleUpAt,
 					lastScaleDownAt,
 				}, config);
@@ -92,7 +109,8 @@ export async function runAutoscaler(): Promise<void> {
 				if (decision.workers !== null) {
 					logger.info(
 						`[autoscale] ${config.appName} ${workers} -> ${decision.workers} `
-						+ `workers: ${decision.reason}. cpu: ${cpuPercents.join(',')}`,
+						+ `workers: ${decision.reason}. cpu: ${cpuPercents.join(',')}. `
+						+ `restarts: ${reading.restarts}`,
 					);
 
 					await scaleTo(config.appName, decision.workers);

@@ -9,6 +9,17 @@
 const busyMs = Number(process.env['BB_BUSY_MS'] ?? 0);
 const idleMs = Number(process.env['BB_IDLE_MS'] ?? 100);
 const readyDelayMs = Number(process.env['BB_READY_DELAY_MS'] ?? 200);
+const crashAfterMs = Number(process.env['BB_CRASH_AFTER_MS'] ?? 0);
+
+// `abort` is what a worker that exhausts its heap does: V8 prints
+// `FATAL ERROR: Reached heap limit` and raises SIGABRT, which is how the
+// planner's Api died on 2026-09-08 under `--max-old-space-size=1024`. What the
+// supervisor records is a worker killed by a signal and restarted, and that is
+// the whole of what the autoscaler reads — so this reproduces the observable
+// without spending a runner's memory to get there.
+if (crashAfterMs > 0) {
+	setTimeout(() => process.abort(), crashAfterMs);
+}
 
 // Reported the way the API reports it, from a timer instead of a `listen` callback,
 // so `wait_ready` holds each new worker at `launching` for as long as a real boot.

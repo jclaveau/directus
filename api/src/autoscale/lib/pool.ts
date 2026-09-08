@@ -14,36 +14,63 @@ export function disconnectFromSupervisor(): void {
 
 /** What one sample of the managed app's workers says about it. */
 export interface PoolReading {
-	/** CPU percent of each worker that has reported ready. */
+	/** CPU percent of each worker serving for longer than the warm-up. */
 	cpuPercents: number[];
 	/** Workers the supervisor has started that have not reported ready yet. */
 	pendingWorkers: number;
+	/** Workers serving, but still inside their warm-up. */
+	warmingWorkers: number;
+	/** Restarts the supervisor has counted across the app's workers. */
+	restarts: number;
 }
 
 /**
- * The workers of one app, split by whether they are serving yet.
+ * PM2's published typings stop at a documented subset of `pm2_env`; the
+ * restart counter and the start time are on the runtime object and absent
+ * from them.
+ */
+interface SupervisedWorkerEnv {
+	status?: string;
+	restart_time?: number;
+	pm_uptime?: number;
+}
+
+/**
+ * The workers of one app, split by whether their numbers can be trusted yet.
  *
  * An app whose name matches nothing reads as an empty pool rather than an
  * error: the autoscaler starts alongside the app it scales and may well win
  * the race.
  */
-export async function readPool(appName: string): Promise<PoolReading> {
+export async function readPool(
+	appName: string,
+	warmupSeconds: number,
+): Promise<PoolReading> {
 	const workers = (await list()).filter((app) => app.name === appName);
+	const matureSince = Date.now() - warmupSeconds * 1000;
 	const cpuPercents: number[] = [];
 	let pendingWorkers = 0;
+	let warmingWorkers = 0;
+	let restarts = 0;
 
 	for (const worker of workers) {
-		const env = worker.pm2_env as { status?: string } | undefined;
+		const env = worker.pm2_env as SupervisedWorkerEnv | undefined;
+		restarts += env?.restart_time ?? 0;
 
-		if (env?.status === 'online') {
-			cpuPercents.push(worker.monit?.cpu ?? 0);
-		}
-		else if (env?.status === 'launching') {
+		if (env?.status === 'launching') {
 			pendingWorkers += 1;
+		}
+		else if (env?.status === 'online') {
+			if ((env.pm_uptime ?? 0) > matureSince) {
+				warmingWorkers += 1;
+			}
+			else {
+				cpuPercents.push(worker.monit?.cpu ?? 0);
+			}
 		}
 	}
 
-	return { cpuPercents, pendingWorkers };
+	return { cpuPercents, pendingWorkers, warmingWorkers, restarts };
 }
 
 /**

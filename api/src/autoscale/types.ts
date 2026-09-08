@@ -11,6 +11,17 @@ export interface PoolSample {
 	 * approximate.
 	 */
 	pendingWorkers: number;
+	/**
+	 * Workers serving, but young enough that their CPU is still their own
+	 * startup: a cold schema cache and an unJITted hot path. Counted in the
+	 * pool, kept out of the statistic.
+	 */
+	warmingWorkers: number;
+	/**
+	 * Seconds since a worker of this app last restarted, or `null` if none has
+	 * since the autoscaler started.
+	 */
+	secondsSinceRestart: number | null;
 	/** Milliseconds since the epoch, passed in so the decision stays pure. */
 	now: number;
 	lastScaleUpAt: number;
@@ -45,6 +56,16 @@ export interface AutoscaleConfig {
 	prewarmWorkers: number;
 	minSecondsToScaleUp: number;
 	minSecondsToScaleDown: number;
+	/**
+	 * How long a worker's numbers are its own startup rather than the load.
+	 *
+	 * Also how long the whole pool's numbers are untrusted after a restart. A
+	 * worker that died and came back reads exactly like a busy one through a
+	 * CPU average, and the two call for opposite reactions: on 2026-09-08 a
+	 * heap cap crash-looped the planner's Api, and every restart's boot CPU
+	 * bought another worker that crashed the same way.
+	 */
+	warmupSeconds: number;
 }
 
 export interface Decision {

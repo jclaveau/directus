@@ -41,6 +41,7 @@ function envConfig(): AutoscaleConfig {
 		minSecondsToScaleDown: Number(
 			env['PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER'] ?? 300,
 		),
+		warmupSeconds: Number(env['PM2_AUTOSCALE_WARMUP_SECONDS'] ?? 30),
 	};
 }
 

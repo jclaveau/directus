@@ -65,6 +65,9 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
 			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+			// Short, so a pool that holds is holding on the threshold in play
+			// rather than on the warm-up freeze.
+			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
 		});
 
 		// The same override grows the pool in the arms below; here it is
@@ -99,6 +102,9 @@ describe('The autoscaler takes live configuration from Redis', () => {
 				PM2_AUTOSCALE_MIN_WORKERS: '1',
 				PM2_AUTOSCALE_MAX_WORKERS: '3',
 				PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+				// Short, so a pool that holds is holding on the threshold in play
+				// rather than on the warm-up freeze.
+				PM2_AUTOSCALE_WARMUP_SECONDS: '2',
 			});
 
 			expect(await heldAt(rig, 1, 15_000)).toBe(true);

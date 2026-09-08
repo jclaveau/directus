@@ -1,10 +1,6 @@
 import type { AutoscaleConfig, Decision, PoolSample } from '../types.js';
 
 function statistic(cpuPercents: number[], config: AutoscaleConfig): number {
-	if (cpuPercents.length === 0) {
-		return 0;
-	}
-
 	if (config.signal === 'max') {
 		return Math.max(...cpuPercents);
 	}
@@ -30,7 +26,9 @@ function secondsSince(instant: number, now: number): number {
  * it has run out of ceiling — it can only stop growing.
  */
 export function decide(sample: PoolSample, config: AutoscaleConfig): Decision {
-	const workers = sample.cpuPercents.length + sample.pendingWorkers;
+	const workers = sample.cpuPercents.length
+		+ sample.pendingWorkers
+		+ sample.warmingWorkers;
 
 	if (config.enabled === false) {
 		return { workers: null, reason: 'autoscaling is disabled' };
@@ -60,6 +58,24 @@ export function decide(sample: PoolSample, config: AutoscaleConfig): Decision {
 		};
 	}
 
+	// A pool that is restarting is broken, not busy, and through a CPU average
+	// the two look identical. Adding a worker to a crash loop cannot relieve
+	// it and provably multiplies it: on 2026-09-08 a heap cap crash-looped the
+	// planner's Api and each restart's boot CPU bought another worker that
+	// died the same way, until the container did.
+	//
+	// Frozen in both directions. Releasing would be acting on the same
+	// untrustworthy reading, and a restart is just as likely to be a healthy
+	// recycle under load as a crash.
+	if (
+		sample.secondsSinceRestart !== null
+		&& sample.secondsSinceRestart < config.warmupSeconds
+	) {
+		const ago = Math.round(sample.secondsSinceRestart);
+
+		return { workers: null, reason: `a worker restarted ${ago}s ago` };
+	}
+
 	// A booting worker spends its whole startup at the top of the CPU table,
 	// so a pool with one in flight would read as loaded and add another on
 	// top of it — each add paying for the next. Nothing moves until the pool
@@ -68,6 +84,15 @@ export function decide(sample: PoolSample, config: AutoscaleConfig): Decision {
 		return {
 			workers: null,
 			reason: `${sample.pendingWorkers} worker(s) still starting`,
+		};
+	}
+
+	// Every worker is inside its warm-up, so the pool has told us nothing.
+	// Without this the empty statistic reads as 0% and releases a worker.
+	if (sample.cpuPercents.length === 0) {
+		return {
+			workers: null,
+			reason: `${sample.warmingWorkers} worker(s) still warming up`,
 		};
 	}
 

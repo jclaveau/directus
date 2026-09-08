@@ -33,6 +33,8 @@ export interface PoolOptions {
 	 */
 	busyMs?: number;
 	idleMs?: number;
+	/** Milliseconds each worker serves before aborting, so pm2 restarts it. */
+	crashAfterMs?: number;
 }
 
 /**
@@ -66,6 +68,7 @@ export function startPool(options: PoolOptions): Rig {
 					env: {
 						BB_BUSY_MS: String(options.busyMs ?? 0),
 						BB_IDLE_MS: String(options.idleMs ?? 100),
+						BB_CRASH_AFTER_MS: String(options.crashAfterMs ?? 0),
 					},
 				},
 			],

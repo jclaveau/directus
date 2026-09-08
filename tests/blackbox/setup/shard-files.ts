@@ -49,9 +49,11 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/pgbouncer.test.ts': 40_000,
 	'/tests/db/app/system-mcp.test.ts': 50_000,
 	// A pm2 daemon per arm, and each assertion is a pool settling or a window
-	// spent proving it did not move.
-	'/tests/db/app/autoscale-ramp.test.ts': 75_000,
-	'/tests/db/app/autoscale-config-source.test.ts': 90_000,
+	// spent proving it did not move. Measured over the postgres run of
+	// 2026-09-08, then raised for the two arms added after it: a crash loop
+	// held for 25 s and a warm-up waited out for 12 s before ramping.
+	'/tests/db/app/autoscale-ramp.test.ts': 130_000,
+	'/tests/db/app/autoscale-config-source.test.ts': 58_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,

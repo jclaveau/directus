@@ -40,6 +40,7 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
 			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
 		});
 
 		expect(await poolSize(rig, 3, 60_000)).toBe(3);
@@ -47,6 +48,35 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 		// And stops there: the ceiling is a ceiling, not a pace.
 		expect(await heldAt(rig, 3, 5_000)).toBe(true);
 	}, 90_000);
+
+	// A pool whose workers are all still booting is the pool at its most
+	// CPU-hungry, and none of that is traffic. Adding then is the mistake
+	// prewarm would otherwise make four times over.
+	it('waits out the warm-up before reading the pool at all', async () => {
+		const rig = startPool({
+			appName: 'autoscale-warmup',
+			instances: 1,
+			busyMs: 20,
+			idleMs: 80,
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '5',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '3',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '20',
+		});
+
+		// The same load and threshold that reach the ceiling above.
+		expect(await heldAt(rig, 1, 12_000)).toBe(true);
+
+		// And once the worker is warm, they do here too.
+		expect(await poolSize(rig, 3, 60_000)).toBe(3);
+	}, 120_000);
 
 	it('holds at the floor when that load is under the threshold', async () => {
 		const rig = startPool({
@@ -63,12 +93,42 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
-			// Zero, so holding is the threshold's doing and not a cooldown
-			// that has not run out yet.
+			// Both short, so holding is the threshold's doing and not a
+			// cooldown or a warm-up that has not run out yet.
 			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
 		});
 
 		expect(await heldAt(rig, 1, 20_000)).toBe(true);
+	}, 90_000);
+
+	// The strict witness for the arm above: identical load, identical config,
+	// and the only difference is that these workers die. A pool that is
+	// restarting is broken, not busy, and the two are the same number through
+	// a CPU average — which is how a heap cap took the planner's Api from one
+	// worker to thirty-two on 2026-09-08, every restart's boot CPU buying
+	// another worker that died the same way.
+	it('does not grow while its workers keep restarting', async () => {
+		const rig = startPool({
+			appName: 'autoscale-crash-loop',
+			instances: 1,
+			busyMs: 20,
+			idleMs: 80,
+			crashAfterMs: 3_000,
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '5',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '3',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '30',
+		});
+
+		expect(await heldAt(rig, 1, 25_000)).toBe(true);
 	}, 90_000);
 
 	// The first version of this scaled an app it could not see back up to the
@@ -100,6 +160,10 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
 			PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '5',
+			// Short, so the drain is paced by the release cooldown alone. At the
+			// default the prewarmed workers spend their first half-minute out of
+			// the statistic, and this arm is about prewarm, not warm-up.
+			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
 		});
 
 		expect(await poolSize(rig, 3, 60_000)).toBe(3);
