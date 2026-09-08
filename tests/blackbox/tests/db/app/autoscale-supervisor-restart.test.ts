@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
 	countWorkers,
 	poolSize,
+	reportOf,
 	restartSupervisor,
 	startAutoscaler,
 	startPool,
@@ -44,17 +45,17 @@ describe('The autoscaler outlives its supervisor', () => {
 			PM2_AUTOSCALE_WARMUP_SECONDS: '4',
 		});
 
-		expect(await poolSize(rig, 2, 60_000)).toBe(2);
+		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
 
 		restartSupervisor(rig);
 
 		// The ecosystem declares one worker, so the pool comes back at one
 		// whatever it had grown to. Asserted rather than waited for: without it
 		// the climb below would be satisfied by the two the arm already had.
-		expect(countWorkers(rig)).toBe(1);
+		expect(countWorkers(rig), reportOf(rig)).toBe(1);
 
 		// A decision taken over a connection whose daemon has died since it was
 		// made.
-		expect(await poolSize(rig, 2, 60_000)).toBe(2);
+		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
 	}, 150_000);
 });

@@ -146,6 +146,8 @@ export function stopRig(rig: Rig): void {
 
 interface ListedProcess {
 	name: string;
+	pm_id?: number;
+	monit?: { cpu?: number };
 	pm2_env?: { status?: string; restart_time?: number };
 }
 
@@ -280,6 +282,56 @@ export async function sizesOver(rig: Rig, windowMs: number): Promise<number[]> {
 	} while (Date.now() < deadline);
 
 	return seen;
+}
+
+/**
+ * What the autoscaler was doing, for an assertion to fail with.
+ *
+ * A pool that did not move says nothing about why: the process may be gone, it
+ * may be deciding against a load the runner never gave it, or its ticks may be
+ * failing. All three read as one number, and none of them reproduces on a quiet
+ * laptop.
+ */
+export function reportOf(rig: Rig): string {
+	const autoscaler = rig.autoscaler;
+
+	let alive = 'never started';
+
+	if (autoscaler !== null) {
+		alive = autoscaler.exitCode === null && autoscaler.signalCode === null
+			? 'running'
+			: `gone (code ${autoscaler.exitCode}, signal ${autoscaler.signalCode})`;
+	}
+
+	const tail = rig.logs
+		.join('')
+		.split('\n')
+		.slice(-40)
+		.join('\n');
+
+	// What the supervisor reports for the pool right now, which is the
+	// autoscaler's whole input: a pool that did not grow because the runner gave
+	// it no load to read looks, in the lines above, exactly like one whose ticks
+	// never ran. Caught, because asking means calling the daemon that may be the
+	// thing that failed, and a report that throws takes the assertion it was
+	// meant to explain with it.
+	let reported: string;
+
+	try {
+		reported = listWorkers(rig)
+			.map((worker) => {
+				const status = worker.pm2_env?.status ?? 'unknown';
+
+				return `${worker.pm_id}:${status}:${worker.monit?.cpu ?? '-'}%`;
+			})
+			.join(', ');
+	}
+	catch (error) {
+		reported = `unreadable: ${error}`;
+	}
+
+	return `autoscaler ${alive}; supervisor reports [${reported}]; `
+		+ `its last lines:\n${tail}`;
 }
 
 /** The lines the autoscaler logged for the resizes it decided on. */
