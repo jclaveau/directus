@@ -468,6 +468,7 @@ test('Every declared output property is one the tool actually answers', () => {
 										externalBytes: 4,
 										uptimeMs: 5,
 										nodeVersion: 'v22.0.0',
+										execArgv: [],
 									},
 									supervisor: {
 										status: 'online',

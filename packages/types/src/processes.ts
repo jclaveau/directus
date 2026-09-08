@@ -52,6 +52,13 @@ export interface ProcessRuntimeStats {
 	externalBytes: number;
 	uptimeMs: number;
 	nodeVersion: string;
+	/**
+	 * The Node options this process was actually started with, so a flag set in
+	 * the supervisor config or `NODE_OPTIONS` can be confirmed live rather than
+	 * inferred from what the memory figures look like. Script arguments are not
+	 * here — `execArgv` carries only what Node itself parsed.
+	 */
+	execArgv: string[];
 }
 
 /** One process: a PM2 app instance, or the lone process when unsupervised. */

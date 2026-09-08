@@ -40,6 +40,7 @@ function runtimeStats(): ProcessRuntimeStats {
 		externalBytes: memory.external,
 		uptimeMs: Math.round(process.uptime() * 1000),
 		nodeVersion: process.version,
+		execArgv: process.execArgv,
 	};
 }
 
