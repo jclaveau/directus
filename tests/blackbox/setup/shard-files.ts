@@ -52,7 +52,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// spent proving it did not move. Measured over the postgres runs of
 	// 2026-09-08.
 	'/tests/db/app/autoscale-ramp.test.ts': 175_000,
-	'/tests/db/app/autoscale-config-source.test.ts': 70_000,
+	'/tests/db/app/autoscale-config-source.test.ts': 120_000,
 	// One ramp, one hold, and a churning pool watched either side of the
 	// switch. Estimated from the arms it borrows; to be measured.
 	'/tests/db/app/autoscale-legacy.test.ts': 120_000,
@@ -60,6 +60,10 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// connection cut, plus a cold-start arm. 27s driven directly on a quiet
 	// laptop; the rest is the runner.
 	'/tests/db/app/autoscale-redis-outage.test.ts': 120_000,
+	// A climb, a whole pool falling idle, and the walk back down.
+	'/tests/db/app/autoscale-release.test.ts': 160_000,
+	// One climb, a daemon taken away, and the climb it makes afterwards.
+	'/tests/db/app/autoscale-supervisor-restart.test.ts': 60_000,
 	// Spawns two processes and asks one question of them.
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
