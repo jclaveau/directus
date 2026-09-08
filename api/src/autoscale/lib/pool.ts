@@ -4,12 +4,74 @@ import pm2 from 'pm2';
 const connect = promisify(pm2.connect.bind(pm2));
 const list = promisify(pm2.list.bind(pm2));
 
+/**
+ * How long the supervisor has to answer one call.
+ *
+ * Its client sends over a socket that reconnects on its own, and a call whose
+ * daemon dies between the send and the reply is neither answered nor failed:
+ * the callback is held against a reply nothing will send. Awaited bare that is
+ * the end of the autoscaler, and a silent one — the loop stops between two log
+ * lines, the pool stays at whatever size the daemon went down at, and the next
+ * thing anyone learns is the incident. `pm2 update`, an OOM and a supervisor
+ * restarted under a running autoscaler all produce exactly that.
+ *
+ * Above pm2's own `listen_timeout`, since `wait_ready` holds a scale open until
+ * the new worker reports ready or that runs out. A deployment that raises
+ * `PM2_LISTEN_TIMEOUT` past this costs a log line and a reissue rather than a
+ * wrong pool: a scale names an absolute size, so the tick after sends the same
+ * one and the supervisor answers the second with the first still in flight.
+ */
+const SUPERVISOR_TIMEOUT_MS = 15_000;
+
 export async function connectToSupervisor(): Promise<void> {
 	await connect();
 }
 
 export function disconnectFromSupervisor(): void {
 	pm2.disconnect();
+}
+
+/** What the race resolves with when the supervisor is the one that lost it. */
+const OUT_OF_TIME = Symbol('out of time');
+
+/**
+ * `call`, failed rather than awaited forever once the supervisor is out of
+ * time.
+ *
+ * A call that fails on its own passes straight through: pm2 refusing a scale
+ * is an answer, and the connection that carried it is fine.
+ */
+async function answeredInTime<T>(what: string, call: Promise<T>): Promise<T> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	const outOfTime = new Promise<typeof OUT_OF_TIME>((resolve) => {
+		timer = setTimeout(() => resolve(OUT_OF_TIME), SUPERVISOR_TIMEOUT_MS);
+	});
+
+	let answer: T | typeof OUT_OF_TIME;
+
+	try {
+		answer = await Promise.race([call, outOfTime]);
+	}
+	finally {
+		clearTimeout(timer);
+	}
+
+	if (answer !== OUT_OF_TIME) {
+		return answer;
+	}
+
+	// The client is still holding the callback the daemon owed it, so this is a
+	// skipped tick only if the tick after it reaches a supervisor at all. The
+	// abandoned call is caught on the way out, so that a reply arriving late is
+	// a result nobody wants rather than an unhandled rejection.
+	call.catch(() => undefined);
+	pm2.disconnect();
+	await connect();
+
+	throw new Error(
+		`the supervisor did not answer ${what} in ${SUPERVISOR_TIMEOUT_MS}ms`,
+	);
 }
 
 /** What one sample of the managed app's workers says about it. */
@@ -81,7 +143,9 @@ export async function readPool(
 	appName: string,
 	warmupSeconds: number,
 ): Promise<PoolReading> {
-	const workers = (await list()).filter((app) => app.name === appName);
+	const workers = (await answeredInTime('a process list', list()))
+		.filter((app) => app.name === appName);
+
 	const matureSince = Date.now() - warmupSeconds * 1000;
 	const onlineWorkers: OnlineWorker[] = [];
 	const restartsByWorker = new Map<number, number>();
@@ -146,7 +210,7 @@ interface ScalableSupervisor {
 export async function scaleTo(appName: string, workers: number): Promise<void> {
 	const supervisor = pm2 as unknown as ScalableSupervisor;
 
-	await new Promise<void>((resolve, reject) => {
+	const scaled = new Promise<void>((resolve, reject) => {
 		supervisor.scale(appName, workers, (error) => {
 			if (error && /same process number/i.test(error.message) === false) {
 				reject(error);
@@ -156,4 +220,6 @@ export async function scaleTo(appName: string, workers: number): Promise<void> {
 			}
 		});
 	});
+
+	await answeredInTime(`a scale to ${workers}`, scaled);
 }
