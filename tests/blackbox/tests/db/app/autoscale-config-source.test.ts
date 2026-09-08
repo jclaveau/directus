@@ -174,5 +174,57 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
 			expect(await neverExceeded(rig, 3, 10_000)).toBe(3);
 		}, 120_000);
+
+		// The second of the three rollback levers, after the strategy: pinning
+		// the pool to a size somebody chose. The pool is at three and the load
+		// clears the threshold, so both directions are witnessed at once — it
+		// comes down to the pin, and stays there rather than climbing back.
+		it('pins the pool where the floor and the ceiling meet', async () => {
+			await redis.set(
+				configKey(namespace),
+				JSON.stringify({
+					scaleCpuThreshold: 5,
+					minWorkers: 2,
+					maxWorkers: 2,
+				}),
+			);
+
+			expect(await poolSize(rig, 2, 60_000)).toBe(2);
+			expect(await neverExceeded(rig, 2, 15_000)).toBe(2);
+		}, 120_000);
+
+		// The last lever, and the bluntest: stop deciding. What it is for is an
+		// autoscaler misreading a pool badly enough that no size it picks can be
+		// trusted — so the test of it is a configuration it would obey, ignored.
+		it('holds the pool where it is while autoscaling is disabled', async () => {
+			await redis.set(
+				configKey(namespace),
+				JSON.stringify({
+					enabled: false,
+					scaleCpuThreshold: 5,
+					minWorkers: 1,
+					maxWorkers: 1,
+				}),
+			);
+
+			expect(await sizesOver(rig, 20_000)).toEqual([2]);
+		}, 90_000);
+
+		// And the freeze is the flag, not the pool having run out of reasons to
+		// move: the same override with the flag turned back on empties it to the
+		// ceiling it was carrying all along.
+		it('acts on that same override once it is enabled again', async () => {
+			await redis.set(
+				configKey(namespace),
+				JSON.stringify({
+					enabled: true,
+					scaleCpuThreshold: 5,
+					minWorkers: 1,
+					maxWorkers: 1,
+				}),
+			);
+
+			expect(await poolSize(rig, 1, 60_000)).toBe(1);
+		}, 90_000);
 	});
 });
