@@ -1421,8 +1421,9 @@ composedChain['student_enrollment']!.scopedCacheFields = ['student'];
 // A read that EMBEDS its ancestor's rows. `holder` is fetched as rows, so its keyed
 // filter pin is not trusted — rows can arrive by a path the filter never keyed — and
 // the ancestor slice has to carry it instead. That slice hangs off `owner_account`,
-// which the filter names by PRIMARY KEY across the relation: classified `independent`,
-// pinned by nothing of its own while still holding the key the slice is built from.
+// which the filter names by PRIMARY KEY across the relation: classified
+// `independent`, pinned by nothing of its own while still holding the key the
+// slice is built from.
 const independentTerminalSchema = new SchemaBuilder()
 	.collection('note', (c) => {
 		c.field('id').id();

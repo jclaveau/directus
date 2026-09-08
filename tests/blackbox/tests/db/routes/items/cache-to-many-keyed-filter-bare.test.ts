@@ -17,9 +17,10 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // A filter on a TO-MANY alias names the roots holding at least one matching child —
-// it never bounds the children the read nests. Here the report is matched because ONE
-// attachment was uploaded by K, and the read nests the K2 attachment beside it. Keying
-// the collection to K would leave the K2 row covered by nothing: a write to it purges
+// it never bounds the children the read nests. Here the report is matched because
+// ONE attachment was uploaded by K, and the read nests the K2 attachment beside
+// it. Keying the collection to K would leave the K2 row covered by nothing: a
+// write to it purges
 // `uploaded_by=K2` and the read serves a stale HIT. Only the bare tag covers this.
 
 const OWNER = 'tm_owner';

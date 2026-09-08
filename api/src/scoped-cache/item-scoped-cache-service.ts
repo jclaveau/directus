@@ -758,7 +758,9 @@ export class ItemScopedCacheService {
 				) !== null;
 			});
 
-			return everyHopIsToOne ? own : [];
+			return everyHopIsToOne
+				? own
+				: [];
 		};
 
 		const pushAncestorSliceOrBare = (collection: string): void => {
@@ -782,7 +784,9 @@ export class ItemScopedCacheService {
 				? ancestorSliceTags
 				: ownKeyedSliceFor(collection);
 
-			tags.push(...(sliceTags.length > 0 ? sliceTags : [{ collection }]));
+			tags.push(...(sliceTags.length > 0
+				? sliceTags
+				: [{ collection }]));
 		};
 
 		for (const collection of taggedCollections) {
