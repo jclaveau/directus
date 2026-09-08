@@ -54,6 +54,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// held for 25 s and a warm-up waited out for 12 s before ramping.
 	'/tests/db/app/autoscale-ramp.test.ts': 230_000,
 	'/tests/db/app/autoscale-config-source.test.ts': 90_000,
+	'/tests/db/app/autoscale-processes.test.ts': 60_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,

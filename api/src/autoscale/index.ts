@@ -1,4 +1,5 @@
 import { useLogger } from '../logger/index.js';
+import { initProcessReports } from '../processes/index.js';
 import { decide } from './lib/decide.js';
 import {
 	connectToSupervisor,
@@ -52,6 +53,22 @@ export async function runAutoscaler(): Promise<void> {
 	const logger = useLogger();
 
 	await connectToSupervisor();
+
+	// The supervisor lists this process like any other, and the processes report
+	// is built on that list — so without a self-report of its own the autoscaler
+	// shows up on the Processes page as a worker that never answers, which is
+	// what that page means by a worker crash-looping too fast to reply. It
+	// describes itself for the same reason every worker does.
+	//
+	// Never a reason not to scale: a pool left unmanaged because its autoscaler
+	// could not introduce itself would be a far worse trade than an unexplained
+	// row on a page.
+	try {
+		await initProcessReports();
+	}
+	catch (error) {
+		logger.warn(error, '[autoscale] could not answer processes queries');
+	}
 
 	const stop = () => {
 		disconnectFromSupervisor();
