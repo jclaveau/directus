@@ -184,6 +184,29 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// libvips costs ~20 MiB of RSS in whatever process loads it, so sharp is reached
+	// through one on-demand loader and nothing else may import it eagerly — a value
+	// import anywhere on the boot path puts it back in every worker.
+	// https://github.com/jclaveau/directus/issues/460
+	{
+		files: ['api/src/**/*.ts'],
+		ignores: ['api/src/services/files/lib/get-sharp-instance.ts'],
+		rules: {
+			'@typescript-eslint/no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: 'sharp',
+							allowTypeImports: true,
+							message: "Await getSharpInstance() from 'files/lib/get-sharp-instance.js' instead.",
+						},
+					],
+				},
+			],
+		},
+	},
+
 	// The two modules that gather them are the only place allowed to reach the package
 	{
 		files: ['**/lodash-es-used.ts', '**/date-fns-used.ts'],
