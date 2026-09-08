@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import { toArray } from '@directus/utils';
 import camelcase from 'camelcase';
-import { set } from 'lodash-es';
+import { set } from './lodash-es-used.js';
 
 export interface GetConfigFromEnvOptions {
 	omitPrefix?: string | string[];

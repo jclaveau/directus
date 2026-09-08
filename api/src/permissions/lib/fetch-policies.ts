@@ -1,4 +1,5 @@
 import type { Accountability, Filter } from '@directus/types';
+import { withoutMeta } from '../../utils/read-meta.js';
 import type { Context } from '../types.js';
 import { filterPoliciesByIp } from '../utils/filter-policies-by-ip.js';
 import { withCache } from '../utils/with-cache.js';
@@ -32,7 +33,7 @@ export async function _fetchPolicies(
 	// If the user is not null, we also want to include the policies attached to the user
 	const filter = user ? { _or: [{ user: { _eq: user } }, roleFilter] } : roleFilter;
 
-	const accessRows = (await accessService.readByQuery({
+	const accessRows = withoutMeta(await accessService.readByQuery({
 		filter,
 		fields: ['policy.id', 'policy.ip_access', 'role'],
 		limit: -1,

@@ -163,7 +163,7 @@ test('A node configured for neither half still says where it is', async () => {
 	expect(message.self.pid).toBe(process.pid);
 });
 
-test('Instance zero is the one that attaches the container-wide list', async () => {
+test('A supervised process attaches the container-wide list', async () => {
 	supervisor.available.mockReturnValue(true);
 	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
 	process.env['NODE_APP_INSTANCE'] = '0';
@@ -174,21 +174,35 @@ test('Instance zero is the one that attaches the container-wide list', async () 
 	expect(message.supervisor).toHaveLength(1);
 });
 
-test('Every other instance answers for itself alone', async () => {
+// The list used to come from instance 0 alone. PM2 keeps counting up as the
+// autoscaler releases and adds workers, so a pool can hold instances 2 and 3 and
+// no 0 — and the elected reporter then never existed, which lost every CPU
+// reading for good on the services that autoscale.
+test('A pool whose instance zero is gone still reports its list', async () => {
 	supervisor.available.mockReturnValue(true);
-	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
-	process.env['NODE_APP_INSTANCE'] = '1';
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 3, name: 'directus' }]);
+	process.env['NODE_APP_INSTANCE'] = '2';
 
 	const message = await query();
 
 	expect(message.supervised).toBe(true);
+	expect(message.supervisor).toHaveLength(1);
+});
+
+test('An unsupervised process has no list to attach', async () => {
+	supervisor.available.mockReturnValue(false);
+	supervisor.read.mockResolvedValue(null);
+	process.env['NODE_APP_INSTANCE'] = '1';
+
+	const message = await query();
+
+	expect(message.supervised).toBe(false);
 	expect(message.supervisor).toBeNull();
-	expect(supervisor.read).not.toHaveBeenCalled();
 });
 
 test('The list is not read where stats were not asked for', async () => {
 	supervisor.available.mockReturnValue(true);
-	process.env['NODE_APP_INSTANCE'] = '0';
+	process.env['NODE_APP_INSTANCE'] = '2';
 	config.details.mockReturnValue(['env']);
 
 	const message = await query();
@@ -206,4 +220,34 @@ test('A node that cannot answer says so in the log, not on the bus', async () =>
 	await vi.waitFor(() => expect(logger.warn).toHaveBeenCalled());
 
 	expect(logger.warn.mock.calls[0]![1]).toContain('Could not report this process');
+});
+
+// A caller narrowing to the env half must not be able to take the supervisor's
+// list with it: without that list the replica reports itself `unavailable` and a
+// process too dead to answer is dropped from the tree entirely — a caller would
+// be manufacturing an outage that is not there.
+test('A request for the env half alone still carries the supervisor', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 3, name: 'directus' }]);
+	config.details.mockReturnValue(['stats', 'env']);
+
+	const message = await query(['env']);
+
+	expect(message.supervisor).toHaveLength(1);
+	expect(message.capacity).not.toBeNull();
+
+	// The half that was narrowed away is the one that goes, and only it.
+	expect(message.self.runtime).toBeNull();
+	expect(message.self.env).not.toBeNull();
+});
+
+test('A node not reporting stats attaches no list, however asked', async () => {
+	supervisor.available.mockReturnValue(true);
+	supervisor.read.mockResolvedValue([{ pid: 1, pmId: 0, name: 'directus' }]);
+	config.details.mockReturnValue(['env']);
+
+	const message = await query(['stats', 'env']);
+
+	expect(message.supervisor).toBeNull();
+	expect(message.capacity).toBeNull();
 });

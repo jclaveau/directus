@@ -1,6 +1,6 @@
 import { parseJSON } from '@directus/utils';
 import type { Knex } from 'knex';
-import { assign } from 'lodash-es';
+import { assign } from '../../utils/lodash-es-used.js';
 
 export async function up(knex: Knex): Promise<void> {
 	const rowsLimit = 50;

@@ -1,5 +1,5 @@
 import type { Knex } from 'knex';
-import { merge } from 'lodash-es';
+import { merge } from '../../utils/lodash-es-used.js';
 
 export async function up(knex: Knex): Promise<void> {
 	await knex('directus_relations')

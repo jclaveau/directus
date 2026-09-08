@@ -299,7 +299,7 @@ describe('resolvePreset', () => {
 describe('maybeExtractFormat', () => {
 	test('get last format', () => {
 		const inputTransformations: Transformation[] = [
-			['toFormat', 'jpg', { quality: 80 }],
+			['toFormat', 'jpeg', { quality: 80 }],
 			['toFormat', 'webp', { quality: 80 }],
 		];
 

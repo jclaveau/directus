@@ -1,7 +1,7 @@
 import type { Column } from '@directus/schema';
 import type { Field, Relation } from '@directus/types';
-import { pick } from 'lodash-es';
 import type { Collection } from '../types/index.js';
+import { pick } from './lodash-es-used.js';
 
 /**
  * Pick certain database vendor specific collection properties that should be compared when performing diff

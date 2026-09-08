@@ -45,6 +45,7 @@ function reply(
 			env: null,
 		},
 		supervisor: null,
+		capacity: null,
 		...overrides,
 	};
 }
@@ -271,4 +272,51 @@ test('Stops listening even when the ask itself fails', async () => {
 
 	await expect(collectProcesses()).rejects.toThrow('redis is gone');
 	expect(bus.unsubscribe).toHaveBeenCalledOnce();
+});
+
+test('A replica carries what its container may use', () => {
+	const capacity = { memoryBytes: 2_147_483_648, cpuCores: 2 };
+
+	const tree = buildProcessesTree([
+		reply({ self: { ...reply().self, pid: 1 } }),
+		reply({ self: { ...reply().self, pid: 2 }, capacity }),
+	]);
+
+	expect(tree[0]?.replicas[0]?.capacity).toEqual(capacity);
+});
+
+// Every process of a replica reads the same cgroup, so the tree holds one copy
+// rather than a per-process repeat of the same two numbers.
+test('A replica no process measured reports no capacity', () => {
+	const tree = buildProcessesTree([reply()]);
+
+	expect(tree[0]?.replicas[0]?.capacity).toBeNull();
+});
+
+test('A caller asking for one half asks the nodes for that alone', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	const report = await collectProcesses(['stats']);
+
+	// The nodes are asked, not filtered afterwards: the env never crosses the bus,
+	// which is where the size of this report actually comes from.
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: ['stats'],
+	});
+
+	expect(report.details).toEqual(['stats']);
+});
+
+test('A caller asking for nothing gets the configured halves', async () => {
+	answerWith((requestId) => [reply({ requestId })]);
+
+	const report = await collectProcesses();
+
+	expect(bus.publish).toHaveBeenCalledWith('processes:query', {
+		requestId: expect.any(String),
+		details: ['stats', 'env'],
+	});
+
+	expect(report.details).toEqual(['stats', 'env']);
 });

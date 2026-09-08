@@ -1,7 +1,7 @@
 import type { Alterations, Item, SchemaOverview } from '@directus/types';
 import { isObject } from '@directus/utils';
 import Joi from 'joi';
-import { cloneDeep } from 'lodash-es';
+import { cloneDeep } from './lodash-es-used.js';
 
 const alterationSchema = Joi.object({
 	create: Joi.array().items(Joi.object().unknown()),

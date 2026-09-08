@@ -1,0 +1,10 @@
+export { default as clone } from 'lodash-es/clone.js';
+export { default as cloneDeep } from 'lodash-es/cloneDeep.js';
+export { default as escapeRegExp } from 'lodash-es/escapeRegExp.js';
+export { default as flatten } from 'lodash-es/flatten.js';
+export { default as get } from 'lodash-es/get.js';
+export { default as isNil } from 'lodash-es/isNil.js';
+export { default as isObjectLike } from 'lodash-es/isObjectLike.js';
+export { default as isPlainObject } from 'lodash-es/isPlainObject.js';
+export { default as merge } from 'lodash-es/merge.js';
+export { default as set } from 'lodash-es/set.js';

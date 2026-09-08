@@ -1,5 +1,5 @@
 import type { Flow, FlowRaw, Operation, OperationRaw } from '@directus/types';
-import { omit } from 'lodash-es';
+import { omit } from './lodash-es-used.js';
 
 export function constructFlowTree(flow: FlowRaw): Flow {
 	const rootOperation = flow.operations.find((operation) => operation.id === flow.operation) ?? null;

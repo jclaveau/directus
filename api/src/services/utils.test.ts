@@ -526,6 +526,7 @@ describe('Services / Utils', () => {
 				enabled: true,
 				budgetAlert: null,
 				bufferLength: 0,
+				droppedEvents: 0,
 			};
 
 			vi.mocked(getCacheStatsState).mockResolvedValue(state);

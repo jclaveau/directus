@@ -79,11 +79,26 @@ export interface ProcessNode {
  */
 export type ProcessSupervisorState = 'pm2' | 'unavailable' | 'none';
 
+/**
+ * What the container a replica runs in is allowed to use. Read from the cgroup
+ * rather than from `os`, which reports the whole machine however small a slice
+ * the container was given — a usage bar against the host's 64 GB says nothing
+ * about a process 200 MB from its own limit.
+ */
+export interface ProcessHostCapacity {
+	/** Bytes the cgroup caps memory at, or the machine's where it is uncapped. */
+	memoryBytes: number | null;
+	/** Cores the CPU quota allows, fractional where the quota is. */
+	cpuCores: number | null;
+}
+
 /** One replica: a container, holding one supervisor and its processes. */
 export interface ProcessReplica {
 	replicaId: string;
 	hostname: string;
 	supervisor: ProcessSupervisorState;
+	/** `null` where no process answered with what its container may use. */
+	capacity: ProcessHostCapacity | null;
 	processes: ProcessNode[];
 }
 

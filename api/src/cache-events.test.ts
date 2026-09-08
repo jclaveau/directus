@@ -57,8 +57,12 @@ vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 const mockSchema = vi.hoisted(() => {
 	return {
 		getTablesSize: vi.fn(async () => null as number | null),
+		// Same parameters as the real helper, so what a call recorded is typed.
 		dropOldestChunk: vi.fn(
-			async () => null as { table: string; upTo: Date } | null,
+			async (
+				_tables: string[],
+				_olderThan: Date,
+			) => null as { table: string; upTo: Date } | null,
 		),
 	};
 });
@@ -401,12 +405,12 @@ describe('long redis keys (hash-identity, no length gate)', () => {
 		await queueCacheDescriptor({
 			cacheKey: 'shorthash',
 			redisKey: longRedisKey,
+			coarse: false,
 			method: 'GET',
 			path: '/x',
 			collection: null,
 			userId: null,
 			query: '{}',
-			url: '/x',
 			bytes: 0,
 			fillMs: 0,
 			scopedCacheTags: [],
@@ -537,7 +541,6 @@ describe('queueCacheDescriptor', () => {
 			collection: 'articles',
 			userId: 'user-1',
 			query: '{"limit":5}',
-			url: '/items/articles?limit=5',
 			bytes: 42,
 			fillMs: 240,
 			scopedCacheTags: [],
@@ -566,7 +569,6 @@ describe('queueCacheDescriptor', () => {
 			collection: null,
 			userId: null,
 			query: '{}',
-			url: '',
 			bytes: 0,
 			fillMs: 0,
 			scopedCacheTags: [],
@@ -1512,10 +1514,10 @@ describe('enforceCacheStatsBudget', () => {
 
 		const [, floor] = mockSchema.dropOldestChunk.mock.calls[0]!;
 
-		expect(Date.now() - (floor as Date).getTime())
+		expect(Date.now() - floor.getTime())
 			.toBeGreaterThanOrEqual(6 * HOUR);
 
-		expect(Date.now() - (floor as Date).getTime())
+		expect(Date.now() - floor.getTime())
 			.toBeLessThan(6 * HOUR + 1000);
 	});
 
@@ -1786,7 +1788,6 @@ describe('capture is gated by the runtime flag', () => {
 			collection: null,
 			userId: null,
 			query: '{}',
-			url: '',
 			bytes: 0,
 			fillMs: 0,
 			scopedCacheTags: [],

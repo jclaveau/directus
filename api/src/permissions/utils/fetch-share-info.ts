@@ -1,4 +1,5 @@
 import type { AbstractServiceOptions } from '@directus/types';
+import { withoutMeta } from '../../utils/read-meta.js';
 import { withCache } from './with-cache.js';
 
 export interface ShareInfo {
@@ -17,7 +18,7 @@ export async function _fetchShareInfo(shareId: string, context: AbstractServiceO
 	const { SharesService } = await import('../../services/shares.js');
 	const sharesService = new SharesService(context);
 
-	return (await sharesService.readOne(shareId, {
+	return withoutMeta(await sharesService.readOne(shareId, {
 		fields: ['collection', 'item', 'role', 'user_created.id', 'user_created.role'],
 	})) as ShareInfo;
 }

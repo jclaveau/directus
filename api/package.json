@@ -217,6 +217,7 @@
 		"@types/nodemailer": "catalog:",
 		"@types/object-hash": "catalog:",
 		"@types/papaparse": "catalog:",
+		"@types/pg": "catalog:",
 		"@types/proxy-addr": "catalog:",
 		"@types/qs": "catalog:",
 		"@types/sanitize-html": "catalog:",

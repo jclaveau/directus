@@ -1,5 +1,5 @@
 import type { FragmentDefinitionNode, SelectionNode } from 'graphql';
-import { flatten } from 'lodash-es';
+import { flatten } from '../../../utils/lodash-es-used.js';
 
 /**
  * Replace all fragments in a selectionset for the actual selection set as defined in the fragment

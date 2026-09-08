@@ -28,7 +28,6 @@ import virtualDefault from '@rollup/plugin-virtual';
 import chokidar, { FSWatcher } from 'chokidar';
 import express, { Router } from 'express';
 import ivm from 'isolated-vm';
-import { clone, debounce, isPlainObject } from 'lodash-es';
 import { readFile, readdir } from 'node:fs/promises';
 import os from 'node:os';
 import { dirname, join } from 'node:path';
@@ -48,6 +47,7 @@ import getModuleDefault from '../utils/get-module-default.js';
 import { getSchema } from '../utils/get-schema.js';
 import { importFileUrl } from '../utils/import-file-url.js';
 import { JobQueue } from '../utils/job-queue.js';
+import { clone, debounce, isPlainObject } from '../utils/lodash-es-used.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import { getExtensionsPath } from './lib/get-extensions-path.js';
 import { getExtensionsSettings } from './lib/get-extensions-settings.js';
@@ -84,6 +84,14 @@ export class ExtensionManager {
 	 * Whether or not the extensions have been read from disk and registered into the system
 	 */
 	private isLoaded = false;
+
+	/**
+	 * Whether a load has already happened in this process. A reload has to bypass
+	 * the ESM module cache to pick a changed file up, but the very first load has
+	 * nothing to bypass — and the cache-busting query it would use also makes
+	 * Node's own compile cache miss every time.
+	 */
+	private hasLoadedBefore = false;
 
 	// folder:Extension
 	private localExtensions: Map<string, Extension> = new Map();
@@ -286,6 +294,8 @@ export class ExtensionManager {
 		}
 
 		await Promise.all([this.registerInternalOperations(), this.registerApiExtensions()]);
+
+		this.hasLoadedBefore = true;
 
 		if (env['SERVE_APP']) {
 			await this.generateExtensionBundle();
@@ -655,7 +665,7 @@ export class ExtensionManager {
 				const hookPath = path.resolve(hook.path, hook.entrypoint);
 
 				const hookInstance: HookConfig | { default: HookConfig } = await importFileUrl(hookPath, import.meta.url, {
-					fresh: true,
+					fresh: this.hasLoadedBefore,
 				});
 
 				const config = getModuleDefault(hookInstance);
@@ -684,7 +694,7 @@ export class ExtensionManager {
 					endpointPath,
 					import.meta.url,
 					{
-						fresh: true,
+						fresh: this.hasLoadedBefore,
 					},
 				);
 
@@ -714,7 +724,7 @@ export class ExtensionManager {
 					operationPath,
 					import.meta.url,
 					{
-						fresh: true,
+						fresh: this.hasLoadedBefore,
 					},
 				);
 
@@ -754,7 +764,7 @@ export class ExtensionManager {
 				bundlePath,
 				import.meta.url,
 				{
-					fresh: true,
+					fresh: this.hasLoadedBefore,
 				},
 			);
 

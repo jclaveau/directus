@@ -151,6 +151,45 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// Barrels on the server's boot path
+	{
+		files: [
+			'api/src/**/*.ts',
+			'packages/{env,extensions,schema-builder,utils}/**/*.ts',
+		],
+		rules: {
+			// Naming the package resolves all of it: lodash-es is 640 modules and
+			// date-fns 304, and the API loads both before it answers anything. Each
+			// package gathers what it calls in a `*-used.ts`, so the set stays visible
+			// and stays small. https://github.com/jclaveau/directus/issues/433
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
+						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
+					],
+					patterns: [
+						{
+							group: ['lodash-es/*'],
+							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
+						},
+						{
+							group: ['date-fns/*'],
+							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
+						},
+					],
+				},
+			],
+		},
+	},
+
+	// The two modules that gather them are the only place allowed to reach the package
+	{
+		files: ['**/lodash-es-used.ts', '**/date-fns-used.ts'],
+		rules: { 'no-restricted-imports': 'off' },
+	},
+
 	// Test files
 	{
 		files: ['**/*.test.ts'],

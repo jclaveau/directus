@@ -3,6 +3,7 @@ import { beforeEach, test, vi, expect } from 'vitest';
 import { PoliciesService } from '../../services/policies.js';
 import { UsersService } from '../../services/users.js';
 import { RolesService } from '../../services/roles.js';
+import { withMeta } from '../../utils/read-meta.js';
 import type { Context } from '../types.js';
 import { fetchDynamicVariableData } from './fetch-dynamic-variable-data.js';
 import type { DynamicVariableContext } from './extract-required-dynamic-variable-context.js';
@@ -27,7 +28,7 @@ beforeEach(() => {
 });
 
 test('Returns filter context for current user', async () => {
-	const user = {};
+	const user = withMeta({}, { scopedCacheTags: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(['email']),
@@ -52,7 +53,7 @@ test('Returns filter context for current user', async () => {
 });
 
 test('Returns filter context for current role', async () => {
-	const role = {};
+	const role = withMeta({}, { scopedCacheTags: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),
@@ -77,7 +78,7 @@ test('Returns filter context for current role', async () => {
 });
 
 test('Returns filter context for current policies', async () => {
-	const policies: any[] = [];
+	const policies = withMeta([] as any[], { scopedCacheTags: [] });
 
 	const dynamicVariableContext: DynamicVariableContext = {
 		$CURRENT_USER: new Set(),

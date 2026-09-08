@@ -1,0 +1,9 @@
+{
+	"extends": "@directus/tsconfig/node22",
+	"compilerOptions": {
+		"isolatedDeclarations": false,
+		"verbatimModuleSyntax": false,
+		"moduleResolution": "bundler"
+	},
+	"include": ["**/*.ts"]
+}

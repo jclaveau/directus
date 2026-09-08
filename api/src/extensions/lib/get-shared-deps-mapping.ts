@@ -1,11 +1,11 @@
 import { useEnv } from '@directus/env';
 import { resolvePackage } from '@directus/utils/node';
-import { escapeRegExp } from 'lodash-es';
 import { readdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import path from 'path';
 import { useLogger } from '../../logger/index.js';
+import { escapeRegExp } from '../../utils/lodash-es-used.js';
 import { Url } from '../../utils/url.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

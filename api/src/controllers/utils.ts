@@ -10,7 +10,10 @@ import {
 	pgbouncerReportEnabled,
 	requestedPgBouncerDetails,
 } from '../pgbouncer/index.js';
-import { processesReportEnabled } from '../processes/index.js';
+import {
+	processesReportEnabled,
+	requestedProcessDetails,
+} from '../processes/index.js';
 import { ExportService, ImportService } from '../services/import-export.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
@@ -412,9 +415,11 @@ if (processesReportEnabled()) {
 				schema: req.schema,
 			});
 
+			const details = requestedProcessDetails(req.query['details']);
+
 			// Live supervisor state; a cached copy would be worse than none.
 			res.locals['cache'] = false;
-			res.locals['payload'] = { data: await service.readProcesses() };
+			res.locals['payload'] = { data: await service.readProcesses(details) };
 
 			return next();
 		}),

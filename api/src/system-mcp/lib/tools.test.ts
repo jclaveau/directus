@@ -45,13 +45,14 @@ vi.mock('./config.js', () => {
 });
 
 const processes = vi.hoisted(() => {
-	return { details: vi.fn(), reportEnabled: vi.fn() };
+	return { details: vi.fn(), reportEnabled: vi.fn(), requested: vi.fn() };
 });
 
 vi.mock('../../processes/lib/processes-config.js', () => {
 	return {
 		reportedProcessDetails: processes.details,
 		processesReportEnabled: processes.reportEnabled,
+		requestedProcessDetails: processes.requested,
 	};
 });
 
@@ -150,7 +151,7 @@ test('Each windowed read documents the default it actually takes', () => {
 		allSystemMcpTools()
 			.filter((tool) => 'window' in tool.inputSchema.properties)
 			.map((tool) => {
-				return [tool.name, tool.inputSchema.properties['window'].description];
+				return [tool.name, tool.inputSchema.properties['window']!.description];
 			}),
 	);
 
@@ -450,6 +451,7 @@ test('Every declared output property is one the tool actually answers', () => {
 						{
 							replicaId: 'replica-a',
 							hostname: 'host-a',
+							capacity: { memoryBytes: 2_147_483_648, cpuCores: 2 },
 							supervisor: 'pm2',
 							processes: [
 								{
@@ -498,6 +500,7 @@ test('Every declared output property is one the tool actually answers', () => {
 			{
 				key: 'hash',
 				redisKey: 'scalabus:key',
+				purges: 0,
 				coarse: false,
 				method: 'GET',
 				path: '/items/articles',
@@ -569,6 +572,12 @@ test('Every declared output property is one the tool actually answers', () => {
 					misses: 3,
 					fills: 4,
 					anomalies: 5,
+					purges: 0,
+					coarsePurges: 0,
+					purgedEntries: 0,
+					purgeP50: null,
+					purgeP95: null,
+					purgeP99: null,
 					ttlMs: 6,
 					effectiveTtlMs: 7,
 					hitP50: 1, hitP95: 2, hitP99: 3,
@@ -654,4 +663,47 @@ test('The process tool describes the halves this deployment reports', () => {
 		.description;
 
 	expect(neither).toContain('Only the identity of each process is reported');
+});
+
+test('list_processes passes the halves asked for down to the service', async () => {
+	service.readProcesses.mockResolvedValue({ services: [] });
+	processes.requested.mockReturnValue(['stats']);
+
+	await findSystemMcpTool('list_processes')!.run({ details: ['stats'] }, context);
+
+	// Through the narrowing parser, never straight from the arguments: an agent
+	// must not be able to ask for a half the deployment does not report.
+	expect(processes.requested).toHaveBeenCalledWith(['stats']);
+	expect(service.readProcesses).toHaveBeenCalledWith(['stats']);
+});
+
+test('list_processes with no argument still asks the parser', async () => {
+	service.readProcesses.mockResolvedValue({ services: [] });
+	processes.requested.mockReturnValue(['stats', 'env']);
+
+	await findSystemMcpTool('list_processes')!.run({}, context);
+
+	expect(processes.requested).toHaveBeenCalledWith(undefined);
+	expect(service.readProcesses).toHaveBeenCalledWith(['stats', 'env']);
+});
+
+// A deployment reporting one half advertising both invites a call that answers
+// with strictly less than asking for nothing at all, and says nothing about why.
+test('list_processes advertises only the halves this node reports', () => {
+	processes.details.mockReturnValue(['stats']);
+
+	const details = findSystemMcpTool('list_processes')!
+		.inputSchema
+		.properties['details'];
+
+	expect(details?.['items']).toEqual({ type: 'string', enum: ['stats'] });
+});
+
+test('list_processes advertises the halves as an enum, not free text', () => {
+	const details = findSystemMcpTool('list_processes')!
+		.inputSchema
+		.properties['details'];
+
+	// An enum, so a model cannot invent a third half and have it silently ignored.
+	expect(details?.['items']).toEqual({ type: 'string', enum: ['stats', 'env'] });
 });

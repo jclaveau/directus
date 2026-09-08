@@ -24,7 +24,9 @@ export interface SystemMcpTool {
 	description: string;
 	inputSchema: {
 		type: 'object';
-		properties: Record<string, unknown>;
+		// Every input a tool takes carries the prose a model reads to decide what
+		// to pass; anything else about the property is open.
+		properties: Record<string, { description: string } & Record<string, unknown>>;
 		required?: string[];
 	};
 	/**

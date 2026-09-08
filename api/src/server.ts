@@ -7,7 +7,6 @@ import type { Request } from 'express';
 import type { ListenOptions } from 'net';
 import * as http from 'http';
 import * as https from 'https';
-import { once } from 'lodash-es';
 import qs from 'qs';
 import url from 'url';
 import createApp from './app.js';
@@ -24,6 +23,7 @@ import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
 import { reportUnhandledRejection } from './utils/report-unhandled-rejection.js';
 import { getAddress } from './utils/get-address.js';
+import { once } from './utils/lodash-es-used.js';
 import {
 	createLogsController,
 	createSubscriptionController,

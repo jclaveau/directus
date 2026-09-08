@@ -13,6 +13,7 @@ import { systemMcpToolGroups } from './config.js';
 import {
 	processesReportEnabled,
 	reportedProcessDetails,
+	requestedProcessDetails,
 } from '../../processes/lib/processes-config.js';
 
 /**
@@ -102,7 +103,23 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			group: 'processes',
 			title: 'List running processes',
 			description: processesDescription(),
-			inputSchema: { type: 'object', properties: {} },
+			inputSchema: {
+				type: 'object',
+				properties: {
+					details: {
+						type: 'array',
+						description: 'Which halves to report: "stats", "env", or both.'
+							+ ' Defaults to everything this deployment reports. Asking for'
+							+ ' "stats" alone leaves out the resolved environment, which is'
+							+ ' most of the answer by size and is worth reading only when'
+							+ ' comparing configuration between replicas.',
+						// The halves this deployment reports, not both by rote: an enum
+						// naming one it does not would invite a call that answers with
+						// strictly less than asking for nothing at all.
+						items: { type: 'string', enum: reportedProcessDetails() },
+					},
+				},
+			},
 			outputSchema: {
 				type: 'object',
 				properties: {
@@ -125,7 +142,13 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				},
 			},
 			annotations: READ_ONLY,
-			run: async (_args, context) => utils(context).readProcesses(),
+			run: async (args, context) => {
+				// The deployment's own list still bounds this: a node configured
+				// without env never reports env, however it was asked.
+				const details = requestedProcessDetails(args['details']);
+
+				return utils(context).readProcesses(details);
+			},
 		}),
 		defineSystemMcpTool({
 			name: 'list_cache_entries',

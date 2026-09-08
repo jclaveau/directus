@@ -2,7 +2,6 @@ import { useEnv } from '@directus/env';
 import formatTitle from '@directus/format-title';
 import fse from 'fs-extra';
 import type { Knex } from 'knex';
-import { orderBy } from 'lodash-es';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import path from 'path';
@@ -12,6 +11,7 @@ import type { DatabaseClient } from '@directus/types';
 import type { Migration, MigrationTransactionScope } from '../../types/index.js';
 import { getDatabaseClient } from '../index.js';
 import getModuleDefault from '../../utils/get-module-default.js';
+import { orderBy } from '../../utils/lodash-es-used.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

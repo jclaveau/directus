@@ -1,5 +1,6 @@
 import type {
 	ProcessDetail,
+	ProcessHostCapacity,
 	ProcessRuntimeStats,
 	ResolvedEnvVariable,
 } from '@directus/types';
@@ -36,9 +37,12 @@ export interface ProcessesReportMessage {
 	supervised: boolean;
 	self: ReportedProcess;
 	/**
-	 * The whole container's `pm2 list`, attached by one process per replica so N
-	 * workers don't each publish the same list. `null` from every other process,
-	 * and from an unsupervised one.
+	 * The whole container's `pm2 list`. Every supervised process attaches it and
+	 * the collector keeps one copy per replica — electing a single reporter meant
+	 * losing the list entirely once its instance was recycled. `null` from an
+	 * unsupervised process, and where stats were not asked for.
 	 */
 	supervisor: SupervisedProcess[] | null;
+	/** What this process's container may use, for the totals to be shares of. */
+	capacity: ProcessHostCapacity | null;
 }

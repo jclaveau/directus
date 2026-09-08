@@ -40,9 +40,6 @@ export async function reportCacheAnomaly(
 		query: isGraphQl
 			? JSON.stringify(getGraphqlQueryAndVariables(req))
 			: JSON.stringify(req.sanitizedQuery ?? {}),
-		url: isGraphQl
-			? ''
-			: req.originalUrl,
 		bytes: 0,
 		fillMs: 0,
 		// A locator is written where the read never got far enough to resolve a

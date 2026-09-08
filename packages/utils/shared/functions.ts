@@ -1,5 +1,5 @@
 import type { FieldFunction } from '@directus/types';
-import { getDate, getDay, getWeek, parseISO } from 'date-fns';
+import { getDate, getDay, getWeek, parseISO } from './date-fns-used.js';
 
 export const functions: Record<FieldFunction, (val: any) => any> = {
 	year,

@@ -391,6 +391,16 @@ export class ItemScopedCacheService {
 
 			// A flat field is always projected, so 'coarse' only nulls on a caller
 			// feeding unprojected rows — never here; propagate it regardless.
+			//
+			// Which leaves this return, and the `=== null` arms in the three
+			// callers, unreachable today. They stay on purpose:
+			// - null is the fail-safe: scope unresolvable, so purge coarsely.
+			// - it is unreachable only because the select above projects exactly
+			//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
+			//   two lists together.
+			// - so a later edit to either side makes it reachable again, and
+			//   without the arms the purge would silently narrow rather than
+			//   widen: a stale cache instead of a slow one.
 			if (flatTags === null) {
 				return null;
 			}
@@ -470,6 +480,16 @@ export class ItemScopedCacheService {
 		// so its global reads stay), purging only the tags a hook declared.
 		{ includeCollectionTag = true }: { includeCollectionTag?: boolean } = {},
 	): Promise<ScopedCacheTag[] | null> {
+		// Callers reach here through `shouldClearCache`, which already rules out a
+		// null cache — but it narrows `this.cache`, and a mutable field does not
+		// carry that narrowing across the awaits below. Read it once. With no cache
+		// there is nothing to purge either way.
+		const cache = this.cache;
+
+		if (cache === null) {
+			return [];
+		}
+
 		const context = this.purgeContext();
 		const hookTags = collector?.tags ?? [];
 
@@ -493,7 +513,7 @@ export class ItemScopedCacheService {
 
 			if (includeCollectionTag) {
 				return purgeScopedCache(
-					this.cache,
+					cache,
 					this.collection,
 					ownAndHookTags,
 					context,
@@ -501,7 +521,7 @@ export class ItemScopedCacheService {
 			}
 
 			return purgeScopedCache(
-				this.cache,
+				cache,
 				this.collection,
 				ownAndHookTags,
 				context,
@@ -519,7 +539,7 @@ export class ItemScopedCacheService {
 
 		if (ownTags !== null) {
 			purgedTagSets.push(await purgeScopedCache(
-				this.cache,
+				cache,
 				this.collection,
 				[...ownTags, ...hookTags],
 				context,
@@ -530,7 +550,7 @@ export class ItemScopedCacheService {
 			// A `null` tag set means this collection's own slices are unresolvable →
 			// coarse whole-collection purge (bare tag + every slice).
 			purgedTagSets.push(await purgeScopedCache(
-				this.cache,
+				cache,
 				this.collection,
 				null,
 				context,
@@ -543,7 +563,7 @@ export class ItemScopedCacheService {
 			// collection's bare tag (else it's purged twice and doubled in the header).
 			if (hookTags.length > 0) {
 				purgedTagSets.push(await purgeScopedCache(
-					this.cache,
+					cache,
 					this.collection,
 					hookTags,
 					context,
@@ -559,7 +579,7 @@ export class ItemScopedCacheService {
 		purgedTagSets.push(...await Promise.all(
 			otherCollections.map((changedCollection) => {
 				return purgeScopedCache(
-					this.cache,
+					cache,
 					changedCollection,
 					null,
 					context,

@@ -1,5 +1,5 @@
-import { isString } from 'lodash-es';
 import type { Knex } from 'knex';
+import { isString } from '../../../../utils/lodash-es-used.js';
 import type { Sql } from '../types.js';
 
 export type PrepQueryParamsOptions = {

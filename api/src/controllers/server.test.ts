@@ -30,7 +30,7 @@ async function callInfo() {
 	// router.get('/info', asyncHandler(fn), respond) registers one Route layer
 	// whose own stack holds [handler, respond]; drive the bare handler here.
 	const layer = router.stack.find((l: any) => l.route?.path === '/info');
-	await layer!.route.stack[0].handle(req, res, next);
+	await layer!.route!.stack[0]!.handle(req, res, next);
 
 	return { res, next };
 }

@@ -1,4 +1,5 @@
 import { ForbiddenError } from '@directus/errors';
+import type { Response } from 'express';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { withMeta } from '../utils/read-meta.js';
 
@@ -74,7 +75,7 @@ function handlerFor(method: string, path: string) {
 		(l: any) => l.route && l.route.path === path && l.route.methods[method],
 	);
 
-	const sub = layer!.route.stack;
+	const sub = layer!.route!.stack;
 	// collectionExists / validateBatch / mergeContentVersions / respond are stubbed vi.fn()s; only the
 	// asyncHandler-wrapped route handler stringifies to the `Promise.resolve(fn(...))` wrapper.
 	return sub.find((s: any) => /Promise\.resolve\(fn/.test(s.handle.toString()))!.handle;
@@ -152,7 +153,7 @@ describe('items controller', () => {
 			readOne.mockRejectedValueOnce(new ForbiddenError());
 			const req = makeReq({ body: { a: 1 } });
 			const next = vi.fn();
-			await handler()(req, { locals: {} }, next);
+			await handler()(req, { locals: {} } as unknown as Response, next);
 			expect(next).toHaveBeenCalledWith();
 		});
 
@@ -305,7 +306,7 @@ describe('items controller', () => {
 			readMany.mockRejectedValueOnce(new ForbiddenError());
 			const req = makeReq({ body: [{ a: 1 }] });
 			const next = vi.fn();
-			await handler()(req, { locals: {} }, next);
+			await handler()(req, { locals: {} } as unknown as Response, next);
 			expect(next).toHaveBeenCalledWith();
 		});
 
@@ -348,7 +349,7 @@ describe('items controller', () => {
 			readOne.mockRejectedValueOnce(new ForbiddenError());
 			const req = makeReq({ body: { x: 1 } });
 			const next = vi.fn();
-			await handler()(req, { locals: {} }, next);
+			await handler()(req, { locals: {} } as unknown as Response, next);
 			expect(next).toHaveBeenCalledWith();
 		});
 
@@ -374,7 +375,7 @@ describe('items controller', () => {
 			deleteMany.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: [1, 2] });
 			const next = vi.fn();
-			await handler()(req, undefined, next);
+			await handler()(req, undefined as unknown as Response, next);
 			expect(deleteMany).toHaveBeenCalledWith([1, 2], { allowFilterCancel: true });
 			expect(next).toHaveBeenCalledOnce();
 		});
@@ -382,14 +383,14 @@ describe('items controller', () => {
 		test('deleteMany via body.keys', async () => {
 			deleteMany.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: { keys: [3] } });
-			await handler()(req, undefined, vi.fn());
+			await handler()(req, undefined as unknown as Response, vi.fn());
 			expect(deleteMany).toHaveBeenCalledWith([3], { allowFilterCancel: true });
 		});
 
 		test('deleteByQuery default branch', async () => {
 			deleteByQuery.mockResolvedValueOnce(undefined);
 			const req = makeReq({ body: { query: {} } });
-			await handler()(req, undefined, vi.fn());
+			await handler()(req, undefined as unknown as Response, vi.fn());
 			expect(deleteByQuery).toHaveBeenCalledOnce();
 		});
 	});
@@ -406,7 +407,7 @@ describe('items controller', () => {
 			deleteOne.mockResolvedValueOnce(undefined);
 			const req = makeReq();
 			const next = vi.fn();
-			await handler()(req, undefined, next);
+			await handler()(req, undefined as unknown as Response, next);
 			expect(deleteOne).toHaveBeenCalledWith('1', { allowFilterCancel: true });
 			expect(next).toHaveBeenCalledOnce();
 		});

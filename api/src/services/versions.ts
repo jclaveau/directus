@@ -1,4 +1,5 @@
 import { Action } from '@directus/constants';
+import { withoutMeta } from '../utils/read-meta.js';
 import { ForbiddenError, InvalidPayloadError, UnprocessableContentError } from '@directus/errors';
 import type {
 	AbstractServiceOptions,
@@ -10,12 +11,12 @@ import type {
 	Query,
 } from '@directus/types';
 import Joi from 'joi';
-import { assign, pick } from 'lodash-es';
 import objectHash from 'object-hash';
 import { getCache } from '../cache.js';
 import emitter from '../emitter.js';
 import { purgeScopedCache } from '../scoped-cache.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import { assign, pick } from '../utils/lodash-es-used.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { ActivityService } from './activity.js';
 import { ItemsService } from './items.js';
@@ -276,7 +277,9 @@ export class VersionsService extends ItemsService {
 	}
 
 	async promote(version: PrimaryKey, mainHash: string, fields?: string[]) {
-		const { collection, item, delta } = (await this.readOne(version)) as ContentVersion;
+		const { collection, item, delta } = withoutMeta(
+			await this.readOne(version),
+		) as ContentVersion;
 
 		// will throw an error if the accountability does not have permission to update the item
 		if (this.accountability) {

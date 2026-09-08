@@ -6,7 +6,6 @@ import type { DatabaseClient } from '@directus/types';
 import fse from 'fs-extra';
 import type { Knex } from 'knex';
 import knex from 'knex';
-import { isArray, merge, toArray } from 'lodash-es';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import path from 'path';
@@ -14,6 +13,7 @@ import { performance } from 'perf_hooks';
 import { getExtensionsPath } from '../extensions/lib/get-extensions-path.js';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
+import { isArray, merge, toArray } from '../utils/lodash-es-used.js';
 import { nodeId } from '../utils/node-id.js';
 import { validateEnv } from '../utils/validate-env.js';
 import {

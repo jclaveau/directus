@@ -22,7 +22,7 @@ import { UserIntegrityCheckFlag } from '@directus/types';
 import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { assign, clone, cloneDeep, isPlainObject, omit, pick, without } from 'lodash-es';
+import { randomUUID } from 'node:crypto';
 import { getCache } from '../cache.js';
 import {
 	createScopedCacheCollector,
@@ -55,6 +55,16 @@ import { validateAccess } from '../permissions/modules/validate-access/validate-
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
 import { transaction } from '../utils/transaction.js';
+import { isPrimaryKey } from '../utils/is-primary-key.js';
+import {
+	assign,
+	clone,
+	cloneDeep,
+	isPlainObject,
+	omit,
+	pick,
+	without,
+} from '../utils/lodash-es-used.js';
 import { validateKeys } from '../utils/validate-keys.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
 import { PayloadService } from './payload.js';
@@ -978,6 +988,13 @@ implements AbstractService<Item> {
 			}
 		}
 
+		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
+		// listener's return verbatim, and the cast above asserts rather than checks)
+		// makes this throw `Object.defineProperty called on non-object`. That is a
+		// 500 raised inside whatever transaction was reading — a write snapshotting
+		// its rows for revisions takes the whole update down with it. The write path
+		// validates its own filter returns (`payloadAfterHooks === null`); this one
+		// does not. Covered as it stands by read-hook-null.test.ts.
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
 			scopedCacheUnautopurgeableTags,
@@ -990,7 +1007,11 @@ implements AbstractService<Item> {
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	async readOne(key: PrimaryKey, query: Query = {}, opts?: QueryOptions): Promise<WithMeta<Item>> {
+	async readOne(
+		key: PrimaryKey,
+		query: Query = {},
+		opts?: QueryOptions,
+	): Promise<WithMeta<Item>> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, key);
 
@@ -1015,7 +1036,11 @@ implements AbstractService<Item> {
 	 *
 	 * Uses `this.readByQuery` under the hood.
 	 */
-	async readMany(keys: PrimaryKey[], query: Query = {}, opts?: QueryOptions): Promise<WithMeta<Item[]>> {
+	async readMany(
+		keys: PrimaryKey[],
+		query: Query = {},
+		opts?: QueryOptions,
+	): Promise<WithMeta<Item[]>> {
 		const primaryKeyField = this.schema.collections[this.collection]!.primary;
 		validateKeys(this.schema, this.collection, primaryKeyField, keys);
 
@@ -1075,9 +1100,13 @@ implements AbstractService<Item> {
 
 		// Pre-update scope values for every row this batch touches (old ∪ new on purge,
 		// like updateMany).
-		const batchKeys = data
-			.map((item) => item[primaryKeyField])
-			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
+		const batchKeys = data.flatMap((item) => {
+			const key = item[primaryKeyField];
+
+			return isPrimaryKey(key)
+				? [key]
+				: [];
+		});
 
 		const oldScopedCacheTags = await this.scopedCache.snapshot(batchKeys);
 
@@ -1446,6 +1475,11 @@ implements AbstractService<Item> {
 					// with `keys` by position files a revision under one item
 					// holding another item's data, which `revert` would then
 					// write straight back onto the wrong row.
+					//
+					// `snapshots` is always an array: a read hook can return
+					// anything, but `withMeta` rejects a non-object before
+					// `readByQuery` returns (see the TODO there), so this guard
+					// and the ternary below it cannot currently fire.
 					const snapshotJsonByKey = new Map<string, string>();
 
 					if (Array.isArray(snapshots)) {
@@ -1590,9 +1624,13 @@ implements AbstractService<Item> {
 		// Old scope values for the update subset — any payload carrying an existing key. A
 		// pure-insert payload has no key (or points at no row yet), so it contributes nothing
 		// here; its new slice is picked up from the committed rows below (old ∪ new).
-		const inputKeys = payloads
-			.map((payload) => payload[primaryKeyField])
-			.filter((key): key is PrimaryKey => key !== undefined && key !== null);
+		const inputKeys = payloads.flatMap((payload) => {
+			const key = payload[primaryKeyField];
+
+			return isPrimaryKey(key)
+				? [key]
+				: [];
+		});
 
 		const oldScopedCacheTags = await this.scopedCache.snapshot(inputKeys);
 

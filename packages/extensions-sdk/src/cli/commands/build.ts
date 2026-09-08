@@ -33,6 +33,19 @@ import generateBundleEntrypoint from './helpers/generate-bundle-entrypoint.js';
 import loadConfig from './helpers/load-config.js';
 import { validateSplitEntrypointOption } from './helpers/validate-cli-options.js';
 
+/**
+ * Packages that only mean something in a browser. An api entrypoint reaching one
+ * drags the whole front-end into a bundle every worker parses at boot — one
+ * extension in the wild grew a 13.6 MB api entry out of two such imports, and
+ * nothing said so at build time.
+ */
+export const APP_ONLY_PACKAGES = [
+	// the sdk is the one shared dep an api entrypoint is meant to reach
+	...APP_SHARED_DEPS.filter((dep) => dep !== '@directus/extensions-sdk'),
+	'@directus/themes',
+	'@directus/composables',
+];
+
 // Workaround for https://github.com/rollup/plugins/issues/1329
 const virtual = virtualDefault as unknown as typeof virtualDefault.default;
 const terser = terserDefault as unknown as typeof terserDefault.default;
@@ -41,6 +54,8 @@ type BuildOptions = {
 	type?: string;
 	input?: string;
 	output?: string;
+	external?: string;
+	preserveModules?: boolean;
 	watch?: boolean;
 	minify?: boolean;
 	sourcemap?: boolean;
@@ -50,6 +65,12 @@ export default async function build(options: BuildOptions): Promise<void> {
 	const watch = options.watch ?? false;
 	const sourcemap = options.sourcemap ?? false;
 	const minify = options.minify ?? false;
+	const preserveModules = options.preserveModules ?? false;
+
+	const external = (options.external ?? '')
+		.split(',')
+		.map((dep) => dep.trim())
+		.filter((dep) => dep.length > 0);
 
 	if (!options.type && !options.input && !options.output) {
 		const packagePath = path.resolve('package.json');
@@ -83,6 +104,23 @@ export default async function build(options: BuildOptions): Promise<void> {
 
 		const extensionOptions = extensionManifest[EXTENSION_PKG_KEY];
 
+		// the sandbox reads the entrypoint as a string and rejects every import but
+		// "directus:api", so a spread-out extension can never be loaded there
+		const sandboxed =
+			'sandbox' in extensionOptions && extensionOptions.sandbox?.enabled;
+
+		if (preserveModules && sandboxed) {
+			log(
+				`${chalk.blue('--preserve-modules')} cannot be used by a sandboxed`
+				+ ` extension:`,
+				'error',
+			);
+
+			log(`the sandbox only ever loads the entrypoint itself.`, 'error');
+
+			process.exit(1);
+		}
+
 		const format = extensionManifest.type === 'module' ? 'esm' : 'cjs';
 
 		if (extensionOptions.type === 'bundle') {
@@ -91,6 +129,8 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: extensionOptions.path.app,
 				outputApi: extensionOptions.path.api,
 				format,
+				external,
+				preserveModules,
 				watch,
 				sourcemap,
 				minify,
@@ -102,6 +142,8 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: extensionOptions.path.app,
 				outputApi: extensionOptions.path.api,
 				format,
+				external,
+				preserveModules,
 				watch,
 				sourcemap,
 				minify,
@@ -112,6 +154,8 @@ export default async function build(options: BuildOptions): Promise<void> {
 				input: extensionOptions.source,
 				output: extensionOptions.path,
 				format,
+				external,
+				preserveModules,
 				watch,
 				sourcemap,
 				minify,
@@ -183,6 +227,8 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: splitOutput.app,
 				outputApi: splitOutput.api,
 				format: 'esm',
+				external,
+				preserveModules,
 				watch,
 				sourcemap,
 				minify,
@@ -219,6 +265,8 @@ export default async function build(options: BuildOptions): Promise<void> {
 				outputApp: splitOutput.app,
 				outputApi: splitOutput.api,
 				format: 'esm',
+				external,
+				preserveModules,
 				watch,
 				sourcemap,
 				minify,
@@ -229,6 +277,8 @@ export default async function build(options: BuildOptions): Promise<void> {
 				input,
 				output,
 				format: 'esm',
+				external,
+				preserveModules,
 				watch,
 				sourcemap,
 				minify,
@@ -242,6 +292,8 @@ async function buildAppOrApiExtension({
 	input,
 	output,
 	format,
+	external,
+	preserveModules,
 	watch,
 	sourcemap,
 	minify,
@@ -250,6 +302,8 @@ async function buildAppOrApiExtension({
 	input: string;
 	output: string;
 	format: Format;
+	external: string[];
+	preserveModules: boolean;
 	watch: boolean;
 	sourcemap: boolean;
 	minify: boolean;
@@ -267,9 +321,27 @@ async function buildAppOrApiExtension({
 	const config = await loadConfig();
 
 	const mode = isIn(type, APP_EXTENSION_TYPES) ? 'browser' : 'node';
+	const externalCount = external.length + (config.external?.length ?? 0);
 
-	const inputOptions = getRollupOptions({ mode, input, minify, config });
-	const outputOptions = getRollupOutputOptions({ mode, output, format, sourcemap });
+	// a browser resolves nothing but the host's shared deps, and this extension has
+	// no api entrypoint to carry the rest, so the list would go nowhere
+	if (mode === 'browser' && externalCount > 0) {
+		log(
+			`${chalk.blue('--external')} is ignored for a ${chalk.bold(type)} extension:`
+			+ ` it only has an app entrypoint.`,
+			'warn',
+		);
+	}
+
+	const inputOptions = getRollupOptions({ mode, input, minify, external, config });
+
+	const outputOptions = getRollupOutputOptions({
+		mode,
+		output,
+		format,
+		sourcemap,
+		preserveModules,
+	});
 
 	if (watch) {
 		await watchExtension({ inputOptions, outputOptions });
@@ -284,6 +356,8 @@ async function buildHybridExtension({
 	outputApp,
 	outputApi,
 	format,
+	external,
+	preserveModules,
 	watch,
 	sourcemap,
 	minify,
@@ -293,6 +367,8 @@ async function buildHybridExtension({
 	outputApp: string;
 	outputApi: string;
 	format: Format;
+	external: string[];
+	preserveModules: boolean;
 	watch: boolean;
 	sourcemap: boolean;
 	minify: boolean;
@@ -323,6 +399,7 @@ async function buildHybridExtension({
 		mode: 'browser',
 		input: inputApp,
 		minify,
+		external,
 		config,
 	});
 
@@ -330,11 +407,25 @@ async function buildHybridExtension({
 		mode: 'node',
 		input: inputApi,
 		minify,
+		external,
 		config,
 	});
 
-	const outputOptionsApp = getRollupOutputOptions({ mode: 'browser', output: outputApp, format, sourcemap });
-	const outputOptionsApi = getRollupOutputOptions({ mode: 'node', output: outputApi, format, sourcemap });
+	const outputOptionsApp = getRollupOutputOptions({
+		mode: 'browser',
+		output: outputApp,
+		format,
+		sourcemap,
+		preserveModules,
+	});
+
+	const outputOptionsApi = getRollupOutputOptions({
+		mode: 'node',
+		output: outputApi,
+		format,
+		sourcemap,
+		preserveModules,
+	});
 
 	const rollupOptionsAll = [
 		{ inputOptions: rollupOptionsApp, outputOptions: outputOptionsApp },
@@ -353,6 +444,8 @@ async function buildBundleExtension({
 	outputApp,
 	outputApi,
 	format,
+	external,
+	preserveModules,
 	watch,
 	sourcemap,
 	minify,
@@ -361,6 +454,8 @@ async function buildBundleExtension({
 	outputApp: string;
 	outputApi: string;
 	format: Format;
+	external: string[];
+	preserveModules: boolean;
 	watch: boolean;
 	sourcemap: boolean;
 	minify: boolean;
@@ -395,6 +490,7 @@ async function buildBundleExtension({
 		mode: 'browser',
 		input: { entry: entrypointApp },
 		minify,
+		external,
 		config,
 	});
 
@@ -402,11 +498,25 @@ async function buildBundleExtension({
 		mode: 'node',
 		input: { entry: entrypointApi },
 		minify,
+		external,
 		config,
 	});
 
-	const outputOptionsApp = getRollupOutputOptions({ mode: 'browser', output: outputApp, format, sourcemap });
-	const outputOptionsApi = getRollupOutputOptions({ mode: 'node', output: outputApi, format, sourcemap });
+	const outputOptionsApp = getRollupOutputOptions({
+		mode: 'browser',
+		output: outputApp,
+		format,
+		sourcemap,
+		preserveModules,
+	});
+
+	const outputOptionsApi = getRollupOutputOptions({
+		mode: 'node',
+		output: outputApi,
+		format,
+		sourcemap,
+		preserveModules,
+	});
 
 	const rollupOptionsAll = [
 		{ inputOptions: rollupOptionsApp, outputOptions: outputOptionsApp },
@@ -424,14 +534,93 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 	const configs = Array.isArray(config) ? config : [config];
 
 	const spinner = ora(chalk.bold('Building Directus extension...')).start();
+	const reports: { level: 'info' | 'warn'; message: string }[] = [];
 
 	const result = await Promise.all(
 		configs.map(async (c) => {
 			try {
 				const bundle = await rolldown(c.inputOptions);
 
-				await bundle.write(c.outputOptions);
+				const { output } = await bundle.write(c.outputOptions);
 				await bundle.close();
+
+				// what a worker will parse at every boot, and whether any of it is the app's
+				if (c.inputOptions.platform === 'node') {
+					const chunks = output.flatMap((chunk) => {
+						return chunk.type === 'chunk'
+							? [chunk]
+							: [];
+					});
+
+					const moduleIds = chunks.flatMap((chunk) => {
+						const ids = Object.keys(chunk.modules);
+
+						return ids.map((id) => id.replaceAll('\\', '/'));
+					});
+
+					const appOnly = APP_ONLY_PACKAGES.filter((pkg) => {
+						return moduleIds.some((id) => id.includes(`node_modules/${pkg}/`));
+					});
+
+					// what landed, not what was generated: rolldown appends the sourcemap
+					// comment on write, so the emitted string is short of the file
+					const outDir = c.outputOptions.dir
+						?? path.dirname(c.outputOptions.file ?? '.');
+
+					const bytes = chunks.reduce((total, chunk) => {
+						return total + fse.statSync(path.resolve(outDir, chunk.fileName)).size;
+					}, 0);
+
+					let size = `${bytes} B`;
+
+					if (bytes >= 1e6) {
+						size = `${(bytes / 1e6).toFixed(2)} MB`;
+					}
+					else if (bytes >= 1e3) {
+						size = `${(bytes / 1e3).toFixed(1)} KB`;
+					}
+
+					const weight = chalk.bold(size);
+
+					const plural = moduleIds.length === 1
+						? ''
+						: 's';
+
+					reports.push({
+						level: 'info',
+						message: `API bundle: ${weight}, ${moduleIds.length} module${plural}`
+							+ ` in ${chunks.length} file(s)`,
+					});
+
+					// measured on a 944-module extension: 37 ms bundled, 400 ms spread out,
+					// and a warm compile cache moves neither number much
+					if (c.outputOptions.preserveModules) {
+						reports.push({
+							level: 'warn',
+							message: [
+								`${chalk.blue('--preserve-modules')} builds for reading,`,
+								`not for running:`,
+								`node links every module on its own, which costs about`,
+								`${chalk.bold('0.4 ms per module')} at every boot,`,
+								`and a sandboxed extension cannot load it at all.`,
+								`Deploy the bundled build.`,
+							].join(' '),
+						});
+					}
+
+					if (appOnly.length > 0) {
+						reports.push({
+							level: 'warn',
+							message: [
+								`The API entrypoint pulls in ${chalk.bold(appOnly.join(', '))}.`,
+								`Every worker parses that at boot without ever serving the app —`,
+								`move those imports to the app entrypoint, make them`,
+								`${chalk.blue('import type')}, or exclude them with`,
+								`${chalk.blue('--external')}.`,
+							].join(' '),
+						});
+					}
+				}
 			} catch (error) {
 				return formatRollupError(error as RollupError);
 			}
@@ -450,12 +639,26 @@ async function buildExtension(config: RolldownConfig | RolldownConfig[]) {
 		process.exit(1);
 	} else {
 		spinner.succeed(chalk.bold('Done'));
+
+		for (const report of reports) {
+			log(report.message, report.level);
+		}
 	}
 }
 
 async function watchExtension(config: RolldownConfig | RolldownConfig[]) {
 	const configs = Array.isArray(config) ? config : [config];
 	const userConfig = await loadConfig();
+
+	// the build path says this on every build; a watch rebuilds all day and said it
+	// on none of them
+	if (configs.some((c) => c.outputOptions.preserveModules)) {
+		log(
+			`${chalk.blue('--preserve-modules')} builds for reading, not for running.`
+			+ ` Deploy the bundled build.`,
+			'warn',
+		);
+	}
 
 	const spinner = ora(chalk.bold('Building Directus extension...'));
 
@@ -513,11 +716,13 @@ function getRollupOptions({
 	mode,
 	input,
 	minify,
+	external,
 	config,
 }: {
 	mode: InputOptions['platform'];
 	input: string | Record<string, string>;
 	minify: boolean;
+	external: string[];
 	config: Config;
 }): InputOptions {
 	const plugins = config.plugins ?? [];
@@ -532,7 +737,12 @@ function getRollupOptions({
 				: {}),
 		},
 		input: typeof input !== 'string' ? 'entry' : input,
-		external: [...(mode === 'browser' ? APP_SHARED_DEPS : API_SHARED_DEPS)],
+		// the app is downloaded by a browser that resolves nothing beyond the shared
+		// deps the host guarantees, so what the author externalizes stays on the api
+		// side — a bare specifier left in app.js is a request answered with a 404
+		external: mode === 'browser'
+			? [...APP_SHARED_DEPS]
+			: [...API_SHARED_DEPS, ...external, ...(config.external ?? [])],
 		platform: mode!, // TODO why is undefined possible (and triggering an error) only during extensions-sdk's build?
 		// match upstream: only app (browser) extensions are pinned to production; node extensions keep the real env
 		// rolldown 1.1+ moved `define` under `transform`
@@ -557,11 +767,13 @@ function getRollupOutputOptions({
 	output,
 	format,
 	sourcemap,
+	preserveModules,
 }: {
 	mode: InputOptions['platform'];
 	output: string;
 	format: Format;
 	sourcemap: boolean;
+	preserveModules: boolean;
 }): OutputOptions {
 	const fileExtension = getFileExt(output);
 	let outputFormat = format;
@@ -570,6 +782,25 @@ function getRollupOutputOptions({
 		outputFormat = 'esm';
 	} else if (fileExtension === 'cjs') {
 		outputFormat = 'cjs';
+	}
+
+	// the app side is downloaded as one file the host re-bundles anyway, so only the
+	// api side has anything to gain from spreading over one file per module
+	if (preserveModules && mode === 'node') {
+		return {
+			dir: path.dirname(output),
+			// the manifest names a single entrypoint, so that one file keeps its name
+			// while every other module keeps the path it had in the source tree
+			entryFileNames: (chunk) => {
+				return chunk.isEntry
+					? path.basename(output)
+					: '[name].js';
+			},
+			format: outputFormat,
+			exports: 'auto',
+			preserveModules: true,
+			sourcemap,
+		};
 	}
 
 	return {

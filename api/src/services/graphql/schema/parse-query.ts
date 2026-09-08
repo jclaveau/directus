@@ -1,6 +1,6 @@
 import type { Accountability, Query, SchemaOverview } from '@directus/types';
 import type { FieldNode, GraphQLResolveInfo, InlineFragmentNode, SelectionNode } from 'graphql';
-import { get, mapKeys, merge, set, uniq } from 'lodash-es';
+import { get, mapKeys, merge, set, uniq } from '../../../utils/lodash-es-used.js';
 import { sanitizeQuery } from '../../../utils/sanitize-query.js';
 import { validateQuery } from '../../../utils/validate-query.js';
 import { replaceFuncs } from '../utils/replace-funcs.js';
