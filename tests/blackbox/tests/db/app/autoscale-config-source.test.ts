@@ -1,9 +1,10 @@
 import Redis from 'ioredis';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
-	heldAt,
+	decisionsOf,
 	neverExceeded,
 	poolSize,
+	sizesOver,
 	startAutoscaler,
 	startPool,
 	stopRig,
@@ -73,7 +74,10 @@ describe('The autoscaler takes live configuration from Redis', () => {
 
 		// The same override grows the pool in the arms below; here it is
 		// unreachable, so the env threshold is the only one in play.
-		expect(await heldAt(rig, 1, 20_000)).toBe(true);
+		expect({
+			sizes: await sizesOver(rig, 20_000),
+			decisions: decisionsOf(rig),
+		}).toEqual({ sizes: [1], decisions: [] });
 	}, 90_000);
 
 	describe('with Redis configured', () => {
@@ -108,7 +112,7 @@ describe('The autoscaler takes live configuration from Redis', () => {
 				PM2_AUTOSCALE_WARMUP_SECONDS: '2',
 			});
 
-			expect(await heldAt(rig, 1, 15_000)).toBe(true);
+			expect(await sizesOver(rig, 15_000)).toEqual([1]);
 		}, 90_000);
 
 		it('picks up a stored threshold without being restarted', async () => {
@@ -137,7 +141,7 @@ describe('The autoscaler takes live configuration from Redis', () => {
 
 			// The env ceiling is 3 again and its threshold is 95, so a pool
 			// that keeps growing would mean the override was still applied.
-			expect(await heldAt(rig, 2, 15_000)).toBe(true);
+			expect(await sizesOver(rig, 15_000)).toEqual([2]);
 		}, 90_000);
 
 		// The override is a hand-edited JSON document written during an

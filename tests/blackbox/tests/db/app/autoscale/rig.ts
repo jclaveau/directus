@@ -227,21 +227,35 @@ export async function neverExceeded(
 	return peak;
 }
 
-/** Whether the pool ever left `size` over the window — what "held" means. */
-export async function heldAt(
-	rig: Rig,
-	size: number,
-	windowMs: number,
-): Promise<boolean> {
+/**
+ * Every pool size seen over the window, in the order it was first seen.
+ *
+ * An arm claiming the pool holds fails on a bare boolean without saying what
+ * it saw, and the two ways of leaving a size want opposite fixes: growing is
+ * the scaling defect these arms are about, while dipping is the supervisor
+ * between states on a worker it is replacing.
+ */
+export async function sizesOver(rig: Rig, windowMs: number): Promise<number[]> {
 	const deadline = Date.now() + windowMs;
+	const seen: number[] = [];
 
-	while (Date.now() < deadline) {
-		if (countWorkers(rig) !== size) {
-			return false;
+	do {
+		const size = countWorkers(rig);
+
+		if (seen.includes(size) === false) {
+			seen.push(size);
 		}
 
 		await sleep(250);
-	}
+	} while (Date.now() < deadline);
 
-	return countWorkers(rig) === size;
+	return seen;
+}
+
+/** The lines the autoscaler logged for the resizes it decided on. */
+export function decisionsOf(rig: Rig): string[] {
+	return rig.logs
+		.join('')
+		.split('\n')
+		.filter((line) => line.includes('workers:'));
 }

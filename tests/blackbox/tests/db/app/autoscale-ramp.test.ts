@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import {
-	heldAt,
 	neverExceeded,
 	poolSize,
+	sizesOver,
 	startAutoscaler,
 	startPool,
 	stopRig,
@@ -48,7 +48,7 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 		expect(await poolSize(rig, 3, 60_000)).toBe(3);
 
 		// And stops there: the ceiling is a ceiling, not a pace.
-		expect(await heldAt(rig, 3, 5_000)).toBe(true);
+		expect(await sizesOver(rig, 5_000)).toEqual([3]);
 	}, 90_000);
 
 	// A pool whose workers are all still booting is the pool at its most
@@ -74,7 +74,7 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 		});
 
 		// The same load and threshold that reach the ceiling above.
-		expect(await heldAt(rig, 1, 12_000)).toBe(true);
+		expect(await sizesOver(rig, 12_000)).toEqual([1]);
 
 		// And once the worker is warm, they do here too.
 		expect(await poolSize(rig, 3, 60_000)).toBe(3);
@@ -101,7 +101,7 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
 		});
 
-		expect(await heldAt(rig, 1, 20_000)).toBe(true);
+		expect(await sizesOver(rig, 20_000)).toEqual([1]);
 	}, 90_000);
 
 	// The strict witness for the arm above: identical load, identical config,
@@ -165,7 +165,7 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 
 		// And stays there. A flapping pool passes the line above on its way
 		// through two and fails this one.
-		expect(await heldAt(rig, 2, 15_000)).toBe(true);
+		expect(await sizesOver(rig, 15_000)).toEqual([2]);
 	}, 120_000);
 
 	// An env var the type map cannot cast arrives as NaN, and NaN satisfies
@@ -228,7 +228,7 @@ describe('The autoscaler ramps a pool according to its configuration', () => {
 			PM2_AUTOSCALE_MAX_WORKERS: '3',
 		});
 
-		expect(await heldAt(rig, 1, 15_000)).toBe(true);
+		expect(await sizesOver(rig, 15_000)).toEqual([1]);
 		expect(rig.autoscaler?.exitCode).toBe(null);
 	}, 90_000);
 
