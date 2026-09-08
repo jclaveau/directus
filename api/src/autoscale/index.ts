@@ -72,15 +72,15 @@ export async function runAutoscaler(): Promise<void> {
 	// what that page means by a worker crash-looping too fast to reply. It
 	// describes itself for the same reason every worker does.
 	//
-	// Never a reason not to scale: a pool left unmanaged because its autoscaler
-	// could not introduce itself would be a far worse trade than an unexplained
-	// row on a page.
-	try {
-		await initProcessReports();
-	}
-	catch (error) {
+	// Never a reason not to scale, which is why the loop does not wait for it: the
+	// report subscribes over the shared Redis client, and a command that client is
+	// asked for while it is not connected waits in a queue with no deadline
+	// (jclaveau/directus#463) — on the critical path, an autoscaler booting into a
+	// Redis outage would take no decision at all until that queue was flushed,
+	// which is the retry budget away and can be configured further away still.
+	initProcessReports().catch((error) => {
 		logger.warn(error, '[autoscale] could not answer processes queries');
-	}
+	});
 
 	const stop = () => {
 		disconnectFromSupervisor();
