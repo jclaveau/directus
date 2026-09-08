@@ -10,7 +10,15 @@ vi.mock('../metrics/index.js');
 const error = vi.fn();
 const inc = vi.fn();
 
+// The throttle is module state, so each case starts far enough after the last that
+// nothing it logs is mistaken for a repeat of what the case before it logged.
+let clock = Date.now();
+
 beforeEach(() => {
+	clock += 3_600_000;
+	vi.useFakeTimers();
+	vi.setSystemTime(clock);
+
 	vi.mocked(useLogger).mockReturnValue({ error } as any);
 
 	vi.mocked(useMetrics).mockReturnValue({
@@ -19,6 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.clearAllMocks();
 });
 
@@ -47,6 +56,38 @@ describe('reportUnhandledRejection', () => {
 			{ reason: 'boom' },
 			'Unhandled promise rejection: boom',
 		);
+	});
+
+	it(oneLine`
+		logs one line per failure per window — a dependency that is down rejects once
+		per command asked of it, so the volume follows the traffic and not the failure
+	`, () => {
+		reportUnhandledRejection(new Error('refused'));
+		reportUnhandledRejection(new Error('refused'));
+
+		expect(error).toHaveBeenCalledOnce();
+		expect(inc).toHaveBeenCalledTimes(2);
+	});
+
+	it('counts what the window swallowed into the line that ends it', () => {
+		reportUnhandledRejection(new Error('flushed'));
+		reportUnhandledRejection(new Error('flushed'));
+		reportUnhandledRejection(new Error('flushed'));
+
+		vi.setSystemTime(clock + 60_000);
+		reportUnhandledRejection(new Error('flushed'));
+
+		expect(error).toHaveBeenLastCalledWith(
+			expect.any(Error),
+			'Unhandled promise rejection: Error: flushed (2 more since the last)',
+		);
+	});
+
+	it('throttles each failure on its own', () => {
+		reportUnhandledRejection(new Error('socket closed'));
+		reportUnhandledRejection(new Error('auth failed'));
+
+		expect(error).toHaveBeenCalledTimes(2);
 	});
 
 	it('reports even when metrics are off', () => {
