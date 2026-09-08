@@ -69,6 +69,10 @@ import rateLimiter, {
 	resolvedRateLimiterCharge,
 	type RateLimiterCharge,
 } from './middleware/rate-limiter-ip.js';
+import {
+	instrumentRequestTiming,
+	requestTiming,
+} from './middleware/request-timing.js';
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
 import { assertPgBouncerConnections } from './pgbouncer/index.js';
@@ -144,6 +148,11 @@ export default async function createApp(): Promise<express.Application> {
 	app.disable('x-powered-by');
 	app.set('trust proxy', env['IP_TRUST_PROXY']);
 	app.set('query parser', (str: string) => qs.parse(str, { depth: Number(env['QUERYSTRING_MAX_PARSE_DEPTH']) }));
+
+	// Both before the first layer is mounted: the wrappers have to see the whole
+	// chain, and the clock has to start above it.
+	instrumentRequestTiming(app);
+	app.use(requestTiming);
 
 	if (env['PRESSURE_LIMITER_ENABLED']) {
 		const sampleInterval = Number(env['PRESSURE_LIMITER_SAMPLE_INTERVAL']);

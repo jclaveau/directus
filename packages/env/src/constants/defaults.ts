@@ -204,6 +204,8 @@ export const DEFAULTS = {
 	PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED: false,
 	PRESSURE_LIMITER_RETRY_AFTER: false,
 
+	REQUEST_TIMING_ENABLED: false,
+
 	METRICS_ENABLED: false,
 	METRICS_SERVICES: 'database,cache,redis,storage',
 	METRICS_SCHEDULE: '*/1 * * * *',

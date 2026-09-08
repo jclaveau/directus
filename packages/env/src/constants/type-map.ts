@@ -108,6 +108,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	METRICS_SERVICES: 'array',
 	METRICS_ENABLED: 'boolean',
 
+	REQUEST_TIMING_ENABLED: 'boolean',
+	REQUEST_TIMING_HEADER: 'string',
+
 	SYSTEM_MCP_ENABLED: 'boolean',
 	SYSTEM_MCP_TOOLS: 'array',
 	SYSTEM_MCP_ALLOWED_ORIGINS: 'array',
