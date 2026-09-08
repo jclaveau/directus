@@ -17,8 +17,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * the boot guard is meant to notice, and the only way to reach it from outside:
  * the watch stops as soon as it reads a clean database, so a correctly migrated
  * instance cannot be pushed into this state after the fact.
+ *
+ * The version has to be one no other suite records, since they all share the
+ * vendor's database: `migration-transaction` applies `20990101A` and `20990102A`
+ * and only removes them once its own file is done, so a shard packing the two
+ * side by side boots this instance against a database that has already recorded
+ * the migration it is meant to be missing.
  */
-const OUTSTANDING_MIGRATION = '20990101A-never-applied.js';
+const OUTSTANDING_MIGRATION = '20991231A-never-applied.js';
 
 describe('/server', () => {
 	const directusInstances = {} as Record<Vendor, ChildProcess>;
@@ -122,7 +128,7 @@ describe('/server', () => {
 				{
 					componentType: 'datastore',
 					status: 'error',
-					observedValue: '20990101A',
+					observedValue: '20991231A',
 					output: 'Database migrations have not all been run',
 				},
 			]);
