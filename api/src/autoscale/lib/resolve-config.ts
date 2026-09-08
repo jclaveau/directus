@@ -109,6 +109,61 @@ function withOverride(
 	return merged;
 }
 
+/**
+ * How long a tick waits for the override before deciding without a fresh one.
+ *
+ * The interval between ticks, so a read is never the reason a tick is late.
+ */
+const OVERRIDE_READ_TIMEOUT_MS = 1000;
+
+/**
+ * Statuses in which the client holds no connection to send a command down.
+ *
+ * Connecting is not among them: the first tick of a healthy boot happens
+ * before the handshake finishes, and its read is answered as soon as it does.
+ */
+const DISCONNECTED = new Set(['reconnecting', 'close', 'end']);
+
+/**
+ * The stored override, or a failure if Redis does not produce one promptly.
+ *
+ * ioredis queues a command issued while it is not connected and puts no
+ * deadline on that queue, so a tick that only awaited the read would hold the
+ * loop for as long as the outage lasts — leaving the pool frozen at whatever
+ * size the outage caught it at, which is exactly what this loop exists to
+ * prevent.
+ */
+async function readOverride(): Promise<string | null> {
+	const redis = useRedis();
+
+	if (DISCONNECTED.has(redis.status)) {
+		throw new Error(`the client is ${redis.status}`);
+	}
+
+	const read = redis.get(autoscaleConfigKey());
+
+	// The read that loses the race stays queued, and ioredis rejects a queued
+	// command when it flushes the queue — an unhandled rejection there would
+	// end the process the loop runs in.
+	read.catch(() => {});
+
+	let expire: ReturnType<typeof setTimeout> | undefined;
+
+	try {
+		return await Promise.race([
+			read,
+			new Promise<never>((_resolve, reject) => {
+				expire = setTimeout(() => {
+					reject(new Error(`no answer in ${OVERRIDE_READ_TIMEOUT_MS}ms`));
+				}, OVERRIDE_READ_TIMEOUT_MS);
+			}),
+		]);
+	}
+	finally {
+		clearTimeout(expire);
+	}
+}
+
 let lastCorrections = '';
 let lastGood: AutoscaleConfig | null = null;
 let overrideUnreadable = false;
@@ -158,7 +213,7 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 	}
 
 	try {
-		const stored = await useRedis().get(autoscaleConfigKey());
+		const stored = await readOverride();
 		overrideUnreadable = false;
 
 		if (!stored) {

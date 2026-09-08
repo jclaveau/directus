@@ -79,6 +79,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/app/autoscale-ramp.test.ts',
 			'/tests/db/app/autoscale-config-source.test.ts',
 			'/tests/db/app/autoscale-legacy.test.ts',
+			'/tests/db/app/autoscale-redis-outage.test.ts',
 			// Spawns a Directus of its own beside a pm2 daemon, and asserts on a
 			// collection window a loaded parallel middle would run out.
 			'/tests/db/app/autoscale-processes.test.ts',

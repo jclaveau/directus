@@ -56,6 +56,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// One ramp, one hold, and a churning pool watched either side of the
 	// switch. Estimated from the arms it borrows; to be measured.
 	'/tests/db/app/autoscale-legacy.test.ts': 120_000,
+	// Two climbs paced at ten seconds a worker, one of them decided with the
+	// connection cut, plus a cold-start arm. Estimated; to be measured.
+	'/tests/db/app/autoscale-redis-outage.test.ts': 150_000,
 	// Spawns two processes and asks one question of them.
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,

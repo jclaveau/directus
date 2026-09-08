@@ -14,6 +14,9 @@ vi.mock('../../logger/index.js', () => {
 
 const get = vi.fn();
 
+/** Stands in for the shared ioredis client, whose `status` gates the read. */
+const client = { get, status: 'ready' };
+
 /**
  * `resolveConfig` remembers the last configuration it managed to read, which
  * is the point of it — so each case needs its own instance of the module
@@ -31,7 +34,7 @@ async function freshResolver(): Promise<() => Promise<AutoscaleConfig>> {
 	});
 
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
-	vi.mocked(useRedis).mockReturnValue({ get } as never);
+	vi.mocked(useRedis).mockReturnValue(client as never);
 
 	const { resolveConfig } = await import('./resolve-config.js');
 
@@ -40,6 +43,7 @@ async function freshResolver(): Promise<() => Promise<AutoscaleConfig>> {
 
 beforeEach(() => {
 	get.mockReset();
+	client.status = 'ready';
 });
 
 afterEach(() => {
@@ -125,4 +129,29 @@ test('an override cannot reach through to the prototype', async () => {
 	await resolveConfig();
 
 	expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+});
+
+// ioredis queues a command issued while it is not connected and puts no
+// deadline on that queue, so a tick that only awaited the read would hold the
+// loop for the whole outage — freezing the pool at the size the outage caught
+// it at, which is the one thing the loop must never do.
+test('gives up on a read the client never answers', async () => {
+	const resolveConfig = await freshResolver();
+	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
+	await resolveConfig();
+
+	get.mockReturnValue(new Promise(() => {}));
+
+	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+});
+
+test('does not read through a client that is reconnecting', async () => {
+	const resolveConfig = await freshResolver();
+	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
+	await resolveConfig();
+
+	client.status = 'reconnecting';
+
+	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+	expect(get).toHaveBeenCalledTimes(1);
 });
