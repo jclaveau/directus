@@ -6,23 +6,81 @@ on:
       - opened
       - synchronize
       - labeled
+      - unlabeled
 
 permissions:
   contents: read
 
 jobs:
+  # Blackbox runs by default, because the bugs it catches are the ones unit tests
+  # structurally cannot: a mocked module proves the call shape, not that the real
+  # library still works. Opt out per PR with `Skip Blackbox`, and skip automatically
+  # when a PR changes nothing the suite could exercise.
+  decide:
+    name: Decide
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          has_label() {
+            printf '%s' "$LABELS" | jq -e --arg name "$1" 'index($name)' > /dev/null
+          }
+
+          # A `ci-dialect-*` branch exists only to exercise the one dialect it names, and
+          # refresh-dialect-ci.yml recreates it on every trunk tip. Keying that off the
+          # branch rather than a label means a recreated PR can't lose its trigger.
+          if [[ "$HEAD_REF" == ci-dialect-* ]]; then
+            run=true
+            reason="\`$HEAD_REF\` is a dialect branch"
+          elif has_label 'Skip Blackbox'; then
+            run=false
+            reason='the `Skip Blackbox` label is set'
+          elif has_label 'Run Blackbox' || has_label 'Run Blackbox Full'; then
+            run=true
+            reason='the run was asked for by label'
+          else
+            # Anything the API serves or the suite builds counts. Docs, project memory and
+            # unrelated workflows do not — but an edit to blackbox's own workflows does.
+            relevant=$(
+              gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename' \
+                | while read -r file; do
+                    case "$file" in
+                      .github/workflows/blackbox*) echo "$file" ;;
+                      .agents/* | docs/* | .github/*) ;;
+                      *.md) ;;
+                      *) echo "$file" ;;
+                    esac
+                  done
+            )
+
+            if [[ -n "$relevant" ]]; then
+              run=true
+              reason=$(printf 'it changes %s file(s) the suite covers' "$(printf '%s\n' "$relevant" | wc -l)")
+            else
+              run=false
+              reason='it only changes docs, project memory or unrelated workflows'
+            fi
+          fi
+
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "Blackbox $([[ $run == true ]] && echo runs || echo skipped) because $reason." >> "$GITHUB_STEP_SUMMARY"
+
   blackbox-tests:
     name: Blackbox Tests
-    # `Run Blackbox` runs the postgres smoke set; `Run Blackbox Full` runs the whole vendor
-    # matrix (and triggers on its own, no need to also add `Run Blackbox`).
-    #
-    # A `ci-dialect-*` branch runs unconditionally: it exists only to exercise the one
-    # dialect it names, and refresh-dialect-ci.yml recreates it on every trunk tip. Keying
-    # that off the branch rather than a label means a recreated PR can't lose its trigger.
-    if: >-
-      startsWith(github.head_ref, 'ci-dialect-') ||
-      contains(github.event.pull_request.labels.*.name, 'Run Blackbox') ||
-      contains(github.event.pull_request.labels.*.name, 'Run Blackbox Full')
+    needs: decide
+    # `Run Blackbox Full` runs the whole vendor matrix; the default set is postgres only.
+    if: needs.decide.outputs.run == 'true'
     uses: ./.github/workflows/blackbox.yml
     with:
       full: ${{ contains(github.event.pull_request.labels.*.name, 'Run Blackbox Full') }}
