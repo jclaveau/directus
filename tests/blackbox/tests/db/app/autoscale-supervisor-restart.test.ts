@@ -1,6 +1,8 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import {
 	countWorkers,
+	decisionAfter,
+	decisionsOf,
 	poolSize,
 	reportOf,
 	restartSupervisor,
@@ -47,6 +49,8 @@ describe('The autoscaler outlives its supervisor', () => {
 
 		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
 
+		const decidedBeforeRestart = decisionsOf(rig).length;
+
 		restartSupervisor(rig);
 
 		// The ecosystem declares one worker, so the pool comes back at one
@@ -55,7 +59,14 @@ describe('The autoscaler outlives its supervisor', () => {
 		expect(countWorkers(rig), reportOf(rig)).toBe(1);
 
 		// A decision taken over a connection whose daemon has died since it was
-		// made.
+		// made. Asserted as a decision rather than as the pool size below,
+		// because that is where the two outcomes first differ: an autoscaler
+		// that survived says so on the tick after the restart, and one wedged on
+		// a call the dead daemon never answered says nothing at all — for the
+		// whole minute the size below spends failing to name what went wrong.
+		const decided = await decisionAfter(rig, decidedBeforeRestart, 60_000);
+
+		expect(decided, reportOf(rig)).not.toEqual([]);
 		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
 	}, 150_000);
 });

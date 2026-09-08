@@ -334,6 +334,31 @@ export function reportOf(rig: Rig): string {
 		+ `its last lines:\n${tail}`;
 }
 
+/**
+ * Waits for the autoscaler to decide something it had not decided by `taken`.
+ *
+ * A pool size is where the pool got to, which an arm about the autoscaler still
+ * running can only read a minute late and cannot attribute: the supervisor
+ * moves the pool too, and a pool that never moves says the autoscaler decided
+ * against it and that it decided nothing in the same number. A decision line
+ * says which, on the tick it happened.
+ */
+export async function decisionAfter(
+	rig: Rig,
+	taken: number,
+	timeoutMs: number,
+): Promise<string[]> {
+	const deadline = Date.now() + timeoutMs;
+	let decisions = decisionsOf(rig);
+
+	while (decisions.length <= taken && Date.now() < deadline) {
+		await sleep(250);
+		decisions = decisionsOf(rig);
+	}
+
+	return decisions.slice(taken);
+}
+
 /** The lines the autoscaler logged for the resizes it decided on. */
 export function decisionsOf(rig: Rig): string[] {
 	return rig.logs
