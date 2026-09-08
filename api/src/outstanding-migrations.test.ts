@@ -125,6 +125,37 @@ describe('outstanding migrations', () => {
 		expect(outstandingMigrations).toHaveBeenCalledTimes(polls);
 	});
 
+	it('reports nothing outstanding when the watch was never started', async () => {
+		const { migrationsAreOutstanding } = await loadWatch();
+
+		expect(migrationsAreOutstanding()).toBe(false);
+	});
+
+	it('reports outstanding before the first reading, as health does', async () => {
+		outstandingMigrations.mockReturnValue(new Promise(() => {}));
+
+		const module = await loadWatch();
+		module.watchOutstandingMigrations();
+
+		expect(module.migrationsAreOutstanding()).toBe(true);
+	});
+
+	it('reports outstanding until the missing migration lands', async () => {
+		outstandingMigrations
+			.mockResolvedValueOnce(['20990101A'])
+			.mockResolvedValueOnce([]);
+
+		const module = await loadWatch();
+		module.watchOutstandingMigrations();
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(module.migrationsAreOutstanding()).toBe(true);
+
+		await vi.advanceTimersByTimeAsync(3000);
+
+		expect(module.migrationsAreOutstanding()).toBe(false);
+	});
+
 	it('names an unreadable database in the give-up message', async () => {
 		env['MIGRATIONS_WAIT_TIMEOUT'] = '0s';
 		outstandingMigrations.mockRejectedValue(new Error('pool exhausted'));

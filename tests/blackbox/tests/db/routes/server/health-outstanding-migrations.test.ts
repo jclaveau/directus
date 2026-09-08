@@ -24,6 +24,7 @@ describe('/server', () => {
 	const directusInstances = {} as Record<Vendor, ChildProcess>;
 	const ports = {} as Record<Vendor, number>;
 	const directories = {} as Record<Vendor, string>;
+	const logs = {} as Record<Vendor, string>;
 
 	beforeAll(async () => {
 		const promises = [];
@@ -45,6 +46,18 @@ describe('/server', () => {
 			env[vendor]['MIGRATIONS_WAIT_INTERVAL'] = '100ms';
 			env[vendor]['MIGRATIONS_WAIT_TIMEOUT'] = '2s';
 
+			// The suite runs at `error`, and a held job reports at `warn`.
+			env[vendor]['LOG_LEVEL'] = 'warn';
+
+			// The job the incident was found on, on a cadence that ticks inside the
+			// test rather than every ten seconds. It holds before it touches Redis,
+			// so an unreachable one would not mask the hold — but a configured one
+			// is what gets the job registered at all.
+			env[vendor]['REDIS_HOST'] = 'localhost';
+			env[vendor]['REDIS_PORT'] = '6108';
+			env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+			env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
+
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
@@ -55,6 +68,17 @@ describe('/server', () => {
 				cwd: paths.cwd,
 				env: env[vendor],
 			});
+
+			logs[vendor] = '';
+
+			for (const stream of [
+				directusInstances[vendor].stdout,
+				directusInstances[vendor].stderr,
+			]) {
+				stream?.on('data', (chunk: Buffer) => {
+					logs[vendor] += String(chunk);
+				});
+			}
 
 			promises.push(awaitDirectusConnection(port));
 		}
@@ -103,6 +127,25 @@ describe('/server', () => {
 				},
 			]);
 		});
+
+		it.each(vendors)('%s holds its scheduled jobs meanwhile', async (vendor) => {
+			// The gate this pins is not the health route: a build the database has
+			// not caught up with must not write through a schema it does not match,
+			// and `scheduleSynchronizedJob` hands each tick to one node cluster-wide,
+			// so a node that declines after claiming spends the slot for everyone.
+			const held = /holding job \\?"cache-stats\\?"/;
+			let waited = 0;
+
+			while (!held.test(logs[vendor]!) && waited < 20_000) {
+				await new Promise((resolve) => {
+					setTimeout(resolve, 250);
+				});
+
+				waited += 250;
+			}
+
+			expect(logs[vendor]).toMatch(held);
+		}, 30_000);
 
 		it.each(vendors)('%s tells a non-admin only the status', async (vendor) => {
 			const response = await request(`http://127.0.0.1:${ports[vendor]}`)

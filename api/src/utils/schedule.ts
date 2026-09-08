@@ -1,6 +1,7 @@
 import { CronExpressionParser } from 'cron-parser';
 import schedule from 'node-schedule';
 import { useLogger } from '../logger/index.js';
+import { migrationsAreOutstanding } from '../outstanding-migrations.js';
 import { SynchronizedClock } from '../synchronization.js';
 
 export interface ScheduledJob {
@@ -24,7 +25,34 @@ export function scheduleSynchronizedJob(
 ): ScheduledJob {
 	const clock = new SynchronizedClock(`${id}:${rule}`);
 
+	// Per job rather than per id, so it dies with the job it describes: a reloaded
+	// extension re-registers the same id, and shared state would report that new
+	// job's wait as already said.
+	let heldForMigrations = false;
+
 	const job = schedule.scheduleJob(rule, async (fireDate) => {
+		// A build the database has not caught up with must not write through a
+		// schema it does not match — `/server/health` is already red on the same
+		// reading. Returning before the claim below leaves the tick to a node
+		// that can run it, instead of winning the only slot and dropping it.
+		if (migrationsAreOutstanding()) {
+			if (!heldForMigrations) {
+				heldForMigrations = true;
+
+				useLogger().warn(
+					`[schedule] holding job "${id}" until the database has recorded`
+						+ ` every migration this build ships`,
+				);
+			}
+
+			return;
+		}
+
+		if (heldForMigrations) {
+			heldForMigrations = false;
+			useLogger().info(`[schedule] resuming job "${id}"`);
+		}
+
 		const nextInvocation = job.nextInvocation();
 		if (!nextInvocation) return;
 
