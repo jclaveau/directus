@@ -11,7 +11,9 @@ export function systemMcpEnabled(): boolean {
 }
 
 function isSystemMcpToolGroup(value: unknown): value is SystemMcpToolGroup {
-	return value === 'processes' || value === 'cache';
+	return value === 'processes'
+		|| value === 'cache'
+		|| value === 'autoscale';
 }
 
 /**

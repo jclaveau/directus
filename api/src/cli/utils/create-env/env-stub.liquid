@@ -254,16 +254,17 @@ ASSETS_CACHE_TTL="30d"
 #####################################################################################
 ### System MCP
 
-# Serve a read-only MCP endpoint at /system-mcp exposing the diagnostic
-# reads as tools an LLM agent can call, over the Streamable HTTP transport of
-# MCP revision 2025-06-18. Off by default. [false]
+# Serve an MCP endpoint at /system-mcp exposing the diagnostic reads as tools
+# an LLM agent can call, over the Streamable HTTP transport of MCP revision
+# 2025-06-18. Off by default. [false]
 # SYSTEM_MCP_ENABLED=false
 
-# Which subsystems to expose tools for: "processes" (the process tree) and
-# "cache" (listings, one entry by key, anomalies, latencies, timeseries,
-# telemetry state). A group left out is neither listed nor callable.
-# ["processes,cache"]
-# SYSTEM_MCP_TOOLS="processes,cache"
+# Which subsystems to expose tools for: "processes" (the process tree),
+# "autoscale" (what each pool is being scaled on, and changing it) and "cache"
+# (listings, one entry by key, anomalies, latencies, timeseries, telemetry
+# state). A group left out is neither listed nor callable, and "autoscale" is
+# the one group whose tools also write. ["processes,cache"]
+# SYSTEM_MCP_TOOLS="processes,autoscale,cache"
 
 # Browser origins allowed to call the endpoint. Empty by default, so no browser
 # reaches it: the transport spec requires the Origin header to be validated,

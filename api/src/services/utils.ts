@@ -3,6 +3,8 @@ import { systemCollectionRows } from '@directus/system-data';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	AutoscaleNodeState,
+	AutoscaleRunner,
 	CacheFlushTarget,
 	PgBouncerDetail,
 	PgBouncerReport,
@@ -49,7 +51,10 @@ import {
 	type AutoscaleOverride,
 } from '../autoscale/lib/override.js';
 import { autoscaleConfigKey } from '../autoscale/lib/resolve-config.js';
-import { collectProcesses } from '../processes/index.js';
+import {
+	collectProcesses,
+	processesReportEnabled,
+} from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -520,6 +525,42 @@ export class UtilsService {
 		await writeAutoscaleOverride(override);
 
 		return { key: autoscaleConfigKey(), override };
+	}
+
+	/**
+	 * Every process that is scaling a pool, with what it last decided on.
+	 *
+	 * Read from the same report the processes page collects, because the values
+	 * a pool is actually scaled on are the ones resolved in the process that
+	 * scales it — an api worker resolving them again would answer for its own
+	 * environment, which is a different process's.
+	 */
+	async readAutoscaleRunners(): Promise<AutoscaleRunner[]> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		// With the report off every responder is gone, so collecting one would
+		// wait out its window to answer the empty tree it already knows about.
+		if (processesReportEnabled() === false) {
+			return [];
+		}
+
+		const report = await collectProcesses(['stats']);
+
+		return report.services.flatMap((service) => {
+			return service.replicas.flatMap((replica) => {
+				return replica.processes
+					.filter((node) => node.autoscale !== null)
+					.map((node) => {
+						return {
+							service: service.service,
+							replicaId: replica.replicaId,
+							nodeId: node.nodeId,
+							name: node.name,
+							state: node.autoscale as AutoscaleNodeState,
+						};
+					});
+			});
+		});
 	}
 
 	/** Drop the override, so every field comes from the environment chain again. */

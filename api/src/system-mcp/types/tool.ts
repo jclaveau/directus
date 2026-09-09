@@ -10,7 +10,7 @@ export interface SystemMcpToolContext {
  * The subsystem a tool reads, so a deployment can expose one without the other
  * (`SYSTEM_MCP_TOOLS`).
  */
-export type SystemMcpToolGroup = 'processes' | 'cache';
+export type SystemMcpToolGroup = 'processes' | 'cache' | 'autoscale';
 
 /**
  * One diagnostic read, described well enough for a model to choose it and call
@@ -39,12 +39,15 @@ export interface SystemMcpTool {
 		properties: Record<string, unknown>;
 	};
 	/**
-	 * What a client may assume before calling. Every tool here reads and nothing
-	 * more, which is what lets a client run one without asking the user first.
+	 * What a client may assume before calling: whether the tool only reads, and
+	 * whether calling it twice differs from calling it once. A client shows a
+	 * write to the user before running it, and that is the difference these
+	 * carry — nothing here reaches outside this deployment either way.
 	 */
 	annotations: {
-		readOnlyHint: true;
-		destructiveHint: false;
+		readOnlyHint: boolean;
+		destructiveHint: boolean;
+		idempotentHint?: boolean;
 		openWorldHint: false;
 	};
 	run: (

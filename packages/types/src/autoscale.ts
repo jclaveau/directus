@@ -115,3 +115,12 @@ export interface AutoscaleNodeState {
 	/** The last decision that actually asked for a different pool size. */
 	lastScale: AutoscaleDecision | null;
 }
+
+/** One process that is scaling a pool, and what it is scaling it on. */
+export interface AutoscaleRunner {
+	service: string;
+	replicaId: string;
+	nodeId: string | null;
+	name: string;
+	state: AutoscaleNodeState;
+}

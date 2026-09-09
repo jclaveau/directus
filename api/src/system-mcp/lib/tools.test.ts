@@ -1,4 +1,5 @@
 import type {
+	AutoscaleRunner,
 	CacheTimeseries,
 	ProcessesReport,
 	SchemaOverview,
@@ -8,6 +9,10 @@ import { beforeEach, expect, test, vi } from 'vitest';
 const service = vi.hoisted(() => {
 	return {
 		readProcesses: vi.fn(),
+		readAutoscaleConfig: vi.fn(),
+		readAutoscaleRunners: vi.fn(),
+		updateAutoscaleConfig: vi.fn(),
+		clearAutoscaleConfig: vi.fn(),
 		getCacheEntries: vi.fn(),
 		readCacheEntry: vi.fn(),
 		getCacheAnomalies: vi.fn(),
@@ -26,6 +31,10 @@ vi.mock('../../services/utils.js', () => {
 			}
 
 			readProcesses = service.readProcesses;
+			readAutoscaleConfig = service.readAutoscaleConfig;
+			readAutoscaleRunners = service.readAutoscaleRunners;
+			updateAutoscaleConfig = service.updateAutoscaleConfig;
+			clearAutoscaleConfig = service.clearAutoscaleConfig;
 			getCacheEntries = service.getCacheEntries;
 			readCacheEntry = service.readCacheEntry;
 			getCacheAnomalies = service.getCacheAnomalies;
@@ -42,6 +51,17 @@ const config = vi.hoisted(() => {
 
 vi.mock('./config.js', () => {
 	return { systemMcpToolGroups: config.groups };
+});
+
+const redis = vi.hoisted(() => {
+	return { available: vi.fn() };
+});
+
+vi.mock('../../redis/index.js', async (importOriginal) => {
+	return {
+		...await importOriginal<object>(),
+		redisConfigAvailable: redis.available,
+	};
 });
 
 const processes = vi.hoisted(() => {
@@ -81,7 +101,8 @@ const context = {
 };
 
 beforeEach(() => {
-	config.groups.mockReturnValue(['processes', 'cache']);
+	config.groups.mockReturnValue(['processes', 'autoscale', 'cache']);
+	redis.available.mockReturnValue(true);
 	processes.details.mockReturnValue(['stats', 'env']);
 	processes.reportEnabled.mockReturnValue(true);
 	service.constructed.length = 0;
@@ -99,6 +120,8 @@ beforeEach(() => {
 test('Every tool is described well enough for a model to choose it', () => {
 	expect(allSystemMcpTools().map((tool) => tool.name)).toEqual([
 		'list_processes',
+		'read_autoscale_config',
+		'write_autoscale_config',
 		'list_cache_entries',
 		'read_cache_entry',
 		'list_cache_anomalies',
@@ -118,14 +141,29 @@ test('Every tool is described well enough for a model to choose it', () => {
 		expect(Object.keys(tool.outputSchema.properties).length)
 			.toBeGreaterThan(0);
 
-		// Every one of these reads and nothing more, and says so, which is what
-		// lets a client call it without asking the user to approve it.
-		expect(tool.annotations).toEqual({
-			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		});
+		// Nothing here reaches outside this deployment, whether it reads or
+		// writes — which is the difference a client shows the user before
+		// running one, and the reason the hint is per tool.
+		expect(tool.annotations.openWorldHint).toBe(false);
+		expect(tool.annotations.destructiveHint).toBe(false);
 	}
+});
+
+// A client runs a read without asking and puts a write in front of the user
+// first, so the one tool that changes how the deployment runs has to say so.
+test('Only the configuration write declares itself a write', () => {
+	const writes = allSystemMcpTools()
+		.filter((tool) => tool.annotations.readOnlyHint === false)
+		.map((tool) => tool.name);
+
+	expect(writes).toEqual(['write_autoscale_config']);
+
+	expect(findSystemMcpTool('write_autoscale_config')!.annotations).toEqual({
+		readOnlyHint: false,
+		destructiveHint: false,
+		idempotentHint: true,
+		openWorldHint: false,
+	});
 });
 
 test('Only the windowed reads take a window', () => {
@@ -189,6 +227,8 @@ test('A deployment that reports no processes offers no tool for them', () => {
 
 	expect(systemMcpTools().map((tool) => tool.name))
 		.toEqual([
+			'read_autoscale_config',
+			'write_autoscale_config',
 			'list_cache_entries',
 			'read_cache_entry',
 			'list_cache_anomalies',
@@ -247,6 +287,8 @@ test('Every tool declares the subsystem it reads', () => {
 
 	expect(groups).toEqual([
 		'processes',
+		'autoscale',
+		'autoscale',
 		'cache',
 		'cache',
 		'cache',
@@ -254,6 +296,17 @@ test('Every tool declares the subsystem it reads', () => {
 		'cache',
 		'cache',
 	]);
+});
+
+// The override lives in Redis, and a tool that could only ever fail is worse
+// than one a model never sees.
+test('A deployment without Redis offers no autoscale tools', () => {
+	redis.available.mockReturnValue(false);
+
+	expect(systemMcpTools().map((tool) => tool.name))
+		.not.toContain('write_autoscale_config');
+
+	expect(findSystemMcpTool('read_autoscale_config')).toBeUndefined();
 });
 
 test('An unknown name resolves to no tool', () => {
@@ -284,6 +337,52 @@ test.each([
 	// Absent stays absent rather than becoming a window of its own.
 	await findSystemMcpTool(tool)!.run({}, context);
 	expect(service[method]).toHaveBeenLastCalledWith(undefined);
+});
+
+test('The configuration write sends the note down with the patch', async () => {
+	service.updateAutoscaleConfig.mockResolvedValue({ key: 'k', override: {} });
+
+	await findSystemMcpTool('write_autoscale_config')!.run(
+		{ config: { maxWorkers: 8 }, note: 'spike on the planner' },
+		context,
+	);
+
+	expect(service.updateAutoscaleConfig).toHaveBeenCalledWith({
+		maxWorkers: 8,
+		note: 'spike on the planner',
+	});
+});
+
+test('The configuration write drops the whole override when asked', async () => {
+	service.readAutoscaleConfig.mockResolvedValue({ key: 'k', override: null });
+
+	await findSystemMcpTool('write_autoscale_config')!
+		.run({ clear: true, note: 'incident over' }, context);
+
+	expect(service.clearAutoscaleConfig).toHaveBeenCalledOnce();
+	expect(service.updateAutoscaleConfig).not.toHaveBeenCalled();
+});
+
+// A model that sends the fields at the top level instead of under `config` gets
+// told so, rather than having a note stored and nothing else.
+test('The configuration write refuses a patch that is not an object', async () => {
+	await expect(
+		findSystemMcpTool('write_autoscale_config')!
+			.run({ config: 'maxWorkers=8', note: 'why' }, context),
+	).rejects.toThrowError('`config` has to be an object of configuration fields');
+});
+
+test('The configuration read asks the running processes by default', async () => {
+	service.readAutoscaleConfig.mockResolvedValue({ key: 'k', override: null });
+	service.readAutoscaleRunners.mockResolvedValue([]);
+
+	await findSystemMcpTool('read_autoscale_config')!.run({}, context);
+	expect(service.readAutoscaleRunners).toHaveBeenCalledOnce();
+
+	// Asking them costs about a second, so a caller that only wants the stored
+	// override can say so.
+	await findSystemMcpTool('read_autoscale_config')!.run({ live: false }, context);
+	expect(service.readAutoscaleRunners).toHaveBeenCalledOnce();
 });
 
 test('The entry read reads the one key it was given', async () => {
@@ -426,6 +525,11 @@ test('Every declared output property is one the tool actually answers', () => {
 	 */
 	const answers: {
 		list_processes: ProcessesReport;
+		read_autoscale_config:
+			Awaited<ReturnType<GuardedUtils['readAutoscaleConfig']>>
+			& { running: AutoscaleRunner[] };
+		write_autoscale_config:
+			Awaited<ReturnType<GuardedUtils['updateAutoscaleConfig']>>;
 		list_cache_entries: CacheEntryRecord[];
 		// Everything the service answers except the cached response itself, which
 		// this tool deliberately drops. A field added to the service lands here
@@ -439,6 +543,61 @@ test('Every declared output property is one the tool actually answers', () => {
 		read_cache_timeseries: CacheTimeseries;
 		read_cache_stats_state: CacheStatsState;
 	} = {
+		read_autoscale_config: {
+			key: 'scalabus:autoscale:config',
+			override: { maxWorkers: 8, setBy: 'jean', setAt: '2026-09-09T00:00:00Z' },
+			running: [
+				{
+					service: 'api',
+					replicaId: 'replica-a',
+					nodeId: 'node-1',
+					name: 'autoscale',
+					state: {
+						at: 1_700_000_000_000,
+						config: {
+						enabled: true,
+						strategy: 'scalabus',
+						appName: 'api',
+						signal: 'average',
+						sampleWindow: 5,
+						scaleCpuThreshold: 60,
+						releaseCpuThreshold: 40,
+						minWorkers: 1,
+						maxWorkers: 4,
+						prewarmWorkers: 0,
+						minSecondsToScaleUp: 10,
+						minSecondsToScaleDown: 300,
+						warmupSeconds: 30,
+					},
+						sources: {
+						enabled: 'default',
+						strategy: 'default',
+						appName: 'env',
+						signal: 'default',
+						sampleWindow: 'default',
+						scaleCpuThreshold: 'default',
+						releaseCpuThreshold: 'default',
+						minWorkers: 'env',
+						maxWorkers: 'override',
+						prewarmWorkers: 'default',
+						minSecondsToScaleUp: 'default',
+						minSecondsToScaleDown: 'default',
+						warmupSeconds: 'default',
+					},
+						workers: 2,
+						pendingWorkers: 0,
+						warmingWorkers: 0,
+						cpuPercents: [20, 24],
+						lastDecision: { at: 1, workers: null, reason: 'within the band' },
+						lastScale: { at: 1, workers: 2, reason: 'average cpu 70% is high' },
+					},
+				},
+			],
+		},
+		write_autoscale_config: {
+			key: 'scalabus:autoscale:config',
+			override: { maxWorkers: 8 },
+		},
 		list_processes: {
 			collectedAt: 1_700_000_000_000,
 			collectedForMs: 750,

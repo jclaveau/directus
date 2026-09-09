@@ -3,6 +3,7 @@ import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
 } from '../../cache-events.js';
+import { redisConfigAvailable } from '../../redis/index.js';
 import { UtilsService } from '../../services/utils.js';
 import {
 	defineSystemMcpTool,
@@ -70,12 +71,27 @@ const LIST_OUTPUT = {
 } as const;
 
 /**
- * Every tool here reads and nothing more, which is what lets a client call one
+ * A tool that reads and nothing more, which is what lets a client call one
  * without asking the user to approve it first.
  */
 const READ_ONLY = {
 	readOnlyHint: true,
 	destructiveHint: false,
+	openWorldHint: false,
+} as const;
+
+/**
+ * A tool that changes how this deployment runs.
+ *
+ * Not destructive — it stores values, and each of them is reversible by storing
+ * another — but a client is expected to put the call in front of the user
+ * before making it, which is what `readOnlyHint: false` buys. Idempotent: the
+ * same patch written twice leaves the same override.
+ */
+const CHANGES_CONFIG = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: true,
 	openWorldHint: false,
 } as const;
 
@@ -148,6 +164,135 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				const details = requestedProcessDetails(args['details']);
 
 				return utils(context).readProcesses(details);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_autoscale_config',
+			group: 'autoscale',
+			title: 'Read the autoscale configuration',
+			description:
+				'What every process scaling a PM2 pool is running on: the values it '
+				+ 'resolved, which layer supplied each one, the pool it last read and '
+				+ 'the last decision it took — plus the live override those values are '
+				+ 'resolved through. Use it before changing anything, and to explain a '
+				+ 'pool that is not the size it should be.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					live: {
+						type: 'boolean',
+						description: 'Whether to ask the running processes what they are '
+							+ 'scaling on, which takes about a second. False answers with '
+							+ 'the stored override alone.',
+					},
+				},
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					key: {
+						type: 'string',
+						description: 'The Redis key the override is stored under.',
+					},
+					override: {
+						type: 'object',
+						description: 'The fields the override sets, or null for none. '
+							+ 'Carries `setBy`, `setAt` and `note` beside them.',
+					},
+					running: {
+						type: 'array',
+						description: 'One entry per process that is scaling a pool.',
+						items: { type: 'object' },
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				const service = utils(context);
+				const stored = await service.readAutoscaleConfig();
+
+				return {
+					...stored,
+					running: args['live'] === false
+						? []
+						: await service.readAutoscaleRunners(),
+				};
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'write_autoscale_config',
+			group: 'autoscale',
+			title: 'Change the autoscale configuration',
+			description:
+				'Lay fields over the live autoscale configuration, which every '
+				+ 'process scaling a pool in this cache namespace picks up within a '
+				+ 'second — no redeploy, and no restart of the pool being tuned. '
+				+ 'Pass a field as null to give it back to the environment chain, and '
+				+ '`clear: true` to drop the override entirely. Bounds are corrected '
+				+ 'by the loop rather than refused here, so read the configuration '
+				+ 'back to see what it is actually running on.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					config: {
+						type: 'object',
+						description: 'The fields to set: enabled, strategy, appName, '
+							+ 'signal, sampleWindow, scaleCpuThreshold, '
+							+ 'releaseCpuThreshold, minWorkers, maxWorkers, '
+							+ 'prewarmWorkers, minSecondsToScaleUp, '
+							+ 'minSecondsToScaleDown, warmupSeconds. A null value clears '
+							+ 'that field. Setting minWorkers and maxWorkers to the same '
+							+ 'number pins the pool at it whatever the load reads.',
+					},
+					note: {
+						type: 'string',
+						description: 'Why this is being changed, stored with the '
+							+ 'override. An override outlives the incident that '
+							+ 'justified it, and this is what says which one that was.',
+					},
+					clear: {
+						type: 'boolean',
+						description: 'Drop the whole override, so every field comes from '
+							+ 'the environment chain again.',
+					},
+				},
+				required: ['note'],
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					key: {
+						type: 'string',
+						description: 'The Redis key the override is stored under.',
+					},
+					override: {
+						type: 'object',
+						description: 'The override as it now stands, or null for none.',
+					},
+				},
+			},
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const service = utils(context);
+
+				if (args['clear'] === true) {
+					await service.clearAutoscaleConfig();
+
+					return service.readAutoscaleConfig();
+				}
+
+				const config = args['config'];
+
+				if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+					throw new InvalidPayloadError({
+						reason: '`config` has to be an object of configuration fields',
+					});
+				}
+
+				return service.updateAutoscaleConfig({
+					...config as Record<string, unknown>,
+					note: args['note'],
+				});
 			},
 		}),
 		defineSystemMcpTool({
@@ -385,7 +530,11 @@ export function systemMcpTools(): SystemMcpTool[] {
 		// (`initProcessReports` returns early), so the collector would wait out its
 		// window and answer an empty tree. The REST route is absent in that
 		// deployment; the tool it shares a service with has to be too.
-		.filter((group) => group !== 'processes' || processesReportEnabled());
+		.filter((group) => group !== 'processes' || processesReportEnabled())
+		// The override lives in Redis, so a deployment without one has nowhere to
+		// keep a change and nothing to read back — the same reason the REST route
+		// is not registered there.
+		.filter((group) => group !== 'autoscale' || redisConfigAvailable());
 
 	return allSystemMcpTools().filter((tool) => groups.includes(tool.group));
 }
