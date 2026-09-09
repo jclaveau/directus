@@ -99,8 +99,8 @@ for (const [name, value] of knobs) {
 // A ratio nothing has measured yet is not ratcheted at all. `fan` and the command
 // deltas below are reported on their first run and gated on the next.
 const maxWriteScaling = Number(process.env['PERF_CACHE_WRITE_SCALING_MAX'] ?? 1.5);
-const maxCommandsPerHit = Number(process.env['PERF_CACHE_MAX_COMMANDS_HIT'] ?? 7);
-const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ?? 21);
+const maxCommandsPerHit = Number(process.env['PERF_CACHE_MAX_COMMANDS_HIT'] ?? 2);
+const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ?? 15);
 
 const maxWriteCommandScaling =
 	Number(process.env['PERF_CACHE_WRITE_COMMAND_SCALING_MAX'] ?? 3.1);
@@ -189,14 +189,14 @@ const arms: Arm[] = [
 const readShapes = [
 	{
 		name: 'flat',
-		ceilings: { hitVsOff: 1.15, missVsOff: 1.85, hitVsFull: 1.25, missVsFull: 1.45 },
+		ceilings: { hitVsOff: 1.05, missVsOff: 1.60, hitVsFull: 1.20, missVsFull: 1.35 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`,
 	},
 	{
 		// Two m2o hops, so the pins come off nested rows rather than off the filter.
 		name: 'deep',
-		ceilings: { hitVsOff: 1.15, missVsOff: 1.85, hitVsFull: 1.25, missVsFull: 1.45 },
+		ceilings: { hitVsOff: 0.90, missVsOff: 1.60, hitVsFull: 1.25, missVsFull: 1.40 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`
 				+ `&fields=*,author.*,author.company.*`;
@@ -205,7 +205,7 @@ const readShapes = [
 	{
 		// 200 rows, so the payload itself counts. One pin: the filtered column.
 		name: 'wide',
-		ceilings: { hitVsOff: 1.15, missVsOff: 1.85, hitVsFull: 1.25, missVsFull: 1.45 },
+		ceilings: { hitVsOff: 1.00, missVsOff: 1.65, hitVsFull: 1.25, missVsFull: 1.40 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`,
 	},
@@ -218,7 +218,7 @@ const readShapes = [
 		// per row too, and that is the cost the shape exists to expose rather than
 		// one the ceiling should hide. The target every shape is held to stays in
 		// Headroom.
-		ceilings: { hitVsOff: 1.15, missVsOff: 2.25, hitVsFull: 1.25, missVsFull: 1.75 },
+		ceilings: { hitVsOff: 0.85, missVsOff: 2.25, hitVsFull: 1.20, missVsFull: 1.75 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`
 				+ `&fields=*,author.*`;
@@ -564,6 +564,11 @@ type RedisCounters = {
 	commands: number;
 	byCommand: Record<string, number>;
 	socketReads: number;
+	// What the client actually sent. A command count cannot see the difference
+	// between a script called by its SHA and the same script with its whole body on
+	// the wire — both are one command — and a read that pins per row sends the body
+	// twice per pin.
+	inputBytes: number;
 };
 
 async function readRedisCounters(): Promise<RedisCounters> {
@@ -587,12 +592,14 @@ async function readRedisCounters(): Promise<RedisCounters> {
 	}
 
 	const socketReads = Number(/total_reads_processed:(\d+)/.exec(stats)?.[1] ?? 0);
+	const inputBytes = Number(/total_net_input_bytes:(\d+)/.exec(stats)?.[1] ?? 0);
 
-	return { commands, byCommand, socketReads };
+	return { commands, byCommand, socketReads, inputBytes };
 }
 
 type CensusResult = {
 	perRequest: number;
+	bytesPerRequest: number;
 	// Every command, not a top-N slice: the first run of this bench reported six
 	// commands per hit where the response cache accounts for two, and a truncated
 	// list is what stopped the other four from being attributable to anything.
@@ -633,6 +640,7 @@ async function census(
 
 	return {
 		perRequest: net / requests,
+		bytesPerRequest: counted.inputBytes / requests,
 		breakdown,
 		socketReadsPerRequest: counted.socketReads / requests,
 	};
@@ -796,7 +804,10 @@ test('the cache costs less than what it replaces', async () => {
 	const commandsPerWrite = new Map<string, Map<number, number>>();
 
 	function describe(counted: CensusResult): string {
-		return `**${counted.perRequest.toFixed(1)}** — ${counted.breakdown}`;
+		const bytes = (counted.bytesPerRequest / 1024).toFixed(1);
+
+		return `**${counted.perRequest.toFixed(1)}** (${bytes} KB sent)`
+			+ ` — ${counted.breakdown}`;
 	}
 
 	// `off` is counted too, and that is what makes any of these attributable. A

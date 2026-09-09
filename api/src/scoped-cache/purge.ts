@@ -7,7 +7,6 @@ import {
 	cacheExpiresAtKey,
 	cacheSidecarOwner,
 } from '../cache-sidecars.js';
-import { dropCacheEntries } from '../cache-drop.js';
 import {
 	queueCacheAnomaly,
 	queueCachePurge,
@@ -466,31 +465,21 @@ async function purgeScopedCacheTagKeys(
 		}
 	}
 
-	// Which members are entries and which are sidecars written beside them is set
-	// arithmetic on the list itself and needs no answer from the store — so the two
-	// groups go in a command each rather than one command per member, and UNLINK's
-	// own count is the eviction figure.
-	const present = new Set(members);
-	const entries: string[] = [];
-	const sidecars: string[] = [];
+	const wasDeleted = await Promise.all(members.map((member) => {
+		return cache.delete(member);
+	}));
 
-	for (const member of members) {
+	const present = new Set(members);
+
+	return members.filter((member, index) => {
+		if (wasDeleted[index] === false) {
+			return false;
+		}
+
 		const owner = cacheSidecarOwner(member);
 
-		if (owner === null || present.has(owner) === false) {
-			entries.push(member);
-		}
-		else {
-			sidecars.push(member);
-		}
-	}
-
-	const [evicted] = await Promise.all([
-		dropCacheEntries(cache, entries),
-		dropCacheEntries(cache, sidecars),
-	]);
-
-	return evicted;
+		return owner === null || present.has(owner) === false;
+	}).length;
 }
 
 /**
