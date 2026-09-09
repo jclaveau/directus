@@ -318,9 +318,12 @@ describe('editing one field', () => {
 			.find((candidate: any) => candidate.text().startsWith(field));
 	}
 
+	// The buttons only take a pending change, so let the one just made render
+	// before pressing them.
 	async function applyRow(wrapper: any, field: string) {
-		await row(wrapper, field).findAll('button')
-			.find((button: any) => button.text().includes('Apply'))
+		await flushPromises();
+
+		await row(wrapper, field).find('.apply button')
 			.trigger('click');
 
 		await flushPromises();
@@ -357,6 +360,9 @@ describe('editing one field', () => {
 			{ text: 'scalabus', value: 'scalabus' },
 			{ text: 'legacy', value: 'legacy' },
 		]);
+
+		// The same height as the fields it sits between.
+		expect(select.props('small')).toBe(true);
 
 		select.vm.$emit('update:modelValue', 'legacy');
 		await applyRow(wrapper, 'strategy');
@@ -395,6 +401,38 @@ describe('editing one field', () => {
 		await apply(wrapper, 'maxWorkers', '');
 
 		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { maxWorkers: null });
+	});
+
+	test('a change is discarded without writing it', async () => {
+		const wrapper = await mounted({ maxWorkers: 8 });
+		const input = row(wrapper, 'maxWorkers').find('input');
+
+		await input.setValue('16');
+
+		await row(wrapper, 'maxWorkers').find('.cancel button')
+			.trigger('click');
+
+		await flushPromises();
+
+		expect(api.patch).not.toHaveBeenCalled();
+		expect((input.element as HTMLInputElement).value).toBe('8');
+	});
+
+	// Both buttons act on a pending change, and pressing one with nothing typed
+	// would clear the field rather than do nothing.
+	test('both buttons wait for a change to act on', async () => {
+		const wrapper = await mounted({ maxWorkers: 8 });
+		const untouched = row(wrapper, 'maxWorkers');
+
+		expect(untouched.findAllComponents(VButton)
+			.map((button: any) => button.props('disabled')))
+			.toEqual([true, true]);
+
+		await untouched.find('input').setValue('16');
+
+		expect(row(wrapper, 'maxWorkers').findAllComponents(VButton)
+			.map((button: any) => button.props('disabled')))
+			.toEqual([false, false]);
 	});
 
 	test('a failed write is reported and leaves the panel usable', async () => {

@@ -4,6 +4,7 @@ import type { AutoscaleRunner } from '@directus/types';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
+	type AutoscaleRow,
 	configRows,
 	describeDecision,
 	firstRunner,
@@ -24,7 +25,7 @@ const available = ref(true);
 const error = ref<string | null>(null);
 const saving = ref(false);
 const note = ref('');
-const drafts = ref<Record<string, string>>({});
+const drafts = ref<Record<string, string | null>>({});
 
 const runner = computed(() => firstRunner(props.runners));
 const rows = computed(() => configRows(runner.value?.state ?? null, override.value));
@@ -123,11 +124,33 @@ async function clearAll(): Promise<void> {
 	}
 }
 
+function edited(field: string): boolean {
+	return field in drafts.value;
+}
+
+/**
+ * What the field shows: the change being typed, else the stored override —
+ * the running value is the placeholder underneath both.
+ */
+function shown(row: AutoscaleRow): string | null {
+	if (edited(row.field)) {
+		return drafts.value[row.field] ?? null;
+	}
+
+	return row.override === null
+		? null
+		: String(row.override);
+}
+
 function applyRow(field: string, kind: string): void {
 	const value = parseFieldValue(kind as never, drafts.value[field]);
 
 	delete drafts.value[field];
 	void write({ [field]: value });
+}
+
+function cancelRow(field: string): void {
+	delete drafts.value[field];
 }
 
 function pause(): void {
@@ -261,10 +284,9 @@ onMounted(load);
 						row lays this span out instead. -->
 						<span v-if="row.options" class="control">
 							<v-select
-								:model-value="drafts[row.field] ?? (
-									row.override === null ? null : String(row.override)
-								)"
+								:model-value="shown(row)"
 								:items="row.options"
+								small
 								:placeholder="row.effective === null
 									? undefined
 									: String(row.effective)"
@@ -274,30 +296,46 @@ onMounted(load);
 							/>
 						</span>
 
-						<v-input
-							v-else
-							:model-value="drafts[row.field] ?? (
-								row.override === null ? '' : String(row.override)
-							)"
-							small
-							:type="row.kind === 'number' ? 'number' : 'text'"
-							:min="row.min"
-							:max="row.max"
-							:step="row.step"
-							:suffix="row.unit"
-							:placeholder="row.effective === null ? '' : String(row.effective)"
-							:disabled="saving"
-							@update:model-value="drafts[row.field] = $event"
-							@keyup.enter="applyRow(row.field, row.kind)"
-						/>
+						<span v-else class="control">
+							<v-input
+								:model-value="shown(row) ?? ''"
+								small
+								full-width
+								:type="row.kind === 'number' ? 'number' : 'text'"
+								:min="row.min"
+								:max="row.max"
+								:step="row.step"
+								:suffix="row.unit"
+								:placeholder="row.effective === null
+									? ''
+									: String(row.effective)"
+								:disabled="saving"
+								@update:model-value="drafts[row.field] = $event"
+								@keyup.enter="applyRow(row.field, row.kind)"
+							/>
+						</span>
 
 						<v-button
 							x-small
+							icon
 							secondary
-							:disabled="saving"
+							class="cancel"
+							:tooltip="t('autoscale_cancel', 'Discard this change')"
+							:disabled="saving || !edited(row.field)"
+							@click="cancelRow(row.field)"
+						>
+							<v-icon name="close" x-small />
+						</v-button>
+
+						<v-button
+							x-small
+							icon
+							class="apply"
+							:tooltip="t('autoscale_apply', 'Apply this change')"
+							:disabled="saving || !edited(row.field)"
 							@click="applyRow(row.field, row.kind)"
 						>
-							{{ t('autoscale_apply', 'Apply') }}
+							<v-icon name="check" x-small />
 						</v-button>
 					</td>
 				</tr>
@@ -361,7 +399,7 @@ onMounted(load);
 
 .edit {
 	display: flex;
-	gap: 8px;
+	gap: 4px;
 	align-items: center;
 	max-inline-size: 320px;
 }
