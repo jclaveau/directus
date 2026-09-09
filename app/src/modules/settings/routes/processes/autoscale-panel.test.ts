@@ -8,6 +8,7 @@ import {
 	parseFieldValue,
 	pinPatch,
 	secondsSince,
+	supervisorRows,
 } from './autoscale-panel';
 
 function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState {
@@ -61,6 +62,18 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 		workers: 3,
 		pendingWorkers: 0,
 		warmingWorkers: 0,
+		supervisor: {
+			instances: 2,
+			execMode: 'cluster_mode',
+			maxMemoryRestart: null,
+			listenTimeout: 3000,
+			killTimeout: 1600,
+			minUptime: 1000,
+			maxRestarts: 16,
+			restartDelay: 0,
+			autorestart: true,
+			waitReady: true,
+		},
 		cpuPercents: [20, 24, 22],
 		lastDecision: null,
 		lastScale: null,
@@ -241,4 +254,39 @@ test('one runner describes the pool, and none is answered as none', () => {
 
 	expect(firstRunner([runner])).toBe(runner);
 	expect(firstRunner([])).toBeNull();
+});
+
+// The pool size two layers claim: what pm2 was started with, and what the loop
+// has been resizing it to since. Reported so a pool at a size neither number
+// obviously explains is answered by both of them being on the page.
+test('the declaration reports the size the pool booted at', () => {
+	const rows = supervisorRows(state());
+
+	expect(rows.find((row) => row.field === 'instances')?.value).toBe('2');
+});
+
+// A ceiling is reported in the unit it is set in rather than in the bytes it is
+// held in: nobody sets one in bytes, and a nine-digit number reads as noise.
+test('a memory ceiling is reported in megabytes', () => {
+	const declared = state();
+	declared.supervisor!.maxMemoryRestart = 536_870_912;
+
+	const rows = supervisorRows(declared);
+
+	expect(rows.find((row) => row.field === 'maxMemoryRestart')?.value)
+		.toBe('512 MB');
+});
+
+test('no memory ceiling reads as off rather than as a size', () => {
+	const rows = supervisorRows(state());
+
+	expect(rows.find((row) => row.field === 'maxMemoryRestart')?.value)
+		.toBe('off');
+});
+
+// Nothing to report is an empty section rather than a table of fallbacks: a
+// process that reported no declaration is one whose pool nobody has read.
+test('a pool that reported no declaration has no rows', () => {
+	expect(supervisorRows(state({ supervisor: null }))).toEqual([]);
+	expect(supervisorRows(null)).toEqual([]);
 });

@@ -119,6 +119,11 @@ export interface AutoscaleNodeState {
 	/** Online but young enough that their CPU is still their own startup. */
 	warmingWorkers: number;
 	/**
+	 * The pm2 declaration those workers are running under, or `null` where the
+	 * supervisor reported no worker of this app to read one off.
+	 */
+	supervisor: AutoscaleSupervisor | null;
+	/**
 	 * The per-worker readings the rule that decided actually looked at.
 	 *
 	 * Which workers those are is the strategy's own: `legacy` reads every
@@ -152,4 +157,43 @@ export interface AutoscaleDrill {
 	until: number | null;
 	/** The share of its time a drilling worker spends holding the processor. */
 	percent: number;
+}
+
+/**
+ * The pm2 application declaration the scaled pool is running under.
+ *
+ * Read off the supervisor rather than off the `PM2_*` variables it was built
+ * from: `ecosystem.config.cjs` is consulted once, at `pm2 start`, so a variable
+ * edited after that is a value the deployment holds and the pool does not.
+ *
+ * Each field carries the value pm2 acts on, which for one the declaration left
+ * out is pm2's own fallback rather than nothing — an unset `listenTimeout` still
+ * decides when a worker is given up on.
+ */
+export interface AutoscaleSupervisor {
+	/**
+	 * Workers the declaration asks for.
+	 *
+	 * The size the pool boots at, and the only size it has until the first
+	 * tick; from there `minWorkers`, `maxWorkers` and `prewarmWorkers` own it.
+	 */
+	instances: number;
+	execMode: string;
+	/** Bytes a worker may reach before the supervisor restarts it, or `null`. */
+	maxMemoryRestart: number | null;
+	/** Milliseconds a worker has to send `ready` before it counts as up. */
+	listenTimeout: number;
+	/** Milliseconds between the SIGINT that releases a worker and the SIGKILL. */
+	killTimeout: number;
+	/** Milliseconds a worker has to survive for its start to count as clean. */
+	minUptime: number;
+	maxRestarts: number;
+	/** Milliseconds the supervisor waits before restarting a worker that died. */
+	restartDelay: number;
+	autorestart: boolean;
+	/**
+	 * Whether the supervisor holds a worker at `launching` until it says it is
+	 * ready, which is what makes `pendingWorkers` mean anything.
+	 */
+	waitReady: boolean;
 }

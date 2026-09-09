@@ -614,6 +614,7 @@ test('Every declared output property is one the tool actually answers', () => {
 						workers: 2,
 						pendingWorkers: 0,
 						warmingWorkers: 0,
+						supervisor: null,
 						cpuPercents: [20, 24],
 						lastDecision: { at: 1, workers: null, reason: 'within the band' },
 						lastScale: { at: 1, workers: 2, reason: 'average cpu 70% is high' },

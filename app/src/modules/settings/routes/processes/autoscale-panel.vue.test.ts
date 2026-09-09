@@ -77,6 +77,7 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 		workers: 3,
 		pendingWorkers: 0,
 		warmingWorkers: 0,
+		supervisor: null,
 		cpuPercents: [20, 24, 22],
 		lastDecision: {
 			at: Date.now(),
@@ -200,6 +201,41 @@ describe('what the panel shows', () => {
 
 	// The route only exists where Redis does, so its absence is the answer to
 	// "can this be changed here" rather than a failure to report.
+	// The two numbers that both claim the pool size, on one page: a pool at four
+	// workers under a declaration asking for two is the autoscaler's doing, and
+	// nothing says so while only one of them is reported.
+	test('the pm2 declaration is reported beside the config', async () => {
+		const declared = state({
+			supervisor: {
+				instances: 2,
+				execMode: 'cluster_mode',
+				maxMemoryRestart: null,
+				listenTimeout: 3000,
+				killTimeout: 1600,
+				minUptime: 1000,
+				maxRestarts: 16,
+				restartDelay: 0,
+				autorestart: true,
+				waitReady: true,
+			},
+		});
+
+		const wrapper = await mounted(null, [runner(declared)]);
+
+		const row = wrapper.findAll('.supervisor tbody tr')
+			.find((line) => line.text().startsWith('instances'));
+
+		expect(row?.find('.declared').text()).toBe('2');
+	});
+
+	// A pool nothing reported a declaration for gets no section rather than a
+	// table of the values pm2 would have fallen back to.
+	test('a pool with no declaration reported shows no supervisor', async () => {
+		const wrapper = await mounted(null);
+
+		expect(wrapper.find('.supervisor').exists()).toBe(false);
+	});
+
 	test('a 404 says the deployment is tuned by its environment', async () => {
 		vi.mocked(api.get).mockRejectedValue({ response: { status: 404 } });
 

@@ -31,6 +31,7 @@ test('answers with the tick that was recorded', async () => {
 		workers: 2,
 		pendingWorkers: 1,
 		warmingWorkers: 0,
+		supervisor: null,
 		cpuPercents: [20, 30],
 		lastDecision: { at: 1000, workers: 3, reason: 'average cpu 25% is high' },
 	});
@@ -43,6 +44,7 @@ test('answers with the tick that was recorded', async () => {
 		workers: 2,
 		pendingWorkers: 1,
 		warmingWorkers: 0,
+		supervisor: null,
 		cpuPercents: [20, 30],
 		lastDecision: { at: 1000, workers: 3, reason: 'average cpu 25% is high' },
 		lastScale: { at: 1000, workers: 3, reason: 'average cpu 25% is high' },
@@ -63,6 +65,7 @@ test('keeps the last move a tick that decides nothing', async () => {
 		workers: 3,
 		pendingWorkers: 0,
 		warmingWorkers: 0,
+		supervisor: null,
 		cpuPercents: [20],
 	};
 

@@ -259,6 +259,7 @@ export async function runAutoscaler(): Promise<void> {
 				workers: onlineWorkers.length,
 				pendingWorkers,
 				warmingWorkers,
+				supervisor: reading.supervisor,
 				cpuPercents: config.strategy === 'legacy'
 					? legacyWorkers.map((worker) => worker.cpuPercent)
 					: cpuPercents,

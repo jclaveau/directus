@@ -104,3 +104,55 @@ test('a supervisor that answers keeps its connection', async () => {
 
 	expect(disconnect).not.toHaveBeenCalled();
 });
+
+// What the pool is running under is asked of the supervisor rather than of this
+// process's environment: the api worker serving the page that shows it was
+// started by the same declaration, but a deployment scaling an app it does not
+// itself belong to would report its own.
+test('the declaration is read off the workers the supervisor listed', async () => {
+	const { readPool } = await import('./pool.js');
+
+	list.mockImplementation((
+		callback: (error: Error | null, apps: unknown[]) => void,
+	) => {
+		callback(null, [
+			{
+				name: 'directus',
+				pm_id: 0,
+				pid: 100,
+				monit: { cpu: 10, memory: 0 },
+				pm2_env: {
+					status: 'online',
+					pm_uptime: 0,
+					instances: 2,
+					exec_mode: 'cluster_mode',
+					kill_timeout: 30_000,
+					wait_ready: true,
+				},
+			},
+		]);
+	});
+
+	await expect(readPool('directus', 30)).resolves.toMatchObject({
+		supervisor: {
+			instances: 2,
+			execMode: 'cluster_mode',
+			killTimeout: 30_000,
+			waitReady: true,
+		},
+	});
+});
+
+test('a pool with no worker reports no declaration', async () => {
+	const { readPool } = await import('./pool.js');
+
+	list.mockImplementation((
+		callback: (error: Error | null, apps: unknown[]) => void,
+	) => {
+		callback(null, []);
+	});
+
+	await expect(readPool('directus', 30)).resolves.toMatchObject({
+		supervisor: null,
+	});
+});

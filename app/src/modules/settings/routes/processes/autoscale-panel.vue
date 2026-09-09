@@ -17,6 +17,7 @@ import {
 	parseFieldValue,
 	pinPatch,
 	secondsSince,
+	supervisorRows,
 	underLoad,
 } from './autoscale-panel';
 
@@ -141,6 +142,14 @@ const stampLine = computed(() => {
 
 	return parts.join(' ');
 });
+
+/**
+ * The pm2 declaration the pool runs under.
+ *
+ * Reported beside the configuration rather than mixed into it: these are read
+ * when a worker starts, so what changes one is a deploy, not this page.
+ */
+const supervisor = computed(() => supervisorRows(runner.value?.state ?? null));
 
 const decided = computed(() => {
 	const state = runner.value?.state;
@@ -694,6 +703,30 @@ onUnmounted(disarmClock);
 			</span>
 		</div>
 
+		<template v-if="supervisor.length > 0">
+			<h4 class="section-title supervisor-title">
+				{{ t('autoscale_supervisor', 'Supervisor') }}
+			</h4>
+
+			<p class="supervisor-note">
+				{{ t(
+					'autoscale_supervisor_note',
+					'What PM2 was started with. Read when a worker starts, so a '
+						+ 'change to one of these reaches the pool through a deploy '
+						+ 'rather than through this page.',
+				) }}
+			</p>
+
+			<table class="fields supervisor">
+				<tbody>
+					<tr v-for="row in supervisor" :key="row.field">
+						<td><span v-tooltip="row.description">{{ row.field }}</span></td>
+						<td class="declared">{{ row.value }}</td>
+					</tr>
+				</tbody>
+			</table>
+		</template>
+
 		<p v-if="configKey" class="key">{{ configKey }}</p>
 	</div>
 </template>
@@ -851,6 +884,19 @@ onUnmounted(disarmClock);
 }
 
 .drill-note {
+	color: var(--theme--foreground-subdued);
+}
+
+.supervisor-title {
+	margin-block-start: 24px;
+}
+
+.supervisor-note {
+	margin-block-end: 8px;
+	color: var(--theme--foreground-subdued);
+}
+
+.fields.supervisor .declared {
 	color: var(--theme--foreground-subdued);
 }
 </style>

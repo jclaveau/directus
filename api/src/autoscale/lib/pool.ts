@@ -1,5 +1,7 @@
+import type { AutoscaleSupervisor } from '@directus/types';
 import { promisify } from 'node:util';
 import pm2 from 'pm2';
+import { type DeclaredWorkerEnv, declaredBy } from './supervisor.js';
 
 const connect = promisify(pm2.connect.bind(pm2));
 const list = promisify(pm2.list.bind(pm2));
@@ -95,6 +97,14 @@ export interface PoolReading {
 	 * and the restart goes unseen.
 	 */
 	restartsByWorker: Map<number, number>;
+	/**
+	 * The declaration those workers are running under, off the first one the
+	 * supervisor named, or `null` for a pool with no worker to read.
+	 *
+	 * One worker answers for the pool: pm2 clones the declaration per worker
+	 * from the app it belongs to, so they carry the same one.
+	 */
+	supervisor: AutoscaleSupervisor | null;
 }
 
 export interface OnlineWorker {
@@ -110,7 +120,7 @@ export interface OnlineWorker {
  * restart counter and the start time are on the runtime object and absent
  * from them.
  */
-interface SupervisedWorkerEnv {
+interface SupervisedWorkerEnv extends DeclaredWorkerEnv {
 	status?: string;
 	restart_time?: number;
 	pm_uptime?: number;
@@ -151,9 +161,14 @@ export async function readPool(
 	const restartsByWorker = new Map<number, number>();
 	let pendingWorkers = 0;
 	let warmingWorkers = 0;
+	let supervisor: AutoscaleSupervisor | null = null;
 
 	for (const worker of workers) {
 		const env = worker.pm2_env as SupervisedWorkerEnv | undefined;
+
+		if (env !== undefined && supervisor === null) {
+			supervisor = declaredBy(env);
+		}
 
 		if (worker.pm_id !== undefined) {
 			restartsByWorker.set(worker.pm_id, env?.restart_time ?? 0);
@@ -183,6 +198,7 @@ export async function readPool(
 		warmingWorkers,
 		onlineWorkers,
 		restartsByWorker,
+		supervisor,
 	};
 }
 
