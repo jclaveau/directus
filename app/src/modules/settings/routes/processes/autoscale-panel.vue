@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import api from '@/api';
-import type { AutoscaleRunner } from '@directus/types';
+import type { AutoscaleRunner, AutoscaleValueSource } from '@directus/types';
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
@@ -108,7 +108,7 @@ async function write(patch: Record<string, unknown>): Promise<void> {
 	}
 }
 
-async function clearAll(): Promise<void> {
+async function resetToEnv(): Promise<void> {
 	saving.value = true;
 	error.value = null;
 
@@ -128,6 +128,19 @@ async function clearAll(): Promise<void> {
 
 function edited(field: string): boolean {
 	return field in drafts.value;
+}
+
+const dirty = computed(() => Object.keys(drafts.value).length > 0);
+
+/** What the layer a value came from is called here. */
+function sourceLabel(source: AutoscaleValueSource | null): string {
+	if (source === null) {
+		return '—';
+	}
+
+	return source === 'override'
+		? t('autoscale_source_config', 'config')
+		: source;
 }
 
 /**
@@ -157,23 +170,44 @@ function cancelRow(field: string): void {
 	delete drafts.value[field];
 }
 
-function clearRow(field: string): void {
+function resetRow(field: string): void {
 	delete drafts.value[field];
 	void write({ [field]: null });
 }
 
 /**
- * What clearing a field would leave it on, named in the button that does it.
- *
- * The value comes from the deciding process, which is the only one that knows
- * what its own environment says once an override is hiding it.
+ * Every pending change in one write, so a set of fields meant to move together
+ * reaches the loop on the same tick.
  */
-function clearedTo(row: AutoscaleRow): string {
-	if (row.cleared === null) {
-		return t('autoscale_clear_field', 'Clear this field');
+function applyAll(): void {
+	const patch: Record<string, unknown> = {};
+
+	for (const row of rows.value) {
+		if (edited(row.field)) {
+			patch[row.field] = parseFieldValue(row.kind, drafts.value[row.field]);
+		}
 	}
 
-	const back = t('autoscale_clear_field_to', 'Clear, back to');
+	drafts.value = {};
+	void write(patch);
+}
+
+function resetAll(): void {
+	drafts.value = {};
+}
+
+/**
+ * What resetting a field would leave it on, named in the button that does it.
+ *
+ * The value comes from the deciding process, which is the only one that knows
+ * what its own environment says while a stored value is hiding it.
+ */
+function resetsTo(row: AutoscaleRow): string {
+	if (row.cleared === null) {
+		return t('autoscale_reset_field', 'Reset this field to the environment');
+	}
+
+	const back = t('autoscale_reset_field_to', 'Reset to the environment:');
 
 	return `${back} ${String(row.cleared)}`;
 }
@@ -223,8 +257,8 @@ onMounted(load);
 		<v-notice v-if="available && runners.length === 0" type="warning">
 			{{ t(
 				'autoscale_no_runner',
-				'No process reported that it is scaling a pool. An override stored '
-					+ 'here still applies to whichever one starts next.',
+				'No process reported that it is scaling a pool. A configuration '
+					+ 'stored here still applies to whichever one starts next.',
 			) }}
 		</v-notice>
 
@@ -260,14 +294,10 @@ onMounted(load);
 					? t('autoscale_unpin', 'Unpin the pool')
 					: t('autoscale_pin', 'Pin the pool where it is') }}
 			</v-button>
-
-			<v-button small secondary :disabled="!override || saving" @click="clearAll">
-				{{ t('autoscale_clear', 'Clear the override') }}
-			</v-button>
 		</div>
 
 		<p v-if="stamp" class="stamp">
-			{{ t('autoscale_set_by', 'Overridden') }}
+			{{ t('autoscale_set_by', 'Configured') }}
 			<template v-if="stamp.setBy">by {{ stamp.setBy }}</template>
 			{{ stamp.days }}{{ t('autoscale_days_ago', 'd ago') }}
 			<template v-if="stamp.note">— {{ stamp.note }}</template>
@@ -278,7 +308,6 @@ onMounted(load);
 				<tr>
 					<th>{{ t('autoscale_field', 'Field') }}</th>
 					<th>{{ t('autoscale_value', 'Value') }}</th>
-					<th>{{ t('autoscale_source', 'From') }}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -298,7 +327,13 @@ onMounted(load);
 								small
 								:disabled="saving || row.inactive"
 								@update:model-value="drafts[row.field] = $event"
-							/>
+							>
+								<template #append>
+									<span :class="['source', row.source]">
+										{{ sourceLabel(row.source) }}
+									</span>
+								</template>
+							</v-select>
 						</span>
 
 						<span
@@ -318,7 +353,13 @@ onMounted(load);
 								:disabled="saving || row.inactive"
 								@update:model-value="drafts[row.field] = $event"
 								@keyup.enter="applyRow(row.field, row.kind)"
-							/>
+							>
+								<template #append>
+									<span :class="['source', row.source]">
+										{{ sourceLabel(row.source) }}
+									</span>
+								</template>
+							</v-input>
 						</span>
 
 						<v-button
@@ -348,22 +389,31 @@ onMounted(load);
 							x-small
 							icon
 							secondary
-							class="clear"
-							:tooltip="clearedTo(row)"
+							class="reset"
+							:tooltip="resetsTo(row)"
 							:disabled="saving || row.inactive || row.override === null"
-							@click="clearRow(row.field)"
+							@click="resetRow(row.field)"
 						>
 							<v-icon name="settings_backup_restore" x-small />
 						</v-button>
 					</td>
-					<td>
-						<span :class="['source', row.source]">
-							{{ row.source === null ? '—' : row.source }}
-						</span>
-					</td>
 				</tr>
 			</tbody>
 		</table>
+
+		<div v-if="available" class="bulk">
+			<v-button small :disabled="!dirty || saving" @click="applyAll">
+				{{ t('autoscale_apply_all', 'Apply all changes') }}
+			</v-button>
+
+			<v-button small secondary :disabled="!dirty || saving" @click="resetAll">
+				{{ t('autoscale_reset_all', 'Reset all changes') }}
+			</v-button>
+
+			<v-button small secondary :disabled="!override || saving" @click="resetToEnv">
+				{{ t('autoscale_reset_env', 'Reset to env') }}
+			</v-button>
+		</div>
 
 		<p v-if="configKey" class="key">{{ configKey }}</p>
 	</div>
@@ -419,20 +469,47 @@ onMounted(load);
 	display: flex;
 	gap: 4px;
 	align-items: center;
-	max-inline-size: 360px;
+	max-inline-size: 440px;
 }
 
 .control {
 	flex-grow: 1;
 }
 
-/* A number reads against the unit that names it rather than across the box. */
+/* A number and the unit that names it read as one phrase at the start of the
+   box, so the box grows with what is typed rather than stretching to the end. */
 .control.numeric :deep(input) {
-	text-align: end;
+	flex-grow: 0;
+	field-sizing: content;
+	min-inline-size: 4ch;
+	max-inline-size: 10ch;
+}
+
+.control :deep(.suffix) {
+	margin-inline-start: 4px;
+}
+
+/* Where the value came from sits at the far end, whatever the value is wide. */
+.control :deep(.append) {
+	margin-inline-start: auto;
 }
 
 .fields tr.inactive td {
 	opacity: 0.4;
+}
+
+.bulk {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	margin-block: 12px 8px;
+}
+
+.source {
+	flex-shrink: 0;
+	color: var(--theme--foreground-subdued);
+	font-size: 12px;
 }
 
 .source.override {

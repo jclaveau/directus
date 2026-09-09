@@ -163,10 +163,10 @@ describe('what the panel shows', () => {
 
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
 
-		// Where a value came from is read after the value, not before it.
-		const cells = ceiling?.findAll('td') ?? [];
-
-		expect(cells.at(-1)?.text()).toBe('override');
+		// Where a value came from is read inside the field it belongs to, under
+		// the name the page gives that layer.
+		expect(ceiling?.findAll('td')).toHaveLength(2);
+		expect(ceiling?.find('.edit .source').text()).toBe('config');
 	});
 
 	// The route only exists where Redis does, so its absence is the answer to
@@ -294,9 +294,74 @@ describe('the levers', () => {
 		});
 	});
 
-	test('clearing the override deletes the key and reloads the report', async () => {
+});
+
+describe('the whole form at once', () => {
+	function row(wrapper: any, field: string) {
+		return wrapper.findAll('tbody tr')
+			.find((candidate: any) => candidate.text().startsWith(field));
+	}
+
+	async function press(wrapper: any, label: string) {
+		const button = wrapper.findAll('.bulk button')
+			.find((candidate: any) => candidate.text().includes(label));
+
+		await button.trigger('click');
+		await flushPromises();
+	}
+
+	// Fields that only make sense together — a floor raised past the old
+	// ceiling — reach the loop on one tick rather than through a refused write.
+	test('every pending change is applied in one write', async () => {
+		const wrapper = await mounted({});
+
+		await row(wrapper, 'minWorkers').find('input')
+			.setValue('6');
+
+		await row(wrapper, 'maxWorkers').find('input')
+			.setValue('8');
+
+		await press(wrapper, 'Apply all');
+
+		expect(api.patch).toHaveBeenCalledTimes(1);
+
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			minWorkers: 6,
+			maxWorkers: 8,
+		});
+	});
+
+	test('resetting the changes writes nothing and puts the values back', async () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
-		await lever(wrapper, 'Clear');
+		const input = row(wrapper, 'maxWorkers').find('input');
+
+		await input.setValue('16');
+		await press(wrapper, 'Reset all');
+
+		expect(api.patch).not.toHaveBeenCalled();
+		expect((input.element as HTMLInputElement).value).toBe('8');
+	});
+
+	test('both change buttons wait for a change to act on', async () => {
+		const wrapper = await mounted({ maxWorkers: 8 });
+
+		function pending(): boolean[] {
+			return wrapper.findAll('.bulk button')
+				.slice(0, 2)
+				.map((button: any) => button.attributes('disabled') !== undefined);
+		}
+
+		expect(pending()).toEqual([true, true]);
+
+		await row(wrapper, 'maxWorkers').find('input')
+			.setValue('16');
+
+		expect(pending()).toEqual([false, false]);
+	});
+
+	test('resetting to env deletes the key and reloads the report', async () => {
+		const wrapper = await mounted({ maxWorkers: 8 });
+		await press(wrapper, 'Reset to env');
 
 		expect(api.delete).toHaveBeenCalledWith('/utils/autoscale');
 		expect(wrapper.emitted('changed')).toHaveLength(1);
@@ -415,8 +480,8 @@ describe('editing one field', () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
 		const untouched = row(wrapper, 'maxWorkers');
 
-		// The third button clears the stored value, which needs no pending
-		// change and is asserted with the rest of clearing.
+		// The third button resets the stored value, which needs no pending
+		// change and is asserted with the rest of resetting.
 		expect(untouched.findAllComponents(VButton)
 			.slice(0, 2)
 			.map((button: any) => button.props('disabled')))
@@ -430,10 +495,10 @@ describe('editing one field', () => {
 			.toEqual([false, false]);
 	});
 
-	test('clearing one field writes a null for that field alone', async () => {
+	test('resetting one field writes a null for that field alone', async () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
 
-		await row(wrapper, 'maxWorkers').find('.clear button')
+		await row(wrapper, 'maxWorkers').find('.reset button')
 			.trigger('click');
 
 		await flushPromises();
@@ -442,16 +507,16 @@ describe('editing one field', () => {
 			.toHaveBeenCalledWith('/utils/autoscale', { maxWorkers: null });
 	});
 
-	// Clearing hands the field back to the env chain, and the value waiting
+	// Resetting hands the field back to the env chain, and the value waiting
 	// there is the deciding process's to report.
-	test('the clear button names the value it would land on', async () => {
+	test('the reset button names the value it would land on', async () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
 
 		const buttons = row(wrapper, 'maxWorkers').findAllComponents(VButton);
 
-		expect(buttons[2].props('tooltip')).toBe('Clear, back to 2');
+		expect(buttons[2].props('tooltip')).toBe('Reset to the environment: 2');
 
-		// A field with nothing stored has nothing to clear.
+		// A field with nothing stored has nothing to reset.
 		const floor = row(wrapper, 'minWorkers').findAllComponents(VButton);
 
 		expect(floor[2].props('disabled')).toBe(true);
@@ -500,8 +565,8 @@ describe('editing one field', () => {
 		expect(api.patch).not.toHaveBeenCalled();
 	});
 
-	// A number reads against the unit that names it, so it is right-aligned and
-	// a name is not.
+	// A number reads as one phrase with the unit that names it, and a name has
+	// no unit to sit beside.
 	test('a number sits against its unit', async () => {
 		const wrapper = await mounted(null);
 
