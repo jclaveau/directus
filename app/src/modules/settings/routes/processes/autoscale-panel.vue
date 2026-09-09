@@ -691,57 +691,57 @@ onUnmounted(disarmClock);
 			:disabled="props.actionsTarget === null"
 		>
 			<div v-if="available" class="levers">
-				<v-button small :disabled="!runner || saving" @click="pause">
-					{{ runner?.state.config.enabled === false
+				<v-button
+					v-tooltip.bottom="runner?.state.config.enabled === false
 						? t('autoscale_resume', 'Resume autoscaling')
-						: t('autoscale_pause', 'Pause autoscaling') }}
-				</v-button>
-
-				<v-button small :disabled="!runner || saving" @click="pin">
-					{{ runner && isPinned(runner.state)
-						? t('autoscale_unpin', 'Unpin the pool')
-						: t('autoscale_pin', 'Pin the pool where it is') }}
+						: t('autoscale_pause', 'Pause autoscaling')"
+					small
+					icon
+					rounded
+					class="pause"
+					:disabled="!runner || saving"
+					@click="pause"
+				>
+					<v-icon
+						:name="runner?.state.config.enabled === false
+							? 'play_arrow'
+							: 'pause'"
+					/>
 				</v-button>
 
 				<v-button
-					v-if="!restartArmed"
+					v-tooltip.bottom="runner && isPinned(runner.state)
+						? t('autoscale_unpin', 'Unpin the pool')
+						: t('autoscale_pin', 'Pin the pool where it is')"
 					small
+					icon
+					rounded
+					class="pin"
+					:disabled="!runner || saving"
+					@click="pin"
+				>
+					<v-icon
+						:name="runner && isPinned(runner.state) ? 'keep_off' : 'push_pin'"
+					/>
+				</v-button>
+
+				<v-button
+					v-tooltip.bottom="restarting
+						? t('autoscale_restarting', 'Restarting the pool')
+						: t('autoscale_restart', 'Restart the pool')"
+					small
+					icon
+					rounded
 					secondary
 					class="restart"
-					:tooltip="restartNote"
 					:disabled="!runner || saving || restarting"
 					@click="restartArmed = true"
 				>
-					{{ restarting
-						? t('autoscale_restarting', 'Restarting the pool')
-						: t('autoscale_restart', 'Restart the pool') }}
+					<v-icon name="restart_alt" />
 				</v-button>
 
-				<template v-else>
-					<v-button
-						small
-						kind="danger"
-						class="restart-confirm"
-						:tooltip="restartNote"
-						:disabled="saving"
-						@click="restart"
-					>
-						{{ t('autoscale_restart_confirm', 'Replace every worker') }}
-					</v-button>
-
-					<v-button
-						small
-						secondary
-						class="restart-cancel"
-						:disabled="saving"
-						@click="restartArmed = false"
-					>
-						{{ t('autoscale_restart_cancel', 'Keep the pool as it is') }}
-					</v-button>
-				</template>
-
 				<div v-if="drillAvailable" class="drill">
-					<span class="knob">
+					<div class="knobs">
 						<v-input
 							v-model="drillSeconds"
 							small
@@ -753,9 +753,7 @@ onUnmounted(disarmClock);
 							suffix="s"
 							:disabled="saving || drilling !== null"
 						/>
-					</span>
 
-					<span class="knob">
 						<v-input
 							v-model="drillPercent"
 							small
@@ -767,34 +765,38 @@ onUnmounted(disarmClock);
 							suffix="%"
 							:disabled="saving || drilling !== null"
 						/>
-					</span>
 
-					<v-button
-						v-if="drilling"
-						small
-						secondary
-						:disabled="saving"
-						@click="stopDrill"
-					>
-						{{ t('autoscale_drill_stop', 'Stop the drill') }}
-					</v-button>
+						<v-button
+							v-if="drilling"
+							v-tooltip.bottom="t('autoscale_drill_stop', 'Stop the drill')"
+							small
+							icon
+							secondary
+							class="drill-stop"
+							:disabled="saving"
+							@click="stopDrill"
+						>
+							<v-icon name="stop" />
+						</v-button>
 
-					<v-button
-						v-else
-						small
-						:tooltip="t(
-							'autoscale_drill_note',
-							'Loads every worker so the pool has to decide, without '
-								+ 'touching anything it decides on.',
-						)"
-						:disabled="saving || drillBlocked !== null"
-						@click="startDrill"
-					>
-						{{ t('autoscale_drill_start', 'Run a load drill') }}
-					</v-button>
+						<v-button
+							v-else
+							v-tooltip.bottom="drillBlocked ?? t(
+								'autoscale_drill_note',
+								'Run a load drill: loads every worker so the pool has to '
+									+ 'decide, without touching anything it decides on.',
+							)"
+							small
+							icon
+							class="drill-start"
+							:disabled="saving || drillBlocked !== null"
+							@click="startDrill"
+						>
+							<v-icon name="bolt" />
+						</v-button>
+					</div>
 
 					<span v-if="drilling" class="drilling">
-						{{ t('autoscale_drilling', 'every worker busy,') }}
 						{{ drilling.remaining }}s {{ t('autoscale_drill_left', 'left') }}
 					</span>
 
@@ -804,6 +806,40 @@ onUnmounted(disarmClock);
 						{{ drillBlocked }}
 					</span>
 				</div>
+
+				<v-dialog
+					v-model="restartArmed"
+					@esc="restartArmed = false"
+					@apply="restart"
+				>
+					<v-card>
+						<v-card-title>
+							{{ t('autoscale_restart', 'Restart the pool') }}
+						</v-card-title>
+
+						<v-card-text>{{ restartNote }}</v-card-text>
+
+						<v-card-actions>
+							<v-button
+								secondary
+								class="restart-cancel"
+								:disabled="saving"
+								@click="restartArmed = false"
+							>
+								{{ t('autoscale_restart_cancel', 'Keep the pool as it is') }}
+							</v-button>
+
+							<v-button
+								danger
+								class="restart-confirm"
+								:disabled="saving"
+								@click="restart"
+							>
+								{{ t('autoscale_restart_confirm', 'Replace every worker') }}
+							</v-button>
+						</v-card-actions>
+					</v-card>
+				</v-dialog>
 			</div>
 		</Teleport>
 
@@ -1063,13 +1099,18 @@ onUnmounted(disarmClock);
 	font-weight: 600;
 }
 
-.summary,
-.levers {
+.summary {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 12px;
 	align-items: center;
 	margin-block-end: 8px;
+}
+
+.levers {
+	display: flex;
+	gap: 8px;
+	align-items: center;
 }
 
 .decision,
@@ -1181,26 +1222,34 @@ onUnmounted(disarmClock);
 	color: var(--theme--primary);
 }
 
-/* The drill sits at the end of the levers it belongs with, hard against the
-   edge, so the buttons that change the pool stay read as one group. */
+/* The drill sits at the end of the levers it belongs with, so the controls
+   that change the pool stay read as one group. */
 .drill {
 	display: flex;
-	flex-wrap: wrap;
-	gap: 12px;
+	gap: 8px;
 	align-items: center;
-	margin-inline-start: auto;
 }
 
-/* The two knobs hug their numbers, so the row reads as a sentence rather than
-   as two boxes with a button after them. */
-.knob :deep(input) {
+/* The seconds, the share and the button that spends them are one control: a
+   drill is what the two numbers are for. */
+.knobs {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+	padding: 2px;
+	border: var(--theme--border-width) solid var(--theme--border-color-subdued);
+	border-radius: var(--theme--border-radius);
+}
+
+/* Each knob hugs its number, so the group is as wide as what it holds. */
+.knobs :deep(input) {
 	flex-grow: 0;
 	field-sizing: content;
 	min-inline-size: 3ch;
 	max-inline-size: 6ch;
 }
 
-.knob :deep(.suffix) {
+.knobs :deep(.suffix) {
 	margin-inline-start: 4px;
 }
 

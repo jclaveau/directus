@@ -19,8 +19,13 @@ vi.mock('@/api', () => {
 import { createMemoryHistory, createRouter } from 'vue-router';
 import api from '@/api';
 import VButton from '@/components/v-button.vue';
+import VCard from '@/components/v-card.vue';
+import VCardActions from '@/components/v-card-actions.vue';
+import VCardText from '@/components/v-card-text.vue';
+import VCardTitle from '@/components/v-card-title.vue';
 import VChip from '@/components/v-chip.vue';
 import VIcon from '@/components/v-icon/v-icon.vue';
+import VDialog from '@/components/v-dialog.vue';
 import VInput from '@/components/v-input.vue';
 import VNotice from '@/components/v-notice.vue';
 import VSelect from '@/components/v-select/v-select.vue';
@@ -121,13 +126,30 @@ const global = {
 			unmounted: () => undefined,
 		},
 	},
-	components: { VButton, VChip, VIcon, VInput, VNotice, VSelect },
+	components: {
+		VButton,
+		VCard,
+		VCardActions,
+		VCardText,
+		VCardTitle,
+		VChip,
+		VDialog,
+		VIcon,
+		VInput,
+		VNotice,
+		VSelect,
+	},
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
 				const real = [
 					'v-button',
+					'v-card',
+					'v-card-actions',
+					'v-card-text',
+					'v-card-title',
 					'v-chip',
+					'v-dialog',
 					'v-icon',
 					'v-input',
 					'v-notice',
@@ -194,6 +216,10 @@ async function mounted(
 }
 
 beforeEach(() => {
+	// The restart confirmation is a dialog, which the app teleports into an
+	// outlet the layout owns.
+	document.body.innerHTML = '<div id="dialog-outlet"></div>';
+
 	// `v-icon` reads a store, so the panel needs a pinia to mount at all.
 	setActivePinia(createTestingPinia({ createSpy: vi.fn }));
 	vi.mocked(api.get).mockReset();
@@ -422,17 +448,23 @@ describe('what the panel shows', () => {
 });
 
 describe('the levers', () => {
-	async function lever(wrapper: any, label: string) {
-		const button = wrapper.findAll('.levers button')
-			.find((candidate: any) => candidate.text().includes(label));
-
-		await button.trigger('click');
+	// The levers are icons in the title bar, so what each one offers is read
+	// off the tooltip the test directive writes into `title`.
+	async function lever(wrapper: any, name: string) {
+		await wrapper.find(`.${name} button`).trigger('click');
 		await flushPromises();
+	}
+
+	function offers(wrapper: any, name: string): string {
+		return wrapper.find(`.${name}`).attributes('title');
 	}
 
 	test('pausing writes the one field that stops the loop', async () => {
 		const wrapper = await mounted({});
-		await lever(wrapper, 'Pause');
+
+		expect(offers(wrapper, 'pause')).toBe('Pause autoscaling');
+
+		await lever(wrapper, 'pause');
 
 		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: false });
 
@@ -446,14 +478,20 @@ describe('the levers', () => {
 		paused.config.enabled = false;
 
 		const wrapper = await mounted({ enabled: false }, [runner(paused)]);
-		await lever(wrapper, 'Resume');
+
+		expect(offers(wrapper, 'pause')).toBe('Resume autoscaling');
+
+		await lever(wrapper, 'pause');
 
 		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: true });
 	});
 
 	test('pinning holds the pool at the size it reported', async () => {
 		const wrapper = await mounted({});
-		await lever(wrapper, 'Pin');
+
+		expect(offers(wrapper, 'pin')).toBe('Pin the pool where it is');
+
+		await lever(wrapper, 'pin');
 
 		expect(api.patch)
 			.toHaveBeenCalledWith('/utils/autoscale', { minWorkers: 3, maxWorkers: 3 });
@@ -466,7 +504,10 @@ describe('the levers', () => {
 
 		const bounds = { minWorkers: 3, maxWorkers: 3 };
 		const wrapper = await mounted(bounds, [runner(pinned)]);
-		await lever(wrapper, 'Unpin');
+
+		expect(offers(wrapper, 'pin')).toBe('Unpin the pool');
+
+		await lever(wrapper, 'pin');
 
 		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
 			minWorkers: null,
@@ -477,9 +518,12 @@ describe('the levers', () => {
 });
 
 describe('restarting the pool', () => {
-	function button(wrapper: any, label: string) {
-		return wrapper.findAll('.levers button')
-			.find((candidate: any) => candidate.text().includes(label));
+	// The confirmation is a dialog, which the layout teleports out of the
+	// panel's own element — so it is reached through the component tree.
+	function inDialog(wrapper: any, name: string) {
+		return wrapper.findAllComponents(VButton)
+			.find((candidate: any) => candidate.classes().includes(name))!
+			.find('button');
 	}
 
 	// The page is served by a worker the restart replaces, so the ask goes to
@@ -487,22 +531,33 @@ describe('restarting the pool', () => {
 	test('a restart is asked for once it has been confirmed', async () => {
 		const wrapper = await mounted(null);
 
-		await button(wrapper, 'Restart the pool').trigger('click');
+		await wrapper.find('.restart button').trigger('click');
 		expect(api.post).not.toHaveBeenCalled();
 
-		await button(wrapper, 'Replace every worker').trigger('click');
+		await inDialog(wrapper, 'restart-confirm').trigger('click');
 		await flushPromises();
 
 		expect(api.post).toHaveBeenCalledWith('/utils/autoscale/reload');
 	});
 
+	// What a restart costs is what the confirmation is for, so the note that
+	// used to sit under the button travels into the dialog with it.
+	test('the confirmation says what a restart does to the pool', async () => {
+		const wrapper = await mounted(null);
+
+		await wrapper.find('.restart button').trigger('click');
+
+		expect(document.querySelector('#dialog-outlet')!.textContent)
+			.toContain('each one only once its replacement is serving');
+	});
+
 	test('backing out of a restart asks for nothing', async () => {
 		const wrapper = await mounted(null);
 
-		await button(wrapper, 'Restart the pool').trigger('click');
-		await button(wrapper, 'Keep the pool as it is').trigger('click');
+		await wrapper.find('.restart button').trigger('click');
+		await inDialog(wrapper, 'restart-cancel').trigger('click');
 
-		expect(button(wrapper, 'Restart the pool')).toBeDefined();
+		expect(wrapper.find('.restart').exists()).toBe(true);
 		expect(api.post).not.toHaveBeenCalled();
 	});
 
@@ -515,7 +570,7 @@ describe('restarting the pool', () => {
 
 		const wrapper = await mounted(null, [runner(running)]);
 
-		expect(button(wrapper, 'Restarting the pool').attributes('disabled'))
+		expect(wrapper.find('.restart button').attributes('disabled'))
 			.toBeDefined();
 
 		expect(wrapper.text()).toContain('restarting the pool, worker by worker');
@@ -1010,10 +1065,8 @@ describe('the load drill', () => {
 
 		expect(wrapper.find('.drill').exists()).toBe(true);
 
-		const start = wrapper.findAll('.drill button')
-			.find((button) => button.text().includes('Run a load drill'));
-
-		expect(start?.attributes('disabled')).toBeUndefined();
+		expect(wrapper.find('.drill-start button').attributes('disabled'))
+			.toBeUndefined();
 	});
 
 	// A drill laid over real traffic measures the traffic and the drill
@@ -1022,10 +1075,9 @@ describe('the load drill', () => {
 		const busy = state({ cpuPercents: [12, 55] });
 		const wrapper = await mounted({}, [runner(busy)], null, drill);
 
-		const start = wrapper.findAll('.drill button')
-			.find((button) => button.text().includes('Run a load drill'));
+		expect(wrapper.find('.drill-start button').attributes('disabled'))
+			.toBeDefined();
 
-		expect(start?.attributes('disabled')).toBeDefined();
 		expect(wrapper.find('.drill').text()).toContain('already working');
 	});
 
@@ -1040,9 +1092,7 @@ describe('the load drill', () => {
 		await inputs[0]!.setValue('45');
 		await inputs[1]!.setValue('70');
 
-		await wrapper.findAll('.drill button')
-			.find((button) => button.text().includes('Run a load drill'))!
-			.trigger('click');
+		await wrapper.find('.drill-start button').trigger('click');
 
 		await flushPromises();
 
@@ -1051,7 +1101,6 @@ describe('the load drill', () => {
 			{ seconds: 45, percent: 70 },
 		);
 
-		expect(wrapper.find('.drill').text()).toContain('every worker busy');
 		expect(wrapper.find('.drill').text()).toContain('60s left');
 	});
 
@@ -1065,14 +1114,12 @@ describe('the load drill', () => {
 
 		expect(wrapper.find('.drill').text()).toContain('30s left');
 
-		await wrapper.findAll('.drill button')
-			.find((button) => button.text().includes('Stop the drill'))!
-			.trigger('click');
+		await wrapper.find('.drill-stop button').trigger('click');
 
 		await flushPromises();
 
 		expect(api.delete).toHaveBeenCalledWith('/utils/autoscale/drill');
-		expect(wrapper.find('.drill').text()).toContain('Run a load drill');
+		expect(wrapper.find('.drill-start').exists()).toBe(true);
 	});
 
 	test('a refused drill is reported as the api put it', async () => {
@@ -1082,9 +1129,7 @@ describe('the load drill', () => {
 
 		const wrapper = await mounted({}, [runner()], null, drill);
 
-		await wrapper.findAll('.drill button')
-			.find((button) => button.text().includes('Run a load drill'))!
-			.trigger('click');
+		await wrapper.find('.drill-start button').trigger('click');
 
 		await flushPromises();
 

@@ -702,9 +702,7 @@ describe('the autoscale panel', () => {
 		const wrapper = mount(ProcessesPage, { global });
 		await flushPromises();
 
-		await wrapper.findAll('.levers button')
-			.find((button) => button.text().includes('Pause'))!
-			.trigger('click');
+		await wrapper.find('.levers .pause button').trigger('click');
 
 		await flushPromises();
 
@@ -737,6 +735,6 @@ describe('the autoscale panel', () => {
 	test('asks the layout for a drawer the tables fit in', async () => {
 		const wrapper = await mountLoaded(scaling());
 
-		expect(wrapper.findComponent(PrivateView).props('sidebarWidth')).toBe(620);
+		expect(wrapper.findComponent(PrivateView).props('sidebarWidth')).toBe(720);
 	});
 });

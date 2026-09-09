@@ -493,7 +493,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<private-view :title="t('processes', 'Processes')" :sidebar-width="620">
+	<private-view :title="t('processes', 'Processes')" :sidebar-width="720">
 		<template #headline>
 			<v-breadcrumb :items="[{ name: t('settings'), to: '/settings' }]" />
 		</template>
