@@ -16,6 +16,7 @@ import {
 	reportedProcessDetails,
 } from './processes-config.js';
 import { resolveReportedEnv } from './redact-env.js';
+import { autoscaleState } from '../../autoscale/lib/state.js';
 import { hostCapacity } from './host-capacity.js';
 import {
 	readSupervisedProcesses,
@@ -79,6 +80,9 @@ async function reportSelf(query: ProcessesQueryMessage): Promise<void> {
 			env: carries('env')
 				? resolveReportedEnv()
 				: null,
+			// Answered whatever was asked for: it is one small object, and it is
+			// the only channel the process that resizes the pool has.
+			autoscale: autoscaleState(),
 		},
 		// Every supervised process attaches the container-wide `pm2 list` and the
 		// collector keeps one copy per replica. Electing a single reporter by

@@ -461,6 +461,7 @@ test('Every declared output property is one the tool actually answers', () => {
 									name: 'directus',
 									instance: 0,
 									responding: true,
+									autoscale: null,
 									runtime: {
 										rssBytes: 1,
 										heapUsedBytes: 2,

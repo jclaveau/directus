@@ -11,10 +11,11 @@ import {
 	restarted,
 	scaleTo,
 } from './lib/pool.js';
-import { resolveConfig } from './lib/resolve-config.js';
+import { resolveConfig, resolvedSources } from './lib/resolve-config.js';
 import { LEGACY_SAMPLE_WINDOW } from './lib/sanitize-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
-import type { AutoscaleConfig } from './types.js';
+import { recordAutoscaleTick } from './lib/state.js';
+import type { AutoscaleConfig, Decision } from './types.js';
 
 /**
  * How often the pool is sampled. The thresholds are what tuning should reach
@@ -33,11 +34,11 @@ const SAMPLE_INTERVAL_MS = 1000;
 async function prewarm(
 	config: AutoscaleConfig,
 	workers: number,
-): Promise<void> {
+): Promise<number | null> {
 	const target = Math.min(config.prewarmWorkers, config.maxWorkers);
 
 	if (target <= workers) {
-		return;
+		return null;
 	}
 
 	useLogger().info(
@@ -46,6 +47,8 @@ async function prewarm(
 	);
 
 	await scaleTo(config.appName, target);
+
+	return target;
 }
 
 /**
@@ -189,15 +192,21 @@ export async function runAutoscaler(): Promise<void> {
 				&& carriesRestarts === false
 				&& prewarmed === false;
 
+			let decision: Decision | null = null;
+
 			if (readyToPrewarm) {
 				prewarmed = true;
-				await prewarm(config, workers);
+				const target = await prewarm(config, workers);
 				lastScaleUpAt = Date.now();
 				lastScaleDownAt = Date.now();
+
+				if (target !== null) {
+					decision = { workers: target, reason: 'prewarming the pool' };
+				}
 			}
 			else if (config.enabled) {
 
-				const decision = decide({
+				decision = decide({
 					cpuPercents,
 					pendingWorkers,
 					warmingWorkers,
@@ -234,6 +243,24 @@ export async function runAutoscaler(): Promise<void> {
 					}
 				}
 			}
+
+			// Reported and not only logged: this process is not one an admin
+			// request can reach, so the answer to what the pool is being scaled
+			// on has to come from the tick that scaled it.
+			recordAutoscaleTick({
+				at: now,
+				config,
+				sources: resolvedSources(),
+				workers: onlineWorkers.length,
+				pendingWorkers,
+				warmingWorkers,
+				cpuPercents: config.strategy === 'legacy'
+					? legacyWorkers.map((worker) => worker.cpuPercent)
+					: cpuPercents,
+				lastDecision: decision === null
+					? null
+					: { at: now, ...decision },
+			});
 		}
 		catch (error) {
 			logger.error(error, '[autoscale] a tick failed');

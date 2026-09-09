@@ -1,7 +1,11 @@
 import { useEnv } from '@directus/env';
 import { useLogger } from '../../logger/index.js';
 import { redisConfigAvailable, useRedis } from '../../redis/index.js';
-import type { AutoscaleConfig } from '../types.js';
+import type {
+	AutoscaleConfig,
+	AutoscaleConfigSources,
+	AutoscaleValueSource,
+} from '@directus/types';
 import {
 	AUTOSCALE_DEFAULTS,
 	numberOr,
@@ -18,6 +22,51 @@ import {
  */
 export function autoscaleConfigKey(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:autoscale:config`;
+}
+
+/** The variable each field reads, so a page can say where a value came from. */
+const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
+	enabled: 'PM2_AUTOSCALE_ENABLED',
+	strategy: 'PM2_AUTOSCALE_STRATEGY',
+	appName: 'PM2_AUTOSCALE_APP_NAME',
+	signal: 'PM2_AUTOSCALE_SIGNAL',
+	sampleWindow: 'PM2_AUTOSCALE_SAMPLE_WINDOW',
+	scaleCpuThreshold: 'PM2_AUTOSCALE_SCALE_CPU_THRESHOLD',
+	releaseCpuThreshold: 'PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD',
+	minWorkers: 'PM2_AUTOSCALE_MIN_WORKERS',
+	maxWorkers: 'PM2_AUTOSCALE_MAX_WORKERS',
+	prewarmWorkers: 'PM2_AUTOSCALE_PREWARM',
+	minSecondsToScaleUp: 'PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER',
+	minSecondsToScaleDown: 'PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER',
+	warmupSeconds: 'PM2_AUTOSCALE_WARMUP_SECONDS',
+};
+
+/**
+ * Which layer each field's value came from.
+ *
+ * An operator reading a threshold needs to know whether changing the
+ * deployment's environment would move it, or whether a live override is
+ * holding it where it is — the two look identical in the resolved value.
+ */
+function sourcesOf(override: Record<string, unknown>): AutoscaleConfigSources {
+	const env = useEnv();
+	const sources = {} as AutoscaleConfigSources;
+
+	for (const field of Object.keys(ENV_KEYS) as (keyof AutoscaleConfig)[]) {
+		let source: AutoscaleValueSource = 'default';
+
+		if (env[ENV_KEYS[field]] !== undefined) {
+			source = 'env';
+		}
+
+		if (override[field] !== undefined && override[field] !== null) {
+			source = 'override';
+		}
+
+		sources[field] = source;
+	}
+
+	return sources;
 }
 
 function envConfig(): AutoscaleConfig {
@@ -166,7 +215,19 @@ async function readOverride(): Promise<string | null> {
 
 let lastCorrections = '';
 let lastGood: AutoscaleConfig | null = null;
+let lastSources: AutoscaleConfigSources | null = null;
 let overrideUnreadable = false;
+
+/**
+ * Where each field of the configuration the last tick used came from.
+ *
+ * Held beside the configuration rather than returned with it because it
+ * answers a different question — one the loop never asks and a page always
+ * does — and because an unreadable override holds both together.
+ */
+export function resolvedSources(): AutoscaleConfigSources {
+	return lastSources ?? sourcesOf({});
+}
 
 function announce(corrections: string[]): void {
 	const summary = corrections.join(', ');
@@ -200,16 +261,20 @@ function announce(corrections: string[]): void {
 export async function resolveConfig(): Promise<AutoscaleConfig> {
 	const fromEnv = envConfig();
 
-	const settle = (candidate: AutoscaleConfig) => {
+	const settle = (
+		candidate: AutoscaleConfig,
+		override: Record<string, unknown>,
+	) => {
 		const { config, corrections } = sanitizeConfig(candidate);
 		announce(corrections);
 		lastGood = config;
+		lastSources = sourcesOf(override);
 
 		return config;
 	};
 
 	if (redisConfigAvailable() === false) {
-		return settle(fromEnv);
+		return settle(fromEnv, {});
 	}
 
 	try {
@@ -217,12 +282,12 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 		overrideUnreadable = false;
 
 		if (!stored) {
-			return settle(fromEnv);
+			return settle(fromEnv, {});
 		}
 
-		return settle(
-			withOverride(fromEnv, JSON.parse(stored) as Record<string, unknown>),
-		);
+		const override = JSON.parse(stored) as Record<string, unknown>;
+
+		return settle(withOverride(fromEnv, override), override);
 	}
 	catch (error) {
 		if (overrideUnreadable === false) {
@@ -234,6 +299,6 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 			);
 		}
 
-		return lastGood ?? settle(fromEnv);
+		return lastGood ?? settle(fromEnv, {});
 	}
 }

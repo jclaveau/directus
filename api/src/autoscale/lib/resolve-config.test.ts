@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { AutoscaleConfig } from '../types.js';
 
+// Every case here re-imports the module under test, which is the point of the
+// file — the configuration it remembers is what it exists to check. That import
+// pulls a fresh graph each time and lands on whichever case runs first, so the
+// budget is the file's own cost and not the latency of anything it measures.
+vi.setConfig({ testTimeout: 30_000 });
+
 vi.mock('@directus/env');
 vi.mock('../../redis/index.js');
 
@@ -22,7 +28,7 @@ const client = { get, status: 'ready' };
  * is the point of it — so each case needs its own instance of the module
  * rather than the one the case before it left behind.
  */
-async function freshResolver(): Promise<() => Promise<AutoscaleConfig>> {
+async function freshModule() {
 	vi.resetModules();
 
 	const { useEnv } = await import('@directus/env');
@@ -36,9 +42,11 @@ async function freshResolver(): Promise<() => Promise<AutoscaleConfig>> {
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 	vi.mocked(useRedis).mockReturnValue(client as never);
 
-	const { resolveConfig } = await import('./resolve-config.js');
+	return import('./resolve-config.js');
+}
 
-	return resolveConfig;
+async function freshResolver(): Promise<() => Promise<AutoscaleConfig>> {
+	return (await freshModule()).resolveConfig;
 }
 
 beforeEach(() => {
@@ -51,10 +59,18 @@ afterEach(() => {
 });
 
 test('reads the override laid over the env chain', async () => {
-	const resolveConfig = await freshResolver();
+	const { resolveConfig, resolvedSources } = await freshModule();
 	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
 
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+
+	// A value the environment set and one a live override is holding read
+	// identically, and an operator deciding whether a redeploy would move it
+	// needs them apart.
+	expect(resolvedSources()).toMatchObject({
+		maxWorkers: 'override',
+		scaleCpuThreshold: 'default',
+	});
 });
 
 // The rollback path: reverting to the rule production already ran is a write
@@ -77,13 +93,17 @@ test('switches strategy from the override', async () => {
 // dropped back by a blip, and the ceiling is corrected with no cooldown — the
 // pool loses the workers at once and takes them back when Redis returns.
 test('holds the last configuration when Redis stops answering', async () => {
-	const resolveConfig = await freshResolver();
+	const { resolveConfig, resolvedSources } = await freshModule();
 	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
 	await resolveConfig();
 
 	get.mockRejectedValue(new Error('Connection is closed.'));
 
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+
+	// Held together: a page told the ceiling came from the environment while
+	// the loop is running an override of it would send an operator to redeploy.
+	expect(resolvedSources()).toMatchObject({ maxWorkers: 'override' });
 });
 
 test('falls back to the env chain when Redis never answered', async () => {
@@ -155,3 +175,4 @@ test('does not read through a client that is reconnecting', async () => {
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
 	expect(get).toHaveBeenCalledTimes(1);
 });
+
