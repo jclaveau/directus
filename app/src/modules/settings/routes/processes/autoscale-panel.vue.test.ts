@@ -24,7 +24,13 @@ import VIcon from '@/components/v-icon/v-icon.vue';
 import VInput from '@/components/v-input.vue';
 import VNotice from '@/components/v-notice.vue';
 import VSelect from '@/components/v-select/v-select.vue';
+import { configRows } from './autoscale-panel';
 import AutoscalePanel from './autoscale-panel.vue';
+
+/** The name the page shows a field under, which is what a row starts with. */
+function variableOf(field: string): string {
+	return configRows(null, null).find((row) => row.field === field)!.variable;
+}
 
 function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState {
 	return {
@@ -207,7 +213,7 @@ describe('what the panel shows', () => {
 		expect(wrapper.text()).toContain('average cpu 22% is in the band');
 
 		const ceiling = wrapper.findAll('tbody tr')
-			.find((row) => row.text().startsWith('maxWorkers'));
+			.find((row) => row.text().startsWith(variableOf('maxWorkers')));
 
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
 
@@ -243,7 +249,7 @@ describe('what the panel shows', () => {
 		const row = wrapper.findAll('.supervisor tbody tr')
 			.find((line) => line.text().startsWith('PM2_INSTANCES'));
 
-		expect(row?.find('.declared').text()).toBe('2');
+		expect((row?.find('input').element as HTMLInputElement).value).toBe('2');
 	});
 
 	// The six options a rolling restart can carry take a value here; the pool
@@ -275,7 +281,10 @@ describe('what the panel shows', () => {
 		expect((listen?.find('input').element as HTMLInputElement).placeholder)
 			.toBe('15000');
 
-		expect(instances?.findAll('input')).toHaveLength(0);
+		// The pool size reads in the same box as the rest, with no way to type
+		// into it: a restart cannot carry it.
+		expect((instances?.find('input').element as HTMLInputElement).disabled)
+			.toBe(true);
 
 		// Nothing declares a memory ceiling by default, and an empty box has
 		// to say so rather than read as a zero the option would refuse.
@@ -349,7 +358,7 @@ describe('what the panel shows', () => {
 		const wrapper = await mounted(null);
 
 		const ceiling = wrapper.findAll('tbody tr')
-			.find((row) => row.text().startsWith('maxWorkers'));
+			.find((row) => row.text().startsWith(variableOf('maxWorkers')));
 
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('4');
 	});
@@ -358,7 +367,7 @@ describe('what the panel shows', () => {
 		const wrapper = await mounted(null, []);
 
 		const ceiling = wrapper.findAll('tbody tr')
-			.find((row) => row.text().startsWith('maxWorkers'));
+			.find((row) => row.text().startsWith(variableOf('maxWorkers')));
 
 		expect(ceiling?.find('.source').text()).toBe('—');
 	});
@@ -371,7 +380,7 @@ describe('what the panel shows', () => {
 		expect(wrapper.text()).toContain('No process reported');
 
 		const ceiling = wrapper.findAll('tbody tr')
-			.find((row) => row.text().startsWith('maxWorkers'));
+			.find((row) => row.text().startsWith(variableOf('maxWorkers')));
 
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
 	});
@@ -532,7 +541,7 @@ describe('restarting the pool', () => {
 describe('the whole form at once', () => {
 	function row(wrapper: any, field: string) {
 		return wrapper.findAll('tbody tr')
-			.find((candidate: any) => candidate.text().startsWith(field));
+			.find((candidate: any) => candidate.text().startsWith(variableOf(field)));
 	}
 
 	async function press(wrapper: any, label: string) {
@@ -604,7 +613,7 @@ describe('the whole form at once', () => {
 describe('editing one field', () => {
 	function row(wrapper: any, field: string) {
 		return wrapper.findAll('tbody tr')
-			.find((candidate: any) => candidate.text().startsWith(field));
+			.find((candidate: any) => candidate.text().startsWith(variableOf(field)));
 	}
 
 	// The buttons only take a pending change, so let the one just made render
@@ -887,6 +896,35 @@ describe('the options a restart carries', () => {
 			.find((row: any) => row.text().startsWith(variable));
 	}
 
+	// The layer a box is showing, read the same way as on the configuration
+	// above it rather than left to be guessed from whether the box is filled.
+	test('a row names the layer its value comes from', async () => {
+		supervisorOverride = { listenTimeout: 20000 };
+
+		const wrapper = await mounted(null, [runner(declared())]);
+
+		const stored = optionRow(wrapper, 'PM2_LISTEN_TIMEOUT').find('.source');
+		const declaring = optionRow(wrapper, 'PM2_KILL_TIMEOUT').find('.source');
+
+		expect(stored.text()).toBe('config');
+		expect(declaring.text()).toBe('pm2');
+	});
+
+	// A change typed but not stored is the page's, and saying it comes from the
+	// supervisor until it is applied would name the layer it is about to leave.
+	test('a typed option reads as stored before it is', async () => {
+		const wrapper = await mounted(null, [runner(declared())]);
+		const row = optionRow(wrapper, 'PM2_KILL_TIMEOUT');
+
+		await row.find('input').setValue('2000');
+
+		expect(row.find('.source').text()).toBe('config');
+
+		await row.find('.edit .cancel button').trigger('click');
+
+		expect(row.find('.source').text()).toBe('pm2');
+	});
+
 	// Its own route because it lands somewhere else: nothing about the pool
 	// changes until the restart below pushes it.
 	test('a stored option goes to the supervisor, not to the loop', async () => {
@@ -894,7 +932,7 @@ describe('the options a restart carries', () => {
 		const row = optionRow(wrapper, 'PM2_LISTEN_TIMEOUT');
 
 		await row.find('input').setValue('20000');
-		await row.find('.option .apply button').trigger('click');
+		await row.find('.edit .apply button').trigger('click');
 		await flushPromises();
 
 		expect(api.patch).toHaveBeenCalledWith(
@@ -912,7 +950,7 @@ describe('the options a restart carries', () => {
 		const row = optionRow(wrapper, 'PM2_KILL_TIMEOUT');
 
 		await row.find('input').setValue('');
-		await row.find('.option .apply button').trigger('click');
+		await row.find('.edit .apply button').trigger('click');
 		await flushPromises();
 
 		expect(api.patch).toHaveBeenCalledWith(
@@ -927,7 +965,7 @@ describe('the options a restart carries', () => {
 		const wrapper = await mounted(null, [runner(declared())]);
 		const row = optionRow(wrapper, 'PM2_MAX_RESTARTS');
 
-		await row.find('.option .reset button').trigger('click');
+		await row.find('.edit .reset button').trigger('click');
 		await flushPromises();
 
 		expect(api.patch).toHaveBeenCalledWith(
@@ -949,7 +987,7 @@ describe('the options a restart carries', () => {
 		const row = optionRow(wrapper, 'PM2_KILL_TIMEOUT');
 
 		await row.find('input').setValue('10');
-		await row.find('.option .apply button').trigger('click');
+		await row.find('.edit .apply button').trigger('click');
 		await flushPromises();
 
 		expect(wrapper.text()).toContain('kill_timeout has to be at least 100');

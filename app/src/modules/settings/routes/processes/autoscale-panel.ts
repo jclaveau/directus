@@ -16,6 +16,12 @@ export interface AutoscaleFieldOption {
 
 export interface AutoscaleField {
 	field: keyof AutoscaleConfig;
+	/**
+	 * The variable that sets it in a deployment, which is what the page names
+	 * it by: a change made here is temporary, and the lasting one is made
+	 * against this name.
+	 */
+	variable: string;
 	kind: AutoscaleFieldKind;
 	/** What this field does to the pool, in a sentence, shown on hover. */
 	description: string;
@@ -46,6 +52,7 @@ const BOOLEAN_OPTIONS: AutoscaleFieldOption[] = [
 export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	{
 		field: 'enabled',
+		variable: 'PM2_AUTOSCALE_ENABLED',
 		kind: 'boolean',
 		description: 'Disabled leaves the pool at whatever size it is now: '
 			+ 'nothing is added and nothing is released.',
@@ -53,6 +60,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'strategy',
+		variable: 'PM2_AUTOSCALE_STRATEGY',
 		kind: 'choice',
 		description: 'Which rule decides. `scalabus` reads a smoothed window and '
 			+ 'holds still while the pool is starting or restarting; `legacy` '
@@ -64,11 +72,13 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'appName',
+		variable: 'PM2_AUTOSCALE_APP_NAME',
 		kind: 'text',
 		description: 'The pm2 app whose workers are counted, judged and resized.',
 	},
 	{
 		field: 'signal',
+		variable: 'PM2_AUTOSCALE_SIGNAL',
 		kind: 'choice',
 		description: 'Whether the pool is judged on the average of its workers or '
 			+ 'on its hottest one. `max` reacts to a single busy worker.',
@@ -80,6 +90,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'sampleWindow',
+		variable: 'PM2_AUTOSCALE_SAMPLE_WINDOW',
 		kind: 'number',
 		description: 'How many one-second readings a worker\'s CPU is averaged '
 			+ 'over before it counts. Wider reacts later and flaps less.',
@@ -91,6 +102,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'scaleCpuThreshold',
+		variable: 'PM2_AUTOSCALE_SCALE_CPU_THRESHOLD',
 		kind: 'number',
 		description: 'At or above this CPU the pool grows by one worker, '
 			+ 'cooldown and ceiling permitting.',
@@ -101,6 +113,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'releaseCpuThreshold',
+		variable: 'PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD',
 		kind: 'number',
 		description: 'Below this CPU the pool gives a worker back. Kept under the '
 			+ 'scale threshold, or a pool would grow and shrink on one reading.',
@@ -111,6 +124,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'minWorkers',
+		variable: 'PM2_AUTOSCALE_MIN_WORKERS',
 		kind: 'number',
 		description: 'The pool never drops below this, however quiet it gets. '
 			+ 'Equal to the ceiling it pins the pool and stops all scaling.',
@@ -121,6 +135,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'maxWorkers',
+		variable: 'PM2_AUTOSCALE_MAX_WORKERS',
 		kind: 'number',
 		description: 'The pool never grows past this, and a pool already above it '
 			+ 'is brought back immediately rather than after a cooldown.',
@@ -131,6 +146,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'prewarmWorkers',
+		variable: 'PM2_AUTOSCALE_PREWARM',
 		kind: 'number',
 		description: 'The size to jump to once after a deploy, so the first '
 			+ 'requests do not land on a pool sized for an idle night.',
@@ -144,6 +160,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	// minutes, and an arrow that moves a five-minute cooldown by one is noise.
 	{
 		field: 'minSecondsToScaleUp',
+		variable: 'PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER',
 		kind: 'number',
 		description: 'How long after adding a worker before another may be added, '
 			+ 'which is how long the last one gets to take load.',
@@ -153,6 +170,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'minSecondsToScaleDown',
+		variable: 'PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER',
 		kind: 'number',
 		description: 'How long after releasing a worker before another may go. '
 			+ 'Longer than the settling window, so a lull cannot empty the pool.',
@@ -162,6 +180,7 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	},
 	{
 		field: 'warmupSeconds',
+		variable: 'PM2_AUTOSCALE_WARMUP_SECONDS',
 		kind: 'number',
 		description: 'How long a worker\'s CPU counts as its own startup rather '
 			+ 'than load, and how long the pool is left alone after a restart.',
@@ -337,7 +356,6 @@ export function drillRemaining(until: number | null, now: number): number {
 		: Math.max(0, Math.ceil((until - now) / 1000));
 }
 
-/** One line of the pm2 declaration, as the panel reports it. */
 /** What an option a restart can carry accepts, and what it runs on now. */
 export interface SupervisorOption {
 	/** The override field the change is written to. */
@@ -349,6 +367,7 @@ export interface SupervisorOption {
 	declared: number | null;
 }
 
+/** One line of the pm2 declaration, as the panel reports it. */
 export interface SupervisorRow {
 	/** The variable that sets it, which is where a change to it is made. */
 	field: string;
@@ -360,6 +379,14 @@ export interface SupervisorRow {
 	option: SupervisorOption | null;
 	/** What the override holds for it, `null` where the environment answers. */
 	override: number | null;
+	/**
+	 * Which layer the running value came from.
+	 *
+	 * Only two are tellable apart from here: the override this page writes, and
+	 * the supervisor itself — whether pm2 took a value from a variable or from
+	 * its own default is not in what it reports.
+	 */
+	source: 'override' | 'pm2';
 }
 
 const MEGABYTE = 1_048_576;
@@ -391,6 +418,12 @@ export function supervisorRows(
 			: null;
 	}
 
+	function sourceOf(field: string): 'override' | 'pm2' {
+		return overriding(field) === null
+			? 'pm2'
+			: 'override';
+	}
+
 	const ceiling = supervisor.maxMemoryRestart === null
 		? null
 		: Math.round(supervisor.maxMemoryRestart / MEGABYTE);
@@ -404,6 +437,7 @@ export function supervisorRows(
 				+ 'and the prewarm above own it.',
 			option: null,
 			override: null,
+			source: 'pm2',
 		},
 		{
 			field: 'PM2_EXEC_MODE',
@@ -412,6 +446,7 @@ export function supervisorRows(
 				+ 'fork mode is one the autoscaler cannot move.',
 			option: null,
 			override: null,
+			source: 'pm2',
 		},
 		{
 			field: 'wait_ready',
@@ -422,6 +457,7 @@ export function supervisorRows(
 				+ 'pool is judged on a worker that is still booting.',
 			option: null,
 			override: null,
+			source: 'pm2',
 		},
 		{
 			field: 'PM2_LISTEN_TIMEOUT',
@@ -437,6 +473,7 @@ export function supervisorRows(
 				declared: supervisor.listenTimeout,
 			},
 			override: overriding('listenTimeout'),
+			source: sourceOf('listenTimeout'),
 		},
 		{
 			field: 'PM2_KILL_TIMEOUT',
@@ -452,6 +489,7 @@ export function supervisorRows(
 				declared: supervisor.killTimeout,
 			},
 			override: overriding('killTimeout'),
+			source: sourceOf('killTimeout'),
 		},
 		{
 			field: 'PM2_MAX_MEMORY_RESTART',
@@ -469,6 +507,7 @@ export function supervisorRows(
 				declared: ceiling,
 			},
 			override: overriding('maxMemoryRestartMegabytes'),
+			source: sourceOf('maxMemoryRestartMegabytes'),
 		},
 		{
 			field: 'PM2_AUTO_RESTART',
@@ -476,6 +515,7 @@ export function supervisorRows(
 			description: 'autorestart: whether a worker that exits is replaced.',
 			option: null,
 			override: null,
+			source: 'pm2',
 		},
 		{
 			field: 'PM2_RESTART_DELAY',
@@ -492,6 +532,7 @@ export function supervisorRows(
 				declared: supervisor.restartDelay,
 			},
 			override: overriding('restartDelay'),
+			source: sourceOf('restartDelay'),
 		},
 		{
 			field: 'PM2_MIN_UPTIME',
@@ -507,6 +548,7 @@ export function supervisorRows(
 				declared: supervisor.minUptime,
 			},
 			override: overriding('minUptime'),
+			source: sourceOf('minUptime'),
 		},
 		{
 			field: 'PM2_MAX_RESTARTS',
@@ -521,6 +563,7 @@ export function supervisorRows(
 				declared: supervisor.maxRestarts,
 			},
 			override: overriding('maxRestarts'),
+			source: sourceOf('maxRestarts'),
 		},
 	];
 }

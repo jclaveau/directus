@@ -258,6 +258,35 @@ test('one runner describes the pool, and none is answered as none', () => {
 	expect(firstRunner([])).toBeNull();
 });
 
+// A field is named by the variable that sets it in a deployment: a change made
+// on the page lasts until someone else makes one, and the variable is where the
+// lasting one goes.
+test('every field is named by the variable that sets it', () => {
+	const rows = configRows(state(), null);
+
+	expect(rows.find((row) => row.field === 'maxWorkers')?.variable)
+		.toBe('PM2_AUTOSCALE_MAX_WORKERS');
+
+	expect(rows.find((row) => row.field === 'prewarmWorkers')?.variable)
+		.toBe('PM2_AUTOSCALE_PREWARM');
+
+	expect(rows.every((row) => row.variable.startsWith('PM2_AUTOSCALE_'))).toBe(true);
+});
+
+// Which layer holds a value is the same question the configuration answers, and
+// the stored override is the only layer the declaration can be told apart from.
+test('a stored option says so and the rest report the supervisor', () => {
+	const rows = supervisorRows(state(), { listenTimeout: 20_000 });
+
+	expect(rows.find((row) => row.field === 'PM2_LISTEN_TIMEOUT'))
+		.toMatchObject({ source: 'override', override: 20_000 });
+
+	expect(rows.find((row) => row.field === 'PM2_KILL_TIMEOUT'))
+		.toMatchObject({ source: 'pm2', override: null });
+
+	expect(rows.find((row) => row.field === 'PM2_INSTANCES')?.source).toBe('pm2');
+});
+
 // The pool size two layers claim: what pm2 was started with, and what the loop
 // has been resizing it to since. Reported so a pool at a size neither number
 // obviously explains is answered by both of them being on the page.

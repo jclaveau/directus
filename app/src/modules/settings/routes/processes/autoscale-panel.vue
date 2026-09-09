@@ -18,7 +18,6 @@ import {
 	parseFieldValue,
 	pinPatch,
 	secondsSince,
-	type SupervisorOption,
 	type SupervisorRow,
 	supervisorRows,
 	underLoad,
@@ -266,7 +265,22 @@ async function writeSupervisor(patch: Record<string, unknown>): Promise<void> {
 	}
 }
 
-function applySupervisorRow(field: string): void {
+function supervisorEdited(row: SupervisorRow): boolean {
+	return row.option !== null && row.option.field in drafts.value;
+}
+
+function supervisorTyped(row: SupervisorRow, typed: string): void {
+	if (row.option !== null) {
+		drafts.value[row.option.field] = typed;
+	}
+}
+
+function applySupervisorRow(row: SupervisorRow): void {
+	if (row.option === null) {
+		return;
+	}
+
+	const field = row.option.field;
 	const typed = drafts.value[field];
 	delete drafts.value[field];
 
@@ -275,9 +289,19 @@ function applySupervisorRow(field: string): void {
 	void writeSupervisor({ [field]: parseFieldValue('number', typed) });
 }
 
-function resetSupervisorRow(field: string): void {
-	delete drafts.value[field];
-	void writeSupervisor({ [field]: null });
+function cancelSupervisorRow(row: SupervisorRow): void {
+	if (row.option !== null) {
+		delete drafts.value[row.option.field];
+	}
+}
+
+function resetSupervisorRow(row: SupervisorRow): void {
+	if (row.option === null) {
+		return;
+	}
+
+	delete drafts.value[row.option.field];
+	void writeSupervisor({ [row.option.field]: null });
 }
 
 /**
@@ -286,20 +310,50 @@ function resetSupervisorRow(field: string): void {
  * A memory ceiling nothing declares reads as off rather than as a zero, which
  * is a number the option would refuse anyway.
  */
-function supervisorPlaceholder(option: SupervisorOption): string {
-	return option.declared === null
-		? t('autoscale_supervisor_unset', 'off')
-		: String(option.declared);
+function supervisorPlaceholder(row: SupervisorRow): string {
+	if (row.option === null || row.option.declared === null) {
+		return t('autoscale_supervisor_unset', 'off');
+	}
+
+	return String(row.option.declared);
 }
 
+/**
+ * What the row shows: the change being typed, else what the override holds —
+ * and for an option no restart can carry, the value pm2 is running it on.
+ */
 function supervisorShown(row: SupervisorRow): string {
-	if (row.option !== null && row.option.field in drafts.value) {
+	if (row.option === null) {
+		return row.value;
+	}
+
+	if (supervisorEdited(row)) {
 		return drafts.value[row.option.field] ?? '';
 	}
 
 	return row.override === null
 		? ''
 		: String(row.override);
+}
+
+/**
+ * Which layer the value in the box would come from.
+ *
+ * `pm2` rather than a layer of its own: whether the supervisor took a value
+ * from a variable or from its own default is not in what it reports.
+ */
+function supervisorSource(row: SupervisorRow): string {
+	if (supervisorEdited(row)) {
+		const draft = drafts.value[row.option!.field];
+
+		return draft === null || draft === ''
+			? t('autoscale_supervisor_source', 'pm2')
+			: sourceLabel('override');
+	}
+
+	return row.source === 'override'
+		? sourceLabel('override')
+		: t('autoscale_supervisor_source', 'pm2');
 }
 
 async function resetToEnv(): Promise<void> {
@@ -672,6 +726,71 @@ onUnmounted(disarmClock);
 					{{ t('autoscale_restart_cancel', 'Keep the pool as it is') }}
 				</v-button>
 			</template>
+
+			<div v-if="drillAvailable" class="drill">
+				<span class="knob">
+					<v-input
+						v-model="drillSeconds"
+						small
+						type="number"
+						:full-width="false"
+						:min="1"
+						:max="120"
+						:step="5"
+						suffix="s"
+						:disabled="saving || drilling !== null"
+					/>
+				</span>
+
+				<span class="knob">
+					<v-input
+						v-model="drillPercent"
+						small
+						type="number"
+						:full-width="false"
+						:min="10"
+						:max="95"
+						:step="5"
+						suffix="%"
+						:disabled="saving || drilling !== null"
+					/>
+				</span>
+
+				<v-button
+					v-if="drilling"
+					small
+					secondary
+					:disabled="saving"
+					@click="stopDrill"
+				>
+					{{ t('autoscale_drill_stop', 'Stop the drill') }}
+				</v-button>
+
+				<v-button
+					v-else
+					small
+					:tooltip="t(
+						'autoscale_drill_note',
+						'Loads every worker so the pool has to decide, without '
+							+ 'touching anything it decides on.',
+					)"
+					:disabled="saving || drillBlocked !== null"
+					@click="startDrill"
+				>
+					{{ t('autoscale_drill_start', 'Run a load drill') }}
+				</v-button>
+
+				<span v-if="drilling" class="drilling">
+					{{ t('autoscale_drilling', 'every worker busy,') }}
+					{{ drilling.remaining }}s {{ t('autoscale_drill_left', 'left') }}
+				</span>
+
+				<!-- The reason a drill cannot run is shown rather than told in the
+				button's tooltip, which a disabled button gives no way to reach. -->
+				<span v-else-if="drillBlocked !== null" class="drill-note">
+					{{ drillBlocked }}
+				</span>
+			</div>
 		</div>
 
 		<p v-if="reloadLine" class="reload">{{ reloadLine }}</p>
@@ -691,7 +810,9 @@ onUnmounted(disarmClock);
 					:key="row.field"
 					:class="{ inactive: row.inactive }"
 				>
-					<td><span v-tooltip="describeField(row)">{{ row.field }}</span></td>
+					<td>
+						<span v-tooltip="describeField(row)">{{ row.variable }}</span>
+					</td>
 					<td class="edit">
 						<!-- `v-select`'s own root has no layout box, so the cell's flex
 						row lays this span out instead. -->
@@ -803,68 +924,6 @@ onUnmounted(disarmClock);
 			</v-button>
 		</div>
 
-		<div v-if="drillAvailable" class="drill">
-			<span class="knob">
-				<v-input
-					v-model="drillSeconds"
-					small
-					type="number"
-					:full-width="false"
-					:min="1"
-					:max="120"
-					:step="5"
-					suffix="s"
-					:disabled="saving || drilling !== null"
-				/>
-			</span>
-
-			<span class="knob">
-				<v-input
-					v-model="drillPercent"
-					small
-					type="number"
-					:full-width="false"
-					:min="10"
-					:max="95"
-					:step="5"
-					suffix="%"
-					:disabled="saving || drilling !== null"
-				/>
-			</span>
-
-			<v-button
-				v-if="drilling"
-				small
-				secondary
-				:disabled="saving"
-				@click="stopDrill"
-			>
-				{{ t('autoscale_drill_stop', 'Stop the drill') }}
-			</v-button>
-
-			<v-button
-				v-else
-				small
-				:disabled="saving || drillBlocked !== null"
-				@click="startDrill"
-			>
-				{{ t('autoscale_drill_start', 'Run a load drill') }}
-			</v-button>
-
-			<span v-if="drilling" class="drilling">
-				{{ t('autoscale_drilling', 'every worker busy,') }}
-				{{ drilling.remaining }}s {{ t('autoscale_drill_left', 'left') }}
-			</span>
-
-			<span v-else class="drill-note">
-				{{ drillBlocked ?? t(
-					'autoscale_drill_note',
-					'Loads every worker so the pool has to decide, without touching '
-						+ 'anything it decides on.',
-				) }}
-			</span>
-		</div>
-
 		<template v-if="supervisor.length > 0">
 			<h4 class="section-title supervisor-title">
 				{{ t('autoscale_supervisor', 'Supervisor') }}
@@ -880,60 +939,91 @@ onUnmounted(disarmClock);
 			</p>
 
 			<table class="fields supervisor">
+				<thead>
+					<tr>
+						<th>{{ t('autoscale_field', 'Field') }}</th>
+						<th>{{ t('autoscale_value', 'Value') }}</th>
+					</tr>
+				</thead>
 				<tbody>
-					<tr v-for="row in supervisor" :key="row.field">
+					<tr
+						v-for="row in supervisor"
+						:key="row.field"
+						:class="{ inactive: row.option === null }"
+					>
 						<td><span v-tooltip="row.description">{{ row.field }}</span></td>
-						<td class="declared">{{ row.value }}</td>
-						<td class="option">
-							<template v-if="row.option">
-								<span
-									class="control numeric"
-									:class="{ pending: row.option.field in drafts }"
+						<td class="edit">
+							<span
+								class="control"
+								:class="{
+									numeric: row.option !== null,
+									pending: supervisorEdited(row),
+								}"
+							>
+								<v-input
+									:model-value="supervisorShown(row)"
+									small
+									full-width
+									:type="row.option ? 'number' : 'text'"
+									:min="row.option?.min"
+									:max="row.option?.max"
+									:suffix="row.option?.unit"
+									:placeholder="supervisorPlaceholder(row)"
+									:disabled="saving || row.option === null"
+									@update:model-value="supervisorTyped(row, $event)"
+									@keyup.enter="applySupervisorRow(row)"
 								>
-									<v-input
-										:model-value="supervisorShown(row)"
-										small
-										full-width
-										type="number"
-										:min="row.option.min"
-										:max="row.option.max"
-										:suffix="row.option.unit"
-										:placeholder="supervisorPlaceholder(row.option)"
-										:disabled="saving"
-										@update:model-value="drafts[row.option.field] = $event"
-										@keyup.enter="applySupervisorRow(row.option.field)"
-									/>
-								</span>
+									<template #append>
+										<span
+											class="source"
+											:class="{ pending: supervisorEdited(row) }"
+										>
+											{{ supervisorSource(row) }}
+										</span>
+									</template>
+								</v-input>
+							</span>
 
-								<v-button
-									x-small
-									icon
-									class="apply"
-									:tooltip="t(
-										'autoscale_supervisor_apply',
-										'Store this for the next restart',
-									)"
-									:disabled="saving || !(row.option.field in drafts)"
-									@click="applySupervisorRow(row.option.field)"
-								>
-									<v-icon name="check" x-small />
-								</v-button>
+							<v-button
+								x-small
+								icon
+								secondary
+								class="cancel"
+								:tooltip="t('autoscale_cancel', 'Discard this change')"
+								:disabled="saving || !supervisorEdited(row)"
+								@click="cancelSupervisorRow(row)"
+							>
+								<v-icon name="close" x-small />
+							</v-button>
 
-								<v-button
-									x-small
-									icon
-									secondary
-									class="reset"
-									:tooltip="t(
-										'autoscale_supervisor_reset',
-										'Hand this option back to the environment',
-									)"
-									:disabled="saving || row.override === null"
-									@click="resetSupervisorRow(row.option.field)"
-								>
-									<v-icon name="settings_backup_restore" x-small />
-								</v-button>
-							</template>
+							<v-button
+								x-small
+								icon
+								class="apply"
+								:tooltip="t(
+									'autoscale_supervisor_apply',
+									'Store this for the next restart',
+								)"
+								:disabled="saving || !supervisorEdited(row)"
+								@click="applySupervisorRow(row)"
+							>
+								<v-icon name="check" x-small />
+							</v-button>
+
+							<v-button
+								x-small
+								icon
+								secondary
+								class="reset"
+								:tooltip="t(
+									'autoscale_supervisor_reset',
+									'Hand this option back to the environment',
+								)"
+								:disabled="saving || row.override === null"
+								@click="resetSupervisorRow(row)"
+							>
+								<v-icon name="settings_backup_restore" x-small />
+							</v-button>
 						</td>
 					</tr>
 				</tbody>
@@ -1077,12 +1167,14 @@ onUnmounted(disarmClock);
 	color: var(--theme--primary);
 }
 
+/* The drill sits at the end of the levers it belongs with, hard against the
+   edge, so the buttons that change the pool stay read as one group. */
 .drill {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 12px;
 	align-items: center;
-	margin-block-end: 8px;
+	margin-inline-start: auto;
 }
 
 /* The two knobs hug their numbers, so the row reads as a sentence rather than
@@ -1112,17 +1204,6 @@ onUnmounted(disarmClock);
 
 .supervisor-note {
 	margin-block-end: 8px;
-	color: var(--theme--foreground-subdued);
-}
-
-.fields.supervisor .option {
-	display: flex;
-	gap: 4px;
-	align-items: center;
-	inline-size: 220px;
-}
-
-.fields.supervisor .declared {
 	color: var(--theme--foreground-subdued);
 }
 </style>
