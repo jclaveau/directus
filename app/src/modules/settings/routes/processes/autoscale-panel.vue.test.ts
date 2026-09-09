@@ -5,6 +5,14 @@ import { setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { i18n } from '@/lang';
 
+const notified = vi.hoisted(() => {
+	return { notify: vi.fn() };
+});
+
+vi.mock('@/utils/notify', () => {
+	return { notify: notified.notify };
+});
+
 vi.mock('@/api', () => {
 	return {
 		default: {
@@ -166,7 +174,7 @@ function answered(
 	override: Record<string, unknown> | null,
 	setByEmail: string | null = null,
 ) {
-	const key = 'scalabus:autoscale:config';
+	const key = 'scalabus:config:pm2';
 
 	return {
 		data: {
@@ -175,7 +183,7 @@ function answered(
 				override,
 				setByEmail,
 				supervisor: {
-					key: 'scalabus:autoscale:supervisor',
+					key: 'scalabus:config:pm2:supervisor',
 					override: supervisorOverride,
 					setByEmail: null,
 				},
@@ -227,6 +235,7 @@ beforeEach(() => {
 	vi.mocked(api.post).mockReset();
 	vi.mocked(api.delete).mockReset();
 	supervisorOverride = null;
+	notified.notify.mockReset();
 	vi.mocked(api.patch).mockResolvedValue(answered({}));
 	vi.mocked(api.delete).mockResolvedValue(answered(null));
 });
@@ -447,6 +456,15 @@ describe('what the panel shows', () => {
 	});
 });
 
+// A bare `scalabus:config:pm2` reads as an identifier of something, with no
+// way to tell what holds it or what it is for.
+test('the key says what it is a key to', async () => {
+	const wrapper = await mounted(null);
+
+	expect(wrapper.find('.key').text())
+		.toBe('Stored in Redis under scalabus:config:pm2');
+});
+
 describe('the levers', () => {
 	// The levers are icons in the title bar, so what each one offers is read
 	// off the tooltip the test directive writes into `title`.
@@ -549,6 +567,54 @@ describe('restarting the pool', () => {
 
 		expect(document.querySelector('#dialog-outlet')!.textContent)
 			.toContain('each one only once its replacement is serving');
+	});
+
+	// The drawer holding the panel is often closed by the time a restart ends,
+	// and a line in it would be read by nobody.
+	test('the end of a restart is announced, not left on the page', async () => {
+		const asked = state({
+			reload: { askedAt: 1000, running: true, finishedAt: null, error: null },
+		});
+
+		const wrapper = await mounted(null, [runner(asked)]);
+
+		expect(notified.notify).not.toHaveBeenCalled();
+
+		const ended = state({
+			reload: { askedAt: 1000, running: false, finishedAt: 2000, error: null },
+		});
+
+		await wrapper.setProps({ runners: [runner(ended)] });
+
+		expect(notified.notify)
+			.toHaveBeenCalledWith({ title: 'The pool finished restarting' });
+
+		expect(wrapper.find('.reload').exists()).toBe(false);
+	});
+
+	// A restart the supervisor refused is not an end worth congratulating, and
+	// the failure stays on the page for as long as it is the last thing to have
+	// happened.
+	test('a restart that failed is not announced as one that ran', async () => {
+		const asked = state({
+			reload: { askedAt: 1000, running: true, finishedAt: null, error: null },
+		});
+
+		const wrapper = await mounted(null, [runner(asked)]);
+
+		const failed = state({
+			reload: {
+				askedAt: 1000,
+				running: false,
+				finishedAt: 2000,
+				error: 'Reload in progress',
+			},
+		});
+
+		await wrapper.setProps({ runners: [runner(failed)] });
+
+		expect(notified.notify).not.toHaveBeenCalled();
+		expect(wrapper.find('.reload').text()).toContain('Reload in progress');
 	});
 
 	test('backing out of a restart asks for nothing', async () => {

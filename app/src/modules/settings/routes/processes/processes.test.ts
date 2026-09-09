@@ -686,7 +686,7 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.patch).mockResolvedValue({
 			data: {
 				data: {
-					key: 'scalabus:autoscale:config',
+					key: 'scalabus:config:pm2',
 					override: { enabled: false },
 				},
 			},
@@ -716,7 +716,7 @@ describe('the autoscale panel', () => {
 
 	// The drawer holding the panel covers the page when it is open and hides it
 	// when it is closed, so the levers are given a home the drawer never touches.
-	test('puts the levers in the header and the tables in the drawer', async () => {
+	test('the drawer keeps the tables and nothing else', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			return url === '/utils/autoscale'
 				? Promise.resolve({ data: { data: { key: 'k', override: null } } } as any)
@@ -728,6 +728,7 @@ describe('the autoscale panel', () => {
 
 		expect(wrapper.find('header .autoscale-actions .levers').exists()).toBe(true);
 		expect(wrapper.find('main .levers').exists()).toBe(false);
+		expect(wrapper.find('main .autoscale-summary .summary').exists()).toBe(true);
 		expect(wrapper.find('aside table.fields').exists()).toBe(true);
 	});
 

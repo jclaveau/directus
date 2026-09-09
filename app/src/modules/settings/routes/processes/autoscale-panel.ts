@@ -594,5 +594,7 @@ export function describeReload(reload: AutoscaleReload | null): string | null {
 		return 'a restart was asked for';
 	}
 
-	return 'the pool finished restarting';
+	// A restart that ended is announced when it ends rather than reported for as
+	// long as it stays the last thing that happened.
+	return null;
 }

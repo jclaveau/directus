@@ -5,8 +5,9 @@ import type {
 	AutoscaleRunner,
 	AutoscaleValueSource,
 } from '@directus/types';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { notify } from '@/utils/notify';
 import {
 	type AutoscaleRow,
 	configRows,
@@ -31,7 +32,13 @@ const props = withDefaults(defineProps<{
 	 * Left out, they are rendered where the panel is.
 	 */
 	actionsTarget?: HTMLElement | null;
-}>(), { actionsTarget: null });
+	/**
+	 * Where the pool and its last decision are reported, for a page that reads
+	 * them beside its own totals. Left out, they are reported where the panel
+	 * is.
+	 */
+	summaryTarget?: HTMLElement | null;
+}>(), { actionsTarget: null, summaryTarget: null });
 
 const emit = defineEmits<{ changed: [] }>();
 
@@ -174,6 +181,27 @@ const reloadLine = computed(() => {
 const restarting = computed(() => {
 	return runner.value?.state.reload.running === true;
 });
+
+/*
+ * A restart that ended is news once, not a line the panel goes on showing. The
+ * page re-reads the report on its own interval, so the end arrives whether or
+ * not the drawer holding this panel is open.
+ */
+watch(
+	() => runner.value?.state.reload ?? null,
+	(reload, before) => {
+		const ended = reload !== null
+			&& reload.error === null
+			&& reload.finishedAt !== null
+			&& reload.finishedAt !== (before?.finishedAt ?? null);
+
+		if (ended) {
+			notify({
+				title: t('autoscale_reload_done', 'The pool finished restarting'),
+			});
+		}
+	},
+);
 
 /**
  * What the pool is in for, named before it is asked for.
@@ -666,25 +694,39 @@ onUnmounted(disarmClock);
 			) }}
 		</v-notice>
 
-		<div v-if="runner" class="summary">
-			<span>{{ runner.state.config.appName }}</span>
-			<span>{{ runner.state.workers }} {{ t('autoscale_workers', 'workers') }}</span>
-			<span v-if="runner.state.pendingWorkers > 0">
-				{{ runner.state.pendingWorkers }} {{ t('autoscale_pending', 'starting') }}
-			</span>
-			<span>{{ runner.state.config.strategy }}</span>
-			<v-chip v-if="!runner.state.config.enabled" small>
-				{{ t('autoscale_paused', 'paused') }}
-			</v-chip>
-			<v-chip v-if="isPinned(runner.state)" small>
-				{{ t('autoscale_pinned', 'pinned') }}
-			</v-chip>
-		</div>
+		<Teleport
+			:to="props.summaryTarget ?? undefined"
+			:disabled="props.summaryTarget === null"
+		>
+			<div v-if="runner" class="summary">
+				<span>{{ runner.state.config.appName }}</span>
 
-		<p v-if="decided" class="decision">
-			{{ decided.text }}
-			<span class="age">{{ decided.seconds }}s ago</span>
-		</p>
+				<span>
+					{{ runner.state.workers }}
+					{{ t('autoscale_workers', 'workers') }}
+				</span>
+
+				<span v-if="runner.state.pendingWorkers > 0">
+					{{ runner.state.pendingWorkers }}
+					{{ t('autoscale_pending', 'starting') }}
+				</span>
+
+				<span>{{ runner.state.config.strategy }}</span>
+
+				<v-chip v-if="!runner.state.config.enabled" small>
+					{{ t('autoscale_paused', 'paused') }}
+				</v-chip>
+
+				<v-chip v-if="isPinned(runner.state)" small>
+					{{ t('autoscale_pinned', 'pinned') }}
+				</v-chip>
+			</div>
+
+			<p v-if="decided" class="decision">
+				{{ decided.text }}
+				<span class="age">{{ decided.seconds }}s ago</span>
+			</p>
+		</Teleport>
 
 		<Teleport
 			:to="props.actionsTarget ?? undefined"
@@ -1085,7 +1127,9 @@ onUnmounted(disarmClock);
 			</p>
 		</template>
 
-		<p v-if="configKey" class="key">{{ configKey }}</p>
+		<p v-if="configKey" class="key">
+			{{ t('autoscale_key', 'Stored in Redis under') }} {{ configKey }}
+		</p>
 	</div>
 </template>
 

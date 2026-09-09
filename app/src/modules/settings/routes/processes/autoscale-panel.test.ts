@@ -353,13 +353,15 @@ test('a request older than the last restart is the one still waiting', () => {
 	})).toBe('a restart was asked for');
 });
 
-test('a restart that ran reports that it finished', () => {
+// The end of a restart is announced when it happens, so a page reading the
+// report afterwards has nothing left to say about it.
+test('a restart that ran leaves no line behind it', () => {
 	expect(describeReload({
 		askedAt: 1000,
 		running: false,
 		finishedAt: 2000,
 		error: null,
-	})).toBe('the pool finished restarting');
+	})).toBeNull();
 });
 
 test('a restart under way outranks the one before it', () => {

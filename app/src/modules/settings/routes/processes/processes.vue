@@ -237,6 +237,7 @@ function copyRaw(key: string, node: ProcessNode): void {
 }
 
 const autoscaleActionsEl = ref<HTMLElement | null>(null);
+const autoscaleSummaryEl = ref<HTMLElement | null>(null);
 const usageChartEl = ref<HTMLElement | null>(null);
 const cpuChartEl = ref<HTMLElement | null>(null);
 const memoryChartEl = ref<HTMLElement | null>(null);
@@ -531,6 +532,7 @@ onUnmounted(() => {
 				<autoscale-panel
 					:runners="autoscaleRunners"
 					:actions-target="autoscaleActionsEl"
+					:summary-target="autoscaleSummaryEl"
 					@changed="load"
 				/>
 			</sidebar-detail>
@@ -570,12 +572,13 @@ onUnmounted(() => {
 				<span>{{ totals.replicas }} replicas</span>
 			</div>
 
+			<!-- The pool the autoscaler reports lands here from the panel in the
+				 drawer: what the deployment is doing belongs beside the totals
+				 counting it, not behind a drawer. -->
+			<div ref="autoscaleSummaryEl" class="autoscale-summary" />
+
 			<div v-show="samples.length > 1" class="charts">
 				<div class="chart">
-					<h3 class="chart-title">
-						{{ t('processes_usage_chart', 'Deployment against its limits') }}
-					</h3>
-
 					<div v-if="usage" class="usage-figures">
 						<span>
 							{{ t('processes_usage_memory', 'Memory') }}
@@ -904,6 +907,10 @@ onUnmounted(() => {
 .process-row .memory,
 .process-row .cpu {
 	flex-shrink: 0;
+}
+
+.autoscale-summary {
+	margin-block-end: 8px;
 }
 
 .autoscale-actions {
