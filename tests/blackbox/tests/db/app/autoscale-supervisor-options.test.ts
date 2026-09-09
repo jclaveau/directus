@@ -3,6 +3,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import {
 	countWorkers,
 	declaredEverywhere,
+	poolSize,
 	reportOf,
 	startAutoscaler,
 	startPool,
@@ -47,7 +48,13 @@ describe('A restart carries the supervisor options stored for it', () => {
 
 	let rig: Rig;
 
-	it('boots the pool the arms below restart', async () => {
+	// A restart is asked for on the bus, and pub/sub keeps nothing for a
+	// subscriber that is not there yet: an arm that published while the
+	// autoscaler was still booting would lose the ask and time out against a
+	// pool nobody ever restarted. The pool starts one worker under the floor so
+	// that the size below can only be reached by a loop that is running, which
+	// is a loop that has already subscribed.
+	it('waits for a loop that has subscribed to the restarts', async () => {
 		await redis.del(supervisorKey(namespace));
 
 		// The ecosystem declares 10s and the environment asks for 12s, so the
@@ -56,7 +63,7 @@ describe('A restart carries the supervisor options stored for it', () => {
 		// that pushed nothing at all.
 		rig = startPool({
 			appName: 'autoscale-supervisor-options',
-			instances: 2,
+			instances: 1,
 			busyMs: 5,
 			idleMs: 95,
 		});
@@ -69,19 +76,22 @@ describe('A restart carries the supervisor options stored for it', () => {
 			REDIS_PORT: String(REDIS_PORT),
 			CACHE_NAMESPACE: namespace,
 			PM2_LISTEN_TIMEOUT: '12000',
-			// A pool nothing resizes, so the only thing that can replace a
-			// worker here is the restart each arm asks for.
+			// Bounds that meet above the size the pool booted at, so the climb
+			// is the floor's doing and no threshold can move it afterwards:
+			// past this arm the only thing that replaces a worker here is the
+			// restart each arm asks for.
 			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
 			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '2',
 			PM2_AUTOSCALE_MAX_WORKERS: '2',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
 			PM2_AUTOSCALE_WARMUP_SECONDS: '8',
 		});
 
-		expect(countWorkers(rig), reportOf(rig)).toBe(2);
+		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
 
-		// What the ecosystem started them on, which is what the arms below have
-		// to move for their assertions to mean anything.
+		// What the pool started them on, which is what the arms below have to
+		// move for their assertions to mean anything.
 		expect(await declaredEverywhere(rig, 'listen_timeout', 10_000, 30_000))
 			.toEqual([10_000, 10_000]);
 	}, 90_000);
