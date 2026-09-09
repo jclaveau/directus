@@ -23,6 +23,13 @@ import {
 	setCacheStatsEnabled,
 	truncateCacheEvents,
 } from '../cache-events.js';
+import {
+	applyOverridePatch,
+	parseOverridePatch,
+	readAutoscaleOverride,
+	writeAutoscaleOverride,
+} from '../autoscale/lib/override.js';
+import { autoscaleConfigKey } from '../autoscale/lib/resolve-config.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
@@ -40,6 +47,8 @@ vi.mock('../cache.js');
 vi.mock('../cache-events.js');
 vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
+vi.mock('../autoscale/lib/override.js');
+vi.mock('../autoscale/lib/resolve-config.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -558,6 +567,68 @@ describe('Services / Utils', () => {
 		it('truncateCacheStats delegates for an admin', async () => {
 			await service(admin).truncateCacheStats();
 			expect(truncateCacheEvents).toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale configuration', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		function stored(override: Record<string, unknown> | null) {
+			vi.mocked(autoscaleConfigKey).mockReturnValue('scalabus:autoscale:config');
+			vi.mocked(readAutoscaleOverride).mockResolvedValue(override);
+			vi.mocked(parseOverridePatch).mockImplementation((patch) => patch);
+
+			vi.mocked(applyOverridePatch)
+				.mockImplementation((_current, patch) => patch);
+		}
+
+		// The stamp keeps the id, which outlives a rename; a page asked to show
+		// who left an override wants the address, and only the table has it.
+		it('names the user behind the id it stamped', async () => {
+			stored({ maxWorkers: 8, setBy: 'writer-id' });
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await expect(service(admin).readAutoscaleConfig()).resolves.toEqual({
+				key: 'scalabus:autoscale:config',
+				override: { maxWorkers: 8, setBy: 'writer-id' },
+				setByEmail: 'ann@example.com',
+			});
+		});
+
+		// The key is editable by hand, and a database asked to match a uuid
+		// against whatever was typed there refuses the comparison.
+		it('names nobody where the id matches no user', async () => {
+			stored({ maxWorkers: 8, setBy: 'not-an-id' });
+			tracker.on.select('directus_users').simulateError('invalid input syntax');
+
+			await expect(service(admin).readAutoscaleConfig())
+				.resolves
+				.toMatchObject({ setByEmail: null });
+		});
+
+		it('stamps the surface the change came in through', async () => {
+			stored(null);
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await service(admin).updateAutoscaleConfig({ maxWorkers: 8 }, 'mcp');
+
+			expect(writeAutoscaleOverride).toHaveBeenCalledWith(
+				expect.objectContaining({ setBy: 'admin-id', setFrom: 'mcp' }),
+			);
+		});
+
+		it('refuses a non-admin', async () => {
+			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+			await expect(service(nonAdmin).updateAutoscaleConfig({}, 'admin'))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeAutoscaleOverride).not.toHaveBeenCalled();
 		});
 	});
 });

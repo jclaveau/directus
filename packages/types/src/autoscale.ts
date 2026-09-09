@@ -78,6 +78,15 @@ export interface AutoscaleConfig {
  */
 export type AutoscaleValueSource = 'default' | 'env' | 'override';
 
+/**
+ * Which surface a change to the override came in through.
+ *
+ * The same configuration is reachable from the admin and from an MCP client,
+ * and a pool found in a shape nobody remembers asking for is answered by which
+ * of them was used as much as by who was holding it.
+ */
+export type AutoscaleWriteSurface = 'admin' | 'mcp';
+
 /** Per field, the layer its effective value came from. */
 export type AutoscaleConfigSources = Record<
 	keyof AutoscaleConfig,

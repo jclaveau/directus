@@ -197,7 +197,11 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					override: {
 						type: 'object',
 						description: 'The fields the override sets, or null for none. '
-							+ 'Carries `setBy`, `setAt` and `note` beside them.',
+							+ 'Carries `setBy`, `setAt`, `setFrom` and `note` beside them.',
+					},
+					setByEmail: {
+						type: 'string',
+						description: 'The address behind `setBy`, or null for none.',
 					},
 					running: {
 						type: 'array',
@@ -267,7 +271,12 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					},
 					override: {
 						type: 'object',
-						description: 'The override as it now stands, or null for none.',
+						description: 'The override as it now stands, or null for none. '
+							+ 'This write stamps it `setFrom: "mcp"`.',
+					},
+					setByEmail: {
+						type: 'string',
+						description: 'The address behind `setBy`, or null for none.',
 					},
 				},
 			},
@@ -289,10 +298,13 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					});
 				}
 
-				return service.updateAutoscaleConfig({
-					...config as Record<string, unknown>,
-					note: args['note'],
-				});
+				return service.updateAutoscaleConfig(
+					{
+						...config as Record<string, unknown>,
+						note: args['note'],
+					},
+					'mcp',
+				);
 			},
 		}),
 		defineSystemMcpTool({

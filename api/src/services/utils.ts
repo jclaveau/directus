@@ -5,6 +5,7 @@ import type {
 	Accountability,
 	AutoscaleNodeState,
 	AutoscaleRunner,
+	AutoscaleWriteSurface,
 	CacheFlushTarget,
 	PgBouncerDetail,
 	PgBouncerReport,
@@ -126,6 +127,14 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	}
 
 	return parsed;
+}
+
+/** What both autoscale reads answer with: the stored override, plus who left it. */
+export interface AutoscaleConfigAnswer {
+	key: string;
+	override: AutoscaleOverride | null;
+	/** The address behind the override's `setBy`, `null` where there is none. */
+	setByEmail: string | null;
 }
 
 export class UtilsService {
@@ -481,16 +490,10 @@ export class UtilsService {
 	 * environment of the process that scales it laid under this, and that
 	 * process reports it with `readProcesses` rather than answering a request.
 	 */
-	async readAutoscaleConfig(): Promise<{
-		key: string;
-		override: AutoscaleOverride | null;
-	}> {
+	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('inspect the autoscale configuration');
 
-		return {
-			key: autoscaleConfigKey(),
-			override: await readAutoscaleOverride(),
-		};
+		return this.answerWith(await readAutoscaleOverride());
 	}
 
 	/**
@@ -503,18 +506,20 @@ export class UtilsService {
 	 */
 	async updateAutoscaleConfig(
 		patch: Record<string, unknown>,
-	): Promise<{ key: string; override: AutoscaleOverride | null }> {
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('change the autoscale configuration');
 
 		const parsed = parseOverridePatch(patch);
 
 		// Stamped by the writer rather than taken from them: an override outlives
-		// the incident that justified it, and the question it is then asked is
-		// who left it and when.
+		// the incident that justified it, and the questions it is then asked are
+		// who left it, when, and through what.
 		const stamped = {
 			...parsed,
 			setBy: this.accountability?.user ?? null,
 			setAt: new Date().toISOString(),
+			setFrom: surface,
 		};
 
 		const override = applyOverridePatch(
@@ -524,7 +529,45 @@ export class UtilsService {
 
 		await writeAutoscaleOverride(override);
 
-		return { key: autoscaleConfigKey(), override };
+		return this.answerWith(override);
+	}
+
+	/**
+	 * The override with the writer named rather than identified.
+	 *
+	 * The stamp keeps the user's id, which survives a rename and a changed
+	 * address; a page reading it back wants the address, and only the database
+	 * turns one into the other.
+	 */
+	private async answerWith(
+		override: AutoscaleOverride | null,
+	): Promise<AutoscaleConfigAnswer> {
+		return {
+			key: autoscaleConfigKey(),
+			override,
+			setByEmail: await this.emailOf(override?.['setBy']),
+		};
+	}
+
+	private async emailOf(user: unknown): Promise<string | null> {
+		if (typeof user !== 'string') {
+			return null;
+		}
+
+		try {
+			const row = await this.knex
+				.select('email')
+				.from('directus_users')
+				.where({ id: user })
+				.first();
+
+			return row?.email ?? null;
+		}
+		catch {
+			// The key is editable by hand, and a database asked to match a uuid
+			// against whatever was typed there refuses the comparison.
+			return null;
+		}
 	}
 
 	/**

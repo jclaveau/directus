@@ -81,8 +81,20 @@ test('gives one field back to the environment chain', () => {
 // deployment as overridden while every value it runs on comes from its
 // environment.
 test('drops an override left holding only its note', () => {
-	expect(applyOverridePatch({ maxWorkers: 8, setBy: 'jean' }, { maxWorkers: null }))
+	const stamped = { maxWorkers: 8, setBy: 'jean', setFrom: 'admin' };
+
+	expect(applyOverridePatch(stamped, { maxWorkers: 8 }))
+		.toEqual(stamped);
+
+	expect(applyOverridePatch(stamped, { maxWorkers: null }))
 		.toBeNull();
+});
+
+// Where a change came in through is stamped beside who made it, so it has to
+// survive the same merge the rest of the stamp does.
+test('takes the surface a change came in through', () => {
+	expect(parseOverridePatch({ maxWorkers: 8, setFrom: 'mcp' }))
+		.toEqual({ maxWorkers: 8, setFrom: 'mcp' });
 });
 
 test('writes the override, and deletes the key for none', async () => {

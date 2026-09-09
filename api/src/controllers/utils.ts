@@ -442,6 +442,7 @@ if (redisConfigAvailable()) {
 
 			const updated = await service.updateAutoscaleConfig(
 				patch as Record<string, unknown>,
+				'admin',
 			);
 
 			res.status(200).json({ data: updated });

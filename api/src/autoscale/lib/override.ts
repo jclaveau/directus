@@ -27,10 +27,11 @@ const FIELD_TYPES: Record<keyof AutoscaleConfig, FieldType> = {
  *
  * The loop takes only the fields it knows, so these ride in the same object
  * without reaching it. They are what turns a forgotten `{"enabled": false}`
- * into one an operator can date and attribute — which is the failure this
- * feature invites and the log line it would otherwise take to answer.
+ * into one an operator can date and attribute — to a person, and to the
+ * surface they used — which is the failure this feature invites and the log
+ * line it would otherwise take to answer.
  */
-const NOTE_FIELDS = ['setBy', 'setAt', 'note'];
+const NOTE_FIELDS = ['setBy', 'setAt', 'setFrom', 'note'];
 
 export interface AutoscaleOverride {
 	[field: string]: unknown;

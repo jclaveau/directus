@@ -340,21 +340,25 @@ test.each([
 });
 
 test('The configuration write sends the note down with the patch', async () => {
-	service.updateAutoscaleConfig.mockResolvedValue({ key: 'k', override: {} });
+	service.updateAutoscaleConfig
+		.mockResolvedValue({ key: 'k', override: {}, setByEmail: null });
 
 	await findSystemMcpTool('write_autoscale_config')!.run(
 		{ config: { maxWorkers: 8 }, note: 'spike on the planner' },
 		context,
 	);
 
-	expect(service.updateAutoscaleConfig).toHaveBeenCalledWith({
-		maxWorkers: 8,
-		note: 'spike on the planner',
-	});
+	// Named as an MCP write, which is what tells an override an agent left from
+	// one a person typed into the admin.
+	expect(service.updateAutoscaleConfig).toHaveBeenCalledWith(
+		{ maxWorkers: 8, note: 'spike on the planner' },
+		'mcp',
+	);
 });
 
 test('The configuration write drops the whole override when asked', async () => {
-	service.readAutoscaleConfig.mockResolvedValue({ key: 'k', override: null });
+	service.readAutoscaleConfig
+		.mockResolvedValue({ key: 'k', override: null, setByEmail: null });
 
 	await findSystemMcpTool('write_autoscale_config')!
 		.run({ clear: true, note: 'incident over' }, context);
@@ -373,7 +377,9 @@ test('The configuration write refuses a patch that is not an object', async () =
 });
 
 test('The configuration read asks the running processes by default', async () => {
-	service.readAutoscaleConfig.mockResolvedValue({ key: 'k', override: null });
+	service.readAutoscaleConfig
+		.mockResolvedValue({ key: 'k', override: null, setByEmail: null });
+
 	service.readAutoscaleRunners.mockResolvedValue([]);
 
 	await findSystemMcpTool('read_autoscale_config')!.run({}, context);
@@ -545,7 +551,13 @@ test('Every declared output property is one the tool actually answers', () => {
 	} = {
 		read_autoscale_config: {
 			key: 'scalabus:autoscale:config',
-			override: { maxWorkers: 8, setBy: 'jean', setAt: '2026-09-09T00:00:00Z' },
+			override: {
+				maxWorkers: 8,
+				setBy: 'jean',
+				setAt: '2026-09-09T00:00:00Z',
+				setFrom: 'mcp',
+			},
+			setByEmail: 'jean@example.com',
 			running: [
 				{
 					service: 'api',
@@ -612,6 +624,7 @@ test('Every declared output property is one the tool actually answers', () => {
 		write_autoscale_config: {
 			key: 'scalabus:autoscale:config',
 			override: { maxWorkers: 8 },
+			setByEmail: 'jean@example.com',
 		},
 		list_processes: {
 			collectedAt: 1_700_000_000_000,

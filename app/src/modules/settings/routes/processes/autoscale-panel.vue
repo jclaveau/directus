@@ -20,6 +20,7 @@ const emit = defineEmits<{ changed: [] }>();
 const { t } = useI18n();
 
 const override = ref<Record<string, unknown> | null>(null);
+const setByEmail = ref<string | null>(null);
 const configKey = ref<string | null>(null);
 const available = ref(true);
 const error = ref<string | null>(null);
@@ -44,11 +45,16 @@ const stamp = computed(() => {
 		return null;
 	}
 
+	// The address where the api could name one, and the id it stamped where it
+	// could not: a user since deleted is still worth reporting as an id.
+	const writer = setByEmail.value ?? (typeof setBy === 'string'
+		? setBy
+		: null);
+
 	return {
 		setAt,
-		setBy: typeof setBy === 'string'
-			? setBy
-			: null,
+		setBy: writer,
+		from: surfaceLabel(override.value?.['setFrom']),
 		note: typeof override.value?.['note'] === 'string'
 			? override.value['note'] as string
 			: null,
@@ -73,6 +79,7 @@ async function load(): Promise<void> {
 	try {
 		const response = await api.get('/utils/autoscale');
 		override.value = response.data.data.override;
+		setByEmail.value = response.data.data.setByEmail ?? null;
 		configKey.value = response.data.data.key;
 		available.value = true;
 	}
@@ -95,6 +102,7 @@ async function write(patch: Record<string, unknown>): Promise<void> {
 	try {
 		const response = await api.patch('/utils/autoscale', patch);
 		override.value = response.data.data.override;
+		setByEmail.value = response.data.data.setByEmail ?? null;
 
 		// The values the loop runs on come back on the process report, and the
 		// tick that reads this write is the one that changes them.
@@ -115,6 +123,7 @@ async function resetToEnv(): Promise<void> {
 	try {
 		await api.delete('/utils/autoscale');
 		override.value = null;
+		setByEmail.value = null;
 		drafts.value = {};
 		emit('changed');
 	}
@@ -131,6 +140,19 @@ function edited(field: string): boolean {
 }
 
 const dirty = computed(() => Object.keys(drafts.value).length > 0);
+
+/** Which surface a change came in through, in the words the page uses. */
+function surfaceLabel(from: unknown): string | null {
+	if (from === 'admin') {
+		return t('autoscale_from_admin', 'the admin');
+	}
+
+	if (from === 'mcp') {
+		return t('autoscale_from_mcp', 'the system MCP');
+	}
+
+	return null;
+}
 
 /** What the layer a value came from is called here. */
 function sourceLabel(source: AutoscaleValueSource | null): string {
@@ -299,6 +321,7 @@ onMounted(load);
 		<p v-if="stamp" class="stamp">
 			{{ t('autoscale_set_by', 'Configured') }}
 			<template v-if="stamp.setBy">by {{ stamp.setBy }}</template>
+			<template v-if="stamp.from">from {{ stamp.from }}</template>
 			{{ stamp.days }}{{ t('autoscale_days_ago', 'd ago') }}
 			<template v-if="stamp.note">— {{ stamp.note }}</template>
 		</p>

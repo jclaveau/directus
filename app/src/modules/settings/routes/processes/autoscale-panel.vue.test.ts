@@ -125,15 +125,21 @@ const global = {
 	},
 };
 
-function answered(override: Record<string, unknown> | null) {
-	return { data: { data: { key: 'scalabus:autoscale:config', override } } };
+function answered(
+	override: Record<string, unknown> | null,
+	setByEmail: string | null = null,
+) {
+	const key = 'scalabus:autoscale:config';
+
+	return { data: { data: { key, override, setByEmail } } };
 }
 
 async function mounted(
 	override: Record<string, unknown> | null,
 	runners = [runner()],
+	setByEmail: string | null = null,
 ) {
-	vi.mocked(api.get).mockResolvedValue(answered(override));
+	vi.mocked(api.get).mockResolvedValue(answered(override, setByEmail));
 
 	const wrapper = mount(AutoscalePanel, { global, props: { runners } });
 	await flushPromises();
@@ -227,17 +233,37 @@ describe('what the panel shows', () => {
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
 	});
 
-	test('who set the override rides along with it', async () => {
-		const wrapper = await mounted({
+	// A uuid names nobody to the person reading it, and the same override is
+	// reachable from two surfaces — so both are read off the stamp.
+	test('who set the config, and through what, rides along with it', async () => {
+		const stamp = {
 			maxWorkers: 8,
-			setBy: 'ann',
+			setBy: '2bcde43c-dda4-4478-b2dd-138e18759c0c',
 			setAt: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+			setFrom: 'mcp',
 			note: 'the friday spike',
-		});
+		};
 
-		expect(wrapper.text()).toContain('by ann');
+		const wrapper = await mounted(stamp, [runner()], 'ann@example.com');
+
+		expect(wrapper.text()).toContain('by ann@example.com');
+		expect(wrapper.text()).toContain('from the system MCP');
 		expect(wrapper.text()).toContain('2d ago');
 		expect(wrapper.text()).toContain('the friday spike');
+	});
+
+	// A user deleted since is still an answer to who left the override, so the
+	// id the api could not name stands in for the address.
+	test('an id the api could not name is shown as it stands', async () => {
+		const wrapper = await mounted({
+			maxWorkers: 8,
+			setBy: 'gone-user',
+			setAt: new Date().toISOString(),
+			setFrom: 'admin',
+		});
+
+		expect(wrapper.text()).toContain('by gone-user');
+		expect(wrapper.text()).toContain('from the admin');
 	});
 });
 
