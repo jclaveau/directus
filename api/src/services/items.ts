@@ -25,22 +25,22 @@ import type { Knex } from 'knex';
 import { getCache } from '../cache.js';
 import {
 	createScopedCacheCollector,
+	foldHandedOverScopedCacheEpochs,
+	ItemScopedCacheService,
 	pinnedScopedCacheTagsFromKeyedFilters,
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromO2mChildren,
+	readScopedCacheEpochs,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
 	scopedCacheFilterKeyingByCollection,
 	scopedCacheOwnershipNestedPkPaths,
 	scopedCachePurgeEnabled,
-	readScopedCacheEpochs,
+	takenOverScopedCacheKey,
 } from '../scoped-cache.js';
 import { collectionsInFieldMap }
 	from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
-import {
-	ItemScopedCacheService,
-} from '../scoped-cache/item-scoped-cache-service.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
@@ -316,7 +316,7 @@ implements AbstractService<Item> {
 					// creation of this row. Surface that key, insert nothing, and let the hook that took
 					// over own the action event.
 					scopedCacheCollector.takenOverKeys.add(
-						`${this.collection}:${String(payloadAfterHooks)}`,
+						takenOverScopedCacheKey(this.collection, payloadAfterHooks),
 					);
 
 					results[index] = payloadAfterHooks;
@@ -973,20 +973,6 @@ implements AbstractService<Item> {
 			);
 		}
 
-		// A `scopeTo` names a collection the capture above could not know about, and
-		// hands over the counter its own dependent read took beforehand. Folded in
-		// here rather than at declaration time so the read's own capture always wins.
-		// Not the same rule the collector uses to merge two DECLARED counters, and it
-		// does not need to be: this one was taken before the query, so it is earlier
-		// than anything a hook could hand over, with no comparison required.
-		for (const [collection, epoch] of Object.entries(
-			scopedCacheCollector.epochs,
-		)) {
-			if (collection in scopedCacheEpochs === false) {
-				scopedCacheEpochs[collection] = epoch;
-			}
-		}
-
 		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
 		// listener's return verbatim, and the cast above asserts rather than checks)
 		// makes this throw `Object.defineProperty called on non-object`. That is a
@@ -997,7 +983,12 @@ implements AbstractService<Item> {
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
 			scopedCacheUnautopurgeableTags,
-			scopedCacheEpochs,
+			// A `scopeTo` names a collection the pre-query capture could not know
+			// about, and hands over the counter its own dependent read took.
+			scopedCacheEpochs: foldHandedOverScopedCacheEpochs(
+				scopedCacheEpochs,
+				scopedCacheCollector.epochs,
+			),
 		});
 	}
 
@@ -1668,7 +1659,7 @@ implements AbstractService<Item> {
 			// purge leaks it → coarse, unless the hook declared its own purgeBy.
 			const someRowTakenOver = primaryKeys.some((key) => {
 				return key != null && scopedCacheCollector.takenOverKeys.has(
-					`${this.collection}:${String(key)}`,
+					takenOverScopedCacheKey(this.collection, key),
 				);
 			});
 
@@ -1804,7 +1795,9 @@ implements AbstractService<Item> {
 		// check and the activity rows all target `keys`, so a hook that returned a
 		// REWRITTEN array (rather than null to cancel) would otherwise purge rows that
 		// survive and leave the deleted ones cached.
-		const oldScopedCacheTags = await this.scopedCache.snapshot(keys);
+		const oldScopedCacheTags = await this.scopedCache.snapshot(keys, {
+			deleting: true,
+		});
 
 		if (this.accountability) {
 			await validateAccess(
@@ -1870,15 +1863,8 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// A direct self-relation SET NULL/DEFAULT rewrites survivors' fk, vacating
-			// their `<field>=<deletedKey>` slice; add those to the precise purge.
-			const vacatedSelfSlices =
-				this.scopedCache.vacatedSelfRelationTags(keys);
-
 			this.scopedCachePurged = await this.scopedCache.purge(
-				oldScopedCacheTags === null
-					? null
-					: [...oldScopedCacheTags, ...vacatedSelfSlices],
+				oldScopedCacheTags,
 				scopedCacheCollector,
 				scopedCacheCollectionsChangedByOnDelete(
 					this.schema,

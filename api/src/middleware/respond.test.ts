@@ -31,7 +31,12 @@ const mocks = vi.hoisted(() => {
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
-		readScopedCacheEpochs: vi.fn().mockResolvedValue({}),
+		scopedCacheSweptDuringFill: vi.fn().mockResolvedValue(undefined),
+		evictCacheEntry: vi.fn(async (cache: any, redisKey: string) => {
+			await cache.delete(redisKey);
+			await cache.delete(`${redisKey}__expires_at`);
+			await cache.delete(`${redisKey}__tags`);
+		}),
 		queueMissLatency: vi.fn(),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
@@ -53,7 +58,10 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
 		serializeScopedCacheTags: mocks.serializeScopedCacheTags,
-		readScopedCacheEpochs: mocks.readScopedCacheEpochs,
+		scopedCacheSweptDuringFill: mocks.scopedCacheSweptDuringFill,
+		// Real, so the unguarded cases below assert the predicate rather than a
+		// stand-in agreeing with them: it is pure, and reaches no Redis.
+		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
@@ -66,6 +74,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 vi.mock('../cache-events.js', () => {
 	return {
 		cacheStatsActive: () => true,
+		evictCacheEntry: mocks.evictCacheEntry,
 		queueCacheDescriptor: mocks.queueCacheDescriptor,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 		queueMissLatency: mocks.queueMissLatency,
@@ -473,7 +482,7 @@ describe('respond middleware', () => {
 		already replaced is attributable rather than silent
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
-		mocks.readScopedCacheEpochs.mockResolvedValue({ articles: '8' });
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
 			scopedCacheTags: [{ collection: 'articles' }],
@@ -497,10 +506,9 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
-		// Moved by the time the writes landed. There is one reading now, taken after
-		// them: a check before the fill could only spare the racing fill its own undo,
-		// and this is the one that decides.
-		mocks.readScopedCacheEpochs.mockResolvedValue({ articles: '8' });
+		// Moved by the time the writes landed: the guard's reading is taken after
+		// them, and it is the one that decides.
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
 
 		const res = makeRes({ data: [] }, {
 			scopedCacheTags: [{ collection: 'articles' }],
@@ -519,7 +527,7 @@ describe('respond middleware', () => {
 		passing by refusing to cache everything
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
-		mocks.readScopedCacheEpochs.mockResolvedValue({ articles: '7' });
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue(undefined);
 
 		const res = makeRes({ data: [] }, {
 			scopedCacheTags: [{ collection: 'articles' }],
@@ -537,8 +545,6 @@ describe('respond middleware', () => {
 		collection landed mid-read
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
-		mocks.readScopedCacheEpochs.mockResolvedValue({ articles: '7', '*': '1' });
-
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheTags: [
 				{ collection: 'articles' },
@@ -562,12 +568,6 @@ describe('respond middleware', () => {
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
 
-		mocks.readScopedCacheEpochs.mockResolvedValue({
-			articles: '7',
-			authors: '4',
-			'*': '1',
-		});
-
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheTags: [
 				{ collection: 'articles' },
@@ -586,8 +586,6 @@ describe('respond middleware', () => {
 		down wherever the counters are off
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
-		mocks.readScopedCacheEpochs.mockResolvedValue({});
-
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheTags: [{ collection: 'authors' }],
 			scopedCacheEpochs: {},

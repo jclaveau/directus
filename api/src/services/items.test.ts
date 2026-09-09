@@ -56,10 +56,18 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', async (importOriginal) => {
+// The owning modules, not the barrel: the collaborator imports its siblings
+// directly, so a stand-in on the re-export would leave the real ones in its graph.
+vi.mock('../scoped-cache/purge.js', async (importOriginal) => {
 	return {
-		...(await importOriginal<typeof import('../scoped-cache.js')>()),
+		...(await importOriginal<typeof import('../scoped-cache/purge.js')>()),
 		purgeScopedCache: vi.fn(),
+	};
+});
+
+vi.mock('../scoped-cache/config.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache/config.js')>()),
 		scopedCachePurgeEnabled: () => {
 			return true;
 		},

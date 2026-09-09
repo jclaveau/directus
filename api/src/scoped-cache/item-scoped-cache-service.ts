@@ -26,18 +26,26 @@ import type {
 import type { AST } from '../types/ast.js';
 import {
 	composeScopedCachePaths,
-	pinnedScopedCacheTagsFromFilter,
-	purgeScopedCache,
 	resolveScopedCacheM2oJoinChainFromPath,
+	type ScopedCacheFilterKeying,
+	type ScopedCacheM2oJoin,
+} from './paths.js';
+import {
+	scopedCachePurgeEnabled,
+} from './config.js';
+import {
+	purgeScopedCache,
+} from './purge.js';
+import {
+	pinnedScopedCacheTagsFromFilter,
 	scopedCacheAncestorSliceCandidates,
 	scopedCacheNestedCollections,
-	scopedCachePurgeEnabled,
+} from './read-tags.js';
+import {
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	type FieldTypesByField,
-	type ScopedCacheFilterKeying,
-	type ScopedCacheM2oJoin,
-} from '../scoped-cache.js';
+} from './tags.js';
 
 
 export type ScopedCacheReadInputs = {
@@ -258,9 +266,15 @@ export class ItemScopedCacheService {
 	 * declares scope fields or not: the read side pins that axis on every collection,
 	 * and a read pinning an axis the write never emits is never purged — stale, which
 	 * is worse than any hit ratio. It costs no query, since the keys are already here.
+	 *
+	 * `deleting` adds the slices the delete VACATES rather than occupies — rows that
+	 * survive it holding a foreign key it rewrites. They belong to the same snapshot
+	 * because they are read off the same keys and purged in the same pass; leaving
+	 * their union to the caller only asked it to redo the `null` handling below.
 	 */
 	async snapshot(
 		keys: PrimaryKey[],
+		{ deleting = false }: { deleting?: boolean } = {},
 	): Promise<ScopedCacheTag[] | null> {
 		if (!scopedCachePurgeEnabled() || keys.length === 0) {
 			return [];
@@ -294,6 +308,10 @@ export class ItemScopedCacheService {
 		}
 
 		tags.push(...valueSliceTags);
+
+		if (deleting) {
+			tags.push(...this.vacatedSelfRelationTags(keys));
+		}
 
 		return tags;
 	}
@@ -428,7 +446,7 @@ export class ItemScopedCacheService {
 	 * `<field>=X` would go stale. Emitted only for a self-relation field the
 	 * collection scopes on (else no read pins it). Keyed by the deleted keys.
 	 */
-	vacatedSelfRelationTags(deletedKeys: PrimaryKey[]): ScopedCacheTag[] {
+	private vacatedSelfRelationTags(deletedKeys: PrimaryKey[]): ScopedCacheTag[] {
 		if (!scopedCachePurgeEnabled() || deletedKeys.length === 0) {
 			return [];
 		}

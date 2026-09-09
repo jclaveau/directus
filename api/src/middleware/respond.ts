@@ -6,6 +6,7 @@ import { getCache, setCacheValue } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
 import {
 	cacheStatsActive,
+	evictCacheEntry,
 	queueCacheDescriptor,
 	queueMissLatency,
 	writeCacheTombstone,
@@ -13,11 +14,13 @@ import {
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
+	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
-	serializeScopedCacheTags,
+	scopedCacheSweptDuringFill,
 	scopedCacheTagLabel,
-	readScopedCacheEpochs,
+	serializeScopedCacheTags,
 	tagScopedCacheKeys,
+	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
 import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
@@ -141,29 +144,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
 
-	// A purge that landed while this read was in flight dropped tag sets this entry is
-	// not in yet: caching it now would store rows the write already replaced, under an
-	// index that purge has already deleted. Captured before the query, compared once
-	// the fill is written — the comparison AFTER the write is the one that closes the
-	// window, so checking here too would only spare the rare racing fill its own
-	// undo, at the price of a round trip on every miss.
+	// Taken before the read's query; what it guards against, and why it is compared
+	// after the fill rather than before, is in `fill-guard.ts`.
 	const capturedEpochs = res.locals['scopedCacheEpochs'] as
-		| Record<string, string | null>
+		| ScopedCacheEpochs
 		| undefined;
 
-	// A read hook's `scopeTo` can name ANY collection, and it runs after the capture
-	// above was taken — so the tag it adds names a collection no counter covers, and
-	// a purge of it landing mid-read passes the comparison below unnoticed. There is
-	// no capturing it late: the check needs a value from BEFORE the query. Refuse the
-	// fill instead. `*` rides every capture, so its presence is what says the guard
-	// ran at all — without it (no redis, purging off, a read that opted out) nothing
-	// here is guarded anyway and this must not refuse the whole cache.
-	const unguardedScopeCollections = capturedEpochs === undefined
-		|| '*' in capturedEpochs === false
-		? []
-		: [...new Set(scopedCacheTags.map((tag) => tag.collection))].filter(
-			(collection) => collection in capturedEpochs === false,
-		);
+	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
+		capturedEpochs,
+		scopedCacheTags,
+	);
 
 	const unguardedScope = unguardedScopeCollections.length > 0;
 
@@ -232,25 +222,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				}, ttlMs),
 			]);
 
-			// The check before the fill cannot see a purge that started after it: that
-			// purge's sweep read the tag sets before this key was filed, or deleted
-			// the key between the two writes above, and either way the value just
-			// written outlives it. Re-reading the counters here catches every such
-			// interleaving, because a purge bumps them BEFORE it sweeps.
 			if (capturedEpochs) {
-				const epochsAfterFill = await readScopedCacheEpochs(
-					Object.keys(capturedEpochs),
-				);
-
-				const sweptDuringFill = Object.entries(capturedEpochs).find(
-					([collection, captured]) => {
-						return epochsAfterFill[collection] !== captured;
-					},
-				)?.[0];
+				const sweptDuringFill =
+					await scopedCacheSweptDuringFill(capturedEpochs);
 
 				if (sweptDuringFill !== undefined) {
-					await cache.delete(redisKey);
-					await cache.delete(`${redisKey}__expires_at`);
+					await evictCacheEntry(cache, redisKey);
 
 					if (cacheStatsActive()) {
 						void reportCacheAnomaly(

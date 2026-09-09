@@ -27,146 +27,20 @@ import {
 import type { EventContext, SchemaOverview, ScopedCacheTag } from '@directus/types';
 import type { Keyv } from 'keyv';
 import {
+	scopedCachePurgeEnabled,
+} from './config.js';
+import {
+	bumpScopedCacheEpochs,
+} from './fill-guard.js';
+import {
 	scopedCacheTagKey,
 	scopedCacheTagLabel,
 } from './tags.js';
 
 const env = useEnv();
 
-/**
- * Whether scoped (tag-based) cache purging is active. Requires the opt-in mode AND a
- * Redis cache store, since the tag→keys index lives in Redis sets. Any other config
- * falls back to full flush.
- */
-export function scopedCachePurgeEnabled(): boolean {
-	return (
-		env['CACHE_AUTO_PURGE_MODE'] === 'scoped' &&
-		env['CACHE_STORE'] === 'redis' &&
-		redisConfigAvailable()
-	);
-}
-
-/**
- * Fail fast at startup: scoped cache purging drives Redis SCAN + multi-key DEL over
- * a single node, so it only works on a standalone client. A cluster client would
- * silently under-purge (keys on other nodes never scanned) and leave stale slices.
- * `useRedis()` always builds a standalone `Redis` in core, so this only bites a
- * custom override — surface it at boot rather than as a mid-request stale HIT.
- */
-export function assertScopedCacheRedisSupported(): void {
-	if (scopedCachePurgeEnabled() && useRedis().isCluster) {
-		throw new Error(
-			'CACHE_AUTO_PURGE_MODE=scoped is not implemented for Redis cluster clients '
-			+ '(SCAN and multi-key DEL are single-node). Use a standalone Redis or '
-			+ 'CACHE_AUTO_PURGE_MODE=full.',
-		);
-	}
-}
-
 // The slice tag keys a collection currently owns, so a collection-wide purge reads
 // them instead of walking the whole keyspace to find them again.
-/**
- * A per-collection purge counter, bumped every time that collection's tags are
- * dropped. `*` is the wholesale entry, bumped by a flush that names no collection.
- */
-function scopedCacheEpochKey(collection: string): string {
-	return `${env['CACHE_NAMESPACE']}:epoch:${collection}`;
-}
-
-/**
- * Read the purge counters of the collections a read depends on.
- *
- * A read's tags reach the index only in `respond`, long after the rows were fetched:
- * a purge landing in between finds nothing to drop, and the fill then stores rows it
- * already superseded — stale for the whole TTL, and (its tag sets having just been
- * deleted) unreachable to every later purge. Comparing the counter captured before
- * the query against the one at fill time is what closes that window.
- */
-export async function readScopedCacheEpochs(
-	collections: Iterable<string>,
-): Promise<Record<string, string | null>> {
-	// Every read pays this round trip, so it is skipped wherever its answer cannot
-	// matter: nothing is filled with the response cache off.
-	if (
-		!env['CACHE_ENABLED'] ||
-		!scopedCachePurgeEnabled() ||
-		!redisConfigAvailable()
-	) {
-		return {};
-	}
-
-	// `*` rides along so a wholesale flush invalidates an in-flight read too.
-	const names = [...new Set([...collections, '*'])];
-
-	// A read that cannot reach the counters still has to answer. Capturing nothing
-	// leaves the fill unguarded, exactly as it is with no redis at all — the same
-	// trade the response cache makes everywhere else.
-	const values = await useRedis()
-		.mget(names.map(scopedCacheEpochKey))
-		.catch((): (string | null)[] => []);
-
-	return Object.fromEntries(
-		names.map((name, index) => [name, values[index] ?? null]),
-	);
-}
-
-/**
- * Bump the counters of the collections a purge just dropped tags for. Expiring, so
- * a collection nothing writes to stops costing a key; a read whose counter expired
- * between capture and fill reads `null` on both sides and caches, which is right —
- * nothing purged it in between.
- */
-async function bumpScopedCacheEpochs(
-	collections: Iterable<string>,
-): Promise<void> {
-	if (!scopedCachePurgeEnabled() || !redisConfigAvailable()) {
-		return;
-	}
-
-	const names = [...new Set(collections)];
-
-	if (names.length === 0) {
-		return;
-	}
-
-	// Best effort, and the whole of it: this runs BEFORE the sweep, so letting a
-	// client that cannot take the command through would abort the purge itself —
-	// trading every entry it was about to drop for the one racing fill the counter
-	// would have refused.
-	try {
-		const pipeline = useRedis().pipeline();
-		appendScopedCacheEpochBumps(pipeline, names);
-		await pipeline.exec();
-	}
-	catch {
-		// See above: the sweep behind this is what makes the cache correct.
-	}
-}
-
-/**
- * Queue the bumps onto a pipeline the caller is already sending, so a purge pays no
- * round trip of its own for them. Redis runs a pipeline's commands in the order they
- * were queued, so a sweep appended after these still reads its members AFTER the
- * counters moved — which is the ordering the guard rests on.
- */
-function appendScopedCacheEpochBumps(
-	pipeline: ReturnType<ReturnType<typeof useRedis>['pipeline']>,
-	collections: Iterable<string>,
-): void {
-	if (!scopedCachePurgeEnabled() || !redisConfigAvailable()) {
-		return;
-	}
-
-	for (const name of new Set(collections)) {
-		pipeline.incr(scopedCacheEpochKey(name));
-
-		pipeline.expire(
-			scopedCacheEpochKey(name),
-			SCOPED_CACHE_EPOCH_TTL_SECONDS,
-		);
-	}
-}
-
 function scopedCacheCollectionSlicesKey(collection: string): string {
 	return `${env['CACHE_NAMESPACE']}:slices:${collection}`;
 }
@@ -249,9 +123,6 @@ export function scopedCacheCollectionsChangedByOnDelete(
  */
 const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
 
-// Long enough that no read outlives its own capture, short enough that a
-// collection nobody writes to stops holding a key.
-const SCOPED_CACHE_EPOCH_TTL_SECONDS = 24 * 60 * 60;
 
 /**
  * File a key under a tag set and give that set an expiry that only ever moves OUT.

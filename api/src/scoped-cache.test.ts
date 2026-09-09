@@ -11,6 +11,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	canonicalScopedCacheValue,
 	countScopedCacheTagMembers,
+	foldHandedOverScopedCacheEpochs,
+	mergeScopedCacheEpochs,
+	scopedCacheCollectionsWithoutGuard,
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
@@ -3324,5 +3327,66 @@ describe('scopedCacheNestedCollections', () => {
 		expect([...scopedCacheNestedCollections(astNesting([
 			{ type: 'field', name: 'label', fieldKey: 'label' },
 		] as unknown as AST['children']))]).toEqual([]);
+	});
+});
+
+
+describe('the purge counters a fill is guarded by', () => {
+	// Two merge rules, and they are not the same rule. A read's own capture was
+	// taken before its query, so it is earlier than anything a hook can hand over
+	// and wins without a comparison. Two captures that become ONE entry have no
+	// such ordering, so the earlier reading has to be found.
+	it(oneLine`
+		keeps the read's own capture over a counter a hook handed for the same
+		collection
+	`, () => {
+		expect(foldHandedOverScopedCacheEpochs(
+			{ articles: '7', '*': '1' },
+			{ articles: '9', authors: '4' },
+		)).toEqual({ articles: '7', '*': '1', authors: '4' });
+	});
+
+	it(oneLine`
+		takes a handed-over counter for a collection the capture never named, since
+		that is the only reading of it there is
+	`, () => {
+		expect(foldHandedOverScopedCacheEpochs({}, { authors: '4' }))
+			.toEqual({ authors: '4' });
+	});
+
+	it('keeps a handed-over null, which is the earliest reading there is', () => {
+		expect(foldHandedOverScopedCacheEpochs({}, { authors: null }))
+			.toEqual({ authors: null });
+	});
+
+	it(oneLine`
+		merges two captures of one entry down to the EARLIER reading, so a purge
+		between them is still visible at fill time
+	`, () => {
+		const merged = { articles: '9', authors: '2' };
+		mergeScopedCacheEpochs(merged, { articles: '7', tags: '5' });
+
+		expect(merged).toEqual({ articles: '7', authors: '2', tags: '5' });
+	});
+
+	it('names the tagged collections no capture covered', () => {
+		expect(scopedCacheCollectionsWithoutGuard(
+			{ articles: '7', '*': '1' },
+			[{ collection: 'articles' }, { collection: 'authors' }],
+		)).toEqual(['authors']);
+	});
+
+	// `*` rides every capture, so its absence says no capture ran — with nothing
+	// guarded either way, refusing here would take the whole cache down.
+	it('names nothing when no capture ran at all', () => {
+		expect(scopedCacheCollectionsWithoutGuard(
+			{},
+			[{ collection: 'authors' }],
+		)).toEqual([]);
+
+		expect(scopedCacheCollectionsWithoutGuard(
+			undefined,
+			[{ collection: 'authors' }],
+		)).toEqual([]);
 	});
 });

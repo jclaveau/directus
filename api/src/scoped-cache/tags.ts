@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import type {
+	PrimaryKey,
 	SchemaOverview,
 	ScopedCacheCollector,
 	ScopedCacheTag,
@@ -254,6 +255,18 @@ export const PIN_UNSAFE_SCOPE_TYPES = new Set<Type>([
 
 export function isPinnableScopeType(type: Type | undefined): boolean {
 	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
+}
+
+/**
+ * How a row a create hook took over is named in the collector's set. Recorded
+ * where the take-over happens and read back in another method entirely, so the
+ * two spellings have to come from one place or the lookup silently misses.
+ */
+export function takenOverScopedCacheKey(
+	collection: string,
+	key: PrimaryKey,
+): string {
+	return `${collection}:${String(key)}`;
 }
 
 export function scopedCacheTagKey(tag: ScopedCacheTag): string {

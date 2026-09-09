@@ -15,7 +15,7 @@ import type { Knex } from 'knex';
 import getDatabase from '../../database/index.js';
 import { getService } from '../../utils/get-service.js';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
-import { earlierScopedCacheEpoch } from '../../scoped-cache.js';
+import { mergeScopedCacheEpochs } from '../../scoped-cache.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
 import { generateSchema } from './schema/index.js';
@@ -159,13 +159,10 @@ export class GraphQLService {
 			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
 		);
 
-		for (const [collection, epoch] of Object.entries(
+		mergeScopedCacheEpochs(
+			this.scopedCacheEpochs,
 			resultMeta?.scopedCacheEpochs ?? {},
-		)) {
-			this.scopedCacheEpochs[collection] = collection in this.scopedCacheEpochs
-				? earlierScopedCacheEpoch(this.scopedCacheEpochs[collection], epoch)
-				: epoch;
-		}
+		);
 
 		return result;
 	}
