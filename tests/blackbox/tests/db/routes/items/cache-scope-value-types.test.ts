@@ -32,6 +32,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // instead, which over-purges and cannot go stale.
 
 const TYPED = 'test_scope_value_types';
+// Stored lowercase, read back uppercase: the spelling an iOS client's
+// `UUID().uuidString` sends while a web client writes the other one.
+const REF = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 const purgedTagsHeader = 'x-scoped-cache-purged-tags';
@@ -58,6 +61,7 @@ describe(oneLine`
 		let serialId: number;
 		let amountId: number;
 		let tenantId: number;
+		let refId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 		beforeAll(async () => {
@@ -73,6 +77,7 @@ describe(oneLine`
 							'amount',
 							'tenant',
 							'due',
+							'ref',
 						],
 					},
 					fields: [
@@ -81,6 +86,7 @@ describe(oneLine`
 						{ field: 'amount', type: 'decimal', meta: {} },
 						{ field: 'tenant', type: 'string', meta: {} },
 						{ field: 'due', type: 'dateTime', meta: {} },
+						{ field: 'ref', type: 'uuid', meta: {} },
 						{ field: 'label', type: 'string', meta: {} },
 					],
 				}],
@@ -98,6 +104,7 @@ describe(oneLine`
 						tenant: 'zzz-due',
 						due: '2024-03-04T05:06:07',
 					},
+					{ label: 'ref', tenant: 'zzz-ref', ref: REF },
 				],
 			});
 
@@ -105,6 +112,7 @@ describe(oneLine`
 			serialId = rows[1].id;
 			amountId = rows[2].id;
 			tenantId = rows[3].id;
+			refId = rows[5].id;
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -245,6 +253,45 @@ describe(oneLine`
 			// serving stale.
 			expect(headerTags(upper, cacheTagsHeader))
 				.toContain(`${TYPED}:tenant=acme`);
+		}, 60_000);
+
+		it(oneLine`
+			pins a uuid slice by its stored spelling, so the write's own lowercase
+			token is the one the read filed
+		`, async () => {
+			await expectSliceRoundTrip({
+				field: 'ref',
+				filterValue: REF,
+				rowId: refId,
+				expectedTag: `${TYPED}:ref=${REF}`,
+			});
+		}, 60_000);
+
+		it(oneLine`
+			pins the lowercase uuid token for an uppercase spelling of it, which the
+			database answers with the same row
+		`, async () => {
+			await clearCache();
+
+			const upper = await readWhere('ref', REF.toUpperCase());
+
+			// The uppercase spelling is what an iOS caller sends; the write side only
+			// ever reads the stored lowercase back off the driver. Pinning the caller's
+			// spelling would file a key no write emits, and the entry would serve stale
+			// for its whole TTL.
+			expect(headerTags(upper, cacheTagsHeader))
+				.toContain(`${TYPED}:ref=${REF}`);
+
+			const hit = await readWhere('ref', REF.toUpperCase());
+			expect(hit.headers[cacheStatusHeader]).toBe('HIT');
+
+			const written = await touch(refId);
+
+			expect(headerTags(written, purgedTagsHeader))
+				.toContain(`${TYPED}:ref=${REF}`);
+
+			const after = await readWhere('ref', REF.toUpperCase());
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
 		}, 60_000);
 
 		it(oneLine`

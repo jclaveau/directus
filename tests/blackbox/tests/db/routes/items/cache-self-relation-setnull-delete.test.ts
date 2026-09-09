@@ -26,9 +26,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // since left it.
 
 const CATEGORY = 'test_items_self_setnull_category';
+const DEFAULTED = 'test_items_self_setdefault_category';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-cache-tags';
 // const purgedTagsHeader = 'x-cache-purged-tags';
+
+// InnoDB rejects a table definition carrying ON DELETE SET DEFAULT and Oracle has no
+// such rule at all; postgres, sqlite and mssql all take it.
+const vendorsRejectingSetDefault = ['mysql', 'mysql5', 'maria', 'oracle'];
 
 describe(oneLine`
 	deleting a parent leaves stale the parent-slice of children a self-relation
@@ -51,6 +56,10 @@ describe(oneLine`
 		let instance: ChildProcess;
 		let doomedParent: number;
 		let survivingParent: number;
+		let doomedDefaultParent: number;
+		let survivingDefaultParent: number;
+
+		const supportsSetDefault = vendorsRejectingSetDefault.includes(vendor) === false;
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -58,11 +67,15 @@ describe(oneLine`
 			// Sliced by `parent` (the self-FK itself): a read bounded to one parent id
 			// is indexed under that slice alone, never under the bare collection tag.
 			await CreateCollections(vendor, {
-				collections: [{
-					collection: CATEGORY,
-					meta: { scoped_cache_fields: ['parent'] },
-					fields: [{ field: 'name', type: 'string', meta: {} }],
-				}],
+				collections: [CATEGORY, ...(supportsSetDefault
+					? [DEFAULTED]
+					: [])].map((collection) => {
+					return {
+						collection,
+						meta: { scoped_cache_fields: ['parent'] },
+						fields: [{ field: 'name', type: 'string', meta: {} }],
+					};
+				}),
 			});
 
 			// The subject: a direct self-relation whose SET NULL rewrites a child's FK
@@ -91,6 +104,35 @@ describe(oneLine`
 				],
 			});
 
+			// The same shape reached through the other rewriting rule. Its default is
+			// null here, so the rows land where SET NULL puts them — the rule, not the
+			// end state, is what the purge has to recognise.
+			if (supportsSetDefault) {
+				await CreateFieldM2O(vendor, {
+					collection: DEFAULTED,
+					field: 'parent',
+					otherCollection: DEFAULTED,
+					relationSchema: { on_delete: 'SET DEFAULT' },
+				});
+
+				const defaultRoots = await CreateItem(vendor, {
+					collection: DEFAULTED,
+					item: [{ name: 'doomed' }, { name: 'survivor' }],
+				});
+
+				doomedDefaultParent = defaultRoots[0].id;
+				survivingDefaultParent = defaultRoots[1].id;
+
+				await CreateItem(vendor, {
+					collection: DEFAULTED,
+					item: [
+						{ name: 'a', parent: doomedDefaultParent },
+						{ name: 'b', parent: doomedDefaultParent },
+						{ name: 'c', parent: survivingDefaultParent },
+					],
+				});
+			}
+
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
@@ -106,14 +148,22 @@ describe(oneLine`
 			instance.kill();
 
 			await DeleteCollection(vendor, { collection: CATEGORY });
+
+			if (supportsSetDefault) {
+				await DeleteCollection(vendor, { collection: DEFAULTED });
+			}
 		});
 
-		function readSlice(parent: number) {
+		function readSliceOf(collection: string, parent: number) {
 			const sliceQuery = `fields=id,name&filter[parent][_eq]=${parent}`;
 
 			return request(getUrl(vendor, env))
-				.get(`/items/${CATEGORY}?${sliceQuery}`)
+				.get(`/items/${collection}?${sliceQuery}`)
 				.set('Authorization', auth);
+		}
+
+		function readSlice(parent: number) {
+			return readSliceOf(CATEGORY, parent);
 		}
 
 		it(oneLine`
@@ -169,6 +219,49 @@ describe(oneLine`
 			// the delete's CACHE_PURGED_TAGS_HEADER should carry a tag dropping
 			// `${CATEGORY}:parent=${doomedParent}`; today it carries only the deleted
 			// row's own slices and the bare collection tag.
+		});
+
+		it.runIf(supportsSetDefault)(oneLine`
+			deleting a parent purges the slice of children whose foreign key it resets
+			to a default, the other rule that rewrites rather than removes
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const [doomedSlice, keptSlice] = await Promise.all([
+				readSliceOf(DEFAULTED, doomedDefaultParent),
+				readSliceOf(DEFAULTED, survivingDefaultParent),
+			]);
+
+			expect(doomedSlice.headers[cacheStatusHeader]).toBe('MISS');
+			expect(keptSlice.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(doomedSlice.headers[cacheTagsHeader])
+			.toBe(`${DEFAULTED}:parent=${doomedDefaultParent}`);
+
+			expect(keptSlice.headers[cacheTagsHeader])
+			.toBe(`${DEFAULTED}:parent=${survivingDefaultParent}`);
+
+			expect(doomedSlice.body.data).toHaveLength(2);
+			expect(keptSlice.body.data).toHaveLength(1);
+
+			await request(url)
+				.delete(`/items/${DEFAULTED}/${doomedDefaultParent}`)
+				.set('Authorization', auth);
+
+			const [doomedAfter, keptAfter] = await Promise.all([
+				readSliceOf(DEFAULTED, doomedDefaultParent),
+				readSliceOf(DEFAULTED, survivingDefaultParent),
+			]);
+
+			expect(doomedAfter.body.data).toHaveLength(0);
+			expect(doomedAfter.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(keptAfter.headers[cacheStatusHeader]).toBe('HIT');
+			expect(keptAfter.body.data).toHaveLength(1);
 		});
 	});
 });

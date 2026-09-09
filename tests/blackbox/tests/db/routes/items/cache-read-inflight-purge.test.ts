@@ -22,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // by writing from an `items.read` filter, which fires with the rows in hand.
 
 const COLLECTION = 'read_inflight_purge';
+const FLUSHED = 'read_inflight_flush';
 const ANOMALIES = 'directus_cache_stats_anomalies';
 const cacheStatusHeader = 'x-cache-status';
 
@@ -50,20 +51,28 @@ describe(oneLine`
 
 		beforeAll(async () => {
 			await CreateCollections(vendor, {
-				collections: [{
-					collection: COLLECTION,
-					meta: { scoped_cache_fields: ['slot'] },
-					fields: [
-						{ field: 'slot', type: 'string', meta: {} },
-						{ field: 'label', type: 'string', meta: {} },
-					],
-				}],
+				collections: [COLLECTION, FLUSHED].map((collection) => {
+					return {
+						collection,
+						meta: { scoped_cache_fields: ['slot'] },
+						fields: [
+							{ field: 'slot', type: 'string', meta: {} },
+							{ field: 'label', type: 'string', meta: {} },
+						],
+					};
+				}),
 			});
 
-			await CreateItem(vendor, {
-				collection: COLLECTION,
-				item: [{ slot: 'a', label: 'v1' }],
-			});
+			await Promise.all([
+				CreateItem(vendor, {
+					collection: COLLECTION,
+					item: [{ slot: 'a', label: 'v1' }],
+				}),
+				CreateItem(vendor, {
+					collection: FLUSHED,
+					item: [{ slot: 'a', label: 'v1' }],
+				}),
+			]);
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -83,13 +92,18 @@ describe(oneLine`
 
 			await db.destroy();
 			await DeleteCollection(vendor, { collection: COLLECTION });
+			await DeleteCollection(vendor, { collection: FLUSHED });
 		});
 
-		function readSlotA() {
+		function readSlotAOf(collection: string) {
 			return request(getUrl(vendor, env))
-				.get(`/items/${COLLECTION}`)
+				.get(`/items/${collection}`)
 				.query({ 'filter[slot][_eq]': 'a' })
 				.set('Authorization', auth);
+		}
+
+		function readSlotA() {
+			return readSlotAOf(COLLECTION);
 		}
 
 		it(oneLine`
@@ -134,6 +148,32 @@ describe(oneLine`
 			}
 
 			throw new Error('no inflight_purge anomaly was recorded');
+		}, 60_000);
+
+		it(oneLine`
+			refuses to cache a read a whole-cache flush crossed, which drops the tag
+			sets a write's purge would have found
+		`, async () => {
+			await request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// The flush the hook raises runs while this read holds its rows and before
+			// `respond` files its tags, so there is no tag set for it to drop — only
+			// the wholesale counter it moves on the way says the read was crossed.
+			const warm = await readSlotAOf(FLUSHED);
+			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			const after = await readSlotAOf(FLUSHED);
+
+			// Storing the first read would leave it reachable to no later purge: the
+			// index it would have been filed under was deleted mid-flight.
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+
+			// The hook is one-shot, so nothing crosses this one and it caches
+			// normally — which is what separates the refusal above from a collection
+			// that simply never caches.
+			expect((await readSlotAOf(FLUSHED)).headers[cacheStatusHeader]).toBe('HIT');
 		}, 60_000);
 	});
 });

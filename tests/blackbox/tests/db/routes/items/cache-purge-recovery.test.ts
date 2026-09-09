@@ -323,6 +323,93 @@ describe(oneLine`
 		}, 60_000);
 
 		it(oneLine`
+			names the entries a recovered purge had been serving stale, so an outage
+			that outlived a write is visible rather than only over
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await emptyCache();
+			await db(PENDING).delete();
+
+			await cachedRead(readNote);
+
+			// The report resolves each stale key through its descriptor, and a
+			// descriptor reaches Postgres on the stats drain rather than with the fill.
+			// The drain below fires within a poll of the reconnect, so a descriptor
+			// still in the buffer then would leave the entry unnamed and this case
+			// asserting nothing.
+			let described = false;
+
+			for (let attempt = 0; attempt < 45 && described === false; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				described = listed.body.data.some((row: any) => {
+					return row.path === `/items/${NOTE}/${readNote}`;
+				});
+
+				if (described === false) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			expect(described).toBe(true);
+
+			await proxy.cut();
+
+			const written = await request(url)
+				.patch(`/items/${NOTE}/${readNote}`)
+				.send({ subject: `renamed-${Date.now()}` })
+				.set('Authorization', auth)
+				.catch(async (error: Error) => {
+					await assertInstanceAlive();
+					throw error;
+				});
+
+			await assertInstanceAlive();
+			expect(written.status).toBe(200);
+
+			await proxy.open();
+
+			for (let attempt = 0; attempt < 80; attempt++) {
+				if ((await db(PENDING).select('id')).length === 0) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
+			// The report runs BEFORE the purge it precedes, which is what leaves the
+			// tag sets still naming the entry it is about to drop.
+			let outage: any;
+
+			for (let attempt = 0; attempt < 45; attempt++) {
+				const listed = await request(url).get('/utils/cache/anomalies')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				outage = listed.body.data
+					.find((row: any) => row.reason === 'redis_error');
+
+				if (outage !== undefined) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			mark(`outage anomaly: ${JSON.stringify(outage ?? null)}`);
+
+			expect(outage).toBeDefined();
+
+			// Resolved through the descriptor to the read that was being served, not
+			// to the write whose purge failed — the entry is what went stale.
+			expect(outage.path).toBe(`/items/${NOTE}/${readNote}`);
+			expect(outage.count).toBeGreaterThanOrEqual(1);
+		}, 60_000);
+
+		it(oneLine`
 			a purge that succeeds records nothing — the table is written on failure only,
 			so it stays empty on every normal write
 		`, async () => {

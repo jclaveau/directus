@@ -4,6 +4,7 @@ import {
 	CreateFieldM2O,
 	CreateItem,
 	DeleteCollection,
+	DeleteField,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
 import { USER } from '@common/variables';
@@ -41,6 +42,18 @@ const SCOPED_CHILD = 'test_items_cascade_scoped_child';
 const DEFAULTED = 'test_items_cascade_defaulted';
 const RESTRICTED = 'test_items_cascade_restricted';
 const SELF = 'test_items_cascade_self';
+// The shapes the walk itself is about, each hung off a root of its own so the
+// exact purged-tag list the rules above assert stays theirs.
+const WALK_ROOT = 'test_items_cascade_walk_root';
+const WALK_MID = 'test_items_cascade_walk_mid';
+const WALK_SHARED = 'test_items_cascade_walk_shared';
+const WALK_DEEP = 'test_items_cascade_walk_deep';
+const CYCLE_A = 'test_items_cascade_cycle_a';
+const CYCLE_B = 'test_items_cascade_cycle_b';
+const DIAMOND_ROOT = 'test_items_cascade_diamond_root';
+const DIAMOND_LEFT = 'test_items_cascade_diamond_left';
+const DIAMOND_RIGHT = 'test_items_cascade_diamond_right';
+const DIAMOND_LEAF = 'test_items_cascade_diamond_leaf';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-cache-tags';
 const purgedTagsHeader = 'x-cache-purged-tags';
@@ -73,6 +86,9 @@ describe(oneLine`
 		let doomedDefaultParent: number;
 		let survivingParent: number;
 		let selfRoot: number;
+		let walkRoot: number;
+		let cycleRoot: number;
+		let diamondRoot: number;
 
 		const supportsSetDefault = vendorsRejectingSetDefault.includes(vendor) === false;
 
@@ -89,6 +105,16 @@ describe(oneLine`
 						NULLED_CHILD,
 						SIBLING,
 						RESTRICTED,
+						WALK_ROOT,
+						WALK_MID,
+						WALK_SHARED,
+						WALK_DEEP,
+						CYCLE_A,
+						CYCLE_B,
+						DIAMOND_ROOT,
+						DIAMOND_LEFT,
+						DIAMOND_RIGHT,
+						DIAMOND_LEAF,
 						...(supportsSetDefault
 							? [DEFAULTED]
 							: []),
@@ -183,6 +209,83 @@ describe(oneLine`
 				relationSchema: { on_delete: 'CASCADE' },
 			});
 
+			// A collection two rules reach: nulled straight off the root, and cascaded
+			// into from the row below it. Reporting it on the first rule must not
+			// retire it from the walk, or nothing under it is ever reached — which is
+			// what WALK_DEEP below is here to catch.
+			await CreateFieldM2O(vendor, {
+				collection: WALK_SHARED,
+				field: 'root',
+				otherCollection: WALK_ROOT,
+				relationSchema: { on_delete: 'SET NULL' },
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: WALK_MID,
+				field: 'root',
+				otherCollection: WALK_ROOT,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: WALK_SHARED,
+				field: 'mid',
+				otherCollection: WALK_MID,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: WALK_DEEP,
+				field: 'shared',
+				otherCollection: WALK_SHARED,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			// Two collections cascading into each other: the walk has to report both
+			// and stop, rather than follow the cycle round again.
+			await CreateFieldM2O(vendor, {
+				collection: CYCLE_B,
+				field: 'root',
+				otherCollection: CYCLE_A,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: CYCLE_A,
+				field: 'peer',
+				otherCollection: CYCLE_B,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			// Two paths onto one leaf: it is reached twice and must be named once.
+			await CreateFieldM2O(vendor, {
+				collection: DIAMOND_LEFT,
+				field: 'root',
+				otherCollection: DIAMOND_ROOT,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: DIAMOND_RIGHT,
+				field: 'root',
+				otherCollection: DIAMOND_ROOT,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: DIAMOND_LEAF,
+				field: 'left',
+				otherCollection: DIAMOND_LEFT,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: DIAMOND_LEAF,
+				field: 'right',
+				otherCollection: DIAMOND_RIGHT,
+				relationSchema: { on_delete: 'CASCADE' },
+			});
+
 			const parents = await CreateItem(vendor, {
 				collection: PARENT,
 				item: [
@@ -251,6 +354,69 @@ describe(oneLine`
 				}),
 			]);
 
+			const [walkRoots, cycleRoots, diamondRoots] = await Promise.all([
+				CreateItem(vendor, {
+					collection: WALK_ROOT,
+					item: [{ label: 'walk-root' }],
+				}),
+				CreateItem(vendor, {
+					collection: CYCLE_A,
+					item: [{ label: 'cycle-root' }],
+				}),
+				CreateItem(vendor, {
+					collection: DIAMOND_ROOT,
+					item: [{ label: 'diamond-root' }],
+				}),
+			]);
+
+			walkRoot = walkRoots[0].id;
+			cycleRoot = cycleRoots[0].id;
+			diamondRoot = diamondRoots[0].id;
+
+			const [mids, lefts, rights] = await Promise.all([
+				CreateItem(vendor, {
+					collection: WALK_MID,
+					item: [{ label: 'walk-mid', root: walkRoot }],
+				}),
+				CreateItem(vendor, {
+					collection: DIAMOND_LEFT,
+					item: [{ label: 'diamond-left', root: diamondRoot }],
+				}),
+				CreateItem(vendor, {
+					collection: DIAMOND_RIGHT,
+					item: [{ label: 'diamond-right', root: diamondRoot }],
+				}),
+				CreateItem(vendor, {
+					collection: CYCLE_B,
+					item: [{ label: 'cycle-child', root: cycleRoot }],
+				}),
+			]);
+
+			// The row the cascade path reaches, beside a sibling the nullify path
+			// reaches: only the first carries anything below it.
+			const shared = await CreateItem(vendor, {
+				collection: WALK_SHARED,
+				item: [
+					{ label: 'walk-shared-cascaded', mid: mids[0].id },
+					{ label: 'walk-shared-nulled', root: walkRoot },
+				],
+			});
+
+			await Promise.all([
+				CreateItem(vendor, {
+					collection: WALK_DEEP,
+					item: [{ label: 'walk-deep', shared: shared[0].id }],
+				}),
+				CreateItem(vendor, {
+					collection: DIAMOND_LEAF,
+					item: [{
+						label: 'diamond-leaf',
+						left: lefts[0].id,
+						right: rights[0].id,
+					}],
+				}),
+			]);
+
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
@@ -264,6 +430,10 @@ describe(oneLine`
 
 		afterAll(async () => {
 			instance.kill();
+
+			// The two cascade into each other, so neither can go while the other's
+			// foreign key still names it.
+			await DeleteField(vendor, { collection: CYCLE_A, field: 'peer' });
 
 			// Depth first: every FK must go before the collection it points at.
 			await DeleteCollection(vendor, { collection: GRANDCHILD });
@@ -280,9 +450,28 @@ describe(oneLine`
 			]);
 
 			await Promise.all([
+				DeleteCollection(vendor, { collection: WALK_DEEP }),
+				DeleteCollection(vendor, { collection: DIAMOND_LEAF }),
+			]);
+
+			await Promise.all([
+				DeleteCollection(vendor, { collection: WALK_SHARED }),
+				DeleteCollection(vendor, { collection: DIAMOND_LEFT }),
+				DeleteCollection(vendor, { collection: DIAMOND_RIGHT }),
+				DeleteCollection(vendor, { collection: CYCLE_B }),
+			]);
+
+			await Promise.all([
+				DeleteCollection(vendor, { collection: WALK_MID }),
+			]);
+
+			await Promise.all([
 				DeleteCollection(vendor, { collection: PARENT }),
 				DeleteCollection(vendor, { collection: SIBLING }),
 				DeleteCollection(vendor, { collection: SELF }),
+				DeleteCollection(vendor, { collection: WALK_ROOT }),
+				DeleteCollection(vendor, { collection: CYCLE_A }),
+				DeleteCollection(vendor, { collection: DIAMOND_ROOT }),
 			]);
 		});
 
@@ -514,6 +703,147 @@ describe(oneLine`
 			// slice the branch row lived in — and the branch row went with the root.
 			expect(branchAfter.headers[cacheStatusHeader]).toBe('MISS');
 			expect(branchAfter.body.data).toHaveLength(0);
+		});
+
+		it(oneLine`
+			keeps walking a collection a cascade reaches after a nullify already
+			reported it, so what hangs below it is purged too
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const [deep, shared, control] = await Promise.all([
+				read(WALK_DEEP),
+				read(WALK_SHARED),
+				read(SIBLING),
+			]);
+
+			for (const response of [deep, shared, control]) {
+				expect(response.headers[cacheStatusHeader]).toBe('MISS');
+			}
+
+			const deleted = await request(url)
+				.delete(`/items/${WALK_ROOT}/${walkRoot}`)
+				.set('Authorization', auth);
+
+			const [deepAfter, sharedAfter, controlAfter] = await Promise.all([
+				read(WALK_DEEP),
+				read(WALK_SHARED),
+				read(SIBLING),
+			]);
+
+			// The finding: the shared collection is reported by the root's own SET NULL
+			// first. Retiring it from the walk there would leave this one unreached,
+			// serving rows the cascade below has removed.
+			expect(deepAfter.headers[cacheStatusHeader]).toBe('MISS');
+			expect(sharedAfter.headers[cacheStatusHeader]).toBe('MISS');
+			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
+
+			expect(deepAfter.body.data).toHaveLength(0);
+
+			// One of the two went with the cascade, the other survived the nullify —
+			// which is what makes the shared collection reachable both ways.
+			expect(sharedAfter.body.data).toHaveLength(1);
+			expect(sharedAfter.body.data[0].root).toBe(null);
+
+			expect(deleted.headers[purgedTagsHeader].split(', ').sort()).toEqual([
+				WALK_ROOT,
+				`${WALK_ROOT}:id=${walkRoot}`,
+				WALK_MID,
+				WALK_SHARED,
+				WALK_DEEP,
+			].sort());
+		});
+
+		it(oneLine`
+			reports both collections of a cascade cycle and terminates, rather than
+			following the cycle round again
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const [child, control] = await Promise.all([
+				read(CYCLE_B),
+				read(SIBLING),
+			]);
+
+			expect(child.headers[cacheStatusHeader]).toBe('MISS');
+			expect(control.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Returning at all is half the assertion: the walk revisits the root
+			// through the cycle, and only the seeded walk set stops it there.
+			const deleted = await request(url)
+				.delete(`/items/${CYCLE_A}/${cycleRoot}`)
+				.set('Authorization', auth);
+
+			const [childAfter, controlAfter] = await Promise.all([
+				read(CYCLE_B),
+				read(SIBLING),
+			]);
+
+			expect(childAfter.headers[cacheStatusHeader]).toBe('MISS');
+			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
+			expect(childAfter.body.data).toHaveLength(0);
+
+			// Each collection once, the root included: coming back round to it must
+			// not name it a second time.
+			expect(deleted.headers[purgedTagsHeader].split(', ').sort()).toEqual([
+				CYCLE_A,
+				`${CYCLE_A}:id=${cycleRoot}`,
+				CYCLE_B,
+			].sort());
+		});
+
+		it(oneLine`
+			names a leaf two cascade paths both reach exactly once
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const [leaf, control] = await Promise.all([
+				read(DIAMOND_LEAF),
+				read(SIBLING),
+			]);
+
+			expect(leaf.headers[cacheStatusHeader]).toBe('MISS');
+			expect(control.headers[cacheStatusHeader]).toBe('MISS');
+
+			const deleted = await request(url)
+				.delete(`/items/${DIAMOND_ROOT}/${diamondRoot}`)
+				.set('Authorization', auth);
+
+			const [leafAfter, controlAfter] = await Promise.all([
+				read(DIAMOND_LEAF),
+				read(SIBLING),
+			]);
+
+			expect(leafAfter.headers[cacheStatusHeader]).toBe('MISS');
+			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
+			expect(leafAfter.body.data).toHaveLength(0);
+
+			const purged = deleted.headers[purgedTagsHeader].split(', ');
+
+			// A purge naming a collection twice pays for the whole scan twice, and the
+			// sorted comparison below is the only thing that would notice.
+			expect(purged.filter((tag: string) => tag === DIAMOND_LEAF))
+				.toHaveLength(1);
+
+			expect(purged.sort()).toEqual([
+				DIAMOND_ROOT,
+				`${DIAMOND_ROOT}:id=${diamondRoot}`,
+				DIAMOND_LEFT,
+				DIAMOND_RIGHT,
+				DIAMOND_LEAF,
+			].sort());
 		});
 	});
 });
