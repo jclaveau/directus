@@ -56,6 +56,8 @@ env:
   SECRET: bench-secret
   ADMIN_EMAIL: admin@example.com
   ADMIN_PASSWORD: bench
+  # Minted by `cli bootstrap` so a bench reaches the API with no login round trip.
+  ADMIN_TOKEN: bench-admin-token
   TELEMETRY: 'false'
   EXTENSIONS_PATH: tests/perf/extensions
 
@@ -149,7 +151,7 @@ jobs:
           node dist-head/cli bootstrap
 
       - name: Measure startup
-        run: pnpm --filter tests-perf bench
+        run: pnpm --filter tests-perf bench:startup
         env:
           PERF_CLI: ${{ github.workspace }}/dist-head/cli
           PERF_CLI_BASELINE: ${{ github.workspace }}/../baseline/dist/cli
@@ -199,5 +201,99 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bench-startup-${{ steps.commits.outputs.head_short }}
+          path: tests/perf/results/
+          if-no-files-found: warn
+
+  cache:
+    name: Cache
+    # Its own runner rather than a step in `startup`: the two would otherwise
+    # measure each other, and this one needs no baseline bundle — every figure it
+    # reports is a ratio between configurations of ONE build.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          fetch-depth: 0
+
+      - name: Choose the commit to measure
+        id: commits
+        env:
+          EXPLICIT_REF: ${{ inputs.ref }}
+        run: |
+          if [ -n "$EXPLICIT_REF" ]; then
+            git checkout --detach "$EXPLICIT_REF"
+          fi
+
+          {
+            echo "head=$(git rev-parse HEAD)"
+            echo "head_short=$(git rev-parse --short=10 HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare
+        uses: ./.github/actions/prepare
+
+      - name: Start database and cache
+        run: docker compose -f tests/blackbox/docker-compose.yml up postgres redis -d --quiet-pull --wait
+
+      - name: Build the bundle
+        run: pnpm --filter directus deploy --legacy --prod dist
+
+      # An empty extensions directory rather than none: a missing one makes every
+      # boot log a resolution failure, and four instances pay for it.
+      - name: Bootstrap the database
+        run: |
+          mkdir -p tests/perf/cache-extensions
+          node dist/cli bootstrap
+
+      - name: Measure the cache
+        run: pnpm --filter tests-perf bench:cache
+        env:
+          PERF_CLI: ${{ github.workspace }}/dist/cli
+          PERF_HEAD_SHA: ${{ steps.commits.outputs.head }}
+          PERF_REDIS: redis://127.0.0.1:6108
+
+      - name: Write the summary
+        if: always()
+        run: |
+          if [ -f tests/perf/results/cache.md ]; then
+            cat tests/perf/results/cache.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### Cache — no result"
+              echo ""
+              echo "The measurement did not finish. See the job log."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Report on the commit
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f tests/perf/results/cache.status.txt ]; then
+            description=$(cat tests/perf/results/cache.status.txt)
+            state=success
+          else
+            description='the measurement did not finish'
+            state=failure
+          fi
+
+          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+            -f state="$state" \
+            -f context='Bench / cache' \
+            -f description="$description" \
+            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-cache-${{ steps.commits.outputs.head_short }}
           path: tests/perf/results/
           if-no-files-found: warn
