@@ -143,3 +143,26 @@ test('the strategies answer a churning pool differently', () => {
 		reason: 'max cpu 90% >= 60%',
 	});
 });
+
+// A floor and a ceiling that meet leave no branch that returns a size: growth
+// wants room under the ceiling and release wants room above the floor, and a
+// pool between two equal bounds has neither. What the pool reports stops
+// mattering — which is how the blackbox arms about configuration sources hold
+// a pool still without also asserting that a supervisor's CPU accounting
+// behaves, and what a `minWorkers = maxWorkers` pin promises an operator
+// reaching for it mid-incident.
+test('a pool pinned between equal bounds ignores what it reports', () => {
+	const pinned = {
+		...config,
+		strategy: 'scalabus' as const,
+		minWorkers: 1,
+		maxWorkers: 1,
+	};
+
+	for (const cpuPercent of [0, 20, 60, 95, 100]) {
+		expect(decide(sample([cpuPercent]), pinned)).toEqual({
+			workers: null,
+			reason: `average cpu ${cpuPercent}% is within the band`,
+		});
+	}
+});

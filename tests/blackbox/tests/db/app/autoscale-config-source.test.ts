@@ -46,9 +46,12 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		const namespace = 'bb-autoscale-envonly';
 		namespaces.push(namespace);
 
+		// Bounds rather than a threshold, so that reading this override is the
+		// only thing that can move the pool: applied it pins three workers on
+		// the first tick, whatever the pool reports.
 		await redis.set(
 			configKey(namespace),
-			JSON.stringify({ scaleCpuThreshold: 5 }),
+			JSON.stringify({ minWorkers: 3, maxWorkers: 3 }),
 		);
 
 		const rig = startPool({
@@ -63,25 +66,15 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		startAutoscaler(rig, {
 			REDIS_ENABLED: 'false',
 			CACHE_NAMESPACE: namespace,
-			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
-			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
-			PM2_AUTOSCALE_MAX_WORKERS: '3',
-			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
-			// Long enough that the pool is reporting its load rather than its
-			// boot: a worker's CPU percent is cumulative over its short life, so
-			// one just out of a two-second warm-up still reads mostly as the
-			// second it spent starting — on a loaded runner, near 100%, which
-			// clears any threshold an arm like this sets out of reach.
-			PM2_AUTOSCALE_WARMUP_SECONDS: '8',
+			PM2_AUTOSCALE_MAX_WORKERS: '1',
 		});
 
-		// The same override grows the pool in the arms below; here it is
-		// unreachable, so the env threshold is the only one in play.
 		expect({
 			sizes: await sizesOver(rig, 20_000),
 			decisions: decisionsOf(rig),
-		}).toEqual({ sizes: [1], decisions: [] });
+			restarts: restartsOf(rig),
+		}).toEqual({ sizes: [1], decisions: [], restarts: 0 });
 	}, 90_000);
 
 	describe('with Redis configured', () => {
@@ -109,13 +102,20 @@ describe('The autoscaler takes live configuration from Redis', () => {
 				PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
 				PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 				PM2_AUTOSCALE_MIN_WORKERS: '1',
-				PM2_AUTOSCALE_MAX_WORKERS: '3',
+				// A floor and a ceiling that meet, so the arms here that assert a
+				// hold are held by the bounds rather than by a threshold nothing
+				// is supposed to reach. The supervisor reports a worker's CPU as
+				// a delta since whichever client last asked, and this suite polls
+				// it four times a second beside an autoscaler polling once: land
+				// those 10-20ms apart and a worker spinning 20ms in every 100ms
+				// is reported at 100%, for as long as the two stay in phase. The
+				// arms below raise the ceiling in the override that needs room.
+				PM2_AUTOSCALE_MAX_WORKERS: '1',
 				PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
-				// Long enough that the pool is reporting its load rather than its
-				// boot: a worker's CPU percent is cumulative over its short life, so
-				// one just out of a two-second warm-up still reads mostly as the
-				// second it spent starting — on a loaded runner, near 100%, which
-				// clears any threshold an arm like this sets out of reach.
+				// Long enough that the arms below deciding on load read the load
+				// rather than a boot: a worker's first CPU percent covers its
+				// whole life so far, which on a loaded runner is mostly the
+				// second it spent starting.
 				PM2_AUTOSCALE_WARMUP_SECONDS: '8',
 			});
 
@@ -130,9 +130,13 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		}, 90_000);
 
 		it('picks up a stored threshold without being restarted', async () => {
+			// The ceiling comes with it because the env chain pins the pool at
+			// one. The threshold is still what makes three reachable: the env
+			// asks for 95% and the fixture holds itself at 20%, so a pool given
+			// only the room would stay where it is.
 			await redis.set(
 				configKey(namespace),
-				JSON.stringify({ scaleCpuThreshold: 5 }),
+				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 3 }),
 			);
 
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
@@ -153,9 +157,11 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		it('returns to the env chain once the override is removed', async () => {
 			await redis.del(configKey(namespace));
 
-			// The env ceiling is 3 again and its threshold is 95, so a pool
-			// that keeps growing would mean the override was still applied.
-			expect(await sizesOver(rig, 15_000)).toEqual([2]);
+			// The env ceiling is one, and the pool is at two: taking the
+			// override away is asserted by the shrink it causes rather than by
+			// a window in which nothing happens, which a pool left where it was
+			// would pass either way.
+			expect(await poolSize(rig, 1, 60_000)).toBe(1);
 		}, 90_000);
 
 		// The override is a hand-edited JSON document written during an
@@ -166,11 +172,12 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		it('clamps an override asking past the ceiling to the ceiling', async () => {
 			await redis.set(
 				configKey(namespace),
-				JSON.stringify({ minWorkers: 10_000 }),
+				JSON.stringify({ minWorkers: 10_000, maxWorkers: 3 }),
 			);
 
-			// Three, because the env ceiling is three: the floor was applied,
-			// so the override was read, and it was read as three.
+			// Three, because that is the ceiling the same override names: the
+			// floor was applied, so the override was read, and it was read as
+			// three rather than as the ten thousand it asks for.
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
 			expect(await neverExceeded(rig, 3, 10_000)).toBe(3);
 		}, 120_000);
