@@ -129,6 +129,8 @@ jobs:
       PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '10'
       PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '30'
       PM2_AUTOSCALE_WARMUP_SECONDS: '15'
+      # The load drill, so the panel's ramp-up button has a pool to ramp.
+      PM2_AUTOSCALE_DRILL_ENABLED: 'true'
     steps:
       - name: Checkout the ref to preview
         uses: actions/checkout@v7
