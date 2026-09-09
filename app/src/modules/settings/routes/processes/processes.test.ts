@@ -600,6 +600,7 @@ describe('the autoscale panel', () => {
 		workers: 2,
 		pendingWorkers: 0,
 		warmingWorkers: 0,
+		reload: { askedAt: null, running: false, finishedAt: null, error: null },
 		supervisor: null,
 		cpuPercents: [12, 14],
 		lastDecision: {

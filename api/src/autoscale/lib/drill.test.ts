@@ -55,6 +55,7 @@ function runner(cpuPercents: number[], releaseCpuThreshold = 40): AutoscaleRunne
 			workers: cpuPercents.length,
 			pendingWorkers: 0,
 			warmingWorkers: 0,
+			reload: { askedAt: null, running: false, finishedAt: null, error: null },
 			supervisor: null,
 			cpuPercents,
 			lastDecision: null,

@@ -43,11 +43,15 @@ const OUT_OF_TIME = Symbol('out of time');
  * A call that fails on its own passes straight through: pm2 refusing a scale
  * is an answer, and the connection that carried it is fine.
  */
-async function answeredInTime<T>(what: string, call: Promise<T>): Promise<T> {
+async function answeredInTime<T>(
+	what: string,
+	call: Promise<T>,
+	timeoutMs: number = SUPERVISOR_TIMEOUT_MS,
+): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 
 	const outOfTime = new Promise<typeof OUT_OF_TIME>((resolve) => {
-		timer = setTimeout(() => resolve(OUT_OF_TIME), SUPERVISOR_TIMEOUT_MS);
+		timer = setTimeout(() => resolve(OUT_OF_TIME), timeoutMs);
 	});
 
 	let answer: T | typeof OUT_OF_TIME;
@@ -72,7 +76,7 @@ async function answeredInTime<T>(what: string, call: Promise<T>): Promise<T> {
 	await connect();
 
 	throw new Error(
-		`the supervisor did not answer ${what} in ${SUPERVISOR_TIMEOUT_MS}ms`,
+		`the supervisor did not answer ${what} in ${timeoutMs}ms`,
 	);
 }
 
@@ -238,4 +242,36 @@ export async function scaleTo(appName: string, workers: number): Promise<void> {
 	});
 
 	await answeredInTime(`a scale to ${workers}`, scaled);
+}
+
+/**
+ * Replaces every worker of the app, one batch at a time.
+ *
+ * The supervisor starts a replacement, waits for it to report ready, and only
+ * then retires the worker it replaces — so the pool holds its size throughout
+ * and no request lands on a worker that is going away. What bounds that wait is
+ * the declaration's `listen_timeout`; under the time a worker takes to boot,
+ * the supervisor gives up waiting and retires the old one anyway, which is the
+ * one way this stops being seamless.
+ *
+ * Each worker keeps the environment it already has: pm2 puts a worker's own
+ * identity in there, and refreshing it from this process would hand every
+ * replacement the identity of the process that asked for the restart.
+ */
+export async function reloadPool(
+	appName: string,
+	timeoutMs: number,
+): Promise<void> {
+	const reloaded = new Promise<void>((resolve, reject) => {
+		pm2.reload(appName, (error) => {
+			if (error) {
+				reject(error);
+			}
+			else {
+				resolve();
+			}
+		});
+	});
+
+	await answeredInTime(`a reload of ${appName}`, reloaded, timeoutMs);
 }

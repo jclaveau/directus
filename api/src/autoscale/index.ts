@@ -12,6 +12,12 @@ import {
 	scaleTo,
 } from './lib/pool.js';
 import {
+	beginAskedReload,
+	initAutoscaleReload,
+	reloadState,
+	reloading,
+} from './lib/reload.js';
+import {
 	resolveConfig,
 	resolvedSources,
 	resolvedWithoutOverride,
@@ -90,6 +96,12 @@ export async function runAutoscaler(): Promise<void> {
 		logger.warn(error, '[autoscale] could not answer processes queries');
 	});
 
+	// The pool cannot restart itself: a worker running the restart would be
+	// retiring the process serving the request. This is the process that holds
+	// the supervisor connection and is not a member of the pool, so it listens
+	// for the ask instead.
+	initAutoscaleReload();
+
 	const stop = () => {
 		disconnectFromSupervisor();
 		process.exit(0);
@@ -129,6 +141,8 @@ export async function runAutoscaler(): Promise<void> {
 			// pool is judged on.
 			const onlineWorkers = cpu.measure(reading.onlineWorkers);
 			const workers = onlineWorkers.length + pendingWorkers;
+
+			beginAskedReload(config.appName, workers, reading.supervisor);
 
 			const carriesRestarts = [...reading.restartsByWorker.values()]
 				.some((count) => count > 0);
@@ -194,7 +208,8 @@ export async function runAutoscaler(): Promise<void> {
 				&& workers > 0
 				&& churning === false
 				&& carriesRestarts === false
-				&& prewarmed === false;
+				&& prewarmed === false
+				&& reloading() === false;
 
 			let decision: Decision | null = null;
 
@@ -208,7 +223,7 @@ export async function runAutoscaler(): Promise<void> {
 					decision = { workers: target, reason: 'prewarming the pool' };
 				}
 			}
-			else if (config.enabled) {
+			else if (config.enabled && reloading() === false) {
 
 				decision = decide({
 					cpuPercents,
@@ -260,6 +275,7 @@ export async function runAutoscaler(): Promise<void> {
 				pendingWorkers,
 				warmingWorkers,
 				supervisor: reading.supervisor,
+				reload: reloadState(),
 				cpuPercents: config.strategy === 'legacy'
 					? legacyWorkers.map((worker) => worker.cpuPercent)
 					: cpuPercents,

@@ -123,6 +123,8 @@ export interface AutoscaleNodeState {
 	 * supervisor reported no worker of this app to read one off.
 	 */
 	supervisor: AutoscaleSupervisor | null;
+	/** Where the pool's last rolling restart got to. */
+	reload: AutoscaleReload;
 	/**
 	 * The per-worker readings the rule that decided actually looked at.
 	 *
@@ -196,4 +198,26 @@ export interface AutoscaleSupervisor {
 	 * ready, which is what makes `pendingWorkers` mean anything.
 	 */
 	waitReady: boolean;
+}
+
+/**
+ * A rolling restart of the scaled pool, and where the last one got to.
+ *
+ * The supervisor replaces a worker by starting its replacement first and
+ * retiring it only once the replacement reports ready, so the pool never dips
+ * below the size it was asked to hold. What bounds that wait is the
+ * declaration's `listenTimeout`, which is why it is reported beside this.
+ */
+export interface AutoscaleReload {
+	/**
+	 * When the pool was last asked for one, in milliseconds since the epoch, or
+	 * `null` where it never has been.
+	 */
+	askedAt: number | null;
+	/** Whether the supervisor is replacing workers right now. */
+	running: boolean;
+	/** When the last one came back, `null` while one runs or before any has. */
+	finishedAt: number | null;
+	/** Why the last one failed, `null` where it did not. */
+	error: string | null;
 }

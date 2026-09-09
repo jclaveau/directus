@@ -30,6 +30,10 @@ import {
 	stopDrill,
 } from '../autoscale/lib/drill.js';
 import {
+	askForReload,
+	reloadRefusal,
+} from '../autoscale/lib/reload.js';
+import {
 	applyOverridePatch,
 	parseOverridePatch,
 	readAutoscaleOverride,
@@ -58,6 +62,7 @@ vi.mock('../cache-events.js');
 vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
 vi.mock('../autoscale/lib/drill.js');
+vi.mock('../autoscale/lib/reload.js');
 vi.mock('../autoscale/lib/override.js');
 vi.mock('../processes/index.js');
 vi.mock('../autoscale/lib/resolve-config.js');
@@ -677,6 +682,64 @@ describe('Services / Utils', () => {
 				.toThrowError(ForbiddenError);
 
 			expect(writeAutoscaleOverride).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale rolling restart', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		beforeEach(() => {
+			// What the pool looks like comes off the processes report, and reading
+			// a refusal out of it is `reloadRefusal` — mocked here, checked in
+			// `reload.test.ts`.
+			vi.mocked(processesReportEnabled).mockReturnValue(false);
+		});
+
+		it('answers with what the asking worker can say for certain', async () => {
+			vi.mocked(reloadRefusal).mockReturnValue(null);
+
+			vi.mocked(askForReload).mockReturnValue({
+				askedAt: 1000,
+				running: false,
+				finishedAt: null,
+				error: null,
+			});
+
+			await expect(service(admin).startAutoscaleReload())
+				.resolves
+				.toEqual({
+					askedAt: 1000,
+					running: false,
+					finishedAt: null,
+					error: null,
+				});
+		});
+
+		// Refused at the asking end and not only greyed out in the page: a pool
+		// that cannot overlap its workers would be stopped rather than rolled.
+		it('refuses a pool the supervisor could not roll', async () => {
+			vi.mocked(reloadRefusal).mockReturnValue('the pool runs in fork_mode');
+
+			await expect(service(admin).startAutoscaleReload())
+				.rejects
+				.toThrowError('the pool runs in fork_mode');
+
+			expect(askForReload).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin', async () => {
+			vi.mocked(reloadRefusal).mockReturnValue(null);
+
+			await expect(service(nonAdmin).startAutoscaleReload())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(askForReload).not.toHaveBeenCalled();
 		});
 	});
 

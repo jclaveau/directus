@@ -11,6 +11,7 @@ import {
 	type AutoscaleRow,
 	configRows,
 	describeDecision,
+	describeReload,
 	drillRemaining,
 	firstRunner,
 	isPinned,
@@ -35,6 +36,7 @@ const saving = ref(false);
 const drafts = ref<Record<string, string | null>>({});
 const drill = ref<AutoscaleDrill | null>(null);
 const drillAvailable = ref(false);
+const restartArmed = ref(false);
 const drillSeconds = ref('60');
 const drillPercent = ref('80');
 
@@ -150,6 +152,33 @@ const stampLine = computed(() => {
  * when a worker starts, so what changes one is a deploy, not this page.
  */
 const supervisor = computed(() => supervisorRows(runner.value?.state ?? null));
+
+const reloadLine = computed(() => {
+	return describeReload(runner.value?.state.reload ?? null);
+});
+
+const restarting = computed(() => {
+	return runner.value?.state.reload.running === true;
+});
+
+/**
+ * What the pool is in for, named before it is asked for.
+ *
+ * The wait for each replacement is what decides whether this is seamless, and
+ * the supervisor's own bound on it is the number worth reading first.
+ */
+const restartNote = computed(() => {
+	const listen = runner.value?.state.supervisor?.listenTimeout;
+
+	const note = t(
+		'autoscale_restart_note',
+		'Replaces every worker, each one only once its replacement is serving.',
+	);
+
+	return listen === undefined
+		? note
+		: `${note} ${t('autoscale_restart_wait', 'The supervisor waits')} ${listen}ms.`;
+});
 
 const decided = computed(() => {
 	const state = runner.value?.state;
@@ -396,6 +425,32 @@ async function loadDrill(): Promise<void> {
 	}
 }
 
+/**
+ * Ask the pool to replace its workers.
+ *
+ * The request goes to the process that scales the pool: this page is served by
+ * a worker that the restart would retire partway through answering it.
+ */
+async function restart(): Promise<void> {
+	restartArmed.value = false;
+	saving.value = true;
+	error.value = null;
+
+	try {
+		await api.post('/utils/autoscale/reload');
+
+		// Where it got to comes back on the process report, from the process
+		// actually doing it.
+		emit('changed');
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
+	finally {
+		saving.value = false;
+	}
+}
+
 async function startDrill(): Promise<void> {
 	saving.value = true;
 	error.value = null;
@@ -512,7 +567,46 @@ onUnmounted(disarmClock);
 					? t('autoscale_unpin', 'Unpin the pool')
 					: t('autoscale_pin', 'Pin the pool where it is') }}
 			</v-button>
+
+			<v-button
+				v-if="!restartArmed"
+				small
+				secondary
+				class="restart"
+				:tooltip="restartNote"
+				:disabled="!runner || saving || restarting"
+				@click="restartArmed = true"
+			>
+				{{ restarting
+					? t('autoscale_restarting', 'Restarting the pool')
+					: t('autoscale_restart', 'Restart the pool') }}
+			</v-button>
+
+			<template v-else>
+				<v-button
+					small
+					kind="danger"
+					class="restart-confirm"
+					:tooltip="restartNote"
+					:disabled="saving"
+					@click="restart"
+				>
+					{{ t('autoscale_restart_confirm', 'Replace every worker') }}
+				</v-button>
+
+				<v-button
+					small
+					secondary
+					class="restart-cancel"
+					:disabled="saving"
+					@click="restartArmed = false"
+				>
+					{{ t('autoscale_restart_cancel', 'Keep the pool as it is') }}
+				</v-button>
+			</template>
 		</div>
+
+		<p v-if="reloadLine" class="reload">{{ reloadLine }}</p>
 
 		<p v-if="stampLine" class="stamp">{{ stampLine }}</p>
 
@@ -751,6 +845,7 @@ onUnmounted(disarmClock);
 }
 
 .decision,
+.reload,
 .stamp,
 .key {
 	margin-block-end: 8px;

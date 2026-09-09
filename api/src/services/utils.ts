@@ -5,6 +5,7 @@ import type {
 	Accountability,
 	AutoscaleDrill,
 	AutoscaleNodeState,
+	AutoscaleReload,
 	AutoscaleRunner,
 	AutoscaleWriteSurface,
 	CacheFlushTarget,
@@ -61,6 +62,10 @@ import {
 	stopDrill,
 	drillState,
 } from '../autoscale/lib/drill.js';
+import {
+	askForReload,
+	reloadRefusal,
+} from '../autoscale/lib/reload.js';
 import {
 	autoscaleConfigKey,
 	configWithOverride,
@@ -700,6 +705,27 @@ export class UtilsService {
 		}
 
 		return startDrill(duration, share);
+	}
+
+	/**
+	 * Restart every worker of the pool without dropping below its size.
+	 *
+	 * The supervisor starts a replacement, waits for it to report ready, and
+	 * only then retires the worker it replaces — which is how a change to
+	 * something the pool reads at boot reaches it without a deploy and without
+	 * a gap in service. Asked for over the bus rather than run here: this
+	 * worker is one of the ones being replaced.
+	 */
+	async startAutoscaleReload(): Promise<AutoscaleReload> {
+		this.assertAdmin('restart the autoscaled pool');
+
+		const refusal = reloadRefusal(await this.readAutoscaleRunners());
+
+		if (refusal !== null) {
+			throw new InvalidPayloadError({ reason: refusal });
+		}
+
+		return askForReload();
 	}
 
 	/** Call the drill off before its deadline. */

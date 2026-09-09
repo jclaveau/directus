@@ -1,6 +1,7 @@
 import type {
 	AutoscaleConfig,
 	AutoscaleNodeState,
+	AutoscaleReload,
 	AutoscaleRunner,
 	AutoscaleValueSource,
 } from '@directus/types';
@@ -437,4 +438,33 @@ export function supervisorRows(
 				+ 'gets before the supervisor stops replacing it.',
 		},
 	];
+}
+
+/**
+ * Where the pool's last rolling restart got to, in a sentence.
+ *
+ * Kept free of any clock: the restart is reported by the process running it,
+ * and a page counting seconds against its own would be timing the gap between
+ * two machines as much as the restart.
+ */
+export function describeReload(reload: AutoscaleReload | null): string | null {
+	if (reload === null || reload.askedAt === null) {
+		return null;
+	}
+
+	if (reload.running) {
+		return 'restarting the pool, worker by worker';
+	}
+
+	if (reload.error !== null) {
+		return `the last restart failed: ${reload.error}`;
+	}
+
+	// A request the loop has seen but not begun: it starts one on its next tick,
+	// and a page saying nothing in between reads as a button that did nothing.
+	if (reload.finishedAt === null || reload.finishedAt < reload.askedAt) {
+		return 'a restart was asked for';
+	}
+
+	return 'the pool finished restarting';
 }

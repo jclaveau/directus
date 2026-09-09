@@ -614,6 +614,12 @@ test('Every declared output property is one the tool actually answers', () => {
 						workers: 2,
 						pendingWorkers: 0,
 						warmingWorkers: 0,
+						reload: {
+							askedAt: null,
+							running: false,
+							finishedAt: null,
+							error: null,
+						},
 						supervisor: null,
 						cpuPercents: [20, 24],
 						lastDecision: { at: 1, workers: null, reason: 'within the band' },

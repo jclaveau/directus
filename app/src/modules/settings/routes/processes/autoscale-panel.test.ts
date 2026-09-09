@@ -3,6 +3,7 @@ import { expect, test } from 'vitest';
 import {
 	configRows,
 	describeDecision,
+	describeReload,
 	firstRunner,
 	isPinned,
 	parseFieldValue,
@@ -62,6 +63,7 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 		workers: 3,
 		pendingWorkers: 0,
 		warmingWorkers: 0,
+		reload: { askedAt: null, running: false, finishedAt: null, error: null },
 		supervisor: {
 			instances: 2,
 			execMode: 'cluster_mode',
@@ -289,4 +291,64 @@ test('no memory ceiling reads as off rather than as a size', () => {
 test('a pool that reported no declaration has no rows', () => {
 	expect(supervisorRows(state({ supervisor: null }))).toEqual([]);
 	expect(supervisorRows(null)).toEqual([]);
+});
+
+test('a pool nothing ever asked to restart says nothing about restarts', () => {
+	expect(describeReload(null)).toBeNull();
+
+	expect(describeReload({
+		askedAt: null,
+		running: false,
+		finishedAt: null,
+		error: null,
+	})).toBeNull();
+});
+
+// The loop starts a restart on its next tick, so a page saying nothing in
+// between reads as a button that did nothing.
+test('a request the loop has not begun still says so', () => {
+	expect(describeReload({
+		askedAt: 2000,
+		running: false,
+		finishedAt: null,
+		error: null,
+	})).toBe('a restart was asked for');
+});
+
+test('a request older than the last restart is the one still waiting', () => {
+	expect(describeReload({
+		askedAt: 3000,
+		running: false,
+		finishedAt: 2000,
+		error: null,
+	})).toBe('a restart was asked for');
+});
+
+test('a restart that ran reports that it finished', () => {
+	expect(describeReload({
+		askedAt: 1000,
+		running: false,
+		finishedAt: 2000,
+		error: null,
+	})).toBe('the pool finished restarting');
+});
+
+test('a restart under way outranks the one before it', () => {
+	expect(describeReload({
+		askedAt: 3000,
+		running: true,
+		finishedAt: 2000,
+		error: null,
+	})).toBe('restarting the pool, worker by worker');
+});
+
+// A supervisor's refusal is the whole answer to why the pool looks untouched,
+// so it is reported as it came rather than as a failure.
+test('a restart that failed reports what the supervisor said', () => {
+	expect(describeReload({
+		askedAt: 1000,
+		running: false,
+		finishedAt: 2000,
+		error: 'Reload in progress',
+	})).toBe('the last restart failed: Reload in progress');
 });

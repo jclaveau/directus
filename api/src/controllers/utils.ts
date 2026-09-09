@@ -464,6 +464,21 @@ if (redisConfigAvailable()) {
 			return;
 		}),
 	);
+
+	// The restart reaches the process that scales the pool over the bus, which
+	// without Redis is an emitter this worker shares with nobody.
+	router.post(
+		'/autoscale/reload',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.status(200).json({ data: await service.startAutoscaleReload() });
+			return;
+		}),
+	);
 }
 
 // The drill reaches the pool over the bus, which without Redis is an emitter this

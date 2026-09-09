@@ -77,6 +77,7 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 		workers: 3,
 		pendingWorkers: 0,
 		warmingWorkers: 0,
+		reload: { askedAt: null, running: false, finishedAt: null, error: null },
 		supervisor: null,
 		cpuPercents: [20, 24, 22],
 		lastDecision: {
@@ -381,6 +382,68 @@ describe('the levers', () => {
 		});
 	});
 
+});
+
+describe('restarting the pool', () => {
+	function button(wrapper: any, label: string) {
+		return wrapper.findAll('.levers button')
+			.find((candidate: any) => candidate.text().includes(label));
+	}
+
+	// The page is served by a worker the restart replaces, so the ask goes to
+	// the process that scales the pool rather than to this one.
+	test('a restart is asked for once it has been confirmed', async () => {
+		const wrapper = await mounted(null);
+
+		await button(wrapper, 'Restart the pool').trigger('click');
+		expect(api.post).not.toHaveBeenCalled();
+
+		await button(wrapper, 'Replace every worker').trigger('click');
+		await flushPromises();
+
+		expect(api.post).toHaveBeenCalledWith('/utils/autoscale/reload');
+	});
+
+	test('backing out of a restart asks for nothing', async () => {
+		const wrapper = await mounted(null);
+
+		await button(wrapper, 'Restart the pool').trigger('click');
+		await button(wrapper, 'Keep the pool as it is').trigger('click');
+
+		expect(button(wrapper, 'Restart the pool')).toBeDefined();
+		expect(api.post).not.toHaveBeenCalled();
+	});
+
+	// A second ask while the supervisor is mid-restart is one pm2 refuses, and
+	// a button that offers it is a button that reports a failure.
+	test('a pool already restarting is not offered another', async () => {
+		const running = state({
+			reload: { askedAt: 1, running: true, finishedAt: null, error: null },
+		});
+
+		const wrapper = await mounted(null, [runner(running)]);
+
+		expect(button(wrapper, 'Restarting the pool').attributes('disabled'))
+			.toBeDefined();
+
+		expect(wrapper.text()).toContain('restarting the pool, worker by worker');
+	});
+
+	test('a restart the supervisor refused is reported as it came', async () => {
+		const failed = state({
+			reload: {
+				askedAt: 1,
+				running: false,
+				finishedAt: 2,
+				error: 'Reload in progress',
+			},
+		});
+
+		const wrapper = await mounted(null, [runner(failed)]);
+
+		expect(wrapper.text())
+			.toContain('the last restart failed: Reload in progress');
+	});
 });
 
 describe('the whole form at once', () => {
