@@ -27,7 +27,14 @@ const saving = ref(false);
 const drafts = ref<Record<string, string | null>>({});
 
 const runner = computed(() => firstRunner(props.runners));
-const rows = computed(() => configRows(runner.value?.state ?? null, override.value));
+
+const rows = computed(() => {
+	return configRows(
+		runner.value?.state ?? null,
+		override.value,
+		drafts.value['strategy'] ?? null,
+	);
+});
 
 const stamp = computed(() => {
 	const setBy = override.value?.['setBy'];
@@ -270,8 +277,8 @@ onMounted(load);
 			<thead>
 				<tr>
 					<th>{{ t('autoscale_field', 'Field') }}</th>
-					<th>{{ t('autoscale_source', 'From') }}</th>
 					<th>{{ t('autoscale_value', 'Value') }}</th>
+					<th>{{ t('autoscale_source', 'From') }}</th>
 				</tr>
 			</thead>
 			<tbody>
@@ -281,11 +288,6 @@ onMounted(load);
 					:class="{ inactive: row.inactive }"
 				>
 					<td><span v-tooltip="describeField(row)">{{ row.field }}</span></td>
-					<td>
-						<span :class="['source', row.source]">
-							{{ row.source === null ? '—' : row.source }}
-						</span>
-					</td>
 					<td class="edit">
 						<!-- `v-select`'s own root has no layout box, so the cell's flex
 						row lays this span out instead. -->
@@ -294,13 +296,16 @@ onMounted(load);
 								:model-value="shown(row)"
 								:items="row.options"
 								small
-								show-deselect
 								:disabled="saving || row.inactive"
 								@update:model-value="drafts[row.field] = $event"
 							/>
 						</span>
 
-						<span v-else class="control">
+						<span
+							v-else
+							class="control"
+							:class="{ numeric: row.kind === 'number' }"
+						>
 							<v-input
 								:model-value="shown(row) ?? ''"
 								small
@@ -350,6 +355,11 @@ onMounted(load);
 						>
 							<v-icon name="settings_backup_restore" x-small />
 						</v-button>
+					</td>
+					<td>
+						<span :class="['source', row.source]">
+							{{ row.source === null ? '—' : row.source }}
+						</span>
 					</td>
 				</tr>
 			</tbody>
@@ -416,8 +426,13 @@ onMounted(load);
 	flex-grow: 1;
 }
 
-.fields tr.inactive {
-	opacity: 0.5;
+/* A number reads against the unit that names it rather than across the box. */
+.control.numeric :deep(input) {
+	text-align: end;
+}
+
+.fields tr.inactive td {
+	opacity: 0.4;
 }
 
 .source.override {

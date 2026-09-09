@@ -195,10 +195,14 @@ export interface AutoscaleRow extends AutoscaleField {
 export function configRows(
 	state: AutoscaleNodeState | null,
 	override: Record<string, unknown> | null,
+	pendingStrategy: unknown = null,
 ): AutoscaleRow[] {
-	const strategy = state === null
-		? override?.['strategy']
-		: state.config.strategy;
+	// A strategy picked but not yet applied greys the fields it would blind, so
+	// the switch shows what it costs before it is made.
+	const strategy = pendingStrategy
+		?? (state === null
+			? override?.['strategy']
+			: state.config.strategy);
 
 	return AUTOSCALE_FIELDS.map((definition) => {
 		const field = definition.field;

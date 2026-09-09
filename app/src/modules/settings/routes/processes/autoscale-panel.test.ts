@@ -138,6 +138,12 @@ test('the fields the legacy rule never reads are marked inactive', () => {
 	expect(configRows(null, { strategy: 'legacy' })
 		.find((row) => row.field === 'signal')?.inactive)
 		.toBe(true);
+
+	// A strategy chosen and not yet applied greys the same fields, so the
+	// switch shows what it costs before it is made.
+	expect(configRows(state(), null, 'legacy')
+		.find((row) => row.field === 'signal')?.inactive)
+		.toBe(true);
 });
 
 test('every field says what it does to the pool', () => {

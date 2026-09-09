@@ -162,7 +162,11 @@ describe('what the panel shows', () => {
 			.find((row) => row.text().startsWith('maxWorkers'));
 
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
-		expect(ceiling?.text()).toContain('override');
+
+		// Where a value came from is read after the value, not before it.
+		const cells = ceiling?.findAll('td') ?? [];
+
+		expect(cells.at(-1)?.text()).toBe('override');
 	});
 
 	// The route only exists where Redis does, so its absence is the answer to
@@ -470,6 +474,42 @@ describe('editing one field', () => {
 			.toEqual([true, true, true]);
 
 		expect(row(wrapper, 'scaleCpuThreshold').classes()).not.toContain('inactive');
+	});
+
+	// Clearing a field is the third button's job, and a select offering the same
+	// thing under a different word made two answers to one question.
+	test('a select offers its values and nothing else', async () => {
+		const wrapper = await mounted(null);
+
+		const select = row(wrapper, 'strategy').findComponent(VSelect);
+
+		expect(select.props('showDeselect')).toBe(false);
+	});
+
+	// Switching rule blinds four fields, and seeing which ones before applying
+	// is part of deciding to.
+	test('picking legacy greys what it would blind, before applying', async () => {
+		const wrapper = await mounted(null);
+
+		row(wrapper, 'strategy').findComponent(VSelect).vm
+			.$emit('update:modelValue', 'legacy');
+
+		await flushPromises();
+
+		expect(row(wrapper, 'sampleWindow').classes()).toContain('inactive');
+		expect(api.patch).not.toHaveBeenCalled();
+	});
+
+	// A number reads against the unit that names it, so it is right-aligned and
+	// a name is not.
+	test('a number sits against its unit', async () => {
+		const wrapper = await mounted(null);
+
+		const ceiling = row(wrapper, 'maxWorkers').find('.control');
+		const name = row(wrapper, 'appName').find('.control');
+
+		expect(ceiling.classes()).toContain('numeric');
+		expect(name.classes()).not.toContain('numeric');
 	});
 
 	test('a field says what it does to the pool on hover', async () => {
