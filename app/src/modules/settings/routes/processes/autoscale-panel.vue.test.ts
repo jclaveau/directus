@@ -167,6 +167,26 @@ describe('what the panel shows', () => {
 		expect(wrapper.text()).toContain('You have to be an admin');
 	});
 
+	// The value a field would keep is worth reading while typing the one that
+	// would replace it.
+	test('an empty row offers the running value as a placeholder', async () => {
+		const wrapper = await mounted(null);
+
+		const ceiling = wrapper.findAll('tbody tr')
+			.find((row) => row.text().startsWith('maxWorkers'));
+
+		expect(ceiling?.find('input').attributes('placeholder')).toBe('4');
+	});
+
+	test('a field neither reported nor overridden names no source', async () => {
+		const wrapper = await mounted(null, []);
+
+		const ceiling = wrapper.findAll('tbody tr')
+			.find((row) => row.text().startsWith('maxWorkers'));
+
+		expect(ceiling?.find('.source').text()).toBe('—');
+	});
+
 	// An override applies to whichever process reads it next, so a stored one
 	// with nothing running is worth saying rather than hiding.
 	test('a stored override with no runner still says so', async () => {

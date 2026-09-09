@@ -85,8 +85,10 @@ test('a pool with no runner shows the override alone', () => {
 
 	expect(ceiling).toMatchObject({ effective: 8, source: 'override' });
 
+	// Nothing reported and nothing stored: naming a layer here would claim a
+	// value came from somewhere when no value came at all.
 	expect(rows.find((row) => row.field === 'minWorkers'))
-		.toMatchObject({ effective: null, override: null });
+		.toMatchObject({ effective: null, override: null, source: null });
 });
 
 test('an emptied field clears rather than writing a zero', () => {

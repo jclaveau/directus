@@ -44,8 +44,8 @@ export interface AutoscaleRow {
 	kind: AutoscaleFieldKind;
 	/** What the loop is running on, or `null` where none reported. */
 	effective: unknown;
-	/** Which layer that value came from. */
-	source: AutoscaleValueSource;
+	/** Which layer that value came from, `null` where no process reported one. */
+	source: AutoscaleValueSource | null;
 	/** What the override sets, or `null` where it sets nothing for this field. */
 	override: unknown;
 }
@@ -65,10 +65,11 @@ export function configRows(
 	return AUTOSCALE_FIELDS.map(({ field, kind }) => {
 		const overridden = override?.[field] ?? null;
 
-		// Nothing reported means nothing is scaling anything here, so the only
-		// value to show is the one stored — and it is stored, not effective.
+		// Nothing reported means nothing is scaling anything here: the only value
+		// to show is the one stored — and where nothing is stored either, the
+		// field has no source to name rather than a default one.
 		const source = state === null
-			? 'override' as AutoscaleValueSource
+			? storedSource(overridden)
 			: state.sources[field];
 
 		return {
@@ -81,6 +82,12 @@ export function configRows(
 			override: overridden,
 		};
 	});
+}
+
+function storedSource(overridden: unknown): AutoscaleValueSource | null {
+	return overridden === null
+		? null
+		: 'override';
 }
 
 /** What a value typed into a row means, `null` clearing the field. */

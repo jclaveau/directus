@@ -118,6 +118,17 @@ jobs:
       # report: two cluster workers with a recycling cap, not a lone process.
       PROCESSES_SERVICE_NAME: preview
       PM2_HOME: /home/runner/.pm2
+      # A second PM2 app scaling the first one, so Settings → Processes has a real
+      # pool to report and its autoscaling panel has levers that move something.
+      # Paced for a preview rather than for production: a short sample window and
+      # cooldowns measured in seconds, so a change is visible while it is watched.
+      PM2_AUTOSCALE_APP_NAME: directus
+      PM2_AUTOSCALE_SAMPLE_WINDOW: '3'
+      PM2_AUTOSCALE_MIN_WORKERS: '2'
+      PM2_AUTOSCALE_MAX_WORKERS: '6'
+      PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '10'
+      PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '30'
+      PM2_AUTOSCALE_WARMUP_SECONDS: '15'
     steps:
       - name: Checkout the ref to preview
         uses: actions/checkout@v7
@@ -217,6 +228,7 @@ jobs:
             echo "- Manual: ${URL}/admin as \`admin@example.com\` (password in the run summary; on a public repo that summary is world-readable)."
             echo "- Seeded: \`items\` → \`sub_items\` (both with \`user_created\`)."
             echo "- Runs under PM2 (cluster workers, 400M cap), so Settings → Processes has a real supervisor to report."
+            echo "- A second PM2 app scales that pool, so the autoscaling panel on that page reports a live configuration."
             echo "- Give it a minute after the run starts: the tunnel answers 502 until Directus finishes booting."
             echo "- Ephemeral: stays up until the run's hard timeout; the link dies with the run."
             echo "- [ ] 🔄 Re-run admin preview"
@@ -328,6 +340,12 @@ jobs:
             --output /tmp/directus.log \
             --error /tmp/directus.log \
             -- start
+
+          pm2 start directus/cli.js \
+            --name autoscale \
+            --output /tmp/directus.log \
+            --error /tmp/directus.log \
+            -- autoscale
 
           for _ in $(seq 1 60); do
             curl -sf http://localhost:8055/server/health >/dev/null 2>&1 && break

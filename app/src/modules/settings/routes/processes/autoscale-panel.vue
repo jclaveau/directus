@@ -251,13 +251,18 @@ onMounted(load);
 				<tr v-for="row in rows" :key="row.field">
 					<td>{{ row.field }}</td>
 					<td>{{ row.effective === null ? '—' : String(row.effective) }}</td>
-					<td><span :class="['source', row.source]">{{ row.source }}</span></td>
+					<td>
+						<span :class="['source', row.source]">
+							{{ row.source === null ? '—' : row.source }}
+						</span>
+					</td>
 					<td class="edit">
 						<v-input
 							:model-value="drafts[row.field] ?? (
 								row.override === null ? '' : String(row.override)
 							)"
 							small
+							:placeholder="row.effective === null ? '' : String(row.effective)"
 							:disabled="saving"
 							@update:model-value="drafts[row.field] = $event"
 							@keyup.enter="applyRow(row.field, row.kind)"
