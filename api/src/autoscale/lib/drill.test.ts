@@ -1,5 +1,5 @@
 import type { AutoscaleConfig, AutoscaleRunner } from '@directus/types';
-import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 vi.mock('@directus/env');
 
@@ -62,6 +62,13 @@ function runner(cpuPercents: number[], releaseCpuThreshold = 40): AutoscaleRunne
 		},
 	};
 }
+
+// Compiling the env package's graph is seconds of work, and a case that pays
+// it is a case timing its own toolchain: every one of these asks for a fresh
+// copy of the module, so the first to run would carry the cost for all of them.
+beforeAll(async () => {
+	await import('@directus/env');
+});
 
 beforeEach(() => {
 	publish.mockClear();
