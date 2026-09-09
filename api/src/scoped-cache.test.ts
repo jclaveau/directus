@@ -39,7 +39,6 @@ import {
 	purgeScopedCache,
 	retryPendingScopedCachePurges,
 	scopedCacheCollectionsChangedByOnDelete,
-	scopedCacheTagExpiryScript,
 	scopedCacheTagKey,
 	startScopedCachePurgeRecovery,
 	tagScopedCacheKeys,
@@ -630,7 +629,10 @@ describe('collection slice index', () => {
 			exec: vi.fn(),
 		};
 
-		vi.mocked(useRedis).mockReturnValue({ pipeline: () => indexPipeline } as any);
+		vi.mocked(useRedis).mockReturnValue({
+			defineCommand: vi.fn(),
+			pipeline: () => indexPipeline,
+		} as any);
 
 		await tagScopedCacheKeys('entry', [
 			{ collection: 'articles' },
@@ -791,9 +793,11 @@ describe('tagScopedCacheKeys', () => {
 		);
 
 		vi.mocked(useRedis).mockReturnValue({
+			defineCommand: vi.fn(),
 			pipeline: () => {
 				return {
 					sadd: vi.fn().mockReturnThis(),
+					scopedCacheTagExpiry: vi.fn().mockReturnThis(),
 					expire: vi.fn().mockReturnThis(),
 					// ioredis reports a refused command in the reply array and only
 					// REJECTS on a connection-level failure, so an ignored reply
@@ -812,16 +816,17 @@ describe('tagScopedCacheKeys', () => {
 		only ever extends a tag set's expiry, so a later write carrying a shorter TTL
 		cannot outlive-orphan the entries an earlier one indexed
 	`, async () => {
-		const evalCommand = vi.fn().mockReturnThis();
+		const tagExpiry = vi.fn().mockReturnThis();
 		const expire = vi.fn().mockReturnThis();
 		env['CACHE_TTL'] = '30m';
 
 		vi.mocked(useRedis).mockReturnValue({
+			defineCommand: vi.fn(),
 			pipeline: () => {
 				return {
 					sadd: vi.fn().mockReturnThis(),
 					expire,
-					eval: evalCommand,
+					scopedCacheTagExpiry: tagExpiry,
 					exec: vi.fn().mockResolvedValue([]),
 				};
 			},
@@ -841,9 +846,7 @@ describe('tagScopedCacheKeys', () => {
 		// set indexing an entry cached for an hour, which no purge can then reach.
 		expect(expire).not.toHaveBeenCalled();
 
-		expect(evalCommand).toHaveBeenCalledWith(
-			scopedCacheTagExpiryScript,
-			1,
+		expect(tagExpiry).toHaveBeenCalledWith(
 			'ns:tag:articles:author=7',
 			3600,
 			'entry',
@@ -851,9 +854,7 @@ describe('tagScopedCacheKeys', () => {
 		);
 
 		// The collection's slice index files under the same rule.
-		expect(evalCommand).toHaveBeenCalledWith(
-			scopedCacheTagExpiryScript,
-			1,
+		expect(tagExpiry).toHaveBeenCalledWith(
 			'ns:slices:articles',
 			3600,
 			'ns:tag:articles:author=7',

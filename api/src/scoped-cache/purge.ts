@@ -28,6 +28,7 @@ import {
 import {
 	getMilliseconds,
 } from '../utils/get-milliseconds.js';
+import type { ChainableCommander, Redis } from 'ioredis';
 import type { EventContext, SchemaOverview, ScopedCacheTag } from '@directus/types';
 import type { Keyv } from 'keyv';
 import {
@@ -158,6 +159,44 @@ end
 return 0
 `;
 
+type ScopedCacheTagExpiryCommand = {
+	scopedCacheTagExpiry(
+		tagKey: string,
+		ttlSeconds: number,
+		...members: string[]
+	): ChainableCommander;
+};
+
+type ScopedCacheTagPipeline = ChainableCommander & ScopedCacheTagExpiryCommand;
+
+const clientsCarryingScripts = new WeakSet<Redis>();
+
+/**
+ * The shared client, with the tag-expiry script registered as a command on it.
+ *
+ * `defineCommand` sends `EVALSHA` and replays the body only when Redis answers
+ * `NOSCRIPT` — so the 316-byte script crosses the wire once per server rather than
+ * once per tag. A read pinned to 200 slices files 402 of these in one pipeline, and
+ * as `EVAL` that is 124 KB of Lua per fill against 193 KB sent in total.
+ *
+ * Registration is per client and idempotent, but `defineCommand` rebuilds the
+ * command each time, so the set keeps it to the first call per connection.
+ */
+function useScriptedRedis(): Redis & ScopedCacheTagExpiryCommand {
+	const redis = useRedis();
+
+	if (! clientsCarryingScripts.has(redis)) {
+		redis.defineCommand('scopedCacheTagExpiry', {
+			numberOfKeys: 1,
+			lua: scopedCacheTagExpiryScript,
+		});
+
+		clientsCarryingScripts.add(redis);
+	}
+
+	return redis as Redis & ScopedCacheTagExpiryCommand;
+}
+
 /**
  * Read a set of tag sets, drop them, and prune the slice index that names them — as
  * one step, so no other client can act between any two of those. A read filing its
@@ -242,12 +281,12 @@ export async function tagScopedCacheKeys(
 		return;
 	}
 
-	const redis = useRedis();
+	const redis = useScriptedRedis();
 
 	const ttlSeconds = Math.ceil(getMilliseconds(resolvedCacheTtl(), 0) / 1000)
 		* SCOPED_CACHE_TAG_TTL_FACTOR;
 
-	const pipeline = redis.pipeline();
+	const pipeline = redis.pipeline() as ScopedCacheTagPipeline;
 	const filedKeys = new Set<string>();
 
 	for (const tag of scopedCacheTags) {
@@ -264,13 +303,7 @@ export async function tagScopedCacheKeys(
 		const members = [key, cacheExpiresAtKey(key), ...extraSiblings];
 
 		if (ttlSeconds > 0) {
-			pipeline.eval(
-				scopedCacheTagExpiryScript,
-				1,
-				tagKey,
-				ttlSeconds,
-				...members,
-			);
+			pipeline.scopedCacheTagExpiry(tagKey, ttlSeconds, ...members);
 		}
 		else {
 			pipeline.sadd(tagKey, ...members);
@@ -287,13 +320,7 @@ export async function tagScopedCacheKeys(
 		// Same expiry as the tag sets it names, written in the same pipeline, so the
 		// index cannot outlive — or predecease — what it points at.
 		if (ttlSeconds > 0) {
-			pipeline.eval(
-				scopedCacheTagExpiryScript,
-				1,
-				slicesKey,
-				ttlSeconds,
-				tagKey,
-			);
+			pipeline.scopedCacheTagExpiry(slicesKey, ttlSeconds, tagKey);
 		}
 		else {
 			pipeline.sadd(slicesKey, tagKey);

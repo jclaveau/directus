@@ -13,6 +13,7 @@ const redis = vi.hoisted(() => {
 		sadd: vi.fn(),
 		expire: vi.fn(),
 		eval: vi.fn(),
+		scopedCacheTagExpiry: vi.fn(),
 		incr: vi.fn(),
 		sunion: vi.fn(),
 		exec: vi.fn(),
@@ -20,6 +21,7 @@ const redis = vi.hoisted(() => {
 
 	return {
 		isCluster: false,
+		defineCommand: vi.fn(),
 		smembers: vi.fn(),
 		del: vi.fn(),
 		srem: vi.fn(),
@@ -89,7 +91,6 @@ const {
 	assertScopedCacheRedisSupported,
 	purgeScopedCache,
 	scopedCachePurgeEnabled,
-	scopedCacheTagExpiryScript,
 	tagScopedCacheKeys,
 } = await import('./scoped-cache.js');
 
@@ -264,18 +265,14 @@ describe('scoped cache purging', () => {
 
 			// The members ride the script, which files them and moves the set's
 			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:articles',
 				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:directus_users',
 				600,
 				'resp-key',
@@ -291,18 +288,14 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
 
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=A',
 				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=7',
 				600,
 				'resp-key',
@@ -316,9 +309,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=\x00null',
 				600,
 				'resp-key',
@@ -338,20 +329,16 @@ describe('scoped cache purging', () => {
 			]);
 
 			// One tag set, plus the one index entry filing it under its collection.
-			expect(redis._pipeline.eval).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
 
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=7',
 				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:slices:slots',
 				600,
 				'scalabus:tag:slots:student=7',
@@ -365,7 +352,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			// The tag set and its index entry, once each — not once per duplicate.
-			expect(redis._pipeline.eval).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
 		});
 
 		test('no-op when no tags', async () => {
@@ -384,9 +371,7 @@ describe('scoped cache purging', () => {
 				'resp-key__tags',
 			]);
 
-			expect(redis._pipeline.eval).toHaveBeenCalledWith(
-				scopedCacheTagExpiryScript,
-				1,
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:articles',
 				600,
 				'resp-key',
