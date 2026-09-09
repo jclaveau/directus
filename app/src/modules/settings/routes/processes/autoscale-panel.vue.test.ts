@@ -246,10 +246,12 @@ describe('what the panel shows', () => {
 
 		const wrapper = await mounted(stamp, [runner()], 'ann@example.com');
 
-		expect(wrapper.text()).toContain('by ann@example.com');
-		expect(wrapper.text()).toContain('from the system MCP');
-		expect(wrapper.text()).toContain('2d ago');
-		expect(wrapper.text()).toContain('the friday spike');
+		// One sentence, spaces and all: assembled out of template fragments the
+		// conditional ones lose the space that separates them.
+		expect(wrapper.find('.stamp').text()).toBe(
+			'Configured by ann@example.com from the system MCP 2d ago '
+				+ '— the friday spike',
+		);
 	});
 
 	// A user deleted since is still an answer to who left the override, so the
@@ -262,8 +264,8 @@ describe('what the panel shows', () => {
 			setFrom: 'admin',
 		});
 
-		expect(wrapper.text()).toContain('by gone-user');
-		expect(wrapper.text()).toContain('from the admin');
+		expect(wrapper.find('.stamp').text())
+			.toBe('Configured by gone-user from the admin 0d ago');
 	});
 });
 
@@ -601,6 +603,39 @@ describe('editing one field', () => {
 
 		expect(ceiling.classes()).toContain('numeric');
 		expect(name.classes()).not.toContain('numeric');
+	});
+
+	// Which layer holds a value is settled; whether the box still agrees with
+	// it is the live question, so that is what the row colours.
+	test('a typed value says which layer it would come from', async () => {
+		const wrapper = await mounted(null);
+		const threshold = row(wrapper, 'scaleCpuThreshold');
+
+		expect(threshold.find('.source').text()).toBe('default');
+		expect(threshold.find('.source').classes()).not.toContain('pending');
+		expect(threshold.find('.control').classes()).not.toContain('pending');
+
+		await threshold.find('input').setValue('75');
+
+		const typed = row(wrapper, 'scaleCpuThreshold');
+
+		expect(typed.find('.source').text()).toBe('config');
+		expect(typed.find('.source').classes()).toContain('pending');
+		expect(typed.find('.control').classes()).toContain('pending');
+	});
+
+	// Emptying a field hands it back to the environment, so naming the config
+	// it is being taken out of would say the opposite of what is about to
+	// happen.
+	test('a field emptied back to the environment names no layer', async () => {
+		const wrapper = await mounted({ maxWorkers: 8 });
+
+		await row(wrapper, 'maxWorkers').find('input')
+			.setValue('');
+
+		const emptied = row(wrapper, 'maxWorkers');
+
+		expect(emptied.find('.source').text()).toBe('—');
 	});
 
 	test('a field says what it does to the pool on hover', async () => {

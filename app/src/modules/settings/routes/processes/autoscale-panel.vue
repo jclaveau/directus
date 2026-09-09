@@ -62,6 +62,36 @@ const stamp = computed(() => {
 	};
 });
 
+/**
+ * The stamp as one sentence.
+ *
+ * Assembled here rather than out of template fragments, which drop the spaces
+ * between them the moment one of the fragments is conditional.
+ */
+const stampLine = computed(() => {
+	if (stamp.value === null) {
+		return null;
+	}
+
+	const parts = [t('autoscale_set_by', 'Configured')];
+
+	if (stamp.value.setBy !== null) {
+		parts.push(`by ${stamp.value.setBy}`);
+	}
+
+	if (stamp.value.from !== null) {
+		parts.push(`from ${stamp.value.from}`);
+	}
+
+	parts.push(`${stamp.value.days}${t('autoscale_days_ago', 'd ago')}`);
+
+	if (stamp.value.note !== null) {
+		parts.push(`— ${stamp.value.note}`);
+	}
+
+	return parts.join(' ');
+});
+
 const decided = computed(() => {
 	const state = runner.value?.state;
 
@@ -152,6 +182,25 @@ function surfaceLabel(from: unknown): string | null {
 	}
 
 	return null;
+}
+
+/**
+ * Which layer the value in the box would come from.
+ *
+ * A field being typed into is answered by where applying it would put the
+ * value, not by where the one it is replacing came from — and a field emptied
+ * back to the environment names no layer until it lands there.
+ */
+function sourceOf(row: AutoscaleRow): AutoscaleValueSource | null {
+	if (edited(row.field) === false) {
+		return row.source;
+	}
+
+	const draft = drafts.value[row.field];
+
+	return draft === null || draft === ''
+		? null
+		: 'override';
 }
 
 /** What the layer a value came from is called here. */
@@ -318,13 +367,7 @@ onMounted(load);
 			</v-button>
 		</div>
 
-		<p v-if="stamp" class="stamp">
-			{{ t('autoscale_set_by', 'Configured') }}
-			<template v-if="stamp.setBy">by {{ stamp.setBy }}</template>
-			<template v-if="stamp.from">from {{ stamp.from }}</template>
-			{{ stamp.days }}{{ t('autoscale_days_ago', 'd ago') }}
-			<template v-if="stamp.note">— {{ stamp.note }}</template>
-		</p>
+		<p v-if="stampLine" class="stamp">{{ stampLine }}</p>
 
 		<table v-if="available" class="fields">
 			<thead>
@@ -343,7 +386,11 @@ onMounted(load);
 					<td class="edit">
 						<!-- `v-select`'s own root has no layout box, so the cell's flex
 						row lays this span out instead. -->
-						<span v-if="row.options" class="control">
+						<span
+							v-if="row.options"
+							class="control"
+							:class="{ pending: edited(row.field) }"
+						>
 							<v-select
 								:model-value="shown(row)"
 								:items="row.options"
@@ -352,8 +399,11 @@ onMounted(load);
 								@update:model-value="drafts[row.field] = $event"
 							>
 								<template #append>
-									<span :class="['source', row.source]">
-										{{ sourceLabel(row.source) }}
+									<span
+										class="source"
+										:class="{ pending: edited(row.field) }"
+									>
+										{{ sourceLabel(sourceOf(row)) }}
 									</span>
 								</template>
 							</v-select>
@@ -362,7 +412,10 @@ onMounted(load);
 						<span
 							v-else
 							class="control"
-							:class="{ numeric: row.kind === 'number' }"
+							:class="{
+								numeric: row.kind === 'number',
+								pending: edited(row.field),
+							}"
 						>
 							<v-input
 								:model-value="shown(row) ?? ''"
@@ -378,8 +431,11 @@ onMounted(load);
 								@keyup.enter="applyRow(row.field, row.kind)"
 							>
 								<template #append>
-									<span :class="['source', row.source]">
-										{{ sourceLabel(row.source) }}
+									<span
+										class="source"
+										:class="{ pending: edited(row.field) }"
+									>
+										{{ sourceLabel(sourceOf(row)) }}
 									</span>
 								</template>
 							</v-input>
@@ -512,8 +568,11 @@ onMounted(load);
 	margin-inline-start: 4px;
 }
 
-/* Where the value came from sits at the far end, whatever the value is wide. */
-.control :deep(.append) {
+/*
+ * Where the value came from sits at the far end, whatever the value is wide.
+ * Specific enough to outrank the 8px the input gives its own append slot.
+ */
+.control :deep(.v-input .input .append) {
 	margin-inline-start: auto;
 }
 
@@ -535,11 +594,13 @@ onMounted(load);
 	font-size: 12px;
 }
 
-.source.override {
+/*
+ * A change that has not been written yet is the one thing on a row worth a
+ * colour: which layer holds a value is not in question, whether the box still
+ * agrees with it is.
+ */
+.control.pending :deep(input),
+.source.pending {
 	color: var(--theme--primary);
-}
-
-.source.default {
-	color: var(--theme--foreground-subdued);
 }
 </style>

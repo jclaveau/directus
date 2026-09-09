@@ -69,7 +69,8 @@ function sourcesOf(override: Record<string, unknown>): AutoscaleConfigSources {
 	return sources;
 }
 
-function envConfig(): AutoscaleConfig {
+/** The configuration this process's environment alone resolves. */
+export function envConfig(): AutoscaleConfig {
 	const env = useEnv();
 
 	return {
@@ -156,6 +157,20 @@ function withOverride(
 	}
 
 	return merged;
+}
+
+/**
+ * What the loop would run on with this override laid over the environment.
+ *
+ * The env chain read here is this process's rather than the scaling process's,
+ * which is a different process with the same deployment's environment. It is
+ * what a write has to be judged against: the field being changed is compared
+ * with fields nobody is changing, and those come from the chain.
+ */
+export function configWithOverride(
+	override: Record<string, unknown>,
+): AutoscaleConfig {
+	return withOverride(sanitizeConfig(envConfig()).config, override);
 }
 
 /**

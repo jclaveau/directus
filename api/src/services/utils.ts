@@ -51,7 +51,11 @@ import {
 	writeAutoscaleOverride,
 	type AutoscaleOverride,
 } from '../autoscale/lib/override.js';
-import { autoscaleConfigKey } from '../autoscale/lib/resolve-config.js';
+import {
+	autoscaleConfigKey,
+	configWithOverride,
+} from '../autoscale/lib/resolve-config.js';
+import { assertUsableConfig } from '../autoscale/lib/validate-config.js';
 import {
 	collectProcesses,
 	processesReportEnabled,
@@ -526,6 +530,11 @@ export class UtilsService {
 			await readAutoscaleOverride(),
 			stamped,
 		);
+
+		// Judged whole rather than field by field: a floor is only too high
+		// against the ceiling it will sit under, and that ceiling is usually a
+		// field this patch never mentions.
+		assertUsableConfig(configWithOverride(override ?? {}));
 
 		await writeAutoscaleOverride(override);
 

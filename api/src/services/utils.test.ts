@@ -1,7 +1,7 @@
 import { ForbiddenError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Accountability } from '@directus/types';
+import type { Accountability, AutoscaleConfig } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -29,7 +29,10 @@ import {
 	readAutoscaleOverride,
 	writeAutoscaleOverride,
 } from '../autoscale/lib/override.js';
-import { autoscaleConfigKey } from '../autoscale/lib/resolve-config.js';
+import {
+	autoscaleConfigKey,
+	configWithOverride,
+} from '../autoscale/lib/resolve-config.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
@@ -577,7 +580,29 @@ describe('Services / Utils', () => {
 			return new UtilsService({ knex: db, schema, accountability });
 		}
 
+		// What the env chain resolves under the override, which is what the
+		// write is judged against.
+		function resolvesTo(config: Partial<AutoscaleConfig>) {
+			vi.mocked(configWithOverride).mockReturnValue({
+				enabled: true,
+				strategy: 'scalabus',
+				appName: 'api',
+				signal: 'average',
+				sampleWindow: 5,
+				scaleCpuThreshold: 60,
+				releaseCpuThreshold: 40,
+				minWorkers: 1,
+				maxWorkers: 4,
+				prewarmWorkers: 0,
+				minSecondsToScaleUp: 10,
+				minSecondsToScaleDown: 300,
+				warmupSeconds: 30,
+				...config,
+			});
+		}
+
 		function stored(override: Record<string, unknown> | null) {
+			resolvesTo({});
 			vi.mocked(autoscaleConfigKey).mockReturnValue('scalabus:autoscale:config');
 			vi.mocked(readAutoscaleOverride).mockResolvedValue(override);
 			vi.mocked(parseOverridePatch).mockImplementation((patch) => patch);
@@ -619,6 +644,20 @@ describe('Services / Utils', () => {
 			expect(writeAutoscaleOverride).toHaveBeenCalledWith(
 				expect.objectContaining({ setBy: 'admin-id', setFrom: 'mcp' }),
 			);
+		});
+
+		// The loop clamps what it is handed, which is the wrong answer to a
+		// write: an operator watching a ceiling be ignored cannot tell a
+		// corrected value from a refused one.
+		it('refuses a configuration the loop would have to correct', async () => {
+			stored({ maxWorkers: 4 });
+			resolvesTo({ minWorkers: 8, maxWorkers: 4 });
+
+			await expect(service(admin).updateAutoscaleConfig({ minWorkers: 8 }, 'admin'))
+				.rejects
+				.toThrowError(`'minWorkers' is 8, above the 'maxWorkers' ceiling of 4`);
+
+			expect(writeAutoscaleOverride).not.toHaveBeenCalled();
 		});
 
 		it('refuses a non-admin', async () => {
