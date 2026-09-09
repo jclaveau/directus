@@ -203,6 +203,13 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'string',
 						description: 'The address behind `setBy`, or null for none.',
 					},
+					supervisor: {
+						type: 'object',
+						description: 'The pm2 options stored for the next rolling '
+							+ 'restart, under `key`, `override` and `setByEmail` of '
+							+ 'their own. They reach the pool through a restart rather '
+							+ 'than on a tick.',
+					},
 					running: {
 						type: 'array',
 						description: 'One entry per process that is scaling a pool.',
@@ -277,6 +284,12 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					setByEmail: {
 						type: 'string',
 						description: 'The address behind `setBy`, or null for none.',
+					},
+					supervisor: {
+						type: 'object',
+						description: 'The pm2 options stored for the next rolling '
+							+ 'restart, answered here because they are read back with '
+							+ 'the configuration. This tool does not change them.',
 					},
 				},
 			},

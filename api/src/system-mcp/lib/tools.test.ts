@@ -558,6 +558,11 @@ test('Every declared output property is one the tool actually answers', () => {
 				setFrom: 'mcp',
 			},
 			setByEmail: 'jean@example.com',
+			supervisor: {
+				key: 'scalabus:autoscale:supervisor',
+				override: { listenTimeout: 20_000 },
+				setByEmail: 'jean@example.com',
+			},
 			running: [
 				{
 					service: 'api',
@@ -632,6 +637,11 @@ test('Every declared output property is one the tool actually answers', () => {
 			key: 'scalabus:autoscale:config',
 			override: { maxWorkers: 8 },
 			setByEmail: 'jean@example.com',
+			supervisor: {
+				key: 'scalabus:autoscale:supervisor',
+				override: null,
+				setByEmail: null,
+			},
 		},
 		list_processes: {
 			collectedAt: 1_700_000_000_000,
