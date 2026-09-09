@@ -264,7 +264,7 @@ test('one runner describes the pool, and none is answered as none', () => {
 test('the declaration reports the size the pool booted at', () => {
 	const rows = supervisorRows(state());
 
-	expect(rows.find((row) => row.field === 'instances')?.value).toBe('2');
+	expect(rows.find((row) => row.field === 'PM2_INSTANCES')?.value).toBe('2');
 });
 
 // A ceiling is reported in the unit it is set in rather than in the bytes it is
@@ -275,14 +275,14 @@ test('a memory ceiling is reported in megabytes', () => {
 
 	const rows = supervisorRows(declared);
 
-	expect(rows.find((row) => row.field === 'maxMemoryRestart')?.value)
+	expect(rows.find((row) => row.field === 'PM2_MAX_MEMORY_RESTART')?.value)
 		.toBe('512 MB');
 });
 
 test('no memory ceiling reads as off rather than as a size', () => {
 	const rows = supervisorRows(state());
 
-	expect(rows.find((row) => row.field === 'maxMemoryRestart')?.value)
+	expect(rows.find((row) => row.field === 'PM2_MAX_MEMORY_RESTART')?.value)
 		.toBe('off');
 });
 

@@ -339,10 +339,11 @@ export function drillRemaining(until: number | null, now: number): number {
 
 /** One line of the pm2 declaration, as the panel reports it. */
 export interface SupervisorRow {
+	/** The variable that sets it, which is where a change to it is made. */
 	field: string;
 	/** The value pm2 acts on, with whatever it counts. */
 	value: string;
-	/** Which variable sets it and what it decides, shown on hover. */
+	/** The pm2 entry it sets and what that entry decides, shown on hover. */
 	description: string;
 }
 
@@ -368,74 +369,74 @@ export function supervisorRows(
 
 	return [
 		{
-			field: 'instances',
+			field: 'PM2_INSTANCES',
 			value: String(supervisor.instances),
-			description: 'PM2_INSTANCES: the workers the pool boots with, and its '
+			description: 'instances: the workers the pool boots with, and its '
 				+ 'size until the first tick. From there the floor, the ceiling '
 				+ 'and the prewarm above own it.',
 		},
 		{
-			field: 'execMode',
+			field: 'PM2_EXEC_MODE',
 			value: supervisor.execMode,
-			description: 'PM2_EXEC_MODE: only a cluster can be resized, so a pool '
-				+ 'in fork mode is one the autoscaler cannot move.',
+			description: 'exec_mode: only a cluster can be resized, so a pool in '
+				+ 'fork mode is one the autoscaler cannot move.',
 		},
 		{
-			field: 'waitReady',
+			field: 'wait_ready',
 			value: String(supervisor.waitReady),
-			description: 'Whether a starting worker is held out of the pool until '
-				+ 'it says it is serving. False counts it in as soon as it forks, '
-				+ 'so the pool is judged on a worker that is still booting.',
+			description: 'Set in ecosystem.config.cjs rather than by a variable. '
+				+ 'Whether a starting worker is held out of the pool until it says '
+				+ 'it is serving. False counts it in as soon as it forks, so the '
+				+ 'pool is judged on a worker that is still booting.',
 		},
 		{
-			field: 'listenTimeout',
+			field: 'PM2_LISTEN_TIMEOUT',
 			value: `${supervisor.listenTimeout} ms`,
-			description: 'PM2_LISTEN_TIMEOUT: how long a worker has to say it is '
-				+ 'ready before it counts as up anyway. Under the time a worker '
-				+ 'takes to boot, every start reports ready before it is.',
+			description: 'listen_timeout: how long a worker has to say it is ready '
+				+ 'before it counts as up anyway. Under the time a worker takes to '
+				+ 'boot, every start reports ready before it is.',
 		},
 		{
-			field: 'killTimeout',
+			field: 'PM2_KILL_TIMEOUT',
 			value: `${supervisor.killTimeout} ms`,
-			description: 'PM2_KILL_TIMEOUT: how long a released worker has between '
-				+ 'the signal to stop and being killed. Under the time a request '
-				+ 'takes, releasing a worker drops the requests it was serving.',
+			description: 'kill_timeout: how long a released worker has between the '
+				+ 'signal to stop and being killed. Under the time a request takes, '
+				+ 'releasing a worker drops the requests it was serving.',
 		},
 		{
-			field: 'maxMemoryRestart',
+			field: 'PM2_MAX_MEMORY_RESTART',
 			value: supervisor.maxMemoryRestart === null
 				? 'off'
 				: `${Math.round(supervisor.maxMemoryRestart / MEGABYTE)} MB`,
-			description: 'PM2_MAX_MEMORY_RESTART: the size a worker is restarted '
-				+ 'at. Set under what a worker legitimately reaches, the restarts '
-				+ 'it causes read as load and buy more workers to restart.',
+			description: 'max_memory_restart: the size a worker is restarted at. '
+				+ 'Set under what a worker legitimately reaches, the restarts it '
+				+ 'causes read as load and buy more workers to restart.',
 		},
 		{
-			field: 'autorestart',
+			field: 'PM2_AUTO_RESTART',
 			value: String(supervisor.autorestart),
-			description: 'PM2_AUTO_RESTART: whether a worker that exits is '
-				+ 'replaced.',
+			description: 'autorestart: whether a worker that exits is replaced.',
 		},
 		{
-			field: 'restartDelay',
+			field: 'PM2_RESTART_DELAY',
 			value: `${supervisor.restartDelay} ms`,
-			description: 'PM2_RESTART_DELAY: how long the supervisor waits before '
+			description: 'restart_delay: how long the supervisor waits before '
 				+ 'replacing a worker that died. At zero a crash loop restarts as '
-				+ 'fast as it can boot, and its boot CPU is what the pool is '
-				+ 'judged on.',
+				+ 'fast as it can boot, and its boot CPU is what the pool is judged '
+				+ 'on.',
 		},
 		{
-			field: 'minUptime',
+			field: 'PM2_MIN_UPTIME',
 			value: `${supervisor.minUptime} ms`,
-			description: 'PM2_MIN_UPTIME: how long a worker has to survive for its '
+			description: 'min_uptime: how long a worker has to survive for its '
 				+ 'start to count as clean rather than as one of the unstable '
 				+ 'restarts counted against the ceiling below.',
 		},
 		{
-			field: 'maxRestarts',
+			field: 'PM2_MAX_RESTARTS',
 			value: String(supervisor.maxRestarts),
-			description: 'PM2_MAX_RESTARTS: how many unstable restarts a worker '
-				+ 'gets before the supervisor stops replacing it.',
+			description: 'max_restarts: how many unstable restarts a worker gets '
+				+ 'before the supervisor stops replacing it.',
 		},
 	];
 }

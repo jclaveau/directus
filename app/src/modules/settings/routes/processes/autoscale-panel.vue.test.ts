@@ -224,7 +224,7 @@ describe('what the panel shows', () => {
 		const wrapper = await mounted(null, [runner(declared)]);
 
 		const row = wrapper.findAll('.supervisor tbody tr')
-			.find((line) => line.text().startsWith('instances'));
+			.find((line) => line.text().startsWith('PM2_INSTANCES'));
 
 		expect(row?.find('.declared').text()).toBe('2');
 	});
