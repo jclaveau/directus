@@ -18,7 +18,7 @@ export async function getMetadata(
 	stream: Readable,
 	allowList: string | string[] = env['FILE_METADATA_ALLOW_LIST'] as string[],
 ): Promise<Metadata> {
-	const transformer = getSharpInstance();
+	const transformer = await getSharpInstance();
 
 	return new Promise((resolve) => {
 		pipeline(
