@@ -15,7 +15,10 @@ beforeEach(() => {
 	list.mockReset();
 	scale.mockReset();
 	reload.mockReset();
-	connect.mockClear();
+	// Reset rather than cleared: an arm below holds a connection open to watch
+	// a second one being asked for, and a mock left holding it would take the
+	// rest of the file with it.
+	connect.mockReset();
 	disconnect.mockClear();
 });
 
@@ -42,6 +45,63 @@ test('a process list the supervisor never answers fails the tick', async () => {
 
 	await vi.advanceTimersByTimeAsync(15_000);
 	await failed;
+});
+
+// pm2 finishes a connection it has already started against the client it finds
+// when the socket lands, so a disconnect issued while one is in flight leaves
+// that callback reading a client nothing holds. It throws from inside a socket
+// handler, where no call is left to carry it, and the process dies — the freeze
+// the reconnect exists to prevent, arriving by the other door. A supervisor
+// restarted under a running loop asks for it from every call it left hanging.
+test('a second call joins the reconnect rather than starting another', async () => {
+	const { readPool } = await import('./pool.js');
+
+	list.mockImplementation(neverAnswers);
+
+	let landed: () => void = () => undefined;
+
+	connect.mockImplementation((callback: (error: Error | null) => void) => {
+		landed = () => callback(null);
+	});
+
+	const first = expect(readPool('directus', 30)).rejects.toThrow();
+	const second = expect(readPool('directus', 30)).rejects.toThrow();
+
+	await vi.advanceTimersByTimeAsync(15_000);
+
+	// One connection taken down and one asked for, on behalf of both.
+	expect(disconnect).toHaveBeenCalledOnce();
+	expect(connect).toHaveBeenCalledOnce();
+
+	landed();
+	await first;
+	await second;
+});
+
+// And the gate opens again whatever the reconnect did, or the first restart
+// that finds no daemon to come back to freezes every tick after it.
+test('a reconnect that failed does not hold the next one', async () => {
+	const { readPool } = await import('./pool.js');
+
+	list.mockImplementation(neverAnswers);
+
+	connect.mockImplementation((callback: (error: Error | null) => void) => {
+		callback(new Error('no daemon to connect to'));
+	});
+
+	const failed = expect(readPool('directus', 30))
+		.rejects
+		.toThrow(/did not answer a process list/);
+
+	await vi.advanceTimersByTimeAsync(15_000);
+	await failed;
+
+	const again = expect(readPool('directus', 30)).rejects.toThrow();
+
+	await vi.advanceTimersByTimeAsync(15_000);
+	await again;
+
+	expect(connect).toHaveBeenCalledTimes(2);
 });
 
 test('a scale the supervisor never answers fails the tick', async () => {

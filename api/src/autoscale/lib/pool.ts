@@ -33,6 +33,36 @@ export function disconnectFromSupervisor(): void {
 	pm2.disconnect();
 }
 
+/**
+ * The reconnect under way, or `null` where none is.
+ *
+ * Taking the client apart and building it again is not a step a second caller
+ * can join halfway. pm2 finishes a connection it has already started against
+ * the client it finds when the socket lands, so a disconnect issued while one
+ * is in flight leaves that callback reading a client nothing holds any more —
+ * and it throws from inside a socket handler, where no call is left to carry
+ * the failure. An uncaught exception ends the process, which is the freeze
+ * this reconnect exists to prevent arriving by the other door.
+ *
+ * A supervisor restarted under a running loop produces exactly that overlap:
+ * every call in flight when the daemon went down runs out of time, and each of
+ * them asks for the same reconnect a tick apart.
+ */
+let reconnecting: Promise<void> | null = null;
+
+/** One reconnect at a time, however many callers found the supervisor gone. */
+function reconnectToSupervisor(): Promise<void> {
+	reconnecting ??= (async () => {
+		pm2.disconnect();
+		await connect();
+	})()
+		.finally(() => {
+			reconnecting = null;
+		});
+
+	return reconnecting;
+}
+
 /** What the race resolves with when the supervisor is the one that lost it. */
 const OUT_OF_TIME = Symbol('out of time');
 
@@ -72,8 +102,11 @@ async function answeredInTime<T>(
 	// abandoned call is caught on the way out, so that a reply arriving late is
 	// a result nobody wants rather than an unhandled rejection.
 	call.catch(() => undefined);
-	pm2.disconnect();
-	await connect();
+
+	// A reconnect that fails leaves the same skipped tick as one that works,
+	// and the tick after it asks again: what the caller is told either way is
+	// which call the supervisor did not answer.
+	await reconnectToSupervisor().catch(() => undefined);
 
 	throw new Error(
 		`the supervisor did not answer ${what} in ${timeoutMs}ms`,
