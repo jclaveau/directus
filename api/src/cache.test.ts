@@ -502,6 +502,60 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledWith('stale-key');
 		});
 
+		test(oneLine`
+			drops a slice's entries in one UNLINK against redis, and reports what it
+			replied rather than one delete per key
+		`, async () => {
+			redis.smembers.mockResolvedValue([
+				'key-a',
+				'key-a__expires_at',
+				'key-b',
+				'key-b__expires_at',
+			]);
+
+			const unlink = vi.fn().mockResolvedValue(1);
+
+			const cache = {
+				clear: vi.fn(),
+				delete: vi.fn(),
+				namespace: 'scalabus_response',
+				store: {
+					namespace: 'scalabus_response',
+					client: { unlink },
+					createKeyPrefix: (key: string, namespace?: string) => {
+						return `${namespace}::${key}`;
+					},
+				},
+			} as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
+
+			// A purge over a slice used to send one delete per key, so its cost grew
+			// with how much the cache held rather than with what the mutation
+			// touched. Two calls now: the entries, and their sidecars.
+			expect(cache.delete).not.toHaveBeenCalled();
+			expect(unlink).toHaveBeenCalledTimes(2);
+
+			expect(unlink).toHaveBeenCalledWith([
+				'scalabus_response::scalabus_response:key-a',
+				'scalabus_response::scalabus_response:key-b',
+			]);
+
+			expect(unlink).toHaveBeenCalledWith([
+				'scalabus_response::scalabus_response:key-a__expires_at',
+				'scalabus_response::scalabus_response:key-b__expires_at',
+			]);
+
+			// One, though two entries were named: a key that expired by TTL is still
+			// a member until the set is dropped, and UNLINK is the one thing that
+			// knows which of them was still there.
+			expect(queueCachePurge).toHaveBeenCalledWith(
+				expect.objectContaining({ evicted: 1 }),
+			);
+		});
+
 		test('records the coarse fallback as the wider thing it is', async () => {
 			redis.smembers.mockImplementation(async (key: string) => {
 				if (key === 'scalabus:slices:articles') {

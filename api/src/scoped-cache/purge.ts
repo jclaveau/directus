@@ -31,6 +31,7 @@ import {
 import type { ChainableCommander, Redis } from 'ioredis';
 import type { EventContext, SchemaOverview, ScopedCacheTag } from '@directus/types';
 import type { Keyv } from 'keyv';
+import { dropCacheEntries } from '../cache-drop.js';
 import {
 	scopedCachePurgeEnabled,
 } from './config.js';
@@ -522,21 +523,27 @@ async function purgeScopedCacheTagKeys(
 		}
 	}
 
-	const wasDeleted = await Promise.all(members.map((member) => {
-		return cache.delete(member);
-	}));
-
 	const present = new Set(members);
 
-	return members.filter((member, index) => {
-		if (wasDeleted[index] === false) {
-			return false;
-		}
-
+	// A tag set holds each entry alongside its `__expires_at` sibling and any extra
+	// one, so the two are counted apart: only the entries are evidence of how wide
+	// the purge reached, and counting members would draw that line at double.
+	const entries = members.filter((member) => {
 		const owner = cacheSidecarOwner(member);
 
 		return owner === null || present.has(owner) === false;
-	}).length;
+	});
+
+	const entryKeys = new Set(entries);
+
+	const [evicted] = await Promise.all([
+		dropCacheEntries(cache, entries),
+		dropCacheEntries(cache, members.filter((member) => {
+			return entryKeys.has(member) === false;
+		})),
+	]);
+
+	return evicted;
 }
 
 /**
