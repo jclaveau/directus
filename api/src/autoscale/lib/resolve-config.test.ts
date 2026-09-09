@@ -73,6 +73,17 @@ test('reads the override laid over the env chain', async () => {
 	});
 });
 
+// The page offers to clear a field, and the value waiting under the override
+// is knowable only here: everywhere else the override has already won.
+test('reports what the chain holds under the override', async () => {
+	const { resolveConfig, resolvedWithoutOverride } = await freshModule();
+	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
+
+	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+
+	expect(resolvedWithoutOverride()).toMatchObject({ maxWorkers: 4 });
+});
+
 // The rollback path: reverting to the rule production already ran is a write
 // to one key, which is the whole reason the strategy is a configuration field
 // rather than a build.

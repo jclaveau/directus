@@ -16,6 +16,8 @@ export interface AutoscaleFieldOption {
 export interface AutoscaleField {
 	field: keyof AutoscaleConfig;
 	kind: AutoscaleFieldKind;
+	/** What this field does to the pool, in a sentence, shown on hover. */
+	description: string;
 	/** What the number counts, shown at the end of the input. */
 	unit?: string;
 	min?: number;
@@ -23,6 +25,8 @@ export interface AutoscaleField {
 	step?: number;
 	/** Every value the field accepts, where it accepts a fixed few. */
 	options?: AutoscaleFieldOption[];
+	/** Set where the `legacy` rule reads this field nowhere. */
+	ignoredByLegacy?: true;
 }
 
 const BOOLEAN_OPTIONS: AutoscaleFieldOption[] = [
@@ -39,35 +43,56 @@ const BOOLEAN_OPTIONS: AutoscaleFieldOption[] = [
  * them, and reports through `Running on` whatever it corrected a value to.
  */
 export const AUTOSCALE_FIELDS: AutoscaleField[] = [
-	{ field: 'enabled', kind: 'boolean', options: BOOLEAN_OPTIONS },
+	{
+		field: 'enabled',
+		kind: 'boolean',
+		description: 'Disabled leaves the pool at whatever size it is now: '
+			+ 'nothing is added and nothing is released.',
+		options: BOOLEAN_OPTIONS,
+	},
 	{
 		field: 'strategy',
 		kind: 'choice',
+		description: 'Which rule decides. `scalabus` reads a smoothed window and '
+			+ 'holds still while the pool is starting or restarting; `legacy` '
+			+ 'reproduces the pm2-autoscale module this replaces.',
 		options: [
 			{ text: 'scalabus', value: 'scalabus' },
 			{ text: 'legacy', value: 'legacy' },
 		],
 	},
-	{ field: 'appName', kind: 'text' },
+	{
+		field: 'appName',
+		kind: 'text',
+		description: 'The pm2 app whose workers are counted, judged and resized.',
+	},
 	{
 		field: 'signal',
 		kind: 'choice',
+		description: 'Whether the pool is judged on the average of its workers or '
+			+ 'on its hottest one. `max` reacts to a single busy worker.',
 		options: [
 			{ text: 'average', value: 'average' },
 			{ text: 'max', value: 'max' },
 		],
+		ignoredByLegacy: true,
 	},
 	{
 		field: 'sampleWindow',
 		kind: 'number',
+		description: 'How many one-second readings a worker\'s CPU is averaged '
+			+ 'over before it counts. Wider reacts later and flaps less.',
 		unit: 'samples',
 		min: 1,
 		max: 30,
 		step: 1,
+		ignoredByLegacy: true,
 	},
 	{
 		field: 'scaleCpuThreshold',
 		kind: 'number',
+		description: 'At or above this CPU the pool grows by one worker, '
+			+ 'cooldown and ceiling permitting.',
 		unit: '%',
 		min: 1,
 		max: 100,
@@ -76,6 +101,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	{
 		field: 'releaseCpuThreshold',
 		kind: 'number',
+		description: 'Below this CPU the pool gives a worker back. Kept under the '
+			+ 'scale threshold, or a pool would grow and shrink on one reading.',
 		unit: '%',
 		min: 0,
 		max: 99,
@@ -84,6 +111,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	{
 		field: 'minWorkers',
 		kind: 'number',
+		description: 'The pool never drops below this, however quiet it gets. '
+			+ 'Equal to the ceiling it pins the pool and stops all scaling.',
 		unit: 'workers',
 		min: 1,
 		max: 64,
@@ -92,6 +121,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	{
 		field: 'maxWorkers',
 		kind: 'number',
+		description: 'The pool never grows past this, and a pool already above it '
+			+ 'is brought back immediately rather than after a cooldown.',
 		unit: 'workers',
 		min: 1,
 		max: 64,
@@ -100,16 +131,44 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 	{
 		field: 'prewarmWorkers',
 		kind: 'number',
+		description: 'The size to jump to once after a deploy, so the first '
+			+ 'requests do not land on a pool sized for an idle night.',
 		unit: 'workers',
 		min: 0,
 		max: 64,
 		step: 1,
+		ignoredByLegacy: true,
 	},
 	// Seconds step by five: every one of these is set in tens of seconds or
 	// minutes, and an arrow that moves a five-minute cooldown by one is noise.
-	{ field: 'minSecondsToScaleUp', kind: 'number', unit: 's', min: 0, step: 5 },
-	{ field: 'minSecondsToScaleDown', kind: 'number', unit: 's', min: 0, step: 5 },
-	{ field: 'warmupSeconds', kind: 'number', unit: 's', min: 0, step: 5 },
+	{
+		field: 'minSecondsToScaleUp',
+		kind: 'number',
+		description: 'How long after adding a worker before another may be added, '
+			+ 'which is how long the last one gets to take load.',
+		unit: 's',
+		min: 0,
+		step: 5,
+	},
+	{
+		field: 'minSecondsToScaleDown',
+		kind: 'number',
+		description: 'How long after releasing a worker before another may go. '
+			+ 'Longer than the settling window, so a lull cannot empty the pool.',
+		unit: 's',
+		min: 0,
+		step: 5,
+	},
+	{
+		field: 'warmupSeconds',
+		kind: 'number',
+		description: 'How long a worker\'s CPU counts as its own startup rather '
+			+ 'than load, and how long the pool is left alone after a restart.',
+		unit: 's',
+		min: 0,
+		step: 5,
+		ignoredByLegacy: true,
+	},
 ];
 
 export interface AutoscaleRow extends AutoscaleField {
@@ -119,6 +178,10 @@ export interface AutoscaleRow extends AutoscaleField {
 	source: AutoscaleValueSource | null;
 	/** What the override sets, or `null` where it sets nothing for this field. */
 	override: unknown;
+	/** Where clearing this field lands it, `null` where nothing reported one. */
+	cleared: unknown;
+	/** Set where the running rule reads this field nowhere. */
+	inactive: boolean;
 }
 
 /**
@@ -133,6 +196,10 @@ export function configRows(
 	state: AutoscaleNodeState | null,
 	override: Record<string, unknown> | null,
 ): AutoscaleRow[] {
+	const strategy = state === null
+		? override?.['strategy']
+		: state.config.strategy;
+
 	return AUTOSCALE_FIELDS.map((definition) => {
 		const field = definition.field;
 		const overridden = override?.[field] ?? null;
@@ -151,6 +218,10 @@ export function configRows(
 				: state.config[field],
 			source,
 			override: overridden,
+			cleared: state === null
+				? null
+				: state.withoutOverride[field],
+			inactive: definition.ignoredByLegacy === true && strategy === 'legacy',
 		};
 	});
 }

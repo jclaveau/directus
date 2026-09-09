@@ -24,7 +24,6 @@ const configKey = ref<string | null>(null);
 const available = ref(true);
 const error = ref<string | null>(null);
 const saving = ref(false);
-const note = ref('');
 const drafts = ref<Record<string, string | null>>({});
 
 const runner = computed(() => firstRunner(props.runners));
@@ -87,11 +86,7 @@ async function write(patch: Record<string, unknown>): Promise<void> {
 	error.value = null;
 
 	try {
-		const body = note.value === ''
-			? patch
-			: { ...patch, note: note.value };
-
-		const response = await api.patch('/utils/autoscale', body);
+		const response = await api.patch('/utils/autoscale', patch);
 		override.value = response.data.data.override;
 
 		// The values the loop runs on come back on the process report, and the
@@ -129,17 +124,19 @@ function edited(field: string): boolean {
 }
 
 /**
- * What the field shows: the change being typed, else the stored override —
- * the running value is the placeholder underneath both.
+ * What the field shows: the change being typed, else what the loop is running
+ * on — the override where there is one, since that is what it runs on.
  */
 function shown(row: AutoscaleRow): string | null {
 	if (edited(row.field)) {
 		return drafts.value[row.field] ?? null;
 	}
 
-	return row.override === null
+	const value = row.override ?? row.effective;
+
+	return value === null || value === undefined
 		? null
-		: String(row.override);
+		: String(value);
 }
 
 function applyRow(field: string, kind: string): void {
@@ -151,6 +148,36 @@ function applyRow(field: string, kind: string): void {
 
 function cancelRow(field: string): void {
 	delete drafts.value[field];
+}
+
+function clearRow(field: string): void {
+	delete drafts.value[field];
+	void write({ [field]: null });
+}
+
+/**
+ * What clearing a field would leave it on, named in the button that does it.
+ *
+ * The value comes from the deciding process, which is the only one that knows
+ * what its own environment says once an override is hiding it.
+ */
+function clearedTo(row: AutoscaleRow): string {
+	if (row.cleared === null) {
+		return t('autoscale_clear_field', 'Clear this field');
+	}
+
+	const back = t('autoscale_clear_field_to', 'Clear, back to');
+
+	return `${back} ${String(row.cleared)}`;
+}
+
+function describeField(row: AutoscaleRow): string {
+	return row.inactive
+		? `${row.description} ${t(
+			'autoscale_legacy_blind',
+			'The legacy rule reads this nowhere.',
+		)}`
+		: row.description;
 }
 
 function pause(): void {
@@ -167,14 +194,6 @@ function pin(): void {
 	void write(isPinned(state)
 		? { minWorkers: null, maxWorkers: null }
 		: pinPatch(state));
-}
-
-function switchStrategy(): void {
-	void write({
-		strategy: runner.value?.state.config.strategy === 'legacy'
-			? 'scalabus'
-			: 'legacy',
-	});
 }
 
 onMounted(load);
@@ -235,23 +254,9 @@ onMounted(load);
 					: t('autoscale_pin', 'Pin the pool where it is') }}
 			</v-button>
 
-			<v-button small :disabled="!runner || saving" @click="switchStrategy">
-				{{ runner?.state.config.strategy === 'legacy'
-					? t('autoscale_use_scalabus', 'Back to the scalabus rule')
-					: t('autoscale_use_legacy', 'Fall back to the legacy rule') }}
-			</v-button>
-
 			<v-button small secondary :disabled="!override || saving" @click="clearAll">
 				{{ t('autoscale_clear', 'Clear the override') }}
 			</v-button>
-		</div>
-
-		<div v-if="available" class="note">
-			<v-input
-				v-model="note"
-				small
-				:placeholder="t('autoscale_note', 'Why (stored with the override)')"
-			/>
 		</div>
 
 		<p v-if="stamp" class="stamp">
@@ -265,15 +270,17 @@ onMounted(load);
 			<thead>
 				<tr>
 					<th>{{ t('autoscale_field', 'Field') }}</th>
-					<th>{{ t('autoscale_effective', 'Running on') }}</th>
 					<th>{{ t('autoscale_source', 'From') }}</th>
-					<th>{{ t('autoscale_override', 'Override') }}</th>
+					<th>{{ t('autoscale_value', 'Value') }}</th>
 				</tr>
 			</thead>
 			<tbody>
-				<tr v-for="row in rows" :key="row.field">
-					<td>{{ row.field }}</td>
-					<td>{{ row.effective === null ? '—' : String(row.effective) }}</td>
+				<tr
+					v-for="row in rows"
+					:key="row.field"
+					:class="{ inactive: row.inactive }"
+				>
+					<td><span v-tooltip="describeField(row)">{{ row.field }}</span></td>
 					<td>
 						<span :class="['source', row.source]">
 							{{ row.source === null ? '—' : row.source }}
@@ -287,11 +294,8 @@ onMounted(load);
 								:model-value="shown(row)"
 								:items="row.options"
 								small
-								:placeholder="row.effective === null
-									? undefined
-									: String(row.effective)"
 								show-deselect
-								:disabled="saving"
+								:disabled="saving || row.inactive"
 								@update:model-value="drafts[row.field] = $event"
 							/>
 						</span>
@@ -306,10 +310,7 @@ onMounted(load);
 								:max="row.max"
 								:step="row.step"
 								:suffix="row.unit"
-								:placeholder="row.effective === null
-									? ''
-									: String(row.effective)"
-								:disabled="saving"
+								:disabled="saving || row.inactive"
 								@update:model-value="drafts[row.field] = $event"
 								@keyup.enter="applyRow(row.field, row.kind)"
 							/>
@@ -321,7 +322,7 @@ onMounted(load);
 							secondary
 							class="cancel"
 							:tooltip="t('autoscale_cancel', 'Discard this change')"
-							:disabled="saving || !edited(row.field)"
+							:disabled="saving || row.inactive || !edited(row.field)"
 							@click="cancelRow(row.field)"
 						>
 							<v-icon name="close" x-small />
@@ -332,10 +333,22 @@ onMounted(load);
 							icon
 							class="apply"
 							:tooltip="t('autoscale_apply', 'Apply this change')"
-							:disabled="saving || !edited(row.field)"
+							:disabled="saving || row.inactive || !edited(row.field)"
 							@click="applyRow(row.field, row.kind)"
 						>
 							<v-icon name="check" x-small />
+						</v-button>
+
+						<v-button
+							x-small
+							icon
+							secondary
+							class="clear"
+							:tooltip="clearedTo(row)"
+							:disabled="saving || row.inactive || row.override === null"
+							@click="clearRow(row.field)"
+						>
+							<v-icon name="settings_backup_restore" x-small />
 						</v-button>
 					</td>
 				</tr>
@@ -376,11 +389,6 @@ onMounted(load);
 	margin-inline-start: 8px;
 }
 
-.note {
-	max-inline-size: 480px;
-	margin-block-end: 12px;
-}
-
 .fields {
 	inline-size: 100%;
 	border-collapse: collapse;
@@ -401,11 +409,15 @@ onMounted(load);
 	display: flex;
 	gap: 4px;
 	align-items: center;
-	max-inline-size: 320px;
+	max-inline-size: 360px;
 }
 
 .control {
 	flex-grow: 1;
+}
+
+.fields tr.inactive {
+	opacity: 0.5;
 }
 
 .source.override {

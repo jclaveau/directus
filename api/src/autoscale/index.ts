@@ -11,7 +11,11 @@ import {
 	restarted,
 	scaleTo,
 } from './lib/pool.js';
-import { resolveConfig, resolvedSources } from './lib/resolve-config.js';
+import {
+	resolveConfig,
+	resolvedSources,
+	resolvedWithoutOverride,
+} from './lib/resolve-config.js';
 import { LEGACY_SAMPLE_WINDOW } from './lib/sanitize-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
 import { recordAutoscaleTick } from './lib/state.js';
@@ -251,6 +255,7 @@ export async function runAutoscaler(): Promise<void> {
 				at: now,
 				config,
 				sources: resolvedSources(),
+				withoutOverride: resolvedWithoutOverride(),
 				workers: onlineWorkers.length,
 				pendingWorkers,
 				warmingWorkers,

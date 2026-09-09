@@ -98,6 +98,11 @@ export interface AutoscaleNodeState {
 	at: number;
 	config: AutoscaleConfig;
 	sources: AutoscaleConfigSources;
+	/**
+	 * The same configuration with the override taken off: the env chain and the
+	 * shipped defaults, which is where clearing a field lands it.
+	 */
+	withoutOverride: AutoscaleConfig;
 	/** Online workers of the scaled app the tick read. */
 	workers: number;
 	/** Started but not yet ready, so counted in the pool and not the statistic. */

@@ -28,6 +28,21 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 			minSecondsToScaleDown: 300,
 			warmupSeconds: 30,
 		},
+		withoutOverride: {
+			enabled: true,
+			strategy: 'scalabus',
+			appName: 'api',
+			signal: 'average',
+			sampleWindow: 5,
+			scaleCpuThreshold: 60,
+			releaseCpuThreshold: 40,
+			minWorkers: 1,
+			maxWorkers: 2,
+			prewarmWorkers: 0,
+			minSecondsToScaleUp: 10,
+			minSecondsToScaleDown: 300,
+			warmupSeconds: 30,
+		},
 		sources: {
 			enabled: 'default',
 			strategy: 'default',
@@ -89,6 +104,46 @@ test('a pool with no runner shows the override alone', () => {
 	// value came from somewhere when no value came at all.
 	expect(rows.find((row) => row.field === 'minWorkers'))
 		.toMatchObject({ effective: null, override: null, source: null });
+});
+
+// Clearing a field hands it back to the env chain, and only the process that
+// resolved that chain knows what it holds under an override.
+test('a row names the value clearing it would land on', () => {
+	const rows = configRows(state(), { maxWorkers: 8 });
+
+	expect(rows.find((row) => row.field === 'maxWorkers')?.cleared).toBe(2);
+
+	// Nothing reported, so nothing to promise about where a clear lands.
+	expect(configRows(null, { maxWorkers: 8 })
+		.find((row) => row.field === 'maxWorkers')?.cleared)
+		.toBeNull();
+});
+
+// The legacy rule reads its own window, its hottest worker and no prewarm, so
+// four of the fields change nothing at all while it is the one deciding.
+test('the fields the legacy rule never reads are marked inactive', () => {
+	const legacy = configRows(state({
+		config: { ...state().config, strategy: 'legacy' },
+	}), null);
+
+	const inactive = legacy.filter((row) => row.inactive)
+		.map((row) => row.field);
+
+	expect(inactive)
+		.toEqual(['signal', 'sampleWindow', 'prewarmWorkers', 'warmupSeconds']);
+
+	expect(configRows(state(), null).filter((row) => row.inactive)).toEqual([]);
+
+	// Nothing is running it yet, so the stored strategy is the one to read.
+	expect(configRows(null, { strategy: 'legacy' })
+		.find((row) => row.field === 'signal')?.inactive)
+		.toBe(true);
+});
+
+test('every field says what it does to the pool', () => {
+	const rows = configRows(state(), null);
+
+	expect(rows.every((row) => row.description.length > 20)).toBe(true);
 });
 
 test('an emptied field clears rather than writing a zero', () => {

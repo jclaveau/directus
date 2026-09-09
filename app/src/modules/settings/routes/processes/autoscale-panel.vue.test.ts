@@ -37,6 +37,21 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 			minSecondsToScaleDown: 300,
 			warmupSeconds: 30,
 		},
+		withoutOverride: {
+			enabled: true,
+			strategy: 'scalabus',
+			appName: 'api',
+			signal: 'average',
+			sampleWindow: 5,
+			scaleCpuThreshold: 60,
+			releaseCpuThreshold: 40,
+			minWorkers: 1,
+			maxWorkers: 2,
+			prewarmWorkers: 0,
+			minSecondsToScaleUp: 10,
+			minSecondsToScaleDown: 300,
+			warmupSeconds: 30,
+		},
 		sources: {
 			enabled: 'default',
 			strategy: 'default',
@@ -86,8 +101,8 @@ const global = {
 	plugins: [i18n, router],
 	directives: {
 		tooltip: {
-			mounted: () => undefined,
-			updated: () => undefined,
+			mounted: (el: any, binding: any) => el.setAttribute('title', binding.value),
+			updated: (el: any, binding: any) => el.setAttribute('title', binding.value),
 			unmounted: () => undefined,
 		},
 	},
@@ -146,7 +161,7 @@ describe('what the panel shows', () => {
 		const ceiling = wrapper.findAll('tbody tr')
 			.find((row) => row.text().startsWith('maxWorkers'));
 
-		expect(ceiling?.text()).toContain('4');
+		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
 		expect(ceiling?.text()).toContain('override');
 	});
 
@@ -175,15 +190,15 @@ describe('what the panel shows', () => {
 		expect(wrapper.text()).toContain('You have to be an admin');
 	});
 
-	// The value a field would keep is worth reading while typing the one that
-	// would replace it.
-	test('an empty row offers the running value as a placeholder', async () => {
+	// One place to read a field and one to change it, rather than a column of
+	// running values beside a column of inputs holding the same numbers.
+	test('a field with no override still holds the running value', async () => {
 		const wrapper = await mounted(null);
 
 		const ceiling = wrapper.findAll('tbody tr')
 			.find((row) => row.text().startsWith('maxWorkers'));
 
-		expect(ceiling?.find('input').attributes('placeholder')).toBe('4');
+		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('4');
 	});
 
 	test('a field neither reported nor overridden names no source', async () => {
@@ -205,7 +220,7 @@ describe('what the panel shows', () => {
 		const ceiling = wrapper.findAll('tbody tr')
 			.find((row) => row.text().startsWith('maxWorkers'));
 
-		expect(ceiling?.text()).toContain('8');
+		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
 	});
 
 	test('who set the override rides along with it', async () => {
@@ -275,40 +290,12 @@ describe('the levers', () => {
 		});
 	});
 
-	test('the rule can be swapped for the one it replaced, and back', async () => {
-		const wrapper = await mounted({});
-		await lever(wrapper, 'legacy');
-
-		expect(api.patch)
-			.toHaveBeenCalledWith('/utils/autoscale', { strategy: 'legacy' });
-
-		const legacy = state();
-		legacy.config.strategy = 'legacy';
-
-		const back = await mounted({ strategy: 'legacy' }, [runner(legacy)]);
-		await lever(back, 'scalabus');
-
-		expect(api.patch)
-			.toHaveBeenCalledWith('/utils/autoscale', { strategy: 'scalabus' });
-	});
-
 	test('clearing the override deletes the key and reloads the report', async () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
 		await lever(wrapper, 'Clear');
 
 		expect(api.delete).toHaveBeenCalledWith('/utils/autoscale');
 		expect(wrapper.emitted('changed')).toHaveLength(1);
-	});
-
-	test('a note typed beside the levers is stored with the change', async () => {
-		const wrapper = await mounted({});
-		await wrapper.find('.note input').setValue('scaling for the demo');
-		await lever(wrapper, 'Pause');
-
-		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
-			enabled: false,
-			note: 'scaling for the demo',
-		});
 	});
 });
 
@@ -424,15 +411,73 @@ describe('editing one field', () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
 		const untouched = row(wrapper, 'maxWorkers');
 
+		// The third button clears the stored value, which needs no pending
+		// change and is asserted with the rest of clearing.
 		expect(untouched.findAllComponents(VButton)
+			.slice(0, 2)
 			.map((button: any) => button.props('disabled')))
 			.toEqual([true, true]);
 
 		await untouched.find('input').setValue('16');
 
 		expect(row(wrapper, 'maxWorkers').findAllComponents(VButton)
+			.slice(0, 2)
 			.map((button: any) => button.props('disabled')))
 			.toEqual([false, false]);
+	});
+
+	test('clearing one field writes a null for that field alone', async () => {
+		const wrapper = await mounted({ maxWorkers: 8 });
+
+		await row(wrapper, 'maxWorkers').find('.clear button')
+			.trigger('click');
+
+		await flushPromises();
+
+		expect(api.patch)
+			.toHaveBeenCalledWith('/utils/autoscale', { maxWorkers: null });
+	});
+
+	// Clearing hands the field back to the env chain, and the value waiting
+	// there is the deciding process's to report.
+	test('the clear button names the value it would land on', async () => {
+		const wrapper = await mounted({ maxWorkers: 8 });
+
+		const buttons = row(wrapper, 'maxWorkers').findAllComponents(VButton);
+
+		expect(buttons[2].props('tooltip')).toBe('Clear, back to 2');
+
+		// A field with nothing stored has nothing to clear.
+		const floor = row(wrapper, 'minWorkers').findAllComponents(VButton);
+
+		expect(floor[2].props('disabled')).toBe(true);
+	});
+
+	// The legacy rule reads its own window and its hottest worker, so leaving
+	// these editable would offer changes that do nothing.
+	test('the fields the running rule ignores are disabled', async () => {
+		const legacy = state();
+		legacy.config.strategy = 'legacy';
+
+		const wrapper = await mounted({ strategy: 'legacy' }, [runner(legacy)]);
+		const window = row(wrapper, 'sampleWindow');
+
+		expect(window.classes()).toContain('inactive');
+		expect(window.findComponent(VInput).props('disabled')).toBe(true);
+
+		expect(window.findAllComponents(VButton)
+			.map((button: any) => button.props('disabled')))
+			.toEqual([true, true, true]);
+
+		expect(row(wrapper, 'scaleCpuThreshold').classes()).not.toContain('inactive');
+	});
+
+	test('a field says what it does to the pool on hover', async () => {
+		const wrapper = await mounted(null);
+
+		const name = row(wrapper, 'maxWorkers').find('td span');
+
+		expect(name.attributes('title')).toContain('never grows past this');
 	});
 
 	test('a failed write is reported and leaves the panel usable', async () => {

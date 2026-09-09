@@ -26,6 +26,7 @@ test('answers with the tick that was recorded', async () => {
 	recordAutoscaleTick({
 		at: 1000,
 		config,
+		withoutOverride: config,
 		sources,
 		workers: 2,
 		pendingWorkers: 1,
@@ -37,6 +38,7 @@ test('answers with the tick that was recorded', async () => {
 	expect(autoscaleState()).toEqual({
 		at: 1000,
 		config,
+		withoutOverride: config,
 		sources,
 		workers: 2,
 		pendingWorkers: 1,
@@ -56,6 +58,7 @@ test('keeps the last move a tick that decides nothing', async () => {
 	const tick = {
 		at: 1000,
 		config,
+		withoutOverride: config,
 		sources,
 		workers: 3,
 		pendingWorkers: 0,

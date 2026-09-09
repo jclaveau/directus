@@ -215,6 +215,7 @@ async function readOverride(): Promise<string | null> {
 
 let lastCorrections = '';
 let lastGood: AutoscaleConfig | null = null;
+let lastBase: AutoscaleConfig | null = null;
 let lastSources: AutoscaleConfigSources | null = null;
 let overrideUnreadable = false;
 
@@ -227,6 +228,16 @@ let overrideUnreadable = false;
  */
 export function resolvedSources(): AutoscaleConfigSources {
 	return lastSources ?? sourcesOf({});
+}
+
+/**
+ * What the last tick would have run on with nothing stored in Redis.
+ *
+ * The page offers to clear a field, and the value that lands there is this
+ * one — knowable only here, since the override wins over it everywhere else.
+ */
+export function resolvedWithoutOverride(): AutoscaleConfig {
+	return lastBase ?? sanitizeConfig(envConfig()).config;
 }
 
 function announce(corrections: string[]): void {
@@ -268,6 +279,7 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 		const { config, corrections } = sanitizeConfig(candidate);
 		announce(corrections);
 		lastGood = config;
+		lastBase = sanitizeConfig(fromEnv).config;
 		lastSources = sourcesOf(override);
 
 		return config;
