@@ -261,16 +261,35 @@ export async function scaleTo(appName: string, workers: number): Promise<void> {
 export async function reloadPool(
 	appName: string,
 	timeoutMs: number,
+	declaration: Record<string, number>,
 ): Promise<void> {
 	const reloaded = new Promise<void>((resolve, reject) => {
-		pm2.reload(appName, (error) => {
-			if (error) {
-				reject(error);
+		// pm2 checks the options of a reload against its command-line schema,
+		// which names none of these, and drops whatever it does not find there.
+		// `PM2_JSON_PROCESSING` is how it is told they are a declaration that
+		// has been checked already. It is process-wide and read while `reload`
+		// is still on the stack, so it goes back as soon as that returns.
+		const processing = process.env['PM2_JSON_PROCESSING'];
+		process.env['PM2_JSON_PROCESSING'] = 'true';
+
+		try {
+			pm2.reload(appName, { current_conf: declaration } as never, (error) => {
+				if (error) {
+					reject(error);
+				}
+				else {
+					resolve();
+				}
+			});
+		}
+		finally {
+			if (processing === undefined) {
+				delete process.env['PM2_JSON_PROCESSING'];
 			}
 			else {
-				resolve();
+				process.env['PM2_JSON_PROCESSING'] = processing;
 			}
-		});
+		}
 	});
 
 	await answeredInTime(`a reload of ${appName}`, reloaded, timeoutMs);

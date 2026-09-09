@@ -140,8 +140,24 @@ function answered(
 ) {
 	const key = 'scalabus:autoscale:config';
 
-	return { data: { data: { key, override, setByEmail } } };
+	return {
+		data: {
+			data: {
+				key,
+				override,
+				setByEmail,
+				supervisor: {
+					key: 'scalabus:autoscale:supervisor',
+					override: supervisorOverride,
+					setByEmail: null,
+				},
+			},
+		},
+	};
 }
+
+/** What the supervisor answer carries, set by the case that cares. */
+let supervisorOverride: Record<string, unknown> | null = null;
 
 /**
  * The panel reads two routes, and they answer different shapes: everything
@@ -178,6 +194,7 @@ beforeEach(() => {
 	vi.mocked(api.patch).mockReset();
 	vi.mocked(api.post).mockReset();
 	vi.mocked(api.delete).mockReset();
+	supervisorOverride = null;
 	vi.mocked(api.patch).mockResolvedValue(answered({}));
 	vi.mocked(api.delete).mockResolvedValue(answered(null));
 });
@@ -227,6 +244,72 @@ describe('what the panel shows', () => {
 			.find((line) => line.text().startsWith('PM2_INSTANCES'));
 
 		expect(row?.find('.declared').text()).toBe('2');
+	});
+
+	// The six options a rolling restart can carry take a value here; the pool
+	// size and its mode cannot be pushed to a running supervisor at all.
+	test('a restart carries the options that take a value', async () => {
+		const declared = state({
+			supervisor: {
+				instances: 2,
+				execMode: 'cluster_mode',
+				maxMemoryRestart: null,
+				listenTimeout: 15000,
+				killTimeout: 1600,
+				minUptime: 1000,
+				maxRestarts: 16,
+				restartDelay: 0,
+				autorestart: true,
+				waitReady: true,
+			},
+		});
+
+		const wrapper = await mounted(null, [runner(declared)]);
+		const rows = wrapper.findAll('.supervisor tbody tr');
+
+		const listen = rows.find((row) => row.text().startsWith('PM2_LISTEN_TIMEOUT'));
+		const instances = rows.find((row) => row.text().startsWith('PM2_INSTANCES'));
+
+		// An empty box is the environment answering, and what it answers with
+		// is what the pool is running under.
+		expect((listen?.find('input').element as HTMLInputElement).placeholder)
+			.toBe('15000');
+
+		expect(instances?.findAll('input')).toHaveLength(0);
+
+		// Nothing declares a memory ceiling by default, and an empty box has
+		// to say so rather than read as a zero the option would refuse.
+		const memory = rows.find((row) => row.text().startsWith('PM2_MAX_MEMORY'));
+
+		expect((memory?.find('input').element as HTMLInputElement).placeholder)
+			.toBe('off');
+	});
+
+	test('a stored option is shown in the box that would change it', async () => {
+		supervisorOverride = { listenTimeout: 20000 };
+
+		const declared = state({
+			supervisor: {
+				instances: 2,
+				execMode: 'cluster_mode',
+				maxMemoryRestart: null,
+				listenTimeout: 15000,
+				killTimeout: 1600,
+				minUptime: 1000,
+				maxRestarts: 16,
+				restartDelay: 0,
+				autorestart: true,
+				waitReady: true,
+			},
+		});
+
+		const wrapper = await mounted(null, [runner(declared)]);
+
+		const listen = wrapper.findAll('.supervisor tbody tr')
+			.find((row) => row.text().startsWith('PM2_LISTEN_TIMEOUT'));
+
+		expect((listen?.find('input').element as HTMLInputElement).value)
+			.toBe('20000');
 	});
 
 	// A pool nothing reported a declaration for gets no section rather than a
@@ -778,6 +861,98 @@ describe('editing one field', () => {
 
 		expect(wrapper.text()).toContain('maxWorkers has to be a number');
 		expect(wrapper.emitted('changed')).toBeUndefined();
+	});
+});
+
+describe('the options a restart carries', () => {
+	function declared() {
+		return state({
+			supervisor: {
+				instances: 2,
+				execMode: 'cluster_mode',
+				maxMemoryRestart: null,
+				listenTimeout: 15000,
+				killTimeout: 1600,
+				minUptime: 1000,
+				maxRestarts: 16,
+				restartDelay: 0,
+				autorestart: true,
+				waitReady: true,
+			},
+		});
+	}
+
+	function optionRow(wrapper: any, variable: string) {
+		return wrapper.findAll('.supervisor tbody tr')
+			.find((row: any) => row.text().startsWith(variable));
+	}
+
+	// Its own route because it lands somewhere else: nothing about the pool
+	// changes until the restart below pushes it.
+	test('a stored option goes to the supervisor, not to the loop', async () => {
+		const wrapper = await mounted(null, [runner(declared())]);
+		const row = optionRow(wrapper, 'PM2_LISTEN_TIMEOUT');
+
+		await row.find('input').setValue('20000');
+		await row.find('.option .apply button').trigger('click');
+		await flushPromises();
+
+		expect(api.patch).toHaveBeenCalledWith(
+			'/utils/autoscale/supervisor',
+			{ listenTimeout: 20000 },
+		);
+	});
+
+	// Emptying the box is the same ask as the button, so both have to reach the
+	// route as the null that releases the option rather than as a zero.
+	test('an emptied option is handed back to the environment', async () => {
+		supervisorOverride = { killTimeout: 5000 };
+
+		const wrapper = await mounted(null, [runner(declared())]);
+		const row = optionRow(wrapper, 'PM2_KILL_TIMEOUT');
+
+		await row.find('input').setValue('');
+		await row.find('.option .apply button').trigger('click');
+		await flushPromises();
+
+		expect(api.patch).toHaveBeenCalledWith(
+			'/utils/autoscale/supervisor',
+			{ killTimeout: null },
+		);
+	});
+
+	test('the reset button releases an option nobody retyped', async () => {
+		supervisorOverride = { maxRestarts: 30 };
+
+		const wrapper = await mounted(null, [runner(declared())]);
+		const row = optionRow(wrapper, 'PM2_MAX_RESTARTS');
+
+		await row.find('.option .reset button').trigger('click');
+		await flushPromises();
+
+		expect(api.patch).toHaveBeenCalledWith(
+			'/utils/autoscale/supervisor',
+			{ maxRestarts: null },
+		);
+	});
+
+	// The refusal is the supervisor's, and the page has no better answer than
+	// the one it came with.
+	test('a refused option is reported as it came', async () => {
+		vi.mocked(api.patch).mockRejectedValue({
+			response: {
+				data: { errors: [{ message: 'kill_timeout has to be at least 100' }] },
+			},
+		});
+
+		const wrapper = await mounted(null, [runner(declared())]);
+		const row = optionRow(wrapper, 'PM2_KILL_TIMEOUT');
+
+		await row.find('input').setValue('10');
+		await row.find('.option .apply button').trigger('click');
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('kill_timeout has to be at least 100');
 	});
 });
 

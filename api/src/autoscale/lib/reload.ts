@@ -1,11 +1,14 @@
 import type {
 	AutoscaleReload,
 	AutoscaleRunner,
-	AutoscaleSupervisor,
 } from '@directus/types';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
 import { reloadPool } from './pool.js';
+import {
+	readSupervisorOverride,
+	reloadDeclaration,
+} from './supervisor-override.js';
 
 /**
  * The channel a rolling restart is asked for on.
@@ -61,10 +64,10 @@ export function reloading(): boolean {
  */
 export function reloadBudgetMs(
 	workers: number,
-	supervisor: AutoscaleSupervisor | null,
+	declaration: Record<string, number>,
 ): number {
-	const perWorker = (supervisor?.listenTimeout ?? 3000)
-		+ (supervisor?.killTimeout ?? 1600);
+	const perWorker = (declaration['listen_timeout'] ?? 3000)
+		+ (declaration['kill_timeout'] ?? 1600);
 
 	return Math.max(1, workers) * perWorker + RELOAD_SLACK_MS;
 }
@@ -152,11 +155,7 @@ export function askForReload(): AutoscaleReload {
  * stop reporting for the whole of it — leaving the page that asked for the
  * restart unable to say whether it is happening.
  */
-export function beginAskedReload(
-	appName: string,
-	workers: number,
-	supervisor: AutoscaleSupervisor | null,
-): void {
+export function beginAskedReload(appName: string, workers: number): void {
 	if (pending === false || running) {
 		return;
 	}
@@ -169,7 +168,19 @@ export function beginAskedReload(
 
 	logger.info(`[autoscale] restarting the ${appName} pool, worker by worker`);
 
-	reloadPool(appName, reloadBudgetMs(workers, supervisor))
+	// The options an operator changed are pushed by the restart that carries
+	// them, so the read that finds them belongs to the restart rather than to
+	// the tick: a pool nobody is restarting never asks Redis for them.
+	readSupervisorOverride()
+		.then((override) => {
+			const declaration = reloadDeclaration(override);
+
+			return reloadPool(
+				appName,
+				reloadBudgetMs(workers, declaration),
+				declaration,
+			);
+		})
 		.then(() => {
 			logger.info(`[autoscale] the ${appName} pool finished restarting`);
 		})

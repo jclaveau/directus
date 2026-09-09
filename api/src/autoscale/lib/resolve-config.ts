@@ -24,6 +24,17 @@ export function autoscaleConfigKey(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:autoscale:config`;
 }
 
+/**
+ * Where the pm2 options an operator may change are kept.
+ *
+ * Its own key rather than a corner of the configuration's: the loop reads that
+ * one every tick and takes no interest in these, which reach the pool through
+ * a rolling restart instead.
+ */
+export function supervisorOverrideKey(): string {
+	return `${useEnv()['CACHE_NAMESPACE']}:autoscale:supervisor`;
+}
+
 /** The variable each field reads, so a page can say where a value came from. */
 const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
 	enabled: 'PM2_AUTOSCALE_ENABLED',

@@ -42,7 +42,14 @@ import {
 import {
 	autoscaleConfigKey,
 	configWithOverride,
+	supervisorOverrideKey,
 } from '../autoscale/lib/resolve-config.js';
+import {
+	applySupervisorPatch,
+	parseSupervisorPatch,
+	readSupervisorOverride,
+	writeSupervisorOverride,
+} from '../autoscale/lib/supervisor-override.js';
 import { collectProcesses, processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -64,6 +71,7 @@ vi.mock('../utils/compress.js');
 vi.mock('../autoscale/lib/drill.js');
 vi.mock('../autoscale/lib/reload.js');
 vi.mock('../autoscale/lib/override.js');
+vi.mock('../autoscale/lib/supervisor-override.js');
 vi.mock('../processes/index.js');
 vi.mock('../autoscale/lib/resolve-config.js');
 
@@ -618,6 +626,7 @@ describe('Services / Utils', () => {
 		function stored(override: Record<string, unknown> | null) {
 			resolvesTo({});
 			vi.mocked(autoscaleConfigKey).mockReturnValue('scalabus:autoscale:config');
+			vi.mocked(readSupervisorOverride).mockResolvedValue(null);
 			vi.mocked(readAutoscaleOverride).mockResolvedValue(override);
 			vi.mocked(parseOverridePatch).mockImplementation((patch) => patch);
 
@@ -631,10 +640,23 @@ describe('Services / Utils', () => {
 			stored({ maxWorkers: 8, setBy: 'writer-id' });
 			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
 
-			await expect(service(admin).readAutoscaleConfig()).resolves.toEqual({
+			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
 				key: 'scalabus:autoscale:config',
 				override: { maxWorkers: 8, setBy: 'writer-id' },
 				setByEmail: 'ann@example.com',
+			});
+		});
+
+		// One page shows both, and a value it displays cannot be attributed to
+		// the configuration or to the supervisor unless the read carries each.
+		it('answers the supervisor options beside the configuration', async () => {
+			stored(null);
+
+			vi.mocked(readSupervisorOverride)
+				.mockResolvedValue({ listenTimeout: 20_000 });
+
+			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
+				supervisor: { override: { listenTimeout: 20_000 } },
 			});
 		});
 
@@ -700,6 +722,53 @@ describe('Services / Utils', () => {
 				.toThrowError(ForbiddenError);
 
 			expect(writeAutoscaleOverride).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('supervisor options', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		beforeEach(() => {
+			vi.mocked(supervisorOverrideKey)
+				.mockReturnValue('scalabus:autoscale:supervisor');
+
+			vi.mocked(readSupervisorOverride).mockResolvedValue(null);
+			vi.mocked(parseSupervisorPatch).mockImplementation((patch) => patch);
+
+			vi.mocked(applySupervisorPatch)
+				.mockImplementation((_current, patch) => patch);
+		});
+
+		// Nothing reads these but pm2, when it starts a worker, so the write is
+		// stamped with where it came from exactly as the configuration's is.
+		it('stamps the surface the change came in through', async () => {
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await expect(service(admin).updateSupervisorConfig(
+				{ listenTimeout: 20_000 },
+				'mcp',
+			)).resolves.toMatchObject({ key: 'scalabus:autoscale:supervisor' });
+
+			expect(writeSupervisorOverride).toHaveBeenCalledWith(
+				expect.objectContaining({
+					listenTimeout: 20_000,
+					setBy: 'admin-id',
+					setFrom: 'mcp',
+				}),
+			);
+		});
+
+		it('refuses a non-admin', async () => {
+			await expect(service(nonAdmin).updateSupervisorConfig({}, 'admin'))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeSupervisorOverride).not.toHaveBeenCalled();
 		});
 	});
 

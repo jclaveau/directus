@@ -338,6 +338,17 @@ export function drillRemaining(until: number | null, now: number): number {
 }
 
 /** One line of the pm2 declaration, as the panel reports it. */
+/** What an option a restart can carry accepts, and what it runs on now. */
+export interface SupervisorOption {
+	/** The override field the change is written to. */
+	field: string;
+	min: number;
+	max: number;
+	unit: string;
+	/** What pm2 is running under, shown in an empty box, `null` for nothing. */
+	declared: number | null;
+}
+
 export interface SupervisorRow {
 	/** The variable that sets it, which is where a change to it is made. */
 	field: string;
@@ -345,6 +356,10 @@ export interface SupervisorRow {
 	value: string;
 	/** The pm2 entry it sets and what that entry decides, shown on hover. */
 	description: string;
+	/** `null` for an option no restart can carry, so the page cannot offer it. */
+	option: SupervisorOption | null;
+	/** What the override holds for it, `null` where the environment answers. */
+	override: number | null;
 }
 
 const MEGABYTE = 1_048_576;
@@ -352,20 +367,33 @@ const MEGABYTE = 1_048_576;
 /**
  * The declaration the pool runs under, as rows.
  *
- * Read-only, and separate from the configuration above it: pm2 reads these when
- * it starts a worker, so changing one is a restart rather than a write. They
- * are reported anyway because two of them decide what the numbers above mean —
- * `instances` is the size the pool boots at, and `listenTimeout` is how long a
- * worker may take to come up before the supervisor counts it as up regardless.
+ * Separate from the configuration above it: pm2 reads these when it starts a
+ * worker, so a change to one reaches the pool through the rolling restart
+ * below rather than on the next tick. Six of them a restart can carry, and
+ * those take a value; the pool size and its execution mode it cannot, and the
+ * size is the loop's to decide anyway.
  */
 export function supervisorRows(
 	state: AutoscaleNodeState | null,
+	override: Record<string, unknown> | null = null,
 ): SupervisorRow[] {
 	const supervisor = state?.supervisor ?? null;
 
 	if (supervisor === null) {
 		return [];
 	}
+
+	function overriding(field: string): number | null {
+		const value = override?.[field];
+
+		return typeof value === 'number'
+			? value
+			: null;
+	}
+
+	const ceiling = supervisor.maxMemoryRestart === null
+		? null
+		: Math.round(supervisor.maxMemoryRestart / MEGABYTE);
 
 	return [
 		{
@@ -374,12 +402,16 @@ export function supervisorRows(
 			description: 'instances: the workers the pool boots with, and its '
 				+ 'size until the first tick. From there the floor, the ceiling '
 				+ 'and the prewarm above own it.',
+			option: null,
+			override: null,
 		},
 		{
 			field: 'PM2_EXEC_MODE',
 			value: supervisor.execMode,
 			description: 'exec_mode: only a cluster can be resized, so a pool in '
 				+ 'fork mode is one the autoscaler cannot move.',
+			option: null,
+			override: null,
 		},
 		{
 			field: 'wait_ready',
@@ -388,6 +420,8 @@ export function supervisorRows(
 				+ 'Whether a starting worker is held out of the pool until it says '
 				+ 'it is serving. False counts it in as soon as it forks, so the '
 				+ 'pool is judged on a worker that is still booting.',
+			option: null,
+			override: null,
 		},
 		{
 			field: 'PM2_LISTEN_TIMEOUT',
@@ -395,6 +429,14 @@ export function supervisorRows(
 			description: 'listen_timeout: how long a worker has to say it is ready '
 				+ 'before it counts as up anyway. Under the time a worker takes to '
 				+ 'boot, every start reports ready before it is.',
+			option: {
+				field: 'listenTimeout',
+				min: 1000,
+				max: 600_000,
+				unit: 'ms',
+				declared: supervisor.listenTimeout,
+			},
+			override: overriding('listenTimeout'),
 		},
 		{
 			field: 'PM2_KILL_TIMEOUT',
@@ -402,20 +444,38 @@ export function supervisorRows(
 			description: 'kill_timeout: how long a released worker has between the '
 				+ 'signal to stop and being killed. Under the time a request takes, '
 				+ 'releasing a worker drops the requests it was serving.',
+			option: {
+				field: 'killTimeout',
+				min: 100,
+				max: 600_000,
+				unit: 'ms',
+				declared: supervisor.killTimeout,
+			},
+			override: overriding('killTimeout'),
 		},
 		{
 			field: 'PM2_MAX_MEMORY_RESTART',
-			value: supervisor.maxMemoryRestart === null
+			value: ceiling === null
 				? 'off'
-				: `${Math.round(supervisor.maxMemoryRestart / MEGABYTE)} MB`,
+				: `${ceiling} MB`,
 			description: 'max_memory_restart: the size a worker is restarted at. '
 				+ 'Set under what a worker legitimately reaches, the restarts it '
 				+ 'causes read as load and buy more workers to restart.',
+			option: {
+				field: 'maxMemoryRestartMegabytes',
+				min: 64,
+				max: 65_536,
+				unit: 'MB',
+				declared: ceiling,
+			},
+			override: overriding('maxMemoryRestartMegabytes'),
 		},
 		{
 			field: 'PM2_AUTO_RESTART',
 			value: String(supervisor.autorestart),
 			description: 'autorestart: whether a worker that exits is replaced.',
+			option: null,
+			override: null,
 		},
 		{
 			field: 'PM2_RESTART_DELAY',
@@ -424,6 +484,14 @@ export function supervisorRows(
 				+ 'replacing a worker that died. At zero a crash loop restarts as '
 				+ 'fast as it can boot, and its boot CPU is what the pool is judged '
 				+ 'on.',
+			option: {
+				field: 'restartDelay',
+				min: 0,
+				max: 600_000,
+				unit: 'ms',
+				declared: supervisor.restartDelay,
+			},
+			override: overriding('restartDelay'),
 		},
 		{
 			field: 'PM2_MIN_UPTIME',
@@ -431,12 +499,28 @@ export function supervisorRows(
 			description: 'min_uptime: how long a worker has to survive for its '
 				+ 'start to count as clean rather than as one of the unstable '
 				+ 'restarts counted against the ceiling below.',
+			option: {
+				field: 'minUptime',
+				min: 100,
+				max: 600_000,
+				unit: 'ms',
+				declared: supervisor.minUptime,
+			},
+			override: overriding('minUptime'),
 		},
 		{
 			field: 'PM2_MAX_RESTARTS',
 			value: String(supervisor.maxRestarts),
 			description: 'max_restarts: how many unstable restarts a worker gets '
 				+ 'before the supervisor stops replacing it.',
+			option: {
+				field: 'maxRestarts',
+				min: 0,
+				max: 1000,
+				unit: '',
+				declared: supervisor.maxRestarts,
+			},
+			override: overriding('maxRestarts'),
 		},
 	];
 }

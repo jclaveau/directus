@@ -142,7 +142,7 @@ export async function runAutoscaler(): Promise<void> {
 			const onlineWorkers = cpu.measure(reading.onlineWorkers);
 			const workers = onlineWorkers.length + pendingWorkers;
 
-			beginAskedReload(config.appName, workers, reading.supervisor);
+			beginAskedReload(config.appName, workers);
 
 			const carriesRestarts = [...reading.restartsByWorker.values()]
 				.some((count) => count > 0);

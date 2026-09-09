@@ -69,7 +69,15 @@ import {
 import {
 	autoscaleConfigKey,
 	configWithOverride,
+	supervisorOverrideKey,
 } from '../autoscale/lib/resolve-config.js';
+import {
+	applySupervisorPatch,
+	parseSupervisorPatch,
+	readSupervisorOverride,
+	type SupervisorOverride,
+	writeSupervisorOverride,
+} from '../autoscale/lib/supervisor-override.js';
 import { assertUsableConfig } from '../autoscale/lib/validate-config.js';
 import {
 	collectProcesses,
@@ -173,12 +181,21 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	return parsed;
 }
 
-/** What both autoscale reads answer with: the stored override, plus who left it. */
-export interface AutoscaleConfigAnswer {
+/** What an autoscale read answers with: the stored override, plus who left it. */
+export interface AutoscaleOverrideAnswer {
 	key: string;
 	override: AutoscaleOverride | null;
 	/** The address behind the override's `setBy`, `null` where there is none. */
 	setByEmail: string | null;
+}
+
+export interface AutoscaleConfigAnswer extends AutoscaleOverrideAnswer {
+	/**
+	 * The pm2 options a restart would carry, answered beside the configuration
+	 * because a page showing one without the other cannot say which of the two
+	 * a value it displays came from.
+	 */
+	supervisor: AutoscaleOverrideAnswer;
 }
 
 export class UtilsService {
@@ -595,7 +612,48 @@ export class UtilsService {
 			key: autoscaleConfigKey(),
 			override,
 			setByEmail: await this.emailOf(override?.['setBy']),
+			supervisor: await this.supervisorAnswer(await readSupervisorOverride()),
 		};
+	}
+
+	private async supervisorAnswer(
+		override: SupervisorOverride | null,
+	): Promise<AutoscaleOverrideAnswer> {
+		return {
+			key: supervisorOverrideKey(),
+			override,
+			setByEmail: await this.emailOf(override?.['setBy']),
+		};
+	}
+
+	/**
+	 * Change the pm2 options the next rolling restart will carry.
+	 *
+	 * Stored rather than applied: pm2 reads these when it starts a worker, so
+	 * the write lands on the pool through the restart below it and the page
+	 * says so. Nothing is clamped — a supervisor takes what it is handed.
+	 */
+	async updateSupervisorConfig(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleOverrideAnswer> {
+		this.assertAdmin('change the supervisor configuration');
+
+		const stamped = {
+			...parseSupervisorPatch(patch),
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+			setFrom: surface,
+		};
+
+		const override = applySupervisorPatch(
+			await readSupervisorOverride(),
+			stamped,
+		);
+
+		await writeSupervisorOverride(override);
+
+		return this.supervisorAnswer(override);
 	}
 
 	private async emailOf(user: unknown): Promise<string | null> {

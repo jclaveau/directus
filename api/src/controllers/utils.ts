@@ -451,6 +451,32 @@ if (redisConfigAvailable()) {
 		}),
 	);
 
+	router.patch(
+		'/autoscale/supervisor',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const patch: unknown = req.body;
+
+			if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+				throw new InvalidPayloadError({
+					reason: 'An object of supervisor options is required',
+				});
+			}
+
+			const updated = await service.updateSupervisorConfig(
+				patch as Record<string, unknown>,
+				'admin',
+			);
+
+			res.status(200).json({ data: updated });
+			return;
+		}),
+	);
+
 	router.delete(
 		'/autoscale',
 		asyncHandler(async (req, res) => {

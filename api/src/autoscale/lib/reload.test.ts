@@ -26,6 +26,16 @@ vi.mock('./pool.js', () => {
 	return { reloadPool };
 });
 
+const readSupervisorOverride = vi.fn(async () => null);
+const reloadDeclaration = vi.fn(() => DECLARATION);
+
+vi.mock('./supervisor-override.js', () => {
+	return { readSupervisorOverride, reloadDeclaration };
+});
+
+/** What the options an operator changed come to, as pm2 names them. */
+const DECLARATION = { listen_timeout: 15_000, kill_timeout: 30_000 };
+
 // Compiling the graph behind these modules is seconds of work, and a case that
 // pays it is a case timing its own toolchain.
 beforeAll(async () => {
@@ -87,6 +97,8 @@ beforeEach(() => {
 	subscribe.mockClear();
 	reloadPool.mockReset();
 	reloadPool.mockResolvedValue(undefined);
+	readSupervisorOverride.mockClear();
+	reloadDeclaration.mockClear();
 });
 
 afterEach(() => {
@@ -136,10 +148,21 @@ test('the restart runs beside the loop and reports that it finished', async () =
 
 	initAutoscaleReload();
 	ask();
-	beginAskedReload('directus', 4, supervisor());
+	readSupervisorOverride.mockResolvedValueOnce({ listenTimeout: 20_000 } as never);
+	beginAskedReload('directus', 4);
 
-	expect(reloadPool).toHaveBeenCalledWith('directus', 4 * 45_000 + 30_000);
+	// Held still from the moment it starts, not from the moment the supervisor
+	// is reached: the override it carries is a read away.
 	expect(reloading()).toBe(true);
+
+	await vi.waitFor(() => {
+		expect(reloadPool)
+			.toHaveBeenCalledWith('directus', 4 * 45_000 + 30_000, DECLARATION);
+	});
+
+	// The options an operator stored are what the restart pushes, so the
+	// declaration is built from the read rather than from the environment.
+	expect(reloadDeclaration).toHaveBeenCalledWith({ listenTimeout: 20_000 });
 
 	await vi.waitFor(() => {
 		expect(reloading()).toBe(false);
@@ -159,7 +182,7 @@ test('a restart that failed reports why and releases the loop', async () => {
 
 	initAutoscaleReload();
 	ask();
-	beginAskedReload('directus', 4, supervisor());
+	beginAskedReload('directus', 4);
 
 	await vi.waitFor(() => {
 		expect(reloading()).toBe(false);
@@ -172,7 +195,7 @@ test('a tick with nothing asked for starts nothing', async () => {
 	const { beginAskedReload, initAutoscaleReload } = await freshModule();
 
 	initAutoscaleReload();
-	beginAskedReload('directus', 4, supervisor());
+	beginAskedReload('directus', 4);
 
 	expect(reloadPool).not.toHaveBeenCalled();
 });
@@ -183,19 +206,19 @@ test('a tick with nothing asked for starts nothing', async () => {
 test('the budget covers every worker under its own declaration', async () => {
 	const { reloadBudgetMs } = await freshModule();
 
-	expect(reloadBudgetMs(8, supervisor())).toBe(8 * 45_000 + 30_000);
+	expect(reloadBudgetMs(8, DECLARATION)).toBe(8 * 45_000 + 30_000);
 });
 
-test('a pool with no declaration reported gets pm2 own fallbacks', async () => {
+test('a declaration that names no timeout gets pm2 own fallbacks', async () => {
 	const { reloadBudgetMs } = await freshModule();
 
-	expect(reloadBudgetMs(2, null)).toBe(2 * 4600 + 30_000);
+	expect(reloadBudgetMs(2, {})).toBe(2 * 4600 + 30_000);
 });
 
 test('an empty pool still gets one worker worth of budget', async () => {
 	const { reloadBudgetMs } = await freshModule();
 
-	expect(reloadBudgetMs(0, supervisor())).toBe(45_000 + 30_000);
+	expect(reloadBudgetMs(0, DECLARATION)).toBe(45_000 + 30_000);
 });
 
 test('a pool nothing reported is refused', async () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const getCacheGroupLatencies = vi.fn();
 const readAutoscaleConfig = vi.fn();
 const updateAutoscaleConfig = vi.fn();
+const updateSupervisorConfig = vi.fn();
 const clearAutoscaleConfig = vi.fn();
 const startAutoscaleReload = vi.fn();
 const readAutoscaleDrill = vi.fn();
@@ -16,6 +17,7 @@ vi.mock('../services/utils.js', () => {
 				getCacheGroupLatencies,
 				readAutoscaleConfig,
 				updateAutoscaleConfig,
+				updateSupervisorConfig,
 				clearAutoscaleConfig,
 				startAutoscaleReload,
 				readAutoscaleDrill,
@@ -162,6 +164,34 @@ describe('utils controller /autoscale', () => {
 
 		expect(clearAutoscaleConfig).toHaveBeenCalledOnce();
 		expect(json).toHaveBeenCalledWith({ data: { override: null } });
+	});
+
+	test('hands the supervisor options down as an admin write', async () => {
+		updateSupervisorConfig.mockResolvedValueOnce({ override: null });
+
+		const json = vi.fn();
+		const res = { status: vi.fn(() => ({ json })) } as any;
+		const body = { listenTimeout: 20000 };
+		const req = { accountability: null, schema: {}, body } as any;
+
+		await handlerFor('/autoscale/supervisor', 'patch')(req, res, vi.fn());
+
+		expect(updateSupervisorConfig).toHaveBeenCalledWith(body, 'admin');
+		expect(json).toHaveBeenCalledWith({ data: { override: null } });
+	});
+
+	test('refuses supervisor options that are not an object', async () => {
+		const res = { status: vi.fn() } as any;
+		const req = { accountability: null, schema: {}, body: ['listenTimeout'] } as any;
+		const next = vi.fn();
+
+		await handlerFor('/autoscale/supervisor', 'patch')(req, res, next);
+
+		expect(next.mock.calls[0]![0].message).toContain(
+			'An object of supervisor options is required',
+		);
+
+		expect(updateSupervisorConfig).not.toHaveBeenCalled();
 	});
 
 	test('a restart answers with the state the request left behind', async () => {

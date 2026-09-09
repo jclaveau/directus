@@ -62,7 +62,9 @@ vi.mock('./lib/resolve-config.js', () => {
 	return { resolveConfig, resolvedSources, resolvedWithoutOverride };
 });
 
-const decide = vi.fn(() => ({ workers: null, reason: 'steady' }));
+const decide = vi.fn((): { workers: number | null; reason: string } => {
+	return { workers: null, reason: 'steady' };
+});
 
 vi.mock('./lib/decide.js', () => {
 	return { decide };
@@ -237,7 +239,7 @@ describe('runAutoscaler', () => {
 
 		await ticks(1);
 
-		expect(beginAskedReload).toHaveBeenCalledWith('api', 2, supervisor);
+		expect(beginAskedReload).toHaveBeenCalledWith('api', 2);
 	});
 
 	// A tick that throws is a tick that was skipped: ending the loop would

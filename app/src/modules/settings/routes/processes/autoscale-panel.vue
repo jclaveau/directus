@@ -18,6 +18,8 @@ import {
 	parseFieldValue,
 	pinPatch,
 	secondsSince,
+	type SupervisorOption,
+	type SupervisorRow,
 	supervisorRows,
 	underLoad,
 } from './autoscale-panel';
@@ -30,6 +32,8 @@ const { t } = useI18n();
 const override = ref<Record<string, unknown> | null>(null);
 const setByEmail = ref<string | null>(null);
 const configKey = ref<string | null>(null);
+const supervisorOverride = ref<Record<string, unknown> | null>(null);
+const supervisorSetByEmail = ref<string | null>(null);
 const available = ref(true);
 const error = ref<string | null>(null);
 const saving = ref(false);
@@ -151,7 +155,9 @@ const stampLine = computed(() => {
  * Reported beside the configuration rather than mixed into it: these are read
  * when a worker starts, so what changes one is a deploy, not this page.
  */
-const supervisor = computed(() => supervisorRows(runner.value?.state ?? null));
+const supervisor = computed(() => {
+	return supervisorRows(runner.value?.state ?? null, supervisorOverride.value);
+});
 
 const reloadLine = computed(() => {
 	return describeReload(runner.value?.state.reload ?? null);
@@ -199,6 +205,8 @@ async function load(): Promise<void> {
 		override.value = response.data.data.override;
 		setByEmail.value = response.data.data.setByEmail ?? null;
 		configKey.value = response.data.data.key;
+		supervisorOverride.value = response.data.data.supervisor?.override ?? null;
+		supervisorSetByEmail.value = response.data.data.supervisor?.setByEmail ?? null;
 		available.value = true;
 	}
 	catch (err: any) {
@@ -232,6 +240,66 @@ async function write(patch: Record<string, unknown>): Promise<void> {
 	finally {
 		saving.value = false;
 	}
+}
+
+/**
+ * Store an option the next rolling restart will carry.
+ *
+ * Its own write because it lands somewhere else: pm2 reads these when it starts
+ * a worker, so nothing about the pool changes until the restart below pushes
+ * them.
+ */
+async function writeSupervisor(patch: Record<string, unknown>): Promise<void> {
+	saving.value = true;
+	error.value = null;
+
+	try {
+		const response = await api.patch('/utils/autoscale/supervisor', patch);
+		supervisorOverride.value = response.data.data.override;
+		supervisorSetByEmail.value = response.data.data.setByEmail ?? null;
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
+	finally {
+		saving.value = false;
+	}
+}
+
+function applySupervisorRow(field: string): void {
+	const typed = drafts.value[field];
+	delete drafts.value[field];
+
+	// A box emptied hands the option back to the environment, which is what a
+	// deployment that never overrode it runs on.
+	void writeSupervisor({ [field]: parseFieldValue('number', typed) });
+}
+
+function resetSupervisorRow(field: string): void {
+	delete drafts.value[field];
+	void writeSupervisor({ [field]: null });
+}
+
+/**
+ * What an empty box stands for, which is what the pool runs on now.
+ *
+ * A memory ceiling nothing declares reads as off rather than as a zero, which
+ * is a number the option would refuse anyway.
+ */
+function supervisorPlaceholder(option: SupervisorOption): string {
+	return option.declared === null
+		? t('autoscale_supervisor_unset', 'off')
+		: String(option.declared);
+}
+
+function supervisorShown(row: SupervisorRow): string {
+	if (row.option !== null && row.option.field in drafts.value) {
+		return drafts.value[row.option.field] ?? '';
+	}
+
+	return row.override === null
+		? ''
+		: String(row.override);
 }
 
 async function resetToEnv(): Promise<void> {
@@ -805,9 +873,9 @@ onUnmounted(disarmClock);
 			<p class="supervisor-note">
 				{{ t(
 					'autoscale_supervisor_note',
-					'What PM2 was started with. Read when a worker starts, so a '
-						+ 'change to one of these reaches the pool through a deploy '
-						+ 'rather than through this page.',
+					'What PM2 is running the pool under. Read when a worker starts, '
+						+ 'so a change here reaches the pool on the next restart. '
+						+ 'The pool size and its mode take a deploy.',
 				) }}
 			</p>
 
@@ -816,9 +884,65 @@ onUnmounted(disarmClock);
 					<tr v-for="row in supervisor" :key="row.field">
 						<td><span v-tooltip="row.description">{{ row.field }}</span></td>
 						<td class="declared">{{ row.value }}</td>
+						<td class="option">
+							<template v-if="row.option">
+								<span
+									class="control numeric"
+									:class="{ pending: row.option.field in drafts }"
+								>
+									<v-input
+										:model-value="supervisorShown(row)"
+										small
+										full-width
+										type="number"
+										:min="row.option.min"
+										:max="row.option.max"
+										:suffix="row.option.unit"
+										:placeholder="supervisorPlaceholder(row.option)"
+										:disabled="saving"
+										@update:model-value="drafts[row.option.field] = $event"
+										@keyup.enter="applySupervisorRow(row.option.field)"
+									/>
+								</span>
+
+								<v-button
+									x-small
+									icon
+									class="apply"
+									:tooltip="t(
+										'autoscale_supervisor_apply',
+										'Store this for the next restart',
+									)"
+									:disabled="saving || !(row.option.field in drafts)"
+									@click="applySupervisorRow(row.option.field)"
+								>
+									<v-icon name="check" x-small />
+								</v-button>
+
+								<v-button
+									x-small
+									icon
+									secondary
+									class="reset"
+									:tooltip="t(
+										'autoscale_supervisor_reset',
+										'Hand this option back to the environment',
+									)"
+									:disabled="saving || row.override === null"
+									@click="resetSupervisorRow(row.option.field)"
+								>
+									<v-icon name="settings_backup_restore" x-small />
+								</v-button>
+							</template>
+						</td>
 					</tr>
 				</tbody>
 			</table>
+
+			<p v-if="supervisorSetByEmail" class="supervisor-note">
+				{{ t('autoscale_supervisor_set_by', 'Options stored by') }}
+				{{ supervisorSetByEmail }}
+			</p>
 		</template>
 
 		<p v-if="configKey" class="key">{{ configKey }}</p>
@@ -989,6 +1113,13 @@ onUnmounted(disarmClock);
 .supervisor-note {
 	margin-block-end: 8px;
 	color: var(--theme--foreground-subdued);
+}
+
+.fields.supervisor .option {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+	inline-size: 220px;
 }
 
 .fields.supervisor .declared {

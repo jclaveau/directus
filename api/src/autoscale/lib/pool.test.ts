@@ -4,15 +4,17 @@ const connect = vi.fn((callback: (error: Error | null) => void) => callback(null
 const disconnect = vi.fn();
 const list = vi.fn();
 const scale = vi.fn();
+const reload = vi.fn();
 
 vi.mock('pm2', () => {
-	return { default: { connect, disconnect, list, scale } };
+	return { default: { connect, disconnect, list, scale, reload } };
 });
 
 beforeEach(() => {
 	vi.useFakeTimers();
 	list.mockReset();
 	scale.mockReset();
+	reload.mockReset();
 	connect.mockClear();
 	disconnect.mockClear();
 });
@@ -155,4 +157,47 @@ test('a pool with no worker reports no declaration', async () => {
 	await expect(readPool('directus', 30)).resolves.toMatchObject({
 		supervisor: null,
 	});
+});
+
+// pm2 checks a reload's options against its command-line schema and drops
+// whatever it does not find there, so the declaration only survives while it
+// is told the options have been checked already.
+test('the options are handed to the reload as a checked declaration', async () => {
+	const { reloadPool } = await import('./pool.js');
+	let flagDuringCall: string | undefined;
+
+	reload.mockImplementation((
+		_name: string,
+		_options: unknown,
+		callback: (error: Error | null) => void,
+	) => {
+		flagDuringCall = process.env['PM2_JSON_PROCESSING'];
+		callback(null);
+	});
+
+	await reloadPool('directus', 30_000, { listen_timeout: 20_000 });
+
+	expect(reload).toHaveBeenCalledWith(
+		'directus',
+		{ current_conf: { listen_timeout: 20_000 } },
+		expect.any(Function),
+	);
+
+	expect(flagDuringCall).toBe('true');
+
+	// The flag is process-wide, so a reload leaves it as it found it rather
+	// than making every later pm2 call skip the same check.
+	expect(process.env['PM2_JSON_PROCESSING']).toBeUndefined();
+});
+
+test('a reload the supervisor never answers fails the restart', async () => {
+	const { reloadPool } = await import('./pool.js');
+
+	reload.mockImplementation(neverAnswers);
+
+	const reloading = reloadPool('directus', 30_000, {});
+	const failed = expect(reloading).rejects.toThrow(/did not answer a reload/);
+
+	await vi.advanceTimersByTimeAsync(30_000);
+	await failed;
 });
