@@ -102,10 +102,21 @@ const maxWriteScaling = Number(process.env['PERF_CACHE_WRITE_SCALING_MAX'] ?? 1.
 const maxCommandsPerHit = Number(process.env['PERF_CACHE_MAX_COMMANDS_HIT'] ?? 2);
 const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ?? 15);
 
+// The fan fill is where the tagging cost lives: a read pinned per row writes a tag
+// set per row. Gated on both counts, because the two moved for different reasons —
+// grouping a collection's slices into one index call halved the commands, and
+// sending the tag script by hash cut the bytes without touching the count.
+const maxCommandsPerFanFill =
+	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 900);
+
+const maxKilobytesPerFanFill =
+	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 70);
+
 const maxWriteCommandScaling =
-	// 3.2 rather than the 3.10 measured: a ceiling set to exactly what a run
-	// measured fails that same run, since 62/20 lands a floating-point hair above.
-	Number(process.env['PERF_CACHE_WRITE_COMMAND_SCALING_MAX'] ?? 3.2);
+	// Down from 3.2 now that a purge sends one UNLINK per 500 keys rather than one
+	// per key: a write over 200 entries and one over 25 both cost 14 commands, so
+	// what this gates is a return to a purge whose cost tracks the cache's size.
+	Number(process.env['PERF_CACHE_WRITE_COMMAND_SCALING_MAX'] ?? 1.1);
 
 // The target every shape is held to in Headroom, whatever its own ratchet allows.
 const targetMissVsOff = 1.85;
@@ -803,6 +814,7 @@ test('the cache costs less than what it replaces', async () => {
 	const commandsPerHit = new Map<string, number>();
 	const commandsPerFill = new Map<string, number>();
 	const commandsPerFanFill = new Map<string, number>();
+	const kilobytesPerFanFill = new Map<string, number>();
 	const commandsPerWrite = new Map<string, Map<number, number>>();
 
 	function describe(counted: CensusResult): string {
@@ -859,6 +871,7 @@ test('the cache costs less than what it replaces', async () => {
 		);
 
 		commandsPerFanFill.set(arm.name, fanFill.perRequest);
+		kilobytesPerFanFill.set(arm.name, fanFill.bytesPerRequest / 1024);
 		recordCensus('read, fresh key (fan)', arm.name, describe(fanFill));
 
 		const hitPath = `/items/${NOTE}?filter[tenant][_eq]=t1&limit=25`;
@@ -1122,6 +1135,18 @@ test('the cache costs less than what it replaces', async () => {
 	// A purge that drops one slice should cost the same however much the cache
 	// holds. Its LATENCY already does, because the deletes pipeline into one round
 	// trip; whether its COMMAND count does is the question a local Redis hides.
+	verdict(
+		'Redis commands per scoped fan fill',
+		commandsPerFanFill.get('scoped')!,
+		maxCommandsPerFanFill,
+	);
+
+	verdict(
+		'KB sent per scoped fan fill',
+		kilobytesPerFanFill.get('scoped')!,
+		maxKilobytesPerFanFill,
+	);
+
 	verdict(
 		`Redis commands per scoped write, ${warmSizes[1]} entries against`
 		+ ` ${warmSizes[0]}`,
