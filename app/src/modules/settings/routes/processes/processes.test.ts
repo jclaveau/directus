@@ -50,6 +50,7 @@ import VTextOverflow from '@/components/v-text-overflow.vue';
 import VTab from '@/components/v-tab.vue';
 import VTable from '@/components/v-table/v-table.vue';
 import VTabs from '@/components/v-tabs.vue';
+import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import ProcessesPage from './processes.vue';
 
 const ENV = [
@@ -143,6 +144,17 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 // `v-button` renders through a router link, so the page needs a router to mount.
 const router = createRouter({ history: createMemoryHistory(), routes: [] });
 
+// The page hangs its own content off three of the layout's slots, and a layout
+// left as an unknown element renders none of them.
+const PrivateView = {
+	props: ['sidebarWidth'],
+	template: `<div class="private-view">
+		<header><slot name="actions:prepend" /><slot name="actions" /></header>
+		<main><slot /></main>
+		<aside><slot name="sidebar" /></aside>
+	</div>`,
+};
+
 const global = {
 	plugins: [i18n, router],
 	directives: {
@@ -152,11 +164,22 @@ const global = {
 			unmounted: () => undefined,
 		},
 	},
-	components: { VButton, VChip, VIcon, VInput, VTab, VTable, VTabs, VTextOverflow },
+	components: {
+		PrivateView,
+		VButton,
+		VChip,
+		VIcon,
+		VInput,
+		VTab,
+		VTable,
+		VTabs,
+		VTextOverflow,
+	},
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
 				const real = [
+					'private-view',
 					'v-button',
 					'v-chip',
 					'v-icon',
@@ -505,17 +528,13 @@ describe('the cpu and memory charts', () => {
 		const wrapper = await mountLoaded();
 		const canvases = wrapper.findAll('.canvas');
 
-		// The sidebar's refresh control lives in a slot of a stubbed layout, so
-		// the refresh it fires is asked for the way it asks for it.
-		const refresh = (wrapper.vm as any).load as () => Promise<void>;
-
-		await refresh();
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
 		await flushPromises();
 
 		expect(apex.updateOptions).toHaveBeenCalledTimes(3);
 
 		await canvases[0]!.trigger('pointerenter');
-		await refresh();
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
 		await flushPromises();
 
 		// The two nobody is reading redraw on the refresh they always did.
@@ -695,5 +714,29 @@ describe('the autoscale panel', () => {
 			.filter(([url]) => url === '/utils/processes');
 
 		expect(reads).toHaveLength(2);
+	});
+
+	// The drawer holding the panel covers the page when it is open and hides it
+	// when it is closed, so the levers are given a home the drawer never touches.
+	test('puts the levers in the header and the tables in the drawer', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			return url === '/utils/autoscale'
+				? Promise.resolve({ data: { data: { key: 'k', override: null } } } as any)
+				: Promise.resolve({ data: { data: scaling() } } as any);
+		});
+
+		const wrapper = mount(ProcessesPage, { global });
+		await flushPromises();
+
+		expect(wrapper.find('header .autoscale-actions .levers').exists()).toBe(true);
+		expect(wrapper.find('main .levers').exists()).toBe(false);
+		expect(wrapper.find('aside table.fields').exists()).toBe(true);
+	});
+
+	// The variable names the config table reads wrap at the drawer's own width.
+	test('asks the layout for a drawer the tables fit in', async () => {
+		const wrapper = await mountLoaded(scaling());
+
+		expect(wrapper.findComponent(PrivateView).props('sidebarWidth')).toBe(620);
 	});
 });

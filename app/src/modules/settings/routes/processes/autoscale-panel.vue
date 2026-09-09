@@ -23,7 +23,16 @@ import {
 	underLoad,
 } from './autoscale-panel';
 
-const props = defineProps<{ runners: AutoscaleRunner[] }>();
+const props = withDefaults(defineProps<{
+	runners: AutoscaleRunner[];
+	/**
+	 * Where the levers are rendered, for a page that wants them somewhere its
+	 * own layout decides — a header the panel's own drawer does not cover.
+	 * Left out, they are rendered where the panel is.
+	 */
+	actionsTarget?: HTMLElement | null;
+}>(), { actionsTarget: null });
+
 const emit = defineEmits<{ changed: [] }>();
 
 const { t } = useI18n();
@@ -677,121 +686,126 @@ onUnmounted(disarmClock);
 			<span class="age">{{ decided.seconds }}s ago</span>
 		</p>
 
-		<div v-if="available" class="levers">
-			<v-button small :disabled="!runner || saving" @click="pause">
-				{{ runner?.state.config.enabled === false
-					? t('autoscale_resume', 'Resume autoscaling')
-					: t('autoscale_pause', 'Pause autoscaling') }}
-			</v-button>
+		<Teleport
+			:to="props.actionsTarget ?? undefined"
+			:disabled="props.actionsTarget === null"
+		>
+			<div v-if="available" class="levers">
+				<v-button small :disabled="!runner || saving" @click="pause">
+					{{ runner?.state.config.enabled === false
+						? t('autoscale_resume', 'Resume autoscaling')
+						: t('autoscale_pause', 'Pause autoscaling') }}
+				</v-button>
 
-			<v-button small :disabled="!runner || saving" @click="pin">
-				{{ runner && isPinned(runner.state)
-					? t('autoscale_unpin', 'Unpin the pool')
-					: t('autoscale_pin', 'Pin the pool where it is') }}
-			</v-button>
+				<v-button small :disabled="!runner || saving" @click="pin">
+					{{ runner && isPinned(runner.state)
+						? t('autoscale_unpin', 'Unpin the pool')
+						: t('autoscale_pin', 'Pin the pool where it is') }}
+				</v-button>
 
-			<v-button
-				v-if="!restartArmed"
-				small
-				secondary
-				class="restart"
-				:tooltip="restartNote"
-				:disabled="!runner || saving || restarting"
-				@click="restartArmed = true"
-			>
-				{{ restarting
-					? t('autoscale_restarting', 'Restarting the pool')
-					: t('autoscale_restart', 'Restart the pool') }}
-			</v-button>
-
-			<template v-else>
 				<v-button
+					v-if="!restartArmed"
 					small
-					kind="danger"
-					class="restart-confirm"
+					secondary
+					class="restart"
 					:tooltip="restartNote"
-					:disabled="saving"
-					@click="restart"
+					:disabled="!runner || saving || restarting"
+					@click="restartArmed = true"
 				>
-					{{ t('autoscale_restart_confirm', 'Replace every worker') }}
+					{{ restarting
+						? t('autoscale_restarting', 'Restarting the pool')
+						: t('autoscale_restart', 'Restart the pool') }}
 				</v-button>
 
-				<v-button
-					small
-					secondary
-					class="restart-cancel"
-					:disabled="saving"
-					@click="restartArmed = false"
-				>
-					{{ t('autoscale_restart_cancel', 'Keep the pool as it is') }}
-				</v-button>
-			</template>
-
-			<div v-if="drillAvailable" class="drill">
-				<span class="knob">
-					<v-input
-						v-model="drillSeconds"
+				<template v-else>
+					<v-button
 						small
-						type="number"
-						:full-width="false"
-						:min="1"
-						:max="120"
-						:step="5"
-						suffix="s"
-						:disabled="saving || drilling !== null"
-					/>
-				</span>
+						kind="danger"
+						class="restart-confirm"
+						:tooltip="restartNote"
+						:disabled="saving"
+						@click="restart"
+					>
+						{{ t('autoscale_restart_confirm', 'Replace every worker') }}
+					</v-button>
 
-				<span class="knob">
-					<v-input
-						v-model="drillPercent"
+					<v-button
 						small
-						type="number"
-						:full-width="false"
-						:min="10"
-						:max="95"
-						:step="5"
-						suffix="%"
-						:disabled="saving || drilling !== null"
-					/>
-				</span>
+						secondary
+						class="restart-cancel"
+						:disabled="saving"
+						@click="restartArmed = false"
+					>
+						{{ t('autoscale_restart_cancel', 'Keep the pool as it is') }}
+					</v-button>
+				</template>
 
-				<v-button
-					v-if="drilling"
-					small
-					secondary
-					:disabled="saving"
-					@click="stopDrill"
-				>
-					{{ t('autoscale_drill_stop', 'Stop the drill') }}
-				</v-button>
+				<div v-if="drillAvailable" class="drill">
+					<span class="knob">
+						<v-input
+							v-model="drillSeconds"
+							small
+							type="number"
+							:full-width="false"
+							:min="1"
+							:max="120"
+							:step="5"
+							suffix="s"
+							:disabled="saving || drilling !== null"
+						/>
+					</span>
 
-				<v-button
-					v-else
-					small
-					:tooltip="t(
-						'autoscale_drill_note',
-						'Loads every worker so the pool has to decide, without '
-							+ 'touching anything it decides on.',
-					)"
-					:disabled="saving || drillBlocked !== null"
-					@click="startDrill"
-				>
-					{{ t('autoscale_drill_start', 'Run a load drill') }}
-				</v-button>
+					<span class="knob">
+						<v-input
+							v-model="drillPercent"
+							small
+							type="number"
+							:full-width="false"
+							:min="10"
+							:max="95"
+							:step="5"
+							suffix="%"
+							:disabled="saving || drilling !== null"
+						/>
+					</span>
 
-				<span v-if="drilling" class="drilling">
-					{{ t('autoscale_drilling', 'every worker busy,') }}
-					{{ drilling.remaining }}s {{ t('autoscale_drill_left', 'left') }}
-				</span>
+					<v-button
+						v-if="drilling"
+						small
+						secondary
+						:disabled="saving"
+						@click="stopDrill"
+					>
+						{{ t('autoscale_drill_stop', 'Stop the drill') }}
+					</v-button>
 
-				<!-- The reason a drill cannot run is shown rather than told in the
-				button's tooltip, which a disabled button gives no way to reach. -->
-				<span v-else-if="drillBlocked !== null" class="drill-note">
-					{{ drillBlocked }}
-				</span>
+					<v-button
+						v-else
+						small
+						:tooltip="t(
+							'autoscale_drill_note',
+							'Loads every worker so the pool has to decide, without '
+								+ 'touching anything it decides on.',
+						)"
+						:disabled="saving || drillBlocked !== null"
+						@click="startDrill"
+					>
+						{{ t('autoscale_drill_start', 'Run a load drill') }}
+					</v-button>
+
+					<span v-if="drilling" class="drilling">
+						{{ t('autoscale_drilling', 'every worker busy,') }}
+						{{ drilling.remaining }}s {{ t('autoscale_drill_left', 'left') }}
+					</span>
+
+					<!-- The reason a drill cannot run is shown rather than told in the
+					button's tooltip, which a disabled button gives no way to reach. -->
+					<span v-else-if="drillBlocked !== null" class="drill-note">
+						{{ drillBlocked }}
+					</span>
+				</div>
 			</div>
-		</div>
+		</Teleport>
 
 		<p v-if="reloadLine" class="reload">{{ reloadLine }}</p>
 

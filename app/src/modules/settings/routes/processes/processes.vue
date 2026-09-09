@@ -19,6 +19,7 @@ import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
+import SidebarDetail from '@/views/private/components/sidebar-detail.vue';
 import AutoscalePanel from './autoscale-panel.vue';
 import {
 	appendProcessSample,
@@ -235,6 +236,7 @@ function copyRaw(key: string, node: ProcessNode): void {
 	});
 }
 
+const autoscaleActionsEl = ref<HTMLElement | null>(null);
 const usageChartEl = ref<HTMLElement | null>(null);
 const cpuChartEl = ref<HTMLElement | null>(null);
 const memoryChartEl = ref<HTMLElement | null>(null);
@@ -491,7 +493,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<private-view :title="t('processes', 'Processes')">
+	<private-view :title="t('processes', 'Processes')" :sidebar-width="620">
 		<template #headline>
 			<v-breadcrumb :items="[{ name: t('settings'), to: '/settings' }]" />
 		</template>
@@ -500,6 +502,12 @@ onUnmounted(() => {
 			<v-button class="header-icon" rounded icon exact disabled>
 				<v-icon name="account_tree" />
 			</v-button>
+		</template>
+
+		<!-- The levers land here from the panel in the drawer, so the pool can be
+			 paused, pinned or restarted whether or not the drawer is open. -->
+		<template #actions:prepend>
+			<div ref="autoscaleActionsEl" class="autoscale-actions" />
 		</template>
 
 		<template #actions>
@@ -519,6 +527,14 @@ onUnmounted(() => {
 		</template>
 
 		<template #sidebar>
+			<sidebar-detail icon="speed" :title="t('autoscale', 'Autoscaling')">
+				<autoscale-panel
+					:runners="autoscaleRunners"
+					:actions-target="autoscaleActionsEl"
+					@changed="load"
+				/>
+			</sidebar-detail>
+
 			<!-- The same intervals the cache page offers. The charts need a second
 				 sample before they draw anything, so the short ones are what make
 				 them fill while you watch: the report is a live snapshot with no
@@ -547,8 +563,6 @@ onUnmounted(() => {
 					'Resolved environment reporting is off (PROCESSES_REPORT_DETAILS).',
 				) }}
 			</v-notice>
-
-			<autoscale-panel :runners="autoscaleRunners" @changed="load" />
 
 			<div v-if="totals" class="totals">
 				<span>{{ totals.processes }} processes</span>
@@ -890,6 +904,13 @@ onUnmounted(() => {
 .process-row .memory,
 .process-row .cpu {
 	flex-shrink: 0;
+}
+
+.autoscale-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
 }
 
 .charts {
