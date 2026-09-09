@@ -19,7 +19,6 @@ import type {
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { getCache } from '../cache.js';
@@ -27,27 +26,16 @@ import {
 	createScopedCacheCollector,
 	foldHandedOverScopedCacheEpochs,
 	ItemScopedCacheService,
-	pinnedScopedCacheTagsFromKeyedFilters,
-	pinnedScopedCacheTagsFromM2oParents,
-	pinnedScopedCacheTagsFromO2mChildren,
 	readScopedCacheEpochs,
-	resolveScopedCacheM2oJoinChainFromPath,
-	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheCollectionsChangedByOnDelete,
-	scopedCacheFilterKeyingByCollection,
-	scopedCacheOwnershipNestedPkPaths,
-	scopedCachePurgeEnabled,
 	takenOverScopedCacheKey,
 } from '../scoped-cache.js';
-import { collectionsInFieldMap }
-	from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
-import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -744,25 +732,8 @@ implements AbstractService<Item> {
 				)
 				: query;
 
-		// Nest the ownership ancestors so the scope pins them by key, not a bare tag a
-		// `fields: ['*']` read would over-purge on; stripped from the response below.
-		const injectedOwnershipPaths = scopedCachePurgeEnabled()
-			? scopedCacheOwnershipNestedPkPaths(this.schema, this.collection)
-					.filter((path) => {
-						const ancestorPath = path.split('.').slice(0, -1);
-
-						// The caller already nests past this prefix — its rows come back
-						// on their own, so neither inject nor strip it.
-						return !(updatedQuery.fields ?? []).some((field) => {
-							const segments = field.split('.');
-
-							return (
-								segments.length > ancestorPath.length &&
-								ancestorPath.every((seg, at) => segments[at] === seg)
-							);
-						});
-					})
-			: [];
+		const injectedOwnershipPaths =
+			this.scopedCache.ownershipPathsToInject(updatedQuery);
 
 		let ast = await getAstFromQuery(
 			{
@@ -789,72 +760,15 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		// Derived from the AST alone, so it must not hang on the read handing rows
-		// back: `run-ast` returns early on an empty result and never reaches the
-		// callback, and an empty map here drops every collection's tag. A read with
-		// purging off lists no collection anyway.
-		const fieldMap = scopedCachePurgeEnabled()
-			? fieldMapFromAst(ast, this.schema)
-			: { read: new Map(), other: new Map() };
-
-		// A collection this read's filters name by primary key depends on those
-		// rows and no others, so it is pinned even when no row of it was nested.
-		const filterKeying:
-			ReturnType<typeof scopedCacheFilterKeyingByCollection> =
-			scopedCachePurgeEnabled()
-				? scopedCacheFilterKeyingByCollection(this.schema, ast)
-				: new Map();
-
-		const keyedFilterPins = pinnedScopedCacheTagsFromKeyedFilters(
-			this.schema,
-			this.collection,
-			filterKeying,
+		const scopedCachePlan = this.scopedCache.planRead(
+			ast,
+			injectedOwnershipPaths,
 		);
 
-		// Read before the query runs: `run-ast` fills the pins from inside it, and
-		// the tag loop below needs the same answer.
-		const beyondNestedRows = scopedCachePurgeEnabled()
-			? scopedCacheCollectionsBeyondNestedRows(this.schema, ast, filterKeying)
-			: new Set<string>();
-
-		// A permission-gated ancestor is marked beyond, but we injected its rows to pin
-		// by key, and a permission change flushes the cache — so the key can't go stale.
-		for (const path of injectedOwnershipPaths) {
-			const joins = resolveScopedCacheM2oJoinChainFromPath(
-				this.schema,
-				this.collection,
-				path.split('.').slice(0, -1),
-			);
-
-			const ancestor = joins?.[joins.length - 1]?.relatedCollection;
-
-			if (ancestor) {
-				beyondNestedRows.delete(ancestor);
-			}
-		}
-
-		// The pins DO depend on the rows, so this one is filled from inside the read.
-		let m2oParentPins:
-			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
-
-		let o2mChildPins:
-			ReturnType<typeof pinnedScopedCacheTagsFromO2mChildren> = new Map();
-
-		// Collections reached by two disagreeing reverse fks: no single ownership
-		// slice covers them, so they stay bare even when an ancestor is pinned.
-		const o2mConflicted = new Set<string>();
-
-		// Before the query, so it predates any purge racing this read. The collections
-		// are the ones its tags will name, both known already: the field map is built
-		// off the AST and the keying off the filter.
-		const scopedCacheEpochs: Record<string, string | null>
-			= opts?.skipScopedCacheEpochs === true
+		// Before the query, so it predates any purge racing this read.
+		const scopedCacheEpochs = opts?.skipScopedCacheEpochs === true
 			? {}
-			: await readScopedCacheEpochs([
-				this.collection,
-				...collectionsInFieldMap(fieldMap),
-				...filterKeying.keys(),
-			]);
+			: await readScopedCacheEpochs(scopedCachePlan.collectionsToGuard());
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
@@ -867,28 +781,7 @@ implements AbstractService<Item> {
 			// that key, so it reads them from the one place they still exist. Not
 			// called for an empty result, which needs no pin: with no row nested,
 			// the bare tag is already what each collection deserves.
-			onRowsWithTemporaryFields: (rows) => {
-				if (scopedCachePurgeEnabled() === false) {
-					return;
-				}
-
-				m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
-					this.schema,
-					this.collection,
-					fieldMap,
-					toArray(rows),
-					beyondNestedRows,
-				);
-
-				o2mChildPins = pinnedScopedCacheTagsFromO2mChildren(
-					this.schema,
-					this.collection,
-					fieldMap,
-					toArray(rows),
-					beyondNestedRows,
-					o2mConflicted,
-				);
-			},
+			onRowsWithTemporaryFields: (rows) => scopedCachePlan.pinFromRows(rows),
 		});
 
 		// TODO when would this happen?
@@ -922,27 +815,14 @@ implements AbstractService<Item> {
 
 		// Scope this read for cache purging (see ItemScopedCacheService.readTags);
 		// bounded to this read — it rides the result via `getMeta()`, not a field.
-		let scopedCacheTags: ScopedCacheTag[] = [];
-		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
-
-		if (scopedCachePurgeEnabled()) {
-			const readTagResult = await this.scopedCache.readTags({
+		const { tags: scopedCacheTags, unautopurgeable: scopedCacheUnautopurgeableTags }
+			= await this.scopedCache.readTags({
 				ast,
-				fieldMap,
+				plan: scopedCachePlan,
 				updatedQuery,
-				filterKeying,
-				keyedFilterPins,
-				m2oParentPins,
-				o2mChildPins,
-				o2mConflicted,
-				beyondNestedRows,
 				filteredRecords: filteredRecords as Item[],
 				collector: scopedCacheCollector,
 			});
-
-			scopedCacheTags = readTagResult.tags;
-			scopedCacheUnautopurgeableTags = readTagResult.unautopurgeable;
-		}
 
 		if (opts?.emitEvents !== false) {
 			// Read action hooks stay fire-and-forget; the await opt-in (`awaitActionHooks`) is for mutations.

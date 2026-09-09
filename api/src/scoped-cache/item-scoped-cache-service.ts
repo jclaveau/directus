@@ -19,17 +19,14 @@ import {
 import {
 	collectionsInFieldMap,
 } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
-import type {
-	CollectionKey,
-	FieldMap,
-} from '../permissions/modules/process-ast/types.js';
 import type { AST } from '../types/ast.js';
 import {
 	composeScopedCachePaths,
 	resolveScopedCacheM2oJoinChainFromPath,
-	type ScopedCacheFilterKeying,
+	scopedCacheOwnershipNestedPkPaths,
 	type ScopedCacheM2oJoin,
 } from './paths.js';
+import { ScopedCacheReadPlan } from './read-plan.js';
 import {
 	scopedCachePurgeEnabled,
 } from './config.js';
@@ -50,14 +47,8 @@ import {
 
 export type ScopedCacheReadInputs = {
 	ast: AST;
-	fieldMap: FieldMap;
+	plan: ScopedCacheReadPlan;
 	updatedQuery: Query;
-	filterKeying: Map<CollectionKey, ScopedCacheFilterKeying>;
-	keyedFilterPins: Map<CollectionKey, ScopedCacheTag[]>;
-	m2oParentPins: Map<CollectionKey, ScopedCacheTag[]>;
-	o2mChildPins: Map<CollectionKey, ScopedCacheTag[]>;
-	o2mConflicted: Set<CollectionKey>;
-	beyondNestedRows: Set<CollectionKey>;
 	filteredRecords: Item[];
 	collector: ScopedCacheCollector;
 };
@@ -479,6 +470,46 @@ export class ItemScopedCacheService {
 	}
 
 	/**
+	 * Ownership ancestors to nest into the read so the scope pins them by key rather
+	 * than by the bare tag a `fields: ['*']` read would over-purge on. Stripped from
+	 * the response again once the tags are built.
+	 */
+	ownershipPathsToInject(query: Query): string[] {
+		if (!scopedCachePurgeEnabled()) {
+			return [];
+		}
+
+		return scopedCacheOwnershipNestedPkPaths(this.schema, this.collection)
+			.filter((path) => {
+				const ancestorPath = path.split('.').slice(0, -1);
+
+				// The caller already nests past this prefix — its rows come back on
+				// their own, so neither inject nor strip it.
+				return !(query.fields ?? []).some((field) => {
+					const segments = field.split('.');
+
+					return (
+						segments.length > ancestorPath.length &&
+						ancestorPath.every((seg, at) => segments[at] === seg)
+					);
+				});
+			});
+	}
+
+	/**
+	 * Everything this read's tags need that the AST alone decides, resolved before
+	 * the query runs. The plan fills its own row-dependent half from inside it.
+	 */
+	planRead(ast: AST, injectedOwnershipPaths: string[]): ScopedCacheReadPlan {
+		return new ScopedCacheReadPlan(
+			this.collection,
+			this.schema,
+			ast,
+			injectedOwnershipPaths,
+		);
+	}
+
+	/**
 	 * Event context handed to the `cache.purge` filter so extensions can resolve their
 	 * own tags.
 	 */
@@ -632,20 +663,28 @@ export class ItemScopedCacheService {
 	}> {
 		const {
 			ast,
-			fieldMap,
+			plan,
 			updatedQuery,
-			filterKeying,
-			keyedFilterPins,
-			m2oParentPins,
-			o2mChildPins,
-			o2mConflicted,
-			beyondNestedRows,
 			filteredRecords,
 			collector: scopedCacheCollector,
 		} = inputs;
 
 		let tags: ScopedCacheTag[] = [];
 		let unautopurgeable: ScopedCacheTag[] = [];
+
+		if (!scopedCachePurgeEnabled()) {
+			return { tags, unautopurgeable };
+		}
+
+		const {
+			fieldMap,
+			filterKeying,
+			keyedFilterPins,
+			m2oParentPins,
+			o2mChildPins,
+			o2mConflicted,
+			beyondNestedRows,
+		} = plan;
 
 		const nestedCollections = scopedCacheNestedCollections(ast);
 
