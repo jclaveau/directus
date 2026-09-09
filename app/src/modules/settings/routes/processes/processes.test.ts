@@ -499,6 +499,41 @@ describe('the cpu and memory charts', () => {
 		expect(apex.updateOptions).not.toHaveBeenCalled();
 	});
 
+	// A refresh under the pointer is a reading lost: ApexCharts rebuilds the
+	// tooltip on every update, so the chart being read waits for the pointer.
+	test('holds the chart the pointer is over until it leaves', async () => {
+		const wrapper = await mountLoaded();
+		const canvases = wrapper.findAll('.canvas');
+
+		// The sidebar's refresh control lives in a slot of a stubbed layout, so
+		// the refresh it fires is asked for the way it asks for it.
+		const refresh = (wrapper.vm as any).load as () => Promise<void>;
+
+		await refresh();
+		await flushPromises();
+
+		expect(apex.updateOptions).toHaveBeenCalledTimes(3);
+
+		await canvases[0]!.trigger('pointerenter');
+		await refresh();
+		await flushPromises();
+
+		// The two nobody is reading redraw on the refresh they always did.
+		expect(apex.updateOptions).toHaveBeenCalledTimes(5);
+
+		await canvases[0]!.trigger('pointerleave');
+		await flushPromises();
+
+		expect(apex.updateOptions).toHaveBeenCalledTimes(8);
+
+		// Nothing waited this time, so leaving asks for no redraw of its own.
+		await canvases[1]!.trigger('pointerenter');
+		await canvases[1]!.trigger('pointerleave');
+		await flushPromises();
+
+		expect(apex.updateOptions).toHaveBeenCalledTimes(8);
+	});
+
 	// ApexCharts attaches outside Vue's tree, so nothing else would clean it up.
 	test('destroys every chart when the page goes away', async () => {
 		const wrapper = await mountLoaded();

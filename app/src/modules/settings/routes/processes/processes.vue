@@ -366,38 +366,70 @@ function memoryChartOptions(): ApexOptions {
 	);
 }
 
+type ChartName = 'usage' | 'cpu' | 'memory';
+
+/** The chart the pointer is over, whose redraw waits for the pointer to leave. */
+const reading = ref<ChartName | null>(null);
+const heldRedraw = ref(false);
+
+function release(): void {
+	reading.value = null;
+
+	if (heldRedraw.value) {
+		heldRedraw.value = false;
+		void renderCharts();
+	}
+}
+
+async function drawChart(
+	name: ChartName,
+	element: HTMLElement | null,
+	chart: ApexCharts | null,
+	options: () => ApexOptions,
+): Promise<ApexCharts | null> {
+	if (element === null) {
+		return chart;
+	}
+
+	if (chart === null) {
+		const drawn = new ApexCharts(element, options());
+		await drawn.render();
+		return drawn;
+	}
+
+	// An update rebuilds the tooltip, so a chart being read under the pointer
+	// would lose the reading on every refresh. The samples keep arriving; what
+	// they draw is what the pointer leaving asks for.
+	if (reading.value === name) {
+		heldRedraw.value = true;
+		return chart;
+	}
+
+	await chart.updateOptions(options(), true, false);
+	return chart;
+}
+
 async function renderCharts(): Promise<void> {
-	if (usageChartEl.value !== null) {
-		if (usageChart === null) {
-			usageChart = new ApexCharts(usageChartEl.value, usageChartOptions());
-			await usageChart.render();
-		}
-		else {
-			await usageChart.updateOptions(usageChartOptions(), true, false);
-		}
-	}
+	usageChart = await drawChart(
+		'usage',
+		usageChartEl.value,
+		usageChart,
+		usageChartOptions,
+	);
 
-	if (cpuChartEl.value !== null) {
-		if (cpuChart === null) {
-			cpuChart = new ApexCharts(cpuChartEl.value, cpuChartOptions());
-			await cpuChart.render();
-		}
-		else {
-			await cpuChart.updateOptions(cpuChartOptions(), true, false);
-		}
-	}
+	cpuChart = await drawChart(
+		'cpu',
+		cpuChartEl.value,
+		cpuChart,
+		cpuChartOptions,
+	);
 
-	if (memoryChartEl.value === null) {
-		return;
-	}
-
-	if (memoryChart === null) {
-		memoryChart = new ApexCharts(memoryChartEl.value, memoryChartOptions());
-		await memoryChart.render();
-		return;
-	}
-
-	await memoryChart.updateOptions(memoryChartOptions(), true, false);
+	memoryChart = await drawChart(
+		'memory',
+		memoryChartEl.value,
+		memoryChart,
+		memoryChartOptions,
+	);
 }
 
 // The processes that are scaling a pool, plucked from the tree the page already
@@ -570,7 +602,12 @@ onUnmounted(() => {
 						) }}
 					</v-notice>
 
-					<div ref="usageChartEl" />
+					<div
+						ref="usageChartEl"
+						class="canvas"
+						@pointerenter="reading = 'usage'"
+						@pointerleave="release"
+					/>
 				</div>
 
 				<div class="chart">
@@ -586,14 +623,25 @@ onUnmounted(() => {
 						) }}
 					</v-notice>
 
-					<div v-show="chartsCarryCpu" ref="cpuChartEl" />
+					<div
+						v-show="chartsCarryCpu"
+						ref="cpuChartEl"
+						class="canvas"
+						@pointerenter="reading = 'cpu'"
+						@pointerleave="release"
+					/>
 				</div>
 
 				<div class="chart">
 					<h3 class="chart-title">
 						{{ t('processes_memory_chart', 'Memory per process') }}
 					</h3>
-					<div ref="memoryChartEl" />
+					<div
+						ref="memoryChartEl"
+						class="canvas"
+						@pointerenter="reading = 'memory'"
+						@pointerleave="release"
+					/>
 				</div>
 			</div>
 
@@ -855,6 +903,22 @@ onUnmounted(() => {
 .chart-title {
 	font-weight: 600;
 	margin-block-end: 8px;
+}
+
+/*
+ * The dot beside a series is a text glyph drawn ten points larger than the box
+ * holding it, so it rides above the label it belongs to. Drawn as a shape it
+ * sits on the line instead, in the colour the series is already given.
+ */
+.chart :deep(.apexcharts-tooltip-marker) {
+	inline-size: 10px;
+	block-size: 10px;
+	border-radius: 50%;
+	background: currentcolor;
+}
+
+.chart :deep(.apexcharts-tooltip-marker::before) {
+	content: none;
 }
 
 .usage-figures {
