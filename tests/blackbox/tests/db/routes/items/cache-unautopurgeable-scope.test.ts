@@ -6,6 +6,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
+import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -31,6 +32,7 @@ const MANUAL_DEP = 'p_manual_dep';
 const SCOPE_HOOK_READ = 'p_unauto_scope_hook';
 const MANUAL_BARE_READ = 'p_manual_bare_read';
 const COVERED_READ = 'p_unauto_covered';
+const ANOMALIES = 'directus_cache_stats_anomalies';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -48,7 +50,12 @@ describe(oneLine`
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-unauto-${vendor}`;
 
+		// The cancellation is silent to the caller, so the anomaly is the only place
+		// the unreproducible tag is named.
+		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
 		let instance: ChildProcess;
+		let db: Knex;
 		let manualDep: number;
 		let covered: number;
 
@@ -159,11 +166,15 @@ describe(oneLine`
 				env: env[vendor],
 			});
 
+			db = knex(config.knexConfig[vendor]!);
+
 			await awaitDirectusConnection(port);
 		}, 60_000);
 
 		afterAll(async () => {
 			instance.kill();
+
+			await db.destroy();
 
 			await Promise.all([
 				DeleteCollection(vendor, { collection: CANCEL_READ }),
@@ -325,5 +336,29 @@ describe(oneLine`
 			expect(first.headers[cacheStatusHeader]).toBe('MISS');
 			expect(second.headers[cacheStatusHeader]).toBe('MISS');
 		});
+
+		it(oneLine`
+			files the cancellation as an anomaly naming the tag no write reproduces, so
+			the hook that has to claim manuallyPurged can be found
+		`, async () => {
+			await readSlice(CANCEL_READ, 'z');
+
+			// The stats stream drains on a ten-second cron, so the row lands some
+			// ticks after the request that refused.
+			for (let attempt = 0; attempt < 40; attempt++) {
+				const rows = await db(ANOMALIES)
+					.where({ reason: 'unautopurgeable_scope' })
+					.select('detail');
+
+				if (rows.length > 0) {
+					expect(String(rows[0].detail)).toBe(`${CANCEL_DEP}:ghost`);
+					return;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			throw new Error('no unautopurgeable_scope anomaly was recorded');
+		}, 60_000);
 	});
 });

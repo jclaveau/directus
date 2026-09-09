@@ -10,6 +10,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
+import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -21,6 +22,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // by writing from an `items.read` filter, which fires with the rows in hand.
 
 const COLLECTION = 'read_inflight_purge';
+const ANOMALIES = 'directus_cache_stats_anomalies';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -38,7 +40,12 @@ describe(oneLine`
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-inflight-${vendor}`;
 
+		// The refusal is silent by design, so the operator only ever learns of it
+		// through the anomaly it files — which is itself only written with stats on.
+		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
 		let instance: ChildProcess;
+		let db: Knex;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 		beforeAll(async () => {
@@ -66,12 +73,15 @@ describe(oneLine`
 				env: env[vendor],
 			});
 
+			db = knex(config.knexConfig[vendor]!);
+
 			await awaitDirectusConnection(port);
 		}, 60_000);
 
 		afterAll(async () => {
 			instance?.kill();
 
+			await db.destroy();
 			await DeleteCollection(vendor, { collection: COLLECTION });
 		});
 
@@ -101,5 +111,29 @@ describe(oneLine`
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
 			expect(after.body.data[0].label).toBe('v2');
 		});
+
+		it(oneLine`
+			files the refusal as an anomaly naming the collection whose counter moved,
+			so a read that never caches is visible rather than only slow
+		`, async () => {
+			await readSlotA();
+
+			// The stats stream drains on a ten-second cron, so the row lands some
+			// ticks after the request that refused.
+			for (let attempt = 0; attempt < 40; attempt++) {
+				const rows = await db(ANOMALIES)
+					.where({ reason: 'inflight_purge' })
+					.select('detail');
+
+				if (rows.length > 0) {
+					expect(String(rows[0].detail)).toBe(COLLECTION);
+					return;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			throw new Error('no inflight_purge anomaly was recorded');
+		}, 60_000);
 	});
 });

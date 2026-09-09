@@ -10,6 +10,7 @@ import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
+import knex, { type Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -28,6 +29,7 @@ const UNGUARDED_READ = 'unguarded_read';
 const UNGUARDED_DEP = 'unguarded_dep';
 const GUARDED_READ = 'guarded_read';
 const GUARDED_DEP = 'guarded_dep';
+const ANOMALIES = 'directus_cache_stats_anomalies';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -45,7 +47,12 @@ describe(oneLine`
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-unguarded-${vendor}`;
 
+		// A response that never caches is otherwise indistinguishable from a slow
+		// one; the anomaly is the only place the refusal is named.
+		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
 		let instance: ChildProcess;
+		let db: Knex;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 		beforeAll(async () => {
@@ -86,11 +93,15 @@ describe(oneLine`
 				env: env[vendor],
 			});
 
+			db = knex(config.knexConfig[vendor]!);
+
 			await awaitDirectusConnection(port);
 		}, 60_000);
 
 		afterAll(async () => {
 			instance?.kill();
+
+			await db.destroy();
 
 			await Promise.all([
 				UNGUARDED_READ,
@@ -162,5 +173,29 @@ describe(oneLine`
 			expect(afterDepWrite.headers[cacheStatusHeader]).toBe('MISS');
 			expect(afterDepWrite.body.data[0].dep_label).toBe('v2');
 		});
+
+		it(oneLine`
+			files the refusal as an anomaly naming the collection no counter covered,
+			so the operator can find the hook that has to hand its counters over
+		`, async () => {
+			await read(UNGUARDED_READ);
+
+			// The stats stream drains on a ten-second cron, so the row lands some
+			// ticks after the request that refused.
+			for (let attempt = 0; attempt < 40; attempt++) {
+				const rows = await db(ANOMALIES)
+					.where({ reason: 'unguarded_scope' })
+					.select('detail');
+
+				if (rows.length > 0) {
+					expect(String(rows[0].detail)).toBe(UNGUARDED_DEP);
+					return;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			throw new Error('no unguarded_scope anomaly was recorded');
+		}, 60_000);
 	});
 });
