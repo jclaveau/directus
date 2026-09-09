@@ -82,6 +82,28 @@ describe('get', () => {
 		expect(cache['redis'].get).toHaveBeenCalledWith(mockKey);
 		expect(result).toBe(mockRedisValue);
 	});
+
+	test('Keeps the redis value locally, without telling the peers', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		await cache.get(mockKey);
+
+		// The point of the tier: a second lookup of a key this process never set
+		// must not reach redis again.
+		expect(cache['local'].set).toHaveBeenCalledWith(mockKey, mockRedisValue);
+
+		// And no clear goes out — nothing changed, so a peer's copy is still good.
+		expect(cache['bus'].publish).not.toHaveBeenCalled();
+	});
+
+	test('Keeps nothing when redis has nothing either', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+		vi.mocked(cache['redis'].get).mockResolvedValue(undefined);
+
+		await cache.get(mockKey);
+
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
 });
 
 describe('set', () => {

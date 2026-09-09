@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
 	return {
 		mockCache: {},
 		getCacheValue: vi.fn(),
+		getCacheValues: vi.fn(),
 		warn: vi.fn(),
 		shouldSkipCache: vi.fn(),
 		getCacheKey: vi.fn(),
@@ -23,12 +24,14 @@ const mocks = vi.hoisted(() => {
 	};
 });
 
-const { getCacheValue, warn, shouldSkipCache, getCacheKey } = mocks;
+const { getCacheValue, getCacheValues, warn, shouldSkipCache, getCacheKey }
+	= mocks;
 
 vi.mock('../cache.js', () => {
 	return {
 		getCache: () => ({ cache: mocks.mockCache }),
 		getCacheValue: mocks.getCacheValue,
+		getCacheValues: mocks.getCacheValues,
 	};
 });
 
@@ -155,6 +158,13 @@ beforeEach(() => {
 
 	vi.mocked(cacheStatsActive).mockReturnValue(false);
 	vi.mocked(readCacheMissGap).mockResolvedValue(null);
+
+	// Answered from the per-key mock every fixture below already sets, so a batched
+	// read means exactly what the same keys read one at a time meant — including
+	// rejecting when any one of them does.
+	getCacheValues.mockImplementation((cache: unknown, keys: string[]) => {
+		return Promise.all(keys.map((key) => getCacheValue(cache, key)));
+	});
 });
 
 afterEach(() => {
@@ -237,6 +247,20 @@ describe('checkCacheMiddleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith('x-cache-status', 'MISS');
 		expect(next).toHaveBeenCalled();
+	});
+
+	test('reads the payload and its expiry sibling in one call', async () => {
+		primeHit();
+
+		await checkCacheMiddleware(makeReq(), makeRes(), next);
+
+		// The round trip the batch saves. Two awaited reads satisfy every other
+		// assertion in this file and cost twice as much on every hit, so nothing
+		// else here would notice them coming back.
+		expect(getCacheValues).toHaveBeenCalledWith(
+			expect.anything(),
+			['cache-key', 'cache-key__expires_at'],
+		);
 	});
 
 	test('a value read failure is logged and falls through as a MISS', async () => {
