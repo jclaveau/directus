@@ -124,7 +124,6 @@ jobs:
       # cooldowns measured in seconds, so a change is visible while it is watched.
       PM2_AUTOSCALE_APP_NAME: directus
       PM2_AUTOSCALE_SAMPLE_WINDOW: '3'
-      PM2_AUTOSCALE_MIN_WORKERS: '2'
       PM2_AUTOSCALE_MAX_WORKERS: '6'
       PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '10'
       PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '30'
@@ -335,10 +334,15 @@ jobs:
           # /directus) so EXTENSIONS_PATH still finds the auto-login extension, and
           # pointed at one log file so the streaming step below is unchanged.
           npm install --global pm2@5
+          # --wait-ready and the matching listen_timeout are what
+          # ecosystem.config.cjs declares, and a rolling restart retiring a
+          # worker before its replacement serves is what they prevent.
           ADMIN_PASSWORD="$PW" PUBLIC_URL="$URL" pm2 start directus/cli.js \
             --name directus \
             --instances "${{ inputs.instances || '3' }}" \
             --max-memory-restart 400M \
+            --wait-ready \
+            --listen-timeout 15000 \
             --output /tmp/directus.log \
             --error /tmp/directus.log \
             -- start
