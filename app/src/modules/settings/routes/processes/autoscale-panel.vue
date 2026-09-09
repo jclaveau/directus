@@ -569,10 +569,11 @@ onMounted(load);
 }
 
 /*
- * Where the value came from sits at the far end, whatever the value is wide.
- * Specific enough to outrank the 8px the input gives its own append slot.
+ * The steppers sit where a select's chevron sits, with the layer that supplied
+ * the value after them — so a number row and a chosen row read at the same
+ * two points rather than each at its own.
  */
-.control :deep(.v-input .input .append) {
+.control.numeric :deep(.arrows) {
 	margin-inline-start: auto;
 }
 
