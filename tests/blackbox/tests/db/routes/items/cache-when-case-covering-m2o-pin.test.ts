@@ -39,10 +39,25 @@ describe(oneLine`
 
 		// A non-null filter is what drives `hasItemPermissions` true, which is what
 		// leaves nothing in `allowedFields`.
-		const readEverything = (collection: string) => {
+		const readUnderRowFilter = (collection: string) => {
 			return {
 				policy: '+',
 				permissions: { id: { _nnull: true } },
+				validation: null,
+				fields: ['*'],
+				presets: null,
+				collection,
+				action: 'read',
+			};
+		};
+
+		// The parent is readable outright: a row filter of its own would join into
+		// the m2o's query and bare the collection over membership, which is a
+		// separate cause from the whenCase this test pins.
+		const readOutright = (collection: string) => {
+			return {
+				policy: '+',
+				permissions: {},
 				validation: null,
 				fields: ['*'],
 				presets: null,
@@ -103,15 +118,15 @@ describe(oneLine`
 			});
 
 			await createUser('when case covering', coveringToken, [
-				readEverything(PARENT),
-				readEverything(CHILD),
+				readOutright(PARENT),
+				readUnderRowFilter(CHILD),
 			]);
 
 			// A second rule on the child, with its own filter and a narrower field
 			// set, leaves `parent` readable under the first case only.
 			await createUser('when case partial', partialToken, [
-				readEverything(PARENT),
-				readEverything(CHILD),
+				readOutright(PARENT),
+				readUnderRowFilter(CHILD),
 				{
 					policy: '+',
 					permissions: { label: { _eq: 'never matched' } },
