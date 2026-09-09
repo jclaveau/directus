@@ -98,19 +98,25 @@ for (const [name, value] of knobs) {
 //
 // A ratio nothing has measured yet is not ratcheted at all. `fan` and the command
 // deltas below are reported on their first run and gated on the next.
-const maxHitVsOff = Number(process.env['PERF_CACHE_HIT_VS_OFF_MAX'] ?? 1.15);
-const maxMissVsOff = Number(process.env['PERF_CACHE_MISS_VS_OFF_MAX'] ?? 1.85);
-const maxScopedVsFull = Number(process.env['PERF_CACHE_SCOPED_VS_FULL_MAX'] ?? 1.25);
-const maxFillVsFull = Number(process.env['PERF_CACHE_FILL_VS_FULL_MAX'] ?? 1.45);
 const maxWriteScaling = Number(process.env['PERF_CACHE_WRITE_SCALING_MAX'] ?? 1.5);
 const maxCommandsPerHit = Number(process.env['PERF_CACHE_MAX_COMMANDS_HIT'] ?? 7);
 const maxCommandsPerFill = Number(process.env['PERF_CACHE_MAX_COMMANDS_FILL'] ?? 21);
 
-// What the same figures would be with the response cache alone paying for itself:
-// two reads on a hit, and on a fill the epoch capture, the tag writes, the value
-// and its sidecar, and the post-fill re-read.
+const maxWriteCommandScaling =
+	Number(process.env['PERF_CACHE_WRITE_COMMAND_SCALING_MAX'] ?? 3.1);
+
+// The target every shape is held to in Headroom, whatever its own ratchet allows.
+const targetMissVsOff = 1.85;
+const targetMissVsFull = 1.45;
+
+// What the counts would be with the response cache alone paying for itself: two
+// reads on a hit, and on a fill the epoch capture, the tag writes, the value and
+// its sidecar, and the post-fill re-read.
 const targetCommandsPerHit = 2;
 const targetCommandsPerFill = 7;
+
+// A purge that drops one slice should cost the same however much the cache holds.
+const targetWriteCommandScaling = 1.5;
 
 const STATUS_HEADER = 'x-cache-status';
 const NOTE = 'perf_note';
@@ -183,14 +189,14 @@ const arms: Arm[] = [
 const readShapes = [
 	{
 		name: 'flat',
-		ratcheted: true,
+		ceilings: { hitVsOff: 1.15, missVsOff: 1.85, hitVsFull: 1.25, missVsFull: 1.45 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`,
 	},
 	{
 		// Two m2o hops, so the pins come off nested rows rather than off the filter.
 		name: 'deep',
-		ratcheted: true,
+		ceilings: { hitVsOff: 1.15, missVsOff: 1.85, hitVsFull: 1.25, missVsFull: 1.45 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=25`
 				+ `&fields=*,author.*,author.company.*`;
@@ -199,7 +205,7 @@ const readShapes = [
 	{
 		// 200 rows, so the payload itself counts. One pin: the filtered column.
 		name: 'wide',
-		ratcheted: true,
+		ceilings: { hitVsOff: 1.15, missVsOff: 1.85, hitVsFull: 1.25, missVsFull: 1.45 },
 		path: (tenant: string) =>
 			`/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`,
 	},
@@ -208,8 +214,11 @@ const readShapes = [
 		// carries a DIFFERENT parent. What separates this from `wide` is the pin
 		// fan-out alone, which is the crossover #392 is about.
 		name: 'fan',
-		// Nothing has measured it yet, so it is reported and not gated.
-		ratcheted: false,
+		// Its own, looser pair: a read that pins one tag per row writes a tag set
+		// per row too, and that is the cost the shape exists to expose rather than
+		// one the ceiling should hide. The target every shape is held to stays in
+		// Headroom.
+		ceilings: { hitVsOff: 1.15, missVsOff: 2.25, hitVsFull: 1.25, missVsFull: 1.75 },
 		path: (tenant: string) => {
 			return `/items/${NOTE}?filter[tenant][_eq]=${tenant}&limit=200`
 				+ `&fields=*,author.*`;
@@ -629,6 +638,42 @@ async function census(
 	};
 }
 
+/**
+ * The commands one request issues, named by the keys they touch.
+ *
+ * The census says how many; only this says which. Four commands the response
+ * cache cannot account for look the same in a count and are obvious the moment
+ * their keys are visible, so this runs after the timed phases — MONITOR sees
+ * every client on the server and slows it down — with the other arms idle.
+ */
+async function traceRedisCommands(
+	label: string,
+	run: () => Promise<void>,
+): Promise<string[]> {
+	const watcher = new Redis(redisUrl);
+	const monitor = await watcher.monitor();
+	const lines: string[] = [];
+
+	monitor.on('monitor', (_time: string, args: string[]) => {
+		lines.push(args.join(' ').slice(0, 140));
+	});
+
+	// The subscription is registered asynchronously on the server, so a command
+	// issued straight after it can be processed before it is.
+	await new Promise((wake) => setTimeout(wake, 250));
+	await run();
+	await new Promise((wake) => setTimeout(wake, 250));
+
+	monitor.disconnect();
+	watcher.disconnect();
+
+	return [
+		`${label} — ${lines.length} commands`,
+		...lines.map((line) => `    ${line}`),
+		'',
+	];
+}
+
 async function measureIdleRedisFloor(): Promise<number> {
 	await redis.config('RESETSTAT');
 	await new Promise((wake) => setTimeout(wake, 3000));
@@ -897,6 +942,26 @@ test('the cache costs less than what it replaces', async () => {
 		}
 	}
 
+	// After every timed phase and every count, because MONITOR slows the server it
+	// watches. One fill and one hit per arm, which is all it takes: the commands a
+	// request issues are the same every time.
+	const traces: string[] = [];
+
+	for (const armName of ['full', 'scoped']) {
+		const arm = arms.find((candidate) => candidate.name === armName)!;
+		const tracePath = `/items/${NOTE}?filter[tenant][_eq]=t5&limit=25`;
+
+		await clearResponseCache(arm);
+
+		traces.push(...await traceRedisCommands(`${armName}, one fill`, async () => {
+			await api(arm.base, tracePath);
+		}));
+
+		traces.push(...await traceRedisCommands(`${armName}, one hit`, async () => {
+			await api(arm.base, tracePath);
+		}));
+	}
+
 	const verdicts: string[] = [];
 	const headroom: string[] = [];
 
@@ -949,35 +1014,56 @@ test('the cache costs less than what it replaces', async () => {
 		const uncachedMiss = seriesOf(`${shape.name}:miss`, 'off').median;
 		const scopedHit = seriesOf(`${shape.name}:hit`, 'scoped').median;
 		const scopedMiss = seriesOf(`${shape.name}:miss`, 'scoped').median;
+		const missVsOff = scopedMiss / uncachedMiss;
+		const missVsFull = scopedMiss / seriesOf(`${shape.name}:miss`, 'full').median;
 
-		const record = shape.ratcheted
-			? verdict
-			: observe;
-
-		record(
+		verdict(
 			`${shape.name}: a scoped HIT against no cache at all`,
 			scopedHit / uncachedMiss,
-			maxHitVsOff,
+			shape.ceilings.hitVsOff,
 		);
 
-		record(
+		verdict(
 			`${shape.name}: a scoped MISS against no cache at all`,
-			scopedMiss / uncachedMiss,
-			maxMissVsOff,
+			missVsOff,
+			shape.ceilings.missVsOff,
 		);
 
-		record(
+		verdict(
 			`${shape.name}: a scoped HIT against a full-mode HIT`,
 			scopedHit / seriesOf(`${shape.name}:hit`, 'full').median,
-			maxScopedVsFull,
+			shape.ceilings.hitVsFull,
 		);
 
-		record(
+		verdict(
 			`${shape.name}: a scoped MISS against a full-mode MISS`,
-			scopedMiss / seriesOf(`${shape.name}:miss`, 'full').median,
-			maxFillVsFull,
+			missVsFull,
+			shape.ceilings.missVsFull,
+		);
+
+		// The same two against the figure every shape should reach, not the one
+		// its own ceiling was ratcheted to.
+		observe(
+			`${shape.name}: a scoped MISS against no cache at all`,
+			missVsOff,
+			targetMissVsOff,
+		);
+
+		observe(
+			`${shape.name}: a scoped MISS against a full-mode MISS`,
+			missVsFull,
+			targetMissVsFull,
 		);
 	}
+
+	const writeCommandScaling =
+		commandsPerWrite.get('scoped')!.get(warmSizes[1]!)!
+		/ commandsPerWrite.get('scoped')!.get(warmSizes[0]!)!;
+
+	const hitCommandCost = commandsPerHit.get('scoped')! - commandsPerHit.get('off')!;
+
+	const fillCommandCost =
+		commandsPerFill.get('scoped')! - commandsPerFill.get('off')!;
 
 	verdict(
 		`a scoped write over ${warmSizes[1]} entries against one over ${warmSizes[0]}`,
@@ -998,35 +1084,47 @@ test('the cache costs less than what it replaces', async () => {
 		maxCommandsPerFill,
 	);
 
-	// The same two counts with the control subtracted, which is what the response
-	// cache itself costs — the rest is what a request pays Redis before reaching
-	// it. Reported until a run has measured them; ratcheted after.
+	// A purge that drops one slice should cost the same however much the cache
+	// holds. Its LATENCY already does, because the deletes pipeline into one round
+	// trip; whether its COMMAND count does is the question a local Redis hides.
+	verdict(
+		`Redis commands per scoped write, ${warmSizes[1]} entries against`
+		+ ` ${warmSizes[0]}`,
+		writeCommandScaling,
+		maxWriteCommandScaling,
+	);
+
 	observe(
 		'Redis commands a scoped HIT adds over an uncached read',
-		commandsPerHit.get('scoped')! - commandsPerHit.get('off')!,
+		hitCommandCost,
 		targetCommandsPerHit,
 	);
 
 	observe(
 		'Redis commands a scoped fill adds over an uncached read',
-		commandsPerFill.get('scoped')! - commandsPerFill.get('off')!,
+		fillCommandCost,
 		targetCommandsPerFill,
 	);
 
-	// A purge that drops one slice should cost the same however much the cache
-	// holds. Its LATENCY already does, because the deletes pipeline into one round
-	// trip; whether its COMMAND count does is the question a local Redis hides.
 	observe(
 		`Redis commands per scoped write, ${warmSizes[1]} entries against`
 		+ ` ${warmSizes[0]}`,
-		commandsPerWrite.get('scoped')!.get(warmSizes[1]!)!
-		/ commandsPerWrite.get('scoped')!.get(warmSizes[0]!)!,
-		maxWriteScaling,
+		writeCommandScaling,
+		targetWriteCommandScaling,
 	);
 
 	report.push(
 		'',
 		...breakEven,
+		'',
+		'#### One request, command by command',
+		'',
+		'What the counts above are made of. Taken with MONITOR after every timed',
+		'phase, so it slows nothing that was measured.',
+		'',
+		'```',
+		...traces,
+		'```',
 		'',
 		'#### Gates',
 		'',
