@@ -3,6 +3,7 @@ import { systemCollectionRows } from '@directus/system-data';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	AutoscaleDrill,
 	AutoscaleNodeState,
 	AutoscaleRunner,
 	AutoscaleWriteSurface,
@@ -52,6 +53,15 @@ import {
 	type AutoscaleOverride,
 } from '../autoscale/lib/override.js';
 import {
+	loadedWorker,
+	MAX_DRILL_PERCENT,
+	MAX_DRILL_SECONDS,
+	MIN_DRILL_PERCENT,
+	startDrill,
+	stopDrill,
+	drillState,
+} from '../autoscale/lib/drill.js';
+import {
 	autoscaleConfigKey,
 	configWithOverride,
 } from '../autoscale/lib/resolve-config.js';
@@ -65,6 +75,31 @@ import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+
+/**
+ * A whole number inside the range the field accepts, or the answer saying it
+ * is not one.
+ *
+ * Both drill inputs reach here off a query string, where every value is a
+ * string and `'abc'` and `''` are the same `NaN` — so the check is one place
+ * and the message names the field and the range it missed.
+ */
+function wholeNumberWithin(
+	value: unknown,
+	low: number,
+	high: number,
+	field: string,
+): number {
+	const parsed = Number(value);
+
+	if (Number.isInteger(parsed) === false || parsed < low || parsed > high) {
+		throw new InvalidPayloadError({
+			reason: `'${field}' has to be a whole number between ${low} and ${high}`,
+		});
+	}
+
+	return parsed;
+}
 
 /**
  * How far back a cache read was asked to look, as milliseconds.
@@ -613,6 +648,65 @@ export class UtilsService {
 					});
 			});
 		});
+	}
+
+	/** What the worker answering this is burning, and until when. */
+	async readAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('inspect the autoscale load drill');
+
+		return drillState();
+	}
+
+	/**
+	 * Put the whole pool under load for a while.
+	 *
+	 * A configuration change is judged by what the loop does with it, and a
+	 * quiet pool does nothing with any of it: the thresholds are never reached,
+	 * the cooldowns never start, and a ceiling that is wrong stays wrong until
+	 * the traffic that proves it arrives at the worst possible time. This
+	 * produces that traffic's effect on demand, and nothing else — it never
+	 * touches the bounds it is being used to test.
+	 */
+	async startAutoscaleDrill(
+		seconds: unknown,
+		percent: unknown,
+	): Promise<AutoscaleDrill> {
+		this.assertAdmin('run an autoscale load drill');
+
+		const duration = wholeNumberWithin(
+			seconds,
+			1,
+			MAX_DRILL_SECONDS,
+			'seconds',
+		);
+
+		const share = wholeNumberWithin(
+			percent,
+			MIN_DRILL_PERCENT,
+			MAX_DRILL_PERCENT,
+			'percent',
+		);
+
+		// Refused here and not only greyed out in the page: a drill laid over real
+		// traffic buys workers for load nobody asked to serve and measures the two
+		// together, which is worth refusing whatever surface asked for it.
+		const hottest = loadedWorker(await this.readAutoscaleRunners());
+
+		if (hottest !== null) {
+			throw new InvalidPayloadError({
+				reason: `the pool is already working — a worker is at ${hottest}% `
+					+ 'CPU, so a drill would measure that as well as itself',
+			});
+		}
+
+		return startDrill(duration, share);
+	}
+
+	/** Call the drill off before its deadline. */
+	async stopAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('stop the autoscale load drill');
+
+		return stopDrill();
 	}
 
 	/** Drop the override, so every field comes from the environment chain again. */

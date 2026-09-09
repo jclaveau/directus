@@ -6,7 +6,14 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { i18n } from '@/lang';
 
 vi.mock('@/api', () => {
-	return { default: { get: vi.fn(), patch: vi.fn(), delete: vi.fn() } };
+	return {
+		default: {
+			get: vi.fn(),
+			patch: vi.fn(),
+			post: vi.fn(),
+			delete: vi.fn(),
+		},
+	};
 });
 
 import { createMemoryHistory, createRouter } from 'vue-router';
@@ -134,12 +141,27 @@ function answered(
 	return { data: { data: { key, override, setByEmail } } };
 }
 
+/**
+ * The panel reads two routes, and they answer different shapes: everything
+ * here that is not the drill is the configuration.
+ */
 async function mounted(
 	override: Record<string, unknown> | null,
 	runners = [runner()],
 	setByEmail: string | null = null,
+	drill: { until: number | null; percent: number } | null = null,
 ) {
-	vi.mocked(api.get).mockResolvedValue(answered(override, setByEmail));
+	vi.mocked(api.get).mockImplementation(async (url: string) => {
+		if (url !== '/utils/autoscale/drill') {
+			return answered(override, setByEmail);
+		}
+
+		if (drill === null) {
+			throw { response: { status: 404 } };
+		}
+
+		return { data: { data: drill } };
+	});
 
 	const wrapper = mount(AutoscalePanel, { global, props: { runners } });
 	await flushPromises();
@@ -152,6 +174,7 @@ beforeEach(() => {
 	setActivePinia(createTestingPinia({ createSpy: vi.fn }));
 	vi.mocked(api.get).mockReset();
 	vi.mocked(api.patch).mockReset();
+	vi.mocked(api.post).mockReset();
 	vi.mocked(api.delete).mockReset();
 	vi.mocked(api.patch).mockResolvedValue(answered({}));
 	vi.mocked(api.delete).mockResolvedValue(answered(null));
@@ -656,5 +679,103 @@ describe('editing one field', () => {
 
 		expect(wrapper.text()).toContain('maxWorkers has to be a number');
 		expect(wrapper.emitted('changed')).toBeUndefined();
+	});
+});
+
+describe('the load drill', () => {
+	const drill = { until: null, percent: 80 };
+
+	// The route only exists where the deployment asked for it, so its absence
+	// is the answer to "can load be made here".
+	test('a deployment without the drill is offered none', async () => {
+		const wrapper = await mounted({});
+
+		expect(wrapper.find('.drill').exists()).toBe(false);
+	});
+
+	test('a quiet pool is offered a drill', async () => {
+		const wrapper = await mounted({}, [runner()], null, drill);
+
+		expect(wrapper.find('.drill').exists()).toBe(true);
+
+		const start = wrapper.findAll('.drill button')
+			.find((button) => button.text().includes('Run a load drill'));
+
+		expect(start?.attributes('disabled')).toBeUndefined();
+	});
+
+	// A drill laid over real traffic measures the traffic and the drill
+	// together, and buys workers nobody asked for.
+	test('a pool already working is not offered one, and is told why', async () => {
+		const busy = state({ cpuPercents: [12, 55] });
+		const wrapper = await mounted({}, [runner(busy)], null, drill);
+
+		const start = wrapper.findAll('.drill button')
+			.find((button) => button.text().includes('Run a load drill'));
+
+		expect(start?.attributes('disabled')).toBeDefined();
+		expect(wrapper.find('.drill').text()).toContain('already working');
+	});
+
+	test('starting one asks for the seconds and the share in the boxes', async () => {
+		vi.mocked(api.post).mockResolvedValue({
+			data: { data: { until: Date.now() + 60_000, percent: 80 } },
+		});
+
+		const wrapper = await mounted({}, [runner()], null, drill);
+		const inputs = wrapper.findAll('.drill input');
+
+		await inputs[0]!.setValue('45');
+		await inputs[1]!.setValue('70');
+
+		await wrapper.findAll('.drill button')
+			.find((button) => button.text().includes('Run a load drill'))!
+			.trigger('click');
+
+		await flushPromises();
+
+		expect(api.post).toHaveBeenCalledWith(
+			'/utils/autoscale/drill',
+			{ seconds: 45, percent: 70 },
+		);
+
+		expect(wrapper.find('.drill').text()).toContain('every worker busy');
+		expect(wrapper.find('.drill').text()).toContain('60s left');
+	});
+
+	test('a running drill offers the way out of it', async () => {
+		vi.mocked(api.delete).mockResolvedValue({
+			data: { data: { until: null, percent: 80 } },
+		});
+
+		const running = { until: Date.now() + 30_000, percent: 80 };
+		const wrapper = await mounted({}, [runner()], null, running);
+
+		expect(wrapper.find('.drill').text()).toContain('30s left');
+
+		await wrapper.findAll('.drill button')
+			.find((button) => button.text().includes('Stop the drill'))!
+			.trigger('click');
+
+		await flushPromises();
+
+		expect(api.delete).toHaveBeenCalledWith('/utils/autoscale/drill');
+		expect(wrapper.find('.drill').text()).toContain('Run a load drill');
+	});
+
+	test('a refused drill is reported as the api put it', async () => {
+		vi.mocked(api.post).mockRejectedValue({
+			response: { data: { errors: [{ message: 'the pool is already working' }] } },
+		});
+
+		const wrapper = await mounted({}, [runner()], null, drill);
+
+		await wrapper.findAll('.drill button')
+			.find((button) => button.text().includes('Run a load drill'))!
+			.trigger('click');
+
+		await flushPromises();
+
+		expect(wrapper.text()).toContain('the pool is already working');
 	});
 });

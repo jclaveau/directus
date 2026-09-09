@@ -138,3 +138,18 @@ export interface AutoscaleRunner {
 	name: string;
 	state: AutoscaleNodeState;
 }
+
+/**
+ * A load drill: every worker of the pool spending a share of its time busy,
+ * on purpose, so a change to the configuration can be watched deciding
+ * something instead of waiting for traffic that would decide it.
+ */
+export interface AutoscaleDrill {
+	/**
+	 * When the drill runs out, in milliseconds since the epoch, or `null` where
+	 * none is running.
+	 */
+	until: number | null;
+	/** The share of its time a drilling worker spends holding the processor. */
+	percent: number;
+}

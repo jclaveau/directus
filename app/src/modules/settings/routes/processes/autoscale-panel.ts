@@ -312,3 +312,26 @@ export function pinPatch(state: AutoscaleNodeState): Record<string, number> {
 export function isPinned(state: AutoscaleNodeState): boolean {
 	return state.config.minWorkers === state.config.maxWorkers;
 }
+
+/**
+ * Whether the pool is already doing something.
+ *
+ * A drill measures what the loop does with a configuration on load it made
+ * itself, so it is only honest on a pool at rest — and the workers it would
+ * buy over real traffic are ones nobody chose to buy. What the loop calls a
+ * worker that is not busy is its own release threshold, so that is what this
+ * is read against. The api refuses the same case; this only stops the button
+ * offering it.
+ */
+export function underLoad(state: AutoscaleNodeState): boolean {
+	return state.cpuPercents.some((cpu) => {
+		return cpu >= state.config.releaseCpuThreshold;
+	});
+}
+
+/** Seconds left of a drill, given when it runs out and what the clock says. */
+export function drillRemaining(until: number | null, now: number): number {
+	return until === null
+		? 0
+		: Math.max(0, Math.ceil((until - now) / 1000));
+}

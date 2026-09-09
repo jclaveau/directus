@@ -4,7 +4,7 @@ import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, AutoscaleConfig } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
@@ -24,6 +24,12 @@ import {
 	truncateCacheEvents,
 } from '../cache-events.js';
 import {
+	drillState,
+	loadedWorker,
+	startDrill,
+	stopDrill,
+} from '../autoscale/lib/drill.js';
+import {
 	applyOverridePatch,
 	parseOverridePatch,
 	readAutoscaleOverride,
@@ -33,6 +39,7 @@ import {
 	autoscaleConfigKey,
 	configWithOverride,
 } from '../autoscale/lib/resolve-config.js';
+import { processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
@@ -50,7 +57,9 @@ vi.mock('../cache.js');
 vi.mock('../cache-events.js');
 vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
+vi.mock('../autoscale/lib/drill.js');
 vi.mock('../autoscale/lib/override.js');
+vi.mock('../processes/index.js');
 vi.mock('../autoscale/lib/resolve-config.js');
 
 const schema = new SchemaBuilder()
@@ -668,6 +677,94 @@ describe('Services / Utils', () => {
 				.toThrowError(ForbiddenError);
 
 			expect(writeAutoscaleOverride).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale load drill', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		beforeEach(() => {
+			// The runners come off the processes report, and what they say is what
+			// `loadedWorker` is asked about — mocked here, checked in `drill.test.ts`.
+			vi.mocked(processesReportEnabled).mockReturnValue(false);
+		});
+
+		it('answers with the deadline the pool was given', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(null);
+			vi.mocked(startDrill).mockReturnValue({ until: 1000, percent: 80 });
+
+			await expect(service(admin).startAutoscaleDrill('30', '80'))
+				.resolves
+				.toEqual({ until: 1000, percent: 80 });
+
+			expect(startDrill).toHaveBeenCalledWith(30, 80);
+		});
+
+		// A drill laid over real traffic buys workers for load nobody asked to
+		// serve, and measures the two together.
+		it('refuses a drill over a pool that is already working', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(41);
+
+			await expect(service(admin).startAutoscaleDrill(30, 80))
+				.rejects
+				.toThrowError('a worker is at 41% CPU');
+
+			expect(startDrill).not.toHaveBeenCalled();
+		});
+
+		it('refuses a drill longer than a worker will run one for', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(null);
+
+			await expect(service(admin).startAutoscaleDrill(600, 80))
+				.rejects
+				.toThrowError(`'seconds' has to be a whole number between 1 and 120`);
+
+			expect(startDrill).not.toHaveBeenCalled();
+		});
+
+		it('refuses a share outside what a worker will burn', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(null);
+
+			await expect(service(admin).startAutoscaleDrill(30, 200))
+				.rejects
+				.toThrowError(`'percent' has to be a whole number between 10 and 95`);
+
+			expect(startDrill).not.toHaveBeenCalled();
+		});
+
+		it('stops a drill and reads back what this worker is burning', async () => {
+			vi.mocked(stopDrill).mockReturnValue({ until: null, percent: 80 });
+			vi.mocked(drillState).mockReturnValue({ until: 2000, percent: 80 });
+
+			await expect(service(admin).stopAutoscaleDrill())
+				.resolves
+				.toEqual({ until: null, percent: 80 });
+
+			await expect(service(admin).readAutoscaleDrill())
+				.resolves
+				.toEqual({ until: 2000, percent: 80 });
+		});
+
+		it('refuses a non-admin', async () => {
+			await expect(service(nonAdmin).startAutoscaleDrill(30, 80))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).stopAutoscaleDrill())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).readAutoscaleDrill())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(startDrill).not.toHaveBeenCalled();
+			expect(stopDrill).not.toHaveBeenCalled();
 		});
 	});
 });

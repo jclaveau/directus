@@ -1,17 +1,23 @@
 <script setup lang="ts">
 import api from '@/api';
-import type { AutoscaleRunner, AutoscaleValueSource } from '@directus/types';
-import { computed, onMounted, ref } from 'vue';
+import type {
+	AutoscaleDrill,
+	AutoscaleRunner,
+	AutoscaleValueSource,
+} from '@directus/types';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
 	type AutoscaleRow,
 	configRows,
 	describeDecision,
+	drillRemaining,
 	firstRunner,
 	isPinned,
 	parseFieldValue,
 	pinPatch,
 	secondsSince,
+	underLoad,
 } from './autoscale-panel';
 
 const props = defineProps<{ runners: AutoscaleRunner[] }>();
@@ -26,6 +32,50 @@ const available = ref(true);
 const error = ref<string | null>(null);
 const saving = ref(false);
 const drafts = ref<Record<string, string | null>>({});
+const drill = ref<AutoscaleDrill | null>(null);
+const drillAvailable = ref(false);
+const drillSeconds = ref('60');
+const drillPercent = ref('80');
+
+/**
+ * The clock the countdown is read against.
+ *
+ * Held as state rather than read where it is needed, because a computed over
+ * `Date.now()` never recomputes: nothing it depends on ever changes.
+ */
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | null = null;
+
+function disarmClock(): void {
+	if (clock !== null) {
+		clearInterval(clock);
+		clock = null;
+	}
+}
+
+/**
+ * Tick only while there is something to count down.
+ *
+ * A drill lasts a couple of minutes and the page outlives it by hours, so a
+ * timer left running past the deadline is a render a second for nothing.
+ */
+function armClock(): void {
+	now.value = Date.now();
+
+	const remaining = drillRemaining(drill.value?.until ?? null, now.value);
+
+	if (clock !== null || remaining === 0) {
+		return;
+	}
+
+	clock = setInterval(() => {
+		now.value = Date.now();
+
+		if (drillRemaining(drill.value?.until ?? null, now.value) === 0) {
+			disarmClock();
+		}
+	}, 1000);
+}
 
 const runner = computed(() => firstRunner(props.runners));
 
@@ -292,6 +342,89 @@ function describeField(row: AutoscaleRow): string {
 		: row.description;
 }
 
+/**
+ * What the drill is doing, in the words the section shows.
+ *
+ * `remaining` counts down off the deadline the api answered with rather than
+ * off a timer of its own, so a page opened halfway through a drill another
+ * admin started shows the same end.
+ */
+const drilling = computed(() => {
+	const remaining = drillRemaining(drill.value?.until ?? null, now.value);
+
+	return remaining === 0
+		? null
+		: { remaining, percent: drill.value?.percent ?? 0 };
+});
+
+/** Why the drill cannot be started, or `null` where it can. */
+const drillBlocked = computed(() => {
+	const state = runner.value?.state;
+
+	if (state !== undefined && underLoad(state)) {
+		return t(
+			'autoscale_drill_busy',
+			'The pool is already working, so a drill would measure that too.',
+		);
+	}
+
+	return null;
+});
+
+async function loadDrill(): Promise<void> {
+	try {
+		const response = await api.get('/utils/autoscale/drill');
+		drill.value = response.data.data;
+		drillAvailable.value = true;
+		armClock();
+	}
+	catch (err: any) {
+		// Absent rather than refusing, exactly like the configuration route: a
+		// deployment that did not ask for the drill carries no drill.
+		if (err?.response?.status !== 404) {
+			error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		}
+	}
+}
+
+async function startDrill(): Promise<void> {
+	saving.value = true;
+	error.value = null;
+
+	try {
+		const response = await api.post('/utils/autoscale/drill', {
+			seconds: Number(drillSeconds.value),
+			percent: Number(drillPercent.value),
+		});
+
+		drill.value = response.data.data;
+		armClock();
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
+	finally {
+		saving.value = false;
+	}
+}
+
+async function stopDrill(): Promise<void> {
+	saving.value = true;
+	error.value = null;
+
+	try {
+		const response = await api.delete('/utils/autoscale/drill');
+		drill.value = response.data.data;
+		disarmClock();
+	}
+	catch (err: any) {
+		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+	}
+	finally {
+		saving.value = false;
+	}
+}
+
 function pause(): void {
 	void write({ enabled: runner.value?.state.config.enabled === false });
 }
@@ -308,7 +441,12 @@ function pin(): void {
 		: pinPatch(state));
 }
 
-onMounted(load);
+onMounted(() => {
+	void load();
+	void loadDrill();
+});
+
+onUnmounted(disarmClock);
 </script>
 
 <template>
@@ -494,6 +632,68 @@ onMounted(load);
 			</v-button>
 		</div>
 
+		<div v-if="drillAvailable" class="drill">
+			<span class="knob">
+				<v-input
+					v-model="drillSeconds"
+					small
+					type="number"
+					:full-width="false"
+					:min="1"
+					:max="120"
+					:step="5"
+					suffix="s"
+					:disabled="saving || drilling !== null"
+				/>
+			</span>
+
+			<span class="knob">
+				<v-input
+					v-model="drillPercent"
+					small
+					type="number"
+					:full-width="false"
+					:min="10"
+					:max="95"
+					:step="5"
+					suffix="%"
+					:disabled="saving || drilling !== null"
+				/>
+			</span>
+
+			<v-button
+				v-if="drilling"
+				small
+				secondary
+				:disabled="saving"
+				@click="stopDrill"
+			>
+				{{ t('autoscale_drill_stop', 'Stop the drill') }}
+			</v-button>
+
+			<v-button
+				v-else
+				small
+				:disabled="saving || drillBlocked !== null"
+				@click="startDrill"
+			>
+				{{ t('autoscale_drill_start', 'Run a load drill') }}
+			</v-button>
+
+			<span v-if="drilling" class="drilling">
+				{{ t('autoscale_drilling', 'every worker busy,') }}
+				{{ drilling.remaining }}s {{ t('autoscale_drill_left', 'left') }}
+			</span>
+
+			<span v-else class="drill-note">
+				{{ drillBlocked ?? t(
+					'autoscale_drill_note',
+					'Loads every worker so the pool has to decide, without touching '
+						+ 'anything it decides on.',
+				) }}
+			</span>
+		</div>
+
 		<p v-if="configKey" class="key">{{ configKey }}</p>
 	</div>
 </template>
@@ -603,5 +803,34 @@ onMounted(load);
 .control.pending :deep(input),
 .source.pending {
 	color: var(--theme--primary);
+}
+
+.drill {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: center;
+	margin-block-end: 8px;
+}
+
+/* The two knobs hug their numbers, so the row reads as a sentence rather than
+   as two boxes with a button after them. */
+.knob :deep(input) {
+	flex-grow: 0;
+	field-sizing: content;
+	min-inline-size: 3ch;
+	max-inline-size: 6ch;
+}
+
+.knob :deep(.suffix) {
+	margin-inline-start: 4px;
+}
+
+.drilling {
+	color: var(--theme--primary);
+}
+
+.drill-note {
+	color: var(--theme--foreground-subdued);
 }
 </style>

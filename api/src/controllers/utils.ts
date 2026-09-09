@@ -4,6 +4,7 @@ import argon2 from 'argon2';
 import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
+import { autoscaleDrillEnabled } from '../autoscale/lib/drill.js';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
 import {
@@ -460,6 +461,64 @@ if (redisConfigAvailable()) {
 
 			await service.clearAutoscaleConfig();
 			res.status(200).json({ data: { override: null } });
+			return;
+		}),
+	);
+}
+
+// The drill reaches the pool over the bus, which without Redis is an emitter this
+// worker shares with nobody: a deployment lacking either the flag or Redis has no
+// drill to offer rather than one that would load a single worker.
+if (autoscaleDrillEnabled() && redisConfigAvailable()) {
+	router.get(
+		'/autoscale/drill',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readAutoscaleDrill() };
+
+			return next();
+		}),
+		respond,
+	);
+
+	router.post(
+		'/autoscale/drill',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const body: Record<string, unknown> = typeof req.body === 'object'
+				&& req.body !== null
+				&& Array.isArray(req.body) === false
+				? req.body as Record<string, unknown>
+				: {};
+
+			const drill = await service.startAutoscaleDrill(
+				body['seconds'],
+				body['percent'],
+			);
+
+			res.status(200).json({ data: drill });
+			return;
+		}),
+	);
+
+	router.delete(
+		'/autoscale/drill',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.status(200).json({ data: await service.stopAutoscaleDrill() });
 			return;
 		}),
 	);
