@@ -6,42 +6,113 @@ import type {
 } from '@directus/types';
 
 /** What a field holds, which is what the row renders and how a write is typed. */
-export type AutoscaleFieldKind =
-	| 'boolean'
-	| 'number'
-	| 'strategy'
-	| 'signal'
-	| 'text';
+export type AutoscaleFieldKind = 'boolean' | 'choice' | 'number' | 'text';
+
+export interface AutoscaleFieldOption {
+	text: string;
+	value: string;
+}
 
 export interface AutoscaleField {
 	field: keyof AutoscaleConfig;
 	kind: AutoscaleFieldKind;
+	/** What the number counts, shown at the end of the input. */
+	unit?: string;
+	min?: number;
+	max?: number;
+	step?: number;
+	/** Every value the field accepts, where it accepts a fixed few. */
+	options?: AutoscaleFieldOption[];
 }
+
+const BOOLEAN_OPTIONS: AutoscaleFieldOption[] = [
+	{ text: 'enabled', value: 'true' },
+	{ text: 'disabled', value: 'false' },
+];
 
 /**
  * The fields, in the order they are read rather than alphabetically: what the
  * loop is doing, then what it decides on, then the bounds it decides within,
  * then the pacing.
+ *
+ * The bounds here shape the input; the loop's `sanitizeConfig` is what enforces
+ * them, and reports through `Running on` whatever it corrected a value to.
  */
 export const AUTOSCALE_FIELDS: AutoscaleField[] = [
-	{ field: 'enabled', kind: 'boolean' },
-	{ field: 'strategy', kind: 'strategy' },
+	{ field: 'enabled', kind: 'boolean', options: BOOLEAN_OPTIONS },
+	{
+		field: 'strategy',
+		kind: 'choice',
+		options: [
+			{ text: 'scalabus', value: 'scalabus' },
+			{ text: 'legacy', value: 'legacy' },
+		],
+	},
 	{ field: 'appName', kind: 'text' },
-	{ field: 'signal', kind: 'signal' },
-	{ field: 'sampleWindow', kind: 'number' },
-	{ field: 'scaleCpuThreshold', kind: 'number' },
-	{ field: 'releaseCpuThreshold', kind: 'number' },
-	{ field: 'minWorkers', kind: 'number' },
-	{ field: 'maxWorkers', kind: 'number' },
-	{ field: 'prewarmWorkers', kind: 'number' },
-	{ field: 'minSecondsToScaleUp', kind: 'number' },
-	{ field: 'minSecondsToScaleDown', kind: 'number' },
-	{ field: 'warmupSeconds', kind: 'number' },
+	{
+		field: 'signal',
+		kind: 'choice',
+		options: [
+			{ text: 'average', value: 'average' },
+			{ text: 'max', value: 'max' },
+		],
+	},
+	{
+		field: 'sampleWindow',
+		kind: 'number',
+		unit: 'samples',
+		min: 1,
+		max: 30,
+		step: 1,
+	},
+	{
+		field: 'scaleCpuThreshold',
+		kind: 'number',
+		unit: '%',
+		min: 1,
+		max: 100,
+		step: 1,
+	},
+	{
+		field: 'releaseCpuThreshold',
+		kind: 'number',
+		unit: '%',
+		min: 0,
+		max: 99,
+		step: 1,
+	},
+	{
+		field: 'minWorkers',
+		kind: 'number',
+		unit: 'workers',
+		min: 1,
+		max: 64,
+		step: 1,
+	},
+	{
+		field: 'maxWorkers',
+		kind: 'number',
+		unit: 'workers',
+		min: 1,
+		max: 64,
+		step: 1,
+	},
+	{
+		field: 'prewarmWorkers',
+		kind: 'number',
+		unit: 'workers',
+		min: 0,
+		max: 64,
+		step: 1,
+	},
+	// Seconds step by five: every one of these is set in tens of seconds or
+	// minutes, and an arrow that moves a five-minute cooldown by one is noise.
+	{ field: 'minSecondsToScaleUp', kind: 'number', unit: 's', min: 0, step: 5 },
+	{ field: 'minSecondsToScaleDown', kind: 'number', unit: 's', min: 0, step: 5 },
+	{ field: 'warmupSeconds', kind: 'number', unit: 's', min: 0, step: 5 },
 ];
 
-export interface AutoscaleRow {
-	field: keyof AutoscaleConfig;
-	kind: AutoscaleFieldKind;
+export interface AutoscaleRow extends AutoscaleField {
 	/** What the loop is running on, or `null` where none reported. */
 	effective: unknown;
 	/** Which layer that value came from, `null` where no process reported one. */
@@ -62,7 +133,8 @@ export function configRows(
 	state: AutoscaleNodeState | null,
 	override: Record<string, unknown> | null,
 ): AutoscaleRow[] {
-	return AUTOSCALE_FIELDS.map(({ field, kind }) => {
+	return AUTOSCALE_FIELDS.map((definition) => {
+		const field = definition.field;
 		const overridden = override?.[field] ?? null;
 
 		// Nothing reported means nothing is scaling anything here: the only value
@@ -73,8 +145,7 @@ export function configRows(
 			: state.sources[field];
 
 		return {
-			field,
-			kind,
+			...definition,
 			effective: state === null
 				? overridden
 				: state.config[field],

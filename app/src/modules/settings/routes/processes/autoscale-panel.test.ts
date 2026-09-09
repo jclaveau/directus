@@ -59,7 +59,7 @@ test('a row shows what the loop runs on and where it came from', () => {
 	const rows = configRows(state(), { maxWorkers: 8 });
 	const ceiling = rows.find((row) => row.field === 'maxWorkers');
 
-	expect(ceiling).toEqual({
+	expect(ceiling).toMatchObject({
 		field: 'maxWorkers',
 		kind: 'number',
 		effective: 4,
@@ -97,7 +97,53 @@ test('an emptied field clears rather than writing a zero', () => {
 	expect(parseFieldValue('number', 'eight')).toBeNull();
 	expect(parseFieldValue('boolean', 'true')).toBe(true);
 	expect(parseFieldValue('boolean', 'false')).toBe(false);
-	expect(parseFieldValue('strategy', 'legacy')).toBe('legacy');
+	expect(parseFieldValue('choice', 'legacy')).toBe('legacy');
+});
+
+// The loop clamps what it is given; these only shape the input, so they are
+// worth pinning against the bounds they mirror.
+test('a number field carries the bounds and the unit it counts in', () => {
+	const rows = configRows(state(), null);
+
+	expect(rows.find((row) => row.field === 'maxWorkers')).toMatchObject({
+		kind: 'number',
+		unit: 'workers',
+		min: 1,
+		max: 64,
+		step: 1,
+	});
+
+	expect(rows.find((row) => row.field === 'scaleCpuThreshold'))
+		.toMatchObject({ unit: '%', min: 1, max: 100 });
+
+	expect(rows.find((row) => row.field === 'warmupSeconds'))
+		.toMatchObject({ unit: 's', min: 0, step: 5 });
+});
+
+test('a field with a fixed few values offers exactly those', () => {
+	const rows = configRows(state(), null);
+
+	expect(rows.find((row) => row.field === 'strategy')?.options)
+		.toEqual([
+			{ text: 'scalabus', value: 'scalabus' },
+			{ text: 'legacy', value: 'legacy' },
+		]);
+
+	expect(rows.find((row) => row.field === 'signal')?.options)
+		.toEqual([
+			{ text: 'average', value: 'average' },
+			{ text: 'max', value: 'max' },
+		]);
+
+	expect(rows.find((row) => row.field === 'enabled')?.options)
+		.toEqual([
+			{ text: 'enabled', value: 'true' },
+			{ text: 'disabled', value: 'false' },
+		]);
+
+	// A pool name is whatever the deployment called its app.
+	expect(rows.find((row) => row.field === 'appName')?.kind).toBe('text');
+	expect(rows.find((row) => row.field === 'appName')?.options).toBeUndefined();
 });
 
 // A floor and a ceiling that meet leave the rule no branch that returns a size,

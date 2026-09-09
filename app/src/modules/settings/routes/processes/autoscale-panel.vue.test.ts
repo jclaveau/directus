@@ -16,6 +16,7 @@ import VChip from '@/components/v-chip.vue';
 import VIcon from '@/components/v-icon/v-icon.vue';
 import VInput from '@/components/v-input.vue';
 import VNotice from '@/components/v-notice.vue';
+import VSelect from '@/components/v-select/v-select.vue';
 import AutoscalePanel from './autoscale-panel.vue';
 
 function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState {
@@ -90,11 +91,18 @@ const global = {
 			unmounted: () => undefined,
 		},
 	},
-	components: { VButton, VChip, VIcon, VInput, VNotice },
+	components: { VButton, VChip, VIcon, VInput, VNotice, VSelect },
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
-				const real = ['v-button', 'v-chip', 'v-icon', 'v-input', 'v-notice'];
+				const real = [
+					'v-button',
+					'v-chip',
+					'v-icon',
+					'v-input',
+					'v-notice',
+					'v-select',
+				];
 
 				return tag.includes('-') && !real.includes(tag);
 			},
@@ -305,13 +313,74 @@ describe('the levers', () => {
 });
 
 describe('editing one field', () => {
-	async function apply(wrapper: any, field: string, typed: string) {
-		const row = wrapper.findAll('tbody tr')
+	function row(wrapper: any, field: string) {
+		return wrapper.findAll('tbody tr')
 			.find((candidate: any) => candidate.text().startsWith(field));
+	}
 
-		await row.find('input').setValue(typed);
-		await row.find('button').trigger('click');
+	async function applyRow(wrapper: any, field: string) {
+		await row(wrapper, field).findAll('button')
+			.find((button: any) => button.text().includes('Apply'))
+			.trigger('click');
+
 		await flushPromises();
+	}
+
+	test('a number field is typed, bounded and says what it counts', async () => {
+		const wrapper = await mounted(null);
+		const input = row(wrapper, 'maxWorkers').findComponent(VInput);
+
+		expect(input.props()).toMatchObject({
+			type: 'number',
+			min: 1,
+			max: 64,
+			step: 1,
+			suffix: 'workers',
+		});
+	});
+
+	test('a text field stays a text field', async () => {
+		const wrapper = await mounted(null);
+
+		const input = row(wrapper, 'appName').findComponent(VInput);
+
+		expect(input.props('type')).toBe('text');
+	});
+
+	// Typing `scalabuss` into a rule that accepts two names is a silent
+	// fallback, so the field offers the names instead of accepting any.
+	test('a field with a fixed few values is chosen, not typed', async () => {
+		const wrapper = await mounted(null);
+		const select = row(wrapper, 'strategy').findComponent(VSelect);
+
+		expect(select.props('items')).toEqual([
+			{ text: 'scalabus', value: 'scalabus' },
+			{ text: 'legacy', value: 'legacy' },
+		]);
+
+		select.vm.$emit('update:modelValue', 'legacy');
+		await applyRow(wrapper, 'strategy');
+
+		expect(api.patch)
+			.toHaveBeenCalledWith('/utils/autoscale', { strategy: 'legacy' });
+	});
+
+	test('a chosen boolean is written as a boolean', async () => {
+		const wrapper = await mounted(null);
+
+		row(wrapper, 'enabled').findComponent(VSelect).vm
+			.$emit('update:modelValue', 'false');
+
+		await applyRow(wrapper, 'enabled');
+
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: false });
+	});
+
+	async function apply(wrapper: any, field: string, typed: string) {
+		const input = row(wrapper, field).find('input');
+
+		await input.setValue(typed);
+		await applyRow(wrapper, field);
 	}
 
 	test('a typed number is written as a number', async () => {

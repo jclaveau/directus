@@ -257,11 +257,34 @@ onMounted(load);
 						</span>
 					</td>
 					<td class="edit">
+						<!-- `v-select`'s own root has no layout box, so the cell's flex
+						row lays this span out instead. -->
+						<span v-if="row.options" class="control">
+							<v-select
+								:model-value="drafts[row.field] ?? (
+									row.override === null ? null : String(row.override)
+								)"
+								:items="row.options"
+								:placeholder="row.effective === null
+									? undefined
+									: String(row.effective)"
+								show-deselect
+								:disabled="saving"
+								@update:model-value="drafts[row.field] = $event"
+							/>
+						</span>
+
 						<v-input
+							v-else
 							:model-value="drafts[row.field] ?? (
 								row.override === null ? '' : String(row.override)
 							)"
 							small
+							:type="row.kind === 'number' ? 'number' : 'text'"
+							:min="row.min"
+							:max="row.max"
+							:step="row.step"
+							:suffix="row.unit"
 							:placeholder="row.effective === null ? '' : String(row.effective)"
 							:disabled="saving"
 							@update:model-value="drafts[row.field] = $event"
@@ -341,6 +364,10 @@ onMounted(load);
 	gap: 8px;
 	align-items: center;
 	max-inline-size: 320px;
+}
+
+.control {
+	flex-grow: 1;
 }
 
 .source.override {
