@@ -792,6 +792,7 @@ test('the cache costs less than what it replaces', async () => {
 
 	const commandsPerHit = new Map<string, number>();
 	const commandsPerFill = new Map<string, number>();
+	const commandsPerFanFill = new Map<string, number>();
 	const commandsPerWrite = new Map<string, Map<number, number>>();
 
 	function describe(counted: CensusResult): string {
@@ -825,6 +826,27 @@ test('the cache costs less than what it replaces', async () => {
 
 		commandsPerFill.set(arm.name, fill.perRequest);
 		recordCensus('read, fresh key', arm.name, describe(fill));
+
+		// The same again over the fan shape, because the flat one writes two tag
+		// sets and hides the cost this whole file exists to expose: a read that
+		// pins per row writes a tag set per row, and each of those is a script
+		// call carrying its own EXISTS, SADD and expiry.
+		const fanFill = await census(
+			async () => {
+				for (let index = 0; index < censusRequests; index++) {
+					await api(
+						arm.base,
+						`/items/${NOTE}?filter[tenant][_eq]=t2&limit=200`
+						+ `&fields=*,author.*&offset=${index}`,
+					);
+				}
+			},
+			censusRequests,
+			idleFloor,
+		);
+
+		commandsPerFanFill.set(arm.name, fanFill.perRequest);
+		recordCensus('read, fresh key (fan)', arm.name, describe(fanFill));
 
 		const hitPath = `/items/${NOTE}?filter[tenant][_eq]=t1&limit=25`;
 		await api(arm.base, hitPath);
@@ -1103,6 +1125,14 @@ test('the cache costs less than what it replaces', async () => {
 	observe(
 		'Redis commands a scoped fill adds over an uncached read',
 		fillCommandCost,
+		targetCommandsPerFill,
+	);
+
+	// One pin per row, so the target is the flat fill's plus a script call per pin.
+	// Reported until a run has measured it.
+	observe(
+		'Redis commands a scoped fan fill adds over an uncached read',
+		commandsPerFanFill.get('scoped')! - commandsPerFanFill.get('off')!,
 		targetCommandsPerFill,
 	);
 
