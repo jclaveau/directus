@@ -902,6 +902,7 @@ describe('dropScopedCacheTagIndex', () => {
 			.mockResolvedValueOnce(['0', []]);
 
 		const del = vi.fn();
+
 		const bumps = {
 			incr: vi.fn().mockReturnThis(),
 			expire: vi.fn().mockReturnThis(),
