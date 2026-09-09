@@ -97,6 +97,13 @@ test('takes the surface a change came in through', () => {
 		.toEqual({ maxWorkers: 8, setFrom: 'mcp' });
 });
 
+// The stamp is what a page shows an operator about who changed what, so a
+// field of it that is not text would be read back as one.
+test('refuses a stamp field that is not text', () => {
+	expect(() => parseOverridePatch({ setFrom: 7 }))
+		.toThrowError(`'setFrom' has to be a string`);
+});
+
 test('writes the override, and deletes the key for none', async () => {
 	await redisHolding(null);
 

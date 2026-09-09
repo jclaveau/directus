@@ -43,7 +43,7 @@ import {
 	autoscaleConfigKey,
 	configWithOverride,
 } from '../autoscale/lib/resolve-config.js';
-import { processesReportEnabled } from '../processes/index.js';
+import { collectProcesses, processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
@@ -682,6 +682,85 @@ describe('Services / Utils', () => {
 				.toThrowError(ForbiddenError);
 
 			expect(writeAutoscaleOverride).not.toHaveBeenCalled();
+		});
+
+		// Clearing writes the absence rather than the resolved values, so the
+		// env chain is what answers again afterwards.
+		it('clears the override by writing no override at all', async () => {
+			await service(admin).clearAutoscaleConfig();
+
+			expect(writeAutoscaleOverride).toHaveBeenCalledWith(null);
+		});
+
+		it('refuses a non-admin clearing it', async () => {
+			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+			await expect(service(nonAdmin).clearAutoscaleConfig())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeAutoscaleOverride).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale runners', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		// One deployment answers with a tree; what the panel and every refusal
+		// read is the flat list of the processes that actually scale a pool.
+		it('flattens the report down to the processes that scale', async () => {
+			vi.mocked(processesReportEnabled).mockReturnValue(true);
+
+			vi.mocked(collectProcesses).mockResolvedValue({
+				services: [
+					{
+						service: 'api',
+						replicas: [
+							{
+								replicaId: 'one',
+								processes: [
+									{ nodeId: 'a', name: 'autoscaler', autoscale: { workers: 2 } },
+									{ nodeId: 'b', name: 'api', autoscale: null },
+								],
+							},
+						],
+					},
+				],
+			} as any);
+
+			await expect(service(admin).readAutoscaleRunners()).resolves.toEqual([
+				{
+					service: 'api',
+					replicaId: 'one',
+					nodeId: 'a',
+					name: 'autoscaler',
+					state: { workers: 2 },
+				},
+			]);
+		});
+
+		// Collecting one would wait out the reply window to build the empty tree
+		// the caller already knows it would get.
+		it('asks nobody where the report is off', async () => {
+			vi.mocked(processesReportEnabled).mockReturnValue(false);
+
+			await expect(service(admin).readAutoscaleRunners()).resolves.toEqual([]);
+			expect(collectProcesses).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin', async () => {
+			vi.mocked(processesReportEnabled).mockReturnValue(true);
+
+			await expect(service(nonAdmin).readAutoscaleRunners())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(collectProcesses).not.toHaveBeenCalled();
 		});
 	});
 

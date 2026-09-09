@@ -117,6 +117,28 @@ test('holds the last configuration when Redis stops answering', async () => {
 	expect(resolvedSources()).toMatchObject({ maxWorkers: 'override' });
 });
 
+// A deployment with nowhere to keep an override has none to read, and asking
+// anyway would be a command on a client that was never going to answer.
+test('reads no override where there is nowhere to keep one', async () => {
+	const { redisConfigAvailable } = await import('../../redis/index.js');
+	const { resolveConfig, resolvedSources } = await freshModule();
+	vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
+
+	expect(get).not.toHaveBeenCalled();
+	expect(resolvedSources()).toMatchObject({ maxWorkers: 'env' });
+});
+
+// A write is judged against the whole configuration it would produce, and the
+// fields nobody is changing come from the chain rather than from the patch.
+test('lays a would-be override over the chain without storing it', async () => {
+	const { configWithOverride } = await freshModule();
+
+	expect(configWithOverride({ maxWorkers: 8 }))
+		.toMatchObject({ maxWorkers: 8, minWorkers: 1 });
+});
+
 test('falls back to the env chain when Redis never answered', async () => {
 	const resolveConfig = await freshResolver();
 	get.mockRejectedValue(new Error('Connection is closed.'));
