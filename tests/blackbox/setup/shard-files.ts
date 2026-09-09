@@ -64,6 +64,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-release.test.ts': 160_000,
 	// One climb, a daemon taken away, and the climb it makes afterwards.
 	'/tests/db/app/autoscale-supervisor-restart.test.ts': 60_000,
+	'/tests/db/app/autoscale-supervisor-options.test.ts': 90_000,
 	// Spawns two processes and asks one question of them.
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
 	'/tests/db/app/autoscale-config-validation.test.ts': 20_000,

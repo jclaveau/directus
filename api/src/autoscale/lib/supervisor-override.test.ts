@@ -120,6 +120,30 @@ test('a memory ceiling is asked for in megabytes and pushed in bytes', async () 
 		.toMatchObject({ max_memory_restart: 536_870_912 });
 });
 
+// pm2 takes this one as a size, so an environment that asked for `512M` is
+// asking for the same ceiling the panel calls 512 — read as a plain number it
+// would be dropped instead, and a released ceiling would never revert.
+test('a memory ceiling the environment sized is read as megabytes', async () => {
+	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: '512M' });
+
+	expect(reloadDeclaration(null)).toMatchObject({
+		max_memory_restart: 536_870_912,
+	});
+
+	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: '1G' });
+
+	expect(reloadDeclaration(null)).toMatchObject({
+		max_memory_restart: 1_073_741_824,
+	});
+
+	// A bare number is the bytes pm2 means by one.
+	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: 536_870_912 });
+
+	expect(reloadDeclaration(null)).toMatchObject({
+		max_memory_restart: 536_870_912,
+	});
+});
+
 // An option the environment never set and pm2 has no number for is left out,
 // so the supervisor keeps its own answer rather than being handed one.
 test('an option nothing declares is not carried at all', async () => {

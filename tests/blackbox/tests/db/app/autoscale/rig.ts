@@ -148,7 +148,8 @@ interface ListedProcess {
 	name: string;
 	pm_id?: number;
 	monit?: { cpu?: number };
-	pm2_env?: { status?: string; restart_time?: number };
+	/** The declaration a worker booted under, entry by entry, as pm2 names them. */
+	pm2_env?: { status?: string; restart_time?: number; [entry: string]: unknown };
 }
 
 /**
@@ -199,6 +200,49 @@ function listWorkers(rig: Rig): ListedProcess[] {
 	})) as ListedProcess[];
 
 	return listed.filter((worker) => worker.name === rig.appName);
+}
+
+/**
+ * What each serving worker holds for one pm2 entry.
+ *
+ * Read off the daemon rather than off the autoscaler's report: the claim
+ * being made is about the declaration a replacement worker booted under, and
+ * only the supervisor holding that worker can answer it.
+ */
+export function declarationsOf(rig: Rig, entry: string): unknown[] {
+	return listWorkers(rig)
+		.filter((worker) => worker.pm2_env?.status !== 'stopped')
+		.map((worker) => worker.pm2_env?.[entry]);
+}
+
+/**
+ * Waits until every serving worker holds the entry at the value given.
+ *
+ * A rolling restart replaces the workers one at a time, so the pool holds the
+ * old declaration beside the new one for as long as it runs: the arm is only
+ * answered once the last worker still on the old one has gone. Returns what
+ * it last saw either way, so a failure names the declaration it timed out on.
+ */
+export async function declaredEverywhere(
+	rig: Rig,
+	entry: string,
+	value: unknown,
+	timeoutMs: number,
+): Promise<unknown[]> {
+	const deadline = Date.now() + timeoutMs;
+	let held: unknown[] = [];
+
+	while (Date.now() < deadline) {
+		held = declarationsOf(rig, entry);
+
+		if (held.length > 0 && held.every((seen) => seen === value)) {
+			return held;
+		}
+
+		await sleep(500);
+	}
+
+	return held;
 }
 
 export function countWorkers(rig: Rig): number {

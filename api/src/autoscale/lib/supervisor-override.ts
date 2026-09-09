@@ -180,6 +180,30 @@ export function applySupervisorPatch(
 		: merged;
 }
 
+/** Megabytes in each suffix pm2 takes a size in. */
+const SIZE_UNITS: Record<string, number> = { K: 1 / 1024, M: 1, G: 1024 };
+
+/**
+ * A memory ceiling in megabytes, however pm2 was asked for it.
+ *
+ * pm2 takes this one as a size rather than as a number — `512M` as readily as
+ * the bytes a bare number means — while the panel asks for megabytes, so the
+ * two have to meet somewhere.
+ */
+function megabytesOf(declared: unknown): number | null {
+	const size = /^(\d+(?:\.\d+)?)\s*([KMG])?B?$/i.exec(String(declared).trim());
+
+	if (size === null) {
+		return null;
+	}
+
+	const unit = size[2]?.toUpperCase();
+
+	return unit === undefined
+		? Math.round(Number(size[1]) / MEGABYTE)
+		: Math.round(Number(size[1]) * (SIZE_UNITS[unit] as number));
+}
+
 /**
  * What the environment asks for, which is what a released field goes back to.
  *
@@ -189,9 +213,16 @@ export function applySupervisorPatch(
  */
 function fromEnv(field: string): number | null {
 	const declared = useEnv()[ENV_VARIABLES[field] as string];
-	const parsed = Number(declared);
 
-	return declared === undefined || Number.isFinite(parsed) === false
+	if (declared === undefined) {
+		return ENV_FALLBACKS[field] ?? null;
+	}
+
+	const parsed = field === 'maxMemoryRestartMegabytes'
+		? megabytesOf(declared)
+		: Number(declared);
+
+	return parsed === null || Number.isFinite(parsed) === false
 		? ENV_FALLBACKS[field] ?? null
 		: parsed;
 }
