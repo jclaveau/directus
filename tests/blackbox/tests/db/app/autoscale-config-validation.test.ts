@@ -100,6 +100,18 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			});
 	}
 
+	function callMcp(vendor: Vendor, name: string, args: object) {
+		return request(getUrl(vendor, envs[vendor]))
+			.post('/system-mcp')
+			.set('Authorization', auth)
+			.send({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/call',
+				params: { name, arguments: args },
+			});
+	}
+
 	function refusal(response: request.Response): string {
 		return response.body.errors[0].message;
 	}
@@ -201,6 +213,44 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			const stored = await read(vendor);
 
 			expect(stored.body.data.override?.minWorkers).toBeUndefined();
+		});
+	});
+
+	// The supervisor options reach pm2 unclamped — a supervisor takes what it
+	// is handed — so the bounds are the whole of what stands between a number
+	// typed during an incident and a pool that cannot come back. A listen
+	// timeout of five milliseconds retires every replacement before it can
+	// report ready, which empties the pool one worker at a time.
+	describe('refuses a supervisor option outside its bounds', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await callMcp(vendor, 'write_supervisor_config', {
+				supervisor: { listenTimeout: 5 },
+				note: 'the boot got slower',
+			});
+
+			expect(response.body.error.code).toBe(-32602);
+
+			expect(response.body.error.message).toContain(
+				`'listenTimeout' has to be a whole number between 1000 and 600000`,
+			);
+
+			// And the note did not land on its own: a refused write stores
+			// nothing at all.
+			expect((await read(vendor)).body.data.supervisor.override).toBeNull();
+		});
+	});
+
+	// Nothing here is scaling a pool, and a restart is asked for over the bus:
+	// answered with a success it would leave an agent believing a pool it
+	// cannot see had been rolled, and reading the options it wrote as applied.
+	describe('refuses a restart nothing would hear', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await callMcp(vendor, 'restart_autoscale_pool', {});
+
+			expect(response.body.error.code).toBe(-32602);
+
+			expect(response.body.error.message)
+				.toContain('no process reported that it is scaling a pool');
 		});
 	});
 });

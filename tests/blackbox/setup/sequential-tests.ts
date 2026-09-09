@@ -86,6 +86,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// Spawns a Directus of its own beside a pm2 daemon, and asserts on a
 			// collection window a loaded parallel middle would run out.
 			'/tests/db/app/autoscale-processes.test.ts',
+			// The same shape again — its own Directus, its own pm2 daemon, and a
+			// collection window a loaded parallel middle would run out.
+			'/tests/db/app/autoscale-mcp-levers.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 		],
 		// If specified, only run these tests sequentially

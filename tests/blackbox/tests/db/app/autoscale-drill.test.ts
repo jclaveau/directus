@@ -38,6 +38,10 @@ describe('The autoscale load drill', () => {
 			env[vendor]['REDIS_PORT'] = '6108';
 			env[vendor]['CACHE_NAMESPACE'] = `blackbox-autoscale-drill-${vendor}`;
 			env[vendor]['PM2_AUTOSCALE_DRILL_ENABLED'] = 'true';
+			env[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
+			// Only the drill: the arm below reads the listing to prove the
+			// configuration levers did not come with it.
+			env[vendor]['SYSTEM_MCP_TOOLS'] = 'autoscale_drill';
 
 			const port = await getPort();
 			env[vendor].PORT = String(port);
@@ -81,6 +85,18 @@ describe('The autoscale load drill', () => {
 		return request(getUrl(vendor, envs[vendor]))
 			.get('/utils/autoscale/drill')
 			.set('Authorization', auth);
+	}
+
+	function callMcp(vendor: Vendor, name: string, args: object) {
+		return request(getUrl(vendor, envs[vendor]))
+			.post('/system-mcp')
+			.set('Authorization', auth)
+			.send({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/call',
+				params: { name, arguments: args },
+			});
 	}
 
 	// The lever exists where a deployment asked for it and nowhere else, which
@@ -185,6 +201,72 @@ describe('The autoscale load drill', () => {
 
 			expect(response.body.errors[0].message)
 				.toContain(`'percent' has to be a whole number between 10 and 95`);
+		});
+	});
+
+	// An agent asked to prove a ceiling has no browser to open the panel in,
+	// and the whole lever is the pair: start it, watch what the pool does, put
+	// it down again. All three reach the same worker the REST arms above do.
+	describe('runs from an MCP client too', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			await stop(vendor);
+
+			const started = await callMcp(vendor, 'run_autoscale_drill', {
+				seconds: DRILL_SECONDS,
+				percent: 20,
+			});
+
+			expect(started.body.result.isError).toBeUndefined();
+			expect(started.body.result.structuredContent.percent).toBe(20);
+
+			// Read back rather than taken from the answer: the deadline that ends
+			// a drill is the one the burning worker holds.
+			const live = await callMcp(vendor, 'read_autoscale_drill', {});
+
+			expect(live.body.result.structuredContent.until)
+				.toBe(started.body.result.structuredContent.until);
+
+			const stopped = await callMcp(vendor, 'run_autoscale_drill', {
+				stop: true,
+			});
+
+			expect(stopped.body.result.structuredContent.until).toBeNull();
+		});
+	});
+
+	// The bounds belong to the service both surfaces call, so an agent asking
+	// past them is refused for the reason a person typing it is refused.
+	describe('refuses a drill past its cap over the MCP', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await callMcp(vendor, 'run_autoscale_drill', {
+				seconds: 600,
+				percent: 20,
+			});
+
+			// "Invalid params": the drill never started, which the spec lists
+			// among the protocol errors rather than as a tool result.
+			expect(response.body.error.code).toBe(-32602);
+
+			expect(response.body.error.message)
+				.toContain(`'seconds' has to be a whole number between 1 and 120`);
+
+			expect((await read(vendor)).body.data.until).toBeNull();
+		});
+	});
+
+	// Its own group, so opening the lever that loads a pool does not also hand
+	// over what the pool is scaled on.
+	describe('is listed without the configuration tools beside it', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const listed = await request(getUrl(vendor, envs[vendor]))
+				.post('/system-mcp')
+				.set('Authorization', auth)
+				.send({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+
+			const names = listed.body.result.tools
+				.map((tool: { name: string }) => tool.name);
+
+			expect(names).toEqual(['read_autoscale_drill', 'run_autoscale_drill']);
 		});
 	});
 });

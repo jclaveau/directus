@@ -69,6 +69,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
 	'/tests/db/app/autoscale-config-validation.test.ts': 20_000,
 	'/tests/db/app/autoscale-drill.test.ts': 25_000,
+	'/tests/db/app/autoscale-mcp-levers.test.ts': 120_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,

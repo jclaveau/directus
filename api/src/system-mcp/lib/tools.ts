@@ -3,6 +3,12 @@ import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
 } from '../../cache-events.js';
+import {
+	autoscaleDrillEnabled,
+	MAX_DRILL_PERCENT,
+	MAX_DRILL_SECONDS,
+	MIN_DRILL_PERCENT,
+} from '../../autoscale/lib/drill.js';
 import { redisConfigAvailable } from '../../redis/index.js';
 import { UtilsService } from '../../services/utils.js';
 import {
@@ -92,6 +98,22 @@ const CHANGES_CONFIG = {
 	readOnlyHint: false,
 	destructiveHint: false,
 	idempotentHint: true,
+	openWorldHint: false,
+} as const;
+
+/**
+ * A tool that disturbs the workers currently serving.
+ *
+ * The pool comes back either way — a roll starts each replacement before it
+ * retires the worker it replaces, and a drill runs out on a deadline the
+ * worker holds — but both spend a live deployment to do it, and neither
+ * leaves it where it found it: a second call is a second restart, and a
+ * second drill.
+ */
+const DISTURBS_POOL = {
+	readOnlyHint: false,
+	destructiveHint: true,
+	idempotentHint: false,
 	openWorldHint: false,
 } as const;
 
@@ -318,6 +340,213 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					},
 					'mcp',
 				);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'write_supervisor_config',
+			group: 'autoscale',
+			title: 'Change the pm2 options the pool boots under',
+			description:
+				'Store the pm2 options every worker of the scaled pool boots under. '
+				+ 'pm2 reads them when it starts a worker, so nothing written here '
+				+ 'reaches the pool by itself — `restart_autoscale_pool` is what '
+				+ 'carries it, and until that runs the values are stored and '
+				+ 'unapplied. Pass a field as null to hand it back to the '
+				+ 'environment chain. Nothing is corrected: a value outside its '
+				+ 'bounds is refused, because a supervisor takes what it is handed.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					supervisor: {
+						type: 'object',
+						description: 'The options to store, each a whole number: '
+							+ '`listenTimeout` (1000-600000 ms, how long a replacement '
+							+ 'has to report ready before the roll gives up on it), '
+							+ '`killTimeout` (100-600000 ms), `minUptime` '
+							+ '(100-600000 ms), `restartDelay` (0-600000 ms), '
+							+ '`maxRestarts` (0-1000) and `maxMemoryRestartMegabytes` '
+							+ '(64-65536). A null value clears that one field.',
+					},
+					note: {
+						type: 'string',
+						description: 'Why this is being changed, stored with the '
+							+ 'options. An override outlives the incident that '
+							+ 'justified it, and this is what says which one that was.',
+					},
+				},
+				required: ['note'],
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					key: {
+						type: 'string',
+						description: 'The Redis key the options are stored under.',
+					},
+					override: {
+						type: 'object',
+						description: 'The options as they now stand, or null for none. '
+							+ 'This write stamps them `setFrom: "mcp"`.',
+					},
+					setByEmail: {
+						type: 'string',
+						description: 'The address behind `setBy`, or null for none.',
+					},
+				},
+			},
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				const supervisor = args['supervisor'];
+
+				const usable = typeof supervisor === 'object'
+					&& supervisor !== null
+					&& Array.isArray(supervisor) === false;
+
+				if (usable === false) {
+					throw new InvalidPayloadError({
+						reason: '`supervisor` has to be an object of pm2 options',
+					});
+				}
+
+				return utils(context).updateSupervisorConfig(
+					{
+						...supervisor as Record<string, unknown>,
+						note: args['note'],
+					},
+					'mcp',
+				);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'restart_autoscale_pool',
+			group: 'autoscale',
+			title: 'Restart the scaled pool',
+			description:
+				'Roll every worker of the scaled pool: the supervisor starts a '
+				+ 'replacement, waits for it to report ready, and only then retires '
+				+ 'the worker it replaces — so the pool never drops below the size '
+				+ 'it is holding. This is how anything a worker reads at boot '
+				+ 'reaches a running pool without a deploy, and it is what applies '
+				+ 'the options `write_supervisor_config` stores. Refused, with the '
+				+ 'reason, where nothing reports that it is scaling a pool, where a '
+				+ 'restart is already running, or where the pool is not in cluster '
+				+ 'mode and a worker would be stopped before its replacement starts.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					askedAt: {
+						type: 'number',
+						description: 'When the pool was asked for this one, in '
+							+ 'milliseconds since the epoch.',
+					},
+					running: {
+						type: 'boolean',
+						description: 'Whether the supervisor is replacing workers, '
+							+ 'which it still is when this answers.',
+					},
+					finishedAt: {
+						type: 'number',
+						description: 'When the last restart came back, null while one '
+							+ 'runs. Read it back to watch this one land.',
+					},
+					error: {
+						type: 'string',
+						description: 'Why the last restart failed, or null.',
+					},
+				},
+			},
+			annotations: DISTURBS_POOL,
+			run: async (_args, context) => utils(context).startAutoscaleReload(),
+		}),
+		defineSystemMcpTool({
+			name: 'read_autoscale_drill',
+			group: 'autoscale_drill',
+			title: 'Read the running load drill',
+			description:
+				'Whether the pool is under a drill right now, and until when. Read '
+				+ 'it back after starting one: the deadline that ends a drill is '
+				+ 'the one each burning worker holds, not the one the request '
+				+ 'asked for.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					until: {
+						type: 'number',
+						description: 'When the drill runs out, in milliseconds since '
+							+ 'the epoch, or null where none is running.',
+					},
+					percent: {
+						type: 'number',
+						description: 'The share of its time a drilling worker spends '
+							+ 'holding the processor.',
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).readAutoscaleDrill(),
+		}),
+		defineSystemMcpTool({
+			name: 'run_autoscale_drill',
+			group: 'autoscale_drill',
+			title: 'Put the pool under load',
+			description:
+				'Make every worker of the pool spend a share of its time busy, on '
+				+ 'purpose, so a configuration change can be watched deciding '
+				+ 'something instead of waiting for the traffic that would decide '
+				+ 'it. It touches nothing the loop reads except the load itself. '
+				+ 'Refused where the pool is already working, because a drill laid '
+				+ 'over real traffic measures both at once. Pass `stop: true` to '
+				+ 'call one off before its deadline.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					seconds: {
+						type: 'integer',
+						description: 'How long to hold the pool under load, '
+							+ `1-${MAX_DRILL_SECONDS}. Required unless stopping. The `
+							+ 'cap is what makes a lost stop harmless, so a longer '
+							+ 'drill is refused rather than shortened to it.',
+					},
+					percent: {
+						type: 'integer',
+						description: 'The share of its time each worker spends holding '
+							+ `the processor, ${MIN_DRILL_PERCENT}-${MAX_DRILL_PERCENT}. `
+							+ 'Required unless stopping. It stops short of the whole '
+							+ 'slice so the deployment keeps answering while it burns.',
+					},
+					stop: {
+						type: 'boolean',
+						description: 'Call the running drill off now instead of '
+							+ 'starting one.',
+					},
+				},
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					until: {
+						type: 'number',
+						description: 'When the drill runs out, in milliseconds since '
+							+ 'the epoch, or null where none is running.',
+					},
+					percent: {
+						type: 'number',
+						description: 'The share of its time a drilling worker spends '
+							+ 'holding the processor.',
+					},
+				},
+			},
+			annotations: DISTURBS_POOL,
+			run: async (args, context) => {
+				const service = utils(context);
+
+				if (args['stop'] === true) {
+					return service.stopAutoscaleDrill();
+				}
+
+				return service.startAutoscaleDrill(args['seconds'], args['percent']);
 			},
 		}),
 		defineSystemMcpTool({
@@ -559,7 +788,15 @@ export function systemMcpTools(): SystemMcpTool[] {
 		// The override lives in Redis, so a deployment without one has nowhere to
 		// keep a change and nothing to read back — the same reason the REST route
 		// is not registered there.
-		.filter((group) => group !== 'autoscale' || redisConfigAvailable());
+		.filter((group) => group !== 'autoscale' || redisConfigAvailable())
+		// The drill holds real workers on the processor, so a deployment opens it
+		// deliberately or not at all, and it reaches them over the bus — which
+		// without Redis is an emitter this worker shares with nobody. Both gates
+		// are the ones the REST routes are registered behind.
+		.filter((group) => {
+			return group !== 'autoscale_drill'
+				|| (autoscaleDrillEnabled() && redisConfigAvailable());
+		});
 
 	return allSystemMcpTools().filter((tool) => groups.includes(tool.group));
 }

@@ -260,11 +260,15 @@ ASSETS_CACHE_TTL="30d"
 # SYSTEM_MCP_ENABLED=false
 
 # Which subsystems to expose tools for: "processes" (the process tree),
-# "autoscale" (what each pool is being scaled on, and changing it) and "cache"
-# (listings, one entry by key, anomalies, latencies, timeseries, telemetry
-# state). A group left out is neither listed nor callable, and "autoscale" is
-# the one group whose tools also write. ["processes,cache"]
-# SYSTEM_MCP_TOOLS="processes,autoscale,cache"
+# "autoscale" (what each pool is being scaled on, changing it, the pm2 options
+# a restart carries, and asking for that restart), "autoscale_drill" (loading
+# the pool on purpose, gated on PM2_AUTOSCALE_DRILL_ENABLED as well) and
+# "cache" (listings, one entry by key, anomalies, latencies, timeseries,
+# telemetry state). A group left out is neither listed nor callable. The two
+# autoscale groups are the ones whose tools write, and the drill is its own
+# because it is the only one that spends the deployment it describes.
+# ["processes,cache"]
+# SYSTEM_MCP_TOOLS="processes,autoscale,autoscale_drill,cache"
 
 # Browser origins allowed to call the endpoint. Empty by default, so no browser
 # reaches it: the transport spec requires the Origin header to be validated,

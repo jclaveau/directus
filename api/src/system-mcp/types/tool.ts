@@ -10,7 +10,11 @@ export interface SystemMcpToolContext {
  * The subsystem a tool reads, so a deployment can expose one without the other
  * (`SYSTEM_MCP_TOOLS`).
  */
-export type SystemMcpToolGroup = 'processes' | 'cache' | 'autoscale';
+export type SystemMcpToolGroup =
+	| 'processes'
+	| 'cache'
+	| 'autoscale'
+	| 'autoscale_drill';
 
 /**
  * One diagnostic read, described well enough for a model to choose it and call
