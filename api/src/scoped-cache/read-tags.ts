@@ -160,9 +160,11 @@ export function scopedCacheNestedCollections(ast: AST): Set<CollectionKey> {
  *   filter withholds parents, and which ones it withholds is decided by every
  *   collection that filter reads — each of them one the response may have nested
  *   only in part.
- * - A nested node carries a field-level case, so a parent it references can be
- *   withheld and arrive as a null slot — which `mergeWithParentItems` writes for
- *   a null foreign key too, leaving the two indistinguishable once merged.
+ * - A nested node reads under only SOME of its parent's cases, so a parent it
+ *   references can be withheld and arrive as a null slot — which
+ *   `mergeWithParentItems` writes for a null foreign key too, leaving the two
+ *   indistinguishable once merged. Reading under every case withholds nothing:
+ *   a row is returned only when it matched one of them.
  */
 export function scopedCacheCollectionsBeyondNestedRows(
 	schema: SchemaOverview,
@@ -259,7 +261,20 @@ export function scopedCacheCollectionsBeyondNestedRows(
 
 	addCollectionsQueriedBy(ast.name, ast.query, ast.cases);
 
-	const addWhatNestedM2oNodesDependOn = (children: AST['children']): void => {
+	// `whenCase` indexes the cases of the collection the node hangs OFF, which
+	// `injectCases` fills from the parent's `caseMap` — not the related
+	// collection's cases it stores beside them. Naming every one leaves nothing to
+	// withhold: a row comes back only when it matched some case, and the node
+	// reads under all of them. An empty list names nothing and cannot cover.
+	const readsUnderEveryCase = (whenCase: number[], cases: Filter[]): boolean => {
+		return cases.length > 0
+			&& cases.every((_, index) => whenCase.includes(index));
+	};
+
+	const addWhatNestedM2oNodesDependOn = (
+		children: AST['children'],
+		cases: Filter[],
+	): void => {
 		for (const child of children) {
 			if (child.type !== 'm2o') {
 				continue;
@@ -273,15 +288,18 @@ export function scopedCacheCollectionsBeyondNestedRows(
 
 			// Not a filter, so nothing above reads it: the case decides per ROW
 			// whether this parent is shown at all.
-			if (child.whenCase.length > 0) {
+			if (
+				child.whenCase.length > 0
+				&& !readsUnderEveryCase(child.whenCase, cases)
+			) {
 				beyond.add(child.relation.related_collection!);
 			}
 
-			addWhatNestedM2oNodesDependOn(child.children);
+			addWhatNestedM2oNodesDependOn(child.children, child.cases);
 		}
 	};
 
-	addWhatNestedM2oNodesDependOn(ast.children);
+	addWhatNestedM2oNodesDependOn(ast.children, ast.cases);
 
 	return beyond;
 }

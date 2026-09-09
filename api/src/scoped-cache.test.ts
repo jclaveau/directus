@@ -2059,12 +2059,16 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 	// Only the parts the function reads. The real shape comes from
 	// `getAstFromQuery`, which the blackbox suite exercises end to end; pulling it
 	// in here would drag the Redis KV into a unit test.
-	function astOf(query: Query, ownerNode: Partial<M2ONode> = {}): AST {
+	function astOf(
+		query: Query,
+		ownerNode: Partial<M2ONode> = {},
+		cases: Filter[] = [],
+	): AST {
 		return {
 			type: 'root',
 			name: 'owned_item',
 			query,
-			cases: [],
+			cases,
 			children: [
 				{
 					type: 'm2o',
@@ -2210,15 +2214,53 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 		]).toContain('owner');
 	});
 
-	it('names a collection whose nested node carries a field-level case', () => {
-		// A `whenCase` withholds the field for the rows the case excludes, and
+	it('names a collection whose nested node reads under only some cases', () => {
+		// The case it does not name withholds the field for that case's rows, and
 		// `mergeWithParentItems` writes those slots null like any hidden parent.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, { whenCase: [0] }, [
+					{ name: { _eq: 'alice' } },
+					{ name: { _eq: 'bob' } },
+				]),
+			),
+		]).toContain('owner');
+	});
+
+	it('names a collection whose nested node names no case at all', () => {
+		// `whenCase` points into a case list the parent does not carry, so
+		// nothing here says the field survives and the bare tag stays.
 		expect([
 			...scopedCacheCollectionsBeyondNestedRows(
 				schema,
 				astOf({}, { whenCase: [0] }),
 			),
 		]).toContain('owner');
+	});
+
+	it('spares a collection whose nested node reads under every case', () => {
+		// A row comes back only when it matched a case and the field reads under
+		// all of them, so its slot is null exactly when the foreign key is.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, { whenCase: [0] }, [{ name: { _eq: 'alice' } }]),
+			),
+		]).not.toContain('owner');
+	});
+
+	it('spares a nested node reading under every case two hops down', () => {
+		// The grandchild's `whenCase` indexes the CHILD's cases, not the root's.
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				astOf({}, {
+					children: [{ ...companyNode, whenCase: [0] }],
+					cases: [{ name: { _eq: 'alice' } }],
+				}),
+			),
+		]).not.toContain('company');
 	});
 
 	it('names a collection a nested node\'s own filter reads', () => {
