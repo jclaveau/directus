@@ -401,29 +401,6 @@ export async function countScopedCacheTagMembers(
 	return counts;
 }
 
-/**
- * Delete the cache entries a set of tag keys point to, then drop the tag sets.
- * Shared by the scoped purge (specific value slices) and the collection-wide
- * fallback (every slice).
- *
- * Returns how many cache ENTRIES it actually deleted, which is neither how many keys
- * it deleted nor how many the tag sets named.
- *
- * Not the key count, because a tag set holds each entry alongside its `__expires_at`
- * sibling and any extra sibling (`__tags`), so counting members would report every
- * entry twice over. A sidecar is recognisable by its base key being in the set
- * beside it — the `sadd` writes them together — which stays right as siblings are
- * added.
- *
- * Not the membership count either, because nothing ever SREMs: a member that expired
- * by TTL stays named by the set until the set itself is dropped here. On the
- * workload this fork exists for — per-user keys, so high cardinality, TTLs shorter
- * than the gap between mutations — most of a set can be entries that were already
- * gone, and counting them would inflate every purge figure on the page. So the
- * store's own answer decides. Only an explicit `false` is evidence the key was
- * absent; a store that reports nothing leaves the count where it was rather than
- * silently collapsing it to zero.
- */
 /** The collection a tag key names, bare tag or value slice alike. */
 function scopedCacheCollectionOfTagKey(tagKey: string): string | null {
 	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
@@ -470,6 +447,27 @@ function sliceIndexPruningsOf(tagKeys: readonly string[]): string[] {
 	return prunings;
 }
 
+/**
+ * Delete the cache entries a set of tag keys point to, then drop the tag sets.
+ * Shared by the scoped purge (specific value slices) and the collection-wide
+ * fallback (every slice).
+ *
+ * Returns how many cache ENTRIES it actually deleted, which is neither how many keys
+ * it deleted nor how many the tag sets named.
+ *
+ * Not the key count, because a tag set holds each entry alongside its `__expires_at`
+ * sibling and any extra sibling (`__tags`), so counting members would report every
+ * entry twice over. A sidecar is recognisable by its base key being in the set
+ * beside it — the `sadd` writes them together — which stays right as siblings are
+ * added.
+ *
+ * Not the membership count either, because nothing ever SREMs: a member that expired
+ * by TTL stays named by the set until the set itself is dropped here. On the
+ * workload this fork exists for — per-user keys, so high cardinality, TTLs shorter
+ * than the gap between mutations — most of a set can be entries that were already
+ * gone, and counting them would inflate every purge figure on the page. So what the
+ * store freed decides; `dropCacheEntries` is where that answer comes from.
+ */
 async function purgeScopedCacheTagKeys(
 	cache: Keyv,
 	tagKeys: string[],
@@ -598,8 +596,14 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 		return;
 	}
 
-	// Array form: this list is a whole-keyspace scan, so it is the longest of them.
-	await useRedis().del(tagKeys);
+	// Chunked for the same reason the sweep and the entry drop are: redis parses a
+	// whole argument list before it frees anything, and this list is a whole-keyspace
+	// scan, so it is the longest any of them can be.
+	const redis = useRedis();
+
+	for (let at = 0; at < tagKeys.length; at += SCOPED_CACHE_SWEEP_CHUNK_KEYS) {
+		await redis.del(tagKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS));
+	}
 }
 
 /**
@@ -718,13 +722,6 @@ export function retryPendingScopedCachePurges(): Promise<number> {
 }
 
 /**
- * Retries the recorded targets, never the namespace: a failure records what it
- * could not drop, so recovery drops exactly that and every other slice stays
- * warm. Returns how many recorded rows it cleared — not how many targets they
- * collapsed into, since an outage records one slice once per write that touched
- * it and the operator reads the table, not the grouping.
- */
-/**
  * Whether the response store can actually drop an entry right now.
  *
  * Keyv reports a store error by emitting `error` and answering `undefined`, so a
@@ -756,6 +753,13 @@ async function scopedCacheStoreDropsEntries(cache: Keyv): Promise<boolean> {
 	}
 }
 
+/**
+ * Retries the recorded targets, never the namespace: a failure records what it
+ * could not drop, so recovery drops exactly that and every other slice stays
+ * warm. Returns how many recorded rows it cleared — not how many targets they
+ * collapsed into, since an outage records one slice once per write that touched
+ * it and the operator reads the table, not the grouping.
+ */
 async function drainPendingScopedCachePurges(): Promise<number> {
 	if (!redisConfigAvailable()) {
 		return 0;
@@ -898,15 +902,25 @@ export function startScopedCachePurgeRecovery(): void {
 	// And again when the response cache's own client comes back: it reconnects on its
 	// own schedule, so the drain above can find it still offline and bail, leaving
 	// this the only thing that finishes those records.
-	void import('../cache.js').then(({ getCache }) => {
-		const { cache } = getCache();
+	void import('../cache.js')
+		.then(({ getCache }) => {
+			const { cache } = getCache();
 
-		const storeClient = (cache?.store as {
-			client?: { on?: (event: string, listener: () => void) => void };
-		} | undefined)?.client;
+			const storeClient = (cache?.store as {
+				client?: { on?: (event: string, listener: () => void) => void };
+			} | undefined)?.client;
 
-		storeClient?.on?.('ready', recover);
-	});
+			storeClient?.on?.('ready', recover);
+		})
+		// `getCache` builds the store on first call, so it can throw here — on a
+		// boot path, where an unhandled rejection is the process's problem rather
+		// than this listener's. The other two triggers still cover the drain.
+		.catch((error: any) => {
+			logger.warn(
+				error,
+				`[scoped-cache] could not watch the response cache client: ${error}`,
+			);
+		});
 
 	recover();
 }
@@ -1040,14 +1054,33 @@ export async function purgeScopedCache(
 		return [{ collection }];
 	}
 
-	const resolvedScopedCacheTags = (await emitter.emitFilter(
-		'cache.purge',
-		options.includeCollectionTag === false
-			? [...scopedCacheTags]
-			: [{ collection }, ...scopedCacheTags],
-		{ collection },
-		context,
-	)) as ScopedCacheTag[];
+	const declaredScopedCacheTags = options.includeCollectionTag === false
+		? [...scopedCacheTags]
+		: [{ collection }, ...scopedCacheTags];
+
+	let resolvedScopedCacheTags = declaredScopedCacheTags;
+
+	// The filter runs after the mutation committed, so an extension that throws
+	// here would answer 500 for a durable write — and, being outside
+	// `purgeOrRecord`, would record nothing either, leaving the entries it was
+	// about to drop stale with nothing coming for them. Purging what was already
+	// resolved loses whatever the extension would have added, which is the smaller
+	// harm and the visible one: its own `purgeBy` is what that tag is for.
+	try {
+		resolvedScopedCacheTags = (await emitter.emitFilter(
+			'cache.purge',
+			declaredScopedCacheTags,
+			{ collection },
+			context,
+		)) as ScopedCacheTag[];
+	}
+	catch (error: any) {
+		useLogger().warn(
+			error,
+			`[scoped-cache] cache.purge filter failed, purging the tags resolved `
+			+ `without it: ${error}`,
+		);
+	}
 
 	const tagKeys = [...new Set(resolvedScopedCacheTags.map(scopedCacheTagKey))];
 	let evicted: number | null = null;

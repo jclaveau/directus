@@ -157,8 +157,15 @@ export function canonicalScopedCacheValue(
 	}
 
 	if (type === 'boolean') {
-		const truthy = value === true || value === 1 || value === '1'
-			|| value === 't' || value === 'true';
+		// Every spelling a boolean column accepts, folded — `TRUE` from a filter and
+		// `t` from a postgres row are one value to the database, so they must be one
+		// slice. Matched case-insensitively for the same reason `uuid` folds below:
+		// unfolded, a read filtered `flag=TRUE` pins `flag=false` while the write
+		// emits `flag=true`, and no purge ever reaches that entry.
+		const spelling = String(value).toLowerCase();
+
+		const truthy = value === true || value === 1
+			|| ['1', 't', 'true', 'y', 'yes', 'on'].includes(spelling);
 
 		return truthy
 			? 'true'

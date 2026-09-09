@@ -1,5 +1,8 @@
 import { useEnv } from '@directus/env';
 import {
+	useLogger,
+} from '../logger/index.js';
+import {
 	redisConfigAvailable,
 	useRedis,
 } from '../redis/index.js';
@@ -57,7 +60,14 @@ export async function readScopedCacheEpochs(
 	// trade the response cache makes everywhere else.
 	const values = await useRedis()
 		.mget(names.map(scopedCacheEpochKey))
-		.catch((): (string | null)[] => []);
+		.catch((): null => null);
+
+	// Nothing, rather than a counter reading of `null` per collection: `*` is what
+	// says a capture was taken, and filling it in from a read that never happened
+	// would report the guard as running over collections nothing was read for.
+	if (values === null) {
+		return {};
+	}
 
 	return Object.fromEntries(
 		names.map((name, index) => [name, values[index] ?? null]),
@@ -99,10 +109,27 @@ export async function bumpScopedCacheEpochs(
 			);
 		}
 
-		await pipeline.exec();
+		const results = await pipeline.exec();
+
+		// Best effort is not the same as unobserved. `exec` rejects only on a
+		// connection-level failure, so an `INCR` refused on its own — maxmemory with
+		// noeviction, a WRONGTYPE — resolves as an entry error. The purge then sweeps
+		// with the counter unmoved, and a fill racing it compares equal and stores
+		// rows that purge already superseded. Nothing here can stop the sweep, but a
+		// guard that silently stopped guarding must not also be silent.
+		const refused = results?.find(([error]) => error !== null)?.[0];
+
+		if (refused) {
+			throw refused;
+		}
 	}
-	catch {
+	catch (error: any) {
 		// See above: the sweep behind this is what makes the cache correct.
+		useLogger().warn(
+			error,
+			`[scoped-cache] purge counters not bumped, fills racing this purge are `
+			+ `unguarded: ${error}`,
+		);
 	}
 }
 

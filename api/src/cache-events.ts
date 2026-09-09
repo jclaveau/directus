@@ -1645,10 +1645,21 @@ export async function listCacheGroupLatencies(
 export async function evictCacheEntry(
 	cache: Keyv,
 	redisKey: string,
-): Promise<void> {
-	await cache.delete(redisKey);
-	await cache.delete(cacheExpiresAtKey(redisKey));
-	await cache.delete(cacheTagsKey(redisKey));
+): Promise<boolean> {
+	// Read back rather than trusted. Keyv reports a store error by emitting `error`
+	// and answering `undefined`, so a swallowed delete is indistinguishable from a
+	// successful one at the call site — which is exactly what the in-flight purge
+	// guard must not assume, its whole job being to leave nothing stale behind.
+	try {
+		await cache.delete(redisKey);
+		await cache.delete(cacheExpiresAtKey(redisKey));
+		await cache.delete(cacheTagsKey(redisKey));
+
+		return await cache.get(redisKey) === undefined;
+	}
+	catch {
+		return false;
+	}
 }
 
 // Evict every currently-described entry on a path. Returns the count attempted.

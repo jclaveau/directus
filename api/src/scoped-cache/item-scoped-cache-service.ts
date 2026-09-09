@@ -560,6 +560,10 @@ export class ItemScopedCacheService {
 		if (ownTags !== null && otherCollections.length === 0) {
 			const ownAndHookTags = [...ownTags, ...hookTags];
 
+			// Spelled twice rather than passing `{ includeCollectionTag }`: the option
+			// object is what a caller reads as "this purge is doing something unusual",
+			// and every assertion on the common call would have to carry a default it
+			// never asked for.
 			if (includeCollectionTag) {
 				return purgeScopedCache(
 					cache,

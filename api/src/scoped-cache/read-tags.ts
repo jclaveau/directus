@@ -234,8 +234,8 @@ export function scopedCacheCollectionsBeyondNestedRows(
 		}
 
 		for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
-			const collection = entry.collection;
-			const kind = keyingByCollection.get(collection)?.kind;
+			const queried = entry.collection;
+			const kind = keyingByCollection.get(queried)?.kind;
 			const namedByFilter = kind === 'keyed' || kind === 'independent';
 
 			// A sort only reorders a collection's rows; a per-slice pin catches the
@@ -244,18 +244,18 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			// aggregate collapses rows across slices and always crosses.
 			// `independent` is skipped in readTags, so its scope fields pin nothing.
 			const hasCoveringSlice =
-				(schema.collections[collection]?.scopedCacheFields ?? []).length > 0
+				(schema.collections[queried]?.scopedCacheFields ?? []).length > 0
 				&& kind !== 'independent';
 
 			const crossesMembership =
-				groupedOrAggregated.has(collection) ||
-				(sorted.has(collection) && !hasCoveringSlice);
+				groupedOrAggregated.has(queried) ||
+				(sorted.has(queried) && !hasCoveringSlice);
 
 			if (namedByFilter && !crossesMembership) {
 				continue;
 			}
 
-			beyond.add(collection);
+			beyond.add(queried);
 		}
 	};
 

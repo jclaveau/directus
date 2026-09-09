@@ -432,6 +432,31 @@ describe('scoped cache purging', () => {
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
+		test(oneLine`
+			purges the tags it had when a cache.purge extension throws, rather than
+			failing a mutation whose write already committed
+		`, async () => {
+			redis.smembers.mockResolvedValue(['key-a']);
+			emitFilter.mockRejectedValueOnce(new Error('extension exploded'));
+
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			// The filter runs after the transaction, so letting it out answers 500 for
+			// a durable write — and, sitting outside `purgeOrRecord`, records nothing
+			// either, leaving the entries it was about to drop with nothing coming.
+			await expect(purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			])).resolves.toEqual([
+				{ collection: 'slots' },
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
+
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=A');
+			expect(cache.delete).toHaveBeenCalledWith('key-a');
+			expect(cache.clear).not.toHaveBeenCalled();
+		});
+
 		test('records the purge, how wide it reached and what it took', async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
 				return tagKey === 'scalabus:tag:slots'

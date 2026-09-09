@@ -23,6 +23,9 @@ import {
 	tagScopedCacheKeys,
 	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
+import {
+	recordPendingScopedCachePurge,
+} from '../scoped-cache-pending-purges.js';
 import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -228,7 +231,25 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					await scopedCacheSweptDuringFill(capturedEpochs);
 
 				if (sweptDuringFill !== undefined) {
-					await evictCacheEntry(cache, redisKey);
+					// This is the one purge that knows precisely which key is stale, and
+					// everywhere else a purge that could not run is recorded for a retry.
+					// A store that swallowed the delete answers `undefined` rather than
+					// throwing, so without reading the eviction back the entry would serve
+					// rows a purge already superseded for its whole TTL — the failure the
+					// guard exists to prevent, one step later.
+					if (await evictCacheEntry(cache, redisKey) === false) {
+						await recordPendingScopedCachePurge(
+							{
+								mode: 'slices',
+								collection: req.collection ?? null,
+								scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
+							},
+							new Error(
+								`in-flight purge of ${sweptDuringFill} left `
+								+ `${redisKey} cached`,
+							),
+						);
+					}
 
 					if (cacheStatsActive()) {
 						void reportCacheAnomaly(

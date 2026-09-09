@@ -209,6 +209,22 @@ describe(oneLine`
 			});
 		}, 60_000);
 
+		// A boolean column takes every one of these spellings and reads them as the
+		// one value, so a filter written in any of them must resolve the slice the
+		// row's own write emits. Unfolded, `TRUE` pins `flag=false` while the write
+		// emits `flag=true`, and the entry is left for its whole TTL with no purge
+		// able to name it.
+		it.each(['TRUE', 'True', 't', 'T', 'yes', 'on'])(oneLine`
+			pins the boolean slice %s the same way the driver's own spelling does
+		`, async (filterValue) => {
+			await expectSliceRoundTrip({
+				field: 'flag',
+				filterValue,
+				rowId: flaggedId,
+				expectedTag: `${TYPED}:flag=true`,
+			});
+		}, 60_000);
+
 		it(oneLine`
 			pins a bigInteger slice by magnitude, so a padded filter value and the
 			driver's plain integer are one slice

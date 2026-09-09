@@ -892,6 +892,40 @@ describe('dropScopedCacheTagIndex', () => {
 	});
 
 	it(oneLine`
+		deletes the scanned keys in batches, so one flush cannot hold redis parsing
+		an argument list as long as the whole keyspace
+	`, async () => {
+		const found = Array.from({ length: 1201 }, (_, at) => `ns:tag:c${at}`);
+
+		const scan = vi.fn()
+			.mockResolvedValueOnce(['0', found])
+			.mockResolvedValueOnce(['0', []]);
+
+		const del = vi.fn();
+		const bumps = {
+			incr: vi.fn().mockReturnThis(),
+			expire: vi.fn().mockReturnThis(),
+			exec: vi.fn().mockResolvedValue([]),
+		};
+
+		vi.mocked(useRedis).mockReturnValue({
+			scan,
+			del,
+			pipeline: () => bumps,
+		} as any);
+
+		await dropScopedCacheTagIndex();
+
+		expect(del).toHaveBeenCalledTimes(3);
+		expect(del.mock.calls[0]![0]).toHaveLength(500);
+		expect(del.mock.calls[2]![0]).toHaveLength(201);
+
+		// Still one array per call, never a spread: the batch bounds how long redis
+		// is held, and the array is what keeps the argument off the stack.
+		expect(del.mock.calls.flatMap((call) => call[0])).toEqual(found);
+	});
+
+	it(oneLine`
 		bumps the wholesale counter BEFORE the scan, so a read filing its tags across
 		the flush declines instead of keeping an entry the DEL orphaned
 	`, async () => {
@@ -1449,6 +1483,33 @@ describe('startScopedCachePurgeRecovery', () => {
 		startScopedCachePurgeRecovery();
 
 		await vi.waitFor(() => expect(warn).toHaveBeenCalledOnce());
+	});
+
+	it(oneLine`
+		logs rather than leaves an unhandled rejection when the response cache cannot
+		be reached to watch its own client
+	`, async () => {
+		const warn = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+		vi.mocked(useRedis).mockReturnValue({ on: vi.fn() } as any);
+
+		// `getCache` builds the store on its first call, so it throws here on a boot
+		// path — where an unhandled rejection is the process's problem rather than
+		// this listener's. The other two triggers still cover the drain.
+		vi.mocked(getCache).mockImplementation(() => {
+			throw new Error('cache store unavailable');
+		});
+
+		startScopedCachePurgeRecovery();
+
+		// Named, not merely counted: the drain reaches `getCache` too, so a bare
+		// "something warned" would pass with the listener's own rejection unhandled.
+		await vi.waitFor(() => {
+			expect(warn).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.stringContaining('could not watch the response cache client'),
+			);
+		});
 	});
 
 	it('reports the count once there was something to finish', async () => {
@@ -3462,16 +3523,55 @@ describe('reading and bumping the purge counters', () => {
 		expect(mget).not.toHaveBeenCalled();
 	});
 
-	// A read that cannot reach the counters still has to answer. Capturing null
-	// leaves the fill unguarded, exactly as it is with no Redis at all — and the
-	// `*` key still rides along, so the guard can tell this from no capture.
-	it('captures nulls when the counters cannot be read', async () => {
+	// A read that cannot reach the counters still has to answer, and the fill is
+	// left unguarded exactly as it is with no Redis at all. What it must NOT do is
+	// answer with a counter reading per collection: `*` is what says a capture was
+	// taken, so filling it in from a read that never happened reports the guard as
+	// covering collections nothing was read for.
+	it(oneLine`
+		captures nothing at all when the counters cannot be read, rather than a
+		reading of null per collection
+	`, async () => {
 		mget.mockRejectedValue(new Error('connection is closed'));
 
-		expect(await readScopedCacheEpochs(['articles'])).toEqual({
-			articles: null,
-			'*': null,
-		});
+		const captured = await readScopedCacheEpochs(['articles']);
+
+		expect(captured).toEqual({});
+
+		// The tags name a collection the capture never covered, and with no `*` the
+		// guard reports itself off rather than claiming to have covered it.
+		expect(scopedCacheCollectionsWithoutGuard(captured, [
+			{ collection: 'articles' },
+		])).toEqual([]);
+	});
+
+	// `exec` rejects only on a connection-level failure, so an INCR refused on its
+	// own resolves as an entry error. Nothing here can stop the sweep behind it —
+	// that is what makes the cache correct — but a guard that silently stopped
+	// guarding must not also be silent: the fills racing this purge are unguarded.
+	it('warns when a counter bump was refused rather than dropped', async () => {
+		const warn = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		counterPipeline.exec.mockResolvedValue([
+			[null, 1],
+			[new Error('OOM command not allowed'), null],
+		]);
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(warn).toHaveBeenCalledOnce();
+	});
+
+	it('says nothing when every bump landed', async () => {
+		const warn = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		counterPipeline.exec.mockResolvedValue([[null, 1], [null, 1]]);
+
+		await bumpScopedCacheEpochs(['articles']);
+
+		expect(warn).not.toHaveBeenCalled();
 	});
 
 	// An expiring counter, so a collection nothing writes to stops costing a key. A
@@ -3608,6 +3708,21 @@ describe('the canonical scope value', () => {
 
 		expect(canonicalScopedCacheValue(upper, 'uuid'))
 			.toBe(upper.toLowerCase());
+	});
+
+	// Every spelling a boolean column accepts is one value to the database, so they
+	// must be one slice: unfolded, a read filtered `flag=TRUE` pins `flag=false`
+	// while the write emits `flag=true`, and no purge ever reaches that entry.
+	it.each([
+		true, 1, '1', 't', 'T', 'true', 'TRUE', 'True', 'y', 'YES', 'on', 'ON',
+	])('reads %s as the one true slice', (raw) => {
+		expect(canonicalScopedCacheValue(raw, 'boolean')).toBe('true');
+	});
+
+	it.each([
+		false, 0, '0', 'f', 'F', 'false', 'FALSE', 'n', 'NO', 'off',
+	])('reads %s as the one false slice', (raw) => {
+		expect(canonicalScopedCacheValue(raw, 'boolean')).toBe('false');
 	});
 
 	it('reads null and undefined as the one sentinel', () => {

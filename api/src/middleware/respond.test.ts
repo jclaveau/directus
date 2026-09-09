@@ -36,7 +36,12 @@ const mocks = vi.hoisted(() => {
 			await cache.delete(redisKey);
 			await cache.delete(`${redisKey}__expires_at`);
 			await cache.delete(`${redisKey}__tags`);
+
+			// The real one reads the key back, because a store reports an error by
+			// answering `undefined` rather than throwing.
+			return true;
 		}),
+		recordPendingScopedCachePurge: vi.fn().mockResolvedValue(undefined),
 		queueMissLatency: vi.fn(),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
@@ -79,6 +84,10 @@ vi.mock('../cache-events.js', () => {
 		writeCacheTombstone: mocks.writeCacheTombstone,
 		queueMissLatency: mocks.queueMissLatency,
 	};
+});
+
+vi.mock('../scoped-cache-pending-purges.js', () => {
+	return { recordPendingScopedCachePurge: mocks.recordPendingScopedCachePurge };
 });
 
 vi.mock('../utils/get-string-byte-size.js', () => {
@@ -498,6 +507,51 @@ describe('respond middleware', () => {
 		);
 
 		expect(res.json).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		records the entry a failed eviction left cached, so the drain finishes what
+		the in-flight purge could not
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
+
+		// What a store that swallowed the delete answers. Nothing throws, so
+		// without reading the eviction back the entry stays and serves rows the
+		// purge already superseded, for its whole TTL.
+		// `Once`, not a standing override: `clearAllMocks` resets the calls but keeps
+		// the implementation, so a standing one would answer for every later test.
+		mocks.evictCacheEntry.mockResolvedValueOnce(false);
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles', field: 'author', value: 7 }],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.recordPendingScopedCachePurge).toHaveBeenCalledWith(
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:author=7'],
+			},
+			expect.any(Error),
+		);
+	});
+
+	test('records nothing when the eviction took', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.recordPendingScopedCachePurge).not.toHaveBeenCalled();
 	});
 
 	test(oneLine`
