@@ -13,6 +13,7 @@ import {
 } from './lib/pool.js';
 import { resolveConfig } from './lib/resolve-config.js';
 import { LEGACY_SAMPLE_WINDOW } from './lib/sanitize-config.js';
+import { WorkerCpu } from './lib/worker-cpu.js';
 import type { AutoscaleConfig } from './types.js';
 
 /**
@@ -101,6 +102,10 @@ export async function runAutoscaler(): Promise<void> {
 	// reading it happens to switch on.
 	const samples = new PoolSamples();
 
+	// Kept across ticks because a CPU percent is a window rather than a value,
+	// and this is what holds the end of the previous one.
+	const cpu = new WorkerCpu();
+
 	for (;;) {
 		// A tick that throws is a tick that was skipped, never the end of the
 		// autoscaler: it would leave the pool frozen at whatever size the
@@ -109,7 +114,13 @@ export async function runAutoscaler(): Promise<void> {
 		try {
 			const config = await resolveConfig();
 			const reading = await readPool(config.appName, config.warmupSeconds);
-			const { onlineWorkers, pendingWorkers, warmingWorkers } = reading;
+			const { pendingWorkers, warmingWorkers } = reading;
+
+			// Re-measured rather than taken from the supervisor: pm2's percent
+			// covers the time since whichever client last asked about that pid,
+			// so anything else listing the same daemon sets the window this
+			// pool is judged on.
+			const onlineWorkers = cpu.measure(reading.onlineWorkers);
 			const workers = onlineWorkers.length + pendingWorkers;
 
 			const carriesRestarts = [...reading.restartsByWorker.values()]
