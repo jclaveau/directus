@@ -526,7 +526,7 @@ onUnmounted(disarmClock);
 						row lays this span out instead. -->
 						<span
 							v-if="row.options"
-							class="control"
+							class="control choice"
 							:class="{ pending: edited(row.field) }"
 						>
 							<v-select
@@ -769,12 +769,32 @@ onUnmounted(disarmClock);
 }
 
 /*
- * The steppers sit where a select's chevron sits, with the layer that supplied
- * the value after them — so a number row and a chosen row read at the same
- * two points rather than each at its own.
+ * Every row ends the same way: the layer that supplied the value, then the
+ * control that changes it — a number's steppers where a select's chevron is.
+ * The pair is pushed to the end of the box, so the two read at the same two
+ * points rather than each at its own.
+ *
+ * `.edit` earns the rule its specificity: `v-input` sets the margin on
+ * `.append` from three classes deep inside its own scope.
  */
-.control.numeric :deep(.arrows) {
+.edit .control.numeric :deep(.append) {
+	order: 1;
 	margin-inline-start: auto;
+}
+
+.control.numeric :deep(.arrows) {
+	order: 2;
+}
+
+/* A select puts its chevron in the same box as this slot, and first. */
+.control.choice :deep(.append) {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+}
+
+.control.choice :deep(.append > .v-icon) {
+	order: 1;
 }
 
 .fields tr.inactive td {
