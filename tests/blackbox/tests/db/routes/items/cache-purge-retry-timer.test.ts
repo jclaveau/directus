@@ -136,7 +136,9 @@ describe(oneLine`
 			// The write is durable by the time the purge runs, so it must not 500.
 			expect(write.status).toBe(200);
 
-			const recorded = await db(PENDING).select('mode', 'scoped_cache_tag');
+			const recorded = await db(PENDING)
+				.select('mode', 'collection', 'scoped_cache_tag');
+
 			expect(recorded.length).toBeGreaterThan(0);
 
 			// Nothing dropped it, so the pre-write body is still being served — the
@@ -156,6 +158,7 @@ describe(oneLine`
 				await new Promise((resolve) => setTimeout(resolve, 1000));
 
 				served = await readSlotA();
+				const pending = (await db(PENDING).select('id')).length;
 
 				// The two failures this can end in are indistinguishable from the
 				// header alone: a drain that never ran, and one that cleared the record
@@ -163,11 +166,26 @@ describe(oneLine`
 				// eslint-disable-next-line no-console
 				console.info(oneLine`
 					[retry-timer] ${attempt} ${served.headers[cacheStatusHeader]}
-					pending=${(await db(PENDING).select('id')).length}
+					pending=${pending}
 				`);
 
 				if (served.headers[cacheStatusHeader] === 'MISS') {
 					break;
+				}
+
+				// Every process on this database drains the same table and the shard
+				// runs several, so a sibling instance can finish these records against
+				// ITS namespace — dropping nothing here and leaving nothing to retry.
+				// A record that went without the purge it names is written again.
+				if (pending === 0) {
+					await db(PENDING).insert(recorded.map((row) => {
+						return {
+							...row,
+							failed_at: new Date(),
+							attempts: 0,
+							last_error: 'reseeded after a sibling took the record',
+						};
+					}));
 				}
 			}
 
