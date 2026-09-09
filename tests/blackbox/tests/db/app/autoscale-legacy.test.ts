@@ -24,7 +24,7 @@ import {
 const REDIS_PORT = 6108;
 
 function configKey(namespace: string): string {
-	return `${namespace}:autoscale:config`;
+	return `${namespace}:config:pm2`;
 }
 
 describe('The autoscaler can be reverted to the module rule it replaces', () => {

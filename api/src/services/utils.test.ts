@@ -625,7 +625,7 @@ describe('Services / Utils', () => {
 
 		function stored(override: Record<string, unknown> | null) {
 			resolvesTo({});
-			vi.mocked(autoscaleConfigKey).mockReturnValue('scalabus:autoscale:config');
+			vi.mocked(autoscaleConfigKey).mockReturnValue('scalabus:config:pm2');
 			vi.mocked(readSupervisorOverride).mockResolvedValue(null);
 			vi.mocked(readAutoscaleOverride).mockResolvedValue(override);
 			vi.mocked(parseOverridePatch).mockImplementation((patch) => patch);
@@ -641,7 +641,7 @@ describe('Services / Utils', () => {
 			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
 
 			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
-				key: 'scalabus:autoscale:config',
+				key: 'scalabus:config:pm2',
 				override: { maxWorkers: 8, setBy: 'writer-id' },
 				setByEmail: 'ann@example.com',
 			});
@@ -735,7 +735,7 @@ describe('Services / Utils', () => {
 
 		beforeEach(() => {
 			vi.mocked(supervisorOverrideKey)
-				.mockReturnValue('scalabus:autoscale:supervisor');
+				.mockReturnValue('scalabus:config:pm2:supervisor');
 
 			vi.mocked(readSupervisorOverride).mockResolvedValue(null);
 			vi.mocked(parseSupervisorPatch).mockImplementation((patch) => patch);
@@ -752,7 +752,7 @@ describe('Services / Utils', () => {
 			await expect(service(admin).updateSupervisorConfig(
 				{ listenTimeout: 20_000 },
 				'mcp',
-			)).resolves.toMatchObject({ key: 'scalabus:autoscale:supervisor' });
+			)).resolves.toMatchObject({ key: 'scalabus:config:pm2:supervisor' });
 
 			expect(writeSupervisorOverride).toHaveBeenCalledWith(
 				expect.objectContaining({

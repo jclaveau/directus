@@ -21,7 +21,7 @@ import {
  * tuned separately rather than through each other.
  */
 export function autoscaleConfigKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:autoscale:config`;
+	return `${useEnv()['CACHE_NAMESPACE']}:config:pm2`;
 }
 
 /**
@@ -32,7 +32,7 @@ export function autoscaleConfigKey(): string {
  * a rolling restart instead.
  */
 export function supervisorOverrideKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:autoscale:supervisor`;
+	return `${useEnv()['CACHE_NAMESPACE']}:config:pm2:supervisor`;
 }
 
 /** The variable each field reads, so a page can say where a value came from. */

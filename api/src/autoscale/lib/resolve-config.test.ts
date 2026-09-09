@@ -73,6 +73,19 @@ test('reads the override laid over the env chain', async () => {
 	});
 });
 
+// The band a deployment that configures nothing runs in: a threshold above the
+// CPU a quiet worker spends on its own background work, and a floor of one so
+// the pool can come all the way back down.
+test('an unconfigured pool scales at 70% and releases to one worker', async () => {
+	const { resolveConfig } = await freshModule();
+	get.mockResolvedValue(null);
+
+	await expect(resolveConfig()).resolves.toMatchObject({
+		scaleCpuThreshold: 70,
+		minWorkers: 1,
+	});
+});
+
 // The page offers to clear a field, and the value waiting under the override
 // is knowable only here: everywhere else the override has already won.
 test('reports what the chain holds under the override', async () => {

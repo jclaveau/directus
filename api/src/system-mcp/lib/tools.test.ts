@@ -550,7 +550,7 @@ test('Every declared output property is one the tool actually answers', () => {
 		read_cache_stats_state: CacheStatsState;
 	} = {
 		read_autoscale_config: {
-			key: 'scalabus:autoscale:config',
+			key: 'scalabus:config:pm2',
 			override: {
 				maxWorkers: 8,
 				setBy: 'jean',
@@ -559,7 +559,7 @@ test('Every declared output property is one the tool actually answers', () => {
 			},
 			setByEmail: 'jean@example.com',
 			supervisor: {
-				key: 'scalabus:autoscale:supervisor',
+				key: 'scalabus:config:pm2:supervisor',
 				override: { listenTimeout: 20_000 },
 				setByEmail: 'jean@example.com',
 			},
@@ -634,11 +634,11 @@ test('Every declared output property is one the tool actually answers', () => {
 			],
 		},
 		write_autoscale_config: {
-			key: 'scalabus:autoscale:config',
+			key: 'scalabus:config:pm2',
 			override: { maxWorkers: 8 },
 			setByEmail: 'jean@example.com',
 			supervisor: {
-				key: 'scalabus:autoscale:supervisor',
+				key: 'scalabus:config:pm2:supervisor',
 				override: null,
 				setByEmail: null,
 			},

@@ -22,7 +22,7 @@ import {
 const REDIS_PORT = 6108;
 
 function configKey(namespace: string): string {
-	return `${namespace}:autoscale:config`;
+	return `${namespace}:config:pm2`;
 }
 
 describe('The autoscaler takes live configuration from Redis', () => {

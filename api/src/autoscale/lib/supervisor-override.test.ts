@@ -33,7 +33,7 @@ test('reads the override under a key of its own', async () => {
 		.resolves
 		.toEqual({ listenTimeout: 20_000 });
 
-	expect(get).toHaveBeenCalledWith('scalabus:autoscale:supervisor');
+	expect(get).toHaveBeenCalledWith('scalabus:config:pm2:supervisor');
 });
 
 // A restart makes no override of a key it cannot parse, and the page reading it
@@ -50,12 +50,12 @@ test('writes the override, and deletes the key for none', async () => {
 	await writeSupervisorOverride({ killTimeout: 5000 });
 
 	expect(set).toHaveBeenCalledWith(
-		'scalabus:autoscale:supervisor',
+		'scalabus:config:pm2:supervisor',
 		'{"killTimeout":5000}',
 	);
 
 	await writeSupervisorOverride(null);
-	expect(del).toHaveBeenCalledWith('scalabus:autoscale:supervisor');
+	expect(del).toHaveBeenCalledWith('scalabus:config:pm2:supervisor');
 });
 
 test('refuses an option a restart cannot carry', () => {

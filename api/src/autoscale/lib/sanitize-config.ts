@@ -24,7 +24,7 @@ export const LEGACY_SAMPLE_WINDOW = 30;
 /** What every numeric field falls back to, wherever one turns out unusable. */
 export const AUTOSCALE_DEFAULTS = {
 	sampleWindow: 5,
-	scaleCpuThreshold: 60,
+	scaleCpuThreshold: 70,
 	releaseCpuThreshold: 40,
 	minWorkers: 1,
 	maxWorkers: 4,

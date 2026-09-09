@@ -26,7 +26,7 @@ test('reads the override under the namespaced key', async () => {
 	await redisHolding(JSON.stringify({ maxWorkers: 8 }));
 
 	await expect(readAutoscaleOverride()).resolves.toEqual({ maxWorkers: 8 });
-	expect(get).toHaveBeenCalledWith('scalabus:autoscale:config');
+	expect(get).toHaveBeenCalledWith('scalabus:config:pm2');
 });
 
 // The loop makes no override of a key it cannot parse, and an operator reading
@@ -108,8 +108,8 @@ test('writes the override, and deletes the key for none', async () => {
 	await redisHolding(null);
 
 	await writeAutoscaleOverride({ maxWorkers: 8 });
-	expect(set).toHaveBeenCalledWith('scalabus:autoscale:config', '{"maxWorkers":8}');
+	expect(set).toHaveBeenCalledWith('scalabus:config:pm2', '{"maxWorkers":8}');
 
 	await writeAutoscaleOverride(null);
-	expect(del).toHaveBeenCalledWith('scalabus:autoscale:config');
+	expect(del).toHaveBeenCalledWith('scalabus:config:pm2');
 });
