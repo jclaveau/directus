@@ -176,11 +176,20 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 			expect(await declaredEverywhere(rig, 'listen_timeout', 10_000, 10_000))
 				.toEqual([10_000, 10_000]);
 
+			const asked = Date.now();
 			const rolled = await callMcp(vendor, 'restart_autoscale_pool', {});
 
 			expect(rolled.body.result.isError).toBeUndefined();
-			expect(rolled.body.result.structuredContent.running).toBe(true);
-			expect(rolled.body.result.structuredContent.error).toBeNull();
+
+			// The answer is what the worker taking the call can honestly say: the
+			// request is out. The process that restarts the pool is another one,
+			// so where the restart got to comes back on its report, not here.
+			const state = rolled.body.result.structuredContent;
+
+			expect(state.running).toBe(false);
+			expect(state.finishedAt).toBeNull();
+			expect(state.error).toBeNull();
+			expect(state.askedAt).toBeGreaterThanOrEqual(asked);
 
 			expect(
 				await declaredEverywhere(rig, 'listen_timeout', 21_000, 150_000),
