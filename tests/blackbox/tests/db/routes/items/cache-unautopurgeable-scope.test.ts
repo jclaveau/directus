@@ -346,12 +346,15 @@ describe(oneLine`
 			// The stats stream drains on a ten-second cron, so the row lands some
 			// ticks after the request that refused.
 			for (let attempt = 0; attempt < 40; attempt++) {
+				// Filtered on the detail too, not just the reason: the table is shared
+				// by every instance on this database and never truncated, and the query
+				// is unordered — so `rows[0]` of a reason alone is whichever row the
+				// planner hands back first, this spec's or a neighbour's.
 				const rows = await db(ANOMALIES)
-					.where({ reason: 'unautopurgeable_scope' })
-					.select('detail');
+					.where({ reason: 'unautopurgeable_scope', detail: `${CANCEL_DEP}:ghost` })
+					.select('id');
 
 				if (rows.length > 0) {
-					expect(String(rows[0].detail)).toBe(`${CANCEL_DEP}:ghost`);
 					return;
 				}
 

@@ -26,6 +26,21 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // outage wide enough to record a namespace purge is a different (and much
 // slower) test than asserting what happens to the row once it exists.
 //
+// `namespace` mode is deliberately NOT driven from here, and must not be. The
+// table carries no namespace column and the drain reads it unfiltered, so a
+// namespace-mode row is picked up by whichever instance drains next — every
+// Directus process on this database, and the shard runs several. It answers by
+// clearing ITS OWN store, which silently satisfies a sibling spec's "MISS proves
+// the purge ran" with a flush that spec never asked for. The dispatch itself is
+// covered where nothing can be collateral: `scoped-cache.test.ts` drives it over
+// a mocked table.
+//
+// Every row seeded below names this spec's own collection (or is the null-
+// collection shape nothing else writes), so a sibling that drains one scans a
+// collection it does not have and changes nothing. For the same reason the
+// deletes and the row assertions are scoped to those shapes rather than taking
+// the table wholesale.
+//
 // The third case is the one worth having. `collection` mode names a scan, and
 // the column is nullable, so a row can exist that nothing can run. Dropping it
 // would silently discard a record whose entries are still stale, so it has to be
@@ -107,7 +122,7 @@ describe(oneLine`
 		afterAll(async () => {
 			instance?.kill();
 
-			await db(PENDING).delete();
+			await ownRows().delete();
 			await db.destroy();
 
 			await DeleteCollection(vendor, { collection: SLICED });
@@ -170,8 +185,20 @@ describe(oneLine`
 			throw new Error(`timed out waiting for ${what}`);
 		}
 
+		// The two shapes this spec seeds, and nothing else: a scan of its own
+		// collection, and the null-collection row no mutation ever records. Every
+		// read and delete goes through this, so a sibling's in-flight record is
+		// neither counted here nor thrown away.
+		function ownRows() {
+			return db(PENDING)
+				.where({ mode: 'collection', collection: SLICED })
+				.orWhere((builder: Knex.QueryBuilder) => {
+					builder.where({ mode: 'collection' }).whereNull('collection');
+				});
+		}
+
 		function pendingRows() {
-			return db(PENDING).select('id', 'mode', 'collection', 'attempts');
+			return ownRows().select('id', 'mode', 'collection', 'attempts');
 		}
 
 		// Every Directus process pointed at this database drains the same table, and
@@ -201,33 +228,11 @@ describe(oneLine`
 		}
 
 		it(oneLine`
-			finishes a namespace-mode record by clearing the store, so every slice it
-			held is gone
-		`, async () => {
-			await clearCache();
-			await db(PENDING).delete();
-
-			await fill(() => readSlice('a'));
-			await fill(readSibling);
-
-			await untilDrained(
-				{ mode: 'namespace', collection: null },
-				async () => {
-					const read = await readSlice('a');
-					return read.headers[cacheStatusHeader] === 'MISS';
-				},
-				'the namespace record to clear this instance\'s store',
-			);
-
-			expect((await readSibling()).headers[cacheStatusHeader]).toBe('MISS');
-		}, 60_000);
-
-		it(oneLine`
 			finishes a collection-mode record by scanning that collection alone, so a
 			sibling collection's entry survives it
 		`, async () => {
 			await clearCache();
-			await db(PENDING).delete();
+			await ownRows().delete();
 
 			await fill(() => readSlice('a'));
 			await fill(() => readSlice('b'));
@@ -251,7 +256,7 @@ describe(oneLine`
 			instead of discarding entries nothing else will drop
 		`, async () => {
 			await clearCache();
-			await db(PENDING).delete();
+			await ownRows().delete();
 
 			await record({ mode: 'collection', collection: null });
 
@@ -268,7 +273,7 @@ describe(oneLine`
 			expect(rows).toHaveLength(1);
 			expect(rows[0].collection).toBe(null);
 
-			const [{ last_error: lastError }] = await db(PENDING)
+			const [{ last_error: lastError }] = await ownRows()
 				.select('last_error');
 
 			expect(String(lastError)).toMatch(/names no collection/);

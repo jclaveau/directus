@@ -56,6 +56,9 @@ describe(oneLine`
 				item: [
 					{ slot: 'a', body: 'in-a' },
 					{ slot: 'b', body: 'in-b' },
+					// The control slice: the update names neither it nor the row it holds,
+					// so only a wholesale purge reaches it.
+					{ slot: 'c', body: 'in-c' },
 				],
 			});
 
@@ -96,10 +99,11 @@ describe(oneLine`
 				.post('/utils/cache/clear')
 				.set('Authorization', auth);
 
-			await readSlot('a');
+			await Promise.all([readSlot('a'), readSlot('c')]);
 
-			const warm = await readSlot('a');
+			const [warm, control] = await Promise.all([readSlot('a'), readSlot('c')]);
 			expect(warm.headers[cacheStatusHeader]).toBe('HIT');
+			expect(control.headers[cacheStatusHeader]).toBe('HIT');
 			expect(warm.body.data).toHaveLength(1);
 
 			// The hook declares purgeBy(slot=a) then empties the payload to {}.
@@ -108,9 +112,16 @@ describe(oneLine`
 				.send({ slot: '__drop__' })
 				.set('Authorization', auth);
 
-			const afterUpdate = await readSlot('a');
+			const [afterUpdate, controlAfter] = await Promise.all([
+				readSlot('a'),
+				readSlot('c'),
+			]);
 
 			expect(afterUpdate.headers[cacheStatusHeader]).toBe('MISS');
+
+			// What separates the declared purge from a coarse one: slot=a MISSing
+			// because everything did is not the declaration surviving the empty payload.
+			expect(controlAfter.headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });

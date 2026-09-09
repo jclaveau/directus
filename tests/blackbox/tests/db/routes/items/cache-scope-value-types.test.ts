@@ -175,7 +175,15 @@ describe(oneLine`
 			const miss = await readWhere(field, filterValue);
 			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
 			expect(miss.body.data).toHaveLength(1);
-			expect(headerTags(miss, cacheTagsHeader)).toContain(expectedTag);
+
+			const pinned = headerTags(miss, cacheTagsHeader);
+			expect(pinned).toContain(expectedTag);
+
+			// The bare tag is a live outcome in this very collection — it is what the
+			// `due` case below asserts — and a read carrying it too would be dropped by
+			// the write through the bare tag alone. The MISS at the end would then pass
+			// with the slice matching nothing, which is the whole subject here.
+			expect(pinned).not.toContain(TYPED);
 
 			const hit = await readWhere(field, filterValue);
 			expect(hit.headers[cacheStatusHeader]).toBe('HIT');
@@ -279,8 +287,12 @@ describe(oneLine`
 			// ever reads the stored lowercase back off the driver. Pinning the caller's
 			// spelling would file a key no write emits, and the entry would serve stale
 			// for its whole TTL.
-			expect(headerTags(upper, cacheTagsHeader))
-				.toContain(`${TYPED}:ref=${REF}`);
+			const pinned = headerTags(upper, cacheTagsHeader);
+			expect(pinned).toContain(`${TYPED}:ref=${REF}`);
+
+			// Same reason as the round-trip helper: were the read bare-tagged as well,
+			// the touch below would drop it without the uuid folding doing anything.
+			expect(pinned).not.toContain(TYPED);
 
 			const hit = await readWhere('ref', REF.toUpperCase());
 			expect(hit.headers[cacheStatusHeader]).toBe('HIT');

@@ -90,11 +90,22 @@ describe(oneLine`
 			await redisCommand(REDIS_PORT, ['DEL', `${namespace}:tag:${NOTE}`])
 				.catch(() => '');
 
-			await db(PENDING).delete();
+			await ownRows().delete();
 			await db.destroy();
 
 			await DeleteCollection(vendor, { collection: NOTE });
 		});
+
+		// Every process on this database shares the table, so nothing here may take
+		// it wholesale: a sibling's in-flight record deleted from under it drains
+		// nothing and still lets that spec's "the purge ran" MISS pass. Both shapes a
+		// failure over this collection records name it — `collection` mode in the
+		// column, tags mode in the label — and no other spec writes either.
+		function ownRows() {
+			return db(PENDING)
+				.where({ collection: NOTE })
+				.orWhere('scoped_cache_tag', 'like', `${NOTE}%`);
+		}
 
 		function readSlotA() {
 			return request(getUrl(vendor, env))
@@ -109,7 +120,7 @@ describe(oneLine`
 		`, async () => {
 			const url = getUrl(vendor, env);
 
-			await db(PENDING).delete();
+			await ownRows().delete();
 
 			await request(url)
 				.post('/utils/cache/clear')
@@ -136,7 +147,7 @@ describe(oneLine`
 			// The write is durable by the time the purge runs, so it must not 500.
 			expect(write.status).toBe(200);
 
-			const recorded = await db(PENDING)
+			const recorded = await ownRows()
 				.select('mode', 'collection', 'scoped_cache_tag');
 
 			expect(recorded.length).toBeGreaterThan(0);
@@ -158,7 +169,7 @@ describe(oneLine`
 				await new Promise((resolve) => setTimeout(resolve, 1000));
 
 				served = await readSlotA();
-				const pending = (await db(PENDING).select('id')).length;
+				const pending = (await ownRows().select('id')).length;
 
 				// The two failures this can end in are indistinguishable from the
 				// header alone: a drain that never ran, and one that cleared the record
@@ -191,7 +202,7 @@ describe(oneLine`
 
 			expect(served.headers[cacheStatusHeader]).toBe('MISS');
 			expect(served.body.data[0].label).toBe('v2');
-			expect(await db(PENDING).select('id')).toEqual([]);
+			expect(await ownRows().select('id')).toEqual([]);
 		}, 60_000);
 	});
 });

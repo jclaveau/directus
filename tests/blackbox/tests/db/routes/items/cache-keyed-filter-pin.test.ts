@@ -549,6 +549,11 @@ describe(oneLine`
 			const warm = await readItemsWithFilteredSubItem();
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
 
+			// The MISS after the write only means something once the entry is known to
+			// be stored; a read that never cached would pass this test on its own.
+			expect((await readItemsWithFilteredSubItem())
+				.headers[cacheStatusHeader]).toBe('HIT');
+
 			await request(getUrl(vendor, env))
 				.patch(`/items/${OWNED_SUB_ITEM}/${filteredSubItemId}`)
 				.send({ note: 'filtered-after' })
