@@ -142,5 +142,20 @@ describe('The autoscaler describes itself to the processes report', () => {
 		expect(node.runtime!.rssBytes).toBeGreaterThan(0);
 		expect(node.runtime!.nodeVersion).toBe(process.version);
 		expect(node.supervisor!.status).toBe('online');
+
+		// The admin panel reads the pool off this block and nowhere else: the
+		// loop serves no HTTP, so a report that carried no configuration would
+		// leave the page with nothing to describe or change.
+		expect(node.autoscale, 'the autoscaler says what it is scaling on')
+			.not.toBeNull();
+
+		expect(node.autoscale!.config.appName).toBe('no-such-app');
+		expect(node.autoscale!.sources.appName).toBe('env');
+
+		// The band a deployment that configures nothing runs in, resolved by
+		// the process that scales on it rather than asserted next to it.
+		expect(node.autoscale!.config.scaleCpuThreshold).toBe(70);
+		expect(node.autoscale!.config.minWorkers).toBe(1);
+		expect(node.autoscale!.sources.scaleCpuThreshold).toBe('default');
 	}, 120_000);
 });

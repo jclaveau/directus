@@ -61,6 +61,14 @@ vi.mock('../../utils/node-id.js', () => {
 	return { nodeId: 'node-1' };
 });
 
+const autoscale = vi.hoisted(() => {
+	return { autoscaleState: vi.fn() };
+});
+
+vi.mock('../../autoscale/lib/state.js', () => {
+	return { autoscaleState: autoscale.autoscaleState };
+});
+
 import { initProcessReports } from './report-processes.js';
 
 const platform = { ...process.env };
@@ -85,6 +93,7 @@ beforeEach(() => {
 	bus.publish.mockReset();
 	bus.subscribe.mockReset();
 	logger.warn.mockReset();
+	autoscale.autoscaleState.mockReturnValue(null);
 	delete process.env['NODE_APP_INSTANCE'];
 	delete process.env['pm_id'];
 	delete process.env['name'];
@@ -130,6 +139,27 @@ test('Answers with what this process is and what it measured', async () => {
 	expect(message.self.runtime?.rssBytes).toBeGreaterThan(0);
 	expect(message.self.runtime?.nodeVersion).toBe(process.version);
 	expect(message.self.env).toHaveLength(1);
+});
+
+// The process that scales the pool answers no HTTP of its own, so what it is
+// scaling on reaches the admin page on this report or not at all.
+test('The process scaling a pool answers with what it is scaling on', async () => {
+	autoscale.autoscaleState.mockReturnValue({ workers: 3 });
+
+	expect((await query()).self.autoscale).toEqual({ workers: 3 });
+});
+
+// Every other process is asked the same question and has no pool behind it.
+test('A process scaling nothing says so rather than leaving it out', async () => {
+	expect((await query()).self.autoscale).toBeNull();
+});
+
+// The block is small enough that narrowing the query is not worth losing it:
+// a page asking for the env alone still has a pool to describe.
+test('The pool is answered however the query was narrowed', async () => {
+	autoscale.autoscaleState.mockReturnValue({ workers: 3 });
+
+	expect((await query(['env'])).self.autoscale).toEqual({ workers: 3 });
 });
 
 test('Carries the identity PM2 gave it', async () => {
