@@ -2575,6 +2575,38 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 		});
 	});
 
+	it(oneLine`
+		bares a related collection two keyable fields name at once, since one alias
+		is one row and two axes name no single slice
+	`, () => {
+		const scopedSchema = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		scopedSchema.collections['owner']!.scopedCacheFields = ['name'];
+
+		// Both bound: `id` names the row and `name` names its slice. Pinning either
+		// alone would claim a bound the other does not share, so the alias falls
+		// bare — an over-purge, and the reason a filter written to defeat the
+		// `independent` verdict has to pick a sibling the keying cannot key on.
+		expect(scopedCacheFilterKeyingByCollection(scopedSchema, {
+			type: 'root',
+			name: 'owned_item',
+			query: {
+				filter: { owner: { id: { _eq: 7 }, name: { _eq: 'alice' } } },
+			},
+			cases: [],
+			children: [],
+		} as AST).get('owner')).toEqual({ kind: 'unkeyed' });
+	});
+
 	it('leaves a related collection unkeyed on a non-scoped, non-key field', () => {
 		// The same filter where `name` is neither the pk nor a scoped field names no
 		// pinnable slice, so the owner stays unkeyed (bare).

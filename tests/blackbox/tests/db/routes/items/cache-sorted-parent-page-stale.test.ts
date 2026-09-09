@@ -123,16 +123,22 @@ describe(oneLine`
 		// Two of three, ordered by the nested parent's name: the third root and its
 		// parent are outside the page, which is what the rename below moves.
 		//
-		// The `tenant` sibling is what stops the pk condition reading as
-		// `independent` — a lone `parent.id` is answered by the root's own foreign
-		// key column, and an independent collection is skipped rather than pinned.
-		// With it, PARENT is `keyed` on its pk, which is the arm this exercises.
+		// The `name` sibling is what stops the pk condition reading as `independent`
+		// — a lone `parent.id` is answered by the root's own foreign key column, and
+		// an independent collection is skipped rather than pinned. With it the far
+		// row has to be read, and PARENT comes back `keyed` on its pk, which is the
+		// arm this exercises.
+		//
+		// It has to be a column the keying CANNOT key on. `tenant` is a declared
+		// scope field, so it would contribute a second keyed axis, and two keyed
+		// fields under one alias name no single slice — `keyedAxisAcross` calls that
+		// a conflict and the alias falls bare, taking the pin with it.
 		function readFirstPage() {
 			return request(getUrl(vendor, env))
 				.get(`/items/${ROOT}`)
 				.query({
 					'filter[parent][id][_in]': parentIds.join(','),
-					'filter[parent][tenant][_eq]': 'acme',
+					'filter[parent][name][_nnull]': 'true',
 					fields: 'id,label,parent.name',
 					sort: 'parent.name',
 					limit: '2',
