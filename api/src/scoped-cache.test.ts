@@ -9,8 +9,14 @@ import type {
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+	assertScopedCacheRedisSupported,
+	bumpScopedCacheEpochs,
 	canonicalScopedCacheValue,
 	countScopedCacheTagMembers,
+	earlierScopedCacheEpoch,
+	isPinnableScopeType,
+	readScopedCacheEpochs,
+	scopedCacheSweptDuringFill,
 	foldHandedOverScopedCacheEpochs,
 	mergeScopedCacheEpochs,
 	scopedCacheCollectionsWithoutGuard,
@@ -3389,4 +3395,314 @@ describe('the purge counters a fill is guarded by', () => {
 			[{ collection: 'authors' }],
 		)).toEqual([]);
 	});
+});
+
+// The counters themselves, as opposed to the merge rules above: what a capture asks
+// Redis for, and what it answers when it cannot ask. Every arm below is a failure or
+// a configuration one, so none of them has a blackbox witness — a read that captures
+// nothing looks exactly like a read that captured and found nothing moved.
+describe('reading and bumping the purge counters', () => {
+	const mget = vi.fn();
+
+	const counterPipeline = {
+		incr: vi.fn().mockReturnThis(),
+		expire: vi.fn().mockReturnThis(),
+		exec: vi.fn(),
+	};
+
+	beforeEach(() => {
+		env['CACHE_ENABLED'] = true;
+		mget.mockResolvedValue([]);
+		counterPipeline.exec.mockResolvedValue([]);
+
+		vi.mocked(useRedis).mockReturnValue({
+			mget,
+			pipeline: () => counterPipeline,
+		} as any);
+	});
+
+	afterEach(() => {
+		delete env['CACHE_ENABLED'];
+	});
+
+	it('asks for the wholesale counter alongside the named collections', async () => {
+		mget.mockResolvedValue(['7', '1']);
+
+		expect(await readScopedCacheEpochs(['articles'])).toEqual({
+			articles: '7',
+			'*': '1',
+		});
+
+		expect(mget).toHaveBeenCalledWith(['ns:epoch:articles', 'ns:epoch:*']);
+	});
+
+	it('asks once for a collection named twice', async () => {
+		await readScopedCacheEpochs(['articles', 'articles']);
+
+		expect(mget).toHaveBeenCalledWith(['ns:epoch:articles', 'ns:epoch:*']);
+	});
+
+	// Every read pays this round trip, so it is skipped wherever its answer could
+	// not matter. Nothing is filled with the response cache off.
+	it.each([
+		['the response cache is off', () => {
+			env['CACHE_ENABLED'] = false;
+		}],
+		['scoped purging is off', () => {
+			env['CACHE_AUTO_PURGE_MODE'] = 'full';
+		}],
+		['there is no Redis configured', () => {
+			vi.mocked(redisConfigAvailable).mockReturnValue(false);
+		}],
+	])('captures nothing, and asks nothing, when %s', async (_case, disable) => {
+		disable();
+
+		expect(await readScopedCacheEpochs(['articles'])).toEqual({});
+		expect(mget).not.toHaveBeenCalled();
+	});
+
+	// A read that cannot reach the counters still has to answer. Capturing null
+	// leaves the fill unguarded, exactly as it is with no Redis at all — and the
+	// `*` key still rides along, so the guard can tell this from no capture.
+	it('captures nulls when the counters cannot be read', async () => {
+		mget.mockRejectedValue(new Error('connection is closed'));
+
+		expect(await readScopedCacheEpochs(['articles'])).toEqual({
+			articles: null,
+			'*': null,
+		});
+	});
+
+	// An expiring counter, so a collection nothing writes to stops costing a key. A
+	// read whose counter expired between capture and fill reads null on both sides
+	// and caches, which is right — nothing purged it in between.
+	it('bumps each collection once and gives the counter a day', async () => {
+		await bumpScopedCacheEpochs(['articles', 'articles', 'authors']);
+
+		expect(counterPipeline.incr).toHaveBeenCalledTimes(2);
+		expect(counterPipeline.incr).toHaveBeenCalledWith('ns:epoch:articles');
+		expect(counterPipeline.incr).toHaveBeenCalledWith('ns:epoch:authors');
+
+		expect(counterPipeline.expire)
+			.toHaveBeenCalledWith('ns:epoch:articles', 24 * 60 * 60);
+
+		expect(counterPipeline.exec).toHaveBeenCalledOnce();
+	});
+
+	it('opens no pipeline for an empty collection list', async () => {
+		await bumpScopedCacheEpochs([]);
+
+		expect(counterPipeline.exec).not.toHaveBeenCalled();
+	});
+
+	// Best effort, and the whole of it: this runs BEFORE the sweep, so letting a
+	// client that cannot take the command through would abort the purge itself —
+	// trading every entry it was about to drop for the one racing fill the counter
+	// would have refused.
+	it(oneLine`
+		swallows a bump the client refuses, so the sweep behind it still runs
+	`, async () => {
+		counterPipeline.exec.mockRejectedValue(new Error('closed'));
+
+		await expect(bumpScopedCacheEpochs(['articles'])).resolves.toBeUndefined();
+	});
+
+	// Called AFTER the entry is written: a purge bumps the counters before it
+	// sweeps, so re-reading them here catches every interleaving the pre-fill check
+	// was too early to see.
+	it('names the collection whose counter moved during the fill', async () => {
+		mget.mockResolvedValue(['8', '1']);
+
+		expect(await scopedCacheSweptDuringFill({ articles: '7', '*': '1' }))
+			.toBe('articles');
+	});
+
+	it('names the wholesale counter when a flush moved that one', async () => {
+		mget.mockResolvedValue(['7', '2']);
+
+		expect(await scopedCacheSweptDuringFill({ articles: '7', '*': '1' }))
+			.toBe('*');
+	});
+
+	it('names nothing when every counter reads back the same', async () => {
+		mget.mockResolvedValue(['7', '1']);
+
+		expect(await scopedCacheSweptDuringFill({ articles: '7', '*': '1' }))
+			.toBeUndefined();
+	});
+
+	// A counter that vanished between the two reads moved, and so did one that
+	// appeared: either way the entry cannot be trusted.
+	it('names a counter that stopped answering as moved', async () => {
+		mget.mockResolvedValue([null, '1']);
+
+		expect(await scopedCacheSweptDuringFill({ articles: '7', '*': '1' }))
+			.toBe('articles');
+	});
+});
+
+// Absent beats every count: a counter that did not exist yet is the earliest
+// reading there is, and any number later on proves a purge created it in between.
+describe('the earlier of two counter readings', () => {
+	it('takes the lower count', () => {
+		expect(earlierScopedCacheEpoch('7', '9')).toBe('7');
+		expect(earlierScopedCacheEpoch('9', '7')).toBe('7');
+	});
+
+	it('keeps the reading when both agree', () => {
+		expect(earlierScopedCacheEpoch('7', '7')).toBe('7');
+	});
+
+	it.each([
+		['a missing left', null, '9'],
+		['a missing right', '7', null],
+		['an absent left', undefined, '9'],
+	])('answers absent for %s', (_case, left, right) => {
+		expect(earlierScopedCacheEpoch(left, right)).toBeNull();
+	});
+
+	// `INCR` cannot produce one, so a value that will not parse means something is
+	// wrong, and the direction that fails toward not caching is the one to take.
+	it('answers absent for a reading no INCR could have written', () => {
+		expect(earlierScopedCacheEpoch('7', 'not-a-count')).toBeNull();
+	});
+});
+
+// Scoped purging drives SCAN + multi-key DEL over a single node, so a cluster
+// client would silently under-purge — keys on other nodes are never scanned — and
+// leave stale slices. `useRedis()` always builds a standalone client in core, so
+// this only bites a custom override, and there is no blackbox rig that supplies one.
+describe('the Redis client scoped purging requires', () => {
+	it('refuses a cluster client while scoped purging is on', () => {
+		vi.mocked(useRedis).mockReturnValue({ isCluster: true } as any);
+
+		expect(() => assertScopedCacheRedisSupported())
+			.toThrow(/not implemented for Redis cluster/);
+	});
+
+	it('accepts a standalone client', () => {
+		vi.mocked(useRedis).mockReturnValue({ isCluster: false } as any);
+
+		expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+	});
+
+	// Outside scoped mode the purge is a full flush, which a cluster takes.
+	it('says nothing about a cluster with scoped purging off', () => {
+		env['CACHE_AUTO_PURGE_MODE'] = 'full';
+		vi.mocked(useRedis).mockReturnValue({ isCluster: true } as any);
+
+		expect(() => assertScopedCacheRedisSupported()).not.toThrow();
+	});
+});
+
+// The read gets a scope value parsed out of a filter and the write reads it back off
+// the driver, so the two shapes have to canonicalise to ONE token or the read pins a
+// key no write emits. The types below are the ones where those shapes differ; the
+// blackbox suite drives the ones a filter can express, and these are the rest.
+describe('the canonical scope value', () => {
+	// A uuid is compared case-insensitively by the database, so both spellings name
+	// one row and must name one slice. Neither side normalises for us.
+	it('folds a uuid to one case', () => {
+		const upper = '3F2504E0-4F89-11D3-9A0C-0305E82C3301';
+
+		expect(canonicalScopedCacheValue(upper, 'uuid'))
+			.toBe(upper.toLowerCase());
+	});
+
+	it('reads null and undefined as the one sentinel', () => {
+		expect(canonicalScopedCacheValue(null, 'string')).toBe('\x00null');
+		expect(canonicalScopedCacheValue(undefined, 'string')).toBe('\x00null');
+	});
+
+	// `01`, `+1`, `0001` and a driver's `1` are one key to the database, so they
+	// must not resolve different slices.
+	it.each([
+		['0042', '42'],
+		['+42', '42'],
+		['0', '0'],
+		['-0', '0'],
+		['-0042', '-42'],
+	])('strips an integer spelling %s down to %s', (raw, canonical) => {
+		expect(canonicalScopedCacheValue(raw, 'bigInteger')).toBe(canonical);
+	});
+
+	// Spellings `validateKeys` still lets through, since it only asks
+	// `Number.isInteger(Number(key))`.
+	it.each([
+		['1e3', '1000'],
+		['0x10', '16'],
+		['1.0', '1'],
+	])('normalises %s, which validateKeys accepts, to %s', (raw, canonical) => {
+		expect(canonicalScopedCacheValue(raw, 'integer')).toBe(canonical);
+	});
+
+	// Past MAX_SAFE_INTEGER no token can be right, and such a key cannot have
+	// matched a row either, so a numeric pass would corrupt it for nothing.
+	it('keeps an unsafe integer spelling exactly as written', () => {
+		expect(canonicalScopedCacheValue('9007199254740993e0', 'bigInteger'))
+			.toBe('9007199254740993e0');
+	});
+
+	it('keeps a bigInteger magnitude no Number could hold', () => {
+		const beyond = '170141183460469231731687303715884105727';
+
+		expect(canonicalScopedCacheValue(`0${beyond}`, 'bigInteger')).toBe(beyond);
+	});
+
+	// Only the fixed-scale types need the numeric pass (`'1.50'` vs `1.5`).
+	it.each(['decimal', 'float'] as const)('reads a %s numerically', (type) => {
+		expect(canonicalScopedCacheValue('1.50', type)).toBe('1.5');
+		expect(canonicalScopedCacheValue(1.5, type)).toBe('1.5');
+	});
+
+	it('keeps a decimal that is not a number as written', () => {
+		expect(canonicalScopedCacheValue('not-a-number', 'decimal'))
+			.toBe('not-a-number');
+	});
+
+	// `time` has no date component, so both sides give `HH:MM:SS` and it stays a
+	// plain string — unlike the three types below it.
+	it('leaves a time value alone', () => {
+		expect(canonicalScopedCacheValue('05:06:07', 'time')).toBe('05:06:07');
+	});
+
+	it.each(['date', 'dateTime', 'timestamp'] as const)(
+		'reads a %s as epoch milliseconds',
+		(type) => {
+			const iso = '2024-03-04T05:06:07.000Z';
+
+			expect(canonicalScopedCacheValue(iso, type))
+				.toBe(String(Date.parse(iso)));
+
+			expect(canonicalScopedCacheValue(new Date(iso), type))
+				.toBe(String(Date.parse(iso)));
+		},
+	);
+
+	it('keeps a date it cannot parse as written', () => {
+		expect(canonicalScopedCacheValue('never', 'dateTime')).toBe('never');
+	});
+
+	it('falls through to the string form for a type it says nothing about', () => {
+		expect(canonicalScopedCacheValue(7, 'json')).toBe('7');
+		expect(canonicalScopedCacheValue(7, undefined)).toBe('7');
+	});
+
+	// A naive column comes back as a local Date from the driver but as an ISO string
+	// from a filter, so the epoch-ms canonical can diverge across drivers and
+	// timezones. The read side never pins these — the bare collection tag instead,
+	// which over-purges and cannot go stale.
+	it.each(['date', 'dateTime', 'timestamp'] as const)(
+		'refuses to pin a %s',
+		(type) => {
+			expect(isPinnableScopeType(type)).toBe(false);
+		},
+	);
+
+	it.each(['string', 'uuid', 'integer', 'boolean', 'time', undefined] as const)(
+		'pins a %s',
+		(type) => {
+			expect(isPinnableScopeType(type)).toBe(true);
+		},
+	);
 });

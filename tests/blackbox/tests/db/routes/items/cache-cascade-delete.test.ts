@@ -792,10 +792,12 @@ describe(oneLine`
 			expect(childAfter.body.data).toHaveLength(0);
 
 			// Each collection once, the root included: coming back round to it must
-			// not name it a second time.
+			// not name it a second time. And the root's own key slice is gone with it —
+			// the cycle names the root a collection the delete CHANGED, which purges
+			// every slice it has, so pinning the deleted row on top would be naming
+			// keys the wider purge already covers.
 			expect(deleted.headers[purgedTagsHeader].split(', ').sort()).toEqual([
 				CYCLE_A,
-				`${CYCLE_A}:id=${cycleRoot}`,
 				CYCLE_B,
 			].sort());
 		});

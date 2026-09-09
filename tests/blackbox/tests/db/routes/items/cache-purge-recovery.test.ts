@@ -157,6 +157,11 @@ describe(oneLine`
 			env[vendor]['REDIS_PORT'] = String(proxyPort);
 			env[vendor]['CACHE_NAMESPACE'] = `directus-purge-recovery-${vendor}`;
 
+			// The entries a recovered purge had been serving stale are named through
+			// their descriptors, and both the descriptor and the anomaly it carries
+			// reach Postgres on the stats drain.
+			env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+
 			// 20 attempts at the stock 50ms..2000ms backoff take ~30s to give up on a
 			// queued command; this brings the whole outage inside a test's patience,
 			// and reconnects within one poll of the proxy returning.
