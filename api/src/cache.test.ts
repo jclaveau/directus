@@ -345,6 +345,27 @@ describe('scoped cache purging', () => {
 			);
 		});
 
+		test(oneLine`
+			every slice of one collection lands in a single index call, not one each
+		`, async () => {
+			await tagScopedCacheKeys('resp-key', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'student', value: 'B' },
+			]);
+
+			// The index set is the same key for both, and its expiry is the same
+			// value both times: sending it twice buys an EXISTS and a TTL for
+			// nothing. Two tag sets plus the one index call that names them.
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(3);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:slices:slots',
+				600,
+				'scalabus:tag:slots:student=A',
+				'scalabus:tag:slots:student=B',
+			);
+		});
+
 		test('duplicate tags collapse to a single SADD', async () => {
 			await tagScopedCacheKeys('resp-key', [
 				{ collection: 'slots', field: 'student', value: 'A' },

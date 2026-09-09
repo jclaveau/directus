@@ -128,6 +128,16 @@ export function scopedCacheCollectionsChangedByOnDelete(
  */
 const SCOPED_CACHE_TAG_TTL_FACTOR = 2;
 
+/**
+ * How many tag keys one slice-index call files at once.
+ *
+ * The members are spread into the call and `unpack`ed inside the script, and both
+ * of those have a stack ceiling well below the number of slices one read can be
+ * pinned to. The expiry the call carries is the same value for every chunk, so
+ * splitting changes nothing but how many calls it takes.
+ */
+const SCOPED_CACHE_INDEX_CHUNK_MEMBERS = 500;
+
 
 /**
  * File a key under a tag set and give that set an expiry that only ever moves OUT.
@@ -289,6 +299,12 @@ export async function tagScopedCacheKeys(
 	const pipeline = redis.pipeline() as ScopedCacheTagPipeline;
 	const filedKeys = new Set<string>();
 
+	// One entry per collection, not per slice: a read pinned to 200 slices of the
+	// same collection files 200 tag keys into ONE index set, and sending that as 200
+	// calls costs 200 EXISTS and 200 TTL for a set whose expiry lands on the same
+	// value every time. Gathered here and sent below, after the tag sets they name.
+	const indexedTagKeys = new Map<string, string[]>();
+
 	for (const tag of scopedCacheTags) {
 		const tagKey = scopedCacheTagKey(tag);
 
@@ -316,14 +332,28 @@ export async function tagScopedCacheKeys(
 		}
 
 		const slicesKey = scopedCacheCollectionSlicesKey(tag.collection);
+		const indexed = indexedTagKeys.get(slicesKey);
 
-		// Same expiry as the tag sets it names, written in the same pipeline, so the
-		// index cannot outlive — or predecease — what it points at.
-		if (ttlSeconds > 0) {
-			pipeline.scopedCacheTagExpiry(slicesKey, ttlSeconds, tagKey);
+		if (indexed === undefined) {
+			indexedTagKeys.set(slicesKey, [tagKey]);
 		}
 		else {
-			pipeline.sadd(slicesKey, tagKey);
+			indexed.push(tagKey);
+		}
+	}
+
+	// Same expiry as the tag sets they name, written in the same pipeline, so the
+	// index cannot outlive — or predecease — what it points at.
+	for (const [slicesKey, tagKeys] of indexedTagKeys) {
+		for (let at = 0; at < tagKeys.length; at += SCOPED_CACHE_INDEX_CHUNK_MEMBERS) {
+			const chunk = tagKeys.slice(at, at + SCOPED_CACHE_INDEX_CHUNK_MEMBERS);
+
+			if (ttlSeconds > 0) {
+				pipeline.scopedCacheTagExpiry(slicesKey, ttlSeconds, ...chunk);
+			}
+			else {
+				pipeline.sadd(slicesKey, ...chunk);
+			}
 		}
 	}
 
