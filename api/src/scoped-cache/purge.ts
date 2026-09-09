@@ -4,6 +4,10 @@ import {
 	resolvedCacheTtl,
 } from '../cache-config.js';
 import {
+	cacheExpiresAtKey,
+	cacheSidecarOwner,
+} from '../cache-sidecars.js';
+import {
 	queueCacheAnomaly,
 	queueCachePurge,
 } from '../cache-events.js';
@@ -257,7 +261,7 @@ export async function tagScopedCacheKeys(
 
 		// `extraSiblings` = other keys written with the entry a purge must also drop
 		// — e.g. the dev-only `${key}__tags` sibling (respond.ts). Empty by default.
-		const members = [key, `${key}__expires_at`, ...extraSiblings];
+		const members = [key, cacheExpiresAtKey(key), ...extraSiblings];
 
 		if (ttlSeconds > 0) {
 			pipeline.eval(
@@ -362,21 +366,6 @@ export async function countScopedCacheTagMembers(
  * absent; a store that reports nothing leaves the count where it was rather than
  * silently collapsing it to zero.
  */
-// The suffixes a cached response's siblings carry. They ride the same tag set as
-// the payload key, so both the purge (which must not count them as evictions of
-// their own) and the recovery report (which must not name them as stale entries)
-// need the same answer to "whose sidecar is this?".
-const SCOPED_CACHE_SIDECAR_SUFFIXES = ['__expires_at', '__tags'];
-
-function scopedCacheSidecarOwner(member: string): string | null {
-	const suffix = SCOPED_CACHE_SIDECAR_SUFFIXES
-		.find((candidate) => member.endsWith(candidate));
-
-	return suffix === undefined
-		? null
-		: member.slice(0, -suffix.length);
-}
-
 /** The collection a tag key names, bare tag or value slice alike. */
 function scopedCacheCollectionOfTagKey(tagKey: string): string | null {
 	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
@@ -487,7 +476,7 @@ async function purgeScopedCacheTagKeys(
 			return false;
 		}
 
-		const owner = scopedCacheSidecarOwner(member);
+		const owner = cacheSidecarOwner(member);
 
 		return owner === null || present.has(owner) === false;
 	}).length;
@@ -879,7 +868,7 @@ async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<voi
 	// The sidecars ride the same tag set as the entry they belong to, so they are
 	// the same stale entry counted two more times.
 	const members = [...new Set(memberLists.flat())].filter((member) => {
-		return scopedCacheSidecarOwner(member) === null;
+		return cacheSidecarOwner(member) === null;
 	});
 
 	for (const member of members) {

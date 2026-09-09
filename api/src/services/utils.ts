@@ -13,6 +13,7 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
+import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
 import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
@@ -375,8 +376,11 @@ export class UtilsService {
 		}
 
 		const value = await getCacheValue(cache, redisKey);
-		const expiry = (await getCacheValue(cache, `${redisKey}__expires_at`)) ?? null;
-		const tagged = await getCacheValue(cache, `${redisKey}__tags`);
+
+		const expiry =
+			(await getCacheValue(cache, cacheExpiresAtKey(redisKey))) ?? null;
+
+		const tagged = await getCacheValue(cache, cacheTagsKey(redisKey));
 
 		// `__tags` stores the comma-joined scoped-cache tags (only when the
 		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).

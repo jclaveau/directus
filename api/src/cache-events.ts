@@ -11,6 +11,7 @@ import type { Knex } from 'knex';
 import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
 import { resolvedCacheTtl } from './cache-config.js';
+import { cacheExpiresAtKey, cacheTagsKey } from './cache-sidecars.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -1646,8 +1647,8 @@ export async function evictCacheEntry(
 	redisKey: string,
 ): Promise<void> {
 	await cache.delete(redisKey);
-	await cache.delete(`${redisKey}__expires_at`);
-	await cache.delete(`${redisKey}__tags`);
+	await cache.delete(cacheExpiresAtKey(redisKey));
+	await cache.delete(cacheTagsKey(redisKey));
 }
 
 // Evict every currently-described entry on a path. Returns the count attempted.

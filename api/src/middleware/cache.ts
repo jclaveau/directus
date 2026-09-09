@@ -2,6 +2,7 @@ import { useEnv } from '@directus/env';
 import type { RequestHandler } from 'express';
 import { getCache, getCacheValue } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
+import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
 	queueCacheHit,
@@ -68,12 +69,12 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 		let expiresMeta;
 
 		try {
-			expiresMeta = await getCacheValue(cache, `${redisKey}__expires_at`);
+			expiresMeta = await getCacheValue(cache, cacheExpiresAtKey(redisKey));
 			cacheExpiryDate = expiresMeta?.exp;
 		} catch (err: any) {
 			logger.warn(
 				err,
-				`[cache] Couldn't read key ${redisKey}__expires_at. ${err.message}`,
+				`[cache] Couldn't read key ${cacheExpiresAtKey(redisKey)}. ${err.message}`,
 			);
 
 			if (cacheStatsActive()) {
@@ -118,7 +119,7 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 			// Dev-only: pins were persisted to a `${redisKey}__tags` sibling at write
 			// time (respond.ts); the read that builds them is skipped on a HIT.
 			try {
-				const stored = await getCacheValue(cache, `${redisKey}__tags`);
+				const stored = await getCacheValue(cache, cacheTagsKey(redisKey));
 
 				// Same guard utils.ts puts on this sidecar: anything else flattens into
 				// a garbled header instead of being skipped.

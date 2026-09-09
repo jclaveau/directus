@@ -4,6 +4,7 @@ import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
+import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
 	evictCacheEntry,
@@ -198,7 +199,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				redisKey,
 				scopedCacheTags,
 				env['CACHE_TAGS_HEADER']
-					? [`${redisKey}__tags`]
+					? [cacheTagsKey(redisKey)]
 					: [],
 			);
 
@@ -215,7 +216,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				// three numbers do not repay a snappy pass on every fill and a second
 				// one on every hit, and `decompress` sniffs the Buffer rather than the
 				// setting, so a reader takes it either way.
-				cache.set(`${redisKey}__expires_at`, {
+				cache.set(cacheExpiresAtKey(redisKey), {
 					exp: expiresAt,
 					createdAt: now,
 					ttlMs: ttlMs ?? null,
@@ -252,7 +253,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// a CacheValue (object) — a raw string won't round-trip.
 					await setCacheValue(
 						cache,
-						`${redisKey}__tags`,
+						cacheTagsKey(redisKey),
 						{ tags: serializeScopedCacheTags(pins) },
 						getMilliseconds(resolvedCacheTtl()),
 					);
