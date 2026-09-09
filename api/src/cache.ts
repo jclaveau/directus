@@ -165,6 +165,7 @@ export function getCache(): {
 
 export async function flushCaches(forced?: boolean): Promise<void> {
 	const { cache } = getCache();
+	const startedAt = Date.now();
 
 	// Best-effort, all of it. Every caller here runs AFTER the thing it is flushing
 	// for already happened — a migration recorded its version, a schema diff applied,
@@ -199,12 +200,24 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 	// so a throw here fails a deploy over a cache the request path already treats as a
 	// MISS while Redis is away. What is left behind self-expires, or goes with the
 	// next flush that reaches Redis.
+	let droppedIndexKeys = 0;
+
 	try {
-		await dropScopedCacheTagIndex();
+		droppedIndexKeys = await dropScopedCacheTagIndex();
 	}
 	catch (error: any) {
 		logger.warn(error, `[cache] could not drop the scoped-tag index: ${error}`);
 	}
+
+	// Every caller of this is a deploy-shaped event — a migration, a schema diff, a
+	// build-identity change — and on the boot path it is time the container is not
+	// serving. Whether that is 20ms or 20s was not knowable from the logs
+	// (https://github.com/jclaveau/directus/issues/468), so it is said here rather
+	// than at each caller: one line, and the number that explains it.
+	logger.info(
+		`[cache] flushed in ${Date.now() - startedAt}ms, `
+		+ `dropped ${droppedIndexKeys} scoped-tag index keys`,
+	);
 }
 
 export async function clearSystemCache(opts?: {

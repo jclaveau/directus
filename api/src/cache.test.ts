@@ -9,15 +9,21 @@ const mockEnv = vi.hoisted(() => ({ current: {} as Record<string, any> }));
 const env = mockEnv.current;
 
 const redis = vi.hoisted(() => {
-	const pipeline = { sadd: vi.fn(), expire: vi.fn(), exec: vi.fn() };
+	const pipeline = {
+		sadd: vi.fn(),
+		expire: vi.fn(),
+		unlink: vi.fn(),
+		exec: vi.fn(),
+	};
+
 	// chainable pipeline
 	pipeline.sadd.mockReturnValue(pipeline);
 	pipeline.expire.mockReturnValue(pipeline);
+	pipeline.unlink.mockReturnValue(pipeline);
 
 	return {
 		isCluster: false,
 		smembers: vi.fn(),
-		del: vi.fn(),
 		srem: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
 		pipeline: vi.fn(() => pipeline),
@@ -44,11 +50,11 @@ vi.mock('./bus/index.js', () => {
 	};
 });
 
-vi.mock('./logger/index.js', () => {
-	return {
-		useLogger: () => ({ warn() {}, error() {}, info() {} }),
-	};
+const logger = vi.hoisted(() => {
+	return { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
 });
+
+vi.mock('./logger/index.js', () => ({ useLogger: () => logger }));
 
 vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 
@@ -355,7 +361,7 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.delete).toHaveBeenCalledWith('key-a__expires_at');
 
-			expect(redis.del).toHaveBeenCalledWith([
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
 				'scalabus:tag:slots',
 				'scalabus:tag:slots:student=A',
 			]);
@@ -538,7 +544,8 @@ describe('scoped cache purging', () => {
 				'scalabus:tag:slots:student=B',
 			);
 
-			expect(redis.del).not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
+			expect(redis._pipeline.unlink)
+				.not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
 		});
 
 		test('no scoped cache tags purges only the collection-level tag', async () => {
@@ -550,7 +557,7 @@ describe('scoped cache purging', () => {
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
 			expect(redis.smembers).toHaveBeenCalledOnce();
 			expect(cache.delete).toHaveBeenCalledTimes(3);
-			expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles']);
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith(['scalabus:tag:articles']);
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -587,7 +594,7 @@ describe('scoped cache purging', () => {
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
 
-			expect(redis.del).toHaveBeenCalledWith([
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
 				'scalabus:tag:articles',
 				'scalabus:tag:articles:author=1',
 				'scalabus:tag:articles:author=2',
@@ -607,7 +614,7 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			expect(redis.del).toHaveBeenCalledWith([
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
 				'scalabus:tag:articles',
 				'scalabus:tag:articles:author=1',
 				'scalabus:tag:articles:author=2',
@@ -653,19 +660,19 @@ describe('scoped cache purging', () => {
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=7');
 			expect(cache.delete).toHaveBeenCalledWith('read-key');
 
-			expect(redis.del).toHaveBeenCalledWith([
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
 				'scalabus:tag:slots',
 				'scalabus:tag:slots:student=7',
 			]);
 		});
 
 		test(oneLine`
-			a cache.purge filter that empties the tag set deletes nothing and never calls
-			redis.del
+			a cache.purge filter that empties the tag set deletes nothing and never
+			unlinks
 		`, async () => {
-			// `redis.del()` with no keys throws; an extension is free to drop every
-			// tag, so the empty set must be a no-op rather than a crash (and must not
-			// degrade into a full flush).
+			// A delete with no keys throws; an extension is free to drop every tag, so
+			// the empty set must be a no-op rather than a crash (and must not degrade
+			// into a full flush).
 			emitFilter.mockImplementation(async () => []);
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
@@ -676,7 +683,7 @@ describe('scoped cache purging', () => {
 
 			expect(redis.smembers).not.toHaveBeenCalled();
 			expect(cache.delete).not.toHaveBeenCalled();
-			expect(redis.del).not.toHaveBeenCalled();
+			expect(redis._pipeline.unlink).not.toHaveBeenCalled();
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -701,7 +708,7 @@ describe('scoped cache purging', () => {
 
 			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:owner=B');
 
-			expect(redis.del).toHaveBeenCalledWith([
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
 				'scalabus:tag:slots',
 				'scalabus:tag:slots:owner=B',
 			]);
@@ -910,12 +917,37 @@ describe('flushCaches', () => {
 		expect(redis.scan).toHaveBeenCalledWith(
 			'0',
 			'MATCH',
-			'scalabus:tag:*',
+			'scalabus:*',
 			'COUNT',
-			250,
+			1000,
 		);
 
-		expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
+		expect(redis._pipeline.unlink)
+			.toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
+	});
+
+	test(oneLine`
+		says what the flush cost — on the boot path this is time the container is not
+		serving, and the only line it used to write was that it had started
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockResolvedValueOnce(['0', [
+			'scalabus:tag:articles',
+			'scalabus:tag:articles:id=1',
+		]]);
+
+		await flushCaches(true);
+
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringMatching(
+				/^\[cache\] flushed in \d+ms, dropped 2 scoped-tag index keys$/,
+			),
+		);
 	});
 
 	test(oneLine`
