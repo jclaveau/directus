@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
+import { useRefreshInterval } from '@/composables/use-refresh-interval';
 import { formatDuration } from '@/utils/format-duration';
 import { formatFilesize } from '@/utils/format-filesize';
 import { getStringifiedValue } from '@/utils/get-stringified-value';
@@ -42,7 +43,7 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(false);
 const error = ref<string | null>(null);
 const report = ref<ProcessesReport | null>(null);
-const refreshInterval = ref<number | null>(null);
+const refreshInterval = useRefreshInterval('settings-processes-refresh-interval');
 const expanded = ref<Record<string, boolean>>({});
 const envSearch = ref<Record<string, string>>({});
 const samples = ref<ProcessSample[]>([]);
