@@ -13,6 +13,18 @@ vi.mock('@/utils/notify', () => {
 	return { notify: notified.notify };
 });
 
+// `v-dialog` traps focus inside itself while it is open, and hands it back on
+// the way out. jsdom reports nothing as tabbable, so the trap has no node to
+// hold and refuses the hand-back — a rejection raised while a browser is doing
+// the one thing this file never asserts on.
+vi.mock('@vueuse/integrations/useFocusTrap', () => {
+	return {
+		useFocusTrap: () => {
+			return { activate: vi.fn(), deactivate: vi.fn() };
+		},
+	};
+});
+
 vi.mock('@/api', () => {
 	return {
 		default: {
