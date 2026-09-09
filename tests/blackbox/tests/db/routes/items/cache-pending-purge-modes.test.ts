@@ -174,6 +174,32 @@ describe(oneLine`
 			return db(PENDING).select('id', 'mode', 'collection', 'attempts');
 		}
 
+		// Every Directus process pointed at this database drains the same table, and
+		// the shard runs several of them, so the row seeded here can be finished by a
+		// sibling spec's instance — which clears ITS namespace and then deletes the
+		// record this one is waiting on. So the wait is on the purge this instance
+		// can observe, and a record that vanished without producing it is seeded
+		// again.
+		async function untilDrained(
+			row: { mode: string; collection: string | null },
+			purged: () => Promise<boolean>,
+			what: string,
+		): Promise<void> {
+			await record(row);
+
+			await until(async () => {
+				if (await purged()) {
+					return true;
+				}
+
+				if ((await pendingRows()).length === 0) {
+					await record(row);
+				}
+
+				return false;
+			}, what);
+		}
+
 		it(oneLine`
 			finishes a namespace-mode record by clearing the store, so every slice it
 			held is gone
@@ -184,14 +210,15 @@ describe(oneLine`
 			await fill(() => readSlice('a'));
 			await fill(readSibling);
 
-			await record({ mode: 'namespace', collection: null });
-
-			await until(
-				async () => (await pendingRows()).length === 0,
-				'the namespace record to be finished',
+			await untilDrained(
+				{ mode: 'namespace', collection: null },
+				async () => {
+					const read = await readSlice('a');
+					return read.headers[cacheStatusHeader] === 'MISS';
+				},
+				'the namespace record to clear this instance\'s store',
 			);
 
-			expect((await readSlice('a')).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readSibling()).headers[cacheStatusHeader]).toBe('MISS');
 		}, 60_000);
 
@@ -206,14 +233,15 @@ describe(oneLine`
 			await fill(() => readSlice('b'));
 			await fill(readSibling);
 
-			await record({ mode: 'collection', collection: SLICED });
-
-			await until(
-				async () => (await pendingRows()).length === 0,
-				'the collection record to be finished',
+			await untilDrained(
+				{ mode: 'collection', collection: SLICED },
+				async () => {
+					const read = await readSlice('a');
+					return read.headers[cacheStatusHeader] === 'MISS';
+				},
+				'the collection record to purge this instance\'s slices',
 			);
 
-			expect((await readSlice('a')).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readSlice('b')).headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readSibling()).headers[cacheStatusHeader]).toBe('HIT');
 		}, 60_000);

@@ -545,6 +545,7 @@ describe('respond middleware', () => {
 		collection landed mid-read
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheTags: [
 				{ collection: 'articles' },
@@ -586,6 +587,7 @@ describe('respond middleware', () => {
 		down wherever the counters are off
 	`, async () => {
 		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
 		await respond(makeReq(), makeRes({ data: [] }, {
 			scopedCacheTags: [{ collection: 'authors' }],
 			scopedCacheEpochs: {},
