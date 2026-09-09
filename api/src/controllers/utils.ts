@@ -15,6 +15,7 @@ import {
 	requestedProcessDetails,
 } from '../processes/index.js';
 import { ExportService, ImportService } from '../services/import-export.js';
+import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -403,6 +404,65 @@ router.post(
 		return;
 	}),
 );
+
+// The override lives in Redis, so a deployment without one has nowhere to keep a
+// change and says so by not carrying the endpoint at all.
+if (redisConfigAvailable()) {
+	router.get(
+		'/autoscale',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readAutoscaleConfig() };
+
+			return next();
+		}),
+		respond,
+	);
+
+	router.patch(
+		'/autoscale',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const patch: unknown = req.body;
+
+			if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+				throw new InvalidPayloadError({
+					reason: 'An object of autoscale configuration fields is required',
+				});
+			}
+
+			const updated = await service.updateAutoscaleConfig(
+				patch as Record<string, unknown>,
+			);
+
+			res.status(200).json({ data: updated });
+			return;
+		}),
+	);
+
+	router.delete(
+		'/autoscale',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			await service.clearAutoscaleConfig();
+			res.status(200).json({ data: { override: null } });
+			return;
+		}),
+	);
+}
 
 // Registered only where the report is turned on, so a deployment that disabled it
 // answers a plain 404 — the endpoint is absent, not merely refusing.

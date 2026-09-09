@@ -41,6 +41,14 @@ import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { collectPgBouncer } from '../pgbouncer/index.js';
+import {
+	applyOverridePatch,
+	parseOverridePatch,
+	readAutoscaleOverride,
+	writeAutoscaleOverride,
+	type AutoscaleOverride,
+} from '../autoscale/lib/override.js';
+import { autoscaleConfigKey } from '../autoscale/lib/resolve-config.js';
 import { collectProcesses } from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
@@ -459,6 +467,66 @@ export class UtilsService {
 		this.assertAdmin('inspect the running processes');
 
 		return collectProcesses(details);
+	}
+
+	/**
+	 * The live override, and the key it is stored under.
+	 *
+	 * Only the override: what the pool is actually being scaled on is the
+	 * environment of the process that scales it laid under this, and that
+	 * process reports it with `readProcesses` rather than answering a request.
+	 */
+	async readAutoscaleConfig(): Promise<{
+		key: string;
+		override: AutoscaleOverride | null;
+	}> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		return {
+			key: autoscaleConfigKey(),
+			override: await readAutoscaleOverride(),
+		};
+	}
+
+	/**
+	 * Lay a patch over the override, `null` giving one field back to the
+	 * environment chain.
+	 *
+	 * Field by field on purpose: a write of the whole object would pin every
+	 * value a form happened to render, and the next deployment's environment
+	 * would stop reaching the pool without anyone having asked for that.
+	 */
+	async updateAutoscaleConfig(
+		patch: Record<string, unknown>,
+	): Promise<{ key: string; override: AutoscaleOverride | null }> {
+		this.assertAdmin('change the autoscale configuration');
+
+		const parsed = parseOverridePatch(patch);
+
+		// Stamped by the writer rather than taken from them: an override outlives
+		// the incident that justified it, and the question it is then asked is
+		// who left it and when.
+		const stamped = {
+			...parsed,
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+		};
+
+		const override = applyOverridePatch(
+			await readAutoscaleOverride(),
+			stamped,
+		);
+
+		await writeAutoscaleOverride(override);
+
+		return { key: autoscaleConfigKey(), override };
+	}
+
+	/** Drop the override, so every field comes from the environment chain again. */
+	async clearAutoscaleConfig(): Promise<void> {
+		this.assertAdmin('clear the autoscale configuration');
+
+		await writeAutoscaleOverride(null);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {
