@@ -1,0 +1,2 @@
+const e=(e,t,n=`cookie`)=>()=>{let r={share:e,password:t,mode:n};return{path:`/shares/auth`,method:`POST`,body:JSON.stringify(r)}},t=(e,t)=>()=>({path:`/shares/invite`,method:`POST`,body:JSON.stringify({share:e,emails:t})}),n=e=>()=>({path:`/shares/info/${e}`,method:`GET`});export{e as authenticateShare,t as inviteShare,n as readShareInfo};
+//# sourceMappingURL=shares.js.map

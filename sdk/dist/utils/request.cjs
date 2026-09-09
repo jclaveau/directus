@@ -1,0 +1,2 @@
+const e=require(`./extract-data.cjs`),t=async(t,n,r=globalThis.fetch)=>(n.headers=typeof n.headers==`object`&&!Array.isArray(n.headers)?n.headers:{},r(t,n).then(t=>e.extractData(t).catch(e=>{let n={message:``,errors:e&&typeof e==`object`&&`errors`in e?e.errors:e,response:t};return e&&typeof e==`object`&&`data`in e&&(n.data=e.data),Array.isArray(n.errors)&&n.errors[0]?.message&&(n.message=n.errors[0].message),Promise.reject(n)})));exports.request=t;
+//# sourceMappingURL=request.cjs.map

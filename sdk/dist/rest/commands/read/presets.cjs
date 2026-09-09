@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/presets`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/presets/${t}`,params:n??{},method:`GET`});exports.readPreset=n,exports.readPresets=t;
+//# sourceMappingURL=presets.cjs.map

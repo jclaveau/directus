@@ -1,16 +1,16 @@
 {
-	"name": "tests-perf",
-	"version": "0.0.0",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"bench": "vitest --watch=false",
-		"bench:startup": "vitest --watch=false startup.perf",
-		"bench:cache": "vitest --watch=false cache.perf"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "catalog:",
-		"ioredis": "catalog:",
-		"vitest": "catalog:"
-	}
+  "name": "tests-perf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@directus/tsconfig": "4.0.0",
+    "ioredis": "5.11.1",
+    "vitest": "3.2.6"
+  },
+  "scripts": {
+    "bench": "vitest --watch=false",
+    "bench:startup": "vitest --watch=false startup.perf",
+    "bench:cache": "vitest --watch=false cache.perf"
+  }
 }

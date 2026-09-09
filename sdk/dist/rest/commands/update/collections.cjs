@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Collection cannot be empty`),{path:`/collections/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`}),n=(e,t)=>()=>({path:`/collections`,params:t??{},body:JSON.stringify(e),method:`PATCH`});exports.updateCollection=t,exports.updateCollectionsBatch=n;
+//# sourceMappingURL=collections.cjs.map

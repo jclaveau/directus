@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=require(`../../utils/throw-core-collection.cjs`),n=(n,r)=>()=>(e.throwIfEmpty(String(n),`Collection cannot be empty`),t.throwIfCoreCollection(n,`Cannot use readSingleton for core collections`),{path:`/items/${n}`,params:r??{},method:`GET`});exports.readSingleton=n;
+//# sourceMappingURL=singleton.cjs.map

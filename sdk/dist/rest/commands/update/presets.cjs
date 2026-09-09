@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/presets`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/presets`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/presets/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updatePreset=r,exports.updatePresets=t,exports.updatePresetsBatch=n;
+//# sourceMappingURL=presets.cjs.map
