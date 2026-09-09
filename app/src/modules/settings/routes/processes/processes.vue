@@ -6,13 +6,19 @@ import { formatFilesize } from '@/utils/format-filesize';
 import { getStringifiedValue } from '@/utils/get-stringified-value';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import type { HeaderRaw, Sort } from '@/components/v-table/types';
-import type { ProcessNode, ProcessReplica, ProcessesReport, ResolvedEnvVariable }
-	from '@directus/types';
+import type {
+	AutoscaleRunner,
+	ProcessNode,
+	ProcessReplica,
+	ProcessesReport,
+	ResolvedEnvVariable,
+} from '@directus/types';
 import { useLocalStorage } from '@vueuse/core';
 import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
+import AutoscalePanel from './autoscale-panel.vue';
 import {
 	appendProcessSample,
 	capacitySeries,
@@ -393,6 +399,33 @@ async function renderCharts(): Promise<void> {
 	await memoryChart.updateOptions(memoryChartOptions(), true, false);
 }
 
+// The processes that are scaling a pool, plucked from the tree the page already
+// holds: the values a pool is scaled on are resolved in the process that scales
+// it, so they arrive on its own report rather than from a second read.
+const autoscaleRunners = computed((): AutoscaleRunner[] => {
+	return (report.value?.services ?? []).flatMap((service) => {
+		return service.replicas.flatMap((replica) => {
+			return replica.processes.flatMap((node) => {
+				// A replica that answered the bus from an older build reports no
+				// autoscale state at all, and its report is carried as it came.
+				const state = node.autoscale ?? null;
+
+				if (state === null) {
+					return [];
+				}
+
+				return [{
+					service: service.service,
+					replicaId: replica.replicaId,
+					nodeId: node.nodeId,
+					name: node.name,
+					state,
+				}];
+			});
+		});
+	});
+});
+
 async function load(): Promise<void> {
 	loading.value = true;
 	error.value = null;
@@ -481,6 +514,8 @@ onUnmounted(() => {
 					'Resolved environment reporting is off (PROCESSES_REPORT_DETAILS).',
 				) }}
 			</v-notice>
+
+			<autoscale-panel :runners="autoscaleRunners" @changed="load" />
 
 			<div v-if="totals" class="totals">
 				<span>{{ totals.processes }} processes</span>

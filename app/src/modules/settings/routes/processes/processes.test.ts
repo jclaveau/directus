@@ -1,4 +1,4 @@
-import type { ProcessesReport } from '@directus/types';
+import type { AutoscaleNodeState, ProcessesReport } from '@directus/types';
 import { createTestingPinia } from '@pinia/testing';
 import { flushPromises, mount } from '@vue/test-utils';
 import { setActivePinia } from 'pinia';
@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { i18n } from '@/lang';
 
 vi.mock('@/api', () => {
-	return { default: { get: vi.fn() } };
+	return { default: { get: vi.fn(), patch: vi.fn(), delete: vi.fn() } };
 });
 
 const clipboard = vi.hoisted(() => {
@@ -107,6 +107,7 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 									configuredInstances: 2,
 								},
 								env: ENV,
+								autoscale: null,
 							},
 							{
 								nodeId: null,
@@ -128,6 +129,7 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 									configuredInstances: 2,
 								},
 								env: null,
+								autoscale: null,
 							},
 						],
 					},
@@ -172,7 +174,13 @@ const global = {
 };
 
 async function mountLoaded(data: ProcessesReport = report()) {
-	vi.mocked(api.get).mockResolvedValue({ data: { data } } as any);
+	// The autoscale panel reads its own route, which a deployment with no Redis
+	// does not serve at all.
+	vi.mocked(api.get).mockImplementation((url: string) => {
+		return url === '/utils/autoscale'
+			? Promise.reject({ response: { status: 404 } })
+			: Promise.resolve({ data: { data } } as any);
+	});
 
 	const wrapper = mount(ProcessesPage, { global });
 	await flushPromises();
@@ -538,5 +546,102 @@ describe('the deployment chart', () => {
 
 		expect(wrapper.text())
 			.toContain('No replica reported what its container may use');
+	});
+});
+
+describe('the autoscale panel', () => {
+	const state: AutoscaleNodeState = {
+		at: 1_700_000_000_000,
+		config: {
+			enabled: true,
+			strategy: 'scalabus',
+			appName: 'directus',
+			signal: 'average',
+			sampleWindow: 5,
+			scaleCpuThreshold: 60,
+			releaseCpuThreshold: 40,
+			minWorkers: 1,
+			maxWorkers: 4,
+			prewarmWorkers: 0,
+			minSecondsToScaleUp: 10,
+			minSecondsToScaleDown: 300,
+			warmupSeconds: 30,
+		},
+		sources: {
+			enabled: 'default',
+			strategy: 'default',
+			appName: 'env',
+			signal: 'default',
+			sampleWindow: 'default',
+			scaleCpuThreshold: 'default',
+			releaseCpuThreshold: 'default',
+			minWorkers: 'default',
+			maxWorkers: 'override',
+			prewarmWorkers: 'default',
+			minSecondsToScaleUp: 'default',
+			minSecondsToScaleDown: 'default',
+			warmupSeconds: 'default',
+		},
+		workers: 2,
+		pendingWorkers: 0,
+		warmingWorkers: 0,
+		cpuPercents: [12, 14],
+		lastDecision: {
+			at: 1_700_000_000_000,
+			workers: null,
+			reason: 'average cpu 13% is in the band',
+		},
+		lastScale: null,
+	};
+
+	function scaling(): ProcessesReport {
+		const data = report();
+
+		data.services[0]!.replicas[0]!.processes[0]!.autoscale = state;
+
+		return data;
+	}
+
+	// The configuration is resolved in the process that scales the pool, so it
+	// arrives on that process's own report instead of on a second read.
+	test('describes the pool from the report the page already read', async () => {
+		const wrapper = await mountLoaded(scaling());
+
+		expect(wrapper.text()).toContain('2 workers');
+		expect(wrapper.text()).toContain('average cpu 13% is in the band');
+	});
+
+	test('re-reads the report once the panel has changed something', async () => {
+		vi.mocked(api.patch).mockResolvedValue({
+			data: {
+				data: {
+					key: 'scalabus:autoscale:config',
+					override: { enabled: false },
+				},
+			},
+		} as any);
+
+		// The levers are only offered where a change can be stored.
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			return url === '/utils/autoscale'
+				? Promise.resolve({ data: { data: { key: 'k', override: null } } } as any)
+				: Promise.resolve({ data: { data: scaling() } } as any);
+		});
+
+		const wrapper = mount(ProcessesPage, { global });
+		await flushPromises();
+
+		await wrapper.findAll('.levers button')
+			.find((button) => button.text().includes('Pause'))!
+			.trigger('click');
+
+		await flushPromises();
+
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: false });
+
+		const reads = vi.mocked(api.get).mock.calls
+			.filter(([url]) => url === '/utils/processes');
+
+		expect(reads).toHaveLength(2);
 	});
 });
