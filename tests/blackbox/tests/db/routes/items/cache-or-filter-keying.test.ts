@@ -14,27 +14,28 @@ import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-// A disjunction keys only when every branch names the SAME field: the read is
-// then bounded to that field's named slices and can be pinned to them. Branches
-// on different fields name no single axis — the read spans rows no one slice
-// covers — so the collection goes bare, which over-purges and cannot go stale.
+// Two analyses read a disjunction and they do not agree, on purpose. The KEYING
+// walk asks whether one axis bounds the read, so branches on different fields
+// leave it unkeyed. The root PIN unions instead: the rows returned are the rows
+// of `owner=a` plus the rows of `stage=live`, and tagging both covers all of
+// them. The union is what survives into the response's tags, so a two-field `_or`
+// is pinned, not bared — the keying's answer only governs what a NESTED
+// collection may lean on.
 //
-// The same fallback catches any operator the keying walk cannot compile. `_not`
-// is the live one: `applyFilter` drops it rather than compiling it, so the rows
-// actually returned are not the rows the filter reads as, and everything under
-// it has to be unkeyed.
+// What does bare is an operator that names no value at all. Only `_eq` and `_in`
+// key: every other operator describes rows by what they are not, and a write can
+// move a row across that boundary without touching any slice the read named.
 //
-// Both cases look identical from the outside — a fresh response either way — so
-// the keyed contrast is what makes the bare ones mean anything: without it, a
-// keying walk that simply gave up on `_or` would pass every assertion here.
+// All three shapes stay fresh, so freshness cannot tell them apart — the pins are
+// the assertion, and each case pairs them with a write that must NOT invalidate.
 
 const SLICED = 'or_filter_sliced';
 const cacheStatusHeader = 'x-cache-status';
 const cacheTagsHeader = 'x-scoped-cache-tags';
 
 describe(oneLine`
-	an _or over one field keys to its named slices, while one over two fields — or
-	an operator the walk cannot read — bares the collection
+	an _or pins the union of the slices its branches name, while an operator naming
+	no value bares the collection
 `, () => {
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
@@ -116,9 +117,80 @@ describe(oneLine`
 				.filter((tag) => tag !== '');
 		}
 
-		// The write lands in a slice NO branch of the filter names, so only a bare
-		// tag can carry the invalidation.
-		async function expectBareOver(filter: unknown) {
+		async function expectPinned(options: {
+			filter: unknown;
+			expectedTags: string[];
+			invalidatingRow: Record<string, string>;
+			indifferentRow: Record<string, string>;
+		}) {
+			const { filter, expectedTags, invalidatingRow, indifferentRow } = options;
+
+			await clearCache();
+
+			const miss = await readFiltered(filter);
+			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
+
+			const tags = tagsOf(miss);
+
+			for (const expected of expectedTags) {
+				expect(tags).toContain(expected);
+			}
+
+			// A bare tag would invalidate on both writes below, passing the freshness
+			// half of this while pinning nothing.
+			expect(tags).not.toContain(SLICED);
+
+			expect(
+				(await readFiltered(filter)).headers[cacheStatusHeader],
+			).toBe('HIT');
+
+			await addRow(indifferentRow);
+
+			expect(
+				(await readFiltered(filter)).headers[cacheStatusHeader],
+			).toBe('HIT');
+
+			await addRow(invalidatingRow);
+
+			expect(
+				(await readFiltered(filter)).headers[cacheStatusHeader],
+			).toBe('MISS');
+		}
+
+		it(oneLine`
+			pins each value an _or over one field names
+		`, async () => {
+			await expectPinned({
+				filter: {
+					_or: [{ owner: { _eq: 'a' } }, { owner: { _eq: 'b' } }],
+				},
+				expectedTags: [`${SLICED}:owner=a`, `${SLICED}:owner=b`],
+				invalidatingRow: { label: 'a2', owner: 'a', stage: 'draft' },
+				indifferentRow: { label: 'c2', owner: 'c', stage: 'done' },
+			});
+		}, 60_000);
+
+		it(oneLine`
+			pins both axes of an _or over two fields, since the rows it returns are the
+			union of the two slices rather than rows no slice covers
+		`, async () => {
+			await expectPinned({
+				filter: {
+					_or: [{ owner: { _eq: 'a' } }, { stage: { _eq: 'live' } }],
+				},
+				expectedTags: [`${SLICED}:owner=a`, `${SLICED}:stage=live`],
+				invalidatingRow: { label: 'b2', owner: 'b', stage: 'live' },
+				// In neither branch's slice, so it belongs in neither result.
+				indifferentRow: { label: 'z', owner: 'z', stage: 'archived' },
+			});
+		}, 60_000);
+
+		it(oneLine`
+			bares the collection for an operator naming no value, so a write anywhere in
+			it invalidates the read
+		`, async () => {
+			const filter = { owner: { _nnull: true } };
+
 			await clearCache();
 
 			const miss = await readFiltered(filter);
@@ -129,62 +201,13 @@ describe(oneLine`
 				(await readFiltered(filter)).headers[cacheStatusHeader],
 			).toBe('HIT');
 
-			await addRow({ label: 'z', owner: 'z', stage: 'archived' });
+			// A slice no branch could have named, since the filter named none: only
+			// the bare tag can carry this.
+			await addRow({ label: 'z2', owner: 'z', stage: 'archived' });
 
 			expect(
 				(await readFiltered(filter)).headers[cacheStatusHeader],
 			).toBe('MISS');
-		}
-
-		it(oneLine`
-			keys an _or whose branches name one field, pinning each value and leaving
-			the collection unbared
-		`, async () => {
-			const filter = {
-				_or: [{ owner: { _eq: 'a' } }, { owner: { _eq: 'b' } }],
-			};
-
-			await clearCache();
-
-			const miss = await readFiltered(filter);
-			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
-
-			const tags = tagsOf(miss);
-			expect(tags).toContain(`${SLICED}:owner=a`);
-			expect(tags).toContain(`${SLICED}:owner=b`);
-			expect(tags).not.toContain(SLICED);
-
-			expect(
-				(await readFiltered(filter)).headers[cacheStatusHeader],
-			).toBe('HIT');
-
-			await addRow({ label: 'c2', owner: 'c', stage: 'done' });
-
-			expect(
-				(await readFiltered(filter)).headers[cacheStatusHeader],
-			).toBe('HIT');
-
-			await addRow({ label: 'a2', owner: 'a', stage: 'draft' });
-
-			expect(
-				(await readFiltered(filter)).headers[cacheStatusHeader],
-			).toBe('MISS');
-		}, 60_000);
-
-		it(oneLine`
-			bares the collection for an _or whose branches name different fields, since
-			no single axis covers the rows it returns
-		`, async () => {
-			await expectBareOver({
-				_or: [{ owner: { _eq: 'a' } }, { stage: { _eq: 'live' } }],
-			});
-		}, 60_000);
-
-		it(oneLine`
-			bares the collection under a _not, whose condition the query never compiles
-			and the keying must not read as a bound
-		`, async () => {
-			await expectBareOver({ _not: { owner: { _eq: 'a' } } });
 		}, 60_000);
 	});
 });
