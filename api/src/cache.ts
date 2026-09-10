@@ -239,7 +239,7 @@ export async function clearSystemCache(opts?: {
 	// Since a lot of cached permission function rely on the schema it needs to be cleared as well
 	await clearPermissionCache();
 
-	messenger.publish<CacheMessage>('schemaChanged', { autoPurgeCache: opts?.autoPurgeCache });
+	await messenger.publish<CacheMessage>('schemaChanged', { autoPurgeCache: opts?.autoPurgeCache });
 }
 
 /**
@@ -268,7 +268,7 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 		await lockCache.clear();
 	}
 
-	messenger.publish<CacheClearMessage>('cacheCleared', { targets });
+	await messenger.publish<CacheClearMessage>('cacheCleared', { targets });
 }
 
 export async function setSystemCache(key: string, value: any, ttl?: number): Promise<void> {

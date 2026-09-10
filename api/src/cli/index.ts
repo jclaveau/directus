@@ -3,6 +3,7 @@ import { version } from 'directus/version';
 import emitter from '../emitter.js';
 import { startServer } from '../server.js';
 import bootstrap from './commands/bootstrap/index.js';
+import cacheFlush from './commands/cache/flush.js';
 import count from './commands/count/index.js';
 import dbInstall from './commands/database/install.js';
 import dbMigrate from './commands/database/migrate.js';
@@ -58,6 +59,13 @@ export async function createCli(): Promise<Command> {
 		.command('migrate:down')
 		.description('Downgrade the database')
 		.action(() => dbMigrate('down'));
+
+	const cacheCommand = program.command('cache');
+
+	cacheCommand
+		.command('flush')
+		.description('Flush the response, system and permission caches on every node')
+		.action(cacheFlush);
 
 	const usersCommand = program.command('users');
 
