@@ -7,17 +7,24 @@ vi.mock('../../../cache.js');
 vi.mock('../../../logger/index.js');
 
 const error = vi.fn();
-vi.mocked(useLogger).mockReturnValue({ error } as unknown as ReturnType<typeof useLogger>);
 
-// The command's whole contract is its exit code, so the exit has to stop the function
-// the way the real one does rather than let it run on into the next statement.
+function mockLogger() {
+	vi.mocked(useLogger).mockReturnValue(
+		{ error } as unknown as ReturnType<typeof useLogger>,
+	);
+}
+
+mockLogger();
+
+// The command's whole contract is its exit code, so the exit has to stop the
+// function the way the real one does rather than run on into the next statement.
 const exit = vi.spyOn(process, 'exit').mockImplementation((code) => {
 	throw new Error(`exit:${code}`);
 });
 
 afterEach(() => {
 	vi.clearAllMocks();
-	vi.mocked(useLogger).mockReturnValue({ error } as unknown as ReturnType<typeof useLogger>);
+	mockLogger();
 });
 
 test('forces the flush and exits 0', async () => {
