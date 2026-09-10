@@ -58,6 +58,7 @@ test('arms nothing when the budget does not parse', () => {
 	vi.advanceTimersByTime(60_000);
 
 	expect(exit).not.toHaveBeenCalled();
+
 	expect(warn).toHaveBeenCalledWith(
 		'[cli] the cache flush has no usable budget, so none is armed',
 	);

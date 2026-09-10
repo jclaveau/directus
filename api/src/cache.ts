@@ -292,10 +292,19 @@ export async function clearSystemCache(opts?: {
 	// Since a lot of cached permission function rely on the schema it needs to be cleared as well
 	await clearPermissionCache();
 
-	await messenger.publish<CacheMessage>(
-		'schemaChanged',
-		{ autoPurgeCache: opts?.autoPurgeCache },
-	);
+	// Awaited so the flush that wraps this can report a lost broadcast, but never
+	// fatal: the 23 callers are mutations whose write has already committed, and
+	// `collections.ts` calls this from a `finally`, where a throw would replace the
+	// outcome it was running after. The peers stay stale either way.
+	try {
+		await messenger.publish<CacheMessage>(
+			'schemaChanged',
+			{ autoPurgeCache: opts?.autoPurgeCache },
+		);
+	}
+	catch (error: any) {
+		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);
+	}
 }
 
 /**
@@ -324,7 +333,15 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 		await lockCache.clear();
 	}
 
-	await messenger.publish<CacheClearMessage>('cacheCleared', { targets });
+	// Same reasoning as the `schemaChanged` publish above: the tiers this cleared
+	// are already cleared, and an operator who asked for a flush is not served by
+	// an error over the one part of it nothing can retry.
+	try {
+		await messenger.publish<CacheClearMessage>('cacheCleared', { targets });
+	}
+	catch (error: any) {
+		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);
+	}
 }
 
 export async function setSystemCache(key: string, value: any, ttl?: number): Promise<void> {

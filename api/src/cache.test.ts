@@ -37,8 +37,9 @@ const redis = vi.hoisted(() => {
 		srem: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
 		// The one-off sweep of the pre-`:index:` layout reads this marker; '1' says
-		// it is done, so these cases scan for the current layout alone.
-		get: vi.fn(async () => '1'),
+		// it is done, so these cases scan for the current layout alone. Typed wider
+		// than the default, since the sweep's own cases hand back the unswept null.
+		get: vi.fn(async (): Promise<string | null> => '1'),
 		set: vi.fn(),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
@@ -112,7 +113,13 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-const { flushCaches, getCache, getRedisConnection } = await import('./cache.js');
+const {
+	clearCacheTargets,
+	clearSystemCache,
+	flushCaches,
+	getCache,
+	getRedisConnection,
+} = await import('./cache.js');
 
 // Snapshotted here: a later case re-imports cache.ts behind `vi.resetModules()`,
 // and that copy's subscriber overwrites the shared record with handlers closing
@@ -1051,13 +1058,15 @@ describe('flushCaches', () => {
 		.mockRejectedValueOnce(new Error('Connection is closed.'))
 		.mockRejectedValueOnce(new Error('Connection is closed.'));
 
-		// Both publishes ride the same bus, so both are named: the `schemaChanged`
-		// fan-out inside the system clear, and the `cacheCleared` one below it.
+		// Both publishes ride the same bus and both fail, but only one is a flush
+		// failure: the `schemaChanged` fan-out is caught where it is sent, since the
+		// mutations that trigger it have already committed. The outage still shows
+		// up, under the `cacheCleared` publish this call makes itself.
 		await expect(flushCaches(true)).resolves.toMatchObject({
-			failures: ['system cache', 'peer notification'],
+			failures: ['peer notification'],
 		});
 
-		expect(busPublish).toHaveBeenCalled();
+		expect(busPublish).toHaveBeenCalledTimes(2);
 	});
 
 	// A peer on a memory store holds its own response and system tiers, and
@@ -1237,6 +1246,32 @@ describe('the one-off sweep of the pre-`:index:` layout', () => {
 			'EX',
 			expect.any(Number),
 		);
+	});
+});
+
+describe('a bus that cannot publish', () => {
+	beforeEach(() => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		busPublish.mockRejectedValue(new Error('Connection is closed.'));
+	});
+
+	// 23 call sites reach this from a mutation whose write already committed, and
+	// `collections.ts` calls it from a `finally`, where a throw replaces the
+	// outcome it was running after — including the error it was already carrying.
+	test('does not fail the schema change that asked for the fan-out', async () => {
+		await expect(clearSystemCache()).resolves.toBeUndefined();
+		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	test('does not fail the flush an operator asked for', async () => {
+		await expect(clearCacheTargets(['response'])).resolves.toBeUndefined();
+		expect(logger.warn).toHaveBeenCalled();
 	});
 });
 
