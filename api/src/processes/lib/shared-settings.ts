@@ -199,23 +199,30 @@ export function onSharedSettingsChanged(
  * makes. A command that builds no app — a schema apply, a seed script — stores
  * the value with nobody to announce it, and the other nodes take it on their
  * own re-read floor instead.
+ *
+ * The create as well as the update: a deployment nobody has saved a setting on
+ * yet has no singleton row, and the first write to it makes one.
  */
 export async function initSharedSettings(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');
 
-	emitter.onAction('settings.update', ({ payload }) => {
-		if (!payload) {
-			return;
-		}
+	for (const event of ['settings.create', 'settings.update']) {
+		emitter.onAction(event, ({ payload }) => {
+			if (!payload) {
+				return;
+			}
 
-		for (const column of Object.values(SHARED_SETTINGS_COLUMNS)) {
-			if (column in payload) {
+			for (const column of Object.values(SHARED_SETTINGS_COLUMNS)) {
+				if (column in payload === false) {
+					continue;
+				}
+
 				const announced = useBus()
 					.publish<SharedSettingsChange>(CHANGED_CHANNEL, { column });
 
 				// The write is already durable, so an unreachable bus costs the
-				// other nodes their floor rather than the value. Dropped, it would
-				// end the process that has just answered the operator.
+				// other nodes their floor rather than the value. Dropped, it
+				// would end the process that has just answered the operator.
 				announced.catch((error: unknown) => {
 					useLogger().warn(
 						error,
@@ -223,6 +230,6 @@ export async function initSharedSettings(): Promise<void> {
 					);
 				});
 			}
-		}
-	});
+		});
+	}
 }

@@ -218,6 +218,32 @@ test('announces a write to either column, and nothing else', async () => {
 	);
 });
 
+// A deployment nobody has saved a setting on yet has no singleton row, so the
+// first write to a column is a create and every other node would hear nothing
+// of it until its own floor came round.
+test('announces the create as well as the update', async () => {
+	await busReady();
+
+	const { default: emitter } = await import('../../emitter.js');
+	await initSharedSettings();
+
+	expect(vi.mocked(emitter.onAction).mock.calls.map(([event]) => event))
+		.toEqual(['settings.create', 'settings.update']);
+
+	const written = { payload: { autoscale_settings: { maxWorkers: 8 } } };
+
+	for (const [, announce] of vi.mocked(emitter.onAction).mock.calls) {
+		announce(written, {} as EventContext);
+	}
+
+	expect(publish).toHaveBeenCalledTimes(2);
+
+	expect(publish).toHaveBeenCalledWith(
+		'sharedSettingsChanged',
+		{ column: SHARED_SETTINGS_COLUMNS.autoscale },
+	);
+});
+
 // A deployment coming up while Redis is unreachable subscribes to nothing. The
 // process holding the pool has to outlive that — an outage that ended it would
 // take the pool with it — and its own re-read floor is what keeps it current
