@@ -406,7 +406,7 @@ router.post(
 	}),
 );
 
-// The shared config lives in Redis, so a deployment without one has nowhere to
+// The shared settings live in Redis, so a deployment without one has nowhere to
 // keep a change and says so by not carrying the endpoint at all.
 if (redisConfigAvailable()) {
 	router.get(
@@ -486,7 +486,7 @@ if (redisConfigAvailable()) {
 			});
 
 			await service.clearAutoscaleConfig();
-			res.status(200).json({ data: { sharedConfig: null } });
+			res.status(200).json({ data: { sharedSettings: null } });
 			return;
 		}),
 	);

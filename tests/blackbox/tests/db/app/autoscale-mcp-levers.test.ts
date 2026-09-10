@@ -164,9 +164,9 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 
 			expect(written.body.result.isError).toBeUndefined();
 
-			const stored = written.body.result.structuredContent.sharedConfig;
+			const stored = written.body.result.structuredContent.sharedSettings;
 
-			// Stamped as an agent's doing, which is what tells this shared config from
+			// Stamped as an agent's doing, which is what tells these shared settings from
 			// one a person typed into the panel during the same incident.
 			expect(stored).toMatchObject({ listenTimeout: 21_000, setFrom: 'mcp' });
 			expect(stored.note).toContain('the extension bundle grew');

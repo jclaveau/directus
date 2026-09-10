@@ -621,7 +621,7 @@ describe('the autoscale panel', () => {
 			minSecondsToScaleDown: 300,
 			warmupSeconds: 30,
 		},
-		withoutSharedConfig: {
+		withoutSharedSettings: {
 			enabled: true,
 			strategy: 'scalabus',
 			appName: 'directus',
@@ -645,7 +645,7 @@ describe('the autoscale panel', () => {
 			scaleCpuThreshold: 'default',
 			releaseCpuThreshold: 'default',
 			minWorkers: 'default',
-			maxWorkers: 'sharedConfig',
+			maxWorkers: 'sharedSettings',
 			prewarmWorkers: 'default',
 			minSecondsToScaleUp: 'default',
 			minSecondsToScaleDown: 'default',
@@ -687,7 +687,7 @@ describe('the autoscale panel', () => {
 			data: {
 				data: {
 					key: 'scalabus:config:processes:autoscale',
-					sharedConfig: { enabled: false },
+					sharedSettings: { enabled: false },
 				},
 			},
 		} as any);
@@ -696,7 +696,7 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			return url === '/utils/autoscale'
 				? Promise.resolve(
-					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+					{ data: { data: { key: 'k', sharedSettings: null } } } as any,
 				)
 				: Promise.resolve({ data: { data: scaling() } } as any);
 		});
@@ -725,7 +725,7 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			return url === '/utils/autoscale'
 				? Promise.resolve(
-					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+					{ data: { data: { key: 'k', sharedSettings: null } } } as any,
 				)
 				: Promise.resolve({ data: { data: scaling() } } as any);
 		});

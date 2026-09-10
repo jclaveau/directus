@@ -58,17 +58,17 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-test('reads the shared config laid over the env chain', async () => {
+test('reads the shared settings laid over the env chain', async () => {
 	const { resolveConfig, resolvedSources } = await freshModule();
 	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
 
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
 
-	// A value the environment set and one the shared config is holding read
+	// A value the environment set and one the shared settings are holding read
 	// identically, and an operator deciding whether a redeploy would move it
 	// needs them apart.
 	expect(resolvedSources()).toMatchObject({
-		maxWorkers: 'sharedConfig',
+		maxWorkers: 'sharedSettings',
 		scaleCpuThreshold: 'default',
 	});
 });
@@ -86,21 +86,21 @@ test('an unconfigured pool scales at 70% and releases to one worker', async () =
 	});
 });
 
-// The page offers to clear a field, and the value waiting under the shared config
-// is knowable only here: everywhere else the shared config has already won.
-test('reports what the chain holds under the shared config', async () => {
-	const { resolveConfig, resolvedWithoutSharedConfig } = await freshModule();
+// The page offers to clear a field, and the value waiting under the shared settings
+// is knowable only here: everywhere else the shared settings have already won.
+test('reports what the chain holds under the shared settings', async () => {
+	const { resolveConfig, resolvedWithoutSharedSettings } = await freshModule();
 	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
 
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
 
-	expect(resolvedWithoutSharedConfig()).toMatchObject({ maxWorkers: 4 });
+	expect(resolvedWithoutSharedSettings()).toMatchObject({ maxWorkers: 4 });
 });
 
 // The rollback path: reverting to the rule production already ran is a write
 // to one key, which is the whole reason the strategy is a configuration field
 // rather than a build.
-test('switches strategy from the shared config', async () => {
+test('switches strategy from the shared settings', async () => {
 	const resolveConfig = await freshResolver();
 
 	await expect(resolveConfig()).resolves.toMatchObject({
@@ -126,13 +126,13 @@ test('holds the last configuration when Redis stops answering', async () => {
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
 
 	// Held together: a page told the ceiling came from the environment while
-	// the loop is running a shared config of it would send an operator to redeploy.
-	expect(resolvedSources()).toMatchObject({ maxWorkers: 'sharedConfig' });
+	// the loop is running shared settings of it would send an operator to redeploy.
+	expect(resolvedSources()).toMatchObject({ maxWorkers: 'sharedSettings' });
 });
 
-// A deployment with nowhere to keep a shared config has none to read, and asking
+// A deployment with nowhere to keep shared settings has none to read, and asking
 // anyway would be a command on a client that was never going to answer.
-test('reads no shared config where there is nowhere to keep one', async () => {
+test('reads no shared settings where there is nowhere to keep one', async () => {
 	const { redisConfigAvailable } = await import('../../../redis/index.js');
 	const { resolveConfig, resolvedSources } = await freshModule();
 	vi.mocked(redisConfigAvailable).mockReturnValue(false);
@@ -145,10 +145,10 @@ test('reads no shared config where there is nowhere to keep one', async () => {
 
 // A write is judged against the whole configuration it would produce, and the
 // fields nobody is changing come from the chain rather than from the patch.
-test('lays a would-be shared config over the chain without storing it', async () => {
-	const { configWithSharedConfig } = await freshModule();
+test('lays would-be settings over the chain without storing them', async () => {
+	const { configWithSharedSettings } = await freshModule();
 
-	expect(configWithSharedConfig({ maxWorkers: 8 }))
+	expect(configWithSharedSettings({ maxWorkers: 8 }))
 		.toMatchObject({ maxWorkers: 8, minWorkers: 1 });
 });
 
@@ -159,7 +159,7 @@ test('falls back to the env chain when Redis never answered', async () => {
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
 });
 
-test('takes the env chain back once the shared config is deleted', async () => {
+test('takes the env chain back once the shared settings are deleted', async () => {
 	const resolveConfig = await freshResolver();
 	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
 	await resolveConfig();
@@ -169,9 +169,9 @@ test('takes the env chain back once the shared config is deleted', async () => {
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
 });
 
-// The shared config is a hand-edited JSON document, so it is exactly where a typed
-// zero too many arrives.
-test('a shared config past what is supported is clamped, not obeyed', async () => {
+// The shared settings are a hand-edited JSON document, so they are exactly
+// where a typed zero too many arrives.
+test('shared settings past what is supported are clamped, not obeyed', async () => {
 	const resolveConfig = await freshResolver();
 	get.mockResolvedValue(JSON.stringify({ minWorkers: 10_000 }));
 
@@ -181,14 +181,14 @@ test('a shared config past what is supported is clamped, not obeyed', async () =
 	});
 });
 
-test('an unparseable shared config leaves the env chain in force', async () => {
+test('unparseable shared settings leave the env chain in force', async () => {
 	const resolveConfig = await freshResolver();
 	get.mockResolvedValue('{ not json');
 
 	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
 });
 
-test('a shared config cannot reach through to the prototype', async () => {
+test('shared settings cannot reach through to the prototype', async () => {
 	const resolveConfig = await freshResolver();
 	get.mockResolvedValue('{"__proto__":{"polluted":true}}');
 

@@ -26,11 +26,11 @@ vi.mock('../../supervisor/index.js', () => {
 	return { reloadApp };
 });
 
-const readSupervisorSharedConfig = vi.fn(async () => null);
+const readSupervisorSharedSettings = vi.fn(async () => null);
 const reloadDeclaration = vi.fn(() => DECLARATION);
 
-vi.mock('./supervisor-shared-config.js', () => {
-	return { readSupervisorSharedConfig, reloadDeclaration };
+vi.mock('./supervisor-shared-settings.js', () => {
+	return { readSupervisorSharedSettings, reloadDeclaration };
 });
 
 /** What the options an operator changed come to, as pm2 names them. */
@@ -97,7 +97,7 @@ beforeEach(() => {
 	subscribe.mockClear();
 	reloadApp.mockReset();
 	reloadApp.mockResolvedValue(undefined);
-	readSupervisorSharedConfig.mockClear();
+	readSupervisorSharedSettings.mockClear();
 	reloadDeclaration.mockClear();
 });
 
@@ -149,13 +149,13 @@ test('the restart runs beside the loop and reports that it finished', async () =
 	initAutoscaleReload();
 	ask();
 
-	readSupervisorSharedConfig
+	readSupervisorSharedSettings
 		.mockResolvedValueOnce({ listenTimeout: 20_000 } as never);
 
 	beginAskedReload('directus', 4);
 
 	// Held still from the moment it starts, not from the moment the supervisor
-	// is reached: the shared config it carries is a read away.
+	// is reached: the shared settings it carries are a read away.
 	expect(reloading()).toBe(true);
 
 	await vi.waitFor(() => {

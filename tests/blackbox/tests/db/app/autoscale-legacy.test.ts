@@ -98,7 +98,7 @@ describe('The autoscaler can be reverted to the module rule it replaces', () => 
 	// module cannot tell and this autoscaler freezes on. Nothing changes here
 	// but the strategy — same daemon, same load, same thresholds — so a pool
 	// that starts growing is the switch arriving and nothing else.
-	it('starts scaling a churning pool once the shared config says so', async () => {
+	it('starts scaling a churning pool once the shared settings say so', async () => {
 		const rig = startPool({
 			appName: 'autoscale-legacy-switch',
 			instances: 2,

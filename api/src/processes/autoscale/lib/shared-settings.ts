@@ -3,7 +3,9 @@ import type { AutoscaleConfig } from '@directus/types';
 import { useRedis } from '../../../redis/index.js';
 import { autoscaleConfigKey } from './resolve-config.js';
 
-/** What a field of the shared config may hold, so a bad write fails at the door. */
+/**
+ * What a field of the shared settings may hold, so a bad write fails at the door.
+ */
 type FieldType = string[] | 'boolean' | 'number' | 'string';
 
 const FIELD_TYPES: Record<keyof AutoscaleConfig, FieldType> = {
@@ -23,7 +25,7 @@ const FIELD_TYPES: Record<keyof AutoscaleConfig, FieldType> = {
 };
 
 /**
- * What the shared config carries besides the configuration itself.
+ * What the shared settings carry besides the configuration itself.
  *
  * The loop takes only the fields it knows, so these ride in the same object
  * without reaching it. They are what turns a forgotten `{"enabled": false}`
@@ -33,12 +35,12 @@ const FIELD_TYPES: Record<keyof AutoscaleConfig, FieldType> = {
  */
 const NOTE_FIELDS = ['setBy', 'setAt', 'setFrom', 'note'];
 
-export interface AutoscaleSharedConfig {
+export interface AutoscaleSharedSettings {
 	[field: string]: unknown;
 }
 
-/** The shared config as it stands, or `null` where nothing is set for anything. */
-export async function readSharedConfig(): Promise<AutoscaleSharedConfig | null> {
+/** The shared settings as they stand, `null` where nothing is set anywhere. */
+export async function readSharedSettings(): Promise<AutoscaleSharedSettings | null> {
 	const stored = await useRedis().get(autoscaleConfigKey());
 
 	if (!stored) {
@@ -49,12 +51,12 @@ export async function readSharedConfig(): Promise<AutoscaleSharedConfig | null> 
 		const parsed: unknown = JSON.parse(stored);
 
 		return typeof parsed === 'object' && parsed !== null
-			? parsed as AutoscaleSharedConfig
+			? parsed as AutoscaleSharedSettings
 			: null;
 	}
 	catch {
 		// A key edited by hand into something unparseable is reported as no
-		// shared config, which is what the loop makes of it too.
+		// shared settings, which is what the loop makes of them too.
 		return null;
 	}
 }
@@ -67,7 +69,7 @@ export async function readSharedConfig(): Promise<AutoscaleSharedConfig | null> 
  * rejected write from a clamped one. Bounds are not checked — those the loop
  * corrects, and it reports what it corrected them to.
  */
-export function parseSharedConfigPatch(
+export function parseSharedSettingsPatch(
 	patch: Record<string, unknown>,
 ): Record<string, unknown> {
 	const parsed: Record<string, unknown> = {};
@@ -98,7 +100,7 @@ export function parseSharedConfigPatch(
 		}
 
 		// Null clears one field back to the environment chain, which is how a
-		// single value is handed back without dropping the whole shared config.
+		// single value is handed back without dropping the whole shared settings.
 		if (value === null) {
 			parsed[field] = null;
 			continue;
@@ -135,17 +137,17 @@ export function parseSharedConfigPatch(
 }
 
 /**
- * The shared config with the patch applied, a `null` value removing its field.
+ * The shared settings with the patch applied, a `null` value removing its field.
  *
- * A shared config that ends up holding nothing but its own note is removed
- * altogether: a page reading it would otherwise show a deployment as carrying
- * one while every value it runs on comes from its environment.
+ * Shared settings that end up holding nothing but their own note are removed
+ * altogether: a page reading them would otherwise show a deployment as
+ * carrying some while every value it runs on comes from its environment.
  */
-export function applySharedConfigPatch(
-	sharedConfig: AutoscaleSharedConfig | null,
+export function applySharedSettingsPatch(
+	sharedSettings: AutoscaleSharedSettings | null,
 	patch: Record<string, unknown>,
-): AutoscaleSharedConfig | null {
-	const merged: AutoscaleSharedConfig = { ...sharedConfig };
+): AutoscaleSharedSettings | null {
+	const merged: AutoscaleSharedSettings = { ...sharedSettings };
 
 	for (const [field, value] of Object.entries(patch)) {
 		if (value === null) {
@@ -164,15 +166,15 @@ export function applySharedConfigPatch(
 		: merged;
 }
 
-export async function writeSharedConfig(
-	sharedConfig: AutoscaleSharedConfig | null,
+export async function writeSharedSettings(
+	sharedSettings: AutoscaleSharedSettings | null,
 ): Promise<void> {
 	const redis = useRedis();
 
-	if (sharedConfig === null) {
+	if (sharedSettings === null) {
 		await redis.del(autoscaleConfigKey());
 		return;
 	}
 
-	await redis.set(autoscaleConfigKey(), JSON.stringify(sharedConfig));
+	await redis.set(autoscaleConfigKey(), JSON.stringify(sharedSettings));
 }

@@ -15,7 +15,7 @@ import {
 } from './sanitize-config.js';
 
 /**
- * Where the shared config is read from.
+ * Where the shared settings are read from.
  *
  * Namespaced like the tag index, so two deployments sharing one Redis are
  * tuned separately rather than through each other. Under `processes` because
@@ -32,7 +32,7 @@ export function autoscaleConfigKey(): string {
  * one every tick and takes no interest in these, which reach the pool through
  * a rolling restart instead.
  */
-export function supervisorSharedConfigKey(): string {
+export function supervisorSharedSettingsKey(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:config:processes:supervisor`;
 }
 
@@ -57,10 +57,10 @@ const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
  * Which layer each field's value came from.
  *
  * An operator reading a threshold needs to know whether changing the
- * deployment's environment would move it, or whether the shared config is
+ * deployment's environment would move it, or whether the shared settings are
  * holding it where it is — the two look identical in the resolved value.
  */
-function sourcesOf(sharedConfig: Record<string, unknown>): AutoscaleConfigSources {
+function sourcesOf(sharedSettings: Record<string, unknown>): AutoscaleConfigSources {
 	const env = useEnv();
 	const sources = {} as AutoscaleConfigSources;
 
@@ -71,8 +71,8 @@ function sourcesOf(sharedConfig: Record<string, unknown>): AutoscaleConfigSource
 			source = 'env';
 		}
 
-		if (sharedConfig[field] !== undefined && sharedConfig[field] !== null) {
-			source = 'sharedConfig';
+		if (sharedSettings[field] !== undefined && sharedSettings[field] !== null) {
+			source = 'sharedSettings';
 		}
 
 		sources[field] = source;
@@ -130,17 +130,18 @@ export function envConfig(): AutoscaleConfig {
 }
 
 /**
- * Only the fields the shared config actually sets are taken from it, so raising
+ * Only the fields the shared settings actually set are taken from them, so
+ * raising
  * one threshold during an incident leaves the rest on the env chain rather
  * than resetting them to defaults nobody asked for.
  */
-function withSharedConfig(
+function withSharedSettings(
 	base: AutoscaleConfig,
-	sharedConfig: Record<string, unknown>,
+	sharedSettings: Record<string, unknown>,
 ): AutoscaleConfig {
 	const merged = { ...base };
 
-	for (const [field, value] of Object.entries(sharedConfig)) {
+	for (const [field, value] of Object.entries(sharedSettings)) {
 		if (Object.hasOwn(base, field) === false) {
 			continue;
 		}
@@ -172,25 +173,26 @@ function withSharedConfig(
 }
 
 /**
- * What the loop would run on with this shared config laid over the environment.
+ * What the loop would run on with these shared settings laid over the
+ * environment.
  *
  * The env chain read here is this process's rather than the scaling process's,
  * which is a different process with the same deployment's environment. It is
  * what a write has to be judged against: the field being changed is compared
  * with fields nobody is changing, and those come from the chain.
  */
-export function configWithSharedConfig(
-	sharedConfig: Record<string, unknown>,
+export function configWithSharedSettings(
+	sharedSettings: Record<string, unknown>,
 ): AutoscaleConfig {
-	return withSharedConfig(sanitizeConfig(envConfig()).config, sharedConfig);
+	return withSharedSettings(sanitizeConfig(envConfig()).config, sharedSettings);
 }
 
 /**
- * How long a tick waits for the shared config before deciding without a fresh one.
+ * How long a tick waits for the shared settings before deciding without a fresh one.
  *
  * The interval between ticks, so a read is never the reason a tick is late.
  */
-const SHARED_CONFIG_READ_TIMEOUT_MS = 1000;
+const SHARED_SETTINGS_READ_TIMEOUT_MS = 1000;
 
 /**
  * Statuses in which the client holds no connection to send a command down.
@@ -201,7 +203,7 @@ const SHARED_CONFIG_READ_TIMEOUT_MS = 1000;
 const DISCONNECTED = new Set(['reconnecting', 'close', 'end']);
 
 /**
- * The stored shared config, or a failure if Redis does not produce one promptly.
+ * The stored shared settings, or a failure if Redis does not produce one promptly.
  *
  * ioredis queues a command issued while it is not connected and puts no
  * deadline on that queue, so a tick that only awaited the read would hold the
@@ -209,7 +211,7 @@ const DISCONNECTED = new Set(['reconnecting', 'close', 'end']);
  * size the outage caught it at, which is exactly what this loop exists to
  * prevent.
  */
-async function readStoredSharedConfig(): Promise<string | null> {
+async function readStoredSharedSettings(): Promise<string | null> {
 	const redis = useRedis();
 
 	if (DISCONNECTED.has(redis.status)) {
@@ -230,8 +232,8 @@ async function readStoredSharedConfig(): Promise<string | null> {
 			read,
 			new Promise<never>((_resolve, reject) => {
 				expire = setTimeout(() => {
-					reject(new Error(`no answer in ${SHARED_CONFIG_READ_TIMEOUT_MS}ms`));
-				}, SHARED_CONFIG_READ_TIMEOUT_MS);
+					reject(new Error(`no answer in ${SHARED_SETTINGS_READ_TIMEOUT_MS}ms`));
+				}, SHARED_SETTINGS_READ_TIMEOUT_MS);
 			}),
 		]);
 	}
@@ -244,14 +246,14 @@ let lastCorrections = '';
 let lastGood: AutoscaleConfig | null = null;
 let lastBase: AutoscaleConfig | null = null;
 let lastSources: AutoscaleConfigSources | null = null;
-let sharedConfigUnreadable = false;
+let sharedSettingsUnreadable = false;
 
 /**
  * Where each field of the configuration the last tick used came from.
  *
  * Held beside the configuration rather than returned with it because it
  * answers a different question — one the loop never asks and a page always
- * does — and because an unreadable shared config holds both together.
+ * does — and because unreadable shared settings hold both together.
  */
 export function resolvedSources(): AutoscaleConfigSources {
 	return lastSources ?? sourcesOf({});
@@ -261,9 +263,10 @@ export function resolvedSources(): AutoscaleConfigSources {
  * What the last tick would have run on with nothing stored in Redis.
  *
  * The page offers to clear a field, and the value that lands there is this
- * one — knowable only here, since the shared config wins over it everywhere else.
+ * one — knowable only here, since the shared settings win over it everywhere
+ * else.
  */
-export function resolvedWithoutSharedConfig(): AutoscaleConfig {
+export function resolvedWithoutSharedSettings(): AutoscaleConfig {
 	return lastBase ?? sanitizeConfig(envConfig()).config;
 }
 
@@ -301,13 +304,13 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 
 	const settle = (
 		candidate: AutoscaleConfig,
-		sharedConfig: Record<string, unknown>,
+		sharedSettings: Record<string, unknown>,
 	) => {
 		const { config, corrections } = sanitizeConfig(candidate);
 		announce(corrections);
 		lastGood = config;
 		lastBase = sanitizeConfig(fromEnv).config;
-		lastSources = sourcesOf(sharedConfig);
+		lastSources = sourcesOf(sharedSettings);
 
 		return config;
 	};
@@ -317,24 +320,24 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 	}
 
 	try {
-		const stored = await readStoredSharedConfig();
-		sharedConfigUnreadable = false;
+		const stored = await readStoredSharedSettings();
+		sharedSettingsUnreadable = false;
 
 		if (!stored) {
 			return settle(fromEnv, {});
 		}
 
-		const sharedConfig = JSON.parse(stored) as Record<string, unknown>;
+		const sharedSettings = JSON.parse(stored) as Record<string, unknown>;
 
-		return settle(withSharedConfig(fromEnv, sharedConfig), sharedConfig);
+		return settle(withSharedSettings(fromEnv, sharedSettings), sharedSettings);
 	}
 	catch (error) {
-		if (sharedConfigUnreadable === false) {
-			sharedConfigUnreadable = true;
+		if (sharedSettingsUnreadable === false) {
+			sharedSettingsUnreadable = true;
 
 			useLogger().warn(
 				error,
-				'[autoscale] could not read the shared config; '
+				'[autoscale] could not read the shared settings; '
 					+ 'holding the last configuration',
 			);
 		}

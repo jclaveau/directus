@@ -47,12 +47,12 @@ import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { collectPgBouncer } from '../pgbouncer/index.js';
 import {
-	applySharedConfigPatch,
-	parseSharedConfigPatch,
-	readSharedConfig,
-	writeSharedConfig,
-	type AutoscaleSharedConfig,
-} from '../processes/autoscale/lib/shared-config.js';
+	applySharedSettingsPatch,
+	parseSharedSettingsPatch,
+	readSharedSettings,
+	writeSharedSettings,
+	type AutoscaleSharedSettings,
+} from '../processes/autoscale/lib/shared-settings.js';
 import {
 	loadedWorker,
 	MAX_DRILL_PERCENT,
@@ -68,16 +68,16 @@ import {
 } from '../processes/autoscale/lib/reload.js';
 import {
 	autoscaleConfigKey,
-	configWithSharedConfig,
-	supervisorSharedConfigKey,
+	configWithSharedSettings,
+	supervisorSharedSettingsKey,
 } from '../processes/autoscale/lib/resolve-config.js';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorSharedConfig,
-	type SupervisorSharedConfig,
-	writeSupervisorSharedConfig,
-} from '../processes/autoscale/lib/supervisor-shared-config.js';
+	readSupervisorSharedSettings,
+	type SupervisorSharedSettings,
+	writeSupervisorSharedSettings,
+} from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
 import {
 	collectProcesses,
@@ -182,23 +182,23 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 }
 
 /**
- * What an autoscale read answers with: the stored shared config, plus who
+ * What an autoscale read answers with: the stored shared settings, plus who
  * left it.
  */
-export interface AutoscaleSharedConfigAnswer {
+export interface AutoscaleSharedSettingsAnswer {
 	key: string;
-	sharedConfig: AutoscaleSharedConfig | null;
-	/** The address behind the shared config's `setBy`, `null` where there is none. */
+	sharedSettings: AutoscaleSharedSettings | null;
+	/** The address behind the shared settings' `setBy`, `null` where there is none. */
 	setByEmail: string | null;
 }
 
-export interface AutoscaleConfigAnswer extends AutoscaleSharedConfigAnswer {
+export interface AutoscaleConfigAnswer extends AutoscaleSharedSettingsAnswer {
 	/**
 	 * The pm2 options a restart would carry, answered beside the configuration
 	 * because a page showing one without the other cannot say which of the two
 	 * a value it displays came from.
 	 */
-	supervisor: AutoscaleSharedConfigAnswer;
+	supervisor: AutoscaleSharedSettingsAnswer;
 }
 
 export class UtilsService {
@@ -548,20 +548,20 @@ export class UtilsService {
 	}
 
 	/**
-	 * The shared config, and the key it is stored under.
+	 * The shared settings, and the key they are stored under.
 	 *
-	 * Only the shared config: what the pool is actually being scaled on is the
+	 * Only the shared settings: what the pool is actually being scaled on is the
 	 * environment of the process that scales it laid under this, and that
 	 * process reports it with `readProcesses` rather than answering a request.
 	 */
 	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('inspect the autoscale configuration');
 
-		return this.answerWith(await readSharedConfig());
+		return this.answerWith(await readSharedSettings());
 	}
 
 	/**
-	 * Lay a patch over the shared config, `null` giving one field back to the
+	 * Lay a patch over the shared settings, `null` giving one field back to the
 	 * environment chain.
 	 *
 	 * Field by field on purpose: a write of the whole object would pin every
@@ -574,11 +574,11 @@ export class UtilsService {
 	): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('change the autoscale configuration');
 
-		const parsed = parseSharedConfigPatch(patch);
+		const parsed = parseSharedSettingsPatch(patch);
 
-		// Stamped by the writer rather than taken from them: a shared config outlives
-		// the incident that justified it, and the questions it is then asked are
-		// who left it, when, and through what.
+		// Stamped by the writer rather than taken from them: shared settings
+		// outlive the incident that justified them, and the questions they are then
+		// asked are who left them, when, and through what.
 		const stamped = {
 			...parsed,
 			setBy: this.accountability?.user ?? null,
@@ -586,46 +586,46 @@ export class UtilsService {
 			setFrom: surface,
 		};
 
-		const sharedConfig = applySharedConfigPatch(
-			await readSharedConfig(),
+		const sharedSettings = applySharedSettingsPatch(
+			await readSharedSettings(),
 			stamped,
 		);
 
 		// Judged whole rather than field by field: a floor is only too high
 		// against the ceiling it will sit under, and that ceiling is usually a
 		// field this patch never mentions.
-		assertUsableConfig(configWithSharedConfig(sharedConfig ?? {}));
+		assertUsableConfig(configWithSharedSettings(sharedSettings ?? {}));
 
-		await writeSharedConfig(sharedConfig);
+		await writeSharedSettings(sharedSettings);
 
-		return this.answerWith(sharedConfig);
+		return this.answerWith(sharedSettings);
 	}
 
 	/**
-	 * The shared config with the writer named rather than identified.
+	 * The shared settings with the writer named rather than identified.
 	 *
 	 * The stamp keeps the user's id, which survives a rename and a changed
 	 * address; a page reading it back wants the address, and only the database
 	 * turns one into the other.
 	 */
 	private async answerWith(
-		sharedConfig: AutoscaleSharedConfig | null,
+		sharedSettings: AutoscaleSharedSettings | null,
 	): Promise<AutoscaleConfigAnswer> {
 		return {
 			key: autoscaleConfigKey(),
-			sharedConfig,
-			setByEmail: await this.emailOf(sharedConfig?.['setBy']),
-			supervisor: await this.supervisorAnswer(await readSupervisorSharedConfig()),
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+			supervisor: await this.supervisorAnswer(await readSupervisorSharedSettings()),
 		};
 	}
 
 	private async supervisorAnswer(
-		sharedConfig: SupervisorSharedConfig | null,
-	): Promise<AutoscaleSharedConfigAnswer> {
+		sharedSettings: SupervisorSharedSettings | null,
+	): Promise<AutoscaleSharedSettingsAnswer> {
 		return {
-			key: supervisorSharedConfigKey(),
-			sharedConfig,
-			setByEmail: await this.emailOf(sharedConfig?.['setBy']),
+			key: supervisorSharedSettingsKey(),
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
 		};
 	}
 
@@ -639,7 +639,7 @@ export class UtilsService {
 	async updateSupervisorConfig(
 		patch: Record<string, unknown>,
 		surface: AutoscaleWriteSurface,
-	): Promise<AutoscaleSharedConfigAnswer> {
+	): Promise<AutoscaleSharedSettingsAnswer> {
 		this.assertAdmin('change the supervisor configuration');
 
 		const stamped = {
@@ -649,14 +649,14 @@ export class UtilsService {
 			setFrom: surface,
 		};
 
-		const sharedConfig = applySupervisorPatch(
-			await readSupervisorSharedConfig(),
+		const sharedSettings = applySupervisorPatch(
+			await readSupervisorSharedSettings(),
 			stamped,
 		);
 
-		await writeSupervisorSharedConfig(sharedConfig);
+		await writeSupervisorSharedSettings(sharedSettings);
 
-		return this.supervisorAnswer(sharedConfig);
+		return this.supervisorAnswer(sharedSettings);
 	}
 
 	private async emailOf(user: unknown): Promise<string | null> {
@@ -796,11 +796,11 @@ export class UtilsService {
 		return stopDrill();
 	}
 
-	/** Drop the shared config, so every field comes from the environment again. */
+	/** Drop the shared settings, so every field comes from the environment again. */
 	async clearAutoscaleConfig(): Promise<void> {
 		this.assertAdmin('clear the autoscale configuration');
 
-		await writeSharedConfig(null);
+		await writeSharedSettings(null);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {

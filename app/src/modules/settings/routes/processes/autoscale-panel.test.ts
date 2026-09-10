@@ -32,7 +32,7 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 			minSecondsToScaleDown: 300,
 			warmupSeconds: 30,
 		},
-		withoutSharedConfig: {
+		withoutSharedSettings: {
 			enabled: true,
 			strategy: 'scalabus',
 			appName: 'api',
@@ -56,7 +56,7 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 			scaleCpuThreshold: 'default',
 			releaseCpuThreshold: 'default',
 			minWorkers: 'default',
-			maxWorkers: 'sharedConfig',
+			maxWorkers: 'sharedSettings',
 			prewarmWorkers: 'default',
 			minSecondsToScaleUp: 'default',
 			minSecondsToScaleDown: 'default',
@@ -95,8 +95,8 @@ test('a row shows what the loop runs on and where it came from', () => {
 		field: 'maxWorkers',
 		kind: 'number',
 		effective: 4,
-		source: 'sharedConfig',
-		sharedConfig: 8,
+		source: 'sharedSettings',
+		sharedSettings: 8,
 	});
 });
 
@@ -106,25 +106,25 @@ test('a row keeps the stored value apart from the running one', () => {
 	const rows = configRows(state(), { maxWorkers: 8 });
 
 	expect(rows.find((row) => row.field === 'maxWorkers')?.effective).toBe(4);
-	expect(rows.find((row) => row.field === 'maxWorkers')?.sharedConfig).toBe(8);
+	expect(rows.find((row) => row.field === 'maxWorkers')?.sharedSettings).toBe(8);
 });
 
 // Nothing scaling means nothing to show but what is stored — and stored is not
 // running, which is what the source says.
-test('a pool with no runner shows the shared config alone', () => {
+test('a pool with no runner shows the shared settings alone', () => {
 	const rows = configRows(null, { maxWorkers: 8 });
 	const ceiling = rows.find((row) => row.field === 'maxWorkers');
 
-	expect(ceiling).toMatchObject({ effective: 8, source: 'sharedConfig' });
+	expect(ceiling).toMatchObject({ effective: 8, source: 'sharedSettings' });
 
 	// Nothing reported and nothing stored: naming a layer here would claim a
 	// value came from somewhere when no value came at all.
 	expect(rows.find((row) => row.field === 'minWorkers'))
-		.toMatchObject({ effective: null, sharedConfig: null, source: null });
+		.toMatchObject({ effective: null, sharedSettings: null, source: null });
 });
 
 // Clearing a field hands it back to the env chain, and only the process that
-// resolved that chain knows what it holds under a shared config.
+// resolved that chain knows what it holds under shared settings.
 test('a row names the value clearing it would land on', () => {
 	const rows = configRows(state(), { maxWorkers: 8 });
 
@@ -276,15 +276,15 @@ test('every field is named by the variable that sets it', () => {
 });
 
 // Which layer holds a value is the same question the configuration answers, and
-// the stored shared config is the only layer the declaration can be told apart from.
+// the stored shared settings are the only layer the declaration is told apart from.
 test('a stored option says so and the rest report the supervisor', () => {
 	const rows = supervisorRows(state(), { listenTimeout: 20_000 });
 
 	expect(rows.find((row) => row.field === 'PM2_LISTEN_TIMEOUT'))
-		.toMatchObject({ source: 'sharedConfig', sharedConfig: 20_000 });
+		.toMatchObject({ source: 'sharedSettings', sharedSettings: 20_000 });
 
 	expect(rows.find((row) => row.field === 'PM2_KILL_TIMEOUT'))
-		.toMatchObject({ source: 'pm2', sharedConfig: null });
+		.toMatchObject({ source: 'pm2', sharedSettings: null });
 
 	expect(rows.find((row) => row.field === 'PM2_INSTANCES')?.source).toBe('pm2');
 });

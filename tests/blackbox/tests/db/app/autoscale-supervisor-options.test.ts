@@ -58,7 +58,7 @@ describe('A restart carries the supervisor options stored for it', () => {
 		await redis.del(supervisorKey(namespace));
 
 		// The ecosystem declares 10s and the environment asks for 12s, so the
-		// three values an arm can see are all distinct: 21s is the shared config,
+		// three values an arm can see are all distinct: 21s is the shared settings,
 		// 12s is the environment a release goes back to, and 10s is a restart
 		// that pushed nothing at all.
 		rig = startPool({
@@ -116,7 +116,7 @@ describe('A restart carries the supervisor options stored for it', () => {
 	}, 150_000);
 
 	// pm2 keeps whatever the last roll pushed, so a field taken out of the
-	// shared config reverts only because the next restart declares the environment's
+	// shared settings reverts only because the next restart declares the environment's
 	// value in its place. Without that this arm would find 21s still there.
 	it('hands a released option back to the environment', async () => {
 		await redis.del(supervisorKey(namespace));

@@ -2,10 +2,10 @@ import { expect, test, vi } from 'vitest';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorSharedConfig,
+	readSupervisorSharedSettings,
 	reloadDeclaration,
-	writeSupervisorSharedConfig,
-} from './supervisor-shared-config.js';
+	writeSupervisorSharedSettings,
+} from './supervisor-shared-settings.js';
 
 vi.mock('@directus/env');
 vi.mock('../../../redis/index.js');
@@ -26,35 +26,35 @@ async function deploymentWith(
 	vi.mocked(useRedis).mockReturnValue({ get, set, del } as never);
 }
 
-test('reads the shared config under a key of its own', async () => {
+test('reads the shared settings under a key of its own', async () => {
 	await deploymentWith(JSON.stringify({ listenTimeout: 20_000 }));
 
-	await expect(readSupervisorSharedConfig())
+	await expect(readSupervisorSharedSettings())
 		.resolves
 		.toEqual({ listenTimeout: 20_000 });
 
 	expect(get).toHaveBeenCalledWith('scalabus:config:processes:supervisor');
 });
 
-// A restart makes no shared config of a key it cannot parse, and the page reading it
-// has to be told the same thing rather than shown an error.
-test('reads a key edited into nonsense as no shared config', async () => {
+// A restart makes no shared settings of a key it cannot parse, and the page
+// reading it has to be told the same thing rather than shown an error.
+test('reads a key edited into nonsense as no shared settings', async () => {
 	await deploymentWith('{ not json');
 
-	await expect(readSupervisorSharedConfig()).resolves.toBeNull();
+	await expect(readSupervisorSharedSettings()).resolves.toBeNull();
 });
 
-test('writes the shared config, and deletes the key for none', async () => {
+test('writes the shared settings, and deletes the key for none', async () => {
 	await deploymentWith(null);
 
-	await writeSupervisorSharedConfig({ killTimeout: 5000 });
+	await writeSupervisorSharedSettings({ killTimeout: 5000 });
 
 	expect(set).toHaveBeenCalledWith(
 		'scalabus:config:processes:supervisor',
 		'{"killTimeout":5000}',
 	);
 
-	await writeSupervisorSharedConfig(null);
+	await writeSupervisorSharedSettings(null);
 	expect(del).toHaveBeenCalledWith('scalabus:config:processes:supervisor');
 });
 
@@ -94,9 +94,9 @@ test('refuses a stamp field that is not text', () => {
 		.toThrowError(`'setFrom' has to be a string`);
 });
 
-// A shared config holding nothing but its own stamp would show a supervisor as
+// Shared settings holding nothing but their own stamp would show a supervisor as
 // carrying one when every value it runs on came from the environment.
-test('a shared config released down to its stamp is removed', () => {
+test('shared settings released down to their stamp are removed', () => {
 	const stamped = { listenTimeout: 20_000, setBy: 'jean' };
 
 	expect(applySupervisorPatch(stamped, { listenTimeout: null })).toBeNull();
@@ -106,7 +106,7 @@ test('a shared config released down to its stamp is removed', () => {
 });
 
 // The full set every restart, because pm2 keeps what the last one pushed: a
-// field released from the shared config goes back to the environment only if the
+// field released from the shared settings goes back to the environment only if the
 // restart says so.
 test('the restart carries every option, not only the shared ones', async () => {
 	await deploymentWith(null, { PM2_KILL_TIMEOUT: 5000 });

@@ -6,9 +6,9 @@ import { useBus } from '../../../bus/index.js';
 import { useLogger } from '../../../logger/index.js';
 import { reloadApp } from '../../supervisor/index.js';
 import {
-	readSupervisorSharedConfig,
+	readSupervisorSharedSettings,
 	reloadDeclaration,
-} from './supervisor-shared-config.js';
+} from './supervisor-shared-settings.js';
 
 /**
  * The channel a rolling restart is asked for on.
@@ -171,9 +171,9 @@ export function beginAskedReload(appName: string, workers: number): void {
 	// The options an operator changed are pushed by the restart that carries
 	// them, so the read that finds them belongs to the restart rather than to
 	// the tick: a pool nobody is restarting never asks Redis for them.
-	readSupervisorSharedConfig()
-		.then((sharedConfig) => {
-			const declaration = reloadDeclaration(sharedConfig);
+	readSupervisorSharedSettings()
+		.then((sharedSettings) => {
+			const declaration = reloadDeclaration(sharedSettings);
 
 			return reloadApp(
 				appName,

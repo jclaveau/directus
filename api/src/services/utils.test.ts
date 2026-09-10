@@ -34,22 +34,22 @@ import {
 	reloadRefusal,
 } from '../processes/autoscale/lib/reload.js';
 import {
-	applySharedConfigPatch,
-	parseSharedConfigPatch,
-	readSharedConfig,
-	writeSharedConfig,
-} from '../processes/autoscale/lib/shared-config.js';
+	applySharedSettingsPatch,
+	parseSharedSettingsPatch,
+	readSharedSettings,
+	writeSharedSettings,
+} from '../processes/autoscale/lib/shared-settings.js';
 import {
 	autoscaleConfigKey,
-	configWithSharedConfig,
-	supervisorSharedConfigKey,
+	configWithSharedSettings,
+	supervisorSharedSettingsKey,
 } from '../processes/autoscale/lib/resolve-config.js';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorSharedConfig,
-	writeSupervisorSharedConfig,
-} from '../processes/autoscale/lib/supervisor-shared-config.js';
+	readSupervisorSharedSettings,
+	writeSupervisorSharedSettings,
+} from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import { collectProcesses, processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -70,8 +70,8 @@ vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
 vi.mock('../processes/autoscale/lib/drill.js');
 vi.mock('../processes/autoscale/lib/reload.js');
-vi.mock('../processes/autoscale/lib/shared-config.js');
-vi.mock('../processes/autoscale/lib/supervisor-shared-config.js');
+vi.mock('../processes/autoscale/lib/shared-settings.js');
+vi.mock('../processes/autoscale/lib/supervisor-shared-settings.js');
 vi.mock('../processes/index.js');
 vi.mock('../processes/autoscale/lib/resolve-config.js');
 
@@ -602,10 +602,10 @@ describe('Services / Utils', () => {
 			return new UtilsService({ knex: db, schema, accountability });
 		}
 
-		// What the env chain resolves under the shared config, which is what the
+		// What the env chain resolves under the shared settings, which is what the
 		// write is judged against.
 		function resolvesTo(config: Partial<AutoscaleConfig>) {
-			vi.mocked(configWithSharedConfig).mockReturnValue({
+			vi.mocked(configWithSharedSettings).mockReturnValue({
 				enabled: true,
 				strategy: 'scalabus',
 				appName: 'api',
@@ -623,29 +623,29 @@ describe('Services / Utils', () => {
 			});
 		}
 
-		function stored(sharedConfig: Record<string, unknown> | null) {
+		function stored(sharedSettings: Record<string, unknown> | null) {
 			resolvesTo({});
 
 			vi.mocked(autoscaleConfigKey)
 				.mockReturnValue('scalabus:config:processes:autoscale');
 
-			vi.mocked(readSupervisorSharedConfig).mockResolvedValue(null);
-			vi.mocked(readSharedConfig).mockResolvedValue(sharedConfig);
-			vi.mocked(parseSharedConfigPatch).mockImplementation((patch) => patch);
+			vi.mocked(readSupervisorSharedSettings).mockResolvedValue(null);
+			vi.mocked(readSharedSettings).mockResolvedValue(sharedSettings);
+			vi.mocked(parseSharedSettingsPatch).mockImplementation((patch) => patch);
 
-			vi.mocked(applySharedConfigPatch)
+			vi.mocked(applySharedSettingsPatch)
 				.mockImplementation((_current, patch) => patch);
 		}
 
 		// The stamp keeps the id, which outlives a rename; a page asked to show
-		// who left a shared config wants the address, and only the table has it.
+		// who left shared settings wants the address, and only the table has it.
 		it('names the user behind the id it stamped', async () => {
 			stored({ maxWorkers: 8, setBy: 'writer-id' });
 			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
 
 			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
 				key: 'scalabus:config:processes:autoscale',
-				sharedConfig: { maxWorkers: 8, setBy: 'writer-id' },
+				sharedSettings: { maxWorkers: 8, setBy: 'writer-id' },
 				setByEmail: 'ann@example.com',
 			});
 		});
@@ -655,11 +655,11 @@ describe('Services / Utils', () => {
 		it('answers the supervisor options beside the configuration', async () => {
 			stored(null);
 
-			vi.mocked(readSupervisorSharedConfig)
+			vi.mocked(readSupervisorSharedSettings)
 				.mockResolvedValue({ listenTimeout: 20_000 });
 
 			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
-				supervisor: { sharedConfig: { listenTimeout: 20_000 } },
+				supervisor: { sharedSettings: { listenTimeout: 20_000 } },
 			});
 		});
 
@@ -680,7 +680,7 @@ describe('Services / Utils', () => {
 
 			await service(admin).updateAutoscaleConfig({ maxWorkers: 8 }, 'mcp');
 
-			expect(writeSharedConfig).toHaveBeenCalledWith(
+			expect(writeSharedSettings).toHaveBeenCalledWith(
 				expect.objectContaining({ setBy: 'admin-id', setFrom: 'mcp' }),
 			);
 		});
@@ -696,7 +696,7 @@ describe('Services / Utils', () => {
 				.rejects
 				.toThrowError(`'minWorkers' is 8, above the 'maxWorkers' ceiling of 4`);
 
-			expect(writeSharedConfig).not.toHaveBeenCalled();
+			expect(writeSharedSettings).not.toHaveBeenCalled();
 		});
 
 		it('refuses a non-admin', async () => {
@@ -706,15 +706,15 @@ describe('Services / Utils', () => {
 				.rejects
 				.toThrowError(ForbiddenError);
 
-			expect(writeSharedConfig).not.toHaveBeenCalled();
+			expect(writeSharedSettings).not.toHaveBeenCalled();
 		});
 
 		// Clearing writes the absence rather than the resolved values, so the
 		// env chain is what answers again afterwards.
-		it('clears the shared config by writing none at all', async () => {
+		it('clears the shared settings by writing none at all', async () => {
 			await service(admin).clearAutoscaleConfig();
 
-			expect(writeSharedConfig).toHaveBeenCalledWith(null);
+			expect(writeSharedSettings).toHaveBeenCalledWith(null);
 		});
 
 		it('refuses a non-admin clearing it', async () => {
@@ -724,7 +724,7 @@ describe('Services / Utils', () => {
 				.rejects
 				.toThrowError(ForbiddenError);
 
-			expect(writeSharedConfig).not.toHaveBeenCalled();
+			expect(writeSharedSettings).not.toHaveBeenCalled();
 		});
 	});
 
@@ -737,10 +737,10 @@ describe('Services / Utils', () => {
 		}
 
 		beforeEach(() => {
-			vi.mocked(supervisorSharedConfigKey)
+			vi.mocked(supervisorSharedSettingsKey)
 				.mockReturnValue('scalabus:config:processes:supervisor');
 
-			vi.mocked(readSupervisorSharedConfig).mockResolvedValue(null);
+			vi.mocked(readSupervisorSharedSettings).mockResolvedValue(null);
 			vi.mocked(parseSupervisorPatch).mockImplementation((patch) => patch);
 
 			vi.mocked(applySupervisorPatch)
@@ -757,7 +757,7 @@ describe('Services / Utils', () => {
 				'mcp',
 			)).resolves.toMatchObject({ key: 'scalabus:config:processes:supervisor' });
 
-			expect(writeSupervisorSharedConfig).toHaveBeenCalledWith(
+			expect(writeSupervisorSharedSettings).toHaveBeenCalledWith(
 				expect.objectContaining({
 					listenTimeout: 20_000,
 					setBy: 'admin-id',
@@ -771,7 +771,7 @@ describe('Services / Utils', () => {
 				.rejects
 				.toThrowError(ForbiddenError);
 
-			expect(writeSupervisorSharedConfig).not.toHaveBeenCalled();
+			expect(writeSupervisorSharedSettings).not.toHaveBeenCalled();
 		});
 	});
 

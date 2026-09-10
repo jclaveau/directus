@@ -20,7 +20,7 @@ import {
 import {
 	resolveConfig,
 	resolvedSources,
-	resolvedWithoutSharedConfig,
+	resolvedWithoutSharedSettings,
 } from './lib/resolve-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
 import { recordAutoscaleTick } from './lib/state.js';
@@ -269,7 +269,7 @@ export async function runAutoscaler(): Promise<void> {
 				at: now,
 				config,
 				sources: resolvedSources(),
-				withoutSharedConfig: resolvedWithoutSharedConfig(),
+				withoutSharedSettings: resolvedWithoutSharedSettings(),
 				workers: onlineWorkers.length,
 				pendingWorkers,
 				warmingWorkers,
