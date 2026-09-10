@@ -16,10 +16,7 @@ vi.mock('../../logger/index.js', () => {
 	return { useLogger: () => logger };
 });
 
-import {
-	readSupervisedProcesses,
-	supervisorAvailable,
-} from './supervisor-snapshot.js';
+import { readSupervisedProcesses } from './supervisor-snapshot.js';
 
 const platform = { ...process.env };
 
@@ -42,29 +39,6 @@ function listing(apps: unknown[]) {
 		},
 	);
 }
-
-test('A supervised process carries both PM2_HOME and a pm id', () => {
-	expect(supervisorAvailable()).toBe(true);
-
-	delete process.env['PM2_HOME'];
-	expect(supervisorAvailable()).toBe(false);
-});
-
-// The Backend image exports PM2_HOME and then starts the server directly, which
-// reported a broken supervisor where there is none — only PM2 sets `pm_id`.
-test('PM2_HOME alone does not make a process supervised', () => {
-	delete process.env['pm_id'];
-	expect(supervisorAvailable()).toBe(false);
-
-	process.env['pm_id'] = '';
-	expect(supervisorAvailable()).toBe(false);
-
-	process.env['pm_id'] = 'not-a-number';
-	expect(supervisorAvailable()).toBe(false);
-
-	process.env['pm_id'] = '3';
-	expect(supervisorAvailable()).toBe(true);
-});
 
 test('There is no list to read where there is no supervisor', async () => {
 	delete process.env['PM2_HOME'];

@@ -4,7 +4,7 @@ import type {
 } from '@directus/types';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
-import { reloadPool } from './pool.js';
+import { reloadApp } from '../../processes/supervisor/index.js';
 import {
 	readSupervisorSharedConfig,
 	reloadDeclaration,
@@ -175,7 +175,7 @@ export function beginAskedReload(appName: string, workers: number): void {
 		.then((sharedConfig) => {
 			const declaration = reloadDeclaration(sharedConfig);
 
-			return reloadPool(
+			return reloadApp(
 				appName,
 				reloadBudgetMs(workers, declaration),
 				declaration,

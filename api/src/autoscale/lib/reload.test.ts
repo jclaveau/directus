@@ -20,10 +20,10 @@ vi.mock('../../bus/index.js', () => {
 	};
 });
 
-const reloadPool = vi.fn();
+const reloadApp = vi.fn();
 
-vi.mock('./pool.js', () => {
-	return { reloadPool };
+vi.mock('../../processes/supervisor/index.js', () => {
+	return { reloadApp };
 });
 
 const readSupervisorSharedConfig = vi.fn(async () => null);
@@ -95,8 +95,8 @@ function runner(
 beforeEach(() => {
 	publish.mockClear();
 	subscribe.mockClear();
-	reloadPool.mockReset();
-	reloadPool.mockResolvedValue(undefined);
+	reloadApp.mockReset();
+	reloadApp.mockResolvedValue(undefined);
 	readSupervisorSharedConfig.mockClear();
 	reloadDeclaration.mockClear();
 });
@@ -129,7 +129,7 @@ test('a request holds the loop still before anything has started', async () => {
 
 	expect(reloading()).toBe(true);
 	expect(reloadState().askedAt).toBe(1000);
-	expect(reloadPool).not.toHaveBeenCalled();
+	expect(reloadApp).not.toHaveBeenCalled();
 });
 
 test('a second request while one is under way is dropped', async () => {
@@ -159,7 +159,7 @@ test('the restart runs beside the loop and reports that it finished', async () =
 	expect(reloading()).toBe(true);
 
 	await vi.waitFor(() => {
-		expect(reloadPool)
+		expect(reloadApp)
 			.toHaveBeenCalledWith('directus', 4 * 45_000 + 30_000, DECLARATION);
 	});
 
@@ -181,7 +181,7 @@ test('a restart that failed reports why and releases the loop', async () => {
 	const { beginAskedReload, initAutoscaleReload, reloading, reloadState }
 		= await freshModule();
 
-	reloadPool.mockRejectedValue(new Error('Reload in progress'));
+	reloadApp.mockRejectedValue(new Error('Reload in progress'));
 
 	initAutoscaleReload();
 	ask();
@@ -200,7 +200,7 @@ test('a tick with nothing asked for starts nothing', async () => {
 	initAutoscaleReload();
 	beginAskedReload('directus', 4);
 
-	expect(reloadPool).not.toHaveBeenCalled();
+	expect(reloadApp).not.toHaveBeenCalled();
 });
 
 // Each worker costs the time it has to come up plus the time the one it

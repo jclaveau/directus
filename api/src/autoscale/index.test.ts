@@ -29,18 +29,17 @@ vi.mock('../utils/report-unhandled-rejection.js', () => {
 
 const connectToSupervisor = vi.fn(async () => undefined);
 const disconnectFromSupervisor = vi.fn();
+const scaleApp = vi.fn(async () => undefined);
+
+vi.mock('../processes/supervisor/index.js', () => {
+	return { connectToSupervisor, disconnectFromSupervisor, scaleApp };
+});
+
 const readPool = vi.fn();
 const restarted = vi.fn(() => false);
-const scaleTo = vi.fn(async () => undefined);
 
 vi.mock('./lib/pool.js', () => {
-	return {
-		connectToSupervisor,
-		disconnectFromSupervisor,
-		readPool,
-		restarted,
-		scaleTo,
-	};
+	return { readPool, restarted };
 });
 
 const beginAskedReload = vi.fn();
@@ -195,7 +194,7 @@ describe('runAutoscaler', () => {
 		// The first tick out of a deploy is prewarm's, whatever it decides.
 		await ticks(2);
 
-		expect(scaleTo).toHaveBeenCalledWith('api', 3);
+		expect(scaleApp).toHaveBeenCalledWith('api', 3);
 
 		expect(recordAutoscaleTick).toHaveBeenLastCalledWith(expect.objectContaining({
 			config,
@@ -221,7 +220,7 @@ describe('runAutoscaler', () => {
 		await ticks(2);
 
 		expect(decide).not.toHaveBeenCalled();
-		expect(scaleTo).not.toHaveBeenCalled();
+		expect(scaleApp).not.toHaveBeenCalled();
 		// Still reported: an admin watching the restart is watching this.
 		expect(recordAutoscaleTick).toHaveBeenCalledTimes(2);
 	});
@@ -231,7 +230,7 @@ describe('runAutoscaler', () => {
 
 		await ticks(2);
 
-		expect(scaleTo).toHaveBeenCalledExactlyOnceWith('api', 3);
+		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 3);
 
 		expect(recordAutoscaleTick).toHaveBeenNthCalledWith(1, expect.objectContaining({
 			lastDecision: expect.objectContaining({ reason: 'prewarming the pool' }),
@@ -258,7 +257,7 @@ describe('runAutoscaler', () => {
 
 		await ticks(1);
 
-		expect(scaleTo).not.toHaveBeenCalled();
+		expect(scaleApp).not.toHaveBeenCalled();
 		expect(decide).toHaveBeenCalledOnce();
 	});
 

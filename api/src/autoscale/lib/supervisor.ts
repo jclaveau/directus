@@ -1,4 +1,5 @@
 import type { AutoscaleSupervisor } from '@directus/types';
+import type { SupervisedProcessEnv } from '../../processes/supervisor/index.js';
 
 /**
  * What pm2 acts on for a declaration that names no value.
@@ -19,23 +20,6 @@ const SUPERVISOR_FALLBACKS = {
 };
 
 /**
- * PM2's published typings stop at a documented subset of `pm2_env`; the
- * application declaration is on the runtime object in full.
- */
-export interface DeclaredWorkerEnv {
-	instances?: unknown;
-	exec_mode?: unknown;
-	max_memory_restart?: unknown;
-	listen_timeout?: unknown;
-	kill_timeout?: unknown;
-	min_uptime?: unknown;
-	max_restarts?: unknown;
-	restart_delay?: unknown;
-	autorestart?: unknown;
-	wait_ready?: unknown;
-}
-
-/**
  * A declared value as a number, or `fallback` where the declaration named
  * none.
  *
@@ -54,7 +38,7 @@ function declaredNumber(value: unknown, fallback: number): number {
 }
 
 /** The pm2 application declaration one worker is running under. */
-export function declaredBy(env: DeclaredWorkerEnv): AutoscaleSupervisor {
+export function declaredBy(env: SupervisedProcessEnv): AutoscaleSupervisor {
 	const memory = Number(env.max_memory_restart);
 
 	return {

@@ -2,16 +2,15 @@ import { freemem } from 'node:os';
 import { LEGACY_SAMPLE_WINDOW } from '@directus/constants';
 import { useLogger } from '../logger/index.js';
 import { initProcessReports } from '../processes/index.js';
-import { reportUnhandledRejection } from '../utils/report-unhandled-rejection.js';
-import { decide } from './lib/decide.js';
-import { PoolSamples } from './lib/pool-samples.js';
 import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
-	readPool,
-	restarted,
-	scaleTo,
-} from './lib/pool.js';
+	scaleApp,
+} from '../processes/supervisor/index.js';
+import { reportUnhandledRejection } from '../utils/report-unhandled-rejection.js';
+import { decide } from './lib/decide.js';
+import { PoolSamples } from './lib/pool-samples.js';
+import { readPool, restarted } from './lib/pool.js';
 import {
 	beginAskedReload,
 	initAutoscaleReload,
@@ -56,7 +55,7 @@ async function prewarm(
 		+ `from ${workers} to ${target} workers`,
 	);
 
-	await scaleTo(config.appName, target);
+	await scaleApp(config.appName, target);
 
 	return target;
 }
@@ -252,7 +251,7 @@ export async function runAutoscaler(): Promise<void> {
 						+ `restarts: ${[...reading.restartsByWorker.values()].join(',')}`,
 					);
 
-					await scaleTo(config.appName, decision.workers);
+					await scaleApp(config.appName, decision.workers);
 
 					if (decision.workers > workers) {
 						lastScaleUpAt = Date.now();

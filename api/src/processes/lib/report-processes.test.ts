@@ -35,10 +35,11 @@ const supervisor = vi.hoisted(() => {
 });
 
 vi.mock('./supervisor-snapshot.js', () => {
-	return {
-		supervisorAvailable: supervisor.available,
-		readSupervisedProcesses: supervisor.read,
-	};
+	return { readSupervisedProcesses: supervisor.read };
+});
+
+vi.mock('../supervisor/index.js', () => {
+	return { supervisorAvailable: supervisor.available };
 });
 
 vi.mock('./redact-env.js', () => {

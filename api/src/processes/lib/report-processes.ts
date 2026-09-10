@@ -18,10 +18,8 @@ import {
 import { resolveReportedEnv } from './redact-env.js';
 import { autoscaleState } from '../../autoscale/lib/state.js';
 import { hostCapacity } from './host-capacity.js';
-import {
-	readSupervisedProcesses,
-	supervisorAvailable,
-} from './supervisor-snapshot.js';
+import { readSupervisedProcesses } from './supervisor-snapshot.js';
+import { supervisorAvailable } from '../supervisor/index.js';
 
 function instanceNumber(): number | null {
 	const parsed = Number(process.env['NODE_APP_INSTANCE']);
