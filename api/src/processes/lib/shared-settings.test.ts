@@ -1,14 +1,17 @@
 import type { EventContext } from '@directus/types';
 import { beforeEach, expect, test, vi } from 'vitest';
+import { useEnv } from '@directus/env';
 import {
 	SHARED_SETTINGS_COLUMNS,
 	initSharedSettings,
 	onSharedSettingsChanged,
+	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
 	type SharedSettingsChange,
 } from './shared-settings.js';
 
+vi.mock('@directus/env');
 vi.mock('../../database/index.js');
 vi.mock('../../services/settings.js');
 vi.mock('../../bus/index.js');
@@ -58,6 +61,49 @@ async function busReady() {
 
 beforeEach(() => {
 	vi.clearAllMocks();
+
+	// A deployment that names no database never reaches one, so every arm below
+	// that expects a read has to say that this one names one.
+	vi.mocked(useEnv).mockReturnValue({ DB_CLIENT: 'pg' });
+});
+
+// `getDatabase` reports a missing connection by ending the process rather than
+// by throwing, so a caller asking for a tuning value cannot catch it: the
+// question has to be answered before the connection is reached for.
+test('answers nothing where the deployment names no database', async () => {
+	await settingsHolding({ maxWorkers: 8 });
+	vi.mocked(useEnv).mockReturnValue({});
+
+	await expect(readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale))
+		.resolves.toBeNull();
+
+	await expect(readAllSharedSettings()).resolves.toEqual({
+		autoscale_settings: null,
+		supervisor_settings: null,
+	});
+
+	expect(first).not.toHaveBeenCalled();
+});
+
+// A page reads both, and a value it shows could have come from either, so they
+// are taken in one statement rather than a row at a time.
+test('reads both columns in a single statement', async () => {
+	const { default: getDatabase } = await import('../../database/index.js');
+
+	first.mockResolvedValue({
+		[SHARED_SETTINGS_COLUMNS.autoscale]: { maxWorkers: 8 },
+		[SHARED_SETTINGS_COLUMNS.supervisor]: JSON.stringify({ listenTimeout: 20 }),
+	});
+
+	const select = vi.fn(() => ({ from: () => ({ first }) }));
+	vi.mocked(getDatabase).mockReturnValue({ select } as never);
+
+	await expect(readAllSharedSettings()).resolves.toEqual({
+		autoscale_settings: { maxWorkers: 8 },
+		supervisor_settings: { listenTimeout: 20 },
+	});
+
+	expect(select).toHaveBeenCalledTimes(1);
 });
 
 test('reads the column the way Postgres answers it', async () => {

@@ -406,10 +406,11 @@ router.post(
 	}),
 );
 
-// A change reaches the process that scales the pool over the bus, and without
-// Redis that bus is an emitter this worker shares with nobody — so a deployment
-// without one says so by not carrying the endpoints at all rather than by
-// accepting writes the pool would pick up whenever its floor next came round.
+// Without Redis the bus is an emitter this worker shares with nobody, and
+// every one of these routes needs it to reach the process that scales the pool:
+// the panel finds that process over the bus, and a restart is asked for over
+// it. A deployment without Redis says so by not carrying the endpoints rather
+// than by serving a page that cannot see the pool it is meant to describe.
 if (redisConfigAvailable()) {
 	router.get(
 		'/autoscale',

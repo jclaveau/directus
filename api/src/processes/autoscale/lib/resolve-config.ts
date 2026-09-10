@@ -42,8 +42,13 @@ const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
  * An operator reading a threshold needs to know whether changing the
  * deployment's environment would move it, or whether the shared settings are
  * holding it where it is — the two look identical in the resolved value.
+ *
+ * Told by what the merge took rather than by what the column mentions: the
+ * column is editable outside the write that checks it, and a value the merge
+ * could not use leaves its field on the environment. Naming that field as
+ * stored is a page disagreeing with the pool it describes.
  */
-function sourcesOf(sharedSettings: Record<string, unknown>): AutoscaleConfigSources {
+function sourcesOf(taken: Set<keyof AutoscaleConfig>): AutoscaleConfigSources {
 	const env = useEnv();
 	const sources = {} as AutoscaleConfigSources;
 
@@ -54,7 +59,7 @@ function sourcesOf(sharedSettings: Record<string, unknown>): AutoscaleConfigSour
 			source = 'env';
 		}
 
-		if (sharedSettings[field] !== undefined && sharedSettings[field] !== null) {
+		if (taken.has(field)) {
 			source = 'sharedSettings';
 		}
 
@@ -112,20 +117,29 @@ export function envConfig(): AutoscaleConfig {
 	};
 }
 
+interface Layered {
+	config: AutoscaleConfig;
+	/** The fields the shared settings supplied, for {@link sourcesOf} to read. */
+	taken: Set<keyof AutoscaleConfig>;
+}
+
 /**
  * Only the fields the shared settings actually set are taken from them, so
- * raising
- * one threshold during an incident leaves the rest on the env chain rather
- * than resetting them to defaults nobody asked for.
+ * raising one threshold during an incident leaves the rest on the env chain
+ * rather than resetting them to defaults nobody asked for.
+ *
+ * A field whose stored value this cannot use is left on the chain too, and left
+ * out of `taken` with it.
  */
 function withSharedSettings(
 	base: AutoscaleConfig,
 	sharedSettings: Record<string, unknown>,
-): AutoscaleConfig {
-	const merged = { ...base };
+): Layered {
+	const config = { ...base };
+	const taken = new Set<keyof AutoscaleConfig>();
 
-	for (const [field, value] of Object.entries(sharedSettings)) {
-		if (Object.hasOwn(base, field) === false) {
+	for (const [name, value] of Object.entries(sharedSettings)) {
+		if (Object.hasOwn(base, name) === false) {
 			continue;
 		}
 
@@ -133,26 +147,46 @@ function withSharedSettings(
 			continue;
 		}
 
-		const current = base[field as keyof AutoscaleConfig];
+		const field = name as keyof AutoscaleConfig;
+		const current = base[field];
 
 		if (typeof current === 'number') {
-			Object.assign(merged, { [field]: numberOr(value, current) });
+			const parsed = Number(value);
+
+			if (Number.isFinite(parsed) === false || parsed < 0) {
+				continue;
+			}
+
+			Object.assign(config, { [field]: parsed });
 		}
 		else if (typeof current === 'boolean') {
-			Object.assign(merged, { [field]: value === true || value === 'true' });
+			Object.assign(config, { [field]: value === true || value === 'true' });
 		}
 		else if (field === 'signal') {
-			Object.assign(merged, { [field]: signalOr(value, base.signal) });
+			if (signalOr(value, base.signal) !== value) {
+				continue;
+			}
+
+			Object.assign(config, { [field]: value });
 		}
 		else if (field === 'strategy') {
-			Object.assign(merged, { [field]: strategyOr(value, base.strategy) });
+			if (strategyOr(value, base.strategy) !== value) {
+				continue;
+			}
+
+			Object.assign(config, { [field]: value });
 		}
 		else if (typeof current === 'string' && typeof value === 'string') {
-			Object.assign(merged, { [field]: value });
+			Object.assign(config, { [field]: value });
 		}
+		else {
+			continue;
+		}
+
+		taken.add(field);
 	}
 
-	return merged;
+	return { config, taken };
 }
 
 /**
@@ -167,7 +201,10 @@ function withSharedSettings(
 export function configWithSharedSettings(
 	sharedSettings: Record<string, unknown>,
 ): AutoscaleConfig {
-	return withSharedSettings(sanitizeConfig(envConfig()).config, sharedSettings);
+	return withSharedSettings(
+		sanitizeConfig(envConfig()).config,
+		sharedSettings,
+	).config;
 }
 
 /**
@@ -179,6 +216,16 @@ export function configWithSharedSettings(
  * heals and staleness that waits for a restart.
  */
 const MIRROR_FLOOR_MS = 30_000;
+
+/**
+ * How long the first read may take before the loop starts without it.
+ *
+ * A tick on the environment chain scales the pool on the wrong floor for a
+ * moment; a loop that has not started scales it not at all, and a database
+ * that is simply unreachable holds a query for as long as its own acquire
+ * timeout allows. The mirror takes the read whenever it lands.
+ */
+const BOOT_READ_MS = 5_000;
 
 let lastCorrections = '';
 let lastAnnounced: string | null = null;
@@ -196,7 +243,7 @@ let unreadable = false;
  * does.
  */
 export function resolvedSources(): AutoscaleConfigSources {
-	return lastSources ?? sourcesOf({});
+	return lastSources ?? sourcesOf(new Set());
 }
 
 /**
@@ -281,11 +328,27 @@ async function refreshSharedSettings(): Promise<void> {
  * Awaited at boot so the first tick decides on what is stored rather than on
  * the environment it would fall back to — a pool that starts at the
  * environment's floor and climbs to a stored one has spent that climb short of
- * workers.
+ * workers — but only for as long as {@link BOOT_READ_MS} allows.
  */
 export async function initSharedSettingsMirror(): Promise<void> {
-	await refreshSharedSettings();
-	announceSharedSettings();
+	const read = refreshSharedSettings();
+
+	const answered = await Promise.race([
+		read.then(() => true),
+		new Promise<boolean>((resolve) => {
+			// Unreferenced so the shorter of the two never holds the process open
+			// once the loop below it has stopped.
+			const timer = setTimeout(() => resolve(false), BOOT_READ_MS);
+			timer.unref();
+		}),
+	]);
+
+	if (answered === false) {
+		useLogger().warn(
+			'[autoscale] the shared settings have not answered yet; scaling on '
+				+ 'the environment chain until they do',
+		);
+	}
 
 	onSharedSettingsChanged(SHARED_SETTINGS_COLUMNS.autoscale, () => {
 		void refreshSharedSettings();
@@ -309,14 +372,12 @@ export function resolveConfig(): AutoscaleConfig {
 	}
 
 	const fromEnv = envConfig();
-	const stored = sharedSettings ?? {};
-
-	const { config, corrections }
-		= sanitizeConfig(withSharedSettings(fromEnv, stored));
+	const layered = withSharedSettings(fromEnv, sharedSettings ?? {});
+	const { config, corrections } = sanitizeConfig(layered.config);
 
 	announce(corrections);
 	lastBase = sanitizeConfig(fromEnv).config;
-	lastSources = sourcesOf(stored);
+	lastSources = sourcesOf(layered.taken);
 
 	return config;
 }

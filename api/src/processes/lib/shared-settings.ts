@@ -1,3 +1,4 @@
+import { useEnv } from '@directus/env';
 import type { AbstractServiceOptions } from '@directus/types';
 import { parseJSON } from '@directus/utils';
 import { useBus } from '../../bus/index.js';
@@ -66,6 +67,15 @@ function asSharedSettings(stored: unknown): SharedSettings | null {
 export async function readSharedSettings(
 	column: SharedSettingsColumn,
 ): Promise<SharedSettings | null> {
+	// Answered before the database is reached for, because `getDatabase` reports
+	// a missing connection by ending the process rather than by throwing: a
+	// caller asking for a tuning value cannot catch that, and the autoscaler
+	// asking for one would be replaced by its supervisor and end the same way on
+	// the next boot, leaving the pool at whatever size it was found at.
+	if ('DB_CLIENT' in useEnv() === false) {
+		return null;
+	}
+
 	// Imported lazily so the autoscaler — its own process, reading this on a slow
 	// floor rather than on its tick — does not pull the dialect graph in at load.
 	const { default: getDatabase } = await import('../../database/index.js');
@@ -76,6 +86,35 @@ export async function readSharedSettings(
 		.first();
 
 	return asSharedSettings(row?.[column]);
+}
+
+/**
+ * Both columns in a single statement.
+ *
+ * A page reads them together — one is meaningless without the other, since a
+ * value it shows could have come from either — so they are fetched together
+ * rather than a row at a time.
+ */
+export async function readAllSharedSettings(): Promise<
+	Record<SharedSettingsColumn, SharedSettings | null>
+> {
+	const columns = Object.values(SHARED_SETTINGS_COLUMNS);
+
+	if ('DB_CLIENT' in useEnv() === false) {
+		return { autoscale_settings: null, supervisor_settings: null };
+	}
+
+	const { default: getDatabase } = await import('../../database/index.js');
+
+	const row = await getDatabase()
+		.select(columns)
+		.from('directus_settings')
+		.first();
+
+	return {
+		autoscale_settings: asSharedSettings(row?.['autoscale_settings']),
+		supervisor_settings: asSharedSettings(row?.['supervisor_settings']),
+	};
 }
 
 /**
@@ -125,12 +164,17 @@ export function onSharedSettingsChanged(
 }
 
 /**
- * Announce every write to either column, whatever wrote it.
+ * Announce every write this instance makes to either column, whatever made it.
  *
  * From the action rather than from `SettingsService`, for the reason
- * `initCacheConfig` gives: a config-sync import and a seed script both write the
- * singleton through a plain `ItemsService`, and a value stored without being
- * announced leaves each node on the layer it last read until it restarts.
+ * `initCacheConfig` gives: an import running against this instance writes the
+ * singleton through a plain `ItemsService`, and the announcement has to ride
+ * the write wherever inside the instance it came from.
+ *
+ * Registered with the app, so it covers the writes a process that built one
+ * makes. A command that builds no app — a schema apply, a seed script — stores
+ * the value with nobody to announce it, and the other nodes take it on their
+ * own re-read floor instead.
  */
 export async function initSharedSettings(): Promise<void> {
 	const { default: emitter } = await import('../../emitter.js');

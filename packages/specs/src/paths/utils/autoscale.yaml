@@ -27,8 +27,8 @@ patch:
   description: >
     Lays a patch over the shared settings, field by field. A field left out of the
     patch keeps whatever the environment chain resolves for it, and a field set
-    to null is removed from the shared settings and handed back to that chain. An
-    sharedSettings left holding nothing but its own stamp is deleted. The write is
+    to null is removed from the shared settings and handed back to that chain.
+    Shared settings left holding nothing but their own stamp are deleted. The write is
     refused whole where the resulting configuration is unusable — a floor above
     its ceiling, a release threshold at or above the scale threshold — and the
     refusal names every problem at once. Who wrote it, when, and through which

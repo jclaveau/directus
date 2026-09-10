@@ -74,6 +74,7 @@ import {
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
+	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
 } from '../processes/lib/shared-settings.js';
@@ -556,8 +557,11 @@ export class UtilsService {
 	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('inspect the autoscale configuration');
 
+		const stored = await readAllSharedSettings();
+
 		return this.answerWith(
-			await readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale),
+			stored[SHARED_SETTINGS_COLUMNS.autoscale],
+			stored[SHARED_SETTINGS_COLUMNS.supervisor],
 		);
 	}
 
@@ -587,8 +591,10 @@ export class UtilsService {
 			setFrom: surface,
 		};
 
+		const stored = await readAllSharedSettings();
+
 		const sharedSettings = applySharedSettingsPatch(
-			await readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale),
+			stored[SHARED_SETTINGS_COLUMNS.autoscale],
 			stamped,
 		);
 
@@ -603,7 +609,10 @@ export class UtilsService {
 			this.settingsOptions,
 		);
 
-		return this.answerWith(sharedSettings);
+		return this.answerWith(
+			sharedSettings,
+			stored[SHARED_SETTINGS_COLUMNS.supervisor],
+		);
 	}
 
 	/**
@@ -615,14 +624,13 @@ export class UtilsService {
 	 */
 	private async answerWith(
 		sharedSettings: AutoscaleSharedSettings | null,
+		supervisorSettings: SupervisorSharedSettings | null,
 	): Promise<AutoscaleConfigAnswer> {
 		return {
 			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.autoscale}`,
 			sharedSettings,
 			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
-			supervisor: await this.supervisorAnswer(
-				await readSharedSettings(SHARED_SETTINGS_COLUMNS.supervisor),
-			),
+			supervisor: await this.supervisorAnswer(supervisorSettings),
 		};
 	}
 

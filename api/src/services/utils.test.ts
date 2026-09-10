@@ -46,6 +46,7 @@ import {
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
 import {
 	SHARED_SETTINGS_COLUMNS,
+	readAllSharedSettings,
 	readSharedSettings,
 	writeSharedSettings,
 } from '../processes/lib/shared-settings.js';
@@ -82,6 +83,7 @@ vi.mock('../processes/lib/shared-settings.js', () => {
 			autoscale: 'autoscale_settings',
 			supervisor: 'supervisor_settings',
 		},
+		readAllSharedSettings: vi.fn(),
 		readSharedSettings: vi.fn(),
 		writeSharedSettings: vi.fn(),
 	};
@@ -644,6 +646,11 @@ describe('Services / Utils', () => {
 				return column === SHARED_SETTINGS_COLUMNS.autoscale
 					? columns.autoscale ?? null
 					: columns.supervisor ?? null;
+			});
+
+			vi.mocked(readAllSharedSettings).mockResolvedValue({
+				[SHARED_SETTINGS_COLUMNS.autoscale]: columns.autoscale ?? null,
+				[SHARED_SETTINGS_COLUMNS.supervisor]: columns.supervisor ?? null,
 			});
 		}
 

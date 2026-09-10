@@ -239,3 +239,64 @@ test('decides on the mirror while the re-read is still out', async () => {
 	expect(resolveConfig()).toMatchObject({ maxWorkers: 8 });
 	expect(readSharedSettings).toHaveBeenCalledTimes(2);
 });
+
+// The column is editable outside the write that checks it — by hand, by a
+// config-sync import, by a restore of an older row — so a value the merge
+// cannot use has to leave its field on the chain, and has to say so: a page
+// naming a field stored while the pool runs the environment's value is a page
+// disagreeing with the pool it describes.
+test('leaves a field the shared settings cannot set on the chain', async () => {
+	const { resolveConfig, resolvedSources } = await mirroring({
+		maxWorkers: 'plenty',
+		strategy: 'whichever',
+		signal: 'vibes',
+	});
+
+	expect(resolveConfig()).toMatchObject({
+		maxWorkers: 4,
+		strategy: 'scalabus',
+		signal: 'average',
+	});
+
+	expect(resolvedSources()).toMatchObject({
+		maxWorkers: 'env',
+		strategy: 'default',
+		signal: 'default',
+	});
+});
+
+// A number arrives as a string from a form and from a hand-edited column alike,
+// and refusing it would leave a field the operator can see stored running on
+// something else.
+test('takes a number the shared settings wrote as a string', async () => {
+	const { resolveConfig, resolvedSources } = await mirroring({ maxWorkers: '3' });
+
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 3 });
+	expect(resolvedSources()).toMatchObject({ maxWorkers: 'sharedSettings' });
+});
+
+// The read is bounded because the loop cannot start without it: a pool ticking
+// on the environment chain is scaling on the wrong floor for a moment, and a
+// pool whose loop never started is not scaling at all.
+test('starts the loop where the first read has not answered', async () => {
+	vi.useFakeTimers();
+
+	try {
+		const module = await freshModule();
+		readSharedSettings.mockReturnValue(new Promise(() => {}));
+
+		const started = module.initSharedSettingsMirror();
+
+		await vi.advanceTimersByTimeAsync(5_000);
+		await started;
+
+		expect(module.resolveConfig()).toMatchObject({ maxWorkers: 4 });
+
+		expect(warn).toHaveBeenCalledWith(
+			expect.stringContaining('have not answered yet'),
+		);
+	}
+	finally {
+		vi.useRealTimers();
+	}
+});

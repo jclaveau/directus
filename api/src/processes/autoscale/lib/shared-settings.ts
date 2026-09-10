@@ -42,8 +42,10 @@ export interface AutoscaleSharedSettings {
  *
  * A value the loop would silently drop has to fail here instead: an operator
  * who typed a ceiling and watched the pool ignore it has no way to tell a
- * rejected write from a clamped one. Bounds are not checked — those the loop
- * corrects, and it reports what it corrected them to.
+ * rejected write from a clamped one. One field against another — a floor
+ * against its ceiling — is not checked here: the ceiling is usually a field
+ * this patch never mentions, so the whole resolved configuration is judged
+ * once the patch has been laid over it.
  */
 export function parseSharedSettingsPatch(
 	patch: Record<string, unknown>,

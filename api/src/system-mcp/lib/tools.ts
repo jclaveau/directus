@@ -258,12 +258,13 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			title: 'Change the autoscale configuration',
 			description:
 				'Lay fields over the live autoscale configuration, which every '
-				+ 'process scaling a pool in this cache namespace picks up within a '
+				+ 'process scaling a pool against this database picks up within a '
 				+ 'second — no redeploy, and no restart of the pool being tuned. '
 				+ 'Pass a field as null to give it back to the environment chain, and '
-				+ '`clear: true` to drop the shared settings entirely. Bounds are corrected '
-				+ 'by the loop rather than refused here, so read the configuration '
-				+ 'back to see what it is actually running on.',
+				+ '`clear: true` to drop the shared settings entirely. A configuration '
+				+ 'that cannot be run — a floor above its ceiling, a release threshold '
+				+ 'at or above the scale threshold — is refused whole, and the refusal '
+				+ 'names every problem at once.',
 			inputSchema: {
 				type: 'object',
 				properties: {
@@ -285,8 +286,8 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					},
 					clear: {
 						type: 'boolean',
-						description: 'Drop the whole shared settings, so every field comes '
-							+ 'the environment chain again.',
+						description: 'Drop the whole shared settings, so every field '
+							+ 'comes from the environment chain again.',
 					},
 				},
 				required: ['note'],
