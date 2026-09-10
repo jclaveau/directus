@@ -2,26 +2,21 @@ import { useEnv } from '@directus/env';
 import { toArray } from '@directus/utils';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { promisify } from 'node:util';
-import pm2 from 'pm2';
 import type { MetricObjectWithValues, MetricValue } from 'prom-client';
 import { AggregatorRegistry, Counter, Histogram, register } from 'prom-client';
 import { getCache } from '../../cache.js';
 import { hasDatabaseConnection } from '../../database/index.js';
 import { useLogger } from '../../logger/index.js';
+import {
+	listSupervisedApps,
+	sendToSupervisedProcess,
+} from '../../processes/supervisor/index.js';
 import { redisConfigAvailable, useRedis } from '../../redis/index.js';
 import { getStorage } from '../../storage/index.js';
 import type { MetricService } from '../types/metric.js';
 
 const isPM2 = 'PM2_HOME' in process.env;
 const METRICS_SYNC_PACKET = 'directus:metrics---data-sync';
-
-const listApps = promisify(pm2.list.bind(pm2));
-
-// pin to pm2's real (proc_id, packet, cb) runtime form; its new types make promisify mis-infer the overload
-const sendDataToProcessId = promisify(
-	pm2.sendDataToProcessId.bind(pm2) as (procId: number, packet: object, cb: (err: Error | null) => void) => void,
-);
 
 export function createMetrics() {
 	const env = useEnv();
@@ -56,7 +51,7 @@ export function createMetrics() {
 		 */
 		if (isPM2) {
 			try {
-				const apps = await listApps();
+				const apps = await listSupervisedApps();
 
 				const data = await register.getMetricsAsJSON();
 
@@ -68,7 +63,7 @@ export function createMetrics() {
 					}
 
 					syncs.push(
-						sendDataToProcessId(app.pm_id, {
+						sendToSupervisedProcess(app.pm_id, {
 							data: { pid: process.pid, metrics: data },
 							topic: METRICS_SYNC_PACKET,
 						}),
@@ -96,7 +91,7 @@ export function createMetrics() {
 		 * only currently active instances are added to the aggregate
 		 */
 		if (isPM2 && aggregates.size !== 0) {
-			const apps = await listApps();
+			const apps = await listSupervisedApps();
 
 			const aggregate = [];
 

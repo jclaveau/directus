@@ -1,0 +1,49 @@
+type: object
+nullable: true
+description: >
+  The shared configuration as it stands, null where nothing is set for any
+  field.
+  The configuration fields it holds ride in the same flat object as the stamp
+  the api wrote — the reader takes only the fields it knows, so the stamp costs
+  no migration.
+properties:
+  enabled:
+    type: boolean
+  strategy:
+    type: string
+    enum: [scalabus, legacy]
+  appName:
+    type: string
+  signal:
+    type: string
+    enum: [average, max]
+  sampleWindow:
+    type: integer
+  scaleCpuThreshold:
+    type: integer
+  releaseCpuThreshold:
+    type: integer
+  minWorkers:
+    type: integer
+  maxWorkers:
+    type: integer
+  prewarmWorkers:
+    type: integer
+  minSecondsToScaleUp:
+    type: integer
+  minSecondsToScaleDown:
+    type: integer
+  warmupSeconds:
+    type: integer
+  setBy:
+    type: string
+    nullable: true
+    description: The id of whoever wrote it, which survives a rename.
+  setAt:
+    type: string
+  setFrom:
+    type: string
+    enum: [admin, mcp]
+  note:
+    type: string
+    description: Why the change was made, as its writer put it.

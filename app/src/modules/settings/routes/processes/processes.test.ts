@@ -1,4 +1,4 @@
-import type { ProcessesReport } from '@directus/types';
+import type { AutoscaleNodeState, ProcessesReport } from '@directus/types';
 import { createTestingPinia } from '@pinia/testing';
 import { flushPromises, mount } from '@vue/test-utils';
 import { setActivePinia } from 'pinia';
@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { i18n } from '@/lang';
 
 vi.mock('@/api', () => {
-	return { default: { get: vi.fn() } };
+	return { default: { get: vi.fn(), patch: vi.fn(), delete: vi.fn() } };
 });
 
 const clipboard = vi.hoisted(() => {
@@ -50,6 +50,7 @@ import VTextOverflow from '@/components/v-text-overflow.vue';
 import VTab from '@/components/v-tab.vue';
 import VTable from '@/components/v-table/v-table.vue';
 import VTabs from '@/components/v-tabs.vue';
+import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import ProcessesPage from './processes.vue';
 
 const ENV = [
@@ -107,6 +108,7 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 									configuredInstances: 2,
 								},
 								env: ENV,
+								autoscale: null,
 							},
 							{
 								nodeId: null,
@@ -128,6 +130,7 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 									configuredInstances: 2,
 								},
 								env: null,
+								autoscale: null,
 							},
 						],
 					},
@@ -141,6 +144,17 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 // `v-button` renders through a router link, so the page needs a router to mount.
 const router = createRouter({ history: createMemoryHistory(), routes: [] });
 
+// The page hangs its own content off three of the layout's slots, and a layout
+// left as an unknown element renders none of them.
+const PrivateView = {
+	props: ['sidebarWidth'],
+	template: `<div class="private-view">
+		<header><slot name="actions:prepend" /><slot name="actions" /></header>
+		<main><slot /></main>
+		<aside><slot name="sidebar" /></aside>
+	</div>`,
+};
+
 const global = {
 	plugins: [i18n, router],
 	directives: {
@@ -150,11 +164,22 @@ const global = {
 			unmounted: () => undefined,
 		},
 	},
-	components: { VButton, VChip, VIcon, VInput, VTab, VTable, VTabs, VTextOverflow },
+	components: {
+		PrivateView,
+		VButton,
+		VChip,
+		VIcon,
+		VInput,
+		VTab,
+		VTable,
+		VTabs,
+		VTextOverflow,
+	},
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {
 				const real = [
+					'private-view',
 					'v-button',
 					'v-chip',
 					'v-icon',
@@ -172,7 +197,13 @@ const global = {
 };
 
 async function mountLoaded(data: ProcessesReport = report()) {
-	vi.mocked(api.get).mockResolvedValue({ data: { data } } as any);
+	// The autoscale panel reads its own route, which a deployment with no Redis
+	// does not serve at all.
+	vi.mocked(api.get).mockImplementation((url: string) => {
+		return url === '/utils/autoscale'
+			? Promise.reject({ response: { status: 404 } })
+			: Promise.resolve({ data: { data } } as any);
+	});
 
 	const wrapper = mount(ProcessesPage, { global });
 	await flushPromises();
@@ -491,6 +522,37 @@ describe('the cpu and memory charts', () => {
 		expect(apex.updateOptions).not.toHaveBeenCalled();
 	});
 
+	// A refresh under the pointer is a reading lost: ApexCharts rebuilds the
+	// tooltip on every update, so the chart being read waits for the pointer.
+	test('holds the chart the pointer is over until it leaves', async () => {
+		const wrapper = await mountLoaded();
+		const canvases = wrapper.findAll('.canvas');
+
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		expect(apex.updateOptions).toHaveBeenCalledTimes(3);
+
+		await canvases[0]!.trigger('pointerenter');
+		wrapper.findComponent(AutoRefresh).vm.$emit('refresh');
+		await flushPromises();
+
+		// The two nobody is reading redraw on the refresh they always did.
+		expect(apex.updateOptions).toHaveBeenCalledTimes(5);
+
+		await canvases[0]!.trigger('pointerleave');
+		await flushPromises();
+
+		expect(apex.updateOptions).toHaveBeenCalledTimes(8);
+
+		// Nothing waited this time, so leaving asks for no redraw of its own.
+		await canvases[1]!.trigger('pointerenter');
+		await canvases[1]!.trigger('pointerleave');
+		await flushPromises();
+
+		expect(apex.updateOptions).toHaveBeenCalledTimes(8);
+	});
+
 	// ApexCharts attaches outside Vue's tree, so nothing else would clean it up.
 	test('destroys every chart when the page goes away', async () => {
 		const wrapper = await mountLoaded();
@@ -538,5 +600,149 @@ describe('the deployment chart', () => {
 
 		expect(wrapper.text())
 			.toContain('No replica reported what its container may use');
+	});
+});
+
+describe('the autoscale panel', () => {
+	const state: AutoscaleNodeState = {
+		at: 1_700_000_000_000,
+		config: {
+			enabled: true,
+			strategy: 'scalabus',
+			appName: 'directus',
+			signal: 'average',
+			sampleWindow: 5,
+			scaleCpuThreshold: 60,
+			releaseCpuThreshold: 40,
+			minWorkers: 1,
+			maxWorkers: 4,
+			prewarmWorkers: 0,
+			minSecondsToScaleUp: 10,
+			minSecondsToScaleDown: 300,
+			warmupSeconds: 30,
+		},
+		withoutSharedConfig: {
+			enabled: true,
+			strategy: 'scalabus',
+			appName: 'directus',
+			signal: 'average',
+			sampleWindow: 5,
+			scaleCpuThreshold: 60,
+			releaseCpuThreshold: 40,
+			minWorkers: 1,
+			maxWorkers: 2,
+			prewarmWorkers: 0,
+			minSecondsToScaleUp: 10,
+			minSecondsToScaleDown: 300,
+			warmupSeconds: 30,
+		},
+		sources: {
+			enabled: 'default',
+			strategy: 'default',
+			appName: 'env',
+			signal: 'default',
+			sampleWindow: 'default',
+			scaleCpuThreshold: 'default',
+			releaseCpuThreshold: 'default',
+			minWorkers: 'default',
+			maxWorkers: 'sharedConfig',
+			prewarmWorkers: 'default',
+			minSecondsToScaleUp: 'default',
+			minSecondsToScaleDown: 'default',
+			warmupSeconds: 'default',
+		},
+		workers: 2,
+		pendingWorkers: 0,
+		warmingWorkers: 0,
+		reload: { askedAt: null, running: false, finishedAt: null, error: null },
+		supervisor: null,
+		cpuPercents: [12, 14],
+		lastDecision: {
+			at: 1_700_000_000_000,
+			workers: null,
+			reason: 'average cpu 13% is in the band',
+		},
+		lastScale: null,
+	};
+
+	function scaling(): ProcessesReport {
+		const data = report();
+
+		data.services[0]!.replicas[0]!.processes[0]!.autoscale = state;
+
+		return data;
+	}
+
+	// The configuration is resolved in the process that scales the pool, so it
+	// arrives on that process's own report instead of on a second read.
+	test('describes the pool from the report the page already read', async () => {
+		const wrapper = await mountLoaded(scaling());
+
+		expect(wrapper.text()).toContain('2 workers');
+		expect(wrapper.text()).toContain('average cpu 13% is in the band');
+	});
+
+	test('re-reads the report once the panel has changed something', async () => {
+		vi.mocked(api.patch).mockResolvedValue({
+			data: {
+				data: {
+					key: 'scalabus:config:processes:autoscale',
+					sharedConfig: { enabled: false },
+				},
+			},
+		} as any);
+
+		// The levers are only offered where a change can be stored.
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			return url === '/utils/autoscale'
+				? Promise.resolve(
+					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+				)
+				: Promise.resolve({ data: { data: scaling() } } as any);
+		});
+
+		const wrapper = mount(ProcessesPage, { global });
+		await flushPromises();
+
+		await wrapper.find('.levers .pause button').trigger('click');
+
+		await flushPromises();
+
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			enabled: false,
+			note: null,
+		});
+
+		const reads = vi.mocked(api.get).mock.calls
+			.filter(([url]) => url === '/utils/processes');
+
+		expect(reads).toHaveLength(2);
+	});
+
+	// The drawer holding the panel covers the page when it is open and hides it
+	// when it is closed, so the levers are given a home the drawer never touches.
+	test('the drawer keeps the tables and nothing else', async () => {
+		vi.mocked(api.get).mockImplementation((url: string) => {
+			return url === '/utils/autoscale'
+				? Promise.resolve(
+					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+				)
+				: Promise.resolve({ data: { data: scaling() } } as any);
+		});
+
+		const wrapper = mount(ProcessesPage, { global });
+		await flushPromises();
+
+		expect(wrapper.find('header .autoscale-actions .levers').exists()).toBe(true);
+		expect(wrapper.find('main .levers').exists()).toBe(false);
+		expect(wrapper.find('main .autoscale-summary .summary').exists()).toBe(true);
+		expect(wrapper.find('aside table.fields').exists()).toBe(true);
+	});
+
+	// The variable names the config table reads wrap at the drawer's own width.
+	test('asks the layout for a drawer the tables fit in', async () => {
+		const wrapper = await mountLoaded(scaling());
+
+		expect(wrapper.findComponent(PrivateView).props('sidebarWidth')).toBe(720);
 	});
 });

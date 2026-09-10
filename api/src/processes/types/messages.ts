@@ -1,4 +1,5 @@
 import type {
+	AutoscaleNodeState,
 	ProcessDetail,
 	ProcessHostCapacity,
 	ProcessRuntimeStats,
@@ -26,6 +27,8 @@ export interface ReportedProcess {
 	name: string;
 	runtime: ProcessRuntimeStats | null;
 	env: ResolvedEnvVariable[] | null;
+	/** What this process is scaling, `null` from every process that scales nothing. */
+	autoscale: AutoscaleNodeState | null;
 }
 
 export interface ProcessesReportMessage {

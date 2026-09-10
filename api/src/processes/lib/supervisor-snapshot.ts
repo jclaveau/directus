@@ -1,37 +1,10 @@
 import type { ProcessSupervisorStats } from '@directus/types';
-import { promisify } from 'node:util';
-import pm2 from 'pm2';
 import { useLogger } from '../../logger/index.js';
-
-/**
- * Whether a PM2 daemon supervises this process. `PM2_HOME` alone does not say
- * so: an image can export it and still start the server directly — the Backend
- * container does exactly that — which reported a broken supervisor where there
- * is none at all. PM2 injects `pm_id` into the processes it spawns and nothing
- * else does, so the pair is the honest probe.
- */
-export function supervisorAvailable(): boolean {
-	return 'PM2_HOME' in process.env
-		&& /^\d+$/.test(process.env['pm_id'] ?? '');
-}
-
-const listApps = promisify(pm2.list.bind(pm2));
-
-/**
- * PM2's published typings stop at a documented subset of `pm2_env`; the recycling
- * cap and the exec mode — the two fields this page exists to show — are on the
- * runtime object but absent from them.
- */
-interface SupervisedProcessEnv {
-	status?: string;
-	restart_time?: number;
-	unstable_restarts?: number;
-	pm_uptime?: number;
-	max_memory_restart?: number;
-	exec_mode?: string;
-	instances?: number | 'max';
-	NODE_APP_INSTANCE?: string | number;
-}
+import {
+	type SupervisedProcessEnv,
+	listSupervisedApps,
+	supervisorAvailable,
+} from '../supervisor/index.js';
 
 /** One row of `pm2 list`, as this report needs it. */
 export interface SupervisedProcess {
@@ -66,7 +39,7 @@ export async function readSupervisedProcesses(): Promise<
 	}
 
 	try {
-		const apps = await listApps();
+		const apps = await listSupervisedApps();
 
 		return apps.map((app) => {
 			const pm2Env: SupervisedProcessEnv = app.pm2_env ?? {};

@@ -3045,6 +3045,9 @@ importers:
       graphql-ws:
         specifier: 6.0.8
         version: 6.0.8(graphql@16.14.2)(ws@8.21.0)
+      ioredis:
+        specifier: 'catalog:'
+        version: 5.11.1
       istanbul-lib-coverage:
         specifier: 3.2.2
         version: 3.2.2

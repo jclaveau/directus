@@ -1,0 +1,224 @@
+/**
+ * What the process that resizes a PM2 pool is running on, and what it last
+ * decided.
+ *
+ * Shared here because the autoscaler resolves this configuration in its own
+ * process — beside the pool, not inside it — so the only honest answer to
+ * "what is it scaling on right now" is the one that process reports.
+ */
+
+/**
+ * `signal` picks the statistic both thresholds read.
+ *
+ * `average` converges: adding a worker lowers it, so the pool grows until the
+ * band is met and then stops. `max` does not — adding a worker does not cool the
+ * hottest one, so a threshold inside the normal spread of a healthy worker is
+ * satisfied permanently and the pool grows to its ceiling on no real demand.
+ * That is what took the planner's Api down on 2026-09-08, so `average` is the
+ * default and `max` is kept only for a workload that genuinely needs it.
+ */
+export type AutoscaleSignal = 'average' | 'max';
+
+/**
+ * Which rule decides the pool size.
+ *
+ * `legacy` reproduces the `pm2-autoscale` module this replaces, so a defect in
+ * the fork's own rule can be reverted fleet-wide with one Redis write instead
+ * of a redeploy. It reads the maximum CPU to grow and the average to shrink,
+ * over a thirty-sample window, and knows nothing of warm-ups, restarts or
+ * prewarming.
+ */
+export type AutoscaleStrategy = 'scalabus' | 'legacy';
+
+export interface AutoscaleConfig {
+	enabled: boolean;
+	strategy: AutoscaleStrategy;
+	/** The pm2 app this scales. Anything else the daemon runs is left alone. */
+	appName: string;
+	signal: AutoscaleSignal;
+	/**
+	 * How many of the last per-second readings a worker's CPU is averaged over.
+	 *
+	 * A supervisor samples processes that spend their time in bursts, so a
+	 * single reading is as much sampling as load — and acted on alone it buys a
+	 * worker for one busy second, or gives one back during a lull in a pool that
+	 * is genuinely loaded. The `legacy` strategy is fixed at the module's own
+	 * thirty; this is the same protection at a fraction of the latency.
+	 */
+	sampleWindow: number;
+	scaleCpuThreshold: number;
+	releaseCpuThreshold: number;
+	minWorkers: number;
+	maxWorkers: number;
+	/**
+	 * Workers to start with, which is not the floor: the pool may fall back to
+	 * `minWorkers` once the load that justified them is gone.
+	 */
+	prewarmWorkers: number;
+	minSecondsToScaleUp: number;
+	minSecondsToScaleDown: number;
+	/**
+	 * How long a worker's numbers are its own startup rather than the load.
+	 *
+	 * Also how long the whole pool's numbers are untrusted after a restart. A
+	 * worker that died and came back reads exactly like a busy one through a
+	 * CPU average, and the two call for opposite reactions: on 2026-09-08 a
+	 * heap cap crash-looped the planner's Api, and every restart's boot CPU
+	 * bought another worker that crashed the same way.
+	 */
+	warmupSeconds: number;
+}
+
+/**
+ * Which layer supplied a field's value:
+ *
+ * - `default` — the shipped defaults, nothing set the variable
+ * - `env` — a `PM2_AUTOSCALE_*` variable of the process that scales
+ * - `sharedConfig` — the shared config in Redis, one copy for the whole fleet,
+ *   which wins over both
+ */
+export type AutoscaleValueSource = 'default' | 'env' | 'sharedConfig';
+
+/**
+ * Which surface a change to the shared config came in through.
+ *
+ * The same configuration is reachable from the admin and from an MCP client,
+ * and a pool found in a shape nobody remembers asking for is answered by which
+ * of them was used as much as by who was holding it.
+ */
+export type AutoscaleWriteSurface = 'admin' | 'mcp';
+
+/** Per field, the layer its effective value came from. */
+export type AutoscaleConfigSources = Record<
+	keyof AutoscaleConfig,
+	AutoscaleValueSource
+>;
+
+/** What one tick concluded, whether or not it resized anything. */
+export interface AutoscaleDecision {
+	/** Milliseconds since the epoch, as the deciding process read its clock. */
+	at: number;
+	/** The size asked for, or `null` where the pool was left alone. */
+	workers: number | null;
+	reason: string;
+}
+
+/** What the autoscaler is running on, as of its last completed tick. */
+export interface AutoscaleNodeState {
+	at: number;
+	config: AutoscaleConfig;
+	sources: AutoscaleConfigSources;
+	/**
+	 * The same configuration with the shared config taken off: the env chain and the
+	 * shipped defaults, which is where clearing a field lands it.
+	 */
+	withoutSharedConfig: AutoscaleConfig;
+	/** Online workers of the scaled app the tick read. */
+	workers: number;
+	/** Started but not yet ready, so counted in the pool and not the statistic. */
+	pendingWorkers: number;
+	/** Online but young enough that their CPU is still their own startup. */
+	warmingWorkers: number;
+	/**
+	 * The pm2 declaration those workers are running under, or `null` where the
+	 * supervisor reported no worker of this app to read one off.
+	 */
+	supervisor: AutoscaleSupervisor | null;
+	/** Where the pool's last rolling restart got to. */
+	reload: AutoscaleReload;
+	/**
+	 * The per-worker readings the rule that decided actually looked at.
+	 *
+	 * Which workers those are is the strategy's own: `legacy` reads every
+	 * online worker, `scalabus` drops the ones still warming up.
+	 */
+	cpuPercents: number[];
+	lastDecision: AutoscaleDecision | null;
+	/** The last decision that actually asked for a different pool size. */
+	lastScale: AutoscaleDecision | null;
+}
+
+/** One process that is scaling a pool, and what it is scaling it on. */
+export interface AutoscaleRunner {
+	service: string;
+	replicaId: string;
+	nodeId: string | null;
+	name: string;
+	state: AutoscaleNodeState;
+}
+
+/**
+ * A load drill: every worker of the pool spending a share of its time busy,
+ * on purpose, so a change to the configuration can be watched deciding
+ * something instead of waiting for traffic that would decide it.
+ */
+export interface AutoscaleDrill {
+	/**
+	 * When the drill runs out, in milliseconds since the epoch, or `null` where
+	 * none is running.
+	 */
+	until: number | null;
+	/** The share of its time a drilling worker spends holding the processor. */
+	percent: number;
+}
+
+/**
+ * The pm2 application declaration the scaled pool is running under.
+ *
+ * Read off the supervisor rather than off the `PM2_*` variables it was built
+ * from: `ecosystem.config.cjs` is consulted once, at `pm2 start`, so a variable
+ * edited after that is a value the deployment holds and the pool does not.
+ *
+ * Each field carries the value pm2 acts on, which for one the declaration left
+ * out is pm2's own fallback rather than nothing — an unset `listenTimeout` still
+ * decides when a worker is given up on.
+ */
+export interface AutoscaleSupervisor {
+	/**
+	 * Workers the declaration asks for.
+	 *
+	 * The size the pool boots at, and the only size it has until the first
+	 * tick; from there `minWorkers`, `maxWorkers` and `prewarmWorkers` own it.
+	 */
+	instances: number;
+	execMode: string;
+	/** Bytes a worker may reach before the supervisor restarts it, or `null`. */
+	maxMemoryRestart: number | null;
+	/** Milliseconds a worker has to send `ready` before it counts as up. */
+	listenTimeout: number;
+	/** Milliseconds between the SIGINT that releases a worker and the SIGKILL. */
+	killTimeout: number;
+	/** Milliseconds a worker has to survive for its start to count as clean. */
+	minUptime: number;
+	maxRestarts: number;
+	/** Milliseconds the supervisor waits before restarting a worker that died. */
+	restartDelay: number;
+	autorestart: boolean;
+	/**
+	 * Whether the supervisor holds a worker at `launching` until it says it is
+	 * ready, which is what makes `pendingWorkers` mean anything.
+	 */
+	waitReady: boolean;
+}
+
+/**
+ * A rolling restart of the scaled pool, and where the last one got to.
+ *
+ * The supervisor replaces a worker by starting its replacement first and
+ * retiring it only once the replacement reports ready, so the pool never dips
+ * below the size it was asked to hold. What bounds that wait is the
+ * declaration's `listenTimeout`, which is why it is reported beside this.
+ */
+export interface AutoscaleReload {
+	/**
+	 * When the pool was last asked for one, in milliseconds since the epoch, or
+	 * `null` where it never has been.
+	 */
+	askedAt: number | null;
+	/** Whether the supervisor is replacing workers right now. */
+	running: boolean;
+	/** When the last one came back, `null` while one runs or before any has. */
+	finishedAt: number | null;
+	/** Why the last one failed, `null` where it did not. */
+	error: string | null;
+}

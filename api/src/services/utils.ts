@@ -3,6 +3,11 @@ import { systemCollectionRows } from '@directus/system-data';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	AutoscaleDrill,
+	AutoscaleNodeState,
+	AutoscaleReload,
+	AutoscaleRunner,
+	AutoscaleWriteSurface,
 	CacheFlushTarget,
 	PgBouncerDetail,
 	PgBouncerReport,
@@ -41,12 +46,73 @@ import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { collectPgBouncer } from '../pgbouncer/index.js';
-import { collectProcesses } from '../processes/index.js';
+import {
+	applySharedConfigPatch,
+	parseSharedConfigPatch,
+	readSharedConfig,
+	writeSharedConfig,
+	type AutoscaleSharedConfig,
+} from '../processes/autoscale/lib/shared-config.js';
+import {
+	loadedWorker,
+	MAX_DRILL_PERCENT,
+	MAX_DRILL_SECONDS,
+	MIN_DRILL_PERCENT,
+	startDrill,
+	stopDrill,
+	drillState,
+} from '../processes/autoscale/lib/drill.js';
+import {
+	askForReload,
+	reloadRefusal,
+} from '../processes/autoscale/lib/reload.js';
+import {
+	autoscaleConfigKey,
+	configWithSharedConfig,
+	supervisorSharedConfigKey,
+} from '../processes/autoscale/lib/resolve-config.js';
+import {
+	applySupervisorPatch,
+	parseSupervisorPatch,
+	readSupervisorSharedConfig,
+	type SupervisorSharedConfig,
+	writeSupervisorSharedConfig,
+} from '../processes/autoscale/lib/supervisor-shared-config.js';
+import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
+import {
+	collectProcesses,
+	processesReportEnabled,
+} from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+
+/**
+ * A whole number inside the range the field accepts, or the answer saying it
+ * is not one.
+ *
+ * Both drill inputs reach here off a query string, where every value is a
+ * string and `'abc'` and `''` are the same `NaN` — so the check is one place
+ * and the message names the field and the range it missed.
+ */
+function wholeNumberWithin(
+	value: unknown,
+	low: number,
+	high: number,
+	field: string,
+): number {
+	const parsed = Number(value);
+
+	if (Number.isInteger(parsed) === false || parsed < low || parsed > high) {
+		throw new InvalidPayloadError({
+			reason: `'${field}' has to be a whole number between ${low} and ${high}`,
+		});
+	}
+
+	return parsed;
+}
 
 /**
  * How far back a cache read was asked to look, as milliseconds.
@@ -113,6 +179,26 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	}
 
 	return parsed;
+}
+
+/**
+ * What an autoscale read answers with: the stored shared config, plus who
+ * left it.
+ */
+export interface AutoscaleSharedConfigAnswer {
+	key: string;
+	sharedConfig: AutoscaleSharedConfig | null;
+	/** The address behind the shared config's `setBy`, `null` where there is none. */
+	setByEmail: string | null;
+}
+
+export interface AutoscaleConfigAnswer extends AutoscaleSharedConfigAnswer {
+	/**
+	 * The pm2 options a restart would carry, answered beside the configuration
+	 * because a page showing one without the other cannot say which of the two
+	 * a value it displays came from.
+	 */
+	supervisor: AutoscaleSharedConfigAnswer;
 }
 
 export class UtilsService {
@@ -459,6 +545,262 @@ export class UtilsService {
 		this.assertAdmin('inspect the running processes');
 
 		return collectProcesses(details);
+	}
+
+	/**
+	 * The shared config, and the key it is stored under.
+	 *
+	 * Only the shared config: what the pool is actually being scaled on is the
+	 * environment of the process that scales it laid under this, and that
+	 * process reports it with `readProcesses` rather than answering a request.
+	 */
+	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		return this.answerWith(await readSharedConfig());
+	}
+
+	/**
+	 * Lay a patch over the shared config, `null` giving one field back to the
+	 * environment chain.
+	 *
+	 * Field by field on purpose: a write of the whole object would pin every
+	 * value a form happened to render, and the next deployment's environment
+	 * would stop reaching the pool without anyone having asked for that.
+	 */
+	async updateAutoscaleConfig(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleConfigAnswer> {
+		this.assertAdmin('change the autoscale configuration');
+
+		const parsed = parseSharedConfigPatch(patch);
+
+		// Stamped by the writer rather than taken from them: a shared config outlives
+		// the incident that justified it, and the questions it is then asked are
+		// who left it, when, and through what.
+		const stamped = {
+			...parsed,
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+			setFrom: surface,
+		};
+
+		const sharedConfig = applySharedConfigPatch(
+			await readSharedConfig(),
+			stamped,
+		);
+
+		// Judged whole rather than field by field: a floor is only too high
+		// against the ceiling it will sit under, and that ceiling is usually a
+		// field this patch never mentions.
+		assertUsableConfig(configWithSharedConfig(sharedConfig ?? {}));
+
+		await writeSharedConfig(sharedConfig);
+
+		return this.answerWith(sharedConfig);
+	}
+
+	/**
+	 * The shared config with the writer named rather than identified.
+	 *
+	 * The stamp keeps the user's id, which survives a rename and a changed
+	 * address; a page reading it back wants the address, and only the database
+	 * turns one into the other.
+	 */
+	private async answerWith(
+		sharedConfig: AutoscaleSharedConfig | null,
+	): Promise<AutoscaleConfigAnswer> {
+		return {
+			key: autoscaleConfigKey(),
+			sharedConfig,
+			setByEmail: await this.emailOf(sharedConfig?.['setBy']),
+			supervisor: await this.supervisorAnswer(await readSupervisorSharedConfig()),
+		};
+	}
+
+	private async supervisorAnswer(
+		sharedConfig: SupervisorSharedConfig | null,
+	): Promise<AutoscaleSharedConfigAnswer> {
+		return {
+			key: supervisorSharedConfigKey(),
+			sharedConfig,
+			setByEmail: await this.emailOf(sharedConfig?.['setBy']),
+		};
+	}
+
+	/**
+	 * Change the pm2 options the next rolling restart will carry.
+	 *
+	 * Stored rather than applied: pm2 reads these when it starts a worker, so
+	 * the write lands on the pool through the restart below it and the page
+	 * says so. Nothing is clamped — a supervisor takes what it is handed.
+	 */
+	async updateSupervisorConfig(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleSharedConfigAnswer> {
+		this.assertAdmin('change the supervisor configuration');
+
+		const stamped = {
+			...parseSupervisorPatch(patch),
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+			setFrom: surface,
+		};
+
+		const sharedConfig = applySupervisorPatch(
+			await readSupervisorSharedConfig(),
+			stamped,
+		);
+
+		await writeSupervisorSharedConfig(sharedConfig);
+
+		return this.supervisorAnswer(sharedConfig);
+	}
+
+	private async emailOf(user: unknown): Promise<string | null> {
+		if (typeof user !== 'string') {
+			return null;
+		}
+
+		try {
+			const row = await this.knex
+				.select('email')
+				.from('directus_users')
+				.where({ id: user })
+				.first();
+
+			return row?.email ?? null;
+		}
+		catch {
+			// The key is editable by hand, and a database asked to match a uuid
+			// against whatever was typed there refuses the comparison.
+			return null;
+		}
+	}
+
+	/**
+	 * Every process that is scaling a pool, with what it last decided on.
+	 *
+	 * Read from the same report the processes page collects, because the values
+	 * a pool is actually scaled on are the ones resolved in the process that
+	 * scales it — an api worker resolving them again would answer for its own
+	 * environment, which is a different process's.
+	 */
+	async readAutoscaleRunners(): Promise<AutoscaleRunner[]> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		// With the report off every responder is gone, so collecting one would
+		// wait out its window to answer the empty tree it already knows about.
+		if (processesReportEnabled() === false) {
+			return [];
+		}
+
+		const report = await collectProcesses(['stats']);
+
+		return report.services.flatMap((service) => {
+			return service.replicas.flatMap((replica) => {
+				return replica.processes
+					.filter((node) => node.autoscale !== null)
+					.map((node) => {
+						return {
+							service: service.service,
+							replicaId: replica.replicaId,
+							nodeId: node.nodeId,
+							name: node.name,
+							state: node.autoscale as AutoscaleNodeState,
+						};
+					});
+			});
+		});
+	}
+
+	/** What the worker answering this is burning, and until when. */
+	async readAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('inspect the autoscale load drill');
+
+		return drillState();
+	}
+
+	/**
+	 * Put the whole pool under load for a while.
+	 *
+	 * A configuration change is judged by what the loop does with it, and a
+	 * quiet pool does nothing with any of it: the thresholds are never reached,
+	 * the cooldowns never start, and a ceiling that is wrong stays wrong until
+	 * the traffic that proves it arrives at the worst possible time. This
+	 * produces that traffic's effect on demand, and nothing else — it never
+	 * touches the bounds it is being used to test.
+	 */
+	async startAutoscaleDrill(
+		seconds: unknown,
+		percent: unknown,
+	): Promise<AutoscaleDrill> {
+		this.assertAdmin('run an autoscale load drill');
+
+		const duration = wholeNumberWithin(
+			seconds,
+			1,
+			MAX_DRILL_SECONDS,
+			'seconds',
+		);
+
+		const share = wholeNumberWithin(
+			percent,
+			MIN_DRILL_PERCENT,
+			MAX_DRILL_PERCENT,
+			'percent',
+		);
+
+		// Refused here and not only greyed out in the page: a drill laid over real
+		// traffic buys workers for load nobody asked to serve and measures the two
+		// together, which is worth refusing whatever surface asked for it.
+		const hottest = loadedWorker(await this.readAutoscaleRunners());
+
+		if (hottest !== null) {
+			throw new InvalidPayloadError({
+				reason: `the pool is already working — a worker is at ${hottest}% `
+					+ 'CPU, so a drill would measure that as well as itself',
+			});
+		}
+
+		return startDrill(duration, share);
+	}
+
+	/**
+	 * Restart every worker of the pool without dropping below its size.
+	 *
+	 * The supervisor starts a replacement, waits for it to report ready, and
+	 * only then retires the worker it replaces — which is how a change to
+	 * something the pool reads at boot reaches it without a deploy and without
+	 * a gap in service. Asked for over the bus rather than run here: this
+	 * worker is one of the ones being replaced.
+	 */
+	async startAutoscaleReload(): Promise<AutoscaleReload> {
+		this.assertAdmin('restart the autoscaled pool');
+
+		const refusal = reloadRefusal(await this.readAutoscaleRunners());
+
+		if (refusal !== null) {
+			throw new InvalidPayloadError({ reason: refusal });
+		}
+
+		return askForReload();
+	}
+
+	/** Call the drill off before its deadline. */
+	async stopAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('stop the autoscale load drill');
+
+		return stopDrill();
+	}
+
+	/** Drop the shared config, so every field comes from the environment again. */
+	async clearAutoscaleConfig(): Promise<void> {
+		this.assertAdmin('clear the autoscale configuration');
+
+		await writeSharedConfig(null);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {

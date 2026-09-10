@@ -31,6 +31,7 @@ function nodeFromReport(report: ProcessesReportMessage): ProcessNode {
 		runtime: report.self.runtime,
 		supervisor: null,
 		env: report.self.env,
+		autoscale: report.self.autoscale,
 	};
 }
 
@@ -78,6 +79,7 @@ function replicaProcesses(reports: ProcessesReportMessage[]): ProcessNode[] {
 			runtime: report?.self.runtime ?? null,
 			supervisor: supervised.stats,
 			env: report?.self.env ?? null,
+			autoscale: report?.self.autoscale ?? null,
 		};
 	});
 

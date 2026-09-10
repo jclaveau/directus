@@ -6,6 +6,7 @@ import { formatFilesize } from '@/utils/format-filesize';
 import { getRootPath } from '@/utils/get-root-path';
 import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
+import { useRefreshInterval } from '@/composables/use-refresh-interval';
 import { useLocalStorage } from '@vueuse/core';
 import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref, watch, type Ref } from 'vue';
@@ -129,27 +130,7 @@ const userId = (userStore.currentUser as User | null)?.id ?? 'anon';
 // view (like the flush targets below).
 const selectedWindow = useLocalStorage(`cache-window-${userId}`, '24h');
 
-// vueuse's serializer for a null default is identity (stores/returns a raw string),
-// which would break the number|null contract; coerce so the interval round-trips as
-// a real number (empty = off).
-const refreshInterval = useLocalStorage<number | null>(
-	`cache-refresh-${userId}`,
-	null,
-	{
-		serializer: {
-			read: (value) => {
-				return value
-					? Number(value)
-					: null;
-			},
-			write: (value) => {
-				return value === null
-					? ''
-					: String(value);
-			},
-		},
-	},
-);
+const refreshInterval = useRefreshInterval(`cache-refresh-${userId}`);
 
 // Bumped per load; a superseded window's late response can't clobber a newer one.
 let loadToken = 0;

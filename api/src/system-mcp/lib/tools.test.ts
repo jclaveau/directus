@@ -1,4 +1,5 @@
 import type {
+	AutoscaleRunner,
 	CacheTimeseries,
 	ProcessesReport,
 	SchemaOverview,
@@ -8,6 +9,15 @@ import { beforeEach, expect, test, vi } from 'vitest';
 const service = vi.hoisted(() => {
 	return {
 		readProcesses: vi.fn(),
+		readAutoscaleConfig: vi.fn(),
+		readAutoscaleRunners: vi.fn(),
+		updateAutoscaleConfig: vi.fn(),
+		clearAutoscaleConfig: vi.fn(),
+		updateSupervisorConfig: vi.fn(),
+		startAutoscaleReload: vi.fn(),
+		readAutoscaleDrill: vi.fn(),
+		startAutoscaleDrill: vi.fn(),
+		stopAutoscaleDrill: vi.fn(),
 		getCacheEntries: vi.fn(),
 		readCacheEntry: vi.fn(),
 		getCacheAnomalies: vi.fn(),
@@ -26,6 +36,15 @@ vi.mock('../../services/utils.js', () => {
 			}
 
 			readProcesses = service.readProcesses;
+			readAutoscaleConfig = service.readAutoscaleConfig;
+			readAutoscaleRunners = service.readAutoscaleRunners;
+			updateAutoscaleConfig = service.updateAutoscaleConfig;
+			clearAutoscaleConfig = service.clearAutoscaleConfig;
+			updateSupervisorConfig = service.updateSupervisorConfig;
+			startAutoscaleReload = service.startAutoscaleReload;
+			readAutoscaleDrill = service.readAutoscaleDrill;
+			startAutoscaleDrill = service.startAutoscaleDrill;
+			stopAutoscaleDrill = service.stopAutoscaleDrill;
 			getCacheEntries = service.getCacheEntries;
 			readCacheEntry = service.readCacheEntry;
 			getCacheAnomalies = service.getCacheAnomalies;
@@ -44,6 +63,31 @@ vi.mock('./config.js', () => {
 	return { systemMcpToolGroups: config.groups };
 });
 
+const redis = vi.hoisted(() => {
+	return { available: vi.fn() };
+});
+
+vi.mock('../../redis/index.js', async (importOriginal) => {
+	return {
+		...await importOriginal<object>(),
+		redisConfigAvailable: redis.available,
+	};
+});
+
+const drill = vi.hoisted(() => {
+	return { enabled: vi.fn() };
+});
+
+// Spread rather than replaced: the drill's bounds are read here to build the
+// tool's own description, and a mock that dropped them would advertise
+// `undefined-undefined` while every assertion still passed.
+vi.mock('../../processes/autoscale/lib/drill.js', async (importOriginal) => {
+	return {
+		...await importOriginal<object>(),
+		autoscaleDrillEnabled: drill.enabled,
+	};
+});
+
 const processes = vi.hoisted(() => {
 	return { details: vi.fn(), reportEnabled: vi.fn(), requested: vi.fn() };
 });
@@ -56,6 +100,11 @@ vi.mock('../../processes/lib/processes-config.js', () => {
 	};
 });
 
+import {
+	MAX_DRILL_PERCENT,
+	MAX_DRILL_SECONDS,
+	MIN_DRILL_PERCENT,
+} from '../../processes/autoscale/lib/drill.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
@@ -81,7 +130,15 @@ const context = {
 };
 
 beforeEach(() => {
-	config.groups.mockReturnValue(['processes', 'cache']);
+	config.groups.mockReturnValue([
+		'processes',
+		'autoscale',
+		'autoscale_drill',
+		'cache',
+	]);
+
+	redis.available.mockReturnValue(true);
+	drill.enabled.mockReturnValue(true);
 	processes.details.mockReturnValue(['stats', 'env']);
 	processes.reportEnabled.mockReturnValue(true);
 	service.constructed.length = 0;
@@ -99,6 +156,12 @@ beforeEach(() => {
 test('Every tool is described well enough for a model to choose it', () => {
 	expect(allSystemMcpTools().map((tool) => tool.name)).toEqual([
 		'list_processes',
+		'read_autoscale_config',
+		'write_autoscale_config',
+		'write_supervisor_config',
+		'restart_autoscale_pool',
+		'read_autoscale_drill',
+		'run_autoscale_drill',
 		'list_cache_entries',
 		'read_cache_entry',
 		'list_cache_anomalies',
@@ -118,14 +181,55 @@ test('Every tool is described well enough for a model to choose it', () => {
 		expect(Object.keys(tool.outputSchema.properties).length)
 			.toBeGreaterThan(0);
 
-		// Every one of these reads and nothing more, and says so, which is what
-		// lets a client call it without asking the user to approve it.
-		expect(tool.annotations).toEqual({
-			readOnlyHint: true,
-			destructiveHint: false,
-			openWorldHint: false,
-		});
+		// Nothing here reaches outside this deployment, whether it reads, writes
+		// or restarts.
+		expect(tool.annotations.openWorldHint).toBe(false);
 	}
+});
+
+// A client runs a read without asking and puts a write in front of the user
+// first, so every tool that changes how the deployment runs has to say so.
+test('Only the reads declare themselves reads', () => {
+	const writes = allSystemMcpTools()
+		.filter((tool) => tool.annotations.readOnlyHint === false)
+		.map((tool) => tool.name);
+
+	expect(writes).toEqual([
+		'write_autoscale_config',
+		'write_supervisor_config',
+		'restart_autoscale_pool',
+		'run_autoscale_drill',
+	]);
+});
+
+// Storing a value is reversible by storing another, and the same patch written
+// twice leaves the same shared config behind. Holding real workers on the processor
+// is neither: a second call is a second restart, and a second drill.
+test('Only what disturbs serving workers is called destructive', () => {
+	const disturbing = allSystemMcpTools()
+		.filter((tool) => tool.annotations.destructiveHint)
+		.map((tool) => tool.name);
+
+	expect(disturbing).toEqual([
+		'restart_autoscale_pool',
+		'run_autoscale_drill',
+	]);
+
+	expect(findSystemMcpTool('restart_autoscale_pool')!.annotations).toEqual({
+		readOnlyHint: false,
+		destructiveHint: true,
+		idempotentHint: false,
+		openWorldHint: false,
+	});
+
+	// The supervisor options are stored and nothing more: what carries them to
+	// the pool is the restart above, which is the tool that says so.
+	expect(findSystemMcpTool('write_supervisor_config')!.annotations).toEqual({
+		readOnlyHint: false,
+		destructiveHint: false,
+		idempotentHint: true,
+		openWorldHint: false,
+	});
 });
 
 test('Only the windowed reads take a window', () => {
@@ -189,6 +293,12 @@ test('A deployment that reports no processes offers no tool for them', () => {
 
 	expect(systemMcpTools().map((tool) => tool.name))
 		.toEqual([
+			'read_autoscale_config',
+			'write_autoscale_config',
+			'write_supervisor_config',
+			'restart_autoscale_pool',
+			'read_autoscale_drill',
+			'run_autoscale_drill',
 			'list_cache_entries',
 			'read_cache_entry',
 			'list_cache_anomalies',
@@ -247,12 +357,72 @@ test('Every tool declares the subsystem it reads', () => {
 
 	expect(groups).toEqual([
 		'processes',
+		'autoscale',
+		'autoscale',
+		'autoscale',
+		'autoscale',
+		'autoscale_drill',
+		'autoscale_drill',
 		'cache',
 		'cache',
 		'cache',
 		'cache',
 		'cache',
 		'cache',
+	]);
+});
+
+// The shared config lives in Redis, and a tool that could only ever fail is worse
+// than one a model never sees.
+test('A deployment without Redis offers no autoscale tools', () => {
+	redis.available.mockReturnValue(false);
+
+	expect(systemMcpTools().map((tool) => tool.name))
+		.not.toContain('write_autoscale_config');
+
+	expect(findSystemMcpTool('read_autoscale_config')).toBeUndefined();
+});
+
+// The drill loads a production pool on purpose, so a deployment that never
+// asked for the lever must not be handed it by naming the group alone.
+test('A deployment that did not ask for the drill offers no drill', () => {
+	drill.enabled.mockReturnValue(false);
+
+	expect(systemMcpTools().map((tool) => tool.name))
+		.not.toContain('run_autoscale_drill');
+
+	expect(findSystemMcpTool('read_autoscale_drill')).toBeUndefined();
+
+	// And the configuration levers beside it are untouched: the drill is its
+	// own group so that one can be opened without the other.
+	expect(findSystemMcpTool('write_autoscale_config')).toBeDefined();
+});
+
+// It reaches the workers over the bus, which without Redis is an emitter this
+// worker shares with nobody — the same reason the REST route is absent there.
+test('A deployment without Redis offers no drill either', () => {
+	redis.available.mockReturnValue(false);
+
+	expect(findSystemMcpTool('run_autoscale_drill')).toBeUndefined();
+});
+
+// Naming one group must not carry the other in with it, in either direction:
+// an agent given the drill has no way to change what the pool scales on.
+test('The two autoscale groups are opened separately', () => {
+	config.groups.mockReturnValue(['autoscale_drill']);
+
+	expect(systemMcpTools().map((tool) => tool.name)).toEqual([
+		'read_autoscale_drill',
+		'run_autoscale_drill',
+	]);
+
+	config.groups.mockReturnValue(['autoscale']);
+
+	expect(systemMcpTools().map((tool) => tool.name)).toEqual([
+		'read_autoscale_config',
+		'write_autoscale_config',
+		'write_supervisor_config',
+		'restart_autoscale_pool',
 	]);
 });
 
@@ -284,6 +454,146 @@ test.each([
 	// Absent stays absent rather than becoming a window of its own.
 	await findSystemMcpTool(tool)!.run({}, context);
 	expect(service[method]).toHaveBeenLastCalledWith(undefined);
+});
+
+test('The configuration write sends the note down with the patch', async () => {
+	service.updateAutoscaleConfig
+		.mockResolvedValue({ key: 'k', sharedConfig: {}, setByEmail: null });
+
+	await findSystemMcpTool('write_autoscale_config')!.run(
+		{ config: { maxWorkers: 8 }, note: 'spike on the planner' },
+		context,
+	);
+
+	// Named as an MCP write, which is what tells a shared config an agent left from
+	// one a person typed into the admin.
+	expect(service.updateAutoscaleConfig).toHaveBeenCalledWith(
+		{ maxWorkers: 8, note: 'spike on the planner' },
+		'mcp',
+	);
+});
+
+test('the configuration write drops the whole shared config', async () => {
+	service.readAutoscaleConfig
+		.mockResolvedValue({ key: 'k', sharedConfig: null, setByEmail: null });
+
+	await findSystemMcpTool('write_autoscale_config')!
+		.run({ clear: true, note: 'incident over' }, context);
+
+	expect(service.clearAutoscaleConfig).toHaveBeenCalledOnce();
+	expect(service.updateAutoscaleConfig).not.toHaveBeenCalled();
+});
+
+// A model that sends the fields at the top level instead of under `config` gets
+// told so, rather than having a note stored and nothing else.
+test('The configuration write refuses a patch that is not an object', async () => {
+	await expect(
+		findSystemMcpTool('write_autoscale_config')!
+			.run({ config: 'maxWorkers=8', note: 'why' }, context),
+	).rejects.toThrowError('`config` has to be an object of configuration fields');
+});
+
+test('The supervisor write sends the note down with the options', async () => {
+	service.updateSupervisorConfig
+		.mockResolvedValue({ key: 'k', sharedConfig: {}, setByEmail: null });
+
+	await findSystemMcpTool('write_supervisor_config')!.run(
+		{ supervisor: { listenTimeout: 21_000 }, note: 'boot got slower' },
+		context,
+	);
+
+	expect(service.updateSupervisorConfig).toHaveBeenCalledWith(
+		{ listenTimeout: 21_000, note: 'boot got slower' },
+		'mcp',
+	);
+});
+
+// The same mistake the configuration write refuses, and for the same reason: a
+// model that sends the options at the top level would otherwise store a note
+// and nothing else.
+test('The supervisor write refuses options that are not an object', async () => {
+	await expect(
+		findSystemMcpTool('write_supervisor_config')!
+			.run({ supervisor: 'listenTimeout=21000', note: 'why' }, context),
+	).rejects.toThrowError('`supervisor` has to be an object of pm2 options');
+
+	expect(service.updateSupervisorConfig).not.toHaveBeenCalled();
+});
+
+// It takes no arguments at all: what a restart may do is decided by the state
+// of the pool, which the service reads, and never by what the caller passed.
+test('The restart asks the service and hands it nothing', async () => {
+	service.startAutoscaleReload.mockResolvedValue({
+		askedAt: 1,
+		running: true,
+		finishedAt: null,
+		error: null,
+	});
+
+	const answer = await findSystemMcpTool('restart_autoscale_pool')!
+		.run({ appName: 'something-else' }, context);
+
+	expect(service.startAutoscaleReload).toHaveBeenCalledWith();
+	expect(answer).toMatchObject({ running: true });
+});
+
+test('The drill hands both bounds to the service as they were given', async () => {
+	service.startAutoscaleDrill.mockResolvedValue({ until: 2, percent: 20 });
+
+	await findSystemMcpTool('run_autoscale_drill')!
+		.run({ seconds: 30, percent: 20 }, context);
+
+	// Unread on the way through, so this tool and `POST /utils/autoscale/drill`
+	// judge the same value the same way rather than each keeping an opinion of
+	// it. A drill an agent asks 600 seconds for is refused, not shortened.
+	expect(service.startAutoscaleDrill).toHaveBeenCalledWith(30, 20);
+});
+
+test('The drill leaves a missing bound missing', async () => {
+	service.startAutoscaleDrill.mockResolvedValue({ until: null, percent: 10 });
+
+	await findSystemMcpTool('run_autoscale_drill')!.run({}, context);
+
+	expect(service.startAutoscaleDrill).toHaveBeenCalledWith(undefined, undefined);
+});
+
+test('The drill is called off rather than started when asked to stop', async () => {
+	service.stopAutoscaleDrill.mockResolvedValue({ until: null, percent: 20 });
+
+	await findSystemMcpTool('run_autoscale_drill')!
+		.run({ stop: true, seconds: 30, percent: 20 }, context);
+
+	expect(service.stopAutoscaleDrill).toHaveBeenCalledOnce();
+	expect(service.startAutoscaleDrill).not.toHaveBeenCalled();
+});
+
+// The bounds are the service's, and a description naming different ones sends
+// an agent to a refusal it was told to expect to work.
+test('The drill advertises the bounds the service enforces', () => {
+	const properties = findSystemMcpTool('run_autoscale_drill')!
+		.inputSchema
+		.properties;
+
+	expect(properties['seconds']!.description)
+		.toContain(`1-${MAX_DRILL_SECONDS}`);
+
+	expect(properties['percent']!.description)
+		.toContain(`${MIN_DRILL_PERCENT}-${MAX_DRILL_PERCENT}`);
+});
+
+test('The configuration read asks the running processes by default', async () => {
+	service.readAutoscaleConfig
+		.mockResolvedValue({ key: 'k', sharedConfig: null, setByEmail: null });
+
+	service.readAutoscaleRunners.mockResolvedValue([]);
+
+	await findSystemMcpTool('read_autoscale_config')!.run({}, context);
+	expect(service.readAutoscaleRunners).toHaveBeenCalledOnce();
+
+	// Asking them costs about a second, so a caller that only wants the stored
+	// shared config can say so.
+	await findSystemMcpTool('read_autoscale_config')!.run({ live: false }, context);
+	expect(service.readAutoscaleRunners).toHaveBeenCalledOnce();
 });
 
 test('The entry read reads the one key it was given', async () => {
@@ -426,6 +736,19 @@ test('Every declared output property is one the tool actually answers', () => {
 	 */
 	const answers: {
 		list_processes: ProcessesReport;
+		read_autoscale_config:
+			Awaited<ReturnType<GuardedUtils['readAutoscaleConfig']>>
+			& { running: AutoscaleRunner[] };
+		write_autoscale_config:
+			Awaited<ReturnType<GuardedUtils['updateAutoscaleConfig']>>;
+		write_supervisor_config:
+			Awaited<ReturnType<GuardedUtils['updateSupervisorConfig']>>;
+		restart_autoscale_pool:
+			Awaited<ReturnType<GuardedUtils['startAutoscaleReload']>>;
+		read_autoscale_drill:
+			Awaited<ReturnType<GuardedUtils['readAutoscaleDrill']>>;
+		run_autoscale_drill:
+			Awaited<ReturnType<GuardedUtils['startAutoscaleDrill']>>;
 		list_cache_entries: CacheEntryRecord[];
 		// Everything the service answers except the cached response itself, which
 		// this tool deliberately drops. A field added to the service lands here
@@ -439,6 +762,113 @@ test('Every declared output property is one the tool actually answers', () => {
 		read_cache_timeseries: CacheTimeseries;
 		read_cache_stats_state: CacheStatsState;
 	} = {
+		read_autoscale_config: {
+			key: 'scalabus:config:processes:autoscale',
+			sharedConfig: {
+				maxWorkers: 8,
+				setBy: 'jean',
+				setAt: '2026-09-09T00:00:00Z',
+				setFrom: 'mcp',
+			},
+			setByEmail: 'jean@example.com',
+			supervisor: {
+				key: 'scalabus:config:processes:supervisor',
+				sharedConfig: { listenTimeout: 20_000 },
+				setByEmail: 'jean@example.com',
+			},
+			running: [
+				{
+					service: 'api',
+					replicaId: 'replica-a',
+					nodeId: 'node-1',
+					name: 'autoscale',
+					state: {
+						at: 1_700_000_000_000,
+						config: {
+						enabled: true,
+						strategy: 'scalabus',
+						appName: 'api',
+						signal: 'average',
+						sampleWindow: 5,
+						scaleCpuThreshold: 60,
+						releaseCpuThreshold: 40,
+						minWorkers: 1,
+						maxWorkers: 4,
+						prewarmWorkers: 0,
+						minSecondsToScaleUp: 10,
+						minSecondsToScaleDown: 300,
+						warmupSeconds: 30,
+					},
+						withoutSharedConfig: {
+						enabled: true,
+						strategy: 'scalabus',
+						appName: 'api',
+						signal: 'average',
+						sampleWindow: 5,
+						scaleCpuThreshold: 60,
+						releaseCpuThreshold: 40,
+						minWorkers: 1,
+						maxWorkers: 2,
+						prewarmWorkers: 0,
+						minSecondsToScaleUp: 10,
+						minSecondsToScaleDown: 300,
+						warmupSeconds: 30,
+					},
+						sources: {
+						enabled: 'default',
+						strategy: 'default',
+						appName: 'env',
+						signal: 'default',
+						sampleWindow: 'default',
+						scaleCpuThreshold: 'default',
+						releaseCpuThreshold: 'default',
+						minWorkers: 'env',
+						maxWorkers: 'sharedConfig',
+						prewarmWorkers: 'default',
+						minSecondsToScaleUp: 'default',
+						minSecondsToScaleDown: 'default',
+						warmupSeconds: 'default',
+					},
+						workers: 2,
+						pendingWorkers: 0,
+						warmingWorkers: 0,
+						reload: {
+							askedAt: null,
+							running: false,
+							finishedAt: null,
+							error: null,
+						},
+						supervisor: null,
+						cpuPercents: [20, 24],
+						lastDecision: { at: 1, workers: null, reason: 'within the band' },
+						lastScale: { at: 1, workers: 2, reason: 'average cpu 70% is high' },
+					},
+				},
+			],
+		},
+		write_autoscale_config: {
+			key: 'scalabus:config:processes:autoscale',
+			sharedConfig: { maxWorkers: 8 },
+			setByEmail: 'jean@example.com',
+			supervisor: {
+				key: 'scalabus:config:processes:supervisor',
+				sharedConfig: null,
+				setByEmail: null,
+			},
+		},
+		write_supervisor_config: {
+			key: 'scalabus:config:processes:supervisor',
+			sharedConfig: { listenTimeout: 21_000 },
+			setByEmail: 'jean@example.com',
+		},
+		restart_autoscale_pool: {
+			askedAt: 1_700_000_000_000,
+			running: true,
+			finishedAt: null,
+			error: null,
+		},
+		read_autoscale_drill: { until: null, percent: 10 },
+		run_autoscale_drill: { until: 1_700_000_000_000, percent: 20 },
 		list_processes: {
 			collectedAt: 1_700_000_000_000,
 			collectedForMs: 750,
@@ -461,6 +891,7 @@ test('Every declared output property is one the tool actually answers', () => {
 									name: 'directus',
 									instance: 0,
 									responding: true,
+									autoscale: null,
 									runtime: {
 										rssBytes: 1,
 										heapUsedBytes: 2,

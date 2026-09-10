@@ -40,10 +40,18 @@ const props = withDefaults(
 		splitView?: boolean;
 		splitViewMinWidth?: number;
 		sidebarShadow?: boolean;
+		/**
+		 * How wide the sidebar is when open, in pixels. A page whose sidebar
+		 * carries more than a form — a table, a chart — sets its own; the
+		 * collapsed peek and the width at which the sidebar starts overlaying
+		 * the content are the same whatever it is set to.
+		 */
+		sidebarWidth?: number;
 	}>(),
 	{
 		headerShadow: true,
 		splitViewMinWidth: 0,
+		sidebarWidth: 280,
 	},
 );
 
@@ -88,7 +96,9 @@ watch(splitViewWritable, () => {
 });
 
 const { width: windowWidth } = useWindowSize();
-const { width: sidebarWidth } = useElementSize(sidebarEl);
+// The measured element, not the width asked for: the sidebar the layout has
+// to fit around is whatever the page set, collapsed or open.
+const { width: openSidebarWidth } = useElementSize(sidebarEl);
 
 const showMain = computed(() => {
 	if (!splitViewWritable.value) {
@@ -99,7 +109,11 @@ const showMain = computed(() => {
 
 	if (windowWidth.value >= 1260) {
 		remainingWidth =
-			windowWidth.value - SIZES.moduleBarWidth - SIZES.minModuleNavWidth - SIZES.minContentWidth - sidebarWidth.value;
+			windowWidth.value -
+			SIZES.moduleBarWidth -
+			SIZES.minModuleNavWidth -
+			SIZES.minContentWidth -
+			openSidebarWidth.value;
 	} else if (windowWidth.value >= 960) {
 		remainingWidth =
 			windowWidth.value -
@@ -152,7 +166,11 @@ const maxWidthNav = computed(() => {
 	let maxWidth;
 
 	if (windowWidth.value >= 1260) {
-		maxWidth = windowWidth.value - SIZES.moduleBarWidth - useMainWidth - sidebarWidth.value;
+		maxWidth =
+			windowWidth.value -
+			SIZES.moduleBarWidth -
+			useMainWidth -
+			openSidebarWidth.value;
 	} else if (windowWidth.value >= 960) {
 		maxWidth = windowWidth.value - SIZES.moduleBarWidth - useMainWidth - SIZES.collapsedSidebarWidth;
 	} else {
@@ -168,7 +186,12 @@ const maxWidthMain = computed(() => {
 	let maxWidth;
 
 	if (windowWidth.value >= 1260) {
-		maxWidth = windowWidth.value - SIZES.moduleBarWidth - navWidth.value - splitViewMinWidth - sidebarWidth.value;
+		maxWidth =
+			windowWidth.value -
+			SIZES.moduleBarWidth -
+			navWidth.value -
+			splitViewMinWidth -
+			openSidebarWidth.value;
 	} else if (windowWidth.value >= 960) {
 		maxWidth =
 			windowWidth.value - SIZES.moduleBarWidth - navWidth.value - splitViewMinWidth - SIZES.collapsedSidebarWidth;
@@ -268,7 +291,12 @@ const showLicenseBanner = computed(() => userStore.isAdmin && settingsStore.sett
 		</template>
 	</v-info>
 
-	<div v-else class="private-view" :class="{ appearance, 'full-screen': fullScreen, splitView }">
+	<div
+		v-else
+		class="private-view"
+		:class="{ appearance, 'full-screen': fullScreen, splitView }"
+		:style="{ '--sidebar-width': `${sidebarWidth}px` }"
+	>
 		<skip-menu section="nav" />
 
 		<aside
@@ -549,7 +577,7 @@ const showLicenseBanner = computed(() => userStore.isAdmin && settingsStore.sett
 		inset-block-start: 0;
 		inset-inline-end: 0;
 		z-index: 30;
-		inline-size: 280px;
+		inline-size: var(--sidebar-width);
 		block-size: 100%;
 		overflow: hidden;
 		background-color: var(--theme--sidebar--background);
@@ -581,7 +609,7 @@ const showLicenseBanner = computed(() => userStore.isAdmin && settingsStore.sett
 		.flex-container {
 			display: flex;
 			flex-direction: column;
-			inline-size: 280px;
+			inline-size: var(--sidebar-width);
 			block-size: 100%;
 		}
 
@@ -602,7 +630,7 @@ const showLicenseBanner = computed(() => userStore.isAdmin && settingsStore.sett
 				transform var(--slow) var(--transition);
 
 			&.is-open {
-				flex-basis: 280px;
+				flex-basis: var(--sidebar-width);
 			}
 		}
 	}

@@ -1,10 +1,10 @@
 import { ForbiddenError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
-import type { Accountability } from '@directus/types';
+import type { Accountability, AutoscaleConfig } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
@@ -23,6 +23,34 @@ import {
 	setCacheStatsEnabled,
 	truncateCacheEvents,
 } from '../cache-events.js';
+import {
+	drillState,
+	loadedWorker,
+	startDrill,
+	stopDrill,
+} from '../processes/autoscale/lib/drill.js';
+import {
+	askForReload,
+	reloadRefusal,
+} from '../processes/autoscale/lib/reload.js';
+import {
+	applySharedConfigPatch,
+	parseSharedConfigPatch,
+	readSharedConfig,
+	writeSharedConfig,
+} from '../processes/autoscale/lib/shared-config.js';
+import {
+	autoscaleConfigKey,
+	configWithSharedConfig,
+	supervisorSharedConfigKey,
+} from '../processes/autoscale/lib/resolve-config.js';
+import {
+	applySupervisorPatch,
+	parseSupervisorPatch,
+	readSupervisorSharedConfig,
+	writeSupervisorSharedConfig,
+} from '../processes/autoscale/lib/supervisor-shared-config.js';
+import { collectProcesses, processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
@@ -40,6 +68,12 @@ vi.mock('../cache.js');
 vi.mock('../cache-events.js');
 vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
+vi.mock('../processes/autoscale/lib/drill.js');
+vi.mock('../processes/autoscale/lib/reload.js');
+vi.mock('../processes/autoscale/lib/shared-config.js');
+vi.mock('../processes/autoscale/lib/supervisor-shared-config.js');
+vi.mock('../processes/index.js');
+vi.mock('../processes/autoscale/lib/resolve-config.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -558,6 +592,393 @@ describe('Services / Utils', () => {
 		it('truncateCacheStats delegates for an admin', async () => {
 			await service(admin).truncateCacheStats();
 			expect(truncateCacheEvents).toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale configuration', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		// What the env chain resolves under the shared config, which is what the
+		// write is judged against.
+		function resolvesTo(config: Partial<AutoscaleConfig>) {
+			vi.mocked(configWithSharedConfig).mockReturnValue({
+				enabled: true,
+				strategy: 'scalabus',
+				appName: 'api',
+				signal: 'average',
+				sampleWindow: 5,
+				scaleCpuThreshold: 60,
+				releaseCpuThreshold: 40,
+				minWorkers: 1,
+				maxWorkers: 4,
+				prewarmWorkers: 0,
+				minSecondsToScaleUp: 10,
+				minSecondsToScaleDown: 300,
+				warmupSeconds: 30,
+				...config,
+			});
+		}
+
+		function stored(sharedConfig: Record<string, unknown> | null) {
+			resolvesTo({});
+
+			vi.mocked(autoscaleConfigKey)
+				.mockReturnValue('scalabus:config:processes:autoscale');
+
+			vi.mocked(readSupervisorSharedConfig).mockResolvedValue(null);
+			vi.mocked(readSharedConfig).mockResolvedValue(sharedConfig);
+			vi.mocked(parseSharedConfigPatch).mockImplementation((patch) => patch);
+
+			vi.mocked(applySharedConfigPatch)
+				.mockImplementation((_current, patch) => patch);
+		}
+
+		// The stamp keeps the id, which outlives a rename; a page asked to show
+		// who left a shared config wants the address, and only the table has it.
+		it('names the user behind the id it stamped', async () => {
+			stored({ maxWorkers: 8, setBy: 'writer-id' });
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
+				key: 'scalabus:config:processes:autoscale',
+				sharedConfig: { maxWorkers: 8, setBy: 'writer-id' },
+				setByEmail: 'ann@example.com',
+			});
+		});
+
+		// One page shows both, and a value it displays cannot be attributed to
+		// the configuration or to the supervisor unless the read carries each.
+		it('answers the supervisor options beside the configuration', async () => {
+			stored(null);
+
+			vi.mocked(readSupervisorSharedConfig)
+				.mockResolvedValue({ listenTimeout: 20_000 });
+
+			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
+				supervisor: { sharedConfig: { listenTimeout: 20_000 } },
+			});
+		});
+
+		// The key is editable by hand, and a database asked to match a uuid
+		// against whatever was typed there refuses the comparison.
+		it('names nobody where the id matches no user', async () => {
+			stored({ maxWorkers: 8, setBy: 'not-an-id' });
+			tracker.on.select('directus_users').simulateError('invalid input syntax');
+
+			await expect(service(admin).readAutoscaleConfig())
+				.resolves
+				.toMatchObject({ setByEmail: null });
+		});
+
+		it('stamps the surface the change came in through', async () => {
+			stored(null);
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await service(admin).updateAutoscaleConfig({ maxWorkers: 8 }, 'mcp');
+
+			expect(writeSharedConfig).toHaveBeenCalledWith(
+				expect.objectContaining({ setBy: 'admin-id', setFrom: 'mcp' }),
+			);
+		});
+
+		// The loop clamps what it is handed, which is the wrong answer to a
+		// write: an operator watching a ceiling be ignored cannot tell a
+		// corrected value from a refused one.
+		it('refuses a configuration the loop would have to correct', async () => {
+			stored({ maxWorkers: 4 });
+			resolvesTo({ minWorkers: 8, maxWorkers: 4 });
+
+			await expect(service(admin).updateAutoscaleConfig({ minWorkers: 8 }, 'admin'))
+				.rejects
+				.toThrowError(`'minWorkers' is 8, above the 'maxWorkers' ceiling of 4`);
+
+			expect(writeSharedConfig).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin', async () => {
+			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+			await expect(service(nonAdmin).updateAutoscaleConfig({}, 'admin'))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeSharedConfig).not.toHaveBeenCalled();
+		});
+
+		// Clearing writes the absence rather than the resolved values, so the
+		// env chain is what answers again afterwards.
+		it('clears the shared config by writing none at all', async () => {
+			await service(admin).clearAutoscaleConfig();
+
+			expect(writeSharedConfig).toHaveBeenCalledWith(null);
+		});
+
+		it('refuses a non-admin clearing it', async () => {
+			const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+			await expect(service(nonAdmin).clearAutoscaleConfig())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeSharedConfig).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('supervisor options', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		beforeEach(() => {
+			vi.mocked(supervisorSharedConfigKey)
+				.mockReturnValue('scalabus:config:processes:supervisor');
+
+			vi.mocked(readSupervisorSharedConfig).mockResolvedValue(null);
+			vi.mocked(parseSupervisorPatch).mockImplementation((patch) => patch);
+
+			vi.mocked(applySupervisorPatch)
+				.mockImplementation((_current, patch) => patch);
+		});
+
+		// Nothing reads these but pm2, when it starts a worker, so the write is
+		// stamped with where it came from exactly as the configuration's is.
+		it('stamps the surface the change came in through', async () => {
+			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
+
+			await expect(service(admin).updateSupervisorConfig(
+				{ listenTimeout: 20_000 },
+				'mcp',
+			)).resolves.toMatchObject({ key: 'scalabus:config:processes:supervisor' });
+
+			expect(writeSupervisorSharedConfig).toHaveBeenCalledWith(
+				expect.objectContaining({
+					listenTimeout: 20_000,
+					setBy: 'admin-id',
+					setFrom: 'mcp',
+				}),
+			);
+		});
+
+		it('refuses a non-admin', async () => {
+			await expect(service(nonAdmin).updateSupervisorConfig({}, 'admin'))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(writeSupervisorSharedConfig).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale runners', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		// One deployment answers with a tree; what the panel and every refusal
+		// read is the flat list of the processes that actually scale a pool.
+		it('flattens the report down to the processes that scale', async () => {
+			vi.mocked(processesReportEnabled).mockReturnValue(true);
+
+			vi.mocked(collectProcesses).mockResolvedValue({
+				services: [
+					{
+						service: 'api',
+						replicas: [
+							{
+								replicaId: 'one',
+								processes: [
+									{ nodeId: 'a', name: 'autoscaler', autoscale: { workers: 2 } },
+									{ nodeId: 'b', name: 'api', autoscale: null },
+								],
+							},
+						],
+					},
+				],
+			} as any);
+
+			await expect(service(admin).readAutoscaleRunners()).resolves.toEqual([
+				{
+					service: 'api',
+					replicaId: 'one',
+					nodeId: 'a',
+					name: 'autoscaler',
+					state: { workers: 2 },
+				},
+			]);
+		});
+
+		// Collecting one would wait out the reply window to build the empty tree
+		// the caller already knows it would get.
+		it('asks nobody where the report is off', async () => {
+			vi.mocked(processesReportEnabled).mockReturnValue(false);
+
+			await expect(service(admin).readAutoscaleRunners()).resolves.toEqual([]);
+			expect(collectProcesses).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin', async () => {
+			vi.mocked(processesReportEnabled).mockReturnValue(true);
+
+			await expect(service(nonAdmin).readAutoscaleRunners())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(collectProcesses).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale rolling restart', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		beforeEach(() => {
+			// What the pool looks like comes off the processes report, and reading
+			// a refusal out of it is `reloadRefusal` — mocked here, checked in
+			// `reload.test.ts`.
+			vi.mocked(processesReportEnabled).mockReturnValue(false);
+		});
+
+		it('answers with what the asking worker can say for certain', async () => {
+			vi.mocked(reloadRefusal).mockReturnValue(null);
+
+			vi.mocked(askForReload).mockReturnValue({
+				askedAt: 1000,
+				running: false,
+				finishedAt: null,
+				error: null,
+			});
+
+			await expect(service(admin).startAutoscaleReload())
+				.resolves
+				.toEqual({
+					askedAt: 1000,
+					running: false,
+					finishedAt: null,
+					error: null,
+				});
+		});
+
+		// Refused at the asking end and not only greyed out in the page: a pool
+		// that cannot overlap its workers would be stopped rather than rolled.
+		it('refuses a pool the supervisor could not roll', async () => {
+			vi.mocked(reloadRefusal).mockReturnValue('the pool runs in fork_mode');
+
+			await expect(service(admin).startAutoscaleReload())
+				.rejects
+				.toThrowError('the pool runs in fork_mode');
+
+			expect(askForReload).not.toHaveBeenCalled();
+		});
+
+		it('refuses a non-admin', async () => {
+			vi.mocked(reloadRefusal).mockReturnValue(null);
+
+			await expect(service(nonAdmin).startAutoscaleReload())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(askForReload).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('autoscale load drill', () => {
+		const admin = { user: 'admin-id', admin: true } as Accountability;
+		const nonAdmin = { user: 'test-user', admin: false } as Accountability;
+
+		function service(accountability: Accountability) {
+			return new UtilsService({ knex: db, schema, accountability });
+		}
+
+		beforeEach(() => {
+			// The runners come off the processes report, and what they say is what
+			// `loadedWorker` is asked about — mocked here, checked in `drill.test.ts`.
+			vi.mocked(processesReportEnabled).mockReturnValue(false);
+		});
+
+		it('answers with the deadline the pool was given', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(null);
+			vi.mocked(startDrill).mockReturnValue({ until: 1000, percent: 80 });
+
+			await expect(service(admin).startAutoscaleDrill('30', '80'))
+				.resolves
+				.toEqual({ until: 1000, percent: 80 });
+
+			expect(startDrill).toHaveBeenCalledWith(30, 80);
+		});
+
+		// A drill laid over real traffic buys workers for load nobody asked to
+		// serve, and measures the two together.
+		it('refuses a drill over a pool that is already working', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(41);
+
+			await expect(service(admin).startAutoscaleDrill(30, 80))
+				.rejects
+				.toThrowError('a worker is at 41% CPU');
+
+			expect(startDrill).not.toHaveBeenCalled();
+		});
+
+		it('refuses a drill longer than a worker will run one for', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(null);
+
+			await expect(service(admin).startAutoscaleDrill(600, 80))
+				.rejects
+				.toThrowError(`'seconds' has to be a whole number between 1 and 120`);
+
+			expect(startDrill).not.toHaveBeenCalled();
+		});
+
+		it('refuses a share outside what a worker will burn', async () => {
+			vi.mocked(loadedWorker).mockReturnValue(null);
+
+			await expect(service(admin).startAutoscaleDrill(30, 200))
+				.rejects
+				.toThrowError(`'percent' has to be a whole number between 10 and 95`);
+
+			expect(startDrill).not.toHaveBeenCalled();
+		});
+
+		it('stops a drill and reads back what this worker is burning', async () => {
+			vi.mocked(stopDrill).mockReturnValue({ until: null, percent: 80 });
+			vi.mocked(drillState).mockReturnValue({ until: 2000, percent: 80 });
+
+			await expect(service(admin).stopAutoscaleDrill())
+				.resolves
+				.toEqual({ until: null, percent: 80 });
+
+			await expect(service(admin).readAutoscaleDrill())
+				.resolves
+				.toEqual({ until: 2000, percent: 80 });
+		});
+
+		it('refuses a non-admin', async () => {
+			await expect(service(nonAdmin).startAutoscaleDrill(30, 80))
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).stopAutoscaleDrill())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			await expect(service(nonAdmin).readAutoscaleDrill())
+				.rejects
+				.toThrowError(ForbiddenError);
+
+			expect(startDrill).not.toHaveBeenCalled();
+			expect(stopDrill).not.toHaveBeenCalled();
 		});
 	});
 });

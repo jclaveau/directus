@@ -43,6 +43,7 @@ function reply(
 			name: 'directus',
 			runtime: null,
 			env: null,
+			autoscale: null,
 		},
 		supervisor: null,
 		capacity: null,

@@ -1,0 +1,78 @@
+get:
+  summary: Read the autoscale configuration
+  description: >
+    What the pool is being scaled on: the shared config stored for this cache
+    namespace, the address of whoever last wrote it, the Redis key it lives
+    under, and the same three for the pm2 options a rolling restart carries.
+    The values the loop actually resolved are on the process report rather than
+    here — the autoscaler runs as its own process, with its own environment,
+    and no request reaches it. Admin only, and served only where Redis is
+    configured: elsewhere the path is absent rather than refusing, because
+    there is nowhere to keep a change.
+  operationId: read-autoscale-config
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleAnswer'
+      description: Successful request
+  tags:
+    - Autoscaling
+patch:
+  summary: Change the autoscale configuration
+  description: >
+    Lays a patch over the shared config, field by field. A field left out of the
+    patch keeps whatever the environment chain resolves for it, and a field set
+    to null is removed from the shared config and handed back to that chain. An
+    sharedConfig left holding nothing but its own stamp is deleted. The write is
+    refused whole where the resulting configuration is unusable — a floor above
+    its ceiling, a release threshold at or above the scale threshold — and the
+    refusal names every problem at once. Who wrote it, when, and through which
+    surface are stamped by the api and cannot be set by the request. Admin
+    only, and present only where Redis is configured.
+  operationId: update-autoscale-config
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/AutoscaleConfigPatch'
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleAnswer'
+      description: Successful request
+  tags:
+    - Autoscaling
+delete:
+  summary: Clear the autoscale configuration
+  description: >
+    Deletes the shared config key, so every field goes back to what the deployment's
+    environment resolves for it. The pm2 options a restart carries live under
+    their own key and are left alone. Admin only, and present only where Redis
+    is configured.
+  operationId: clear-autoscale-config
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  sharedConfig:
+                    type: object
+                    nullable: true
+      description: Successful request
+  tags:
+    - Autoscaling

@@ -1,0 +1,53 @@
+type: object
+description: >
+  A sparse patch. A field left out keeps whatever the environment chain
+  resolves for it; a field set to null is removed from the shared config and
+  handed back to that chain.
+properties:
+  enabled:
+    type: boolean
+    nullable: true
+  strategy:
+    type: string
+    nullable: true
+    enum: [scalabus, legacy]
+  appName:
+    type: string
+    nullable: true
+  signal:
+    type: string
+    nullable: true
+    enum: [average, max]
+  sampleWindow:
+    type: integer
+    nullable: true
+  scaleCpuThreshold:
+    type: integer
+    nullable: true
+  releaseCpuThreshold:
+    type: integer
+    nullable: true
+  minWorkers:
+    type: integer
+    nullable: true
+  maxWorkers:
+    type: integer
+    nullable: true
+  prewarmWorkers:
+    type: integer
+    nullable: true
+  minSecondsToScaleUp:
+    type: integer
+    nullable: true
+  minSecondsToScaleDown:
+    type: integer
+    nullable: true
+  warmupSeconds:
+    type: integer
+    nullable: true
+  note:
+    type: string
+    nullable: true
+    description: >
+      Why this change is being made, stored with it. Null drops the note the
+      last change left, so a stamp names the reason for its own change.

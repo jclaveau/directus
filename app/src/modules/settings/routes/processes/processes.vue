@@ -1,18 +1,26 @@
 <script setup lang="ts">
 import api from '@/api';
 import { useClipboard } from '@/composables/use-clipboard';
+import { useRefreshInterval } from '@/composables/use-refresh-interval';
 import { formatDuration } from '@/utils/format-duration';
 import { formatFilesize } from '@/utils/format-filesize';
 import { getStringifiedValue } from '@/utils/get-stringified-value';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import type { HeaderRaw, Sort } from '@/components/v-table/types';
-import type { ProcessNode, ProcessReplica, ProcessesReport, ResolvedEnvVariable }
-	from '@directus/types';
+import type {
+	AutoscaleRunner,
+	ProcessNode,
+	ProcessReplica,
+	ProcessesReport,
+	ResolvedEnvVariable,
+} from '@directus/types';
 import { useLocalStorage } from '@vueuse/core';
 import ApexCharts, { type ApexOptions } from 'apexcharts';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import SettingsNavigation from '../../components/navigation.vue';
+import SidebarDetail from '@/views/private/components/sidebar-detail.vue';
+import AutoscalePanel from './autoscale-panel.vue';
 import {
 	appendProcessSample,
 	capacitySeries,
@@ -36,7 +44,7 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(false);
 const error = ref<string | null>(null);
 const report = ref<ProcessesReport | null>(null);
-const refreshInterval = ref<number | null>(null);
+const refreshInterval = useRefreshInterval('settings-processes-refresh-interval');
 const expanded = ref<Record<string, boolean>>({});
 const envSearch = ref<Record<string, string>>({});
 const samples = ref<ProcessSample[]>([]);
@@ -228,6 +236,8 @@ function copyRaw(key: string, node: ProcessNode): void {
 	});
 }
 
+const autoscaleActionsEl = ref<HTMLElement | null>(null);
+const autoscaleSummaryEl = ref<HTMLElement | null>(null);
 const usageChartEl = ref<HTMLElement | null>(null);
 const cpuChartEl = ref<HTMLElement | null>(null);
 const memoryChartEl = ref<HTMLElement | null>(null);
@@ -359,39 +369,98 @@ function memoryChartOptions(): ApexOptions {
 	);
 }
 
-async function renderCharts(): Promise<void> {
-	if (usageChartEl.value !== null) {
-		if (usageChart === null) {
-			usageChart = new ApexCharts(usageChartEl.value, usageChartOptions());
-			await usageChart.render();
-		}
-		else {
-			await usageChart.updateOptions(usageChartOptions(), true, false);
-		}
-	}
+type ChartName = 'usage' | 'cpu' | 'memory';
 
-	if (cpuChartEl.value !== null) {
-		if (cpuChart === null) {
-			cpuChart = new ApexCharts(cpuChartEl.value, cpuChartOptions());
-			await cpuChart.render();
-		}
-		else {
-			await cpuChart.updateOptions(cpuChartOptions(), true, false);
-		}
-	}
+/** The chart the pointer is over, whose redraw waits for the pointer to leave. */
+const reading = ref<ChartName | null>(null);
+const heldRedraw = ref(false);
 
-	if (memoryChartEl.value === null) {
-		return;
-	}
+function release(): void {
+	reading.value = null;
 
-	if (memoryChart === null) {
-		memoryChart = new ApexCharts(memoryChartEl.value, memoryChartOptions());
-		await memoryChart.render();
-		return;
+	if (heldRedraw.value) {
+		heldRedraw.value = false;
+		void renderCharts();
 	}
-
-	await memoryChart.updateOptions(memoryChartOptions(), true, false);
 }
+
+async function drawChart(
+	name: ChartName,
+	element: HTMLElement | null,
+	chart: ApexCharts | null,
+	options: () => ApexOptions,
+): Promise<ApexCharts | null> {
+	if (element === null) {
+		return chart;
+	}
+
+	if (chart === null) {
+		const drawn = new ApexCharts(element, options());
+		await drawn.render();
+		return drawn;
+	}
+
+	// An update rebuilds the tooltip, so a chart being read under the pointer
+	// would lose the reading on every refresh. The samples keep arriving; what
+	// they draw is what the pointer leaving asks for.
+	if (reading.value === name) {
+		heldRedraw.value = true;
+		return chart;
+	}
+
+	await chart.updateOptions(options(), true, false);
+	return chart;
+}
+
+async function renderCharts(): Promise<void> {
+	usageChart = await drawChart(
+		'usage',
+		usageChartEl.value,
+		usageChart,
+		usageChartOptions,
+	);
+
+	cpuChart = await drawChart(
+		'cpu',
+		cpuChartEl.value,
+		cpuChart,
+		cpuChartOptions,
+	);
+
+	memoryChart = await drawChart(
+		'memory',
+		memoryChartEl.value,
+		memoryChart,
+		memoryChartOptions,
+	);
+}
+
+// The processes that are scaling a pool, plucked from the tree the page already
+// holds: the values a pool is scaled on are resolved in the process that scales
+// it, so they arrive on its own report rather than from a second read.
+const autoscaleRunners = computed((): AutoscaleRunner[] => {
+	return (report.value?.services ?? []).flatMap((service) => {
+		return service.replicas.flatMap((replica) => {
+			return replica.processes.flatMap((node) => {
+				// A replica that answered the bus from an older build reports no
+				// autoscale state at all, and its report is carried as it came.
+				const state = node.autoscale ?? null;
+
+				if (state === null) {
+					return [];
+				}
+
+				return [{
+					service: service.service,
+					replicaId: replica.replicaId,
+					nodeId: node.nodeId,
+					name: node.name,
+					state,
+				}];
+			});
+		});
+	});
+});
 
 async function load(): Promise<void> {
 	loading.value = true;
@@ -425,7 +494,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-	<private-view :title="t('processes', 'Processes')">
+	<private-view :title="t('processes', 'Processes')" :sidebar-width="720">
 		<template #headline>
 			<v-breadcrumb :items="[{ name: t('settings'), to: '/settings' }]" />
 		</template>
@@ -434,6 +503,12 @@ onUnmounted(() => {
 			<v-button class="header-icon" rounded icon exact disabled>
 				<v-icon name="account_tree" />
 			</v-button>
+		</template>
+
+		<!-- The levers land here from the panel in the drawer, so the pool can be
+			 paused, pinned or restarted whether or not the drawer is open. -->
+		<template #actions:prepend>
+			<div ref="autoscaleActionsEl" class="autoscale-actions" />
 		</template>
 
 		<template #actions>
@@ -453,6 +528,15 @@ onUnmounted(() => {
 		</template>
 
 		<template #sidebar>
+			<sidebar-detail icon="speed" :title="t('autoscale', 'Autoscaling')">
+				<autoscale-panel
+					:runners="autoscaleRunners"
+					:actions-target="autoscaleActionsEl"
+					:summary-target="autoscaleSummaryEl"
+					@changed="load"
+				/>
+			</sidebar-detail>
+
 			<!-- The same intervals the cache page offers. The charts need a second
 				 sample before they draw anything, so the short ones are what make
 				 them fill while you watch: the report is a live snapshot with no
@@ -488,12 +572,13 @@ onUnmounted(() => {
 				<span>{{ totals.replicas }} replicas</span>
 			</div>
 
+			<!-- The pool the autoscaler reports lands here from the panel in the
+				 drawer: what the deployment is doing belongs beside the totals
+				 counting it, not behind a drawer. -->
+			<div ref="autoscaleSummaryEl" class="autoscale-summary" />
+
 			<div v-show="samples.length > 1" class="charts">
 				<div class="chart">
-					<h3 class="chart-title">
-						{{ t('processes_usage_chart', 'Deployment against its limits') }}
-					</h3>
-
 					<div v-if="usage" class="usage-figures">
 						<span>
 							{{ t('processes_usage_memory', 'Memory') }}
@@ -534,7 +619,12 @@ onUnmounted(() => {
 						) }}
 					</v-notice>
 
-					<div ref="usageChartEl" />
+					<div
+						ref="usageChartEl"
+						class="canvas"
+						@pointerenter="reading = 'usage'"
+						@pointerleave="release"
+					/>
 				</div>
 
 				<div class="chart">
@@ -550,14 +640,25 @@ onUnmounted(() => {
 						) }}
 					</v-notice>
 
-					<div v-show="chartsCarryCpu" ref="cpuChartEl" />
+					<div
+						v-show="chartsCarryCpu"
+						ref="cpuChartEl"
+						class="canvas"
+						@pointerenter="reading = 'cpu'"
+						@pointerleave="release"
+					/>
 				</div>
 
 				<div class="chart">
 					<h3 class="chart-title">
 						{{ t('processes_memory_chart', 'Memory per process') }}
 					</h3>
-					<div ref="memoryChartEl" />
+					<div
+						ref="memoryChartEl"
+						class="canvas"
+						@pointerenter="reading = 'memory'"
+						@pointerleave="release"
+					/>
 				</div>
 			</div>
 
@@ -808,6 +909,17 @@ onUnmounted(() => {
 	flex-shrink: 0;
 }
 
+.autoscale-summary {
+	margin-block-end: 8px;
+}
+
+.autoscale-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+
 .charts {
 	margin-block-end: 24px;
 }
@@ -819,6 +931,22 @@ onUnmounted(() => {
 .chart-title {
 	font-weight: 600;
 	margin-block-end: 8px;
+}
+
+/*
+ * The dot beside a series is a text glyph drawn ten points larger than the box
+ * holding it, so it rides above the label it belongs to. Drawn as a shape it
+ * sits on the line instead, in the colour the series is already given.
+ */
+.chart :deep(.apexcharts-tooltip-marker) {
+	inline-size: 10px;
+	block-size: 10px;
+	border-radius: 50%;
+	background: currentcolor;
+}
+
+.chart :deep(.apexcharts-tooltip-marker::before) {
+	content: none;
 }
 
 .usage-figures {
