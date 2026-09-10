@@ -137,7 +137,7 @@ const stamp = computed(() => {
 		note: typeof override.value?.['note'] === 'string'
 			? override.value['note'] as string
 			: null,
-		days: Math.floor((Date.now() - Date.parse(setAt)) / 86_400_000),
+		days: Math.floor((now.value - Date.parse(setAt)) / 86_400_000),
 	};
 });
 
@@ -197,10 +197,15 @@ const restarting = computed(() => {
 watch(
 	() => runner.value?.state.reload ?? null,
 	(reload, before) => {
-		const ended = reload !== null
+		// Nothing before it means the first report to reach the panel, which
+		// arrives after it mounts: a restart that ended before the page was
+		// opened is the pool's last news rather than this page's.
+		const ended = before !== null
+			&& before !== undefined
+			&& reload !== null
 			&& reload.error === null
 			&& reload.finishedAt !== null
-			&& reload.finishedAt !== (before?.finishedAt ?? null);
+			&& reload.finishedAt !== before.finishedAt;
 
 		if (ended) {
 			notify({
@@ -647,6 +652,17 @@ async function loadDrill(): Promise<void> {
 		}
 	}
 }
+
+/*
+ * The drill runs on the pool rather than on this page, and any admin can start
+ * or call one off: it is read again with each report so one begun elsewhere is
+ * counted down here too.
+ */
+watch(() => props.runners, () => {
+	if (drillAvailable.value) {
+		void loadDrill();
+	}
+});
 
 /**
  * Ask the pool to replace its workers.

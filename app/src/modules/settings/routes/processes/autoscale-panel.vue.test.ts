@@ -614,6 +614,20 @@ describe('restarting the pool', () => {
 		expect(wrapper.find('.reload').exists()).toBe(false);
 	});
 
+	// The page renders this panel before the first report reaches it, so the
+	// panel mounts on an empty pool and the report arrives as a change: any pool
+	// that has ever finished a restart carries the end of one.
+	test('a restart that ended before the page opened is not announced', async () => {
+		const ended = state({
+			reload: { askedAt: 1000, running: false, finishedAt: 2000, error: null },
+		});
+
+		const wrapper = await mounted(null, []);
+		await wrapper.setProps({ runners: [runner(ended)] });
+
+		expect(notified.notify).not.toHaveBeenCalled();
+	});
+
 	// A restart the supervisor refused is not an end worth congratulating, and
 	// the failure stays on the page for as long as it is the last thing to have
 	// happened.
