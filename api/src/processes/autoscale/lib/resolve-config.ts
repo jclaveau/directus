@@ -18,10 +18,11 @@ import {
  * Where the shared config is read from.
  *
  * Namespaced like the tag index, so two deployments sharing one Redis are
- * tuned separately rather than through each other.
+ * tuned separately rather than through each other. Under `processes` because
+ * that is the module these two documents configure; the leaf says which half.
  */
 export function autoscaleConfigKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:config:pm2`;
+	return `${useEnv()['CACHE_NAMESPACE']}:config:processes:autoscale`;
 }
 
 /**
@@ -32,7 +33,7 @@ export function autoscaleConfigKey(): string {
  * a rolling restart instead.
  */
 export function supervisorSharedConfigKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:config:pm2:supervisor`;
+	return `${useEnv()['CACHE_NAMESPACE']}:config:processes:supervisor`;
 }
 
 /** The variable each field reads, so a page can say where a value came from. */

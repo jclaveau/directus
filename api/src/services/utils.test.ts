@@ -625,7 +625,10 @@ describe('Services / Utils', () => {
 
 		function stored(sharedConfig: Record<string, unknown> | null) {
 			resolvesTo({});
-			vi.mocked(autoscaleConfigKey).mockReturnValue('scalabus:config:pm2');
+
+			vi.mocked(autoscaleConfigKey)
+				.mockReturnValue('scalabus:config:processes:autoscale');
+
 			vi.mocked(readSupervisorSharedConfig).mockResolvedValue(null);
 			vi.mocked(readSharedConfig).mockResolvedValue(sharedConfig);
 			vi.mocked(parseSharedConfigPatch).mockImplementation((patch) => patch);
@@ -641,7 +644,7 @@ describe('Services / Utils', () => {
 			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
 
 			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
-				key: 'scalabus:config:pm2',
+				key: 'scalabus:config:processes:autoscale',
 				sharedConfig: { maxWorkers: 8, setBy: 'writer-id' },
 				setByEmail: 'ann@example.com',
 			});
@@ -735,7 +738,7 @@ describe('Services / Utils', () => {
 
 		beforeEach(() => {
 			vi.mocked(supervisorSharedConfigKey)
-				.mockReturnValue('scalabus:config:pm2:supervisor');
+				.mockReturnValue('scalabus:config:processes:supervisor');
 
 			vi.mocked(readSupervisorSharedConfig).mockResolvedValue(null);
 			vi.mocked(parseSupervisorPatch).mockImplementation((patch) => patch);
@@ -752,7 +755,7 @@ describe('Services / Utils', () => {
 			await expect(service(admin).updateSupervisorConfig(
 				{ listenTimeout: 20_000 },
 				'mcp',
-			)).resolves.toMatchObject({ key: 'scalabus:config:pm2:supervisor' });
+			)).resolves.toMatchObject({ key: 'scalabus:config:processes:supervisor' });
 
 			expect(writeSupervisorSharedConfig).toHaveBeenCalledWith(
 				expect.objectContaining({

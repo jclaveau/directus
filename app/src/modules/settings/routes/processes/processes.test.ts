@@ -686,7 +686,7 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.patch).mockResolvedValue({
 			data: {
 				data: {
-					key: 'scalabus:config:pm2',
+					key: 'scalabus:config:processes:autoscale',
 					sharedConfig: { enabled: false },
 				},
 			},

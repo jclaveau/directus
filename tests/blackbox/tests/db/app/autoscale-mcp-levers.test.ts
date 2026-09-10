@@ -31,7 +31,7 @@ import {
 const REDIS_PORT = 6108;
 
 function supervisorKey(namespace: string): string {
-	return `${namespace}:config:pm2:supervisor`;
+	return `${namespace}:config:processes:supervisor`;
 }
 
 describe('The pm2 options and the restart that carries them, over the MCP', () => {

@@ -22,7 +22,7 @@ const REDIS_PORT = 6108;
 const DEAD_PORT = 6110;
 
 function configKey(namespace: string): string {
-	return `${namespace}:config:pm2`;
+	return `${namespace}:config:processes:autoscale`;
 }
 
 interface Proxy {

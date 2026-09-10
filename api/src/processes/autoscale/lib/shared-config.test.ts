@@ -26,7 +26,7 @@ test('reads the shared config under the namespaced key', async () => {
 	await redisHolding(JSON.stringify({ maxWorkers: 8 }));
 
 	await expect(readSharedConfig()).resolves.toEqual({ maxWorkers: 8 });
-	expect(get).toHaveBeenCalledWith('scalabus:config:pm2');
+	expect(get).toHaveBeenCalledWith('scalabus:config:processes:autoscale');
 });
 
 // The loop makes no shared config of a key it cannot parse, and an operator reading
@@ -119,8 +119,12 @@ test('writes the shared config, and deletes the key for none', async () => {
 	await redisHolding(null);
 
 	await writeSharedConfig({ maxWorkers: 8 });
-	expect(set).toHaveBeenCalledWith('scalabus:config:pm2', '{"maxWorkers":8}');
+
+	expect(set).toHaveBeenCalledWith(
+		'scalabus:config:processes:autoscale',
+		'{"maxWorkers":8}',
+	);
 
 	await writeSharedConfig(null);
-	expect(del).toHaveBeenCalledWith('scalabus:config:pm2');
+	expect(del).toHaveBeenCalledWith('scalabus:config:processes:autoscale');
 });

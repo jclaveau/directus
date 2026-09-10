@@ -29,7 +29,7 @@ const REDIS_PORT = 6108;
 const RELOAD_CHANNEL = 'directus:bus:autoscaleReload';
 
 function supervisorKey(namespace: string): string {
-	return `${namespace}:config:pm2:supervisor`;
+	return `${namespace}:config:processes:supervisor`;
 }
 
 describe('A restart carries the supervisor options stored for it', () => {

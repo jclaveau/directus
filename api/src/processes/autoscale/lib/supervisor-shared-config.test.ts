@@ -33,7 +33,7 @@ test('reads the shared config under a key of its own', async () => {
 		.resolves
 		.toEqual({ listenTimeout: 20_000 });
 
-	expect(get).toHaveBeenCalledWith('scalabus:config:pm2:supervisor');
+	expect(get).toHaveBeenCalledWith('scalabus:config:processes:supervisor');
 });
 
 // A restart makes no shared config of a key it cannot parse, and the page reading it
@@ -50,12 +50,12 @@ test('writes the shared config, and deletes the key for none', async () => {
 	await writeSupervisorSharedConfig({ killTimeout: 5000 });
 
 	expect(set).toHaveBeenCalledWith(
-		'scalabus:config:pm2:supervisor',
+		'scalabus:config:processes:supervisor',
 		'{"killTimeout":5000}',
 	);
 
 	await writeSupervisorSharedConfig(null);
-	expect(del).toHaveBeenCalledWith('scalabus:config:pm2:supervisor');
+	expect(del).toHaveBeenCalledWith('scalabus:config:processes:supervisor');
 });
 
 test('refuses an option a restart cannot carry', () => {

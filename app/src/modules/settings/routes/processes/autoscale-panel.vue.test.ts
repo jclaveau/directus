@@ -186,7 +186,7 @@ function answered(
 	sharedConfig: Record<string, unknown> | null,
 	setByEmail: string | null = null,
 ) {
-	const key = 'scalabus:config:pm2';
+	const key = 'scalabus:config:processes:autoscale';
 
 	return {
 		data: {
@@ -195,7 +195,7 @@ function answered(
 				sharedConfig,
 				setByEmail,
 				supervisor: {
-					key: 'scalabus:config:pm2:supervisor',
+					key: 'scalabus:config:processes:supervisor',
 					sharedConfig: supervisorSharedConfig,
 					setByEmail: null,
 				},
@@ -468,13 +468,13 @@ describe('what the panel shows', () => {
 	});
 });
 
-// A bare `scalabus:config:pm2` reads as an identifier of something, with no
-// way to tell what holds it or what it is for.
+// A bare `scalabus:config:processes:autoscale` reads as an identifier of
+// something, with no way to tell what holds it or what it is for.
 test('the key says what it is a key to', async () => {
 	const wrapper = await mounted(null);
 
 	expect(wrapper.find('.key').text())
-		.toBe('Stored in Redis under scalabus:config:pm2');
+		.toBe('Stored in Redis under scalabus:config:processes:autoscale');
 });
 
 describe('the levers', () => {
