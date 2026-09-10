@@ -122,7 +122,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			expect(response.statusCode).toBe(200);
 
-			expect(response.body.data.override).toMatchObject({
+			expect(response.body.data.sharedConfig).toMatchObject({
 				maxWorkers: 3,
 				minWorkers: 2,
 			});
@@ -147,7 +147,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			// Nothing stored: a refused write leaves the pool on what it had.
 			const stored = await read(vendor);
 
-			expect(stored.body.data.override?.minWorkers).toBeUndefined();
+			expect(stored.body.data.sharedConfig?.minWorkers).toBeUndefined();
 		});
 	});
 
@@ -212,7 +212,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			const stored = await read(vendor);
 
-			expect(stored.body.data.override?.minWorkers).toBeUndefined();
+			expect(stored.body.data.sharedConfig?.minWorkers).toBeUndefined();
 		});
 	});
 
@@ -236,7 +236,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			// And the note did not land on its own: a refused write stores
 			// nothing at all.
-			expect((await read(vendor)).body.data.supervisor.override).toBeNull();
+			expect((await read(vendor)).body.data.supervisor.sharedConfig).toBeNull();
 		});
 	});
 

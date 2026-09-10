@@ -26,11 +26,11 @@ vi.mock('./pool.js', () => {
 	return { reloadPool };
 });
 
-const readSupervisorOverride = vi.fn(async () => null);
+const readSupervisorSharedConfig = vi.fn(async () => null);
 const reloadDeclaration = vi.fn(() => DECLARATION);
 
-vi.mock('./supervisor-override.js', () => {
-	return { readSupervisorOverride, reloadDeclaration };
+vi.mock('./supervisor-shared-config.js', () => {
+	return { readSupervisorSharedConfig, reloadDeclaration };
 });
 
 /** What the options an operator changed come to, as pm2 names them. */
@@ -97,7 +97,7 @@ beforeEach(() => {
 	subscribe.mockClear();
 	reloadPool.mockReset();
 	reloadPool.mockResolvedValue(undefined);
-	readSupervisorOverride.mockClear();
+	readSupervisorSharedConfig.mockClear();
 	reloadDeclaration.mockClear();
 });
 
@@ -148,11 +148,14 @@ test('the restart runs beside the loop and reports that it finished', async () =
 
 	initAutoscaleReload();
 	ask();
-	readSupervisorOverride.mockResolvedValueOnce({ listenTimeout: 20_000 } as never);
+
+	readSupervisorSharedConfig
+		.mockResolvedValueOnce({ listenTimeout: 20_000 } as never);
+
 	beginAskedReload('directus', 4);
 
 	// Held still from the moment it starts, not from the moment the supervisor
-	// is reached: the override it carries is a read away.
+	// is reached: the shared config it carries is a read away.
 	expect(reloading()).toBe(true);
 
 	await vi.waitFor(() => {

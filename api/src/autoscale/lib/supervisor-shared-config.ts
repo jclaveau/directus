@@ -2,7 +2,7 @@ import { type AutoscaleBound, SUPERVISOR_BOUNDS } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError } from '@directus/errors';
 import { useRedis } from '../../redis/index.js';
-import { supervisorOverrideKey } from './resolve-config.js';
+import { supervisorSharedConfigKey } from './resolve-config.js';
 
 /**
  * The pm2 options a rolling restart can carry.
@@ -12,7 +12,7 @@ import { supervisorOverrideKey } from './resolve-config.js';
  * replacement boots under. Pool size and execution mode are not here: neither
  * survives that route, and the size is the loop's to decide anyway.
  */
-export interface SupervisorOverride {
+export interface SupervisorSharedConfig {
 	[field: string]: unknown;
 }
 
@@ -33,9 +33,9 @@ const ENTRIES: Record<string, string> = {
 const BOUNDS: Record<string, AutoscaleBound> = SUPERVISOR_BOUNDS;
 
 /**
- * What the override carries besides the values themselves, kept out of what is
- * handed to pm2 — the same stamp the configuration override takes, and for the
- * same reason: an override outlives the incident that justified it.
+ * What the shared config carries besides the values themselves, kept out of what is
+ * handed to pm2 — the same stamp the configuration shared config takes, and for the
+ * same reason: a shared config outlives the incident that justified it.
  */
 const NOTE_FIELDS = ['setBy', 'setAt', 'setFrom', 'note'];
 
@@ -60,8 +60,10 @@ const ENV_VARIABLES: Record<string, string> = {
 	maxMemoryRestartMegabytes: 'PM2_MAX_MEMORY_RESTART',
 };
 
-export async function readSupervisorOverride(): Promise<SupervisorOverride | null> {
-	const stored = await useRedis().get(supervisorOverrideKey());
+export async function readSupervisorSharedConfig(): Promise<
+	SupervisorSharedConfig | null
+> {
+	const stored = await useRedis().get(supervisorSharedConfigKey());
 
 	if (!stored) {
 		return null;
@@ -71,27 +73,27 @@ export async function readSupervisorOverride(): Promise<SupervisorOverride | nul
 		const parsed: unknown = JSON.parse(stored);
 
 		return typeof parsed === 'object' && parsed !== null
-			? parsed as SupervisorOverride
+			? parsed as SupervisorSharedConfig
 			: null;
 	}
 	catch {
 		// A key edited by hand into something unparseable is reported as no
-		// override, which is what a restart makes of it too.
+		// shared config, which is what a restart makes of it too.
 		return null;
 	}
 }
 
-export async function writeSupervisorOverride(
-	override: SupervisorOverride | null,
+export async function writeSupervisorSharedConfig(
+	sharedConfig: SupervisorSharedConfig | null,
 ): Promise<void> {
 	const redis = useRedis();
 
-	if (override === null) {
-		await redis.del(supervisorOverrideKey());
+	if (sharedConfig === null) {
+		await redis.del(supervisorSharedConfigKey());
 		return;
 	}
 
-	await redis.set(supervisorOverrideKey(), JSON.stringify(override));
+	await redis.set(supervisorSharedConfigKey(), JSON.stringify(sharedConfig));
 }
 
 /**
@@ -132,7 +134,7 @@ export function parseSupervisorPatch(
 		}
 
 		// Null hands one field back to the environment, which is how a single
-		// value is released without dropping the whole override.
+		// value is released without dropping the whole shared config.
 		if (value === null) {
 			parsed[field] = null;
 			continue;
@@ -157,17 +159,17 @@ export function parseSupervisorPatch(
 }
 
 /**
- * The override with the patch applied, a `null` value removing its field.
+ * The shared config with the patch applied, a `null` value removing its field.
  *
- * An override holding nothing but its own stamp is removed altogether, so a
- * page reading it back does not show a supervisor as overridden when every
+ * A shared config holding nothing but its own stamp is removed altogether, so
+ * a page reading it back does not show a supervisor as carrying one while every
  * value it runs on came from the environment.
  */
 export function applySupervisorPatch(
-	override: SupervisorOverride | null,
+	sharedConfig: SupervisorSharedConfig | null,
 	patch: Record<string, unknown>,
-): SupervisorOverride | null {
-	const merged: SupervisorOverride = { ...override };
+): SupervisorSharedConfig | null {
+	const merged: SupervisorSharedConfig = { ...sharedConfig };
 
 	for (const [field, value] of Object.entries(patch)) {
 		if (value === null) {
@@ -244,20 +246,20 @@ function fromEnv(field: string): number | null {
 /**
  * Every option a restart carries, as pm2 names them.
  *
- * The full set every time, not only what the override holds: pm2 keeps the
+ * The full set every time, not only what the shared config holds: pm2 keeps the
  * extended declaration on the running process, so a field released from the
- * override goes back to the environment's value only if the restart says so.
+ * shared config goes back to the environment's value only if the restart says so.
  */
 export function reloadDeclaration(
-	override: SupervisorOverride | null,
+	sharedConfig: SupervisorSharedConfig | null,
 ): Record<string, number> {
 	const declaration: Record<string, number> = {};
 
 	for (const [field, entry] of Object.entries(ENTRIES)) {
-		const overridden = override?.[field];
+		const sharedConfigValue = sharedConfig?.[field];
 
-		const value = typeof overridden === 'number'
-			? overridden
+		const value = typeof sharedConfigValue === 'number'
+			? sharedConfigValue
 			: fromEnv(field);
 
 		if (value === null) {

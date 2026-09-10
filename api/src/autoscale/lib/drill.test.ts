@@ -51,7 +51,7 @@ function runner(cpuPercents: number[], releaseCpuThreshold = 40): AutoscaleRunne
 			at: 0,
 			config: { releaseCpuThreshold } as AutoscaleConfig,
 			sources: {} as never,
-			withoutOverride: {} as never,
+			withoutSharedConfig: {} as never,
 			workers: cpuPercents.length,
 			pendingWorkers: 0,
 			warmingWorkers: 0,

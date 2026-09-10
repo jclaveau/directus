@@ -621,7 +621,7 @@ describe('the autoscale panel', () => {
 			minSecondsToScaleDown: 300,
 			warmupSeconds: 30,
 		},
-		withoutOverride: {
+		withoutSharedConfig: {
 			enabled: true,
 			strategy: 'scalabus',
 			appName: 'directus',
@@ -645,7 +645,7 @@ describe('the autoscale panel', () => {
 			scaleCpuThreshold: 'default',
 			releaseCpuThreshold: 'default',
 			minWorkers: 'default',
-			maxWorkers: 'override',
+			maxWorkers: 'sharedConfig',
 			prewarmWorkers: 'default',
 			minSecondsToScaleUp: 'default',
 			minSecondsToScaleDown: 'default',
@@ -687,7 +687,7 @@ describe('the autoscale panel', () => {
 			data: {
 				data: {
 					key: 'scalabus:config:pm2',
-					override: { enabled: false },
+					sharedConfig: { enabled: false },
 				},
 			},
 		} as any);
@@ -695,7 +695,9 @@ describe('the autoscale panel', () => {
 		// The levers are only offered where a change can be stored.
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			return url === '/utils/autoscale'
-				? Promise.resolve({ data: { data: { key: 'k', override: null } } } as any)
+				? Promise.resolve(
+					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+				)
 				: Promise.resolve({ data: { data: scaling() } } as any);
 		});
 
@@ -722,7 +724,9 @@ describe('the autoscale panel', () => {
 	test('the drawer keeps the tables and nothing else', async () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			return url === '/utils/autoscale'
-				? Promise.resolve({ data: { data: { key: 'k', override: null } } } as any)
+				? Promise.resolve(
+					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+				)
 				: Promise.resolve({ data: { data: scaling() } } as any);
 		});
 

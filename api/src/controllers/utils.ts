@@ -406,8 +406,8 @@ router.post(
 	}),
 );
 
-// The override lives in Redis, so a deployment without one has nowhere to keep a
-// change and says so by not carrying the endpoint at all.
+// The shared config lives in Redis, so a deployment without one has nowhere to
+// keep a change and says so by not carrying the endpoint at all.
 if (redisConfigAvailable()) {
 	router.get(
 		'/autoscale',
@@ -486,7 +486,7 @@ if (redisConfigAvailable()) {
 			});
 
 			await service.clearAutoscaleConfig();
-			res.status(200).json({ data: { override: null } });
+			res.status(200).json({ data: { sharedConfig: null } });
 			return;
 		}),
 	);

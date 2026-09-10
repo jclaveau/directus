@@ -44,10 +44,10 @@ const emit = defineEmits<{ changed: [] }>();
 
 const { t } = useI18n();
 
-const override = ref<Record<string, unknown> | null>(null);
+const sharedConfig = ref<Record<string, unknown> | null>(null);
 const setByEmail = ref<string | null>(null);
 const configKey = ref<string | null>(null);
-const supervisorOverride = ref<Record<string, unknown> | null>(null);
+const supervisorSharedConfig = ref<Record<string, unknown> | null>(null);
 const supervisorSetByEmail = ref<string | null>(null);
 const available = ref(true);
 const error = ref<string | null>(null);
@@ -111,14 +111,14 @@ const runner = computed(() => firstRunner(props.runners));
 const rows = computed(() => {
 	return configRows(
 		runner.value?.state ?? null,
-		override.value,
+		sharedConfig.value,
 		drafts.value['strategy'] ?? null,
 	);
 });
 
 const stamp = computed(() => {
-	const setBy = override.value?.['setBy'];
-	const setAt = override.value?.['setAt'];
+	const setBy = sharedConfig.value?.['setBy'];
+	const setAt = sharedConfig.value?.['setAt'];
 
 	if (typeof setAt !== 'string') {
 		return null;
@@ -133,9 +133,9 @@ const stamp = computed(() => {
 	return {
 		setAt,
 		setBy: writer,
-		from: surfaceLabel(override.value?.['setFrom']),
-		note: typeof override.value?.['note'] === 'string'
-			? override.value['note'] as string
+		from: surfaceLabel(sharedConfig.value?.['setFrom']),
+		note: typeof sharedConfig.value?.['note'] === 'string'
+			? sharedConfig.value['note'] as string
 			: null,
 		days: Math.floor((now.value - Date.parse(setAt)) / 86_400_000),
 	};
@@ -178,7 +178,7 @@ const stampLine = computed(() => {
  * when a worker starts, so what changes one is a deploy, not this page.
  */
 const supervisor = computed(() => {
-	return supervisorRows(runner.value?.state ?? null, supervisorOverride.value);
+	return supervisorRows(runner.value?.state ?? null, supervisorSharedConfig.value);
 });
 
 const reloadLine = computed(() => {
@@ -250,15 +250,18 @@ const decided = computed(() => {
 async function load(): Promise<void> {
 	try {
 		const response = await api.get('/utils/autoscale');
-		override.value = response.data.data.override;
+		sharedConfig.value = response.data.data.sharedConfig;
 		setByEmail.value = response.data.data.setByEmail ?? null;
 		configKey.value = response.data.data.key;
-		supervisorOverride.value = response.data.data.supervisor?.override ?? null;
+
+		supervisorSharedConfig.value
+			= response.data.data.supervisor?.sharedConfig ?? null;
+
 		supervisorSetByEmail.value = response.data.data.supervisor?.setByEmail ?? null;
 		available.value = true;
 	}
 	catch (err: any) {
-		// No Redis, no override: the route is absent rather than refusing, so a
+		// No Redis, no shared config: the route is absent rather than refusing, so a
 		// 404 here is a deployment that can only be tuned by redeploying.
 		if (err?.response?.status === 404) {
 			available.value = false;
@@ -294,7 +297,7 @@ async function write(patch: Record<string, unknown>): Promise<boolean> {
 
 	try {
 		const response = await api.patch('/utils/autoscale', withNote(patch));
-		override.value = response.data.data.override;
+		sharedConfig.value = response.data.data.sharedConfig;
 		setByEmail.value = response.data.data.setByEmail ?? null;
 		note.value = '';
 
@@ -331,7 +334,7 @@ async function writeSupervisor(
 			withNote(patch),
 		);
 
-		supervisorOverride.value = response.data.data.override;
+		supervisorSharedConfig.value = response.data.data.sharedConfig;
 		supervisorSetByEmail.value = response.data.data.setByEmail ?? null;
 		note.value = '';
 		return true;
@@ -407,7 +410,7 @@ function supervisorPlaceholder(row: SupervisorRow): string {
 }
 
 /**
- * What the row shows: the change being typed, else what the override holds —
+ * What the row shows: the change being typed, else what the shared config holds —
  * and for an option no restart can carry, the value pm2 is running it on.
  */
 function supervisorShown(row: SupervisorRow): string {
@@ -419,9 +422,9 @@ function supervisorShown(row: SupervisorRow): string {
 		return supervisorDrafts.value[row.option.field] ?? '';
 	}
 
-	return row.override === null
+	return row.sharedConfig === null
 		? ''
-		: String(row.override);
+		: String(row.sharedConfig);
 }
 
 /**
@@ -436,11 +439,11 @@ function supervisorSource(row: SupervisorRow): string {
 
 		return draft === null || draft === ''
 			? t('autoscale_supervisor_source', 'pm2')
-			: sourceLabel('override');
+			: sourceLabel('sharedConfig');
 	}
 
-	return row.source === 'override'
-		? sourceLabel('override')
+	return row.source === 'sharedConfig'
+		? sourceLabel('sharedConfig')
 		: t('autoscale_supervisor_source', 'pm2');
 }
 
@@ -450,7 +453,7 @@ async function resetToEnv(): Promise<void> {
 
 	try {
 		await api.delete('/utils/autoscale');
-		override.value = null;
+		sharedConfig.value = null;
 		setByEmail.value = null;
 		drafts.value = {};
 		note.value = '';
@@ -499,7 +502,7 @@ function sourceOf(row: AutoscaleRow): AutoscaleValueSource | null {
 
 	return draft === null || draft === ''
 		? null
-		: 'override';
+		: 'sharedConfig';
 }
 
 /** What the layer a value came from is called here. */
@@ -508,21 +511,21 @@ function sourceLabel(source: AutoscaleValueSource | null): string {
 		return '—';
 	}
 
-	return source === 'override'
-		? t('autoscale_source_config', 'config')
+	return source === 'sharedConfig'
+		? t('autoscale_source_shared_config', 'shared config')
 		: source;
 }
 
 /**
  * What the field shows: the change being typed, else what the loop is running
- * on — the override where there is one, since that is what it runs on.
+ * on — the shared config where there is one, since that is what it runs on.
  */
 function shown(row: AutoscaleRow): string | null {
 	if (edited(row.field)) {
 		return drafts.value[row.field] ?? null;
 	}
 
-	const value = row.override ?? row.effective;
+	const value = row.sharedConfig ?? row.effective;
 
 	return value === null || value === undefined
 		? null
@@ -970,7 +973,7 @@ onUnmounted(disarmClock);
 		<p v-if="stampLine" class="stamp">{{ stampLine }}</p>
 
 		<!-- Carried by every change made from here, levers included, and stored
-		with it: the override outlives the incident that justified it. -->
+		with it: the shared config outlives the incident that justified it. -->
 		<v-input
 			v-if="available"
 			v-model="note"
@@ -1087,7 +1090,7 @@ onUnmounted(disarmClock);
 							secondary
 							class="reset"
 							:tooltip="resetsTo(row)"
-							:disabled="saving || row.inactive || row.override === null"
+							:disabled="saving || row.inactive || row.sharedConfig === null"
 							@click="resetRow(row.field)"
 						>
 							<v-icon name="settings_backup_restore" x-small />
@@ -1106,7 +1109,12 @@ onUnmounted(disarmClock);
 				{{ t('autoscale_reset_all', 'Reset all changes') }}
 			</v-button>
 
-			<v-button small secondary :disabled="!override || saving" @click="resetToEnv">
+			<v-button
+				small
+				secondary
+				:disabled="!sharedConfig || saving"
+				@click="resetToEnv"
+			>
 				{{ t('autoscale_reset_env', 'Reset to env') }}
 			</v-button>
 		</div>
@@ -1206,7 +1214,7 @@ onUnmounted(disarmClock);
 									'autoscale_supervisor_reset',
 									'Hand this option back to the environment',
 								)"
-								:disabled="saving || row.override === null"
+								:disabled="saving || row.sharedConfig === null"
 								@click="resetSupervisorRow(row)"
 							>
 								<v-icon name="settings_backup_restore" x-small />

@@ -1,8 +1,8 @@
 type: object
 description: >
   A sparse patch. A field left out keeps whatever the environment chain
-  resolves for it; a field set to null is removed from the override and handed
-  back to that chain.
+  resolves for it; a field set to null is removed from the shared config and
+  handed back to that chain.
 properties:
   enabled:
     type: boolean

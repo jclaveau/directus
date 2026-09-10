@@ -155,11 +155,11 @@ describe('The autoscaler decides through a Redis outage', () => {
 		let rig: Rig;
 		let proxy: Proxy;
 
-		it('grows on the override it read before the connection dropped', async () => {
+		it('grows on the shared config read before the connection dropped', async () => {
 			namespaces.push(namespace);
 
 			// A ceiling of three where the env chain allows one, so every size
-			// above one is the override still in force and nothing else.
+			// above one is the shared config still in force and nothing else.
 			await redis.set(
 				configKey(namespace),
 				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 3 }),
@@ -187,7 +187,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 				PM2_AUTOSCALE_MIN_WORKERS: '1',
 				PM2_AUTOSCALE_MAX_WORKERS: '1',
 				// One worker per ten seconds, so the pool is still short of the
-				// override's ceiling when the connection is cut and the growth
+				// shared config's ceiling when the connection is cut and the growth
 				// that finishes the climb is decided without Redis.
 				PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '10',
 				// Long enough that the pool is reporting its load rather than its
@@ -204,7 +204,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 
 			// The warning is the loop reporting a tick it completed without
 			// Redis; the third worker is that tick acting on the ceiling only
-			// the override carries.
+			// the shared config carries.
 			expect(await loggedLine(rig, 'holding the last configuration', 30_000))
 				.toBe(true);
 
@@ -213,7 +213,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 			// them is the runner this arm has to survive.
 		}, 240_000);
 
-		it('takes a new override once Redis answers again', async () => {
+		it('takes a new shared config once Redis answers again', async () => {
 			await redis.set(
 				configKey(namespace),
 				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 2 }),

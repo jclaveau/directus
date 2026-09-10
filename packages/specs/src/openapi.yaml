@@ -347,10 +347,10 @@ components:
       $ref: './components/autoscale-config-patch.yaml'
     AutoscaleDrill:
       $ref: './components/autoscale-drill.yaml'
-    AutoscaleOverride:
-      $ref: './components/autoscale-override.yaml'
-    AutoscaleOverrideAnswer:
-      $ref: './components/autoscale-override-answer.yaml'
+    AutoscaleSharedConfig:
+      $ref: './components/autoscale-shared-config.yaml'
+    AutoscaleSharedConfigAnswer:
+      $ref: './components/autoscale-shared-config-answer.yaml'
     AutoscaleReload:
       $ref: './components/autoscale-reload.yaml'
     AutoscaleSupervisorPatch:

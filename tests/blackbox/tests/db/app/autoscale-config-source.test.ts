@@ -15,7 +15,7 @@ import {
 // Tuning an autoscaler by redeploying restarts the pool being tuned, so the
 // values have to be changeable while it runs. What that costs is a second
 // source of truth, and these arms pin which one wins: the env chain alone when
-// Redis is not configured, the override the moment one is written, and the env
+// Redis is not configured, the shared config the moment one is written, and the env
 // chain again once it is removed.
 //
 // The Redis on 6108 is shared, so each rig owns a namespace and its key.
@@ -42,11 +42,11 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		redis.disconnect();
 	});
 
-	it('ignores an override when Redis is not configured', async () => {
+	it('ignores a shared config when Redis is not configured', async () => {
 		const namespace = 'bb-autoscale-envonly';
 		namespaces.push(namespace);
 
-		// Bounds rather than a threshold, so that reading this override is the
+		// Bounds rather than a threshold, so that reading this shared config is the
 		// only thing that can move the pool: applied it pins three workers on
 		// the first tick, whatever the pool reports.
 		await redis.set(
@@ -81,7 +81,7 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		const namespace = 'bb-autoscale-live';
 		let rig: Rig;
 
-		it('uses the env chain while no override is stored', async () => {
+		it('uses the env chain while no shared config is stored', async () => {
 			namespaces.push(namespace);
 			await redis.del(configKey(namespace));
 
@@ -109,7 +109,7 @@ describe('The autoscaler takes live configuration from Redis', () => {
 				// it four times a second beside an autoscaler polling once: land
 				// those 10-20ms apart and a worker spinning 20ms in every 100ms
 				// is reported at 100%, for as long as the two stay in phase. The
-				// arms below raise the ceiling in the override that needs room.
+				// arms below raise the ceiling in the shared config that needs room.
 				PM2_AUTOSCALE_MAX_WORKERS: '1',
 				PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
 				// Long enough that the arms below deciding on load read the load
@@ -154,29 +154,29 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			expect(await poolSize(rig, 2, 60_000)).toBe(2);
 		}, 90_000);
 
-		it('returns to the env chain once the override is removed', async () => {
+		it('returns to the env chain once the shared config is removed', async () => {
 			await redis.del(configKey(namespace));
 
 			// The env ceiling is one, and the pool is at two: taking the
-			// override away is asserted by the shrink it causes rather than by
+			// shared config away is asserted by the shrink it causes rather than by
 			// a window in which nothing happens, which a pool left where it was
 			// would pass either way.
 			expect(await poolSize(rig, 1, 60_000)).toBe(1);
 		}, 90_000);
 
-		// The override is a hand-edited JSON document written during an
+		// The shared config is a hand-edited JSON document written during an
 		// incident, so it is exactly where a zero too many arrives. Obeyed
 		// literally it would ask pm2 for more workers than the box holds —
 		// the failure this autoscaler exists to stop, arriving through its
 		// own configuration.
-		it('clamps an override asking past the ceiling to the ceiling', async () => {
+		it('clamps a shared config asking past the ceiling to the ceiling', async () => {
 			await redis.set(
 				configKey(namespace),
 				JSON.stringify({ minWorkers: 10_000, maxWorkers: 3 }),
 			);
 
-			// Three, because that is the ceiling the same override names: the
-			// floor was applied, so the override was read, and it was read as
+			// Three, because that is the ceiling the same shared config names: the
+			// floor was applied, so the shared config was read, and it was read as
 			// three rather than as the ten thousand it asks for.
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
 			expect(await neverExceeded(rig, 3, 10_000)).toBe(3);
@@ -218,9 +218,9 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		}, 90_000);
 
 		// And the freeze is the flag, not the pool having run out of reasons to
-		// move: the same override with the flag turned back on empties it to the
+		// move: the same shared config with the flag turned back on empties it to the
 		// ceiling it was carrying all along.
-		it('acts on that same override once it is enabled again', async () => {
+		it('acts on that same shared config once it is enabled again', async () => {
 			await redis.set(
 				configKey(namespace),
 				JSON.stringify({

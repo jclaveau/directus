@@ -92,7 +92,7 @@ const READ_ONLY = {
  * Not destructive — it stores values, and each of them is reversible by storing
  * another — but a client is expected to put the call in front of the user
  * before making it, which is what `readOnlyHint: false` buys. Idempotent: the
- * same patch written twice leaves the same override.
+ * same patch written twice leaves the same shared config.
  */
 const CHANGES_CONFIG = {
 	readOnlyHint: false,
@@ -195,7 +195,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			description:
 				'What every process scaling a PM2 pool is running on: the values it '
 				+ 'resolved, which layer supplied each one, the pool it last read and '
-				+ 'the last decision it took — plus the live override those values are '
+				+ 'the last decision it took — plus the live shared config those values '
 				+ 'resolved through. Use it before changing anything, and to explain a '
 				+ 'pool that is not the size it should be.',
 			inputSchema: {
@@ -205,7 +205,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'boolean',
 						description: 'Whether to ask the running processes what they are '
 							+ 'scaling on, which takes about a second. False answers with '
-							+ 'the stored override alone.',
+							+ 'the stored shared config alone.',
 					},
 				},
 			},
@@ -214,11 +214,11 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				properties: {
 					key: {
 						type: 'string',
-						description: 'The Redis key the override is stored under.',
+						description: 'The Redis key the shared config is stored under.',
 					},
-					override: {
+					sharedConfig: {
 						type: 'object',
-						description: 'The fields the override sets, or null for none. '
+						description: 'The fields the shared config sets, or null for none. '
 							+ 'Carries `setBy`, `setAt`, `setFrom` and `note` beside them.',
 					},
 					setByEmail: {
@@ -228,7 +228,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					supervisor: {
 						type: 'object',
 						description: 'The pm2 options stored for the next rolling '
-							+ 'restart, under `key`, `override` and `setByEmail` of '
+							+ 'restart, under `key`, `sharedConfig` and `setByEmail` of '
 							+ 'their own. They reach the pool through a restart rather '
 							+ 'than on a tick.',
 					},
@@ -261,7 +261,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				+ 'process scaling a pool in this cache namespace picks up within a '
 				+ 'second — no redeploy, and no restart of the pool being tuned. '
 				+ 'Pass a field as null to give it back to the environment chain, and '
-				+ '`clear: true` to drop the override entirely. Bounds are corrected '
+				+ '`clear: true` to drop the shared config entirely. Bounds are corrected '
 				+ 'by the loop rather than refused here, so read the configuration '
 				+ 'back to see what it is actually running on.',
 			inputSchema: {
@@ -280,12 +280,12 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					note: {
 						type: 'string',
 						description: 'Why this is being changed, stored with the '
-							+ 'override. An override outlives the incident that '
+							+ 'sharedConfig. A shared config outlives the incident that '
 							+ 'justified it, and this is what says which one that was.',
 					},
 					clear: {
 						type: 'boolean',
-						description: 'Drop the whole override, so every field comes from '
+						description: 'Drop the whole shared config, so every field comes '
 							+ 'the environment chain again.',
 					},
 				},
@@ -296,11 +296,11 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				properties: {
 					key: {
 						type: 'string',
-						description: 'The Redis key the override is stored under.',
+						description: 'The Redis key the shared config is stored under.',
 					},
-					override: {
+					sharedConfig: {
 						type: 'object',
-						description: 'The override as it now stands, or null for none. '
+						description: 'The shared config as it now stands, or null for none. '
 							+ 'This write stamps it `setFrom: "mcp"`.',
 					},
 					setByEmail: {
@@ -370,7 +370,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					note: {
 						type: 'string',
 						description: 'Why this is being changed, stored with the '
-							+ 'options. An override outlives the incident that '
+							+ 'options. A shared config outlives the incident that '
 							+ 'justified it, and this is what says which one that was.',
 					},
 				},
@@ -383,7 +383,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 						type: 'string',
 						description: 'The Redis key the options are stored under.',
 					},
-					override: {
+					sharedConfig: {
 						type: 'object',
 						description: 'The options as they now stand, or null for none. '
 							+ 'This write stamps them `setFrom: "mcp"`.',
@@ -785,7 +785,7 @@ export function systemMcpTools(): SystemMcpTool[] {
 		// window and answer an empty tree. The REST route is absent in that
 		// deployment; the tool it shares a service with has to be too.
 		.filter((group) => group !== 'processes' || processesReportEnabled())
-		// The override lives in Redis, so a deployment without one has nowhere to
+		// The shared config lives in Redis, so a deployment without one has nowhere to
 		// keep a change and nothing to read back — the same reason the REST route
 		// is not registered there.
 		.filter((group) => group !== 'autoscale' || redisConfigAvailable())

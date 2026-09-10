@@ -57,10 +57,10 @@ vi.mock('./lib/reload.js', () => {
 
 const resolveConfig = vi.fn();
 const resolvedSources = vi.fn(() => ({}));
-const resolvedWithoutOverride = vi.fn(() => null);
+const resolvedWithoutSharedConfig = vi.fn(() => null);
 
 vi.mock('./lib/resolve-config.js', () => {
-	return { resolveConfig, resolvedSources, resolvedWithoutOverride };
+	return { resolveConfig, resolvedSources, resolvedWithoutSharedConfig };
 });
 
 const decide = vi.fn((): { workers: number | null; reason: string } => {

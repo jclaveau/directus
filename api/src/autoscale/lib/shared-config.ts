@@ -3,7 +3,7 @@ import type { AutoscaleConfig } from '@directus/types';
 import { useRedis } from '../../redis/index.js';
 import { autoscaleConfigKey } from './resolve-config.js';
 
-/** What a field of the override may hold, so a bad write fails at the door. */
+/** What a field of the shared config may hold, so a bad write fails at the door. */
 type FieldType = string[] | 'boolean' | 'number' | 'string';
 
 const FIELD_TYPES: Record<keyof AutoscaleConfig, FieldType> = {
@@ -23,7 +23,7 @@ const FIELD_TYPES: Record<keyof AutoscaleConfig, FieldType> = {
 };
 
 /**
- * What the override carries besides the configuration itself.
+ * What the shared config carries besides the configuration itself.
  *
  * The loop takes only the fields it knows, so these ride in the same object
  * without reaching it. They are what turns a forgotten `{"enabled": false}`
@@ -33,12 +33,12 @@ const FIELD_TYPES: Record<keyof AutoscaleConfig, FieldType> = {
  */
 const NOTE_FIELDS = ['setBy', 'setAt', 'setFrom', 'note'];
 
-export interface AutoscaleOverride {
+export interface AutoscaleSharedConfig {
 	[field: string]: unknown;
 }
 
-/** The override as it stands, or `null` where nothing is overriding anything. */
-export async function readAutoscaleOverride(): Promise<AutoscaleOverride | null> {
+/** The shared config as it stands, or `null` where nothing is set for anything. */
+export async function readSharedConfig(): Promise<AutoscaleSharedConfig | null> {
 	const stored = await useRedis().get(autoscaleConfigKey());
 
 	if (!stored) {
@@ -49,12 +49,12 @@ export async function readAutoscaleOverride(): Promise<AutoscaleOverride | null>
 		const parsed: unknown = JSON.parse(stored);
 
 		return typeof parsed === 'object' && parsed !== null
-			? parsed as AutoscaleOverride
+			? parsed as AutoscaleSharedConfig
 			: null;
 	}
 	catch {
 		// A key edited by hand into something unparseable is reported as no
-		// override, which is what the loop makes of it too.
+		// shared config, which is what the loop makes of it too.
 		return null;
 	}
 }
@@ -67,7 +67,7 @@ export async function readAutoscaleOverride(): Promise<AutoscaleOverride | null>
  * rejected write from a clamped one. Bounds are not checked — those the loop
  * corrects, and it reports what it corrected them to.
  */
-export function parseOverridePatch(
+export function parseSharedConfigPatch(
 	patch: Record<string, unknown>,
 ): Record<string, unknown> {
 	const parsed: Record<string, unknown> = {};
@@ -98,7 +98,7 @@ export function parseOverridePatch(
 		}
 
 		// Null clears one field back to the environment chain, which is how a
-		// single value is handed back without dropping the whole override.
+		// single value is handed back without dropping the whole shared config.
 		if (value === null) {
 			parsed[field] = null;
 			continue;
@@ -135,17 +135,17 @@ export function parseOverridePatch(
 }
 
 /**
- * The override with the patch applied, a `null` value removing its field.
+ * The shared config with the patch applied, a `null` value removing its field.
  *
- * An override that ends up holding nothing but its own note is removed
- * altogether: a page reading it would otherwise show a deployment as overridden
- * when every value it runs on comes from its environment.
+ * A shared config that ends up holding nothing but its own note is removed
+ * altogether: a page reading it would otherwise show a deployment as carrying
+ * one while every value it runs on comes from its environment.
  */
-export function applyOverridePatch(
-	override: AutoscaleOverride | null,
+export function applySharedConfigPatch(
+	sharedConfig: AutoscaleSharedConfig | null,
 	patch: Record<string, unknown>,
-): AutoscaleOverride | null {
-	const merged: AutoscaleOverride = { ...override };
+): AutoscaleSharedConfig | null {
+	const merged: AutoscaleSharedConfig = { ...sharedConfig };
 
 	for (const [field, value] of Object.entries(patch)) {
 		if (value === null) {
@@ -164,15 +164,15 @@ export function applyOverridePatch(
 		: merged;
 }
 
-export async function writeAutoscaleOverride(
-	override: AutoscaleOverride | null,
+export async function writeSharedConfig(
+	sharedConfig: AutoscaleSharedConfig | null,
 ): Promise<void> {
 	const redis = useRedis();
 
-	if (override === null) {
+	if (sharedConfig === null) {
 		await redis.del(autoscaleConfigKey());
 		return;
 	}
 
-	await redis.set(autoscaleConfigKey(), JSON.stringify(override));
+	await redis.set(autoscaleConfigKey(), JSON.stringify(sharedConfig));
 }

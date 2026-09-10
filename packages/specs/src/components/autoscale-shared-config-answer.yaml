@@ -1,11 +1,11 @@
 type: object
-description: An override, where it is kept, and who last wrote it.
+description: A shared config, where it is kept, and who last wrote it.
 properties:
   key:
     type: string
-    description: The Redis key the override is stored under.
-  override:
-    $ref: '../openapi.yaml#/components/schemas/AutoscaleOverride'
+    description: The Redis key the shared config is stored under.
+  sharedConfig:
+    $ref: '../openapi.yaml#/components/schemas/AutoscaleSharedConfig'
   setByEmail:
     type: string
     nullable: true

@@ -74,12 +74,13 @@ export interface AutoscaleConfig {
  *
  * - `default` — the shipped defaults, nothing set the variable
  * - `env` — a `PM2_AUTOSCALE_*` variable of the process that scales
- * - `override` — the live Redis override, which wins over both
+ * - `sharedConfig` — the shared config in Redis, one copy for the whole fleet,
+ *   which wins over both
  */
-export type AutoscaleValueSource = 'default' | 'env' | 'override';
+export type AutoscaleValueSource = 'default' | 'env' | 'sharedConfig';
 
 /**
- * Which surface a change to the override came in through.
+ * Which surface a change to the shared config came in through.
  *
  * The same configuration is reachable from the admin and from an MCP client,
  * and a pool found in a shape nobody remembers asking for is answered by which
@@ -108,10 +109,10 @@ export interface AutoscaleNodeState {
 	config: AutoscaleConfig;
 	sources: AutoscaleConfigSources;
 	/**
-	 * The same configuration with the override taken off: the env chain and the
+	 * The same configuration with the shared config taken off: the env chain and the
 	 * shipped defaults, which is where clearing a field lands it.
 	 */
-	withoutOverride: AutoscaleConfig;
+	withoutSharedConfig: AutoscaleConfig;
 	/** Online workers of the scaled app the tick read. */
 	workers: number;
 	/** Started but not yet ready, so counted in the pool and not the statistic. */

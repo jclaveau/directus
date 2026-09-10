@@ -47,12 +47,12 @@ import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { collectPgBouncer } from '../pgbouncer/index.js';
 import {
-	applyOverridePatch,
-	parseOverridePatch,
-	readAutoscaleOverride,
-	writeAutoscaleOverride,
-	type AutoscaleOverride,
-} from '../autoscale/lib/override.js';
+	applySharedConfigPatch,
+	parseSharedConfigPatch,
+	readSharedConfig,
+	writeSharedConfig,
+	type AutoscaleSharedConfig,
+} from '../autoscale/lib/shared-config.js';
 import {
 	loadedWorker,
 	MAX_DRILL_PERCENT,
@@ -68,16 +68,16 @@ import {
 } from '../autoscale/lib/reload.js';
 import {
 	autoscaleConfigKey,
-	configWithOverride,
-	supervisorOverrideKey,
+	configWithSharedConfig,
+	supervisorSharedConfigKey,
 } from '../autoscale/lib/resolve-config.js';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorOverride,
-	type SupervisorOverride,
-	writeSupervisorOverride,
-} from '../autoscale/lib/supervisor-override.js';
+	readSupervisorSharedConfig,
+	type SupervisorSharedConfig,
+	writeSupervisorSharedConfig,
+} from '../autoscale/lib/supervisor-shared-config.js';
 import { assertUsableConfig } from '../autoscale/lib/validate-config.js';
 import {
 	collectProcesses,
@@ -181,21 +181,24 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	return parsed;
 }
 
-/** What an autoscale read answers with: the stored override, plus who left it. */
-export interface AutoscaleOverrideAnswer {
+/**
+ * What an autoscale read answers with: the stored shared config, plus who
+ * left it.
+ */
+export interface AutoscaleSharedConfigAnswer {
 	key: string;
-	override: AutoscaleOverride | null;
-	/** The address behind the override's `setBy`, `null` where there is none. */
+	sharedConfig: AutoscaleSharedConfig | null;
+	/** The address behind the shared config's `setBy`, `null` where there is none. */
 	setByEmail: string | null;
 }
 
-export interface AutoscaleConfigAnswer extends AutoscaleOverrideAnswer {
+export interface AutoscaleConfigAnswer extends AutoscaleSharedConfigAnswer {
 	/**
 	 * The pm2 options a restart would carry, answered beside the configuration
 	 * because a page showing one without the other cannot say which of the two
 	 * a value it displays came from.
 	 */
-	supervisor: AutoscaleOverrideAnswer;
+	supervisor: AutoscaleSharedConfigAnswer;
 }
 
 export class UtilsService {
@@ -545,20 +548,20 @@ export class UtilsService {
 	}
 
 	/**
-	 * The live override, and the key it is stored under.
+	 * The shared config, and the key it is stored under.
 	 *
-	 * Only the override: what the pool is actually being scaled on is the
+	 * Only the shared config: what the pool is actually being scaled on is the
 	 * environment of the process that scales it laid under this, and that
 	 * process reports it with `readProcesses` rather than answering a request.
 	 */
 	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('inspect the autoscale configuration');
 
-		return this.answerWith(await readAutoscaleOverride());
+		return this.answerWith(await readSharedConfig());
 	}
 
 	/**
-	 * Lay a patch over the override, `null` giving one field back to the
+	 * Lay a patch over the shared config, `null` giving one field back to the
 	 * environment chain.
 	 *
 	 * Field by field on purpose: a write of the whole object would pin every
@@ -571,9 +574,9 @@ export class UtilsService {
 	): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('change the autoscale configuration');
 
-		const parsed = parseOverridePatch(patch);
+		const parsed = parseSharedConfigPatch(patch);
 
-		// Stamped by the writer rather than taken from them: an override outlives
+		// Stamped by the writer rather than taken from them: a shared config outlives
 		// the incident that justified it, and the questions it is then asked are
 		// who left it, when, and through what.
 		const stamped = {
@@ -583,46 +586,46 @@ export class UtilsService {
 			setFrom: surface,
 		};
 
-		const override = applyOverridePatch(
-			await readAutoscaleOverride(),
+		const sharedConfig = applySharedConfigPatch(
+			await readSharedConfig(),
 			stamped,
 		);
 
 		// Judged whole rather than field by field: a floor is only too high
 		// against the ceiling it will sit under, and that ceiling is usually a
 		// field this patch never mentions.
-		assertUsableConfig(configWithOverride(override ?? {}));
+		assertUsableConfig(configWithSharedConfig(sharedConfig ?? {}));
 
-		await writeAutoscaleOverride(override);
+		await writeSharedConfig(sharedConfig);
 
-		return this.answerWith(override);
+		return this.answerWith(sharedConfig);
 	}
 
 	/**
-	 * The override with the writer named rather than identified.
+	 * The shared config with the writer named rather than identified.
 	 *
 	 * The stamp keeps the user's id, which survives a rename and a changed
 	 * address; a page reading it back wants the address, and only the database
 	 * turns one into the other.
 	 */
 	private async answerWith(
-		override: AutoscaleOverride | null,
+		sharedConfig: AutoscaleSharedConfig | null,
 	): Promise<AutoscaleConfigAnswer> {
 		return {
 			key: autoscaleConfigKey(),
-			override,
-			setByEmail: await this.emailOf(override?.['setBy']),
-			supervisor: await this.supervisorAnswer(await readSupervisorOverride()),
+			sharedConfig,
+			setByEmail: await this.emailOf(sharedConfig?.['setBy']),
+			supervisor: await this.supervisorAnswer(await readSupervisorSharedConfig()),
 		};
 	}
 
 	private async supervisorAnswer(
-		override: SupervisorOverride | null,
-	): Promise<AutoscaleOverrideAnswer> {
+		sharedConfig: SupervisorSharedConfig | null,
+	): Promise<AutoscaleSharedConfigAnswer> {
 		return {
-			key: supervisorOverrideKey(),
-			override,
-			setByEmail: await this.emailOf(override?.['setBy']),
+			key: supervisorSharedConfigKey(),
+			sharedConfig,
+			setByEmail: await this.emailOf(sharedConfig?.['setBy']),
 		};
 	}
 
@@ -636,7 +639,7 @@ export class UtilsService {
 	async updateSupervisorConfig(
 		patch: Record<string, unknown>,
 		surface: AutoscaleWriteSurface,
-	): Promise<AutoscaleOverrideAnswer> {
+	): Promise<AutoscaleSharedConfigAnswer> {
 		this.assertAdmin('change the supervisor configuration');
 
 		const stamped = {
@@ -646,14 +649,14 @@ export class UtilsService {
 			setFrom: surface,
 		};
 
-		const override = applySupervisorPatch(
-			await readSupervisorOverride(),
+		const sharedConfig = applySupervisorPatch(
+			await readSupervisorSharedConfig(),
 			stamped,
 		);
 
-		await writeSupervisorOverride(override);
+		await writeSupervisorSharedConfig(sharedConfig);
 
-		return this.supervisorAnswer(override);
+		return this.supervisorAnswer(sharedConfig);
 	}
 
 	private async emailOf(user: unknown): Promise<string | null> {
@@ -793,11 +796,11 @@ export class UtilsService {
 		return stopDrill();
 	}
 
-	/** Drop the override, so every field comes from the environment chain again. */
+	/** Drop the shared config, so every field comes from the environment again. */
 	async clearAutoscaleConfig(): Promise<void> {
 		this.assertAdmin('clear the autoscale configuration');
 
-		await writeAutoscaleOverride(null);
+		await writeSharedConfig(null);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {

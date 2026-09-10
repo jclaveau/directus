@@ -1,7 +1,7 @@
 get:
   summary: Read the autoscale configuration
   description: >
-    What the pool is being scaled on: the override stored for this cache
+    What the pool is being scaled on: the shared config stored for this cache
     namespace, the address of whoever last wrote it, the Redis key it lives
     under, and the same three for the pm2 options a rolling restart carries.
     The values the loop actually resolved are on the process report rather than
@@ -25,10 +25,10 @@ get:
 patch:
   summary: Change the autoscale configuration
   description: >
-    Lays a patch over the override, field by field. A field left out of the
+    Lays a patch over the shared config, field by field. A field left out of the
     patch keeps whatever the environment chain resolves for it, and a field set
-    to null is removed from the override and handed back to that chain. An
-    override left holding nothing but its own stamp is deleted. The write is
+    to null is removed from the shared config and handed back to that chain. An
+    sharedConfig left holding nothing but its own stamp is deleted. The write is
     refused whole where the resulting configuration is unusable — a floor above
     its ceiling, a release threshold at or above the scale threshold — and the
     refusal names every problem at once. Who wrote it, when, and through which
@@ -55,7 +55,7 @@ patch:
 delete:
   summary: Clear the autoscale configuration
   description: >
-    Deletes the override key, so every field goes back to what the deployment's
+    Deletes the shared config key, so every field goes back to what the deployment's
     environment resolves for it. The pm2 options a restart carries live under
     their own key and are left alone. Admin only, and present only where Redis
     is configured.
@@ -70,7 +70,7 @@ delete:
               data:
                 type: object
                 properties:
-                  override:
+                  sharedConfig:
                     type: object
                     nullable: true
       description: Successful request

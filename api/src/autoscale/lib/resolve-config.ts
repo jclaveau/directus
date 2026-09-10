@@ -15,7 +15,7 @@ import {
 } from './sanitize-config.js';
 
 /**
- * Where a live override is read from.
+ * Where the shared config is read from.
  *
  * Namespaced like the tag index, so two deployments sharing one Redis are
  * tuned separately rather than through each other.
@@ -31,7 +31,7 @@ export function autoscaleConfigKey(): string {
  * one every tick and takes no interest in these, which reach the pool through
  * a rolling restart instead.
  */
-export function supervisorOverrideKey(): string {
+export function supervisorSharedConfigKey(): string {
 	return `${useEnv()['CACHE_NAMESPACE']}:config:pm2:supervisor`;
 }
 
@@ -56,10 +56,10 @@ const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
  * Which layer each field's value came from.
  *
  * An operator reading a threshold needs to know whether changing the
- * deployment's environment would move it, or whether a live override is
+ * deployment's environment would move it, or whether the shared config is
  * holding it where it is — the two look identical in the resolved value.
  */
-function sourcesOf(override: Record<string, unknown>): AutoscaleConfigSources {
+function sourcesOf(sharedConfig: Record<string, unknown>): AutoscaleConfigSources {
 	const env = useEnv();
 	const sources = {} as AutoscaleConfigSources;
 
@@ -70,8 +70,8 @@ function sourcesOf(override: Record<string, unknown>): AutoscaleConfigSources {
 			source = 'env';
 		}
 
-		if (override[field] !== undefined && override[field] !== null) {
-			source = 'override';
+		if (sharedConfig[field] !== undefined && sharedConfig[field] !== null) {
+			source = 'sharedConfig';
 		}
 
 		sources[field] = source;
@@ -129,17 +129,17 @@ export function envConfig(): AutoscaleConfig {
 }
 
 /**
- * Only the fields a live override actually sets are taken from it, so raising
+ * Only the fields the shared config actually sets are taken from it, so raising
  * one threshold during an incident leaves the rest on the env chain rather
  * than resetting them to defaults nobody asked for.
  */
-function withOverride(
+function withSharedConfig(
 	base: AutoscaleConfig,
-	override: Record<string, unknown>,
+	sharedConfig: Record<string, unknown>,
 ): AutoscaleConfig {
 	const merged = { ...base };
 
-	for (const [field, value] of Object.entries(override)) {
+	for (const [field, value] of Object.entries(sharedConfig)) {
 		if (Object.hasOwn(base, field) === false) {
 			continue;
 		}
@@ -171,25 +171,25 @@ function withOverride(
 }
 
 /**
- * What the loop would run on with this override laid over the environment.
+ * What the loop would run on with this shared config laid over the environment.
  *
  * The env chain read here is this process's rather than the scaling process's,
  * which is a different process with the same deployment's environment. It is
  * what a write has to be judged against: the field being changed is compared
  * with fields nobody is changing, and those come from the chain.
  */
-export function configWithOverride(
-	override: Record<string, unknown>,
+export function configWithSharedConfig(
+	sharedConfig: Record<string, unknown>,
 ): AutoscaleConfig {
-	return withOverride(sanitizeConfig(envConfig()).config, override);
+	return withSharedConfig(sanitizeConfig(envConfig()).config, sharedConfig);
 }
 
 /**
- * How long a tick waits for the override before deciding without a fresh one.
+ * How long a tick waits for the shared config before deciding without a fresh one.
  *
  * The interval between ticks, so a read is never the reason a tick is late.
  */
-const OVERRIDE_READ_TIMEOUT_MS = 1000;
+const SHARED_CONFIG_READ_TIMEOUT_MS = 1000;
 
 /**
  * Statuses in which the client holds no connection to send a command down.
@@ -200,7 +200,7 @@ const OVERRIDE_READ_TIMEOUT_MS = 1000;
 const DISCONNECTED = new Set(['reconnecting', 'close', 'end']);
 
 /**
- * The stored override, or a failure if Redis does not produce one promptly.
+ * The stored shared config, or a failure if Redis does not produce one promptly.
  *
  * ioredis queues a command issued while it is not connected and puts no
  * deadline on that queue, so a tick that only awaited the read would hold the
@@ -208,7 +208,7 @@ const DISCONNECTED = new Set(['reconnecting', 'close', 'end']);
  * size the outage caught it at, which is exactly what this loop exists to
  * prevent.
  */
-async function readOverride(): Promise<string | null> {
+async function readStoredSharedConfig(): Promise<string | null> {
 	const redis = useRedis();
 
 	if (DISCONNECTED.has(redis.status)) {
@@ -229,8 +229,8 @@ async function readOverride(): Promise<string | null> {
 			read,
 			new Promise<never>((_resolve, reject) => {
 				expire = setTimeout(() => {
-					reject(new Error(`no answer in ${OVERRIDE_READ_TIMEOUT_MS}ms`));
-				}, OVERRIDE_READ_TIMEOUT_MS);
+					reject(new Error(`no answer in ${SHARED_CONFIG_READ_TIMEOUT_MS}ms`));
+				}, SHARED_CONFIG_READ_TIMEOUT_MS);
 			}),
 		]);
 	}
@@ -243,14 +243,14 @@ let lastCorrections = '';
 let lastGood: AutoscaleConfig | null = null;
 let lastBase: AutoscaleConfig | null = null;
 let lastSources: AutoscaleConfigSources | null = null;
-let overrideUnreadable = false;
+let sharedConfigUnreadable = false;
 
 /**
  * Where each field of the configuration the last tick used came from.
  *
  * Held beside the configuration rather than returned with it because it
  * answers a different question — one the loop never asks and a page always
- * does — and because an unreadable override holds both together.
+ * does — and because an unreadable shared config holds both together.
  */
 export function resolvedSources(): AutoscaleConfigSources {
 	return lastSources ?? sourcesOf({});
@@ -260,9 +260,9 @@ export function resolvedSources(): AutoscaleConfigSources {
  * What the last tick would have run on with nothing stored in Redis.
  *
  * The page offers to clear a field, and the value that lands there is this
- * one — knowable only here, since the override wins over it everywhere else.
+ * one — knowable only here, since the shared config wins over it everywhere else.
  */
-export function resolvedWithoutOverride(): AutoscaleConfig {
+export function resolvedWithoutSharedConfig(): AutoscaleConfig {
 	return lastBase ?? sanitizeConfig(envConfig()).config;
 }
 
@@ -300,13 +300,13 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 
 	const settle = (
 		candidate: AutoscaleConfig,
-		override: Record<string, unknown>,
+		sharedConfig: Record<string, unknown>,
 	) => {
 		const { config, corrections } = sanitizeConfig(candidate);
 		announce(corrections);
 		lastGood = config;
 		lastBase = sanitizeConfig(fromEnv).config;
-		lastSources = sourcesOf(override);
+		lastSources = sourcesOf(sharedConfig);
 
 		return config;
 	};
@@ -316,24 +316,25 @@ export async function resolveConfig(): Promise<AutoscaleConfig> {
 	}
 
 	try {
-		const stored = await readOverride();
-		overrideUnreadable = false;
+		const stored = await readStoredSharedConfig();
+		sharedConfigUnreadable = false;
 
 		if (!stored) {
 			return settle(fromEnv, {});
 		}
 
-		const override = JSON.parse(stored) as Record<string, unknown>;
+		const sharedConfig = JSON.parse(stored) as Record<string, unknown>;
 
-		return settle(withOverride(fromEnv, override), override);
+		return settle(withSharedConfig(fromEnv, sharedConfig), sharedConfig);
 	}
 	catch (error) {
-		if (overrideUnreadable === false) {
-			overrideUnreadable = true;
+		if (sharedConfigUnreadable === false) {
+			sharedConfigUnreadable = true;
 
 			useLogger().warn(
 				error,
-				'[autoscale] could not read the override; holding the last configuration',
+				'[autoscale] could not read the shared config; '
+					+ 'holding the last configuration',
 			);
 		}
 

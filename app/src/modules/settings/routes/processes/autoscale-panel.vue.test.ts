@@ -75,7 +75,7 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 			minSecondsToScaleDown: 300,
 			warmupSeconds: 30,
 		},
-		withoutOverride: {
+		withoutSharedConfig: {
 			enabled: true,
 			strategy: 'scalabus',
 			appName: 'api',
@@ -99,7 +99,7 @@ function state(overrides: Partial<AutoscaleNodeState> = {}): AutoscaleNodeState 
 			scaleCpuThreshold: 'default',
 			releaseCpuThreshold: 'default',
 			minWorkers: 'default',
-			maxWorkers: 'override',
+			maxWorkers: 'sharedConfig',
 			prewarmWorkers: 'default',
 			minSecondsToScaleUp: 'default',
 			minSecondsToScaleDown: 'default',
@@ -183,7 +183,7 @@ const global = {
 };
 
 function answered(
-	override: Record<string, unknown> | null,
+	sharedConfig: Record<string, unknown> | null,
 	setByEmail: string | null = null,
 ) {
 	const key = 'scalabus:config:pm2';
@@ -192,11 +192,11 @@ function answered(
 		data: {
 			data: {
 				key,
-				override,
+				sharedConfig,
 				setByEmail,
 				supervisor: {
 					key: 'scalabus:config:pm2:supervisor',
-					override: supervisorOverride,
+					sharedConfig: supervisorSharedConfig,
 					setByEmail: null,
 				},
 			},
@@ -205,21 +205,21 @@ function answered(
 }
 
 /** What the supervisor answer carries, set by the case that cares. */
-let supervisorOverride: Record<string, unknown> | null = null;
+let supervisorSharedConfig: Record<string, unknown> | null = null;
 
 /**
  * The panel reads two routes, and they answer different shapes: everything
  * here that is not the drill is the configuration.
  */
 async function mounted(
-	override: Record<string, unknown> | null,
+	sharedConfig: Record<string, unknown> | null,
 	runners = [runner()],
 	setByEmail: string | null = null,
 	drill: { until: number | null; percent: number } | null = null,
 ) {
 	vi.mocked(api.get).mockImplementation(async (url: string) => {
 		if (url !== '/utils/autoscale/drill') {
-			return answered(override, setByEmail);
+			return answered(sharedConfig, setByEmail);
 		}
 
 		if (drill === null) {
@@ -246,7 +246,7 @@ beforeEach(() => {
 	vi.mocked(api.patch).mockReset();
 	vi.mocked(api.post).mockReset();
 	vi.mocked(api.delete).mockReset();
-	supervisorOverride = null;
+	supervisorSharedConfig = null;
 	notified.notify.mockReset();
 	vi.mocked(api.patch).mockResolvedValue(answered({}));
 	vi.mocked(api.delete).mockResolvedValue(answered(null));
@@ -267,7 +267,7 @@ describe('what the panel shows', () => {
 		// Where a value came from is read inside the field it belongs to, under
 		// the name the page gives that layer.
 		expect(ceiling?.findAll('td')).toHaveLength(2);
-		expect(ceiling?.find('.edit .source').text()).toBe('config');
+		expect(ceiling?.find('.edit .source').text()).toBe('shared config');
 	});
 
 	// The route only exists where Redis does, so its absence is the answer to
@@ -342,7 +342,7 @@ describe('what the panel shows', () => {
 	});
 
 	test('a stored option is shown in the box that would change it', async () => {
-		supervisorOverride = { listenTimeout: 20000 };
+		supervisorSharedConfig = { listenTimeout: 20000 };
 
 		const declared = state({
 			supervisor: {
@@ -401,7 +401,7 @@ describe('what the panel shows', () => {
 
 	// One place to read a field and one to change it, rather than a column of
 	// running values beside a column of inputs holding the same numbers.
-	test('a field with no override still holds the running value', async () => {
+	test('a field with no shared config still holds the running value', async () => {
 		const wrapper = await mounted(null);
 
 		const ceiling = wrapper.findAll('tbody tr')
@@ -410,7 +410,7 @@ describe('what the panel shows', () => {
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('4');
 	});
 
-	test('a field neither reported nor overridden names no source', async () => {
+	test('a field neither reported nor shared names no source', async () => {
 		const wrapper = await mounted(null, []);
 
 		const ceiling = wrapper.findAll('tbody tr')
@@ -419,9 +419,9 @@ describe('what the panel shows', () => {
 		expect(ceiling?.find('.source').text()).toBe('—');
 	});
 
-	// An override applies to whichever process reads it next, so a stored one
+	// A shared config applies to whichever process reads it next, so a stored one
 	// with nothing running is worth saying rather than hiding.
-	test('a stored override with no runner still says so', async () => {
+	test('a stored shared config with no runner still says so', async () => {
 		const wrapper = await mounted({ maxWorkers: 8 }, []);
 
 		expect(wrapper.text()).toContain('No process reported');
@@ -432,7 +432,7 @@ describe('what the panel shows', () => {
 		expect((ceiling?.find('input').element as HTMLInputElement).value).toBe('8');
 	});
 
-	// A uuid names nobody to the person reading it, and the same override is
+	// A uuid names nobody to the person reading it, and the same shared config is
 	// reachable from two surfaces — so both are read off the stamp.
 	test('who set the config, and through what, rides along with it', async () => {
 		const stamp = {
@@ -453,7 +453,7 @@ describe('what the panel shows', () => {
 		);
 	});
 
-	// A user deleted since is still an answer to who left the override, so the
+	// A user deleted since is still an answer to who left the shared config, so the
 	// id the api could not name stands in for the address.
 	test('an id the api could not name is shown as it stands', async () => {
 		const wrapper = await mounted({
@@ -1029,7 +1029,7 @@ describe('editing one field', () => {
 
 		const typed = row(wrapper, 'scaleCpuThreshold');
 
-		expect(typed.find('.source').text()).toBe('config');
+		expect(typed.find('.source').text()).toBe('shared config');
 		expect(typed.find('.source').classes()).toContain('pending');
 		expect(typed.find('.control').classes()).toContain('pending');
 	});
@@ -1070,7 +1070,7 @@ describe('editing one field', () => {
 		expect(row(wrapper, 'maxWorkers').find('input').element.value).toBe('400');
 	});
 
-	// The override outlives the incident that justified it, and what it is then
+	// The shared config outlives the incident that justified it, and what it is then
 	// asked is why — which no lever and no field can answer.
 	test('the reason typed beside the fields is stored with the change', async () => {
 		const wrapper = await mounted({});
@@ -1138,14 +1138,14 @@ describe('the options a restart carries', () => {
 	// The layer a box is showing, read the same way as on the configuration
 	// above it rather than left to be guessed from whether the box is filled.
 	test('a row names the layer its value comes from', async () => {
-		supervisorOverride = { listenTimeout: 20000 };
+		supervisorSharedConfig = { listenTimeout: 20000 };
 
 		const wrapper = await mounted(null, [runner(declared())]);
 
 		const stored = optionRow(wrapper, 'PM2_LISTEN_TIMEOUT').find('.source');
 		const declaring = optionRow(wrapper, 'PM2_KILL_TIMEOUT').find('.source');
 
-		expect(stored.text()).toBe('config');
+		expect(stored.text()).toBe('shared config');
 		expect(declaring.text()).toBe('pm2');
 	});
 
@@ -1157,7 +1157,7 @@ describe('the options a restart carries', () => {
 
 		await row.find('input').setValue('2000');
 
-		expect(row.find('.source').text()).toBe('config');
+		expect(row.find('.source').text()).toBe('shared config');
 
 		await row.find('.edit .cancel button').trigger('click');
 
@@ -1183,7 +1183,7 @@ describe('the options a restart carries', () => {
 	// Emptying the box is the same ask as the button, so both have to reach the
 	// route as the null that releases the option rather than as a zero.
 	test('an emptied option is handed back to the environment', async () => {
-		supervisorOverride = { killTimeout: 5000 };
+		supervisorSharedConfig = { killTimeout: 5000 };
 
 		const wrapper = await mounted(null, [runner(declared())]);
 		const row = optionRow(wrapper, 'PM2_KILL_TIMEOUT');
@@ -1199,7 +1199,7 @@ describe('the options a restart carries', () => {
 	});
 
 	test('the reset button releases an option nobody retyped', async () => {
-		supervisorOverride = { maxRestarts: 30 };
+		supervisorSharedConfig = { maxRestarts: 30 };
 
 		const wrapper = await mounted(null, [runner(declared())]);
 		const row = optionRow(wrapper, 'PM2_MAX_RESTARTS');

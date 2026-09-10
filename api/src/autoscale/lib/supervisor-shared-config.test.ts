@@ -2,10 +2,10 @@ import { expect, test, vi } from 'vitest';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorOverride,
+	readSupervisorSharedConfig,
 	reloadDeclaration,
-	writeSupervisorOverride,
-} from './supervisor-override.js';
+	writeSupervisorSharedConfig,
+} from './supervisor-shared-config.js';
 
 vi.mock('@directus/env');
 vi.mock('../../redis/index.js');
@@ -26,35 +26,35 @@ async function deploymentWith(
 	vi.mocked(useRedis).mockReturnValue({ get, set, del } as never);
 }
 
-test('reads the override under a key of its own', async () => {
+test('reads the shared config under a key of its own', async () => {
 	await deploymentWith(JSON.stringify({ listenTimeout: 20_000 }));
 
-	await expect(readSupervisorOverride())
+	await expect(readSupervisorSharedConfig())
 		.resolves
 		.toEqual({ listenTimeout: 20_000 });
 
 	expect(get).toHaveBeenCalledWith('scalabus:config:pm2:supervisor');
 });
 
-// A restart makes no override of a key it cannot parse, and the page reading it
+// A restart makes no shared config of a key it cannot parse, and the page reading it
 // has to be told the same thing rather than shown an error.
-test('reads a key edited into nonsense as no override', async () => {
+test('reads a key edited into nonsense as no shared config', async () => {
 	await deploymentWith('{ not json');
 
-	await expect(readSupervisorOverride()).resolves.toBeNull();
+	await expect(readSupervisorSharedConfig()).resolves.toBeNull();
 });
 
-test('writes the override, and deletes the key for none', async () => {
+test('writes the shared config, and deletes the key for none', async () => {
 	await deploymentWith(null);
 
-	await writeSupervisorOverride({ killTimeout: 5000 });
+	await writeSupervisorSharedConfig({ killTimeout: 5000 });
 
 	expect(set).toHaveBeenCalledWith(
 		'scalabus:config:pm2:supervisor',
 		'{"killTimeout":5000}',
 	);
 
-	await writeSupervisorOverride(null);
+	await writeSupervisorSharedConfig(null);
 	expect(del).toHaveBeenCalledWith('scalabus:config:pm2:supervisor');
 });
 
@@ -94,9 +94,9 @@ test('refuses a stamp field that is not text', () => {
 		.toThrowError(`'setFrom' has to be a string`);
 });
 
-// An override holding nothing but its own stamp would show a supervisor as
-// overridden when every value it runs on came from the environment.
-test('an override released down to its stamp is removed', () => {
+// A shared config holding nothing but its own stamp would show a supervisor as
+// carrying one when every value it runs on came from the environment.
+test('a shared config released down to its stamp is removed', () => {
 	const stamped = { listenTimeout: 20_000, setBy: 'jean' };
 
 	expect(applySupervisorPatch(stamped, { listenTimeout: null })).toBeNull();
@@ -106,9 +106,9 @@ test('an override released down to its stamp is removed', () => {
 });
 
 // The full set every restart, because pm2 keeps what the last one pushed: a
-// field released from the override goes back to the environment only if the
+// field released from the shared config goes back to the environment only if the
 // restart says so.
-test('the restart carries every option, not only the overridden ones', async () => {
+test('the restart carries every option, not only the shared ones', async () => {
 	await deploymentWith(null, { PM2_KILL_TIMEOUT: 5000 });
 
 	expect(reloadDeclaration({ listenTimeout: 20_000 })).toEqual({
