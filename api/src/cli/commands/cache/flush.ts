@@ -1,6 +1,7 @@
 import { flushCaches, type CacheFlushReport } from '../../../cache.js';
 import { useLogger } from '../../../logger/index.js';
 import { redisConfigAvailable } from '../../../redis/index.js';
+import { drainStdout } from '../../utils/drain-stdout.js';
 
 /**
  * The boot-path flush (`flushCachesIfBuildChanged`) is keyed to the build
@@ -24,7 +25,8 @@ export default async function cacheFlush(): Promise<void> {
 			'[cache] no REDIS is configured, so this would reach no other node',
 		);
 
-		process.exit(1);
+		await exitWhenLogged(1);
+		return;
 	}
 
 	let report: CacheFlushReport | undefined;
@@ -40,16 +42,24 @@ export default async function cacheFlush(): Promise<void> {
 	// listener runs, and a fallthrough from the failed flush into the report it
 	// never returned raises a TypeError out of the handler for exit 1.
 	if (report === undefined) {
-		process.exit(1);
+		await exitWhenLogged(1);
 	}
 	else if (report.failures.length > 0) {
 		// `flushCaches` is best-effort by contract — it warns and carries on rather
 		// than throwing — so an exit code read off the absence of an exception would
 		// tell a deploy the caches are clear when Redis refused every one of them.
 		logger.error(`[cache] flush incomplete: ${report.failures.join(', ')}`);
-		process.exit(1);
+		await exitWhenLogged(1);
 	}
 	else {
-		process.exit(0);
+		await exitWhenLogged(0);
 	}
+}
+
+// Everything this command reports, it reports by logging it, and the deploy step
+// reading that log gets a stdout that is a pipe rather than a TTY — asynchronous,
+// and emptied by an exit that does not wait for it.
+async function exitWhenLogged(code: number): Promise<void> {
+	await drainStdout();
+	process.exit(code);
 }

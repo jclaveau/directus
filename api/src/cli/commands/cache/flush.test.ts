@@ -1,4 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest';
+import { drainStdout } from '../../utils/drain-stdout.js';
 import { flushCaches, type CacheFlushReport } from '../../../cache.js';
 import { useLogger } from '../../../logger/index.js';
 import { redisConfigAvailable } from '../../../redis/index.js';
@@ -7,6 +8,7 @@ import cacheFlush from './flush.js';
 vi.mock('../../../cache.js');
 vi.mock('../../../logger/index.js');
 vi.mock('../../../redis/index.js');
+vi.mock('../../utils/drain-stdout.js');
 
 const error = vi.fn();
 
@@ -22,6 +24,7 @@ function report(overrides: Partial<CacheFlushReport> = {}): CacheFlushReport {
 
 mockLogger();
 vi.mocked(redisConfigAvailable).mockReturnValue(true);
+vi.mocked(drainStdout).mockResolvedValue();
 
 // The command's whole contract is its exit code, so the exit has to stop the
 // function the way the real one does rather than run on into the next statement.
@@ -33,6 +36,7 @@ afterEach(() => {
 	vi.clearAllMocks();
 	mockLogger();
 	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(drainStdout).mockResolvedValue();
 });
 
 test('forces the flush and exits 0', async () => {
@@ -96,4 +100,26 @@ test('refuses a run with no bus to reach the other nodes', async () => {
 	expect(error).toHaveBeenCalledWith(
 		'[cache] no REDIS is configured, so this would reach no other node',
 	);
+});
+
+// `process.exit` discards whatever stdout still holds, and stdout is asynchronous
+// wherever it is not a TTY — a deploy log, a CI step. The line saying how the run
+// went is the first thing an immediate exit drops.
+test('lets what it logged leave the process before it exits', async () => {
+	const order: string[] = [];
+
+	vi.mocked(drainStdout).mockImplementation(async () => {
+		order.push('drained');
+	});
+
+	exit.mockImplementationOnce(((code: number) => {
+		order.push(`exit:${code}`);
+		throw new Error(`exit:${code}`);
+	}) as never);
+
+	vi.mocked(flushCaches).mockResolvedValue(report());
+
+	await expect(cacheFlush()).rejects.toThrowError('exit:0');
+
+	expect(order).toEqual(['drained', 'exit:0']);
 });

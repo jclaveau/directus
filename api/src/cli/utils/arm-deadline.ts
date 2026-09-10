@@ -18,6 +18,9 @@ export function armDeadline(budgetMs: number | undefined, what: string): void {
 		return;
 	}
 
+	// Exits without waiting for stdout to drain, unlike the commands it guards: this
+	// is the last resort, and a drain that never resolves would hang the deploy step
+	// on the one path with nothing left to rescue it.
 	const ranOutOfTime = setTimeout(() => {
 		useLogger().error(`[cli] ${what} did not finish within ${budgetMs}ms`);
 		process.exit(1);
