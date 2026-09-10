@@ -2,7 +2,7 @@ import { beforeEach, expect, test, vi } from 'vitest';
 
 const listSupervisedApps = vi.fn();
 
-vi.mock('../../processes/supervisor/index.js', () => {
+vi.mock('../../supervisor/index.js', () => {
 	return { listSupervisedApps };
 });
 

@@ -1,7 +1,7 @@
 import { type AutoscaleBound, SUPERVISOR_BOUNDS } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError } from '@directus/errors';
-import { useRedis } from '../../redis/index.js';
+import { useRedis } from '../../../redis/index.js';
 import { supervisorSharedConfigKey } from './resolve-config.js';
 
 /**

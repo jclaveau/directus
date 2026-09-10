@@ -1,6 +1,6 @@
 import { InvalidPayloadError } from '@directus/errors';
 import type { AutoscaleConfig } from '@directus/types';
-import { useRedis } from '../../redis/index.js';
+import { useRedis } from '../../../redis/index.js';
 import { autoscaleConfigKey } from './resolve-config.js';
 
 /** What a field of the shared config may hold, so a bad write fails at the door. */

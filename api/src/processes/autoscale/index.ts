@@ -1,13 +1,13 @@
 import { freemem } from 'node:os';
 import { LEGACY_SAMPLE_WINDOW } from '@directus/constants';
-import { useLogger } from '../logger/index.js';
-import { initProcessReports } from '../processes/index.js';
+import { useLogger } from '../../logger/index.js';
+import { initProcessReports } from '../index.js';
 import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
 	scaleApp,
-} from '../processes/supervisor/index.js';
-import { reportUnhandledRejection } from '../utils/report-unhandled-rejection.js';
+} from '../supervisor/index.js';
+import { reportUnhandledRejection } from '../../utils/report-unhandled-rejection.js';
 import { decide } from './lib/decide.js';
 import { PoolSamples } from './lib/pool-samples.js';
 import { readPool, restarted } from './lib/pool.js';

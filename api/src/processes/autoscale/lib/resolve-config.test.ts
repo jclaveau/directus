@@ -8,9 +8,9 @@ import type { AutoscaleConfig } from '../types.js';
 vi.setConfig({ testTimeout: 30_000 });
 
 vi.mock('@directus/env');
-vi.mock('../../redis/index.js');
+vi.mock('../../../redis/index.js');
 
-vi.mock('../../logger/index.js', () => {
+vi.mock('../../../logger/index.js', () => {
 	return {
 		useLogger: () => {
 			return { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
@@ -32,7 +32,7 @@ async function freshModule() {
 	vi.resetModules();
 
 	const { useEnv } = await import('@directus/env');
-	const { redisConfigAvailable, useRedis } = await import('../../redis/index.js');
+	const { redisConfigAvailable, useRedis } = await import('../../../redis/index.js');
 
 	vi.mocked(useEnv).mockReturnValue({
 		CACHE_NAMESPACE: 'scalabus',
@@ -133,7 +133,7 @@ test('holds the last configuration when Redis stops answering', async () => {
 // A deployment with nowhere to keep a shared config has none to read, and asking
 // anyway would be a command on a client that was never going to answer.
 test('reads no shared config where there is nowhere to keep one', async () => {
-	const { redisConfigAvailable } = await import('../../redis/index.js');
+	const { redisConfigAvailable } = await import('../../../redis/index.js');
 	const { resolveConfig, resolvedSources } = await freshModule();
 	vi.mocked(redisConfigAvailable).mockReturnValue(false);
 

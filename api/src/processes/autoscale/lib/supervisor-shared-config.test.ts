@@ -8,7 +8,7 @@ import {
 } from './supervisor-shared-config.js';
 
 vi.mock('@directus/env');
-vi.mock('../../redis/index.js');
+vi.mock('../../../redis/index.js');
 
 const get = vi.fn();
 const set = vi.fn();
@@ -19,7 +19,7 @@ async function deploymentWith(
 	env: Record<string, unknown> = {},
 ) {
 	const { useEnv } = await import('@directus/env');
-	const { useRedis } = await import('../../redis/index.js');
+	const { useRedis } = await import('../../../redis/index.js');
 
 	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'scalabus', ...env });
 	get.mockResolvedValue(stored);

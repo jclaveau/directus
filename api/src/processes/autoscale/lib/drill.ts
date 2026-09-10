@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { AutoscaleDrill, AutoscaleRunner } from '@directus/types';
-import { useBus } from '../../bus/index.js';
-import { useLogger } from '../../logger/index.js';
+import { useBus } from '../../../bus/index.js';
+import { useLogger } from '../../../logger/index.js';
 
 /**
  * The channel a drill is announced on.

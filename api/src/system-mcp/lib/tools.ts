@@ -8,7 +8,7 @@ import {
 	MAX_DRILL_PERCENT,
 	MAX_DRILL_SECONDS,
 	MIN_DRILL_PERCENT,
-} from '../../autoscale/lib/drill.js';
+} from '../../processes/autoscale/lib/drill.js';
 import { redisConfigAvailable } from '../../redis/index.js';
 import { UtilsService } from '../../services/utils.js';
 import {

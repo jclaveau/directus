@@ -66,7 +66,7 @@ const autoscale = vi.hoisted(() => {
 	return { autoscaleState: vi.fn() };
 });
 
-vi.mock('../../autoscale/lib/state.js', () => {
+vi.mock('../autoscale/lib/state.js', () => {
 	return { autoscaleState: autoscale.autoscaleState };
 });
 

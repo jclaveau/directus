@@ -28,28 +28,28 @@ import {
 	loadedWorker,
 	startDrill,
 	stopDrill,
-} from '../autoscale/lib/drill.js';
+} from '../processes/autoscale/lib/drill.js';
 import {
 	askForReload,
 	reloadRefusal,
-} from '../autoscale/lib/reload.js';
+} from '../processes/autoscale/lib/reload.js';
 import {
 	applySharedConfigPatch,
 	parseSharedConfigPatch,
 	readSharedConfig,
 	writeSharedConfig,
-} from '../autoscale/lib/shared-config.js';
+} from '../processes/autoscale/lib/shared-config.js';
 import {
 	autoscaleConfigKey,
 	configWithSharedConfig,
 	supervisorSharedConfigKey,
-} from '../autoscale/lib/resolve-config.js';
+} from '../processes/autoscale/lib/resolve-config.js';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
 	readSupervisorSharedConfig,
 	writeSupervisorSharedConfig,
-} from '../autoscale/lib/supervisor-shared-config.js';
+} from '../processes/autoscale/lib/supervisor-shared-config.js';
 import { collectProcesses, processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -68,12 +68,12 @@ vi.mock('../cache.js');
 vi.mock('../cache-events.js');
 vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
-vi.mock('../autoscale/lib/drill.js');
-vi.mock('../autoscale/lib/reload.js');
-vi.mock('../autoscale/lib/shared-config.js');
-vi.mock('../autoscale/lib/supervisor-shared-config.js');
+vi.mock('../processes/autoscale/lib/drill.js');
+vi.mock('../processes/autoscale/lib/reload.js');
+vi.mock('../processes/autoscale/lib/shared-config.js');
+vi.mock('../processes/autoscale/lib/supervisor-shared-config.js');
 vi.mock('../processes/index.js');
-vi.mock('../autoscale/lib/resolve-config.js');
+vi.mock('../processes/autoscale/lib/resolve-config.js');
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {

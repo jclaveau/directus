@@ -1,5 +1,5 @@
 import type { AutoscaleSupervisor } from '@directus/types';
-import type { SupervisedProcessEnv } from '../../processes/supervisor/index.js';
+import type { SupervisedProcessEnv } from '../../supervisor/index.js';
 
 /**
  * What pm2 acts on for a declaration that names no value.

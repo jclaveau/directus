@@ -52,7 +52,7 @@ import {
 	validateDatabaseExtensions,
 	outstandingMigrationsOrExit,
 } from './database/index.js';
-import { initAutoscaleDrill } from './autoscale/lib/drill.js';
+import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { initCacheConfig } from './cache-config.js';
 import emitter from './emitter.js';

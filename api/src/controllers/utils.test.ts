@@ -37,7 +37,9 @@ vi.mock('../redis/index.js', async (importOriginal) => {
 	};
 });
 
-vi.mock('../autoscale/lib/drill.js', () => ({ autoscaleDrillEnabled: () => true }));
+vi.mock('../processes/autoscale/lib/drill.js', () => {
+	return { autoscaleDrillEnabled: () => true };
+});
 
 vi.mock('../services/import-export.js', () => {
 	return { ExportService: vi.fn(), ImportService: vi.fn() };

@@ -16,7 +16,7 @@ import {
 	reportedProcessDetails,
 } from './processes-config.js';
 import { resolveReportedEnv } from './redact-env.js';
-import { autoscaleState } from '../../autoscale/lib/state.js';
+import { autoscaleState } from '../autoscale/lib/state.js';
 import { hostCapacity } from './host-capacity.js';
 import { readSupervisedProcesses } from './supervisor-snapshot.js';
 import { supervisorAvailable } from '../supervisor/index.js';

@@ -2,9 +2,9 @@ import type {
 	AutoscaleReload,
 	AutoscaleRunner,
 } from '@directus/types';
-import { useBus } from '../../bus/index.js';
-import { useLogger } from '../../logger/index.js';
-import { reloadApp } from '../../processes/supervisor/index.js';
+import { useBus } from '../../../bus/index.js';
+import { useLogger } from '../../../logger/index.js';
+import { reloadApp } from '../../supervisor/index.js';
 import {
 	readSupervisorSharedConfig,
 	reloadDeclaration,

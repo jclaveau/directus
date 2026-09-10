@@ -1,7 +1,7 @@
 import type { AutoscaleRunner, AutoscaleSupervisor } from '@directus/types';
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
-vi.mock('../../logger/index.js', () => {
+vi.mock('../../../logger/index.js', () => {
 	return {
 		useLogger: () => {
 			return { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
@@ -12,7 +12,7 @@ vi.mock('../../logger/index.js', () => {
 const publish = vi.fn();
 const subscribe = vi.fn();
 
-vi.mock('../../bus/index.js', () => {
+vi.mock('../../../bus/index.js', () => {
 	return {
 		useBus: () => {
 			return { publish, subscribe };
@@ -22,7 +22,7 @@ vi.mock('../../bus/index.js', () => {
 
 const reloadApp = vi.fn();
 
-vi.mock('../../processes/supervisor/index.js', () => {
+vi.mock('../../supervisor/index.js', () => {
 	return { reloadApp };
 });
 

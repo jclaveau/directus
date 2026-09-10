@@ -3,7 +3,7 @@ import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 
 vi.mock('@directus/env');
 
-vi.mock('../../logger/index.js', () => {
+vi.mock('../../../logger/index.js', () => {
 	return {
 		useLogger: () => {
 			return { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
@@ -14,7 +14,7 @@ vi.mock('../../logger/index.js', () => {
 const publish = vi.fn();
 const subscribe = vi.fn();
 
-vi.mock('../../bus/index.js', () => {
+vi.mock('../../../bus/index.js', () => {
 	return {
 		useBus: () => {
 			return { publish, subscribe };

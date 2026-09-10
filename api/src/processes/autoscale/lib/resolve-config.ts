@@ -1,6 +1,6 @@
 import { useEnv } from '@directus/env';
-import { useLogger } from '../../logger/index.js';
-import { redisConfigAvailable, useRedis } from '../../redis/index.js';
+import { useLogger } from '../../../logger/index.js';
+import { redisConfigAvailable, useRedis } from '../../../redis/index.js';
 import type {
 	AutoscaleConfig,
 	AutoscaleConfigSources,

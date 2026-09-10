@@ -2,7 +2,7 @@ import type { AutoscaleSupervisor } from '@directus/types';
 import {
 	type SupervisedProcessEnv,
 	listSupervisedApps,
-} from '../../processes/supervisor/index.js';
+} from '../../supervisor/index.js';
 import { declaredBy } from './supervisor.js';
 
 /** What one sample of the managed app's workers says about it. */

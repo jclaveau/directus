@@ -8,22 +8,22 @@ import {
 	test,
 	vi,
 } from 'vitest';
-import { reportUnhandledRejection } from '../utils/report-unhandled-rejection.js';
+import { reportUnhandledRejection } from '../../utils/report-unhandled-rejection.js';
 import type { AutoscaleConfig } from './types.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-vi.mock('../logger/index.js', () => {
+vi.mock('../../logger/index.js', () => {
 	return { useLogger: () => logger };
 });
 
 const initProcessReports = vi.fn(async () => undefined);
 
-vi.mock('../processes/index.js', () => {
+vi.mock('../index.js', () => {
 	return { initProcessReports };
 });
 
-vi.mock('../utils/report-unhandled-rejection.js', () => {
+vi.mock('../../utils/report-unhandled-rejection.js', () => {
 	return { reportUnhandledRejection: vi.fn() };
 });
 
@@ -31,7 +31,7 @@ const connectToSupervisor = vi.fn(async () => undefined);
 const disconnectFromSupervisor = vi.fn();
 const scaleApp = vi.fn(async () => undefined);
 
-vi.mock('../processes/supervisor/index.js', () => {
+vi.mock('../supervisor/index.js', () => {
 	return { connectToSupervisor, disconnectFromSupervisor, scaleApp };
 });
 

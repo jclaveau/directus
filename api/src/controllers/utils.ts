@@ -4,7 +4,7 @@ import argon2 from 'argon2';
 import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
-import { autoscaleDrillEnabled } from '../autoscale/lib/drill.js';
+import { autoscaleDrillEnabled } from '../processes/autoscale/lib/drill.js';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
 import {

@@ -42,7 +42,7 @@ export async function createCli(): Promise<Command> {
 		.command('autoscale')
 		.description('Resize the API worker pool to match its load')
 		.action(async () => {
-			const { runAutoscaler } = await import('../autoscale/index.js');
+			const { runAutoscaler } = await import('../processes/autoscale/index.js');
 
 			await runAutoscaler();
 		});

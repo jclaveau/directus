@@ -81,7 +81,7 @@ const drill = vi.hoisted(() => {
 // Spread rather than replaced: the drill's bounds are read here to build the
 // tool's own description, and a mock that dropped them would advertise
 // `undefined-undefined` while every assertion still passed.
-vi.mock('../../autoscale/lib/drill.js', async (importOriginal) => {
+vi.mock('../../processes/autoscale/lib/drill.js', async (importOriginal) => {
 	return {
 		...await importOriginal<object>(),
 		autoscaleDrillEnabled: drill.enabled,
@@ -104,7 +104,7 @@ import {
 	MAX_DRILL_PERCENT,
 	MAX_DRILL_SECONDS,
 	MIN_DRILL_PERCENT,
-} from '../../autoscale/lib/drill.js';
+} from '../../processes/autoscale/lib/drill.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,

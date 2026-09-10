@@ -52,7 +52,7 @@ import {
 	readSharedConfig,
 	writeSharedConfig,
 	type AutoscaleSharedConfig,
-} from '../autoscale/lib/shared-config.js';
+} from '../processes/autoscale/lib/shared-config.js';
 import {
 	loadedWorker,
 	MAX_DRILL_PERCENT,
@@ -61,24 +61,24 @@ import {
 	startDrill,
 	stopDrill,
 	drillState,
-} from '../autoscale/lib/drill.js';
+} from '../processes/autoscale/lib/drill.js';
 import {
 	askForReload,
 	reloadRefusal,
-} from '../autoscale/lib/reload.js';
+} from '../processes/autoscale/lib/reload.js';
 import {
 	autoscaleConfigKey,
 	configWithSharedConfig,
 	supervisorSharedConfigKey,
-} from '../autoscale/lib/resolve-config.js';
+} from '../processes/autoscale/lib/resolve-config.js';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
 	readSupervisorSharedConfig,
 	type SupervisorSharedConfig,
 	writeSupervisorSharedConfig,
-} from '../autoscale/lib/supervisor-shared-config.js';
-import { assertUsableConfig } from '../autoscale/lib/validate-config.js';
+} from '../processes/autoscale/lib/supervisor-shared-config.js';
+import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
 import {
 	collectProcesses,
 	processesReportEnabled,
