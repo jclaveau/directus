@@ -706,7 +706,10 @@ describe('the autoscale panel', () => {
 
 		await flushPromises();
 
-		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: false });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			enabled: false,
+			note: null,
+		});
 
 		const reads = vi.mocked(api.get).mock.calls
 			.filter(([url]) => url === '/utils/processes');

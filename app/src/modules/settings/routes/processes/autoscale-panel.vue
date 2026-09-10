@@ -53,6 +53,8 @@ const available = ref(true);
 const error = ref<string | null>(null);
 const saving = ref(false);
 const drafts = ref<Record<string, string | null>>({});
+
+const note = ref('');
 const drill = ref<AutoscaleDrill | null>(null);
 const drillAvailable = ref(false);
 const restartArmed = ref(false);
@@ -257,14 +259,33 @@ async function load(): Promise<void> {
 	}
 }
 
+/**
+ * The patch with the reason typed for it.
+ *
+ * Null where nothing is typed rather than left out: the note belongs to the
+ * change that carried it, and one left behind would attribute the next change
+ * to the reason for the last.
+ */
+function withNote(patch: Record<string, unknown>): Record<string, unknown> {
+	const typed = note.value.trim();
+
+	return {
+		...patch,
+		note: typed === ''
+			? null
+			: typed,
+	};
+}
+
 async function write(patch: Record<string, unknown>): Promise<void> {
 	saving.value = true;
 	error.value = null;
 
 	try {
-		const response = await api.patch('/utils/autoscale', patch);
+		const response = await api.patch('/utils/autoscale', withNote(patch));
 		override.value = response.data.data.override;
 		setByEmail.value = response.data.data.setByEmail ?? null;
+		note.value = '';
 
 		// The values the loop runs on come back on the process report, and the
 		// tick that reads this write is the one that changes them.
@@ -290,9 +311,14 @@ async function writeSupervisor(patch: Record<string, unknown>): Promise<void> {
 	error.value = null;
 
 	try {
-		const response = await api.patch('/utils/autoscale/supervisor', patch);
+		const response = await api.patch(
+			'/utils/autoscale/supervisor',
+			withNote(patch),
+		);
+
 		supervisorOverride.value = response.data.data.override;
 		supervisorSetByEmail.value = response.data.data.setByEmail ?? null;
+		note.value = '';
 	}
 	catch (err: any) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
@@ -402,6 +428,7 @@ async function resetToEnv(): Promise<void> {
 		override.value = null;
 		setByEmail.value = null;
 		drafts.value = {};
+		note.value = '';
 		emit('changed');
 	}
 	catch (err: any) {
@@ -889,6 +916,21 @@ onUnmounted(disarmClock);
 
 		<p v-if="stampLine" class="stamp">{{ stampLine }}</p>
 
+		<!-- Carried by every change made from here, levers included, and stored
+		with it: the override outlives the incident that justified it. -->
+		<v-input
+			v-if="available"
+			v-model="note"
+			small
+			full-width
+			class="note"
+			:disabled="saving"
+			:placeholder="t(
+				'autoscale_note',
+				'Why — stored with the next change made here',
+			)"
+		/>
+
 		<table v-if="available" class="fields">
 			<thead>
 				<tr>
@@ -1155,6 +1197,10 @@ onUnmounted(disarmClock);
 	display: flex;
 	gap: 8px;
 	align-items: center;
+}
+
+.note {
+	margin-block-end: 8px;
 }
 
 .decision,

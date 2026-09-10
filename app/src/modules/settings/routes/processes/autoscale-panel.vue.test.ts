@@ -496,7 +496,10 @@ describe('the levers', () => {
 
 		await lever(wrapper, 'pause');
 
-		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: false });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			enabled: false,
+			note: null,
+		});
 
 		// The values shown come from the process report, which the page holding
 		// this panel re-reads.
@@ -513,7 +516,10 @@ describe('the levers', () => {
 
 		await lever(wrapper, 'pause');
 
-		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: true });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			enabled: true,
+			note: null,
+		});
 	});
 
 	test('pinning holds the pool at the size it reported', async () => {
@@ -523,8 +529,11 @@ describe('the levers', () => {
 
 		await lever(wrapper, 'pin');
 
-		expect(api.patch)
-			.toHaveBeenCalledWith('/utils/autoscale', { minWorkers: 3, maxWorkers: 3 });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			minWorkers: 3,
+			maxWorkers: 3,
+			note: null,
+		});
 	});
 
 	test('unpinning clears both bounds rather than guessing them', async () => {
@@ -542,6 +551,7 @@ describe('the levers', () => {
 		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
 			minWorkers: null,
 			maxWorkers: null,
+			note: null,
 		});
 	});
 
@@ -570,8 +580,8 @@ describe('restarting the pool', () => {
 		expect(api.post).toHaveBeenCalledWith('/utils/autoscale/reload');
 	});
 
-	// What a restart costs is what the confirmation is for, so the note that
-	// used to sit under the button travels into the dialog with it.
+	// What a restart costs is what the confirmation is for, so what it does to
+	// the pool is said in the dialog rather than under the button that opens it.
 	test('the confirmation says what a restart does to the pool', async () => {
 		const wrapper = await mounted(null);
 
@@ -703,6 +713,7 @@ describe('the whole form at once', () => {
 		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
 			minWorkers: 6,
 			maxWorkers: 8,
+			note: null,
 		});
 	});
 
@@ -798,8 +809,10 @@ describe('editing one field', () => {
 		select.vm.$emit('update:modelValue', 'legacy');
 		await applyRow(wrapper, 'strategy');
 
-		expect(api.patch)
-			.toHaveBeenCalledWith('/utils/autoscale', { strategy: 'legacy' });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			strategy: 'legacy',
+			note: null,
+		});
 	});
 
 	test('a chosen boolean is written as a boolean', async () => {
@@ -810,7 +823,10 @@ describe('editing one field', () => {
 
 		await applyRow(wrapper, 'enabled');
 
-		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { enabled: false });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			enabled: false,
+			note: null,
+		});
 	});
 
 	async function apply(wrapper: any, field: string, typed: string) {
@@ -824,14 +840,20 @@ describe('editing one field', () => {
 		const wrapper = await mounted({});
 		await apply(wrapper, 'maxWorkers', '8');
 
-		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { maxWorkers: 8 });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			maxWorkers: 8,
+			note: null,
+		});
 	});
 
 	test('emptying a field clears it instead of writing an empty one', async () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
 		await apply(wrapper, 'maxWorkers', '');
 
-		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', { maxWorkers: null });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			maxWorkers: null,
+			note: null,
+		});
 	});
 
 	test('a change is discarded without writing it', async () => {
@@ -878,8 +900,10 @@ describe('editing one field', () => {
 
 		await flushPromises();
 
-		expect(api.patch)
-			.toHaveBeenCalledWith('/utils/autoscale', { maxWorkers: null });
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			maxWorkers: null,
+			note: null,
+		});
 	});
 
 	// Resetting hands the field back to the env chain, and the value waiting
@@ -993,6 +1017,35 @@ describe('editing one field', () => {
 		expect(name.attributes('title')).toContain('never grows past this');
 	});
 
+	// The override outlives the incident that justified it, and what it is then
+	// asked is why — which no lever and no field can answer.
+	test('the reason typed beside the fields is stored with the change', async () => {
+		const wrapper = await mounted({});
+
+		await wrapper.find('.note input').setValue('ceiling raised for the launch');
+		await apply(wrapper, 'maxWorkers', '8');
+
+		expect(api.patch).toHaveBeenCalledWith('/utils/autoscale', {
+			maxWorkers: 8,
+			note: 'ceiling raised for the launch',
+		});
+	});
+
+	// A reason left behind would date and attribute the next change with the
+	// reason for the last one.
+	test('a reason belongs to the change that carried it', async () => {
+		const wrapper = await mounted({});
+
+		await wrapper.find('.note input').setValue('pinned during the incident');
+		await apply(wrapper, 'maxWorkers', '8');
+		await apply(wrapper, 'minWorkers', '2');
+
+		expect(api.patch).toHaveBeenLastCalledWith('/utils/autoscale', {
+			minWorkers: 2,
+			note: null,
+		});
+	});
+
 	test('a failed write is reported and leaves the panel usable', async () => {
 		vi.mocked(api.patch).mockRejectedValue({
 			response: { data: { errors: [{ message: 'maxWorkers has to be a number' }] } },
@@ -1070,7 +1123,7 @@ describe('the options a restart carries', () => {
 
 		expect(api.patch).toHaveBeenCalledWith(
 			'/utils/autoscale/supervisor',
-			{ listenTimeout: 20000 },
+			{ listenTimeout: 20000, note: null },
 		);
 	});
 
@@ -1088,7 +1141,7 @@ describe('the options a restart carries', () => {
 
 		expect(api.patch).toHaveBeenCalledWith(
 			'/utils/autoscale/supervisor',
-			{ killTimeout: null },
+			{ killTimeout: null, note: null },
 		);
 	});
 
@@ -1103,7 +1156,25 @@ describe('the options a restart carries', () => {
 
 		expect(api.patch).toHaveBeenCalledWith(
 			'/utils/autoscale/supervisor',
-			{ maxRestarts: null },
+			{ maxRestarts: null, note: null },
+		);
+	});
+
+	// One box for both tables: a restart option is changed during the same
+	// incident, through the same page, and is worth the same sentence.
+	test('the reason reaches the supervisor route too', async () => {
+		const wrapper = await mounted(null, [runner(declared())]);
+
+		await wrapper.find('.note input').setValue('listen timeout raised');
+
+		const row = optionRow(wrapper, 'PM2_LISTEN_TIMEOUT');
+		await row.find('input').setValue('20000');
+		await row.find('.edit .apply button').trigger('click');
+		await flushPromises();
+
+		expect(api.patch).toHaveBeenCalledWith(
+			'/utils/autoscale/supervisor',
+			{ listenTimeout: 20000, note: 'listen timeout raised' },
 		);
 	});
 
