@@ -122,6 +122,8 @@ interface Layered {
 	config: AutoscaleConfig;
 	/** The fields the shared settings supplied, for {@link sourcesOf} to read. */
 	taken: Set<keyof AutoscaleConfig>;
+	/** The fields whose stored value the merge could not use, as `name=value`. */
+	refused: string[];
 }
 
 /**
@@ -129,8 +131,12 @@ interface Layered {
  * raising one threshold during an incident leaves the rest on the env chain
  * rather than resetting them to defaults nobody asked for.
  *
- * A field whose stored value this cannot use is left on the chain too, and left
- * out of `taken` with it.
+ * A field whose stored value this cannot use is left on the chain too, left out
+ * of `taken` with it, and named in `refused` so the drop is not silent. Refused
+ * rather than thrown on: this runs on the scaling tick, and the value it is
+ * reading is already durable — a throw would end the pool on every tick until
+ * somebody edited the table. The write is where a bad value is refused, and
+ * the check the settings guard runs is what refuses it there.
  */
 function withSharedSettings(
 	base: AutoscaleConfig,
@@ -138,8 +144,12 @@ function withSharedSettings(
 ): Layered {
 	const config = { ...base };
 	const taken = new Set<keyof AutoscaleConfig>();
+	const refused: string[] = [];
 
 	for (const [name, value] of Object.entries(sharedSettings)) {
+		// A field of no configuration is one of the note fields riding in the
+		// same object, and a null hands that field back to the environment on
+		// purpose. Neither is a value that could not be used.
 		if (Object.hasOwn(base, name) === false) {
 			continue;
 		}
@@ -150,21 +160,33 @@ function withSharedSettings(
 
 		const field = name as keyof AutoscaleConfig;
 		const current = base[field];
+		const stored = `${name}=${JSON.stringify(value)}`;
 
 		if (typeof current === 'number') {
 			const parsed = Number(value);
 
 			if (Number.isFinite(parsed) === false || parsed < 0) {
+				refused.push(stored);
 				continue;
 			}
 
 			Object.assign(config, { [field]: parsed });
 		}
 		else if (typeof current === 'boolean') {
-			Object.assign(config, { [field]: value === true || value === 'true' });
+			// Refused rather than read as false, which is what every field
+			// beside it does with a value it cannot use. Coerced, a stored
+			// `"oui"` stops the pool scaling while the page names the shared
+			// settings as what asked for that.
+			if (value !== true && value !== false) {
+				refused.push(stored);
+				continue;
+			}
+
+			Object.assign(config, { [field]: value });
 		}
 		else if (field === 'signal') {
 			if (signalOr(value, base.signal) !== value) {
+				refused.push(stored);
 				continue;
 			}
 
@@ -172,6 +194,7 @@ function withSharedSettings(
 		}
 		else if (field === 'strategy') {
 			if (strategyOr(value, base.strategy) !== value) {
+				refused.push(stored);
 				continue;
 			}
 
@@ -181,13 +204,14 @@ function withSharedSettings(
 			Object.assign(config, { [field]: value });
 		}
 		else {
+			refused.push(stored);
 			continue;
 		}
 
 		taken.add(field);
 	}
 
-	return { config, taken };
+	return { config, taken, refused };
 }
 
 /**
@@ -219,6 +243,7 @@ export function configWithSharedSettings(
 const BOOT_READ_MS = 5_000;
 
 let lastCorrections = '';
+let lastRefused = '';
 let lastAnnounced: string | null = null;
 let lastBase: AutoscaleConfig | null = null;
 let lastSources: AutoscaleConfigSources | null = null;
@@ -259,6 +284,31 @@ function announce(corrections: string[]): void {
 
 	if (summary !== '') {
 		useLogger().warn(`[autoscale] configuration corrected: ${summary}`);
+	}
+}
+
+/**
+ * Say which stored values the merge could not use.
+ *
+ * The pool is running the environment's value for those fields and the page
+ * says so, which leaves the operator who stored one with a page that agrees
+ * with the pool and neither of them mentioning what they did with what was
+ * asked for. Every write through the API is checked, so a field reaching here
+ * was stored by something that went around it.
+ */
+function announceRefused(refused: string[]): void {
+	const summary = refused.join(', ');
+
+	if (summary === lastRefused) {
+		return;
+	}
+
+	lastRefused = summary;
+
+	if (summary !== '') {
+		useLogger().warn(
+			`[autoscale] unusable shared settings, left on the environment: ${summary}`,
+		);
 	}
 }
 
@@ -367,6 +417,7 @@ export function resolveConfig(): AutoscaleConfig {
 	const { config, corrections } = sanitizeConfig(layered.config);
 
 	announce(corrections);
+	announceRefused(layered.refused);
 	lastBase = sanitizeConfig(fromEnv).config;
 	lastSources = sourcesOf(layered.taken);
 

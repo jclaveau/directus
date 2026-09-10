@@ -268,6 +268,33 @@ test('leaves a field the shared settings cannot set on the chain', async () => {
 	});
 });
 
+// Coerced instead, a value nobody can read as a boolean turns into `false` —
+// the pool stops scaling, and the page names the shared settings as what asked
+// for that. Every field beside it refuses one, and so does the write.
+test('refuses a stored value nobody can read as a boolean', async () => {
+	const { resolveConfig, resolvedSources } = await mirroring({ enabled: 'oui' });
+
+	expect(resolveConfig()).toMatchObject({ enabled: true });
+	expect(resolvedSources()).toMatchObject({ enabled: 'default' });
+});
+
+// A refusal the operator cannot see is a page and a pool that agree with each
+// other and neither of them mentioning what became of the value stored.
+test('says what it could not use, and says it once', async () => {
+	const { resolveConfig } = await mirroring({ enabled: 'oui', maxWorkers: -1 });
+
+	resolveConfig();
+
+	expect(warn).toHaveBeenCalledWith(
+		'[autoscale] unusable shared settings, left on the environment: '
+			+ 'enabled="oui", maxWorkers=-1',
+	);
+
+	// Read on every tick, so a line a tick would be the pool's whole log.
+	resolveConfig();
+	expect(warn).toHaveBeenCalledTimes(1);
+});
+
 // A number arrives as a string from a form and from a hand-edited column alike,
 // and refusing it would leave a field the operator can see stored running on
 // something else.
