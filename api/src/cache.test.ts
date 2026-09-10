@@ -1,7 +1,15 @@
 import { oneLine } from '@directus/utils';
 import type { ScopedCacheTag } from '@directus/types';
 import type Keyv from 'keyv';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	onTestFinished,
+	test,
+	vi,
+} from 'vitest';
 
 // cache.ts captures `const env = useEnv()` at module load, so mutate one shared object
 // (never reassign) to keep that reference and getConfigFromEnv's useEnv() in sync.
@@ -50,9 +58,23 @@ vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
 // so a test that needs the publish to fail has to own the same function it captured.
 const busPublish = vi.hoisted(() => vi.fn());
 
+// Subscribed once, at module load, so `clearAllMocks` wipes the calls that carried
+// the handlers long before a test asks for one. Held by channel so a test can drive
+// the subscriber side too.
+const busHandlers = vi.hoisted(() => {
+	return {} as Record<string, (payload: any) => Promise<void>>;
+});
+
 vi.mock('./bus/index.js', () => {
 	return {
-		useBus: () => ({ subscribe: vi.fn(), publish: busPublish }),
+		useBus: () => {
+			return {
+				subscribe: vi.fn((channel: string, handler: any) => {
+					busHandlers[channel] = handler;
+				}),
+				publish: busPublish,
+			};
+		},
 	};
 });
 
@@ -91,6 +113,11 @@ vi.mock('./redis/index.js', () => {
 });
 
 const { flushCaches, getCache, getRedisConnection } = await import('./cache.js');
+
+// Snapshotted here: a later case re-imports cache.ts behind `vi.resetModules()`,
+// and that copy's subscriber overwrites the shared record with handlers closing
+// over its own cache singletons rather than the ones `getCache` above returns.
+const cacheHandlers = { ...busHandlers };
 
 const {
 	assertScopedCacheRedisSupported,
@@ -1061,5 +1088,228 @@ describe('flushCaches', () => {
 
 		expect(report.failures).toEqual(['scoped-cache index']);
 		expect(report.droppedIndexKeys).toBe(0);
+	});
+
+	test(oneLine`
+		reports a response cache it could not clear rather than throwing it at the
+		migration runner, which calls this uncaught right after recording the version
+		it applied
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const { cache } = getCache();
+
+		// Restored by hand: `clearAllMocks` empties a spy without uninstalling it,
+		// leaving every later clear of this same instance a silent no-op.
+		const refuse = vi.spyOn(cache!, 'clear')
+			.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		onTestFinished(() => refuse.mockRestore());
+
+		await expect(flushCaches(true)).resolves.toMatchObject({
+			failures: ['response cache'],
+		});
+	});
+
+	test(oneLine`
+		reports an index whose unlink redis refused — a pipeline answers per command,
+		so a chunk that failed is a chunk still there, and a count alone cannot tell
+		that from an index that was already empty
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockResolvedValueOnce(['0', ['scalabus:index:tag:articles']]);
+
+		redis._pipeline.exec.mockResolvedValueOnce([
+			[new Error('MISCONF Redis is configured to save RDB snapshots'), null],
+		]);
+
+		const report = await flushCaches(true);
+
+		expect(report.failures).toEqual(['scoped-cache index']);
+		expect(report.droppedIndexKeys).toBe(0);
+	});
+
+	test(oneLine`
+		walks the index keyspace once, not once per kind — the layout this replaced
+		took a pass for the tags and another for the slices, and a SCAN pass costs the
+		whole keyspace whatever it matches
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		await flushCaches(true);
+
+		expect(redis.scan).toHaveBeenCalledTimes(1);
+
+		expect(redis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'scalabus:index:*',
+			'COUNT',
+			1000,
+		);
+	});
+
+	test(oneLine`
+		unlinks each scan batch as it arrives rather than buffering the whole index
+		keyspace — the array is the one thing here that grows with the cache
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan
+		.mockResolvedValueOnce(['42', ['scalabus:index:tag:articles']])
+		.mockResolvedValueOnce(['0', ['scalabus:index:tag:authors']]);
+
+		await flushCaches(true);
+
+		expect(redis._pipeline.unlink).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe('the one-off sweep of the pre-`:index:` layout', () => {
+	beforeEach(() => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		// Not yet swept, so these cases reach the sweep the other flush cases skip.
+		redis.get.mockResolvedValueOnce(null);
+	});
+
+	test(oneLine`
+		leaves the marker unwritten when the sweep could not drop what it found, so
+		the next flush tries again instead of recording a layout still standing
+	`, async () => {
+		redis.scan
+		.mockResolvedValueOnce(['0', []])
+		.mockResolvedValueOnce(['0', ['scalabus:tag:articles']])
+		.mockResolvedValueOnce(['0', []]);
+
+		redis._pipeline.exec.mockResolvedValue([
+			[new Error('Connection is closed.'), null],
+		]);
+
+		await flushCaches(true);
+
+		expect(redis.set).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		expires the marker rather than keeping it forever — a node still on the old
+		layout goes on writing those keys through a rolling deploy, and a permanent
+		marker strands everything it wrote after the first new node swept
+	`, async () => {
+		await flushCaches(true);
+
+		expect(redis.set).toHaveBeenCalledWith(
+			'scalabus:legacy-index-swept',
+			'1',
+			'EX',
+			expect.any(Number),
+		);
+	});
+});
+
+describe('the cacheCleared broadcast', () => {
+	function watchClears() {
+		const { cache, systemCache } = getCache();
+
+		// Asserted on the call rather than on what the tier holds: these Keyv
+		// instances are module singletons the whole file shares, so a value written
+		// here is at the mercy of whatever built them first.
+		const response = vi.spyOn(cache!, 'clear').mockResolvedValue(undefined);
+		const system = vi.spyOn(systemCache, 'clear').mockResolvedValue(undefined);
+
+		onTestFinished(() => {
+			response.mockRestore();
+			system.mockRestore();
+		});
+
+		return { response, system };
+	}
+
+	test(oneLine`
+		is the only thing that drops a memory-store peer's response tier once
+		CACHE_AUTO_PURGE is off — with it on, the schemaChanged handler already did,
+		which is why a peer arm left it on proves nothing
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+			CACHE_AUTO_PURGE: false,
+		});
+
+		const { response } = watchClears();
+
+		await cacheHandlers['schemaChanged']!({ autoPurgeCache: undefined });
+		expect(response).not.toHaveBeenCalled();
+
+		await cacheHandlers['cacheCleared']!({ targets: ['response', 'system'] });
+		expect(response).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		is not what drops that peer's response tier when CACHE_AUTO_PURGE is on: the
+		schemaChanged handler this flush already published gets there first, so a peer
+		arm that leaves it on passes with the broadcast removed
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+			CACHE_AUTO_PURGE: true,
+		});
+
+		const { response } = watchClears();
+
+		await cacheHandlers['schemaChanged']!({ autoPurgeCache: undefined });
+
+		expect(response).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		is the only thing that drops that peer's system tier, whatever
+		CACHE_AUTO_PURGE says — schemaChanged never touches the _system tier, so this
+		is the half of the broadcast a response-tier arm cannot stand in for
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_SYSTEM_TTL: '5m',
+			CACHE_STORE: 'memory',
+			CACHE_AUTO_PURGE: true,
+		});
+
+		const { system } = watchClears();
+
+		await cacheHandlers['schemaChanged']!({ autoPurgeCache: undefined });
+		expect(system).not.toHaveBeenCalled();
+
+		await cacheHandlers['cacheCleared']!({ targets: ['response', 'system'] });
+		expect(system).toHaveBeenCalled();
 	});
 });

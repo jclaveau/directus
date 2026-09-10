@@ -32,6 +32,16 @@ test('arms the flush deadline before the CLI boots', async () => {
 	expect(armDeadline).toHaveBeenCalledWith(9000, 'the cache flush');
 });
 
+// Commander reads the program's own options ahead of the subcommand, so the
+// command name is not reliably the first argument.
+test('finds the command past a global option', async () => {
+	process.argv = ['node', 'directus', '--experimental', 'cache', 'flush'];
+
+	await import('./run.js');
+
+	expect(armDeadline).toHaveBeenCalledWith(9000, 'the cache flush');
+});
+
 test('leaves every other command unbudgeted', async () => {
 	process.argv = ['node', 'directus', 'database', 'migrate:latest'];
 

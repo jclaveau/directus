@@ -58,6 +58,11 @@ describe('`directus cache flush` clears a running node from another process', ()
 		const peerEnv = cloneDeep(env);
 		peerEnv[vendor]['CACHE_STORE'] = 'memory';
 
+		// Off, or the peer arm proves nothing: the system clear this flush runs has
+		// always published `schemaChanged`, and its handler drops a memory-store
+		// peer's response cache on its own whenever this is on.
+		peerEnv[vendor]['CACHE_AUTO_PURGE'] = 'false';
+
 		let instance: ChildProcess;
 		let peer: ChildProcess;
 		let db: Knex;
@@ -259,6 +264,19 @@ describe('`directus cache flush` clears a running node from another process', ()
 		}, 60_000);
 
 		it(oneLine`
+			refuses a run that can reach no other node, rather than reporting a flush
+			the rest of the cluster never heard about
+		`, async () => {
+			// The command runs in the deploy shell, whose env is not the running
+			// service's, so an absent REDIS is a misconfiguration rather than a
+			// contrivance: it clears this process alone and tells nobody.
+			const { code, output } = await runCacheFlush({ REDIS: '' });
+
+			expect(code).toBe(1);
+			expect(output).toMatch(/\[cache\]/);
+		}, 60_000);
+
+		it(oneLine`
 			drops the copy a peer on a memory store holds, which no broadcast the flush
 			used to send could reach
 		`, async () => {
@@ -287,7 +305,7 @@ describe('`directus cache flush` clears a running node from another process', ()
 		}, 60_000);
 
 		it(oneLine`
-			leaves the cache-stats stream the index scan no longer walks over
+			leaves the cache-stats stream sitting beside the index alone
 		`, async () => {
 			await readOwner('acme');
 			await readOwner('globex');
@@ -312,9 +330,8 @@ describe('`directus cache flush` clears a running node from another process', ()
 
 			const afterFlush = await cacheStatsState();
 
-			// `<namespace>:stats:events` sits beside the index under `<namespace>:`,
-			// which is what the scan used to match before it was narrowed to
-			// `<namespace>:index:*`.
+			// `<namespace>:stats:events` is one widened MATCH away from going with
+			// the index it neighbours, and nothing else here would say so.
 			expect(afterFlush.body.data.bufferLength).toBeGreaterThanOrEqual(buffered);
 		}, 60_000);
 	});

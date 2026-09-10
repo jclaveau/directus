@@ -64,3 +64,17 @@ test('exits 1 on a flush that resolved with tiers it could not clear', async () 
 		'[cache] flush incomplete: system cache, scoped-cache index',
 	);
 });
+
+// `process.exit` does not stop the caller while an `exit` listener runs, so the
+// command reads on into a report it never got and raises a TypeError out of the
+// handler for exit 1.
+test('stops at the first exit rather than reading a missing report', async () => {
+	exit.mockImplementationOnce((() => undefined) as never);
+
+	vi.mocked(flushCaches).mockRejectedValue(new Error('redis is away'));
+
+	await expect(cacheFlush()).resolves.toBeUndefined();
+
+	expect(exit).toHaveBeenCalledTimes(1);
+	expect(exit).toHaveBeenCalledWith(1);
+});
