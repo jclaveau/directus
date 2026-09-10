@@ -272,3 +272,92 @@ test('a packet the supervisor never answers fails the send', async () => {
 	await vi.advanceTimersByTimeAsync(15_000);
 	await failed;
 });
+
+test('connecting and disconnecting run against the supervisor', async () => {
+	const { connectToSupervisor, disconnectFromSupervisor }
+		= await import('./client.js');
+
+	connect.mockImplementation((callback: (error: Error | null) => void) => {
+		callback(null);
+	});
+
+	await expect(connectToSupervisor()).resolves.toBeUndefined();
+	expect(connect).toHaveBeenCalledTimes(1);
+
+	disconnectFromSupervisor();
+	expect(disconnect).toHaveBeenCalledTimes(1);
+});
+
+test('a reload the supervisor refuses fails the restart', async () => {
+	const { reloadApp } = await import('./client.js');
+
+	reload.mockImplementation((
+		_name: string,
+		_options: unknown,
+		callback: (error: Error) => void,
+	) => {
+		callback(new Error('app not found'));
+	});
+
+	await expect(reloadApp('directus', 30_000, {}))
+		.rejects
+		.toThrow('app not found');
+});
+
+// The flag is process-wide and belongs to whatever set it: a reload that
+// cleared one it was handed would make the enclosing call skip its own check.
+test('a reload gives the processing flag back to its owner', async () => {
+	const { reloadApp } = await import('./client.js');
+
+	process.env['PM2_JSON_PROCESSING'] = 'outer';
+
+	reload.mockImplementation((
+		_name: string,
+		_options: unknown,
+		callback: (error: Error | null) => void,
+	) => {
+		callback(null);
+	});
+
+	await reloadApp('directus', 30_000, {});
+
+	expect(process.env['PM2_JSON_PROCESSING']).toBe('outer');
+});
+
+test('a packet the supervisor takes reaches the named process', async () => {
+	const { sendToSupervisedProcess } = await import('./client.js');
+
+	sendDataToProcessId.mockImplementation((
+		_pmId: number,
+		_packet: object,
+		callback: (error: Error | null) => void,
+	) => {
+		callback(null);
+	});
+
+	await expect(sendToSupervisedProcess(3, { topic: 'metrics' }))
+		.resolves
+		.toBeUndefined();
+
+	expect(sendDataToProcessId).toHaveBeenCalledWith(
+		3,
+		{ topic: 'metrics' },
+		expect.any(Function),
+	);
+});
+
+test('a packet the supervisor refuses fails the send', async () => {
+	const { sendToSupervisedProcess } = await import('./client.js');
+
+	sendDataToProcessId.mockImplementation((
+		_pmId: number,
+		_packet: object,
+		callback: (error: Error) => void,
+	) => {
+		callback(new Error('process not found'));
+	});
+
+	await expect(sendToSupervisedProcess(3, {}))
+		.rejects
+		.toThrow('process not found');
+});
