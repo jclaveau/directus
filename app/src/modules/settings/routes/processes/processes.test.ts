@@ -621,7 +621,7 @@ describe('the autoscale panel', () => {
 			minSecondsToScaleDown: 300,
 			warmupSeconds: 30,
 		},
-		withoutSharedConfig: {
+		withoutSharedSettings: {
 			enabled: true,
 			strategy: 'scalabus',
 			appName: 'directus',
@@ -645,7 +645,7 @@ describe('the autoscale panel', () => {
 			scaleCpuThreshold: 'default',
 			releaseCpuThreshold: 'default',
 			minWorkers: 'default',
-			maxWorkers: 'sharedConfig',
+			maxWorkers: 'sharedSettings',
 			prewarmWorkers: 'default',
 			minSecondsToScaleUp: 'default',
 			minSecondsToScaleDown: 'default',
@@ -686,8 +686,8 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.patch).mockResolvedValue({
 			data: {
 				data: {
-					key: 'scalabus:config:processes:autoscale',
-					sharedConfig: { enabled: false },
+					key: 'directus_settings.autoscale_settings',
+					sharedSettings: { enabled: false },
 				},
 			},
 		} as any);
@@ -696,7 +696,7 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			return url === '/utils/autoscale'
 				? Promise.resolve(
-					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+					{ data: { data: { key: 'k', sharedSettings: null } } } as any,
 				)
 				: Promise.resolve({ data: { data: scaling() } } as any);
 		});
@@ -717,7 +717,9 @@ describe('the autoscale panel', () => {
 			.filter(([url]) => url === '/utils/processes');
 
 		expect(reads).toHaveLength(2);
-	});
+		// Two full mounts of a page carrying three charts, which is a second or
+		// two on a quiet laptop and rather more on a runner sharing its cores.
+	}, 20_000);
 
 	// The drawer holding the panel covers the page when it is open and hides it
 	// when it is closed, so the levers are given a home the drawer never touches.
@@ -725,7 +727,7 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.get).mockImplementation((url: string) => {
 			return url === '/utils/autoscale'
 				? Promise.resolve(
-					{ data: { data: { key: 'k', sharedConfig: null } } } as any,
+					{ data: { data: { key: 'k', sharedSettings: null } } } as any,
 				)
 				: Promise.resolve({ data: { data: scaling() } } as any);
 		});

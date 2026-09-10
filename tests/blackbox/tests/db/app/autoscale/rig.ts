@@ -1,5 +1,8 @@
-import { paths } from '@common/config';
+import config, { paths } from '@common/config';
+import vendors, { type Vendor } from '@common/get-dbs-to-test';
 import { ChildProcess, execFileSync, spawn } from 'child_process';
+import Redis from 'ioredis';
+import knex, { type Knex } from 'knex';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -91,12 +94,99 @@ export function startPool(options: PoolOptions): Rig {
 	return { appName: options.appName, pm2Home, autoscaler: null, logs: [] };
 }
 
+/** The `directus_settings` columns the processes module lays over the env. */
+export type SharedSettingsColumn = 'autoscale_settings' | 'supervisor_settings';
+
+// The channel `useBus` publishes a change on. It is namespaced by the bus
+// rather than by the deployment, so it is the same one for every process on
+// the shared Redis.
+const CHANGED_CHANNEL = 'directus:bus:sharedSettingsChanged';
+
+const REDIS_PORT = 6108;
+
+const databases = new Map<Vendor, Knex>();
+
+let announcer: Redis | null = null;
+
+/**
+ * The vendor's connection, as the autoscaler has to be told to reach it.
+ *
+ * It is spawned with this process's environment, which carries no `DB_*` at
+ * all: the vendor's connection lives in the config the suites' own Directus
+ * instances are spawned with.
+ */
+export function databaseEnv(vendor: Vendor): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(config.envs[vendor])
+			.filter(([key]) => key.startsWith('DB_')),
+	);
+}
+
+/**
+ * Stores the layer every process of a deployment reads, or clears it.
+ *
+ * Written to the singleton directly rather than through `PATCH /settings`,
+ * because most of these suites run a pool and an autoscaler and no Directus at
+ * all. `announce` is what a write through the service would have published,
+ * and leaving it off is how a suite asks whether the re-read floor alone
+ * carries a change to a node the bus never reached.
+ */
+export async function storeSharedSettings(
+	vendor: Vendor,
+	column: SharedSettingsColumn,
+	settings: Record<string, unknown> | null,
+	announce = true,
+): Promise<void> {
+	let database = databases.get(vendor);
+
+	if (database === undefined) {
+		database = knex(config.knexConfig[vendor]!);
+		databases.set(vendor, database);
+	}
+
+	const stored = settings === null
+		? null
+		: JSON.stringify(settings);
+
+	const rows = await database('directus_settings').update({ [column]: stored });
+
+	// A deployment nobody has saved a setting on yet has no singleton to carry
+	// the layer, and the autoscaler reading one is how it gets there in
+	// production too.
+	if (rows === 0) {
+		await database('directus_settings').insert({ [column]: stored });
+	}
+
+	if (announce) {
+		announcer ??= new Redis({ host: 'localhost', port: REDIS_PORT });
+		await announcer.publish(CHANGED_CHANNEL, JSON.stringify({ column }));
+	}
+}
+
+/** Closes whatever storing a layer opened. */
+export async function closeSharedSettings(): Promise<void> {
+	for (const database of databases.values()) {
+		await database.destroy();
+	}
+
+	databases.clear();
+
+	announcer?.disconnect();
+	announcer = null;
+}
+
 /** Runs `directus autoscale` against the rig's daemon, keeping its decisions. */
 export function startAutoscaler(rig: Rig, env: Record<string, string>): void {
 	const autoscaler = spawn('node', [paths.cli, 'autoscale'], {
 		cwd: paths.cwd,
 		env: {
 			...process.env,
+			// The autoscaler is a process of a Directus deployment and reads the
+			// shared settings out of its database, so one spawned without a
+			// connection exits on the missing variable before its first tick. The
+			// first vendor stands in for the suites whose claim is about the loop
+			// rather than about a vendor; the others name their own below.
+			...databaseEnv(vendors[0]!),
 			PM2_HOME: rig.pm2Home,
 			PM2_AUTOSCALE_APP_NAME: rig.appName,
 			LOG_LEVEL: 'info',

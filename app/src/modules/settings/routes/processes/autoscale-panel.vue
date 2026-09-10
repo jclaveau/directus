@@ -44,10 +44,10 @@ const emit = defineEmits<{ changed: [] }>();
 
 const { t } = useI18n();
 
-const sharedConfig = ref<Record<string, unknown> | null>(null);
+const sharedSettings = ref<Record<string, unknown> | null>(null);
 const setByEmail = ref<string | null>(null);
 const configKey = ref<string | null>(null);
-const supervisorSharedConfig = ref<Record<string, unknown> | null>(null);
+const supervisorSharedSettings = ref<Record<string, unknown> | null>(null);
 const supervisorSetByEmail = ref<string | null>(null);
 const available = ref(true);
 const error = ref<string | null>(null);
@@ -111,14 +111,14 @@ const runner = computed(() => firstRunner(props.runners));
 const rows = computed(() => {
 	return configRows(
 		runner.value?.state ?? null,
-		sharedConfig.value,
+		sharedSettings.value,
 		drafts.value['strategy'] ?? null,
 	);
 });
 
 const stamp = computed(() => {
-	const setBy = sharedConfig.value?.['setBy'];
-	const setAt = sharedConfig.value?.['setAt'];
+	const setBy = sharedSettings.value?.['setBy'];
+	const setAt = sharedSettings.value?.['setAt'];
 
 	if (typeof setAt !== 'string') {
 		return null;
@@ -133,9 +133,9 @@ const stamp = computed(() => {
 	return {
 		setAt,
 		setBy: writer,
-		from: surfaceLabel(sharedConfig.value?.['setFrom']),
-		note: typeof sharedConfig.value?.['note'] === 'string'
-			? sharedConfig.value['note'] as string
+		from: surfaceLabel(sharedSettings.value?.['setFrom']),
+		note: typeof sharedSettings.value?.['note'] === 'string'
+			? sharedSettings.value['note'] as string
 			: null,
 		days: Math.floor((now.value - Date.parse(setAt)) / 86_400_000),
 	};
@@ -178,7 +178,7 @@ const stampLine = computed(() => {
  * when a worker starts, so what changes one is a deploy, not this page.
  */
 const supervisor = computed(() => {
-	return supervisorRows(runner.value?.state ?? null, supervisorSharedConfig.value);
+	return supervisorRows(runner.value?.state ?? null, supervisorSharedSettings.value);
 });
 
 const reloadLine = computed(() => {
@@ -250,19 +250,20 @@ const decided = computed(() => {
 async function load(): Promise<void> {
 	try {
 		const response = await api.get('/utils/autoscale');
-		sharedConfig.value = response.data.data.sharedConfig;
+		sharedSettings.value = response.data.data.sharedSettings;
 		setByEmail.value = response.data.data.setByEmail ?? null;
 		configKey.value = response.data.data.key;
 
-		supervisorSharedConfig.value
-			= response.data.data.supervisor?.sharedConfig ?? null;
+		supervisorSharedSettings.value
+			= response.data.data.supervisor?.sharedSettings ?? null;
 
 		supervisorSetByEmail.value = response.data.data.supervisor?.setByEmail ?? null;
 		available.value = true;
 	}
 	catch (err: any) {
-		// No Redis, no shared config: the route is absent rather than refusing, so a
-		// 404 here is a deployment that can only be tuned by redeploying.
+		// No Redis, no bus to carry a change to the scaling process, so the route is
+		// absent rather than refusing: a 404 here is a deployment that can only be
+		// tuned by redeploying.
 		if (err?.response?.status === 404) {
 			available.value = false;
 			return;
@@ -297,7 +298,7 @@ async function write(patch: Record<string, unknown>): Promise<boolean> {
 
 	try {
 		const response = await api.patch('/utils/autoscale', withNote(patch));
-		sharedConfig.value = response.data.data.sharedConfig;
+		sharedSettings.value = response.data.data.sharedSettings;
 		setByEmail.value = response.data.data.setByEmail ?? null;
 		note.value = '';
 
@@ -334,7 +335,7 @@ async function writeSupervisor(
 			withNote(patch),
 		);
 
-		supervisorSharedConfig.value = response.data.data.sharedConfig;
+		supervisorSharedSettings.value = response.data.data.sharedSettings;
 		supervisorSetByEmail.value = response.data.data.setByEmail ?? null;
 		note.value = '';
 		return true;
@@ -410,7 +411,7 @@ function supervisorPlaceholder(row: SupervisorRow): string {
 }
 
 /**
- * What the row shows: the change being typed, else what the shared config holds —
+ * What the row shows: the change being typed, else what the shared settings hold —
  * and for an option no restart can carry, the value pm2 is running it on.
  */
 function supervisorShown(row: SupervisorRow): string {
@@ -422,9 +423,9 @@ function supervisorShown(row: SupervisorRow): string {
 		return supervisorDrafts.value[row.option.field] ?? '';
 	}
 
-	return row.sharedConfig === null
+	return row.sharedSettings === null
 		? ''
-		: String(row.sharedConfig);
+		: String(row.sharedSettings);
 }
 
 /**
@@ -439,11 +440,11 @@ function supervisorSource(row: SupervisorRow): string {
 
 		return draft === null || draft === ''
 			? t('autoscale_supervisor_source', 'pm2')
-			: sourceLabel('sharedConfig');
+			: sourceLabel('sharedSettings');
 	}
 
-	return row.source === 'sharedConfig'
-		? sourceLabel('sharedConfig')
+	return row.source === 'sharedSettings'
+		? sourceLabel('sharedSettings')
 		: t('autoscale_supervisor_source', 'pm2');
 }
 
@@ -453,7 +454,7 @@ async function resetToEnv(): Promise<void> {
 
 	try {
 		await api.delete('/utils/autoscale');
-		sharedConfig.value = null;
+		sharedSettings.value = null;
 		setByEmail.value = null;
 		drafts.value = {};
 		note.value = '';
@@ -502,7 +503,7 @@ function sourceOf(row: AutoscaleRow): AutoscaleValueSource | null {
 
 	return draft === null || draft === ''
 		? null
-		: 'sharedConfig';
+		: 'sharedSettings';
 }
 
 /** What the layer a value came from is called here. */
@@ -511,21 +512,21 @@ function sourceLabel(source: AutoscaleValueSource | null): string {
 		return '—';
 	}
 
-	return source === 'sharedConfig'
-		? t('autoscale_source_shared_config', 'shared config')
+	return source === 'sharedSettings'
+		? t('autoscale_source_shared_settings', 'shared settings')
 		: source;
 }
 
 /**
  * What the field shows: the change being typed, else what the loop is running
- * on — the shared config where there is one, since that is what it runs on.
+ * on — the shared settings where there is one, since that is what it runs on.
  */
 function shown(row: AutoscaleRow): string | null {
 	if (edited(row.field)) {
 		return drafts.value[row.field] ?? null;
 	}
 
-	const value = row.sharedConfig ?? row.effective;
+	const value = row.sharedSettings ?? row.effective;
 
 	return value === null || value === undefined
 		? null
@@ -762,8 +763,9 @@ onUnmounted(disarmClock);
 		<v-notice v-if="!available" type="info">
 			{{ t(
 				'autoscale_no_redis',
-				'No Redis configured, so there is nowhere to keep a live change: '
-					+ 'this deployment is tuned through its environment.',
+				'No Redis configured, so a change has no way to reach the process '
+					+ 'that scales the pool: this deployment is tuned through its '
+					+ 'environment.',
 			) }}
 		</v-notice>
 
@@ -973,7 +975,7 @@ onUnmounted(disarmClock);
 		<p v-if="stampLine" class="stamp">{{ stampLine }}</p>
 
 		<!-- Carried by every change made from here, levers included, and stored
-		with it: the shared config outlives the incident that justified it. -->
+		with it: the shared settings outlive the incident that justified them. -->
 		<v-input
 			v-if="available"
 			v-model="note"
@@ -1090,7 +1092,7 @@ onUnmounted(disarmClock);
 							secondary
 							class="reset"
 							:tooltip="resetsTo(row)"
-							:disabled="saving || row.inactive || row.sharedConfig === null"
+							:disabled="saving || row.inactive || row.sharedSettings === null"
 							@click="resetRow(row.field)"
 						>
 							<v-icon name="settings_backup_restore" x-small />
@@ -1112,7 +1114,7 @@ onUnmounted(disarmClock);
 			<v-button
 				small
 				secondary
-				:disabled="!sharedConfig || saving"
+				:disabled="!sharedSettings || saving"
 				@click="resetToEnv"
 			>
 				{{ t('autoscale_reset_env', 'Reset to env') }}
@@ -1214,7 +1216,7 @@ onUnmounted(disarmClock);
 									'autoscale_supervisor_reset',
 									'Hand this option back to the environment',
 								)"
-								:disabled="saving || row.sharedConfig === null"
+								:disabled="saving || row.sharedSettings === null"
 								@click="resetSupervisorRow(row)"
 							>
 								<v-icon name="settings_backup_restore" x-small />
@@ -1231,7 +1233,7 @@ onUnmounted(disarmClock);
 		</template>
 
 		<p v-if="configKey" class="key">
-			{{ t('autoscale_key', 'Stored in Redis under') }} {{ configKey }}
+			{{ t('autoscale_key', 'Stored in') }} {{ configKey }}
 		</p>
 	</div>
 </template>

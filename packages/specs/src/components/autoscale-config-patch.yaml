@@ -1,7 +1,7 @@
 type: object
 description: >
   A sparse patch. A field left out keeps whatever the environment chain
-  resolves for it; a field set to null is removed from the shared config and
+  resolves for it; a field set to null is removed from the shared settings and
   handed back to that chain.
 properties:
   enabled:

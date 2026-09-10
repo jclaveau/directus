@@ -406,8 +406,11 @@ router.post(
 	}),
 );
 
-// The shared config lives in Redis, so a deployment without one has nowhere to
-// keep a change and says so by not carrying the endpoint at all.
+// Without Redis the bus is an emitter this worker shares with nobody, and
+// every one of these routes needs it to reach the process that scales the pool:
+// the panel finds that process over the bus, and a restart is asked for over
+// it. A deployment without Redis says so by not carrying the endpoints rather
+// than by serving a page that cannot see the pool it is meant to describe.
 if (redisConfigAvailable()) {
 	router.get(
 		'/autoscale',
@@ -486,7 +489,7 @@ if (redisConfigAvailable()) {
 			});
 
 			await service.clearAutoscaleConfig();
-			res.status(200).json({ data: { sharedConfig: null } });
+			res.status(200).json({ data: { sharedSettings: null } });
 			return;
 		}),
 	);

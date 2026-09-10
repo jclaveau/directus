@@ -7,7 +7,9 @@ import {
 	disconnectFromSupervisor,
 	scaleApp,
 } from '../supervisor/index.js';
-import { reportUnhandledRejection } from '../../utils/report-unhandled-rejection.js';
+import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
+import { validateBooleanEnv } from '../../utils/validate-env.js';
+import { PROCESSES_BOOLEAN_ENV } from '../lib/boolean-env.js';
 import { decide } from './lib/decide.js';
 import { PoolSamples } from './lib/pool-samples.js';
 import { readPool, restarted } from './lib/pool.js';
@@ -18,9 +20,10 @@ import {
 	reloading,
 } from './lib/reload.js';
 import {
+	initSharedSettingsMirror,
 	resolveConfig,
 	resolvedSources,
-	resolvedWithoutSharedConfig,
+	resolvedWithoutSharedSettings,
 } from './lib/resolve-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
 import { recordAutoscaleTick } from './lib/state.js';
@@ -69,13 +72,18 @@ async function prewarm(
 export async function runAutoscaler(): Promise<void> {
 	const logger = useLogger();
 
+	// Before anything is connected to: a pool told to scale by a variable this
+	// process reads as false would run at its floor under any load, and the
+	// deployment that set it would have no line saying why.
+	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
+
 	// This command outlives the pool it manages, so it takes the guard the server
 	// process takes and for the same reason: Node ends a process on a rejection
 	// nothing awaited, and an unreachable Redis produces them from the bus
 	// subscriber and from commands its own caller has already given up on. An
 	// autoscaler that exits leaves the pool at whatever size the outage caught it
 	// at, and its supervisor restarts it into the same outage.
-	process.on('unhandledRejection', reportUnhandledRejection);
+	guardUnhandledRejections();
 
 	await connectToSupervisor();
 
@@ -100,6 +108,12 @@ export async function runAutoscaler(): Promise<void> {
 	// the supervisor connection and is not a member of the pool, so it listens
 	// for the ask instead.
 	initAutoscaleReload();
+
+	// Before the loop rather than inside it: the mirror the ticks read is seeded
+	// once here, and kept current by the announcement every settings write makes
+	// plus a floor of its own. A tick that had to fetch it would put a query on
+	// the one path that must not be able to hang.
+	await initSharedSettingsMirror();
 
 	const stop = () => {
 		disconnectFromSupervisor();
@@ -130,7 +144,7 @@ export async function runAutoscaler(): Promise<void> {
 		// failure caught it in, and a pool that cannot shrink is how the
 		// module this replaces took production down.
 		try {
-			const config = await resolveConfig();
+			const config = resolveConfig();
 			const reading = await readPool(config.appName, config.warmupSeconds);
 			const { pendingWorkers, warmingWorkers } = reading;
 
@@ -269,7 +283,7 @@ export async function runAutoscaler(): Promise<void> {
 				at: now,
 				config,
 				sources: resolvedSources(),
-				withoutSharedConfig: resolvedWithoutSharedConfig(),
+				withoutSharedSettings: resolvedWithoutSharedSettings(),
 				workers: onlineWorkers.length,
 				pendingWorkers,
 				warmingWorkers,

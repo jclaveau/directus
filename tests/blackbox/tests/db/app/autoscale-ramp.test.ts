@@ -1,11 +1,14 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import vendors from '@common/get-dbs-to-test';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+	closeSharedSettings,
 	neverExceeded,
 	poolSize,
 	sizesOver,
 	startAutoscaler,
 	startPool,
 	stopRig,
+	storeSharedSettings,
 	waitForRestart,
 	type Rig,
 } from './autoscale/rig';
@@ -15,15 +18,25 @@ import {
 // fixture — a duty cycle the daemon reports as a steady percentage — which is
 // what lets a threshold above it and a threshold below it be compared at all.
 //
-// No vendor loop: nothing here touches a database, and every arm costs a pm2
-// daemon plus the workers it spawns.
+// No vendor loop: what a threshold does to a pool is the same on every vendor,
+// and each arm costs a pm2 daemon plus the workers it spawns.
 describe('The autoscaler ramps a pool according to its configuration', () => {
 	const rigs: Rig[] = [];
 
-	afterAll(() => {
+	// The autoscaler reads the shared layer out of the singleton every other
+	// suite writes to, so a value one of them left behind would sit over the
+	// environment these arms tune. Cleared here rather than trusted, and the
+	// connection closed with the rigs.
+	beforeAll(async () => {
+		await storeSharedSettings(vendors[0]!, 'autoscale_settings', null);
+	});
+
+	afterAll(async () => {
 		for (const rig of rigs) {
 			stopRig(rig);
 		}
+
+		await closeSharedSettings();
 	});
 
 	it('grows to the ceiling while the load clears the threshold', async () => {

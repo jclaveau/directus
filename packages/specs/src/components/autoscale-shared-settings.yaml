@@ -1,7 +1,7 @@
 type: object
 nullable: true
 description: >
-  The shared configuration as it stands, null where nothing is set for any
+  The shared settings as they stand, null where nothing is set for any
   field.
   The configuration fields it holds ride in the same flat object as the stamp
   the api wrote — the reader takes only the fields it knows, so the stamp costs

@@ -1,6 +1,12 @@
 import { useEnv } from '@directus/env';
 import { useLogger } from '../../../logger/index.js';
-import { redisConfigAvailable, useRedis } from '../../../redis/index.js';
+import {
+	SHARED_SETTINGS_COLUMNS,
+	onSharedSettingsChanged,
+	readSharedSettings,
+	sharedSettingsPollMs,
+	type SharedSettings,
+} from '../../lib/shared-settings.js';
 import type {
 	AutoscaleConfig,
 	AutoscaleConfigSources,
@@ -13,28 +19,6 @@ import {
 	signalOr,
 	strategyOr,
 } from './sanitize-config.js';
-
-/**
- * Where the shared config is read from.
- *
- * Namespaced like the tag index, so two deployments sharing one Redis are
- * tuned separately rather than through each other. Under `processes` because
- * that is the module these two documents configure; the leaf says which half.
- */
-export function autoscaleConfigKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:config:processes:autoscale`;
-}
-
-/**
- * Where the pm2 options an operator may change are kept.
- *
- * Its own key rather than a corner of the configuration's: the loop reads that
- * one every tick and takes no interest in these, which reach the pool through
- * a rolling restart instead.
- */
-export function supervisorSharedConfigKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:config:processes:supervisor`;
-}
 
 /** The variable each field reads, so a page can say where a value came from. */
 const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
@@ -57,10 +41,15 @@ const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
  * Which layer each field's value came from.
  *
  * An operator reading a threshold needs to know whether changing the
- * deployment's environment would move it, or whether the shared config is
+ * deployment's environment would move it, or whether the shared settings are
  * holding it where it is — the two look identical in the resolved value.
+ *
+ * Told by what the merge took rather than by what the column mentions: the
+ * column is editable outside the write that checks it, and a value the merge
+ * could not use leaves its field on the environment. Naming that field as
+ * stored is a page disagreeing with the pool it describes.
  */
-function sourcesOf(sharedConfig: Record<string, unknown>): AutoscaleConfigSources {
+function sourcesOf(taken: Set<keyof AutoscaleConfig>): AutoscaleConfigSources {
 	const env = useEnv();
 	const sources = {} as AutoscaleConfigSources;
 
@@ -71,8 +60,8 @@ function sourcesOf(sharedConfig: Record<string, unknown>): AutoscaleConfigSource
 			source = 'env';
 		}
 
-		if (sharedConfig[field] !== undefined && sharedConfig[field] !== null) {
-			source = 'sharedConfig';
+		if (taken.has(field)) {
+			source = 'sharedSettings';
 		}
 
 		sources[field] = source;
@@ -129,19 +118,39 @@ export function envConfig(): AutoscaleConfig {
 	};
 }
 
-/**
- * Only the fields the shared config actually sets are taken from it, so raising
- * one threshold during an incident leaves the rest on the env chain rather
- * than resetting them to defaults nobody asked for.
- */
-function withSharedConfig(
-	base: AutoscaleConfig,
-	sharedConfig: Record<string, unknown>,
-): AutoscaleConfig {
-	const merged = { ...base };
+interface Layered {
+	config: AutoscaleConfig;
+	/** The fields the shared settings supplied, for {@link sourcesOf} to read. */
+	taken: Set<keyof AutoscaleConfig>;
+	/** The fields whose stored value the merge could not use, as `name=value`. */
+	refused: string[];
+}
 
-	for (const [field, value] of Object.entries(sharedConfig)) {
-		if (Object.hasOwn(base, field) === false) {
+/**
+ * Only the fields the shared settings actually set are taken from them, so
+ * raising one threshold during an incident leaves the rest on the env chain
+ * rather than resetting them to defaults nobody asked for.
+ *
+ * A field whose stored value this cannot use is left on the chain too, left out
+ * of `taken` with it, and named in `refused` so the drop is not silent. Refused
+ * rather than thrown on: this runs on the scaling tick, and the value it is
+ * reading is already durable — a throw would end the pool on every tick until
+ * somebody edited the table. The write is where a bad value is refused, and
+ * the check the settings guard runs is what refuses it there.
+ */
+function withSharedSettings(
+	base: AutoscaleConfig,
+	sharedSettings: Record<string, unknown>,
+): Layered {
+	const config = { ...base };
+	const taken = new Set<keyof AutoscaleConfig>();
+	const refused: string[] = [];
+
+	for (const [name, value] of Object.entries(sharedSettings)) {
+		// A field of no configuration is one of the note fields riding in the
+		// same object, and a null hands that field back to the environment on
+		// purpose. Neither is a value that could not be used.
+		if (Object.hasOwn(base, name) === false) {
 			continue;
 		}
 
@@ -149,121 +158,118 @@ function withSharedConfig(
 			continue;
 		}
 
-		const current = base[field as keyof AutoscaleConfig];
+		const field = name as keyof AutoscaleConfig;
+		const current = base[field];
+		const stored = `${name}=${JSON.stringify(value)}`;
 
 		if (typeof current === 'number') {
-			Object.assign(merged, { [field]: numberOr(value, current) });
+			const parsed = Number(value);
+
+			if (Number.isFinite(parsed) === false || parsed < 0) {
+				refused.push(stored);
+				continue;
+			}
+
+			Object.assign(config, { [field]: parsed });
 		}
 		else if (typeof current === 'boolean') {
-			Object.assign(merged, { [field]: value === true || value === 'true' });
+			// Refused rather than read as false, which is what every field
+			// beside it does with a value it cannot use. Coerced, a stored
+			// `"oui"` stops the pool scaling while the page names the shared
+			// settings as what asked for that.
+			if (value !== true && value !== false) {
+				refused.push(stored);
+				continue;
+			}
+
+			Object.assign(config, { [field]: value });
 		}
 		else if (field === 'signal') {
-			Object.assign(merged, { [field]: signalOr(value, base.signal) });
+			if (signalOr(value, base.signal) !== value) {
+				refused.push(stored);
+				continue;
+			}
+
+			Object.assign(config, { [field]: value });
 		}
 		else if (field === 'strategy') {
-			Object.assign(merged, { [field]: strategyOr(value, base.strategy) });
+			if (strategyOr(value, base.strategy) !== value) {
+				refused.push(stored);
+				continue;
+			}
+
+			Object.assign(config, { [field]: value });
 		}
 		else if (typeof current === 'string' && typeof value === 'string') {
-			Object.assign(merged, { [field]: value });
+			Object.assign(config, { [field]: value });
 		}
+		else {
+			refused.push(stored);
+			continue;
+		}
+
+		taken.add(field);
 	}
 
-	return merged;
+	return { config, taken, refused };
 }
 
 /**
- * What the loop would run on with this shared config laid over the environment.
+ * What the loop would run on with these shared settings laid over the
+ * environment.
  *
  * The env chain read here is this process's rather than the scaling process's,
  * which is a different process with the same deployment's environment. It is
  * what a write has to be judged against: the field being changed is compared
  * with fields nobody is changing, and those come from the chain.
  */
-export function configWithSharedConfig(
-	sharedConfig: Record<string, unknown>,
+export function configWithSharedSettings(
+	sharedSettings: Record<string, unknown>,
 ): AutoscaleConfig {
-	return withSharedConfig(sanitizeConfig(envConfig()).config, sharedConfig);
+	return withSharedSettings(
+		sanitizeConfig(envConfig()).config,
+		sharedSettings,
+	).config;
 }
 
 /**
- * How long a tick waits for the shared config before deciding without a fresh one.
+ * How long the first read may take before the loop starts without it.
  *
- * The interval between ticks, so a read is never the reason a tick is late.
+ * A tick on the environment chain scales the pool on the wrong floor for a
+ * moment; a loop that has not started scales it not at all, and a database
+ * that is simply unreachable holds a query for as long as its own acquire
+ * timeout allows. The mirror takes the read whenever it lands.
  */
-const SHARED_CONFIG_READ_TIMEOUT_MS = 1000;
-
-/**
- * Statuses in which the client holds no connection to send a command down.
- *
- * Connecting is not among them: the first tick of a healthy boot happens
- * before the handshake finishes, and its read is answered as soon as it does.
- */
-const DISCONNECTED = new Set(['reconnecting', 'close', 'end']);
-
-/**
- * The stored shared config, or a failure if Redis does not produce one promptly.
- *
- * ioredis queues a command issued while it is not connected and puts no
- * deadline on that queue, so a tick that only awaited the read would hold the
- * loop for as long as the outage lasts — leaving the pool frozen at whatever
- * size the outage caught it at, which is exactly what this loop exists to
- * prevent.
- */
-async function readStoredSharedConfig(): Promise<string | null> {
-	const redis = useRedis();
-
-	if (DISCONNECTED.has(redis.status)) {
-		throw new Error(`the client is ${redis.status}`);
-	}
-
-	const read = redis.get(autoscaleConfigKey());
-
-	// The read that loses the race stays queued, and ioredis rejects a queued
-	// command when it flushes the queue — an unhandled rejection there would
-	// end the process the loop runs in.
-	read.catch(() => {});
-
-	let expire: ReturnType<typeof setTimeout> | undefined;
-
-	try {
-		return await Promise.race([
-			read,
-			new Promise<never>((_resolve, reject) => {
-				expire = setTimeout(() => {
-					reject(new Error(`no answer in ${SHARED_CONFIG_READ_TIMEOUT_MS}ms`));
-				}, SHARED_CONFIG_READ_TIMEOUT_MS);
-			}),
-		]);
-	}
-	finally {
-		clearTimeout(expire);
-	}
-}
+const BOOT_READ_MS = 5_000;
 
 let lastCorrections = '';
-let lastGood: AutoscaleConfig | null = null;
+let lastRefused = '';
+let lastAnnounced: string | null = null;
 let lastBase: AutoscaleConfig | null = null;
 let lastSources: AutoscaleConfigSources | null = null;
-let sharedConfigUnreadable = false;
+let sharedSettings: SharedSettings | null = null;
+let readAt = 0;
+let unreadable = false;
 
 /**
  * Where each field of the configuration the last tick used came from.
  *
  * Held beside the configuration rather than returned with it because it
  * answers a different question — one the loop never asks and a page always
- * does — and because an unreadable shared config holds both together.
+ * does.
  */
 export function resolvedSources(): AutoscaleConfigSources {
-	return lastSources ?? sourcesOf({});
+	return lastSources ?? sourcesOf(new Set());
 }
 
 /**
- * What the last tick would have run on with nothing stored in Redis.
+ * What the last tick would have run on with nothing stored.
  *
  * The page offers to clear a field, and the value that lands there is this
- * one — knowable only here, since the shared config wins over it everywhere else.
+ * one — knowable only here, since the shared settings win over it everywhere
+ * else.
  */
-export function resolvedWithoutSharedConfig(): AutoscaleConfig {
+export function resolvedWithoutSharedSettings(): AutoscaleConfig {
 	return lastBase ?? sanitizeConfig(envConfig()).config;
 }
 
@@ -282,63 +288,138 @@ function announce(corrections: string[]): void {
 }
 
 /**
- * The configuration for this tick: the env chain, with whatever Redis
- * currently holds laid over it, checked before the loop is allowed to act
- * on it.
+ * Say which stored values the merge could not use.
+ *
+ * The pool is running the environment's value for those fields and the page
+ * says so, which leaves the operator who stored one with a page that agrees
+ * with the pool and neither of them mentioning what they did with what was
+ * asked for. Every write through the API is checked, so a field reaching here
+ * was stored by something that went around it.
+ */
+function announceRefused(refused: string[]): void {
+	const summary = refused.join(', ');
+
+	if (summary === lastRefused) {
+		return;
+	}
+
+	lastRefused = summary;
+
+	if (summary !== '') {
+		useLogger().warn(
+			`[autoscale] unusable shared settings, left on the environment: ${summary}`,
+		);
+	}
+}
+
+/**
+ * Say what the pool is being tuned by, at boot and whenever that changes.
+ *
+ * Nothing stored gets a line of its own rather than silence: a layer that went
+ * missing — a column cleared, a database restored from before it was written —
+ * reads exactly like a deployment that never had one, and the difference
+ * between them is a ceiling somebody raised to survive an incident.
+ */
+function announceSharedSettings(): void {
+	const summary = sharedSettings === null
+		? 'nothing stored, so the environment chain alone'
+		: Object.keys(sharedSettings).join(', ');
+
+	if (summary === lastAnnounced) {
+		return;
+	}
+
+	lastAnnounced = summary;
+	useLogger().info(`[autoscale] shared settings: ${summary}`);
+}
+
+/**
+ * Re-read the stored layer into the mirror.
+ *
+ * Best-effort, and the last one read is kept on a failure rather than the
+ * environment being taken back: an operator who has just raised the ceiling to
+ * survive a spike would have it dropped by a blip, and the ceiling is
+ * corrected with no cooldown — the pool would lose the workers at once and
+ * take them back when the database answered again.
+ */
+async function refreshSharedSettings(): Promise<void> {
+	readAt = Date.now();
+
+	try {
+		sharedSettings = await readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale);
+		unreadable = false;
+		announceSharedSettings();
+	}
+	catch (error) {
+		if (unreadable === false) {
+			unreadable = true;
+
+			useLogger().warn(
+				error,
+				'[autoscale] could not read the shared settings; '
+					+ 'holding the last ones read',
+			);
+		}
+	}
+}
+
+/**
+ * Seed the mirror and keep it current.
+ *
+ * Awaited at boot so the first tick decides on what is stored rather than on
+ * the environment it would fall back to — a pool that starts at the
+ * environment's floor and climbs to a stored one has spent that climb short of
+ * workers — but only for as long as {@link BOOT_READ_MS} allows.
+ */
+export async function initSharedSettingsMirror(): Promise<void> {
+	const read = refreshSharedSettings();
+
+	const answered = await Promise.race([
+		read.then(() => true),
+		new Promise<boolean>((resolve) => {
+			// Unreferenced so the shorter of the two never holds the process open
+			// once the loop below it has stopped.
+			const timer = setTimeout(() => resolve(false), BOOT_READ_MS);
+			timer.unref();
+		}),
+	]);
+
+	if (answered === false) {
+		useLogger().warn(
+			'[autoscale] the shared settings have not answered yet; scaling on '
+				+ 'the environment chain until they do',
+		);
+	}
+
+	onSharedSettingsChanged(SHARED_SETTINGS_COLUMNS.autoscale, () => {
+		void refreshSharedSettings();
+	});
+}
+
+/**
+ * The configuration for this tick: the env chain with the stored layer over
+ * it, checked before the loop is allowed to act on it.
  *
  * Tuning an autoscaler by redeploying restarts the pool, which destroys the
  * state being tuned, so the values have to be changeable without one.
  *
- * A Redis that cannot be read keeps the last configuration that was, rather
- * than reverting to the env chain. Reverting sounds safer and is not: an
- * operator who has just raised the ceiling to survive a spike would have it
- * dropped back by a blip, and the ceiling is corrected with no cooldown — the
- * pool would lose the workers immediately and take them back when Redis
- * returned.
+ * Read off the mirror rather than the table: a tick is the only thing standing
+ * between a pool and the size an outage caught it at, and a query on its path
+ * is a query that can hold it for as long as the outage lasts.
  */
-export async function resolveConfig(): Promise<AutoscaleConfig> {
+export function resolveConfig(): AutoscaleConfig {
+	if (Date.now() - readAt >= sharedSettingsPollMs()) {
+		void refreshSharedSettings();
+	}
+
 	const fromEnv = envConfig();
+	const layered = withSharedSettings(fromEnv, sharedSettings ?? {});
+	const { config, corrections } = sanitizeConfig(layered.config);
 
-	const settle = (
-		candidate: AutoscaleConfig,
-		sharedConfig: Record<string, unknown>,
-	) => {
-		const { config, corrections } = sanitizeConfig(candidate);
-		announce(corrections);
-		lastGood = config;
-		lastBase = sanitizeConfig(fromEnv).config;
-		lastSources = sourcesOf(sharedConfig);
+	announce(corrections);
+	announceRefused(layered.refused);
+	lastBase = sanitizeConfig(fromEnv).config;
+	lastSources = sourcesOf(layered.taken);
 
-		return config;
-	};
-
-	if (redisConfigAvailable() === false) {
-		return settle(fromEnv, {});
-	}
-
-	try {
-		const stored = await readStoredSharedConfig();
-		sharedConfigUnreadable = false;
-
-		if (!stored) {
-			return settle(fromEnv, {});
-		}
-
-		const sharedConfig = JSON.parse(stored) as Record<string, unknown>;
-
-		return settle(withSharedConfig(fromEnv, sharedConfig), sharedConfig);
-	}
-	catch (error) {
-		if (sharedConfigUnreadable === false) {
-			sharedConfigUnreadable = true;
-
-			useLogger().warn(
-				error,
-				'[autoscale] could not read the shared config; '
-					+ 'holding the last configuration',
-			);
-		}
-
-		return lastGood ?? settle(fromEnv, {});
-	}
+	return config;
 }

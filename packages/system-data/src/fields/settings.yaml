@@ -685,6 +685,16 @@ fields:
     width: half
     hidden: true
 
+  - field: autoscale_settings
+    special:
+      - cast-json
+    hidden: true
+
+  - field: supervisor_settings
+    special:
+      - cast-json
+    hidden: true
+
   - field: project_id
     hidden: true
 
