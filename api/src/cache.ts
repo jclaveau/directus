@@ -10,7 +10,7 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { dropScopedCacheTagIndex } from './scoped-cache.js';
+import { dropScopedCacheIndex } from './scoped-cache.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -226,7 +226,7 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	let droppedIndexKeys = 0;
 
 	try {
-		const index = await dropScopedCacheTagIndex();
+		const index = await dropScopedCacheIndex();
 		droppedIndexKeys = index.dropped;
 
 		// Redis refuses a pipelined command by answering with the error rather than
@@ -334,7 +334,7 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 		await cache?.clear();
 		// The scoped-tag index lives in raw Redis outside the Keyv namespace, so the
 		// clear above misses it — drop it too so no orphan tag pointers linger.
-		refusedIndexKeys = (await dropScopedCacheTagIndex()).refused;
+		refusedIndexKeys = (await dropScopedCacheIndex()).refused;
 	}
 
 	if (targets.includes('locks')) {

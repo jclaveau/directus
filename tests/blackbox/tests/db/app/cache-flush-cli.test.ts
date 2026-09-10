@@ -25,7 +25,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //
 // The unit tests mock ioredis, so the key layout they assume is the one they were
 // written against. These drive real Redis, the real namespace, the real
-// `<namespace>:index:*` scan, and the cache-stats keys sitting beside it.
+// `<namespace>:scoped-cache-index:*` scan, and the cache-stats keys sitting
+// beside it.
 
 const COLLECTION = 'test_cache_flush_cli';
 const cacheStatusHeader = 'x-cache-status';

@@ -253,8 +253,12 @@ function isPinnableScopeType(type: Type | undefined): boolean {
 // cache-stats stream, its per-entry tombstones and whatever family lands there
 // next, and a pattern wide enough to cover the index dragged all of those over the
 // wire to be filtered out here (https://github.com/jclaveau/directus/issues/468).
+// Named after this module rather than `index`, because a flush unlinks the whole
+// segment: under a noun that broad, whatever a later feature parks there goes with
+// it. `<namespace>:stats` is the family that must not — it is the only place Redis
+// holds cache state no table can rebuild — and it stays outside.
 function scopedCacheIndexPrefix(): string {
-	return `${env['CACHE_NAMESPACE']}:index:`;
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-index:`;
 }
 
 function scopedCacheTagKeyPrefix(): string {
@@ -694,67 +698,10 @@ async function* scanScopedCacheKeys(match: string): AsyncGenerator<string[]> {
 	while (cursor !== '0');
 }
 
-// Where the index lived before it moved under `<namespace>:index:`. Kept only so
-// the keys that layout left behind can be swept once — see below.
-const SCOPED_CACHE_LEGACY_INDEX_KINDS = ['tag', 'slices'] as const;
-
-// Long enough to outlast any rolling deploy, short enough that the two extra scan
-// passes it suppresses do not come back for good.
-const SCOPED_CACHE_LEGACY_SWEPT_TTL_SECONDS = 7 * 24 * 60 * 60;
-
-// Outside `<namespace>:index:` on purpose: a flush unlinks everything under that
-// prefix, so a marker stored there would be dropped by the very call it records.
-function scopedCacheLegacySweptKey(): string {
-	return `${env['CACHE_NAMESPACE']}:legacy-index-swept`;
-}
-
 /**
- * Drop the index keys written by the layout this replaced (`<namespace>:tag:*`
- * and `<namespace>:slices:*`).
- *
- * The scan above cannot reach them, and a tag SET self-expires only when
- * `CACHE_TTL` is set — with it unset these are deliberately unbounded, so an
- * upgrade would strand them forever. Two extra passes are worth that once, and
- * a marker keeps them from becoming a permanent third and fourth pass.
- */
-async function sweepLegacyScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
-	const redis = useRedis();
-	const tally = { dropped: 0, refused: 0 };
-
-	if (await redis.get(scopedCacheLegacySweptKey()) !== null) {
-		return tally;
-	}
-
-	for (const kind of SCOPED_CACHE_LEGACY_INDEX_KINDS) {
-		const kindTally = await unlinkScopedCacheKeysMatching(
-			`${env['CACHE_NAMESPACE']}:${kind}:*`,
-		);
-
-		tally.dropped += kindTally.dropped;
-		tally.refused += kindTally.refused;
-	}
-
-	// Only once nothing was refused, or a sweep Redis turned down would record a
-	// layout it left standing and never look at it again.
-	if (tally.refused === 0) {
-		// Expiring rather than permanent: a node still on the old layout goes on
-		// writing those keys for the rest of a rolling deploy, and everything it
-		// writes after the first new node swept is stranded under a marker that
-		// never lifts.
-		await redis.set(
-			scopedCacheLegacySweptKey(),
-			'1',
-			'EX',
-			SCOPED_CACHE_LEGACY_SWEPT_TTL_SECONDS,
-		);
-	}
-
-	return tally;
-}
-
-/**
- * Drop every scoped-cache index key: the tag SETs (`<namespace>:index:tag:*`) and
- * the per-collection slice indexes (`<namespace>:index:slices:*`). These are
+ * Drop every scoped-cache index key: the tag SETs
+ * (`<namespace>:scoped-cache-index:tag:*`) and the per-collection slice indexes
+ * (`<namespace>:scoped-cache-index:slices:*`). These are
  * written direct via ioredis `sadd`, outside any Keyv namespace, so a response
  * `cache.clear()` never reaches them — they would linger as orphan pointers until
  * their `ttl*2` self-expiry, or forever when `CACHE_TTL` is unset and they are
@@ -766,18 +713,14 @@ async function sweepLegacyScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
  * flush that called it can say what it cost, and say so honestly when the index is
  * still there (https://github.com/jclaveau/directus/issues/468).
  */
-export async function dropScopedCacheTagIndex(): Promise<ScopedCacheUnlinkTally> {
+export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!redisConfigAvailable()) {
 		return { dropped: 0, refused: 0 };
 	}
 
-	const index = await unlinkScopedCacheKeysMatching(`${scopedCacheIndexPrefix()}*`);
-	const legacy = await sweepLegacyScopedCacheIndex();
-
-	return {
-		dropped: index.dropped + legacy.dropped,
-		refused: index.refused + legacy.refused,
-	};
+	// The keys the pre-scoped-cache-index layout left behind are not swept here:
+	// they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
+	return unlinkScopedCacheKeysMatching(`${scopedCacheIndexPrefix()}*`);
 }
 
 /**
@@ -938,7 +881,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	}
 
 	// Imported lazily so the module graph stays acyclic: `cache.js` imports this
-	// module for `dropScopedCacheTagIndex`, so a static import back would close
+	// module for `dropScopedCacheIndex`, so a static import back would close
 	// the loop. Same reason `cache-config.ts` defers its database import.
 	const { getCache } = await import('./cache.js');
 	const { cache } = getCache();
