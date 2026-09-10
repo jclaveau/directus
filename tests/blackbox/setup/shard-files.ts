@@ -67,7 +67,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-supervisor-options.test.ts': 90_000,
 	// Spawns two processes and asks one question of them.
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
-	'/tests/db/app/autoscale-config-validation.test.ts': 20_000,
+	'/tests/db/app/autoscale-config-validation.test.ts': 30_000,
 	// One CLI command per vendor: a module load, a query, and the few
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,
