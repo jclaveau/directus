@@ -1,0 +1,14 @@
+type: object
+description: An override, where it is kept, and who last wrote it.
+properties:
+  key:
+    type: string
+    description: The Redis key the override is stored under.
+  override:
+    $ref: '../openapi.yaml#/components/schemas/AutoscaleOverride'
+  setByEmail:
+    type: string
+    nullable: true
+    description: >
+      The address of whoever wrote it, resolved from the id in the stamp. Null
+      where the id names no user any more, or where nothing is stored.

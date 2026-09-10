@@ -1,0 +1,79 @@
+# Absent from the published spec where the endpoint is absent from the router.
+x-enabled-by: PM2_AUTOSCALE_DRILL_ENABLED
+get:
+  summary: Read the load drill
+  description: >
+    What this deployment is burning, `until` being null where it burns nothing.
+    Admin only. Served only where PM2_AUTOSCALE_DRILL_ENABLED is on and Redis
+    is configured — the drill reaches the pool over the bus, so without Redis
+    it would load one worker rather than the pool.
+  operationId: read-autoscale-drill
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleDrill'
+      description: Successful request
+  tags:
+    - Autoscaling
+post:
+  summary: Start a load drill
+  description: >
+    Announces a drill to the pool, and keeps announcing it while it runs so a
+    worker bought halfway through joins it. Every worker then holds the
+    processor for the given share of each slice until the deadline, which is
+    load the autoscaler has to decide on without anything it decides on being
+    touched. Capped at 120 seconds and at 95% of a slice, and refused on a pool
+    already working, where the reading would be the traffic and the drill
+    together. Admin only, and gated as the read above.
+  operationId: start-autoscale-drill
+  requestBody:
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            seconds:
+              type: integer
+              description: How long to burn for, capped at 120.
+              example: 60
+            percent:
+              type: integer
+              description: The share of each slice to hold, from 10 to 95.
+              example: 80
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleDrill'
+      description: Successful request
+  tags:
+    - Autoscaling
+delete:
+  summary: Call the drill off
+  description: >
+    Announces a deadline already past, which every worker stops on, and ends
+    the rebroadcast wherever it is held. A drill also ends on its own deadline,
+    which is what makes a lost stop harmless. Admin only, and gated as the read
+    above.
+  operationId: stop-autoscale-drill
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleDrill'
+      description: Successful request
+  tags:
+    - Autoscaling

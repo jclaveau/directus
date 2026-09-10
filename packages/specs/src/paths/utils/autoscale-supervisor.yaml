@@ -1,0 +1,29 @@
+patch:
+  summary: Change the options a restart carries
+  description: >
+    Stores the pm2 options the next rolling restart will push onto the pool:
+    listen_timeout, kill_timeout, min_uptime, restart_delay, max_restarts and
+    the memory ceiling a worker is recycled at. Nothing about the running pool
+    changes here — pm2 reads these when it starts a worker, so the restart is
+    what lands them. Values outside what an option accepts are refused rather
+    than corrected, since nothing downstream corrects them. Null hands one
+    option back to the environment. Admin only, and present only where Redis is
+    configured.
+  operationId: update-autoscale-supervisor-config
+  requestBody:
+    content:
+      application/json:
+        schema:
+          $ref: '../../openapi.yaml#/components/schemas/AutoscaleSupervisorPatch'
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleOverrideAnswer'
+      description: Successful request
+  tags:
+    - Autoscaling

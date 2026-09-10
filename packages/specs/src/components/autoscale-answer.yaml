@@ -1,0 +1,14 @@
+type: object
+description: >
+  The autoscale configuration override and the supervisor options, which are
+  kept under separate keys and written through separate routes.
+properties:
+  key:
+    type: string
+  override:
+    $ref: '../openapi.yaml#/components/schemas/AutoscaleOverride'
+  setByEmail:
+    type: string
+    nullable: true
+  supervisor:
+    $ref: '../openapi.yaml#/components/schemas/AutoscaleOverrideAnswer'

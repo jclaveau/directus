@@ -269,4 +269,22 @@ describe('The autoscale load drill', () => {
 			expect(names).toEqual(['read_autoscale_drill', 'run_autoscale_drill']);
 		});
 	});
+
+	// The path exists on this deployment because it asked for the drill, so the
+	// spec carries it — the same `x-enabled-by` that drops it elsewhere.
+	describe('publishes the drill where the deployment carries one', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await request(getUrl(vendor, envs[vendor]))
+				.get('/server/specs/oas')
+				.set('Authorization', auth);
+
+			expect(response.statusCode).toBe(200);
+
+			const drill = response.body.paths['/utils/autoscale/drill'];
+
+			expect(drill.get.operationId).toBe('read-autoscale-drill');
+			expect(drill.post.operationId).toBe('start-autoscale-drill');
+			expect(drill.delete.operationId).toBe('stop-autoscale-drill');
+		});
+	});
 });

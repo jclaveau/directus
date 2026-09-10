@@ -1,0 +1,12 @@
+type: object
+description: What this deployment is burning for the autoscaler to decide on.
+properties:
+  until:
+    type: integer
+    nullable: true
+    description: >
+      When the drill runs out, in milliseconds since the epoch. Null where
+      nothing is burning.
+  percent:
+    type: integer
+    description: The share of each slice a drilling worker holds.

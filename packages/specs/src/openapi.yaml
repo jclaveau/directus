@@ -22,6 +22,11 @@ tags:
       What this deployment is doing right now — the processes it runs and the behaviour of its
       response cache. Read-only, and readable by an administrator only.
     x-authentication: admin
+  - name: Autoscaling
+    description:
+      The pool this deployment is scaled to and the rule it is scaled by — read, changed, and
+      restarted. Readable and writable by an administrator only.
+    x-authentication: admin
   - name: Activity
     description:
       All events that happen within Directus are tracked and stored in the activities collection. This gives you full
@@ -299,6 +304,14 @@ paths:
     $ref: './paths/utils/cache-stats.yaml'
   /utils/processes:
     $ref: './paths/utils/processes.yaml'
+  /utils/autoscale:
+    $ref: './paths/utils/autoscale.yaml'
+  /utils/autoscale/supervisor:
+    $ref: './paths/utils/autoscale-supervisor.yaml'
+  /utils/autoscale/reload:
+    $ref: './paths/utils/autoscale-reload.yaml'
+  /utils/autoscale/drill:
+    $ref: './paths/utils/autoscale-drill.yaml'
 
   # System MCP
   /system-mcp:
@@ -328,6 +341,20 @@ components:
   schemas:
     Activity:
       $ref: './components/activity.yaml'
+    AutoscaleAnswer:
+      $ref: './components/autoscale-answer.yaml'
+    AutoscaleConfigPatch:
+      $ref: './components/autoscale-config-patch.yaml'
+    AutoscaleDrill:
+      $ref: './components/autoscale-drill.yaml'
+    AutoscaleOverride:
+      $ref: './components/autoscale-override.yaml'
+    AutoscaleOverrideAnswer:
+      $ref: './components/autoscale-override-answer.yaml'
+    AutoscaleReload:
+      $ref: './components/autoscale-reload.yaml'
+    AutoscaleSupervisorPatch:
+      $ref: './components/autoscale-supervisor-patch.yaml'
     Presets:
       $ref: './components/preset.yaml'
     Collections:

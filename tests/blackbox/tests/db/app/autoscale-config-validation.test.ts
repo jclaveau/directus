@@ -240,6 +240,53 @@ describe('The autoscale configuration is checked before it is stored', () => {
 		});
 	});
 
+	// `/server/specs/oas` needs no credential and gates per tag, so a path
+	// published under a tag that names no audience is published to anonymous
+	// callers. The runtime refusal is `assertAdmin`'s; this is disclosure.
+	describe('publishes the autoscale surface to administrators alone', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const spec = async (token: string | null) => {
+				const call = request(getUrl(vendor, envs[vendor]))
+					.get('/server/specs/oas');
+
+				const response = token === null
+					? await call
+					: await call.set('Authorization', `Bearer ${token}`);
+
+				expect(response.statusCode).toBe(200);
+
+				return {
+					paths: Object.keys(response.body.paths),
+					tags: response.body.tags.map((tag: { name: string }) => tag.name),
+				};
+			};
+
+			const admin = await spec(USER.ADMIN.TOKEN);
+
+			expect(admin.tags).toContain('Autoscaling');
+			expect(admin.paths).toContain('/utils/autoscale');
+			expect(admin.paths).toContain('/utils/autoscale/supervisor');
+			expect(admin.paths).toContain('/utils/autoscale/reload');
+
+			// This deployment did not ask for the drill, so the path is a 404 on
+			// it and publishing one would document the 404.
+			expect(admin.paths).not.toContain('/utils/autoscale/drill');
+
+			for (const token of [USER.APP_ACCESS.TOKEN, null]) {
+				const other = await spec(token);
+
+				expect(other.tags).not.toContain('Autoscaling');
+				expect(other.paths).not.toContain('/utils/autoscale');
+				expect(other.paths).not.toContain('/utils/autoscale/supervisor');
+				expect(other.paths).not.toContain('/utils/autoscale/reload');
+
+				// Non-vacuous: a spec that came back empty would pass every line
+				// above it.
+				expect(other.paths).toContain('/auth/login');
+			}
+		});
+	});
+
 	// Nothing here is scaling a pool, and a restart is asked for over the bus:
 	// answered with a success it would leave an agent believing a pool it
 	// cannot see had been rolled, and reading the options it wrote as applied.
