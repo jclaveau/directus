@@ -140,6 +140,14 @@ function announced({ until, percent: share }: DrillAnnouncement): void {
 	deadline = cappedDeadline(until, now);
 	percent = clampPercent(share);
 
+	// A stop is announced to the pool, and the worker that started the drill is
+	// only one member of it: a stop landing anywhere else would leave the
+	// starter rebroadcasting the original announcement a second later, and the
+	// drill would resume to its full deadline with the panel reporting it over.
+	if (deadline <= now) {
+		stopRebroadcast();
+	}
+
 	// Logged by the worker that will burn, not by the one that was asked: a pool
 	// whose CPU rose on nobody's traffic is answered by every member saying it
 	// was told to.

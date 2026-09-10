@@ -140,6 +140,32 @@ test('stopping calls the pool off with a deadline already past', async () => {
 	expect(announced().until).toBe(0);
 });
 
+// A stop reaches the pool as an announcement, and the worker that started the
+// drill is one member of it holding the rebroadcast: a stop it hears has to end
+// that too, or the announcement goes out again a second later and the drill
+// resumes to its full deadline while every page reports it over.
+test('a stop announced to the pool ends this rebroadcast', async () => {
+	const { initAutoscaleDrill, startDrill } = await freshModule();
+
+	vi.useFakeTimers();
+
+	try {
+		initAutoscaleDrill();
+		const receive = subscribe.mock.calls[0]![1] as (message: unknown) => void;
+
+		startDrill(30, 80);
+		receive({ until: 0, percent: 80 });
+		publish.mockClear();
+
+		vi.advanceTimersByTime(3 * 1000);
+
+		expect(publish).not.toHaveBeenCalled();
+	}
+	finally {
+		vi.useRealTimers();
+	}
+});
+
 test('a worker burns until its deadline and then reports none', async () => {
 	const { drillState, initAutoscaleDrill } = await freshModule();
 
