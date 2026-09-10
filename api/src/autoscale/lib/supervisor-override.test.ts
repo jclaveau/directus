@@ -76,6 +76,14 @@ test('refuses a value outside what the option may hold', () => {
 		);
 });
 
+// `constructor` is answered by every object, so a lookup that is not by own
+// property finds a function where the bounds should be and judges the value
+// against it.
+test('refuses a prototype key as an option no restart carries', () => {
+	expect(() => parseSupervisorPatch({ constructor: 4 }))
+		.toThrowError("'constructor' is not an option a restart can carry");
+});
+
 test('takes a value inside the range, and null to release it', () => {
 	expect(parseSupervisorPatch({ listenTimeout: 20_000, killTimeout: null }))
 		.toEqual({ listenTimeout: 20_000, killTimeout: null });

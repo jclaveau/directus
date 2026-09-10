@@ -42,6 +42,14 @@ test('refuses a field the configuration does not have', () => {
 		.toThrowError("'maxWorker' is not a field of the autoscale configuration");
 });
 
+// `constructor` is answered by every object, so a lookup that is not by own
+// property finds a function where a field's type should be and reports the
+// value as the wrong shape rather than the field as no field at all.
+test('refuses a prototype key as a field the configuration lacks', () => {
+	expect(() => parseOverridePatch({ constructor: 8 }))
+		.toThrowError("'constructor' is not a field of the autoscale configuration");
+});
+
 // A value the loop would drop has to fail here: an operator who typed a ceiling
 // and watched the pool ignore it cannot tell a rejected write from a clamped one.
 test('refuses a value of the wrong shape', () => {

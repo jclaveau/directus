@@ -84,7 +84,12 @@ export function parseOverridePatch(
 			continue;
 		}
 
-		const expected = FIELD_TYPES[field as keyof AutoscaleConfig];
+		// Read as an own property: `constructor` and `toString` are answered by
+		// every object, and one reaching the branches below would be checked
+		// against a function rather than named as no field of the configuration.
+		const expected = Object.hasOwn(FIELD_TYPES, field)
+			? FIELD_TYPES[field as keyof AutoscaleConfig]
+			: undefined;
 
 		if (expected === undefined) {
 			throw new InvalidPayloadError({

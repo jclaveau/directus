@@ -117,7 +117,12 @@ export function parseSupervisorPatch(
 			continue;
 		}
 
-		const bounds = FIELDS[field];
+		// Read as an own property: `constructor` and `toString` are answered by
+		// every object, and one reaching the bounds below would be judged
+		// against a function.
+		const bounds = Object.hasOwn(FIELDS, field)
+			? FIELDS[field]
+			: undefined;
 
 		if (bounds === undefined) {
 			throw new InvalidPayloadError({
