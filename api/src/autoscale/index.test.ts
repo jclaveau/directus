@@ -8,6 +8,7 @@ import {
 	test,
 	vi,
 } from 'vitest';
+import { reportUnhandledRejection } from '../utils/report-unhandled-rejection.js';
 import type { AutoscaleConfig } from './types.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -148,9 +149,44 @@ afterEach(() => {
 	// Each run registers its own, and the process outlives the case.
 	process.removeAllListeners('SIGINT');
 	process.removeAllListeners('SIGTERM');
+	process.removeListener('unhandledRejection', reportUnhandledRejection);
 });
 
 describe('runAutoscaler', () => {
+	// Taken before the first await rather than beside the loop: an unreachable
+	// Redis rejects from the bus subscriber and from commands whose caller has
+	// already given up, Node ends the process on one nothing awaited, and the
+	// supervisor restarts this into the same outage — with the pool left at
+	// whatever size the outage caught it at.
+	test('guards against a stray rejection before one can happen', async () => {
+		let guardedAtConnect = false;
+
+		connectToSupervisor.mockImplementationOnce(async () => {
+			guardedAtConnect = process
+				.listeners('unhandledRejection')
+				.includes(reportUnhandledRejection);
+
+			return undefined;
+		});
+
+		await ticks(1);
+
+		expect(guardedAtConnect).toBe(true);
+	});
+
+	// Once at boot and not once a tick: a listener added every second is one
+	// this process carries for as long as it runs, and it runs for the life of
+	// the pool.
+	test('takes that guard once however long it runs', async () => {
+		await ticks(3);
+
+		const guards = process
+			.listeners('unhandledRejection')
+			.filter((listener) => listener === reportUnhandledRejection);
+
+		expect(guards).toHaveLength(1);
+	});
+
 	// This process answers no request, so what the pool is being scaled on can
 	// only come from the tick that scaled it.
 	test('reports the reading its decision was taken on', async () => {
