@@ -1200,6 +1200,30 @@ describe('flushCaches', () => {
 
 		expect(redis._pipeline.unlink).toHaveBeenCalledTimes(2);
 	});
+
+	test(oneLine`
+		says the cost as an outcome rather than as a second opinion — a line reading
+		"flushed" under the warn saying it was not answers the same question twice
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		clearPermissionCache.mockRejectedValueOnce(
+			new Error('Reached the max retries per request limit (which is 20).'),
+		);
+
+		await flushCaches(true);
+
+		expect(logger.info).not.toHaveBeenCalled();
+
+		const [line] = logger.warn.mock.calls.at(-1)!;
+
+		expect(line).toMatch(/^\[cache\] flushed in \d+ms, dropped 0 scoped/);
+		expect(line).toMatch(/index keys, without system cache$/);
+	});
 });
 
 describe('the one-off sweep of the pre-`:index:` layout', () => {
@@ -1356,5 +1380,99 @@ describe('the cacheCleared broadcast', () => {
 
 		await cacheHandlers['cacheCleared']!({ targets: ['response', 'system'] });
 		expect(system).toHaveBeenCalled();
+	});
+});
+
+describe('clearCacheTargets', () => {
+	beforeEach(() => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+	});
+
+	function refuseTheIndexUnlink() {
+		redis.scan.mockResolvedValueOnce(['0', ['scalabus:index:tag:articles']]);
+
+		redis._pipeline.exec.mockResolvedValueOnce([
+			[new Error('MISCONF Redis is configured to save RDB snapshots'), null],
+		]);
+	}
+
+	// Unlike the flush this wraps, this one has somebody waiting on the answer: an
+	// admin who asked for the clear and is told 200 either way reads a half-dropped
+	// index as a finished job, and what survived it stays invisible.
+	test('fails a clear whose index unlink redis refused', async () => {
+		refuseTheIndexUnlink();
+
+		await expect(clearCacheTargets(['response'])).rejects.toThrowError(
+			/scoped-cache index/,
+		);
+	});
+
+	test(oneLine`
+		tells the other nodes before it says so — the tiers it did clear are cleared
+		whatever it then reports, and a peer left holding them is the worse outcome
+	`, async () => {
+		refuseTheIndexUnlink();
+
+		await expect(clearCacheTargets(['response'])).rejects.toThrowError();
+
+		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
+			targets: ['response'],
+		});
+	});
+});
+
+describe('what the flush duration counts', () => {
+	// `startedAt` sat after `getCache()`, whose first call builds the four Keyv
+	// tiers — on the boot path exactly the work the caller waits through, and the
+	// one run where the number was worth reading.
+	test('the cache build the first call has to do', async () => {
+		let clock = 0;
+		const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+
+		vi.resetModules();
+
+		vi.doMock('keyv', () => {
+			return {
+				default: class {
+					store = {};
+					constructor() {
+						clock += 5;
+					}
+
+					on() {}
+					async get() {}
+					async set() {}
+					async delete() {}
+					async clear() {}
+				},
+			};
+		});
+
+		onTestFinished(async () => {
+			now.mockRestore();
+			vi.doUnmock('keyv');
+			vi.resetModules();
+			await import('./cache.js');
+		});
+
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const reloaded = await import('./cache.js');
+
+		// Only the first call builds anything, so this is the run that has to count
+		// it — a second one would measure a flush over caches already standing.
+		const report = await reloaded.flushCaches(true);
+
+		expect(report.durationMs).toBeGreaterThan(0);
 	});
 });

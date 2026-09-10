@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { ServiceUnavailableError } from '@directus/errors';
 import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
@@ -34,10 +35,6 @@ let memorySchemaCache: Readonly<SchemaOverview> | null = null;
 type Store = 'memory' | 'redis';
 
 const messenger = useBus();
-
-interface CacheMessage {
-	autoPurgeCache: boolean | undefined;
-}
 
 interface CacheMessage {
 	autoPurgeCache: boolean | undefined;
@@ -176,8 +173,11 @@ export interface CacheFlushReport {
 }
 
 export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
-	const { cache } = getCache();
+	// Before `getCache`, whose first call builds the four Keyv tiers: on the boot
+	// path that build is part of what the caller is waiting through, and that run is
+	// the one where the number was worth reading.
 	const startedAt = Date.now();
+	const { cache } = getCache();
 	const failures: string[] = [];
 
 	// Best-effort, all of it. Every caller here runs AFTER the thing it is flushing
@@ -265,10 +265,17 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// than at each caller: one line, and the number that explains it.
 	const durationMs = Date.now() - startedAt;
 
-	logger.info(
-		`[cache] flushed in ${durationMs}ms, `
-		+ `dropped ${droppedIndexKeys} scoped-cache index keys`,
-	);
+	const flushed = `[cache] flushed in ${durationMs}ms, `
+		+ `dropped ${droppedIndexKeys} scoped-cache index keys`;
+
+	// Under the warns naming the tiers that did not go, an info line reading
+	// "flushed" answers the question they just answered, with the other answer.
+	if (failures.length > 0) {
+		logger.warn(`${flushed}, without ${failures.join(', ')}`);
+	}
+	else {
+		logger.info(flushed);
+	}
 
 	return { durationMs, droppedIndexKeys, failures };
 }
@@ -315,6 +322,7 @@ export async function clearSystemCache(opts?: {
  */
 export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<void> {
 	const { cache, lockCache } = getCache();
+	let refusedIndexKeys = 0;
 
 	if (targets.includes('system')) {
 		// forced so it runs even while a lock is held; its `schemaChanged` publish
@@ -326,7 +334,7 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 		await cache?.clear();
 		// The scoped-tag index lives in raw Redis outside the Keyv namespace, so the
 		// clear above misses it — drop it too so no orphan tag pointers linger.
-		await dropScopedCacheTagIndex();
+		refusedIndexKeys = (await dropScopedCacheTagIndex()).refused;
 	}
 
 	if (targets.includes('locks')) {
@@ -341,6 +349,17 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	}
 	catch (error: any) {
 		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);
+	}
+
+	// Raised only once the peers have been told, and raised at all because unlike
+	// `flushCaches` this one has somebody waiting on the answer: a pipeline answers
+	// per command, so a chunk redis refused is a chunk still indexed, and an admin
+	// told the clear succeeded has no other way to learn it did not.
+	if (refusedIndexKeys > 0) {
+		throw new ServiceUnavailableError({
+			service: 'scoped-cache index',
+			reason: `redis refused ${refusedIndexKeys} of the unlink commands`,
+		});
 	}
 }
 
