@@ -54,6 +54,11 @@ const error = ref<string | null>(null);
 const saving = ref(false);
 const drafts = ref<Record<string, string | null>>({});
 
+// Its own map rather than a shared one: the two tables are written to separate
+// keys through separate routes, and a field named in both would otherwise be
+// one draft answering for two changes.
+const supervisorDrafts = ref<Record<string, string | null>>({});
+
 const note = ref('');
 const drill = ref<AutoscaleDrill | null>(null);
 const drillAvailable = ref(false);
@@ -277,7 +282,8 @@ function withNote(patch: Record<string, unknown>): Record<string, unknown> {
 	};
 }
 
-async function write(patch: Record<string, unknown>): Promise<void> {
+/** Whether the write landed, so a refused one leaves the typing to fix. */
+async function write(patch: Record<string, unknown>): Promise<boolean> {
 	saving.value = true;
 	error.value = null;
 
@@ -290,9 +296,11 @@ async function write(patch: Record<string, unknown>): Promise<void> {
 		// The values the loop runs on come back on the process report, and the
 		// tick that reads this write is the one that changes them.
 		emit('changed');
+		return true;
 	}
 	catch (err: any) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		return false;
 	}
 	finally {
 		saving.value = false;
@@ -306,7 +314,9 @@ async function write(patch: Record<string, unknown>): Promise<void> {
  * a worker, so nothing about the pool changes until the restart below pushes
  * them.
  */
-async function writeSupervisor(patch: Record<string, unknown>): Promise<void> {
+async function writeSupervisor(
+	patch: Record<string, unknown>,
+): Promise<boolean> {
 	saving.value = true;
 	error.value = null;
 
@@ -319,9 +329,11 @@ async function writeSupervisor(patch: Record<string, unknown>): Promise<void> {
 		supervisorOverride.value = response.data.data.override;
 		supervisorSetByEmail.value = response.data.data.setByEmail ?? null;
 		note.value = '';
+		return true;
 	}
 	catch (err: any) {
 		error.value = err?.response?.data?.errors?.[0]?.message ?? String(err);
+		return false;
 	}
 	finally {
 		saving.value = false;
@@ -329,42 +341,50 @@ async function writeSupervisor(patch: Record<string, unknown>): Promise<void> {
 }
 
 function supervisorEdited(row: SupervisorRow): boolean {
-	return row.option !== null && row.option.field in drafts.value;
+	return row.option !== null && row.option.field in supervisorDrafts.value;
 }
 
 function supervisorTyped(row: SupervisorRow, typed: string): void {
 	if (row.option !== null) {
-		drafts.value[row.option.field] = typed;
+		supervisorDrafts.value[row.option.field] = typed;
 	}
 }
 
-function applySupervisorRow(row: SupervisorRow): void {
+async function applySupervisorRow(row: SupervisorRow): Promise<void> {
 	if (row.option === null) {
 		return;
 	}
 
 	const field = row.option.field;
-	const typed = drafts.value[field];
-	delete drafts.value[field];
 
 	// A box emptied hands the option back to the environment, which is what a
 	// deployment that never overrode it runs on.
-	void writeSupervisor({ [field]: parseFieldValue('number', typed) });
+	const value = parseFieldValue('number', supervisorDrafts.value[field]);
+
+	// Dropped once it has landed: a refused value is the one worth correcting,
+	// and a box emptied under the operator leaves them retyping it from the
+	// message alone.
+	if (await writeSupervisor({ [field]: value })) {
+		delete supervisorDrafts.value[field];
+	}
 }
 
 function cancelSupervisorRow(row: SupervisorRow): void {
 	if (row.option !== null) {
-		delete drafts.value[row.option.field];
+		delete supervisorDrafts.value[row.option.field];
 	}
 }
 
-function resetSupervisorRow(row: SupervisorRow): void {
+async function resetSupervisorRow(row: SupervisorRow): Promise<void> {
 	if (row.option === null) {
 		return;
 	}
 
-	delete drafts.value[row.option.field];
-	void writeSupervisor({ [row.option.field]: null });
+	const field = row.option.field;
+
+	if (await writeSupervisor({ [field]: null })) {
+		delete supervisorDrafts.value[field];
+	}
 }
 
 /**
@@ -391,7 +411,7 @@ function supervisorShown(row: SupervisorRow): string {
 	}
 
 	if (supervisorEdited(row)) {
-		return drafts.value[row.option.field] ?? '';
+		return supervisorDrafts.value[row.option.field] ?? '';
 	}
 
 	return row.override === null
@@ -407,7 +427,7 @@ function supervisorShown(row: SupervisorRow): string {
  */
 function supervisorSource(row: SupervisorRow): string {
 	if (supervisorEdited(row)) {
-		const draft = drafts.value[row.option!.field];
+		const draft = supervisorDrafts.value[row.option!.field];
 
 		return draft === null || draft === ''
 			? t('autoscale_supervisor_source', 'pm2')
@@ -504,27 +524,36 @@ function shown(row: AutoscaleRow): string | null {
 		: String(value);
 }
 
-function applyRow(field: string, kind: string): void {
+/**
+ * Apply one row, and keep what was typed unless the write took it.
+ *
+ * A refused value is the one worth correcting: the message says what is wrong
+ * with it, and a box emptied under the operator leaves them retyping it from
+ * that message alone.
+ */
+async function applyRow(field: string, kind: string): Promise<void> {
 	const value = parseFieldValue(kind as never, drafts.value[field]);
 
-	delete drafts.value[field];
-	void write({ [field]: value });
+	if (await write({ [field]: value })) {
+		delete drafts.value[field];
+	}
 }
 
 function cancelRow(field: string): void {
 	delete drafts.value[field];
 }
 
-function resetRow(field: string): void {
-	delete drafts.value[field];
-	void write({ [field]: null });
+async function resetRow(field: string): Promise<void> {
+	if (await write({ [field]: null })) {
+		delete drafts.value[field];
+	}
 }
 
 /**
  * Every pending change in one write, so a set of fields meant to move together
  * reaches the loop on the same tick.
  */
-function applyAll(): void {
+async function applyAll(): Promise<void> {
 	const patch: Record<string, unknown> = {};
 
 	for (const row of rows.value) {
@@ -533,8 +562,16 @@ function applyAll(): void {
 		}
 	}
 
-	drafts.value = {};
-	void write(patch);
+	// The whole set is judged against the whole configuration, so this is the
+	// write most likely to be refused — and the one whose typing costs most to
+	// lose.
+	if (await write(patch) === false) {
+		return;
+	}
+
+	for (const field of Object.keys(patch)) {
+		delete drafts.value[field];
+	}
 }
 
 function resetAll(): void {

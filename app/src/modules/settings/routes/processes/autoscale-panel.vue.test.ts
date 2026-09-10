@@ -717,6 +717,31 @@ describe('the whole form at once', () => {
 		});
 	});
 
+	// The whole set is judged against the whole configuration, so this is the
+	// write most likely to be refused — and the one whose typing costs most.
+	test('a refused write keeps every pending change', async () => {
+		vi.mocked(api.patch).mockRejectedValue({
+			response: {
+				data: { errors: [{ message: 'minWorkers is 6, above the ceiling of 4' }] },
+			},
+		});
+
+		const wrapper = await mounted({});
+
+		await row(wrapper, 'minWorkers').find('input')
+			.setValue('6');
+
+		await row(wrapper, 'maxWorkers').find('input')
+			.setValue('8');
+
+		await press(wrapper, 'Apply all');
+
+		expect(wrapper.text()).toContain('above the ceiling');
+
+		expect(row(wrapper, 'minWorkers').find('input').element.value).toBe('6');
+		expect(row(wrapper, 'maxWorkers').find('input').element.value).toBe('8');
+	});
+
 	test('resetting the changes writes nothing and puts the values back', async () => {
 		const wrapper = await mounted({ maxWorkers: 8 });
 		const input = row(wrapper, 'maxWorkers').find('input');
@@ -1015,6 +1040,20 @@ describe('editing one field', () => {
 		const name = row(wrapper, 'maxWorkers').find('td span');
 
 		expect(name.attributes('title')).toContain('never grows past this');
+	});
+
+	// The message says what is wrong with the value, and the value is what has
+	// to be corrected: a box emptied under the operator leaves them retyping it
+	// from the message alone.
+	test('a refused write leaves the value there to correct', async () => {
+		vi.mocked(api.patch).mockRejectedValue({
+			response: { data: { errors: [{ message: 'maxWorkers is 400' }] } },
+		});
+
+		const wrapper = await mounted({});
+		await apply(wrapper, 'maxWorkers', '400');
+
+		expect(row(wrapper, 'maxWorkers').find('input').element.value).toBe('400');
 	});
 
 	// The override outlives the incident that justified it, and what it is then
