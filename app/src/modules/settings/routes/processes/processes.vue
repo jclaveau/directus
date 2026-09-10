@@ -637,6 +637,9 @@ onUnmounted(() => {
 								<span>rss {{ formatFilesize(node.runtime.rssBytes) }}</span>
 								<span>heap {{ formatFilesize(node.runtime.heapUsedBytes) }}</span>
 								<span>node {{ node.runtime.nodeVersion }}</span>
+								<span v-if="node.runtime.execArgv.length">
+									flags {{ node.runtime.execArgv.join(' ') }}
+								</span>
 								<span v-if="node.nodeId">id {{ node.nodeId }}</span>
 							</div>
 

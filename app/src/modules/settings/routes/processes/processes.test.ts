@@ -94,6 +94,7 @@ function report(overrides: Partial<ProcessesReport> = {}): ProcessesReport {
 									externalBytes: 1_000,
 									uptimeMs: 65_000,
 									nodeVersion: 'v22.0.0',
+									execArgv: ['--max-semi-space-size=2'],
 								},
 								supervisor: {
 									status: 'online',
@@ -305,6 +306,15 @@ describe('the env panel', () => {
 
 		await wrapper.findAll('.process-row')[0]!.trigger('click');
 		expect(wrapper.find('.detail').exists()).toBe(false);
+	});
+
+	test('shows the Node options the process was started with', async () => {
+		// So a flag set in the supervisor config or NODE_OPTIONS can be confirmed
+		// live, rather than inferred from what the memory figures look like.
+		const wrapper = await expanded();
+
+		expect(wrapper.find('.runtime').text())
+			.toContain('--max-semi-space-size=2');
 	});
 
 	test('lists the variables, and never a redacted value', async () => {
