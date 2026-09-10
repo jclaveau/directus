@@ -11,10 +11,11 @@ vi.mock('../../../redis/index.js');
 vi.mock('../../utils/drain-stdout.js');
 
 const error = vi.fn();
+const warn = vi.fn();
 
 function mockLogger() {
 	vi.mocked(useLogger).mockReturnValue(
-		{ error } as unknown as ReturnType<typeof useLogger>,
+		{ error, warn } as unknown as ReturnType<typeof useLogger>,
 	);
 }
 
@@ -87,18 +88,19 @@ test('stops at the first exit rather than reading a missing report', async () =>
 	expect(exit).toHaveBeenCalledWith(1);
 });
 
-// The command runs in the deploy shell, whose env is not the running service's,
-// so this is a misconfiguration rather than an outage: it would clear a process
-// that serves nothing, tell no node, and report the cluster flushed.
-test('refuses a run with no bus to reach the other nodes', async () => {
+// A single node on a memory store is its own cluster, so this still does the only
+// thing it can do — and says what it could not, because the same shape is a deploy
+// shell whose env is missing the REDIS the running service has.
+test('says a run reaches no other node, and flushes anyway', async () => {
 	vi.mocked(redisConfigAvailable).mockReturnValue(false);
+	vi.mocked(flushCaches).mockResolvedValue(report());
 
-	await expect(cacheFlush()).rejects.toThrowError('exit:1');
+	await expect(cacheFlush()).rejects.toThrowError('exit:0');
 
-	expect(flushCaches).not.toHaveBeenCalled();
+	expect(flushCaches).toHaveBeenCalledWith(true);
 
-	expect(error).toHaveBeenCalledWith(
-		'[cache] no REDIS is configured, so this would reach no other node',
+	expect(warn).toHaveBeenCalledWith(
+		'[cache] no REDIS is configured, so this reaches no other node',
 	);
 });
 

@@ -17,16 +17,14 @@ import { drainStdout } from '../../utils/drain-stdout.js';
 export default async function cacheFlush(): Promise<void> {
 	const logger = useLogger();
 
-	// This runs in the deploy shell, whose env is not the running service's. With
-	// no bus it clears the caches of a process that serves nothing and tells no
-	// node, then reports the cluster flushed.
+	// Said rather than refused: a single node on a memory store IS the cluster, so
+	// this is only wrong when the deploy shell's env differs from the running
+	// service's — which the shell cannot tell from here. What it must not do is
+	// clear a process serving nothing, tell no node, and say nothing about it.
 	if (!redisConfigAvailable()) {
-		logger.error(
-			'[cache] no REDIS is configured, so this would reach no other node',
+		logger.warn(
+			'[cache] no REDIS is configured, so this reaches no other node',
 		);
-
-		await exitWhenLogged(1);
-		return;
 	}
 
 	let report: CacheFlushReport | undefined;

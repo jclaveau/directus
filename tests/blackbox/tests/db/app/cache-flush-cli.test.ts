@@ -264,15 +264,15 @@ describe('`directus cache flush` clears a running node from another process', ()
 		}, 60_000);
 
 		it(oneLine`
-			refuses a run that can reach no other node, rather than reporting a flush
-			the rest of the cluster never heard about
+			says a run can reach no other node, rather than reporting a flush the rest
+			of the cluster never heard about
 		`, async () => {
 			// The command runs in the deploy shell, whose env is not the running
-			// service's, so a bus-less run is a misconfiguration rather than a
-			// contrivance: it clears this process alone and tells nobody.
+			// service's, so a bus-less run is as likely a misconfiguration as a real
+			// single node: it clears this process alone, and has to say so.
 			const { code, output } = await runCacheFlush({ REDIS_ENABLED: 'false' });
 
-			expect(code).toBe(1);
+			expect(code).toBe(0);
 			expect(output).toMatch(/no REDIS is configured/);
 		}, 60_000);
 
