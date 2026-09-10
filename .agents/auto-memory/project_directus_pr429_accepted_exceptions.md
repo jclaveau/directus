@@ -2,6 +2,7 @@
 name: project_directus_pr429_accepted_exceptions
 description: PR #429 (run the type tests, gate on the types they reach) — MERGED 6dc12247b6; settled points a fresh review would wrongly re-flag
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

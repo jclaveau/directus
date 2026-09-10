@@ -2,6 +2,7 @@
 name: project_directus_build_identity_cache_flush
 description: PR #285 (MERGED) — flush the redis cache on boot when the build identity changes, so a code-only deploy self-heals; architecture + accepted design decisions (don't re-raise in a fresh review)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

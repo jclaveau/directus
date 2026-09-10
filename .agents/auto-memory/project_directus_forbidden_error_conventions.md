@@ -4,6 +4,7 @@ description:
   Directus error conventions — 403 for missing items (anti-enumeration), pre-access input validation should be 400,
   ForbiddenError({reason}) is upstream, status never env-gated
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

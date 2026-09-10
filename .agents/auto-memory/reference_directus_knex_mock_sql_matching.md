@@ -2,6 +2,7 @@
 name: reference_directus_knex_mock_sql_matching
 description: knex-mock-client matches handlers against the raw SQL string, so a column name can steal another table's query; plus the RELATIONAL_BATCH_SIZE infinite loop in items.test.ts
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

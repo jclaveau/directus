@@ -2,6 +2,7 @@
 name: project_directus_migration_transaction_design
 description: Why the migration runner wraps a run in one transaction on Postgres only, which migrations must stay outside it, and the points already settled on #420/#421 — do not re-raise
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

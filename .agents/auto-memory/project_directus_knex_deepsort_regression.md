@@ -4,6 +4,7 @@ description:
   Directus is incompatible with knex >= 3.2.10 (PR #6392) — it double-escapes the rowNumber window alias
   and 500s every deep o2m/m2m/m2a sort on all dialects; the fork pins knex 3.1.0
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

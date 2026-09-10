@@ -2,6 +2,7 @@
 name: project_directus_issue_autoclose_hhh_dev
 description: on jclaveau/directus since 2026-07-27 `v11.10.1-hhh-dev` IS the default branch, so a PR's `Closes #N` now auto-closes on merge to hhh-dev — manual close only needed for PRs merged BEFORE the default flip
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

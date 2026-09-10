@@ -2,6 +2,7 @@
 name: project_directus_blackbox_flakes
 description: known intermittent blackbox flakes in jclaveau/directus CI (m2o.test.ts WebSocket-OPEN timeout) + how to rerun a failed shard — don't chase these as real bugs
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_cache_events_mock_builder
 description: "cache-events.test.ts shares ONE knex mock builder resolved by `lastTable` at await time — building two query builders before awaiting either makes both read the last table, so code that is correct against real knex goes red"
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

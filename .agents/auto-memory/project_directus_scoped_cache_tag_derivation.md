@@ -2,6 +2,7 @@
 name: project_directus_scoped_cache_tag_derivation
 description: how the scoped-cache feature decides which collections a read is tagged with (the invalidation surface)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

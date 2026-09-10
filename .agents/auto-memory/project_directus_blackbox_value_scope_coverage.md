@@ -2,6 +2,7 @@
 name: project_directus_blackbox_value_scope_coverage
 description: Blackbox value-slice cache coverage — scoped_cache_fields via CreateCollection meta at seed time; strict-witness HIT/MISS design; upsertMany has no REST surface
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

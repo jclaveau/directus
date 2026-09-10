@@ -2,6 +2,7 @@
 name: project_directus_pr371_accepted_exceptions
 description: PR #371 (purge the collections a delete cascades into or nullifies + slice index) — MERGED 2026-08-20; settled points a fresh review should not re-raise
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -5,6 +5,7 @@ description:
   integration auto-composed from the hhh-main-* copy stack; plus blackbox/e2e label-gating + mssql fork-runner
   saturation
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

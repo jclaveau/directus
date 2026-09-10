@@ -2,6 +2,7 @@
 name: project_directus_fork_no_upstream_prs
 description: jclaveau/directus fork — we no longer submit PRs upstream; free to diverge from directus/directus; fork additions are BSL-1.1 under jean's own grant
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

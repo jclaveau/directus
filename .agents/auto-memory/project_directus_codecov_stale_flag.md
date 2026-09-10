@@ -2,6 +2,7 @@
 name: project_directus_codecov_stale_flag
 description: A codecov patch status can be wrong two ways on this repo — a conflicting PR stops pull_request CI entirely, and a carried-forward flag reports a stale number; check both before writing tests.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

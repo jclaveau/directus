@@ -2,6 +2,7 @@
 name: project_directus_blackbox_run_and_logs
 description: How to trigger the label-gated blackbox suite on a branch HEAD (compare-PR + Run Blackbox label) and why its REST job logs are unreadable (containerized vitest output) — read the streamed section before ELIFECYCLE instead.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

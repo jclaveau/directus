@@ -2,6 +2,7 @@
 name: project_directus_local_api_test_env
 description: api/src/app.test.ts cannot pass locally without a built @directus/app, and the app build dies under the Bash tool — CI is that file's only arbiter
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

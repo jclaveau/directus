@@ -4,6 +4,7 @@ description:
   Directus v12+ requires a license key (relicensing); v11.9.2 = last license-free release Hippocast runs, so the fork
   keeps two live integration lines and compose must eventually target both. Current infra targets main only.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

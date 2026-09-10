@@ -2,6 +2,7 @@
 name: project_directus_pr205_accepted_exceptions
 description: PR #205 scoped-cache-value-tags — points jean explicitly accepted/settled during review; do NOT re-raise these when reviewing #205 or its follow-ups in a fresh session
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

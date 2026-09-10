@@ -2,6 +2,7 @@
 name: project_directus_typescript7_blocked
 description: TypeScript 7.0.2 is a clean bump for this repo but typescript-eslint blocks it — its peer caps below 6.1 and TS 7 ships no compiler API, so pnpm lint dies at module load
 metadata:
+  author: Jean Claveau
   type: project
 ---
 
