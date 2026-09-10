@@ -204,9 +204,17 @@ function megabytesOf(declared: unknown): number | null {
 
 	const unit = size[2]?.toUpperCase();
 
-	return unit === undefined
-		? Math.round(Number(size[1]) / MEGABYTE)
-		: Math.round(Number(size[1]) * (SIZE_UNITS[unit] as number));
+	const megabytes = unit === undefined
+		? Number(size[1]) / MEGABYTE
+		: Number(size[1]) * (SIZE_UNITS[unit] as number);
+
+	// A ceiling under a megabyte is one every worker is already over, and pm2
+	// acts on what it is given: rounded to zero it would be pushed with the next
+	// roll and restart the pool as fast as it can boot. Unknown instead, so the
+	// restart carries no ceiling and pm2 keeps the one it started under.
+	return megabytes < 1
+		? null
+		: Math.round(megabytes);
 }
 
 /**

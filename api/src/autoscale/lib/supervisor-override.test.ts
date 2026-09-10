@@ -159,3 +159,12 @@ test('an option nothing declares is not carried at all', async () => {
 
 	expect(reloadDeclaration(null)).not.toHaveProperty('max_memory_restart');
 });
+
+// pm2 reads a bare number as bytes, so `400` asks for 400 bytes rather than the
+// 400 megabytes whoever wrote it meant. Rounded to a ceiling of zero it would be
+// pushed with the next roll and restart every worker as fast as it can boot.
+test('a memory ceiling under a megabyte is carried by no restart', async () => {
+	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: 400 });
+
+	expect(reloadDeclaration(null)).not.toHaveProperty('max_memory_restart');
+});
