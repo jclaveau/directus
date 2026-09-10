@@ -763,7 +763,7 @@ test('Every declared output property is one the tool actually answers', () => {
 		read_cache_stats_state: CacheStatsState;
 	} = {
 		read_autoscale_config: {
-			key: 'scalabus:config:processes:autoscale',
+			key: 'directus_settings.autoscale_settings',
 			sharedSettings: {
 				maxWorkers: 8,
 				setBy: 'jean',
@@ -772,7 +772,7 @@ test('Every declared output property is one the tool actually answers', () => {
 			},
 			setByEmail: 'jean@example.com',
 			supervisor: {
-				key: 'scalabus:config:processes:supervisor',
+				key: 'directus_settings.supervisor_settings',
 				sharedSettings: { listenTimeout: 20_000 },
 				setByEmail: 'jean@example.com',
 			},
@@ -847,17 +847,17 @@ test('Every declared output property is one the tool actually answers', () => {
 			],
 		},
 		write_autoscale_config: {
-			key: 'scalabus:config:processes:autoscale',
+			key: 'directus_settings.autoscale_settings',
 			sharedSettings: { maxWorkers: 8 },
 			setByEmail: 'jean@example.com',
 			supervisor: {
-				key: 'scalabus:config:processes:supervisor',
+				key: 'directus_settings.supervisor_settings',
 				sharedSettings: null,
 				setByEmail: null,
 			},
 		},
 		write_supervisor_config: {
-			key: 'scalabus:config:processes:supervisor',
+			key: 'directus_settings.supervisor_settings',
 			sharedSettings: { listenTimeout: 21_000 },
 			setByEmail: 'jean@example.com',
 		},

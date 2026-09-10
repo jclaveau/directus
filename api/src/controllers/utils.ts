@@ -406,8 +406,10 @@ router.post(
 	}),
 );
 
-// The shared settings live in Redis, so a deployment without one has nowhere to
-// keep a change and says so by not carrying the endpoint at all.
+// A change reaches the process that scales the pool over the bus, and without
+// Redis that bus is an emitter this worker shares with nobody — so a deployment
+// without one says so by not carrying the endpoints at all rather than by
+// accepting writes the pool would pick up whenever its floor next came round.
 if (redisConfigAvailable()) {
 	router.get(
 		'/autoscale',

@@ -186,16 +186,14 @@ function answered(
 	sharedSettings: Record<string, unknown> | null,
 	setByEmail: string | null = null,
 ) {
-	const key = 'scalabus:config:processes:autoscale';
-
 	return {
 		data: {
 			data: {
-				key,
+				key: 'directus_settings.autoscale_settings',
 				sharedSettings,
 				setByEmail,
 				supervisor: {
-					key: 'scalabus:config:processes:supervisor',
+					key: 'directus_settings.supervisor_settings',
 					sharedSettings: supervisorSharedSettings,
 					setByEmail: null,
 				},
@@ -468,13 +466,13 @@ describe('what the panel shows', () => {
 	});
 });
 
-// A bare `scalabus:config:processes:autoscale` reads as an identifier of
-// something, with no way to tell what holds it or what it is for.
-test('the key says what it is a key to', async () => {
+// A bare column name reads as an identifier of something, with no way to tell
+// what holds it or what it is for.
+test('the panel says where the settings are kept', async () => {
 	const wrapper = await mounted(null);
 
 	expect(wrapper.find('.key').text())
-		.toBe('Stored in Redis under scalabus:config:processes:autoscale');
+		.toBe('Stored in directus_settings.autoscale_settings');
 });
 
 describe('the levers', () => {

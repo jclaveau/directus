@@ -214,7 +214,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				properties: {
 					key: {
 						type: 'string',
-						description: 'The Redis key the shared settings are stored under.',
+						description: 'The settings column the shared settings are stored in.',
 					},
 					sharedSettings: {
 						type: 'object',
@@ -296,7 +296,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				properties: {
 					key: {
 						type: 'string',
-						description: 'The Redis key the shared settings are stored under.',
+						description: 'The settings column the shared settings are stored in.',
 					},
 					sharedSettings: {
 						type: 'object',
@@ -785,7 +785,7 @@ export function systemMcpTools(): SystemMcpTool[] {
 		// window and answer an empty tree. The REST route is absent in that
 		// deployment; the tool it shares a service with has to be too.
 		.filter((group) => group !== 'processes' || processesReportEnabled())
-		// The shared settings live in Redis, so a deployment without one has nowhere to
+		// A change travels to the scaling process over the bus, so a deployment with no
 		// keep a change and nothing to read back — the same reason the REST route
 		// is not registered there.
 		.filter((group) => group !== 'autoscale' || redisConfigAvailable())

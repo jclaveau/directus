@@ -129,6 +129,50 @@ describe('The autoscale configuration is checked before it is stored', () => {
 		});
 	});
 
+	// A change to the pool is a change to a setting, so it is audited like every
+	// other one: the revision names the writer, the moment, and the whole
+	// document they left behind. That trail is what the write goes through
+	// `SettingsService` for, rather than touching the column itself.
+	describe('leaves the change in the audit trail', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			await patch(vendor, { minWorkers: 2, maxWorkers: 4 });
+
+			const written = await patch(vendor, {
+				maxWorkers: 3,
+				note: 'the sale starts at nine',
+			});
+
+			expect(written.statusCode).toBe(200);
+
+			const revisions = await request(getUrl(vendor, envs[vendor]))
+				.get('/revisions')
+				.query({
+					'filter[collection][_eq]': 'directus_settings',
+					fields: 'delta,activity.action,activity.user.email',
+					sort: '-id',
+					limit: 1,
+				})
+				.set('Authorization', auth);
+
+			expect(revisions.statusCode).toBe(200);
+
+			const latest = revisions.body.data[0];
+
+			expect(latest.activity.action).toBe('update');
+			expect(latest.activity.user.email).toBe(USER.ADMIN.EMAIL);
+
+			// The whole document, not the field that moved: what the next reader
+			// gets handed is this, and a delta holding only `maxWorkers` would
+			// read as a pool with no floor.
+			expect(latest.delta.autoscale_settings).toMatchObject({
+				maxWorkers: 3,
+				minWorkers: 2,
+				note: 'the sale starts at nine',
+				setFrom: 'admin',
+			});
+		});
+	});
+
 	// The ceiling this floor is judged against is the environment's, not one
 	// in the patch: a rule that only compared fields written together would
 	// take this and let the loop clamp it back.

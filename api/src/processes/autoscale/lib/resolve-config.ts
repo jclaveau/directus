@@ -1,6 +1,11 @@
 import { useEnv } from '@directus/env';
 import { useLogger } from '../../../logger/index.js';
-import { redisConfigAvailable, useRedis } from '../../../redis/index.js';
+import {
+	SHARED_SETTINGS_COLUMNS,
+	onSharedSettingsChanged,
+	readSharedSettings,
+	type SharedSettings,
+} from '../../lib/shared-settings.js';
 import type {
 	AutoscaleConfig,
 	AutoscaleConfigSources,
@@ -13,28 +18,6 @@ import {
 	signalOr,
 	strategyOr,
 } from './sanitize-config.js';
-
-/**
- * Where the shared settings are read from.
- *
- * Namespaced like the tag index, so two deployments sharing one Redis are
- * tuned separately rather than through each other. Under `processes` because
- * that is the module these two documents configure; the leaf says which half.
- */
-export function autoscaleConfigKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:config:processes:autoscale`;
-}
-
-/**
- * Where the pm2 options an operator may change are kept.
- *
- * Its own key rather than a corner of the configuration's: the loop reads that
- * one every tick and takes no interest in these, which reach the pool through
- * a rolling restart instead.
- */
-export function supervisorSharedSettingsKey(): string {
-	return `${useEnv()['CACHE_NAMESPACE']}:config:processes:supervisor`;
-}
 
 /** The variable each field reads, so a page can say where a value came from. */
 const ENV_KEYS: Record<keyof AutoscaleConfig, string> = {
@@ -188,79 +171,36 @@ export function configWithSharedSettings(
 }
 
 /**
- * How long a tick waits for the shared settings before deciding without a fresh one.
+ * How long the mirror may go unrefreshed before it re-reads unprompted.
  *
- * The interval between ticks, so a read is never the reason a tick is late.
+ * The announcement is what lands a change in a second; this is what lands it
+ * at all on a node that missed one. A bus message is delivered at most once
+ * and nothing replays it, so a floor is the difference between staleness that
+ * heals and staleness that waits for a restart.
  */
-const SHARED_SETTINGS_READ_TIMEOUT_MS = 1000;
-
-/**
- * Statuses in which the client holds no connection to send a command down.
- *
- * Connecting is not among them: the first tick of a healthy boot happens
- * before the handshake finishes, and its read is answered as soon as it does.
- */
-const DISCONNECTED = new Set(['reconnecting', 'close', 'end']);
-
-/**
- * The stored shared settings, or a failure if Redis does not produce one promptly.
- *
- * ioredis queues a command issued while it is not connected and puts no
- * deadline on that queue, so a tick that only awaited the read would hold the
- * loop for as long as the outage lasts — leaving the pool frozen at whatever
- * size the outage caught it at, which is exactly what this loop exists to
- * prevent.
- */
-async function readStoredSharedSettings(): Promise<string | null> {
-	const redis = useRedis();
-
-	if (DISCONNECTED.has(redis.status)) {
-		throw new Error(`the client is ${redis.status}`);
-	}
-
-	const read = redis.get(autoscaleConfigKey());
-
-	// The read that loses the race stays queued, and ioredis rejects a queued
-	// command when it flushes the queue — an unhandled rejection there would
-	// end the process the loop runs in.
-	read.catch(() => {});
-
-	let expire: ReturnType<typeof setTimeout> | undefined;
-
-	try {
-		return await Promise.race([
-			read,
-			new Promise<never>((_resolve, reject) => {
-				expire = setTimeout(() => {
-					reject(new Error(`no answer in ${SHARED_SETTINGS_READ_TIMEOUT_MS}ms`));
-				}, SHARED_SETTINGS_READ_TIMEOUT_MS);
-			}),
-		]);
-	}
-	finally {
-		clearTimeout(expire);
-	}
-}
+const MIRROR_FLOOR_MS = 30_000;
 
 let lastCorrections = '';
-let lastGood: AutoscaleConfig | null = null;
+let lastAnnounced: string | null = null;
 let lastBase: AutoscaleConfig | null = null;
 let lastSources: AutoscaleConfigSources | null = null;
-let sharedSettingsUnreadable = false;
+let sharedSettings: SharedSettings | null = null;
+let readAt = 0;
+let unreadable = false;
 
 /**
  * Where each field of the configuration the last tick used came from.
  *
  * Held beside the configuration rather than returned with it because it
  * answers a different question — one the loop never asks and a page always
- * does — and because unreadable shared settings hold both together.
+ * does.
  */
 export function resolvedSources(): AutoscaleConfigSources {
 	return lastSources ?? sourcesOf({});
 }
 
 /**
- * What the last tick would have run on with nothing stored in Redis.
+ * What the last tick would have run on with nothing stored.
  *
  * The page offers to clear a field, and the value that lands there is this
  * one — knowable only here, since the shared settings win over it everywhere
@@ -285,63 +225,98 @@ function announce(corrections: string[]): void {
 }
 
 /**
- * The configuration for this tick: the env chain, with whatever Redis
- * currently holds laid over it, checked before the loop is allowed to act
- * on it.
+ * Say what the pool is being tuned by, at boot and whenever that changes.
  *
- * Tuning an autoscaler by redeploying restarts the pool, which destroys the
- * state being tuned, so the values have to be changeable without one.
- *
- * A Redis that cannot be read keeps the last configuration that was, rather
- * than reverting to the env chain. Reverting sounds safer and is not: an
- * operator who has just raised the ceiling to survive a spike would have it
- * dropped back by a blip, and the ceiling is corrected with no cooldown — the
- * pool would lose the workers immediately and take them back when Redis
- * returned.
+ * Nothing stored gets a line of its own rather than silence: a layer that went
+ * missing — a column cleared, a database restored from before it was written —
+ * reads exactly like a deployment that never had one, and the difference
+ * between them is a ceiling somebody raised to survive an incident.
  */
-export async function resolveConfig(): Promise<AutoscaleConfig> {
-	const fromEnv = envConfig();
+function announceSharedSettings(): void {
+	const summary = sharedSettings === null
+		? 'nothing stored, so the environment chain alone'
+		: Object.keys(sharedSettings).join(', ');
 
-	const settle = (
-		candidate: AutoscaleConfig,
-		sharedSettings: Record<string, unknown>,
-	) => {
-		const { config, corrections } = sanitizeConfig(candidate);
-		announce(corrections);
-		lastGood = config;
-		lastBase = sanitizeConfig(fromEnv).config;
-		lastSources = sourcesOf(sharedSettings);
-
-		return config;
-	};
-
-	if (redisConfigAvailable() === false) {
-		return settle(fromEnv, {});
+	if (summary === lastAnnounced) {
+		return;
 	}
+
+	lastAnnounced = summary;
+	useLogger().info(`[autoscale] shared settings: ${summary}`);
+}
+
+/**
+ * Re-read the stored layer into the mirror.
+ *
+ * Best-effort, and the last one read is kept on a failure rather than the
+ * environment being taken back: an operator who has just raised the ceiling to
+ * survive a spike would have it dropped by a blip, and the ceiling is
+ * corrected with no cooldown — the pool would lose the workers at once and
+ * take them back when the database answered again.
+ */
+async function refreshSharedSettings(): Promise<void> {
+	readAt = Date.now();
 
 	try {
-		const stored = await readStoredSharedSettings();
-		sharedSettingsUnreadable = false;
-
-		if (!stored) {
-			return settle(fromEnv, {});
-		}
-
-		const sharedSettings = JSON.parse(stored) as Record<string, unknown>;
-
-		return settle(withSharedSettings(fromEnv, sharedSettings), sharedSettings);
+		sharedSettings = await readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale);
+		unreadable = false;
+		announceSharedSettings();
 	}
 	catch (error) {
-		if (sharedSettingsUnreadable === false) {
-			sharedSettingsUnreadable = true;
+		if (unreadable === false) {
+			unreadable = true;
 
 			useLogger().warn(
 				error,
 				'[autoscale] could not read the shared settings; '
-					+ 'holding the last configuration',
+					+ 'holding the last ones read',
 			);
 		}
-
-		return lastGood ?? settle(fromEnv, {});
 	}
+}
+
+/**
+ * Seed the mirror and keep it current.
+ *
+ * Awaited at boot so the first tick decides on what is stored rather than on
+ * the environment it would fall back to — a pool that starts at the
+ * environment's floor and climbs to a stored one has spent that climb short of
+ * workers.
+ */
+export async function initSharedSettingsMirror(): Promise<void> {
+	await refreshSharedSettings();
+	announceSharedSettings();
+
+	onSharedSettingsChanged(SHARED_SETTINGS_COLUMNS.autoscale, () => {
+		void refreshSharedSettings();
+	});
+}
+
+/**
+ * The configuration for this tick: the env chain with the stored layer over
+ * it, checked before the loop is allowed to act on it.
+ *
+ * Tuning an autoscaler by redeploying restarts the pool, which destroys the
+ * state being tuned, so the values have to be changeable without one.
+ *
+ * Read off the mirror rather than the table: a tick is the only thing standing
+ * between a pool and the size an outage caught it at, and a query on its path
+ * is a query that can hold it for as long as the outage lasts.
+ */
+export function resolveConfig(): AutoscaleConfig {
+	if (Date.now() - readAt >= MIRROR_FLOOR_MS) {
+		void refreshSharedSettings();
+	}
+
+	const fromEnv = envConfig();
+	const stored = sharedSettings ?? {};
+
+	const { config, corrections }
+		= sanitizeConfig(withSharedSettings(fromEnv, stored));
+
+	announce(corrections);
+	lastBase = sanitizeConfig(fromEnv).config;
+	lastSources = sourcesOf(stored);
+
+	return config;
 }

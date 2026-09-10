@@ -1,10 +1,13 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import vendors from '@common/get-dbs-to-test';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+	closeSharedSettings,
 	poolSize,
 	sizesOver,
 	startAutoscaler,
 	startPool,
 	stopRig,
+	storeSharedSettings,
 	type Rig,
 } from './autoscale/rig';
 
@@ -19,10 +22,20 @@ import {
 describe('The autoscaler gives back what the load no longer needs', () => {
 	const rigs: Rig[] = [];
 
-	afterAll(() => {
+	// The autoscaler reads the shared layer out of the singleton every other
+	// suite writes to, so a value one of them left behind would sit over the
+	// environment these arms tune. Cleared here rather than trusted, and the
+	// connection closed with the rigs.
+	beforeAll(async () => {
+		await storeSharedSettings(vendors[0]!, 'autoscale_settings', null);
+	});
+
+	afterAll(async () => {
 		for (const rig of rigs) {
 			stopRig(rig);
 		}
+
+		await closeSharedSettings();
 	});
 
 	it('walks a grown pool back to its floor once the load goes', async () => {

@@ -1,7 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
 import type { AutoscaleConfig } from '@directus/types';
-import { useRedis } from '../../../redis/index.js';
-import { autoscaleConfigKey } from './resolve-config.js';
 
 /**
  * What a field of the shared settings may hold, so a bad write fails at the door.
@@ -37,28 +35,6 @@ const NOTE_FIELDS = ['setBy', 'setAt', 'setFrom', 'note'];
 
 export interface AutoscaleSharedSettings {
 	[field: string]: unknown;
-}
-
-/** The shared settings as they stand, `null` where nothing is set anywhere. */
-export async function readSharedSettings(): Promise<AutoscaleSharedSettings | null> {
-	const stored = await useRedis().get(autoscaleConfigKey());
-
-	if (!stored) {
-		return null;
-	}
-
-	try {
-		const parsed: unknown = JSON.parse(stored);
-
-		return typeof parsed === 'object' && parsed !== null
-			? parsed as AutoscaleSharedSettings
-			: null;
-	}
-	catch {
-		// A key edited by hand into something unparseable is reported as no
-		// shared settings, which is what the loop makes of them too.
-		return null;
-	}
 }
 
 /**
@@ -164,17 +140,4 @@ export function applySharedSettingsPatch(
 	return configured.length === 0
 		? null
 		: merged;
-}
-
-export async function writeSharedSettings(
-	sharedSettings: AutoscaleSharedSettings | null,
-): Promise<void> {
-	const redis = useRedis();
-
-	if (sharedSettings === null) {
-		await redis.del(autoscaleConfigKey());
-		return;
-	}
-
-	await redis.set(autoscaleConfigKey(), JSON.stringify(sharedSettings));
 }

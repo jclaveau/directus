@@ -1,44 +1,42 @@
-import Redis from 'ioredis';
+import vendors from '@common/get-dbs-to-test';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+	closeSharedSettings,
+	databaseEnv,
 	neverExceeded,
 	poolSize,
 	sizesOver,
 	startAutoscaler,
 	startPool,
 	stopRig,
+	storeSharedSettings,
 	waitForRestart,
 	type Rig,
 } from './autoscale/rig';
 
 // The autoscaler replaces a module that ran this pool for months, and a defect
 // in the rule that replaces it lands on everyone at once. So the module's rule
-// is kept as a strategy: reverting is a write to one Redis key, taking effect
+// is kept as a strategy: reverting is one write to the settings, taking effect
 // on the next tick of every replica, with no redeploy and no shell.
 //
 // These arms are the claim that reverting is worth doing — that the strategy
 // scales the way the module scaled — and the arm that it can be reached
 // without restarting anything.
 //
-// The Redis on 6108 is shared, so the rig owns a namespace and its key.
-const REDIS_PORT = 6108;
-
-function configKey(namespace: string): string {
-	return `${namespace}:config:processes:autoscale`;
-}
+// One vendor: the claim is about which rule the loop runs, which every vendor
+// stores the same way, and each rig it needs costs a pm2 daemon under load.
+const vendor = vendors[0]!;
 
 describe('The autoscaler can be reverted to the module rule it replaces', () => {
-	const redis = new Redis({ host: 'localhost', port: REDIS_PORT });
 	const rigs: Rig[] = [];
-	const namespace = 'bb-autoscale-strategy';
 
 	afterAll(async () => {
 		for (const rig of rigs) {
 			stopRig(rig);
 		}
 
-		await redis.del(configKey(namespace));
-		redis.disconnect();
+		await storeSharedSettings(vendor, 'autoscale_settings', null);
+		await closeSharedSettings();
 	});
 
 	it('ramps a loaded pool to the ceiling', async () => {
@@ -98,7 +96,7 @@ describe('The autoscaler can be reverted to the module rule it replaces', () => 
 	// module cannot tell and this autoscaler freezes on. Nothing changes here
 	// but the strategy — same daemon, same load, same thresholds — so a pool
 	// that starts growing is the switch arriving and nothing else.
-	it('starts scaling a churning pool once the shared settings say so', async () => {
+	it('starts scaling a churning pool once the settings say so', async () => {
 		const rig = startPool({
 			appName: 'autoscale-legacy-switch',
 			instances: 2,
@@ -110,17 +108,17 @@ describe('The autoscaler can be reverted to the module rule it replaces', () => 
 
 		rigs.push(rig);
 
-		await redis.del(configKey(namespace));
+		await storeSharedSettings(vendor, 'autoscale_settings', null);
 
 		// Started beside a pool that has not crashed yet, the autoscaler sees
 		// a calm pool — correctly — and acts on it before the first crash.
 		expect(await waitForRestart(rig, 30_000)).toBe(true);
 
 		startAutoscaler(rig, {
+			...databaseEnv(vendor),
 			REDIS_ENABLED: 'true',
 			REDIS_HOST: 'localhost',
-			REDIS_PORT: String(REDIS_PORT),
-			CACHE_NAMESPACE: namespace,
+			REDIS_PORT: '6108',
 			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '5',
 			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
@@ -133,7 +131,7 @@ describe('The autoscaler can be reverted to the module rule it replaces', () => 
 
 		expect(await neverExceeded(rig, 2, 20_000)).toBe(2);
 
-		await redis.set(configKey(namespace), JSON.stringify({ strategy: 'legacy' }));
+		await storeSharedSettings(vendor, 'autoscale_settings', { strategy: 'legacy' });
 
 		// Which is the module's answer to the same pool, and the reason the
 		// rule above exists.

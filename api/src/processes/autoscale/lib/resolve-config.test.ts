@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import type { AutoscaleConfig } from '../types.js';
 
 // Every case here re-imports the module under test, which is the point of the
 // file — the configuration it remembers is what it exists to check. That import
@@ -8,50 +7,69 @@ import type { AutoscaleConfig } from '../types.js';
 vi.setConfig({ testTimeout: 30_000 });
 
 vi.mock('@directus/env');
-vi.mock('../../../redis/index.js');
+
+const warn = vi.fn();
+const info = vi.fn();
 
 vi.mock('../../../logger/index.js', () => {
 	return {
 		useLogger: () => {
-			return { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
+			return { warn, info, error: vi.fn() };
 		},
 	};
 });
 
-const get = vi.fn();
+const readSharedSettings = vi.fn();
+const onSharedSettingsChanged = vi.fn();
 
-/** Stands in for the shared ioredis client, whose `status` gates the read. */
-const client = { get, status: 'ready' };
+vi.mock('../../lib/shared-settings.js', () => {
+	return {
+		SHARED_SETTINGS_COLUMNS: {
+			autoscale: 'autoscale_settings',
+			supervisor: 'supervisor_settings',
+		},
+		readSharedSettings,
+		onSharedSettingsChanged,
+	};
+});
 
 /**
- * `resolveConfig` remembers the last configuration it managed to read, which
- * is the point of it — so each case needs its own instance of the module
- * rather than the one the case before it left behind.
+ * `resolveConfig` reads a mirror the module holds, which is the point of it —
+ * so each case needs its own instance of the module rather than the one the
+ * case before it left behind.
  */
 async function freshModule() {
 	vi.resetModules();
 
 	const { useEnv } = await import('@directus/env');
-	const { redisConfigAvailable, useRedis } = await import('../../../redis/index.js');
 
 	vi.mocked(useEnv).mockReturnValue({
 		CACHE_NAMESPACE: 'scalabus',
 		PM2_AUTOSCALE_MAX_WORKERS: 4,
 	});
 
-	vi.mocked(redisConfigAvailable).mockReturnValue(true);
-	vi.mocked(useRedis).mockReturnValue(client as never);
-
 	return import('./resolve-config.js');
 }
 
-async function freshResolver(): Promise<() => Promise<AutoscaleConfig>> {
-	return (await freshModule()).resolveConfig;
+/** A module whose mirror already holds what the column was answering. */
+async function mirroring(stored: Record<string, unknown> | null) {
+	const module = await freshModule();
+	readSharedSettings.mockResolvedValue(stored);
+	await module.initSharedSettingsMirror();
+
+	return module;
+}
+
+/** The re-read the bus asks for, called as a change to the column would. */
+function announced(): void {
+	onSharedSettingsChanged.mock.calls.at(-1)?.[1]();
 }
 
 beforeEach(() => {
-	get.mockReset();
-	client.status = 'ready';
+	readSharedSettings.mockReset();
+	readSharedSettings.mockResolvedValue(null);
+	warn.mockClear();
+	info.mockClear();
 });
 
 afterEach(() => {
@@ -59,10 +77,9 @@ afterEach(() => {
 });
 
 test('reads the shared settings laid over the env chain', async () => {
-	const { resolveConfig, resolvedSources } = await freshModule();
-	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
+	const { resolveConfig, resolvedSources } = await mirroring({ maxWorkers: 8 });
 
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 8 });
 
 	// A value the environment set and one the shared settings are holding read
 	// identically, and an operator deciding whether a redeploy would move it
@@ -77,70 +94,87 @@ test('reads the shared settings laid over the env chain', async () => {
 // CPU a quiet worker spends on its own background work, and a floor of one so
 // the pool can come all the way back down.
 test('an unconfigured pool scales at 70% and releases to one worker', async () => {
-	const { resolveConfig } = await freshModule();
-	get.mockResolvedValue(null);
+	const { resolveConfig } = await mirroring(null);
 
-	await expect(resolveConfig()).resolves.toMatchObject({
+	expect(resolveConfig()).toMatchObject({
 		scaleCpuThreshold: 70,
 		minWorkers: 1,
 	});
 });
 
-// The page offers to clear a field, and the value waiting under the shared settings
-// is knowable only here: everywhere else the shared settings have already won.
+// The page offers to clear a field, and the value waiting under the shared
+// settings is knowable only here: everywhere else they have already won.
 test('reports what the chain holds under the shared settings', async () => {
-	const { resolveConfig, resolvedWithoutSharedSettings } = await freshModule();
-	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
+	const module = await mirroring({ maxWorkers: 8 });
 
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+	expect(module.resolveConfig()).toMatchObject({ maxWorkers: 8 });
 
-	expect(resolvedWithoutSharedSettings()).toMatchObject({ maxWorkers: 4 });
+	expect(module.resolvedWithoutSharedSettings()).toMatchObject({ maxWorkers: 4 });
 });
 
-// The rollback path: reverting to the rule production already ran is a write
-// to one key, which is the whole reason the strategy is a configuration field
-// rather than a build.
+// The rollback path: reverting to the rule production already ran is one write
+// to the settings, which is the whole reason the strategy is a configuration
+// field rather than a build.
 test('switches strategy from the shared settings', async () => {
-	const resolveConfig = await freshResolver();
+	const { resolveConfig } = await mirroring(null);
 
-	await expect(resolveConfig()).resolves.toMatchObject({
-		strategy: 'scalabus',
-	});
+	expect(resolveConfig()).toMatchObject({ strategy: 'scalabus' });
 
-	get.mockResolvedValue(JSON.stringify({ strategy: 'legacy' }));
+	readSharedSettings.mockResolvedValue({ strategy: 'legacy' });
+	announced();
+	await vi.waitFor(() => expect(readSharedSettings).toHaveBeenCalledTimes(2));
 
-	await expect(resolveConfig()).resolves.toMatchObject({ strategy: 'legacy' });
+	expect(resolveConfig()).toMatchObject({ strategy: 'legacy' });
 });
 
-// Reverting to the env chain sounds like the safe answer and is not. An
-// operator who has just raised the ceiling to survive a spike would have it
-// dropped back by a blip, and the ceiling is corrected with no cooldown — the
-// pool loses the workers at once and takes them back when Redis returns.
-test('holds the last configuration when Redis stops answering', async () => {
-	const { resolveConfig, resolvedSources } = await freshModule();
-	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
-	await resolveConfig();
+// Taking the env chain back sounds like the safe answer and is not. An operator
+// who has just raised the ceiling to survive a spike would have it dropped by a
+// blip, and the ceiling is corrected with no cooldown — the pool loses the
+// workers at once and takes them back when the database answers again.
+test('holds the last settings read when the table stops answering', async () => {
+	const { resolveConfig, resolvedSources } = await mirroring({ maxWorkers: 8 });
 
-	get.mockRejectedValue(new Error('Connection is closed.'));
+	readSharedSettings.mockRejectedValue(new Error('Connection terminated.'));
+	announced();
+	await vi.waitFor(() => expect(warn).toHaveBeenCalled());
 
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 8 });
 
-	// Held together: a page told the ceiling came from the environment while
-	// the loop is running shared settings of it would send an operator to redeploy.
+	// Held together: a page saying the ceiling came from the environment while
+	// the loop runs a stored one would send an operator to redeploy.
 	expect(resolvedSources()).toMatchObject({ maxWorkers: 'sharedSettings' });
 });
 
-// A deployment with nowhere to keep shared settings has none to read, and asking
-// anyway would be a command on a client that was never going to answer.
-test('reads no shared settings where there is nowhere to keep one', async () => {
-	const { redisConfigAvailable } = await import('../../../redis/index.js');
-	const { resolveConfig, resolvedSources } = await freshModule();
-	vi.mocked(redisConfigAvailable).mockReturnValue(false);
+// A database that answers nothing answers nothing every second, and a line per
+// tick would bury the one that says what the pool is actually running on.
+test('says the table is unreadable once, not every read', async () => {
+	await mirroring({ maxWorkers: 8 });
 
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
+	readSharedSettings.mockRejectedValue(new Error('Connection terminated.'));
+	announced();
+	await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
 
-	expect(get).not.toHaveBeenCalled();
-	expect(resolvedSources()).toMatchObject({ maxWorkers: 'env' });
+	announced();
+	await vi.waitFor(() => expect(readSharedSettings).toHaveBeenCalledTimes(3));
+
+	expect(warn).toHaveBeenCalledTimes(1);
+});
+
+// A layer that went missing — a column cleared, a database restored from before
+// it was written — reads exactly like a deployment that never had one, and the
+// difference between them is a ceiling somebody raised during an incident.
+test('says what the pool is tuned by, and again when that changes', async () => {
+	await mirroring(null);
+
+	expect(info).toHaveBeenCalledWith(
+		'[autoscale] shared settings: nothing stored, so the environment chain alone',
+	);
+
+	readSharedSettings.mockResolvedValue({ maxWorkers: 8 });
+	announced();
+	await vi.waitFor(() => expect(info).toHaveBeenCalledTimes(2));
+
+	expect(info).toHaveBeenLastCalledWith('[autoscale] shared settings: maxWorkers');
 });
 
 // A write is judged against the whole configuration it would produce, and the
@@ -152,73 +186,56 @@ test('lays would-be settings over the chain without storing them', async () => {
 		.toMatchObject({ maxWorkers: 8, minWorkers: 1 });
 });
 
-test('falls back to the env chain when Redis never answered', async () => {
-	const resolveConfig = await freshResolver();
-	get.mockRejectedValue(new Error('Connection is closed.'));
+test('falls back to the env chain when the table answered nothing', async () => {
+	const { resolveConfig, resolvedSources } = await mirroring(null);
 
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 4 });
+	expect(resolvedSources()).toMatchObject({ maxWorkers: 'env' });
 });
 
-test('takes the env chain back once the shared settings are deleted', async () => {
-	const resolveConfig = await freshResolver();
-	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
-	await resolveConfig();
+test('takes the env chain back once the shared settings are cleared', async () => {
+	const { resolveConfig } = await mirroring({ maxWorkers: 8 });
 
-	get.mockResolvedValue(null);
+	readSharedSettings.mockResolvedValue(null);
+	announced();
+	await vi.waitFor(() => expect(readSharedSettings).toHaveBeenCalledTimes(2));
 
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 4 });
 });
 
-// The shared settings are a hand-edited JSON document, so they are exactly
+// The shared settings are a document an operator edits, so they are exactly
 // where a typed zero too many arrives.
 test('shared settings past what is supported are clamped, not obeyed', async () => {
-	const resolveConfig = await freshResolver();
-	get.mockResolvedValue(JSON.stringify({ minWorkers: 10_000 }));
+	const { resolveConfig } = await mirroring({ minWorkers: 10_000 });
 
-	await expect(resolveConfig()).resolves.toMatchObject({
-		minWorkers: 4,
-		maxWorkers: 4,
-	});
+	expect(resolveConfig()).toMatchObject({ minWorkers: 4, maxWorkers: 4 });
 });
 
-test('unparseable shared settings leave the env chain in force', async () => {
-	const resolveConfig = await freshResolver();
-	get.mockResolvedValue('{ not json');
+// A bus message is delivered at most once and nothing replays it, so a node
+// that missed one would run the layer it last read until it restarted.
+test('re-reads unprompted once the mirror is old enough', async () => {
+	const { resolveConfig } = await mirroring({ maxWorkers: 8 });
 
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 4 });
+	resolveConfig();
+	expect(readSharedSettings).toHaveBeenCalledTimes(1);
+
+	readSharedSettings.mockResolvedValue({ maxWorkers: 16 });
+	vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 30_000);
+
+	resolveConfig();
+	await vi.waitFor(() => expect(readSharedSettings).toHaveBeenCalledTimes(2));
+
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 16 });
 });
 
-test('shared settings cannot reach through to the prototype', async () => {
-	const resolveConfig = await freshResolver();
-	get.mockResolvedValue('{"__proto__":{"polluted":true}}');
+// A tick is the only thing standing between a pool and the size an outage
+// caught it at, so the re-read it starts is one it must never wait on.
+test('decides on the mirror while the re-read is still out', async () => {
+	const { resolveConfig } = await mirroring({ maxWorkers: 8 });
 
-	await resolveConfig();
+	readSharedSettings.mockReturnValue(new Promise(() => {}));
+	vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 30_000);
 
-	expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 8 });
+	expect(readSharedSettings).toHaveBeenCalledTimes(2);
 });
-
-// ioredis queues a command issued while it is not connected and puts no
-// deadline on that queue, so a tick that only awaited the read would hold the
-// loop for the whole outage — freezing the pool at the size the outage caught
-// it at, which is the one thing the loop must never do.
-test('gives up on a read the client never answers', async () => {
-	const resolveConfig = await freshResolver();
-	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
-	await resolveConfig();
-
-	get.mockReturnValue(new Promise(() => {}));
-
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
-});
-
-test('does not read through a client that is reconnecting', async () => {
-	const resolveConfig = await freshResolver();
-	get.mockResolvedValue(JSON.stringify({ maxWorkers: 8 }));
-	await resolveConfig();
-
-	client.status = 'reconnecting';
-
-	await expect(resolveConfig()).resolves.toMatchObject({ maxWorkers: 8 });
-	expect(get).toHaveBeenCalledTimes(1);
-});
-

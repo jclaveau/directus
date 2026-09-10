@@ -2,61 +2,16 @@ import { expect, test, vi } from 'vitest';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorSharedSettings,
 	reloadDeclaration,
-	writeSupervisorSharedSettings,
 } from './supervisor-shared-settings.js';
 
 vi.mock('@directus/env');
-vi.mock('../../../redis/index.js');
 
-const get = vi.fn();
-const set = vi.fn();
-const del = vi.fn();
-
-async function deploymentWith(
-	stored: string | null,
-	env: Record<string, unknown> = {},
-) {
+async function deploymentWith(env: Record<string, unknown> = {}) {
 	const { useEnv } = await import('@directus/env');
-	const { useRedis } = await import('../../../redis/index.js');
 
 	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'scalabus', ...env });
-	get.mockResolvedValue(stored);
-	vi.mocked(useRedis).mockReturnValue({ get, set, del } as never);
 }
-
-test('reads the shared settings under a key of its own', async () => {
-	await deploymentWith(JSON.stringify({ listenTimeout: 20_000 }));
-
-	await expect(readSupervisorSharedSettings())
-		.resolves
-		.toEqual({ listenTimeout: 20_000 });
-
-	expect(get).toHaveBeenCalledWith('scalabus:config:processes:supervisor');
-});
-
-// A restart makes no shared settings of a key it cannot parse, and the page
-// reading it has to be told the same thing rather than shown an error.
-test('reads a key edited into nonsense as no shared settings', async () => {
-	await deploymentWith('{ not json');
-
-	await expect(readSupervisorSharedSettings()).resolves.toBeNull();
-});
-
-test('writes the shared settings, and deletes the key for none', async () => {
-	await deploymentWith(null);
-
-	await writeSupervisorSharedSettings({ killTimeout: 5000 });
-
-	expect(set).toHaveBeenCalledWith(
-		'scalabus:config:processes:supervisor',
-		'{"killTimeout":5000}',
-	);
-
-	await writeSupervisorSharedSettings(null);
-	expect(del).toHaveBeenCalledWith('scalabus:config:processes:supervisor');
-});
 
 test('refuses an option a restart cannot carry', () => {
 	expect(() => parseSupervisorPatch({ instances: 4 }))
@@ -109,7 +64,7 @@ test('shared settings released down to their stamp are removed', () => {
 // field released from the shared settings goes back to the environment only if the
 // restart says so.
 test('the restart carries every option, not only the shared ones', async () => {
-	await deploymentWith(null, { PM2_KILL_TIMEOUT: 5000 });
+	await deploymentWith({ PM2_KILL_TIMEOUT: 5000 });
 
 	expect(reloadDeclaration({ listenTimeout: 20_000 })).toEqual({
 		listen_timeout: 20_000,
@@ -122,7 +77,7 @@ test('the restart carries every option, not only the shared ones', async () => {
 
 // Nobody sets a memory ceiling in bytes, and pm2 counts it in them.
 test('a memory ceiling is asked for in megabytes and pushed in bytes', async () => {
-	await deploymentWith(null);
+	await deploymentWith();
 
 	expect(reloadDeclaration({ maxMemoryRestartMegabytes: 512 }))
 		.toMatchObject({ max_memory_restart: 536_870_912 });
@@ -132,20 +87,20 @@ test('a memory ceiling is asked for in megabytes and pushed in bytes', async () 
 // asking for the same ceiling the panel calls 512 — read as a plain number it
 // would be dropped instead, and a released ceiling would never revert.
 test('a memory ceiling the environment sized is read as megabytes', async () => {
-	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: '512M' });
+	await deploymentWith({ PM2_MAX_MEMORY_RESTART: '512M' });
 
 	expect(reloadDeclaration(null)).toMatchObject({
 		max_memory_restart: 536_870_912,
 	});
 
-	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: '1G' });
+	await deploymentWith({ PM2_MAX_MEMORY_RESTART: '1G' });
 
 	expect(reloadDeclaration(null)).toMatchObject({
 		max_memory_restart: 1_073_741_824,
 	});
 
 	// A bare number is the bytes pm2 means by one.
-	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: 536_870_912 });
+	await deploymentWith({ PM2_MAX_MEMORY_RESTART: 536_870_912 });
 
 	expect(reloadDeclaration(null)).toMatchObject({
 		max_memory_restart: 536_870_912,
@@ -155,7 +110,7 @@ test('a memory ceiling the environment sized is read as megabytes', async () => 
 // An option the environment never set and pm2 has no number for is left out,
 // so the supervisor keeps its own answer rather than being handed one.
 test('an option nothing declares is not carried at all', async () => {
-	await deploymentWith(null);
+	await deploymentWith();
 
 	expect(reloadDeclaration(null)).not.toHaveProperty('max_memory_restart');
 });
@@ -164,7 +119,7 @@ test('an option nothing declares is not carried at all', async () => {
 // 400 megabytes whoever wrote it meant. Rounded to a ceiling of zero it would be
 // pushed with the next roll and restart every worker as fast as it can boot.
 test('a memory ceiling under a megabyte is carried by no restart', async () => {
-	await deploymentWith(null, { PM2_MAX_MEMORY_RESTART: 400 });
+	await deploymentWith({ PM2_MAX_MEMORY_RESTART: 400 });
 
 	expect(reloadDeclaration(null)).not.toHaveProperty('max_memory_restart');
 });

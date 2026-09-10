@@ -86,3 +86,24 @@ export function reportUnhandledRejection(reason: unknown): void {
 
 	useLogger().error(reported, line);
 }
+
+/**
+ * Take the guard for this process, wherever it entered.
+ *
+ * The listener has to be in place before the first promise that can reject
+ * without an awaiter, and the CLI builds itself — extensions included, bus
+ * subscription and all — before it reaches the command it was asked for. A
+ * command taking the guard for itself is a command that has already run the
+ * riskiest part of its boot without one.
+ *
+ * Idempotent so that entry points can each take it without the process
+ * carrying a listener per import: a rejection answered twice counts twice, and
+ * the metric is what says how much of an outage this process swallowed.
+ */
+export function guardUnhandledRejections(): void {
+	if (process.listeners('unhandledRejection').includes(reportUnhandledRejection)) {
+		return;
+	}
+
+	process.on('unhandledRejection', reportUnhandledRejection);
+}

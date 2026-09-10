@@ -49,8 +49,6 @@ import { collectPgBouncer } from '../pgbouncer/index.js';
 import {
 	applySharedSettingsPatch,
 	parseSharedSettingsPatch,
-	readSharedSettings,
-	writeSharedSettings,
 	type AutoscaleSharedSettings,
 } from '../processes/autoscale/lib/shared-settings.js';
 import {
@@ -67,17 +65,18 @@ import {
 	reloadRefusal,
 } from '../processes/autoscale/lib/reload.js';
 import {
-	autoscaleConfigKey,
 	configWithSharedSettings,
-	supervisorSharedSettingsKey,
 } from '../processes/autoscale/lib/resolve-config.js';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorSharedSettings,
 	type SupervisorSharedSettings,
-	writeSupervisorSharedSettings,
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
+import {
+	SHARED_SETTINGS_COLUMNS,
+	readSharedSettings,
+	writeSharedSettings,
+} from '../processes/lib/shared-settings.js';
 import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
 import {
 	collectProcesses,
@@ -557,7 +556,9 @@ export class UtilsService {
 	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
 		this.assertAdmin('inspect the autoscale configuration');
 
-		return this.answerWith(await readSharedSettings());
+		return this.answerWith(
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale),
+		);
 	}
 
 	/**
@@ -587,7 +588,7 @@ export class UtilsService {
 		};
 
 		const sharedSettings = applySharedSettingsPatch(
-			await readSharedSettings(),
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale),
 			stamped,
 		);
 
@@ -596,7 +597,11 @@ export class UtilsService {
 		// field this patch never mentions.
 		assertUsableConfig(configWithSharedSettings(sharedSettings ?? {}));
 
-		await writeSharedSettings(sharedSettings);
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.autoscale,
+			sharedSettings,
+			this.settingsOptions,
+		);
 
 		return this.answerWith(sharedSettings);
 	}
@@ -612,10 +617,12 @@ export class UtilsService {
 		sharedSettings: AutoscaleSharedSettings | null,
 	): Promise<AutoscaleConfigAnswer> {
 		return {
-			key: autoscaleConfigKey(),
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.autoscale}`,
 			sharedSettings,
 			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
-			supervisor: await this.supervisorAnswer(await readSupervisorSharedSettings()),
+			supervisor: await this.supervisorAnswer(
+				await readSharedSettings(SHARED_SETTINGS_COLUMNS.supervisor),
+			),
 		};
 	}
 
@@ -623,7 +630,7 @@ export class UtilsService {
 		sharedSettings: SupervisorSharedSettings | null,
 	): Promise<AutoscaleSharedSettingsAnswer> {
 		return {
-			key: supervisorSharedSettingsKey(),
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.supervisor}`,
 			sharedSettings,
 			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
 		};
@@ -650,13 +657,32 @@ export class UtilsService {
 		};
 
 		const sharedSettings = applySupervisorPatch(
-			await readSupervisorSharedSettings(),
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.supervisor),
 			stamped,
 		);
 
-		await writeSupervisorSharedSettings(sharedSettings);
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.supervisor,
+			sharedSettings,
+			this.settingsOptions,
+		);
 
 		return this.supervisorAnswer(sharedSettings);
+	}
+
+	/**
+	 * What a write to the settings singleton runs as.
+	 *
+	 * The accountability travels with it because that is what puts a row in
+	 * `directus_revisions`: the stamp says who changed a threshold, and the
+	 * revision is what survives the stamp being overwritten by the next change.
+	 */
+	private get settingsOptions(): AbstractServiceOptions {
+		return {
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		};
 	}
 
 	private async emailOf(user: unknown): Promise<string | null> {
@@ -800,7 +826,11 @@ export class UtilsService {
 	async clearAutoscaleConfig(): Promise<void> {
 		this.assertAdmin('clear the autoscale configuration');
 
-		await writeSharedSettings(null);
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.autoscale,
+			null,
+			this.settingsOptions,
+		);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {

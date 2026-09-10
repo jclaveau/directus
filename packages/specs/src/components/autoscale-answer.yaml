@@ -1,7 +1,7 @@
 type: object
 description: >
   The autoscale configuration sharedSettings and the supervisor options, which are
-  kept under separate keys and written through separate routes.
+  kept in separate settings columns and written through separate routes.
 properties:
   key:
     type: string

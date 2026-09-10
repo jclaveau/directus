@@ -1,29 +1,35 @@
-import Redis from 'ioredis';
+import vendors from '@common/get-dbs-to-test';
 import { connect, createServer, type Server, type Socket } from 'node:net';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+	closeSharedSettings,
+	databaseEnv,
+	decisionAfter,
+	decisionsOf,
 	neverExceeded,
 	poolSize,
+	reportOf,
 	startAutoscaler,
 	startPool,
 	stopRig,
+	storeSharedSettings,
 	type Rig,
 } from './autoscale/rig';
 
-// Redis holds the values an operator changes during an incident, which is
-// precisely when Redis is a plausible thing to lose. What the autoscaler owes
-// the pool then is to keep deciding: an outage that only cost it the freshest
-// configuration is survivable, one that stops it deciding at all leaves the
-// pool frozen at the size the incident caught it at.
+// Redis carries the announcement that a value an operator changes during an
+// incident has moved, which is precisely when Redis is a plausible thing to
+// lose. What the autoscaler owes the pool then is to keep deciding, and to keep
+// deciding on the values themselves: the settings are where they live, and an
+// outage of the transport must cost freshness rather than the whole layer.
 const REDIS_PORT = 6108;
+
+// One vendor: what an outage costs is the same wherever the settings are kept,
+// and each rig that can tell costs a pm2 daemon and a pool under load.
+const vendor = vendors[0]!;
 
 // Nothing listens here, which is the Redis that is unreachable from the first
 // tick rather than one lost part-way through.
 const DEAD_PORT = 6110;
-
-function configKey(namespace: string): string {
-	return `${namespace}:config:processes:autoscale`;
-}
 
 interface Proxy {
 	server: Server;
@@ -103,35 +109,8 @@ function restoreProxy(proxy: Proxy): Promise<void> {
 	});
 }
 
-/**
- * Waits for a line the autoscaler logs, which is what says it took a tick at
- * all — a pool at the size an arm expects says nothing about whether the loop
- * is still running or stopped there.
- */
-async function loggedLine(
-	rig: Rig,
-	fragment: string,
-	timeoutMs: number,
-): Promise<boolean> {
-	const deadline = Date.now() + timeoutMs;
-
-	while (Date.now() < deadline) {
-		if (rig.logs.join('').includes(fragment)) {
-			return true;
-		}
-
-		await new Promise((resolve) => {
-			setTimeout(resolve, 250);
-		});
-	}
-
-	return false;
-}
-
 describe('The autoscaler decides through a Redis outage', () => {
-	const redis = new Redis({ host: 'localhost', port: REDIS_PORT });
 	const rigs: Rig[] = [];
-	const namespaces: string[] = [];
 	const proxies: Proxy[] = [];
 
 	afterAll(async () => {
@@ -139,31 +118,25 @@ describe('The autoscaler decides through a Redis outage', () => {
 			stopRig(rig);
 		}
 
-		for (const namespace of namespaces) {
-			await redis.del(configKey(namespace));
-		}
-
 		for (const proxy of proxies) {
 			cutProxy(proxy);
 		}
 
-		redis.disconnect();
+		await storeSharedSettings(vendor, 'autoscale_settings', null);
+		await closeSharedSettings();
 	});
 
-	describe('losing a Redis it had already read', () => {
-		const namespace = 'bb-autoscale-outage';
+	describe('losing the Redis its announcements come over', () => {
 		let rig: Rig;
 		let proxy: Proxy;
 
-		it('grows on the settings read before the connection dropped', async () => {
-			namespaces.push(namespace);
-
+		it('grows on the settings the outage cannot reach', async () => {
 			// A ceiling of three where the env chain allows one, so every size
-			// above one is the shared settings still in force and nothing else.
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 3 }),
-			);
+			// above one is the stored layer still in force and nothing else.
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				scaleCpuThreshold: 5,
+				maxWorkers: 3,
+			});
 
 			proxy = await startProxy();
 			proxies.push(proxy);
@@ -178,17 +151,17 @@ describe('The autoscaler decides through a Redis outage', () => {
 			rigs.push(rig);
 
 			startAutoscaler(rig, {
+				...databaseEnv(vendor),
 				REDIS_ENABLED: 'true',
 				REDIS_HOST: '127.0.0.1',
 				REDIS_PORT: String(proxy.port),
-				CACHE_NAMESPACE: namespace,
 				PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
 				PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 				PM2_AUTOSCALE_MIN_WORKERS: '1',
 				PM2_AUTOSCALE_MAX_WORKERS: '1',
 				// One worker per ten seconds, so the pool is still short of the
-				// shared settings' ceiling when the connection is cut and the growth
-				// that finishes the climb is decided without Redis.
+				// stored ceiling when the connection is cut and the growth that
+				// finishes the climb is decided without Redis.
 				PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '10',
 				// Long enough that the pool is reporting its load rather than its
 				// boot: a worker's CPU percent is cumulative over its short life, so
@@ -200,44 +173,56 @@ describe('The autoscaler decides through a Redis outage', () => {
 
 			expect(await poolSize(rig, 2, 60_000)).toBe(2);
 
+			const taken = decisionsOf(rig).length;
 			cutProxy(proxy);
 
-			// The warning is the loop reporting a tick it completed without
+			// A decision line is the loop reporting a tick it completed without
 			// Redis; the third worker is that tick acting on the ceiling only
-			// the shared settings carry.
-			expect(await loggedLine(rig, 'holding the last configuration', 30_000))
-				.toBe(true);
+			// the stored layer carries.
+			expect(await decisionAfter(rig, taken, 60_000)).not.toEqual([]);
 
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
 			// Three waits of a minute apiece, and a runner slow enough to need
 			// them is the runner this arm has to survive.
 		}, 240_000);
 
-		it('takes a new shared settings once Redis answers again', async () => {
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 2 }),
-			);
+		// The claim the whole layer rests on: what an operator writes during an
+		// incident reaches a pool whose transport is down. Nothing announces
+		// this one — the connection is cut — so the re-read floor is what
+		// carries it, and a node that had lost the value with Redis would hold
+		// three workers here forever.
+		it('takes a change written while Redis is still down', async () => {
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				scaleCpuThreshold: 5,
+				maxWorkers: 2,
+			});
 
+			expect(await poolSize(rig, 2, 120_000)).toBe(2);
+		}, 180_000);
+
+		it('is announced to again once Redis answers', async () => {
 			await restoreProxy(proxy);
 
-			expect(await poolSize(rig, 2, 90_000)).toBe(2);
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				scaleCpuThreshold: 5,
+				minWorkers: 1,
+				maxWorkers: 1,
+			});
+
+			expect(await poolSize(rig, 1, 60_000)).toBe(1);
 		}, 120_000);
 	});
 
-	// The outage the env chain is the fallback for: a deploy that comes up
-	// while Redis is down has no configuration to hold, and a pool with no
-	// autoscaler at all is the worst of the outcomes available.
-	it('uses the env chain when Redis has never answered', async () => {
-		const namespace = 'bb-autoscale-outage-cold';
-		namespaces.push(namespace);
-
-		// Reachable only to this suite, so a pool that grows past two is one
-		// that read it.
-		await redis.set(
-			configKey(namespace),
-			JSON.stringify({ maxWorkers: 3 }),
-		);
+	// A deploy that comes up while Redis is down still has every value an
+	// operator stored, because none of them was ever kept there: the pool it
+	// starts is the one the settings ask for rather than the one the image was
+	// built with.
+	it('uses the stored settings when Redis has never answered', async () => {
+		// A ceiling of three where the env chain allows two, so a pool that
+		// grows past two is one that read the settings without Redis.
+		await storeSharedSettings(vendor, 'autoscale_settings', {
+			maxWorkers: 3,
+		});
 
 		const rig = startPool({
 			appName: 'autoscale-outage-cold',
@@ -249,10 +234,10 @@ describe('The autoscaler decides through a Redis outage', () => {
 		rigs.push(rig);
 
 		startAutoscaler(rig, {
+			...databaseEnv(vendor),
 			REDIS_ENABLED: 'true',
 			REDIS_HOST: '127.0.0.1',
 			REDIS_PORT: String(DEAD_PORT),
-			CACHE_NAMESPACE: namespace,
 			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '5',
 			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
@@ -266,7 +251,7 @@ describe('The autoscaler decides through a Redis outage', () => {
 			PM2_AUTOSCALE_WARMUP_SECONDS: '8',
 		});
 
-		expect(await poolSize(rig, 2, 60_000)).toBe(2);
-		expect(await neverExceeded(rig, 2, 10_000)).toBe(2);
+		expect(await poolSize(rig, 3, 60_000), reportOf(rig)).toBe(3);
+		expect(await neverExceeded(rig, 3, 10_000), reportOf(rig)).toBe(3);
 	}, 120_000);
 });

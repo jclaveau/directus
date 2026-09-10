@@ -261,8 +261,9 @@ async function load(): Promise<void> {
 		available.value = true;
 	}
 	catch (err: any) {
-		// No Redis, no shared settings: the route is absent rather than refusing, so a
-		// 404 here is a deployment that can only be tuned by redeploying.
+		// No Redis, no bus to carry a change to the scaling process, so the route is
+		// absent rather than refusing: a 404 here is a deployment that can only be
+		// tuned by redeploying.
 		if (err?.response?.status === 404) {
 			available.value = false;
 			return;
@@ -762,8 +763,9 @@ onUnmounted(disarmClock);
 		<v-notice v-if="!available" type="info">
 			{{ t(
 				'autoscale_no_redis',
-				'No Redis configured, so there is nowhere to keep a live change: '
-					+ 'this deployment is tuned through its environment.',
+				'No Redis configured, so a change has no way to reach the process '
+					+ 'that scales the pool: this deployment is tuned through its '
+					+ 'environment.',
 			) }}
 		</v-notice>
 
@@ -1231,7 +1233,7 @@ onUnmounted(disarmClock);
 		</template>
 
 		<p v-if="configKey" class="key">
-			{{ t('autoscale_key', 'Stored in Redis under') }} {{ configKey }}
+			{{ t('autoscale_key', 'Stored in') }} {{ configKey }}
 		</p>
 	</div>
 </template>

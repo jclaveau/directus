@@ -1,41 +1,8 @@
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 import {
 	applySharedSettingsPatch,
 	parseSharedSettingsPatch,
-	readSharedSettings,
-	writeSharedSettings,
 } from './shared-settings.js';
-
-vi.mock('@directus/env');
-vi.mock('../../../redis/index.js');
-
-const get = vi.fn();
-const set = vi.fn();
-const del = vi.fn();
-
-async function redisHolding(stored: string | null) {
-	const { useEnv } = await import('@directus/env');
-	const { useRedis } = await import('../../../redis/index.js');
-
-	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'scalabus' });
-	get.mockResolvedValue(stored);
-	vi.mocked(useRedis).mockReturnValue({ get, set, del } as never);
-}
-
-test('reads the shared settings under the namespaced key', async () => {
-	await redisHolding(JSON.stringify({ maxWorkers: 8 }));
-
-	await expect(readSharedSettings()).resolves.toEqual({ maxWorkers: 8 });
-	expect(get).toHaveBeenCalledWith('scalabus:config:processes:autoscale');
-});
-
-// The loop makes no shared settings of a key it cannot parse, and an operator
-// reading the page has to be told the same thing rather than shown an error.
-test('reads a key edited into nonsense as no shared settings', async () => {
-	await redisHolding('{ not json');
-
-	await expect(readSharedSettings()).resolves.toBeNull();
-});
 
 test('refuses a field the configuration does not have', () => {
 	expect(() => parseSharedSettingsPatch({ maxWorker: 8 }))
@@ -116,18 +83,4 @@ test('takes the surface a change came in through', () => {
 test('refuses a stamp field that is not text', () => {
 	expect(() => parseSharedSettingsPatch({ setFrom: 7 }))
 		.toThrowError(`'setFrom' has to be a string`);
-});
-
-test('writes the shared settings, and deletes the key for none', async () => {
-	await redisHolding(null);
-
-	await writeSharedSettings({ maxWorkers: 8 });
-
-	expect(set).toHaveBeenCalledWith(
-		'scalabus:config:processes:autoscale',
-		'{"maxWorkers":8}',
-	);
-
-	await writeSharedSettings(null);
-	expect(del).toHaveBeenCalledWith('scalabus:config:processes:autoscale');
 });

@@ -26,11 +26,22 @@ vi.mock('../../supervisor/index.js', () => {
 	return { reloadApp };
 });
 
-const readSupervisorSharedSettings = vi.fn(async () => null);
+const readSharedSettings = vi.fn(async () => null);
+
+vi.mock('../../lib/shared-settings.js', () => {
+	return {
+		SHARED_SETTINGS_COLUMNS: {
+			autoscale: 'autoscale_settings',
+			supervisor: 'supervisor_settings',
+		},
+		readSharedSettings,
+	};
+});
+
 const reloadDeclaration = vi.fn(() => DECLARATION);
 
 vi.mock('./supervisor-shared-settings.js', () => {
-	return { readSupervisorSharedSettings, reloadDeclaration };
+	return { reloadDeclaration };
 });
 
 /** What the options an operator changed come to, as pm2 names them. */
@@ -97,7 +108,7 @@ beforeEach(() => {
 	subscribe.mockClear();
 	reloadApp.mockReset();
 	reloadApp.mockResolvedValue(undefined);
-	readSupervisorSharedSettings.mockClear();
+	readSharedSettings.mockClear();
 	reloadDeclaration.mockClear();
 });
 
@@ -149,8 +160,7 @@ test('the restart runs beside the loop and reports that it finished', async () =
 	initAutoscaleReload();
 	ask();
 
-	readSupervisorSharedSettings
-		.mockResolvedValueOnce({ listenTimeout: 20_000 } as never);
+	readSharedSettings.mockResolvedValueOnce({ listenTimeout: 20_000 } as never);
 
 	beginAskedReload('directus', 4);
 

@@ -36,20 +36,19 @@ import {
 import {
 	applySharedSettingsPatch,
 	parseSharedSettingsPatch,
-	readSharedSettings,
-	writeSharedSettings,
 } from '../processes/autoscale/lib/shared-settings.js';
 import {
-	autoscaleConfigKey,
 	configWithSharedSettings,
-	supervisorSharedSettingsKey,
 } from '../processes/autoscale/lib/resolve-config.js';
 import {
 	applySupervisorPatch,
 	parseSupervisorPatch,
-	readSupervisorSharedSettings,
-	writeSupervisorSharedSettings,
 } from '../processes/autoscale/lib/supervisor-shared-settings.js';
+import {
+	SHARED_SETTINGS_COLUMNS,
+	readSharedSettings,
+	writeSharedSettings,
+} from '../processes/lib/shared-settings.js';
 import { collectProcesses, processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
@@ -74,6 +73,19 @@ vi.mock('../processes/autoscale/lib/shared-settings.js');
 vi.mock('../processes/autoscale/lib/supervisor-shared-settings.js');
 vi.mock('../processes/index.js');
 vi.mock('../processes/autoscale/lib/resolve-config.js');
+
+// Named here rather than taken from the module, so the columns the service
+// reads and writes are pinned by the test rather than by whatever it imports.
+vi.mock('../processes/lib/shared-settings.js', () => {
+	return {
+		SHARED_SETTINGS_COLUMNS: {
+			autoscale: 'autoscale_settings',
+			supervisor: 'supervisor_settings',
+		},
+		readSharedSettings: vi.fn(),
+		writeSharedSettings: vi.fn(),
+	};
+});
 
 const schema = new SchemaBuilder()
 	.collection('test', (c) => {
@@ -623,14 +635,22 @@ describe('Services / Utils', () => {
 			});
 		}
 
+		/** What each column answers with, one read standing for both. */
+		function holding(columns: {
+			autoscale?: Record<string, unknown> | null;
+			supervisor?: Record<string, unknown> | null;
+		}) {
+			vi.mocked(readSharedSettings).mockImplementation(async (column) => {
+				return column === SHARED_SETTINGS_COLUMNS.autoscale
+					? columns.autoscale ?? null
+					: columns.supervisor ?? null;
+			});
+		}
+
 		function stored(sharedSettings: Record<string, unknown> | null) {
 			resolvesTo({});
+			holding({ autoscale: sharedSettings });
 
-			vi.mocked(autoscaleConfigKey)
-				.mockReturnValue('scalabus:config:processes:autoscale');
-
-			vi.mocked(readSupervisorSharedSettings).mockResolvedValue(null);
-			vi.mocked(readSharedSettings).mockResolvedValue(sharedSettings);
 			vi.mocked(parseSharedSettingsPatch).mockImplementation((patch) => patch);
 
 			vi.mocked(applySharedSettingsPatch)
@@ -644,7 +664,7 @@ describe('Services / Utils', () => {
 			tracker.on.select('directus_users').response({ email: 'ann@example.com' });
 
 			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
-				key: 'scalabus:config:processes:autoscale',
+				key: 'directus_settings.autoscale_settings',
 				sharedSettings: { maxWorkers: 8, setBy: 'writer-id' },
 				setByEmail: 'ann@example.com',
 			});
@@ -655,8 +675,7 @@ describe('Services / Utils', () => {
 		it('answers the supervisor options beside the configuration', async () => {
 			stored(null);
 
-			vi.mocked(readSupervisorSharedSettings)
-				.mockResolvedValue({ listenTimeout: 20_000 });
+			holding({ supervisor: { listenTimeout: 20_000 } });
 
 			await expect(service(admin).readAutoscaleConfig()).resolves.toMatchObject({
 				supervisor: { sharedSettings: { listenTimeout: 20_000 } },
@@ -681,7 +700,9 @@ describe('Services / Utils', () => {
 			await service(admin).updateAutoscaleConfig({ maxWorkers: 8 }, 'mcp');
 
 			expect(writeSharedSettings).toHaveBeenCalledWith(
+				SHARED_SETTINGS_COLUMNS.autoscale,
 				expect.objectContaining({ setBy: 'admin-id', setFrom: 'mcp' }),
+				expect.anything(),
 			);
 		});
 
@@ -714,7 +735,11 @@ describe('Services / Utils', () => {
 		it('clears the shared settings by writing none at all', async () => {
 			await service(admin).clearAutoscaleConfig();
 
-			expect(writeSharedSettings).toHaveBeenCalledWith(null);
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				SHARED_SETTINGS_COLUMNS.autoscale,
+				null,
+				expect.anything(),
+			);
 		});
 
 		it('refuses a non-admin clearing it', async () => {
@@ -737,10 +762,7 @@ describe('Services / Utils', () => {
 		}
 
 		beforeEach(() => {
-			vi.mocked(supervisorSharedSettingsKey)
-				.mockReturnValue('scalabus:config:processes:supervisor');
-
-			vi.mocked(readSupervisorSharedSettings).mockResolvedValue(null);
+			vi.mocked(readSharedSettings).mockResolvedValue(null);
 			vi.mocked(parseSupervisorPatch).mockImplementation((patch) => patch);
 
 			vi.mocked(applySupervisorPatch)
@@ -755,14 +777,18 @@ describe('Services / Utils', () => {
 			await expect(service(admin).updateSupervisorConfig(
 				{ listenTimeout: 20_000 },
 				'mcp',
-			)).resolves.toMatchObject({ key: 'scalabus:config:processes:supervisor' });
+			)).resolves.toMatchObject({
+				key: 'directus_settings.supervisor_settings',
+			});
 
-			expect(writeSupervisorSharedSettings).toHaveBeenCalledWith(
+			expect(writeSharedSettings).toHaveBeenCalledWith(
+				SHARED_SETTINGS_COLUMNS.supervisor,
 				expect.objectContaining({
 					listenTimeout: 20_000,
 					setBy: 'admin-id',
 					setFrom: 'mcp',
 				}),
+				expect.anything(),
 			);
 		});
 
@@ -771,7 +797,7 @@ describe('Services / Utils', () => {
 				.rejects
 				.toThrowError(ForbiddenError);
 
-			expect(writeSupervisorSharedSettings).not.toHaveBeenCalled();
+			expect(writeSharedSettings).not.toHaveBeenCalled();
 		});
 	});
 

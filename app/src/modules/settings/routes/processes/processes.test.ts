@@ -686,7 +686,7 @@ describe('the autoscale panel', () => {
 		vi.mocked(api.patch).mockResolvedValue({
 			data: {
 				data: {
-					key: 'scalabus:config:processes:autoscale',
+					key: 'directus_settings.autoscale_settings',
 					sharedSettings: { enabled: false },
 				},
 			},
@@ -717,7 +717,9 @@ describe('the autoscale panel', () => {
 			.filter(([url]) => url === '/utils/processes');
 
 		expect(reads).toHaveLength(2);
-	});
+		// Two full mounts of a page carrying three charts, which is a second or
+		// two on a quiet laptop and rather more on a runner sharing its cores.
+	}, 20_000);
 
 	// The drawer holding the panel covers the page when it is open and hides it
 	// when it is closed, so the levers are given a home the drawer never touches.

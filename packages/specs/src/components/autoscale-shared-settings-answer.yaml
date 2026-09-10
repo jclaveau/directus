@@ -3,7 +3,7 @@ description: Shared settings, where they are kept, and who last wrote them.
 properties:
   key:
     type: string
-    description: The Redis key the shared settings are stored under.
+    description: The settings column the shared settings are stored in.
   sharedSettings:
     $ref: '../openapi.yaml#/components/schemas/AutoscaleSharedSettings'
   setByEmail:

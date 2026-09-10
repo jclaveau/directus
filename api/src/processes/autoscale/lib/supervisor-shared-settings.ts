@@ -1,8 +1,6 @@
 import { type AutoscaleBound, SUPERVISOR_BOUNDS } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError } from '@directus/errors';
-import { useRedis } from '../../../redis/index.js';
-import { supervisorSharedSettingsKey } from './resolve-config.js';
 
 /**
  * The pm2 options a rolling restart can carry.
@@ -59,42 +57,6 @@ const ENV_VARIABLES: Record<string, string> = {
 	maxRestarts: 'PM2_MAX_RESTARTS',
 	maxMemoryRestartMegabytes: 'PM2_MAX_MEMORY_RESTART',
 };
-
-export async function readSupervisorSharedSettings(): Promise<
-	SupervisorSharedSettings | null
-> {
-	const stored = await useRedis().get(supervisorSharedSettingsKey());
-
-	if (!stored) {
-		return null;
-	}
-
-	try {
-		const parsed: unknown = JSON.parse(stored);
-
-		return typeof parsed === 'object' && parsed !== null
-			? parsed as SupervisorSharedSettings
-			: null;
-	}
-	catch {
-		// A key edited by hand into something unparseable is reported as no
-		// shared settings, which is what a restart makes of them too.
-		return null;
-	}
-}
-
-export async function writeSupervisorSharedSettings(
-	sharedSettings: SupervisorSharedSettings | null,
-): Promise<void> {
-	const redis = useRedis();
-
-	if (sharedSettings === null) {
-		await redis.del(supervisorSharedSettingsKey());
-		return;
-	}
-
-	await redis.set(supervisorSharedSettingsKey(), JSON.stringify(sharedSettings));
-}
 
 /**
  * The patch, checked field by field.
