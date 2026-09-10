@@ -1,3 +1,4 @@
+import { AUTOSCALE_BOUNDS, SUPERVISOR_BOUNDS } from '@directus/constants';
 import type {
 	AutoscaleConfig,
 	AutoscaleNodeState,
@@ -95,8 +96,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'How many one-second readings a worker\'s CPU is averaged '
 			+ 'over before it counts. Wider reacts later and flaps less.',
 		unit: 'samples',
-		min: 1,
-		max: 30,
+		min: AUTOSCALE_BOUNDS.sampleWindow.low,
+		max: AUTOSCALE_BOUNDS.sampleWindow.high,
 		step: 1,
 		ignoredByLegacy: true,
 	},
@@ -107,8 +108,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'At or above this CPU the pool grows by one worker, '
 			+ 'cooldown and ceiling permitting.',
 		unit: '%',
-		min: 1,
-		max: 100,
+		min: AUTOSCALE_BOUNDS.scaleCpuThreshold.low,
+		max: AUTOSCALE_BOUNDS.scaleCpuThreshold.high,
 		step: 1,
 	},
 	{
@@ -118,8 +119,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'Below this CPU the pool gives a worker back. Kept under the '
 			+ 'scale threshold, or a pool would grow and shrink on one reading.',
 		unit: '%',
-		min: 0,
-		max: 99,
+		min: AUTOSCALE_BOUNDS.releaseCpuThreshold.low,
+		max: AUTOSCALE_BOUNDS.releaseCpuThreshold.high,
 		step: 1,
 	},
 	{
@@ -129,8 +130,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'The pool never drops below this, however quiet it gets. '
 			+ 'Equal to the ceiling it pins the pool and stops all scaling.',
 		unit: 'workers',
-		min: 1,
-		max: 64,
+		min: AUTOSCALE_BOUNDS.minWorkers.low,
+		max: AUTOSCALE_BOUNDS.minWorkers.high,
 		step: 1,
 	},
 	{
@@ -140,8 +141,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'The pool never grows past this, and a pool already above it '
 			+ 'is brought back immediately rather than after a cooldown.',
 		unit: 'workers',
-		min: 1,
-		max: 64,
+		min: AUTOSCALE_BOUNDS.maxWorkers.low,
+		max: AUTOSCALE_BOUNDS.maxWorkers.high,
 		step: 1,
 	},
 	{
@@ -151,8 +152,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'The size to jump to once after a deploy, so the first '
 			+ 'requests do not land on a pool sized for an idle night.',
 		unit: 'workers',
-		min: 0,
-		max: 64,
+		min: AUTOSCALE_BOUNDS.prewarmWorkers.low,
+		max: AUTOSCALE_BOUNDS.prewarmWorkers.high,
 		step: 1,
 		ignoredByLegacy: true,
 	},
@@ -165,7 +166,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'How long after adding a worker before another may be added, '
 			+ 'which is how long the last one gets to take load.',
 		unit: 's',
-		min: 0,
+		min: AUTOSCALE_BOUNDS.minSecondsToScaleUp.low,
+		max: AUTOSCALE_BOUNDS.minSecondsToScaleUp.high,
 		step: 5,
 	},
 	{
@@ -175,7 +177,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'How long after releasing a worker before another may go. '
 			+ 'Longer than the settling window, so a lull cannot empty the pool.',
 		unit: 's',
-		min: 0,
+		min: AUTOSCALE_BOUNDS.minSecondsToScaleDown.low,
+		max: AUTOSCALE_BOUNDS.minSecondsToScaleDown.high,
 		step: 5,
 	},
 	{
@@ -185,7 +188,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		description: 'How long a worker\'s CPU counts as its own startup rather '
 			+ 'than load, and how long the pool is left alone after a restart.',
 		unit: 's',
-		min: 0,
+		min: AUTOSCALE_BOUNDS.warmupSeconds.low,
+		max: AUTOSCALE_BOUNDS.warmupSeconds.high,
 		step: 5,
 		ignoredByLegacy: true,
 	},
@@ -467,9 +471,9 @@ export function supervisorRows(
 				+ 'boot, every start reports ready before it is.',
 			option: {
 				field: 'listenTimeout',
-				min: 1000,
-				max: 600_000,
-				unit: 'ms',
+				min: SUPERVISOR_BOUNDS.listenTimeout.low,
+				max: SUPERVISOR_BOUNDS.listenTimeout.high,
+				unit: SUPERVISOR_BOUNDS.listenTimeout.unit,
 				declared: supervisor.listenTimeout,
 			},
 			override: overriding('listenTimeout'),
@@ -483,9 +487,9 @@ export function supervisorRows(
 				+ 'releasing a worker drops the requests it was serving.',
 			option: {
 				field: 'killTimeout',
-				min: 100,
-				max: 600_000,
-				unit: 'ms',
+				min: SUPERVISOR_BOUNDS.killTimeout.low,
+				max: SUPERVISOR_BOUNDS.killTimeout.high,
+				unit: SUPERVISOR_BOUNDS.killTimeout.unit,
 				declared: supervisor.killTimeout,
 			},
 			override: overriding('killTimeout'),
@@ -501,9 +505,9 @@ export function supervisorRows(
 				+ 'causes read as load and buy more workers to restart.',
 			option: {
 				field: 'maxMemoryRestartMegabytes',
-				min: 64,
-				max: 65_536,
-				unit: 'MB',
+				min: SUPERVISOR_BOUNDS.maxMemoryRestartMegabytes.low,
+				max: SUPERVISOR_BOUNDS.maxMemoryRestartMegabytes.high,
+				unit: SUPERVISOR_BOUNDS.maxMemoryRestartMegabytes.unit,
 				declared: ceiling,
 			},
 			override: overriding('maxMemoryRestartMegabytes'),
@@ -526,9 +530,9 @@ export function supervisorRows(
 				+ 'on.',
 			option: {
 				field: 'restartDelay',
-				min: 0,
-				max: 600_000,
-				unit: 'ms',
+				min: SUPERVISOR_BOUNDS.restartDelay.low,
+				max: SUPERVISOR_BOUNDS.restartDelay.high,
+				unit: SUPERVISOR_BOUNDS.restartDelay.unit,
 				declared: supervisor.restartDelay,
 			},
 			override: overriding('restartDelay'),
@@ -542,9 +546,9 @@ export function supervisorRows(
 				+ 'restarts counted against the ceiling below.',
 			option: {
 				field: 'minUptime',
-				min: 100,
-				max: 600_000,
-				unit: 'ms',
+				min: SUPERVISOR_BOUNDS.minUptime.low,
+				max: SUPERVISOR_BOUNDS.minUptime.high,
+				unit: SUPERVISOR_BOUNDS.minUptime.unit,
 				declared: supervisor.minUptime,
 			},
 			override: overriding('minUptime'),
@@ -557,9 +561,9 @@ export function supervisorRows(
 				+ 'before the supervisor stops replacing it.',
 			option: {
 				field: 'maxRestarts',
-				min: 0,
-				max: 1000,
-				unit: '',
+				min: SUPERVISOR_BOUNDS.maxRestarts.low,
+				max: SUPERVISOR_BOUNDS.maxRestarts.high,
+				unit: SUPERVISOR_BOUNDS.maxRestarts.unit,
 				declared: supervisor.maxRestarts,
 			},
 			override: overriding('maxRestarts'),

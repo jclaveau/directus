@@ -1,25 +1,9 @@
+import { AUTOSCALE_BOUNDS } from '@directus/constants';
 import type {
 	AutoscaleConfig,
 	AutoscaleSignal,
 	AutoscaleStrategy,
 } from '../types.js';
-
-/**
- * The most workers this will scale to whatever it is asked for.
- *
- * A blunt guard against a typed zero, not a capacity calculation: the pool
- * that can actually be afforded comes from the cgroup limit divided by
- * measured per-worker RSS, which is #455. Until then a `maxWorkers` of 10000
- * has to fail as a clamp and a log line rather than as a dead container.
- */
-export const MAX_SUPPORTED_WORKERS = 64;
-
-/**
- * How many samples the `legacy` strategy averages a worker over, which is the
- * module's own number and so the depth of the ring both strategies read: no
- * window can be asked for past it.
- */
-export const LEGACY_SAMPLE_WINDOW = 30;
 
 /** What every numeric field falls back to, wherever one turns out unusable. */
 export const AUTOSCALE_DEFAULTS = {
@@ -105,10 +89,12 @@ export function sanitizeConfig(config: AutoscaleConfig): {
 	const corrections: string[] = [];
 	const sane = { ...config };
 
-	const settle = <Field extends keyof typeof AUTOSCALE_DEFAULTS>(
+	// The bounds default to the shared table and are passed only where one of
+	// them depends on another field's settled value.
+	const settle = <Field extends keyof typeof AUTOSCALE_BOUNDS>(
 		field: Field,
-		low: number,
-		high: number,
+		high: number = AUTOSCALE_BOUNDS[field].high,
+		low: number = AUTOSCALE_BOUNDS[field].low,
 	) => {
 		const value = clamp(config[field], low, high, AUTOSCALE_DEFAULTS[field]);
 
@@ -123,22 +109,22 @@ export function sanitizeConfig(config: AutoscaleConfig): {
 	// The ceiling wins over the floor: it stands for what the box holds, and a
 	// floor above it asks for workers there is no room for. Left alone the two
 	// correct each other on alternate ticks, and neither waits for a cooldown.
-	const maxWorkers = settle('maxWorkers', 1, MAX_SUPPORTED_WORKERS);
-	settle('minWorkers', 1, maxWorkers);
-	settle('prewarmWorkers', 0, maxWorkers);
+	const maxWorkers = settle('maxWorkers');
+	settle('minWorkers', maxWorkers);
+	settle('prewarmWorkers', maxWorkers);
 
-	settle('sampleWindow', 1, LEGACY_SAMPLE_WINDOW);
+	settle('sampleWindow');
 
 	// A release threshold at or above the scale threshold gives the pool a
 	// reading that is both too hot to grow and too cold to hold: at the
 	// ceiling the add branch is skipped for want of room, the release branch
 	// fires on the same reading, and the worker comes straight back.
-	const scaleCpuThreshold = settle('scaleCpuThreshold', 1, 100);
-	settle('releaseCpuThreshold', 0, scaleCpuThreshold - 1);
+	const scaleCpuThreshold = settle('scaleCpuThreshold');
+	settle('releaseCpuThreshold', scaleCpuThreshold - 1);
 
-	settle('minSecondsToScaleUp', 0, Number.MAX_SAFE_INTEGER);
-	settle('minSecondsToScaleDown', 0, Number.MAX_SAFE_INTEGER);
-	settle('warmupSeconds', 0, Number.MAX_SAFE_INTEGER);
+	settle('minSecondsToScaleUp');
+	settle('minSecondsToScaleDown');
+	settle('warmupSeconds');
 
 	sane.signal = signalOr(config.signal, 'average');
 

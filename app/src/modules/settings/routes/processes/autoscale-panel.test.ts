@@ -1,6 +1,8 @@
+import { AUTOSCALE_BOUNDS, SUPERVISOR_BOUNDS } from '@directus/constants';
 import type { AutoscaleNodeState, AutoscaleRunner } from '@directus/types';
 import { expect, test } from 'vitest';
 import {
+	AUTOSCALE_FIELDS,
 	configRows,
 	describeDecision,
 	describeReload,
@@ -382,4 +384,34 @@ test('a restart that failed reports what the supervisor said', () => {
 		finishedAt: 2000,
 		error: 'Reload in progress',
 	})).toBe('the last restart failed: Reload in progress');
+});
+
+// The api refuses what sits outside these and the loop clamps to them: an input
+// offering a wider range offers a value the write will not take, and a narrower
+// one hides a value the deployment is allowed.
+test('every numeric field offers the range the api judges it by', () => {
+	for (const field of AUTOSCALE_FIELDS) {
+		if (field.kind !== 'number') {
+			continue;
+		}
+
+		const bound = AUTOSCALE_BOUNDS[field.field as keyof typeof AUTOSCALE_BOUNDS];
+
+		expect([field.field, field.min, field.max])
+			.toEqual([field.field, bound.low, bound.high]);
+	}
+});
+
+test('every restart option offers the range the api judges it by', () => {
+	for (const row of supervisorRows(state(), null)) {
+		if (row.option === null) {
+			continue;
+		}
+
+		const name = row.option.field as keyof typeof SUPERVISOR_BOUNDS;
+		const bound = SUPERVISOR_BOUNDS[name];
+
+		expect([row.field, row.option.min, row.option.max, row.option.unit])
+			.toEqual([row.field, bound.low, bound.high, bound.unit]);
+	}
 });

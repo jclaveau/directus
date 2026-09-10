@@ -1,4 +1,5 @@
 import { freemem } from 'node:os';
+import { LEGACY_SAMPLE_WINDOW } from '@directus/constants';
 import { useLogger } from '../logger/index.js';
 import { initProcessReports } from '../processes/index.js';
 import { reportUnhandledRejection } from '../utils/report-unhandled-rejection.js';
@@ -22,7 +23,6 @@ import {
 	resolvedSources,
 	resolvedWithoutOverride,
 } from './lib/resolve-config.js';
-import { LEGACY_SAMPLE_WINDOW } from './lib/sanitize-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
 import { recordAutoscaleTick } from './lib/state.js';
 import type { AutoscaleConfig, Decision } from './types.js';

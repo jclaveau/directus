@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { PoolSamples } from './pool-samples.js';
-import { LEGACY_SAMPLE_WINDOW } from './sanitize-config.js';
+import { LEGACY_SAMPLE_WINDOW } from '@directus/constants';
 
 const MEGABYTE = 1_048_576;
 

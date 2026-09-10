@@ -1,10 +1,7 @@
+import { MAX_PACING_SECONDS, MAX_SUPPORTED_WORKERS } from '@directus/constants';
 import { describe, expect, test } from 'vitest';
 import type { AutoscaleConfig } from '../types.js';
-import {
-	AUTOSCALE_DEFAULTS,
-	MAX_SUPPORTED_WORKERS,
-	sanitizeConfig,
-} from './sanitize-config.js';
+import { AUTOSCALE_DEFAULTS, sanitizeConfig } from './sanitize-config.js';
 
 const base: AutoscaleConfig = {
 	enabled: true,
@@ -171,4 +168,19 @@ describe('values that are not numbers at all', () => {
 		expect(config.strategy).toBe('legacy');
 		expect(corrections).toEqual([]);
 	});
+});
+
+// The write refuses a pacing field past a day because past it the number is a
+// duration typed in milliseconds. The environment carries the same typo just as
+// easily, and a loop honouring it holds the pool still for days.
+test('a cooldown past a day is brought back to it', () => {
+	const { config, corrections } = sanitizeConfig({
+		...base,
+		minSecondsToScaleDown: 300_000,
+	});
+
+	expect(config.minSecondsToScaleDown).toBe(MAX_PACING_SECONDS);
+
+	expect(corrections)
+		.toEqual([`minSecondsToScaleDown 300000 -> ${MAX_PACING_SECONDS}`]);
 });

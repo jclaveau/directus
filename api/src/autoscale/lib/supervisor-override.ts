@@ -1,3 +1,4 @@
+import { type AutoscaleBound, SUPERVISOR_BOUNDS } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError } from '@directus/errors';
 import { useRedis } from '../../redis/index.js';
@@ -15,21 +16,21 @@ export interface SupervisorOverride {
 	[field: string]: unknown;
 }
 
-/** The bounds a value has to sit in, and the pm2 entry it is written to. */
-interface SupervisorField {
-	entry: string;
-	min: number;
-	max: number;
-}
-
-const FIELDS: Record<string, SupervisorField> = {
-	listenTimeout: { entry: 'listen_timeout', min: 1000, max: 600_000 },
-	killTimeout: { entry: 'kill_timeout', min: 100, max: 600_000 },
-	minUptime: { entry: 'min_uptime', min: 100, max: 600_000 },
-	restartDelay: { entry: 'restart_delay', min: 0, max: 600_000 },
-	maxRestarts: { entry: 'max_restarts', min: 0, max: 1000 },
-	maxMemoryRestartMegabytes: { entry: 'max_memory_restart', min: 64, max: 65_536 },
+/** The pm2 entry each option is written to, which names the option itself. */
+const ENTRIES: Record<string, string> = {
+	listenTimeout: 'listen_timeout',
+	killTimeout: 'kill_timeout',
+	minUptime: 'min_uptime',
+	restartDelay: 'restart_delay',
+	maxRestarts: 'max_restarts',
+	maxMemoryRestartMegabytes: 'max_memory_restart',
 };
+
+/**
+ * The same bounds the panel's inputs offer, read through an index signature so
+ * a field named by a request can be looked up by name.
+ */
+const BOUNDS: Record<string, AutoscaleBound> = SUPERVISOR_BOUNDS;
 
 /**
  * What the override carries besides the values themselves, kept out of what is
@@ -120,8 +121,8 @@ export function parseSupervisorPatch(
 		// Read as an own property: `constructor` and `toString` are answered by
 		// every object, and one reaching the bounds below would be judged
 		// against a function.
-		const bounds = Object.hasOwn(FIELDS, field)
-			? FIELDS[field]
+		const bounds = Object.hasOwn(BOUNDS, field)
+			? BOUNDS[field]
 			: undefined;
 
 		if (bounds === undefined) {
@@ -139,13 +140,13 @@ export function parseSupervisorPatch(
 
 		const usable = typeof value === 'number'
 			&& Number.isInteger(value)
-			&& value >= bounds.min
-			&& value <= bounds.max;
+			&& value >= bounds.low
+			&& value <= bounds.high;
 
 		if (usable === false) {
 			throw new InvalidPayloadError({
 				reason: `'${field}' has to be a whole number `
-					+ `between ${bounds.min} and ${bounds.max}`,
+					+ `between ${bounds.low} and ${bounds.high}`,
 			});
 		}
 
@@ -252,7 +253,7 @@ export function reloadDeclaration(
 ): Record<string, number> {
 	const declaration: Record<string, number> = {};
 
-	for (const [field, { entry }] of Object.entries(FIELDS)) {
+	for (const [field, entry] of Object.entries(ENTRIES)) {
 		const overridden = override?.[field];
 
 		const value = typeof overridden === 'number'

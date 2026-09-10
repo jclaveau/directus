@@ -1,4 +1,4 @@
-import { LEGACY_SAMPLE_WINDOW } from './sanitize-config.js';
+import { LEGACY_SAMPLE_WINDOW } from '@directus/constants';
 import type { LegacyWorkerSample } from '../types.js';
 import type { OnlineWorker } from './pool.js';
 

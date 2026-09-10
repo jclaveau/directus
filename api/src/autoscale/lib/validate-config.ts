@@ -1,34 +1,6 @@
+import { AUTOSCALE_BOUNDS } from '@directus/constants';
 import { InvalidPayloadError } from '@directus/errors';
 import type { AutoscaleConfig } from '@directus/types';
-import { LEGACY_SAMPLE_WINDOW, MAX_SUPPORTED_WORKERS } from './sanitize-config.js';
-
-/**
- * The longest any of the pacing fields may be asked for, in seconds.
- *
- * A day, which no cooldown is: past it the number is a duration typed in
- * milliseconds, and a cooldown of `300000` freezes the pool for three and a
- * half days without ever looking wrong in a list of numbers.
- */
-export const MAX_PACING_SECONDS = 86_400;
-
-interface Bound {
-	low: number;
-	high: number;
-	/** What the number counts, so the message reads as the field does. */
-	unit: string;
-}
-
-const BOUNDS: Record<string, Bound> = {
-	sampleWindow: { low: 1, high: LEGACY_SAMPLE_WINDOW, unit: 'samples' },
-	scaleCpuThreshold: { low: 1, high: 100, unit: '%' },
-	releaseCpuThreshold: { low: 0, high: 99, unit: '%' },
-	minWorkers: { low: 1, high: MAX_SUPPORTED_WORKERS, unit: 'workers' },
-	maxWorkers: { low: 1, high: MAX_SUPPORTED_WORKERS, unit: 'workers' },
-	prewarmWorkers: { low: 0, high: MAX_SUPPORTED_WORKERS, unit: 'workers' },
-	minSecondsToScaleUp: { low: 0, high: MAX_PACING_SECONDS, unit: 'seconds' },
-	minSecondsToScaleDown: { low: 0, high: MAX_PACING_SECONDS, unit: 'seconds' },
-	warmupSeconds: { low: 0, high: MAX_PACING_SECONDS, unit: 'seconds' },
-};
 
 /**
  * Everything wrong with a configuration, in the words of the fields it names.
@@ -46,7 +18,7 @@ const BOUNDS: Record<string, Bound> = {
 export function configProblems(config: AutoscaleConfig): string[] {
 	const problems: string[] = [];
 
-	for (const [field, bound] of Object.entries(BOUNDS)) {
+	for (const [field, bound] of Object.entries(AUTOSCALE_BOUNDS)) {
 		const value = config[field as keyof AutoscaleConfig] as number;
 
 		if (Number.isInteger(value) === false) {
