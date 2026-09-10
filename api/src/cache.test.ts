@@ -962,15 +962,15 @@ describe('flushCaches', () => {
 		});
 
 		redis.scan.mockResolvedValueOnce(['0', [
-			'scalabus:tag:articles',
-			'scalabus:tag:articles:id=1',
+			'scalabus:index:tag:articles',
+			'scalabus:index:tag:articles:id=1',
 		]]);
 
 		await flushCaches(true);
 
 		expect(logger.info).toHaveBeenCalledWith(
 			expect.stringMatching(
-				/^\[cache\] flushed in \d+ms, dropped 2 scoped-tag index keys$/,
+				/^\[cache\] flushed in \d+ms, dropped 2 scoped-cache index keys$/,
 			),
 		);
 	});
@@ -991,13 +991,14 @@ describe('flushCaches', () => {
 			new Error('Reached the max retries per request limit (which is 20).'),
 		);
 
-		await expect(flushCaches(true)).resolves.toBeUndefined();
+		// Reported rather than thrown, and reported rather than swallowed: an
+		// operator-invoked flush that exits 0 having cleared nothing tells a deploy
+		// the caches are warm on the new data when every one of them is stale.
+		await expect(flushCaches(true)).resolves.toMatchObject({
+			failures: ['system cache'],
+		});
 	});
 
-	// `clearSystemCache` does not await the publish, so this pins that it stays that
-	// way: awaiting it would hand every caller — the migration runner included — a
-	// rejection during the one outage where the message could not be delivered
-	// anyway, on top of tiers it has already cleared.
 	test(oneLine`
 		survives a bus that cannot publish — the schemaChanged fan-out rides Redis, so
 		it is down in exactly the outage this has to live through, and a lost message
@@ -1009,10 +1010,38 @@ describe('flushCaches', () => {
 			CACHE_STORE: 'memory',
 		});
 
-		busPublish.mockRejectedValueOnce(new Error('Connection is closed.'));
+		busPublish
+		.mockRejectedValueOnce(new Error('Connection is closed.'))
+		.mockRejectedValueOnce(new Error('Connection is closed.'));
 
-		await expect(flushCaches(true)).resolves.toBeUndefined();
+		// Both publishes ride the same bus, so both are named: the `schemaChanged`
+		// fan-out inside the system clear, and the `cacheCleared` one below it.
+		await expect(flushCaches(true)).resolves.toMatchObject({
+			failures: ['system cache', 'peer notification'],
+		});
+
 		expect(busPublish).toHaveBeenCalled();
+	});
+
+	// A peer on a memory store holds its own response and system tiers, and
+	// `schemaChanged` reaches neither: its handler drops the response cache only
+	// under CACHE_AUTO_PURGE, and never touches `_system` at all. Those nodes kept
+	// serving the reads this call exists to retire.
+	test(oneLine`
+		tells the other nodes which tiers went, so a peer on a memory store drops the
+		copies only it holds
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		await flushCaches(true);
+
+		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
+			targets: ['response', 'system'],
+		});
 	});
 
 	test(oneLine`
@@ -1028,6 +1057,9 @@ describe('flushCaches', () => {
 
 		redis.scan.mockRejectedValue(new Error('Connection is closed.'));
 
-		await expect(flushCaches(true)).resolves.toBeUndefined();
+		const report = await flushCaches(true);
+
+		expect(report.failures).toEqual(['scoped-cache index']);
+		expect(report.droppedIndexKeys).toBe(0);
 	});
 });

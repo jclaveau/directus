@@ -163,9 +163,22 @@ export function getCache(): {
 	return { cache, systemCache, localSchemaCache, lockCache };
 }
 
-export async function flushCaches(forced?: boolean): Promise<void> {
+/**
+ * What a flush managed and what it did not. `flushCaches` stays best-effort — see
+ * the comment inside — so the tiers it could not clear are reported rather than
+ * thrown, and a caller that must not silently succeed (`directus cache flush`)
+ * reads `failures` instead of the absence of an exception.
+ */
+export interface CacheFlushReport {
+	durationMs: number;
+	droppedIndexKeys: number;
+	failures: string[];
+}
+
+export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	const { cache } = getCache();
 	const startedAt = Date.now();
+	const failures: string[] = [];
 
 	// Best-effort, all of it. Every caller here runs AFTER the thing it is flushing
 	// for already happened — a migration recorded its version, a schema diff applied,
@@ -183,6 +196,7 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 		await clearSystemCache({ forced });
 	}
 	catch (error: any) {
+		failures.push('system cache');
 		logger.warn(error, `[cache] could not clear the system cache: ${error}`);
 	}
 
@@ -206,7 +220,22 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 		droppedIndexKeys = await dropScopedCacheTagIndex();
 	}
 	catch (error: any) {
+		failures.push('scoped-cache index');
 		logger.warn(error, `[cache] could not drop the scoped-tag index: ${error}`);
+	}
+
+	// A peer on a memory store holds its own response and system tiers, and
+	// `schemaChanged` reaches neither: its handler drops the response cache only
+	// under `CACHE_AUTO_PURGE`, and never touches `_system` at all. Without this
+	// those nodes keep serving the reads this call exists to retire.
+	try {
+		await messenger.publish<CacheClearMessage>('cacheCleared', {
+			targets: ['response', 'system'],
+		});
+	}
+	catch (error: any) {
+		failures.push('peer notification');
+		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);
 	}
 
 	// Every caller of this is a deploy-shaped event — a migration, a schema diff, a
@@ -214,10 +243,14 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 	// serving. Whether that is 20ms or 20s was not knowable from the logs
 	// (https://github.com/jclaveau/directus/issues/468), so it is said here rather
 	// than at each caller: one line, and the number that explains it.
+	const durationMs = Date.now() - startedAt;
+
 	logger.info(
-		`[cache] flushed in ${Date.now() - startedAt}ms, `
-		+ `dropped ${droppedIndexKeys} scoped-tag index keys`,
+		`[cache] flushed in ${durationMs}ms, `
+		+ `dropped ${droppedIndexKeys} scoped-cache index keys`,
 	);
+
+	return { durationMs, droppedIndexKeys, failures };
 }
 
 export async function clearSystemCache(opts?: {
