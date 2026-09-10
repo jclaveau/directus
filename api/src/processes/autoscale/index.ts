@@ -8,6 +8,8 @@ import {
 	scaleApp,
 } from '../supervisor/index.js';
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
+import { validateBooleanEnv } from '../../utils/validate-env.js';
+import { PROCESSES_BOOLEAN_ENV } from '../lib/boolean-env.js';
 import { decide } from './lib/decide.js';
 import { PoolSamples } from './lib/pool-samples.js';
 import { readPool, restarted } from './lib/pool.js';
@@ -69,6 +71,11 @@ async function prewarm(
  */
 export async function runAutoscaler(): Promise<void> {
 	const logger = useLogger();
+
+	// Before anything is connected to: a pool told to scale by a variable this
+	// process reads as false would run at its floor under any load, and the
+	// deployment that set it would have no line saying why.
+	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
 
 	// This command outlives the pool it manages, so it takes the guard the server
 	// process takes and for the same reason: Node ends a process on a rejection

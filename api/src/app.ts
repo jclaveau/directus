@@ -55,6 +55,8 @@ import {
 import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { initCacheConfig } from './cache-config.js';
+import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
+import { validateBooleanEnv } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
 import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
 import emitter from './emitter.js';
@@ -407,6 +409,7 @@ export default async function createApp(): Promise<express.Application> {
 	await metricsSchedule();
 	await cacheStatsSchedule();
 	await initCacheConfig();
+	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
 	await initSharedSettings();
 	await initSharedSettingsGuard();
 	await initProcessReports();
