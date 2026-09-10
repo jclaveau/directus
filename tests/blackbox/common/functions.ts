@@ -441,10 +441,25 @@ export async function CreateRelation(vendor: Vendor, options: OptionsCreateRelat
 		return relationResponse.body.data;
 	}
 
-	const response = await request(getUrl(vendor))
+	let response = await request(getUrl(vendor))
 		.post(`/relations`)
 		.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
 		.send(options);
+
+	// Same schema-lag as CreateField: the cache server can serve a snapshot from
+	// before the field this relation points at existed, so it reads as "doesn't
+	// exist" here though its POST just returned 200. The no-cache instance recomputes
+	// the schema from the database each request, so it always sees it.
+	const fieldNotYetVisible =
+		response.status === 400 &&
+		response.body?.errors?.[0]?.message?.includes(`doesn't exist`);
+
+	if (fieldNotYetVisible) {
+		response = await request(getNoCacheUrl(vendor))
+			.post(`/relations`)
+			.set('Authorization', `Bearer ${USER.TESTS_FLOW.TOKEN}`)
+			.send(options);
+	}
 
 	return dataOrThrow(response, `relation "${options.collection}.${options.field}"`);
 }

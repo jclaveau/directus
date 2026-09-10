@@ -4,8 +4,10 @@ import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
+import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
+	evictCacheEntry,
 	queueCacheDescriptor,
 	queueMissLatency,
 	writeCacheTombstone,
@@ -13,11 +15,17 @@ import {
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
+	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
-	serializeScopedCacheTags,
+	scopedCacheSweptDuringFill,
 	scopedCacheTagLabel,
+	serializeScopedCacheTags,
 	tagScopedCacheKeys,
+	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
+import {
+	recordPendingScopedCachePurge,
+} from '../scoped-cache-pending-purges.js';
 import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -140,6 +148,19 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
 
+	// Taken before the read's query; what it guards against, and why it is compared
+	// after the fill rather than before, is in `fill-guard.ts`.
+	const capturedEpochs = res.locals['scopedCacheEpochs'] as
+		| ScopedCacheEpochs
+		| undefined;
+
+	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
+		capturedEpochs,
+		scopedCacheTags,
+	);
+
+	const unguardedScope = unguardedScopeCollections.length > 0;
+
 	let filled = false;
 
 	if (
@@ -148,6 +169,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
+		unguardedScope === false &&
 		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,
@@ -160,34 +182,87 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	) {
 		filled = true;
 
-		const { redisKey, cacheKey } = await getCacheKey(req);
+		// Built by the cache middleware for the lookup that missed. It returns early
+		// without one for a request it never looks up (a skip rule, the cache off),
+		// which is the only path that still pays for its own.
+		const { redisKey, cacheKey } = res.locals['httpRequestCacheKey']
+			?? await getCacheKey(req);
 
 		try {
 			const now = Date.now();
 			const ttlMs = getMilliseconds(resolvedCacheTtl());
 			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
 
-			await setCacheValue(cache, redisKey, res.locals['payload'], ttlMs);
-
-			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
-			// `ttlMs` explicitly so it tracks the live override, not the Keyv default
-			// TTL frozen at the response cache's construction.
-			await setCacheValue(cache, `${redisKey}__expires_at`, {
-				exp: expiresAt,
-				createdAt: now,
-				ttlMs: ttlMs ?? null,
-			}, ttlMs);
-
-			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
-			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
-
+			// Index BEFORE the value exists. The two writes are not atomic, and the
+			// failure modes are not symmetric: a tag naming a key that was never
+			// written costs one miss on the purge's `del`, while a value written
+			// under no tag is unreachable to every purge and serves stale for its
+			// whole TTL. So tag first and let a throw here skip the value entirely.
 			await tagScopedCacheKeys(
 				redisKey,
 				scopedCacheTags,
 				env['CACHE_TAGS_HEADER']
-					? [`${redisKey}__tags`]
+					? [cacheTagsKey(redisKey)]
 					: [],
 			);
+
+			// Handed over together rather than awaited in turn: node-redis corks its
+			// socket and drains the whole queue per tick, so the pair costs one round
+			// trip. Neither reads the other's answer, and a sidecar left behind by a
+			// failed payload write is an orphan its own TTL collects.
+			await Promise.all([
+				setCacheValue(cache, redisKey, res.locals['payload'], ttlMs),
+
+				// Enriched so a HIT reads age/TTL off this sibling — no extra read.
+				// Pass `ttlMs` explicitly so it tracks the live override, not the Keyv
+				// default TTL frozen at the response cache's construction. Stored raw:
+				// three numbers do not repay a snappy pass on every fill and a second
+				// one on every hit, and `decompress` sniffs the Buffer rather than the
+				// setting, so a reader takes it either way.
+				cache.set(cacheExpiresAtKey(redisKey), {
+					exp: expiresAt,
+					createdAt: now,
+					ttlMs: ttlMs ?? null,
+				}, ttlMs),
+			]);
+
+			if (capturedEpochs) {
+				const sweptDuringFill =
+					await scopedCacheSweptDuringFill(capturedEpochs);
+
+				if (sweptDuringFill !== undefined) {
+					// This is the one purge that knows precisely which key is stale, and
+					// everywhere else a purge that could not run is recorded for a retry.
+					// A store that swallowed the delete answers `undefined` rather than
+					// throwing, so without reading the eviction back the entry would serve
+					// rows a purge already superseded for its whole TTL — the failure the
+					// guard exists to prevent, one step later.
+					if (await evictCacheEntry(cache, redisKey) === false) {
+						await recordPendingScopedCachePurge(
+							{
+								mode: 'slices',
+								collection: req.collection ?? null,
+								scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
+							},
+							new Error(
+								`in-flight purge of ${sweptDuringFill} left `
+								+ `${redisKey} cached`,
+							),
+						);
+					}
+
+					if (cacheStatsActive()) {
+						void reportCacheAnomaly(
+							req,
+							'inflight_purge',
+							sweptDuringFill,
+						).catch(() => {});
+					}
+				}
+			}
+
+			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
+			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
 
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.
@@ -199,7 +274,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// a CacheValue (object) — a raw string won't round-trip.
 					await setCacheValue(
 						cache,
-						`${redisKey}__tags`,
+						cacheTagsKey(redisKey),
 						{ tags: serializeScopedCacheTags(pins) },
 						getMilliseconds(resolvedCacheTtl()),
 					);
@@ -327,6 +402,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 			void reportCacheAnomaly(req, 'unautopurgeable_scope', detail).catch(() => {});
 		}
+		else if (unguardedScope) {
+			void reportCacheAnomaly(
+				req,
+				'unguarded_scope',
+				unguardedScopeCollections.join(', '),
+			).catch(() => {});
+		}
 	}
 
 	// Every cacheable-by-method request reaching here was a miss (hits are served
@@ -340,7 +422,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		);
 
 		const anomalous =
-			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope;
+			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope
+			|| unguardedScope;
 
 		queueMissLatency(
 			missMs,

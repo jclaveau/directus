@@ -3,6 +3,7 @@ import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test } from 'vitest';
+import { summarise, summaryRow } from './measure.js';
 
 /**
  * How long a worker takes from spawn to its first answered request.
@@ -136,15 +137,6 @@ const serverEnv = {
 
 type Arm = { name: string; cli: string; samples: number[] };
 
-type Summary = {
-	name: string;
-	samples: number[];
-	min: number;
-	median: number;
-	p95: number;
-	max: number;
-};
-
 async function timeOneBoot(
 	arm: Arm,
 	attempt: number,
@@ -205,27 +197,6 @@ async function timeOneBoot(
 	return { ms: Math.round(ready - started), output };
 }
 
-function summarise({ name, samples }: Arm): Summary {
-	const sorted = [...samples].sort((a, b) => a - b);
-
-	const at = (fraction: number) =>
-		sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))]!;
-
-	return {
-		name,
-		samples,
-		min: sorted[0]!,
-		median: at(0.5),
-		p95: at(0.95),
-		max: sorted[sorted.length - 1]!,
-	};
-}
-
-function row(summary: Summary): string {
-	return `| ${summary.name} | ${summary.min} ms | **${summary.median} ms**`
-		+ ` | ${summary.p95} ms | ${summary.max} ms |`;
-}
-
 test('the API answers its first request', async () => {
 	const arms: Arm[] = [{ name: 'head', cli, samples: [] }];
 
@@ -260,7 +231,7 @@ test('the API answers its first request', async () => {
 		}
 	}
 
-	const summaries = arms.map(summarise);
+	const summaries = arms.map((arm) => summarise(arm.name, arm.samples));
 	const [head, baseline] = summaries;
 
 	const comparison = baseline
@@ -315,7 +286,7 @@ test('the API answers its first request', async () => {
 			'',
 			'| arm | min | median | p95 | max |',
 			'| --- | ---: | ---: | ---: | ---: |',
-			...summaries.map(row),
+			...summaries.map((summary) => summaryRow(summary)),
 			...verdict,
 			'',
 			`${reps} measured boots per arm, alternating, one discarded warm-up each.`,

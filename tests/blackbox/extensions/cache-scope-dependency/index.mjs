@@ -26,7 +26,12 @@ export default function registerHooks({ filter }, { services }) {
 			{ emitEvents: false },
 		);
 
-		context.scopedCache?.scopeTo(result.getMeta?.()?.scopedCacheTags ?? []);
+		// The metric read's own purge counters ride along with its tags: the host
+		// captured `report`'s before its query and cannot have captured `metric`'s,
+		// so without this the report response is left uncached (`unguarded_scope`).
+		context.scopedCache?.scopeTo(result.getMeta?.()?.scopedCacheTags ?? [], {
+			epochs: result.getMeta?.()?.scopedCacheEpochs,
+		});
 
 		return records;
 	});

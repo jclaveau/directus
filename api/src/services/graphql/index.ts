@@ -15,6 +15,7 @@ import type { Knex } from 'knex';
 import getDatabase from '../../database/index.js';
 import { getService } from '../../utils/get-service.js';
 import { readMeta, withMeta } from '../../utils/read-meta.js';
+import { mergeScopedCacheEpochs } from '../../scoped-cache.js';
 import { formatError } from './errors/format.js';
 import { GraphQLExecutionError, GraphQLValidationError } from './errors/index.js';
 import { generateSchema } from './schema/index.js';
@@ -48,6 +49,21 @@ export class GraphQLService {
 	 */
 	scopedCacheUnautopurgeableTags: ScopedCacheTag[];
 
+	/**
+	 * The scoped cache purge counters this request's reads captured, merged across
+	 * every root. A `/graphql` response is ONE cached entry assembled from several
+	 * reads, and `respond` compares these after the fill to detect a purge that
+	 * landed while they were running — so an entry the aggregate never mentions is
+	 * filled with no such check at all.
+	 *
+	 * The EARLIEST capture wins per collection: a root reading `E+1` where another
+	 * read `E` means a purge landed between them, and only the earlier value makes
+	 * the post-fill comparison notice. By capture, not by arrival — graphql-js
+	 * resolves root fields in parallel, so the first result back is not the first
+	 * counter taken.
+	 */
+	scopedCacheEpochs: Record<string, string | null>;
+
 	constructor(options: AbstractServiceOptions & { scope: GQLScope }) {
 		this.accountability = options?.accountability || null;
 		this.knex = options?.knex || getDatabase();
@@ -55,6 +71,7 @@ export class GraphQLService {
 		this.scope = options.scope;
 		this.scopedCacheTags = [];
 		this.scopedCacheUnautopurgeableTags = [];
+		this.scopedCacheEpochs = {};
 	}
 
 	/**
@@ -107,6 +124,7 @@ export class GraphQLService {
 		return withMeta(formattedResult, {
 			scopedCacheTags: this.scopedCacheTags,
 			scopedCacheUnautopurgeableTags: this.scopedCacheUnautopurgeableTags,
+			scopedCacheEpochs: this.scopedCacheEpochs,
 		});
 	}
 
@@ -139,6 +157,11 @@ export class GraphQLService {
 
 		this.scopedCacheUnautopurgeableTags.push(
 			...(resultMeta?.scopedCacheUnautopurgeableTags ?? []),
+		);
+
+		mergeScopedCacheEpochs(
+			this.scopedCacheEpochs,
+			resultMeta?.scopedCacheEpochs ?? {},
 		);
 
 		return result;

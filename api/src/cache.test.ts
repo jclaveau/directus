@@ -9,16 +9,23 @@ const mockEnv = vi.hoisted(() => ({ current: {} as Record<string, any> }));
 const env = mockEnv.current;
 
 const redis = vi.hoisted(() => {
-	const pipeline = { sadd: vi.fn(), expire: vi.fn(), exec: vi.fn() };
-	// chainable pipeline
-	pipeline.sadd.mockReturnValue(pipeline);
-	pipeline.expire.mockReturnValue(pipeline);
+	const pipeline = {
+		sadd: vi.fn(),
+		expire: vi.fn(),
+		eval: vi.fn(),
+		scopedCacheTagExpiry: vi.fn(),
+		incr: vi.fn(),
+		sunion: vi.fn(),
+		exec: vi.fn(),
+	};
 
 	return {
 		isCluster: false,
+		defineCommand: vi.fn(),
 		smembers: vi.fn(),
 		del: vi.fn(),
 		srem: vi.fn(),
+		eval: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
@@ -97,6 +104,43 @@ function setEnv(values: Record<string, unknown>) {
 
 afterEach(() => {
 	vi.clearAllMocks();
+});
+
+// `clearAllMocks` drops implementations as well as calls, so the pipeline is armed
+// per test: chainable, and `exec` resolving because the epoch bump hangs its own
+// `.catch` off the returned promise.
+//
+// A purge reads its members with one `SUNION` over every tag key, queued on that
+// same pipeline. The double answers it as the union of the per-key `smembers` a
+// case arms, which is what the command does — so a case still says which tag sets
+// hold what, and still sees the purge ask for them.
+beforeEach(() => {
+	redis._pipeline.sadd.mockReturnValue(redis._pipeline);
+	redis._pipeline.expire.mockReturnValue(redis._pipeline);
+	redis._pipeline.exec.mockResolvedValue([]);
+
+	// The sweep is one script, so the double runs what the script runs: read each tag
+	// set, drop them all, prune the slice index. It reads through `redis.smembers` and
+	// writes through `redis.del`/`redis.srem` so a case still arms which set holds
+	// what, and still sees the sweep ask for and drop exactly those.
+	redis.eval.mockImplementation(
+		async (_script: string, numKeys: number, ...args: string[]) => {
+			const tagKeys = args.slice(0, numKeys);
+			const prunings = args.slice(numKeys);
+
+			const memberLists = await Promise.all(
+				tagKeys.map((key) => redis.smembers(key)),
+			);
+
+			await redis.del(tagKeys);
+
+			for (let at = 0; at < prunings.length; at += 2) {
+				await redis.srem(prunings[at], prunings[at + 1]);
+			}
+
+			return [...new Set(memberLists.flat())];
+		},
+	);
 });
 
 describe('getRedisConnection', () => {
@@ -219,22 +263,20 @@ describe('scoped cache purging', () => {
 				{ collection: 'directus_users' },
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
-				'resp-key',
-				'resp-key__expires_at',
-			);
-
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:directus_users',
-				'resp-key',
-				'resp-key__expires_at',
-			);
-
-			// 2 × CACHE_TTL (5m = 300s) = 600s
-			expect(redis._pipeline.expire).toHaveBeenCalledWith(
+			// The members ride the script, which files them and moves the set's
+			// expiry OUT only. 2 × CACHE_TTL (5m = 300s) = 600s.
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:articles',
 				600,
+				'resp-key',
+				'resp-key__expires_at',
+			);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:tag:directus_users',
+				600,
+				'resp-key',
+				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.exec).toHaveBeenCalledOnce();
@@ -246,14 +288,16 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=A',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=7',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -265,8 +309,9 @@ describe('scoped cache purging', () => {
 			]);
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=\x00null',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -284,17 +329,40 @@ describe('scoped cache purging', () => {
 			]);
 
 			// One tag set, plus the one index entry filing it under its collection.
-			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:slots:student=7',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:slices:slots',
+				600,
 				'scalabus:tag:slots:student=7',
+			);
+		});
+
+		test(oneLine`
+			every slice of one collection lands in a single index call, not one each
+		`, async () => {
+			await tagScopedCacheKeys('resp-key', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+				{ collection: 'slots', field: 'student', value: 'B' },
+			]);
+
+			// The index set is the same key for both, and its expiry is the same
+			// value both times: sending it twice buys an EXISTS and a TTL for
+			// nothing. Two tag sets plus the one index call that names them.
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(3);
+
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
+				'scalabus:slices:slots',
+				600,
+				'scalabus:tag:slots:student=A',
+				'scalabus:tag:slots:student=B',
 			);
 		});
 
@@ -305,7 +373,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			// The tag set and its index entry, once each — not once per duplicate.
-			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledTimes(2);
 		});
 
 		test('no-op when no tags', async () => {
@@ -324,8 +392,9 @@ describe('scoped cache purging', () => {
 				'resp-key__tags',
 			]);
 
-			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
+			expect(redis._pipeline.scopedCacheTagExpiry).toHaveBeenCalledWith(
 				'scalabus:tag:articles',
+				600,
 				'resp-key',
 				'resp-key__expires_at',
 				'resp-key__tags',
@@ -360,6 +429,31 @@ describe('scoped cache purging', () => {
 				'scalabus:tag:slots:student=A',
 			]);
 
+			expect(cache.clear).not.toHaveBeenCalled();
+		});
+
+		test(oneLine`
+			purges the tags it had when a cache.purge extension throws, rather than
+			failing a mutation whose write already committed
+		`, async () => {
+			redis.smembers.mockResolvedValue(['key-a']);
+			emitFilter.mockRejectedValueOnce(new Error('extension exploded'));
+
+			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
+
+			// The filter runs after the transaction, so letting it out answers 500 for
+			// a durable write — and, sitting outside `purgeOrRecord`, records nothing
+			// either, leaving the entries it was about to drop with nothing coming.
+			await expect(purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			])).resolves.toEqual([
+				{ collection: 'slots' },
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
+
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=A');
+			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -431,6 +525,60 @@ describe('scoped cache purging', () => {
 
 			// It was still ASKED for — the count changes, the cleanup does not.
 			expect(cache.delete).toHaveBeenCalledWith('stale-key');
+		});
+
+		test(oneLine`
+			drops a slice's entries in one UNLINK against redis, and reports what it
+			replied rather than one delete per key
+		`, async () => {
+			redis.smembers.mockResolvedValue([
+				'key-a',
+				'key-a__expires_at',
+				'key-b',
+				'key-b__expires_at',
+			]);
+
+			const unlink = vi.fn().mockResolvedValue(1);
+
+			const cache = {
+				clear: vi.fn(),
+				delete: vi.fn(),
+				namespace: 'scalabus_response',
+				store: {
+					namespace: 'scalabus_response',
+					client: { unlink },
+					createKeyPrefix: (key: string, namespace?: string) => {
+						return `${namespace}::${key}`;
+					},
+				},
+			} as unknown as Keyv;
+
+			await purgeScopedCache(cache, 'slots', [
+				{ collection: 'slots', field: 'student', value: 'A' },
+			]);
+
+			// A purge over a slice used to send one delete per key, so its cost grew
+			// with how much the cache held rather than with what the mutation
+			// touched. Two calls now: the entries, and their sidecars.
+			expect(cache.delete).not.toHaveBeenCalled();
+			expect(unlink).toHaveBeenCalledTimes(2);
+
+			expect(unlink).toHaveBeenCalledWith([
+				'scalabus_response::scalabus_response:key-a',
+				'scalabus_response::scalabus_response:key-b',
+			]);
+
+			expect(unlink).toHaveBeenCalledWith([
+				'scalabus_response::scalabus_response:key-a__expires_at',
+				'scalabus_response::scalabus_response:key-b__expires_at',
+			]);
+
+			// One, though two entries were named: a key that expired by TTL is still
+			// a member until the set is dropped, and UNLINK is the one thing that
+			// knows which of them was still there.
+			expect(queueCachePurge).toHaveBeenCalledWith(
+				expect.objectContaining({ evicted: 1 }),
+			);
 		});
 
 		test('records the coarse fallback as the wider thing it is', async () => {
@@ -593,6 +741,20 @@ describe('scoped cache purging', () => {
 				'scalabus:tag:articles:author=2',
 			]);
 
+			// ONE command for every tag set the purge sweeps, and it is a script: a
+			// pipeline only orders its own commands, so another client could file a
+			// key into a set between the read and the drop and have that set deleted
+			// under it.
+			expect(redis.eval).toHaveBeenCalledOnce();
+
+			expect(redis.eval.mock.calls[0]?.slice(0, 5)).toEqual([
+				expect.stringContaining('SMEMBERS'),
+				3,
+				'scalabus:tag:articles',
+				'scalabus:tag:articles:author=1',
+				'scalabus:tag:articles:author=2',
+			]);
+
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -613,14 +775,18 @@ describe('scoped cache purging', () => {
 				'scalabus:tag:articles:author=2',
 			]);
 
-			// The index is pruned by the same purge: left naming keys it just dropped,
-			// it would grow without bound and inflate every count taken off it.
+			// The index is pruned by the same purge — and inside the same script, so a
+			// slice re-added while the sweep ran cannot be pruned after the fact.
+			// Left naming keys it just dropped, it would grow without bound and
+			// inflate every count taken off it.
 			expect(redis.srem).toHaveBeenCalledWith(
 				'scalabus:slices:articles',
-				[
-					'scalabus:tag:articles:author=1',
-					'scalabus:tag:articles:author=2',
-				],
+				'scalabus:tag:articles:author=1',
+			);
+
+			expect(redis.srem).toHaveBeenCalledWith(
+				'scalabus:slices:articles',
+				'scalabus:tag:articles:author=2',
 			);
 		});
 

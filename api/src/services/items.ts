@@ -9,51 +9,34 @@ import type {
 	ActionEventParams,
 	Alterations,
 	Item as AnyItem,
-	EventContext,
 	MutationTracker,
 	MutationOptions,
 	PrimaryKey,
 	Query,
 	QueryOptions,
 	SchemaOverview,
-	ScopedCacheCollector,
-	ScopedCachePath,
 	ScopedCacheTag,
 	WithMeta,
 } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
-import { toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
-import { randomUUID } from 'node:crypto';
 import { getCache } from '../cache.js';
 import {
-	composeScopedCachePaths,
 	createScopedCacheCollector,
-	pinnedScopedCacheTagsFromM2oParents,
-	pinnedScopedCacheTagsFromFilter,
-	purgeScopedCache,
-	resolveScopedCacheM2oJoinChainFromPath,
-	scopedCacheCollectionsBeyondNestedRows,
+	foldHandedOverScopedCacheEpochs,
+	ItemScopedCacheService,
+	readScopedCacheEpochs,
 	scopedCacheCollectionsChangedByOnDelete,
-	scopedCacheTagKey,
-	scopedCacheTagsFromRows,
-	scopedCachePurgeEnabled,
-	type FieldTypesByField,
-	type ScopedCacheM2oJoin,
+	takenOverScopedCacheKey,
 } from '../scoped-cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
 import { getHelpers } from '../database/helpers/index.js';
 import getDatabase, { getDatabaseForAccountability } from '../database/index.js';
-import {
-	joinFilterWithCases,
-} from '../database/run-ast/lib/apply-query/join-filter-with-cases.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import emitter from '../emitter.js';
-import { fieldMapFromAst } from '../permissions/modules/process-ast/lib/field-map-from-ast.js';
 import { processAst } from '../permissions/modules/process-ast/process-ast.js';
-import { collectionsInFieldMap } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import { processPayload } from '../permissions/modules/process-payload/process-payload.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
@@ -114,6 +97,8 @@ implements AbstractService<Item> {
 	// use) — so the purged set rides the instance. `null` until a mutation purges.
 	scopedCachePurged: ScopedCacheTag[] | null = null;
 
+	scopedCache: ItemScopedCacheService;
+
 	constructor(collection: Collection, options: AbstractServiceOptions) {
 		this.collection = collection;
 		this.knex = options.knex || getDatabaseForAccountability(options.accountability);
@@ -127,446 +112,15 @@ implements AbstractService<Item> {
 		this.cache = getCache().cache;
 		this.nested = options.nested ?? [];
 
-		return this;
-	}
-
-	/**
-	 * Snapshot the current scope values for the given keys as scoped cache tags, before
-	 * a mutation runs. Snapshots the *old* values an update/delete is about to change so
-	 * their slices get purged (an update that moves a row from `student=A` to `student=B`
-	 * must drop both). Returns an empty list when there are no keys (a
-	 * collection-level purge then suffices).
-	 *
-	 * Always emits the primary-key slice of every key, on every collection, whether it
-	 * declares scope fields or not: the read side pins that axis on every collection,
-	 * and a read pinning an axis the write never emits is never purged — stale, which
-	 * is worse than any hit ratio. It costs no query, since the keys are already here.
-	 */
-	private async snapshotScopedCacheTags(
-		keys: PrimaryKey[],
-	): Promise<ScopedCacheTag[] | null> {
-		if (!scopedCachePurgeEnabled() || keys.length === 0) {
-			return [];
-		}
-
-		const primaryKeyField = this.schema.collections[this.collection]?.primary;
-
-		// This ran behind a "no scope fields declared" early return until the key axis
-		// made it run for every mutation, so it now meets collections absent from the
-		// schema. Such a collection resolves no key and no scope field either, and the
-		// bare collection tag the purge always carries still drops its reads.
-		if (primaryKeyField === undefined) {
-			return [];
-		}
-
-		const flatFields = this.collectionScopedCacheFlatFields;
-		const paths = this.collectionScopedCachePaths;
-		const fieldTypes = this.collectionScopedCacheFieldTypes;
-
-		const tags: ScopedCacheTag[] = keys.map((key) => {
-			return {
-				collection: this.collection,
-				field: primaryKeyField,
-				value: key,
-				type: fieldTypes[primaryKeyField],
-			};
-		});
-
-		if (flatFields.length > 0) {
-			const rows = await this.knex
-				// Deduped: a project that also lists its primary key in
-				// `scoped_cache_fields` would otherwise project the column twice.
-				.select([...new Set([primaryKeyField, ...flatFields])])
-				.from(this.collection)
-				.whereIn(primaryKeyField, keys);
-
-			const flatTags = scopedCacheTagsFromRows(
-				this.collection,
-				flatFields,
-				rows,
-				'coarse',
-				fieldTypes,
-			);
-
-			// A flat field is always projected, so 'coarse' only nulls on a caller
-			// feeding unprojected rows — never here; propagate it regardless.
-			//
-			// Which leaves this return, and the `=== null` arms in the three
-			// callers, unreachable today. They stay on purpose:
-			// - null is the fail-safe: scope unresolvable, so purge coarsely.
-			// - it is unreachable only because the select above projects exactly
-			//   the fields `scopedCacheTagsFromRows` reads, and nothing ties those
-			//   two lists together.
-			// - so a later edit to either side makes it reachable again, and
-			//   without the arms the purge would silently narrow rather than
-			//   widen: a stale cache instead of a slow one.
-			if (flatTags === null) {
-				return null;
-			}
-
-			tags.push(...flatTags);
-		}
-
-		tags.push(...(await this.snapshotScopedCachePathTags(paths, keys, fieldTypes)));
-
-		return tags;
-	}
-
-	/**
-	 * Resolve every path scope field to its terminal value per mutated row via its M2O
-	 * join chain, then reuse the row-tag builder for canonicalization + dedup. The
-	 * mutated row carries only the first-hop fk, so the ancestor joins recover the
-	 * SAME terminals the read side pinned — the identical `field=<path>` slices.
-	 *
-	 * One query for every path, not one per path: composition derives the paths by
-	 * extending each other (`teaching_unit.discipline`, then
-	 * `teaching_unit.discipline.enrollment`), so a join keyed by the segments leading
-	 * to it is shared and each further path costs at most one more join. On
-	 * `student_course` that turns four round trips into one, per snapshot, and a
-	 * mutation snapshots twice.
-	 */
-	private async snapshotScopedCachePathTags(
-		paths: ScopedCachePath[],
-		keys: PrimaryKey[],
-		fieldTypes: FieldTypesByField,
-	): Promise<ScopedCacheTag[]> {
-		const primaryKeyField = this.schema.collections[this.collection]!.primary;
-		const aliasByLeadingSegments = new Map<string, string>();
-		const terminalRefByPath: { field: string; terminalRef: string }[] = [];
-
-		let query = this.knex.from({ root: this.collection });
-
-		for (const { field } of paths) {
-			const resolved = this.resolveScopedCachePath(field);
-
-			if (!resolved) {
-				continue;
-			}
-
-			let leadingSegments = '';
-			let prevAlias = 'root';
-
-			for (const join of resolved.joins) {
-				leadingSegments = `${leadingSegments}.${join.field}`;
-
-				let alias = aliasByLeadingSegments.get(leadingSegments);
-
-				if (alias === undefined) {
-					alias = `p${aliasByLeadingSegments.size}`;
-					aliasByLeadingSegments.set(leadingSegments, alias);
-
-					query = query.leftJoin(
-						{ [alias]: join.relatedCollection },
-						`${alias}.${join.relatedPk}`,
-						`${prevAlias}.${join.field}`,
-					);
-				}
-
-				prevAlias = alias;
-			}
-
-			terminalRefByPath.push({
-				field,
-				terminalRef: `${prevAlias}.${resolved.terminalField}`,
-			});
-		}
-
-		if (terminalRefByPath.length === 0) {
-			return [];
-		}
-
-		// Positional column names: a path spells its own name with dots, and two paths
-		// ending on the same terminal field would collide under that name.
-		const rows = await query
-			.select(
-				terminalRefByPath.map(({ terminalRef }, index) => {
-					return this.knex.ref(terminalRef).as(`value${index}`);
-				}),
-			)
-			.whereIn(`root.${primaryKeyField}`, keys);
-
-		const tags: ScopedCacheTag[] = [];
-
-		terminalRefByPath.forEach(({ field }, index) => {
-			tags.push(...scopedCacheTagsFromRows(
-				this.collection,
-				[field],
-				rows.map((row) => ({ [field]: row[`value${index}`] })),
-				'skip',
-				{ [field]: fieldTypes[field] },
-			));
-		});
-
-		return tags;
-	}
-
-	/**
-	 * Event context handed to the `cache.purge` filter so extensions can resolve their
-	 * own tags.
-	 */
-	private scopedCachePurgeContext(): EventContext {
-		return {
-			database: this.knex,
-			schema: this.schema,
-			accountability: this.accountability,
-		};
-	}
-
-	private async purgeScopedCache(
-		tags: ScopedCacheTag[] | null,
-		collector?: Pick<ScopedCacheCollector, 'tags'>,
-		changedCollections: string[] = [],
-	): Promise<void> {
-		// Callers reach here through `shouldClearCache`, which already rules out a
-		// null cache — but it narrows `this.cache`, and a mutable field does not
-		// carry that narrowing across the awaits below. Read it once. With no cache
-		// there is nothing to purge either way.
-		const cache = this.cache;
-
-		if (cache === null) {
-			return;
-		}
-
-		const context = this.scopedCachePurgeContext();
-		const hookTags = collector?.tags ?? [];
-
-		// A rule reaching back into this collection leaves its own slices unresolvable
-		// too, so it takes the collection-wide purge — whose reach already covers the
-		// tag purge it would otherwise get alongside.
-		const ownTags = changedCollections.includes(this.collection)
-			? null
-			: tags;
-
-		// Outside scoped mode a purge clears the whole namespace, so one is all it
-		// takes and the fan-out would be that many more flushes to no effect.
-		const otherCollections = scopedCachePurgeEnabled()
-			? changedCollections.filter((changedCollection) => {
-				return changedCollection !== this.collection;
-			})
-			: [];
-
-		if (ownTags !== null && otherCollections.length === 0) {
-			this.scopedCachePurged = await purgeScopedCache(
-				cache,
-				this.collection,
-				[...ownTags, ...hookTags],
-				context,
-			);
-
-			return;
-		}
-
-		// Every operation below serves one mutation, so they share one purge id for
-		// the same reason they share one header: they are one purge. Telemetry counts
-		// by that id, so without it an entry several of them reach reports several
-		// purges for the one mutation that caused them. The single-operation case
-		// returns above precisely so it keeps minting its own, being its own purge.
-		const scopedCachePurgeId = randomUUID();
-		const purgedTagSets: (ScopedCacheTag[] | null)[] = [];
-
-		if (ownTags !== null) {
-			purgedTagSets.push(await purgeScopedCache(
-				cache,
-				this.collection,
-				[...ownTags, ...hookTags],
-				context,
-				{ scopedCachePurgeId },
-			));
-		}
-		else {
-			// A `null` tag set means this collection's own slices are unresolvable →
-			// coarse whole-collection purge (bare tag + every slice).
-			purgedTagSets.push(await purgeScopedCache(
-				cache,
-				this.collection,
-				null,
-				context,
-				{ scopedCachePurgeId },
-			));
-
-			// Tags a hook added via `context.scopedCache` are often for OTHER collections
-			// the coarse pass never reaches, so purge them too — but with
-			// `includeCollectionTag: false`, since the coarse pass already owns this
-			// collection's bare tag (else it's purged twice and doubled in the header).
-			if (hookTags.length > 0) {
-				purgedTagSets.push(await purgeScopedCache(
-					cache,
-					this.collection,
-					hookTags,
-					context,
-					{ includeCollectionTag: false, scopedCachePurgeId },
-				));
-			}
-		}
-
-		// A collection the database changed under this mutation. Which of its slices
-		// moved is unresolvable — those rows were never read — and its bare tag indexes
-		// none of them (a read bounded to one value is filed under that slice alone), so
-		// each takes the collection-wide purge rather than a tag that cannot reach it.
-		purgedTagSets.push(...await Promise.all(
-			otherCollections.map((changedCollection) => {
-				return purgeScopedCache(
-					cache,
-					changedCollection,
-					null,
-					context,
-					{ scopedCachePurgeId },
-				);
-			}),
-		));
-
-		// Reflect every purge in the dev debug header; a `null` from any of them means
-		// the whole namespace was flushed, which already covers what the others reached.
-		this.scopedCachePurged = purgedTagSets.some((tagSet) => tagSet === null)
-			? null
-			: purgedTagSets.flatMap((tagSet) => tagSet ?? []);
-	}
-
-	private get collectionScopedCacheFields(): string[] {
-		return this.schema.collections[this.collection]?.scopedCacheFields ?? [];
-	}
-
-	// Direct-column scope fields (no dot): they project into the snapshot SELECT and
-	// feed the pinner's flat + one-hop logic. Dotted paths are handled separately.
-	private get collectionScopedCacheFlatFields(): string[] {
-		return this.collectionScopedCacheFields.filter((field) => !field.includes('.'));
-	}
-
-	// The multi-hop paths this collection pins by: explicit dotted entries PLUS paths
-	// auto-derived from local scope fields (see `composeScopedCachePaths`). Each is
-	// re-resolved so a to-many/unknown hop drops it → bare tag both sides. Deduped.
-	private get collectionScopedCachePaths(): ScopedCachePath[] {
-		const byField = new Map<string, ScopedCachePath>();
-
-		const addPath = (field: string) => {
-			if (byField.has(field)) {
-				return;
-			}
-
-			const resolved = this.resolveScopedCachePath(field);
-
-			if (resolved) {
-				byField.set(field, { field, segments: resolved.segments });
-			}
-		};
-
-		for (const field of this.collectionScopedCacheFields) {
-			if (field.includes('.')) {
-				addPath(field);
-			}
-		}
-
-		for (const { field } of composeScopedCachePaths(this.schema, this.collection)) {
-			addPath(field);
-		}
-
-		return [...byField.values()];
-	}
-
-	// Resolve a dotted scope field into the M2O join chain reaching its terminal.
-	// Every INTERMEDIATE segment must be M2O (a row maps to exactly one parent); a
-	// to-many hop or unknown field returns null → the caller degrades to the bare
-	// tag. The terminal is a plain column on the last collection (scalar or fk).
-	private resolveScopedCachePath(path: string): {
-		segments: string[];
-		joins: ScopedCacheM2oJoin[];
-		terminalCollection: string;
-		terminalField: string;
-	} | null {
-		const segments = path.split('.');
-
-		if (segments.length < 2) {
-			return null;
-		}
-
-		const joins = resolveScopedCacheM2oJoinChainFromPath(
-			this.schema,
+		this.scopedCache = new ItemScopedCacheService(
 			this.collection,
-			segments.slice(0, -1),
+			this.schema,
+			this.knex,
+			this.cache,
+			this.accountability,
 		);
 
-		if (joins === null) {
-			return null;
-		}
-
-		return {
-			segments,
-			joins,
-			// At least one hop, since a path shorter than two segments returned above.
-			terminalCollection: joins[joins.length - 1]!.relatedCollection,
-			terminalField: segments[segments.length - 1]!,
-		};
-	}
-
-	private get collectionScopedCacheFieldTypes(): FieldTypesByField {
-		const rootFields = this.schema.collections[this.collection]?.fields ?? {};
-		const types: FieldTypesByField = {};
-
-		// The primary key pins implicitly on every collection, so its type travels with
-		// the declared ones — both sides canonicalize the key the same way.
-		const primaryKeyField = this.schema.collections[this.collection]?.primary;
-
-		if (primaryKeyField !== undefined) {
-			types[primaryKeyField] = rootFields[primaryKeyField]?.type;
-		}
-
-		for (const field of this.collectionScopedCacheFlatFields) {
-			types[field] = rootFields[field]?.type;
-		}
-
-		for (const { field } of this.collectionScopedCachePaths) {
-			const resolved = this.resolveScopedCachePath(field);
-
-			if (!resolved) {
-				continue;
-			}
-
-			const terminal = this.schema.collections[resolved.terminalCollection];
-			types[field] = terminal?.fields[resolved.terminalField]?.type;
-		}
-
-		return types;
-	}
-
-	// A scope field's related primary key, so the read side can unwrap the
-	// `{ fk: { <pk>: { _eq } } }` shape queries/permissions use — for a flat one-hop
-	// relation, and for a path whose terminal is itself an M2O (`{ user: { id } }`).
-	private get collectionScopedCacheFieldRelatedPks(): Record<string, string> {
-		const map: Record<string, string> = {};
-
-		const addRelatedPk = (
-			field: string,
-			fromCollection: string,
-			fromField: string,
-		) => {
-			const relation = this.schema.relations.find((rel) => {
-				return rel.collection === fromCollection && rel.field === fromField;
-			});
-
-			const relatedCollection = relation?.related_collection;
-
-			const primaryKey = relatedCollection
-				? this.schema.collections[relatedCollection]?.primary
-				: undefined;
-
-			if (primaryKey) {
-				map[field] = primaryKey;
-			}
-		};
-
-		for (const field of this.collectionScopedCacheFlatFields) {
-			addRelatedPk(field, this.collection, field);
-		}
-
-		for (const { field } of this.collectionScopedCachePaths) {
-			const resolved = this.resolveScopedCachePath(field);
-
-			if (resolved) {
-				addRelatedPk(field, resolved.terminalCollection, resolved.terminalField);
-			}
-		}
-
-		return map;
+		return this;
 	}
 
 	/**
@@ -631,7 +185,15 @@ implements AbstractService<Item> {
 
 		// We read the IDs of the items based on the query, and then run `updateMany`. `updateMany` does it's own
 		// permissions check for the keys, so we don't have to make this an authenticated read
-		const items = await itemsService.readByQuery(readQuery);
+		//
+		// No response is built from these keys, so the purge counters this read would
+		// capture are read by nobody. Every other `readByQuery` keeps capturing them:
+		// a missed capture costs staleness, and only a call site that owns the whole
+		// round trip can know its rows never reach the cache.
+		const items = await itemsService.readByQuery(readQuery, {
+			skipScopedCacheEpochs: true,
+		});
+
 		return items.map((item: AnyItem) => item[primaryKeyField]).filter((pk) => pk);
 	}
 
@@ -741,6 +303,10 @@ implements AbstractService<Item> {
 					// A filter hook returned a primary key instead of a payload: it has taken over the
 					// creation of this row. Surface that key, insert nothing, and let the hook that took
 					// over own the action event.
+					scopedCacheCollector.takenOverKeys.add(
+						takenOverScopedCacheKey(this.collection, payloadAfterHooks),
+					);
+
 					results[index] = payloadAfterHooks;
 					continue;
 				}
@@ -1133,9 +699,12 @@ implements AbstractService<Item> {
 			// stale even where no scope field is declared.
 			const scopedCacheTags = takeoverUndeclared
 				? null
-				: await this.snapshotScopedCacheTags(changedKeys);
+				: await this.scopedCache.snapshot(changedKeys);
 
-			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
+			this.scopedCachePurged = await this.scopedCache.purge(
+				scopedCacheTags,
+				scopedCacheCollector,
+			);
 		}
 
 		return results;
@@ -1163,10 +732,21 @@ implements AbstractService<Item> {
 				)
 				: query;
 
+		const injectedOwnershipPaths =
+			this.scopedCache.ownershipPathsToInject(updatedQuery);
+
 		let ast = await getAstFromQuery(
 			{
 				collection: this.collection,
-				query: updatedQuery,
+				query: injectedOwnershipPaths.length > 0
+					? {
+						...updatedQuery,
+						fields: [
+							...(updatedQuery.fields ?? ['*']),
+							...injectedOwnershipPaths,
+						],
+					}
+					: updatedQuery,
 				accountability: this.accountability,
 			},
 			{
@@ -1180,17 +760,15 @@ implements AbstractService<Item> {
 			{ knex: this.knex, schema: this.schema },
 		);
 
-		// Derived from the AST alone, so it must not hang on the read handing rows
-		// back: `run-ast` returns early on an empty result and never reaches the
-		// callback, and an empty map here drops every collection's tag. A read with
-		// purging off lists no collection anyway.
-		const fieldMap = scopedCachePurgeEnabled()
-			? fieldMapFromAst(ast, this.schema)
-			: { read: new Map(), other: new Map() };
+		const scopedCachePlan = this.scopedCache.planRead(
+			ast,
+			injectedOwnershipPaths,
+		);
 
-		// The pins DO depend on the rows, so this one is filled from inside the read.
-		let m2oParentPins:
-			ReturnType<typeof pinnedScopedCacheTagsFromM2oParents> = new Map();
+		// Before the query, so it predates any purge racing this read.
+		const scopedCacheEpochs = opts?.skipScopedCacheEpochs === true
+			? {}
+			: await readScopedCacheEpochs(scopedCachePlan.collectionsToGuard());
 
 		const records = await runAst(ast, this.schema, this.accountability, {
 			knex: this.knex,
@@ -1203,19 +781,7 @@ implements AbstractService<Item> {
 			// that key, so it reads them from the one place they still exist. Not
 			// called for an empty result, which needs no pin: with no row nested,
 			// the bare tag is already what each collection deserves.
-			onRowsWithTemporaryFields: (rows) => {
-				if (scopedCachePurgeEnabled() === false) {
-					return;
-				}
-
-				m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
-					this.schema,
-					this.collection,
-					fieldMap,
-					toArray(rows),
-					scopedCacheCollectionsBeyondNestedRows(this.schema, ast),
-				);
-			},
+			onRowsWithTemporaryFields: (rows) => scopedCachePlan.pinFromRows(rows),
 		});
 
 		// TODO when would this happen?
@@ -1247,111 +813,16 @@ implements AbstractService<Item> {
 				)
 				: records;
 
-		// Scope this read for cache purging. The root collection gets value slices only
-		// when the query filter *bounds* it to those values (`pinnedScopedCacheTagsFromFilter`),
-		// so one owner's/partition's later write drops only their entries. An unbounded
-		// root (no scope-field filter — e.g. an admin list) and every other touched
-		// collection fall back to a bare collection tag, so any write to them invalidates
-		// the read (a value-slice tag would miss an insert of a brand-new value). The
-		// `cache.scope` filter lets extensions augment these (e.g. resolve M2M owners, or
-		// tag a collection an `items.read` hook enriched from); it receives the enriched
-		// `records` so data-derived tags are possible. Whatever they add here must be
-		// reproducible on the `cache.purge` side or it leaks. Bounded to this read — it
-		// rides the result via `getMeta()`, not a service-level field.
-		let scopedCacheTags: ScopedCacheTag[] = [];
-		let scopedCacheUnautopurgeableTags: ScopedCacheTag[] = [];
-
-		if (scopedCachePurgeEnabled()) {
-			// Self-reference guard: pinning the root to a value slice is sound only while the
-			// filter bounds every row the read returns. A self-referential relation (the root
-			// collection reached again through a nested field) pulls rows the root filter
-			// doesn't bound — a parent/child can belong to any slice — so a write to another
-			// slice would leave this read stale. Detect it (the root collection at more than
-			// one field-map path) and fall back to the bare collection tag. It guards the
-			// implicit primary-key axis too: `readOne(1, { fields: ['*', 'children.*'] })`
-			// embeds rows whose own keys the `<pk>._eq 1` filter never bounded.
-			const rootPaths = new Set<string>();
-
-			for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
-				if (entry.collection === this.collection) {
-					rootPaths.add(path);
-				}
-			}
-
-			// Scope off the read's EFFECTIVE bound = the API filter AND the permission cases,
-			// combined by the same `joinFilterWithCases` the SQL WHERE uses (`{ _and: [filter,
-			// { _or: cases }] }`) so the pin can't diverge from what the query actually returns. Both
-			// are already dynamic-var-resolved before the service runs — the filter by sanitizeQuery,
-			// the cases by fetchPermissions → processPermissions → parseFilter — so `$CURRENT_USER` is
-			// the concrete user id, matching what a write's row yields. The pinner unions an `_or`'s
-			// slices when every branch binds a pinnable field — same field or different ones (the
-			// multi-policy case) — else falls back to bare.
-			const rootScopedCacheTags = rootPaths.size > 1
-				? []
-				: pinnedScopedCacheTagsFromFilter(
-					this.collection,
-					this.collectionScopedCacheFlatFields,
-					joinFilterWithCases(updatedQuery.filter, ast.cases),
-					this.collectionScopedCacheFieldTypes,
-					this.collectionScopedCacheFieldRelatedPks,
-					this.collectionScopedCachePaths,
-					this.schema.collections[this.collection]?.primary,
-				);
-
-			for (const collection of collectionsInFieldMap(fieldMap)) {
-				if (collection === this.collection && rootScopedCacheTags.length > 0) {
-					scopedCacheTags.push(...rootScopedCacheTags);
-					continue;
-				}
-
-				// A collection the read reached only through M2O hops is pinned by the
-				// keys it nested; absent from the map, it keeps the bare tag that any
-				// write to it drops.
-				const parentPins = m2oParentPins.get(collection);
-
-				if (parentPins === undefined) {
-					scopedCacheTags.push({ collection });
-					continue;
-				}
-
-				scopedCacheTags.push(...parentPins);
-			}
-
-			scopedCacheTags = (await emitter.emitFilter(
-				'cache.scope',
-				scopedCacheTags,
-				// `records` are the post-`items.read` rows, so a hook that enriched the response from
-				// another collection can derive value-level tags off the actual data it pulled.
-				{ collection: this.collection, query: updatedQuery, records: filteredRecords },
-				{ database: this.knex, schema: this.schema, accountability: this.accountability },
-			)) as ScopedCacheTag[];
-
-			// Fold in tags an `items.read` hook added via `context.scopedCache.scopeTo`.
-			scopedCacheTags.push(...scopedCacheCollector.tags);
-
-			// A scopeTo tag on a field its collection isn't scoped on can't be reproduced
-			// by that collection's auto-purge — the read would go stale — unless the hook
-			// marked it `manuallyPurged` (it reproduces the tag via its own purgeBy). List
-			// them so respond.ts leaves the read uncached + names them in the anomaly.
-			scopedCacheUnautopurgeableTags = scopedCacheCollector.tags.filter((tag) => {
-				if (tag.field === undefined) {
-					return false;
-				}
-
-				const collectionSchema = this.schema.collections[tag.collection];
-
-				// Every collection auto-purges its primary-key slice, so a hook pinning
-				// a foreign row by its key needs no `manuallyPurged` claim.
-				if (tag.field === collectionSchema?.primary) {
-					return false;
-				}
-
-				return (
-					!collectionSchema?.scopedCacheFields?.includes(tag.field) &&
-					!scopedCacheCollector.manuallyPurgedKeys.has(scopedCacheTagKey(tag))
-				);
+		// Scope this read for cache purging (see ItemScopedCacheService.readTags);
+		// bounded to this read — it rides the result via `getMeta()`, not a field.
+		const { tags: scopedCacheTags, unautopurgeable: scopedCacheUnautopurgeableTags }
+			= await this.scopedCache.readTags({
+				ast,
+				plan: scopedCachePlan,
+				updatedQuery,
+				filteredRecords: filteredRecords as Item[],
+				collector: scopedCacheCollector,
 			});
-		}
 
 		if (opts?.emitEvents !== false) {
 			// Read action hooks stay fire-and-forget; the await opt-in (`awaitActionHooks`) is for mutations.
@@ -1372,6 +843,16 @@ implements AbstractService<Item> {
 			);
 		}
 
+		if (injectedOwnershipPaths.length > 0) {
+			stripInjectedOwnershipNesting(
+				filteredRecords as Item[],
+				injectedOwnershipPaths,
+				updatedQuery,
+				this.schema,
+				this.collection,
+			);
+		}
+
 		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
 		// listener's return verbatim, and the cast above asserts rather than checks)
 		// makes this throw `Object.defineProperty called on non-object`. That is a
@@ -1382,6 +863,12 @@ implements AbstractService<Item> {
 		return withMeta(filteredRecords as Item[], {
 			scopedCacheTags,
 			scopedCacheUnautopurgeableTags,
+			// A `scopeTo` names a collection the pre-query capture could not know
+			// about, and hands over the counter its own dependent read took.
+			scopedCacheEpochs: foldHandedOverScopedCacheEpochs(
+				scopedCacheEpochs,
+				scopedCacheCollector.epochs,
+			),
 		});
 	}
 
@@ -1491,7 +978,7 @@ implements AbstractService<Item> {
 				: [];
 		});
 
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
+		const oldScopedCacheTags = await this.scopedCache.snapshot(batchKeys);
 
 		// One collector shared across the forked child updates so an `items.update`
 		// hook's `purgeBy` survives to the single deferred purge below (children run
@@ -1514,8 +1001,8 @@ implements AbstractService<Item> {
 					}
 
 					const combinedOpts: MutationOptions = {
-						autoPurgeCache: false,
 						...opts,
+						autoPurgeCache: false,
 						scopedCacheCollector,
 						onRequireUserIntegrityCheck: (flags) => (userIntegrityCheckFlags |= flags),
 					};
@@ -1541,14 +1028,17 @@ implements AbstractService<Item> {
 				// the transaction: invoked from a hook it shares the caller's, so the
 				// purge below lands pre-commit —
 				// https://github.com/jclaveau/directus/issues/363
-				const newScopedCacheTags = await this.snapshotScopedCacheTags(batchKeys);
+				const newScopedCacheTags = await this.scopedCache.snapshot(batchKeys);
 
 				const scopedCacheTags =
 					oldScopedCacheTags === null || newScopedCacheTags === null
 						? null
 						: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-				await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
+				this.scopedCachePurged = await this.scopedCache.purge(
+				scopedCacheTags,
+				scopedCacheCollector,
+			);
 			}
 		}
 
@@ -1587,7 +1077,7 @@ implements AbstractService<Item> {
 		// Capture the scope values these rows hold before the update so an update that
 		// moves a row to a new scope value purges both slices (old ∪ new). Empty when the
 		// collection isn't scoped.
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(keys);
+		const oldScopedCacheTags = await this.scopedCache.snapshot(keys);
 
 		const fields = Object.keys(this.schema.collections[this.collection]!.fields);
 
@@ -1644,11 +1134,10 @@ implements AbstractService<Item> {
 				scopedCacheCollector.tags.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
-				this.scopedCachePurged = await purgeScopedCache(
-					this.cache,
-					this.collection,
-					scopedCacheCollector.tags,
-					this.scopedCachePurgeContext(),
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheCollector,
+					[],
 					{ includeCollectionTag: false },
 				);
 			}
@@ -1695,6 +1184,20 @@ implements AbstractService<Item> {
 		const changedFields = Object.keys(payloadAfterHooks ?? {}).filter((field) => !changesNothing(field));
 
 		if (changedFields.length === 0) {
+			// A hook declared a purge for this update; the declaration stands even though
+			// nothing changes, so drain it here as the cancel path does.
+			if (
+				scopedCacheCollector.tags.length > 0 &&
+				shouldClearCache(this.cache, opts, this.collection)
+			) {
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheCollector,
+					[],
+					{ includeCollectionTag: false },
+				);
+			}
+
 			// An empty payload, a PK-only update, or a filter hook that cleared every field to an
 			// empty alterations object leaves nothing to change — skip the transaction,
 			// activity/revision rows and integrity checks.
@@ -1909,14 +1412,17 @@ implements AbstractService<Item> {
 			// holds only when this call owns the transaction; from a hook it shares the
 			// caller's and this purge runs pre-commit —
 			// https://github.com/jclaveau/directus/issues/363
-			const newScopedCacheTags = await this.snapshotScopedCacheTags(keys);
+			const newScopedCacheTags = await this.scopedCache.snapshot(keys);
 
 			const scopedCacheTags =
 				oldScopedCacheTags === null || newScopedCacheTags === null
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
+			this.scopedCachePurged = await this.scopedCache.purge(
+				scopedCacheTags,
+				scopedCacheCollector,
+			);
 		}
 
 		if (opts.emitEvents !== false) {
@@ -1996,7 +1502,7 @@ implements AbstractService<Item> {
 				: [];
 		});
 
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(inputKeys);
+		const oldScopedCacheTags = await this.scopedCache.snapshot(inputKeys);
 
 		// Shared collector: child upserts run with autoPurgeCache off, so a
 		// create/update hook's `purgeBy` reaches the deferred purge only via this sink.
@@ -2021,22 +1527,33 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			// Re-snapshot the committed rows for their new scope values (covers both the
-			// inserts and the moved updates). Reading by returned key also captures a row a
-			// create hook took over — whatever's stored is what gets purged. No
-			// `someRowTakenOver` row-count guard is needed here (unlike createMany): upsertMany
-			// resolves values off `primaryKeys` returned by upsertOne, so every committed row is
-			// already re-read rather than trusted from the input payload count.
-			const newScopedCacheTags = await this.snapshotScopedCacheTags(
+			// New scope values for every committed row (inserts + moved updates), re-read
+			// by returned key so a hook's take-over shows as whatever is now stored.
+			const newScopedCacheTags = await this.scopedCache.snapshot(
 				primaryKeys.filter((key): key is PrimaryKey => key !== null && key !== undefined),
 			);
 
+			// An insert-shaped payload routes to createOne, where a filter hook can take
+			// the row over and return an existing key — an update in disguise, whose OLD
+			// slice was never snapshotted (the key wasn't in `inputKeys`), so an old ∪ new
+			// purge leaks it → coarse, unless the hook declared its own purgeBy.
+			const someRowTakenOver = primaryKeys.some((key) => {
+				return key != null && scopedCacheCollector.takenOverKeys.has(
+					takenOverScopedCacheKey(this.collection, key),
+				);
+			});
+
 			const scopedCacheTags =
-				oldScopedCacheTags === null || newScopedCacheTags === null
+				(someRowTakenOver && scopedCacheCollector.tags.length === 0) ||
+				oldScopedCacheTags === null ||
+				newScopedCacheTags === null
 					? null
 					: [...oldScopedCacheTags, ...newScopedCacheTags];
 
-			await this.purgeScopedCache(scopedCacheTags, scopedCacheCollector);
+			this.scopedCachePurged = await this.scopedCache.purge(
+				scopedCacheTags,
+				scopedCacheCollector,
+			);
 		}
 
 		return primaryKeys;
@@ -2139,11 +1656,10 @@ implements AbstractService<Item> {
 				scopedCacheCollector.tags.length > 0 &&
 				shouldClearCache(this.cache, opts, this.collection)
 			) {
-				this.scopedCachePurged = await purgeScopedCache(
-					this.cache,
-					this.collection,
-					scopedCacheCollector.tags,
-					this.scopedCachePurgeContext(),
+				this.scopedCachePurged = await this.scopedCache.purge(
+					[],
+					scopedCacheCollector,
+					[],
 					{ includeCollectionTag: false },
 				);
 			}
@@ -2155,8 +1671,13 @@ implements AbstractService<Item> {
 
 		// Capture the scope values of the rows about to be deleted; after the delete
 		// they're gone and can't be read, so a later purge couldn't tell which slices to
-		// drop.
-		const oldScopedCacheTags = await this.snapshotScopedCacheTags(keysAfterHooks);
+		// drop. Off `keys`, not the filter's return: the statement below, the access
+		// check and the activity rows all target `keys`, so a hook that returned a
+		// REWRITTEN array (rather than null to cancel) would otherwise purge rows that
+		// survive and leave the deleted ones cached.
+		const oldScopedCacheTags = await this.scopedCache.snapshot(keys, {
+			deleting: true,
+		});
 
 		if (this.accountability) {
 			await validateAccess(
@@ -2222,7 +1743,7 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
-			await this.purgeScopedCache(
+			this.scopedCachePurged = await this.scopedCache.purge(
 				oldScopedCacheTags,
 				scopedCacheCollector,
 				scopedCacheCollectionsChangedByOnDelete(
@@ -2312,5 +1833,89 @@ implements AbstractService<Item> {
 		}
 
 		return await this.createOne(data, opts);
+	}
+}
+
+// Recursive undo of the injected nesting — kept out of its one caller by choice.
+// eslint-disable-next-line local/no-single-caller-function
+export function stripInjectedOwnershipNesting(
+	records: AnyItem[],
+	injectedPaths: string[],
+	query: Query,
+	schema: SchemaOverview,
+	rootCollection: string,
+): void {
+	const fields = query.fields ?? ['*'];
+
+	const nestedPrefixes = new Set<string>();
+	const leavesByPrefix = new Map<string, Set<string>>();
+
+	for (const field of fields) {
+		const segments = field.split('.');
+
+		for (let end = 1; end < segments.length; end++) {
+			nestedPrefixes.add(segments.slice(0, end).join('.'));
+		}
+
+		const parentPrefix = segments.slice(0, -1).join('.');
+		const leaves = leavesByPrefix.get(parentPrefix) ?? new Set<string>();
+		leaves.add(segments[segments.length - 1]!);
+		leavesByPrefix.set(parentPrefix, leaves);
+	}
+
+	const surfacesAsScalar = (prefix: string, field: string): boolean => {
+		const leaves = leavesByPrefix.get(prefix);
+		return leaves !== undefined && (leaves.has('*') || leaves.has(field));
+	};
+
+	const collapse = (
+		node: Record<string, any>,
+		collection: string,
+		segments: string[],
+		index: number,
+		prefix: string,
+	): void => {
+		if (node === null || typeof node !== 'object' || index >= segments.length - 1) {
+			return;
+		}
+
+		const field = segments[index]!;
+
+		const childPrefix = prefix === ''
+			? field
+			: `${prefix}.${field}`;
+
+		const childCollection = schema.relations.find(
+			(candidate) =>
+				candidate.collection === collection && candidate.field === field,
+		)?.related_collection;
+
+		const child = node[field];
+
+		if (!childCollection || child === null || typeof child !== 'object') {
+			return;
+		}
+
+		if (nestedPrefixes.has(childPrefix)) {
+			collapse(child, childCollection, segments, index + 1, childPrefix);
+			return;
+		}
+
+		const childPrimaryKey = schema.collections[childCollection]?.primary;
+
+		if (childPrimaryKey && surfacesAsScalar(prefix, field)) {
+			node[field] = child[childPrimaryKey];
+		}
+		else {
+			delete node[field];
+		}
+	};
+
+	for (const path of injectedPaths) {
+		const segments = path.split('.');
+
+		for (const record of records) {
+			collapse(record, rootCollection, segments, 0, '');
+		}
 	}
 }

@@ -43,7 +43,20 @@ export class CacheMulti implements Cache {
 			return local;
 		}
 
-		return await this.redis.get<T>(key);
+		const shared = await this.redis.get<T>(key);
+
+		// Without this the local tier only ever holds what THIS process wrote: a peer's
+		// `set` clears the key here (`onMessageClear`), and the redis read that follows
+		// used to answer without refilling it — so every later request for that key went
+		// to redis again, for the life of the process. One process kept a working local
+		// tier (the one that set last, since it ignores its own message) and every other
+		// one paid a round trip per lookup. No `clearOthers` here: nothing changed, and
+		// the peers' copies are as valid as they were a moment ago.
+		if (shared !== undefined) {
+			await this.local.set(key, shared);
+		}
+
+		return shared;
 	}
 
 	async set(key: string, value: unknown) {

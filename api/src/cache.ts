@@ -302,6 +302,31 @@ export async function setCacheValue(
 	await cache.set(key, compressed, ttl);
 }
 
+/**
+ * Read several entries in one round trip.
+ *
+ * The response cache never reads a payload without also reading the sidecar it is
+ * stored beside, and awaiting them in turn cost two round trips on every HIT —
+ * which on a redis that is a network hop is the whole of what serving from cache
+ * saves. `@keyv/redis` answers this with one MGET.
+ *
+ * A key the store has nothing for comes back `undefined`, in its own position: the
+ * caller tells a missing payload from a missing sidecar by index, as it did when
+ * the two were separate reads.
+ */
+export async function getCacheValues(
+	cache: Keyv,
+	keys: string[],
+): Promise<any[]> {
+	const values = await cache.getMany(keys);
+
+	return Promise.all(values.map((value) => {
+		return value
+			? decompress(value)
+			: undefined;
+	}));
+}
+
 export async function getCacheValue(cache: Keyv, key: string): Promise<any> {
 	const value = await cache.get(key);
 

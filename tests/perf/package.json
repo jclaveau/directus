@@ -4,10 +4,13 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"bench": "vitest --watch=false"
+		"bench": "vitest --watch=false",
+		"bench:startup": "vitest --watch=false startup.perf",
+		"bench:cache": "vitest --watch=false cache.perf"
 	},
 	"devDependencies": {
 		"@directus/tsconfig": "catalog:",
+		"ioredis": "catalog:",
 		"vitest": "catalog:"
 	}
 }

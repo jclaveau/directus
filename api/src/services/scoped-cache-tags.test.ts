@@ -132,11 +132,13 @@ describe('canonicalScopedCacheValue', () => {
 	});
 
 	test(oneLine`
-		string: spelling is NOT normalized — a varchar key really is a distinct value,
-		and the DB would not match the other spelling either
+		string and text: digits keep their spelling, since a varchar 01 is a value and
+		not the number 1 — but letters fold to one case, because a case-insensitive
+		collation matches both spellings to the same row
 	`, () => {
 		expect(canonicalScopedCacheValue('01', 'string')).toBe('01');
-		expect(canonicalScopedCacheValue('ABC', 'string')).toBe('ABC');
+		expect(canonicalScopedCacheValue('ABC', 'string')).toBe('abc');
+		expect(canonicalScopedCacheValue('AbC', 'text')).toBe('abc');
 	});
 
 	test('unknown/undefined type falls back to `String` (owner-id path)', () => {

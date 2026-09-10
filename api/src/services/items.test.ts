@@ -15,7 +15,7 @@ import { purgeScopedCache } from '../scoped-cache.js';
 import { readMeta, withMeta } from '../utils/read-meta.js';
 import { transaction } from '../utils/transaction.js';
 import { validateUserCountIntegrity } from '../utils/validate-user-count-integrity.js';
-import { ItemsService } from './items.js';
+import { ItemsService, stripInjectedOwnershipNesting } from './items.js';
 
 // Mirrors scoped-cache-purge.test.ts: force auto-purge on so shouldClearCache() routes to a
 // truthy cache, mock the database client to postgres, and stub the scoped-cache module so the
@@ -56,10 +56,18 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', async (importOriginal) => {
+// The owning modules, not the barrel: the collaborator imports its siblings
+// directly, so a stand-in on the re-export would leave the real ones in its graph.
+vi.mock('../scoped-cache/purge.js', async (importOriginal) => {
 	return {
-		...(await importOriginal<typeof import('../scoped-cache.js')>()),
+		...(await importOriginal<typeof import('../scoped-cache/purge.js')>()),
 		purgeScopedCache: vi.fn(),
+	};
+});
+
+vi.mock('../scoped-cache/config.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache/config.js')>()),
 		scopedCachePurgeEnabled: () => {
 			return true;
 		},
@@ -1718,6 +1726,93 @@ describe('ItemsService — system collections, uuid PKs, revisions, singletons',
 	});
 });
 
+
+describe('stripInjectedOwnershipNesting', () => {
+	// The ownership pin injects the ancestor key paths a read did not ask for, so
+	// the response comes back carrying nesting the caller never requested. This
+	// puts each injected branch back to whatever the caller's own `fields` asked
+	// for — the foreign key where it named the field, nothing where it did not.
+	const schema = new SchemaBuilder()
+		.collection('member', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('team').m2o('team');
+		})
+		.collection('team', (c) => {
+			c.field('id').id();
+			c.field('name').string();
+			c.field('lead').m2o('member');
+		})
+		.build();
+
+	function stripped(fields: string[], injected: string[], record: any) {
+		const records = [record];
+
+		stripInjectedOwnershipNesting(
+			records,
+			injected,
+			{ fields },
+			schema,
+			'member',
+		);
+
+		return records[0];
+	}
+
+	it('collapses an injected branch to the key the caller asked for', () => {
+		// `*` names `team` as a scalar, so the row it was expanded into goes back
+		// to being the foreign key it started as.
+		expect(stripped(['*'], ['team.lead.id'], {
+			id: 1,
+			name: 'm',
+			team: { id: 5, name: 't', lead: { id: 9 } },
+		})).toEqual({ id: 1, name: 'm', team: 5 });
+	});
+
+	it('removes an injected branch the caller never named', () => {
+		expect(stripped(['id'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, lead: { id: 9 } },
+		})).toEqual({ id: 1 });
+	});
+
+	it('descends a prefix the caller did ask for, stripping below it', () => {
+		// `team.name` keeps `team` nested, so the strip has to walk INTO it and
+		// take out only the hop the injection added underneath.
+		expect(stripped(['team.name'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, name: 't', lead: { id: 9, name: 'x' } },
+		})).toEqual({ id: 1, team: { id: 5, name: 't' } });
+	});
+
+	it('collapses a deeper hop the caller named with a wildcard', () => {
+		expect(stripped(['team.*'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, name: 't', lead: { id: 9, name: 'x' } },
+		})).toEqual({ id: 1, team: { id: 5, name: 't', lead: 9 } });
+	});
+
+	it('leaves a path that ends on the row itself alone', () => {
+		// One segment names no hop to collapse.
+		expect(stripped(['*'], ['team'], {
+			id: 1,
+			team: { id: 5, name: 't' },
+		})).toEqual({ id: 1, team: { id: 5, name: 't' } });
+	});
+
+	it('leaves a branch the response answered with null', () => {
+		expect(stripped(['*'], ['team.lead.id'], { id: 1, team: null }))
+			.toEqual({ id: 1, team: null });
+	});
+
+	it('leaves a path no relation describes', () => {
+		expect(stripped(['*'], ['nonexistent.id'], {
+			id: 1,
+			nonexistent: { id: 5 },
+		})).toEqual({ id: 1, nonexistent: { id: 5 } });
+	});
+});
+
 describe('Services / Items / purgeScopedCache', () => {
 	let db: Knex;
 
@@ -1734,9 +1829,9 @@ describe('Services / Items / purgeScopedCache', () => {
 	it('skips the purge when the service has no cache', async () => {
 		const service = new ItemsService('test', { knex: db, schema });
 
-		service.cache = null;
+		service.scopedCache['cache'] = null;
 
-		await service['purgeScopedCache']([{ collection: 'test' }]);
+		await service.scopedCache.purge([{ collection: 'test' }]);
 
 		expect(purgeScopedCache).not.toHaveBeenCalled();
 	});
@@ -1744,7 +1839,7 @@ describe('Services / Items / purgeScopedCache', () => {
 	it('purges the collection when the service has a cache', async () => {
 		const service = new ItemsService('test', { knex: db, schema });
 
-		await service['purgeScopedCache']([{ collection: 'test' }]);
+		await service.scopedCache.purge([{ collection: 'test' }]);
 
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			service.cache,

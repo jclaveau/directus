@@ -1,5 +1,6 @@
 import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
+import type { MutationOptions } from '@directus/types';
 import knex, { type Knex } from 'knex';
 import { MockClient, createTracker, type Tracker } from 'knex-mock-client';
 import {
@@ -41,10 +42,18 @@ vi.mock('../cache.js', () => {
 	};
 });
 
-vi.mock('../scoped-cache.js', async (importOriginal) => {
+// The owning modules, not the barrel: the collaborator imports its siblings
+// directly, so a stand-in on the re-export would leave the real ones in its graph.
+vi.mock('../scoped-cache/purge.js', async (importOriginal) => {
 	return {
-		...(await importOriginal<typeof import('../scoped-cache.js')>()),
+		...(await importOriginal<typeof import('../scoped-cache/purge.js')>()),
 		purgeScopedCache,
+	};
+});
+
+vi.mock('../scoped-cache/config.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache/config.js')>()),
 		scopedCachePurgeEnabled: () => scopedPurgeEnabled,
 	};
 });
@@ -365,6 +374,42 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		updateBatch keeps its own autoPurgeCache:false when the caller passes true, so
+		the batch purges once after the commit, not once per forked child
+	`, async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.update('test').response(1);
+
+		// The caller's opts are spread FIRST so this `true` cannot reach the children:
+		// a child purge runs inside the transaction, dropping the slices before the
+		// rows it read are committed — the window a concurrent read refills as stale.
+		await service().updateBatch(
+			[{ id: 1, name: 'renamed' }, { id: 2, name: 'other' }],
+			// `autoPurgeCache` is typed `false | undefined` — only turning it OFF
+			// means anything. Passing the forbidden `true` is the point: even then
+			// it must not reach the children.
+			{ autoPurgeCache: true } as unknown as MutationOptions,
+		);
+
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		// The one call is the deferred parent's: old ∪ new over BOTH batched rows.
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
 		updateBatch falls back to a coarse purge (null) when a batched row is missing the
 		scope field
 	`, async () => {
@@ -617,6 +662,35 @@ describe(oneLine`
 		]);
 	});
 
+	// The ancestor slice's LAST hop lands on a collection the filter names by primary
+	// key, which is classified `independent`: it needs no tag of its own, yet it holds
+	// the key the descendant slices by. Reading only the keyed pins loses that key, so
+	// every ownership chain ending on such a terminal fell back to the bare tag — one
+	// write anywhere in `holder` then dropping every owner's entry.
+	it(oneLine`
+		an ancestor slice whose terminal is independent pins the slice, not the bare tag
+	`, async () => {
+		tracker.on.select('note').response([{ id: 1, holder: 5 }]);
+		tracker.on.select('holder').response([{ id: 5, owner: 9 }]);
+
+		const noteService = new ItemsService('note', {
+			knex: db,
+			schema: independentTerminalSchema,
+		});
+
+		const result = await noteService.readByQuery({
+			fields: ['*', 'holder.owner'],
+			filter: { holder: { owner: { id: { _eq: 9 } } } },
+		});
+
+		expect(
+			(readMeta(result)?.scopedCacheTags ?? [])
+				.filter((tag) => tag.collection === 'holder'),
+		).toEqual([
+			{ collection: 'holder', field: 'owner', value: 9, type: 'integer' },
+		]);
+	});
+
 	// A self-referential relation pulls rows of the root collection the root filter can't
 	// bound (a parent belongs to any student), so pinning the root to a value slice would
 	// leave the read stale after a write to another slice. The root falls back to bare.
@@ -730,9 +804,12 @@ describe(oneLine`
 		`, async () => {
 			tracker.on.select('test').response([{ id: 1, name: 'a', student: 'A' }]);
 
-			// `test` is scoped on `student`, not `ghost` — this slice tag is orphaned.
+			// A FOREIGN collection, so nothing else on this response covers it: `other`
+			// is scoped on no `ghost` field, and no other tag names `other` either, so
+			// no write reaches this entry through it. On the read's OWN collection the
+			// same tag would be harmless freight beside its computed slice.
 			const declare = async (payload: any, _meta: any, ctx: any) => {
-				ctx.scopedCache.scopeTo({ collection: 'test', field: 'ghost', value: 'g' });
+				ctx.scopedCache.scopeTo({ collection: 'other', field: 'ghost', value: 'g' });
 				return payload;
 			};
 
@@ -742,7 +819,7 @@ describe(oneLine`
 				const result = await service().readByQuery({});
 
 				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
-					{ collection: 'test', field: 'ghost', value: 'g' },
+					{ collection: 'other', field: 'ghost', value: 'g' },
 				]);
 			}
 			finally {
@@ -758,7 +835,7 @@ describe(oneLine`
 
 			const declare = async (payload: any, _meta: any, ctx: any) => {
 				ctx.scopedCache.scopeTo(
-					{ collection: 'test', field: 'ghost', value: 'g' },
+					{ collection: 'other', field: 'ghost', value: 'g' },
 					{ manuallyPurged: true },
 				);
 
@@ -1030,6 +1107,39 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('test.items.update', declareThenCancel);
+			}
+		});
+
+		it(oneLine`
+			a delete hook that declares a slice then cancels (null) purges only
+			that slice — includeCollectionTag:false keeps the cancelled
+			collection's bare tag warm, since nothing in it was deleted
+		`, async () => {
+			// deleteMany snapshots rows AFTER the filter, so a cancel returns
+			// before any select — only the hook-declared slice is purged.
+			const declareThenCancel = async (_keys: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.purgeBy(authorsDependency);
+				return null; // cancel the delete
+			};
+
+			emitter.onFilter('test.items.delete', declareThenCancel);
+
+			try {
+				await service().deleteMany([1], { allowFilterCancel: true });
+
+				// Only the declared slice, and the 5th arg excludes the bare `test` tag.
+				expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+				expect(purgeScopedCache).toHaveBeenCalledWith(
+					expect.anything(),
+					'test',
+					[authorsDependency],
+					expect.anything(),
+					{ includeCollectionTag: false },
+				);
+			}
+			finally {
+				emitter.offFilter('test.items.delete', declareThenCancel);
 			}
 		});
 
@@ -1320,6 +1430,38 @@ composedChain['student_teaching_unit']!.scopedCacheFields = ['discipline'];
 composedChain['student_discipline']!.scopedCacheFields = ['enrollment'];
 composedChain['student_enrollment']!.scopedCacheFields = ['student'];
 
+// A read that EMBEDS its ancestor's rows. `holder` is fetched as rows, so its keyed
+// filter pin is not trusted — rows can arrive by a path the filter never keyed — and
+// the ancestor slice has to carry it instead. That slice hangs off `owner_account`,
+// which the filter names by PRIMARY KEY across the relation: classified
+// `independent`, pinned by nothing of its own while still holding the key the
+// slice is built from.
+const independentTerminalSchema = new SchemaBuilder()
+	.collection('note', (c) => {
+		c.field('id').id();
+		c.field('holder').m2o('holder');
+	})
+	.collection('holder', (c) => {
+		c.field('id').id();
+		c.field('owner').m2o('owner_account');
+	})
+	.collection('owner_account', (c) => {
+		c.field('id').id();
+		c.field('name').string();
+	})
+	.build();
+
+const independentTerminal = independentTerminalSchema.collections;
+
+independentTerminal['note']!.scopedCacheFields = ['holder'];
+independentTerminal['holder']!.scopedCacheFields = ['owner'];
+
+// `independent` is granted only behind an enforced fk: every way the far row can
+// disappear writes the near row too, so the near row's own tag covers it.
+for (const relation of independentTerminalSchema.relations) {
+	relation.schema = { on_delete: 'CASCADE' } as any;
+}
+
 // Two chains landing on a terminal carrying the same NAME on both sides. Keying the
 // projected columns by the terminal field would collapse them onto one value.
 const sharedTerminalNameSchema = new SchemaBuilder()
@@ -1366,16 +1508,15 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		resolves three composed paths in a single joined query per snapshot, sharing the
 		hops the shorter paths already walked
 	`, async () => {
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
-
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+		]);
 
 		tracker.on.update('student_course').response(1);
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
 
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+		]);
 
 		await new ItemsService(
 			'student_course',
@@ -1393,18 +1534,17 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		emits the same slice per composed path as the per-path queries did, for the old
 		row and the committed one
 	`, async () => {
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
-
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 20, value1: 30, value2: 'A' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 10, value0: 20, value1: 30, value2: 'A' },
+		]);
 
 		tracker.on.update('student_course').response(1);
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 11 }]);
 
 		// Every terminal differs from the old row's, so a column read off the wrong path
 		// would surface as a wrong value rather than passing on a shared one.
-		tracker.on.select('student_course')
-			.responseOnce([{ value0: 21, value1: 31, value2: 'B' }]);
+		tracker.on.select('student_course').responseOnce([
+			{ id: 1, teaching_unit: 11, value0: 21, value1: 31, value2: 'B' },
+		]);
 
 		await new ItemsService(
 			'student_course',
@@ -1474,10 +1614,13 @@ describe('scoped cache path snapshot (one query for every path)', () => {
 		keeps two paths apart when their terminal fields share a name, instead of
 		collapsing them onto one slice
 	`, async () => {
-		tracker.on.select('note').responseOnce([{ id: 1, left_ref: 7, right_ref: 8 }]);
-
-		tracker.on.select('note')
-			.responseOnce([{ value0: 'left-owner', value1: 'right-owner' }]);
+		tracker.on.select('note').responseOnce([{
+			id: 1,
+			left_ref: 7,
+			right_ref: 8,
+			value0: 'left-owner',
+			value1: 'right-owner',
+		}]);
 
 		tracker.on.delete('note').response(1);
 
@@ -1546,13 +1689,8 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		reading every path off that row rather than the first one
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10 },
-			{ id: 2, teaching_unit: 20 },
-		]);
-
-		tracker.on.select('student_course').responseOnce([
-			{ value0: 11, value1: 12, value2: 'A' },
-			{ value0: 21, value1: 22, value2: 'B' },
+			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
+			{ id: 2, teaching_unit: 20, value0: 21, value1: 22, value2: 'B' },
 		]);
 
 		tracker.on.delete('student_course').response(2);
@@ -1636,15 +1774,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 		pins, and collapses two such rows onto one tag
 	`, async () => {
 		tracker.on.select('student_course').responseOnce([
-			{ id: 1, teaching_unit: 10 },
-			{ id: 2, teaching_unit: null },
-			{ id: 3, teaching_unit: null },
-		]);
-
-		tracker.on.select('student_course').responseOnce([
-			{ value0: 11, value1: 12, value2: 'A' },
-			{ value0: null, value1: null, value2: null },
-			{ value0: null, value1: null, value2: null },
+			{ id: 1, teaching_unit: 10, value0: 11, value1: 12, value2: 'A' },
+			{ id: 2, teaching_unit: null, value0: null, value1: null, value2: null },
+			{ id: 3, teaching_unit: null, value0: null, value1: null, value2: null },
 		]);
 
 		tracker.on.delete('student_course').response(3);
@@ -1732,8 +1864,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 	it(oneLine`
 		leaves out a path the schema cannot resolve, and still emits its sibling's slice
 	`, async () => {
-		tracker.on.select('note').responseOnce([{ id: 1, holder: 7 }]);
-		tracker.on.select('note').responseOnce([{ value0: 'owner-a' }]);
+		tracker.on.select('note')
+			.responseOnce([{ id: 1, holder: 7, value0: 'owner-a' }]);
+
 		tracker.on.delete('note').response(1);
 
 		await new ItemsService(
@@ -1769,10 +1902,9 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 	});
 
 	it(oneLine`
-		emits no path slice when the joined query matches no row, leaving the key slices
-		the caller already resolved
+		emits no value slice at all when the snapshot query matches no row, leaving the
+		key slices the caller already resolved
 	`, async () => {
-		tracker.on.select('student_course').responseOnce([{ id: 1, teaching_unit: 10 }]);
 		tracker.on.select('student_course').responseOnce([]);
 		tracker.on.delete('student_course').response(1);
 
@@ -1781,6 +1913,8 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 			{ knex: db, schema: composedChainSchema },
 		).deleteMany([1]);
 
+		// One query carries the flat columns and the path terminals both, so a row can
+		// no longer be present for one and absent for the other.
 		expect(purgeScopedCache).toHaveBeenCalledWith(
 			expect.anything(),
 			`student_course`,
@@ -1789,12 +1923,6 @@ describe('scoped cache path snapshot — rows and paths it has to survive', () =
 					collection: `student_course`,
 					field: `id`,
 					value: 1,
-					type: `integer`,
-				},
-				{
-					collection: `student_course`,
-					field: `teaching_unit`,
-					value: 10,
 					type: `integer`,
 				},
 			],

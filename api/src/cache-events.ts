@@ -11,6 +11,7 @@ import type { Knex } from 'knex';
 import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
 import { resolvedCacheTtl } from './cache-config.js';
+import { cacheExpiresAtKey, cacheTagsKey } from './cache-sidecars.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -114,12 +115,19 @@ export interface CacheDescriptor {
 //   - missing_scope: scoped mode, response has no scope tag (can't be purged).
 //   - unautopurgeable_scope: a read hook scoped TO a tag no write auto-purges (a
 //     value slice on a non-scoped field) without `manuallyPurged` — left uncached.
+//   - unguarded_scope: a read hook scoped TO a collection whose purge counter the
+//     read never captured, so an in-flight purge of it cannot be detected — left
+//     uncached rather than stored with no way to notice it went stale.
 //   - value_too_large: payload over CACHE_VALUE_MAX_SIZE.
 //   - redis_error: a Redis write failed.
 export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'unautopurgeable_scope'
+	| 'unguarded_scope'
 	| 'value_too_large'
+	// A purge landed between this read's query and its fill, so the rows it holds
+	// are already superseded and its tags missed that purge's sweep.
+	| 'inflight_purge'
 	| 'redis_error';
 
 export interface CacheAnomaly {
@@ -1637,10 +1645,21 @@ export async function listCacheGroupLatencies(
 export async function evictCacheEntry(
 	cache: Keyv,
 	redisKey: string,
-): Promise<void> {
-	await cache.delete(redisKey);
-	await cache.delete(`${redisKey}__expires_at`);
-	await cache.delete(`${redisKey}__tags`);
+): Promise<boolean> {
+	// Read back rather than trusted. Keyv reports a store error by emitting `error`
+	// and answering `undefined`, so a swallowed delete is indistinguishable from a
+	// successful one at the call site — which is exactly what the in-flight purge
+	// guard must not assume, its whole job being to leave nothing stale behind.
+	try {
+		await cache.delete(redisKey);
+		await cache.delete(cacheExpiresAtKey(redisKey));
+		await cache.delete(cacheTagsKey(redisKey));
+
+		return await cache.get(redisKey) === undefined;
+	}
+	catch {
+		return false;
+	}
 }
 
 // Evict every currently-described entry on a path. Returns the count attempted.
