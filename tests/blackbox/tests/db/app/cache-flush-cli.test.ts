@@ -24,8 +24,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // hold is that a node it never touched serves the change.
 //
 // The unit tests mock ioredis, so the key layout they assume is the one they were
-// written against. These drive real Redis, the real namespace, the real widened
-// `<namespace>:*` scan, and the cache-stats keys under that same prefix.
+// written against. These drive real Redis, the real namespace, the real
+// `<namespace>:index:*` scan, and the cache-stats keys sitting beside it.
 
 const COLLECTION = 'test_cache_flush_cli';
 const cacheStatusHeader = 'x-cache-status';
@@ -53,7 +53,13 @@ describe('`directus cache flush` clears a running node from another process', ()
 		// flush, so it is parked on new year's day and the stream only grows.
 		env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '0 0 0 1 1 *';
 
+		// Same bus, its own response and system tiers. `schemaChanged` reaches neither
+		// of them, so this is the node the flush has to speak to rather than clear.
+		const peerEnv = cloneDeep(env);
+		peerEnv[vendor]['CACHE_STORE'] = 'memory';
+
 		let instance: ChildProcess;
+		let peer: ChildProcess;
 		let db: Knex;
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -95,18 +101,30 @@ describe('`directus cache flush` clears a running node from another process', ()
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
+			const peerPort = await getPort();
+			peerEnv[vendor].PORT = String(peerPort);
+
 			instance = spawn('node', [paths.cli, 'start'], {
 				cwd: paths.cwd,
 				env: env[vendor],
 			});
 
+			peer = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: peerEnv[vendor],
+			});
+
 			db = knex(config.knexConfig[vendor]!);
 
-			await awaitDirectusConnection(port);
+			await Promise.all([
+				awaitDirectusConnection(port),
+				awaitDirectusConnection(peerPort),
+			]);
 		}, 60_000);
 
 		afterAll(async () => {
 			instance.kill();
+			peer.kill();
 
 			await db.destroy();
 			await DeleteCollection(vendor, { collection: COLLECTION });
@@ -114,11 +132,13 @@ describe('`directus cache flush` clears a running node from another process', ()
 
 		// Its own process, with the instance's env: the deploy step the command
 		// exists for, not an in-process call to `flushCaches`.
-		function runCacheFlush(): Promise<{ code: number | null; output: string }> {
+		function runCacheFlush(
+			overrides: Record<string, string> = {},
+		): Promise<{ code: number | null; output: string }> {
 			return new Promise((resolve) => {
 				const cli = spawn('node', [paths.cli, 'cache', 'flush'], {
 					cwd: paths.cwd,
-					env: { ...env[vendor], LOG_LEVEL: 'info' },
+					env: { ...env[vendor], LOG_LEVEL: 'info', ...overrides },
 				});
 
 				let output = '';
@@ -130,8 +150,8 @@ describe('`directus cache flush` clears a running node from another process', ()
 			});
 		}
 
-		function readOwner(owner: string) {
-			return request(getUrl(vendor, env))
+		function readOwner(owner: string, from = env) {
+			return request(getUrl(vendor, from))
 				.get(`/items/${COLLECTION}`)
 				.query({ filter: { owner: { _eq: owner } } })
 				.set('Authorization', auth);
@@ -162,7 +182,7 @@ describe('`directus cache flush` clears a running node from another process', ()
 			expect(code).toBe(0);
 
 			const flushed = output.match(
-				/\[cache\] flushed in (\d+)ms, dropped (\d+) scoped-tag index keys/,
+				/\[cache\] flushed in (\d+)ms, dropped (\d+) scoped-cache index keys/,
 			);
 
 			expect(flushed).not.toBe(null);
@@ -212,7 +232,62 @@ describe('`directus cache flush` clears a running node from another process', ()
 		}, 60_000);
 
 		it(oneLine`
-			leaves the cache-stats stream the widened index scan walks over
+			fails within its budget when Redis cannot be reached, rather than holding
+			the deploy step open
+		`, async () => {
+			// A command issued while Redis is unreachable waits on the next reconnect,
+			// and the CLI bootstrap issues some before the flush itself does — so
+			// without the deadline this asserts, the deploy step calling the command
+			// hangs before it even reaches the flush.
+			const startedAt = Date.now();
+
+			const { code, output } = await runCacheFlush({
+				REDIS: 'redis://localhost:6199',
+				CACHE_FLUSH_TIMEOUT: '3s',
+
+				// Past the budget on purpose. ioredis abandons a command after 20
+				// reconnect attempts, and the default backoff burns those inside three
+				// seconds — which would end the run on ioredis's deadline rather than
+				// on the one under test.
+				REDIS_RETRY_BASE_DELAY: '5000',
+				REDIS_RETRY_MAX_DELAY: '5000',
+			});
+
+			expect(code).toBe(1);
+			expect(Date.now() - startedAt).toBeLessThan(30_000);
+			expect(output).toMatch(/did not finish within 3000ms/);
+		}, 60_000);
+
+		it(oneLine`
+			drops the copy a peer on a memory store holds, which no broadcast the flush
+			used to send could reach
+		`, async () => {
+			await readOwner('acme', peerEnv);
+
+			const warmed = await readOwner('acme', peerEnv);
+			expect(warmed.headers[cacheStatusHeader]).toBe('HIT');
+
+			const { code } = await runCacheFlush();
+			expect(code).toBe(0);
+
+			// The peer clears on a message rather than on the call, so its read is
+			// only eventually a MISS.
+			let status: string | undefined = 'HIT';
+
+			for (let attempt = 0; attempt < 20 && status === 'HIT'; attempt++) {
+				const afterFlush = await readOwner('acme', peerEnv);
+				status = afterFlush.headers[cacheStatusHeader];
+
+				if (status === 'HIT') {
+					await new Promise((resolve) => setTimeout(resolve, 250));
+				}
+			}
+
+			expect(status).toBe('MISS');
+		}, 60_000);
+
+		it(oneLine`
+			leaves the cache-stats stream the index scan no longer walks over
 		`, async () => {
 			await readOwner('acme');
 			await readOwner('globex');
@@ -237,8 +312,9 @@ describe('`directus cache flush` clears a running node from another process', ()
 
 			const afterFlush = await cacheStatsState();
 
-			// `<namespace>:stats:events` shares the prefix the flush now scans, and
-			// only the client-side filter keeps it out of the unlink.
+			// `<namespace>:stats:events` sits beside the index under `<namespace>:`,
+			// which is what the scan used to match before it was narrowed to
+			// `<namespace>:index:*`.
 			expect(afterFlush.body.data.bufferLength).toBeGreaterThanOrEqual(buffered);
 		}, 60_000);
 	});
