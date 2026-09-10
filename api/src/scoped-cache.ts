@@ -533,14 +533,22 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * clients between two commands of a pipeline, but not inside one — so the cost is a
  * single round trip either way.
  *
- * Returns what Redis reported removing rather than what it was handed: a pipeline
- * reports per command, so a chunk that failed is a chunk still there, and a caller
- * logging the input count would name a number that never happened.
+ * Reports what Redis said it removed and how many commands it refused, rather than
+ * what it was handed: a pipeline answers per command, so a chunk that failed is a
+ * chunk still there, and a count on its own cannot be told from an index that was
+ * already empty.
  */
-async function unlinkScopedCacheKeys(keys: string[]): Promise<number> {
+export interface ScopedCacheUnlinkTally {
+	dropped: number;
+	refused: number;
+}
+
+async function unlinkScopedCacheKeys(
+	keys: string[],
+): Promise<ScopedCacheUnlinkTally> {
 	// `unlink()` with no keys throws, and a flush with nothing to drop is normal.
 	if (keys.length === 0) {
-		return 0;
+		return { dropped: 0, refused: 0 };
 	}
 
 	const pipeline = useRedis().pipeline();
@@ -552,12 +560,41 @@ async function unlinkScopedCacheKeys(keys: string[]): Promise<number> {
 	}
 
 	const results = await pipeline.exec();
+	const tally: ScopedCacheUnlinkTally = { dropped: 0, refused: 0 };
 
-	return (results ?? []).reduce((dropped, [error, removed]) => {
-		return error
-			? dropped
-			: dropped + Number(removed ?? 0);
-	}, 0);
+	for (const [error, removed] of results ?? []) {
+		if (error) {
+			tally.refused += 1;
+		}
+		else {
+			tally.dropped += Number(removed ?? 0);
+		}
+	}
+
+	return tally;
+}
+
+/**
+ * Unlink every key under a prefix, a scan batch at a time.
+ *
+ * Batch by batch rather than collecting first: the list a full flush would collect
+ * is the one thing here that grows with the cache, and holding all of it to delete
+ * all of it puts the whole index in this process's heap for no gain — the deletes
+ * are per-batch round trips either way.
+ */
+async function unlinkScopedCacheKeysMatching(
+	match: string,
+): Promise<ScopedCacheUnlinkTally> {
+	const tally = { dropped: 0, refused: 0 };
+
+	for await (const batch of scanScopedCacheKeys(match)) {
+		const batchTally = await unlinkScopedCacheKeys(batch);
+
+		tally.dropped += batchTally.dropped;
+		tally.refused += batchTally.refused;
+	}
+
+	return tally;
 }
 
 async function purgeScopedCacheTagKeys(
@@ -638,9 +675,8 @@ async function purgeScopedCacheTagKeys(
  * cluster would miss keys on other nodes. Scoped mode is refused on a cluster at
  * startup (`assertScopedCacheRedisSupported`), so the client is always standalone.
  */
-async function scanScopedCacheKeys(match: string): Promise<string[]> {
+async function* scanScopedCacheKeys(match: string): AsyncGenerator<string[]> {
 	const redis = useRedis();
-	const found: string[] = [];
 	let cursor = '0';
 
 	do {
@@ -653,16 +689,18 @@ async function scanScopedCacheKeys(match: string): Promise<string[]> {
 		);
 
 		cursor = next;
-		found.push(...batch);
+		yield batch;
 	}
 	while (cursor !== '0');
-
-	return found;
 }
 
 // Where the index lived before it moved under `<namespace>:index:`. Kept only so
 // the keys that layout left behind can be swept once — see below.
 const SCOPED_CACHE_LEGACY_INDEX_KINDS = ['tag', 'slices'] as const;
+
+// Long enough to outlast any rolling deploy, short enough that the two extra scan
+// passes it suppresses do not come back for good.
+const SCOPED_CACHE_LEGACY_SWEPT_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 // Outside `<namespace>:index:` on purpose: a flush unlinks everything under that
 // prefix, so a marker stored there would be dropped by the very call it records.
@@ -679,28 +717,39 @@ function scopedCacheLegacySweptKey(): string {
  * upgrade would strand them forever. Two extra passes are worth that once, and
  * a marker keeps them from becoming a permanent third and fourth pass.
  */
-async function sweepLegacyScopedCacheIndex(): Promise<number> {
+async function sweepLegacyScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	const redis = useRedis();
+	const tally = { dropped: 0, refused: 0 };
 
 	if (await redis.get(scopedCacheLegacySweptKey()) !== null) {
-		return 0;
+		return tally;
 	}
 
-	const legacyKeys: string[] = [];
-
 	for (const kind of SCOPED_CACHE_LEGACY_INDEX_KINDS) {
-		legacyKeys.push(
-			...await scanScopedCacheKeys(`${env['CACHE_NAMESPACE']}:${kind}:*`),
+		const kindTally = await unlinkScopedCacheKeysMatching(
+			`${env['CACHE_NAMESPACE']}:${kind}:*`,
+		);
+
+		tally.dropped += kindTally.dropped;
+		tally.refused += kindTally.refused;
+	}
+
+	// Only once nothing was refused, or a sweep Redis turned down would record a
+	// layout it left standing and never look at it again.
+	if (tally.refused === 0) {
+		// Expiring rather than permanent: a node still on the old layout goes on
+		// writing those keys for the rest of a rolling deploy, and everything it
+		// writes after the first new node swept is stranded under a marker that
+		// never lifts.
+		await redis.set(
+			scopedCacheLegacySweptKey(),
+			'1',
+			'EX',
+			SCOPED_CACHE_LEGACY_SWEPT_TTL_SECONDS,
 		);
 	}
 
-	const dropped = await unlinkScopedCacheKeys(legacyKeys);
-
-	// After the unlink, so a sweep that died halfway runs again rather than
-	// recording a layout it left half-standing.
-	await redis.set(scopedCacheLegacySweptKey(), '1');
-
-	return dropped;
+	return tally;
 }
 
 /**
@@ -713,18 +762,22 @@ async function sweepLegacyScopedCacheIndex(): Promise<number> {
  * `cache.clear()` for a clean wipe. Only the SET keys are dropped; the entries
  * they pointed at are already gone with the namespace clear.
  *
- * Returns how many keys Redis reported removing, so the flush that called it can
- * say what it cost (https://github.com/jclaveau/directus/issues/468).
+ * Reports how many keys Redis removed and how many commands it refused, so the
+ * flush that called it can say what it cost, and say so honestly when the index is
+ * still there (https://github.com/jclaveau/directus/issues/468).
  */
-export async function dropScopedCacheTagIndex(): Promise<number> {
+export async function dropScopedCacheTagIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!redisConfigAvailable()) {
-		return 0;
+		return { dropped: 0, refused: 0 };
 	}
 
-	const indexKeys = await scanScopedCacheKeys(`${scopedCacheIndexPrefix()}*`);
-	const dropped = await unlinkScopedCacheKeys(indexKeys);
+	const index = await unlinkScopedCacheKeysMatching(`${scopedCacheIndexPrefix()}*`);
+	const legacy = await sweepLegacyScopedCacheIndex();
 
-	return dropped + await sweepLegacyScopedCacheIndex();
+	return {
+		dropped: index.dropped + legacy.dropped,
+		refused: index.refused + legacy.refused,
+	};
 }
 
 /**

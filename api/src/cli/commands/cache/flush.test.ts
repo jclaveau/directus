@@ -1,10 +1,12 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { flushCaches, type CacheFlushReport } from '../../../cache.js';
 import { useLogger } from '../../../logger/index.js';
+import { redisConfigAvailable } from '../../../redis/index.js';
 import cacheFlush from './flush.js';
 
 vi.mock('../../../cache.js');
 vi.mock('../../../logger/index.js');
+vi.mock('../../../redis/index.js');
 
 const error = vi.fn();
 
@@ -19,6 +21,7 @@ function report(overrides: Partial<CacheFlushReport> = {}): CacheFlushReport {
 }
 
 mockLogger();
+vi.mocked(redisConfigAvailable).mockReturnValue(true);
 
 // The command's whole contract is its exit code, so the exit has to stop the
 // function the way the real one does rather than run on into the next statement.
@@ -29,6 +32,7 @@ const exit = vi.spyOn(process, 'exit').mockImplementation((code) => {
 afterEach(() => {
 	vi.clearAllMocks();
 	mockLogger();
+	vi.mocked(redisConfigAvailable).mockReturnValue(true);
 });
 
 test('forces the flush and exits 0', async () => {
@@ -77,4 +81,19 @@ test('stops at the first exit rather than reading a missing report', async () =>
 
 	expect(exit).toHaveBeenCalledTimes(1);
 	expect(exit).toHaveBeenCalledWith(1);
+});
+
+// The command runs in the deploy shell, whose env is not the running service's,
+// so this is a misconfiguration rather than an outage: it would clear a process
+// that serves nothing, tell no node, and report the cluster flushed.
+test('refuses a run with no bus to reach the other nodes', async () => {
+	vi.mocked(redisConfigAvailable).mockReturnValue(false);
+
+	await expect(cacheFlush()).rejects.toThrowError('exit:1');
+
+	expect(flushCaches).not.toHaveBeenCalled();
+
+	expect(error).toHaveBeenCalledWith(
+		'[cache] no REDIS is configured, so this would reach no other node',
+	);
 });

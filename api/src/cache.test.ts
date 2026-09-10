@@ -136,6 +136,16 @@ function setEnv(values: Record<string, unknown>) {
 
 afterEach(() => {
 	vi.clearAllMocks();
+
+	// Implementations survive `clearAllMocks`, so one case reaching for
+	// `mockRejectedValue` rather than its `Once` form leaves the shared stand-in
+	// rejecting for every case after it.
+	redis.scan.mockImplementation(async () => ['0', []] as [string, string[]]);
+	redis.get.mockImplementation(async () => '1');
+
+	redis._pipeline.exec.mockImplementation(async () => {
+		return redis._pipeline.unlink.mock.calls.map(([keys]) => [null, keys.length]);
+	});
 });
 
 describe('getRedisConnection', () => {

@@ -1,5 +1,6 @@
-import { flushCaches } from '../../../cache.js';
+import { flushCaches, type CacheFlushReport } from '../../../cache.js';
 import { useLogger } from '../../../logger/index.js';
+import { redisConfigAvailable } from '../../../redis/index.js';
 
 /**
  * The boot-path flush (`flushCachesIfBuildChanged`) is keyed to the build
@@ -14,26 +15,41 @@ import { useLogger } from '../../../logger/index.js';
  */
 export default async function cacheFlush(): Promise<void> {
 	const logger = useLogger();
-	let report;
+
+	// This runs in the deploy shell, whose env is not the running service's. With
+	// no bus it clears the caches of a process that serves nothing and tells no
+	// node, then reports the cluster flushed.
+	if (!redisConfigAvailable()) {
+		logger.error(
+			'[cache] no REDIS is configured, so this would reach no other node',
+		);
+
+		process.exit(1);
+	}
+
+	let report: CacheFlushReport | undefined;
 
 	try {
 		report = await flushCaches(true);
 	}
 	catch (error: any) {
 		logger.error(error);
-		process.exit(1);
 	}
 
-	// Both exits sit outside the catch: `process.exit` throws under test, and inside
-	// it that throw would be swallowed and reported as the flush having failed.
-	//
-	// `flushCaches` is best-effort by contract — it warns and carries on rather than
-	// throwing — so an exit code read off the absence of an exception would tell a
-	// deploy the caches are clear when Redis refused every one of them.
-	if (report.failures.length > 0) {
+	// One branch, one exit: `process.exit` does not stop the caller while an `exit`
+	// listener runs, and a fallthrough from the failed flush into the report it
+	// never returned raises a TypeError out of the handler for exit 1.
+	if (report === undefined) {
+		process.exit(1);
+	}
+	else if (report.failures.length > 0) {
+		// `flushCaches` is best-effort by contract — it warns and carries on rather
+		// than throwing — so an exit code read off the absence of an exception would
+		// tell a deploy the caches are clear when Redis refused every one of them.
 		logger.error(`[cache] flush incomplete: ${report.failures.join(', ')}`);
 		process.exit(1);
 	}
-
-	process.exit(0);
+	else {
+		process.exit(0);
+	}
 }

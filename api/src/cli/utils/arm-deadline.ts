@@ -10,7 +10,14 @@ import { useLogger } from '../../logger/index.js';
  * reads through the same Redis, so a command aimed at one that is down never
  * reaches the action in the first place.
  */
-export function armDeadline(budgetMs: number, what: string): void {
+export function armDeadline(budgetMs: number | undefined, what: string): void {
+	// `setTimeout(undefined)` fires on the next tick, so an unparseable budget would
+	// kill every run instantly rather than never. Unbudgeted is the safer reading.
+	if (typeof budgetMs !== 'number' || budgetMs <= 0) {
+		useLogger().warn(`[cli] ${what} has no usable budget, so none is armed`);
+		return;
+	}
+
 	const ranOutOfTime = setTimeout(() => {
 		useLogger().error(`[cli] ${what} did not finish within ${budgetMs}ms`);
 		process.exit(1);

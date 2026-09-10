@@ -200,7 +200,16 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 		logger.warn(error, `[cache] could not clear the system cache: ${error}`);
 	}
 
-	await cache?.clear();
+	// Caught like the rest. Left to throw, it reaches the migration runner that
+	// calls this uncaught, and it keeps the one tier the flush command exists for
+	// out of the report that command reads its exit code from.
+	try {
+		await cache?.clear();
+	}
+	catch (error: any) {
+		failures.push('response cache');
+		logger.warn(error, `[cache] could not clear the response cache: ${error}`);
+	}
 
 	// Same reason as the `response` target in `clearCacheTargets`: the scoped-tag
 	// index sits in raw Redis outside the Keyv namespace, so the clear above misses
@@ -217,7 +226,18 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	let droppedIndexKeys = 0;
 
 	try {
-		droppedIndexKeys = await dropScopedCacheTagIndex();
+		const index = await dropScopedCacheTagIndex();
+		droppedIndexKeys = index.dropped;
+
+		// Redis refuses a pipelined command by answering with the error rather than
+		// by throwing, so this is the only place a half-dropped index is visible.
+		if (index.refused > 0) {
+			failures.push('scoped-cache index');
+
+			logger.warn(
+				`[cache] redis refused ${index.refused} of the index unlink commands`,
+			);
+		}
 	}
 	catch (error: any) {
 		failures.push('scoped-cache index');

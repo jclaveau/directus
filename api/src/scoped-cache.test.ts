@@ -661,14 +661,20 @@ describe('dropScopedCacheTagIndex', () => {
 
 		// ONE array argument, never a spread: the SCAN result is unbounded, and
 		// spreading it past the stack's headroom throws RangeError.
-		expect(unlink).toHaveBeenCalledWith([
+		//
+		// One call per scan page, not one for the lot: collecting first would put
+		// the whole index in this process's heap to delete it from Redis.
+		expect(unlink).toHaveBeenNthCalledWith(1, [
 			'ns:index:tag:articles',
 			'ns:index:slices:articles',
+		]);
+
+		expect(unlink).toHaveBeenNthCalledWith(2, [
 			'ns:index:tag:articles:id=1',
 			'ns:index:tag:authors',
 		]);
 
-		expect(dropped).toBe(4);
+		expect(dropped).toEqual({ dropped: 4, refused: 0 });
 	});
 
 	it('counts what Redis removed, not what it was handed', async () => {
@@ -683,7 +689,10 @@ describe('dropScopedCacheTagIndex', () => {
 			[new Error('LOADING Redis is loading the dataset in memory'), null],
 		]);
 
-		expect(await dropScopedCacheTagIndex()).toBe(0);
+		// Counted, not just skipped: a caller handed 0 with no refusals cannot tell
+		// an index Redis would not touch from one that was already empty.
+		expect(await dropScopedCacheTagIndex())
+		.toEqual({ dropped: 0, refused: 1 });
 	});
 
 	it('splits the drop into chunked commands', async () => {
@@ -710,14 +719,16 @@ describe('dropScopedCacheTagIndex', () => {
 		const dropped = await dropScopedCacheTagIndex();
 
 		expect(unlink).not.toHaveBeenCalled();
-		expect(dropped).toBe(0);
+		expect(dropped).toEqual({ dropped: 0, refused: 0 });
 	});
 
 	it('no-ops when Redis is unavailable', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
 		const { scan } = mockScan(['0', []]);
 
-		expect(await dropScopedCacheTagIndex()).toBe(0);
+		expect(await dropScopedCacheTagIndex())
+		.toEqual({ dropped: 0, refused: 0 });
+
 		expect(scan).not.toHaveBeenCalled();
 	});
 
@@ -734,24 +745,28 @@ describe('dropScopedCacheTagIndex', () => {
 
 			get.mockResolvedValue(null);
 
-			expect(await dropScopedCacheTagIndex()).toBe(4);
+			expect(await dropScopedCacheTagIndex())
+			.toEqual({ dropped: 4, refused: 0 });
 
 			expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:tag:*', 'COUNT', 1000);
 
 			expect(scan)
 			.toHaveBeenCalledWith('0', 'MATCH', 'ns:slices:*', 'COUNT', 1000);
 
-			// Both old kinds go in one UNLINK: two passes are the price of reaching
-			// them, two commands would be a price nothing asks for.
-			expect(unlink).toHaveBeenCalledWith([
-				'ns:tag:articles',
-				'ns:tag:authors',
-				'ns:slices:articles',
-			]);
+			// One UNLINK per pass, each carrying what that pass found.
+			expect(unlink).toHaveBeenCalledWith(['ns:tag:articles', 'ns:tag:authors']);
+			expect(unlink).toHaveBeenCalledWith(['ns:slices:articles']);
 
 			// Outside `ns:index:`, or the flush that recorded the sweep would drop
-			// the record of it and pay for the two extra passes on every call.
-			expect(set).toHaveBeenCalledWith('ns:legacy-index-swept', '1');
+			// the record of it and pay for the two extra passes on every call. And
+			// expiring, so a node still writing the old layout through a rolling
+			// deploy is not stranded under a marker that never lifts.
+			expect(set).toHaveBeenCalledWith(
+				'ns:legacy-index-swept',
+				'1',
+				'EX',
+				expect.any(Number),
+			);
 		});
 
 		it('costs nothing on a Redis that was already swept', async () => {
