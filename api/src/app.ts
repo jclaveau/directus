@@ -56,6 +56,7 @@ import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
 import { initCacheConfig } from './cache-config.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
+import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
 import { getFlowManager } from './flows.js';
@@ -407,6 +408,7 @@ export default async function createApp(): Promise<express.Application> {
 	await cacheStatsSchedule();
 	await initCacheConfig();
 	await initSharedSettings();
+	await initSharedSettingsGuard();
 	await initProcessReports();
 	initAutoscaleDrill();
 	assertPgBouncerConnections();

@@ -113,6 +113,14 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			.send(body);
 	}
 
+	/** The singleton the columns live on, written the way anything else is. */
+	function patchSettings(vendor: Vendor, body: object) {
+		return request(getUrl(vendor, envs[vendor]))
+			.patch('/settings')
+			.set('Authorization', auth)
+			.send(body);
+	}
+
 	function writeOverMcp(vendor: Vendor, autoscale: object, note: string) {
 		return request(getUrl(vendor, envs[vendor]))
 			.post('/system-mcp')
@@ -480,6 +488,79 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			// Non-vacuous: an instance that never came up would answer every
 			// line above with the same 404 and prove nothing.
 			expect((await request(url).get('/server/ping')).statusCode).toBe(200);
+		});
+	});
+
+	// The columns are ordinary fields of the settings singleton, so `PATCH
+	// /settings` reaches them — as does a config-sync import or a seed script
+	// writing through a plain `ItemsService`. Checking the route the panel uses
+	// left every one of those able to store a configuration the route refuses,
+	// announce it to the fleet, and have each loop clamp it on the next tick:
+	// exactly the corrected-versus-refused an operator cannot tell apart.
+	describe('refuses over the singleton what it refuses over the route', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const crossed = await patchSettings(vendor, {
+				autoscale_settings: { minWorkers: ENV_MAX_WORKERS + 4 },
+			});
+
+			expect(crossed.statusCode).toBe(400);
+
+			expect(refusal(crossed)).toContain(
+				`'minWorkers' is ${ENV_MAX_WORKERS + 4}, above the 'maxWorkers' `
+					+ `ceiling of ${ENV_MAX_WORKERS}`,
+			);
+
+			// A value neither true nor false resolves to false, so this would
+			// be a disable of the whole loop that nobody asked for.
+			const enabled = await patchSettings(vendor, {
+				autoscale_settings: { enabled: 'TRUE' },
+			});
+
+			expect(enabled.statusCode).toBe(400);
+			expect(refusal(enabled)).toContain(`'enabled' has to be a boolean`);
+
+			// Stored, this reads back as nothing at all: the pool would run the
+			// environment while the column says a layer is holding it.
+			const shapeless = await patchSettings(vendor, {
+				autoscale_settings: [{ maxWorkers: 2 }],
+			});
+
+			expect(shapeless.statusCode).toBe(400);
+
+			const supervisor = await patchSettings(vendor, {
+				supervisor_settings: { killTimeout: 1 },
+			});
+
+			expect(supervisor.statusCode).toBe(400);
+
+			// Nothing any of them tried reached a column.
+			expect((await read(vendor)).body.data).toMatchObject({
+				sharedSettings: null,
+				supervisor: { sharedSettings: null },
+			});
+		});
+	});
+
+	// Non-vacuous: a route answering 400 to every settings write would pass
+	// every line above without one of these checks existing.
+	describe('stores over the singleton what the route would have stored', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const written = await patchSettings(vendor, {
+				autoscale_settings: { maxWorkers: ENV_MAX_WORKERS - 1 },
+			});
+
+			expect(written.statusCode).toBe(200);
+
+			expect((await read(vendor)).body.data).toMatchObject({
+				sharedSettings: { maxWorkers: ENV_MAX_WORKERS - 1 },
+			});
+
+			const cleared = await patchSettings(vendor, {
+				autoscale_settings: null,
+			});
+
+			expect(cleared.statusCode).toBe(200);
+			expect((await read(vendor)).body.data.sharedSettings).toBeNull();
 		});
 	});
 });

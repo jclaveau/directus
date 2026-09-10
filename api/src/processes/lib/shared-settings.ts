@@ -66,7 +66,7 @@ export interface SharedSettingsChange {
  * A JSON column comes back parsed on Postgres and as a string on sqlite, so
  * both arms are the dialect answering rather than a stored shape that varies.
  */
-function asSharedSettings(stored: unknown): SharedSettings | null {
+export function asSharedSettings(stored: unknown): SharedSettings | null {
 	let value = stored;
 
 	if (typeof value === 'string') {
