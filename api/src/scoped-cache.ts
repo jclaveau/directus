@@ -248,14 +248,27 @@ function isPinnableScopeType(type: Type | undefined): boolean {
 	return !PIN_UNSAFE_SCOPE_TYPES.has(type as Type);
 }
 
+// Every index key this module writes sits under one segment, so the full-flush scan
+// can ask Redis for exactly them. `<namespace>:` alone is shared with the
+// cache-stats stream, its per-entry tombstones and whatever family lands there
+// next, and a pattern wide enough to cover the index dragged all of those over the
+// wire to be filtered out here (https://github.com/jclaveau/directus/issues/468).
+function scopedCacheIndexPrefix(): string {
+	return `${env['CACHE_NAMESPACE']}:index:`;
+}
+
+function scopedCacheTagKeyPrefix(): string {
+	return `${scopedCacheIndexPrefix()}tag:`;
+}
+
 // The slice tag keys a collection currently owns, so a collection-wide purge reads
 // them instead of walking the whole keyspace to find them again.
 function scopedCacheCollectionSlicesKey(collection: string): string {
-	return `${env['CACHE_NAMESPACE']}:slices:${collection}`;
+	return `${scopedCacheIndexPrefix()}slices:${collection}`;
 }
 
 export function scopedCacheTagKey(tag: ScopedCacheTag): string {
-	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
+	const base = `${scopedCacheTagKeyPrefix()}${tag.collection}`;
 	return tag.field === undefined
 		? base
 		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
@@ -519,11 +532,15 @@ const SCOPED_CACHE_UNLINK_CHUNK = 1000;
  * that part is O(keys). The chunks go in one pipeline — Redis can serve other
  * clients between two commands of a pipeline, but not inside one — so the cost is a
  * single round trip either way.
+ *
+ * Returns what Redis reported removing rather than what it was handed: a pipeline
+ * reports per command, so a chunk that failed is a chunk still there, and a caller
+ * logging the input count would name a number that never happened.
  */
-async function unlinkScopedCacheKeys(keys: string[]): Promise<void> {
+async function unlinkScopedCacheKeys(keys: string[]): Promise<number> {
 	// `unlink()` with no keys throws, and a flush with nothing to drop is normal.
 	if (keys.length === 0) {
-		return;
+		return 0;
 	}
 
 	const pipeline = useRedis().pipeline();
@@ -534,7 +551,13 @@ async function unlinkScopedCacheKeys(keys: string[]): Promise<void> {
 		pipeline.unlink(keys.slice(at, at + SCOPED_CACHE_UNLINK_CHUNK));
 	}
 
-	await pipeline.exec();
+	const results = await pipeline.exec();
+
+	return (results ?? []).reduce((dropped, [error, removed]) => {
+		return error
+			? dropped
+			: dropped + Number(removed ?? 0);
+	}, 0);
 }
 
 async function purgeScopedCacheTagKeys(
@@ -563,7 +586,7 @@ async function purgeScopedCacheTagKeys(
 	// wholesale keeps naming keys that are gone, and grows without bound. A
 	// collection name cannot hold a `:`, so the first one after the prefix is
 	// where the field starts.
-	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
+	const tagPrefix = scopedCacheTagKeyPrefix();
 	const sliceKeysByCollection = new Map<string, string[]>();
 
 	for (const tagKey of tagKeys) {
@@ -604,36 +627,19 @@ async function purgeScopedCacheTagKeys(
 	}).length;
 }
 
-// The two key kinds the scoped-cache index is made of, as the segment that follows
-// the namespace. Both are walked in one pass, and neither is what SCAN is given as a
-// pattern — see `scanScopedCacheIndexKeys`.
-const SCOPED_CACHE_INDEX_KINDS = ['tag', 'slices'] as const;
-
 /**
- * Cursor-scan every scoped-cache index key — tag sets and per-collection slice
- * indexes — in ONE pass.
+ * Cursor-scan every key under a prefix.
  *
- * `SCAN ... MATCH` filters server-side AFTER iterating, so a pass costs the
- * whole keyspace however few keys match: scanning `:tag:*` and `:slices:*`
- * separately walked everything twice for two disjoint slices of one prefix. One
- * pass over `<namespace>:*`, split here, costs half that for the same keys.
- *
- * The pattern has to stay wider than the keys we want, so what keeps
- * `<namespace>:stats` — the cache-stats Redis stream, which lives under the same
- * prefix and is not an index — out of the list a drop then unlinks is the filter
- * below, not the pattern.
+ * `SCAN ... MATCH` filters server-side AFTER iterating, so a pass costs the whole
+ * keyspace however few keys match — but only the matches cross the wire, which is
+ * why the prefix is worth having.
  *
  * A single-node SCAN only covers the whole keyspace on a standalone client; a
  * cluster would miss keys on other nodes. Scoped mode is refused on a cluster at
  * startup (`assertScopedCacheRedisSupported`), so the client is always standalone.
  */
-async function scanScopedCacheIndexKeys(): Promise<string[]> {
+async function scanScopedCacheKeys(match: string): Promise<string[]> {
 	const redis = useRedis();
-	const namespace = env['CACHE_NAMESPACE'];
-
-	const prefixes = SCOPED_CACHE_INDEX_KINDS
-		.map((kind) => `${namespace}:${kind}:`);
-
 	const found: string[] = [];
 	let cursor = '0';
 
@@ -641,49 +647,84 @@ async function scanScopedCacheIndexKeys(): Promise<string[]> {
 		const [next, batch] = await redis.scan(
 			cursor,
 			'MATCH',
-			`${namespace}:*`,
+			match,
 			'COUNT',
 			SCOPED_CACHE_SCAN_COUNT,
 		);
 
 		cursor = next;
-
-		// A batch is whatever the cursor walked, so the split between the index keys
-		// and the rest of the namespace happens here rather than in the pattern.
-		for (const key of batch) {
-			if (prefixes.some((prefix) => key.startsWith(prefix))) {
-				found.push(key);
-			}
-		}
+		found.push(...batch);
 	}
 	while (cursor !== '0');
 
 	return found;
 }
 
+// Where the index lived before it moved under `<namespace>:index:`. Kept only so
+// the keys that layout left behind can be swept once — see below.
+const SCOPED_CACHE_LEGACY_INDEX_KINDS = ['tag', 'slices'] as const;
+
+// Outside `<namespace>:index:` on purpose: a flush unlinks everything under that
+// prefix, so a marker stored there would be dropped by the very call it records.
+function scopedCacheLegacySweptKey(): string {
+	return `${env['CACHE_NAMESPACE']}:legacy-index-swept`;
+}
+
 /**
- * Drop every scoped-tag index SET (`<namespace>:tag:*`) and every per-collection
- * slice index (`<namespace>:slices:*`). These are written direct via ioredis
- * `sadd`, outside any Keyv namespace, so a response `cache.clear()` never reaches
- * them — they would linger as orphan pointers until their `ttl*2` self-expiry, or
- * forever when `CACHE_TTL` is unset and they are deliberately unbounded. The
- * `Response cache` flush calls this alongside `cache.clear()` for a clean wipe.
- * Only the SET keys are dropped; the entries they pointed at are already gone with
- * the namespace clear.
+ * Drop the index keys written by the layout this replaced (`<namespace>:tag:*`
+ * and `<namespace>:slices:*`).
  *
- * Returns how many index keys it dropped, so the flush that called it can say what
- * it cost (https://github.com/jclaveau/directus/issues/468).
+ * The scan above cannot reach them, and a tag SET self-expires only when
+ * `CACHE_TTL` is set — with it unset these are deliberately unbounded, so an
+ * upgrade would strand them forever. Two extra passes are worth that once, and
+ * a marker keeps them from becoming a permanent third and fourth pass.
+ */
+async function sweepLegacyScopedCacheIndex(): Promise<number> {
+	const redis = useRedis();
+
+	if (await redis.get(scopedCacheLegacySweptKey()) !== null) {
+		return 0;
+	}
+
+	const legacyKeys: string[] = [];
+
+	for (const kind of SCOPED_CACHE_LEGACY_INDEX_KINDS) {
+		legacyKeys.push(
+			...await scanScopedCacheKeys(`${env['CACHE_NAMESPACE']}:${kind}:*`),
+		);
+	}
+
+	const dropped = await unlinkScopedCacheKeys(legacyKeys);
+
+	// After the unlink, so a sweep that died halfway runs again rather than
+	// recording a layout it left half-standing.
+	await redis.set(scopedCacheLegacySweptKey(), '1');
+
+	return dropped;
+}
+
+/**
+ * Drop every scoped-cache index key: the tag SETs (`<namespace>:index:tag:*`) and
+ * the per-collection slice indexes (`<namespace>:index:slices:*`). These are
+ * written direct via ioredis `sadd`, outside any Keyv namespace, so a response
+ * `cache.clear()` never reaches them — they would linger as orphan pointers until
+ * their `ttl*2` self-expiry, or forever when `CACHE_TTL` is unset and they are
+ * deliberately unbounded. The `Response cache` flush calls this alongside
+ * `cache.clear()` for a clean wipe. Only the SET keys are dropped; the entries
+ * they pointed at are already gone with the namespace clear.
+ *
+ * Returns how many keys Redis reported removing, so the flush that called it can
+ * say what it cost (https://github.com/jclaveau/directus/issues/468).
  */
 export async function dropScopedCacheTagIndex(): Promise<number> {
 	if (!redisConfigAvailable()) {
 		return 0;
 	}
 
-	const indexKeys = await scanScopedCacheIndexKeys();
+	const indexKeys = await scanScopedCacheKeys(`${scopedCacheIndexPrefix()}*`);
+	const dropped = await unlinkScopedCacheKeys(indexKeys);
 
-	await unlinkScopedCacheKeys(indexKeys);
-
-	return indexKeys.length;
+	return dropped + await sweepLegacyScopedCacheIndex();
 }
 
 /**
@@ -698,8 +739,6 @@ export async function purgeCollectionScopedCache(
 	collection: string,
 	scopedCachePurgeId?: string,
 ): Promise<void> {
-	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
-
 	// Read off the index each slice files itself into, rather than walking the whole
 	// keyspace for keys that a collection owning none can never yield.
 	const startedAt = Date.now();
@@ -708,7 +747,7 @@ export async function purgeCollectionScopedCache(
 		scopedCacheCollectionSlicesKey(collection),
 	);
 
-	const tagKeys = [bareKey, ...sliceKeys];
+	const tagKeys = [`${scopedCacheTagKeyPrefix()}${collection}`, ...sliceKeys];
 
 	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
@@ -768,7 +807,7 @@ async function purgeOrRecord(
  * is at retry time rather than the one that was set when the purge failed.
  */
 function scopedCacheTagKeyFromLabel(label: string): string {
-	return `${env['CACHE_NAMESPACE']}:tag:${label}`;
+	return `${scopedCacheTagKeyPrefix()}${label}`;
 }
 
 // The drain in flight, so the next trigger queues behind it rather than beside it.

@@ -13,7 +13,9 @@ const redis = vi.hoisted(() => {
 		sadd: vi.fn(),
 		expire: vi.fn(),
 		unlink: vi.fn(),
-		exec: vi.fn(),
+		exec: vi.fn(async () => {
+			return pipeline.unlink.mock.calls.map(([keys]) => [null, keys.length]);
+		}),
 	};
 
 	// chainable pipeline
@@ -26,6 +28,10 @@ const redis = vi.hoisted(() => {
 		smembers: vi.fn(),
 		srem: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
+		// The one-off sweep of the pre-`:index:` layout reads this marker; '1' says
+		// it is done, so these cases scan for the current layout alone.
+		get: vi.fn(async () => '1'),
+		set: vi.fn(),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
 	};
@@ -226,20 +232,20 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
+				'scalabus:index:tag:articles',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:directus_users',
+				'scalabus:index:tag:directus_users',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			// 2 × CACHE_TTL (5m = 300s) = 600s
 			expect(redis._pipeline.expire).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
+				'scalabus:index:tag:articles',
 				600,
 			);
 
@@ -253,13 +259,13 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=A',
+				'scalabus:index:tag:slots:student=A',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=7',
+				'scalabus:index:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -272,7 +278,7 @@ describe('scoped cache purging', () => {
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=\x00null',
+				'scalabus:index:tag:slots:student=\x00null',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -293,14 +299,14 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=7',
+				'scalabus:index:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:slices:slots',
-				'scalabus:tag:slots:student=7',
+				'scalabus:index:slices:slots',
+				'scalabus:index:tag:slots:student=7',
 			);
 		});
 
@@ -331,7 +337,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
+				'scalabus:index:tag:articles',
 				'resp-key',
 				'resp-key__expires_at',
 				'resp-key__tags',
@@ -344,7 +350,7 @@ describe('scoped cache purging', () => {
 			always purges the collection-level tag (global readers) alongside slices
 		`, async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'scalabus:tag:slots'
+				return tagKey === 'scalabus:index:tag:slots'
 					? ['global-key']
 					: ['key-a', 'key-a__expires_at'];
 			});
@@ -355,15 +361,18 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots');
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=A');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:index:tag:slots');
+
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:index:tag:slots:student=A');
+
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.delete).toHaveBeenCalledWith('key-a__expires_at');
 
 			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
-				'scalabus:tag:slots',
-				'scalabus:tag:slots:student=A',
+				'scalabus:index:tag:slots',
+				'scalabus:index:tag:slots:student=A',
 			]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -371,7 +380,7 @@ describe('scoped cache purging', () => {
 
 		test('records the purge, how wide it reached and what it took', async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'scalabus:tag:slots'
+				return tagKey === 'scalabus:index:tag:slots'
 					? ['global-key', 'global-key__expires_at']
 					: ['key-a', 'key-a__expires_at', 'key-a__tags'];
 			});
@@ -441,14 +450,14 @@ describe('scoped cache purging', () => {
 
 		test('records the coarse fallback as the wider thing it is', async () => {
 			redis.smembers.mockImplementation(async (key: string) => {
-				if (key === 'scalabus:slices:articles') {
+				if (key === 'scalabus:index:slices:articles') {
 					return [
-						'scalabus:tag:articles:author=1',
-						'scalabus:tag:articles:author=2',
+						'scalabus:index:tag:articles:author=1',
+						'scalabus:index:tag:articles:author=2',
 					];
 				}
 
-				return key === 'scalabus:tag:articles'
+				return key === 'scalabus:index:tag:articles'
 					? ['global-key']
 					: ['slice-key'];
 			});
@@ -480,11 +489,11 @@ describe('scoped cache purging', () => {
 			// single purge operation, so a bucket count of purges stays a count of
 			// purges rather than tracking how wide each one happened to reach.
 			redis.smembers.mockImplementation(async (key: string) => {
-				return key === 'scalabus:slices:articles'
+				return key === 'scalabus:index:slices:articles'
 					? [
-						'scalabus:tag:articles:author=1',
-						'scalabus:tag:articles:author=2',
-						'scalabus:tag:articles:author=3',
+						'scalabus:index:tag:articles:author=1',
+						'scalabus:index:tag:articles:author=2',
+						'scalabus:index:tag:articles:author=3',
 					]
 					: [];
 			});
@@ -541,7 +550,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis.smembers).not.toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=B',
+				'scalabus:index:tag:slots:student=B',
 			);
 
 			expect(redis._pipeline.unlink)
@@ -554,10 +563,13 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles');
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:index:tag:articles');
 			expect(redis.smembers).toHaveBeenCalledOnce();
 			expect(cache.delete).toHaveBeenCalledTimes(3);
-			expect(redis._pipeline.unlink).toHaveBeenCalledWith(['scalabus:tag:articles']);
+
+			expect(redis._pipeline.unlink)
+			.toHaveBeenCalledWith(['scalabus:index:tag:articles']);
+
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -566,14 +578,14 @@ describe('scoped cache purging', () => {
 			slice), sparing other collections
 		`, async () => {
 			redis.smembers.mockImplementation(async (key: string) => {
-				if (key === 'scalabus:slices:articles') {
+				if (key === 'scalabus:index:slices:articles') {
 					return [
-						'scalabus:tag:articles:author=1',
-						'scalabus:tag:articles:author=2',
+						'scalabus:index:tag:articles:author=1',
+						'scalabus:index:tag:articles:author=2',
 					];
 				}
 
-				if (key === 'scalabus:tag:articles') {
+				if (key === 'scalabus:index:tag:articles') {
 					return ['global-key'];
 				}
 
@@ -586,18 +598,21 @@ describe('scoped cache purging', () => {
 
 			// Its own index rather than a keyspace walk, which is also what keeps a
 			// prefix sibling (`articles_archive`) out of the purge.
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:slices:articles');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:index:slices:articles');
 			expect(redis.scan).not.toHaveBeenCalled();
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles:author=1');
+			expect(redis.smembers).toHaveBeenCalledWith('scalabus:index:tag:articles');
+
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:index:tag:articles:author=1');
+
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
 
 			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
-				'scalabus:tag:articles',
-				'scalabus:tag:articles:author=1',
-				'scalabus:tag:articles:author=2',
+				'scalabus:index:tag:articles',
+				'scalabus:index:tag:articles:author=1',
+				'scalabus:index:tag:articles:author=2',
 			]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -605,8 +620,11 @@ describe('scoped cache purging', () => {
 
 		test('the collection-wide purge takes every slice the index names', async () => {
 			redis.smembers.mockImplementation(async (key: string) => {
-				return key === 'scalabus:slices:articles'
-					? ['scalabus:tag:articles:author=1', 'scalabus:tag:articles:author=2']
+				return key === 'scalabus:index:slices:articles'
+					? [
+						'scalabus:index:tag:articles:author=1',
+						'scalabus:index:tag:articles:author=2',
+					]
 					: [];
 			});
 
@@ -615,18 +633,18 @@ describe('scoped cache purging', () => {
 			await purgeScopedCache(cache, 'articles', null);
 
 			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
-				'scalabus:tag:articles',
-				'scalabus:tag:articles:author=1',
-				'scalabus:tag:articles:author=2',
+				'scalabus:index:tag:articles',
+				'scalabus:index:tag:articles:author=1',
+				'scalabus:index:tag:articles:author=2',
 			]);
 
 			// The index is pruned by the same purge: left naming keys it just dropped,
 			// it would grow without bound and inflate every count taken off it.
 			expect(redis.srem).toHaveBeenCalledWith(
-				'scalabus:slices:articles',
+				'scalabus:index:slices:articles',
 				[
-					'scalabus:tag:articles:author=1',
-					'scalabus:tag:articles:author=2',
+					'scalabus:index:tag:articles:author=1',
+					'scalabus:index:tag:articles:author=2',
 				],
 			);
 		});
@@ -657,12 +675,14 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=7');
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:index:tag:slots:student=7');
+
 			expect(cache.delete).toHaveBeenCalledWith('read-key');
 
 			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
-				'scalabus:tag:slots',
-				'scalabus:tag:slots:student=7',
+				'scalabus:index:tag:slots',
+				'scalabus:index:tag:slots:student=7',
 			]);
 		});
 
@@ -706,11 +726,12 @@ describe('scoped cache purging', () => {
 				null,
 			);
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:owner=B');
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:index:tag:slots:owner=B');
 
 			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
-				'scalabus:tag:slots',
-				'scalabus:tag:slots:owner=B',
+				'scalabus:index:tag:slots',
+				'scalabus:index:tag:slots:owner=B',
 			]);
 		});
 
@@ -910,20 +931,24 @@ describe('flushCaches', () => {
 			CACHE_STORE: 'memory',
 		});
 
-		redis.scan.mockResolvedValueOnce(['0', ['scalabus:tag:articles:id=1']]);
+		redis.scan.mockResolvedValueOnce(['0', ['scalabus:index:tag:articles:id=1']]);
 
 		await flushCaches(true);
 
+		// Not `scalabus:*`: `MATCH` filters server-side, so a pattern wider than the
+		// index shipped every cache-stats tombstone and fill-guard epoch key over the
+		// wire to be filtered out in the client. Measured on the dev keyspace, that
+		// was 84 keys crossing to unlink 0.
 		expect(redis.scan).toHaveBeenCalledWith(
 			'0',
 			'MATCH',
-			'scalabus:*',
+			'scalabus:index:*',
 			'COUNT',
 			1000,
 		);
 
 		expect(redis._pipeline.unlink)
-			.toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
+			.toHaveBeenCalledWith(['scalabus:index:tag:articles:id=1']);
 	});
 
 	test(oneLine`
