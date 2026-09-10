@@ -7,6 +7,7 @@ import {
 	onSharedSettingsChanged,
 	readAllSharedSettings,
 	readSharedSettings,
+	sharedSettingsPollMs,
 	writeSharedSettings,
 	type SharedSettingsChange,
 } from './shared-settings.js';
@@ -251,4 +252,24 @@ test('outlives a bus it cannot announce on', async () => {
 	);
 
 	await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+});
+
+test('re-reads every thirty seconds where nothing says otherwise', () => {
+	expect(sharedSettingsPollMs()).toBe(30_000);
+});
+
+// A deployment with no Redis has no bus to miss an announcement on, so this
+// floor is the only thing that lands a change there at all.
+test('takes the interval the deployment configured', () => {
+	vi.mocked(useEnv).mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: 5 });
+
+	expect(sharedSettingsPollMs()).toBe(5_000);
+});
+
+// The floor is read on the scaling tick, so a floor of none is a select every
+// time the pool is sized — and a typo would ask for one just as loudly.
+test.each([0, -5, 'often'])('refuses %o as an interval', (seconds) => {
+	vi.mocked(useEnv).mockReturnValue({ SHARED_SETTINGS_POLL_SECONDS: seconds });
+
+	expect(sharedSettingsPollMs()).toBe(30_000);
 });

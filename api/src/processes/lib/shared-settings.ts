@@ -18,6 +18,30 @@ export const SHARED_SETTINGS_COLUMNS = {
 	supervisor: 'supervisor_settings',
 } as const;
 
+/** What the floor below falls back to, in seconds. */
+const DEFAULT_POLL_SECONDS = 30;
+
+/**
+ * How long a mirror of one of these columns may go unrefreshed before it
+ * re-reads unprompted.
+ *
+ * The announcement is what lands a change in a second; this is what lands it
+ * at all on a node that missed one. A bus message is delivered at most once and
+ * nothing replays it, so this floor is the difference between staleness that
+ * heals and staleness that waits for a restart — and on a deployment with no
+ * Redis there is no bus to miss a message on, so it is the only thing that
+ * lands a change at all. Lower it there, at a select per node per interval.
+ */
+export function sharedSettingsPollMs(): number {
+	const seconds = Number(useEnv()['SHARED_SETTINGS_POLL_SECONDS']);
+
+	// Zero and below are refused rather than obeyed: the floor is read on the
+	// scaling tick, so a floor of none is a select every time the pool is sized.
+	return (Number.isFinite(seconds) && seconds > 0
+		? seconds
+		: DEFAULT_POLL_SECONDS) * 1000;
+}
+
 export type SharedSettingsColumn =
 	(typeof SHARED_SETTINGS_COLUMNS)[keyof typeof SHARED_SETTINGS_COLUMNS];
 

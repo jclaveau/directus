@@ -149,6 +149,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	PM2_AUTOSCALE_WARMUP_SECONDS: 'number',
 	PM2_AUTOSCALE_DRILL_ENABLED: 'boolean',
 
+	SHARED_SETTINGS_POLL_SECONDS: 'number',
+
 	PGBOUNCER_REPORT_ENABLED: 'boolean',
 	PGBOUNCER_CONNECTIONS: 'array',
 	PGBOUNCER_QUERY_TIMEOUT: 'string',

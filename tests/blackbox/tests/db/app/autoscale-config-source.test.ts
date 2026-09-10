@@ -42,17 +42,10 @@ describe('The autoscaler takes live configuration from the settings', () => {
 	// once: a node that was restarting, or one on a deployment with no Redis at
 	// all, is a node the announcement never reached. The floor is what makes
 	// that staleness heal instead of waiting for the next deploy — so this arm
-	// stores the layer and deliberately announces nothing.
+	// stores the layer with nothing to announce it and after the loop is
+	// already running, which is the only order the boot read cannot answer.
 	it('reaches a node the announcement never got to', async () => {
-		await storeSharedSettings(
-			vendor,
-			'autoscale_settings',
-			// Bounds rather than a threshold, so reading the layer is the only
-			// thing that can move the pool: applied it pins three workers on the
-			// tick that reads it, whatever the pool reports.
-			{ minWorkers: 3, maxWorkers: 3 },
-			false,
-		);
+		await storeSharedSettings(vendor, 'autoscale_settings', null, false);
 
 		const rig = startPool({
 			appName: 'autoscale-floor-only',
@@ -66,12 +59,31 @@ describe('The autoscaler takes live configuration from the settings', () => {
 		startAutoscaler(rig, {
 			...databaseEnv(vendor),
 			REDIS_ENABLED: 'false',
+			// Short enough that the wait below is over well before the default
+			// interval would come round, which is what makes this arm the
+			// interval's own witness rather than the default's.
+			SHARED_SETTINGS_POLL_SECONDS: '3',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '1',
 		});
 
-		expect(await poolSize(rig, 3, 90_000)).toBe(3);
-	}, 150_000);
+		// The env chain is what it boots on, and it has to be seen holding
+		// there: a pool that arrived at three some other way would satisfy the
+		// assertion below without the layer ever having been read.
+		expect(await neverExceeded(rig, 1, 10_000)).toBe(1);
+
+		await storeSharedSettings(
+			vendor,
+			'autoscale_settings',
+			// Bounds rather than a threshold, so reading the layer is the only
+			// thing that can move the pool: applied it pins three workers on the
+			// tick that reads it, whatever the pool reports.
+			{ minWorkers: 3, maxWorkers: 3 },
+			false,
+		);
+
+		expect(await poolSize(rig, 3, 20_000)).toBe(3);
+	}, 90_000);
 
 	describe('with the bus carrying the change', () => {
 		let rig: Rig;

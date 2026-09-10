@@ -4,6 +4,7 @@ import {
 	SHARED_SETTINGS_COLUMNS,
 	onSharedSettingsChanged,
 	readSharedSettings,
+	sharedSettingsPollMs,
 	type SharedSettings,
 } from '../../lib/shared-settings.js';
 import type {
@@ -208,16 +209,6 @@ export function configWithSharedSettings(
 }
 
 /**
- * How long the mirror may go unrefreshed before it re-reads unprompted.
- *
- * The announcement is what lands a change in a second; this is what lands it
- * at all on a node that missed one. A bus message is delivered at most once
- * and nothing replays it, so a floor is the difference between staleness that
- * heals and staleness that waits for a restart.
- */
-const MIRROR_FLOOR_MS = 30_000;
-
-/**
  * How long the first read may take before the loop starts without it.
  *
  * A tick on the environment chain scales the pool on the wrong floor for a
@@ -367,7 +358,7 @@ export async function initSharedSettingsMirror(): Promise<void> {
  * is a query that can hold it for as long as the outage lasts.
  */
 export function resolveConfig(): AutoscaleConfig {
-	if (Date.now() - readAt >= MIRROR_FLOOR_MS) {
+	if (Date.now() - readAt >= sharedSettingsPollMs()) {
 		void refreshSharedSettings();
 	}
 

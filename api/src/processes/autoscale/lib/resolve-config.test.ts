@@ -21,6 +21,7 @@ vi.mock('../../../logger/index.js', () => {
 
 const readSharedSettings = vi.fn();
 const onSharedSettingsChanged = vi.fn();
+const sharedSettingsPollMs = vi.fn(() => 30_000);
 
 vi.mock('../../lib/shared-settings.js', () => {
 	return {
@@ -30,6 +31,7 @@ vi.mock('../../lib/shared-settings.js', () => {
 		},
 		readSharedSettings,
 		onSharedSettingsChanged,
+		sharedSettingsPollMs,
 	};
 });
 
@@ -68,6 +70,7 @@ function announced(): void {
 beforeEach(() => {
 	readSharedSettings.mockReset();
 	readSharedSettings.mockResolvedValue(null);
+	sharedSettingsPollMs.mockReturnValue(30_000);
 	warn.mockClear();
 	info.mockClear();
 });
@@ -299,4 +302,20 @@ test('starts the loop where the first read has not answered', async () => {
 	finally {
 		vi.useRealTimers();
 	}
+});
+
+// The floor is read on the tick rather than captured at boot, so a deployment
+// that shortened it — one with no bus, where the floor is the only thing that
+// lands a change at all — gets the interval it asked for.
+test('re-reads on the interval the deployment configured', async () => {
+	const { resolveConfig } = await mirroring({ maxWorkers: 8 });
+
+	sharedSettingsPollMs.mockReturnValue(5_000);
+	readSharedSettings.mockResolvedValue({ maxWorkers: 16 });
+	vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5_000);
+
+	resolveConfig();
+	await vi.waitFor(() => expect(readSharedSettings).toHaveBeenCalledTimes(2));
+
+	expect(resolveConfig()).toMatchObject({ maxWorkers: 16 });
 });
