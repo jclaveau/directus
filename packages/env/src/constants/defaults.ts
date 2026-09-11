@@ -90,6 +90,11 @@ export const DEFAULTS = {
 	// platform-specific per-request headers here; globs allowed.
 	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: '',
 	CACHE_AUTO_FLUSH_ON_DEPLOY: true,
+	// How long `directus cache flush` waits before giving up. A command issued
+	// while Redis is unreachable waits on the next reconnect, and the retry policy
+	// spaces those out — the serverless recipe puts them 15 minutes apart — so
+	// without a deadline the deploy step calling it hangs instead of failing.
+	CACHE_FLUSH_TIMEOUT: '30s',
 	CACHE_CONTROL_S_MAXAGE: '0',
 	CACHE_SCHEMA: true,
 	CACHE_SCHEMA_MAX_ITERATIONS: 100,

@@ -1,7 +1,15 @@
 import { oneLine } from '@directus/utils';
 import type { ScopedCacheTag } from '@directus/types';
 import type Keyv from 'keyv';
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	onTestFinished,
+	test,
+	vi,
+} from 'vitest';
 
 // cache.ts captures `const env = useEnv()` at module load, so mutate one shared object
 // (never reassign) to keep that reference and getConfigFromEnv's useEnv() in sync.
@@ -9,17 +17,27 @@ const mockEnv = vi.hoisted(() => ({ current: {} as Record<string, any> }));
 const env = mockEnv.current;
 
 const redis = vi.hoisted(() => {
-	const pipeline = { sadd: vi.fn(), expire: vi.fn(), exec: vi.fn() };
+	const pipeline = {
+		sadd: vi.fn(),
+		expire: vi.fn(),
+		unlink: vi.fn(),
+		exec: vi.fn(async () => {
+			return pipeline.unlink.mock.calls.map(([keys]) => [null, keys.length]);
+		}),
+	};
+
 	// chainable pipeline
 	pipeline.sadd.mockReturnValue(pipeline);
 	pipeline.expire.mockReturnValue(pipeline);
+	pipeline.unlink.mockReturnValue(pipeline);
 
 	return {
 		isCluster: false,
 		smembers: vi.fn(),
-		del: vi.fn(),
 		srem: vi.fn(),
 		scan: vi.fn(async (): Promise<[string, string[]]> => ['0', []]),
+		get: vi.fn(async (): Promise<string | null> => '1'),
+		set: vi.fn(),
 		pipeline: vi.fn(() => pipeline),
 		_pipeline: pipeline,
 	};
@@ -38,17 +56,31 @@ vi.mock('@directus/env', () => ({ useEnv: () => mockEnv.current }));
 // so a test that needs the publish to fail has to own the same function it captured.
 const busPublish = vi.hoisted(() => vi.fn());
 
+// Subscribed once, at module load, so `clearAllMocks` wipes the calls that carried
+// the handlers long before a test asks for one. Held by channel so a test can drive
+// the subscriber side too.
+const busHandlers = vi.hoisted(() => {
+	return {} as Record<string, (payload: any) => Promise<void>>;
+});
+
 vi.mock('./bus/index.js', () => {
 	return {
-		useBus: () => ({ subscribe: vi.fn(), publish: busPublish }),
+		useBus: () => {
+			return {
+				subscribe: vi.fn((channel: string, handler: any) => {
+					busHandlers[channel] = handler;
+				}),
+				publish: busPublish,
+			};
+		},
 	};
 });
 
-vi.mock('./logger/index.js', () => {
-	return {
-		useLogger: () => ({ warn() {}, error() {}, info() {} }),
-	};
+const logger = vi.hoisted(() => {
+	return { warn: vi.fn(), error: vi.fn(), info: vi.fn() };
 });
+
+vi.mock('./logger/index.js', () => ({ useLogger: () => logger }));
 
 vi.mock('./emitter.js', () => ({ default: { emitFilter } }));
 
@@ -78,7 +110,18 @@ vi.mock('./redis/index.js', () => {
 	};
 });
 
-const { flushCaches, getCache, getRedisConnection } = await import('./cache.js');
+const {
+	clearCacheTargets,
+	clearSystemCache,
+	flushCaches,
+	getCache,
+	getRedisConnection,
+} = await import('./cache.js');
+
+// Snapshotted here: a later case re-imports cache.ts behind `vi.resetModules()`,
+// and that copy's subscriber overwrites the shared record with handlers closing
+// over its own cache singletons rather than the ones `getCache` above returns.
+const cacheHandlers = { ...busHandlers };
 
 const {
 	assertScopedCacheRedisSupported,
@@ -97,6 +140,16 @@ function setEnv(values: Record<string, unknown>) {
 
 afterEach(() => {
 	vi.clearAllMocks();
+
+	// Implementations survive `clearAllMocks`, so one case reaching for
+	// `mockRejectedValue` rather than its `Once` form leaves the shared stand-in
+	// rejecting for every case after it.
+	redis.scan.mockImplementation(async () => ['0', []] as [string, string[]]);
+	redis.get.mockImplementation(async () => '1');
+
+	redis._pipeline.exec.mockImplementation(async () => {
+		return redis._pipeline.unlink.mock.calls.map(([keys]) => [null, keys.length]);
+	});
 });
 
 describe('getRedisConnection', () => {
@@ -220,20 +273,20 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
+				'scalabus:scoped-cache-index:tag:articles',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:directus_users',
+				'scalabus:scoped-cache-index:tag:directus_users',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			// 2 × CACHE_TTL (5m = 300s) = 600s
 			expect(redis._pipeline.expire).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
+				'scalabus:scoped-cache-index:tag:articles',
 				600,
 			);
 
@@ -247,13 +300,13 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=A',
+				'scalabus:scoped-cache-index:tag:slots:student=A',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=7',
+				'scalabus:scoped-cache-index:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -266,7 +319,7 @@ describe('scoped cache purging', () => {
 
 			// The sentinel keeps SQL NULL distinct from a literal "null" string value.
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=\x00null',
+				'scalabus:scoped-cache-index:tag:slots:student=\x00null',
 				'resp-key',
 				'resp-key__expires_at',
 			);
@@ -287,14 +340,14 @@ describe('scoped cache purging', () => {
 			expect(redis._pipeline.sadd).toHaveBeenCalledTimes(2);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=7',
+				'scalabus:scoped-cache-index:tag:slots:student=7',
 				'resp-key',
 				'resp-key__expires_at',
 			);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:slices:slots',
-				'scalabus:tag:slots:student=7',
+				'scalabus:scoped-cache-index:slices:slots',
+				'scalabus:scoped-cache-index:tag:slots:student=7',
 			);
 		});
 
@@ -325,7 +378,7 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis._pipeline.sadd).toHaveBeenCalledWith(
-				'scalabus:tag:articles',
+				'scalabus:scoped-cache-index:tag:articles',
 				'resp-key',
 				'resp-key__expires_at',
 				'resp-key__tags',
@@ -338,7 +391,7 @@ describe('scoped cache purging', () => {
 			always purges the collection-level tag (global readers) alongside slices
 		`, async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'scalabus:tag:slots'
+				return tagKey === 'scalabus:scoped-cache-index:tag:slots'
 					? ['global-key']
 					: ['key-a', 'key-a__expires_at'];
 			});
@@ -349,15 +402,19 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 'A' },
 			]);
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots');
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=A');
+			expect(redis.smembers)
+				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots');
+
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:student=A');
+
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.delete).toHaveBeenCalledWith('key-a__expires_at');
 
-			expect(redis.del).toHaveBeenCalledWith([
-				'scalabus:tag:slots',
-				'scalabus:tag:slots:student=A',
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
+				'scalabus:scoped-cache-index:tag:slots',
+				'scalabus:scoped-cache-index:tag:slots:student=A',
 			]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -365,7 +422,7 @@ describe('scoped cache purging', () => {
 
 		test('records the purge, how wide it reached and what it took', async () => {
 			redis.smembers.mockImplementation(async (tagKey: string) => {
-				return tagKey === 'scalabus:tag:slots'
+				return tagKey === 'scalabus:scoped-cache-index:tag:slots'
 					? ['global-key', 'global-key__expires_at']
 					: ['key-a', 'key-a__expires_at', 'key-a__tags'];
 			});
@@ -435,14 +492,14 @@ describe('scoped cache purging', () => {
 
 		test('records the coarse fallback as the wider thing it is', async () => {
 			redis.smembers.mockImplementation(async (key: string) => {
-				if (key === 'scalabus:slices:articles') {
+				if (key === 'scalabus:scoped-cache-index:slices:articles') {
 					return [
-						'scalabus:tag:articles:author=1',
-						'scalabus:tag:articles:author=2',
+						'scalabus:scoped-cache-index:tag:articles:author=1',
+						'scalabus:scoped-cache-index:tag:articles:author=2',
 					];
 				}
 
-				return key === 'scalabus:tag:articles'
+				return key === 'scalabus:scoped-cache-index:tag:articles'
 					? ['global-key']
 					: ['slice-key'];
 			});
@@ -474,11 +531,11 @@ describe('scoped cache purging', () => {
 			// single purge operation, so a bucket count of purges stays a count of
 			// purges rather than tracking how wide each one happened to reach.
 			redis.smembers.mockImplementation(async (key: string) => {
-				return key === 'scalabus:slices:articles'
+				return key === 'scalabus:scoped-cache-index:slices:articles'
 					? [
-						'scalabus:tag:articles:author=1',
-						'scalabus:tag:articles:author=2',
-						'scalabus:tag:articles:author=3',
+						'scalabus:scoped-cache-index:tag:articles:author=1',
+						'scalabus:scoped-cache-index:tag:articles:author=2',
+						'scalabus:scoped-cache-index:tag:articles:author=3',
 					]
 					: [];
 			});
@@ -535,10 +592,11 @@ describe('scoped cache purging', () => {
 			]);
 
 			expect(redis.smembers).not.toHaveBeenCalledWith(
-				'scalabus:tag:slots:student=B',
+				'scalabus:scoped-cache-index:tag:slots:student=B',
 			);
 
-			expect(redis.del).not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
+			expect(redis._pipeline.unlink)
+				.not.toHaveBeenCalledWith(expect.stringContaining('student=B'));
 		});
 
 		test('no scoped cache tags purges only the collection-level tag', async () => {
@@ -547,10 +605,15 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles');
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
+			expect(redis.smembers)
+				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:articles');
+
 			expect(redis.smembers).toHaveBeenCalledOnce();
 			expect(cache.delete).toHaveBeenCalledTimes(3);
-			expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles']);
+
+			expect(redis._pipeline.unlink)
+			.toHaveBeenCalledWith(['scalabus:scoped-cache-index:tag:articles']);
+
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -559,14 +622,14 @@ describe('scoped cache purging', () => {
 			slice), sparing other collections
 		`, async () => {
 			redis.smembers.mockImplementation(async (key: string) => {
-				if (key === 'scalabus:slices:articles') {
+				if (key === 'scalabus:scoped-cache-index:slices:articles') {
 					return [
-						'scalabus:tag:articles:author=1',
-						'scalabus:tag:articles:author=2',
+						'scalabus:scoped-cache-index:tag:articles:author=1',
+						'scalabus:scoped-cache-index:tag:articles:author=2',
 					];
 				}
 
-				if (key === 'scalabus:tag:articles') {
+				if (key === 'scalabus:scoped-cache-index:tag:articles') {
 					return ['global-key'];
 				}
 
@@ -579,18 +642,24 @@ describe('scoped cache purging', () => {
 
 			// Its own index rather than a keyspace walk, which is also what keeps a
 			// prefix sibling (`articles_archive`) out of the purge.
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:slices:articles');
+			expect(redis.smembers)
+				.toHaveBeenCalledWith('scalabus:scoped-cache-index:slices:articles');
+
 			expect(redis.scan).not.toHaveBeenCalled();
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles');
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:articles:author=1');
+			expect(redis.smembers)
+				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:articles');
+
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:articles:author=1');
+
 			expect(cache.delete).toHaveBeenCalledWith('global-key');
 			expect(cache.delete).toHaveBeenCalledWith('slice-key');
 
-			expect(redis.del).toHaveBeenCalledWith([
-				'scalabus:tag:articles',
-				'scalabus:tag:articles:author=1',
-				'scalabus:tag:articles:author=2',
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
+				'scalabus:scoped-cache-index:tag:articles',
+				'scalabus:scoped-cache-index:tag:articles:author=1',
+				'scalabus:scoped-cache-index:tag:articles:author=2',
 			]);
 
 			expect(cache.clear).not.toHaveBeenCalled();
@@ -598,8 +667,11 @@ describe('scoped cache purging', () => {
 
 		test('the collection-wide purge takes every slice the index names', async () => {
 			redis.smembers.mockImplementation(async (key: string) => {
-				return key === 'scalabus:slices:articles'
-					? ['scalabus:tag:articles:author=1', 'scalabus:tag:articles:author=2']
+				return key === 'scalabus:scoped-cache-index:slices:articles'
+					? [
+						'scalabus:scoped-cache-index:tag:articles:author=1',
+						'scalabus:scoped-cache-index:tag:articles:author=2',
+					]
 					: [];
 			});
 
@@ -607,19 +679,19 @@ describe('scoped cache purging', () => {
 
 			await purgeScopedCache(cache, 'articles', null);
 
-			expect(redis.del).toHaveBeenCalledWith([
-				'scalabus:tag:articles',
-				'scalabus:tag:articles:author=1',
-				'scalabus:tag:articles:author=2',
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
+				'scalabus:scoped-cache-index:tag:articles',
+				'scalabus:scoped-cache-index:tag:articles:author=1',
+				'scalabus:scoped-cache-index:tag:articles:author=2',
 			]);
 
 			// The index is pruned by the same purge: left naming keys it just dropped,
 			// it would grow without bound and inflate every count taken off it.
 			expect(redis.srem).toHaveBeenCalledWith(
-				'scalabus:slices:articles',
+				'scalabus:scoped-cache-index:slices:articles',
 				[
-					'scalabus:tag:articles:author=1',
-					'scalabus:tag:articles:author=2',
+					'scalabus:scoped-cache-index:tag:articles:author=1',
+					'scalabus:scoped-cache-index:tag:articles:author=2',
 				],
 			);
 		});
@@ -650,22 +722,24 @@ describe('scoped cache purging', () => {
 				{ collection: 'slots', field: 'student', value: 7 },
 			]);
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:student=7');
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:student=7');
+
 			expect(cache.delete).toHaveBeenCalledWith('read-key');
 
-			expect(redis.del).toHaveBeenCalledWith([
-				'scalabus:tag:slots',
-				'scalabus:tag:slots:student=7',
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
+				'scalabus:scoped-cache-index:tag:slots',
+				'scalabus:scoped-cache-index:tag:slots:student=7',
 			]);
 		});
 
 		test(oneLine`
-			a cache.purge filter that empties the tag set deletes nothing and never calls
-			redis.del
+			a cache.purge filter that empties the tag set deletes nothing and never
+			unlinks
 		`, async () => {
-			// `redis.del()` with no keys throws; an extension is free to drop every
-			// tag, so the empty set must be a no-op rather than a crash (and must not
-			// degrade into a full flush).
+			// A delete with no keys throws; an extension is free to drop every tag, so
+			// the empty set must be a no-op rather than a crash (and must not degrade
+			// into a full flush).
 			emitFilter.mockImplementation(async () => []);
 
 			const cache = { clear: vi.fn(), delete: vi.fn() } as unknown as Keyv;
@@ -676,7 +750,7 @@ describe('scoped cache purging', () => {
 
 			expect(redis.smembers).not.toHaveBeenCalled();
 			expect(cache.delete).not.toHaveBeenCalled();
-			expect(redis.del).not.toHaveBeenCalled();
+			expect(redis._pipeline.unlink).not.toHaveBeenCalled();
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
 
@@ -699,11 +773,12 @@ describe('scoped cache purging', () => {
 				null,
 			);
 
-			expect(redis.smembers).toHaveBeenCalledWith('scalabus:tag:slots:owner=B');
+			expect(redis.smembers)
+			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:owner=B');
 
-			expect(redis.del).toHaveBeenCalledWith([
-				'scalabus:tag:slots',
-				'scalabus:tag:slots:owner=B',
+			expect(redis._pipeline.unlink).toHaveBeenCalledWith([
+				'scalabus:scoped-cache-index:tag:slots',
+				'scalabus:scoped-cache-index:tag:slots:owner=B',
 			]);
 		});
 
@@ -903,19 +978,50 @@ describe('flushCaches', () => {
 			CACHE_STORE: 'memory',
 		});
 
-		redis.scan.mockResolvedValueOnce(['0', ['scalabus:tag:articles:id=1']]);
+		redis.scan.mockResolvedValueOnce(
+			['0', ['scalabus:scoped-cache-index:tag:articles:id=1']],
+		);
 
 		await flushCaches(true);
 
+		// Not `scalabus:*`: `MATCH` filters server-side, so a pattern wider than the
+		// index shipped every cache-stats tombstone and fill-guard epoch key over the
+		// wire to be filtered out in the client. Measured on the dev keyspace, that
+		// was 84 keys crossing to unlink 0.
 		expect(redis.scan).toHaveBeenCalledWith(
 			'0',
 			'MATCH',
-			'scalabus:tag:*',
+			'scalabus:scoped-cache-index:*',
 			'COUNT',
-			250,
+			1000,
 		);
 
-		expect(redis.del).toHaveBeenCalledWith(['scalabus:tag:articles:id=1']);
+		expect(redis._pipeline.unlink)
+			.toHaveBeenCalledWith(['scalabus:scoped-cache-index:tag:articles:id=1']);
+	});
+
+	test(oneLine`
+		says what the flush cost — on the boot path this is time the container is not
+		serving, and the only line it used to write was that it had started
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockResolvedValueOnce(['0', [
+			'scalabus:scoped-cache-index:tag:articles',
+			'scalabus:scoped-cache-index:tag:articles:id=1',
+		]]);
+
+		await flushCaches(true);
+
+		expect(logger.info).toHaveBeenCalledWith(
+			expect.stringMatching(
+				/^\[cache\] flushed in \d+ms, dropped 2 scoped-cache index keys$/,
+			),
+		);
 	});
 
 	test(oneLine`
@@ -934,13 +1040,14 @@ describe('flushCaches', () => {
 			new Error('Reached the max retries per request limit (which is 20).'),
 		);
 
-		await expect(flushCaches(true)).resolves.toBeUndefined();
+		// Reported rather than thrown, and reported rather than swallowed: an
+		// operator-invoked flush that exits 0 having cleared nothing tells a deploy
+		// the caches are warm on the new data when every one of them is stale.
+		await expect(flushCaches(true)).resolves.toMatchObject({
+			failures: ['system cache'],
+		});
 	});
 
-	// `clearSystemCache` does not await the publish, so this pins that it stays that
-	// way: awaiting it would hand every caller — the migration runner included — a
-	// rejection during the one outage where the message could not be delivered
-	// anyway, on top of tiers it has already cleared.
 	test(oneLine`
 		survives a bus that cannot publish — the schemaChanged fan-out rides Redis, so
 		it is down in exactly the outage this has to live through, and a lost message
@@ -952,10 +1059,40 @@ describe('flushCaches', () => {
 			CACHE_STORE: 'memory',
 		});
 
-		busPublish.mockRejectedValueOnce(new Error('Connection is closed.'));
+		busPublish
+		.mockRejectedValueOnce(new Error('Connection is closed.'))
+		.mockRejectedValueOnce(new Error('Connection is closed.'));
 
-		await expect(flushCaches(true)).resolves.toBeUndefined();
-		expect(busPublish).toHaveBeenCalled();
+		// Both publishes ride the same bus and both fail, but only one is a flush
+		// failure: the `schemaChanged` fan-out is caught where it is sent, since the
+		// mutations that trigger it have already committed. The outage still shows
+		// up, under the `cacheCleared` publish this call makes itself.
+		await expect(flushCaches(true)).resolves.toMatchObject({
+			failures: ['peer notification'],
+		});
+
+		expect(busPublish).toHaveBeenCalledTimes(2);
+	});
+
+	// A peer on a memory store holds its own response and system tiers, and
+	// `schemaChanged` reaches neither: its handler drops the response cache only
+	// under CACHE_AUTO_PURGE, and never touches `_system` at all. Those nodes kept
+	// serving the reads this call exists to retire.
+	test(oneLine`
+		tells the other nodes which tiers went, so a peer on a memory store drops the
+		copies only it holds
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		await flushCaches(true);
+
+		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
+			targets: ['response', 'system'],
+		});
 	});
 
 	test(oneLine`
@@ -971,6 +1108,333 @@ describe('flushCaches', () => {
 
 		redis.scan.mockRejectedValue(new Error('Connection is closed.'));
 
-		await expect(flushCaches(true)).resolves.toBeUndefined();
+		const report = await flushCaches(true);
+
+		expect(report.failures).toEqual(['scoped-cache index']);
+		expect(report.droppedIndexKeys).toBe(0);
+	});
+
+	test(oneLine`
+		reports a response cache it could not clear rather than throwing it at the
+		migration runner, which calls this uncaught right after recording the version
+		it applied
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const { cache } = getCache();
+
+		// Restored by hand: `clearAllMocks` empties a spy without uninstalling it,
+		// leaving every later clear of this same instance a silent no-op.
+		const refuse = vi.spyOn(cache!, 'clear')
+			.mockRejectedValueOnce(new Error('Connection is closed.'));
+
+		onTestFinished(() => refuse.mockRestore());
+
+		await expect(flushCaches(true)).resolves.toMatchObject({
+			failures: ['response cache'],
+		});
+	});
+
+	test(oneLine`
+		reports an index whose unlink redis refused — a pipeline answers per command,
+		so a chunk that failed is a chunk still there, and a count alone cannot tell
+		that from an index that was already empty
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan.mockResolvedValueOnce(
+			['0', ['scalabus:scoped-cache-index:tag:articles']],
+		);
+
+		redis._pipeline.exec.mockResolvedValueOnce([
+			[new Error('MISCONF Redis is configured to save RDB snapshots'), null],
+		]);
+
+		const report = await flushCaches(true);
+
+		expect(report.failures).toEqual(['scoped-cache index']);
+		expect(report.droppedIndexKeys).toBe(0);
+	});
+
+	test(oneLine`
+		walks the index keyspace once, not once per kind — the layout this replaced
+		took a pass for the tags and another for the slices, and a SCAN pass costs the
+		whole keyspace whatever it matches
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		await flushCaches(true);
+
+		expect(redis.scan).toHaveBeenCalledTimes(1);
+
+		expect(redis.scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'scalabus:scoped-cache-index:*',
+			'COUNT',
+			1000,
+		);
+	});
+
+	test(oneLine`
+		unlinks each scan batch as it arrives rather than buffering the whole index
+		keyspace — the array is the one thing here that grows with the cache
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		redis.scan
+		.mockResolvedValueOnce(['42', ['scalabus:scoped-cache-index:tag:articles']])
+		.mockResolvedValueOnce(['0', ['scalabus:scoped-cache-index:tag:authors']]);
+
+		await flushCaches(true);
+
+		expect(redis._pipeline.unlink).toHaveBeenCalledTimes(2);
+	});
+
+	test(oneLine`
+		says the cost as an outcome rather than as a second opinion — a line reading
+		"flushed" under the warn saying it was not answers the same question twice
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_STORE: 'memory',
+		});
+
+		clearPermissionCache.mockRejectedValueOnce(
+			new Error('Reached the max retries per request limit (which is 20).'),
+		);
+
+		await flushCaches(true);
+
+		expect(logger.info).not.toHaveBeenCalled();
+
+		const [line] = logger.warn.mock.calls.at(-1)!;
+
+		expect(line).toMatch(/^\[cache\] flushed in \d+ms, dropped 0 scoped/);
+		expect(line).toMatch(/index keys, without system cache$/);
+	});
+});
+
+describe('a bus that cannot publish', () => {
+	beforeEach(() => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		busPublish.mockRejectedValue(new Error('Connection is closed.'));
+	});
+
+	// 23 call sites reach this from a mutation whose write already committed, and
+	// `collections.ts` calls it from a `finally`, where a throw replaces the
+	// outcome it was running after — including the error it was already carrying.
+	test('does not fail the schema change that asked for the fan-out', async () => {
+		await expect(clearSystemCache()).resolves.toBeUndefined();
+		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	test('does not fail the flush an operator asked for', async () => {
+		await expect(clearCacheTargets(['response'])).resolves.toBeUndefined();
+		expect(logger.warn).toHaveBeenCalled();
+	});
+});
+
+describe('the cacheCleared broadcast', () => {
+	function watchClears() {
+		const { cache, systemCache } = getCache();
+
+		// Asserted on the call rather than on what the tier holds: these Keyv
+		// instances are module singletons the whole file shares, so a value written
+		// here is at the mercy of whatever built them first.
+		const response = vi.spyOn(cache!, 'clear').mockResolvedValue(undefined);
+		const system = vi.spyOn(systemCache, 'clear').mockResolvedValue(undefined);
+
+		onTestFinished(() => {
+			response.mockRestore();
+			system.mockRestore();
+		});
+
+		return { response, system };
+	}
+
+	test(oneLine`
+		is the only thing that drops a memory-store peer's response tier once
+		CACHE_AUTO_PURGE is off — with it on, the schemaChanged handler already did,
+		which is why a peer arm left it on proves nothing
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+			CACHE_AUTO_PURGE: false,
+		});
+
+		const { response } = watchClears();
+
+		await cacheHandlers['schemaChanged']!({ autoPurgeCache: undefined });
+		expect(response).not.toHaveBeenCalled();
+
+		await cacheHandlers['cacheCleared']!({ targets: ['response', 'system'] });
+		expect(response).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		is not what drops that peer's response tier when CACHE_AUTO_PURGE is on: the
+		schemaChanged handler this flush already published gets there first, so a peer
+		arm that leaves it on passes with the broadcast removed
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+			CACHE_AUTO_PURGE: true,
+		});
+
+		const { response } = watchClears();
+
+		await cacheHandlers['schemaChanged']!({ autoPurgeCache: undefined });
+
+		expect(response).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		is the only thing that drops that peer's system tier, whatever
+		CACHE_AUTO_PURGE says — schemaChanged never touches the _system tier, so this
+		is the half of the broadcast a response-tier arm cannot stand in for
+	`, async () => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_SYSTEM_TTL: '5m',
+			CACHE_STORE: 'memory',
+			CACHE_AUTO_PURGE: true,
+		});
+
+		const { system } = watchClears();
+
+		await cacheHandlers['schemaChanged']!({ autoPurgeCache: undefined });
+		expect(system).not.toHaveBeenCalled();
+
+		await cacheHandlers['cacheCleared']!({ targets: ['response', 'system'] });
+		expect(system).toHaveBeenCalled();
+	});
+});
+
+describe('clearCacheTargets', () => {
+	beforeEach(() => {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+	});
+
+	function refuseTheIndexUnlink() {
+		redis.scan.mockResolvedValueOnce(
+			['0', ['scalabus:scoped-cache-index:tag:articles']],
+		);
+
+		redis._pipeline.exec.mockResolvedValueOnce([
+			[new Error('MISCONF Redis is configured to save RDB snapshots'), null],
+		]);
+	}
+
+	// Unlike the flush this wraps, this one has somebody waiting on the answer: an
+	// admin who asked for the clear and is told 200 either way reads a half-dropped
+	// index as a finished job, and what survived it stays invisible.
+	test('fails a clear whose index unlink redis refused', async () => {
+		refuseTheIndexUnlink();
+
+		await expect(clearCacheTargets(['response'])).rejects.toThrowError(
+			/scoped-cache index/,
+		);
+	});
+
+	test(oneLine`
+		tells the other nodes before it says so — the tiers it did clear are cleared
+		whatever it then reports, and a peer left holding them is the worse outcome
+	`, async () => {
+		refuseTheIndexUnlink();
+
+		await expect(clearCacheTargets(['response'])).rejects.toThrowError();
+
+		expect(busPublish).toHaveBeenCalledWith('cacheCleared', {
+			targets: ['response'],
+		});
+	});
+});
+
+describe('what the flush duration counts', () => {
+	// `startedAt` sat after `getCache()`, whose first call builds the four Keyv
+	// tiers — on the boot path exactly the work the caller waits through, and the
+	// one run where the number was worth reading.
+	test('the cache build the first call has to do', async () => {
+		let clock = 0;
+		const now = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+
+		vi.resetModules();
+
+		vi.doMock('keyv', () => {
+			return {
+				default: class {
+					store = {};
+					constructor() {
+						clock += 5;
+					}
+
+					on() {}
+					async get() {}
+					async set() {}
+					async delete() {}
+					async clear() {}
+				},
+			};
+		});
+
+		onTestFinished(async () => {
+			now.mockRestore();
+			vi.doUnmock('keyv');
+			vi.resetModules();
+			await import('./cache.js');
+		});
+
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const reloaded = await import('./cache.js');
+
+		// Only the first call builds anything, so this is the run that has to count
+		// it — a second one would measure a flush over caches already standing.
+		const report = await reloaded.flushCaches(true);
+
+		expect(report.durationMs).toBeGreaterThan(0);
 	});
 });

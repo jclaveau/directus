@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache } from './cache.js';
-import { dropScopedCacheTagIndex } from './scoped-cache.js';
+import { dropScopedCacheIndex } from './scoped-cache.js';
 
 // hoisted: cache.ts reads `const env = useEnv()` at module load, before a plain
 // `const env` below would be initialised (temporal dead zone).
@@ -16,7 +16,15 @@ const env = vi.hoisted(() => {
 
 vi.mock('@directus/env', () => ({ useEnv: () => env }));
 vi.mock('./redis/index.js', () => ({ redisConfigAvailable: () => false }));
-vi.mock('./scoped-cache.js', () => ({ dropScopedCacheTagIndex: vi.fn() }));
+
+// Answers with a tally rather than with nothing: `clearCacheTargets` reads
+// `refused` off it to decide whether the clear it was asked for actually happened.
+vi.mock('./scoped-cache.js', () => {
+	return {
+		dropScopedCacheIndex: vi.fn(async () => ({ dropped: 0, refused: 0 })),
+	};
+});
+
 vi.mock('./permissions/cache.js', () => ({ clearCache: vi.fn() }));
 vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
 vi.mock('./utils/validate-env.js', () => ({ validateEnv: vi.fn() }));
@@ -54,7 +62,7 @@ describe('clearCacheTargets', () => {
 		expect(await cache.get('response-key')).toBeUndefined();
 		expect(await systemCache.get('system-key')).toBe('s');
 		expect(await lockCache.get('lock-key')).toBe('l');
-		expect(dropScopedCacheTagIndex).toHaveBeenCalledOnce();
+		expect(dropScopedCacheIndex).toHaveBeenCalledOnce();
 	});
 
 	it('system: clears the system cache and fans out via schemaChanged', async () => {
@@ -64,7 +72,7 @@ describe('clearCacheTargets', () => {
 
 		expect(await systemCache.get('system-key')).toBeUndefined();
 		expect(await cache.get('response-key')).toBe('r');
-		expect(dropScopedCacheTagIndex).not.toHaveBeenCalled();
+		expect(dropScopedCacheIndex).not.toHaveBeenCalled();
 
 		expect(mockBus.publish).toHaveBeenCalledWith(
 			'schemaChanged',
