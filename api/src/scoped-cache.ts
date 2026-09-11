@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { ServiceUnavailableError } from '@directus/errors';
 import type {
 	EventContext,
 	Filter,
@@ -621,7 +622,19 @@ async function purgeScopedCacheTagKeys(
 
 	// One key per tag purged, so the same unbounded-single-command problem a full
 	// flush has, on the hot mutation path.
-	await unlinkScopedCacheKeys(tagKeys);
+	const { refused } = await unlinkScopedCacheKeys(tagKeys);
+
+	// Raised rather than tallied like the full flush does: this path has
+	// `purgeOrRecord` behind it, and a refused command is a tag still indexed that
+	// only the retry a throw files will reach. The failures it covers are the ones
+	// the SMEMBERS above got through — `maxmemory` with `noeviction`, a demoted
+	// primary — where reads answer and writes do not.
+	if (refused > 0) {
+		throw new ServiceUnavailableError({
+			service: 'scoped-cache index',
+			reason: `redis refused ${refused} of the unlink commands`,
+		});
+	}
 
 	// Drop the purged slice keys from their collection's index: one pruned only
 	// wholesale keeps naming keys that are gone, and grows without bound. A

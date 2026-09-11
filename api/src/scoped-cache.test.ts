@@ -919,6 +919,37 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
+		keeps the record when redis REFUSES the unlink rather than dropping the
+		connection, which is how a pipeline reports the failures a purge survives to see
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+
+		// A pipeline answers per command, so this resolves where a dropped connection
+		// rejects — the shape `maxmemory` with `noeviction` and a demoted primary both
+		// take, where the SMEMBERS above is served and the write behind it is not.
+		purgePipeline.exec
+			.mockResolvedValueOnce([[new Error('OOM command not allowed'), null]]);
+
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+
+		expect(countFailedScopedCachePurgeRetry)
+			.toHaveBeenCalledWith([7], expect.any(Error));
+
+		expect(clearPendingScopedCachePurges).not.toHaveBeenCalledWith([7]);
+
+		// The tag stayed indexed, so the slice naming it has to stay too: pruning it
+		// here would orphan the key the retry comes back for.
+		expect(redis.srem).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
 		still purges when naming the stale entries fails — the report is best-effort and
 		the purge is the correctness step, so a descriptor read must not gate it
 	`, async () => {
