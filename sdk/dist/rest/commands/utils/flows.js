@@ -1,0 +1,2 @@
+const e=(e,t,n)=>()=>e===`GET`?{path:`/flows/trigger/${t}`,params:n??{},method:`GET`}:{path:`/flows/trigger/${t}`,body:JSON.stringify(n??{}),method:`POST`};export{e as triggerFlow};
+//# sourceMappingURL=flows.js.map

@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/shares`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/shares`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createShare=t,exports.createShares=e;
+//# sourceMappingURL=shares.cjs.map

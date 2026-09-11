@@ -1,0 +1,2 @@
+function e(e){return typeof e!=`object`||!e?!1:`headers`in e&&`ok`in e&&`json`in e&&typeof e.json==`function`&&`text`in e&&typeof e.json==`function`}exports.isFetchResponse=e;
+//# sourceMappingURL=is-response.cjs.map

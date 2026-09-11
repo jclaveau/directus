@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=t=>()=>{let n={};return Array.isArray(t)?(e(t,`keysOrQuery cannot be empty`),n={keys:t}):(e(Object.keys(t),`keysOrQuery cannot be empty`),n={query:t}),{path:`/comments`,body:JSON.stringify(n),method:`DELETE`}},n=t=>()=>(e(String(t),`Key cannot be empty`),{path:`/comments/${t}`,method:`DELETE`});export{n as deleteComment,t as deleteComments};
+//# sourceMappingURL=comments.js.map

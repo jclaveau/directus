@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/comments`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/comments/${t}`,params:n??{},method:`GET`});export{n as readComment,t as readComments};
+//# sourceMappingURL=comments.js.map

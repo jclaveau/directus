@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/folders`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/folders/${t}`,params:n??{},method:`GET`});export{n as readFolder,t as readFolders};
+//# sourceMappingURL=folders.js.map

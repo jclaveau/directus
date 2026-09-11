@@ -1,0 +1,2 @@
+import{queryToParams as e}from"../rest/utils/query-to-params.js";import"../index.js";const t=(e,t)=>(e.endsWith(`/`)&&(e=e.slice(0,-1)),t.startsWith(`/`)||(t=`/`+t),e+t),n=(n,r,i)=>{let a=n.pathname===`/`?r:t(n.pathname,r),o=new globalThis.URL(a,n);if(i)for(let[t,n]of Object.entries(e(i)))if(n&&typeof n==`object`&&!Array.isArray(n))for(let[e,r]of Object.entries(n))o.searchParams.set(`${t}[${e}]`,String(r));else o.searchParams.set(t,n);return o};export{n as getRequestUrl};
+//# sourceMappingURL=get-request-url.js.map

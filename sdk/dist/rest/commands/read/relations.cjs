@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=()=>()=>({path:`/relations`,method:`GET`}),n=e=>()=>({path:`/relations/${e}`,method:`GET`}),r=(t,n)=>()=>(e.throwIfEmpty(t,`Collection cannot be empty`),e.throwIfEmpty(n,`Field cannot be empty`),{path:`/relations/${t}/${n}`,method:`GET`});exports.readRelation=r,exports.readRelationByCollection=n,exports.readRelations=t;
+//# sourceMappingURL=relations.cjs.map
