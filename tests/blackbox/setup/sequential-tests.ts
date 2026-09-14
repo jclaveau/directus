@@ -89,6 +89,13 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// The same shape again — its own Directus, its own pm2 daemon, and a
 			// collection window a loaded parallel middle would run out.
 			'/tests/db/app/autoscale-mcp-levers.test.ts',
+			// A Directus, a pm2 daemon and an autoscaler, and the claim is what
+			// one says about the other two — a suite beside it scaling its own
+			// pool reports on the same bus.
+			'/tests/db/app/autoscale-pool-health.test.ts',
+			// And again, with the pool being what the Directus beside it is
+			// waiting on before it will report itself ready at all.
+			'/tests/db/app/autoscale-prewarm-health.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 		],
 		// If specified, only run these tests sequentially

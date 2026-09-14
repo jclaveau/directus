@@ -1,19 +1,24 @@
+import vendors from '@common/get-dbs-to-test';
 import Redis from 'ioredis';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+	closeSharedSettings,
 	countWorkers,
+	databaseEnv,
 	declaredEverywhere,
 	poolSize,
 	reportOf,
 	startAutoscaler,
 	startPool,
 	stopRig,
+	storeSharedSettings,
 	type Rig,
 } from './autoscale/rig';
 
 // Six pm2 options are changeable from the admin panel, and every one of them
-// travels the same route: stored in Redis, picked up by the rolling restart
-// that carries it, pushed as a declaration the replacement worker boots under.
+// travels the same route: stored in the settings, picked up by the rolling
+// restart that carries it, pushed as a declaration the replacement worker
+// boots under.
 //
 // That last step is a claim about pm2's own internals — it checks a reload's
 // options against its command-line schema and drops what it does not find
@@ -21,20 +26,18 @@ import {
 // been checked already. Nothing below the supervisor can falsify that, which
 // is why it is asserted here against a real daemon rolling real workers.
 //
-// The Redis on 6108 is shared, so the rig owns a namespace and its key.
+// One vendor: the options are stored the same way whatever holds them, and the
+// rig that can tell costs a pm2 daemon rolling real workers.
+const vendor = vendors[0]!;
+
 const REDIS_PORT = 6108;
 
 // What `useBus` publishes on: the channel is namespaced by the bus rather than
 // by the deployment, so it is the same one for every process on this Redis.
 const RELOAD_CHANNEL = 'directus:bus:autoscaleReload';
 
-function supervisorKey(namespace: string): string {
-	return `${namespace}:config:processes:supervisor`;
-}
-
 describe('A restart carries the supervisor options stored for it', () => {
 	const redis = new Redis({ host: 'localhost', port: REDIS_PORT });
-	const namespace = 'bb-autoscale-supervisor-options';
 	const rigs: Rig[] = [];
 
 	afterAll(async () => {
@@ -42,7 +45,8 @@ describe('A restart carries the supervisor options stored for it', () => {
 			stopRig(rig);
 		}
 
-		await redis.del(supervisorKey(namespace));
+		await storeSharedSettings(vendor, 'supervisor_settings', null);
+		await closeSharedSettings();
 		redis.disconnect();
 	});
 
@@ -55,10 +59,10 @@ describe('A restart carries the supervisor options stored for it', () => {
 	// that the size below can only be reached by a loop that is running, which
 	// is a loop that has already subscribed.
 	it('waits for a loop that has subscribed to the restarts', async () => {
-		await redis.del(supervisorKey(namespace));
+		await storeSharedSettings(vendor, 'supervisor_settings', null);
 
 		// The ecosystem declares 10s and the environment asks for 12s, so the
-		// three values an arm can see are all distinct: 21s is the shared config,
+		// three values an arm can see are all distinct: 21s is what is stored,
 		// 12s is the environment a release goes back to, and 10s is a restart
 		// that pushed nothing at all.
 		rig = startPool({
@@ -71,10 +75,10 @@ describe('A restart carries the supervisor options stored for it', () => {
 		rigs.push(rig);
 
 		startAutoscaler(rig, {
+			...databaseEnv(vendor),
 			REDIS_ENABLED: 'true',
 			REDIS_HOST: 'localhost',
 			REDIS_PORT: String(REDIS_PORT),
-			CACHE_NAMESPACE: namespace,
 			PM2_LISTEN_TIMEOUT: '12000',
 			// Bounds that meet above the size the pool booted at, so the climb
 			// is the floor's doing and no threshold can move it afterwards:
@@ -97,10 +101,10 @@ describe('A restart carries the supervisor options stored for it', () => {
 	}, 90_000);
 
 	it('pushes a stored option to every worker it replaces', async () => {
-		await redis.set(
-			supervisorKey(namespace),
-			JSON.stringify({ listenTimeout: 21_000, setBy: 'blackbox' }),
-		);
+		await storeSharedSettings(vendor, 'supervisor_settings', {
+			listenTimeout: 21_000,
+			setBy: 'blackbox',
+		});
 
 		await redis.publish(RELOAD_CHANNEL, JSON.stringify({ at: Date.now() }));
 
@@ -116,10 +120,11 @@ describe('A restart carries the supervisor options stored for it', () => {
 	}, 150_000);
 
 	// pm2 keeps whatever the last roll pushed, so a field taken out of the
-	// shared config reverts only because the next restart declares the environment's
-	// value in its place. Without that this arm would find 21s still there.
+	// stored options reverts only because the next restart declares the
+	// environment's value in its place. Without that this arm would find 21s
+	// still there.
 	it('hands a released option back to the environment', async () => {
-		await redis.del(supervisorKey(namespace));
+		await storeSharedSettings(vendor, 'supervisor_settings', null);
 		await redis.publish(RELOAD_CHANNEL, JSON.stringify({ at: Date.now() }));
 
 		expect(

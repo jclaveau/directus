@@ -406,8 +406,15 @@ router.post(
 	}),
 );
 
-// The shared config lives in Redis, so a deployment without one has nowhere to
-// keep a change and says so by not carrying the endpoint at all.
+// These serve one panel, and its subject is a pool this worker reaches only
+// over the bus — which without Redis is an emitter it shares with nobody. The
+// process that scales is found over it and the restart below is asked for over
+// it, so a deployment without Redis carries no panel rather than a page showing
+// a form where the pool it describes should be.
+//
+// Not the only door onto what the panel writes: these settings are columns of
+// `directus_settings`, so a settings write reaches them in any deployment, and
+// the guard on that write is what holds the two doors to the same answer.
 if (redisConfigAvailable()) {
 	router.get(
 		'/autoscale',
@@ -486,7 +493,7 @@ if (redisConfigAvailable()) {
 			});
 
 			await service.clearAutoscaleConfig();
-			res.status(200).json({ data: { sharedConfig: null } });
+			res.status(200).json({ data: { sharedSettings: null } });
 			return;
 		}),
 	);

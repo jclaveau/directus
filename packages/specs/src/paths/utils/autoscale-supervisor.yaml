@@ -23,7 +23,7 @@ patch:
             type: object
             properties:
               data:
-                $ref: '../../openapi.yaml#/components/schemas/AutoscaleSharedConfigAnswer'
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleSharedSettingsAnswer'
       description: Successful request
   tags:
     - Autoscaling

@@ -67,7 +67,25 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-supervisor-options.test.ts': 90_000,
 	// Spawns two processes and asks one question of them.
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
-	'/tests/db/app/autoscale-config-validation.test.ts': 20_000,
+	'/tests/db/app/autoscale-config-validation.test.ts': 30_000,
+	// Three boots that end at the check and one that goes all the way
+	// through, each a full module load. Measured over the postgres run of
+	// 2026-09-14.
+	'/tests/db/app/autoscale-boolean-env.test.ts': 12_000,
+	// A boot, a pool losing a worker, and an autoscaler started after it to
+	// report on. Measured over the postgres run of 2026-09-14.
+	'/tests/db/app/autoscale-pool-health.test.ts': 13_000,
+	// Two deployments, each booting a Directus and a pool for it, one of them
+	// waiting out the hold it is asserting. Measured over the postgres run of
+	// 2026-09-14.
+	'/tests/db/app/autoscale-prewarm-health.test.ts': 80_000,
+	// One CLI command per vendor: a module load, a query, and the few
+	// milliseconds the rejection it boots through takes to arrive.
+	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,
+	// A whole Directus booted with no Redis at all and waited on until it
+	// answers, then an autoscaler booted and cut off from its database. Both
+	// spawns answer in seconds; what the run measures is the boots.
+	'/tests/db/app/processes-missing-dependency.test.ts': 10_000,
 	'/tests/db/app/autoscale-drill.test.ts': 25_000,
 	'/tests/db/app/autoscale-mcp-levers.test.ts': 120_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,

@@ -1,8 +1,6 @@
 import { type AutoscaleBound, SUPERVISOR_BOUNDS } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError } from '@directus/errors';
-import { useRedis } from '../../../redis/index.js';
-import { supervisorSharedConfigKey } from './resolve-config.js';
 
 /**
  * The pm2 options a rolling restart can carry.
@@ -12,7 +10,7 @@ import { supervisorSharedConfigKey } from './resolve-config.js';
  * replacement boots under. Pool size and execution mode are not here: neither
  * survives that route, and the size is the loop's to decide anyway.
  */
-export interface SupervisorSharedConfig {
+export interface SupervisorSharedSettings {
 	[field: string]: unknown;
 }
 
@@ -33,9 +31,9 @@ const ENTRIES: Record<string, string> = {
 const BOUNDS: Record<string, AutoscaleBound> = SUPERVISOR_BOUNDS;
 
 /**
- * What the shared config carries besides the values themselves, kept out of what is
- * handed to pm2 — the same stamp the configuration shared config takes, and for the
- * same reason: a shared config outlives the incident that justified it.
+ * What the shared settings carry besides the values themselves, kept out of
+ * what is handed to pm2 — the same stamp the configuration's shared settings
+ * take, and for the same reason: they outlive the incident that justified them.
  */
 const NOTE_FIELDS = ['setBy', 'setAt', 'setFrom', 'note'];
 
@@ -59,42 +57,6 @@ const ENV_VARIABLES: Record<string, string> = {
 	maxRestarts: 'PM2_MAX_RESTARTS',
 	maxMemoryRestartMegabytes: 'PM2_MAX_MEMORY_RESTART',
 };
-
-export async function readSupervisorSharedConfig(): Promise<
-	SupervisorSharedConfig | null
-> {
-	const stored = await useRedis().get(supervisorSharedConfigKey());
-
-	if (!stored) {
-		return null;
-	}
-
-	try {
-		const parsed: unknown = JSON.parse(stored);
-
-		return typeof parsed === 'object' && parsed !== null
-			? parsed as SupervisorSharedConfig
-			: null;
-	}
-	catch {
-		// A key edited by hand into something unparseable is reported as no
-		// shared config, which is what a restart makes of it too.
-		return null;
-	}
-}
-
-export async function writeSupervisorSharedConfig(
-	sharedConfig: SupervisorSharedConfig | null,
-): Promise<void> {
-	const redis = useRedis();
-
-	if (sharedConfig === null) {
-		await redis.del(supervisorSharedConfigKey());
-		return;
-	}
-
-	await redis.set(supervisorSharedConfigKey(), JSON.stringify(sharedConfig));
-}
 
 /**
  * The patch, checked field by field.
@@ -134,7 +96,7 @@ export function parseSupervisorPatch(
 		}
 
 		// Null hands one field back to the environment, which is how a single
-		// value is released without dropping the whole shared config.
+		// value is released without dropping the whole shared settings.
 		if (value === null) {
 			parsed[field] = null;
 			continue;
@@ -159,17 +121,17 @@ export function parseSupervisorPatch(
 }
 
 /**
- * The shared config with the patch applied, a `null` value removing its field.
+ * The shared settings with the patch applied, a `null` value removing its field.
  *
- * A shared config holding nothing but its own stamp is removed altogether, so
- * a page reading it back does not show a supervisor as carrying one while every
- * value it runs on came from the environment.
+ * Shared settings holding nothing but their own stamp are removed altogether,
+ * so a page reading them back does not show a supervisor as carrying some
+ * while every value it runs on came from the environment.
  */
 export function applySupervisorPatch(
-	sharedConfig: SupervisorSharedConfig | null,
+	sharedSettings: SupervisorSharedSettings | null,
 	patch: Record<string, unknown>,
-): SupervisorSharedConfig | null {
-	const merged: SupervisorSharedConfig = { ...sharedConfig };
+): SupervisorSharedSettings | null {
+	const merged: SupervisorSharedSettings = { ...sharedSettings };
 
 	for (const [field, value] of Object.entries(patch)) {
 		if (value === null) {
@@ -246,20 +208,21 @@ function fromEnv(field: string): number | null {
 /**
  * Every option a restart carries, as pm2 names them.
  *
- * The full set every time, not only what the shared config holds: pm2 keeps the
- * extended declaration on the running process, so a field released from the
- * shared config goes back to the environment's value only if the restart says so.
+ * The full set every time, not only what the shared settings hold: pm2 keeps
+ * the extended declaration on the running process, so a field released from
+ * the shared settings goes back to the environment's value only if the restart
+ * says so.
  */
 export function reloadDeclaration(
-	sharedConfig: SupervisorSharedConfig | null,
+	sharedSettings: SupervisorSharedSettings | null,
 ): Record<string, number> {
 	const declaration: Record<string, number> = {};
 
 	for (const [field, entry] of Object.entries(ENTRIES)) {
-		const sharedConfigValue = sharedConfig?.[field];
+		const sharedSettingsValue = sharedSettings?.[field];
 
-		const value = typeof sharedConfigValue === 'number'
-			? sharedConfigValue
+		const value = typeof sharedSettingsValue === 'number'
+			? sharedSettingsValue
 			: fromEnv(field);
 
 		if (value === null) {

@@ -24,7 +24,20 @@ vi.mock('../index.js', () => {
 });
 
 vi.mock('../../utils/report-unhandled-rejection.js', () => {
-	return { reportUnhandledRejection: vi.fn() };
+	const report = vi.fn();
+
+	// Taken for real rather than stubbed: what the arms below read is the
+	// listener the process ends up carrying, which is the whole claim.
+	return {
+		reportUnhandledRejection: report,
+		guardUnhandledRejections: () => {
+			if (process.listeners('unhandledRejection').includes(report)) {
+				return;
+			}
+
+			process.on('unhandledRejection', report);
+		},
+	};
 });
 
 const connectToSupervisor = vi.fn(async () => undefined);
@@ -54,12 +67,18 @@ vi.mock('./lib/reload.js', () => {
 	return { beginAskedReload, initAutoscaleReload, reloadState, reloading };
 });
 
+const initSharedSettingsMirror = vi.fn(async () => undefined);
 const resolveConfig = vi.fn();
 const resolvedSources = vi.fn(() => ({}));
-const resolvedWithoutSharedConfig = vi.fn(() => null);
+const resolvedWithoutSharedSettings = vi.fn(() => null);
 
 vi.mock('./lib/resolve-config.js', () => {
-	return { resolveConfig, resolvedSources, resolvedWithoutSharedConfig };
+	return {
+		initSharedSettingsMirror,
+		resolveConfig,
+		resolvedSources,
+		resolvedWithoutSharedSettings,
+	};
 });
 
 const decide = vi.fn((): { workers: number | null; reason: string } => {
@@ -132,7 +151,7 @@ beforeEach(() => {
 	restarted.mockReturnValue(false);
 	reloading.mockReturnValue(false);
 	decide.mockReturnValue({ workers: null, reason: 'steady' });
-	resolveConfig.mockResolvedValue(config);
+	resolveConfig.mockReturnValue(config);
 
 	readPool.mockResolvedValue({
 		pendingWorkers: 0,
@@ -214,7 +233,7 @@ describe('runAutoscaler', () => {
 	// pool, which are both signals the loop reads as a pool in trouble.
 	test('takes no decision while the pool is being restarted', async () => {
 		reloading.mockReturnValue(true);
-		resolveConfig.mockResolvedValue({ ...config, prewarmWorkers: 3 });
+		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
 		decide.mockReturnValue({ workers: 3, reason: 'cpu above the threshold' });
 
 		await ticks(2);
@@ -226,7 +245,7 @@ describe('runAutoscaler', () => {
 	});
 
 	test('prewarms a pool fresh out of a deploy, once', async () => {
-		resolveConfig.mockResolvedValue({ ...config, prewarmWorkers: 3 });
+		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
 
 		await ticks(2);
 
@@ -245,7 +264,7 @@ describe('runAutoscaler', () => {
 	// crash-looping before the autoscaler arrived, and prewarm would hand it a
 	// batch of workers to crash.
 	test('does not prewarm a pool that is already crash-looping', async () => {
-		resolveConfig.mockResolvedValue({ ...config, prewarmWorkers: 3 });
+		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
 
 		readPool.mockResolvedValue({
 			pendingWorkers: 0,
@@ -280,15 +299,54 @@ describe('runAutoscaler', () => {
 	// A tick that throws is a tick that was skipped: ending the loop would
 	// leave the pool frozen at whatever size the failure caught it in.
 	test('skips a tick that failed rather than ending', async () => {
-		resolveConfig.mockRejectedValueOnce(new Error('redis is gone'));
+		resolveConfig.mockImplementationOnce(() => {
+			throw new Error('the pool could not be read');
+		});
 
 		await ticks(2);
 
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ message: 'redis is gone' }),
+			expect.objectContaining({ message: 'the pool could not be read' }),
 			'[autoscale] a tick failed',
 		);
 
 		expect(recordAutoscaleTick).toHaveBeenCalledOnce();
+	});
+});
+
+describe('targetPoolSize', () => {
+	const config = {
+		enabled: true,
+		minWorkers: 1,
+		maxWorkers: 4,
+		prewarmWorkers: 0,
+	} as AutoscaleConfig;
+
+	test('is the floor where no prewarm was asked for', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		expect(targetPoolSize({ ...config, minWorkers: 2 })).toBe(2);
+	});
+
+	test('is the prewarm where one was', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		expect(targetPoolSize({ ...config, prewarmWorkers: 3 })).toBe(3);
+	});
+
+	test('is the ceiling where the prewarm is above it', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		// The same clamp prewarm itself runs under, so health is not held down
+		// waiting for a size the pool is not allowed to reach.
+		expect(targetPoolSize({ ...config, prewarmWorkers: 9 })).toBe(4);
+	});
+
+	test('is the floor where scaling is off', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		// Prewarm is one of the things that does not run then.
+		expect(targetPoolSize({ ...config, enabled: false, prewarmWorkers: 3 }))
+			.toBe(1);
 	});
 });

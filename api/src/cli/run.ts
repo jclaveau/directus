@@ -1,3 +1,4 @@
+import '../entry-guard.js';
 import { createCli } from './index.js';
 
 createCli()

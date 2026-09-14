@@ -2,7 +2,10 @@ import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
-import { reportUnhandledRejection } from './report-unhandled-rejection.js';
+import {
+	guardUnhandledRejections,
+	reportUnhandledRejection,
+} from './report-unhandled-rejection.js';
 
 vi.mock('../logger/index.js');
 vi.mock('../metrics/index.js');
@@ -95,5 +98,34 @@ describe('reportUnhandledRejection', () => {
 
 		expect(() => reportUnhandledRejection(new Error('boom'))).not.toThrow();
 		expect(error).toHaveBeenCalledOnce();
+	});
+});
+
+describe('guardUnhandledRejections', () => {
+	afterEach(() => {
+		// The listener outlives the case: the process running these is the one it
+		// would be installed on.
+		process.removeListener('unhandledRejection', reportUnhandledRejection);
+	});
+
+	it('answers a rejection nothing awaited', () => {
+		guardUnhandledRejections();
+
+		expect(process.listeners('unhandledRejection'))
+			.toContain(reportUnhandledRejection);
+	});
+
+	// Every entry point takes it, and one process can enter through more than one
+	// of them. A second listener would count the same outage twice, and the count
+	// is what says how much of one this process swallowed.
+	it('leaves one listener however often it is taken', () => {
+		guardUnhandledRejections();
+		guardUnhandledRejections();
+
+		const taken = process
+			.listeners('unhandledRejection')
+			.filter((listener) => listener === reportUnhandledRejection);
+
+		expect(taken).toHaveLength(1);
 	});
 });

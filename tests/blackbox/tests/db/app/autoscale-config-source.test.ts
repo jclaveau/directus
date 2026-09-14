@@ -1,6 +1,8 @@
-import Redis from 'ioredis';
+import vendors from '@common/get-dbs-to-test';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+	closeSharedSettings,
+	databaseEnv,
 	decisionsOf,
 	neverExceeded,
 	poolSize,
@@ -9,53 +11,44 @@ import {
 	startAutoscaler,
 	startPool,
 	stopRig,
+	storeSharedSettings,
 	type Rig,
 } from './autoscale/rig';
 
 // Tuning an autoscaler by redeploying restarts the pool being tuned, so the
 // values have to be changeable while it runs. What that costs is a second
-// source of truth, and these arms pin which one wins: the env chain alone when
-// Redis is not configured, the shared config the moment one is written, and the env
-// chain again once it is removed.
+// place a value can come from, and these arms pin which one wins: the env
+// chain while the settings hold nothing, the stored layer the moment it is
+// written, and the env chain again once it is cleared.
 //
-// The Redis on 6108 is shared, so each rig owns a namespace and its key.
-const REDIS_PORT = 6108;
+// One vendor, because the claim is about which layer the loop takes a field
+// from and every vendor answers that the same way — while each rig it needs to
+// tell costs a pm2 daemon and a pool under load.
+const vendor = vendors[0]!;
 
-function configKey(namespace: string): string {
-	return `${namespace}:config:processes:autoscale`;
-}
-
-describe('The autoscaler takes live configuration from Redis', () => {
-	const redis = new Redis({ host: 'localhost', port: REDIS_PORT });
+describe('The autoscaler takes live configuration from the settings', () => {
 	const rigs: Rig[] = [];
-	const namespaces: string[] = [];
 
 	afterAll(async () => {
 		for (const rig of rigs) {
 			stopRig(rig);
 		}
 
-		for (const namespace of namespaces) {
-			await redis.del(configKey(namespace));
-		}
-
-		redis.disconnect();
+		await storeSharedSettings(vendor, 'autoscale_settings', null);
+		await closeSharedSettings();
 	});
 
-	it('ignores a shared config when Redis is not configured', async () => {
-		const namespace = 'bb-autoscale-envonly';
-		namespaces.push(namespace);
-
-		// Bounds rather than a threshold, so that reading this shared config is the
-		// only thing that can move the pool: applied it pins three workers on
-		// the first tick, whatever the pool reports.
-		await redis.set(
-			configKey(namespace),
-			JSON.stringify({ minWorkers: 3, maxWorkers: 3 }),
-		);
+	// A change is announced on the bus, and a bus message is delivered at most
+	// once: a node that was restarting, or one on a deployment with no Redis at
+	// all, is a node the announcement never reached. The floor is what makes
+	// that staleness heal instead of waiting for the next deploy — so this arm
+	// stores the layer with nothing to announce it and after the loop is
+	// already running, which is the only order the boot read cannot answer.
+	it('reaches a node the announcement never got to', async () => {
+		await storeSharedSettings(vendor, 'autoscale_settings', null, false);
 
 		const rig = startPool({
-			appName: 'autoscale-env-only',
+			appName: 'autoscale-floor-only',
 			instances: 1,
 			busyMs: 20,
 			idleMs: 80,
@@ -64,26 +57,39 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		rigs.push(rig);
 
 		startAutoscaler(rig, {
+			...databaseEnv(vendor),
 			REDIS_ENABLED: 'false',
-			CACHE_NAMESPACE: namespace,
+			// Short enough that the wait below is over well before the default
+			// interval would come round, which is what makes this arm the
+			// interval's own witness rather than the default's.
+			SHARED_SETTINGS_POLL_SECONDS: '3',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '1',
 		});
 
-		expect({
-			sizes: await sizesOver(rig, 20_000),
-			decisions: decisionsOf(rig),
-			restarts: restartsOf(rig),
-		}).toEqual({ sizes: [1], decisions: [], restarts: 0 });
+		// The env chain is what it boots on, and it has to be seen holding
+		// there: a pool that arrived at three some other way would satisfy the
+		// assertion below without the layer ever having been read.
+		expect(await neverExceeded(rig, 1, 10_000)).toBe(1);
+
+		await storeSharedSettings(
+			vendor,
+			'autoscale_settings',
+			// Bounds rather than a threshold, so reading the layer is the only
+			// thing that can move the pool: applied it pins three workers on the
+			// tick that reads it, whatever the pool reports.
+			{ minWorkers: 3, maxWorkers: 3 },
+			false,
+		);
+
+		expect(await poolSize(rig, 3, 20_000)).toBe(3);
 	}, 90_000);
 
-	describe('with Redis configured', () => {
-		const namespace = 'bb-autoscale-live';
+	describe('with the bus carrying the change', () => {
 		let rig: Rig;
 
-		it('uses the env chain while no shared config is stored', async () => {
-			namespaces.push(namespace);
-			await redis.del(configKey(namespace));
+		it('uses the env chain while the settings hold nothing', async () => {
+			await storeSharedSettings(vendor, 'autoscale_settings', null);
 
 			rig = startPool({
 				appName: 'autoscale-live',
@@ -95,10 +101,10 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			rigs.push(rig);
 
 			startAutoscaler(rig, {
+				...databaseEnv(vendor),
 				REDIS_ENABLED: 'true',
 				REDIS_HOST: 'localhost',
-				REDIS_PORT: String(REDIS_PORT),
-				CACHE_NAMESPACE: namespace,
+				REDIS_PORT: '6108',
 				PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '95',
 				PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '0',
 				PM2_AUTOSCALE_MIN_WORKERS: '1',
@@ -109,7 +115,7 @@ describe('The autoscaler takes live configuration from Redis', () => {
 				// it four times a second beside an autoscaler polling once: land
 				// those 10-20ms apart and a worker spinning 20ms in every 100ms
 				// is reported at 100%, for as long as the two stay in phase. The
-				// arms below raise the ceiling in the shared config that needs room.
+				// arms below raise the ceiling in the layer that needs room.
 				PM2_AUTOSCALE_MAX_WORKERS: '1',
 				PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '0',
 				// Long enough that the arms below deciding on load read the load
@@ -134,10 +140,10 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			// one. The threshold is still what makes three reachable: the env
 			// asks for 95% and the fixture holds itself at 20%, so a pool given
 			// only the room would stay where it is.
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 3 }),
-			);
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				scaleCpuThreshold: 5,
+				maxWorkers: 3,
+			});
 
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
 		}, 90_000);
@@ -146,38 +152,37 @@ describe('The autoscaler takes live configuration from Redis', () => {
 			// Both fields, so the pool is shrunk by the new ceiling rather
 			// than by the scale threshold reverting to the env's 95 at the
 			// same moment.
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({ scaleCpuThreshold: 5, maxWorkers: 2 }),
-			);
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				scaleCpuThreshold: 5,
+				maxWorkers: 2,
+			});
 
 			expect(await poolSize(rig, 2, 60_000)).toBe(2);
 		}, 90_000);
 
-		it('returns to the env chain once the shared config is removed', async () => {
-			await redis.del(configKey(namespace));
+		it('returns to the env chain once the layer is cleared', async () => {
+			await storeSharedSettings(vendor, 'autoscale_settings', null);
 
-			// The env ceiling is one, and the pool is at two: taking the
-			// shared config away is asserted by the shrink it causes rather than by
-			// a window in which nothing happens, which a pool left where it was
-			// would pass either way.
+			// The env ceiling is one, and the pool is at two: clearing the layer
+			// is asserted by the shrink it causes rather than by a window in
+			// which nothing happens, which a pool left where it was would pass
+			// either way.
 			expect(await poolSize(rig, 1, 60_000)).toBe(1);
 		}, 90_000);
 
-		// The shared config is a hand-edited JSON document written during an
-		// incident, so it is exactly where a zero too many arrives. Obeyed
-		// literally it would ask pm2 for more workers than the box holds —
-		// the failure this autoscaler exists to stop, arriving through its
-		// own configuration.
-		it('clamps a shared config asking past the ceiling to the ceiling', async () => {
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({ minWorkers: 10_000, maxWorkers: 3 }),
-			);
+		// The layer is a document an operator writes during an incident, so it
+		// is exactly where a zero too many arrives. Obeyed literally it would
+		// ask pm2 for more workers than the box holds — the failure this
+		// autoscaler exists to stop, arriving through its own configuration.
+		it('clamps settings asking past the ceiling to the ceiling', async () => {
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				minWorkers: 10_000,
+				maxWorkers: 3,
+			});
 
-			// Three, because that is the ceiling the same shared config names: the
-			// floor was applied, so the shared config was read, and it was read as
-			// three rather than as the ten thousand it asks for.
+			// Three, because that is the ceiling the same layer names: the floor
+			// was applied, so it was read, and it was read as three rather than
+			// as the ten thousand it asks for.
 			expect(await poolSize(rig, 3, 60_000)).toBe(3);
 			expect(await neverExceeded(rig, 3, 10_000)).toBe(3);
 		}, 120_000);
@@ -187,14 +192,11 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		// clears the threshold, so both directions are witnessed at once — it
 		// comes down to the pin, and stays there rather than climbing back.
 		it('pins the pool where the floor and the ceiling meet', async () => {
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({
-					scaleCpuThreshold: 5,
-					minWorkers: 2,
-					maxWorkers: 2,
-				}),
-			);
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				scaleCpuThreshold: 5,
+				minWorkers: 2,
+				maxWorkers: 2,
+			});
 
 			expect(await poolSize(rig, 2, 60_000)).toBe(2);
 			expect(await neverExceeded(rig, 2, 15_000)).toBe(2);
@@ -204,32 +206,26 @@ describe('The autoscaler takes live configuration from Redis', () => {
 		// autoscaler misreading a pool badly enough that no size it picks can be
 		// trusted — so the test of it is a configuration it would obey, ignored.
 		it('holds the pool where it is while autoscaling is disabled', async () => {
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({
-					enabled: false,
-					scaleCpuThreshold: 5,
-					minWorkers: 1,
-					maxWorkers: 1,
-				}),
-			);
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				enabled: false,
+				scaleCpuThreshold: 5,
+				minWorkers: 1,
+				maxWorkers: 1,
+			});
 
 			expect(await sizesOver(rig, 20_000)).toEqual([2]);
 		}, 90_000);
 
 		// And the freeze is the flag, not the pool having run out of reasons to
-		// move: the same shared config with the flag turned back on empties it to the
-		// ceiling it was carrying all along.
-		it('acts on that same shared config once it is enabled again', async () => {
-			await redis.set(
-				configKey(namespace),
-				JSON.stringify({
-					enabled: true,
-					scaleCpuThreshold: 5,
-					minWorkers: 1,
-					maxWorkers: 1,
-				}),
-			);
+		// move: the same settings with the flag turned back on empty it to the
+		// ceiling they were carrying all along.
+		it('acts on those same settings once they are enabled again', async () => {
+			await storeSharedSettings(vendor, 'autoscale_settings', {
+				enabled: true,
+				scaleCpuThreshold: 5,
+				minWorkers: 1,
+				maxWorkers: 1,
+			});
 
 			expect(await poolSize(rig, 1, 60_000)).toBe(1);
 		}, 90_000);

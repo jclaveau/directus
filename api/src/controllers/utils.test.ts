@@ -29,7 +29,7 @@ vi.mock('../services/utils.js', () => {
 });
 
 // Both gates are read at import time: the autoscale routes exist only where Redis
-// can carry the shared config and the bus can reach the pool.
+// can carry the shared settings and the bus can reach the pool.
 vi.mock('../redis/index.js', async (importOriginal) => {
 	return {
 		...await importOriginal<object>(),
@@ -154,7 +154,7 @@ describe('utils controller /autoscale', () => {
 		expect(updateAutoscaleConfig).not.toHaveBeenCalled();
 	});
 
-	test('clearing the shared config answers with the absence it leaves', async () => {
+	test('clearing the settings answers with the absence it leaves', async () => {
 		clearAutoscaleConfig.mockResolvedValueOnce(undefined);
 
 		const json = vi.fn();
@@ -165,11 +165,11 @@ describe('utils controller /autoscale', () => {
 		await handlerFor('/autoscale', 'delete')(req, res, vi.fn());
 
 		expect(clearAutoscaleConfig).toHaveBeenCalledOnce();
-		expect(json).toHaveBeenCalledWith({ data: { sharedConfig: null } });
+		expect(json).toHaveBeenCalledWith({ data: { sharedSettings: null } });
 	});
 
 	test('hands the supervisor options down as an admin write', async () => {
-		updateSupervisorConfig.mockResolvedValueOnce({ sharedConfig: null });
+		updateSupervisorConfig.mockResolvedValueOnce({ sharedSettings: null });
 
 		const json = vi.fn();
 		const res = { status: vi.fn(() => ({ json })) } as any;
@@ -179,7 +179,7 @@ describe('utils controller /autoscale', () => {
 		await handlerFor('/autoscale/supervisor', 'patch')(req, res, vi.fn());
 
 		expect(updateSupervisorConfig).toHaveBeenCalledWith(body, 'admin');
-		expect(json).toHaveBeenCalledWith({ data: { sharedConfig: null } });
+		expect(json).toHaveBeenCalledWith({ data: { sharedSettings: null } });
 	});
 
 	test('refuses supervisor options that are not an object', async () => {

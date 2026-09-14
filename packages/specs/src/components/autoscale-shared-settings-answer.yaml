@@ -1,11 +1,11 @@
 type: object
-description: A shared config, where it is kept, and who last wrote it.
+description: Shared settings, where they are kept, and who last wrote them.
 properties:
   key:
     type: string
-    description: The Redis key the shared config is stored under.
-  sharedConfig:
-    $ref: '../openapi.yaml#/components/schemas/AutoscaleSharedConfig'
+    description: The settings column the shared settings are stored in.
+  sharedSettings:
+    $ref: '../openapi.yaml#/components/schemas/AutoscaleSharedSettings'
   setByEmail:
     type: string
     nullable: true

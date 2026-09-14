@@ -200,8 +200,8 @@ export interface AutoscaleRow extends AutoscaleField {
 	effective: unknown;
 	/** Which layer that value came from, `null` where no process reported one. */
 	source: AutoscaleValueSource | null;
-	/** What the shared config sets, or `null` where it sets nothing for this field. */
-	sharedConfig: unknown;
+	/** What the shared settings set, `null` where they set nothing for this field. */
+	sharedSettings: unknown;
 	/** Where clearing this field lands it, `null` where nothing reported one. */
 	cleared: unknown;
 	/** Set where the running rule reads this field nowhere. */
@@ -210,7 +210,7 @@ export interface AutoscaleRow extends AutoscaleField {
 
 /**
  * One row per field: what the loop runs on, where it came from, and what the
- * shared config holds.
+ * shared settings hold.
  *
  * The effective value is the one the deciding process reported and never one
  * recomputed here — the environment this page's request landed in belongs to an
@@ -218,46 +218,46 @@ export interface AutoscaleRow extends AutoscaleField {
  */
 export function configRows(
 	state: AutoscaleNodeState | null,
-	sharedConfig: Record<string, unknown> | null,
+	sharedSettings: Record<string, unknown> | null,
 	pendingStrategy: unknown = null,
 ): AutoscaleRow[] {
 	// A strategy picked but not yet applied greys the fields it would blind, so
 	// the switch shows what it costs before it is made.
 	const strategy = pendingStrategy
 		?? (state === null
-			? sharedConfig?.['strategy']
+			? sharedSettings?.['strategy']
 			: state.config.strategy);
 
 	return AUTOSCALE_FIELDS.map((definition) => {
 		const field = definition.field;
-		const sharedConfigValue = sharedConfig?.[field] ?? null;
+		const sharedSettingsValue = sharedSettings?.[field] ?? null;
 
 		// Nothing reported means nothing is scaling anything here: the only value
 		// to show is the one stored — and where nothing is stored either, the
 		// field has no source to name rather than a default one.
 		const source = state === null
-			? storedSource(sharedConfigValue)
+			? storedSource(sharedSettingsValue)
 			: state.sources[field];
 
 		return {
 			...definition,
 			effective: state === null
-				? sharedConfigValue
+				? sharedSettingsValue
 				: state.config[field],
 			source,
-			sharedConfig: sharedConfigValue,
+			sharedSettings: sharedSettingsValue,
 			cleared: state === null
 				? null
-				: state.withoutSharedConfig[field],
+				: state.withoutSharedSettings[field],
 			inactive: definition.ignoredByLegacy === true && strategy === 'legacy',
 		};
 	});
 }
 
-function storedSource(sharedConfigValue: unknown): AutoscaleValueSource | null {
-	return sharedConfigValue === null
+function storedSource(sharedSettingsValue: unknown): AutoscaleValueSource | null {
+	return sharedSettingsValue === null
 		? null
-		: 'sharedConfig';
+		: 'sharedSettings';
 }
 
 /** What a value typed into a row means, `null` clearing the field. */
@@ -362,7 +362,7 @@ export function drillRemaining(until: number | null, now: number): number {
 
 /** What an option a restart can carry accepts, and what it runs on now. */
 export interface SupervisorOption {
-	/** The shared config field the change is written to. */
+	/** The shared settings field the change is written to. */
 	field: string;
 	min: number;
 	max: number;
@@ -381,16 +381,16 @@ export interface SupervisorRow {
 	description: string;
 	/** `null` for an option no restart can carry, so the page cannot offer it. */
 	option: SupervisorOption | null;
-	/** What the shared config holds for it, `null` where the environment answers. */
-	sharedConfig: number | null;
+	/** What the shared settings hold for it, `null` where the environment answers. */
+	sharedSettings: number | null;
 	/**
 	 * Which layer the running value came from.
 	 *
-	 * Only two are tellable apart from here: the shared config this page writes, and
+	 * Only two are tellable apart from here: the shared settings this page writes, and
 	 * the supervisor itself — whether pm2 took a value from a variable or from
 	 * its own default is not in what it reports.
 	 */
-	source: 'sharedConfig' | 'pm2';
+	source: 'sharedSettings' | 'pm2';
 }
 
 const MEGABYTE = 1_048_576;
@@ -406,7 +406,7 @@ const MEGABYTE = 1_048_576;
  */
 export function supervisorRows(
 	state: AutoscaleNodeState | null,
-	sharedConfig: Record<string, unknown> | null = null,
+	sharedSettings: Record<string, unknown> | null = null,
 ): SupervisorRow[] {
 	const supervisor = state?.supervisor ?? null;
 
@@ -414,18 +414,18 @@ export function supervisorRows(
 		return [];
 	}
 
-	function sharedConfigFor(field: string): number | null {
-		const value = sharedConfig?.[field];
+	function sharedSettingsFor(field: string): number | null {
+		const value = sharedSettings?.[field];
 
 		return typeof value === 'number'
 			? value
 			: null;
 	}
 
-	function sourceOf(field: string): 'sharedConfig' | 'pm2' {
-		return sharedConfigFor(field) === null
+	function sourceOf(field: string): 'sharedSettings' | 'pm2' {
+		return sharedSettingsFor(field) === null
 			? 'pm2'
-			: 'sharedConfig';
+			: 'sharedSettings';
 	}
 
 	const ceiling = supervisor.maxMemoryRestart === null
@@ -440,7 +440,7 @@ export function supervisorRows(
 				+ 'size until the first tick. From there the floor, the ceiling '
 				+ 'and the prewarm above own it.',
 			option: null,
-			sharedConfig: null,
+			sharedSettings: null,
 			source: 'pm2',
 		},
 		{
@@ -449,7 +449,7 @@ export function supervisorRows(
 			description: 'exec_mode: only a cluster can be resized, so a pool in '
 				+ 'fork mode is one the autoscaler cannot move.',
 			option: null,
-			sharedConfig: null,
+			sharedSettings: null,
 			source: 'pm2',
 		},
 		{
@@ -460,7 +460,7 @@ export function supervisorRows(
 				+ 'it is serving. False counts it in as soon as it forks, so the '
 				+ 'pool is judged on a worker that is still booting.',
 			option: null,
-			sharedConfig: null,
+			sharedSettings: null,
 			source: 'pm2',
 		},
 		{
@@ -476,7 +476,7 @@ export function supervisorRows(
 				unit: SUPERVISOR_BOUNDS.listenTimeout.unit,
 				declared: supervisor.listenTimeout,
 			},
-			sharedConfig: sharedConfigFor('listenTimeout'),
+			sharedSettings: sharedSettingsFor('listenTimeout'),
 			source: sourceOf('listenTimeout'),
 		},
 		{
@@ -492,7 +492,7 @@ export function supervisorRows(
 				unit: SUPERVISOR_BOUNDS.killTimeout.unit,
 				declared: supervisor.killTimeout,
 			},
-			sharedConfig: sharedConfigFor('killTimeout'),
+			sharedSettings: sharedSettingsFor('killTimeout'),
 			source: sourceOf('killTimeout'),
 		},
 		{
@@ -510,7 +510,7 @@ export function supervisorRows(
 				unit: SUPERVISOR_BOUNDS.maxMemoryRestartMegabytes.unit,
 				declared: ceiling,
 			},
-			sharedConfig: sharedConfigFor('maxMemoryRestartMegabytes'),
+			sharedSettings: sharedSettingsFor('maxMemoryRestartMegabytes'),
 			source: sourceOf('maxMemoryRestartMegabytes'),
 		},
 		{
@@ -518,7 +518,7 @@ export function supervisorRows(
 			value: String(supervisor.autorestart),
 			description: 'autorestart: whether a worker that exits is replaced.',
 			option: null,
-			sharedConfig: null,
+			sharedSettings: null,
 			source: 'pm2',
 		},
 		{
@@ -535,7 +535,7 @@ export function supervisorRows(
 				unit: SUPERVISOR_BOUNDS.restartDelay.unit,
 				declared: supervisor.restartDelay,
 			},
-			sharedConfig: sharedConfigFor('restartDelay'),
+			sharedSettings: sharedSettingsFor('restartDelay'),
 			source: sourceOf('restartDelay'),
 		},
 		{
@@ -551,7 +551,7 @@ export function supervisorRows(
 				unit: SUPERVISOR_BOUNDS.minUptime.unit,
 				declared: supervisor.minUptime,
 			},
-			sharedConfig: sharedConfigFor('minUptime'),
+			sharedSettings: sharedSettingsFor('minUptime'),
 			source: sourceOf('minUptime'),
 		},
 		{
@@ -566,7 +566,7 @@ export function supervisorRows(
 				unit: SUPERVISOR_BOUNDS.maxRestarts.unit,
 				declared: supervisor.maxRestarts,
 			},
-			sharedConfig: sharedConfigFor('maxRestarts'),
+			sharedSettings: sharedSettingsFor('maxRestarts'),
 			source: sourceOf('maxRestarts'),
 		},
 	];

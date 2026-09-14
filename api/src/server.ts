@@ -21,7 +21,7 @@ import {
 import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
-import { reportUnhandledRejection } from './utils/report-unhandled-rejection.js';
+import { guardUnhandledRejections } from './utils/report-unhandled-rejection.js';
 import { getAddress } from './utils/get-address.js';
 import { once } from './utils/lodash-es-used.js';
 import {
@@ -176,7 +176,7 @@ export async function startServer(): Promise<void> {
 	// dependency, not being a server. `uncaughtException` is
 	// deliberately NOT handled — by then the state that threw is unknown, and Node's
 	// own guidance is to exit.
-	process.on('unhandledRejection', reportUnhandledRejection);
+	guardUnhandledRejections();
 
 	// Held before anything can serve; the polling only starts once `createServer`
 	// has validated the connection, so a database that is simply down reports its

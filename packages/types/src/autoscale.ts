@@ -23,8 +23,8 @@ export type AutoscaleSignal = 'average' | 'max';
  * Which rule decides the pool size.
  *
  * `legacy` reproduces the `pm2-autoscale` module this replaces, so a defect in
- * the fork's own rule can be reverted fleet-wide with one Redis write instead
- * of a redeploy. It reads the maximum CPU to grow and the average to shrink,
+ * the fork's own rule can be reverted fleet-wide with one settings write
+ * instead of a redeploy. It reads the maximum CPU to grow and the average to shrink,
  * over a thirty-sample window, and knows nothing of warm-ups, restarts or
  * prewarming.
  */
@@ -74,13 +74,13 @@ export interface AutoscaleConfig {
  *
  * - `default` — the shipped defaults, nothing set the variable
  * - `env` — a `PM2_AUTOSCALE_*` variable of the process that scales
- * - `sharedConfig` — the shared config in Redis, one copy for the whole fleet,
- *   which wins over both
+ * - `sharedSettings` — the shared settings in `directus_settings`, one copy for
+ *   the whole fleet, which wins over both
  */
-export type AutoscaleValueSource = 'default' | 'env' | 'sharedConfig';
+export type AutoscaleValueSource = 'default' | 'env' | 'sharedSettings';
 
 /**
- * Which surface a change to the shared config came in through.
+ * Which surface a change to the shared settings came in through.
  *
  * The same configuration is reachable from the admin and from an MCP client,
  * and a pool found in a shape nobody remembers asking for is answered by which
@@ -109,10 +109,10 @@ export interface AutoscaleNodeState {
 	config: AutoscaleConfig;
 	sources: AutoscaleConfigSources;
 	/**
-	 * The same configuration with the shared config taken off: the env chain and the
+	 * The same configuration with the shared settings taken off: the env chain and the
 	 * shipped defaults, which is where clearing a field lands it.
 	 */
-	withoutSharedConfig: AutoscaleConfig;
+	withoutSharedSettings: AutoscaleConfig;
 	/** Online workers of the scaled app the tick read. */
 	workers: number;
 	/** Started but not yet ready, so counted in the pool and not the statistic. */

@@ -103,6 +103,10 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	LOG_HTTP_IGNORE_PATHS: 'array',
 
 	REDIS_ENABLED: 'boolean',
+	REDIS_MAX_RETRIES_PER_REQUEST: 'number',
+	REDIS_RETRY_BASE_DELAY: 'number',
+	REDIS_RETRY_MAX_DELAY: 'number',
+	REDIS_RETRY_MAX_ATTEMPTS: 'number',
 
 	METRICS_TOKENS: 'array',
 	METRICS_SERVICES: 'array',
@@ -144,6 +148,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: 'number',
 	PM2_AUTOSCALE_WARMUP_SECONDS: 'number',
 	PM2_AUTOSCALE_DRILL_ENABLED: 'boolean',
+
+	SHARED_SETTINGS_POLL_SECONDS: 'number',
 
 	PGBOUNCER_REPORT_ENABLED: 'boolean',
 	PGBOUNCER_CONNECTIONS: 'array',

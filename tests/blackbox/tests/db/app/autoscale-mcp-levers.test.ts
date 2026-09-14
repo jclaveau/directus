@@ -4,18 +4,20 @@ import { USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { ChildProcess, spawn } from 'child_process';
 import getPort from 'get-port';
-import Redis from 'ioredis';
 import { cloneDeep } from 'lodash-es';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
+	closeSharedSettings,
 	countWorkers,
+	databaseEnv,
 	declaredEverywhere,
 	poolSize,
 	reportOf,
 	startAutoscaler,
 	startPool,
 	stopRig,
+	storeSharedSettings,
 	type Rig,
 } from './autoscale/rig';
 
@@ -27,19 +29,14 @@ import {
 //
 // The rig is the smallest one that can tell: a real pool under a pm2 daemon of
 // its own, a real autoscaler beside it, and a Directus serving the MCP over the
-// same Redis — which is the only way the write and the pool meet.
+// same database and the same Redis — which is the only way the write and the
+// pool meet.
 const REDIS_PORT = 6108;
 
-function supervisorKey(namespace: string): string {
-	return `${namespace}:config:processes:supervisor`;
-}
-
 describe('The pm2 options and the restart that carries them, over the MCP', () => {
-	const redis = new Redis({ host: 'localhost', port: REDIS_PORT });
 	const instances = {} as Record<Vendor, ChildProcess>;
 	const envs = {} as Record<Vendor, Env>;
 	const rigs = {} as Record<Vendor, Rig>;
-	const namespaces: string[] = [];
 
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -50,8 +47,7 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 			const env = cloneDeep(config.envs);
 			const namespace = `bb-autoscale-mcp-levers-${vendor}`;
 			const service = `autoscale-mcp-levers-${vendor}`;
-			namespaces.push(namespace);
-			await redis.del(supervisorKey(namespace));
+			await storeSharedSettings(vendor, 'supervisor_settings', null);
 
 			env[vendor]['REDIS_HOST'] = 'localhost';
 			env[vendor]['REDIS_PORT'] = String(REDIS_PORT);
@@ -86,6 +82,9 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 			rigs[vendor] = rig;
 
 			startAutoscaler(rig, {
+				// The write lands in this vendor's settings, so the restart that
+				// carries it has to be reading the same database the MCP wrote to.
+				...databaseEnv(vendor),
 				REDIS_ENABLED: 'true',
 				REDIS_HOST: 'localhost',
 				REDIS_PORT: String(REDIS_PORT),
@@ -113,11 +112,12 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 			instances[vendor]!.kill();
 		}
 
-		for (const namespace of namespaces) {
-			await redis.del(supervisorKey(namespace));
+		for (const vendor of vendors) {
+			await storeSharedSettings(vendor, 'supervisor_settings', null);
+			await storeSharedSettings(vendor, 'autoscale_settings', null);
 		}
 
-		redis.disconnect();
+		await closeSharedSettings();
 	});
 
 	function callMcp(vendor: Vendor, name: string, args: object) {
@@ -164,9 +164,9 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 
 			expect(written.body.result.isError).toBeUndefined();
 
-			const stored = written.body.result.structuredContent.sharedConfig;
+			const stored = written.body.result.structuredContent.sharedSettings;
 
-			// Stamped as an agent's doing, which is what tells this shared config from
+			// Stamped as an agent's doing, which is what tells these shared settings from
 			// one a person typed into the panel during the same incident.
 			expect(stored).toMatchObject({ listenTimeout: 21_000, setFrom: 'mcp' });
 			expect(stored.note).toContain('the extension bundle grew');
@@ -202,4 +202,30 @@ describe('The pm2 options and the restart that carries them, over the MCP', () =
 			expect(countWorkers(rig), reportOf(rig)).toBe(2);
 		}
 	}, 300_000);
+
+	// The panel and the MCP both write through `SettingsService`, and a
+	// config-sync import or a seed script writes through a plain `ItemsService`
+	// instead — the same row, none of the subclass. Announcing from the
+	// `settings.update` action rather than from the service is what makes that
+	// write reach the pool, and this is the only surface that can tell.
+	//
+	// Last, because it moves the pool the arms above pin at two.
+	it('carries a write that went past the service', async () => {
+		for (const vendor of vendors) {
+			const rig = rigs[vendor]!;
+
+			const imported = await request(getUrl(vendor, envs[vendor]))
+				.post('/settings-import-write')
+				.set('Authorization', auth)
+				.send({
+					autoscale_settings: { minWorkers: 3, maxWorkers: 3 },
+				});
+
+			expect(imported.statusCode).toBe(200);
+
+			// Under the mirror's own re-read floor, so a pool that reaches three
+			// inside it was told, rather than having gone looking on its own.
+			expect(await poolSize(rig, 3, 25_000), reportOf(rig)).toBe(3);
+		}
+	}, 120_000);
 });

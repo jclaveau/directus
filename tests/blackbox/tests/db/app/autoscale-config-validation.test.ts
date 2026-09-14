@@ -29,6 +29,11 @@ describe('The autoscale configuration is checked before it is stored', () => {
 	const instances = {} as Record<Vendor, ChildProcess>;
 	const envs = {} as Record<Vendor, Env>;
 
+	// The same deployment with nothing to reach the pool over, kept beside the
+	// one above so the arm asking it for the routes costs no extra boot.
+	const buslessInstances = {} as Record<Vendor, ChildProcess>;
+	const buslessEnvs = {} as Record<Vendor, Env>;
+
 	const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
 	beforeAll(async () => {
@@ -57,6 +62,21 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			});
 
 			started.push(awaitDirectusConnection(port));
+
+			const busless = cloneDeep(config.envs);
+
+			busless[vendor]['REDIS_ENABLED'] = 'false';
+
+			const buslessPort = await getPort();
+			busless[vendor].PORT = String(buslessPort);
+			buslessEnvs[vendor] = busless;
+
+			buslessInstances[vendor] = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: busless[vendor],
+			});
+
+			started.push(awaitDirectusConnection(buslessPort));
 		}
 
 		await Promise.all(started);
@@ -69,6 +89,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 				.set('Authorization', auth);
 
 			instances[vendor]!.kill();
+			buslessInstances[vendor]!.kill();
 		}
 	});
 
@@ -83,6 +104,21 @@ describe('The autoscale configuration is checked before it is stored', () => {
 		return request(getUrl(vendor, envs[vendor]))
 			.get('/utils/autoscale')
 			.set('Authorization', auth);
+	}
+
+	function patchSupervisor(vendor: Vendor, body: object) {
+		return request(getUrl(vendor, envs[vendor]))
+			.patch('/utils/autoscale/supervisor')
+			.set('Authorization', auth)
+			.send(body);
+	}
+
+	/** The singleton the columns live on, written the way anything else is. */
+	function patchSettings(vendor: Vendor, body: object) {
+		return request(getUrl(vendor, envs[vendor]))
+			.patch('/settings')
+			.set('Authorization', auth)
+			.send(body);
 	}
 
 	function writeOverMcp(vendor: Vendor, autoscale: object, note: string) {
@@ -122,9 +158,53 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			expect(response.statusCode).toBe(200);
 
-			expect(response.body.data.sharedConfig).toMatchObject({
+			expect(response.body.data.sharedSettings).toMatchObject({
 				maxWorkers: 3,
 				minWorkers: 2,
+			});
+		});
+	});
+
+	// A change to the pool is a change to a setting, so it is audited like every
+	// other one: the revision names the writer, the moment, and the whole
+	// document they left behind. That trail is what the write goes through
+	// `SettingsService` for, rather than touching the column itself.
+	describe('leaves the change in the audit trail', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			await patch(vendor, { minWorkers: 2, maxWorkers: 4 });
+
+			const written = await patch(vendor, {
+				maxWorkers: 3,
+				note: 'the sale starts at nine',
+			});
+
+			expect(written.statusCode).toBe(200);
+
+			const revisions = await request(getUrl(vendor, envs[vendor]))
+				.get('/revisions')
+				.query({
+					'filter[collection][_eq]': 'directus_settings',
+					fields: 'delta,activity.action,activity.user.email',
+					sort: '-id',
+					limit: 1,
+				})
+				.set('Authorization', auth);
+
+			expect(revisions.statusCode).toBe(200);
+
+			const latest = revisions.body.data[0];
+
+			expect(latest.activity.action).toBe('update');
+			expect(latest.activity.user.email).toBe(USER.ADMIN.EMAIL);
+
+			// The whole document, not the field that moved: what the next reader
+			// gets handed is this, and a delta holding only `maxWorkers` would
+			// read as a pool with no floor.
+			expect(latest.delta.autoscale_settings).toMatchObject({
+				maxWorkers: 3,
+				minWorkers: 2,
+				note: 'the sale starts at nine',
+				setFrom: 'admin',
 			});
 		});
 	});
@@ -147,7 +227,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 			// Nothing stored: a refused write leaves the pool on what it had.
 			const stored = await read(vendor);
 
-			expect(stored.body.data.sharedConfig?.minWorkers).toBeUndefined();
+			expect(stored.body.data.sharedSettings?.minWorkers).toBeUndefined();
 		});
 	});
 
@@ -212,7 +292,7 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			const stored = await read(vendor);
 
-			expect(stored.body.data.sharedConfig?.minWorkers).toBeUndefined();
+			expect(stored.body.data.sharedSettings?.minWorkers).toBeUndefined();
 		});
 	});
 
@@ -236,7 +316,71 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			// And the note did not land on its own: a refused write stores
 			// nothing at all.
-			expect((await read(vendor)).body.data.supervisor.sharedConfig).toBeNull();
+			expect((await read(vendor)).body.data.supervisor.sharedSettings).toBeNull();
+		});
+	});
+
+	// The panel writes the supervisor options over this route while an agent
+	// writes them over the MCP, and the two meet at the same service method —
+	// the route, the payload check and the answer a page redraws itself from
+	// are the part only this one carries.
+	describe('stores a supervisor option and releases it again', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const written = await patchSupervisor(vendor, {
+				listenTimeout: 21_000,
+				note: 'the boot got slower',
+			});
+
+			expect(written.statusCode).toBe(200);
+
+			expect(written.body.data).toMatchObject({
+				key: 'directus_settings.supervisor_settings',
+				setByEmail: USER.ADMIN.EMAIL,
+				sharedSettings: {
+					listenTimeout: 21_000,
+					note: 'the boot got slower',
+					setFrom: 'admin',
+				},
+			});
+
+			// Read back over the route the panel loads with, which reaches the
+			// column through a different method than the one that wrote it.
+			const stored = await read(vendor);
+
+			expect(stored.body.data.supervisor.sharedSettings)
+				.toMatchObject({ listenTimeout: 21_000 });
+
+			// Releasing the last value they hold drops the shared settings
+			// whole, so the page stops naming a supervisor as carrying some
+			// while every option it runs on comes from the environment.
+			const released = await patchSupervisor(vendor, { listenTimeout: null });
+
+			expect(released.statusCode).toBe(200);
+			expect(released.body.data.sharedSettings).toBeNull();
+
+			expect((await read(vendor)).body.data.supervisor.sharedSettings)
+				.toBeNull();
+		});
+	});
+
+	// Clearing is the whole layer at once, and the answer says what is left
+	// behind: the panel redraws every field as the environment's from it
+	// rather than asking again.
+	describe('hands the whole layer back to the environment', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			await patch(vendor, { minWorkers: 2, maxWorkers: 3 });
+
+			expect((await read(vendor)).body.data.sharedSettings)
+				.toMatchObject({ minWorkers: 2 });
+
+			const cleared = await request(getUrl(vendor, envs[vendor]))
+				.delete('/utils/autoscale')
+				.set('Authorization', auth);
+
+			expect(cleared.statusCode).toBe(200);
+			expect(cleared.body.data).toEqual({ sharedSettings: null });
+
+			expect((await read(vendor)).body.data.sharedSettings).toBeNull();
 		});
 	});
 
@@ -298,6 +442,125 @@ describe('The autoscale configuration is checked before it is stored', () => {
 
 			expect(response.body.error.message)
 				.toContain('no process reported that it is scaling a pool');
+		});
+	});
+
+	// The button in the panel asks over this route, and it has to be refused
+	// on the same terms: a page that took a 200 for an answer would show the
+	// options it had just written as the ones the pool is running.
+	describe('refuses that restart over REST as well', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const response = await request(getUrl(vendor, envs[vendor]))
+				.post('/utils/autoscale/reload')
+				.set('Authorization', auth);
+
+			expect(response.statusCode).toBe(400);
+
+			expect(refusal(response))
+				.toContain('no process reported that it is scaling a pool');
+		});
+	});
+
+	// Without Redis the bus is an emitter this worker shares with nobody, so a
+	// stored change would wait for a pool that never hears of it and a restart
+	// would be answered with a success nothing acted on. Such a deployment says
+	// so by not carrying the routes at all, which is a claim about the router
+	// this instance built and only an instance built that way can answer.
+	describe('carries no autoscale route without a bus to reach the pool', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const url = getUrl(vendor, buslessEnvs[vendor]);
+
+			const routes = [
+				['get', '/utils/autoscale'],
+				['patch', '/utils/autoscale'],
+				['patch', '/utils/autoscale/supervisor'],
+				['delete', '/utils/autoscale'],
+				['post', '/utils/autoscale/reload'],
+			] as const;
+
+			for (const [method, path] of routes) {
+				const response = await request(url)[method](path)
+					.set('Authorization', auth);
+
+				expect(response.statusCode, `${method} ${path}`).toBe(404);
+			}
+
+			// Non-vacuous: an instance that never came up would answer every
+			// line above with the same 404 and prove nothing.
+			expect((await request(url).get('/server/ping')).statusCode).toBe(200);
+		});
+	});
+
+	// The columns are ordinary fields of the settings singleton, so `PATCH
+	// /settings` reaches them — as does a config-sync import or a seed script
+	// writing through a plain `ItemsService`. Checking the route the panel uses
+	// left every one of those able to store a configuration the route refuses,
+	// announce it to the fleet, and have each loop clamp it on the next tick:
+	// exactly the corrected-versus-refused an operator cannot tell apart.
+	describe('refuses over the singleton what it refuses over the route', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const crossed = await patchSettings(vendor, {
+				autoscale_settings: { minWorkers: ENV_MAX_WORKERS + 4 },
+			});
+
+			expect(crossed.statusCode).toBe(400);
+
+			expect(refusal(crossed)).toContain(
+				`'minWorkers' is ${ENV_MAX_WORKERS + 4}, above the 'maxWorkers' `
+					+ `ceiling of ${ENV_MAX_WORKERS}`,
+			);
+
+			// A value neither true nor false resolves to false, so this would
+			// be a disable of the whole loop that nobody asked for.
+			const enabled = await patchSettings(vendor, {
+				autoscale_settings: { enabled: 'TRUE' },
+			});
+
+			expect(enabled.statusCode).toBe(400);
+			expect(refusal(enabled)).toContain(`'enabled' has to be a boolean`);
+
+			// Stored, this reads back as nothing at all: the pool would run the
+			// environment while the column says a layer is holding it.
+			const shapeless = await patchSettings(vendor, {
+				autoscale_settings: [{ maxWorkers: 2 }],
+			});
+
+			expect(shapeless.statusCode).toBe(400);
+
+			const supervisor = await patchSettings(vendor, {
+				supervisor_settings: { killTimeout: 1 },
+			});
+
+			expect(supervisor.statusCode).toBe(400);
+
+			// Nothing any of them tried reached a column.
+			expect((await read(vendor)).body.data).toMatchObject({
+				sharedSettings: null,
+				supervisor: { sharedSettings: null },
+			});
+		});
+	});
+
+	// Non-vacuous: a route answering 400 to every settings write would pass
+	// every line above without one of these checks existing.
+	describe('stores over the singleton what the route would have stored', () => {
+		it.each(vendors)('%s', async (vendor) => {
+			const written = await patchSettings(vendor, {
+				autoscale_settings: { maxWorkers: ENV_MAX_WORKERS - 1 },
+			});
+
+			expect(written.statusCode).toBe(200);
+
+			expect((await read(vendor)).body.data).toMatchObject({
+				sharedSettings: { maxWorkers: ENV_MAX_WORKERS - 1 },
+			});
+
+			const cleared = await patchSettings(vendor, {
+				autoscale_settings: null,
+			});
+
+			expect(cleared.statusCode).toBe(200);
+			expect((await read(vendor)).body.data.sharedSettings).toBeNull();
 		});
 	});
 });

@@ -203,8 +203,8 @@ test('Only the reads declare themselves reads', () => {
 });
 
 // Storing a value is reversible by storing another, and the same patch written
-// twice leaves the same shared config behind. Holding real workers on the processor
-// is neither: a second call is a second restart, and a second drill.
+// twice leaves the same shared settings behind. Holding real workers on the
+// processor is neither: a second call is a second restart, and a second drill.
 test('Only what disturbs serving workers is called destructive', () => {
 	const disturbing = allSystemMcpTools()
 		.filter((tool) => tool.annotations.destructiveHint)
@@ -372,7 +372,7 @@ test('Every tool declares the subsystem it reads', () => {
 	]);
 });
 
-// The shared config lives in Redis, and a tool that could only ever fail is worse
+// The shared settings live in Redis, and a tool that could only ever fail is worse
 // than one a model never sees.
 test('A deployment without Redis offers no autoscale tools', () => {
 	redis.available.mockReturnValue(false);
@@ -458,14 +458,14 @@ test.each([
 
 test('The configuration write sends the note down with the patch', async () => {
 	service.updateAutoscaleConfig
-		.mockResolvedValue({ key: 'k', sharedConfig: {}, setByEmail: null });
+		.mockResolvedValue({ key: 'k', sharedSettings: {}, setByEmail: null });
 
 	await findSystemMcpTool('write_autoscale_config')!.run(
 		{ config: { maxWorkers: 8 }, note: 'spike on the planner' },
 		context,
 	);
 
-	// Named as an MCP write, which is what tells a shared config an agent left from
+	// Named as an MCP write, which is what tells shared settings an agent left from
 	// one a person typed into the admin.
 	expect(service.updateAutoscaleConfig).toHaveBeenCalledWith(
 		{ maxWorkers: 8, note: 'spike on the planner' },
@@ -473,9 +473,9 @@ test('The configuration write sends the note down with the patch', async () => {
 	);
 });
 
-test('the configuration write drops the whole shared config', async () => {
+test('the configuration write drops the whole shared settings', async () => {
 	service.readAutoscaleConfig
-		.mockResolvedValue({ key: 'k', sharedConfig: null, setByEmail: null });
+		.mockResolvedValue({ key: 'k', sharedSettings: null, setByEmail: null });
 
 	await findSystemMcpTool('write_autoscale_config')!
 		.run({ clear: true, note: 'incident over' }, context);
@@ -495,7 +495,7 @@ test('The configuration write refuses a patch that is not an object', async () =
 
 test('The supervisor write sends the note down with the options', async () => {
 	service.updateSupervisorConfig
-		.mockResolvedValue({ key: 'k', sharedConfig: {}, setByEmail: null });
+		.mockResolvedValue({ key: 'k', sharedSettings: {}, setByEmail: null });
 
 	await findSystemMcpTool('write_supervisor_config')!.run(
 		{ supervisor: { listenTimeout: 21_000 }, note: 'boot got slower' },
@@ -583,7 +583,7 @@ test('The drill advertises the bounds the service enforces', () => {
 
 test('The configuration read asks the running processes by default', async () => {
 	service.readAutoscaleConfig
-		.mockResolvedValue({ key: 'k', sharedConfig: null, setByEmail: null });
+		.mockResolvedValue({ key: 'k', sharedSettings: null, setByEmail: null });
 
 	service.readAutoscaleRunners.mockResolvedValue([]);
 
@@ -591,7 +591,7 @@ test('The configuration read asks the running processes by default', async () =>
 	expect(service.readAutoscaleRunners).toHaveBeenCalledOnce();
 
 	// Asking them costs about a second, so a caller that only wants the stored
-	// shared config can say so.
+	// shared settings can say so.
 	await findSystemMcpTool('read_autoscale_config')!.run({ live: false }, context);
 	expect(service.readAutoscaleRunners).toHaveBeenCalledOnce();
 });
@@ -763,8 +763,8 @@ test('Every declared output property is one the tool actually answers', () => {
 		read_cache_stats_state: CacheStatsState;
 	} = {
 		read_autoscale_config: {
-			key: 'scalabus:config:processes:autoscale',
-			sharedConfig: {
+			key: 'directus_settings.autoscale_settings',
+			sharedSettings: {
 				maxWorkers: 8,
 				setBy: 'jean',
 				setAt: '2026-09-09T00:00:00Z',
@@ -772,8 +772,8 @@ test('Every declared output property is one the tool actually answers', () => {
 			},
 			setByEmail: 'jean@example.com',
 			supervisor: {
-				key: 'scalabus:config:processes:supervisor',
-				sharedConfig: { listenTimeout: 20_000 },
+				key: 'directus_settings.supervisor_settings',
+				sharedSettings: { listenTimeout: 20_000 },
 				setByEmail: 'jean@example.com',
 			},
 			running: [
@@ -799,7 +799,7 @@ test('Every declared output property is one the tool actually answers', () => {
 						minSecondsToScaleDown: 300,
 						warmupSeconds: 30,
 					},
-						withoutSharedConfig: {
+						withoutSharedSettings: {
 						enabled: true,
 						strategy: 'scalabus',
 						appName: 'api',
@@ -823,7 +823,7 @@ test('Every declared output property is one the tool actually answers', () => {
 						scaleCpuThreshold: 'default',
 						releaseCpuThreshold: 'default',
 						minWorkers: 'env',
-						maxWorkers: 'sharedConfig',
+						maxWorkers: 'sharedSettings',
 						prewarmWorkers: 'default',
 						minSecondsToScaleUp: 'default',
 						minSecondsToScaleDown: 'default',
@@ -847,18 +847,18 @@ test('Every declared output property is one the tool actually answers', () => {
 			],
 		},
 		write_autoscale_config: {
-			key: 'scalabus:config:processes:autoscale',
-			sharedConfig: { maxWorkers: 8 },
+			key: 'directus_settings.autoscale_settings',
+			sharedSettings: { maxWorkers: 8 },
 			setByEmail: 'jean@example.com',
 			supervisor: {
-				key: 'scalabus:config:processes:supervisor',
-				sharedConfig: null,
+				key: 'directus_settings.supervisor_settings',
+				sharedSettings: null,
 				setByEmail: null,
 			},
 		},
 		write_supervisor_config: {
-			key: 'scalabus:config:processes:supervisor',
-			sharedConfig: { listenTimeout: 21_000 },
+			key: 'directus_settings.supervisor_settings',
+			sharedSettings: { listenTimeout: 21_000 },
 			setByEmail: 'jean@example.com',
 		},
 		restart_autoscale_pool: {

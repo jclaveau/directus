@@ -7,7 +7,10 @@ import {
 	disconnectFromSupervisor,
 	scaleApp,
 } from '../supervisor/index.js';
-import { reportUnhandledRejection } from '../../utils/report-unhandled-rejection.js';
+import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
+import { validateBooleanEnv } from '../../utils/validate-env.js';
+import { PROCESSES_BOOLEAN_ENV } from '../lib/boolean-env.js';
+import { reportPoolHealth } from '../lib/pool-health.js';
 import { decide } from './lib/decide.js';
 import { PoolSamples } from './lib/pool-samples.js';
 import { readPool, restarted } from './lib/pool.js';
@@ -18,9 +21,10 @@ import {
 	reloading,
 } from './lib/reload.js';
 import {
+	initSharedSettingsMirror,
 	resolveConfig,
 	resolvedSources,
-	resolvedWithoutSharedConfig,
+	resolvedWithoutSharedSettings,
 } from './lib/resolve-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
 import { recordAutoscaleTick } from './lib/state.js';
@@ -61,6 +65,60 @@ async function prewarm(
 }
 
 /**
+ * The size the pool is meant to be serving with once it is up.
+ *
+ * The prewarm where one is asked for, because that is the whole of what it
+ * asks: be this big before the deployment takes traffic. The floor otherwise,
+ * and the floor too where scaling is off, since prewarm is one of the things
+ * that does not run then.
+ */
+export function targetPoolSize(config: AutoscaleConfig): number {
+	if (config.enabled === false) {
+		return config.minWorkers;
+	}
+
+	return Math.min(
+		Math.max(config.minWorkers, config.prewarmWorkers),
+		config.maxWorkers,
+	);
+}
+
+/**
+ * How many workers the supervisor had given up on when that was last said.
+ *
+ * Read on every tick, so a line a tick would be the pool's whole log.
+ */
+let lastFailedWorkers = 0;
+
+/**
+ * Say that the pool is short, and say when it is whole again.
+ *
+ * At error because nothing else reports it: `/server/health` carries the same
+ * reading, but a platform polling it is answered by a worker that is serving
+ * and reads the 200 it was looking for. This line is what a deployment that
+ * lost a worker to a boot it cannot finish has to go on.
+ */
+function announceFailedWorkers(failed: number, online: number): void {
+	if (failed === lastFailedWorkers) {
+		return;
+	}
+
+	const logger = useLogger();
+
+	if (failed > 0) {
+		logger.error(
+			`[autoscale] the supervisor could not keep ${failed} worker(s) `
+				+ `running; the pool is serving with ${online}`,
+		);
+	}
+	else {
+		logger.info(`[autoscale] the pool is whole again, at ${online} worker(s)`);
+	}
+
+	lastFailedWorkers = failed;
+}
+
+/**
  * Watches one pm2 app and resizes it.
  *
  * Runs as its own process beside the app it scales, so the decision survives
@@ -69,13 +127,18 @@ async function prewarm(
 export async function runAutoscaler(): Promise<void> {
 	const logger = useLogger();
 
+	// Before anything is connected to: a pool told to scale by a variable this
+	// process reads as false would run at its floor under any load, and the
+	// deployment that set it would have no line saying why.
+	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
+
 	// This command outlives the pool it manages, so it takes the guard the server
 	// process takes and for the same reason: Node ends a process on a rejection
 	// nothing awaited, and an unreachable Redis produces them from the bus
 	// subscriber and from commands its own caller has already given up on. An
 	// autoscaler that exits leaves the pool at whatever size the outage caught it
 	// at, and its supervisor restarts it into the same outage.
-	process.on('unhandledRejection', reportUnhandledRejection);
+	guardUnhandledRejections();
 
 	await connectToSupervisor();
 
@@ -100,6 +163,12 @@ export async function runAutoscaler(): Promise<void> {
 	// the supervisor connection and is not a member of the pool, so it listens
 	// for the ask instead.
 	initAutoscaleReload();
+
+	// Before the loop rather than inside it: the mirror the ticks read is seeded
+	// once here, and kept current by the announcement every settings write makes
+	// plus a floor of its own. A tick that had to fetch it would put a query on
+	// the one path that must not be able to hang.
+	await initSharedSettingsMirror();
 
 	const stop = () => {
 		disconnectFromSupervisor();
@@ -130,7 +199,7 @@ export async function runAutoscaler(): Promise<void> {
 		// failure caught it in, and a pool that cannot shrink is how the
 		// module this replaces took production down.
 		try {
-			const config = await resolveConfig();
+			const config = resolveConfig();
 			const reading = await readPool(config.appName, config.warmupSeconds);
 			const { pendingWorkers, warmingWorkers } = reading;
 
@@ -142,6 +211,19 @@ export async function runAutoscaler(): Promise<void> {
 			const workers = onlineWorkers.length + pendingWorkers;
 
 			beginAskedReload(config.appName, workers);
+
+			// Held back while a reload is in flight: it replaces the pool a
+			// worker at a time on purpose, and the states it passes through
+			// are not a pool that lost any.
+			if (reloading() === false) {
+				reportPoolHealth({
+					failedWorkers: reading.failedWorkers,
+					onlineWorkers: onlineWorkers.length,
+					targetWorkers: targetPoolSize(config),
+				});
+
+				announceFailedWorkers(reading.failedWorkers, onlineWorkers.length);
+			}
 
 			const carriesRestarts = [...reading.restartsByWorker.values()]
 				.some((count) => count > 0);
@@ -269,7 +351,7 @@ export async function runAutoscaler(): Promise<void> {
 				at: now,
 				config,
 				sources: resolvedSources(),
-				withoutSharedConfig: resolvedWithoutSharedConfig(),
+				withoutSharedSettings: resolvedWithoutSharedSettings(),
 				workers: onlineWorkers.length,
 				pendingWorkers,
 				warmingWorkers,
