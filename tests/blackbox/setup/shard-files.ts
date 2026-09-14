@@ -83,9 +83,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,
 	// A whole Directus booted with no Redis at all and waited on until it
-	// answers, then an autoscaler held for ten seconds against a database that
-	// refuses it.
-	'/tests/db/app/processes-missing-dependency.test.ts': 95_000,
+	// answers, then an autoscaler booted and cut off from its database. Both
+	// spawns answer in seconds; what the run measures is the boots.
+	'/tests/db/app/processes-missing-dependency.test.ts': 10_000,
 	'/tests/db/app/autoscale-drill.test.ts': 25_000,
 	'/tests/db/app/autoscale-mcp-levers.test.ts': 120_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
