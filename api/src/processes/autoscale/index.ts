@@ -65,11 +65,6 @@ async function prewarm(
 }
 
 /**
- * How many workers the supervisor had given up on when that was last said.
- *
- * Read on every tick, so a line a tick would be the pool's whole log.
- */
-/**
  * The size the pool is meant to be serving with once it is up.
  *
  * The prewarm where one is asked for, because that is the whole of what it
@@ -88,6 +83,11 @@ export function targetPoolSize(config: AutoscaleConfig): number {
 	);
 }
 
+/**
+ * How many workers the supervisor had given up on when that was last said.
+ *
+ * Read on every tick, so a line a tick would be the pool's whole log.
+ */
 let lastFailedWorkers = 0;
 
 /**

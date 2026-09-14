@@ -23,8 +23,8 @@ export type AutoscaleSignal = 'average' | 'max';
  * Which rule decides the pool size.
  *
  * `legacy` reproduces the `pm2-autoscale` module this replaces, so a defect in
- * the fork's own rule can be reverted fleet-wide with one Redis write instead
- * of a redeploy. It reads the maximum CPU to grow and the average to shrink,
+ * the fork's own rule can be reverted fleet-wide with one settings write
+ * instead of a redeploy. It reads the maximum CPU to grow and the average to shrink,
  * over a thirty-sample window, and knows nothing of warm-ups, restarts or
  * prewarming.
  */
@@ -74,8 +74,8 @@ export interface AutoscaleConfig {
  *
  * - `default` — the shipped defaults, nothing set the variable
  * - `env` — a `PM2_AUTOSCALE_*` variable of the process that scales
- * - `sharedSettings` — the shared settings in Redis, one copy for the whole fleet,
- *   which wins over both
+ * - `sharedSettings` — the shared settings in `directus_settings`, one copy for
+ *   the whole fleet, which wins over both
  */
 export type AutoscaleValueSource = 'default' | 'env' | 'sharedSettings';
 
