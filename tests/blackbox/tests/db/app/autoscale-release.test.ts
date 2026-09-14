@@ -2,6 +2,7 @@ import vendors from '@common/get-dbs-to-test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeSharedSettings,
+	instancesOf,
 	poolSize,
 	reportOf,
 	sizesOver,
@@ -125,5 +126,48 @@ describe('The autoscaler gives back what the load no longer needs', () => {
 
 		// The gate is a delay, not a stop.
 		expect(await poolSize(rig, 1, 60_000), reportOf(rig)).toBe(1);
+	}, 300_000);
+
+	// Handed a size, pm2 chooses the victim itself: `rmProcs` walks the app's
+	// processes from the first one, which is the worker the pool has had
+	// longest. Under keep-alive that is where the live requests are — node
+	// cluster round-robins new connections, so clients stay on the sockets they
+	// already hold — and stopping it drops them. A scale-down did exactly that
+	// to a 27s POST on 2026-09-13 and the client got a 502.
+	//
+	// The pool here is staged so the two choices differ: the worker pm2 would
+	// take is the one reporting work, and the idle one is the worker the
+	// autoscaler has to name instead.
+	it('stops a worker with nothing in flight, not the one pm2 picks', async () => {
+		const rig = startPool({
+			appName: 'autoscale-victim',
+			instances: 2,
+			busyMs: 0,
+			idleMs: 100,
+			inFlight: 4,
+			inFlightBusyInstance: '0',
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			REDIS_ENABLED: 'false',
+			// Out of reach of an idle pool in both directions: the arm is about
+			// which worker a release takes, so nothing here should depend on
+			// what the runner's CPU happens to be doing.
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '80',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '50',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '2',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '5',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '5',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '5',
+		});
+
+		expect(await poolSize(rig, 1, 90_000), reportOf(rig)).toBe(1);
+
+		// Instance 0 is pm2's own first pick, so the survivor's number is the
+		// whole of the claim.
+		expect(instancesOf(rig), reportOf(rig)).toEqual([0]);
 	}, 300_000);
 });

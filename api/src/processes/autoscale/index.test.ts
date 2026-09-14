@@ -43,9 +43,17 @@ vi.mock('../../utils/report-unhandled-rejection.js', () => {
 const connectToSupervisor = vi.fn(async () => undefined);
 const disconnectFromSupervisor = vi.fn();
 const scaleApp = vi.fn(async () => undefined);
+const releaseWorker = vi.fn(async () => undefined);
+const watchWorkerMessages = vi.fn();
 
 vi.mock('../supervisor/index.js', () => {
-	return { connectToSupervisor, disconnectFromSupervisor, scaleApp };
+	return {
+		connectToSupervisor,
+		disconnectFromSupervisor,
+		releaseWorker,
+		scaleApp,
+		watchWorkerMessages,
+	};
 });
 
 const readPool = vi.fn();
@@ -93,6 +101,13 @@ const recordAutoscaleTick = vi.fn();
 
 vi.mock('./lib/state.js', () => {
 	return { recordAutoscaleTick };
+});
+
+const inFlightOf = vi.fn<(pmId: number) => number | null>(() => null);
+const watchInFlightReports = vi.fn();
+
+vi.mock('./lib/in-flight.js', () => {
+	return { inFlightOf, watchInFlightReports };
 });
 
 // Compiling the graph behind these modules is seconds of work, and a case that
@@ -227,6 +242,37 @@ describe('runAutoscaler', () => {
 				reason: 'cpu above the threshold',
 			}),
 		}));
+	});
+
+	// Handed a size, pm2 walks the app's processes from the first one and
+	// deletes the worker the pool has had longest — which under keep-alive is
+	// the one carrying the live requests, because node cluster round-robins new
+	// connections and clients stay on the sockets they hold. So a release names
+	// the worker instead of the size it wants to be left at.
+	test('releases the idle worker rather than the one pm2 would pick', async () => {
+		readPool.mockResolvedValue({
+			pendingWorkers: 0,
+			warmingWorkers: 0,
+			onlineWorkers: [
+				{ pid: 11, pmId: 0, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 12, pmId: 1, cpuPercent: 5, memoryBytes: 0, mature: true },
+			],
+			restartsByWorker: new Map([[0, 0], [1, 0]]),
+			supervisor,
+		});
+
+		inFlightOf.mockImplementation((pmId) => {
+			return pmId === 0
+				? 4
+				: 0;
+		});
+
+		decide.mockReturnValue({ workers: 1, reason: 'the load went' });
+
+		await ticks(2);
+
+		expect(releaseWorker).toHaveBeenCalledWith(1);
+		expect(scaleApp).not.toHaveBeenCalled();
 	});
 
 	// A reload bumps the restart counter and leaves the retiring worker in the

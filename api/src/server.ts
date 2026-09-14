@@ -18,6 +18,7 @@ import {
 	stopWatchingOutstandingMigrations,
 	watchOutstandingMigrations,
 } from './outstanding-migrations.js';
+import { reportInFlightRequests } from './processes/lib/report-in-flight.js';
 import { dumpCoverage } from './utils/dump-coverage.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getIPFromReq } from './utils/get-ip-from-req.js';
@@ -105,6 +106,12 @@ export async function createServer(): Promise<http.Server> {
 		res.once('finish', complete.bind(null, true));
 		res.once('close', complete.bind(null, false));
 	});
+
+	// So a release can tell a worker with requests open from an idle one. The
+	// supervisor is handed a worker to stop rather than a size to stop at, and
+	// without this it would pick the pool's oldest worker, which under
+	// keep-alive is where the live requests are.
+	reportInFlightRequests(server);
 
 	if (toBoolean(env['WEBSOCKETS_ENABLED']) === true) {
 		createSubscriptionController(server);

@@ -5,7 +5,9 @@ import { LEGACY_SAMPLE_WINDOW } from '@directus/constants';
 const MEGABYTE = 1_048_576;
 
 function worker(pid: number, cpuPercent: number, mature = true) {
-	return { pid, cpuPercent, memoryBytes: 200 * MEGABYTE, mature };
+	// The samples are keyed by pid, which is what changes when a worker is
+	// replaced; the supervisor's own id rides along and nothing here reads it.
+	return { pid, pmId: pid, cpuPercent, memoryBytes: 200 * MEGABYTE, mature };
 }
 
 test('averages a worker over the window it is asked for', () => {

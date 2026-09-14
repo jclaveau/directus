@@ -32,8 +32,56 @@ export function supervisorAvailable(): boolean {
  */
 const SUPERVISOR_TIMEOUT_MS = 15_000;
 
-function connect(): Promise<void> {
-	return promisify(pm2.connect.bind(pm2))();
+async function connect(): Promise<void> {
+	await promisify(pm2.connect.bind(pm2))();
+	await listenToWorkers();
+}
+
+/** What pm2 puts on the bus for one message a worker sent. */
+export interface WorkerMessage {
+	data?: unknown;
+	process?: { pm_id?: number; name?: string };
+}
+
+interface WorkerBus {
+	on(event: 'process:msg', listener: (message: WorkerMessage) => void): void;
+}
+
+let onWorkerMessage: ((message: WorkerMessage) => void) | null = null;
+
+/**
+ * Hands every message the supervised workers send to `listener`.
+ *
+ * pm2 gives the bus its own socket, which its client takes down along with the
+ * calling one — so this is re-armed from `connect` rather than called once, and
+ * a reconnect brings the reports back with the connection that carries them.
+ */
+export function watchWorkerMessages(
+	listener: (message: WorkerMessage) => void,
+): void {
+	onWorkerMessage = listener;
+}
+
+function listenToWorkers(): Promise<void> {
+	const listener = onWorkerMessage;
+
+	if (listener === null) {
+		return Promise.resolve();
+	}
+
+	const launched = new Promise<void>((resolve, reject) => {
+		pm2.launchBus((error, bus: WorkerBus) => {
+			if (error) {
+				reject(error);
+			}
+			else {
+				bus.on('process:msg', listener);
+				resolve();
+			}
+		});
+	});
+
+	return answeredInTime('a worker bus', launched);
 }
 
 /**
@@ -154,6 +202,22 @@ async function answeredInTime<T>(
 	throw new Error(
 		`the supervisor did not answer ${what} in ${timeoutMs}ms`,
 	);
+}
+
+/**
+ * Stops one worker by the id the supervisor knows it as.
+ *
+ * What a release uses instead of naming a size. Handed a size pm2 picks the
+ * victim itself, walking the app's processes from the first one — the worker
+ * the pool has had longest, and under keep-alive the one holding the most live
+ * requests. Naming the worker is the whole of the difference: `delete` and
+ * `scale` both reach `God.deleteProcessId`, and `delete` is the one pm2
+ * publishes in its typings.
+ */
+export async function releaseWorker(pmId: number): Promise<void> {
+	const deleted = promisify(pm2.delete.bind(pm2))(pmId);
+
+	await answeredInTime(`a release of worker ${pmId}`, deleted);
 }
 
 /** Every process the local daemon supervises, whatever app it belongs to. */

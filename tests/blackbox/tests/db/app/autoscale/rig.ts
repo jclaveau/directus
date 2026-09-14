@@ -43,6 +43,17 @@ export interface PoolOptions {
 	/** Which worker crashes, by pm2 instance number. Unset means all of them. */
 	crashOnlyInstance?: string;
 	/**
+	 * Requests a worker reports it is serving, which is what the autoscaler
+	 * chooses a release victim from. Unset means the pool reports nothing, the
+	 * way a pool on a build without the report does.
+	 */
+	inFlight?: number;
+	/**
+	 * Which worker reports `inFlight`, by pm2 instance number. Every other
+	 * worker reports none. Unset means all of them report it.
+	 */
+	inFlightBusyInstance?: string;
+	/**
 	 * How many crashes the daemon puts a worker back for before it gives up and
 	 * leaves it errored, which is the state it calls a failure. One makes the
 	 * first crash the last, so an arm reaches that state without waiting out a
@@ -101,6 +112,15 @@ export function startPool(options: PoolOptions): Rig {
 						...options.crashOnlyInstance === undefined
 							? {}
 							: { BB_CRASH_ONLY_INSTANCE: options.crashOnlyInstance },
+						...options.inFlight === undefined
+							? {}
+							: { BB_IN_FLIGHT: String(options.inFlight) },
+						...options.inFlightBusyInstance === undefined
+							? {}
+							: {
+									BB_IN_FLIGHT_BUSY_INSTANCE:
+										options.inFlightBusyInstance,
+								},
 					},
 				},
 			],
@@ -364,6 +384,22 @@ export async function declaredEverywhere(
  * autoscaler sizes a pool on. A worker it gave up on is neither, and neither is
  * one somebody stopped — a pool is short of both.
  */
+/**
+ * The pm2 instance numbers the daemon is still keeping, in ascending order.
+ *
+ * Which worker a release stopped, rather than how many are left: pm2 walks the
+ * app's processes from the first one, so a release it chose from is a release
+ * that took instance 0.
+ */
+export function instancesOf(rig: Rig): number[] {
+	const gone = ['stopped', 'stopping', 'errored'];
+
+	return listWorkers(rig)
+		.filter((worker) => gone.includes(worker.pm2_env?.status ?? '') === false)
+		.map((worker) => Number(worker.pm2_env?.['NODE_APP_INSTANCE'] ?? -1))
+		.sort((left, right) => left - right);
+}
+
 export function countWorkers(rig: Rig): number {
 	const gone = ['stopped', 'stopping', 'errored'];
 

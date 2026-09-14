@@ -48,6 +48,12 @@ export interface PoolReading {
 
 export interface OnlineWorker {
 	pid: number;
+	/**
+	 * What the supervisor calls the worker, which is what a release has to
+	 * name. Survives a restart where the pid does not, so the two are not
+	 * interchangeable and both are carried.
+	 */
+	pmId: number;
 	cpuPercent: number;
 	memoryBytes: number;
 	/** Serving for longer than the warm-up, so its numbers are its load. */
@@ -116,6 +122,7 @@ export async function readPool(
 
 			onlineWorkers.push({
 				pid: worker.pid ?? 0,
+				pmId: worker.pm_id ?? 0,
 				cpuPercent: worker.monit?.cpu ?? 0,
 				memoryBytes: worker.monit?.memory ?? 0,
 				mature,

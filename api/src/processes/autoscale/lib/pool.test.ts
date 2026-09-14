@@ -85,7 +85,7 @@ test('only the workers of the named app are read', async () => {
 	]);
 
 	await expect(readPool('directus', 30)).resolves.toMatchObject({
-		onlineWorkers: [{ pid: 100, cpuPercent: 10, mature: true }],
+		onlineWorkers: [{ pid: 100, pmId: 0, cpuPercent: 10, mature: true }],
 	});
 });
 

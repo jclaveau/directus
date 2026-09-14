@@ -5,15 +5,18 @@ import { initProcessReports } from '../index.js';
 import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
+	releaseWorker,
 	scaleApp,
 } from '../supervisor/index.js';
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
 import { validateBooleanEnv } from '../../utils/validate-env.js';
 import { PROCESSES_BOOLEAN_ENV } from '../lib/boolean-env.js';
 import { reportPoolHealth } from '../lib/pool-health.js';
+import { chooseVictims } from './lib/choose-victims.js';
 import { decide } from './lib/decide.js';
+import { inFlightOf, watchInFlightReports } from './lib/in-flight.js';
 import { PoolSamples } from './lib/pool-samples.js';
-import { readPool, restarted } from './lib/pool.js';
+import { type OnlineWorker, readPool, restarted } from './lib/pool.js';
 import {
 	beginAskedReload,
 	initAutoscaleReload,
@@ -62,6 +65,32 @@ async function prewarm(
 	await scaleApp(config.appName, target);
 
 	return target;
+}
+
+/**
+ * Shrinks the pool by stopping workers this picks, rather than a size pm2 picks
+ * from.
+ *
+ * Handed a size, pm2 walks the app's processes from the first one and deletes
+ * the worker the pool has had longest. Under keep-alive that is where the live
+ * requests are — node cluster round-robins new connections, so clients stay on
+ * the workers they already hold sockets to — and stopping it drops them: the
+ * drain budget is the shutdown timeout, and a request already past it is a 502.
+ *
+ * One at a time and awaited, so a release that the supervisor does not answer
+ * costs the workers after it rather than the pool's whole shape.
+ */
+async function releaseWorkers(
+	pool: OnlineWorker[],
+	count: number,
+): Promise<void> {
+	const candidates = pool.map((worker) => {
+		return { pmId: worker.pmId, inFlight: inFlightOf(worker.pmId) };
+	});
+
+	for (const pmId of chooseVictims(candidates, count)) {
+		await releaseWorker(pmId);
+	}
 }
 
 /**
@@ -139,6 +168,12 @@ export async function runAutoscaler(): Promise<void> {
 	// autoscaler that exits leaves the pool at whatever size the outage caught it
 	// at, and its supervisor restarts it into the same outage.
 	guardUnhandledRejections();
+
+	// Armed before the connection, which is what launches the bus it reads:
+	// the workers report over pm2's own channel rather than over the bus the
+	// rest of the processes module uses, so what the autoscaler knows about
+	// which worker is busy survives a Redis outage exactly as its scaling does.
+	watchInFlightReports();
 
 	await connectToSupervisor();
 
@@ -333,7 +368,15 @@ export async function runAutoscaler(): Promise<void> {
 						+ `restarts: ${[...reading.restartsByWorker.values()].join(',')}`,
 					);
 
-					await scaleApp(config.appName, decision.workers);
+					if (decision.workers < workers) {
+						await releaseWorkers(
+							onlineWorkers,
+							workers - decision.workers,
+						);
+					}
+					else {
+						await scaleApp(config.appName, decision.workers);
+					}
 
 					if (decision.workers > workers) {
 						lastScaleUpAt = Date.now();

@@ -6,10 +6,24 @@ const list = vi.fn();
 const scale = vi.fn();
 const reload = vi.fn();
 const sendDataToProcessId = vi.fn();
+const deleteProcess = vi.fn();
+
+const launchBus = vi.fn((callback: (error: Error | null, bus: unknown) => void) => {
+	callback(null, { on: vi.fn() });
+});
 
 vi.mock('pm2', () => {
 	return {
-		default: { connect, disconnect, list, scale, reload, sendDataToProcessId },
+		default: {
+			connect,
+			disconnect,
+			list,
+			scale,
+			reload,
+			sendDataToProcessId,
+			delete: deleteProcess,
+			launchBus,
+		},
 	};
 });
 
@@ -23,6 +37,8 @@ beforeEach(() => {
 	scale.mockReset();
 	reload.mockReset();
 	sendDataToProcessId.mockReset();
+	deleteProcess.mockReset();
+	launchBus.mockClear();
 	// Reset rather than cleared: an arm below holds a connection open to watch
 	// a second one being asked for, and a mock left holding it would take the
 	// rest of the file with it.
@@ -399,4 +415,48 @@ test('a reconnect connects only once the disconnect has landed', async () => {
 
 	expect(connect).toHaveBeenCalledOnce();
 	await failed;
+});
+
+// A release names the worker rather than the size to be left at, because pm2
+// picks for itself when handed a size: `rmProcs` walks the app's processes from
+// the first one, which is the worker the pool has had longest.
+test('a release names the worker the supervisor is to stop', async () => {
+	const { releaseWorker } = await import('./client.js');
+
+	deleteProcess.mockImplementation((
+		_pmId: number,
+		callback: (error: Error | null) => void,
+	) => callback(null));
+
+	await releaseWorker(4);
+
+	expect(deleteProcess).toHaveBeenCalledWith(4, expect.any(Function));
+	expect(scale).not.toHaveBeenCalled();
+});
+
+// pm2 gives the bus its own socket and takes it down with the calling one, so a
+// reconnect that only rebuilt the calls would leave the autoscaler deciding
+// which worker to stop on reports that stopped arriving when the daemon
+// restarted — silently, since a worker that says nothing is a worker with
+// nothing known about it.
+test('a reconnect puts the worker bus back', async () => {
+	const { connectToSupervisor, listSupervisedApps, watchWorkerMessages } =
+		await import('./client.js');
+
+	watchWorkerMessages(vi.fn());
+	await connectToSupervisor();
+
+	expect(launchBus).toHaveBeenCalledOnce();
+
+	list.mockImplementation(neverAnswers);
+
+	connect.mockImplementation((callback: (error: Error | null) => void) => {
+		callback(null);
+	});
+
+	const failed = expect(listSupervisedApps()).rejects.toThrow();
+	await vi.advanceTimersByTimeAsync(15_000);
+	await failed;
+
+	expect(launchBus).toHaveBeenCalledTimes(2);
 });

@@ -31,7 +31,7 @@ function stat(cpuSeconds: number, aliveSeconds: number): string {
 
 /** What the supervisor said, which stands wherever `/proc` will not answer. */
 function worker(cpuPercent: number): OnlineWorker {
-	return { pid: 4242, cpuPercent, memoryBytes: 1024, mature: true };
+	return { pid: 4242, pmId: 0, cpuPercent, memoryBytes: 1024, mature: true };
 }
 
 function procHolding(line: string | null): void {

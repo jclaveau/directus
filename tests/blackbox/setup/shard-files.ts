@@ -61,8 +61,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// laptop; the rest is the runner.
 	'/tests/db/app/autoscale-redis-outage.test.ts': 120_000,
 	// A climb, a whole pool falling idle, and the walk back down, plus a second
-	// climb whose release is held by the cooldown the add re-armed.
-	'/tests/db/app/autoscale-release.test.ts': 235_000,
+	// climb whose release is held by the cooldown the add re-armed, and a third
+	// pool released at the worker that is not the one pm2 would have taken.
+	'/tests/db/app/autoscale-release.test.ts': 285_000,
 	// One climb, a daemon taken away, and the climb it makes afterwards.
 	'/tests/db/app/autoscale-supervisor-restart.test.ts': 60_000,
 	'/tests/db/app/autoscale-supervisor-options.test.ts': 90_000,

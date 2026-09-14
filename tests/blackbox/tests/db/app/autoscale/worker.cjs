@@ -45,6 +45,29 @@ if (calmAfterMs > 0) {
 	}, calmAfterMs);
 }
 
+// What the autoscaler chooses a release victim from. A real worker counts the
+// requests it is serving; this says a number, so an arm can stage a pool where
+// the worker pm2 would have deleted is the one holding the work. The topic is
+// `IN_FLIGHT_REPORT_TOPIC` from api/src/processes/types/messages.ts — pm2
+// forwards `data` verbatim and nothing else of the message survives the hop.
+const inFlightReport = process.env['BB_IN_FLIGHT'];
+
+if (inFlightReport !== undefined) {
+	const busyInstance = process.env['BB_IN_FLIGHT_BUSY_INSTANCE'];
+
+	const inFlight = busyInstance === undefined
+		|| busyInstance === process.env['NODE_APP_INSTANCE']
+		? Number(inFlightReport)
+		: 0;
+
+	setInterval(() => {
+		process.send?.({
+			type: 'process:msg',
+			data: { topic: 'processes:in-flight', inFlight },
+		});
+	}, 500).unref();
+}
+
 function burn() {
 	const until = Date.now() + busyMs;
 
