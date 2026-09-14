@@ -62,7 +62,7 @@ async function deploy(
 		instance,
 		rig: startPool({
 			appName: `prewarm-health-${vendor}-${prewarm}`,
-			keepRestarting: false,
+			giveUpAfterRestarts: 1,
 			...pool,
 		}),
 		url: getUrl(vendor, { [vendor]: env } as never),

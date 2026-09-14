@@ -43,12 +43,16 @@ export interface PoolOptions {
 	/** Which worker crashes, by pm2 instance number. Unset means all of them. */
 	crashOnlyInstance?: string;
 	/**
-	 * Whether the daemon puts a worker that ended back. Off, a worker that
-	 * crashes stays in the listing in a state that is neither starting nor
-	 * serving — which is where a worker the supervisor has given up on ends,
-	 * without an arm having to wait out a restart budget to see it.
+	 * How many crashes the daemon puts a worker back for before it gives up and
+	 * leaves it errored, which is the state it calls a failure. One makes the
+	 * first crash the last, so an arm reaches that state without waiting out a
+	 * budget.
+	 *
+	 * A worker left with restarting turned off ends stopped instead, and
+	 * stopped is what an operator's own `pm2 stop` leaves behind — a pool is
+	 * not short of a worker somebody took out of it.
 	 */
-	keepRestarting?: boolean;
+	giveUpAfterRestarts?: number;
 }
 
 /**
@@ -79,7 +83,16 @@ export function startPool(options: PoolOptions): Rig {
 					// than a timer.
 					wait_ready: true,
 					listen_timeout: 10_000,
-					autorestart: options.keepRestarting ?? true,
+					autorestart: true,
+					...options.giveUpAfterRestarts === undefined
+						? {}
+						: {
+								max_restarts: options.giveUpAfterRestarts,
+								// Wider than the crash any arm stages, so the
+								// crash counts against the budget above rather
+								// than reading as a worker that had been up.
+								min_uptime: 30_000,
+							},
 					env: {
 						BB_BUSY_MS: String(options.busyMs ?? 0),
 						BB_IDLE_MS: String(options.idleMs ?? 100),

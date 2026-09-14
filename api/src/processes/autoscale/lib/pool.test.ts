@@ -167,18 +167,61 @@ test('the workers the supervisor could not keep running are counted', async () =
 			monit: { cpu: 0, memory: 0 },
 			pm2_env: { status: 'errored', restart_time: 15 },
 		},
+	]);
+
+	await expect(readPool('directus', 30)).resolves.toMatchObject({
+		failedWorkers: 1,
+		pendingWorkers: 0,
+	});
+});
+
+// A stopped worker is the one state in this list somebody chose, and the health
+// of the deployment is what reads the count: a pool a worker was taken out of on
+// purpose would answer every probe with a warning until somebody put it back,
+// and a deployment that booted that way would never report itself ready at all.
+test.each([
+	'stopped',
+	'stopping',
+])('a worker held at %s is not a failure', async (status) => {
+	const { readPool } = await import('./pool.js');
+
+	listing([
 		{
 			name: 'directus',
-			pm_id: 2,
-			pid: 102,
+			pm_id: 0,
+			pid: 100,
 			monit: { cpu: 0, memory: 0 },
-			pm2_env: { status: 'stopped', restart_time: 15 },
+			pm2_env: { status, restart_time: 15 },
 		},
 	]);
 
 	await expect(readPool('directus', 30)).resolves.toMatchObject({
-		failedWorkers: 2,
+		failedWorkers: 0,
 		pendingWorkers: 0,
+	});
+});
+
+// Counted where a launching worker is counted, because that is what it is: the
+// supervisor is holding it between a stop and the start it already decided on.
+// Called failed instead, it would warn for the length of a restart; counted
+// nowhere, the pool would read short and be given a worker it is about to get
+// back anyway.
+test('a worker between restarts is counted as one on its way', async () => {
+	const { readPool } = await import('./pool.js');
+
+	listing([
+		{
+			name: 'directus',
+			pm_id: 0,
+			pid: 100,
+			monit: { cpu: 0, memory: 0 },
+			pm2_env: { status: 'waiting restart', restart_time: 15 },
+		},
+	]);
+
+	await expect(readPool('directus', 30)).resolves.toMatchObject({
+		failedWorkers: 0,
+		pendingWorkers: 1,
 	});
 });
 

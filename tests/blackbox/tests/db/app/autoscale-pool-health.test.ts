@@ -60,7 +60,7 @@ describe('A pool the supervisor cannot keep whole reaches /server/health', () =>
 				crashOnlyInstance: '1',
 				// The state a worker the supervisor has given up on sits in,
 				// without the arm waiting out a restart budget to reach it.
-				keepRestarting: false,
+				giveUpAfterRestarts: 1,
 			});
 
 			rigs[vendor] = rig;
