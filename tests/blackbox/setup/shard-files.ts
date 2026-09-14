@@ -60,8 +60,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// connection cut, plus a cold-start arm. 27s driven directly on a quiet
 	// laptop; the rest is the runner.
 	'/tests/db/app/autoscale-redis-outage.test.ts': 120_000,
-	// A climb, a whole pool falling idle, and the walk back down.
-	'/tests/db/app/autoscale-release.test.ts': 160_000,
+	// A climb, a whole pool falling idle, and the walk back down, plus a second
+	// climb whose release is held by the cooldown the add re-armed.
+	'/tests/db/app/autoscale-release.test.ts': 235_000,
 	// One climb, a daemon taken away, and the climb it makes afterwards.
 	'/tests/db/app/autoscale-supervisor-restart.test.ts': 60_000,
 	'/tests/db/app/autoscale-supervisor-options.test.ts': 90_000,

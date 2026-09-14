@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeSharedSettings,
 	poolSize,
+	reportOf,
 	sizesOver,
 	startAutoscaler,
 	startPool,
@@ -78,5 +79,51 @@ describe('The autoscaler gives back what the load no longer needs', () => {
 		// One is the floor, so a pool that kept releasing would be releasing
 		// past what it was told to keep.
 		expect(await sizesOver(rig, 10_000)).toEqual([1]);
+	}, 300_000);
+
+	// The release cooldown is measured from the last scaling in either
+	// direction, so the worker a burst just bought is not taken back the moment
+	// the burst ends. Both clocks start when the autoscaler does, which is what
+	// makes this reachable in the steady state rather than only at boot: a pool
+	// running longer than the cooldown has a release clock that reads as
+	// satisfied whatever happens next, and the add is the only thing left
+	// holding the worker.
+	//
+	// The settling time is set above the cooldown so the add lands late enough
+	// for the load to stop right after it. A release gated on its own clock
+	// alone fires about seven seconds after the load goes; one gated on the add
+	// waits the cooldown out from there.
+	it('holds a release that would undo the add that just landed', async () => {
+		const rig = startPool({
+			appName: 'autoscale-antiflap',
+			instances: 1,
+			busyMs: 20,
+			idleMs: 80,
+			calmAfterMs: 24_000,
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			REDIS_ENABLED: 'false',
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '10',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '5',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			// Two, so the climb is one add and the arm knows when it happened.
+			PM2_AUTOSCALE_MAX_WORKERS: '2',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '20',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '25',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '8',
+		});
+
+		expect(await poolSize(rig, 2, 90_000), reportOf(rig)).toBe(2);
+
+		// The window the load spends going away and then some. A release
+		// measured from the boot clock lands inside it; one measured from the
+		// add is still ten seconds out when it closes.
+		expect(await sizesOver(rig, 15_000), reportOf(rig)).toEqual([2]);
+
+		// The gate is a delay, not a stop.
+		expect(await poolSize(rig, 1, 60_000), reportOf(rig)).toBe(1);
 	}, 300_000);
 });

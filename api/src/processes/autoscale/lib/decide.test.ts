@@ -166,3 +166,38 @@ test('a pool pinned between equal bounds ignores what it reports', () => {
 		});
 	}
 });
+
+// A pool that has run for hours without moving has a release cooldown that
+// reads as satisfied whatever happens next, so the add that just landed is the
+// only thing standing between the pool and losing the worker it just gained.
+// The worker also arrives at 0%, dragging the average it will be judged on
+// under the release threshold, so the sample argues for its own undoing.
+test('the scalabus strategy holds a release that would undo a recent add', () => {
+	const scalabus = { ...config, strategy: 'scalabus' as const };
+
+	const justGrown = sample([20, 0], {
+		lastScaleUpAt: NOW - 30_000,
+		lastScaleDownAt: NOW - 6_000_000,
+	});
+
+	expect(decide(justGrown, scalabus)).toEqual({
+		workers: null,
+		reason: '10% releases a worker, 270s of cooldown left',
+	});
+});
+
+// The counterpart, so the gate above is a delay and not a stop: once the add
+// is as old as the cooldown the pool sheds the worker it stopped needing.
+test('the scalabus strategy releases once the add is past the cooldown', () => {
+	const scalabus = { ...config, strategy: 'scalabus' as const };
+
+	const settled = sample([20, 0], {
+		lastScaleUpAt: NOW - 400_000,
+		lastScaleDownAt: NOW - 6_000_000,
+	});
+
+	expect(decide(settled, scalabus)).toEqual({
+		workers: 1,
+		reason: 'average cpu 10% < 40%',
+	});
+});

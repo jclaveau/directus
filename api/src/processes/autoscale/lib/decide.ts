@@ -219,7 +219,14 @@ function decideScalabus(
 	}
 
 	if (cpu < config.releaseCpuThreshold && workers > config.minWorkers) {
-		const waited = secondsSince(sample.lastScaleDownAt, sample.now);
+		// Measured from the last scaling in either direction rather than from
+		// the last release alone. A worker added a moment ago has taken no
+		// load yet, so it lowers the very average that decides this, while a
+		// pool that has been stable for hours carries a `lastScaleDownAt` long
+		// past its cooldown — together those release the worker the tick
+		// before added, with the cooldown reading as honestly satisfied.
+		const settledAt = Math.max(sample.lastScaleUpAt, sample.lastScaleDownAt);
+		const waited = secondsSince(settledAt, sample.now);
 
 		if (waited < config.minSecondsToScaleDown) {
 			const left = Math.round(config.minSecondsToScaleDown - waited);
