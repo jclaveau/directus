@@ -7,6 +7,7 @@ import getPort from 'get-port';
 import { cloneDeep } from 'lodash-es';
 import { createRequire } from 'module';
 import { mkdtempSync } from 'node:fs';
+import { connect, createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import request from 'supertest';
@@ -39,17 +40,65 @@ function envWithout(
 	return env;
 }
 
+/**
+ * A listener that carries one connection through to another, and can stop.
+ *
+ * The database a shard runs against is the one every suite beside it runs
+ * against, so an outage cannot be staged by stopping it. Staged on this side of
+ * the socket instead: the deployment connects through here, and cutting this
+ * leaves it holding a connection to a port nothing answers on any more, which
+ * is what it would be holding either way.
+ */
+function forwardingProxy(host: string, port: number) {
+	const carried = new Set<Socket>();
+
+	const server = createServer((incoming) => {
+		const outgoing = connect(port, host);
+
+		carried.add(incoming);
+		carried.add(outgoing);
+
+		// A socket cut mid-query raises on both ends, and an unanswered `error`
+		// event is thrown rather than reported — by the test's own process.
+		incoming.on('error', () => {});
+		outgoing.on('error', () => {});
+
+		incoming.pipe(outgoing);
+		outgoing.pipe(incoming);
+	});
+
+	return {
+		listen: () => {
+			return new Promise<number>((resolve) => {
+				server.listen(0, '127.0.0.1', () => {
+					resolve((server.address() as { port: number }).port);
+				});
+			});
+		},
+		// The listener and everything it is already carrying: a pool keeps its
+		// connections, so a closed listener alone would be an outage the pool
+		// never notices.
+		cut: () => {
+			server.close();
+
+			for (const socket of carried) {
+				socket.destroy();
+			}
+		},
+	};
+}
+
 /** How long a deployment is given to finish booting and answer. */
 const BOOT_MS = 90_000;
 
-/**
- * How long the autoscaler is watched for, once it has said anything at all.
- *
- * It runs until it is stopped, so the claim is that it is still running — and
- * the failure it is watched for is a call inside its boot ending the process
- * rather than answering.
- */
-const WATCH_MS = 10_000;
+/** Poll until it holds, or until that budget is spent. */
+async function waitFor(held: () => boolean): Promise<void> {
+	const deadline = Date.now() + BOOT_MS;
+
+	while (Date.now() < deadline && held() === false) {
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+}
 
 // Every layer of the processes module is a dependency of the deployment it
 // describes and not of the deployment itself: the pool is reported over the
@@ -98,21 +147,31 @@ describe.each(vendors)('%s', (vendor) => {
 	}, 180_000);
 
 	// The autoscaler reads the shared settings out of the database, which is a
-	// dependency its loop never had before they were kept there. A database
-	// that will not answer has to cost it the layer and nothing else: an
-	// autoscaler that ends leaves the pool at whatever size the outage caught
-	// it at, and its supervisor restarts it into the same outage.
-	it('keeps scaling where the database will not answer', async () => {
+	// dependency its loop never had before they were kept there. A database that
+	// stops answering has to cost it that layer and nothing else: an autoscaler
+	// that ends leaves the pool at whatever size the outage caught it at, and its
+	// supervisor restarts it into the same outage.
+	it('keeps scaling where the database stops answering', async () => {
 		// Without the bus too: this autoscaler reports on a pool of its own, and
 		// a suite beside it reads that channel for a pool of its own.
 		const env = envWithout(vendor, ['REDIS']);
 
-		// Declared in full and answered by nothing, which is the shape an
-		// outage takes. A variable left out instead would end the process long
-		// before the loop — the extensions are registered with a connection
-		// while the CLI is still being built, and that is every command's
-		// boot, not this one's.
-		env['DB_PORT'] = '6199';
+		const proxy = forwardingProxy(
+			env['DB_HOST']!,
+			Number(env['DB_PORT']),
+		);
+
+		// Reached rather than merely declared, because the outage this stages
+		// arrives after the boot. A connection refused from the start ends the
+		// process somewhere else entirely: building the CLI reads the extensions
+		// out of the database, and that read is every command's boot rather than
+		// this one's.
+		env['DB_HOST'] = '127.0.0.1';
+		env['DB_PORT'] = String(await proxy.listen());
+
+		// So the tick that has to notice is seconds away rather than the floor's
+		// half-minute.
+		env['SHARED_SETTINGS_POLL_SECONDS'] = '1';
 
 		// Its own daemon, so a run this arm outlives cannot reach a pool
 		// another suite is scaling.
@@ -132,21 +191,24 @@ describe.each(vendors)('%s', (vendor) => {
 		autoscaler.stderr.on('data', (chunk) => (output += String(chunk)));
 
 		try {
-			const deadline = Date.now() + BOOT_MS;
+			await waitFor(() => output.includes('[autoscale] shared settings:'));
 
-			while (Date.now() < deadline && output.includes('[autoscale]') === false) {
-				await new Promise((resolve) => setTimeout(resolve, 500));
-			}
+			// It read them, so what it loses next is a layer it had.
+			expect(output, output).toContain('[autoscale] shared settings:');
 
-			// It got past the read, so it has a loop to keep.
-			expect(output, output).toContain('[autoscale]');
+			proxy.cut();
 
-			await new Promise((resolve) => setTimeout(resolve, WATCH_MS));
+			await waitFor(() => output.includes('could not read the shared'));
 
+			// Said rather than swallowed, and said by a process still running:
+			// the pool is sized on the environment chain until the database
+			// answers again.
+			expect(output, output).toContain('could not read the shared settings');
 			expect(autoscaler.exitCode, output).toBeNull();
 		}
 		finally {
 			autoscaler.kill();
+			proxy.cut();
 		}
 	}, 180_000);
 });
