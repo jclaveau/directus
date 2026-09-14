@@ -58,6 +58,7 @@ import { initCacheConfig } from './cache-config.js';
 import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
 import { validateBooleanEnv } from './utils/validate-env.js';
 import { initSharedSettings } from './processes/lib/shared-settings.js';
+import { initPoolHealthMirror } from './processes/lib/pool-health.js';
 import { initSharedSettingsGuard } from './processes/lib/settings-guard.js';
 import emitter from './emitter.js';
 import { getExtensionManager } from './extensions/index.js';
@@ -411,6 +412,7 @@ export default async function createApp(): Promise<express.Application> {
 	await initCacheConfig();
 	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
 	await initSharedSettings();
+	initPoolHealthMirror();
 	await initSharedSettingsGuard();
 	await initProcessReports();
 	initAutoscaleDrill();

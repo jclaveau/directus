@@ -42,6 +42,13 @@ export interface PoolOptions {
 	crashAfterMs?: number;
 	/** Which worker crashes, by pm2 instance number. Unset means all of them. */
 	crashOnlyInstance?: string;
+	/**
+	 * Whether the daemon puts a worker that ended back. Off, a worker that
+	 * crashes stays in the listing in a state that is neither starting nor
+	 * serving — which is where a worker the supervisor has given up on ends,
+	 * without an arm having to wait out a restart budget to see it.
+	 */
+	keepRestarting?: boolean;
 }
 
 /**
@@ -72,6 +79,7 @@ export function startPool(options: PoolOptions): Rig {
 					// than a timer.
 					wait_ready: true,
 					listen_timeout: 10_000,
+					autorestart: options.keepRestarting ?? true,
 					env: {
 						BB_BUSY_MS: String(options.busyMs ?? 0),
 						BB_IDLE_MS: String(options.idleMs ?? 100),

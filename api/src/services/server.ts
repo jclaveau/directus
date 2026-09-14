@@ -13,6 +13,7 @@ import getMailer from '../mailer.js';
 import { rateLimiterGlobal } from '../middleware/rate-limiter-global.js';
 import { rateLimiter } from '../middleware/rate-limiter-ip.js';
 import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js';
+import { poolHealthReading } from '../processes/lib/pool-health.js';
 import { SERVER_ONLINE } from '../server.js';
 import { getStorage } from '../storage/index.js';
 import { getAllowedLogLevels } from '../utils/get-allowed-log-levels.js';
@@ -198,6 +199,31 @@ export class ServerService {
 
 			// No need to continue checking if parent status is already error
 			if (data.status === 'error') break;
+		}
+
+		// After the logging loop, like the migrations below: a probe answers on
+		// whatever interval a platform polls at, and the autoscaler already says
+		// this once per change in the log of the process that measured it.
+		const pool = poolHealthReading();
+
+		if (pool !== null && pool.failedWorkers > 0) {
+			// A warning rather than an error, so the 200 stands. The workers
+			// this one is answering for are serving: taking the service out of
+			// rotation for the ones that are not would answer a pool that lost
+			// a worker by dropping the rest of it.
+			if (data.status === 'ok') {
+				data.status = 'warn';
+			}
+
+			data.checks['processes:pool'] = [
+				{
+					componentType: 'system',
+					status: 'warn',
+					observedValue: pool.failedWorkers,
+					observedUnit: 'workers',
+					output: 'The supervisor could not keep every worker running',
+				},
+			];
 		}
 
 		// After the logging loop so a red health poll does not re-log the same line on

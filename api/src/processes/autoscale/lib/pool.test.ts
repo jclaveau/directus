@@ -143,3 +143,51 @@ test('a worker younger than the warmup is online and still warming', async () =>
 		onlineWorkers: [{ pid: 100, mature: false }],
 	});
 });
+
+// A worker that cannot finish `createApp` never binds and never reports ready,
+// so the supervisor restarts it until it gives up and leaves it errored. It is
+// no longer a worker of the pool, and nothing else in the reading counts it:
+// without this the pool reads as the size it has rather than the size it was
+// asked for.
+test('the workers the supervisor could not keep running are counted', async () => {
+	const { readPool } = await import('./pool.js');
+
+	listing([
+		{
+			name: 'directus',
+			pm_id: 0,
+			pid: 100,
+			monit: { cpu: 10, memory: 0 },
+			pm2_env: { status: 'online', pm_uptime: 0 },
+		},
+		{
+			name: 'directus',
+			pm_id: 1,
+			pid: 101,
+			monit: { cpu: 0, memory: 0 },
+			pm2_env: { status: 'errored', restart_time: 15 },
+		},
+		{
+			name: 'directus',
+			pm_id: 2,
+			pid: 102,
+			monit: { cpu: 0, memory: 0 },
+			pm2_env: { status: 'stopped', restart_time: 15 },
+		},
+	]);
+
+	await expect(readPool('directus', 30)).resolves.toMatchObject({
+		failedWorkers: 2,
+		pendingWorkers: 0,
+	});
+});
+
+test('a worker the supervisor said no state for is not called failed', async () => {
+	const { readPool } = await import('./pool.js');
+
+	listing([{ name: 'directus', pm_id: 0, pid: 100, monit: { cpu: 0, memory: 0 } }]);
+
+	await expect(readPool('directus', 30)).resolves.toMatchObject({
+		failedWorkers: 0,
+	});
+});

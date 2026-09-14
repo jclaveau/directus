@@ -72,6 +72,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// through, each a full module load. Measured over the postgres run of
 	// 2026-09-14.
 	'/tests/db/app/autoscale-boolean-env.test.ts': 12_000,
+	// A boot, a pool losing a worker, and an autoscaler started after it to
+	// report on. Estimated from the suites it borrows; to be measured.
+	'/tests/db/app/autoscale-pool-health.test.ts': 70_000,
 	// One CLI command per vendor: a module load, a query, and the few
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,

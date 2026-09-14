@@ -9,6 +9,16 @@ import { declaredBy } from './supervisor.js';
 export interface PoolReading {
 	/** Workers the supervisor has started that have not reported ready yet. */
 	pendingWorkers: number;
+	/**
+	 * Workers the supervisor lists as neither starting nor serving.
+	 *
+	 * A worker that cannot finish `createApp` never binds and never reports
+	 * ready, so it is restarted until the supervisor gives up on it and leaves
+	 * it here. Nothing else in this reading counts it: the pool reads as the
+	 * size it has, and a pool short of what it was asked for reads the same as
+	 * a pool that was asked for less.
+	 */
+	failedWorkers: number;
 	/** Workers serving, but still inside their warm-up. */
 	warmingWorkers: number;
 	/**
@@ -78,6 +88,7 @@ export async function readPool(
 	const onlineWorkers: OnlineWorker[] = [];
 	const restartsByWorker = new Map<number, number>();
 	let pendingWorkers = 0;
+	let failedWorkers = 0;
 	let warmingWorkers = 0;
 	let supervisor: AutoscaleSupervisor | null = null;
 
@@ -109,10 +120,14 @@ export async function readPool(
 				warmingWorkers += 1;
 			}
 		}
+		else if (env?.status !== undefined) {
+			failedWorkers += 1;
+		}
 	}
 
 	return {
 		pendingWorkers,
+		failedWorkers,
 		warmingWorkers,
 		onlineWorkers,
 		restartsByWorker,

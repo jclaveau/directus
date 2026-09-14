@@ -10,6 +10,7 @@ import {
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
 import { validateBooleanEnv } from '../../utils/validate-env.js';
 import { PROCESSES_BOOLEAN_ENV } from '../lib/boolean-env.js';
+import { reportPoolHealth } from '../lib/pool-health.js';
 import { decide } from './lib/decide.js';
 import { PoolSamples } from './lib/pool-samples.js';
 import { readPool, restarted } from './lib/pool.js';
@@ -61,6 +62,41 @@ async function prewarm(
 	await scaleApp(config.appName, target);
 
 	return target;
+}
+
+/**
+ * How many workers the supervisor had given up on when that was last said.
+ *
+ * Read on every tick, so a line a tick would be the pool's whole log.
+ */
+let lastFailedWorkers = 0;
+
+/**
+ * Say that the pool is short, and say when it is whole again.
+ *
+ * At error because nothing else reports it: `/server/health` carries the same
+ * reading, but a platform polling it is answered by a worker that is serving
+ * and reads the 200 it was looking for. This line is what a deployment that
+ * lost a worker to a boot it cannot finish has to go on.
+ */
+function announceFailedWorkers(failed: number, online: number): void {
+	if (failed === lastFailedWorkers) {
+		return;
+	}
+
+	const logger = useLogger();
+
+	if (failed > 0) {
+		logger.error(
+			`[autoscale] the supervisor could not keep ${failed} worker(s) `
+				+ `running; the pool is serving with ${online}`,
+		);
+	}
+	else {
+		logger.info(`[autoscale] the pool is whole again, at ${online} worker(s)`);
+	}
+
+	lastFailedWorkers = failed;
 }
 
 /**
@@ -156,6 +192,18 @@ export async function runAutoscaler(): Promise<void> {
 			const workers = onlineWorkers.length + pendingWorkers;
 
 			beginAskedReload(config.appName, workers);
+
+			// Held back while a reload is in flight: it replaces the pool a
+			// worker at a time on purpose, and the states it passes through
+			// are not a pool that lost any.
+			if (reloading() === false) {
+				reportPoolHealth({
+					failedWorkers: reading.failedWorkers,
+					onlineWorkers: onlineWorkers.length,
+				});
+
+				announceFailedWorkers(reading.failedWorkers, onlineWorkers.length);
+			}
 
 			const carriesRestarts = [...reading.restartsByWorker.values()]
 				.some((count) => count > 0);
