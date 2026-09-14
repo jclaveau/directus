@@ -34,7 +34,11 @@ interface Deployment {
 async function deploy(
 	vendor: Vendor,
 	prewarm: string,
-	pool: { instances: number; crashOnlyInstance?: string },
+	pool: {
+		instances: number;
+		crashAfterMs?: number;
+		crashOnlyInstance?: string;
+	},
 ): Promise<Deployment> {
 	const env = cloneDeep(config.envs)[vendor]!;
 	const port = await getPort();
@@ -153,10 +157,16 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 	it.each(vendors)('%s stays held while a worker will not run', async (vendor) => {
 		const deployment = await deploy(vendor, '2', {
 			instances: 2,
+			crashAfterMs: 2000,
 			crashOnlyInstance: '1',
 		});
 
 		deployed.push(deployment);
+
+		// Short before the autoscaler takes its first reading, so the pool it
+		// reports on is the one this arm is about. A reading taken while every
+		// worker was still up would say the pool came up, and it would have.
+		expect(await poolSize(deployment.rig, 1, 90_000)).toBe(1);
 
 		startAutoscaler(deployment.rig, {
 			REDIS_HOST: 'localhost',
