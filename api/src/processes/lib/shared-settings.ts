@@ -87,16 +87,70 @@ export function asSharedSettings(stored: unknown): SharedSettings | null {
 		: null;
 }
 
+let lastUndeclared = '';
+
+/**
+ * Whether the connection a read would go through is declared in full.
+ *
+ * Answered before the database is reached for, because `getDatabase` reports an
+ * incomplete connection by ending the process rather than by throwing: a caller
+ * asking for a tuning value cannot catch that, and the autoscaler asking for one
+ * would be replaced by its supervisor and end the same way on the next boot,
+ * leaving the pool at whatever size it was found at.
+ *
+ * The whole connection rather than `DB_CLIENT` alone. That variable is where the
+ * requirement starts, not what it comes to: which fields are needed depends on
+ * the dialect and on whether a connection string was given, and a deployment
+ * missing one of the others ends the same process just as surely.
+ *
+ * Read off the module that owns the requirement rather than a list kept beside
+ * it, so a dialect whose fields change is answered here by the same table the
+ * check itself uses.
+ */
+async function connectionIsDeclared(): Promise<boolean> {
+	const env = useEnv();
+
+	if ('DB_CLIENT' in env === false) {
+		return false;
+	}
+
+	const {
+		connectionFieldEnvKey,
+		getBaseDbConfig,
+		requiredConnectionFields,
+	} = await import('../../database/connections.js');
+
+	const missing = requiredConnectionFields(getBaseDbConfig())
+		.map((field) => connectionFieldEnvKey('DB_', field))
+		.filter((key) => key in env === false);
+
+	if (missing.length === 0) {
+		lastUndeclared = '';
+		return true;
+	}
+
+	// Once rather than per read: this is answered on the scaling floor, and a
+	// deployment that cannot reach its own settings would otherwise say so for
+	// as long as it runs. Silence is what it costs otherwise — the pool would
+	// scale on the environment chain with nothing naming the layer it is
+	// missing.
+	if (missing.join(', ') !== lastUndeclared) {
+		lastUndeclared = missing.join(', ');
+
+		useLogger().warn(
+			'[shared-settings] the connection is missing '
+				+ `${lastUndeclared}; the environment chain alone is read`,
+		);
+	}
+
+	return false;
+}
+
 /** What the column holds, or `null` where it holds nothing usable. */
 export async function readSharedSettings(
 	column: SharedSettingsColumn,
 ): Promise<SharedSettings | null> {
-	// Answered before the database is reached for, because `getDatabase` reports
-	// a missing connection by ending the process rather than by throwing: a
-	// caller asking for a tuning value cannot catch that, and the autoscaler
-	// asking for one would be replaced by its supervisor and end the same way on
-	// the next boot, leaving the pool at whatever size it was found at.
-	if ('DB_CLIENT' in useEnv() === false) {
+	if (await connectionIsDeclared() === false) {
 		return null;
 	}
 
@@ -124,7 +178,7 @@ export async function readAllSharedSettings(): Promise<
 > {
 	const columns = Object.values(SHARED_SETTINGS_COLUMNS);
 
-	if ('DB_CLIENT' in useEnv() === false) {
+	if (await connectionIsDeclared() === false) {
 		return { autoscale_settings: null, supervisor_settings: null };
 	}
 

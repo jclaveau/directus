@@ -4,6 +4,10 @@ import type { PoolHealth } from './pool-health.js';
 vi.mock('@directus/env');
 vi.mock('../../bus/index.js');
 
+vi.mock('../../redis/index.js', () => {
+	return { redisConfigAvailable: () => redisAvailable };
+});
+
 const warn = vi.fn();
 
 vi.mock('../../logger/index.js', () => {
@@ -21,6 +25,7 @@ const publish = vi.fn<Publish>(async () => {});
 const subscribe = vi.fn<Subscribe>(async () => {});
 
 let env: Record<string, unknown> = {};
+let redisAvailable = true;
 
 /**
  * The module with its picture of the pool empty, which is every process before
@@ -42,6 +47,7 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	vi.useRealTimers();
 	env = {};
+	redisAvailable = true;
 });
 
 test('answers nothing until something has reported a pool', async () => {
@@ -216,6 +222,20 @@ test('asks nothing of a deployment whose scaling is off', async () => {
 
 	// Prewarm is one of the things that does not run with scaling off, so
 	// holding the deployment down for it would never be answered.
+	expect(poolHasComeUp()).toBe(true);
+});
+
+test('asks nothing of a deployment with no bus to be told on', async () => {
+	env = { PM2_AUTOSCALE_PREWARM: 3 };
+	redisAvailable = false;
+
+	const { poolHasComeUp } = await freshMirror();
+
+	// Without Redis each process subscribes to an emitter it shares with
+	// nobody, so the reading that lifts the hold is published where no worker
+	// hears it. Held, this deployment would answer every probe with an error
+	// for as long as it ran, and the platform gating on that would never
+	// switch traffic onto it.
 	expect(poolHasComeUp()).toBe(true);
 });
 

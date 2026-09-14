@@ -249,6 +249,7 @@ let lastBase: AutoscaleConfig | null = null;
 let lastSources: AutoscaleConfigSources | null = null;
 let sharedSettings: SharedSettings | null = null;
 let readAt = 0;
+let reading = false;
 let unreadable = false;
 
 /**
@@ -343,7 +344,17 @@ function announceSharedSettings(): void {
  * take them back when the database answered again.
  */
 async function refreshSharedSettings(): Promise<void> {
-	readAt = Date.now();
+	// The floor is measured from when a read started, so a read that has not
+	// answered by the time the floor is up would be joined by another, and that
+	// one by another, for as long as it takes. A database holding a query holds
+	// it for its own acquire timeout, which is longer than any floor worth
+	// setting: unguarded, the process that has to keep scaling spends its
+	// connections on copies of the query that is already stuck.
+	if (reading) {
+		return;
+	}
+
+	reading = true;
 
 	try {
 		sharedSettings = await readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale);
@@ -360,6 +371,12 @@ async function refreshSharedSettings(): Promise<void> {
 					+ 'holding the last ones read',
 			);
 		}
+	}
+	finally {
+		// Dated by when it landed rather than by when it began, so a read that
+		// took longer than the floor is not immediately due again.
+		readAt = Date.now();
+		reading = false;
 	}
 }
 

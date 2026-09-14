@@ -1,6 +1,7 @@
 import { useEnv } from '@directus/env';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
+import { redisConfigAvailable } from '../../redis/index.js';
 
 /**
  * The channel the process holding the supervisor connection reports the pool
@@ -54,7 +55,8 @@ let reported: (PoolHealth & { at: number }) | null = null;
 let cameUp = false;
 
 /**
- * Whether this deployment asked for a pool bigger than the one it starts with.
+ * Whether this deployment asked for a pool bigger than the one it starts with,
+ * and can be told when it gets there.
  *
  * Read off the environment because it is a property of the deployment rather
  * than of the moment: the process has to know before it has heard anything
@@ -62,11 +64,19 @@ let cameUp = false;
  * `PM2_AUTOSCALE_ENABLED` is not the question — it defaults to on, so a
  * deployment that never named it would hold its health down forever waiting
  * for an autoscaler it does not run. A prewarm is asked for or it is not.
+ *
+ * The bus is the other half of the question, and it is the same question the
+ * routes describing the pool ask before they will carry themselves. Without
+ * Redis every process subscribes to an emitter it shares with nobody, so the
+ * reading that lifts the hold is published where no worker can hear it: the
+ * hold would stand for the life of the deployment, and the platform gating a
+ * switchover on it would never switch over.
  */
 function awaitsPrewarm(): boolean {
 	const env = useEnv();
 
-	return env['PM2_AUTOSCALE_ENABLED'] !== false
+	return redisConfigAvailable()
+		&& env['PM2_AUTOSCALE_ENABLED'] !== false
 		&& Number(env['PM2_AUTOSCALE_PREWARM'] ?? 0) > 0;
 }
 

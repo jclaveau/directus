@@ -40,6 +40,15 @@ const subscribe = vi.fn<Subscribe>(async () => {});
 
 const options = { schema: { collections: {} } } as never;
 
+/** A connection the dialect's own table reads as complete. */
+const CONNECTION = {
+	DB_CLIENT: 'pg',
+	DB_HOST: 'localhost',
+	DB_PORT: 5432,
+	DB_DATABASE: 'directus',
+	DB_USER: 'directus',
+};
+
 /** Stands in for the singleton row, whose column the read is taken from. */
 async function settingsHolding(stored: unknown) {
 	const { default: getDatabase } = await import('../../database/index.js');
@@ -63,9 +72,36 @@ async function busReady() {
 beforeEach(() => {
 	vi.clearAllMocks();
 
-	// A deployment that names no database never reaches one, so every arm below
-	// that expects a read has to say that this one names one.
-	vi.mocked(useEnv).mockReturnValue({ DB_CLIENT: 'pg' });
+	// A deployment whose connection is not fully declared never reaches one, so
+	// every arm below that expects a read has to declare one here.
+	vi.mocked(useEnv).mockReturnValue({ ...CONNECTION });
+});
+
+// The dialect decides which of these are required, and a read is answered
+// without one rather than taken: the call behind it ends the process on a
+// missing variable, and the process it would end is the one holding the pool.
+test('reads nothing through a connection missing a variable', async () => {
+	const { DB_HOST: _host, ...incomplete } = CONNECTION;
+
+	vi.mocked(useEnv).mockReturnValue(incomplete);
+	await settingsHolding(JSON.stringify({ maxWorkers: 8 }));
+
+	await expect(readSharedSettings(SHARED_SETTINGS_COLUMNS.autoscale))
+		.resolves.toBeNull();
+
+	await expect(readAllSharedSettings()).resolves.toEqual({
+		autoscale_settings: null,
+		supervisor_settings: null,
+	});
+
+	// Said, because the pool then scales on the environment chain alone and
+	// nothing else names the layer it is running without.
+	expect(warn).toHaveBeenCalledWith(
+		expect.stringContaining('DB_HOST'),
+	);
+
+	// Once, not per read: this is answered on the scaling floor.
+	expect(warn).toHaveBeenCalledTimes(1);
 });
 
 // `getDatabase` reports a missing connection by ending the process rather than
