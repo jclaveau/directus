@@ -170,4 +170,47 @@ describe('The autoscaler gives back what the load no longer needs', () => {
 		// whole of the claim.
 		expect(instancesOf(rig), reportOf(rig)).toEqual([0]);
 	}, 300_000);
+
+	// A worker reports 0% both when the pool has capacity to spare and when
+	// nothing has been routed to it, and keep-alive makes the second common:
+	// node cluster round-robins new connections, so clients stay on the sockets
+	// they already hold and a worker can idle beside a pool that is working
+	// hard. Averaged across the whole pool that idle worker pulls the reading
+	// under the release threshold and argues for its own removal, and the work
+	// it was not doing lands on the worker that was doing all of it.
+	//
+	// The pool here reads [~95, 0]. Its average is under the release threshold
+	// whatever the runner gives the busy worker — two workers halve it, and a
+	// release threshold of 50 is half of a percent no worker can reach — so the
+	// unfixed rule releases on any reading. The fixed one holds on any reading
+	// above 50, which is the whole band between what the worker is asked for
+	// and half of it.
+	it('holds a release the surviving worker could not absorb', async () => {
+		const rig = startPool({
+			appName: 'autoscale-lopsided',
+			instances: 2,
+			busyMs: 95,
+			idleMs: 5,
+			busyOnlyInstance: '1',
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			REDIS_ENABLED: 'false',
+			// Over the pool's average, so the arm is about the release branch
+			// rather than about a pool that wanted to grow and could not.
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '70',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '50',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '2',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '5',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '5',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '5',
+		});
+
+		// Long enough for the warm-up and the cooldown to pass and then some,
+		// so a release judged on the pool's average has fired well inside it.
+		expect(await sizesOver(rig, 45_000), reportOf(rig)).toEqual([2]);
+	}, 300_000);
 });

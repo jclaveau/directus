@@ -6,7 +6,15 @@
 // CPU nobody controls. This answers them on demand instead: BB_BUSY_MS of a spin per
 // BB_IDLE_MS of sleep is a duty cycle the daemon reports as a stable percentage.
 
-let busyMs = Number(process.env['BB_BUSY_MS'] ?? 0);
+// Which worker burns, by pm2's own instance number. Unset means all of them.
+// A pool whose workers all report the same percent can only be read one way,
+// and an average is only wrong about a pool where they differ.
+const busyInstance = process.env['BB_BUSY_ONLY_INSTANCE'];
+
+const burns = busyInstance === undefined
+	|| busyInstance === process.env['NODE_APP_INSTANCE'];
+
+let busyMs = burns ? Number(process.env['BB_BUSY_MS'] ?? 0) : 0;
 const idleMs = Number(process.env['BB_IDLE_MS'] ?? 100);
 const readyDelayMs = Number(process.env['BB_READY_DELAY_MS'] ?? 200);
 const crashAfterMs = Number(process.env['BB_CRASH_AFTER_MS'] ?? 0);
