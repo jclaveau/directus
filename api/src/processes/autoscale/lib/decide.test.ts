@@ -182,7 +182,7 @@ test('the scalabus strategy holds a release that would undo a recent add', () =>
 
 	expect(decide(justGrown, scalabus)).toEqual({
 		workers: null,
-		reason: '10% releases a worker, 270s of cooldown left',
+		reason: '20% releases a worker, 270s of cooldown left',
 	});
 });
 
@@ -198,6 +198,39 @@ test('the scalabus strategy releases once the add is past the cooldown', () => {
 
 	expect(decide(settled, scalabus)).toEqual({
 		workers: 1,
-		reason: 'average cpu 10% < 40%',
+		reason: 'cpu 20% across the 1 worker(s) a release leaves < 40%',
+	});
+});
+
+// A worker reports 0% both when the pool has capacity to spare and when nothing
+// has been routed to it, and keep-alive makes the second common: node cluster
+// round-robins new connections, so clients stay on the workers they already
+// hold sockets to and a fresh one can idle beside a busy pool. Averaged across
+// every worker that reads as spare capacity; measured against the workers a
+// release would leave it reads as what it is.
+test('the scalabus strategy holds a release the survivors could not absorb', () => {
+	const scalabus = { ...config, strategy: 'scalabus' as const };
+
+	const lopsided = sample([70, 0], { lastScaleUpAt: NOW - 400_000 });
+
+	expect(decide(lopsided, scalabus)).toEqual({
+		workers: null,
+		reason: 'average cpu 35% is within the band',
+	});
+});
+
+// The warming worker is in the pool's size and not in its statistic, so the
+// divisor a release projects over would not match the workers it is judging.
+test('the scalabus strategy holds a release while a worker warms up', () => {
+	const scalabus = { ...config, strategy: 'scalabus' as const };
+
+	const warming = sample([20, 0], {
+		warmingWorkers: 1,
+		lastScaleUpAt: NOW - 400_000,
+	});
+
+	expect(decide(warming, scalabus)).toEqual({
+		workers: null,
+		reason: '1 worker(s) still warming up',
 	});
 });

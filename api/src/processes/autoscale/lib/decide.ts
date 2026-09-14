@@ -17,10 +17,14 @@ function wholeSecondsSince(instant: number, now: number): number {
 	return Math.round((now - instant) / 1000);
 }
 
-function average(values: number[]): number {
+function averageOver(values: number[], workers: number): number {
 	return Math.round(
-		values.reduce((sum, value) => sum + value, 0) / values.length,
+		values.reduce((sum, value) => sum + value, 0) / workers,
 	);
+}
+
+function average(values: number[]): number {
+	return averageOver(values, values.length);
 }
 
 /**
@@ -218,29 +222,64 @@ function decideScalabus(
 		};
 	}
 
-	if (cpu < config.releaseCpuThreshold && workers > config.minWorkers) {
-		// Measured from the last scaling in either direction rather than from
-		// the last release alone. A worker added a moment ago has taken no
-		// load yet, so it lowers the very average that decides this, while a
-		// pool that has been stable for hours carries a `lastScaleDownAt` long
-		// past its cooldown — together those release the worker the tick
-		// before added, with the cooldown reading as honestly satisfied.
-		const settledAt = Math.max(sample.lastScaleUpAt, sample.lastScaleDownAt);
-		const waited = secondsSince(settledAt, sample.now);
-
-		if (waited < config.minSecondsToScaleDown) {
-			const left = Math.round(config.minSecondsToScaleDown - waited);
-
+	if (workers > config.minWorkers) {
+		// A warming worker counts towards the pool's size but reports nothing
+		// into its statistic, so the two disagree about how many workers are
+		// being judged. Releasing on that would stop a worker to make room for
+		// one the pool is already paying to start. The add branch freezes on a
+		// starting worker for the same reason, and with `minWorkers` bounded at
+		// 1 the pool here holds at least two workers, all of them reporting.
+		if (sample.warmingWorkers > 0) {
 			return {
 				workers: null,
-				reason: `${cpu}% releases a worker, ${left}s of cooldown left`,
+				reason: `${sample.warmingWorkers} worker(s) still warming up`,
 			};
 		}
 
-		return {
-			workers: workers - 1,
-			reason: `${config.signal} cpu ${cpu}% < ${config.releaseCpuThreshold}%`,
-		};
+		// The load the pool would be left carrying, rather than the load it
+		// carries now. A worker reports 0% when nothing has been routed to it
+		// as readily as when the pool has capacity to spare, and an average
+		// across the whole pool cannot tell those apart: the idle worker pulls
+		// it down by a full share, the release fires, and the work that worker
+		// was not doing lands on the ones that were doing all of it. Dividing
+		// by what survives the release takes that share out of the divisor
+		// along with the worker, so a worker at 0% can no longer make the
+		// headroom that removes it. Never below the plain average, so this only
+		// ever holds a release the average would have made.
+		const survivors = workers - 1;
+		const projectedCpu = averageOver(sample.cpuPercents, survivors);
+
+		if (projectedCpu < config.releaseCpuThreshold) {
+			// Measured from the last scaling in either direction rather than
+			// from the last release alone. A worker added a moment ago has
+			// taken no load yet, so it lowers the very average that decides
+			// this, while a pool that has been stable for hours carries a
+			// `lastScaleDownAt` long past its cooldown — together those release
+			// the worker the tick before added, with the cooldown reading as
+			// honestly satisfied.
+			const settledAt = Math.max(
+				sample.lastScaleUpAt,
+				sample.lastScaleDownAt,
+			);
+
+			const waited = secondsSince(settledAt, sample.now);
+
+			if (waited < config.minSecondsToScaleDown) {
+				const left = Math.round(config.minSecondsToScaleDown - waited);
+
+				return {
+					workers: null,
+					reason: `${projectedCpu}% releases a worker, `
+						+ `${left}s of cooldown left`,
+				};
+			}
+
+			return {
+				workers: survivors,
+				reason: `cpu ${projectedCpu}% across the ${survivors} worker(s) `
+					+ `a release leaves < ${config.releaseCpuThreshold}%`,
+			};
+		}
 	}
 
 	return {
