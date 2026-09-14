@@ -36,6 +36,25 @@ function connect(): Promise<void> {
 	return promisify(pm2.connect.bind(pm2))();
 }
 
+/**
+ * The disconnect finished, rather than started.
+ *
+ * pm2 takes the client apart asynchronously and nulls whichever client it
+ * finds when it lands — not the one it was asked about. Started and left to
+ * run, it lands after the connect below has installed a fresh client and nulls
+ * that one instead; what reads it next is pm2's own connect handler, from
+ * inside a socket callback where the throw is nobody's to catch and ends the
+ * process.
+ *
+ * Its refusals resolve rather than reject: every one it has says the
+ * connection is already gone, which is the state being asked for.
+ */
+function disconnected(): Promise<void> {
+	return new Promise((resolve) => {
+		pm2.disconnect(() => resolve());
+	});
+}
+
 export async function connectToSupervisor(): Promise<void> {
 	await connect();
 }
@@ -49,22 +68,26 @@ export function disconnectFromSupervisor(): void {
  *
  * Taking the client apart and building it again is not a step a second caller
  * can join halfway. pm2 finishes a connection it has already started against
- * the client it finds when the socket lands, so a disconnect issued while one
- * is in flight leaves that callback reading a client nothing holds any more —
- * and it throws from inside a socket handler, where no call is left to carry
- * the failure. An uncaught exception ends the process, which is the freeze
- * this reconnect exists to prevent arriving by the other door.
+ * the client it finds when the socket lands, so two reconnects overlapping
+ * leave one of them reading a client nothing holds any more — and it throws
+ * from inside a socket handler, where no call is left to carry the failure. An
+ * uncaught exception ends the process, which is the freeze this reconnect
+ * exists to prevent arriving by the other door.
  *
  * A supervisor restarted under a running caller produces exactly that overlap:
  * every call in flight when the daemon went down runs out of time, and each of
  * them asks for the same reconnect a moment apart.
+ *
+ * This holds callers apart from each other. What holds the two halves of one
+ * reconnect apart is `disconnected()` above, which the same socket handler
+ * would otherwise read through.
  */
 let reconnecting: Promise<void> | null = null;
 
 /** One reconnect at a time, however many callers found the supervisor gone. */
 function reconnectToSupervisor(): Promise<void> {
 	reconnecting ??= (async () => {
-		pm2.disconnect();
+		await disconnected();
 		await connect();
 	})()
 		.finally(() => {

@@ -27,7 +27,11 @@ beforeEach(() => {
 	// a second one being asked for, and a mock left holding it would take the
 	// rest of the file with it.
 	connect.mockReset();
-	disconnect.mockClear();
+	// Reset and re-armed for the same reason: an arm below holds a disconnect
+	// open to watch what the reconnect does while one is still running, and an
+	// implementation left behind would hold the rest of the file there too.
+	disconnect.mockReset();
+	disconnect.mockImplementation((callback?: () => void) => callback?.());
 });
 
 afterEach(() => {
@@ -360,4 +364,39 @@ test('a packet the supervisor refuses fails the send', async () => {
 	await expect(sendToSupervisedProcess(3, {}))
 		.rejects
 		.toThrow('process not found');
+});
+
+// pm2 nulls whichever client it finds when its disconnect lands, which is not
+// the one it was asked about. A reconnect that starts connecting while a
+// disconnect is still running therefore hands it the fresh client to null, and
+// the next thing to read that client is pm2's own connect handler — inside a
+// socket callback, where the throw is nobody's to catch and ends the process.
+// The order is the claim: nothing connects while a disconnect is in flight.
+test('a reconnect connects only once the disconnect has landed', async () => {
+	const { listSupervisedApps } = await import('./client.js');
+
+	list.mockImplementation(neverAnswers);
+
+	let landDisconnect: (() => void) | null = null;
+
+	disconnect.mockImplementation((callback: () => void) => {
+		landDisconnect = callback;
+	});
+
+	connect.mockImplementation((callback: (error: Error | null) => void) => {
+		callback(null);
+	});
+
+	const failed = expect(listSupervisedApps()).rejects.toThrow();
+
+	await vi.advanceTimersByTimeAsync(15_000);
+
+	expect(disconnect).toHaveBeenCalledOnce();
+	expect(connect).not.toHaveBeenCalled();
+
+	(landDisconnect as unknown as () => void)();
+	await vi.advanceTimersByTimeAsync(0);
+
+	expect(connect).toHaveBeenCalledOnce();
+	await failed;
 });

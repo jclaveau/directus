@@ -81,5 +81,18 @@ describe('The autoscaler outlives its supervisor', () => {
 
 		expect(decided, reportOf(rig)).not.toEqual([]);
 		expect(await poolSize(rig, 2, 60_000), reportOf(rig)).toBe(2);
+
+		// The other way the reconnect this arm just exercised can end. pm2
+		// nulls whichever client its disconnect finds when that lands, so one
+		// still running while the reconnect connects nulls the fresh client
+		// instead, and pm2's connect handler reads it from inside a socket
+		// callback where the throw ends the process. A deployment gives the
+		// autoscaler `autorestart`, which buys the pool back in about a second
+		// and hides this entirely; nothing restarts it here, so the exit stands
+		// as the evidence it would otherwise never leave.
+		expect(
+			[rig.autoscaler?.exitCode, rig.autoscaler?.signalCode],
+			reportOf(rig),
+		).toEqual([null, null]);
 	}, 150_000);
 });
