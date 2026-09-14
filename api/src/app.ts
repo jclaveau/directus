@@ -100,6 +100,11 @@ export default async function createApp(): Promise<express.Application> {
 	const logger = useLogger();
 	const helmet = await import('helmet');
 
+	// Before anything is built on the value: a variable this reads as false
+	// turns its feature off silently, and every line after here would run as
+	// though the deployment had asked for that.
+	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
+
 	await validateDatabaseConnection();
 
 	if ((await isInstalled()) === false) {
@@ -410,7 +415,6 @@ export default async function createApp(): Promise<express.Application> {
 	await metricsSchedule();
 	await cacheStatsSchedule();
 	await initCacheConfig();
-	validateBooleanEnv(PROCESSES_BOOLEAN_ENV);
 	await initSharedSettings();
 	initPoolHealthMirror();
 	await initSharedSettingsGuard();
