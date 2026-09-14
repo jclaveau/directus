@@ -2,6 +2,7 @@
 name: project_directus_permission_case_cache
 description: PR #212 — scoped-cache read tags pinned off permission cases (ast.cases) + covered-gated multi-field _or union in the filter pinner; settled design decisions so a fresh review doesn't re-litigate
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_vselect_no_layout_box
 description: a Directus v-select's root is a zero-size v-menu — it can't be clicked, scrolled to, or pushed with an auto margin; wrap siblings in real spans to lay them out and click button.inline-display to drive it
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

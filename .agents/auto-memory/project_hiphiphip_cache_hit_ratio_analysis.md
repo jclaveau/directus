@@ -2,6 +2,7 @@
 name: project_hiphiphip_cache_hit_ratio_analysis
 description: planner cache low hit/fill on /items/student_time_slot = query-shape variance, not a broken cache; 3 domain callers in apps/domain + @directus/sdk aggregate() drops top-level filter/limit (bug); filed as Planner issue #669
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

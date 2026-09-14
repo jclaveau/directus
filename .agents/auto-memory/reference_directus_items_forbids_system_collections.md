@@ -2,6 +2,7 @@
 name: reference_directus_items_forbids_system_collections
 description: Directus /items API rejects directus_* system collections (403 "Forbidden access to directus_* collections") — a custom system collection can't be read/filtered natively via /items
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

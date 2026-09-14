@@ -2,6 +2,7 @@
 name: project_directus_read_meta_rider
 description: The read-meta rider is typed end to end — withMeta runs after the read hooks, withoutMeta strips it for domain conversions, readResult() builds it in mocks
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

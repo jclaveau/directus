@@ -2,6 +2,7 @@
 name: project_directus_cache_failure_semantics
 description: The four cache layers in one Directus call path fail differently — ioredis raises, Keyv swallows, the bus is fire-and-forget, @directus/memory raises — so "Redis is down" produces a different symptom per layer
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_cache_descriptor_query_analysis
 description: How to classify cached reads by filter shape from directus_cache_descriptors.query, and the CTO-gate that blocks arbitrary SQL on the prod Railway DB
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

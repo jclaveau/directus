@@ -2,6 +2,7 @@
 name: reference_directus_bb_extension_imports
 description: bb endpoint extensions resolve bare imports from the extension file's dir (not the api process) — import a workspace pkg only after declaring it in tests/blackbox/package.json, else the extension silently fails to load and its route 404s
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

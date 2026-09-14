@@ -4,6 +4,7 @@ description:
   New feature work on jclaveau/directus now bases directly on v11.10.1-hhh-dev (the work branch, no more
   v11.10.1-feat/* chain branches); always fetch + sync hhh-dev to its latest tip BEFORE starting a new feat
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

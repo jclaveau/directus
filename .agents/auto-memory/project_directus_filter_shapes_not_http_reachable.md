@@ -2,6 +2,7 @@
 name: project_directus_filter_shapes_not_http_reachable
 description: Filter shapes that look blackbox-testable but are refused before the service runs (_not, empty _in) or 500 on this fork (relational groupBy) — unit-test them instead
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

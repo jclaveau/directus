@@ -2,6 +2,7 @@
 name: reference_pn_db_query_local
 description: Inspect the planner Postgres DB non-interactively via pn db:query:local "<SQL>" (LOCAL docker only). READ-ONLY ONLY — the prod/railway twin (pn db:query:railway) is strictly no-mutation
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

@@ -2,6 +2,7 @@
 name: reference_directus_local_api
 description: Local fork api lives on port 8155 (NOT 8055) per jean — jean's other work owns 8055. Set PORT/PUBLIC_URL in api/.env (file overrides process env in @directus/env); Vite app on :8080 needs API_URL to point at 8155
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

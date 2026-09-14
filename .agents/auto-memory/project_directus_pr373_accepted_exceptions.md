@@ -2,6 +2,7 @@
 name: project_directus_pr373_accepted_exceptions
 description: PR #373 "warn on a const read once and a function called once" — MERGED 2026-08-21; the two custom eslint rules' settled contract, what is deliberately not detected, and the fact they gate nothing yet
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

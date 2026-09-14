@@ -2,6 +2,7 @@
 name: reference_rolldown_110_define_moved
 description: rolldown 1.1.x moved the top-level `define` config option under `transform.define`; rc.x→1.1 bumps break extensions-sdk build.ts with TS2769
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_codecov_aggregate_patch_gate
 description: The BLOCKING codecov check on this fork is the unflagged `codecov/patch` at a hard 95% — every per-package flag is informational; blackbox coverage feeds it but attributes coarsely, so bb-only code cannot clear the bar
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

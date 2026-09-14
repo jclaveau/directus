@@ -16,7 +16,7 @@ import {
 	pinnedScopedCacheTagsFromM2oParents,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheCollectionsBeyondNestedRows,
-	dropScopedCacheTagIndex,
+	dropScopedCacheIndex,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
 	retryPendingScopedCachePurges,
@@ -91,6 +91,28 @@ const pipeline = {
 	exec: vi.fn(),
 };
 
+// A purge drops its tag keys through a pipeline of chunked UNLINKs, so every redis
+// stub a purge reaches has to answer `pipeline()` as well as the set commands.
+// Replies the way ioredis does — one `[error, reply]` per queued command, the reply
+// being what UNLINK removed — because the drop now counts what Redis reported
+// rather than what it was handed.
+function unlinkPipeline() {
+	const unlink = vi.fn();
+	let executed = 0;
+
+	const exec = vi.fn(async () => {
+		// Only what was queued since the last exec: a real `pipeline()` hands back a
+		// fresh queue every call, and replaying the whole history would report keys
+		// this exec never sent.
+		const queued = unlink.mock.calls.slice(executed);
+		executed = unlink.mock.calls.length;
+
+		return queued.map(([keys]) => [null, keys.length]);
+	});
+
+	return { unlink, exec };
+}
+
 beforeEach(() => {
 	env['CACHE_AUTO_PURGE_MODE'] = 'scoped';
 	env['CACHE_STORE'] = 'redis';
@@ -146,7 +168,7 @@ describe('the tag display form', () => {
 		};
 
 		expect(scopedCacheTagKey(nullSlice))
-		.toBe(`ns:tag:${scopedCacheTagLabel(nullSlice)}`);
+		.toBe(`ns:scoped-cache-index:tag:${scopedCacheTagLabel(nullSlice)}`);
 	});
 });
 
@@ -346,8 +368,12 @@ describe('countScopedCacheTagMembers', () => {
 			'articles:id=5',
 		]);
 
-		expect(pipeline.scard).toHaveBeenCalledWith('ns:tag:articles');
-		expect(pipeline.scard).toHaveBeenCalledWith('ns:tag:articles:id=5');
+		expect(pipeline.scard)
+			.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles');
+
+		expect(pipeline.scard)
+			.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles:id=5');
+
 		expect(counts).toEqual({ 'articles': 3, 'articles:id=5': 7 });
 	});
 
@@ -361,7 +387,7 @@ describe('countScopedCacheTagMembers', () => {
 		})]);
 
 		expect(pipeline.scard)
-		.toHaveBeenCalledWith('ns:tag:articles:author=\u0000null');
+		.toHaveBeenCalledWith('ns:scoped-cache-index:tag:articles:author=\u0000null');
 	});
 
 	it('treats a missing pipeline reply as a zero count', async () => {
@@ -470,7 +496,7 @@ describe('createScopedCacheCollector', () => {
 		]);
 
 		expect(scopedCacheTagKey(tags[0]!)).toBe(
-			`ns:tag:notes:id=${upper.toLowerCase()}`,
+			`ns:scoped-cache-index:tag:notes:id=${upper.toLowerCase()}`,
 		);
 	});
 
@@ -540,17 +566,23 @@ describe('collection slice index', () => {
 		]);
 
 		expect(indexPipeline.sadd)
-		.toHaveBeenCalledWith('ns:slices:articles', 'ns:tag:articles:author=7');
+		.toHaveBeenCalledWith(
+			'ns:scoped-cache-index:slices:articles',
+			'ns:scoped-cache-index:tag:articles:author=7',
+		);
 
 		// The bare tag is where a collection-wide purge starts, so indexing it would
 		// only name a key the purge already holds.
 		expect(indexPipeline.sadd)
-		.not.toHaveBeenCalledWith('ns:slices:articles', 'ns:tag:articles');
+		.not.toHaveBeenCalledWith(
+			'ns:scoped-cache-index:slices:articles',
+			'ns:scoped-cache-index:tag:articles',
+		);
 	});
 
 	it('reads a collection purge off the index, not a keyspace scan', async () => {
 		const smembers = vi.fn()
-			.mockResolvedValueOnce(['ns:tag:articles:author=7'])
+			.mockResolvedValueOnce(['ns:scoped-cache-index:tag:articles:author=7'])
 			.mockResolvedValue([]);
 
 		const scan = vi.fn();
@@ -558,13 +590,13 @@ describe('collection slice index', () => {
 		vi.mocked(useRedis).mockReturnValue({
 			smembers,
 			scan,
-			del: vi.fn(),
 			srem: vi.fn(),
+			pipeline: unlinkPipeline,
 		} as any);
 
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
-		expect(smembers).toHaveBeenCalledWith('ns:slices:articles');
+		expect(smembers).toHaveBeenCalledWith('ns:scoped-cache-index:slices:articles');
 		expect(scan).not.toHaveBeenCalled();
 	});
 
@@ -573,8 +605,8 @@ describe('collection slice index', () => {
 
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockResolvedValue([]),
-			del: vi.fn(),
 			srem,
+			pipeline: unlinkPipeline,
 		} as any);
 
 		await purgeScopedCache(
@@ -585,57 +617,154 @@ describe('collection slice index', () => {
 
 		// An index pruned only wholesale keeps naming keys that are gone.
 		expect(srem)
-		.toHaveBeenCalledWith('ns:slices:articles', ['ns:tag:articles:author=7']);
+		.toHaveBeenCalledWith(
+			'ns:scoped-cache-index:slices:articles',
+			['ns:scoped-cache-index:tag:articles:author=7'],
+		);
 	});
 });
 
-describe('dropScopedCacheTagIndex', () => {
-	it('scans both namespaces and deletes every index set', async () => {
-		const scan = vi.fn()
-			.mockResolvedValueOnce(['4', ['ns:tag:articles', 'ns:tag:authors']])
-			.mockResolvedValueOnce(['0', ['ns:tag:articles:id=1']])
-			.mockResolvedValueOnce(['0', ['ns:slices:articles']]);
+describe('dropScopedCacheIndex', () => {
+	function mockScan(...pages: [string, string[]][]) {
+		const scan = vi.fn();
 
-		const del = vi.fn();
-		vi.mocked(useRedis).mockReturnValue({ scan, del } as any);
+		for (const page of pages) {
+			scan.mockResolvedValueOnce(page);
+		}
 
-		await dropScopedCacheTagIndex();
+		const pipeline = unlinkPipeline();
 
-		expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:tag:*', 'COUNT', 250);
-		expect(scan).toHaveBeenCalledWith('4', 'MATCH', 'ns:tag:*', 'COUNT', 250);
+		const redis = { scan, pipeline: () => pipeline };
 
-		// The per-collection slice index sits outside `ns:tag:*`, so a flush that
-		// scanned only that pattern would leave it naming keys it just dropped.
-		expect(scan).toHaveBeenCalledWith('0', 'MATCH', 'ns:slices:*', 'COUNT', 250);
+		vi.mocked(useRedis).mockReturnValue(redis as any);
+
+		return { scan, unlink: pipeline.unlink };
+	}
+
+	it(oneLine`
+		asks Redis for the index keys alone, and unlinks what comes back
+	`, async () => {
+		const { scan, unlink } = mockScan(
+			['4', [
+				'ns:scoped-cache-index:tag:articles',
+				'ns:scoped-cache-index:slices:articles',
+			]],
+			['0', [
+				'ns:scoped-cache-index:tag:articles:id=1',
+				'ns:scoped-cache-index:tag:authors',
+			]],
+		);
+
+		const dropped = await dropScopedCacheIndex();
+
+		// `MATCH` filters server-side, so a pattern that covered the index by being
+		// wider than it — `ns:*` — put every cache-stats tombstone and fill-guard
+		// epoch key on the wire to be dropped again here. Measured on the dev
+		// keyspace: 84 keys shipped to unlink 0.
+		expect(scan).toHaveBeenCalledTimes(2);
+
+		expect(scan).toHaveBeenCalledWith(
+			'0',
+			'MATCH',
+			'ns:scoped-cache-index:*',
+			'COUNT',
+			1000,
+		);
+
+		expect(scan).toHaveBeenCalledWith(
+			'4',
+			'MATCH',
+			'ns:scoped-cache-index:*',
+			'COUNT',
+			1000,
+		);
 
 		// ONE array argument, never a spread: the SCAN result is unbounded, and
 		// spreading it past the stack's headroom throws RangeError.
-		expect(del).toHaveBeenCalledWith([
-			'ns:tag:articles',
-			'ns:tag:authors',
-			'ns:tag:articles:id=1',
-			'ns:slices:articles',
+		//
+		// One call per scan page, not one for the lot: collecting first would put
+		// the whole index in this process's heap to delete it from Redis.
+		expect(unlink).toHaveBeenNthCalledWith(1, [
+			'ns:scoped-cache-index:tag:articles',
+			'ns:scoped-cache-index:slices:articles',
 		]);
+
+		expect(unlink).toHaveBeenNthCalledWith(2, [
+			'ns:scoped-cache-index:tag:articles:id=1',
+			'ns:scoped-cache-index:tag:authors',
+		]);
+
+		expect(dropped).toEqual({ dropped: 4, refused: 0 });
 	});
 
-	it('no-ops (never DELs an empty list) when nothing matches', async () => {
-		const scan = vi.fn().mockResolvedValue(['0', []]);
-		const del = vi.fn();
-		vi.mocked(useRedis).mockReturnValue({ scan, del } as any);
+	it('counts what Redis removed, not what it was handed', async () => {
+		const { unlink } = mockScan(
+			['0', ['ns:scoped-cache-index:tag:a', 'ns:scoped-cache-index:tag:b']],
+		);
 
-		await dropScopedCacheTagIndex();
+		// A pipeline reports per command, so a chunk that failed is a chunk still
+		// there — and a flush logging the input count names a number that never
+		// happened.
+		unlink.mock.results.length = 0;
 
-		expect(del).not.toHaveBeenCalled();
+		vi.mocked(useRedis)().pipeline().exec = vi.fn().mockResolvedValue([
+			[new Error('LOADING Redis is loading the dataset in memory'), null],
+		]);
+
+		// Counted, not just skipped: a caller handed 0 with no refusals cannot tell
+		// an index Redis would not touch from one that was already empty.
+		expect(await dropScopedCacheIndex())
+		.toEqual({ dropped: 0, refused: 1 });
+	});
+
+	it('splits the drop into chunked commands', async () => {
+		const keys = Array.from(
+			{ length: 2500 },
+			(_, at) => `ns:scoped-cache-index:tag:c:id=${at}`,
+		);
+
+		const { unlink } = mockScan(['0', keys]);
+
+		await dropScopedCacheIndex();
+
+		// Redis runs one command at a time, so a single UNLINK of the whole scan
+		// holds the server for its own O(keys) work in front of every other client.
+		expect(unlink).toHaveBeenCalledTimes(3);
+		expect(unlink).toHaveBeenNthCalledWith(1, keys.slice(0, 1000));
+		expect(unlink).toHaveBeenNthCalledWith(2, keys.slice(1000, 2000));
+		expect(unlink).toHaveBeenNthCalledWith(3, keys.slice(2000));
+	});
+
+	it('no-ops (never UNLINKs an empty list) when nothing matches', async () => {
+		const { unlink } = mockScan(['0', []]);
+
+		const dropped = await dropScopedCacheIndex();
+
+		expect(unlink).not.toHaveBeenCalled();
+		expect(dropped).toEqual({ dropped: 0, refused: 0 });
 	});
 
 	it('no-ops when Redis is unavailable', async () => {
 		vi.mocked(redisConfigAvailable).mockReturnValue(false);
-		const scan = vi.fn();
-		vi.mocked(useRedis).mockReturnValue({ scan } as any);
+		const { scan } = mockScan(['0', []]);
 
-		await dropScopedCacheTagIndex();
+		expect(await dropScopedCacheIndex())
+		.toEqual({ dropped: 0, refused: 0 });
 
 		expect(scan).not.toHaveBeenCalled();
+	});
+
+	// The keys the pre-scoped-cache-index layout wrote go once, in
+	// `20260911A-drop-the-pre-scoped-cache-index-layout`, not on every flush.
+	it('walks the index prefix and nothing else', async () => {
+		const { scan } = mockScan(['0', ['ns:scoped-cache-index:tag:articles']]);
+
+		await dropScopedCacheIndex();
+
+		expect(scan).toHaveBeenCalledTimes(1);
+
+		expect(scan)
+		.toHaveBeenCalledWith('0', 'MATCH', 'ns:scoped-cache-index:*', 'COUNT', 1000);
 	});
 });
 
@@ -659,13 +788,22 @@ describe('retryPendingScopedCachePurges', () => {
 		get: vi.fn(async (key: string) => probed.get(key)),
 	};
 
-	const redis = { smembers: vi.fn(), del: vi.fn(), scan: vi.fn(), srem: vi.fn() };
+	const purgePipeline = { unlink: vi.fn(), exec: vi.fn() };
+
+	const redis = {
+		smembers: vi.fn(),
+		scan: vi.fn(),
+		srem: vi.fn(),
+		pipeline: () => purgePipeline,
+	};
 
 	beforeEach(() => {
 		vi.mocked(getCache).mockReturnValue({ cache } as any);
 		vi.mocked(useRedis).mockReturnValue(redis as any);
 		redis.smembers.mockResolvedValue([]);
 		redis.scan.mockResolvedValue(['0', []]);
+		purgePipeline.unlink.mockReturnValue(purgePipeline);
+		purgePipeline.exec.mockResolvedValue([]);
 
 		// The shape a deployment with CACHE_STATS off returns for every entry, so a
 		// case has to opt IN to being able to name what it recovered.
@@ -690,9 +828,14 @@ describe('retryPendingScopedCachePurges', () => {
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(redis.smembers).toHaveBeenCalledWith('other:tag:articles:id=1');
+		expect(redis.smembers)
+			.toHaveBeenCalledWith('other:scoped-cache-index:tag:articles:id=1');
+
 		expect(cache.delete).toHaveBeenCalledWith('ns:entry-a');
-		expect(redis.del).toHaveBeenCalledWith(['other:tag:articles:id=1']);
+
+		expect(purgePipeline.unlink)
+			.toHaveBeenCalledWith(['other:scoped-cache-index:tag:articles:id=1']);
+
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
 
@@ -708,17 +851,21 @@ describe('retryPendingScopedCachePurges', () => {
 		}]);
 
 		redis.smembers.mockImplementation(async (key: string) => {
-			return key === 'ns:slices:articles'
-				? ['ns:tag:articles:id=1']
+			return key === 'ns:scoped-cache-index:slices:articles'
+				? ['ns:scoped-cache-index:tag:articles:id=1']
 				: [];
 		});
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
-		expect(redis.smembers).toHaveBeenCalledWith('ns:slices:articles');
+		expect(redis.smembers)
+			.toHaveBeenCalledWith('ns:scoped-cache-index:slices:articles');
 
-		expect(redis.del)
-			.toHaveBeenCalledWith(['ns:tag:articles', 'ns:tag:articles:id=1']);
+		expect(purgePipeline.unlink)
+			.toHaveBeenCalledWith([
+				'ns:scoped-cache-index:tag:articles',
+				'ns:scoped-cache-index:tag:articles:id=1',
+			]);
 
 		expect(cache.clear).not.toHaveBeenCalled();
 	});
@@ -734,7 +881,7 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(cache.clear).toHaveBeenCalledOnce();
-		expect(redis.del).not.toHaveBeenCalled();
+		expect(purgePipeline.unlink).not.toHaveBeenCalled();
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
 	});
 
@@ -759,16 +906,47 @@ describe('retryPendingScopedCachePurges', () => {
 
 		const closed = new Error('Connection is closed.');
 
-		// Fails the DEL rather than the SMEMBERS: the report reads members too, and its
-		// own guard swallows a failure there, so injecting it earlier would prove
+		// Fails the drop rather than the SMEMBERS: the report reads members too, and
+		// its own guard swallows a failure there, so injecting it earlier would prove
 		// nothing about the purge.
-		redis.del.mockRejectedValueOnce(closed);
+		purgePipeline.exec.mockRejectedValueOnce(closed);
 
 		expect(await retryPendingScopedCachePurges()).toBe(1);
 
 		expect(countFailedScopedCachePurgeRetry).toHaveBeenCalledWith([7], closed);
 		expect(clearPendingScopedCachePurges).not.toHaveBeenCalledWith([7]);
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([8]);
+	});
+
+	it(oneLine`
+		keeps the record when redis REFUSES the unlink rather than dropping the
+		connection, which is how a pipeline reports the failures a purge survives to see
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([{
+			mode: 'slices',
+			collection: 'articles',
+			scopedCacheTags: ['articles:id=1'],
+			ids: [7],
+		}]);
+
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+
+		// A pipeline answers per command, so this resolves where a dropped connection
+		// rejects — the shape `maxmemory` with `noeviction` and a demoted primary both
+		// take, where the SMEMBERS above is served and the write behind it is not.
+		purgePipeline.exec
+			.mockResolvedValueOnce([[new Error('OOM command not allowed'), null]]);
+
+		expect(await retryPendingScopedCachePurges()).toBe(0);
+
+		expect(countFailedScopedCachePurgeRetry)
+			.toHaveBeenCalledWith([7], expect.any(Error));
+
+		expect(clearPendingScopedCachePurges).not.toHaveBeenCalledWith([7]);
+
+		// The tag stayed indexed, so the slice naming it has to stay too: pruning it
+		// here would orphan the key the retry comes back for.
+		expect(redis.srem).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
@@ -1081,9 +1259,9 @@ describe('a purge that fails after its mutation committed', () => {
 	beforeEach(() => {
 		vi.mocked(useRedis).mockReturnValue({
 			smembers: vi.fn().mockResolvedValue([]),
-			del: vi.fn(),
 			scan: vi.fn().mockResolvedValue(['0', []]),
 			srem: vi.fn(),
+			pipeline: unlinkPipeline,
 		} as any);
 
 		vi.mocked(emitter.emitFilter).mockImplementation(async (_e, tags) => tags);

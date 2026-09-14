@@ -2,6 +2,7 @@
 name: project_directus_filter_normalization_layers
 description: A read's filter is normalized at three layers and only parseFilter is shared, so the AST describes a different query than the one that runs — the root cause of the scoped-cache tag divergences fixed in PR #402
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

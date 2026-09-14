@@ -2,6 +2,7 @@
 name: project_directus_read_hook_return_unvalidated
 description: An items.read hook's return value is passed through unvalidated and withMeta then rejects a non-object — a 500 raised inside whatever transaction was reading
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: feedback_directus_diverge_from_upstream_freely
 description: On this fork, "it would diverge from a pristine upstream file" is NOT a reason to decline a fix — jean does not care about upstream merge friction
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

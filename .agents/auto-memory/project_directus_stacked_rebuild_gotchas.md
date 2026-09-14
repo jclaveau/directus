@@ -4,6 +4,7 @@ description:
   Gotchas building the hhh-main copy stack via cherry-pick — branches are independent (fix low → rebuild above),
   divergent stacked history isn't a mechanical rebase, merge-tree forced-base lies, and the test-file two-block merge.
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

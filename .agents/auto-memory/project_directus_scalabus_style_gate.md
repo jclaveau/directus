@@ -2,6 +2,7 @@
 name: project_directus_scalabus_style_gate
 description: The scalabus diff-scoped eslint style gate — eslint.style.config.js + lint-style-changes.mjs, prettier disabled, config-is-source, two-pass --fix
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

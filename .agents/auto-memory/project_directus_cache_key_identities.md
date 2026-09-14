@@ -2,6 +2,7 @@
 name: project_directus_cache_key_identities
 description: "a cached response has TWO permanent identities — cacheKey (the digest, every table's join key) and redisKey (what Redis is keyed by); neither is legacy, they differ only under CACHE_KEY_HASH_ENABLED=false, and confusing them reads as a cold cache"
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

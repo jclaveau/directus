@@ -2,6 +2,7 @@
 name: project_directus_blackbox_seed_mechanics
 description: how blackbox seeds + relation helpers work, and the no-link trick for cache-invalidation tests
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

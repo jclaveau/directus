@@ -2,6 +2,7 @@
 name: project_hiphiphip_api_guard_fake_500
 description: bo.hiphiphip.app (planner prod, directus fork) returns FAKE 500s on every /items/* request whose Origin/Referer isn't in API_GUARD_ALLOWED_ORIGINS — an intentional anti-hacker middleware, NOT an outage. Source: @jclaveau/directus-extension-api-guard in planner_2/packages/directus-extension-api-guard/src/api-guard.js
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

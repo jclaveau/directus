@@ -2,6 +2,7 @@
 name: project_directus_cache_key_ignores_unknown_params
 description: The response-cache key is path + sanitizedQuery + user — an invented query param never reaches it, so varying reads by one silently produces a single cache key
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

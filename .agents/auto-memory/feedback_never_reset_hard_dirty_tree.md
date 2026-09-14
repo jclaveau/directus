@@ -2,6 +2,7 @@
 name: feedback_never_reset_hard_dirty_tree
 description: never `git reset --hard` to clean up a dry-run when the tree has pre-existing uncommitted work — it nukes unstaged mods; scope the cleanup instead
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

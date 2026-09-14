@@ -2,6 +2,7 @@
 name: project_directus_schema_read_cache_tagging
 description: PR #222 — schema-describing read endpoints (/fields,/relations,/schema/snapshot,/collections) tagged by their SYSTEM collection so business writes leave them cached; root bug was validateCollection overwriting req.collection; orphan-guard for tagless collection-less GETs in scoped mode
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

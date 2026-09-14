@@ -2,6 +2,7 @@
 name: project_directus_pr427_accepted_exceptions
 description: PR #427 (cover the upsert and update paths before batching) — settled points a fresh review would wrongly re-flag
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

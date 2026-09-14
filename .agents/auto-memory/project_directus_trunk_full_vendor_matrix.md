@@ -2,6 +2,7 @@
 name: project_directus_trunk_full_vendor_matrix
 description: A PR's blackbox is the postgres smoke set while a push to trunk runs sqlite3 + postgres + maria, so a green PR does not prove trunk green for anything dialect-sensitive
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_purge_recovery_bare_tag
 description: Why cache-purge-recovery.test.ts went red after #358 merged its base — the drain ran while the ENTRY store was still offline; the bare-collection-tag theory this file used to carry was refuted
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

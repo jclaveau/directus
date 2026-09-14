@@ -2,6 +2,7 @@
 name: project_scalabus_licensing
 description: Scalabus fork licensing — fork additions are jean's own BSL-1.1 (Additional Use Grant None), NOT GPLv3; scope is repository-minus-upstream; PolyForm Shield or GPLv3 is a deliberate later decision
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

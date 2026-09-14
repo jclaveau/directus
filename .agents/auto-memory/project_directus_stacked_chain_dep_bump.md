@@ -2,6 +2,7 @@
 name: project_directus_stacked_chain_dep_bump
 description: bumping a catalog dep low in the v11.10.1 stacked chain — pnpm lockfile only regens cleanly from a branch's OWN consistent state; rebasing onto a bumped base then regen drifts the whole graph
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

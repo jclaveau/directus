@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { ServiceUnavailableError } from '@directus/errors';
 import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
@@ -9,7 +10,7 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { dropScopedCacheTagIndex } from './scoped-cache.js';
+import { dropScopedCacheIndex } from './scoped-cache.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -34,10 +35,6 @@ let memorySchemaCache: Readonly<SchemaOverview> | null = null;
 type Store = 'memory' | 'redis';
 
 const messenger = useBus();
-
-interface CacheMessage {
-	autoPurgeCache: boolean | undefined;
-}
 
 interface CacheMessage {
 	autoPurgeCache: boolean | undefined;
@@ -163,8 +160,25 @@ export function getCache(): {
 	return { cache, systemCache, localSchemaCache, lockCache };
 }
 
-export async function flushCaches(forced?: boolean): Promise<void> {
+/**
+ * What a flush managed and what it did not. `flushCaches` stays best-effort — see
+ * the comment inside — so the tiers it could not clear are reported rather than
+ * thrown, and a caller that must not silently succeed (`directus cache flush`)
+ * reads `failures` instead of the absence of an exception.
+ */
+export interface CacheFlushReport {
+	durationMs: number;
+	droppedIndexKeys: number;
+	failures: string[];
+}
+
+export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
+	// Before `getCache`, whose first call builds the four Keyv tiers: on the boot
+	// path that build is part of what the caller is waiting through, and that run is
+	// the one where the number was worth reading.
+	const startedAt = Date.now();
 	const { cache } = getCache();
+	const failures: string[] = [];
 
 	// Best-effort, all of it. Every caller here runs AFTER the thing it is flushing
 	// for already happened — a migration recorded its version, a schema diff applied,
@@ -182,10 +196,20 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 		await clearSystemCache({ forced });
 	}
 	catch (error: any) {
+		failures.push('system cache');
 		logger.warn(error, `[cache] could not clear the system cache: ${error}`);
 	}
 
-	await cache?.clear();
+	// Caught like the rest. Left to throw, it reaches the migration runner that
+	// calls this uncaught, and it keeps the one tier the flush command exists for
+	// out of the report that command reads its exit code from.
+	try {
+		await cache?.clear();
+	}
+	catch (error: any) {
+		failures.push('response cache');
+		logger.warn(error, `[cache] could not clear the response cache: ${error}`);
+	}
 
 	// Same reason as the `response` target in `clearCacheTargets`: the scoped-tag
 	// index sits in raw Redis outside the Keyv namespace, so the clear above misses
@@ -199,12 +223,61 @@ export async function flushCaches(forced?: boolean): Promise<void> {
 	// so a throw here fails a deploy over a cache the request path already treats as a
 	// MISS while Redis is away. What is left behind self-expires, or goes with the
 	// next flush that reaches Redis.
+	let droppedIndexKeys = 0;
+
 	try {
-		await dropScopedCacheTagIndex();
+		const index = await dropScopedCacheIndex();
+		droppedIndexKeys = index.dropped;
+
+		// Redis refuses a pipelined command by answering with the error rather than
+		// by throwing, so this is the only place a half-dropped index is visible.
+		if (index.refused > 0) {
+			failures.push('scoped-cache index');
+
+			logger.warn(
+				`[cache] redis refused ${index.refused} of the index unlink commands`,
+			);
+		}
 	}
 	catch (error: any) {
+		failures.push('scoped-cache index');
 		logger.warn(error, `[cache] could not drop the scoped-tag index: ${error}`);
 	}
+
+	// A peer on a memory store holds its own response and system tiers, and
+	// `schemaChanged` reaches neither: its handler drops the response cache only
+	// under `CACHE_AUTO_PURGE`, and never touches `_system` at all. Without this
+	// those nodes keep serving the reads this call exists to retire.
+	try {
+		await messenger.publish<CacheClearMessage>('cacheCleared', {
+			targets: ['response', 'system'],
+		});
+	}
+	catch (error: any) {
+		failures.push('peer notification');
+		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);
+	}
+
+	// Every caller of this is a deploy-shaped event — a migration, a schema diff, a
+	// build-identity change — and on the boot path it is time the container is not
+	// serving. Whether that is 20ms or 20s was not knowable from the logs
+	// (https://github.com/jclaveau/directus/issues/468), so it is said here rather
+	// than at each caller: one line, and the number that explains it.
+	const durationMs = Date.now() - startedAt;
+
+	const flushed = `[cache] flushed in ${durationMs}ms, `
+		+ `dropped ${droppedIndexKeys} scoped-cache index keys`;
+
+	// Under the warns naming the tiers that did not go, an info line reading
+	// "flushed" answers the question they just answered, with the other answer.
+	if (failures.length > 0) {
+		logger.warn(`${flushed}, without ${failures.join(', ')}`);
+	}
+	else {
+		logger.info(flushed);
+	}
+
+	return { durationMs, droppedIndexKeys, failures };
 }
 
 export async function clearSystemCache(opts?: {
@@ -226,7 +299,19 @@ export async function clearSystemCache(opts?: {
 	// Since a lot of cached permission function rely on the schema it needs to be cleared as well
 	await clearPermissionCache();
 
-	messenger.publish<CacheMessage>('schemaChanged', { autoPurgeCache: opts?.autoPurgeCache });
+	// Awaited so the flush that wraps this can report a lost broadcast, but never
+	// fatal: the 23 callers are mutations whose write has already committed, and
+	// `collections.ts` calls this from a `finally`, where a throw would replace the
+	// outcome it was running after. The peers stay stale either way.
+	try {
+		await messenger.publish<CacheMessage>(
+			'schemaChanged',
+			{ autoPurgeCache: opts?.autoPurgeCache },
+		);
+	}
+	catch (error: any) {
+		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);
+	}
 }
 
 /**
@@ -237,6 +322,7 @@ export async function clearSystemCache(opts?: {
  */
 export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<void> {
 	const { cache, lockCache } = getCache();
+	let refusedIndexKeys = 0;
 
 	if (targets.includes('system')) {
 		// forced so it runs even while a lock is held; its `schemaChanged` publish
@@ -248,14 +334,33 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 		await cache?.clear();
 		// The scoped-tag index lives in raw Redis outside the Keyv namespace, so the
 		// clear above misses it — drop it too so no orphan tag pointers linger.
-		await dropScopedCacheTagIndex();
+		refusedIndexKeys = (await dropScopedCacheIndex()).refused;
 	}
 
 	if (targets.includes('locks')) {
 		await lockCache.clear();
 	}
 
-	messenger.publish<CacheClearMessage>('cacheCleared', { targets });
+	// Same reasoning as the `schemaChanged` publish above: the tiers this cleared
+	// are already cleared, and an operator who asked for a flush is not served by
+	// an error over the one part of it nothing can retry.
+	try {
+		await messenger.publish<CacheClearMessage>('cacheCleared', { targets });
+	}
+	catch (error: any) {
+		logger.warn(error, `[cache] could not tell the other nodes: ${error}`);
+	}
+
+	// Raised only once the peers have been told, and raised at all because unlike
+	// `flushCaches` this one has somebody waiting on the answer: a pipeline answers
+	// per command, so a chunk redis refused is a chunk still indexed, and an admin
+	// told the clear succeeded has no other way to learn it did not.
+	if (refusedIndexKeys > 0) {
+		throw new ServiceUnavailableError({
+			service: 'scoped-cache index',
+			reason: `redis refused ${refusedIndexKeys} of the unlink commands`,
+		});
+	}
 }
 
 export async function setSystemCache(key: string, value: any, ttl?: number): Promise<void> {

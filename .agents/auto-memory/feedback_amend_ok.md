@@ -4,6 +4,7 @@ description:
   Amending the prior commit is acceptable in this Directus PR-flow context without asking; force-with-lease push
   afterwards is fine.
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

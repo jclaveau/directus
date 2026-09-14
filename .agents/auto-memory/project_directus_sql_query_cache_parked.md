@@ -2,6 +2,7 @@
 name: project_directus_sql_query_cache_parked
 description: PARKED — SQL/row-level query cache (layer below readByQuery response cache) + per-student partition tagging + owner-tagging for sharing; decided not now
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_prod_db_access
 description: how to reach the HipHipHip prod Postgres and Redis from the laptop (railway link -w/-p/-e, then railway run -s <service> -- psql/redis-cli), and the traps in getting there
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

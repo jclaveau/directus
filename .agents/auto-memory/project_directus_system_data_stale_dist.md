@@ -2,6 +2,7 @@
 name: project_directus_system_data_stale_dist
 description: Fork dev loop — edits to packages/system-data YAML need a dist rebuild; tsx dev api loads dist/index.cjs not the source, symptom = system-collection metadata (relations/fields) missing locally but present in prod
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -2,6 +2,7 @@
 name: project_directus_cache_admin_page
 description: PR #227 cache-stats admin page + Postgres/Timescale TTL-tuning telemetry — current architecture, the accepted design decisions (don't re-raise in a fresh review), and the Directus gotchas that shaped it
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

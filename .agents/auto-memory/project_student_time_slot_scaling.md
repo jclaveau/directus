@@ -2,6 +2,7 @@
 name: project_student_time_slot_scaling
 description: The 10gb+ DB pain table is student_time_slot; parked Timescale-hypertable + clean composite-PK plan
 metadata:
+  author: Jean Claveau
   type: project
 ---
 
