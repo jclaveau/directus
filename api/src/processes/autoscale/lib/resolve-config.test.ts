@@ -346,3 +346,24 @@ test('re-reads on the interval the deployment configured', async () => {
 
 	expect(resolveConfig()).toMatchObject({ maxWorkers: 16 });
 });
+
+// The floor is measured from when the last read started, so a read that never
+// answers leaves every later tick past it. Unguarded, a database holding a
+// query for longer than the floor is sent another one every floor for as long
+// as it holds — the connections of the process that has to keep scaling,
+// spent on copies of the query that is already stuck.
+test('asks once while a read is out, however long it stays out', async () => {
+	const { resolveConfig } = await mirroring({ maxWorkers: 8 });
+	const started = Date.now();
+
+	readSharedSettings.mockReturnValue(new Promise(() => {}));
+
+	for (let elapsed = 30_000; elapsed <= 300_000; elapsed += 30_000) {
+		vi.spyOn(Date, 'now').mockReturnValue(started + elapsed);
+		resolveConfig();
+	}
+
+	// The one the mirror took at boot, and the one the first tick past the
+	// floor started. Nothing after it, because nothing after it can land.
+	expect(readSharedSettings).toHaveBeenCalledTimes(2);
+});

@@ -82,6 +82,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// One CLI command per vendor: a module load, a query, and the few
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,
+	// A Directus booted with no Redis at all, and an autoscaler booted with a
+	// connection it cannot use. Provisional until the run says what it cost.
+	'/tests/db/app/processes-missing-dependency.test.ts': 50_000,
 	'/tests/db/app/autoscale-drill.test.ts': 25_000,
 	'/tests/db/app/autoscale-mcp-levers.test.ts': 120_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
