@@ -27,14 +27,13 @@ function runCli(vendor: string, args: string[]): Promise<Run> {
 				REDIS: '',
 				REDIS_HOST: '127.0.0.1',
 				REDIS_PORT: String(DEAD_PORT),
-				// ioredis gives up on a queued command after this many reconnect
-				// attempts and rejects it. One attempt a millisecond puts that
-				// inside the CLI's own construction, which is the window this
-				// arm is about; the shipped defaults (20 attempts over a 50ms
-				// step) would land it a boot later and prove nothing.
-				REDIS_MAX_RETRIES_PER_REQUEST: '1',
-				REDIS_RETRY_BASE_DELAY: '1',
-				REDIS_RETRY_MAX_DELAY: '2',
+				// No reconnection at all, so the client ends on the first refused
+				// connection and rejects what it was holding there and then.
+				// Tuned instead — a short backoff and a small retry budget — the
+				// rejection would be due after a delay the boot has to outlast,
+				// and the line this arm reads would come or not come depending
+				// on which of the two finished first.
+				REDIS_RETRY_MAX_ATTEMPTS: '0',
 			},
 		});
 
