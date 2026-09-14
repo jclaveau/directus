@@ -69,9 +69,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-processes.test.ts': 10_000,
 	'/tests/db/app/autoscale-config-validation.test.ts': 30_000,
 	// Three boots that end at the check and one that goes all the way
-	// through, each a full module load. Estimated from the boots it
-	// borrows; to be measured.
-	'/tests/db/app/autoscale-boolean-env.test.ts': 90_000,
+	// through, each a full module load. Measured over the postgres run of
+	// 2026-09-14.
+	'/tests/db/app/autoscale-boolean-env.test.ts': 12_000,
 	// One CLI command per vendor: a module load, a query, and the few
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,
