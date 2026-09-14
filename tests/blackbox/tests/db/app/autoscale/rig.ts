@@ -357,9 +357,18 @@ export async function declaredEverywhere(
 	return held;
 }
 
+/**
+ * The workers the daemon is keeping.
+ *
+ * What is serving plus what is on its way to serving, which is the count the
+ * autoscaler sizes a pool on. A worker it gave up on is neither, and neither is
+ * one somebody stopped — a pool is short of both.
+ */
 export function countWorkers(rig: Rig): number {
+	const gone = ['stopped', 'stopping', 'errored'];
+
 	return listWorkers(rig)
-		.filter((worker) => worker.pm2_env?.status !== 'stopped')
+		.filter((worker) => gone.includes(worker.pm2_env?.status ?? '') === false)
 		.length;
 }
 
