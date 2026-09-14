@@ -786,9 +786,11 @@ export function systemMcpTools(): SystemMcpTool[] {
 		// window and answer an empty tree. The REST route is absent in that
 		// deployment; the tool it shares a service with has to be too.
 		.filter((group) => group !== 'processes' || processesReportEnabled())
-		// A change travels to the scaling process over the bus, so a deployment with no
-		// keep a change and nothing to read back — the same reason the REST route
-		// is not registered there.
+		// A change travels to the scaling process over the bus, and the pool these
+		// answer about is found over it — so a deployment with no Redis has a
+		// tool naming a pool nothing can reach. The settings stay reachable as
+		// the columns they are; it is the pool that does not, which is the gate
+		// the REST routes are registered behind.
 		.filter((group) => group !== 'autoscale' || redisConfigAvailable())
 		// The drill holds real workers on the processor, so a deployment opens it
 		// deliberately or not at all, and it reaches them over the bus — which

@@ -406,11 +406,15 @@ router.post(
 	}),
 );
 
-// Without Redis the bus is an emitter this worker shares with nobody, and
-// every one of these routes needs it to reach the process that scales the pool:
-// the panel finds that process over the bus, and a restart is asked for over
-// it. A deployment without Redis says so by not carrying the endpoints rather
-// than by serving a page that cannot see the pool it is meant to describe.
+// These serve one panel, and its subject is a pool this worker reaches only
+// over the bus — which without Redis is an emitter it shares with nobody. The
+// process that scales is found over it and the restart below is asked for over
+// it, so a deployment without Redis carries no panel rather than a page showing
+// a form where the pool it describes should be.
+//
+// Not the only door onto what the panel writes: these settings are columns of
+// `directus_settings`, so a settings write reaches them in any deployment, and
+// the guard on that write is what holds the two doors to the same answer.
 if (redisConfigAvailable()) {
 	router.get(
 		'/autoscale',
