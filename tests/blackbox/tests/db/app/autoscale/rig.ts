@@ -189,11 +189,12 @@ export function startAutoscaler(rig: Rig, env: Record<string, string>): void {
 		cwd: paths.cwd,
 		env: {
 			...process.env,
-			// The autoscaler is a process of a Directus deployment and reads the
-			// shared settings out of its database, so one spawned without a
-			// connection exits on the missing variable before its first tick. The
-			// first vendor stands in for the suites whose claim is about the loop
-			// rather than about a vendor; the others name their own below.
+			// The autoscaler is a process of a Directus deployment, and building
+			// the CLI registers the extensions with a connection: one spawned
+			// without the variables naming it ends on the first missing one
+			// before any command runs. The first vendor stands in for the suites
+			// whose claim is about the loop rather than about a vendor; the
+			// others name their own below.
 			...databaseEnv(vendors[0]!),
 			PM2_HOME: rig.pm2Home,
 			PM2_AUTOSCALE_APP_NAME: rig.appName,

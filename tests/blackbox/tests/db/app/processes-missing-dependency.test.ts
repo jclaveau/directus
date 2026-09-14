@@ -97,14 +97,22 @@ describe.each(vendors)('%s', (vendor) => {
 		}
 	}, 180_000);
 
-	// The autoscaler reads the shared settings out of the database, and the
-	// call that reaches it answers a missing connection variable by ending the
-	// process. An autoscaler that ends leaves the pool at whatever size it was
-	// found at, with its own supervisor restarting it into the same boot.
-	it('keeps scaling where the shared settings cannot be read', async () => {
+	// The autoscaler reads the shared settings out of the database, which is a
+	// dependency its loop never had before they were kept there. A database
+	// that will not answer has to cost it the layer and nothing else: an
+	// autoscaler that ends leaves the pool at whatever size the outage caught
+	// it at, and its supervisor restarts it into the same outage.
+	it('keeps scaling where the database will not answer', async () => {
 		// Without the bus too: this autoscaler reports on a pool of its own, and
 		// a suite beside it reads that channel for a pool of its own.
-		const env = envWithout(vendor, ['DB_HOST', 'REDIS']);
+		const env = envWithout(vendor, ['REDIS']);
+
+		// Declared in full and answered by nothing, which is the shape an
+		// outage takes. A variable left out instead would end the process long
+		// before the loop — the extensions are registered with a connection
+		// while the CLI is still being built, and that is every command's
+		// boot, not this one's.
+		env['DB_PORT'] = '6199';
 
 		// Its own daemon, so a run this arm outlives cannot reach a pool
 		// another suite is scaling.
