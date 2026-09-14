@@ -50,8 +50,17 @@ function connect(): Promise<void> {
  * connection is already gone, which is the state being asked for.
  */
 function disconnected(): Promise<void> {
+	// pm2's published typings give `disconnect` no parameters while the daemon
+	// client has taken an optional completion callback since 2.x, the same gap
+	// `ScalableSupervisor` below covers for `scale`.
+	interface ClosableSupervisor {
+		disconnect(callback: (error: Error | null) => void): void;
+	}
+
+	const supervisor = pm2 as unknown as ClosableSupervisor;
+
 	return new Promise((resolve) => {
-		pm2.disconnect(() => resolve());
+		supervisor.disconnect(() => resolve());
 	});
 }
 
