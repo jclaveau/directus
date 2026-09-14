@@ -10,6 +10,7 @@ import { useLogger } from '../../logger/index.js';
 import type { DatabaseClient } from '@directus/types';
 import type { Migration, MigrationTransactionScope } from '../../types/index.js';
 import { getDatabaseClient } from '../index.js';
+import { getHelpers } from '../helpers/index.js';
 import getModuleDefault from '../../utils/get-module-default.js';
 import { orderBy } from '../../utils/lodash-es-used.js';
 
@@ -117,7 +118,7 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 		}
 
 		if (wrapsInTransaction(migrationModule, nextVersion.file)) {
-			await database.transaction(async (trx) => {
+			await withTransaction(async (trx) => {
 				await applyUp(migrationModule, nextVersion, trx);
 			});
 		}
@@ -160,7 +161,7 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 		}
 
 		if (wrapsInTransaction(migrationModule, migration.file)) {
-			await database.transaction(revert);
+			await withTransaction(revert);
 		}
 		else {
 			await revert(database);
@@ -214,14 +215,18 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 					committed = true;
 				}
 				else if (scope === 'own') {
-					await database.transaction(async (trx) => {
+					await withTransaction(async (trx) => {
 						await applyUp(migrationModule, migration, trx);
 					});
 
 					committed = true;
 				}
 				else {
-					batch ??= await database.transaction();
+					if (!batch) {
+						batch = await database.transaction();
+						await relaxTimeouts(batch);
+					}
+
 					await applyUp(migrationModule, migration, batch);
 				}
 			}
@@ -248,6 +253,36 @@ export default async function run(database: Knex, direction: 'up' | 'down' | 'la
 		}
 
 		await flushCaches(true);
+	}
+
+	/**
+	 * A migration's transaction is the only place its timeouts can be told apart
+	 * from a request's — it connects as the same role, to the same database — and
+	 * only a dialect knows how to say so. Migrations declaring
+	 * `transactionScope: 'none'` open no transaction and so keep the server's.
+	 */
+	async function relaxTimeouts(trx: Knex.Transaction): Promise<void> {
+		let helpers: ReturnType<typeof getHelpers>;
+
+		try {
+			helpers = getHelpers(database);
+		}
+		catch {
+			// `getDatabaseClient` throws on a connection it cannot name, and a
+			// runner that worked on one still does without the dialect's help.
+			return;
+		}
+
+		await helpers.schema.relaxMigrationTimeouts(trx);
+	}
+
+	async function withTransaction(
+		work: (trx: Knex.Transaction) => Promise<void>,
+	): Promise<void> {
+		await database.transaction(async (trx) => {
+			await relaxTimeouts(trx);
+			await work(trx);
+		});
 	}
 
 	function wrapsInTransaction(
