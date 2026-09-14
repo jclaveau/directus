@@ -367,3 +367,27 @@ test('asks once while a read is out, however long it stays out', async () => {
 	// floor started. Nothing after it, because nothing after it can land.
 	expect(readSharedSettings).toHaveBeenCalledTimes(2);
 });
+
+// The guard judging a write lays the stored layer over the same thing the tick
+// does. Settling the environment first resolves a floor against the ceiling the
+// environment declared, and the write on its way in is usually the one raising
+// that ceiling: judged against the settled floor, it is judged against a pool no
+// tick will ever run.
+test('a write is judged against the floor the environment really set', async () => {
+	vi.resetModules();
+
+	const { useEnv } = await import('@directus/env');
+
+	// A floor above its own ceiling, which is what settling would resolve and
+	// what the raised ceiling arriving with this write makes room for.
+	vi.mocked(useEnv).mockReturnValue({
+		CACHE_NAMESPACE: 'scalabus',
+		PM2_AUTOSCALE_MIN_WORKERS: 10,
+		PM2_AUTOSCALE_MAX_WORKERS: 4,
+	});
+
+	const module = await import('./resolve-config.js');
+
+	expect(module.configWithSharedSettings({ maxWorkers: 20 }))
+		.toMatchObject({ minWorkers: 10, maxWorkers: 20 });
+});

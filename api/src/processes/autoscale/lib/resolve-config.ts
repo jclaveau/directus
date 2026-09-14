@@ -222,14 +222,19 @@ function withSharedSettings(
  * which is a different process with the same deployment's environment. It is
  * what a write has to be judged against: the field being changed is compared
  * with fields nobody is changing, and those come from the chain.
+ *
+ * Laid over the chain as the chain is, and not settled. Settling first resolves
+ * a floor against the ceiling the environment declared, and the write being
+ * judged is usually the one raising that ceiling — judged against the settled
+ * floor, it is judged against a pool no tick will run. Settling after would
+ * hide the opposite case just as well: what settling does to a floor above its
+ * ceiling is clamp it, and a write nobody refuses is a write that gets stored,
+ * announced to the fleet and quietly corrected on the next tick.
  */
 export function configWithSharedSettings(
 	sharedSettings: Record<string, unknown>,
 ): AutoscaleConfig {
-	return withSharedSettings(
-		sanitizeConfig(envConfig()).config,
-		sharedSettings,
-	).config;
+	return withSharedSettings(envConfig(), sharedSettings).config;
 }
 
 /**
