@@ -69,6 +69,25 @@ async function prewarm(
  *
  * Read on every tick, so a line a tick would be the pool's whole log.
  */
+/**
+ * The size the pool is meant to be serving with once it is up.
+ *
+ * The prewarm where one is asked for, because that is the whole of what it
+ * asks: be this big before the deployment takes traffic. The floor otherwise,
+ * and the floor too where scaling is off, since prewarm is one of the things
+ * that does not run then.
+ */
+export function targetPoolSize(config: AutoscaleConfig): number {
+	if (config.enabled === false) {
+		return config.minWorkers;
+	}
+
+	return Math.min(
+		Math.max(config.minWorkers, config.prewarmWorkers),
+		config.maxWorkers,
+	);
+}
+
 let lastFailedWorkers = 0;
 
 /**
@@ -200,6 +219,7 @@ export async function runAutoscaler(): Promise<void> {
 				reportPoolHealth({
 					failedWorkers: reading.failedWorkers,
 					onlineWorkers: onlineWorkers.length,
+					targetWorkers: targetPoolSize(config),
 				});
 
 				announceFailedWorkers(reading.failedWorkers, onlineWorkers.length);

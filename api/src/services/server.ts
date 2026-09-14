@@ -13,7 +13,10 @@ import getMailer from '../mailer.js';
 import { rateLimiterGlobal } from '../middleware/rate-limiter-global.js';
 import { rateLimiter } from '../middleware/rate-limiter-ip.js';
 import { outstandingMigrationsHoldingHealth } from '../outstanding-migrations.js';
-import { poolHealthReading } from '../processes/lib/pool-health.js';
+import {
+	poolHasComeUp,
+	poolHealthReading,
+} from '../processes/lib/pool-health.js';
 import { SERVER_ONLINE } from '../server.js';
 import { getStorage } from '../storage/index.js';
 import { getAllowedLogLevels } from '../utils/get-allowed-log-levels.js';
@@ -206,7 +209,25 @@ export class ServerService {
 		// this once per change in the log of the process that measured it.
 		const pool = poolHealthReading();
 
-		if (pool !== null && pool.failedWorkers > 0) {
+		if (poolHasComeUp() === false) {
+			// An error, so a platform gating a switchover on this holds the
+			// deployment back and leaves the previous one serving. A deployment
+			// that asked for a prewarm and cannot reach it is answering its
+			// first requests with a fraction of the pool it was told to have,
+			// which is the failure prewarm was added to prevent.
+			data.status = 'error';
+
+			data.checks['processes:pool'] = [
+				{
+					componentType: 'system',
+					status: 'error',
+					observedValue: pool?.onlineWorkers ?? 0,
+					observedUnit: 'workers',
+					output: 'The pool has not reached the size it serves with',
+				},
+			];
+		}
+		else if (pool !== null && pool.failedWorkers > 0) {
 			// A warning rather than an error, so the 200 stands. The workers
 			// this one is answering for are serving: taking the service out of
 			// rotation for the ones that are not would answer a pool that lost

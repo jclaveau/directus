@@ -313,3 +313,40 @@ describe('runAutoscaler', () => {
 		expect(recordAutoscaleTick).toHaveBeenCalledOnce();
 	});
 });
+
+describe('targetPoolSize', () => {
+	const config = {
+		enabled: true,
+		minWorkers: 1,
+		maxWorkers: 4,
+		prewarmWorkers: 0,
+	} as AutoscaleConfig;
+
+	test('is the floor where no prewarm was asked for', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		expect(targetPoolSize({ ...config, minWorkers: 2 })).toBe(2);
+	});
+
+	test('is the prewarm where one was', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		expect(targetPoolSize({ ...config, prewarmWorkers: 3 })).toBe(3);
+	});
+
+	test('is the ceiling where the prewarm is above it', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		// The same clamp prewarm itself runs under, so health is not held down
+		// waiting for a size the pool is not allowed to reach.
+		expect(targetPoolSize({ ...config, prewarmWorkers: 9 })).toBe(4);
+	});
+
+	test('is the floor where scaling is off', async () => {
+		const { targetPoolSize } = await import('./index.js');
+
+		// Prewarm is one of the things that does not run then.
+		expect(targetPoolSize({ ...config, enabled: false, prewarmWorkers: 3 }))
+			.toBe(1);
+	});
+});
