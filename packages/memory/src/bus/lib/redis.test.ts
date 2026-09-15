@@ -171,6 +171,121 @@ describe('subscribe', () => {
 	});
 });
 
+// The listener the bus registered for `event` on the subscriber, the last one
+// where several were.
+function listenerFor(event: string): () => void {
+	const [, listener] = vi.mocked(mockSubRedis.on).mock.calls
+		.filter(([registered]) => registered === event)
+		.at(-1)!;
+
+	return listener as () => void;
+}
+
+describe('subscribe while the subscriber is inside its ready check', () => {
+	// Between the socket's `connect` and the `INFO` of ioredis's ready check a
+	// subscribe is written at once, its reply puts the connection in subscriber
+	// mode, the check fails for it, and the reconnect replays only what a
+	// connection that reached `ready` held — so the channel is gone while its
+	// handler stays (https://github.com/jclaveau/directus/issues/496).
+	test('Holds the subscribe until the check passes', async () => {
+		mockSubRedis.status = 'connect';
+
+		let settled = false;
+
+		const subscribing = bus.subscribe(mockChannel, mockHandler).then(() => {
+			settled = true;
+		});
+
+		await Promise.resolve();
+
+		expect(mockSubRedis.subscribe).not.toHaveBeenCalled();
+		expect(settled).toBe(false);
+
+		listenerFor('ready')();
+		await subscribing;
+
+		expect(mockSubRedis.subscribe).toHaveBeenCalledWith(mockNamespacedChannel);
+	});
+
+	test('Releases the subscribe when the check fails', async () => {
+		// To the offline queue, which holds it until the reconnect is ready.
+		mockSubRedis.status = 'connect';
+
+		const subscribing = bus.subscribe(mockChannel, mockHandler);
+		await Promise.resolve();
+
+		expect(mockSubRedis.subscribe).not.toHaveBeenCalled();
+
+		listenerFor('close')();
+		await subscribing;
+
+		expect(mockSubRedis.subscribe).toHaveBeenCalledWith(mockNamespacedChannel);
+	});
+
+	test('Listens once: both listeners go when either fires', async () => {
+		mockSubRedis.status = 'connect';
+
+		const subscribing = bus.subscribe(mockChannel, mockHandler);
+		await Promise.resolve();
+
+		listenerFor('ready')();
+		await subscribing;
+
+		expect(mockSubRedis.off).toHaveBeenCalledWith('ready', listenerFor('ready'));
+		expect(mockSubRedis.off).toHaveBeenCalledWith('close', listenerFor('close'));
+	});
+
+	test('Subscribes at once on a connection past its check', async () => {
+		mockSubRedis.status = 'ready';
+
+		await bus.subscribe(mockChannel, mockHandler);
+
+		expect(mockSubRedis.subscribe).toHaveBeenCalledWith(mockNamespacedChannel);
+		expect(mockSubRedis.on).not.toHaveBeenCalledWith('close', expect.any(Function));
+	});
+
+	test('Subscribes at once on a connection still connecting', async () => {
+		// The offline queue holds it until `ready`, which is past the check.
+		mockSubRedis.status = 'connecting';
+
+		await bus.subscribe(mockChannel, mockHandler);
+
+		expect(mockSubRedis.subscribe).toHaveBeenCalledWith(mockNamespacedChannel);
+		expect(mockSubRedis.on).not.toHaveBeenCalledWith('close', expect.any(Function));
+	});
+});
+
+describe('on every ready of the subscriber', () => {
+	test('Subscribes every channel with a handler', async () => {
+		await bus.subscribe(mockChannel, mockHandler);
+		vi.mocked(mockSubRedis.subscribe).mockClear();
+		vi.mocked(mockSubRedis.subscribe).mockResolvedValueOnce(1);
+
+		listenerFor('ready')();
+
+		expect(mockSubRedis.subscribe).toHaveBeenCalledWith(mockNamespacedChannel);
+	});
+
+	test('Subscribes nothing where no handler is registered', () => {
+		listenerFor('ready')();
+
+		expect(mockSubRedis.subscribe).not.toHaveBeenCalled();
+	});
+
+	test('Forwards a refused subscribe to the publisher client', async () => {
+		await bus.subscribe(mockChannel, mockHandler);
+
+		const error = new Error('Connection is closed.');
+		vi.mocked(mockSubRedis.subscribe).mockRejectedValueOnce(error);
+
+		listenerFor('ready')();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(mockRedis.emit).toHaveBeenCalledWith('error', error);
+	});
+});
+
 describe('unsubscribe', () => {
 	test('Returns early when no handlers exist for channel', async () => {
 		await bus.unsubscribe(mockNamespacedChannel, mockHandler);
