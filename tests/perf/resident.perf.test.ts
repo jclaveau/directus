@@ -43,19 +43,20 @@ type Subject = {
 const subjects: Subject[] = [
 	// Building the program: commander and the version, with every command's
 	// module, the extension loader and the emitter behind the gate `autoscale`
-	// passes. Measured 53 MB, the node runtime itself being 42 of them; the
-	// smallest module the gate holds back is ~75 MB on its own.
+	// passes. Measured 53 MB on a laptop and 55 on a runner, the node runtime
+	// itself being 42 of them; the smallest module the gate holds back is
+	// ~75 MB on its own.
 	{ name: 'program', argv: ['autoscale'], modules: [], budgetMb: 70 },
 
 	// The autoscaler as `cli/run.js` leaves it before the loop connects: the
 	// program, the entry guard and the loop's own graph — pm2, ioredis, the
 	// logger, the environment, and the metrics registry the rejection guard
-	// reports to. Measured 115 MB.
+	// reports to. Measured 115 MB on a laptop and 123 on a runner.
 	{
 		name: 'autoscaler',
 		argv: ['autoscale'],
 		modules: ['entry-guard.js', 'processes/autoscale/index.js'],
-		budgetMb: 140,
+		budgetMb: 150,
 	},
 ];
 
