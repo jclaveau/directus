@@ -28,6 +28,28 @@ function average(values: number[]): number {
 }
 
 /**
+ * The smallest pool the load read would leave at or under the middle of the
+ * band, never below the floor.
+ *
+ * Mid-band rather than at the release edge: a pool released to just under
+ * the release threshold has no room to move in either direction, and a pool
+ * released to just under the scale threshold buys its worker back on the next
+ * reading. Never the whole pool: the caller has already found that one fewer
+ * worker sits under the release threshold, which is under the middle.
+ */
+function midBandSize(cpuPercents: number[], config: AutoscaleConfig): number {
+	const midBandCpu = (config.releaseCpuThreshold + config.scaleCpuThreshold) / 2;
+
+	let size = config.minWorkers;
+
+	while (averageOver(cpuPercents, size) > midBandCpu) {
+		size += 1;
+	}
+
+	return size;
+}
+
+/**
  * The pool size this sample calls for, or `null` to leave it alone.
  *
  * Pure, so the rule can be exercised without a supervisor: everything it
@@ -269,15 +291,29 @@ function decideScalabus(
 
 				return {
 					workers: null,
-					reason: `${projectedCpu}% releases a worker, `
+					reason: `${projectedCpu}% calls for a release, `
 						+ `${left}s of cooldown left`,
 				};
 			}
 
+			const target = midBandSize(sample.cpuPercents, config);
+
+			// Half the way there and never less than one, so a drain is
+			// geometric: 32, 16, 8, 4, 2, 1 is five cooldowns from the ceiling
+			// to the floor. Not the whole way, because a worker's reading is
+			// not all load: scheduled jobs, GC and the event loop's own
+			// overhead cost each worker whatever the pool's size, so the
+			// straight extrapolation `target` makes overestimates how far the
+			// pool can fall. A pool that overshoots pays a boot a worker to
+			// climb back, each boot's CPU feeding the next add. Half the step
+			// halves the overshoot.
+			const released = Math.max(1, Math.ceil((workers - target) / 2));
+
 			return {
-				workers: survivors,
+				workers: workers - released,
 				reason: `cpu ${projectedCpu}% across the ${survivors} worker(s) `
-					+ `a release leaves < ${config.releaseCpuThreshold}%`,
+					+ `a release leaves < ${config.releaseCpuThreshold}%; `
+					+ `${target} would sit mid-band, releasing ${released}`,
 			};
 		}
 	}
