@@ -1,7 +1,10 @@
 import type { FieldFunction, FieldOverview } from '@directus/types';
 import { parseFilterKey } from '../../../../../utils/parse-filter-key.js';
 import { InvalidQueryError } from '@directus/errors';
-import { getFunctionsForType, getOutputTypeForFunction } from '@directus/utils';
+import {
+	getFunctionsForType,
+	getOutputTypeForFunction,
+} from '@directus/utils/values';
 
 export function getFilterType(fields: Record<string, FieldOverview>, key: string, collection = 'unknown') {
 	const { fieldName, functionName } = parseFilterKey(key);

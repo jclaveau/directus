@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { toBoolean } from '@directus/utils';
+import { toBoolean } from '@directus/utils/values';
 import { createMetrics } from './create-metrics.js';
 
 export const _cache: {

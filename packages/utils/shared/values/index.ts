@@ -8,6 +8,14 @@
  * of what loading it costs. https://github.com/jclaveau/directus/issues/489
  */
 export { isIn, isTypeIn } from '../array-helpers.js';
+export { compress, decompress } from '../compress.js';
+export { getFilterOperatorsForType } from '../get-filter-operators-for-type.js';
+export { getFunctionsForType } from '../get-functions-for-type.js';
+export { getOutputTypeForFunction } from '../get-output-type-for-function.js';
+export { getRedactedString, REDACTED_TEXT } from '../get-redacted-string.js';
+export { getRelation } from '../get-relation.js';
+export { getSimpleHash } from '../get-simple-hash.js';
+export { isObject } from '../is-object.js';
 export { noproto, parseJSON } from '../parse-json.js';
 export { toArray } from '../to-array.js';
 export { toBoolean } from '../to-boolean.js';

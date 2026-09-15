@@ -308,6 +308,52 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// The autoscaler's floor: its entry, the logger it reports through, the process
+	// modules it is made of and the bus they share settings over. Each reads a
+	// variable and coerces a value, and the barrel would put joi, date-fns and the
+	// system-data tables under every one of them — 31 MB resident in a process that
+	// scales workers. The two bans above are repeated because this replaces that
+	// rule for these files rather than adding to it; `index.graph.test.ts` beside
+	// the autoscaler pins the rest of its graph, which this list cannot name file
+	// by file.
+	// https://github.com/jclaveau/directus/issues/489
+	{
+		files: [
+			'api/src/entry-guard.ts',
+			'api/src/logger/**/*.ts',
+			'api/src/metrics/**/*.ts',
+			'api/src/processes/**/*.ts',
+			'api/src/utils/get-config-from-env.ts',
+			'api/src/utils/report-unhandled-rejection.ts',
+			'packages/memory/**/*.ts',
+		],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
+						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
+						{
+							name: '@directus/utils',
+							message: "Import from '@directus/utils/values'; a helper that reaches for nothing of its own belongs there.",
+						},
+					],
+					patterns: [
+						{
+							group: ['lodash-es/*'],
+							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
+						},
+						{
+							group: ['date-fns/*'],
+							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
+						},
+					],
+				},
+			],
+		},
+	},
+
 	// The two modules that gather them are the only place allowed to reach the package
 	{
 		files: ['**/lodash-es-used.ts', '**/date-fns-used.ts'],

@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils';
+import { toArray } from '@directus/utils/values';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { MetricObjectWithValues, MetricValue } from 'prom-client';
