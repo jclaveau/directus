@@ -8,6 +8,12 @@ vi.mock('./index.js', () => ({ createCli: vi.fn() }));
 vi.mock('./utils/arm-deadline.js', () => ({ armDeadline: vi.fn() }));
 vi.mock('@directus/env', () => ({ useEnv: () => ({ CACHE_FLUSH_TIMEOUT: '9s' }) }));
 
+// The guard is imported for its side effect, and the module behind it reaches
+// the logger and the metrics registry — graphs this file otherwise never loads,
+// and 3.6s of the 5s budget when it does. What it guards is pinned end to end by
+// `cli-boot-redis-outage.test.ts`, which boots the real CLI at a dead Redis.
+vi.mock('../entry-guard.js', () => ({}));
+
 const argv = process.argv;
 
 beforeEach(() => {

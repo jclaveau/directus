@@ -1,0 +1,23 @@
+post:
+  summary: Restart the pool worker by worker
+  description: >
+    Asks the process that scales the pool to replace every worker, each one
+    only once its replacement is serving, carrying whatever the supervisor
+    options above hold. The answer is what the worker taking this call can
+    honestly say — that the request is out — because the restart is run by
+    another process and would retire this one partway through answering. Where
+    the restart got to comes back on the process report. Admin only, and
+    present only where Redis is configured, since the ask travels over the bus.
+  operationId: restart-autoscale-pool
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                $ref: '../../openapi.yaml#/components/schemas/AutoscaleReload'
+      description: Successful request
+  tags:
+    - Autoscaling

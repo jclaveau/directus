@@ -1,3 +1,4 @@
+import '../entry-guard.js';
 import { useEnv } from '@directus/env';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { createCli } from './index.js';

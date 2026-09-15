@@ -3,6 +3,11 @@ import { systemCollectionRows } from '@directus/system-data';
 import type {
 	AbstractServiceOptions,
 	Accountability,
+	AutoscaleDrill,
+	AutoscaleNodeState,
+	AutoscaleReload,
+	AutoscaleRunner,
+	AutoscaleWriteSurface,
 	CacheFlushTarget,
 	PgBouncerDetail,
 	PgBouncerReport,
@@ -41,12 +46,73 @@ import emitter from '../emitter.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
 import { collectPgBouncer } from '../pgbouncer/index.js';
-import { collectProcesses } from '../processes/index.js';
+import {
+	applySharedSettingsPatch,
+	parseSharedSettingsPatch,
+	type AutoscaleSharedSettings,
+} from '../processes/autoscale/lib/shared-settings.js';
+import {
+	loadedWorker,
+	MAX_DRILL_PERCENT,
+	MAX_DRILL_SECONDS,
+	MIN_DRILL_PERCENT,
+	startDrill,
+	stopDrill,
+	drillState,
+} from '../processes/autoscale/lib/drill.js';
+import {
+	askForReload,
+	reloadRefusal,
+} from '../processes/autoscale/lib/reload.js';
+import {
+	configWithSharedSettings,
+} from '../processes/autoscale/lib/resolve-config.js';
+import {
+	applySupervisorPatch,
+	parseSupervisorPatch,
+	type SupervisorSharedSettings,
+} from '../processes/autoscale/lib/supervisor-shared-settings.js';
+import {
+	SHARED_SETTINGS_COLUMNS,
+	readAllSharedSettings,
+	readSharedSettings,
+	writeSharedSettings,
+} from '../processes/lib/shared-settings.js';
+import { assertUsableConfig } from '../processes/autoscale/lib/validate-config.js';
+import {
+	collectProcesses,
+	processesReportEnabled,
+} from '../processes/index.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
 import { shouldClearCache } from '../utils/should-clear-cache.js';
+
+/**
+ * A whole number inside the range the field accepts, or the answer saying it
+ * is not one.
+ *
+ * Both drill inputs reach here off a query string, where every value is a
+ * string and `'abc'` and `''` are the same `NaN` — so the check is one place
+ * and the message names the field and the range it missed.
+ */
+function wholeNumberWithin(
+	value: unknown,
+	low: number,
+	high: number,
+	field: string,
+): number {
+	const parsed = Number(value);
+
+	if (Number.isInteger(parsed) === false || parsed < low || parsed > high) {
+		throw new InvalidPayloadError({
+			reason: `'${field}' has to be a whole number between ${low} and ${high}`,
+		});
+	}
+
+	return parsed;
+}
 
 /**
  * How far back a cache read was asked to look, as milliseconds.
@@ -113,6 +179,26 @@ function requestedTimeseriesBuckets(raw: unknown): number | undefined {
 	}
 
 	return parsed;
+}
+
+/**
+ * What an autoscale read answers with: the stored shared settings, plus who
+ * left it.
+ */
+export interface AutoscaleSharedSettingsAnswer {
+	key: string;
+	sharedSettings: AutoscaleSharedSettings | null;
+	/** The address behind the shared settings' `setBy`, `null` where there is none. */
+	setByEmail: string | null;
+}
+
+export interface AutoscaleConfigAnswer extends AutoscaleSharedSettingsAnswer {
+	/**
+	 * The pm2 options a restart would carry, answered beside the configuration
+	 * because a page showing one without the other cannot say which of the two
+	 * a value it displays came from.
+	 */
+	supervisor: AutoscaleSharedSettingsAnswer;
 }
 
 export class UtilsService {
@@ -459,6 +545,300 @@ export class UtilsService {
 		this.assertAdmin('inspect the running processes');
 
 		return collectProcesses(details);
+	}
+
+	/**
+	 * The shared settings, and the key they are stored under.
+	 *
+	 * Only the shared settings: what the pool is actually being scaled on is the
+	 * environment of the process that scales it laid under this, and that
+	 * process reports it with `readProcesses` rather than answering a request.
+	 */
+	async readAutoscaleConfig(): Promise<AutoscaleConfigAnswer> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		const stored = await readAllSharedSettings();
+
+		return this.answerWith(
+			stored[SHARED_SETTINGS_COLUMNS.autoscale],
+			stored[SHARED_SETTINGS_COLUMNS.supervisor],
+		);
+	}
+
+	/**
+	 * Lay a patch over the shared settings, `null` giving one field back to the
+	 * environment chain.
+	 *
+	 * Field by field on purpose: a write of the whole object would pin every
+	 * value a form happened to render, and the next deployment's environment
+	 * would stop reaching the pool without anyone having asked for that.
+	 */
+	async updateAutoscaleConfig(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleConfigAnswer> {
+		this.assertAdmin('change the autoscale configuration');
+
+		const parsed = parseSharedSettingsPatch(patch);
+
+		// Stamped by the writer rather than taken from them: shared settings
+		// outlive the incident that justified them, and the questions they are then
+		// asked are who left them, when, and through what.
+		const stamped = {
+			...parsed,
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+			setFrom: surface,
+		};
+
+		const stored = await readAllSharedSettings();
+
+		const sharedSettings = applySharedSettingsPatch(
+			stored[SHARED_SETTINGS_COLUMNS.autoscale],
+			stamped,
+		);
+
+		// Judged whole rather than field by field: a floor is only too high
+		// against the ceiling it will sit under, and that ceiling is usually a
+		// field this patch never mentions.
+		assertUsableConfig(configWithSharedSettings(sharedSettings ?? {}));
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.autoscale,
+			sharedSettings,
+			this.settingsOptions,
+		);
+
+		return this.answerWith(
+			sharedSettings,
+			stored[SHARED_SETTINGS_COLUMNS.supervisor],
+		);
+	}
+
+	/**
+	 * The shared settings with the writer named rather than identified.
+	 *
+	 * The stamp keeps the user's id, which survives a rename and a changed
+	 * address; a page reading it back wants the address, and only the database
+	 * turns one into the other.
+	 */
+	private async answerWith(
+		sharedSettings: AutoscaleSharedSettings | null,
+		supervisorSettings: SupervisorSharedSettings | null,
+	): Promise<AutoscaleConfigAnswer> {
+		return {
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.autoscale}`,
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+			supervisor: await this.supervisorAnswer(supervisorSettings),
+		};
+	}
+
+	private async supervisorAnswer(
+		sharedSettings: SupervisorSharedSettings | null,
+	): Promise<AutoscaleSharedSettingsAnswer> {
+		return {
+			key: `directus_settings.${SHARED_SETTINGS_COLUMNS.supervisor}`,
+			sharedSettings,
+			setByEmail: await this.emailOf(sharedSettings?.['setBy']),
+		};
+	}
+
+	/**
+	 * Change the pm2 options the next rolling restart will carry.
+	 *
+	 * Stored rather than applied: pm2 reads these when it starts a worker, so
+	 * the write lands on the pool through the restart below it and the page
+	 * says so. Nothing is clamped — a supervisor takes what it is handed.
+	 */
+	async updateSupervisorConfig(
+		patch: Record<string, unknown>,
+		surface: AutoscaleWriteSurface,
+	): Promise<AutoscaleSharedSettingsAnswer> {
+		this.assertAdmin('change the supervisor configuration');
+
+		const stamped = {
+			...parseSupervisorPatch(patch),
+			setBy: this.accountability?.user ?? null,
+			setAt: new Date().toISOString(),
+			setFrom: surface,
+		};
+
+		const sharedSettings = applySupervisorPatch(
+			await readSharedSettings(SHARED_SETTINGS_COLUMNS.supervisor),
+			stamped,
+		);
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.supervisor,
+			sharedSettings,
+			this.settingsOptions,
+		);
+
+		return this.supervisorAnswer(sharedSettings);
+	}
+
+	/**
+	 * What a write to the settings singleton runs as.
+	 *
+	 * The accountability travels with it because that is what puts a row in
+	 * `directus_revisions`: the stamp says who changed a threshold, and the
+	 * revision is what survives the stamp being overwritten by the next change.
+	 */
+	private get settingsOptions(): AbstractServiceOptions {
+		return {
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		};
+	}
+
+	private async emailOf(user: unknown): Promise<string | null> {
+		if (typeof user !== 'string') {
+			return null;
+		}
+
+		try {
+			const row = await this.knex
+				.select('email')
+				.from('directus_users')
+				.where({ id: user })
+				.first();
+
+			return row?.email ?? null;
+		}
+		catch {
+			// The key is editable by hand, and a database asked to match a uuid
+			// against whatever was typed there refuses the comparison.
+			return null;
+		}
+	}
+
+	/**
+	 * Every process that is scaling a pool, with what it last decided on.
+	 *
+	 * Read from the same report the processes page collects, because the values
+	 * a pool is actually scaled on are the ones resolved in the process that
+	 * scales it — an api worker resolving them again would answer for its own
+	 * environment, which is a different process's.
+	 */
+	async readAutoscaleRunners(): Promise<AutoscaleRunner[]> {
+		this.assertAdmin('inspect the autoscale configuration');
+
+		// With the report off every responder is gone, so collecting one would
+		// wait out its window to answer the empty tree it already knows about.
+		if (processesReportEnabled() === false) {
+			return [];
+		}
+
+		const report = await collectProcesses(['stats']);
+
+		return report.services.flatMap((service) => {
+			return service.replicas.flatMap((replica) => {
+				return replica.processes
+					.filter((node) => node.autoscale !== null)
+					.map((node) => {
+						return {
+							service: service.service,
+							replicaId: replica.replicaId,
+							nodeId: node.nodeId,
+							name: node.name,
+							state: node.autoscale as AutoscaleNodeState,
+						};
+					});
+			});
+		});
+	}
+
+	/** What the worker answering this is burning, and until when. */
+	async readAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('inspect the autoscale load drill');
+
+		return drillState();
+	}
+
+	/**
+	 * Put the whole pool under load for a while.
+	 *
+	 * A configuration change is judged by what the loop does with it, and a
+	 * quiet pool does nothing with any of it: the thresholds are never reached,
+	 * the cooldowns never start, and a ceiling that is wrong stays wrong until
+	 * the traffic that proves it arrives at the worst possible time. This
+	 * produces that traffic's effect on demand, and nothing else — it never
+	 * touches the bounds it is being used to test.
+	 */
+	async startAutoscaleDrill(
+		seconds: unknown,
+		percent: unknown,
+	): Promise<AutoscaleDrill> {
+		this.assertAdmin('run an autoscale load drill');
+
+		const duration = wholeNumberWithin(
+			seconds,
+			1,
+			MAX_DRILL_SECONDS,
+			'seconds',
+		);
+
+		const share = wholeNumberWithin(
+			percent,
+			MIN_DRILL_PERCENT,
+			MAX_DRILL_PERCENT,
+			'percent',
+		);
+
+		// Refused here and not only greyed out in the page: a drill laid over real
+		// traffic buys workers for load nobody asked to serve and measures the two
+		// together, which is worth refusing whatever surface asked for it.
+		const hottest = loadedWorker(await this.readAutoscaleRunners());
+
+		if (hottest !== null) {
+			throw new InvalidPayloadError({
+				reason: `the pool is already working — a worker is at ${hottest}% `
+					+ 'CPU, so a drill would measure that as well as itself',
+			});
+		}
+
+		return startDrill(duration, share);
+	}
+
+	/**
+	 * Restart every worker of the pool without dropping below its size.
+	 *
+	 * The supervisor starts a replacement, waits for it to report ready, and
+	 * only then retires the worker it replaces — which is how a change to
+	 * something the pool reads at boot reaches it without a deploy and without
+	 * a gap in service. Asked for over the bus rather than run here: this
+	 * worker is one of the ones being replaced.
+	 */
+	async startAutoscaleReload(): Promise<AutoscaleReload> {
+		this.assertAdmin('restart the autoscaled pool');
+
+		const refusal = reloadRefusal(await this.readAutoscaleRunners());
+
+		if (refusal !== null) {
+			throw new InvalidPayloadError({ reason: refusal });
+		}
+
+		return askForReload();
+	}
+
+	/** Call the drill off before its deadline. */
+	async stopAutoscaleDrill(): Promise<AutoscaleDrill> {
+		this.assertAdmin('stop the autoscale load drill');
+
+		return stopDrill();
+	}
+
+	/** Drop the shared settings, so every field comes from the environment again. */
+	async clearAutoscaleConfig(): Promise<void> {
+		this.assertAdmin('clear the autoscale configuration');
+
+		await writeSharedSettings(
+			SHARED_SETTINGS_COLUMNS.autoscale,
+			null,
+			this.settingsOptions,
+		);
 	}
 
 	async readPgBouncer(details: PgBouncerDetail[]): Promise<PgBouncerReport> {
