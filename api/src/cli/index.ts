@@ -1,7 +1,6 @@
 import { Command, Option } from 'commander';
 import { version } from 'directus/version';
-import emitter from '../emitter.js';
-import { loadExtensions } from './load-extensions.js';
+import type { Emitter } from '../emitter.js';
 
 /**
  * The first argument selecting each command this file declares.
@@ -9,7 +8,7 @@ import { loadExtensions } from './load-extensions.js';
  * Read by the gate below rather than taken off the built program: the gate runs
  * before the program exists, which is the whole of what it is for.
  */
-const BUILT_IN_COMMANDS = new Set([
+export const BUILT_IN_COMMANDS = new Set([
 	'autoscale',
 	'bootstrap',
 	'cache',
@@ -48,20 +47,32 @@ function needsExtensions(argv: string[]): boolean {
  * Every process of a deployment goes through here — the workers, the
  * autoscaler, each one-shot CLI call a deploy makes — and what a command
  * imports is the API graph behind it: express, knex, every controller and
- * service for `start` alone. Taken eagerly that is ~112 MB resident and ~5s of
+ * service for `start` alone. Taken eagerly that is ~160 MB resident and ~3s of
  * module loading spent before commander has read which command was asked for,
  * in processes that go on to run one of them (jclaveau/directus#489).
+ *
+ * The extension loader and the emitter are reached the same way, behind the
+ * gate: the loader's module is the extension manager's graph (express, knex,
+ * rollup, every service), and the emitter's is the database's. Only an
+ * extension listens on `cli.before` and `cli.after`, so a process that loads
+ * none has nothing to emit to.
  */
 export async function createCli(
 	argv: string[] = process.argv.slice(2),
 ): Promise<Command> {
 	const program = new Command();
+	let emitter: Emitter | null = null;
 
 	if (needsExtensions(argv)) {
-		await loadExtensions();
-	}
+		const [{ loadExtensions }, { useEmitter }] = await Promise.all([
+			import('./load-extensions.js'),
+			import('../emitter.js'),
+		]);
 
-	await emitter.emitInit('cli.before', { program });
+		await loadExtensions();
+		emitter = useEmitter();
+		await emitter.emitInit('cli.before', { program });
+	}
 
 	program.name('directus').usage('[command] [options]');
 	program.version(version, '-v, --version');
@@ -263,7 +274,7 @@ export async function createCli(
 			await apply(path, options);
 		});
 
-	await emitter.emitInit('cli.after', { program });
+	await emitter?.emitInit('cli.after', { program });
 
 	return program;
 }

@@ -14,12 +14,14 @@ import keyGenerate from './commands/security/key.js';
 import secretGenerate from './commands/security/secret.js';
 import usersCreate from './commands/users/create.js';
 import usersPasswd from './commands/users/passwd.js';
-import { createCli } from './index.js';
+import { BUILT_IN_COMMANDS, createCli } from './index.js';
 import { loadExtensions } from './load-extensions.js';
+
+const { emitInit } = vi.hoisted(() => ({ emitInit: vi.fn() }));
 
 vi.mock('directus/version', () => ({ version: '0.0.0' }));
 vi.mock('./load-extensions.js', () => ({ loadExtensions: vi.fn() }));
-vi.mock('../emitter.js', () => ({ default: { emitInit: vi.fn() } }));
+vi.mock('../emitter.js', () => ({ useEmitter: () => ({ emitInit }) }));
 vi.mock('../server.js', () => ({ startServer: vi.fn() }));
 vi.mock('../processes/autoscale/index.js', () => ({ runAutoscaler: vi.fn() }));
 vi.mock('./commands/bootstrap/index.js', () => ({ default: vi.fn() }));
@@ -149,5 +151,38 @@ describe('createCli', () => {
 		await createCli(['--some-option', 'autoscale']);
 
 		expect(vi.mocked(loadExtensions)).not.toHaveBeenCalled();
+	});
+
+	// The gate reads this set because it runs before the program exists, so the
+	// set is maintained by hand: a command declared here but missing from it loads
+	// the extensions for nothing, and a name in it that no command declares turns
+	// the gate against the extension that registers that command.
+	it('gates exactly the commands the program declares', async () => {
+		const program = await createCli(['autoscale']);
+
+		expect(new Set(program.commands.map((command) => command.name())))
+			.toEqual(BUILT_IN_COMMANDS);
+	});
+
+	// The hooks are what an extension registers on, so they are emitted around the
+	// program only when one could have: the emitter's own module carries the
+	// database's graph, and a process loading no extension has nothing to hear it.
+	it('emits the cli hooks around the extensions it loads', async () => {
+		emitInit.mockClear();
+
+		const program = await createCli([]);
+
+		expect(emitInit.mock.calls).toEqual([
+			['cli.before', { program }],
+			['cli.after', { program }],
+		]);
+	});
+
+	it('emits no cli hook when it loads no extension', async () => {
+		emitInit.mockClear();
+
+		await createCli(['autoscale']);
+
+		expect(emitInit).not.toHaveBeenCalled();
 	});
 });

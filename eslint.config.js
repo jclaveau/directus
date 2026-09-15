@@ -243,8 +243,11 @@ export default typescriptEslint.config(
 	// API graph behind it: express, knex, every controller and service for `start`
 	// alone. Each one is reached from its own action, so a process pays for the
 	// command it runs; a static import here puts all thirteen back into every one of
-	// them. The two bans above are repeated because this replaces that rule for this
-	// file rather than adding to it.
+	// them. The extension loader and the emitter sit behind the same kind of gate:
+	// the loader's module is the extension manager's graph and the emitter's the
+	// database's, ~150 MB between them in a process that loads no extension. The
+	// two bans above are repeated because this replaces that rule for this file
+	// rather than adding to it.
 	// https://github.com/jclaveau/directus/issues/489
 	{
 		files: ['api/src/cli/index.ts'],
@@ -258,8 +261,13 @@ export default typescriptEslint.config(
 					],
 					patterns: [
 						{
-							group: ['../server.js', './commands/**'],
+							group: ['../server.js', './commands/**', '../processes/**'],
 							message: 'Import it from the command\'s own action, so only the process running that command pays for it.',
+						},
+						{
+							group: ['./load-extensions.js', '../emitter.js'],
+							allowTypeImports: true,
+							message: 'Import it inside the needsExtensions() gate, so only a process loading extensions pays for it.',
 						},
 					],
 				},
