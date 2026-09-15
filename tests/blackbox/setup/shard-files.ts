@@ -65,6 +65,11 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// released at the worker that is not the one pm2 would have taken, and a
 	// fourth held whole because one of its two workers is carrying everything.
 	'/tests/db/app/autoscale-release.test.ts': 330_000,
+	// Two pools held under a fixed window each, plus the grow the second
+	// arm waits out.
+	'/tests/db/app/autoscale-signal.test.ts': 130_000,
+	// One pool, a crash to wait for and a window to hold it over.
+	'/tests/db/app/autoscale-churn.test.ts': 70_000,
 	// One climb, a daemon taken away, and the climb it makes afterwards.
 	'/tests/db/app/autoscale-supervisor-restart.test.ts': 60_000,
 	'/tests/db/app/autoscale-supervisor-options.test.ts': 90_000,

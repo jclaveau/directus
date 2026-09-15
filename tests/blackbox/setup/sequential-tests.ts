@@ -81,6 +81,8 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/app/autoscale-legacy.test.ts',
 			'/tests/db/app/autoscale-redis-outage.test.ts',
 			'/tests/db/app/autoscale-release.test.ts',
+			'/tests/db/app/autoscale-signal.test.ts',
+			'/tests/db/app/autoscale-churn.test.ts',
 			'/tests/db/app/autoscale-supervisor-restart.test.ts',
 			'/tests/db/app/autoscale-supervisor-options.test.ts',
 			// Spawns a Directus of its own beside a pm2 daemon, and asserts on a
