@@ -238,6 +238,35 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// Every process of a deployment builds this program — the workers, the
+	// autoscaler, each one-shot call a deploy makes — and a command's module is the
+	// API graph behind it: express, knex, every controller and service for `start`
+	// alone. Each one is reached from its own action, so a process pays for the
+	// command it runs; a static import here puts all thirteen back into every one of
+	// them. The two bans above are repeated because this replaces that rule for this
+	// file rather than adding to it.
+	// https://github.com/jclaveau/directus/issues/489
+	{
+		files: ['api/src/cli/index.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
+						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
+					],
+					patterns: [
+						{
+							group: ['../server.js', './commands/**'],
+							message: 'Import it from the command\'s own action, so only the process running that command pays for it.',
+						},
+					],
+				},
+			],
+		},
+	},
+
 	// The two modules that gather them are the only place allowed to reach the package
 	{
 		files: ['**/lodash-es-used.ts', '**/date-fns-used.ts'],
