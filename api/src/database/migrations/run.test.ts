@@ -538,7 +538,7 @@ describe('run', () => {
 		it('leaves a client it does not wrap exactly as it was', async () => {
 			// SQLite's alter-table rebuild cannot survive an outer transaction, and
 			// MySQL-family DDL implicit-commits, so neither is wrapped at all.
-			client = 'sqlite3';
+			client = 'sqlite';
 
 			const { error, applied, tables } = await runFixtures({
 				'20990101A-first.js': createsFirst,
@@ -595,5 +595,266 @@ describe('run', () => {
 
 			expect(error).toBeUndefined();
 		}, 120_000);
+	});
+
+	/**
+	 * A migration's transaction is the only place the runner can widen the
+	 * timeouts it inherits, so these cases assert on the statements it issues
+	 * rather than on an effect a unit test has no way to provoke. The driver is
+	 * the mock client because `set_config` is Postgres's, and the suite's sqlite
+	 * file would answer it with a missing function instead of a recorded call.
+	 */
+	describe('migration timeouts', () => {
+		let directory: string;
+		let client: string;
+		let env: Record<string, unknown>;
+
+		beforeEach(async () => {
+			client = 'postgres';
+			directory = await mkdtemp(join(tmpdir(), 'directus-migration-timeouts-'));
+
+			env = {
+				MIGRATIONS_PATH: directory,
+				MIGRATIONS_STATEMENT_TIMEOUT: '0',
+				MIGRATIONS_LOCK_TIMEOUT: '10s',
+				MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT: '0',
+			};
+		});
+
+		afterEach(async () => {
+			vi.doUnmock('fs-extra');
+			vi.doUnmock('@directus/env');
+			vi.doUnmock('../../cache.js');
+			vi.doUnmock('../index.js');
+			vi.doUnmock('../../logger/index.js');
+			vi.resetModules();
+			await rm(directory, { recursive: true, force: true });
+		});
+
+		const RELAXED = [
+			['statement_timeout', '0'],
+			['lock_timeout', '10s'],
+			['idle_in_transaction_session_timeout', '0'],
+		];
+
+		const doesNothing = `export async function up() {}`;
+
+		const doesNothingEitherWay = `export async function up() {}
+			export async function down() {}`;
+
+		function scopedTo(scope: string, body: string) {
+			return `export const transactionScope = '${scope}';\n${body}`;
+		}
+
+		async function runOnMock(
+			files: Record<string, string>,
+			options: { direction?: 'up' | 'down' | 'latest'; completed?: string[] } = {},
+		) {
+			for (const [name, source] of Object.entries(files)) {
+				await writeFile(join(directory, name), source);
+			}
+
+			vi.resetModules();
+
+			vi.doMock('fs-extra', () => {
+				return {
+					default: {
+						readdir: vi.fn(async (target: string) => {
+							if (target === directory) {
+								return Object.keys(files);
+							}
+
+							return [];
+						}),
+						pathExists: vi.fn(async (target: string) => target === directory),
+					},
+				};
+			});
+
+			vi.doMock('@directus/env', () => {
+				return { useEnv: () => env };
+			});
+
+			vi.doMock('../../cache.js', () => {
+				return { flushCaches: vi.fn() };
+			});
+
+			vi.doMock('../../logger/index.js', () => {
+				return {
+					useLogger: () => {
+						return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+					},
+				};
+			});
+
+			vi.doMock('../index.js', () => {
+				return { getDatabaseClient: () => client };
+			});
+
+			const database = knex.default({ client: MockClient });
+			const mockTracker = createTracker(database);
+
+			mockTracker.on.select('directus_migrations').response(
+				(options.completed ?? []).map((version) => {
+					return { version, name: version, timestamp: version };
+				}),
+			);
+
+			mockTracker.on.any(/.*/).response([]);
+
+			const { default: runFresh } = await import('./run.js');
+
+			const error = await runFresh(
+				database,
+				options.direction ?? 'latest',
+				false,
+			).catch((e: Error) => e);
+
+			// `all` holds every query once, in the order it was issued; the
+			// per-method buckets each hold a subset of it.
+			const recorded = mockTracker.history.all;
+
+			const settings = recorded
+				.filter((query) => query.sql.includes('set_config'))
+				.map((query) => query.bindings.slice(0, 2));
+
+			await database.destroy();
+
+			return { error, settings, statements: recorded.map(({ sql }) => sql) };
+		}
+
+		it('widens both timeouts for the run-long transaction', async () => {
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': doesNothing,
+			});
+
+			expect(error).toBeUndefined();
+
+			expect(settings).toEqual(RELAXED);
+		});
+
+		it('sets them once for a whole batch, not once per migration', async () => {
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': doesNothing,
+				'20990102A-second.js': doesNothing,
+			});
+
+			expect(error).toBeUndefined();
+			expect(settings).toEqual(RELAXED);
+		});
+
+		// An escaping migration commits the open segment, and the batch reopened
+		// after it is a new transaction that carries none of the first one's
+		// settings.
+		it('sets them again for a batch reopened after an escape', async () => {
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': doesNothing,
+				'20990102A-escapes.js': scopedTo('own', doesNothing),
+				'20990103A-third.js': doesNothing,
+			});
+
+			expect(error).toBeUndefined();
+			expect(settings).toEqual([...RELAXED, ...RELAXED, ...RELAXED]);
+		});
+
+		// A setting issued after the migration's first statement would not have
+		// covered it, which is the whole point of issuing them at all. The tracker
+		// files queries per method and only keeps time order within one of them, so
+		// the probe is a SELECT like `set_config` is, and the two are comparable.
+		it('issues them before the migration touches the database', async () => {
+			const { error, statements } = await runOnMock({
+				'20990101A-first.js': `export async function up(knex) {
+					await knex.raw('SELECT 1 AS probe');
+				}`,
+			});
+
+			expect(error).toBeUndefined();
+
+			const relaxed = statements.findIndex((sql) => sql.includes('set_config'));
+			const probe = statements.findIndex((sql) => sql.includes('probe'));
+
+			expect(relaxed).toBeGreaterThanOrEqual(0);
+			expect(probe).toBeGreaterThan(relaxed);
+		});
+
+		it('skips every setting when all three are left empty', async () => {
+			env['MIGRATIONS_STATEMENT_TIMEOUT'] = '';
+			env['MIGRATIONS_LOCK_TIMEOUT'] = '';
+			env['MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT'] = '';
+
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': doesNothing,
+			});
+
+			expect(error).toBeUndefined();
+			expect(settings).toEqual([]);
+		});
+
+		it('gives an "own" migration its own pair', async () => {
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': scopedTo('own', doesNothing),
+			});
+
+			expect(error).toBeUndefined();
+
+			expect(settings).toEqual(RELAXED);
+		});
+
+		it('leaves a "none" migration with the server settings', async () => {
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': scopedTo('none', doesNothing),
+			});
+
+			expect(error).toBeUndefined();
+			expect(settings).toEqual([]);
+		});
+
+		it('widens them for a single "up" as well', async () => {
+			const { error, settings } = await runOnMock(
+				{ '20990101A-first.js': doesNothing },
+				{ direction: 'up' },
+			);
+
+			expect(error).toBeUndefined();
+
+			expect(settings).toEqual(RELAXED);
+		});
+
+		it('widens them for a "down" as well', async () => {
+			const { error, settings } = await runOnMock(
+				{ '20990101A-first.js': doesNothingEitherWay },
+				{ direction: 'down', completed: ['20990101A'] },
+			);
+
+			expect(error).toBeUndefined();
+
+			expect(settings).toEqual(RELAXED);
+		});
+
+		it('skips a setting left empty, keeping the other', async () => {
+			env['MIGRATIONS_STATEMENT_TIMEOUT'] = '';
+
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': doesNothing,
+			});
+
+			expect(error).toBeUndefined();
+
+			expect(settings).toEqual([
+				['lock_timeout', '10s'],
+				['idle_in_transaction_session_timeout', '0'],
+			]);
+		});
+
+		it('says nothing to a dialect whose settings these are not', async () => {
+			client = 'cockroachdb';
+
+			const { error, settings } = await runOnMock({
+				'20990101A-first.js': doesNothing,
+			});
+
+			expect(error).toBeUndefined();
+			expect(settings).toEqual([]);
+		});
 	});
 });

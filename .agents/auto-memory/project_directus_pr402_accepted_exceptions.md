@@ -2,6 +2,7 @@
 name: project_directus_pr402_accepted_exceptions
 description: PR #402 "increase the cache radius by avoiding bare tags" (fixes #401) — the scope jean imposed, the settled calls and the warnings kept on purpose; do NOT re-raise
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

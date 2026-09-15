@@ -41,6 +41,7 @@ describe(oneLine`
 	describe.each(vendors)('%s', (vendor) => {
 		const env = cloneDeep(config.envs);
 		const namespace = `directus-retry-timer-${vendor}`;
+		const noteTagKey = `${namespace}:scoped-cache-index:tag:${NOTE}`;
 		env[vendor]['CACHE_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
 		env[vendor]['CACHE_AUTO_PURGE'] = 'true';
@@ -87,7 +88,7 @@ describe(oneLine`
 		afterAll(async () => {
 			instance?.kill();
 
-			await redisCommand(REDIS_PORT, ['DEL', `${namespace}:tag:${NOTE}`])
+			await redisCommand(REDIS_PORT, ['DEL', noteTagKey])
 				.catch(() => '');
 
 			await ownRows().delete();
@@ -136,7 +137,7 @@ describe(oneLine`
 			// the sweep expects a set. Every other command still works, and the
 			// connection is never dropped — so nothing will emit `ready`.
 			expect(
-				await redisCommand(REDIS_PORT, ['SET', `${namespace}:tag:${NOTE}`, 'x']),
+				await redisCommand(REDIS_PORT, ['SET', noteTagKey, 'x']),
 			).toBe('+OK');
 
 			const write = await request(url)
@@ -158,7 +159,7 @@ describe(oneLine`
 			expect(stale.headers[cacheStatusHeader]).toBe('HIT');
 			expect(stale.body.data[0].label).toBe('v1');
 
-			expect(await redisCommand(REDIS_PORT, ['DEL', `${namespace}:tag:${NOTE}`]))
+			expect(await redisCommand(REDIS_PORT, ['DEL', noteTagKey]))
 				.toBe(':1');
 
 			// The timer is the only thing that can fire now: the link never dropped,

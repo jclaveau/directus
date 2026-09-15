@@ -1,0 +1,15 @@
+type: object
+description: >
+  Where the pool's rolling restart got to, as the process running it reports.
+properties:
+  askedAt:
+    type: integer
+    nullable: true
+  running:
+    type: boolean
+  finishedAt:
+    type: integer
+    nullable: true
+  error:
+    type: string
+    nullable: true

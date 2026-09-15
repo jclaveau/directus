@@ -4,6 +4,7 @@ description:
   How the fork captures blackbox/integration coverage — rolldown-plugin-istanbul instruments the tsdown api build, server
   dumps __coverage__ on shutdown, CI merges to lcov + uploads a `blackbox` codecov flag; needs tsdown, not tsc
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

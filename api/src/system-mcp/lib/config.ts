@@ -11,7 +11,13 @@ export function systemMcpEnabled(): boolean {
 }
 
 function isSystemMcpToolGroup(value: unknown): value is SystemMcpToolGroup {
-	return value === 'processes' || value === 'cache';
+	return value === 'processes'
+		|| value === 'cache'
+		|| value === 'autoscale'
+		// Its own group rather than a corner of `autoscale`: the drill is the one
+		// tool here that spends the deployment it is describing, so a deployment
+		// can hand an agent the configuration levers without handing it that.
+		|| value === 'autoscale_drill';
 }
 
 /**

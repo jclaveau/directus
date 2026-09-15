@@ -39,7 +39,9 @@ import {
 	bumpScopedCacheEpochs,
 } from './fill-guard.js';
 import {
+	scopedCacheIndexPrefix,
 	scopedCacheTagKey,
+	scopedCacheTagKeyPrefix,
 	scopedCacheTagLabel,
 } from './tags.js';
 
@@ -48,7 +50,7 @@ const env = useEnv();
 // The slice tag keys a collection currently owns, so a collection-wide purge reads
 // them instead of walking the whole keyspace to find them again.
 function scopedCacheCollectionSlicesKey(collection: string): string {
-	return `${env['CACHE_NAMESPACE']}:slices:${collection}`;
+	return `${scopedCacheIndexPrefix()}slices:${collection}`;
 }
 
 /**
@@ -238,7 +240,7 @@ for i = 1, #KEYS do
 		end
 	end
 
-	redis.call('DEL', KEYS[i])
+	redis.call('UNLINK', KEYS[i])
 end
 
 for i = 1, #ARGV, 2 do
@@ -375,7 +377,8 @@ export async function tagScopedCacheKeys(
 /**
  * How many cache entries each scoped tag currently indexes — the blast radius of
  * purging that tag. Keyed by the tag's display string (`collection` or
- * `collection:field=value`, which maps 1:1 to the `<namespace>:tag:<…>` set key).
+ * `collection:field=value`, which maps 1:1 to the
+ * `<namespace>:scoped-cache-index:tag:<…>` set key).
  */
 export async function countScopedCacheTagMembers(
 	displayTags: readonly string[],
@@ -403,7 +406,7 @@ export async function countScopedCacheTagMembers(
 
 /** The collection a tag key names, bare tag or value slice alike. */
 function scopedCacheCollectionOfTagKey(tagKey: string): string | null {
-	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
+	const tagPrefix = scopedCacheTagKeyPrefix();
 
 	if (!tagKey.startsWith(tagPrefix)) {
 		return null;
@@ -424,7 +427,7 @@ function scopedCacheCollectionOfTagKey(tagKey: string): string | null {
  * none and is in no slice index.
  */
 function sliceIndexPruningsOf(tagKeys: readonly string[]): string[] {
-	const tagPrefix = `${env['CACHE_NAMESPACE']}:tag:`;
+	const tagPrefix = scopedCacheTagKeyPrefix();
 	const prunings: string[] = [];
 
 	for (const tagKey of tagKeys) {
@@ -472,7 +475,7 @@ async function purgeScopedCacheTagKeys(
 	cache: Keyv,
 	tagKeys: string[],
 ): Promise<number> {
-	// `redis.del()` with no keys throws — a `cache.purge` filter (or an empty
+	// A delete with no keys throws — a `cache.purge` filter (or an empty
 	// collection scan) can leave nothing to purge.
 	if (tagKeys.length === 0) {
 		return 0;
@@ -544,42 +547,145 @@ async function purgeScopedCacheTagKeys(
 	return evicted;
 }
 
+// How many keys a SCAN is asked to look at per round trip. `@keyv/redis` uses 1000
+// for the namespace clears that run beside these, and the 250 this replaced bought
+// nothing for 4x the round trips: SCAN filters server-side, so the pass costs the
+// whole keyspace whatever the COUNT, and only the number of RTTs moves.
+const SCOPED_CACHE_SCAN_COUNT = 1000;
+
+// How many keys one delete command is allowed to carry. Redis runs commands one at a
+// time, so a single command deleting every key of a full flush holds the server for
+// its whole duration — a latency event for every client, not just the caller.
+const SCOPED_CACHE_UNLINK_CHUNK = 1000;
+
 /**
- * Cursor-scan every Redis key matching `match`. A single-node SCAN only covers the
- * whole keyspace on a standalone client; a cluster would miss keys on other nodes.
- * Scoped mode is refused on a cluster at startup
- * (`assertScopedCacheRedisSupported`), so the client here is always standalone.
+ * Delete index keys without stalling the server.
+ *
+ * `UNLINK` rather than `DEL`: these are SETs, so a delete is O(members) as well as
+ * O(keys), and UNLINK does that reclaim on a background thread instead of on the one
+ * thread that answers everyone else.
+ *
+ * Chunked rather than one command, because UNLINK still unlinks synchronously and
+ * that part is O(keys). The chunks go in one pipeline — Redis can serve other
+ * clients between two commands of a pipeline, but not inside one — so the cost is a
+ * single round trip either way.
+ *
+ * Reports what Redis said it removed and how many commands it refused, rather than
+ * what it was handed: a pipeline answers per command, so a chunk that failed is a
+ * chunk still there, and a count on its own cannot be told from an index that was
+ * already empty.
  */
-async function scanScopedCacheTagKeys(match: string): Promise<string[]> {
-	const redis = useRedis();
-	const found: string[] = [];
-	let cursor = '0';
+export interface ScopedCacheUnlinkTally {
+	dropped: number;
+	refused: number;
+}
 
-	do {
-		const [next, batch] = await redis.scan(cursor, 'MATCH', match, 'COUNT', 250);
-		cursor = next;
-		found.push(...batch);
+async function unlinkScopedCacheKeys(
+	keys: string[],
+): Promise<ScopedCacheUnlinkTally> {
+	// `unlink()` with no keys throws, and a flush with nothing to drop is normal.
+	if (keys.length === 0) {
+		return { dropped: 0, refused: 0 };
 	}
-	while (cursor !== '0');
 
-	return found;
+	const pipeline = useRedis().pipeline();
+
+	for (let at = 0; at < keys.length; at += SCOPED_CACHE_UNLINK_CHUNK) {
+		// Array form, never a spread: this list is a whole-keyspace scan, so it is
+		// the longest of them.
+		pipeline.unlink(keys.slice(at, at + SCOPED_CACHE_UNLINK_CHUNK));
+	}
+
+	const results = await pipeline.exec();
+	const tally: ScopedCacheUnlinkTally = { dropped: 0, refused: 0 };
+
+	for (const [error, removed] of results ?? []) {
+		if (error) {
+			tally.refused += 1;
+		}
+		else {
+			tally.dropped += Number(removed ?? 0);
+		}
+	}
+
+	return tally;
 }
 
 /**
- * Drop every scoped-tag index SET (`<namespace>:tag:*`). These are written direct
- * via ioredis `sadd`, outside any Keyv namespace, so a response `cache.clear()`
- * never reaches them — they would linger as orphan pointers until their `ttl*2`
- * self-expiry. The `Response cache` flush calls this alongside `cache.clear()` for a
- * clean wipe. Only the SET keys are dropped; the entries they pointed at are already
- * gone with the namespace clear.
+ * Unlink every key under a prefix, a scan batch at a time.
+ *
+ * Batch by batch rather than collecting first: the list a full flush would collect
+ * is the one thing here that grows with the cache, and holding all of it to delete
+ * all of it puts the whole index in this process's heap for no gain — the deletes
+ * are per-batch round trips either way.
  */
-export async function dropScopedCacheTagIndex(): Promise<void> {
+async function unlinkScopedCacheKeysMatching(
+	match: string,
+): Promise<ScopedCacheUnlinkTally> {
+	const tally = { dropped: 0, refused: 0 };
+
+	for await (const batch of scanScopedCacheKeys(match)) {
+		const batchTally = await unlinkScopedCacheKeys(batch);
+
+		tally.dropped += batchTally.dropped;
+		tally.refused += batchTally.refused;
+	}
+
+	return tally;
+}
+
+/**
+ * Cursor-scan every key under a prefix.
+ *
+ * `SCAN ... MATCH` filters server-side AFTER iterating, so a pass costs the whole
+ * keyspace however few keys match — but only the matches cross the wire, which is
+ * why the prefix is worth having.
+ *
+ * A single-node SCAN only covers the whole keyspace on a standalone client; a
+ * cluster would miss keys on other nodes. Scoped mode is refused on a cluster at
+ * startup (`assertScopedCacheRedisSupported`), so the client is always standalone.
+ */
+async function* scanScopedCacheKeys(match: string): AsyncGenerator<string[]> {
+	const redis = useRedis();
+	let cursor = '0';
+
+	do {
+		const [next, batch] = await redis.scan(
+			cursor,
+			'MATCH',
+			match,
+			'COUNT',
+			SCOPED_CACHE_SCAN_COUNT,
+		);
+
+		cursor = next;
+		yield batch;
+	}
+	while (cursor !== '0');
+}
+
+/**
+ * Drop every scoped-cache index key: the tag SETs
+ * (`<namespace>:scoped-cache-index:tag:*`) and the per-collection slice indexes
+ * (`<namespace>:scoped-cache-index:slices:*`). These are
+ * written direct via ioredis `sadd`, outside any Keyv namespace, so a response
+ * `cache.clear()` never reaches them — they would linger as orphan pointers until
+ * their `ttl*2` self-expiry, or forever when `CACHE_TTL` is unset and they are
+ * deliberately unbounded. The `Response cache` flush calls this alongside
+ * `cache.clear()` for a clean wipe. Only the SET keys are dropped; the entries
+ * they pointed at are already gone with the namespace clear.
+ *
+ * Reports how many keys Redis removed and how many commands it refused, so the
+ * flush that called it can say what it cost, and say so honestly when the index is
+ * still there (https://github.com/jclaveau/directus/issues/468).
+ */
+export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!redisConfigAvailable()) {
-		return;
+		return { dropped: 0, refused: 0 };
 	}
 
 	// BEFORE the scan, like every other sweep: a read that captured the counter
-	// earlier and files its tags between the DEL below and a bump made after it
+	// earlier and files its tags between the unlink below and a bump made after it
 	// would compare equal, keep its entry, and leave it indexed by a set this
 	// function just deleted — reachable to no later purge. Bumping first is what
 	// makes such a read decline. Unconditional, so a flush finding no tag set still
@@ -587,23 +693,9 @@ export async function dropScopedCacheTagIndex(): Promise<void> {
 	// Names no collection, so it moves the wholesale counter every read captures.
 	await bumpScopedCacheEpochs(['*']);
 
-	const tagKeys = [
-		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:tag:*`),
-		...await scanScopedCacheTagKeys(`${env['CACHE_NAMESPACE']}:slices:*`),
-	];
-
-	if (tagKeys.length === 0) {
-		return;
-	}
-
-	// Chunked for the same reason the sweep and the entry drop are: redis parses a
-	// whole argument list before it frees anything, and this list is a whole-keyspace
-	// scan, so it is the longest any of them can be.
-	const redis = useRedis();
-
-	for (let at = 0; at < tagKeys.length; at += SCOPED_CACHE_SWEEP_CHUNK_KEYS) {
-		await redis.del(tagKeys.slice(at, at + SCOPED_CACHE_SWEEP_CHUNK_KEYS));
-	}
+	// The keys the pre-scoped-cache-index layout left behind are not swept here:
+	// they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
+	return unlinkScopedCacheKeysMatching(`${scopedCacheIndexPrefix()}*`);
 }
 
 /**
@@ -618,8 +710,6 @@ export async function purgeCollectionScopedCache(
 	collection: string,
 	scopedCachePurgeId?: string,
 ): Promise<void> {
-	const bareKey = `${env['CACHE_NAMESPACE']}:tag:${collection}`;
-
 	// Not the sweep's own bump repeated: this one has to precede the slice-index
 	// read below, which the sweep never sees. A read filing a NEW slice between that
 	// read and the sweep is missed by this purge either way — bumped first, it
@@ -634,7 +724,7 @@ export async function purgeCollectionScopedCache(
 		scopedCacheCollectionSlicesKey(collection),
 	);
 
-	const tagKeys = [bareKey, ...sliceKeys];
+	const tagKeys = [`${scopedCacheTagKeyPrefix()}${collection}`, ...sliceKeys];
 
 	const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
 
@@ -694,7 +784,7 @@ async function purgeOrRecord(
  * is at retry time rather than the one that was set when the purge failed.
  */
 function scopedCacheTagKeyFromLabel(label: string): string {
-	return `${env['CACHE_NAMESPACE']}:tag:${label}`;
+	return `${scopedCacheTagKeyPrefix()}${label}`;
 }
 
 // The drain in flight, so the next trigger queues behind it rather than beside it.
@@ -772,7 +862,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	}
 
 	// Imported lazily so the module graph stays acyclic: `cache.js` imports this
-	// module for `dropScopedCacheTagIndex`, so a static import back would close
+	// module for `dropScopedCacheIndex`, so a static import back would close
 	// the loop. Same reason `cache-config.ts` defers its database import.
 	const { getCache } = await import('../cache.js');
 	const { cache } = getCache();

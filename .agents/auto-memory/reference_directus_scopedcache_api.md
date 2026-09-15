@@ -2,6 +2,7 @@
 name: reference_directus_scopedcache_api
 description: the context.scopedCache hook API (#292) — event-scoped scopeTo (read) / purgeBy (write), single union-typed field; full compile-time event→method typing is the follow-up #294
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

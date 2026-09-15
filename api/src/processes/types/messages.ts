@@ -1,4 +1,5 @@
 import type {
+	AutoscaleNodeState,
 	ProcessDetail,
 	ProcessHostCapacity,
 	ProcessRuntimeStats,
@@ -26,6 +27,8 @@ export interface ReportedProcess {
 	name: string;
 	runtime: ProcessRuntimeStats | null;
 	env: ResolvedEnvVariable[] | null;
+	/** What this process is scaling, `null` from every process that scales nothing. */
+	autoscale: AutoscaleNodeState | null;
 }
 
 export interface ProcessesReportMessage {
@@ -45,4 +48,18 @@ export interface ProcessesReportMessage {
 	supervisor: SupervisedProcess[] | null;
 	/** What this process's container may use, for the totals to be shares of. */
 	capacity: ProcessHostCapacity | null;
+}
+
+/**
+ * Marks a worker's in-flight report on pm2's channel.
+ *
+ * pm2 gives every worker message the same bus event, so the listener has to
+ * recognise its own by what is inside them.
+ */
+export const IN_FLIGHT_REPORT_TOPIC = 'processes:in-flight';
+
+export interface InFlightReport {
+	topic: typeof IN_FLIGHT_REPORT_TOPIC;
+	/** Requests the worker had open when it sent this. */
+	inFlight: number;
 }

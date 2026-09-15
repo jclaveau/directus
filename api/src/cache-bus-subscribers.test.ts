@@ -34,7 +34,7 @@ vi.mock('./bus/index.js', () => ({ useBus: busMock }));
 // Redis "available" so the subscribe block registers; the tiers are still memory
 // Keyv (store follows CACHE_STORE), so .set/.clear run in-process.
 vi.mock('./redis/index.js', () => ({ redisConfigAvailable: () => true }));
-vi.mock('./scoped-cache.js', () => ({ dropScopedCacheTagIndex: vi.fn() }));
+vi.mock('./scoped-cache.js', () => ({ dropScopedCacheIndex: vi.fn() }));
 vi.mock('./permissions/cache.js', () => ({ clearCache: vi.fn() }));
 vi.mock('./logger/index.js', () => ({ useLogger: () => ({ warn: vi.fn() }) }));
 vi.mock('./utils/validate-env.js', () => ({ validateEnv: vi.fn() }));

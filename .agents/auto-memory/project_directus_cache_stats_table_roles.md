@@ -2,6 +2,7 @@
 name: project_directus_cache_stats_table_roles
 description: which cache-stats tables are pure telemetry vs load-bearing (both scoped_cache tag tables are telemetry — Redis is the mechanism), their reapers, which two are Timescale hypertables, and that the byte budget measures only directus_cache_events
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

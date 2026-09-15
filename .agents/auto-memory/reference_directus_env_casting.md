@@ -2,6 +2,7 @@
 name: reference_directus_env_casting
 description: how @directus/env types values — type-map (explicit/regex per key) then guessType fallback; process-env is ALWAYS cast (create-env:45); unmapped numeric env vars DO become numbers (the "stays string" assumption is false)
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

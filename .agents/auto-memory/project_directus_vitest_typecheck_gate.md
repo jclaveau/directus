@@ -2,6 +2,7 @@
 name: project_directus_vitest_typecheck_gate
 description: How the vitest typecheck gate behaves here — a per-file run hides the ambient error count, and it checks a far narrower set than a full tsc project run
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

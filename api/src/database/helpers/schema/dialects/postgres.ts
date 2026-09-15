@@ -18,7 +18,38 @@ const env = useEnv();
  */
 const timescalePresence = new WeakMap<Knex, boolean>();
 
+/**
+ * The settings a migration should not inherit from a request-shaped session,
+ * against the env var that sizes each. Empty asks for the server's own value,
+ * which is what not issuing the statement already gives.
+ */
+const MIGRATION_TIMEOUTS = {
+	statement_timeout: 'MIGRATIONS_STATEMENT_TIMEOUT',
+	lock_timeout: 'MIGRATIONS_LOCK_TIMEOUT',
+	idle_in_transaction_session_timeout:
+		'MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT',
+} as const;
+
 export class SchemaHelperPostgres extends SchemaHelper {
+	/**
+	 * `set_config`'s local scope is released at COMMIT, which is what makes it
+	 * safe behind PgBouncer in transaction pooling mode: a session-level `SET`
+	 * would outlive the client that issued it and land on whatever ran next on
+	 * that server connection. The value is bound rather than interpolated —
+	 * `SET LOCAL` takes no parameter, `set_config` does.
+	 */
+	override async relaxMigrationTimeouts(trx: Knex.Transaction): Promise<void> {
+		for (const [setting, variable] of Object.entries(MIGRATION_TIMEOUTS)) {
+			const value = env[variable];
+
+			if (value === undefined || value === null || value === '') {
+				continue;
+			}
+
+			await trx.raw('SELECT set_config(?, ?, true)', [setting, String(value)]);
+		}
+	}
+
 	override generateIndexName(
 		type: 'unique' | 'foreign' | 'index',
 		collection: string,

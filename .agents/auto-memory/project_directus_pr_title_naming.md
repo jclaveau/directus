@@ -5,6 +5,7 @@ description:
   compose workflow uses to select features into the integration branch; classify by
   composed-vs-merged destiny, never by which files the PR touches
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

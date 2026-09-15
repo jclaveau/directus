@@ -29,6 +29,10 @@ const CHANGED_BY_DECLARING: Record<string, string> = {
 	CORS_EXPOSED_HEADERS: 'string("Content-Range") -> array(["Content-Range"])',
 	// bytes.parse() reads either.
 	TUS_CHUNK_SIZE: 'number(8388608) -> string("8388608")',
+	// The migration runner hands it to set_config, which takes text, and tells an
+	// unset value by an explicit empty string rather than by truthiness.
+	MIGRATIONS_STATEMENT_TIMEOUT: 'number(0) -> string("0")',
+	MIGRATIONS_IDLE_IN_TRANSACTION_SESSION_TIMEOUT: 'number(0) -> string("0")',
 };
 
 function shapeOf(value: unknown): string {

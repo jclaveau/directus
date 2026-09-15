@@ -2,6 +2,7 @@
 name: project_directus_planner_deploy_shape
 description: How Planner deploys this fork on Railway — API container skips bootstrap, PM2 starts ONE worker then autoscales, autorestart on, healthcheckPath /server/health
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

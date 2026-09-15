@@ -2,6 +2,7 @@
 name: reference_blackbox_coverage_exit0_teardown
 description: blackbox CI with COVERAGE_DIR crashes at teardown — terminus graceful shutdown exits servers with code 0, but upstream setup.ts throws on any non-null exit code
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

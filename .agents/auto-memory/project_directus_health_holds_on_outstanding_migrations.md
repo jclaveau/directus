@@ -2,6 +2,7 @@
 name: project_directus_health_holds_on_outstanding_migrations
 description: Why /server/health reports error while migrations are outstanding instead of refusing to listen, and the design points already settled on #403/#421
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

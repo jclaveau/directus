@@ -184,6 +184,60 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// libvips and the isolated-vm addon each cost RSS in whatever process loads them,
+	// so both are reached through one on-demand loader and nothing else may reach for
+	// them — an import anywhere on the boot path puts them back in every worker, and
+	// a lazy one outside a loader drops the single point that keeps them lazy.
+	// no-restricted-imports only sees a static import, so the dynamic and require
+	// forms need the syntax rule below.
+	// https://github.com/jclaveau/directus/issues/460
+	{
+		files: ['api/src/**/*.ts'],
+		ignores: [
+			'api/src/services/files/lib/get-sharp-instance.ts',
+			'api/src/services/files/lib/get-sharp-instance.test.ts',
+			'api/src/utils/load-isolated-vm.ts',
+		],
+		rules: {
+			'@typescript-eslint/no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{
+							name: 'sharp',
+							allowTypeImports: true,
+							message: "Await getSharpInstance() from 'files/lib/get-sharp-instance.js' instead.",
+						},
+						{
+							name: 'isolated-vm',
+							allowTypeImports: true,
+							message: "Await loadIsolatedVm() from 'utils/load-isolated-vm.js'.",
+						},
+					],
+				},
+			],
+			'no-restricted-syntax': [
+				'error',
+				{
+					selector: "ImportExpression[source.value='sharp']",
+					message: "Await getSharpInstance() from 'files/lib/get-sharp-instance.js' instead.",
+				},
+				{
+					selector: "CallExpression[callee.name='require'][arguments.0.value='sharp']",
+					message: "Await getSharpInstance() from 'files/lib/get-sharp-instance.js' instead.",
+				},
+				{
+					selector: "ImportExpression[source.value='isolated-vm']",
+					message: "Await loadIsolatedVm() from 'utils/load-isolated-vm.js'.",
+				},
+				{
+					selector: "CallExpression[callee.name='require'][arguments.0.value='isolated-vm']",
+					message: "Await loadIsolatedVm() from 'utils/load-isolated-vm.js'.",
+				},
+			],
+		},
+	},
+
 	// The two modules that gather them are the only place allowed to reach the package
 	{
 		files: ['**/lodash-es-used.ts', '**/date-fns-used.ts'],

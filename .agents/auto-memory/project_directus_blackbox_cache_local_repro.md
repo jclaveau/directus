@@ -2,6 +2,7 @@
 name: project_directus_blackbox_cache_local_repro
 description: how to reproduce a directus blackbox cache (HIT/MISS) bug locally without the full harness, + the gotchas
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

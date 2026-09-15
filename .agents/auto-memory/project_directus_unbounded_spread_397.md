@@ -2,6 +2,7 @@
 name: project_directus_unbounded_spread_397
 description: Issue #397 — spreading a data-sized array into a call throws RangeError; 58 sites in api/src incl. savedKeys.push(...keys) in 17 controllers, unbounded because MAX_BATCH_MUTATION defaults to Infinity
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

@@ -323,7 +323,7 @@ function useInvalidInput() {
 			</slot>
 			<v-icon v-if="isInvalidInput" v-tooltip="tooltipInvalid" name="warning" class="warning-invalid" />
 			<span v-if="suffix" class="suffix">{{ suffix }}</span>
-			<span v-if="type === 'number' && !hideArrows">
+			<span v-if="type === 'number' && !hideArrows" class="arrows">
 				<v-icon
 					:class="{ disabled: !isStepUpAllowed }"
 					name="keyboard_arrow_up"

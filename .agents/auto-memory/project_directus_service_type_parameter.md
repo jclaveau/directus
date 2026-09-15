@@ -2,6 +2,7 @@
 name: project_directus_service_type_parameter
 description: ItemsService is already generic and six services pass a type argument — the fifteen that do not are exactly where the read-result casts live (issue #431)
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

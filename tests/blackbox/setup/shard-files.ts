@@ -48,6 +48,54 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Two spawned instances, and one case holds a pool saturated for six seconds.
 	'/tests/db/app/pgbouncer.test.ts': 40_000,
 	'/tests/db/app/system-mcp.test.ts': 50_000,
+	// A pm2 daemon per arm, and each assertion is a pool settling or a window
+	// spent proving it did not move. Measured over the postgres runs of
+	// 2026-09-08.
+	'/tests/db/app/autoscale-ramp.test.ts': 175_000,
+	'/tests/db/app/autoscale-config-source.test.ts': 120_000,
+	// One ramp, one hold, and a churning pool watched either side of the
+	// switch. Estimated from the arms it borrows; to be measured.
+	'/tests/db/app/autoscale-legacy.test.ts': 120_000,
+	// Two climbs paced at ten seconds a worker, one of them decided with the
+	// connection cut, plus a cold-start arm. 27s driven directly on a quiet
+	// laptop; the rest is the runner.
+	'/tests/db/app/autoscale-redis-outage.test.ts': 120_000,
+	// A climb, a whole pool falling idle, and the walk back down, plus a second
+	// climb whose release is held by the cooldown the add re-armed, a third pool
+	// released at the worker that is not the one pm2 would have taken, and a
+	// fourth held whole because one of its two workers is carrying everything.
+	'/tests/db/app/autoscale-release.test.ts': 330_000,
+	// Two pools held under a fixed window each, plus the grow the second
+	// arm waits out.
+	'/tests/db/app/autoscale-signal.test.ts': 130_000,
+	// One pool, a crash to wait for and a window to hold it over.
+	'/tests/db/app/autoscale-churn.test.ts': 70_000,
+	// One climb, a daemon taken away, and the climb it makes afterwards.
+	'/tests/db/app/autoscale-supervisor-restart.test.ts': 60_000,
+	'/tests/db/app/autoscale-supervisor-options.test.ts': 90_000,
+	// Spawns two processes and asks one question of them.
+	'/tests/db/app/autoscale-processes.test.ts': 10_000,
+	'/tests/db/app/autoscale-config-validation.test.ts': 30_000,
+	// Three boots that end at the check and one that goes all the way
+	// through, each a full module load. Measured over the postgres run of
+	// 2026-09-14.
+	'/tests/db/app/autoscale-boolean-env.test.ts': 12_000,
+	// A boot, a pool losing a worker, and an autoscaler started after it to
+	// report on. Measured over the postgres run of 2026-09-14.
+	'/tests/db/app/autoscale-pool-health.test.ts': 13_000,
+	// Two deployments, each booting a Directus and a pool for it, one of them
+	// waiting out the hold it is asserting. Measured over the postgres run of
+	// 2026-09-14.
+	'/tests/db/app/autoscale-prewarm-health.test.ts': 80_000,
+	// One CLI command per vendor: a module load, a query, and the few
+	// milliseconds the rejection it boots through takes to arrive.
+	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,
+	// A whole Directus booted with no Redis at all and waited on until it
+	// answers, then an autoscaler booted and cut off from its database. Both
+	// spawns answer in seconds; what the run measures is the boots.
+	'/tests/db/app/processes-missing-dependency.test.ts': 10_000,
+	'/tests/db/app/autoscale-drill.test.ts': 25_000,
+	'/tests/db/app/autoscale-mcp-levers.test.ts': 120_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
 	'/tests/db/routes/permissions/cache-purge.test.ts': 26_000,

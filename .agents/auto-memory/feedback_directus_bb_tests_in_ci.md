@@ -2,6 +2,7 @@
 name: feedback_directus_bb_tests_in_ci
 description: Never run the blackbox suite locally on this repo — it is slower than CI; push and run it in GitHub Actions, looping on the run until it is green.
 metadata:
+  author: Jean Claveau
   type: feedback
 ---
 

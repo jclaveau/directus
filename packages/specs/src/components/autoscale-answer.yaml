@@ -1,0 +1,14 @@
+type: object
+description: >
+  The autoscale configuration sharedSettings and the supervisor options, which are
+  kept in separate settings columns and written through separate routes.
+properties:
+  key:
+    type: string
+  sharedSettings:
+    $ref: '../openapi.yaml#/components/schemas/AutoscaleSharedSettings'
+  setByEmail:
+    type: string
+    nullable: true
+  supervisor:
+    $ref: '../openapi.yaml#/components/schemas/AutoscaleSharedSettingsAnswer'

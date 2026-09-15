@@ -4,6 +4,7 @@ import argon2 from 'argon2';
 import Busboy from 'busboy';
 import { Router } from 'express';
 import Joi from 'joi';
+import { autoscaleDrillEnabled } from '../processes/autoscale/lib/drill.js';
 import collectionExists from '../middleware/collection-exists.js';
 import { respond } from '../middleware/respond.js';
 import {
@@ -15,6 +16,7 @@ import {
 	requestedProcessDetails,
 } from '../processes/index.js';
 import { ExportService, ImportService } from '../services/import-export.js';
+import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -403,6 +405,172 @@ router.post(
 		return;
 	}),
 );
+
+// These serve one panel, and its subject is a pool this worker reaches only
+// over the bus — which without Redis is an emitter it shares with nobody. The
+// process that scales is found over it and the restart below is asked for over
+// it, so a deployment without Redis carries no panel rather than a page showing
+// a form where the pool it describes should be.
+//
+// Not the only door onto what the panel writes: these settings are columns of
+// `directus_settings`, so a settings write reaches them in any deployment, and
+// the guard on that write is what holds the two doors to the same answer.
+if (redisConfigAvailable()) {
+	router.get(
+		'/autoscale',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readAutoscaleConfig() };
+
+			return next();
+		}),
+		respond,
+	);
+
+	router.patch(
+		'/autoscale',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const patch: unknown = req.body;
+
+			if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+				throw new InvalidPayloadError({
+					reason: 'An object of autoscale configuration fields is required',
+				});
+			}
+
+			const updated = await service.updateAutoscaleConfig(
+				patch as Record<string, unknown>,
+				'admin',
+			);
+
+			res.status(200).json({ data: updated });
+			return;
+		}),
+	);
+
+	router.patch(
+		'/autoscale/supervisor',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const patch: unknown = req.body;
+
+			if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
+				throw new InvalidPayloadError({
+					reason: 'An object of supervisor options is required',
+				});
+			}
+
+			const updated = await service.updateSupervisorConfig(
+				patch as Record<string, unknown>,
+				'admin',
+			);
+
+			res.status(200).json({ data: updated });
+			return;
+		}),
+	);
+
+	router.delete(
+		'/autoscale',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			await service.clearAutoscaleConfig();
+			res.status(200).json({ data: { sharedSettings: null } });
+			return;
+		}),
+	);
+
+	// The restart reaches the process that scales the pool over the bus, which
+	// without Redis is an emitter this worker shares with nobody.
+	router.post(
+		'/autoscale/reload',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.status(200).json({ data: await service.startAutoscaleReload() });
+			return;
+		}),
+	);
+}
+
+// The drill reaches the pool over the bus, which without Redis is an emitter this
+// worker shares with nobody: a deployment lacking either the flag or Redis has no
+// drill to offer rather than one that would load a single worker.
+if (autoscaleDrillEnabled() && redisConfigAvailable()) {
+	router.get(
+		'/autoscale/drill',
+		asyncHandler(async (req, res, next) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.locals['cache'] = false;
+			res.locals['payload'] = { data: await service.readAutoscaleDrill() };
+
+			return next();
+		}),
+		respond,
+	);
+
+	router.post(
+		'/autoscale/drill',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			const body: Record<string, unknown> = typeof req.body === 'object'
+				&& req.body !== null
+				&& Array.isArray(req.body) === false
+				? req.body as Record<string, unknown>
+				: {};
+
+			const drill = await service.startAutoscaleDrill(
+				body['seconds'],
+				body['percent'],
+			);
+
+			res.status(200).json({ data: drill });
+			return;
+		}),
+	);
+
+	router.delete(
+		'/autoscale/drill',
+		asyncHandler(async (req, res) => {
+			const service = new UtilsService({
+				accountability: req.accountability,
+				schema: req.schema,
+			});
+
+			res.status(200).json({ data: await service.stopAutoscaleDrill() });
+			return;
+		}),
+	);
+}
 
 // Registered only where the report is turned on, so a deployment that disabled it
 // answers a plain 404 — the endpoint is absent, not merely refusing.

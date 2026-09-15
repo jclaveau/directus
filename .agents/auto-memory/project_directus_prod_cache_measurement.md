@@ -2,6 +2,7 @@
 name: project_directus_prod_cache_measurement
 description: measured production Redis for the scoped cache (2026-08-26) — sizes, the 130 B/member cost, the effective CACHE_TTL of 48h that contradicts the env file, and why zero pk-shaped tags does NOT mean #358 is absent
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

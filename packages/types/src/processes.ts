@@ -6,6 +6,8 @@
  * Shared here so the API producer and the app view can't drift.
  */
 
+import type { AutoscaleNodeState } from './autoscale.js';
+
 /** Which halves of a node the report carries, per `PROCESSES_REPORT_DETAILS`. */
 export type ProcessDetail = 'stats' | 'env';
 
@@ -68,6 +70,11 @@ export interface ProcessNode {
 	runtime: ProcessRuntimeStats | null;
 	supervisor: ProcessSupervisorStats | null;
 	env: ResolvedEnvVariable[] | null;
+	/**
+	 * What this process is scaling, `null` from every process that scales
+	 * nothing — which is all of them but the autoscaler.
+	 */
+	autoscale: AutoscaleNodeState | null;
 }
 
 /**

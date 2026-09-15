@@ -4,12 +4,24 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 // the import seam is stubbed. What is pinned here is one decision: which loads
 // bypass the ESM module cache, and which do not.
 
+const SANDBOX_FOLDER = 'test-sandboxed-hook';
+const SANDBOX_EVENT = 'test-sandbox.event';
+
 const mocks = vi.hoisted(() => {
 	const noop = () => undefined;
 
+	// manager.ts reads env once at module scope, so the sandbox limits have to be in
+	// place before the import — hence the shared object every reset copies from.
+	const defaultEnv = {
+		SERVE_APP: false,
+		EXTENSIONS_SANDBOX_MEMORY: 128,
+		EXTENSIONS_SANDBOX_TIMEOUT: 10000,
+	};
+
 	return {
-		env: { SERVE_APP: false } as Record<string, unknown>,
-		logger: { info: noop, warn: noop, error: noop, debug: noop, trace: noop },
+		defaultEnv,
+		env: defaultEnv as Record<string, unknown>,
+		logger: { info: noop, warn: vi.fn(), error: vi.fn(), debug: noop, trace: noop },
 		bus: { subscribe: noop, publish: noop, unsubscribe: noop },
 		flows: { addOperation: noop, removeOperation: noop },
 		installation: { install: noop, uninstall: noop },
@@ -21,6 +33,7 @@ const mocks = vi.hoisted(() => {
 			module: new Map(),
 		} as Record<string, Map<string, unknown>>,
 		settings: [] as unknown[],
+		sandboxedCode: '',
 	};
 });
 
@@ -54,13 +67,27 @@ vi.mock('./lib/installation/index.js', () => {
 vi.mock('node:fs/promises', async (importOriginal) => {
 	const original = await importOriginal<typeof import('node:fs/promises')>();
 
-	return { ...original, readdir: async () => [] };
+	return {
+		...original,
+		readdir: async () => [],
+		// The sandbox reads its entrypoint off disk instead of importing it.
+		readFile: async (...args: Parameters<typeof original.readFile>) => {
+			const isSandboxEntrypoint = String(args[0]).includes(SANDBOX_FOLDER);
+
+			if (mocks.sandboxedCode && isSandboxEntrypoint) {
+				return mocks.sandboxedCode;
+			}
+
+			return original.readFile(...args);
+		},
+	};
 });
 
 const { ExtensionManager } = await import('./manager.js');
+const { default: emitter } = await import('../emitter.js');
 
 beforeEach(() => {
-	mocks.env = { SERVE_APP: false };
+	mocks.env = { ...mocks.defaultEnv };
 });
 
 afterEach(() => {
@@ -93,7 +120,7 @@ const shapes = [
 ];
 
 beforeEach(() => {
-	mocks.env = { SERVE_APP: false };
+	mocks.env = { ...mocks.defaultEnv };
 });
 
 afterEach(() => {
@@ -152,3 +179,45 @@ test.each(shapes)(
 		);
 	},
 );
+
+test('runs a sandboxed extension through the on-demand loader', async () => {
+	mocks.sandboxedCode = `
+export default ({ filter }) => {
+	filter('${SANDBOX_EVENT}', (payload) => ({ ...payload, seen: true }));
+};
+`;
+
+	mocks.extensions = {
+		local: new Map([
+			[
+				SANDBOX_FOLDER,
+				{
+					type: 'hook',
+					name: SANDBOX_FOLDER,
+					path: `/extensions/${SANDBOX_FOLDER}`,
+					entrypoint: 'index.js',
+					local: true,
+					sandbox: { enabled: true, requestedScopes: {} },
+				},
+			],
+		]),
+		registry: new Map(),
+		module: new Map(),
+	};
+
+	mocks.settings = [
+		{ id: '1', source: 'local', folder: SANDBOX_FOLDER, enabled: true },
+	];
+
+	await new ExtensionManager().initialize({ schedule: false, watch: false });
+
+	// Every caller of the sandbox path swallows a throw into a warning, so a broken
+	// load would leave the extension silently absent rather than fail the test.
+	expect(mocks.logger.warn).not.toHaveBeenCalled();
+	expect(mocks.importFileUrl).not.toHaveBeenCalled();
+
+	// The isolate only holds a filter if the addon loaded, compiled and evaluated it.
+	const filtered = emitter.emitFilter(SANDBOX_EVENT, { value: 1 }, {}, null);
+
+	await expect(filtered).resolves.toEqual({ value: 1, seen: true });
+});

@@ -43,6 +43,12 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-raw-purge.test.ts',
 			'/tests/db/routes/items/cache-raw-purge-relational.test.ts',
 			'/tests/db/routes/items/cache-read-scope.test.ts',
+			// Spawns an instance and builds a relation on a collection it has just
+			// created. Left in the parallel middle that create-then-relate gap is
+			// wide enough to lose: under a shard that packed it beside heavier
+			// company it read back `Collection "..." doesn't exist` from its own
+			// seed. Sixteen of its siblings already run here for the same reason.
+			'/tests/db/routes/items/cache-slice-index.test.ts',
 			'/tests/db/routes/items/cache-takeover-scope.test.ts',
 			'/tests/db/routes/items/cache-unautopurgeable-scope.test.ts',
 			'/tests/db/routes/items/cache-update-scope.test.ts',
@@ -68,6 +74,30 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/app/processes.test.ts',
 			'/tests/db/app/pgbouncer.test.ts',
 			'/tests/db/app/system-mcp.test.ts',
+			// A pm2 daemon each, and their decisions read a CPU duty cycle the
+			// parallel middle would distort into any number the assertion asks for.
+			'/tests/db/app/autoscale-ramp.test.ts',
+			'/tests/db/app/autoscale-config-source.test.ts',
+			'/tests/db/app/autoscale-legacy.test.ts',
+			'/tests/db/app/autoscale-redis-outage.test.ts',
+			'/tests/db/app/autoscale-release.test.ts',
+			'/tests/db/app/autoscale-signal.test.ts',
+			'/tests/db/app/autoscale-churn.test.ts',
+			'/tests/db/app/autoscale-supervisor-restart.test.ts',
+			'/tests/db/app/autoscale-supervisor-options.test.ts',
+			// Spawns a Directus of its own beside a pm2 daemon, and asserts on a
+			// collection window a loaded parallel middle would run out.
+			'/tests/db/app/autoscale-processes.test.ts',
+			// The same shape again — its own Directus, its own pm2 daemon, and a
+			// collection window a loaded parallel middle would run out.
+			'/tests/db/app/autoscale-mcp-levers.test.ts',
+			// A Directus, a pm2 daemon and an autoscaler, and the claim is what
+			// one says about the other two — a suite beside it scaling its own
+			// pool reports on the same bus.
+			'/tests/db/app/autoscale-pool-health.test.ts',
+			// And again, with the pool being what the Directus beside it is
+			// waiting on before it will report itself ready at all.
+			'/tests/db/app/autoscale-prewarm-health.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
 		],
 		// If specified, only run these tests sequentially

@@ -2,6 +2,7 @@
 name: project_directus_test_run_scopes
 description: how to run the Scalabus suites locally — root `pnpm test` skips api and app, the app run OOM-crashes (shard it), `--changed origin/v11.10.1-hhh-dev` is the fast loop, and which failures are pre-existing rather than yours
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

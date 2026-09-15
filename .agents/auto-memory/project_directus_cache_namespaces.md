@@ -2,6 +2,7 @@
 name: project_directus_cache_namespaces
 description: PR #225 — cache namespace root renamed system-cache→scalabus (the fork's new name), each Keyv layer suffixed _response/_system/_schema/_lock; scoped purge is transparent to the _response split
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

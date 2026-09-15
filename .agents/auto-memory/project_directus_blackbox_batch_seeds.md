@@ -2,6 +2,7 @@
 name: project_directus_blackbox_batch_seeds
 description: prefer batch API ops in blackbox seeds — CreateCollections / CreateItem array bodies, fold fields into collection payloads; no batch collection DELETE endpoint
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

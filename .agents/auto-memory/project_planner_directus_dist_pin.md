@@ -2,6 +2,7 @@
 name: project_planner_directus_dist_pin
 description: the planner pins @directus/* to a BRANCH specifier but pnpm-lock records a COMMIT and the prod Dockerfile installs --frozen-lockfile — so redeploying ships nothing new; the lockfile must be re-resolved and committed first
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

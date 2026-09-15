@@ -2,6 +2,7 @@
 name: project_directus_scoped_cache_pin_soundness
 description: The invariant a scoped-cache key pin rests on (rows depended on ⊆ rows nested) and the two query shapes that break it — filter/sort on the nested collection, and a parent hidden by deep._filter/permissions
 metadata:
+  author: Jean Claveau
   type: project
 ---
 

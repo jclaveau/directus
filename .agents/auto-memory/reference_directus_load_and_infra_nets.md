@@ -2,6 +2,7 @@
 name: reference_directus_load_and_infra_nets
 description: catalog of Directus's existing load-shedding + shared infra primitives — check here BEFORE hand-rolling buffering/pub-sub/metrics/scheduling/rate-limiting in a Directus feature or review
 metadata:
+  author: Jean Claveau
   type: reference
 ---
 

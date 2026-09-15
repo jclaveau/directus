@@ -276,16 +276,34 @@ export function takenOverScopedCacheKey(
 	return `${collection}:${String(key)}`;
 }
 
+// Every index key the scoped cache writes sits under one segment, so the full-flush
+// scan can ask Redis for exactly them. `<namespace>:` alone is shared with the
+// cache-stats stream, its per-entry tombstones and whatever family lands there
+// next, and a pattern wide enough to cover the index dragged all of those over the
+// wire to be filtered out here (https://github.com/jclaveau/directus/issues/468).
+// Named after the feature rather than `index`, because a flush unlinks the whole
+// segment: under a noun that broad, whatever a later feature parks there goes with
+// it. `<namespace>:stats` is the family that must not — it is the only place Redis
+// holds cache state no table can rebuild — and it stays outside.
+export function scopedCacheIndexPrefix(): string {
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-index:`;
+}
+
+export function scopedCacheTagKeyPrefix(): string {
+	return `${scopedCacheIndexPrefix()}tag:`;
+}
+
 export function scopedCacheTagKey(tag: ScopedCacheTag): string {
-	const base = `${env['CACHE_NAMESPACE']}:tag:${tag.collection}`;
+	const base = `${scopedCacheTagKeyPrefix()}${tag.collection}`;
 	return tag.field === undefined
 		? base
 		: `${base}:${tag.field}=${canonicalScopedCacheValue(tag.value, tag.type)}`;
 }
 
 // Render scope tags for the dev-only `X-Scoped-Cache-*` headers: each tag as its
-// key suffix (no `<namespace>:tag:` prefix) — `collection`, or `collection:field=
-// value` for a pinned slice (same canonical value as the Redis key). Comma-joined.
+// key suffix (no `<namespace>:scoped-cache-index:tag:` prefix) — `collection`, or
+// `collection:field=value` for a pinned slice (same canonical value as the Redis
+// key). Comma-joined.
 export function scopedCacheTagLabel(tag: ScopedCacheTag): string {
 	if (tag.field === undefined) {
 		return tag.collection;
