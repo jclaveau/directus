@@ -35,6 +35,22 @@ export class BusRedis implements Bus {
 		// or logged here, so whoever owns the shared client keeps owning what an error
 		// means — this package has no logger and should not grow one for this.
 		this.sub.on('error', (error) => this.pub.emit('error', error));
+
+		// Every channel with a handler, on every connection: ioredis replays a
+		// subscription only from a connection that reached `ready`, so one it
+		// answered and then lost to a failed ready check comes back through
+		// nobody. The channels the connection kept are subscribed twice, which
+		// Redis answers with the same count.
+		this.sub.on('ready', () => {
+			const channels = Object.keys(this.handlers);
+
+			if (channels.length > 0) {
+				this.sub.subscribe(...channels).catch((error) => {
+					this.pub.emit('error', error);
+				});
+			}
+		});
+
 		this.compression = config.compression ?? true;
 		this.compressionMinSize = config.compressionMinSize ?? 1000;
 		this.handlers = {};
@@ -62,6 +78,7 @@ export class BusRedis implements Bus {
 			set.add(callback);
 			this.handlers[namespaced] = set;
 
+			await this.readyCheckSettled();
 			await this.sub.subscribe(namespaced);
 		} else {
 			existingSet.add(callback);
@@ -84,6 +101,36 @@ export class BusRedis implements Bus {
 
 			await this.sub.unsubscribe(namespaced);
 		}
+	}
+
+	/**
+	 * Resolves once the subscriber is past ioredis's ready check, or was never
+	 * inside it.
+	 *
+	 * Between the socket's `connect` and the `INFO` of that check, status
+	 * `connect`, a subscribe is written at once rather than queued: ioredis
+	 * flags `SUBSCRIBE` as valid while the server is loading. Its reply puts the
+	 * connection in subscriber mode, the `INFO` is refused for it, and the
+	 * reconnect that follows replays only what a connection that reached `ready`
+	 * held — nothing (https://github.com/jclaveau/directus/issues/496). Held
+	 * here until `ready` or the `close` of a failed check, after which the
+	 * offline queue holds it as it holds any command sent while connecting.
+	 */
+	private readyCheckSettled(): Promise<void> {
+		if (this.sub.status !== 'connect') {
+			return Promise.resolve();
+		}
+
+		return new Promise((resolve) => {
+			const settled = () => {
+				this.sub.off('ready', settled);
+				this.sub.off('close', settled);
+				resolve();
+			};
+
+			this.sub.on('ready', settled);
+			this.sub.on('close', settled);
+		});
 	}
 
 	/**
