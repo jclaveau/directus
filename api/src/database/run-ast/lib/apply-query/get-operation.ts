@@ -1,4 +1,4 @@
-import { isObject } from '@directus/utils';
+import { isObject } from '@directus/utils/values';
 
 /**
  * Returns null or the operation information form a FieldFilter

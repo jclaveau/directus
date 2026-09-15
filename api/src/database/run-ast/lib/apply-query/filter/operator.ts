@@ -1,7 +1,7 @@
 import type { FieldFunction, SchemaOverview } from '@directus/types';
 import { getColumn } from '../../../utils/get-column.js';
 import type { Knex } from 'knex';
-import { getOutputTypeForFunction } from '@directus/utils';
+import { getOutputTypeForFunction } from '@directus/utils/values';
 import { getHelpers } from '../../../../helpers/index.js';
 
 export function applyOperator(

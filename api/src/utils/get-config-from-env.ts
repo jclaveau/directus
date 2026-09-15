@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { toArray } from '@directus/utils';
+import { toArray } from '@directus/utils/values';
 import camelcase from 'camelcase';
 import { set } from './lodash-es-used.js';
 

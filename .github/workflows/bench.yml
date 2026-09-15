@@ -150,8 +150,8 @@ jobs:
           mkdir -p tests/perf/extensions
           node dist-head/cli bootstrap
 
-      - name: Measure startup
-        run: pnpm --filter tests-perf bench:startup
+      - name: Measure
+        run: pnpm --filter tests-perf bench
         env:
           PERF_CLI: ${{ github.workspace }}/dist-head/cli
           PERF_CLI_BASELINE: ${{ github.workspace }}/../baseline/dist/cli
@@ -162,15 +162,17 @@ jobs:
       - name: Write the summary
         if: always()
         run: |
-          if [ -f tests/perf/results/startup.md ]; then
-            cat tests/perf/results/startup.md >> "$GITHUB_STEP_SUMMARY"
-          else
-            {
-              echo "### Startup — no result"
-              echo ""
-              echo "The measurement did not finish. See the job log."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          for bench in startup resident; do
+            if [ -f "tests/perf/results/$bench.md" ]; then
+              cat "tests/perf/results/$bench.md" >> "$GITHUB_STEP_SUMMARY"
+            else
+              {
+                echo "### ${bench^} — no result"
+                echo ""
+                echo "The measurement did not finish. See the job log."
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       # A workflow_run job does not appear in the commit's own check list, so without
       # this the number would exist only inside a run nobody opens.
@@ -182,19 +184,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          report() {
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
+              -f state="$2" \
+              -f context="Bench / $1" \
+              -f description="$3" \
+              -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+
           if [ -f tests/perf/results/startup.status.txt ]; then
-            description=$(cat tests/perf/results/startup.status.txt)
-            state=success
+            report startup success "$(cat tests/perf/results/startup.status.txt)"
           else
-            description='the measurement did not finish'
-            state=failure
+            report startup failure 'the measurement did not finish'
           fi
 
-          gh api "repos/${{ github.repository }}/statuses/${{ steps.commits.outputs.head }}" \
-            -f state="$state" \
-            -f context='Bench / startup' \
-            -f description="$description" \
-            -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          # The resident bench has budgets, so its status carries a verdict: the
+          # numbers are written whether or not they hold.
+          if [ -f tests/perf/results/resident.status.txt ]; then
+            if [ "$(jq -r .withinBudget tests/perf/results/resident.json)" = true ]; then
+              report resident success "$(cat tests/perf/results/resident.status.txt)"
+            else
+              report resident failure "$(cat tests/perf/results/resident.status.txt)"
+            fi
+          else
+            report resident failure 'the measurement did not finish'
+          fi
 
       - name: Upload the results
         if: always()

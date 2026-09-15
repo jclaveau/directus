@@ -4,8 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"bench": "vitest --watch=false",
-		"bench:startup": "vitest --watch=false startup.perf",
+		"bench": "vitest --watch=false startup.perf resident.perf",
 		"bench:cache": "vitest --watch=false cache.perf"
 	},
 	"devDependencies": {
