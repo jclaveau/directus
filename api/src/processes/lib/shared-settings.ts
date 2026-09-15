@@ -1,6 +1,6 @@
 import { useEnv } from '@directus/env';
 import type { AbstractServiceOptions } from '@directus/types';
-import { parseJSON } from '@directus/utils';
+import { parseJSON } from '@directus/utils/values';
 import { useBus } from '../../bus/index.js';
 import { useLogger } from '../../logger/index.js';
 
