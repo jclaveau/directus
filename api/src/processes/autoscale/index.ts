@@ -40,12 +40,29 @@ import type { AutoscaleConfig, Decision } from './types.js';
 const SAMPLE_INTERVAL_MS = 1000;
 
 /**
- * Brings the pool to `PM2_AUTOSCALE_PREWARM` in one step.
+ * How many workers one prewarm step asks the supervisor for.
+ *
+ * A scale is answered once the workers it named have started, and the call is
+ * bounded so a daemon that died between the send and the reply cannot hold the
+ * loop forever. A whole prewarm asked in one step puts those two against each
+ * other: a pool of fifteen Directus workers does not finish booting inside that
+ * bound, the call fails while the supervisor is perfectly healthy, and the
+ * workers go on arriving behind a scale nobody is waiting for any more. Small
+ * enough to be answered, and the pool is walked up a step a tick instead — which
+ * also spreads the boot CPU a whole batch would spend at once.
+ */
+const PREWARM_STEP_WORKERS = 2;
+
+/**
+ * Walks the pool up towards `PM2_AUTOSCALE_PREWARM`, a step at a time.
  *
  * A deploy restarts the pool at its floor, so the first requests after one
  * land on a pool sized for an idle night. This is not the floor: the extra
  * workers are released like any others once the load does not justify them,
  * so a quiet deploy costs nothing lasting.
+ *
+ * Answers with the size it asked the supervisor for, and with `null` once the
+ * pool is already the size the prewarm was for.
  */
 async function prewarm(
 	config: AutoscaleConfig,
@@ -57,14 +74,16 @@ async function prewarm(
 		return null;
 	}
 
+	const step = Math.min(workers + PREWARM_STEP_WORKERS, target);
+
 	useLogger().info(
 		`[autoscale] prewarming ${config.appName} `
-		+ `from ${workers} to ${target} workers`,
+		+ `from ${workers} to ${step} of ${target} workers`,
 	);
 
-	await scaleApp(config.appName, target);
+	await scaleApp(config.appName, step);
 
-	return target;
+	return step;
 }
 
 /**
@@ -330,13 +349,22 @@ export async function runAutoscaler(): Promise<void> {
 			let decision: Decision | null = null;
 
 			if (readyToPrewarm) {
-				prewarmed = true;
-				const target = await prewarm(config, workers);
+				const asked = await prewarm(config, workers);
 				lastScaleUpAt = Date.now();
 				lastScaleDownAt = Date.now();
 
-				if (target !== null) {
-					decision = { workers: target, reason: 'prewarming the pool' };
+				// Latched on the pool having reached the size the prewarm was for,
+				// rather than on a step having been sent. Latched before the await,
+				// a single scale the supervisor did not answer in time ended the
+				// prewarm for the life of the deployment: the workers that scale had
+				// already started went on arriving, nothing asked for the rest, and
+				// the deployment sat at 503 waiting to be told it had reached a size
+				// nothing was still growing towards.
+				if (asked === null) {
+					prewarmed = true;
+				}
+				else {
+					decision = { workers: asked, reason: 'prewarming the pool' };
 				}
 			}
 			else if (config.enabled && reloading() === false) {

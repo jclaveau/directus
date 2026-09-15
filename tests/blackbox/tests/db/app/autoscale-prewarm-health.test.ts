@@ -38,6 +38,7 @@ async function deploy(
 		instances: number;
 		crashAfterMs?: number;
 		crashOnlyInstance?: string;
+		readyDelayMs?: number;
 	},
 ): Promise<Deployment> {
 	const env = cloneDeep(config.envs)[vendor]!;
@@ -185,5 +186,58 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 		const held = await healthOf(deployment.url);
 
 		expect(held.body['checks']['processes:pool'][0]['status']).toBe('error');
+	}, 240_000);
+
+	// A scale is answered once every worker it names has reported ready, and the
+	// supervisor is asked for them one after another — so one scale costs the
+	// whole batch's boot while the call carrying it is bounded at fifteen
+	// seconds. A prewarm asked in a single step runs past that bound on a
+	// supervisor that is perfectly healthy: the workers it had already started
+	// go on arriving, nothing asks for the rest, and the deployment waits to be
+	// told it reached a size nothing is still growing towards
+	// (jclaveau/directus#490). Eight workers three seconds apart is twenty-one
+	// seconds of boot, which is that shape at a size a runner can hold.
+	it.each(vendors)('%s reaches a prewarm one scale cannot carry', async (vendor) => {
+		const deployment = await deploy(vendor, '8', {
+			instances: 1,
+			readyDelayMs: 3000,
+		});
+
+		deployed.push(deployment);
+
+		expect((await healthOf(deployment.url)).status).toBe(503);
+
+		startAutoscaler(deployment.rig, {
+			REDIS_HOST: 'localhost',
+			REDIS_PORT: '6108',
+			PM2_AUTOSCALE_PREWARM: '8',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '8',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '2',
+		});
+
+		expect(await poolSize(deployment.rig, 8, 120_000)).toBe(8);
+
+		expect(await healthTurns(deployment.url, 200, 60_000)).toBe(200);
+
+		// Where the prewarm went, and not only where it ended: the workers a
+		// scale started arrive whether or not anything is still waiting on it,
+		// so a pool of eight is reached either way and only the steps say the
+		// prewarm was the thing that asked for them.
+		const steps = [...deployment.rig.logs.join('').matchAll(
+			/prewarming \S+ from (\d+) to (\d+) of (\d+) workers/g,
+		)].map((asked) => {
+			return {
+				from: Number(asked[1]),
+				to: Number(asked[2]),
+				target: Number(asked[3]),
+			};
+		});
+
+		expect(steps.length).toBeGreaterThan(1);
+		expect(steps[0]?.from).toBe(1);
+		expect(steps.at(-1)?.to).toBe(8);
+		expect(steps.every((step) => step.to - step.from <= 2)).toBe(true);
+		expect(steps.every((step) => step.target === 8)).toBe(true);
 	}, 240_000);
 });
