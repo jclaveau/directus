@@ -11,30 +11,45 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // End-to-end witness for `context.scopedCache.dependOn`: a read hook hands the
-// lookups it ran to `dependOn` as it got them — pending, a `Promise.all` batch, or
-// `Promise.allSettled` verdicts — and the read is scoped to every fulfilled lookup's
-// slice WITH that lookup's purge counters. `scopeTo` takes the same pair spelled out;
-// `dependOn` is the one-call form, so the counters cannot be forgotten.
+// lookups it ran to `dependOn` as it has them — pending, already awaited, a
+// `Promise.all` batch, or `Promise.allSettled` verdicts — and the read is scoped to
+// every fulfilled lookup's slice WITH that lookup's purge counters. `scopeTo` takes
+// the same pair spelled out; `dependOn` is the one-call form, so the counters cannot
+// be forgotten.
 //
-// `report` depends on `metric`, `audit`, `ledger` and `note`, each partitioned per
-// owner and each fetched in a different shape (see the extension). Read via
-// `x-cache-status` on a scoped-purge redis instance:
+// `report` depends on `metric`, `tally`, `audit`, `ledger` and `note`, each
+// partitioned per owner and each fetched in a different shape (see the extension).
+// Read via `x-cache-status` on a scoped-purge redis instance:
 //
-//   - the report is served from cache at all: the counters of four collections the
+//   - the report is served from cache at all: the counters of five collections the
 //     host never captured were handed over, else the response is left uncached
 //     (`unguarded_scope`).
 //   - a create in any depended-on slice (owner=acme), whatever shape fetched it,
 //     invalidates the cached report → MISS.
-//   - a create in a sibling slice (owner=globex) does not → HIT.
+//   - a create in a sibling slice (owner=globex) does not, whatever shape → HIT.
 //   - the resolved lookups come back through `dependOn`: the hook writes their
 //     sizes, and the rejected sibling's verdict, onto the response.
+//   - the counters folded are the ones each lookup took BEFORE its query, and two
+//     lookups of one collection are judged on the earlier: a read that writes to
+//     metric between two lookups of it, folded later-first, is refused by the fill
+//     and never served again, while the next read caches normally.
 
 const REPORT = 'test_items_depend_report';
 const METRIC = 'test_items_depend_metric';
 const AUDIT = 'test_items_depend_audit';
 const LEDGER = 'test_items_depend_ledger';
 const NOTE = 'test_items_depend_note';
-const DEPENDENCIES = [METRIC, AUDIT, LEDGER, NOTE];
+const TALLY = 'test_items_depend_tally';
+const DEPENDENCIES = [METRIC, TALLY, AUDIT, LEDGER, NOTE];
+
+const SHAPES: [string, string][] = [
+	['a pending lookup', METRIC],
+	['an already-awaited lookup', TALLY],
+	['the first entry of a Promise.all batch', AUDIT],
+	['the second entry of a Promise.all batch', LEDGER],
+	['a fulfilled Promise.allSettled verdict', NOTE],
+];
+
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -70,7 +85,10 @@ describe(oneLine`
 					})),
 					{
 						collection: REPORT,
-						fields: [{ field: 'name', type: 'string', meta: {} }],
+						fields: [
+							{ field: 'name', type: 'string', meta: {} },
+							{ field: 'slot', type: 'string', meta: {} },
+						],
 					},
 				],
 			});
@@ -85,7 +103,13 @@ describe(oneLine`
 						],
 					}),
 				),
-				CreateItem(vendor, { collection: REPORT, item: [{ name: 'summary' }] }),
+				CreateItem(vendor, {
+					collection: REPORT,
+					item: [
+						{ name: 'summary', slot: 'plain' },
+						{ name: 'raced', slot: 'race' },
+					],
+				}),
 			]);
 
 			const port = await getPort();
@@ -111,9 +135,10 @@ describe(oneLine`
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
-		function readReport() {
+		function readReport(slot = 'plain') {
 			return request(getUrl(vendor, env))
 				.get(`/items/${REPORT}`)
+				.query({ filter: { slot: { _eq: slot } } })
 				.set('Authorization', auth);
 		}
 
@@ -150,6 +175,7 @@ describe(oneLine`
 				expect.objectContaining({
 					name: 'summary',
 					metric_count: 1,
+					tally_count: 1,
 					audit_count: 1,
 					ledger_count: 1,
 					note_count: 1,
@@ -158,12 +184,7 @@ describe(oneLine`
 			]);
 		});
 
-		it.each([
-			['a pending lookup', METRIC],
-			['the first entry of a Promise.all batch', AUDIT],
-			['the second entry of a Promise.all batch', LEDGER],
-			['a fulfilled Promise.allSettled verdict', NOTE],
-		])(oneLine`
+		it.each(SHAPES)(oneLine`
 			a create in the slice %s fetched invalidates the cached report
 		`, async (_shape, collection) => {
 			await warmReport();
@@ -173,15 +194,39 @@ describe(oneLine`
 			expect((await readReport()).headers[cacheStatusHeader]).toBe('MISS');
 		});
 
-		it(oneLine`
-			a create in a sibling slice does not invalidate the report — it depends on
-			the acme slices only
-		`, async () => {
+		it.each(SHAPES)(oneLine`
+			a create in the sibling slice of %s does not invalidate the report — it
+			depends on the acme slices only
+		`, async (_shape, collection) => {
 			await warmReport();
 
-			await createIn(METRIC, 'globex');
+			await createIn(collection, 'globex');
 
 			expect((await readReport()).headers[cacheStatusHeader]).toBe('HIT');
+		});
+
+		it(oneLine`
+			refuses to cache a read whose own write landed between two lookups of one
+			collection, folded later-first — the counters are each lookup's pre-query
+			capture, judged on the earlier
+		`, async () => {
+			await request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			// The raced read: its payload holds the pre-write metric count, and the
+			// write it made moved metric's counter after the first lookup captured it.
+			const raced = await readReport('race');
+			const again = await readReport('race');
+
+			expect(raced.headers[cacheStatusHeader]).toBe('MISS');
+			expect(again.headers[cacheStatusHeader]).toBe('MISS');
+
+			expect(again.body.data[0].metric_count)
+				.toBe(raced.body.data[0].metric_count + 1);
+
+			// Not permanently uncacheable: the race fired once, the next fill stands.
+			expect((await readReport('race')).headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });
