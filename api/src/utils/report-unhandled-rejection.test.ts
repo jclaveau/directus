@@ -1,14 +1,13 @@
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLogger } from '../logger/index.js';
-import { useMetrics } from '../metrics/index.js';
+import { _cache as metrics } from '../metrics/lib/instance.js';
 import {
 	guardUnhandledRejections,
 	reportUnhandledRejection,
 } from './report-unhandled-rejection.js';
 
 vi.mock('../logger/index.js');
-vi.mock('../metrics/index.js');
 
 const error = vi.fn();
 const inc = vi.fn();
@@ -24,12 +23,13 @@ beforeEach(() => {
 
 	vi.mocked(useLogger).mockReturnValue({ error } as any);
 
-	vi.mocked(useMetrics).mockReturnValue({
+	metrics.metrics = {
 		getUnhandledRejectionMetric: () => ({ inc }),
-	} as any);
+	} as any;
 });
 
 afterEach(() => {
+	metrics.metrics = undefined;
 	vi.useRealTimers();
 	vi.clearAllMocks();
 });
@@ -93,8 +93,8 @@ describe('reportUnhandledRejection', () => {
 		expect(error).toHaveBeenCalledTimes(2);
 	});
 
-	it('reports even when metrics are off', () => {
-		vi.mocked(useMetrics).mockReturnValue(undefined);
+	it('reports even where this process created no metrics', () => {
+		metrics.metrics = undefined;
 
 		expect(() => reportUnhandledRejection(new Error('boom'))).not.toThrow();
 		expect(error).toHaveBeenCalledOnce();

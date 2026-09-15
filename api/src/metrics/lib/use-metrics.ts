@@ -1,10 +1,9 @@
 import { useEnv } from '@directus/env';
 import { toBoolean } from '@directus/utils/values';
 import { createMetrics } from './create-metrics.js';
+import { _cache } from './instance.js';
 
-export const _cache: {
-	metrics: ReturnType<typeof createMetrics> | undefined;
-} = { metrics: undefined };
+export { _cache };
 
 export const useMetrics = () => {
 	const env = useEnv();

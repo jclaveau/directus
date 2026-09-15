@@ -324,9 +324,10 @@ export default typescriptEslint.config(
 			'api/src/metrics/**/*.ts',
 			'api/src/processes/**/*.ts',
 			'api/src/utils/get-config-from-env.ts',
-			'api/src/utils/report-unhandled-rejection.ts',
 			'packages/memory/**/*.ts',
 		],
+		// A test beside them ships in no process.
+		ignores: ['**/*.test.ts'],
 		rules: {
 			'no-restricted-imports': [
 				'error',
@@ -347,6 +348,45 @@ export default typescriptEslint.config(
 						{
 							group: ['date-fns/*'],
 							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
+						},
+					],
+				},
+			],
+		},
+	},
+
+	// The guard every entry imports first, so its graph is every process's floor.
+	// It counts into the registry this process holds, never into one it would
+	// create: `useMetrics()` is prom-client over the database, the cache, storage
+	// and redis — the graph of a process that serves `/metrics`, ~50 MB in one
+	// that only scales workers.
+	// https://github.com/jclaveau/directus/issues/489
+	{
+		files: ['api/src/utils/report-unhandled-rejection.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
+						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
+						{
+							name: '@directus/utils',
+							message: "Import from '@directus/utils/values'; a helper that reaches for nothing of its own belongs there.",
+						},
+					],
+					patterns: [
+						{
+							group: ['lodash-es/*'],
+							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
+						},
+						{
+							group: ['date-fns/*'],
+							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
+						},
+						{
+							regex: String.raw`^\.\./metrics/(?!lib/instance\.js$)`,
+							message: 'Read the registry this process holds from metrics/lib/instance.js; creating one is the database graph.',
 						},
 					],
 				},

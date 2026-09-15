@@ -50,13 +50,15 @@ const subjects: Subject[] = [
 
 	// The autoscaler as `cli/run.js` leaves it before the loop connects: the
 	// program, the entry guard and the loop's own graph — pm2, ioredis, the
-	// logger, the environment, and the metrics registry the rejection guard
-	// reports to. Measured 115 MB on a laptop and 123 on a runner.
+	// logger, the environment. Measured 80-86 MB on a laptop across four runs;
+	// the runner reads ~8 MB above the laptop. The metrics registry the
+	// rejection guard would report to is the database's graph, ~30 MB, and the
+	// smallest module the graph must not reach.
 	{
 		name: 'autoscaler',
 		argv: ['autoscale'],
 		modules: ['entry-guard.js', 'processes/autoscale/index.js'],
-		budgetMb: 150,
+		budgetMb: 110,
 	},
 ];
 
