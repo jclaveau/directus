@@ -99,6 +99,7 @@ describe(oneLine`
 		const readerEnv = cloneDeep(env);
 		let rowId: string;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
 		const heldSliceKey =
 			`${namespace}:scoped-cache-index:tag:${COLLECTION}:slot=${HELD_SLOT}`;
 

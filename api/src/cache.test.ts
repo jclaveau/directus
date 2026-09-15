@@ -511,8 +511,10 @@ describe('scoped cache purging', () => {
 
 			expect(redis.smembers)
 				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots');
+
 			expect(redis.smembers)
-			.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:student=A');
+				.toHaveBeenCalledWith('scalabus:scoped-cache-index:tag:slots:student=A');
+
 			expect(cache.delete).toHaveBeenCalledWith('key-a');
 			expect(cache.clear).not.toHaveBeenCalled();
 		});
