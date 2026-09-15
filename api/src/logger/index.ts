@@ -1,5 +1,5 @@
 import { useEnv } from '@directus/env';
-import { REDACTED_TEXT, toArray, toBoolean } from '@directus/utils';
+import { REDACTED_TEXT, toArray, toBoolean } from '@directus/utils/values';
 import type { Request, RequestHandler } from 'express';
 import { URL } from 'node:url';
 import { levels, multistream, pino, type Logger, type LoggerOptions } from 'pino';

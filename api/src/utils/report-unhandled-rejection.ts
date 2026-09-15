@@ -1,5 +1,5 @@
 import { useLogger } from '../logger/index.js';
-import { useMetrics } from '../metrics/index.js';
+import { _cache } from '../metrics/lib/instance.js';
 
 /**
  * How long the same failure goes without earning another line.
@@ -40,11 +40,16 @@ const logged = new Map<string, { at: number; suppressed: number }>();
  * ends a window says how much it swallowed.
  */
 export function reportUnhandledRejection(reason: unknown): void {
-	// Counted before anything is decided about logging, and counted every time: the
-	// log says what is failing, the counter says how much, and throttling the first
-	// is what leaves the second the only honest volume. Rising after a deploy is the
-	// signal that a new floating promise shipped.
-	useMetrics()
+	// Counted before anything is decided about logging, and counted every time this
+	// process has a registry: the log says what is failing, the counter says how
+	// much, and throttling the first is what leaves the second the only honest
+	// volume. Rising after a deploy is the signal that a new floating promise
+	// shipped. The registry is read from where it is held rather than asked for,
+	// so a process that never creates one — the autoscaler, a one-shot command —
+	// never loads the database graph behind it for a counter nothing scrapes.
+	// The worker has one from the moment its schedules module loads; a rejection
+	// while the CLI builds, before that, is logged and not counted.
+	_cache.metrics
 		?.getUnhandledRejectionMetric()
 		.inc();
 

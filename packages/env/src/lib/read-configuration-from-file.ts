@@ -1,5 +1,5 @@
 import { JAVASCRIPT_FILE_EXTS } from '@directus/constants';
-import { isIn } from '@directus/utils';
+import { isIn } from '@directus/utils/values';
 import { existsSync } from 'node:fs';
 import { getFileExtension } from '../utils/get-file-extension.js';
 import { readConfigurationFromDotEnv } from '../utils/read-configuration-from-dotenv.js';
