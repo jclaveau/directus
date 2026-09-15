@@ -18,7 +18,10 @@ vi.mock('directus/version', () => {
 	};
 });
 
-vi.mock('./logger/index.js', () => ({ useLogger: () => ({ info: vi.fn() }) }));
+vi.mock('./logger/index.js', () => {
+	return { useLogger: () => ({ info: vi.fn(), warn: vi.fn() }) };
+});
+
 vi.mock('./cache.js', () => ({ flushCaches: vi.fn(), getCache: vi.fn() }));
 
 // path.resolve(ext.path, entrypoint) → content; readFile returns those bytes so a
@@ -286,5 +289,79 @@ describe('flushCachesIfBuildChanged', () => {
 
 		expect(getCache).not.toHaveBeenCalled();
 		expect(flushCaches).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * Held for the work rather than for a fixed stretch of it. A TTL that lapses
+	 * under a flush still scanning hands the lock back while its holder is
+	 * working, and on a deploy that is every worker of the pool starting a flush
+	 * of its own, each walking the same keyspace while the others try to boot.
+	 */
+	it('holds the flush lock for as long as the flush runs', async () => {
+		vi.useFakeTimers();
+
+		const lockCache = makeLockCache();
+		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
+		env['CACHE_FLUSH_TIMEOUT'] = '5m';
+
+		let finish!: () => void;
+
+		vi.mocked(flushCaches).mockReturnValue(new Promise<any>((resolve) => {
+			finish = () => resolve(undefined);
+		}));
+
+		const booting = flushCachesIfBuildChanged(managerOf([]));
+
+		await vi.advanceTimersByTimeAsync(45_000);
+
+		const held = lockCache.set.mock.calls
+			.filter(([key]) => key === 'build-identity-flush-lock');
+
+		expect(held.length).toBeGreaterThan(1);
+		expect(held.at(-1)).toEqual(['build-identity-flush-lock', true, 30_000]);
+
+		finish();
+		await booting;
+
+		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
+
+		vi.useRealTimers();
+	});
+
+	/**
+	 * `createApp()` awaits this before the server listens, and a flush walks
+	 * every key the response cache holds — 167s against a production keyspace.
+	 * Waited on for a budget and then left to finish: the boot it holds up is a
+	 * worker the pool is waiting for, and a flush given up on for good is one
+	 * that never records what it flushed for, so the boot after walks it again.
+	 */
+	it('stops waiting on a long flush, which still records the build', async () => {
+		vi.useFakeTimers();
+
+		const lockCache = makeLockCache();
+		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
+		env['CACHE_FLUSH_TIMEOUT'] = '30s';
+
+		let finish!: () => void;
+
+		vi.mocked(flushCaches).mockReturnValue(new Promise<any>((resolve) => {
+			finish = () => resolve(undefined);
+		}));
+
+		const booting = flushCachesIfBuildChanged(managerOf([]));
+
+		await vi.advanceTimersByTimeAsync(30_000);
+		await booting;
+
+		expect(lockCache.store.has('build-identity')).toBe(false);
+		expect(lockCache.store.get('build-identity-flush-lock')).toBe(true);
+
+		finish();
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(lockCache.store.get('build-identity')).toEqual(expect.any(String));
+		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
+
+		vi.useRealTimers();
 	});
 });

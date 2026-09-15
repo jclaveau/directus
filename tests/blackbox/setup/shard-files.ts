@@ -83,10 +83,11 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// A boot, a pool losing a worker, and an autoscaler started after it to
 	// report on. Measured over the postgres run of 2026-09-14.
 	'/tests/db/app/autoscale-pool-health.test.ts': 13_000,
-	// Two deployments, each booting a Directus and a pool for it, one of them
-	// waiting out the hold it is asserting. Measured over the postgres run of
-	// 2026-09-14.
-	'/tests/db/app/autoscale-prewarm-health.test.ts': 80_000,
+	// Three deployments, each booting a Directus and a pool for it: one waits
+	// out the hold it is asserting, and one walks a pool of eight up three
+	// seconds a worker. Measured over the postgres run of 2026-09-14, plus the
+	// boot the third one spends.
+	'/tests/db/app/autoscale-prewarm-health.test.ts': 140_000,
 	// One CLI command per vendor: a module load, a query, and the few
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,

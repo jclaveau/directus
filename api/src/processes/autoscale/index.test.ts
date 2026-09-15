@@ -147,6 +147,21 @@ const supervisor: AutoscaleSupervisor = {
 	waitReady: true,
 };
 
+/** A pool of `count` idle workers, each past its warm-up. */
+function pool(count: number) {
+	const workers = Array.from({ length: count }, (_unused, index) => {
+		return { pid: 11 + index, cpuPercent: 70, memoryBytes: 0, mature: true };
+	});
+
+	return {
+		pendingWorkers: 0,
+		warmingWorkers: 0,
+		onlineWorkers: workers,
+		restartsByWorker: new Map(workers.map((worker) => [worker.pid, 0])),
+		supervisor,
+	};
+}
+
 /**
  * The loop never returns, so it is driven rather than awaited: while the clock
  * is fake the tick it parks on between samples only comes when a case asks for
@@ -290,19 +305,71 @@ describe('runAutoscaler', () => {
 		expect(recordAutoscaleTick).toHaveBeenCalledTimes(2);
 	});
 
-	test('prewarms a pool fresh out of a deploy, once', async () => {
-		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
+	// A step at a time rather than in one ask: a scale is answered once the
+	// workers it named have started, and a whole prewarm does not finish booting
+	// inside the bound the supervisor call carries.
+	test('walks a pool fresh out of a deploy up to the prewarm', async () => {
+		resolveConfig.mockReturnValue({
+			...config,
+			prewarmWorkers: 5,
+			maxWorkers: 8,
+		});
 
-		await ticks(2);
+		readPool
+			.mockResolvedValueOnce(pool(1))
+			.mockResolvedValueOnce(pool(3))
+			.mockResolvedValue(pool(5));
 
-		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 3);
+		await ticks(3);
+
+		expect(scaleApp.mock.calls).toEqual([['api', 3], ['api', 5]]);
 
 		expect(recordAutoscaleTick).toHaveBeenNthCalledWith(1, expect.objectContaining({
 			lastDecision: expect.objectContaining({ reason: 'prewarming the pool' }),
 		}));
+	});
 
-		// The second tick is a normal one: prewarm is a step out of a deploy,
-		// not a floor the pool is held at.
+	// The defect the prewarm was rewritten for. Latched on the ask, a single
+	// scale the supervisor did not answer in time ended the prewarm for the life
+	// of the deployment: the workers that scale had already started went on
+	// arriving, nothing asked for the rest, and the deployment sat at 503
+	// waiting to be told it had reached a size nothing was growing towards.
+	test('keeps asking after a scale the supervisor does not answer', async () => {
+		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
+
+		scaleApp.mockRejectedValueOnce(
+			new Error('the supervisor did not answer a scale to 3 in 15000ms'),
+		);
+
+		await ticks(3);
+
+		expect(scaleApp.mock.calls)
+			.toEqual([['api', 3], ['api', 3], ['api', 3]]);
+
+		expect(decide).not.toHaveBeenCalled();
+	});
+
+	// Every worker of a pool that is still arriving is idle because it has just
+	// booted, so the release rule reads a whole deploy as a pool nobody wants
+	// and takes it apart faster than the supervisor is putting it together.
+	test('takes no decision while the prewarm has not arrived', async () => {
+		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 4 });
+		decide.mockReturnValue({ workers: 1, reason: 'the pool is idle' });
+
+		await ticks(3);
+
+		expect(decide).not.toHaveBeenCalled();
+		expect(releaseWorker).not.toHaveBeenCalled();
+	});
+
+	// Prewarm is a step out of a deploy, not a floor the pool is held at.
+	test('takes normal decisions once the pool is the size asked for', async () => {
+		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
+		readPool.mockResolvedValueOnce(pool(1)).mockResolvedValue(pool(3));
+
+		await ticks(3);
+
+		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 3);
 		expect(decide).toHaveBeenCalledOnce();
 	});
 

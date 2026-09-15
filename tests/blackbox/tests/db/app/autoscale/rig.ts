@@ -37,6 +37,15 @@ export interface PoolOptions {
 	busyMs?: number;
 	idleMs?: number;
 	/**
+	 * Milliseconds a worker takes to report ready.
+	 *
+	 * `wait_ready` holds the supervisor's answer to a scale until every
+	 * worker that scale named has reported, and it starts them one after
+	 * another — so this is what makes a scale cost what a pool of booting
+	 * Directus workers costs rather than what a pool of empty ones does.
+	 */
+	readyDelayMs?: number;
+	/**
 	 * Which worker spins, by pm2 instance number. Unset means all of them, so
 	 * every worker reports the same percent. Naming one stages a pool where
 	 * they differ, which is the only pool an average can be wrong about.
@@ -113,6 +122,9 @@ export function startPool(options: PoolOptions): Rig {
 					env: {
 						BB_BUSY_MS: String(options.busyMs ?? 0),
 						BB_IDLE_MS: String(options.idleMs ?? 100),
+						...options.readyDelayMs === undefined
+							? {}
+							: { BB_READY_DELAY_MS: String(options.readyDelayMs) },
 						BB_CALM_AFTER_MS: String(options.calmAfterMs ?? 0),
 						...options.busyOnlyInstance === undefined
 							? {}
