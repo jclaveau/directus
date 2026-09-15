@@ -28,7 +28,10 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 
 vi.mock('../database/run-ast/run-ast.js', () => ({ runAst: vi.fn(async () => []) }));
 
-import { scopedCachePurgeEnabled } from '../scoped-cache.js';
+import {
+	scopedCachePurgeEnabled,
+	serializeScopedCacheTags,
+} from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
@@ -166,5 +169,323 @@ describe(oneLine`
 		expect(await service.scopedCache.snapshot([1])).toEqual([
 			{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
 		]);
+	});
+});
+
+// The tags a read carries once the row-dependent pins and the AST-only plan meet.
+// Each case feeds the rows runAst would return — the pinners read parent keys off
+// them — and asserts the serialized tag list, so a pin, a slice and a bare tag are
+// told apart by the exact string a purge matches against.
+describe('read tags at the merge', () => {
+	// Cloned: the ownership strip collapses the fed rows in place, and a fixture
+	// two cases share must reach the second one intact.
+	const feed = (rows: Record<string, unknown>[]): void => {
+		vi.mocked(runAst).mockImplementationOnce(async (_ast, _schema, _acc, opts) => {
+			const fresh = structuredClone(rows);
+			opts?.onRowsWithTemporaryFields?.(fresh);
+			return fresh;
+		});
+	};
+
+	const tagsOf = async (
+		service: ItemsService,
+		query: Parameters<ItemsService['readByQuery']>[0],
+	): Promise<string[]> => {
+		const result = await service.readByQuery(query, { emitEvents: false });
+
+		return serializeScopedCacheTags(readMeta(result)?.scopedCacheTags ?? [])
+			.split(', ')
+			.sort();
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(scopedCachePurgeEnabled).mockReturnValue(true);
+	});
+
+	describe('an injected ownership ancestor a filter hops through unkeyed', () => {
+		const ownership = new SchemaBuilder()
+			.collection('course', (c) => {
+				c.field('id').id();
+				c.field('enrollment').m2o('enrollment');
+			})
+			.collection('enrollment', (c) => {
+				c.field('id').id();
+				c.field('status').string();
+				c.field('student').m2o('student');
+			})
+			.collection('student', (c) => {
+				c.field('id').id();
+				c.field('user').string();
+			})
+			.build();
+
+		ownership.collections['course']!.scopedCacheFields = ['enrollment'];
+		ownership.collections['enrollment']!.scopedCacheFields = ['student'];
+		ownership.collections['student']!.scopedCacheFields = ['user'];
+
+		const rows = [{ id: 1, enrollment: { id: 10, student: { id: 100 } } }];
+
+		test(oneLine`
+			stays bare: the filter reads enrollment rows the injected pin never named
+		`, async () => {
+			const service = new ItemsService('course', {
+				knex: db,
+				schema: ownership,
+				accountability: null,
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(service, {
+				fields: ['*'],
+				filter: { enrollment: { status: { _eq: 'active' } } },
+			})).toEqual(['course', 'enrollment', 'student:id=100']);
+		});
+
+		test('is injected only below what a depth wildcard already nests', () => {
+			const service = new ItemsService('course', {
+				knex: db,
+				schema: ownership,
+				accountability: null,
+			});
+
+			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*'] }))
+				.toEqual(['enrollment.id', 'enrollment.student.id']);
+
+			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*.*'] }))
+				.toEqual(['enrollment.student.id']);
+
+			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*.*.*'] }))
+				.toEqual([]);
+		});
+
+		test('stays nested in the response a depth wildcard asked for', async () => {
+			const service = new ItemsService('course', {
+				knex: db,
+				schema: ownership,
+				accountability: null,
+			});
+
+			feed(rows);
+
+			const result = await service.readByQuery(
+				{ fields: ['*.*'] },
+				{ emitEvents: false },
+			);
+
+			expect(result).toEqual([{ id: 1, enrollment: { id: 10, student: 100 } }]);
+		});
+
+		test('unfiltered, it carries the key pin the injection was for', async () => {
+			const service = new ItemsService('course', {
+				knex: db,
+				schema: ownership,
+				accountability: null,
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(service, { fields: ['*'] }))
+				.toEqual(['course', 'enrollment:id=10', 'student:id=100']);
+		});
+	});
+
+	describe('one collection nested through an M2O path AND an O2M path', () => {
+		const featured = new SchemaBuilder()
+			.collection('article', (c) => {
+				c.field('id').id();
+				c.field('featured_comment').m2o('comment');
+				c.field('comments').o2m('comment', 'article');
+			})
+			.collection('comment', (c) => {
+				c.field('id').id();
+				c.field('body').string();
+				c.field('article').m2o('article');
+			})
+			.build();
+
+		featured.collections['comment']!.scopedCacheFields = ['article'];
+
+		test(oneLine`
+			is bare: the reverse-fk pin names only the rows the O2M path nested
+		`, async () => {
+			const service = new ItemsService('article', {
+				knex: db,
+				schema: featured,
+				accountability: null,
+			});
+
+			feed([{
+				id: 1,
+				featured_comment: { id: 9, body: 'x', article: 2 },
+				comments: [{ id: 5, body: 'y', article: 1 }],
+			}]);
+
+			expect(await tagsOf(service, {
+				fields: ['featured_comment.body', 'comments.body'],
+			})).toEqual(['article', 'comment']);
+		});
+
+		test(oneLine`
+			nested through the O2M path alone, it carries the reverse-fk pin
+		`, async () => {
+			const service = new ItemsService('article', {
+				knex: db,
+				schema: featured,
+				accountability: null,
+			});
+
+			feed([{ id: 1, comments: [{ id: 5, body: 'y', article: 1 }] }]);
+
+			expect(await tagsOf(service, { fields: ['comments.body'] }))
+				.toEqual(['article', 'comment:article=1']);
+		});
+	});
+
+	describe('a to-many reached over a foreign key outside its scope', () => {
+		const reviewing = new SchemaBuilder()
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('notes').o2m('note', 'student');
+				c.field('reviewed_notes').o2m('note', 'reviewer');
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('body').string();
+				c.field('student').m2o('owner');
+				c.field('reviewer').m2o('owner');
+			})
+			.build();
+
+		reviewing.collections['note']!.scopedCacheFields = ['student'];
+
+		const service = () => {
+			return new ItemsService('owner', {
+				knex: db,
+				schema: reviewing,
+				accountability: null,
+			});
+		};
+
+		test('is bare: the root key bounds nothing the note is sliced on', async () => {
+			feed([{
+				id: 7,
+				reviewed_notes: [{ id: 3, body: 'b', student: 8, reviewer: 7 }],
+			}]);
+
+			expect(await tagsOf(service(), {
+				filter: { id: { _eq: 7 } },
+				fields: ['reviewed_notes.body'],
+			})).toEqual(['note', 'owner:id=7']);
+		});
+
+		test(oneLine`
+			reached over its scoped fk, it carries the root key as a slice
+		`, async () => {
+			feed([{ id: 7, notes: [{ id: 3, body: 'b', student: 7, reviewer: 8 }] }]);
+
+			expect(await tagsOf(service(), {
+				filter: { id: { _eq: 7 } },
+				fields: ['notes.body'],
+			})).toEqual(['note:student=7', 'owner:id=7']);
+		});
+
+		test('reached both ways, the unscoped path bares it', async () => {
+			feed([{
+				id: 7,
+				notes: [{ id: 3, body: 'b', student: 7, reviewer: 8 }],
+				reviewed_notes: [{ id: 4, body: 'c', student: 8, reviewer: 7 }],
+			}]);
+
+			expect(await tagsOf(service(), {
+				filter: { id: { _eq: 7 } },
+				fields: ['notes.body', 'reviewed_notes.body'],
+			})).toEqual(['note', 'owner:id=7']);
+		});
+	});
+
+	describe('a collection depended on beyond the rows it nested', () => {
+		const chain = (partScope: string[]) => {
+			const built = new SchemaBuilder()
+				.collection('student', (c) => {
+					c.field('id').id();
+					c.field('courses').o2m('course', 'student');
+				})
+				.collection('course', (c) => {
+					c.field('id').id();
+					c.field('student').m2o('student');
+					c.field('parts').o2m('part', 'course');
+				})
+				.collection('part', (c) => {
+					c.field('id').id();
+					c.field('title').string();
+					c.field('status').string();
+					c.field('course').m2o('course');
+				})
+				.build();
+
+			built.collections['course']!.scopedCacheFields = ['student'];
+			built.collections['part']!.scopedCacheFields = partScope;
+
+			return built;
+		};
+
+		const rows = [{
+			id: 3,
+			courses: [{
+				id: 20,
+				student: 3,
+				parts: [{ id: 200, title: 't', status: 'x', course: 20 }],
+			}],
+		}];
+
+		const query = {
+			filter: { id: { _eq: 3 }, courses: { parts: { status: { _eq: 'x' } } } },
+			fields: ['courses.parts.title'],
+		};
+
+		test(oneLine`
+			carries its row pins beside the slice its ownership chain reverses to the root
+		`, async () => {
+			const service = new ItemsService('student', {
+				knex: db,
+				schema: chain(['course', 'course.student']),
+				accountability: null,
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(service, query)).toEqual([
+				'course:student=3',
+				'part:course.student=3',
+				'part:course=20',
+				'student:id=3',
+			]);
+		});
+
+		test(oneLine`
+			falls back to bare when no slice bounds the rows the filter reads
+		`, async () => {
+			// Rooted on the course itself, filtered by its owner rather than its key:
+			// the root has no key pin for the chain to reverse onto, and nothing in the
+			// filter binds `parts.course`, so the row pin alone cannot stand.
+			const service = new ItemsService('course', {
+				knex: db,
+				schema: chain(['course']),
+				accountability: null,
+			});
+
+			feed([{
+				id: 20,
+				student: 3,
+				parts: [{ id: 200, title: 't', status: 'x', course: 20 }],
+			}]);
+
+			expect(await tagsOf(service, {
+				filter: { student: { _eq: 3 }, parts: { status: { _eq: 'x' } } },
+				fields: ['parts.title'],
+			})).toEqual(['course:student=3', 'part']);
+		});
 	});
 });

@@ -848,3 +848,22 @@ export function composeScopedCachePaths(
 
 	return composed;
 }
+
+/**
+ * Whether a requested field nests past a relational prefix: it names every segment
+ * of the prefix and at least one more. A `*` names any segment — `*.*` nests past
+ * every one-hop relation, the way `getAstFromQuery` expands it.
+ */
+export function requestedFieldNestsPast(
+	field: string,
+	prefix: string[],
+): boolean {
+	const segments = field.split('.');
+
+	return (
+		segments.length > prefix.length &&
+		prefix.every((segment, at) => {
+			return segments[at] === '*' || segments[at] === segment;
+		})
+	);
+}

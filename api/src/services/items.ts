@@ -27,6 +27,7 @@ import {
 	foldHandedOverScopedCacheEpochs,
 	ItemScopedCacheService,
 	readScopedCacheEpochs,
+	requestedFieldNestsPast,
 	scopedCacheCollectionsChangedByOnDelete,
 	takenOverScopedCacheKey,
 } from '../scoped-cache.js';
@@ -1847,25 +1848,23 @@ export function stripInjectedOwnershipNesting(
 ): void {
 	const fields = query.fields ?? ['*'];
 
-	const nestedPrefixes = new Set<string>();
-	const leavesByPrefix = new Map<string, Set<string>>();
+	// The caller asked for the relation's rows, so the injected nesting under it is
+	// theirs — wildcards included, since `*.*` nests every one-hop relation.
+	const nestedByCaller = (prefix: string[]): boolean => {
+		return fields.some((field) => requestedFieldNestsPast(field, prefix));
+	};
 
-	for (const field of fields) {
-		const segments = field.split('.');
+	// The caller asked for the relation as a column, which surfaces its key.
+	const surfacesAsScalar = (prefix: string[], field: string): boolean => {
+		return fields.some((requested) => {
+			const segments = requested.split('.');
 
-		for (let end = 1; end < segments.length; end++) {
-			nestedPrefixes.add(segments.slice(0, end).join('.'));
-		}
-
-		const parentPrefix = segments.slice(0, -1).join('.');
-		const leaves = leavesByPrefix.get(parentPrefix) ?? new Set<string>();
-		leaves.add(segments[segments.length - 1]!);
-		leavesByPrefix.set(parentPrefix, leaves);
-	}
-
-	const surfacesAsScalar = (prefix: string, field: string): boolean => {
-		const leaves = leavesByPrefix.get(prefix);
-		return leaves !== undefined && (leaves.has('*') || leaves.has(field));
+			return (
+				segments.length === prefix.length + 1 &&
+				requestedFieldNestsPast(requested, prefix) &&
+				(segments[prefix.length] === '*' || segments[prefix.length] === field)
+			);
+		});
 	};
 
 	const collapse = (
@@ -1873,17 +1872,14 @@ export function stripInjectedOwnershipNesting(
 		collection: string,
 		segments: string[],
 		index: number,
-		prefix: string,
+		prefix: string[],
 	): void => {
 		if (node === null || typeof node !== 'object' || index >= segments.length - 1) {
 			return;
 		}
 
 		const field = segments[index]!;
-
-		const childPrefix = prefix === ''
-			? field
-			: `${prefix}.${field}`;
+		const childPrefix = [...prefix, field];
 
 		const childCollection = schema.relations.find(
 			(candidate) =>
@@ -1896,7 +1892,7 @@ export function stripInjectedOwnershipNesting(
 			return;
 		}
 
-		if (nestedPrefixes.has(childPrefix)) {
+		if (nestedByCaller(childPrefix)) {
 			collapse(child, childCollection, segments, index + 1, childPrefix);
 			return;
 		}
@@ -1915,7 +1911,7 @@ export function stripInjectedOwnershipNesting(
 		const segments = path.split('.');
 
 		for (const record of records) {
-			collapse(record, rootCollection, segments, 0, '');
+			collapse(record, rootCollection, segments, 0, []);
 		}
 	}
 }

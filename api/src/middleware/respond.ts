@@ -15,6 +15,7 @@ import {
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
+	mergedScopedCacheEpochs,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
@@ -149,10 +150,14 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		res.locals['cache'] !== false;
 
 	// Taken before the read's query; what it guards against, and why it is compared
-	// after the fill rather than before, is in `fill-guard.ts`.
-	const capturedEpochs = res.locals['scopedCacheEpochs'] as
-		| ScopedCacheEpochs
-		| undefined;
+	// after the fill rather than before, is in `fill-guard.ts`. A read service hands
+	// its capture over through the controller; a system route's comes from
+	// `useCollection`, taken for the collection its fallback tag names. Where both
+	// exist the earlier reading wins per collection.
+	const capturedEpochs = mergedScopedCacheEpochs(
+		res.locals['scopedCacheEpochsAtRequest'] as ScopedCacheEpochs | undefined,
+		res.locals['scopedCacheEpochs'] as ScopedCacheEpochs | undefined,
+	);
 
 	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
 		capturedEpochs,

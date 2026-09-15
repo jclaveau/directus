@@ -905,6 +905,69 @@ describe(oneLine`
 		});
 
 		it(oneLine`
+			does NOT flag a scopeTo on a COMPOSED path of a foreign collection — a write
+			there derives the same path off its flat scope field
+		`, async () => {
+			tracker.on.select('student_enrollment').response([{ id: 1, student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({
+					collection: 'student_course',
+					field: 'teaching_unit.discipline.enrollment.student',
+					value: 'A',
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('student_enrollment.items.read', declare);
+
+			try {
+				const result = await new ItemsService('student_enrollment', {
+					knex: db,
+					schema: composedChainSchema,
+				}).readByQuery({});
+
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([]);
+			}
+			finally {
+				emitter.offFilter('student_enrollment.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			flags a dotted scopeTo no write composes — the path leaves the scope chain
+		`, async () => {
+			tracker.on.select('student_enrollment').response([{ id: 1, student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({
+					collection: 'student_course',
+					field: 'teaching_unit.id',
+					value: 10,
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('student_enrollment.items.read', declare);
+
+			try {
+				const result = await new ItemsService('student_enrollment', {
+					knex: db,
+					schema: composedChainSchema,
+				}).readByQuery({});
+
+				expect(readMeta(result)?.scopedCacheUnautopurgeableTags).toEqual([
+					{ collection: 'student_course', field: 'teaching_unit.id', value: 10 },
+				]);
+			}
+			finally {
+				emitter.offFilter('student_enrollment.items.read', declare);
+			}
+		});
+
+		it(oneLine`
 			does NOT flag a bare collection tag — it names no slice, so any write to the
 			collection reproduces it
 		`, async () => {

@@ -24,7 +24,6 @@ import type {
 } from '@directus/types';
 import {
 	ScopedCacheFilterKeying,
-	composeScopedCachePaths,
 	m2oParentRowsAtPathEnd,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheFilterKeyingByCollection,
@@ -173,6 +172,10 @@ export function scopedCacheCollectionsBeyondNestedRows(
 	// what this one exempts is exactly what that one covers. A caller holding it
 	// already passes it rather than paying for a second walk of the AST.
 	keyingByCollection = scopedCacheFilterKeyingByCollection(schema, ast),
+	// Collections a partial `whenCase` alone must not mark: the read nested them to
+	// pin by key. Only that gating is waived — a filter, sort or group reaching one
+	// of them still depends on rows it never nested, and marks it all the same.
+	exemptFromCaseGating: ReadonlySet<CollectionKey> = new Set(),
 ): Set<CollectionKey> {
 	const beyond = new Set<CollectionKey>();
 
@@ -291,6 +294,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			if (
 				child.whenCase.length > 0
 				&& !readsUnderEveryCase(child.whenCase, cases)
+				&& !exemptFromCaseGating.has(child.relation.related_collection!)
 			) {
 				beyond.add(child.relation.related_collection!);
 			}
@@ -314,19 +318,19 @@ export function scopedCacheCollectionsBeyondNestedRows(
  *   response cannot have nested, so the pin cannot go stale.
  * - its own declared scope slices — past the ceiling. One tag per distinct value.
  * - the bare collection tag — a to-many hop or A2O anywhere on one of its paths, no
- *   parent row nested, a row missing its key, or the read depending on it
- *   beyond what it nested (`scopedCacheCollectionsBeyondNestedRows`).
+ *   parent row nested, or a row missing its key.
  *
  * Returns the pinned collections only; the bare tag is the caller's default, so a
  * collection absent here keeps the tag it has always carried. Each fallback
- * over-purges, none serves stale.
+ * over-purges, none serves stale. The pins name the NESTED rows and nothing more:
+ * a read depending on a collection beyond them
+ * (`scopedCacheCollectionsBeyondNestedRows`) owes that half to the caller.
  */
 export function pinnedScopedCacheTagsFromM2oParents(
 	schema: SchemaOverview,
 	rootCollection: CollectionKey,
 	fieldMap: FieldMap,
 	records: Item[],
-	collectionsBeyondNestedRows: Set<CollectionKey>,
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// A set per collection: the field map carries the same path under both its read
 	// and its other group, and walking one path twice would double every row.
@@ -336,11 +340,6 @@ export function pinnedScopedCacheTagsFromM2oParents(
 		// The root is bounded by its own filter, not by what it nested, and a
 		// self-referential relation reaches it again at a path that bounds nothing.
 		if (entry.collection === rootCollection) {
-			continue;
-		}
-
-		// Its parent rows do not bound the read, so only the bare tag covers it.
-		if (collectionsBeyondNestedRows.has(entry.collection)) {
 			continue;
 		}
 
@@ -578,15 +577,21 @@ function scopedCacheRowsAtPathEnd(
  * the prefix descends to parent rows carrying their key — through a to-many too,
  * so a deep pivot under an all-O2M chain slices. Past the per-collection pin ceiling
  * it falls back to the bare tag; an A2O anywhere on the path keeps it bare.
+ *
+ * Every path to the child must pin, or none does: the rows another path nested —
+ * the same collection reached through an M2O, or through an o2m whose reverse fk
+ * is not scoped — lie outside every parent-key slice, and the M2O pinner declines
+ * a collection it shares with a to-many hop. Such a collection is reported through
+ * `conflictedOut`, since only the bare tag covers it.
  */
 export function pinnedScopedCacheTagsFromO2mChildren(
 	schema: SchemaOverview,
 	rootCollection: CollectionKey,
 	fieldMap: FieldMap,
 	records: Item[],
-	collectionsBeyondNestedRows: Set<CollectionKey>,
-	// Populated with the collections reached by two disagreeing reverse fks — the
-	// case a single ownership slice can't cover, so the caller must leave bare.
+	// Populated with the collections some nested path leaves unpinned — two
+	// disagreeing reverse fks, or a path that is no scoped o2m at all — the case a
+	// single ownership slice can't cover, so the caller must leave bare.
 	conflictedOut?: Set<CollectionKey>,
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// One bucket per child collection: it can be nested under several paths, and
@@ -600,14 +605,12 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		conflicted: boolean;
 	}>();
 
+	const reachedUnpinnably = new Set<CollectionKey>();
+
 	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
 		const childCollection = entry.collection;
 
 		if (childCollection === rootCollection) {
-			continue;
-		}
-
-		if (collectionsBeyondNestedRows.has(childCollection)) {
 			continue;
 		}
 
@@ -632,6 +635,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			);
 
 			if (resolved === null) {
+				reachedUnpinnably.add(childCollection);
 				continue;
 			}
 
@@ -649,6 +653,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			!relation ||
 			relation.collection !== childCollection
 		) {
+			reachedUnpinnably.add(childCollection);
 			continue;
 		}
 
@@ -656,6 +661,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		const parentPkField = schema.collections[parentCollection]?.primary;
 
 		if (parentPkField === undefined) {
+			reachedUnpinnably.add(childCollection);
 			continue;
 		}
 
@@ -668,6 +674,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 				.filter((field) => !field.includes('.'))
 				.includes(reverseFk)
 		) {
+			reachedUnpinnably.add(childCollection);
 			continue;
 		}
 
@@ -676,6 +683,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			: scopedCacheRowsAtPathEnd(records, prefix);
 
 		if (parentRows === null) {
+			reachedUnpinnably.add(childCollection);
 			continue;
 		}
 
@@ -714,11 +722,13 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
 
 	for (const [collection, keying] of keyingByChild) {
-		if (keying.conflicted && conflictedOut) {
+		const conflicted = keying.conflicted || reachedUnpinnably.has(collection);
+
+		if (conflicted && conflictedOut) {
 			conflictedOut.add(collection);
 		}
 
-		if (keying.conflicted || keying.rows.length === 0) {
+		if (conflicted || keying.rows.length === 0) {
 			continue;
 		}
 
@@ -739,6 +749,23 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	}
 
 	return pinned;
+}
+
+// The filter node one segment down — through a `_some` when the hop is a to-many
+// written with its quantifier, which joins the same one row the bare key does.
+function descendFilterSegment(
+	node: Record<string, unknown>,
+	segment: string,
+): unknown {
+	if (segment in node) {
+		return node[segment];
+	}
+
+	const some = node['_some'];
+
+	return some !== null && typeof some === 'object'
+		? (some as Record<string, unknown>)[segment]
+		: undefined;
 }
 
 /**
@@ -890,7 +917,7 @@ export function pinnedScopedCacheTagsFromFilter(
 				return null;
 			}
 
-			node = (node as Record<string, unknown>)[segments[i]!];
+			node = descendFilterSegment(node as Record<string, unknown>, segments[i]!);
 		}
 
 		if (node === null || typeof node !== 'object') {
@@ -1011,72 +1038,51 @@ export function pinnedScopedCacheTagsFromFilter(
 }
 
 /**
- * The paths a read can pin a would-be-bare nested collection BY, instead of the bare
- * tag, when an ancestor its ownership chain crosses is itself pinned in the read —
- * nearest first. Every row the collection surfaced belongs to that ancestor's slice,
- * so a per-slice pin stands in for the whole-collection tag.
+ * Whether a read path from the root walks one ownership chain BACKWARDS: from the
+ * root, one o2m hop per chain segment, each landing on the collection the segment
+ * below it is declared on, through the very fk that segment names. Every row
+ * nested that way holds the root row's key at the end of the chain, so the root's
+ * own pin bounds them all — the one way a would-be-bare child slices off the root.
  *
- * Every hop is a scoped-cache ownership edge (`scopedCacheFields`), so a write to
- * the near collection purges every key a candidate names — the invariant keeping the
- * slice sound. `field` is the dotted key the matching pin's value slices on — the
- * same key `composeScopedCachePaths` hands the purge, so read pin and purge agree;
- * `ancestor` is the collection that key reaches; `terminalField` is the field on it
- * a pin must name for the candidate to apply.
- *
- * Two shapes, both ownership-covered:
- * - a flat parent fk (`discipline`) reaching the 1-hop ancestor by its own key, and
- * - a composed relational path (`discipline.enrollment.student.user`) reaching a
- *   deeper ancestor's scope field.
+ * `chain` is read from `collection` upward (`['student', 'user']` on a course:
+ * `course.student` then `student.user`), so it must end on the root.
  */
-export function scopedCacheAncestorSliceCandidates(
+export function scopedCachePathReversesChain(
 	schema: SchemaOverview,
+	rootCollection: CollectionKey,
+	pathSegments: QueryPath,
 	collection: CollectionKey,
-): Array<{ field: string; ancestor: CollectionKey; terminalField: string }> {
-	const candidates: Array<{
-		field: string;
-		ancestor: CollectionKey;
-		terminalField: string;
-	}> = [];
+	chain: string[],
+): boolean {
+	const joins = resolveScopedCacheM2oJoinChainFromPath(schema, collection, chain);
 
-	for (const field of schema.collections[collection]?.scopedCacheFields ?? []) {
-		if (field.includes('.')) {
-			continue;
-		}
-
-		const target = schema.relations.find((rel) => {
-			return rel.collection === collection && rel.field === field;
-		})?.related_collection;
-
-		const targetPk = target
-			? schema.collections[target]?.primary
-			: undefined;
-
-		if (!target || !targetPk) {
-			continue;
-		}
-
-		candidates.push({ field, ancestor: target, terminalField: targetPk });
+	if (
+		joins === null ||
+		joins.length !== pathSegments.length ||
+		joins[joins.length - 1]?.relatedCollection !== rootCollection
+	) {
+		return false;
 	}
 
-	for (const path of composeScopedCachePaths(schema, collection)) {
-		const terminalField = path.segments[path.segments.length - 1];
+	// The collections the chain crosses, `collection` first, the root last.
+	const crossed = [collection, ...joins.map((join) => join.relatedCollection)];
 
-		const joins = resolveScopedCacheM2oJoinChainFromPath(
-			schema,
-			collection,
-			path.segments.slice(0, -1),
+	return pathSegments.every((alias, hop) => {
+		const from = crossed[crossed.length - 1 - hop];
+		const to = crossed[crossed.length - 2 - hop];
+		const fk = chain[chain.length - 1 - hop];
+
+		const { relation, relationType } = getRelationInfo(
+			schema.relations,
+			from!,
+			alias,
 		);
 
-		const ancestor = joins?.[joins.length - 1]?.relatedCollection;
-
-		if (!ancestor || terminalField === undefined) {
-			continue;
-		}
-
-		candidates.push({ field: path.field, ancestor, terminalField });
-	}
-
-	return candidates.sort((a, b) => {
-		return a.field.split('.').length - b.field.split('.').length;
+		return (
+			relationType === 'o2m' &&
+			relation !== null &&
+			relation.collection === to &&
+			relation.field === fk
+		);
 	});
 }

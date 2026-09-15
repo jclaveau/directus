@@ -67,6 +67,7 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		// Real, so the unguarded cases below assert the predicate rather than a
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
 		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
+		mergedScopedCacheEpochs: actual.mergedScopedCacheEpochs,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
@@ -632,6 +633,43 @@ describe('respond middleware', () => {
 		}), next);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		guards a system route's fallback tag by the capture useCollection took, so a
+		read handing over no capture of its own is still compared after the fill
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValueOnce('directus_users');
+
+		await respond(makeReq({ collection: 'directus_users' }), makeRes({ data: [] }, {
+			scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' },
+		}), next);
+
+		expect(mocks.scopedCacheSweptDuringFill).toHaveBeenCalledWith(
+			{ directus_users: '3', '*': '1' },
+		);
+
+		expect(mocks.evictCacheEntry).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		folds the request capture into the read's own, earlier reading first, so a
+		purge between the two is still visible at fill time
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		await respond(makeReq(), makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles' }, { collection: 'authors' }],
+			scopedCacheEpochsAtRequest: { articles: '7', '*': '1' },
+			scopedCacheEpochs: { articles: '8', authors: '4', '*': '1' },
+		}), next);
+
+		expect(mocks.scopedCacheSweptDuringFill).toHaveBeenCalledWith(
+			{ articles: '7', authors: '4', '*': '1' },
+		);
+
 		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
 	});
 

@@ -75,13 +75,13 @@ export class ScopedCacheReadPlan {
 			this.filterKeying,
 		);
 
-		this.beyondNestedRows = enabled
-			? scopedCacheCollectionsBeyondNestedRows(schema, ast, this.filterKeying)
-			: new Set<string>();
+		// An injected ancestor is nested to pin by key, and the case gating its node
+		// is decided on the row that carries the fk — a write to that row purges its
+		// own tags — so a partial `whenCase` alone must not bare it. A filter, sort
+		// or group reaching the ancestor still does: those depend on its rows beyond
+		// the nested ones, whichever way it came to be nested.
+		const injectedAncestors = new Set<CollectionKey>();
 
-		// A permission-gated ancestor is marked beyond, but its rows were injected to
-		// pin by key, and a permission change flushes the cache — so the key cannot go
-		// stale.
 		for (const path of injectedOwnershipPaths) {
 			const joins = resolveScopedCacheM2oJoinChainFromPath(
 				schema,
@@ -92,9 +92,18 @@ export class ScopedCacheReadPlan {
 			const ancestor = joins?.[joins.length - 1]?.relatedCollection;
 
 			if (ancestor) {
-				this.beyondNestedRows.delete(ancestor);
+				injectedAncestors.add(ancestor);
 			}
 		}
+
+		this.beyondNestedRows = enabled
+			? scopedCacheCollectionsBeyondNestedRows(
+				schema,
+				ast,
+				this.filterKeying,
+				injectedAncestors,
+			)
+			: new Set<string>();
 	}
 
 	/**
@@ -115,7 +124,6 @@ export class ScopedCacheReadPlan {
 			this.collection,
 			this.fieldMap,
 			toArray(rows),
-			this.beyondNestedRows,
 		);
 
 		this.o2mChildPins = pinnedScopedCacheTagsFromO2mChildren(
@@ -123,7 +131,6 @@ export class ScopedCacheReadPlan {
 			this.collection,
 			this.fieldMap,
 			toArray(rows),
-			this.beyondNestedRows,
 			this.o2mConflicted,
 		);
 	}

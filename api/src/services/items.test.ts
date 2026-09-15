@@ -1792,6 +1792,22 @@ describe('stripInjectedOwnershipNesting', () => {
 		})).toEqual({ id: 1, team: { id: 5, name: 't', lead: 9 } });
 	});
 
+	it('collapses under a depth wildcard that names the hop as a scalar', () => {
+		// `*.*` nests past `team` and names `team.lead` as a scalar, so the
+		// injected row under it goes back to its key.
+		expect(stripped(['*.*'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, name: 't', lead: { id: 9, name: 'x' } },
+		})).toEqual({ id: 1, team: { id: 5, name: 't', lead: 9 } });
+	});
+
+	it('leaves a branch a depth wildcard nests past', () => {
+		expect(stripped(['*.*.*'], ['team.lead.id'], {
+			id: 1,
+			team: { id: 5, name: 't', lead: { id: 9, name: 'x' } },
+		})).toEqual({ id: 1, team: { id: 5, name: 't', lead: { id: 9, name: 'x' } } });
+	});
+
 	it('leaves a path that ends on the row itself alone', () => {
 		// One segment names no hop to collapse.
 		expect(stripped(['*'], ['team'], {

@@ -176,6 +176,29 @@ export function mergeScopedCacheEpochs(
 }
 
 /**
+ * The two captures one response may carry, folded into one — `undefined` when it
+ * carries neither, which is how the guard tells an unguarded read from a guarded
+ * one that read nothing.
+ */
+export function mergedScopedCacheEpochs(
+	...captures: Array<ScopedCacheEpochs | undefined>
+): ScopedCacheEpochs | undefined {
+	const taken = captures.filter((capture) => capture !== undefined);
+
+	if (taken.length === 0) {
+		return undefined;
+	}
+
+	const merged: ScopedCacheEpochs = {};
+
+	for (const capture of taken) {
+		mergeScopedCacheEpochs(merged, capture);
+	}
+
+	return merged;
+}
+
+/**
  * The collections a response is tagged with that its capture never covered — so a
  * purge of them landing mid-read passes the post-fill comparison unnoticed, and the
  * entry would be stored already stale under an index that purge has swept.

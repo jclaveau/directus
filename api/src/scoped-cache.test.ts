@@ -19,13 +19,14 @@ import {
 	scopedCacheSweptDuringFill,
 	foldHandedOverScopedCacheEpochs,
 	mergeScopedCacheEpochs,
+	mergedScopedCacheEpochs,
 	scopedCacheCollectionsWithoutGuard,
 	scopedCacheTagLabel,
 	serializeScopedCacheTags,
 	createScopedCacheCollector,
 	pinnedScopedCacheTagsFromKeyedFilters,
-	scopedCacheAncestorSliceCandidates,
 	scopedCacheOwnershipNestedPkPaths,
+	scopedCachePathReversesChain,
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromO2mChildren,
 	resolveScopedCacheM2oJoinChainFromPath,
@@ -1943,7 +1944,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 					owned_item: { id: 11, name: 'y', owner: { id: 100, space: 's' } },
 				},
 			],
-			new Set<string>(),
 		);
 
 		expect(pinned.get('owned_item')).toEqual([
@@ -1962,7 +1962,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			'owned_sub_item',
 			subItemFieldMap,
 			[{ id: 1, label: 'a', owned_item: { id: 10, owner: { id: 100 } } }],
-			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_sub_item')).toBe(false);
@@ -1976,7 +1975,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			'owner',
 			fieldMapOf(['', 'owner'], ['owned_items', 'owned_item']),
 			[{ id: 100, owned_items: [{ id: 10 }, { id: 11 }] }],
-			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_item')).toBe(false);
@@ -2003,7 +2001,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 					},
 				},
 			],
-			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_item')).toBe(false);
@@ -2018,7 +2015,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				{ id: 1, label: 'a', owned_item: null },
 				{ id: 2, label: 'b', owned_item: { id: 11, owner: { id: 100 } } },
 			],
-			new Set<string>(),
 		);
 
 		expect(pinned.get('owned_item')).toEqual([
@@ -2040,7 +2036,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
 				[{ id: 1, owned_item: null }],
-				new Set<string>(),
 			).has('owned_item'),
 		).toBe(false);
 	});
@@ -2055,7 +2050,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				{ id: 1, owned_item: { id: 10 } },
 				{ id: 2, owned_item: { name: 'y' } },
 			],
-			new Set<string>(),
 		);
 
 		expect(pinned.has('owned_item')).toBe(false);
@@ -2077,26 +2071,9 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 			'note',
 			fieldMapOf(['subject:owner', 'owner']),
 			[{ id: 1, 'subject:owner': { id: 100 } }],
-			new Set<string>(),
 		);
 
 		expect(pinned.has('owner')).toBe(false);
-	});
-
-	it(oneLine`
-		keeps a collection bare when the read depends on it beyond the rows it nested
-	`, () => {
-		// The set is what `scopedCacheCollectionsBeyondNestedRows` reports; these
-		// rows pin fine on their own, so the exclusion is what decides here.
-		expect(
-			pinnedScopedCacheTagsFromM2oParents(
-				schema,
-				'owned_sub_item',
-				fieldMapOf(['owned_item', 'owned_item']),
-				[{ id: 1, owned_item: { id: 10 } }],
-				new Set(['owned_item']),
-			).has('owned_item'),
-		).toBe(false);
 	});
 
 	it('keeps the root bare where a self-relation reaches it at a real path', () => {
@@ -2117,7 +2094,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_item',
 				fieldMapOf(['parent', 'owned_item']),
 				[{ id: 1, parent: { id: 2 } }],
-				new Set<string>(),
 			).has('owned_item'),
 		).toBe(false);
 	});
@@ -2131,7 +2107,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_sub_item',
 				fieldMapOf(['owned_item', 'owned_item']),
 				[{ id: 1, owned_item: 10 }],
-				new Set<string>(),
 			).has('owned_item'),
 		).toBe(false);
 	});
@@ -2177,7 +2152,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_item',
 				ownerFieldMap,
 				records,
-				new Set<string>(),
 			);
 
 			expect(pinned.get('owner')).toEqual([
@@ -2209,7 +2183,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 					records.map((record, index) => {
 						return { ...record, owner: { id: index, space: `s${index}` } };
 					}),
-					new Set<string>(),
 				).has('owner'),
 			).toBe(false);
 		});
@@ -2239,7 +2212,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 					'owned_item',
 					ownerFieldMap,
 					records,
-					new Set<string>(),
 				).get('owner'),
 			).toEqual([
 				{
@@ -2257,7 +2229,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_item',
 				ownerFieldMap,
 				records,
-				new Set<string>(),
 			);
 
 			expect(pinned.has('owner')).toBe(false);
@@ -2271,7 +2242,6 @@ describe('pinnedScopedCacheTagsFromM2oParents', () => {
 				'owned_item',
 				ownerFieldMap,
 				records.slice(0, ceiling),
-				new Set<string>(),
 			);
 
 			expect(pinned.get('owner')).toHaveLength(ceiling);
@@ -2582,6 +2552,41 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 				astOf({}, { whenCase: [0] }),
 			),
 		]).toContain('owner');
+	});
+
+	it(oneLine`
+		spares a partially-cased node the caller exempts, since the case is decided
+		on the row carrying the fk
+	`, () => {
+		const partial = astOf({}, { whenCase: [0] }, [
+			{ name: { _eq: 'alice' } },
+			{ name: { _eq: 'bob' } },
+		]);
+
+		expect([...scopedCacheCollectionsBeyondNestedRows(
+			schema,
+			partial,
+			scopedCacheFilterKeyingByCollection(schema, partial),
+			new Set(['owner']),
+		)]).not.toContain('owner');
+	});
+
+	it(oneLine`
+		names an exempted collection all the same when a filter hops through it —
+		the exemption waives the case gating, not the rows the filter reads
+	`, () => {
+		const filtered = astOf(
+			{ filter: { owner: { name: { _eq: 'alice' } } } },
+			{ whenCase: [0] },
+			[{ name: { _eq: 'alice' } }, { name: { _eq: 'bob' } }],
+		);
+
+		expect([...scopedCacheCollectionsBeyondNestedRows(
+			schema,
+			filtered,
+			scopedCacheFilterKeyingByCollection(schema, filtered),
+			new Set(['owner']),
+		)]).toContain('owner');
 	});
 
 	it('spares a collection whose nested node reads under every case', () => {
@@ -3294,96 +3299,6 @@ describe('scopedCacheOwnershipNestedPkPaths', () => {
 	});
 });
 
-describe('scopedCacheAncestorSliceCandidates', () => {
-	it('lists the ownership slices to pin a collection by, nearest first', () => {
-		// Own parent fk first, then one composed path per deeper ancestor, so a
-		// caller prefers the nearest ancestor a read actually pinned.
-		const schema = new SchemaBuilder()
-			.collection('teaching_unit', (c) => {
-				c.field('id').id();
-				c.field('discipline').m2o('discipline');
-			})
-			.collection('discipline', (c) => {
-				c.field('id').id();
-				c.field('enrollment').m2o('enrollment');
-			})
-			.collection('enrollment', (c) => {
-				c.field('id').id();
-				c.field('student').m2o('student');
-			})
-			.collection('student', (c) => {
-				c.field('id').id();
-				c.field('user').m2o('user');
-			})
-			.collection('user', (c) => {
-				c.field('id').id();
-			})
-			.build();
-
-		schema.collections['teaching_unit']!.scopedCacheFields = ['discipline'];
-		schema.collections['discipline']!.scopedCacheFields = ['enrollment'];
-		schema.collections['enrollment']!.scopedCacheFields = ['student'];
-		schema.collections['student']!.scopedCacheFields = ['user'];
-
-		expect(scopedCacheAncestorSliceCandidates(schema, 'teaching_unit'))
-			.toEqual([
-				{ field: 'discipline', ancestor: 'discipline', terminalField: 'id' },
-				{
-					field: 'discipline.enrollment',
-					ancestor: 'discipline',
-					terminalField: 'enrollment',
-				},
-				{
-					field: 'discipline.enrollment.student',
-					ancestor: 'enrollment',
-					terminalField: 'student',
-				},
-				{
-					field: 'discipline.enrollment.student.user',
-					ancestor: 'student',
-					terminalField: 'user',
-				},
-			]);
-	});
-
-	it('offers no candidate for a collection with no ownership', () => {
-		const schema = new SchemaBuilder()
-			.collection('config', (c) => {
-				c.field('id').id();
-				c.field('label').string();
-			})
-			.build();
-
-		expect(scopedCacheAncestorSliceCandidates(schema, 'config')).toEqual([]);
-	});
-
-	it('never crosses a relation that is not a scope field', () => {
-		// Fail-safe gate: a plain fk names no candidate, so a slice can only ride an
-		// ownership hop a write to the collection actually purges.
-		const schema = new SchemaBuilder()
-			.collection('doc', (c) => {
-				c.field('id').id();
-				c.field('folder').m2o('folder');
-				c.field('label').m2o('label');
-			})
-			.collection('folder', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-			})
-			.collection('label', (c) => {
-				c.field('id').id();
-				c.field('name').string();
-			})
-			.build();
-
-		schema.collections['doc']!.scopedCacheFields = ['folder'];
-
-		expect(scopedCacheAncestorSliceCandidates(schema, 'doc')).toEqual([
-			{ field: 'folder', ancestor: 'folder', terminalField: 'id' },
-		]);
-	});
-});
-
 describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 	// `child` hangs off `parent` twice, over two different fks, so one read can
 	// reach it by two names. `grandchild` sits a second to-many hop down, and
@@ -3394,12 +3309,15 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 			c.field('name').string();
 			c.field('children').o2m('child', 'parent');
 			c.field('alt_children').o2m('child', 'alt_parent');
+			c.field('drafts').o2m('child', 'drafted_by');
+			c.field('favorite').m2o('child');
 		})
 		.collection('child', (c) => {
 			c.field('id').id();
 			c.field('body').string();
 			c.field('parent').m2o('parent');
 			c.field('alt_parent').m2o('parent');
+			c.field('drafted_by').m2o('parent');
 			c.field('grandchildren').o2m('grandchild', 'child');
 		})
 		.collection('grandchild', (c) => {
@@ -3432,14 +3350,12 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		rootCollection: CollectionKey,
 		fieldMap: FieldMap,
 		records: Item[],
-		beyond = new Set<CollectionKey>(),
 	) {
 		return pinnedScopedCacheTagsFromO2mChildren(
 			schema,
 			rootCollection,
 			fieldMap,
 			records,
-			beyond,
 		);
 	}
 
@@ -3535,10 +3451,45 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 			'parent',
 			fieldMapOf(['children', 'child'], ['alt_children', 'child']),
 			[{ id: 1, name: 'a' }],
-			new Set(),
 			conflicted,
 		);
 
+		expect([...conflicted]).toEqual(['child']);
+	});
+
+	it(oneLine`
+		reports a child one path reaches through an M2O in conflictedOut — those rows
+		lie outside every parent-key slice, and the M2O pinner declined the mix
+	`, () => {
+		const conflicted = new Set<CollectionKey>();
+
+		const pinned = pinnedScopedCacheTagsFromO2mChildren(
+			schema,
+			'parent',
+			fieldMapOf(['children', 'child'], ['favorite', 'child']),
+			[{ id: 1, name: 'a', favorite: { id: 9 } }],
+			conflicted,
+		);
+
+		expect(pinned.has('child')).toBe(false);
+		expect([...conflicted]).toEqual(['child']);
+	});
+
+	it(oneLine`
+		reports a child one path reaches through an o2m whose reverse fk is not
+		scoped — that path's rows carry no slice a write would emit
+	`, () => {
+		const conflicted = new Set<CollectionKey>();
+
+		const pinned = pinnedScopedCacheTagsFromO2mChildren(
+			schema,
+			'parent',
+			fieldMapOf(['children', 'child'], ['drafts', 'child']),
+			[{ id: 1, name: 'a' }],
+			conflicted,
+		);
+
+		expect(pinned.has('child')).toBe(false);
 		expect([...conflicted]).toEqual(['child']);
 	});
 
@@ -3550,7 +3501,6 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 			'parent',
 			fieldMapOf(['children', 'child']),
 			[{ id: 1, name: 'a' }],
-			new Set(),
 			conflicted,
 		);
 
@@ -3565,15 +3515,6 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 		).has('parent')).toBe(false);
 	});
 
-	it('declines a collection the read depends on beyond its nested rows', () => {
-		expect(pinnedFor(
-			'parent',
-			fieldMapOf(['children', 'child']),
-			[{ id: 1, name: 'a' }],
-			new Set(['child']),
-		).has('child')).toBe(false);
-	});
-
 	it('drops the pin whole past the ceiling, never trimmed', () => {
 		expect(pinnedFor(
 			'parent',
@@ -3583,6 +3524,93 @@ describe('pinnedScopedCacheTagsFromO2mChildren', () => {
 				(_, at) => ({ id: at + 1, name: `p${at}` }),
 			),
 		).has('child')).toBe(false);
+	});
+});
+
+describe('scopedCachePathReversesChain', () => {
+	// user <- student.user <- course.student: a user read nesting `students.courses`
+	// walks the course's `student.user` chain backwards. `reviews` reaches course
+	// through a second fk the chain never names.
+	const schema = new SchemaBuilder()
+		.collection('user', (c) => {
+			c.field('id').id();
+			c.field('students').o2m('student', 'user');
+			c.field('reviews').o2m('course', 'reviewer');
+		})
+		.collection('student', (c) => {
+			c.field('id').id();
+			c.field('user').m2o('user');
+			c.field('courses').o2m('course', 'student');
+		})
+		.collection('course', (c) => {
+			c.field('id').id();
+			c.field('student').m2o('student');
+			c.field('reviewer').m2o('user');
+		})
+		.build();
+
+	it('accepts the o2m walk back down a chain, hop for hop', () => {
+		expect(scopedCachePathReversesChain(
+			schema,
+			'user',
+			['students', 'courses'],
+			'course',
+			['student', 'user'],
+		)).toBe(true);
+
+		expect(scopedCachePathReversesChain(
+			schema,
+			'student',
+			['courses'],
+			'course',
+			['student'],
+		)).toBe(true);
+	});
+
+	it('refuses a path reaching the collection through another fk', () => {
+		expect(scopedCachePathReversesChain(
+			schema,
+			'user',
+			['reviews'],
+			'course',
+			['student', 'user'],
+		)).toBe(false);
+
+		expect(scopedCachePathReversesChain(
+			schema,
+			'user',
+			['reviews'],
+			'course',
+			['reviewer'],
+		)).toBe(true);
+	});
+
+	it(oneLine`
+		refuses a chain that does not end on the root, or a path of another length
+	`, () => {
+		expect(scopedCachePathReversesChain(
+			schema,
+			'user',
+			['students', 'courses'],
+			'course',
+			['student'],
+		)).toBe(false);
+
+		expect(scopedCachePathReversesChain(
+			schema,
+			'user',
+			['students'],
+			'course',
+			['student', 'user'],
+		)).toBe(false);
+
+		expect(scopedCachePathReversesChain(
+			schema,
+			'user',
+			['students', 'courses'],
+			'course',
+			['id'],
+		)).toBe(false);
 	});
 });
 
@@ -3787,6 +3815,19 @@ describe('the purge counters a fill is guarded by', () => {
 		mergeScopedCacheEpochs(merged, { articles: '7', tags: '5' });
 
 		expect(merged).toEqual({ articles: '7', authors: '2', tags: '5' });
+	});
+
+	it(oneLine`
+		folds the captures one response carries into one, or none when it carries
+		none — an empty capture is a guard that ran, undefined is one that did not
+	`, () => {
+		expect(mergedScopedCacheEpochs(undefined, undefined)).toBeUndefined();
+		expect(mergedScopedCacheEpochs({}, undefined)).toEqual({});
+
+		expect(mergedScopedCacheEpochs(
+			{ articles: '7', '*': '1' },
+			{ articles: '9', authors: '4', '*': '1' },
+		)).toEqual({ articles: '7', authors: '4', '*': '1' });
 	});
 
 	it('names the tagged collections no capture covered', () => {
