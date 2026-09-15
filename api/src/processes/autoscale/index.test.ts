@@ -43,7 +43,7 @@ vi.mock('../../utils/report-unhandled-rejection.js', () => {
 const connectToSupervisor = vi.fn(async () => undefined);
 const disconnectFromSupervisor = vi.fn();
 const scaleApp = vi.fn(async () => undefined);
-const releaseWorker = vi.fn(async () => undefined);
+const releaseWorker = vi.fn<(pmId: number) => Promise<void>>(async () => undefined);
 const watchWorkerMessages = vi.fn();
 
 vi.mock('../supervisor/index.js', () => {
@@ -332,10 +332,10 @@ describe('runAutoscaler', () => {
 				return Promise.reject(new Error('pm2 did not answer'));
 			}
 
-			return new Promise((resolve) => {
+			return new Promise<void>((resolve) => {
 				setTimeout(() => {
 					answered = true;
-					resolve(undefined);
+					resolve();
 				}, 500);
 			});
 		});

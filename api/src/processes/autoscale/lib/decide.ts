@@ -31,11 +31,12 @@ function average(values: number[]): number {
  * The smallest pool the load read would leave at or under the middle of the
  * band, never below the floor.
  *
- * Mid-band rather than at the release edge: a pool released to just under
- * the release threshold has no room to move in either direction, and a pool
- * released to just under the scale threshold buys its worker back on the next
- * reading. Never the whole pool: the caller has already found that one fewer
- * worker sits under the release threshold, which is under the middle.
+ * Mid-band rather than at either edge: a pool released to sit at the release
+ * threshold releases again on the next dip, and one released to sit at the
+ * scale threshold buys its worker back on the next rise. Never the whole
+ * pool: the caller has already found that all but one worker sit under the
+ * release threshold, which is under the middle, so this stops one short at
+ * the latest.
  */
 function midBandSize(cpuPercents: number[], config: AutoscaleConfig): number {
 	const midBandCpu = (config.releaseCpuThreshold + config.scaleCpuThreshold) / 2;
@@ -268,8 +269,7 @@ function decideScalabus(
 		// along with the worker, so a worker at 0% can no longer make the
 		// headroom that removes it. Never below the plain average, so this only
 		// ever holds a release the average would have made.
-		const survivors = workers - 1;
-		const projectedCpu = averageOver(sample.cpuPercents, survivors);
+		const projectedCpu = averageOver(sample.cpuPercents, workers - 1);
 
 		if (projectedCpu < config.releaseCpuThreshold) {
 			// Measured from the last scaling in either direction rather than
@@ -298,21 +298,21 @@ function decideScalabus(
 
 			const target = midBandSize(sample.cpuPercents, config);
 
-			// Half the way there and never less than one, so a drain is
+			// Half the way there, the half step rounded up, so a drain is
 			// geometric: 32, 16, 8, 4, 2, 1 is five cooldowns from the ceiling
-			// to the floor. Not the whole way, because a worker's reading is
-			// not all load: scheduled jobs, GC and the event loop's own
-			// overhead cost each worker whatever the pool's size, so the
-			// straight extrapolation `target` makes overestimates how far the
-			// pool can fall. A pool that overshoots pays a boot a worker to
-			// climb back, each boot's CPU feeding the next add. Half the step
-			// halves the overshoot.
-			const released = Math.max(1, Math.ceil((workers - target) / 2));
+			// to the floor, and a pool one over its size still moves. Not the
+			// whole way, because a worker's reading is not all load: scheduled
+			// jobs, GC and the event loop's own overhead cost each worker
+			// whatever the pool's size, so the straight extrapolation `target`
+			// makes overestimates how far the pool can fall. A pool that
+			// overshoots pays a boot a worker to climb back, each boot's CPU
+			// feeding the next add. Half the step halves the overshoot.
+			const released = Math.ceil((workers - target) / 2);
 
 			return {
 				workers: workers - released,
-				reason: `cpu ${projectedCpu}% across the ${survivors} worker(s) `
-					+ `a release leaves < ${config.releaseCpuThreshold}%; `
+				reason: `cpu ${projectedCpu}% across all but one worker `
+					+ `< ${config.releaseCpuThreshold}%; `
 					+ `${target} would sit mid-band, releasing ${released}`,
 			};
 		}

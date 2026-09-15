@@ -198,17 +198,17 @@ test('the scalabus strategy releases once the add is past the cooldown', () => {
 
 	expect(decide(settled, scalabus)).toEqual({
 		workers: 1,
-		reason: 'cpu 20% across the 1 worker(s) a release leaves < 40%; '
+		reason: 'cpu 20% across all but one worker < 40%; '
 			+ '1 would sit mid-band, releasing 1',
 	});
 });
 
-// A pool takes workers in ten-second steps and gave them back in five-minute
-// ones, one at a time: at the planner's ceiling of 32 a full pool took 2.6
-// hours to drain to one, holding 9 GB the whole way. The release now reads
-// how many workers the load would keep mid-band and goes half the way there,
-// so the drain is geometric — and a straight jump to the size the reading
-// extrapolates would overshoot, because a worker's reading is not all load.
+// A release of one worker a cooldown drains a pool in `workers - floor`
+// cooldowns: 31 five-minute ones from the planner's ceiling of 32, holding
+// 9 GB most of the way. The release reads how many workers the load would
+// keep mid-band and goes half the way there, so the drain is geometric — and
+// a straight jump to the size the reading extrapolates would overshoot,
+// because a worker's reading is not all load.
 describe('the scalabus strategy releases toward the size the load keeps', () => {
 	const scalabus = {
 		...config,
@@ -221,7 +221,7 @@ describe('the scalabus strategy releases toward the size the load keeps', () => 
 	test('half the way to the floor from an idle pool', () => {
 		expect(decide(sample(Array(32).fill(0), settled), scalabus)).toEqual({
 			workers: 16,
-			reason: 'cpu 0% across the 31 worker(s) a release leaves < 40%; '
+			reason: 'cpu 0% across all but one worker < 40%; '
 				+ '1 would sit mid-band, releasing 16',
 		});
 	});
@@ -233,19 +233,19 @@ describe('the scalabus strategy releases toward the size the load keeps', () => 
 	test('half the way to the size that would sit mid-band', () => {
 		expect(decide(sample(Array(12).fill(25), settled), scalabus)).toEqual({
 			workers: 9,
-			reason: 'cpu 27% across the 11 worker(s) a release leaves < 40%; '
+			reason: 'cpu 27% across all but one worker < 40%; '
 				+ '6 would sit mid-band, releasing 3',
 		});
 	});
 
 	// Three workers at 20% are 60 points, which two would carry at 30%. Half
-	// the way from three to two is half a worker, and a pool that released
-	// nothing on that would sit one over its size for good. At two a release
-	// would leave the one survivor at 40%, which is not under 40: held.
-	test('releases one at least, so a pool one over its size still moves', () => {
+	// the way from three to two is half a worker, and a pool that rounded
+	// that down would sit one over its size for good. At two a release would
+	// leave the one survivor at 40%, which is not under 40: held.
+	test('rounds a half step up, so a pool one over its size still moves', () => {
 		expect(decide(sample([20, 20, 20], settled), scalabus)).toEqual({
 			workers: 2,
-			reason: 'cpu 30% across the 2 worker(s) a release leaves < 40%; '
+			reason: 'cpu 30% across all but one worker < 40%; '
 				+ '2 would sit mid-band, releasing 1',
 		});
 
@@ -262,7 +262,7 @@ describe('the scalabus strategy releases toward the size the load keeps', () => 
 
 		expect(decide(sample(Array(12).fill(0), settled), floored)).toEqual({
 			workers: 8,
-			reason: 'cpu 0% across the 11 worker(s) a release leaves < 40%; '
+			reason: 'cpu 0% across all but one worker < 40%; '
 				+ '4 would sit mid-band, releasing 4',
 		});
 	});

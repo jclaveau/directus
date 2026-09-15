@@ -215,12 +215,13 @@ describe('The autoscaler gives back what the load no longer needs', () => {
 		expect(await sizesOver(rig, 45_000), reportOf(rig)).toEqual([2]);
 	}, 300_000);
 
-	// A pool takes a worker every ten seconds and gave one back every five
-	// minutes: from the planner's ceiling of 32, a night's drain to one took
-	// 2.6 hours and held the memory of 31 workers most of it. The release
-	// now goes half the way to the size the load would keep, so an idle pool
-	// drains geometrically — and the halving is what keeps a reading that is
-	// not all load from overshooting into a pool that has to grow back.
+	// A pool takes a worker every ten seconds; a release of one a cooldown
+	// gives them back in `workers - floor` cooldowns, 31 five-minute ones from
+	// the planner's ceiling of 32, holding the memory of 31 workers most of
+	// the way. The release goes half the way to the size the load would keep,
+	// so an idle pool drains geometrically — and the halving is what keeps a
+	// reading that is not all load from overshooting into a pool that has to
+	// grow back.
 	it('drains an idle pool by halves, not one worker a cooldown', async () => {
 		const rig = startPool({
 			appName: 'autoscale-drain',
@@ -258,7 +259,7 @@ describe('The autoscaler gives back what the load no longer needs', () => {
 	// release that halved its way to the floor would take the eighth worker's
 	// load down to one worker and buy it back on the next reading.
 	//
-	// The pool reads [0 ×7, ~80]. The load keeps two as long as the busy
+	// The pool reads [0 ×7, ~65]. The load keeps two as long as the busy
 	// worker reads at least the release threshold, or the last release would
 	// leave one survivor under it, and under twice the threshold, or two
 	// survivors would already be over it. Asked for 65, the worker has room
