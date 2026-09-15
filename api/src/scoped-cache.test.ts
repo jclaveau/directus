@@ -657,17 +657,19 @@ describe('createScopedCacheCollector', () => {
 		// and the counters the lookup took before its query.
 		const acmeMetrics = { collection: 'metric', field: 'owner', value: 'acme' };
 
-		const metricLookup = () =>
-			withMeta([{ id: 1 }], {
+		const metricLookup = () => {
+			return withMeta([{ id: 1 }], {
 				scopedCacheTags: [acmeMetrics],
 				scopedCacheEpochs: { metric: '4' },
 			});
+		};
 
-		const auditLookup = () =>
-			withMeta([{ id: 2 }], {
+		const auditLookup = () => {
+			return withMeta([{ id: 2 }], {
 				scopedCacheTags: [{ collection: 'audit' }],
 				scopedCacheEpochs: { audit: '7' },
 			});
+		};
 
 		it('folds a pending lookup and hands its rows back', async () => {
 			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);

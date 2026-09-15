@@ -70,9 +70,11 @@ function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
 			if (entry.status === 'fulfilled') {
 				yield* readMetasOf(entry.value);
 			}
-		} else {
-			yield* readMetasOf(entry);
+
+			continue;
 		}
+
+		yield* readMetasOf(entry);
 	}
 }
 

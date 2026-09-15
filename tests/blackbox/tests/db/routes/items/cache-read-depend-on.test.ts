@@ -75,14 +75,16 @@ describe(oneLine`
 			// partitioned per owner; report carries no scope of its own.
 			await CreateCollections(vendor, {
 				collections: [
-					...DEPENDENCIES.map((collection) => ({
-						collection,
-						meta: { scoped_cache_fields: ['owner'] },
-						fields: [
-							{ field: 'owner', type: 'string', meta: {} },
-							{ field: 'amount', type: 'string', meta: {} },
-						],
-					})),
+					...DEPENDENCIES.map((collection) => {
+						return {
+							collection,
+							meta: { scoped_cache_fields: ['owner'] },
+							fields: [
+								{ field: 'owner', type: 'string', meta: {} },
+								{ field: 'amount', type: 'string', meta: {} },
+							],
+						};
+					}),
 					{
 						collection: REPORT,
 						fields: [
@@ -94,15 +96,15 @@ describe(oneLine`
 			});
 
 			await Promise.all([
-				...DEPENDENCIES.map((collection) =>
-					CreateItem(vendor, {
+				...DEPENDENCIES.map((collection) => {
+					return CreateItem(vendor, {
 						collection,
 						item: [
 							{ owner: 'acme', amount: '10' },
 							{ owner: 'globex', amount: '20' },
 						],
-					}),
-				),
+					});
+				}),
 				CreateItem(vendor, {
 					collection: REPORT,
 					item: [
@@ -126,11 +128,9 @@ describe(oneLine`
 		afterAll(async () => {
 			instance.kill();
 
-			await Promise.all(
-				[...DEPENDENCIES, REPORT].map((collection) =>
-					DeleteCollection(vendor, { collection }),
-				),
-			);
+			await Promise.all([...DEPENDENCIES, REPORT].map((collection) => {
+				return DeleteCollection(vendor, { collection });
+			}));
 		});
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;

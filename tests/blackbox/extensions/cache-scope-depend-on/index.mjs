@@ -27,12 +27,13 @@ let alreadyFired = false;
 
 export default function registerHooks({ filter }, { services }) {
 	filter(`${REPORT}.items.read`, async (records, meta, context) => {
-		const serviceOf = (collection) =>
-			new services.ItemsService(collection, {
+		const serviceOf = (collection) => {
+			return new services.ItemsService(collection, {
 				schema: context.schema,
 				accountability: context.accountability,
 				knex: context.database,
 			});
+		};
 
 		const lookup = (collection) => {
 			return serviceOf(collection).readByQuery(
