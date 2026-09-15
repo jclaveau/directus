@@ -35,6 +35,13 @@ export type QueryOptions = {
 	stripNonRequested?: boolean;
 	permissionsAction?: PermissionsAction;
 	emitEvents?: boolean;
+	/**
+	 * Skip capturing the scoped cache purge counters this read would be guarded by.
+	 * Only for a read whose rows can never become a cached response — the counters
+	 * are what stops a fill from storing rows a concurrent write already replaced,
+	 * so a read that does reach `respond` must keep capturing them.
+	 */
+	skipScopedCacheEpochs?: boolean;
 };
 
 export type MutationOptions = {

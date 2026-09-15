@@ -20,7 +20,7 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 const mocks = vi.hoisted(() => {
 	return {
-		mockCache: { get: vi.fn(), set: vi.fn() },
+		mockCache: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
 		tagScopedCacheKeys: vi.fn(),
 		scopedCachePurgeEnabled: vi.fn(() => false),
 		serializeScopedCacheTags: vi.fn(() => 'SERIALIZED'),
@@ -31,6 +31,17 @@ const mocks = vi.hoisted(() => {
 		queueCacheDescriptor: vi.fn().mockResolvedValue(undefined),
 		reportCacheAnomaly: vi.fn().mockResolvedValue(undefined),
 		writeCacheTombstone: vi.fn().mockResolvedValue(undefined),
+		scopedCacheSweptDuringFill: vi.fn().mockResolvedValue(undefined),
+		evictCacheEntry: vi.fn(async (cache: any, redisKey: string) => {
+			await cache.delete(redisKey);
+			await cache.delete(`${redisKey}__expires_at`);
+			await cache.delete(`${redisKey}__tags`);
+
+			// The real one reads the key back, because a store reports an error by
+			// answering `undefined` rather than throwing.
+			return true;
+		}),
+		recordPendingScopedCachePurge: vi.fn().mockResolvedValue(undefined),
 		queueMissLatency: vi.fn(),
 		stringByteSize: vi.fn((s: string) => Buffer.byteLength(s, 'utf8')),
 	};
@@ -52,6 +63,10 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
 		serializeScopedCacheTags: mocks.serializeScopedCacheTags,
+		scopedCacheSweptDuringFill: mocks.scopedCacheSweptDuringFill,
+		// Real, so the unguarded cases below assert the predicate rather than a
+		// stand-in agreeing with them: it is pure, and reaches no Redis.
+		scopedCacheCollectionsWithoutGuard: actual.scopedCacheCollectionsWithoutGuard,
 		// The real one, not a stand-in. The descriptor assertion reads the tag
 		// SPELLING, and a copy here drifts off `canonicalScopedCacheValue` — it
 		// would render a boolean slice `=1` where production writes `=true`, so
@@ -64,10 +79,15 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 vi.mock('../cache-events.js', () => {
 	return {
 		cacheStatsActive: () => true,
+		evictCacheEntry: mocks.evictCacheEntry,
 		queueCacheDescriptor: mocks.queueCacheDescriptor,
 		writeCacheTombstone: mocks.writeCacheTombstone,
 		queueMissLatency: mocks.queueMissLatency,
 	};
+});
+
+vi.mock('../scoped-cache-pending-purges.js', () => {
+	return { recordPendingScopedCachePurge: mocks.recordPendingScopedCachePurge };
 });
 
 vi.mock('../utils/get-string-byte-size.js', () => {
@@ -118,6 +138,7 @@ vi.mock('../services/import-export.js', () => {
 });
 
 import { setCacheValue } from '../cache.js';
+import { getCacheKey } from '../utils/get-cache-key.js';
 import { respond } from './respond.js';
 
 const next = vi.fn();
@@ -188,15 +209,17 @@ describe('respond middleware', () => {
 			expect.any(Number),
 		);
 
-		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
-			mockCache,
+		// Written straight through the store, not through `setCacheValue`: three
+		// numbers do not repay a compression pass on every fill and a second on
+		// every hit.
+		expect(mockCache.set).toHaveBeenCalledWith(
 			'cache-key__expires_at',
 			{
 				exp: expect.any(Number),
 				createdAt: expect.any(Number),
 				ttlMs: expect.any(Number),
 			},
-			// The sibling now carries an explicit ttl so it tracks the live override,
+			// The sibling carries an explicit ttl so it tracks the live override,
 			// not the response cache's construction-time Keyv default.
 			expect.any(Number),
 		);
@@ -208,6 +231,31 @@ describe('respond middleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'max-age=300');
 		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
+	});
+
+	test(oneLine`
+		takes the cache key the middleware already built for the lookup that missed,
+		rather than rebuilding it — each build runs a policy ip-access lookup
+	`, async () => {
+		await respond(makeReq(), makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [{ collection: 'articles' }],
+				httpRequestCacheKey: {
+					redisKey: 'middleware-key',
+					cacheKey: 'middleware-hash',
+				},
+			},
+		), next);
+
+		expect(vi.mocked(getCacheKey)).not.toHaveBeenCalled();
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
+			mockCache,
+			'middleware-key',
+			{ data: [{ id: 1 }] },
+			expect.any(Number),
+		);
 	});
 
 	test('a fill with stats active captures the descriptor + tombstone', async () => {
@@ -438,6 +486,191 @@ describe('respond middleware', () => {
 		expect(tagScopedCacheKeys).toHaveBeenCalledWith('cache-key', [], []);
 	});
 
+	test(oneLine`
+		names the collection whose purge raced the fill, so a read serving rows a write
+		already replaced is attributable rather than silent
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.anything(),
+			'inflight_purge',
+			'articles',
+		);
+
+		expect(res.json).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		records the entry a failed eviction left cached, so the drain finishes what
+		the in-flight purge could not
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
+
+		// What a store that swallowed the delete answers. Nothing throws, so
+		// without reading the eviction back the entry stays and serves rows the
+		// purge already superseded, for its whole TTL.
+		// `Once`, not a standing override: `clearAllMocks` resets the calls but keeps
+		// the implementation, so a standing one would answer for every later test.
+		mocks.evictCacheEntry.mockResolvedValueOnce(false);
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles', field: 'author', value: 7 }],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.recordPendingScopedCachePurge).toHaveBeenCalledWith(
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:author=7'],
+			},
+			expect.any(Error),
+		);
+	});
+
+	test('records nothing when the eviction took', async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(mocks.recordPendingScopedCachePurge).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		a purge that swept while the fill was writing takes the entry back out — its
+		sweep read the tag index before this key was filed into it
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		// Moved by the time the writes landed: the guard's reading is taken after
+		// them, and it is the one that decides.
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue('articles');
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+		expect(mockCache.delete).toHaveBeenCalledWith('cache-key');
+		expect(mockCache.delete).toHaveBeenCalledWith('cache-key__expires_at');
+	});
+
+	test(oneLine`
+		the control: an unmoved epoch is the ordinary fill, so the guard cannot be
+		passing by refusing to cache everything
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+		mocks.scopedCacheSweptDuringFill.mockResolvedValue(undefined);
+
+		const res = makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'articles' }],
+			scopedCacheEpochs: { articles: '7' },
+		});
+
+		await respond(makeReq(), res, next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		refuses to cache a response scoped to a collection the capture never covered —
+		a hook's scopeTo runs after it, so no counter can show a purge of that
+		collection landed mid-read
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		await respond(makeReq(), makeRes({ data: [] }, {
+			scopedCacheTags: [
+				{ collection: 'articles' },
+				{ collection: 'authors' },
+			],
+			scopedCacheEpochs: { articles: '7', '*': '1' },
+		}), next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.anything(),
+			'unguarded_scope',
+			'authors',
+		);
+	});
+
+	test(oneLine`
+		caches the same response once the foreign collection's counter was handed over,
+		so declaring a cross-collection dependency stays a cacheable thing to do
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		await respond(makeReq(), makeRes({ data: [] }, {
+			scopedCacheTags: [
+				{ collection: 'articles' },
+				{ collection: 'authors' },
+			],
+			scopedCacheEpochs: { articles: '7', authors: '4', '*': '1' },
+		}), next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		leaves a response alone when no capture ran at all — with no wholesale entry
+		there is no guard to be outside of, and refusing would take the whole cache
+		down wherever the counters are off
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		await respond(makeReq(), makeRes({ data: [] }, {
+			scopedCacheTags: [{ collection: 'authors' }],
+			scopedCacheEpochs: {},
+		}), next);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		a refused tag index leaves NO value cached: an untagged entry is unreachable to
+		every purge and would serve stale for its whole TTL
+	`, async () => {
+		vi.mocked(tagScopedCacheKeys).mockRejectedValueOnce(new Error('OOM'));
+		const res = makeRes({ data: [] });
+		const req = makeReq();
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(warn).toHaveBeenCalled();
+		expect(res.json).toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.any(Object),
+			'redis_error',
+			'OOM',
+		);
+	});
+
 	test('caching failure is caught and logged, not thrown', async () => {
 		vi.mocked(setCacheValue).mockRejectedValueOnce(new Error('boom'));
 		const res = makeRes({ data: [] });
@@ -446,7 +679,8 @@ describe('respond middleware', () => {
 		await respond(req, res, next);
 
 		expect(warn).toHaveBeenCalled();
-		// tagging is skipped once the set throws, but the response still flushes
+		// The tag index is written first, so a failed value write leaves a tag naming
+		// a key that never landed — one wasted `del` on the next purge, nothing stale.
 		expect(res.json).toHaveBeenCalled();
 
 		// the failed write also surfaces as a redis_error anomaly carrying the message

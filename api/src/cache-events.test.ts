@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
 	cacheStatsActive,
@@ -2540,14 +2541,56 @@ describe('listCacheGroupLatencies', () => {
 });
 
 describe('evictCacheEntry', () => {
-	it('deletes the value and its siblings', async () => {
-		const cache = { delete: vi.fn() };
+	// A store that answers: what was set reads back, what was deleted does not.
+	function liveStore() {
+		const held = new Map<string, unknown>([['k1', 'v']]);
 
-		await evictCacheEntry(cache as any, 'k1');
+		return {
+			set: vi.fn(async (key: string, value: unknown) => {
+				held.set(key, value);
+			}),
+			get: vi.fn(async (key: string) => held.get(key)),
+			delete: vi.fn(async (key: string) => held.delete(key)),
+		};
+	}
+
+	it('deletes the value and its siblings, and reports them gone', async () => {
+		const cache = liveStore();
+
+		expect(await evictCacheEntry(cache as any, 'k1')).toBe(true);
 
 		expect(cache.delete).toHaveBeenCalledWith('k1');
 		expect(cache.delete).toHaveBeenCalledWith('k1__expires_at');
 		expect(cache.delete).toHaveBeenCalledWith('k1__tags');
+	});
+
+	it('reports an entry the delete left behind', async () => {
+		const cache = liveStore();
+		cache.delete.mockResolvedValue(false);
+
+		expect(await evictCacheEntry(cache as any, 'k1')).toBe(false);
+	});
+
+	it(oneLine`
+		reports nothing evicted when the store swallows every call, since the empty
+		read-back then proves nothing
+	`, async () => {
+		// What an offline `@keyv/redis` looks like: each method emits `error` and
+		// resolves as if the key were absent.
+		const cache = {
+			set: vi.fn().mockResolvedValue(true),
+			get: vi.fn().mockResolvedValue(undefined),
+			delete: vi.fn().mockResolvedValue(true),
+		};
+
+		expect(await evictCacheEntry(cache as any, 'k1')).toBe(false);
+	});
+
+	it('reports nothing evicted when the store throws', async () => {
+		const cache = liveStore();
+		cache.delete.mockRejectedValue(new Error('gone'));
+
+		expect(await evictCacheEntry(cache as any, 'k1')).toBe(false);
 	});
 });
 

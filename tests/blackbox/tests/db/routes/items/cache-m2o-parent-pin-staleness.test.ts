@@ -175,6 +175,13 @@ describe(oneLine`
 
 			const warm = await readOwnedItemsNamedFilterMatched();
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Arms everything below: a read that never caches MISSes after the write
+			// too, so without this the file stays green on a cache that quietly
+			// stopped storing these entries at all.
+			const armed = await readOwnedItemsNamedFilterMatched();
+			expect(armed.headers[cacheStatusHeader]).toBe('HIT');
+
 			expect(warm.body.data).toHaveLength(1);
 
 			// This owner was never nested by the read above, but renaming it moves its
@@ -219,6 +226,13 @@ describe(oneLine`
 
 			const warm = await readDeepItemsWithMatchedOwner();
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Arms everything below: a read that never caches MISSes after the write
+			// too, so without this the file stays green on a cache that quietly
+			// stopped storing these entries at all.
+			const armed = await readDeepItemsWithMatchedOwner();
+			expect(armed.headers[cacheStatusHeader]).toBe('HIT');
+
 			expect(warm.body.data).toHaveLength(2);
 
 			// The second row references this owner but the deep filter hid it, so the
@@ -266,6 +280,13 @@ describe(oneLine`
 
 			const warm = await readChainedItemsWithMatchedCompany();
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Arms everything below: a read that never caches MISSes after the write
+			// too, so without this the file stays green on a cache that quietly
+			// stopped storing these entries at all.
+			const armed = await readChainedItemsWithMatchedCompany();
+			expect(armed.headers[cacheStatusHeader]).toBe('HIT');
+
 			expect(warm.body.data).toHaveLength(2);
 
 			// The owner of the second row belongs to the other company, so the
@@ -314,6 +335,13 @@ describe(oneLine`
 
 			const warm = await readGrandparentItemsWithMatchedCompany();
 			expect(warm.headers[cacheStatusHeader]).toBe('MISS');
+
+			// Arms everything below: a read that never caches MISSes after the write
+			// too, so without this the file stays green on a cache that quietly
+			// stopped storing these entries at all.
+			const armed = await readGrandparentItemsWithMatchedCompany();
+			expect(armed.headers[cacheStatusHeader]).toBe('HIT');
+
 			expect(warm.body.data).toHaveLength(2);
 
 			// Both owners come back — only the company of the second is withheld,

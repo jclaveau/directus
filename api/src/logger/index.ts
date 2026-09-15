@@ -28,6 +28,22 @@ export const useLogger = () => {
 	return _cache.logger;
 };
 
+/**
+ * Whether anything is listening for the log stream.
+ *
+ * `LogsHandler` is the channel's only subscriber and `server.ts` registers it only
+ * with websockets on, while `WEBSOCKETS_LOGS_ENABLED` defaults to true and
+ * `WEBSOCKETS_ENABLED` defaults to false — so the default configuration published
+ * every log line to redis for a subscriber that was never started. One line per
+ * request, measured, on an instance nobody could read the logs from.
+ */
+export const webSocketLogsEnabled = () => {
+	const env = useEnv();
+
+	return toBoolean(env['WEBSOCKETS_ENABLED'])
+		&& toBoolean(env['WEBSOCKETS_LOGS_ENABLED']);
+};
+
 export const getLogsStream = (pretty: boolean) => {
 	if (_cache.logsStream) {
 		return _cache.logsStream;
@@ -103,7 +119,7 @@ export const createLogger = () => {
 	}
 
 	// WebSocket Logs
-	if (toBoolean(env['WEBSOCKETS_LOGS_ENABLED'])) {
+	if (webSocketLogsEnabled()) {
 		const wsLevel = (env['WEBSOCKETS_LOGS_LEVEL'] as string) || 'info';
 
 		if (getLoggerLevelValue(wsLevel) < getLoggerLevelValue(mergedOptions.level!)) {
@@ -133,7 +149,7 @@ export const createExpressLogger = () => {
 		},
 	};
 
-	if (env['LOG_STYLE'] === 'raw' || toBoolean(env['WEBSOCKETS_LOGS_ENABLED'])) {
+	if (env['LOG_STYLE'] === 'raw' || webSocketLogsEnabled()) {
 		httpLoggerOptions.redact = {
 			paths: ['req.headers.authorization', 'req.headers.cookie', 'res.headers', 'req.query.access_token'],
 			censor: redactHeaders,
@@ -193,7 +209,7 @@ export const createExpressLogger = () => {
 	}
 
 	// WebSocket Logs
-	if (toBoolean(env['WEBSOCKETS_LOGS_ENABLED'])) {
+	if (webSocketLogsEnabled()) {
 		const wsLevel = (env['WEBSOCKETS_LOGS_LEVEL'] as string) || 'info';
 
 		if (getLoggerLevelValue(wsLevel) < getLoggerLevelValue(mergedHttpOptions.level!)) {

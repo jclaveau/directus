@@ -55,3 +55,4 @@ TODO
 # Benchmark output and its throwaway extensions dir
 tests/perf/results/
 tests/perf/extensions/
+tests/perf/cache-extensions/

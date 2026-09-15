@@ -187,6 +187,7 @@ CACHE_ENABLED=false
 # tag — more purging, never staler. Each pin costs a Redis set and a member of the
 # collection's slice index, so raise it for hit ratio and lower it for memory. [250]
 # CACHE_SCOPED_MAX_PINS_PER_COLLECTION=250
+# CACHE_SCOPED_PURGE_RETRY_INTERVAL=1m
 
 # Request dimensions folded into the cache key so a header-varying response
 # isn't served across callers. The response language (Accept-Language,

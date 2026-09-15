@@ -1,6 +1,6 @@
 ---
 name: reference_directus_scopedcache_api
-description: the context.scopedCache hook API (#292) — event-scoped scopeTo (read) / purgeBy (write), single union-typed field; full compile-time event→method typing is the follow-up #294
+description: the context.scopedCache hook API (#292) — event-scoped scopeTo + dependOn (read) / purgeBy (write), single union-typed field; full compile-time event→method typing is the follow-up #294
 metadata:
   author: Jean Claveau
   type: reference
@@ -10,6 +10,8 @@ metadata:
 
 - `items.read` filter → `context.scopedCache.scopeTo(tags)` — scope the response TO extra slices it depends on (mirrors the `cache.scope` event). Drained into the read's `scopedCacheTags` meta rider.
 - `items.create`/`update`/`delete` filter → `context.scopedCache.purgeBy(tags)` — purge cached responses BY extra slices this mutation touched (mirrors `cache.purge`). Unioned into the purge tags.
+
+- `items.read` filter → `context.scopedCache.dependOn(lookup)` (#438, 2026-09-15) — the one-call form of the pair above: takes the lookup as returned (pending / `Promise.all` batch / `allSettled` verdicts), folds each fulfilled one's `scopedCacheTags` + `scopedCacheEpochs`, returns the lookup resolved. Prefer it over `scopeTo` for a dependency lookup: forgetting `epochs` on `scopeTo` costs no error, only cacheability (`unguarded_scope`). Rejected verdicts pass through untouched. bb: `cache-read-depend-on.test.ts` (extension `cache-scope-depend-on`, all three shapes + passthrough); unit: `scoped-cache.test.ts` `dependOn` describe.
 
 `tags` is one `ScopedCacheTag` or a batch — pass `result.getMeta().scopedCacheTags` from a lookup `readByQuery` to reuse the exact slices it pinned rather than hand-build a tag ([[feedback_reuse_source_of_truth_combiner]]). Idempotent (structural dedup). No-op when scoped purge is off / off the HTTP path. Backs [[reference_directus_takeover_cache_scoping]] (a create hook `purgeBy`s to declare a takeover's footprint and opt out of the coarse fallback).
 

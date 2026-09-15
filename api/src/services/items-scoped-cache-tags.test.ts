@@ -10,10 +10,18 @@ vi.mock('../cache.js', () => ({
 	getCache: () => ({ cache: null }),
 }));
 
-vi.mock('../scoped-cache.js', async (importOriginal) => {
+// The owning modules, not the barrel: the collaborator imports its siblings
+// directly, so a stand-in on the re-export would leave the real ones in its graph.
+vi.mock('../scoped-cache/purge.js', async (importOriginal) => {
 	return {
-		...(await importOriginal<typeof import('../scoped-cache.js')>()),
+		...(await importOriginal<typeof import('../scoped-cache/purge.js')>()),
 		purgeScopedCache: vi.fn(),
+	};
+});
+
+vi.mock('../scoped-cache/config.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache/config.js')>()),
 		scopedCachePurgeEnabled: vi.fn(() => true),
 	};
 });
@@ -145,7 +153,7 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await (service as any).snapshotScopedCacheTags([1])).toEqual([]);
+		expect(await service.scopedCache.snapshot([1])).toEqual([]);
 	});
 
 	test('resolves the key slice on a collection it does know', async () => {
@@ -155,7 +163,7 @@ describe(oneLine`
 			accountability: null,
 		});
 
-		expect(await (service as any).snapshotScopedCacheTags([1])).toEqual([
+		expect(await service.scopedCache.snapshot([1])).toEqual([
 			{ collection: 'articles', field: 'id', value: 1, type: 'integer' },
 		]);
 	});
