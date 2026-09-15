@@ -1,5 +1,5 @@
 import { useLogger } from '../logger/index.js';
-import { _cache as metrics } from '../metrics/lib/instance.js';
+import { _cache } from '../metrics/lib/instance.js';
 
 /**
  * How long the same failure goes without earning another line.
@@ -49,7 +49,7 @@ export function reportUnhandledRejection(reason: unknown): void {
 	// never loads the database graph behind it for a counter nothing scrapes.
 	// The worker has one from the moment its schedules module loads; a rejection
 	// while the CLI builds, before that, is logged and not counted.
-	metrics.metrics
+	_cache.metrics
 		?.getUnhandledRejectionMetric()
 		.inc();
 

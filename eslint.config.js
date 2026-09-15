@@ -8,6 +8,39 @@ import globals from 'globals';
 import process from 'node:process';
 import typescriptEslint from 'typescript-eslint';
 
+// Naming the package resolves all of it: lodash-es is 640 modules and date-fns
+// 304, and the API loads both before it answers anything. Each package gathers
+// what it calls in a `*-used.ts`, so the set stays visible and stays small. A
+// flat config replaces a rule rather than adding to it, so every block below
+// that restricts more imports for fewer files spreads these in again.
+// https://github.com/jclaveau/directus/issues/433
+const gatheredPackages = {
+	paths: [
+		{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
+		{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
+	],
+	patterns: [
+		{
+			group: ['lodash-es/*'],
+			message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
+		},
+		{
+			group: ['date-fns/*'],
+			message: "Add it to this package's 'date-fns-used.ts' and import from there.",
+		},
+	],
+};
+
+// `@directus/utils` ships as one bundle, so naming the package loads joi,
+// date-fns, micromustache and the system-data tables whatever was asked for —
+// 30 MB and 272 ms of it, measured, in every process that reads a variable.
+// `@directus/utils/values` carries the helpers that reach for nothing of their
+// own. https://github.com/jclaveau/directus/issues/489
+const utilsBundle = {
+	name: '@directus/utils',
+	message: "Import from '@directus/utils/values'; a helper that reaches for nothing of its own belongs there.",
+};
+
 export default typescriptEslint.config(
 	// Global config
 	{
@@ -158,29 +191,7 @@ export default typescriptEslint.config(
 			'packages/{env,extensions,schema-builder,utils}/**/*.ts',
 		],
 		rules: {
-			// Naming the package resolves all of it: lodash-es is 640 modules and
-			// date-fns 304, and the API loads both before it answers anything. Each
-			// package gathers what it calls in a `*-used.ts`, so the set stays visible
-			// and stays small. https://github.com/jclaveau/directus/issues/433
-			'no-restricted-imports': [
-				'error',
-				{
-					paths: [
-						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
-						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
-					],
-					patterns: [
-						{
-							group: ['lodash-es/*'],
-							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
-						},
-						{
-							group: ['date-fns/*'],
-							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
-						},
-					],
-				},
-			],
+			'no-restricted-imports': ['error', gatheredPackages],
 		},
 	},
 
@@ -245,9 +256,7 @@ export default typescriptEslint.config(
 	// command it runs; a static import here puts all thirteen back into every one of
 	// them. The extension loader and the emitter sit behind the same kind of gate:
 	// the loader's module is the extension manager's graph and the emitter's the
-	// database's, ~150 MB between them in a process that loads no extension. The
-	// two bans above are repeated because this replaces that rule for this file
-	// rather than adding to it.
+	// database's, ~150 MB between them in a process that loads no extension.
 	// https://github.com/jclaveau/directus/issues/489
 	{
 		files: ['api/src/cli/index.ts'],
@@ -255,11 +264,9 @@ export default typescriptEslint.config(
 			'no-restricted-imports': [
 				'error',
 				{
-					paths: [
-						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
-						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
-					],
+					paths: gatheredPackages.paths,
 					patterns: [
+						...gatheredPackages.patterns,
 						{
 							group: ['../server.js', './commands/**', '../processes/**'],
 							message: 'Import it from the command\'s own action, so only the process running that command pays for it.',
@@ -275,34 +282,16 @@ export default typescriptEslint.config(
 		},
 	},
 
-	// `@directus/utils` ships as one bundle, so naming the package loads joi,
-	// date-fns, micromustache and the system-data tables whatever was asked for —
-	// 30 MB and 272 ms of it, measured, in every process that reads a variable.
-	// `@directus/utils/values` carries the helpers that reach for nothing of their
-	// own. The two bans above are repeated because this replaces that rule for
-	// these files rather than adding to it.
-	// https://github.com/jclaveau/directus/issues/489
+	// Every process reads a variable, so the package that reads them holds the
+	// bundle out of all of them.
 	{
 		files: ['packages/env/**/*.ts'],
 		rules: {
 			'no-restricted-imports': [
 				'error',
 				{
-					paths: [
-						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
-						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
-						{ name: '@directus/utils', message: "Import from '@directus/utils/values'." },
-					],
-					patterns: [
-						{
-							group: ['lodash-es/*'],
-							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
-						},
-						{
-							group: ['date-fns/*'],
-							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
-						},
-					],
+					paths: [...gatheredPackages.paths, utilsBundle],
+					patterns: gatheredPackages.patterns,
 				},
 			],
 		},
@@ -312,10 +301,8 @@ export default typescriptEslint.config(
 	// modules it is made of and the bus they share settings over. Each reads a
 	// variable and coerces a value, and the barrel would put joi, date-fns and the
 	// system-data tables under every one of them — 31 MB resident in a process that
-	// scales workers. The two bans above are repeated because this replaces that
-	// rule for these files rather than adding to it; `index.graph.test.ts` beside
-	// the autoscaler pins the rest of its graph, which this list cannot name file
-	// by file.
+	// scales workers. `index.graph.test.ts` beside the autoscaler pins the rest of
+	// its graph, which this list cannot name file by file.
 	// https://github.com/jclaveau/directus/issues/489
 	{
 		files: [
@@ -332,24 +319,8 @@ export default typescriptEslint.config(
 			'no-restricted-imports': [
 				'error',
 				{
-					paths: [
-						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
-						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
-						{
-							name: '@directus/utils',
-							message: "Import from '@directus/utils/values'; a helper that reaches for nothing of its own belongs there.",
-						},
-					],
-					patterns: [
-						{
-							group: ['lodash-es/*'],
-							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
-						},
-						{
-							group: ['date-fns/*'],
-							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
-						},
-					],
+					paths: [...gatheredPackages.paths, utilsBundle],
+					patterns: gatheredPackages.patterns,
 				},
 			],
 		},
@@ -367,23 +338,9 @@ export default typescriptEslint.config(
 			'no-restricted-imports': [
 				'error',
 				{
-					paths: [
-						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
-						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
-						{
-							name: '@directus/utils',
-							message: "Import from '@directus/utils/values'; a helper that reaches for nothing of its own belongs there.",
-						},
-					],
+					paths: [...gatheredPackages.paths, utilsBundle],
 					patterns: [
-						{
-							group: ['lodash-es/*'],
-							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
-						},
-						{
-							group: ['date-fns/*'],
-							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
-						},
+						...gatheredPackages.patterns,
 						{
 							regex: String.raw`^\.\./metrics/(?!lib/instance\.js$)`,
 							message: 'Read the registry this process holds from metrics/lib/instance.js; creating one is the database graph.',

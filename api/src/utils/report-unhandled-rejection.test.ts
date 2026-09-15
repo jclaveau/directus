@@ -1,7 +1,7 @@
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useLogger } from '../logger/index.js';
-import { _cache as metrics } from '../metrics/lib/instance.js';
+import { _cache } from '../metrics/lib/instance.js';
 import {
 	guardUnhandledRejections,
 	reportUnhandledRejection,
@@ -23,13 +23,13 @@ beforeEach(() => {
 
 	vi.mocked(useLogger).mockReturnValue({ error } as any);
 
-	metrics.metrics = {
+	_cache.metrics = {
 		getUnhandledRejectionMetric: () => ({ inc }),
 	} as any;
 });
 
 afterEach(() => {
-	metrics.metrics = undefined;
+	_cache.metrics = undefined;
 	vi.useRealTimers();
 	vi.clearAllMocks();
 });
@@ -94,7 +94,7 @@ describe('reportUnhandledRejection', () => {
 	});
 
 	it('reports even where this process created no metrics', () => {
-		metrics.metrics = undefined;
+		_cache.metrics = undefined;
 
 		expect(() => reportUnhandledRejection(new Error('boom'))).not.toThrow();
 		expect(error).toHaveBeenCalledOnce();
