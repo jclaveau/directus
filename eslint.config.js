@@ -267,6 +267,39 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// `@directus/utils` ships as one bundle, so naming the package loads joi,
+	// date-fns, micromustache and the system-data tables whatever was asked for —
+	// 30 MB and 272 ms of it, measured, in every process that reads a variable.
+	// `@directus/utils/values` carries the helpers that reach for nothing of their
+	// own. The two bans above are repeated because this replaces that rule for
+	// these files rather than adding to it.
+	// https://github.com/jclaveau/directus/issues/489
+	{
+		files: ['packages/env/**/*.ts'],
+		rules: {
+			'no-restricted-imports': [
+				'error',
+				{
+					paths: [
+						{ name: 'lodash-es', message: "Import from this package's 'lodash-es-used.js'." },
+						{ name: 'date-fns', message: "Import from this package's 'date-fns-used.js'." },
+						{ name: '@directus/utils', message: "Import from '@directus/utils/values'." },
+					],
+					patterns: [
+						{
+							group: ['lodash-es/*'],
+							message: "Add it to this package's 'lodash-es-used.ts' and import from there.",
+						},
+						{
+							group: ['date-fns/*'],
+							message: "Add it to this package's 'date-fns-used.ts' and import from there.",
+						},
+					],
+				},
+			],
+		},
+	},
+
 	// The two modules that gather them are the only place allowed to reach the package
 	{
 		files: ['**/lodash-es-used.ts', '**/date-fns-used.ts'],

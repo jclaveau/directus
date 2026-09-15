@@ -1,4 +1,4 @@
-import { toArray, toBoolean } from '@directus/utils';
+import { toArray, toBoolean } from '@directus/utils/values';
 import { getDefaultType } from '../utils/get-default-type.js';
 import { guessType } from '../utils/guess-type.js';
 import { getCastFlag } from '../utils/has-cast-prefix.js';
