@@ -48,6 +48,7 @@ import { redisConfigAvailable, useRedis } from './redis/index.js';
 import emitter from './emitter.js';
 import { getCache } from './cache.js';
 import { useLogger } from './logger/index.js';
+import { withMeta } from './utils/read-meta.js';
 import {
 	queueCacheAnomaly,
 	queueCachePurge,
@@ -649,6 +650,115 @@ describe('createScopedCacheCollector', () => {
 		purge.purgeBy({ collection: 'authors' });
 
 		expect(manuallyPurgedKeys.size).toBe(0);
+	});
+
+	describe('dependOn', () => {
+		// A lookup as `readByQuery` returns it: rows carrying the tags they resolved
+		// and the counters the lookup took before its query.
+		const acmeMetrics = { collection: 'metric', field: 'owner', value: 'acme' };
+
+		const metricLookup = () =>
+			withMeta([{ id: 1 }], {
+				scopedCacheTags: [acmeMetrics],
+				scopedCacheEpochs: { metric: '4' },
+			});
+
+		const auditLookup = () =>
+			withMeta([{ id: 2 }], {
+				scopedCacheTags: [{ collection: 'audit' }],
+				scopedCacheEpochs: { audit: '7' },
+			});
+
+		it('folds a pending lookup and hands its rows back', async () => {
+			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+
+			const rows = await scope.dependOn(Promise.resolve(metricLookup()));
+
+			expect(rows).toEqual([{ id: 1 }]);
+			expect(tags).toEqual([acmeMetrics]);
+			expect(epochs).toEqual({ metric: '4' });
+		});
+
+		it('takes an already-resolved lookup the same way', async () => {
+			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+
+			await scope.dependOn(metricLookup());
+
+			expect(tags).toEqual([acmeMetrics]);
+			expect(epochs).toEqual({ metric: '4' });
+		});
+
+		it(oneLine`
+			walks a Promise.all batch — a result is itself an array, so the meta rider is
+			what tells one lookup from the batch holding it
+		`, async () => {
+			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+
+			const batch = await scope.dependOn(
+				Promise.all([metricLookup(), auditLookup()]),
+			);
+
+			expect(batch).toHaveLength(2);
+			expect(tags).toEqual([acmeMetrics, { collection: 'audit' }]);
+
+			expect(epochs).toEqual({ metric: '4', audit: '7' });
+		});
+
+		it(oneLine`
+			folds the fulfilled verdicts of a Promise.allSettled batch and passes the
+			rejected one through for the caller to judge
+		`, async () => {
+			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+
+			const verdicts = await scope.dependOn(
+				Promise.allSettled([metricLookup(), Promise.reject(new Error('gone'))]),
+			);
+
+			expect(verdicts.map((verdict) => verdict.status))
+				.toEqual(['fulfilled', 'rejected']);
+
+			expect(tags).toEqual([acmeMetrics]);
+			expect(epochs).toEqual({ metric: '4' });
+		});
+
+		it(oneLine`
+			folds each lookup on its own, so two lookups of one collection straddling a
+			purge are judged on the earlier counter
+		`, async () => {
+			const { scope, epochs } = createScopedCacheCollector(emptySchema);
+
+			const before = withMeta([{ id: 1 }], {
+				scopedCacheTags: [{ collection: 'metric' }],
+				scopedCacheEpochs: { metric: '4' },
+			});
+
+			const after = withMeta([{ id: 1 }], {
+				scopedCacheTags: [{ collection: 'metric' }],
+				scopedCacheEpochs: { metric: '5' },
+			});
+
+			await scope.dependOn([after, before]);
+
+			expect(epochs).toEqual({ metric: '4' });
+		});
+
+		it('never marks a folded tag manuallyPurged', async () => {
+			const { scope, manuallyPurgedKeys } = createScopedCacheCollector(emptySchema);
+
+			await scope.dependOn(metricLookup());
+
+			expect(manuallyPurgedKeys.size).toBe(0);
+		});
+
+		it('adds nothing for a value carrying no meta rider', async () => {
+			const { scope, tags, epochs } = createScopedCacheCollector(emptySchema);
+
+			const rows = await scope.dependOn([{ id: 1 }]);
+
+			expect(rows).toEqual([{ id: 1 }]);
+			expect(tags).toEqual([]);
+			expect(epochs).toEqual({});
+		});
 	});
 });
 

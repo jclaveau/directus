@@ -21,6 +21,16 @@ export interface ScopedCacheTag {
 type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
 
 /**
+ * What a read can depend on through `dependOn`: a read result carrying its meta, a
+ * batch of them (`Promise.all`), or `Promise.allSettled`'s verdicts over them. A
+ * result is itself an array, so the rider is what tells one lookup from a batch.
+ */
+export type ScopedCacheDependency =
+	| MaybeWithMeta<unknown>
+	| readonly ScopedCacheDependency[]
+	| readonly PromiseSettledResult<ScopedCacheDependency>[];
+
+/**
  * Shape of `context.scopedCache` on an `items.read` *filter* hook. Mirrors the
  * `cache.scope` event: scope the cached response TO extra slices it needs, so a
  * later purge of any of them invalidates it. Additive to the framework tags.
@@ -67,6 +77,24 @@ export interface ScopedCacheScopeHandle {
 			epochs?: Record<string, string | null>;
 		},
 	): void;
+
+	/**
+	 * Make this read depend on a lookup it ran: fold the lookup's own tags AND the
+	 * purge counters it took before its query into this read, the pair `scopeTo`
+	 * needs spelled out. Takes the lookup as returned — still pending, one, several,
+	 * or `allSettled` verdicts — and hands it back resolved, so the call wraps the
+	 * lookup where it happens:
+	 *
+	 *   const rows = await context.scopedCache.dependOn(service.readByQuery(query));
+	 *
+	 * A rejected verdict is passed through untouched; whether it fails the read is
+	 * the caller's call. Each fulfilled lookup is folded on its own, so two lookups
+	 * of one collection straddling a purge are judged on the earlier counter.
+	 *
+	 * Nothing here is `manuallyPurged`: a lookup's returned tags are the ones the
+	 * host itself derives, which a write to that collection reproduces.
+	 */
+	dependOn<T extends ScopedCacheDependency>(lookup: T | Promise<T>): Promise<T>;
 }
 
 /**

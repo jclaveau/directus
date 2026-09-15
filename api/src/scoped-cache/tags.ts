@@ -1,10 +1,14 @@
 import { useEnv } from '@directus/env';
 import type {
+	MaybeWithMeta,
 	PrimaryKey,
+	ReadMeta,
 	SchemaOverview,
 	ScopedCacheCollector,
+	ScopedCacheDependency,
 	ScopedCacheTag,
 	Type,
+	WithMeta,
 } from '@directus/types';
 
 const env = useEnv();
@@ -43,6 +47,33 @@ export function earlierScopedCacheEpoch(
 	return leftCount <= rightCount
 		? left
 		: right;
+}
+
+/**
+ * The meta of every fulfilled lookup inside a `dependOn` argument. A read result is
+ * an array carrying a non-enumerable `getMeta`, so the rider is checked before the
+ * array shape: with it, the value is one lookup; without it, a batch to walk, whose
+ * entries are lookups or `allSettled` verdicts over them.
+ */
+function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
+	if (typeof (dependency as MaybeWithMeta<unknown>).getMeta === 'function') {
+		yield (dependency as WithMeta<unknown>).getMeta();
+		return;
+	}
+
+	if (!Array.isArray(dependency)) {
+		return;
+	}
+
+	for (const entry of dependency) {
+		if (entry !== null && typeof entry === 'object' && 'status' in entry) {
+			if (entry.status === 'fulfilled') {
+				yield* readMetasOf(entry.value);
+			}
+		} else {
+			yield* readMetasOf(entry);
+		}
+	}
 }
 
 /**
@@ -128,6 +159,15 @@ export function createScopedCacheCollector(
 		scope: {
 			scopeTo: (input, options) => {
 				add(input, options?.manuallyPurged, options?.epochs);
+			},
+			dependOn: async (lookup) => {
+				const resolved = await lookup;
+
+				for (const meta of readMetasOf(resolved)) {
+					add(meta.scopedCacheTags, false, meta.scopedCacheEpochs);
+				}
+
+				return resolved;
 			},
 		},
 		purge: {

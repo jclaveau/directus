@@ -9,8 +9,8 @@ export type EventContext = {
 	schema: SchemaOverview | null;
 	accountability: Accountability | null;
 	/**
-	 * Scoped-cache tag channel, carrying ONLY the method for this filter's event:
-	 * `scopeTo` on `items.read`, `purgeBy` on `items.create`/`update`/`delete`.
+	 * Scoped-cache tag channel, carrying ONLY the methods for this filter's event:
+	 * `scopeTo`/`dependOn` on `items.read`, `purgeBy` on `items.create`/`update`/`delete`.
 	 */
 	scopedCache?: ScopedCacheScopeHandle | ScopedCachePurgeHandle;
 };
