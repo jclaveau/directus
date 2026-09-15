@@ -1,0 +1,2 @@
+function e(e){return typeof e==`object`&&!!e&&`errors`in e&&Array.isArray(e.errors)&&`message`in e.errors[0]&&`extensions`in e.errors[0]&&`code`in e.errors[0].extensions}export{e as isDirectusError};
+//# sourceMappingURL=is-directus-error.js.map

@@ -1,13 +1,13 @@
 {
-	"name": "tests-perf",
-	"version": "0.0.0",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"bench": "vitest --watch=false"
-	},
-	"devDependencies": {
-		"@directus/tsconfig": "catalog:",
-		"vitest": "catalog:"
-	}
+  "name": "tests-perf",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@directus/tsconfig": "4.0.0",
+    "vitest": "3.2.6"
+  },
+  "scripts": {
+    "bench": "vitest --watch=false"
+  }
 }

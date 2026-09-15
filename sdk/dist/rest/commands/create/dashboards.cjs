@@ -1,0 +1,2 @@
+const e=(e,t)=>()=>({path:`/dashboards`,params:t??{},body:JSON.stringify(e),method:`POST`}),t=(e,t)=>()=>({path:`/dashboards`,params:t??{},body:JSON.stringify(e),method:`POST`});exports.createDashboard=t,exports.createDashboards=e;
+//# sourceMappingURL=dashboards.cjs.map

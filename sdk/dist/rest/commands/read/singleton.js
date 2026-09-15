@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";import{throwIfCoreCollection as t}from"../../utils/throw-core-collection.js";const n=(n,r)=>()=>(e(String(n),`Collection cannot be empty`),t(n,`Cannot use readSingleton for core collections`),{path:`/items/${n}`,params:r??{},method:`GET`});export{n as readSingleton};
+//# sourceMappingURL=singleton.js.map
