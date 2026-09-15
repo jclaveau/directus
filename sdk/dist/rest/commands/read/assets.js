@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/assets/${t}`,params:n??{},method:`GET`,onResponse:e=>e.body}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/assets/${t}`,params:n??{},method:`GET`,onResponse:e=>e.blob()}),r=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/assets/${t}`,params:n??{},method:`GET`,onResponse:e=>e.arrayBuffer()});export{r as readAssetArrayBuffer,n as readAssetBlob,t as readAssetRaw};
+//# sourceMappingURL=assets.js.map

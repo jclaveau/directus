@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/policies`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/policies/${t}`,params:n??{},method:`GET`}),r=()=>()=>({path:`/policies/me/globals`,method:`GET`});exports.readPolicies=t,exports.readPolicy=n,exports.readPolicyGlobals=r;
+//# sourceMappingURL=policies.cjs.map

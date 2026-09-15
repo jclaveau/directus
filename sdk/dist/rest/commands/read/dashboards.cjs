@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=e=>()=>({path:`/dashboards`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e.throwIfEmpty(String(t),`Key cannot be empty`),{path:`/dashboards/${t}`,params:n??{},method:`GET`});exports.readDashboard=n,exports.readDashboards=t;
+//# sourceMappingURL=dashboards.cjs.map
