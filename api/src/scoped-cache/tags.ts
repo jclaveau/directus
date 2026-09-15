@@ -56,8 +56,12 @@ export function earlierScopedCacheEpoch(
  * entries are lookups or `allSettled` verdicts over them.
  */
 function* readMetasOf(dependency: ScopedCacheDependency): Generator<ReadMeta> {
-	if (typeof (dependency as MaybeWithMeta<unknown>).getMeta === 'function') {
-		yield (dependency as WithMeta<unknown>).getMeta();
+	if (dependency === null || typeof dependency !== 'object') {
+		return;
+	}
+
+	if (typeof (dependency as MaybeWithMeta<object>).getMeta === 'function') {
+		yield (dependency as WithMeta<object>).getMeta();
 		return;
 	}
 

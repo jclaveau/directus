@@ -23,12 +23,11 @@ type ScopedCacheTagInput = ScopedCacheTag | readonly ScopedCacheTag[];
 /**
  * What a read can depend on through `dependOn`: a read result carrying its meta, a
  * batch of them (`Promise.all`), or `Promise.allSettled`'s verdicts over them. A
- * result is itself an array, so the rider is what tells one lookup from a batch.
+ * result is itself an array, so the rider is what tells one lookup from a batch —
+ * and a value without one folds nothing and passes through, which is why the type
+ * is open rather than the union it describes.
  */
-export type ScopedCacheDependency =
-	| MaybeWithMeta<unknown>
-	| readonly ScopedCacheDependency[]
-	| readonly PromiseSettledResult<ScopedCacheDependency>[];
+export type ScopedCacheDependency = unknown;
 
 /**
  * Shape of `context.scopedCache` on an `items.read` *filter* hook. Mirrors the

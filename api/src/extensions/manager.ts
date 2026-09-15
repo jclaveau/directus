@@ -837,7 +837,12 @@ export class ExtensionManager {
 		const unregisterFunctions: PromiseCallback[] = [];
 
 		const hookRegistrationContext = {
-			filter: <TIn = unknown, TOut = TIn>(event: string, handler: FilterHandler<TIn, TOut>) => {
+			// `any` for the context: the overloads on `RegisterFilter` decide what a
+			// handler sees from the event name, this one implementation serves them all.
+			filter: <TIn = unknown, TOut = TIn>(
+				event: string,
+				handler: FilterHandler<TIn, TOut, any>,
+			) => {
 				emitter.onFilter(event, handler);
 
 				unregisterFunctions.push(() => {
