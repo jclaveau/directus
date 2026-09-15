@@ -1248,18 +1248,22 @@ test('the cache costs less than what it replaces', async () => {
 	await writeFile(join(outputDir, 'cache.md'), `${report.join('\n')}\n`);
 
 	// One line for whoever is reading a commit rather than a run: CI copies it into
-	// the commit status verbatim, so it has to stand alone.
+	// the commit status verbatim, so it has to stand alone — a breached gate
+	// included, since the status is written whether or not the run below passes.
+	const over = verdicts.filter((line) => line.endsWith('OVER |'));
 	const hitMs = seriesOf('flat:hit', 'scoped').median;
 	const uncachedMs = seriesOf('flat:miss', 'off').median;
 
+	const breached = over.length > 0
+		? `${over.length} gate(s) OVER — `
+		: '';
+
 	await writeFile(
 		join(outputDir, 'cache.status.txt'),
-		`flat hit ${hitMs.toFixed(1)} ms vs ${uncachedMs.toFixed(1)} ms uncached`
-		+ ` (${(hitMs / uncachedMs).toFixed(2)}x),`
+		`${breached}flat hit ${hitMs.toFixed(1)} ms vs ${uncachedMs.toFixed(1)} ms`
+		+ ` uncached (${(hitMs / uncachedMs).toFixed(2)}x),`
 		+ ` ${commandsPerHit.get('scoped')!.toFixed(1)} redis cmd/hit\n`,
 	);
-
-	const over = verdicts.filter((line) => line.endsWith('OVER |'));
 
 	expect(over, `gates exceeded:\n${over.join('\n')}`).toEqual([]);
 }, 30 * 60 * 1000);

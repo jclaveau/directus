@@ -252,6 +252,7 @@ jobs:
           node dist/cli bootstrap
 
       - name: Measure the cache
+        id: measure
         run: pnpm --filter tests-perf bench:cache
         env:
           PERF_CLI: ${{ github.workspace }}/dist/cli
@@ -271,16 +272,23 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The status file is written before the gates are judged, so that a breach
+      # still reports its figures — the verdict comes from the step, not the file.
       - name: Report on the commit
         if: '!cancelled()'
         env:
           GH_TOKEN: ${{ github.token }}
+          MEASURED: ${{ steps.measure.outcome }}
         run: |
           if [ -f tests/perf/results/cache.status.txt ]; then
             description=$(cat tests/perf/results/cache.status.txt)
-            state=success
           else
             description='the measurement did not finish'
+          fi
+
+          if [ "$MEASURED" = success ]; then
+            state=success
+          else
             state=failure
           fi
 

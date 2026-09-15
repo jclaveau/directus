@@ -11,6 +11,7 @@ import {
 	queueCacheAnomaly,
 	queueCachePurge,
 } from '../cache-events.js';
+import { cacheStoreDropsEntries } from '../cache-store-probe.js';
 import {
 	useLogger,
 } from '../logger/index.js';
@@ -812,38 +813,6 @@ export function retryPendingScopedCachePurges(): Promise<number> {
 }
 
 /**
- * Whether the response store can actually drop an entry right now.
- *
- * Keyv reports a store error by emitting `error` and answering `undefined`, so a
- * failed `delete` is indistinguishable from a successful one at the call site —
- * which is what let a drain clear its records while purging nothing. A write read
- * back is the one answer that cannot be swallowed.
- *
- * The probe rides the cache's own namespace and carries a short ttl, so a process
- * that dies between the write and the delete leaves nothing behind for long.
- */
-async function scopedCacheStoreDropsEntries(cache: Keyv): Promise<boolean> {
-	const probeKey = '__scoped_cache_recovery_probe';
-
-	try {
-		await cache.set(probeKey, 1, 30_000);
-
-		if (await cache.get(probeKey) !== 1) {
-			return false;
-		}
-
-		// Only once it is known to be there: a store that swallowed the write has
-		// nothing to clean up, and the delete would be swallowed too.
-		await cache.delete(probeKey);
-		return true;
-	}
-	catch {
-		// A store that throws rather than swallowing is just as unusable.
-		return false;
-	}
-}
-
-/**
  * Retries the recorded targets, never the namespace: a failure records what it
  * could not drop, so recovery drops exactly that and every other slice stays
  * warm. Returns how many recorded rows it cleared — not how many targets they
@@ -883,7 +852,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	// first command — so reading it would retire the boot drain, which is the pass
 	// that exists for a process that restarted while Redis was away. A round-trip
 	// answers the question that actually matters, and dials the client on the way.
-	if (await scopedCacheStoreDropsEntries(cache) === false) {
+	if (await cacheStoreDropsEntries(cache) === false) {
 		return 0;
 	}
 

@@ -12,6 +12,7 @@ import type Keyv from 'keyv';
 import { useBus } from './bus/index.js';
 import { resolvedCacheTtl } from './cache-config.js';
 import { cacheExpiresAtKey, cacheTagsKey } from './cache-sidecars.js';
+import { cacheStoreDropsEntries } from './cache-store-probe.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
@@ -1650,12 +1651,18 @@ export async function evictCacheEntry(
 	// and answering `undefined`, so a swallowed delete is indistinguishable from a
 	// successful one at the call site — which is exactly what the in-flight purge
 	// guard must not assume, its whole job being to leave nothing stale behind.
+	// The read-back is swallowed the same way, so an empty answer is only trusted
+	// once the store proves it drops what it is asked to.
 	try {
 		await cache.delete(redisKey);
 		await cache.delete(cacheExpiresAtKey(redisKey));
 		await cache.delete(cacheTagsKey(redisKey));
 
-		return await cache.get(redisKey) === undefined;
+		if (await cache.get(redisKey) !== undefined) {
+			return false;
+		}
+
+		return await cacheStoreDropsEntries(cache);
 	}
 	catch {
 		return false;

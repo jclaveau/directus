@@ -27,6 +27,13 @@ export class CacheMulti implements Cache {
 	redis: CacheRedis;
 	bus: Bus;
 
+	/**
+	 * Bumped by every clear this process applies to its local tier, its own or a
+	 * peer's. A `get` compares it around the redis round trip: a value read before a
+	 * clear and decompressed after it is the value that clear meant to drop.
+	 */
+	private clearGeneration = 0;
+
 	constructor(config: Omit<CacheConfigMulti, 'type'>) {
 		this.local = new CacheLocal(config.local);
 		this.redis = new CacheRedis(config.redis);
@@ -43,6 +50,7 @@ export class CacheMulti implements Cache {
 			return local;
 		}
 
+		const generationBeforeRead = this.clearGeneration;
 		const shared = await this.redis.get<T>(key);
 
 		// Without this the local tier only ever holds what THIS process wrote: a peer's
@@ -52,7 +60,13 @@ export class CacheMulti implements Cache {
 		// tier (the one that set last, since it ignores its own message) and every other
 		// one paid a round trip per lookup. No `clearOthers` here: nothing changed, and
 		// the peers' copies are as valid as they were a moment ago.
-		if (shared !== undefined) {
+		//
+		// Unless a clear crossed the round trip: the redis read resolves off the
+		// socket, but decompressing it yields to the loop, and a clear landing in that
+		// gap — a permission change flushing every tier — would be undone by the refill
+		// for the life of this process. The value is still answered; only keeping it is
+		// left to the next lookup.
+		if (shared !== undefined && this.clearGeneration === generationBeforeRead) {
 			await this.local.set(key, shared);
 		}
 
@@ -60,11 +74,13 @@ export class CacheMulti implements Cache {
 	}
 
 	async set(key: string, value: unknown) {
+		this.clearGeneration++;
 		await Promise.all([this.local.set(key, value), this.redis.set(key, value)]);
 		await this.clearOthers(key);
 	}
 
 	async delete(key: string) {
+		this.clearGeneration++;
 		await Promise.all([this.local.delete(key), this.redis.delete(key)]);
 		await this.clearOthers(key);
 	}
@@ -83,6 +99,7 @@ export class CacheMulti implements Cache {
 	}
 
 	async clear(): Promise<void> {
+		this.clearGeneration++;
 		await Promise.all([this.local.clear(), this.redis.clear()]);
 		await this.clearOthers();
 	}
@@ -91,6 +108,8 @@ export class CacheMulti implements Cache {
 		// Ignore messages that were sent by the current process. The message is sent in the set and
 		// delete methods; we don't need to delete keys that are already up-to-date / already deleted
 		if (payload.origin === this.processId) return;
+
+		this.clearGeneration++;
 
 		if (payload.key !== undefined) {
 			await this.local.delete(payload.key);

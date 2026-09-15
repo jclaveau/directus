@@ -578,9 +578,15 @@ function scopedCacheFilterKeyingByAlias(
 				// The near row's foreign-key column holds that same value; when it is a
 				// flat scope field (or the pk) the read is bounded by it and the write
 				// emits the matching slice, so pin the near collection rather than bare.
+				// An operator naming no key (`_neq`, `_gt`, an empty `_in`) bounds it to
+				// nothing: a write moving the column into range emits no slice this
+				// read holds, so it depends on the near collection wholesale.
+				const nearRowKeyed = nearRowKeys.size > 0
+					&& isScopedCacheKeyableField(schema, collection, fieldName);
+
 				parts.push(new Map([[
 					alias,
-					isScopedCacheKeyableField(schema, collection, fieldName)
+					nearRowKeyed
 						? { kind: 'keyed', field: fieldName, keys: nearRowKeys }
 						: KEYING_UNKEYED,
 				]]));

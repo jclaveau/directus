@@ -2417,6 +2417,41 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 		]).not.toContain('owner');
 	});
 
+	it('names a collection whose scoped fk the filter bounds to no key', () => {
+		// The owner's `company` column is a scoped field, but `_neq 3` names no
+		// value of it: a write moving an owner's company to 4 puts its item INTO
+		// the filtered set while emitting slices this read never pinned.
+		const slicedSchema = new SchemaBuilder()
+			.collection('company', (c) => {
+				c.field('id').id();
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('company').m2o('company');
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		slicedSchema.collections['owner']!.scopedCacheFields = ['company'];
+
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				slicedSchema,
+				astOf({ filter: { owner: { company: { id: { _neq: 3 } } } } }),
+			),
+		]).toContain('owner');
+
+		expect([
+			...scopedCacheCollectionsBeyondNestedRows(
+				slicedSchema,
+				astOf({ filter: { owner: { company: { id: { _eq: 3 } } } } }),
+			),
+		]).not.toContain('owner');
+	});
+
 	it('names a collection keyed by the filter but also sorted on', () => {
 		// The sort reaches rows the key never named, so the key does not cover
 		// what this read depends on.
@@ -3037,6 +3072,52 @@ describe('scopedCacheFilterKeyingByCollection', () => {
 
 		expect(keying.get('company'))
 			.toEqual({ kind: 'independent', field: 'id', keys: new Set([3]) });
+	});
+
+	it(oneLine`
+		leaves the collection hopped THROUGH unkeyed when the far key names no row,
+		even with its fk a scoped field
+	`, () => {
+		// `_neq 3` bounds the owner's `company` column to nothing: a write moving it
+		// to 4 emits `owner:company=3` and `owner:company=4`, neither of which a
+		// read keyed on an empty set holds. Only the bare tag reaches it.
+		const scopedSchema = new SchemaBuilder()
+			.collection('company', (c) => {
+				c.field('id').id();
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('company').m2o('company');
+			})
+			.collection('owned_item', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		scopedSchema.collections['owner']!.scopedCacheFields = ['company'];
+
+		for (const operators of [
+			{ _neq: 3 },
+			{ _gt: 3 },
+			{ _nnull: true },
+			{ _nin: [3] },
+			{ _in: [] },
+		]) {
+			const keying = scopedCacheFilterKeyingByCollection(scopedSchema, {
+				type: 'root',
+				name: 'owned_item',
+				query: { filter: { owner: { company: { id: operators } } } },
+				cases: [],
+				children: [],
+			} as AST);
+
+			expect(keying.get('owner'), JSON.stringify(operators))
+				.toEqual({ kind: 'unkeyed' });
+
+			expect(keying.get('company'), JSON.stringify(operators))
+				.toEqual({ kind: 'independent', field: 'id', keys: new Set() });
+		}
 	});
 
 	it(oneLine`
