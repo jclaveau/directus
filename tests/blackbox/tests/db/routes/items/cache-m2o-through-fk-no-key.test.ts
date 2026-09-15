@@ -191,6 +191,7 @@ describe(oneLine`
 
 			const filled = await readStudentsNotInMath();
 			expect(filled.headers[cacheStatusHeader]).toBe('MISS');
+
 			expect(filled.body.data.map((row: { id: number }) => row.id))
 				.not.toContain(movedStudentId);
 
@@ -203,6 +204,7 @@ describe(oneLine`
 
 			const after = await readStudentsNotInMath();
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+
 			expect(after.body.data.map((row: { id: number }) => row.id))
 				.toContain(movedStudentId);
 
