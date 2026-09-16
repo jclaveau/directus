@@ -240,6 +240,7 @@ describe('Cache audit over the system MCP', () => {
 				scanned: 2,
 				counts: expect.objectContaining({ fresh: 0, stale: 2 }),
 				evicted: 0,
+				timedOut: false,
 				error: null,
 			});
 

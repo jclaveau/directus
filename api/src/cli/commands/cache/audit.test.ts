@@ -65,6 +65,7 @@ function report(overrides: Partial<CacheAuditRunReport> = {}): CacheAuditRunRepo
 		findings: [],
 		evicted: 0,
 		durationMs: 12,
+		timedOut: false,
 		...overrides,
 	};
 }
@@ -177,6 +178,16 @@ describe('the command', () => {
 		await expect(cacheAudit({})).rejects.toThrowError('exit:0');
 
 		expect(written.join('')).toMatch(/^3 entries audited in 12ms\n/);
+	});
+
+	test('says when the run stopped on its time budget', async () => {
+		vi.mocked(runCacheAudit).mockResolvedValue(report({ timedOut: true }));
+
+		await expect(cacheAudit({})).rejects.toThrowError('exit:0');
+
+		expect(written.join('')).toContain(
+			'\nstopped on CACHE_AUDIT_MAX_DURATION; the next run resumes behind it\n',
+		);
 	});
 
 	test('exits 1 on a stale entry', async () => {

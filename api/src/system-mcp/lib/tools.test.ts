@@ -917,6 +917,7 @@ const auditRun: CacheAuditRun = {
 	},
 	evicted: 0,
 	durationMs: 12,
+	timedOut: false,
 	error: null,
 };
 

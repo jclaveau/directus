@@ -268,6 +268,13 @@ CACHE_AUDIT_ENABLED=true
 # never sees more than one slice of uncached reads per tick. 0 is no limit. [0]
 CACHE_AUDIT_LIMIT=0
 
+# How long one audit may run before it stops and leaves the rest to the next
+# one, whatever CACHE_AUDIT_LIMIT says: a cron tick never outlives its interval,
+# and "Audit now" answers. A run stopped this way is recorded as timed out. One
+# audit runs at a time; a run asked for while another is in flight is refused
+# (503). ["10m"]
+CACHE_AUDIT_MAX_DURATION="10m"
+
 # JSON-pointer globs a cache audit ignores when comparing a stored body with a
 # fresh one: `*` is one segment, `**` the rest. For bodies a hook stamps with a
 # clock. Comma-separated. [""]

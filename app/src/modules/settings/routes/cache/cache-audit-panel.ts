@@ -25,6 +25,8 @@ export interface CacheAuditRun {
 	counts: Record<CacheAuditVerdict, number>;
 	evicted: number;
 	durationMs: number | null;
+	/** Stopped on `CACHE_AUDIT_MAX_DURATION`; what was left waits for the next run. */
+	timedOut: boolean;
 	error: string | null;
 }
 

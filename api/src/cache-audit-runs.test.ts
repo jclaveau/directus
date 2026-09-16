@@ -38,6 +38,22 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 vi.mock('./database/index.js', () => ({ default: vi.fn() }));
 
+// The in-flight claim: a Keyv with a TTL, as the lock cache is.
+const lockCache = vi.hoisted(() => {
+	const held = new Map<string, unknown>();
+
+	return {
+		held,
+		get: vi.fn(async (key: string) => held.get(key)),
+		set: vi.fn(async (key: string, value: unknown) => {
+			held.set(key, value);
+		}),
+		delete: vi.fn(async (key: string) => held.delete(key)),
+	};
+});
+
+vi.mock('./cache.js', () => ({ getCache: () => ({ lockCache }) }));
+
 import getDatabase from './database/index.js';
 
 let db: Knex;
@@ -51,7 +67,9 @@ beforeAll(() => {
 beforeEach(() => {
 	delete env['CACHE_AUDIT_RETENTION'];
 	delete env['CACHE_AUDIT_LIMIT'];
+	delete env['CACHE_AUDIT_MAX_DURATION'];
 	env['CACHE_AUDIT_ENABLED'] = true;
+	lockCache.held.clear();
 	vi.mocked(getDatabase).mockReturnValue(db);
 	vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ['Date'] });
 });
@@ -94,6 +112,7 @@ const report: CacheAuditReport = {
 	findings: [finding, { ...finding, verdict: 'tag_drift', diff: null }],
 	evicted: 2,
 	durationMs: 120,
+	timedOut: false,
 };
 
 function runRow(overrides: Record<string, unknown> = {}) {
@@ -113,6 +132,7 @@ function runRow(overrides: Record<string, unknown> = {}) {
 		unreplayable: 0,
 		evicted: 2,
 		duration_ms: 120,
+		timed_out: false,
 		error: null,
 		...overrides,
 	};
@@ -174,6 +194,7 @@ describe('finishCacheAuditRun', () => {
 			0,
 			2,
 			120,
+			false,
 			7,
 		]);
 
@@ -234,9 +255,76 @@ describe('runCacheAudit', () => {
 		const answered = await runCacheAudit('mcp', { limit: 5 });
 
 		expect(answered).toEqual({ id: 7, ...report });
-		expect(auditCache).toHaveBeenCalledWith({ limit: 5 });
+
+		expect(auditCache).toHaveBeenCalledWith({
+			limit: 5,
+			maxDurationMs: 600_000,
+		});
+
 		expect(tracker.history.insert[0]!.bindings).toContain('mcp');
 		expect(tracker.history.update).toHaveLength(1);
+	});
+
+	it(oneLine`
+		holds the run's claim while it runs, for its time budget and a minute
+		over, and lets it go after
+	`, async () => {
+		env['CACHE_AUDIT_MAX_DURATION'] = '2m';
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		vi.mocked(auditCache).mockImplementation(async () => {
+			expect(lockCache.held.get('cache-audit:run')).toBe(1_700_000_000_000);
+
+			return report;
+		});
+
+		await runCacheAudit('rest');
+
+		expect(auditCache).toHaveBeenCalledWith({
+			limit: undefined,
+			maxDurationMs: 120_000,
+		});
+
+		expect(lockCache.set)
+			.toHaveBeenCalledWith('cache-audit:run', 1_700_000_000_000, 180_000);
+
+		expect(lockCache.delete).toHaveBeenCalledWith('cache-audit:run');
+		expect(lockCache.held.has('cache-audit:run')).toBe(false);
+	});
+
+	it('refuses a run while another is in flight, before any row', async () => {
+		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'a cache audit is already running, since 2023-11-14T22:12:20.000Z',
+		);
+
+		expect(auditCache).not.toHaveBeenCalled();
+		expect(tracker.history.insert).toHaveLength(0);
+		// The refused ask leaves the claim to the run that holds it.
+		expect(lockCache.delete).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		lets the claim go when the engine throws, and takes the default budget
+		over a zero
+	`, async () => {
+		env['CACHE_AUDIT_MAX_DURATION'] = '0';
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		vi.mocked(auditCache).mockRejectedValue(new Error('redis is away'));
+
+		await expect(runCacheAudit('cron')).rejects.toThrow('redis is away');
+
+		expect(auditCache).toHaveBeenCalledWith({
+			limit: undefined,
+			maxDurationMs: 600_000,
+		});
+
+		expect(lockCache.held.has('cache-audit:run')).toBe(false);
 	});
 
 	it(oneLine`
@@ -251,7 +339,8 @@ describe('runCacheAudit', () => {
 
 		await runCacheAudit('cron');
 
-		expect(auditCache).toHaveBeenCalledWith({ limit: 250 });
+		expect(auditCache)
+			.toHaveBeenCalledWith(expect.objectContaining({ limit: 250 }));
 
 		expect(JSON.parse(tracker.history.insert[0]!.bindings[0] as string))
 			.toMatchObject({ limit: 250 });
@@ -269,12 +358,14 @@ describe('runCacheAudit', () => {
 
 		await runCacheAudit('rest', { limit: 5 });
 
-		expect(auditCache).toHaveBeenLastCalledWith({ limit: 5 });
+		expect(auditCache)
+			.toHaveBeenLastCalledWith(expect.objectContaining({ limit: 5 }));
 
 		env['CACHE_AUDIT_LIMIT'] = 0;
 		await runCacheAudit('rest');
 
-		expect(auditCache).toHaveBeenLastCalledWith({ limit: undefined });
+		expect(auditCache)
+			.toHaveBeenLastCalledWith(expect.objectContaining({ limit: undefined }));
 	});
 
 	it('refuses on a node with CACHE_AUDIT_ENABLED off, before any row', async () => {
@@ -325,6 +416,7 @@ describe('listCacheAuditRuns', () => {
 				},
 				evicted: 2,
 				durationMs: 120,
+				timedOut: false,
 				error: null,
 			},
 		]);
@@ -391,6 +483,19 @@ describe('readCacheAuditRun', () => {
 		expect(run).not.toHaveProperty('findings');
 		expect(tracker.history.select).toHaveLength(1);
 		expect(tracker.history.select[0]!.bindings).toEqual([7, 1]);
+	});
+
+	// sqlite stores a boolean as 0/1.
+	it('reads a timed-out run off either boolean spelling', async () => {
+		tracker.on.select('directus_cache_audits')
+			.response([runRow({ timed_out: 1 })]);
+
+		expect((await readCacheAuditRun(7))?.timedOut).toBe(true);
+
+		tracker.on.select('directus_cache_audits')
+			.response([runRow({ timed_out: true })]);
+
+		expect((await readCacheAuditRun(7))?.timedOut).toBe(true);
 	});
 
 	it('answers null where no run has the id', async () => {

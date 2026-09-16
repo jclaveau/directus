@@ -21,6 +21,7 @@ import {
 	queueCacheAnomaly,
 	readCacheAuditQueue,
 	readScopedCacheEntryTags,
+	retireCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
 import {
@@ -137,6 +138,10 @@ function advancedPast(): string[] {
 	return vi.mocked(advanceCacheAuditQueue).mock.calls.flatMap(([keys]) => keys);
 }
 
+function retired(): string[] {
+	return vi.mocked(retireCacheAuditQueue).mock.calls.flatMap(([keys]) => keys);
+}
+
 beforeEach(() => {
 	cache = new FakeCache();
 	envRef.current = { CACHE_AUDIT_IGNORE_PATHS: [] };
@@ -154,7 +159,7 @@ beforeEach(() => {
 	queue = [];
 
 	vi.mocked(readCacheAuditQueue).mockImplementation(async (count, _at, filter) => {
-		const stamped = new Set(advancedPast());
+		const stamped = new Set([...advancedPast(), ...retired()]);
 
 		return queue
 			.filter((each) => !stamped.has(each.cacheKey))
@@ -248,8 +253,8 @@ describe('the queue', () => {
 	});
 
 	test(oneLine`
-		passes over a descriptor whose entry is gone, advancing past it without
-		examining it
+		retires a descriptor whose entry is gone, as of when the cache was asked,
+		without examining it
 	`, async () => {
 		fill('rk2', { data: [] });
 
@@ -259,17 +264,64 @@ describe('the queue', () => {
 		);
 
 		const replay = replayer(answer({ data: [] }));
+		const startedAt = Date.now();
 
 		const report = await auditCache({ replay });
 
 		expect(report.scanned).toBe(1);
 		expect(replay).toHaveBeenCalledTimes(1);
-		expect(advancedPast()).toEqual(['ck1', 'ck2']);
+		// Out of the queue until its next fill, not merely behind the rest.
+		expect(retired()).toEqual(['ck1']);
+		expect(advancedPast()).toEqual(['ck2']);
+
+		const [, askedAt] = vi.mocked(retireCacheAuditQueue).mock.calls[0]!;
+		expect(askedAt.getTime()).toBeGreaterThanOrEqual(startedAt);
+		expect(askedAt.getTime()).toBeLessThanOrEqual(Date.now());
 
 		// Neither its body nor its tags were asked for: the cache said it was
 		// gone before either.
 		expect(cache.getMany).toHaveBeenCalledWith(['rk2']);
 		expect(readScopedCacheEntryTags).toHaveBeenCalledWith(['ck2']);
+	});
+
+	test('stops once its time is up, after the page it began', async () => {
+		fill('rk1', { data: [] });
+		fill('rk2', { data: [] });
+
+		described(
+			descriptor({ redisKey: 'rk1', cacheKey: 'ck1' }),
+			descriptor({ redisKey: 'rk2', cacheKey: 'ck2' }),
+		);
+
+		vi.mocked(readCacheAuditQueue).mockImplementation(async () => {
+			return queue.filter((each) => !advancedPast().includes(each.cacheKey))
+				.slice(0, 1);
+		});
+
+		const report = await auditCache({
+			maxDurationMs: 0,
+			replay: replayer(answer({ data: [] })),
+		});
+
+		// The first page was examined whole; the second was never read.
+		expect(report.scanned).toBe(1);
+		expect(report.timedOut).toBe(true);
+		expect(readCacheAuditQueue).toHaveBeenCalledTimes(1);
+		expect(advancedPast()).toEqual(['ck1']);
+	});
+
+	test('is not timed out where the budget outlasts the queue', async () => {
+		fill('rk1', { data: [] });
+		described(descriptor({ redisKey: 'rk1', cacheKey: 'ck1' }));
+
+		const report = await auditCache({
+			maxDurationMs: 600_000,
+			replay: replayer(answer({ data: [] })),
+		});
+
+		expect(report.scanned).toBe(1);
+		expect(report.timedOut).toBe(false);
+		expect(readCacheAuditQueue).toHaveBeenCalledTimes(2);
 	});
 
 	test(oneLine`
@@ -324,6 +376,7 @@ describe('the queue', () => {
 		expect(report.scanned).toBe(0);
 		expect(replay).not.toHaveBeenCalled();
 		expect(advanceCacheAuditQueue).not.toHaveBeenCalled();
+		expect(retireCacheAuditQueue).not.toHaveBeenCalled();
 	});
 
 	test('is advanced before the replay, not after it', async () => {

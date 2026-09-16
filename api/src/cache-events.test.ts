@@ -24,6 +24,7 @@ import {
 	listPurgesCoveringEntry,
 	readCacheAuditQueue,
 	readCacheAuditQueueState,
+	retireCacheAuditQueue,
 	readScopedCacheEntryTags,
 	readCacheDescriptorForRedisKey,
 	readCacheTombstone,
@@ -815,6 +816,8 @@ describe('drainCacheEvents', () => {
 				bytes: 42,
 				fill_ms: 240,
 				last_filled: new Date(3000),
+				// Merged on a refill: back in the audit queue where it was found gone.
+				gone_at: null,
 			},
 		]);
 
@@ -3141,6 +3144,8 @@ describe('readCacheAuditQueue', () => {
 		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
 		// Nor one written before it kept the key the cache is asked for.
 		expect(builder.whereNot).toHaveBeenCalledWith('redis_key', '');
+		// Nor one the audit found gone, until a fill clears that.
+		expect(builder.whereNull).toHaveBeenCalledWith('gone_at');
 	});
 
 	it('bounds the queue to what was verified before the run began', async () => {
@@ -3230,6 +3235,7 @@ describe('readCacheAuditQueueState', () => {
 		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
 		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
 		expect(builder.whereNot).toHaveBeenCalledWith('redis_key', '');
+		expect(builder.whereNull).toHaveBeenCalledWith('gone_at');
 
 		expect(builder.first).toHaveBeenCalledWith(
 			'COUNT(*) AS size',
@@ -3274,6 +3280,27 @@ describe('advanceCacheAuditQueue', () => {
 
 	it('asks nothing for no descriptor', async () => {
 		await advanceCacheAuditQueue([], new Date(9_500));
+
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('retireCacheAuditQueue', () => {
+	it(oneLine`
+		stamps the descriptors gone as of the ask, leaving one filled since alone
+	`, async () => {
+		const askedAt = new Date(9_500);
+
+		await retireCacheAuditQueue(['ck1', 'ck2'], askedAt);
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
+		expect(builder.where).toHaveBeenCalledWith('last_filled', '<=', askedAt);
+		expect(builder.update).toHaveBeenCalledWith({ gone_at: askedAt });
+	});
+
+	it('asks nothing for no descriptor', async () => {
+		await retireCacheAuditQueue([], new Date(9_500));
 
 		expect(mockDb).not.toHaveBeenCalled();
 	});

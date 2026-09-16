@@ -16,6 +16,7 @@ import {
 	queueCacheAnomaly,
 	readCacheAuditQueue,
 	readScopedCacheEntryTags,
+	retireCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
 import {
@@ -40,8 +41,9 @@ import { getSecret } from './utils/get-secret.js';
  * so it matched then), and the cache is asked for their bodies: only a
  * described entry can be replayed, and a table orders, pages and remembers
  * where a `SCAN` does none of it. A run with a `limit` examines that many
- * and stops; the next one resumes behind them, so a schedule audits the
- * whole cache in slices sized to the load each may put on the database.
+ * and stops, and one with a `maxDurationMs` stops when that is up; the next
+ * one resumes behind them, so a schedule audits the whole cache in slices
+ * sized to the load each may put on the database.
  *
  *   - fresh:         the replay answered the stored body.
  *   - stale:         a diff that held across two fresh reads. `purgesSinceFilled`
@@ -99,6 +101,8 @@ export type CacheAuditReplayer = (
 export interface CacheAuditOptions {
 	/** Stop after this many entries have been examined; the next run resumes. */
 	limit?: number | undefined;
+	/** Stop once this much time has passed, whatever is left; the next run resumes. */
+	maxDurationMs?: number | undefined;
 	/** Only the entries filled for this user id. */
 	user?: string | undefined;
 	/** Only the entries whose root collection is this one. */
@@ -142,13 +146,15 @@ export interface CacheAuditReport {
 	findings: CacheAuditFinding[];
 	evicted: number;
 	durationMs: number;
+	/** Stopped on `maxDurationMs`; whatever was left waits for the next run. */
+	timedOut: boolean;
 }
 
 // Entries in flight at once. Each is one uncached read of the app, so this is
 // the load the audit puts on the database, not a throughput knob.
 const REPLAY_CONCURRENCY = 4;
-// Descriptors read per page of the queue; most describe an entry the cache
-// has already dropped, and those cost one `EXISTS` each and nothing more.
+// Descriptors read per page of the queue; one whose entry the cache has
+// dropped since costs one `EXISTS`, and leaves the queue until its next fill.
 const QUEUE_PAGE = 500;
 const DIFF_PATHS_REPORTED = 20;
 // Enough diff paths to find one an ignore glob does not cover.
@@ -202,6 +208,7 @@ export async function auditCache(
 		findings: [],
 		evicted: 0,
 		durationMs: 0,
+		timedOut: false,
 	};
 
 	if (!cache) {
@@ -239,17 +246,18 @@ export async function auditCache(
 		}
 
 		// Asked whether each is held before any body is fetched: a descriptor
-		// whose entry is gone is passed over, not examined — it describes
-		// nothing until the next fill — and a page can hold more live entries
-		// than the limit has room for; those stay unstamped for the next run.
-		// Only what will be examined has its body and tags read.
+		// whose entry is gone is retired, not examined — it describes nothing
+		// until the next fill — and a page can hold more live entries than the
+		// limit has room for; those stay unstamped for the next run. Only what
+		// will be examined has its body and tags read.
+		const askedAt = new Date();
 		const held = await cache.hasMany(due.map((row) => row.redisKey));
-		const passed: string[] = [];
+		const gone: string[] = [];
 		const taken: typeof due = [];
 
 		due.forEach((row, index) => {
 			if (held[index] !== true) {
-				passed.push(row.cacheKey);
+				gone.push(row.cacheKey);
 			}
 			else if (taken.length < room) {
 				taken.push(row);
@@ -270,10 +278,13 @@ export async function auditCache(
 			};
 		});
 
-		await advanceCacheAuditQueue(
-			[...passed, ...batch.map((entry) => entry.descriptor.cacheKey)],
-			new Date(),
-		);
+		await Promise.all([
+			retireCacheAuditQueue(gone, askedAt),
+			advanceCacheAuditQueue(
+				batch.map((entry) => entry.descriptor.cacheKey),
+				new Date(),
+			),
+		]);
 
 		for (const finding of await audit.examine(batch, limit)) {
 			report.scanned += 1;
@@ -282,6 +293,16 @@ export async function auditCache(
 			if (finding.verdict !== 'fresh') {
 				report.findings.push(finding);
 			}
+		}
+
+		// After the page rather than before it: a page begun is a page examined,
+		// so the stamp it took is never left claiming a replay that did not run.
+		if (
+			options.maxDurationMs !== undefined
+			&& Date.now() - startedAt >= options.maxDurationMs
+		) {
+			report.timedOut = true;
+			break;
 		}
 	}
 

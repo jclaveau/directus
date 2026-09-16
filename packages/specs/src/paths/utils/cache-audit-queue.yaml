@@ -6,7 +6,8 @@ get:
     of them was last known to answer what the database does — every entry has
     been verified since then, by an audit or by the fill that wrote it. Beside
     the schedule and `CACHE_AUDIT_LIMIT` it says how long a full pass takes.
-    Descriptors whose entry has since gone are counted along. Admin only.
+    A descriptor whose entry went since the audit last saw it is counted along
+    until the next run retires it. Admin only.
   operationId: read-cache-audit-queue
   responses:
     '200':

@@ -49,6 +49,7 @@ function recordingTable(columns: string[], indexes: string[]) {
 		text: (name: string) => column('text', name),
 		integer: (name: string) => column('integer', name),
 		json: (name: string) => column('json', name),
+		boolean: (name: string) => column('boolean', name),
 		index: (columns: string | string[], name?: string) => {
 			indexes.push(name ?? (columns as string));
 		},
@@ -109,6 +110,8 @@ describe('20260916A-create-cache-audits', () => {
 				'integer unreplayable notNullable default=0',
 				'integer evicted notNullable default=0',
 				'integer duration_ms nullable',
+				// Stopped on CACHE_AUDIT_MAX_DURATION with entries left.
+				'boolean timed_out notNullable default=false',
 				'text error nullable',
 			],
 			indexes: ['started_at'],
@@ -159,14 +162,17 @@ describe('20260916A-create-cache-audits', () => {
 
 	it(oneLine`
 		gives the descriptors the audit's place in the cache, indexed on Postgres
-		over the expression the queue orders on
+		over the expression the queue orders on and only where the entry is held
 	`, async () => {
 		const knex = fakeKnex();
 
 		await up(knex);
 
 		expect(knex.tables['directus_cache_stats_descriptors']).toEqual({
-			columns: ['timestamp(3) audited_at nullable'],
+			columns: [
+				'timestamp(3) audited_at nullable',
+				'timestamp(3) gone_at nullable',
+			],
 			indexes: [],
 		});
 
@@ -174,7 +180,7 @@ describe('20260916A-create-cache-audits', () => {
 			'CREATE INDEX directus_cache_stats_descriptors_audit_queue '
 			+ 'ON directus_cache_stats_descriptors ((CASE WHEN audited_at IS NULL '
 			+ 'OR audited_at < last_filled THEN last_filled ELSE audited_at END), '
-			+ 'last_filled)',
+			+ 'last_filled) WHERE gone_at IS NULL',
 		);
 	});
 
@@ -199,7 +205,7 @@ describe('20260916A-create-cache-audits', () => {
 			.toEqual(['drop cache_audit_schedule']);
 
 		expect(knex.tables['directus_cache_stats_descriptors']).toEqual({
-			columns: ['drop audited_at'],
+			columns: ['drop audited_at', 'drop gone_at'],
 			indexes: ['drop directus_cache_stats_descriptors_audit_queue'],
 		});
 

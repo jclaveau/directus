@@ -644,6 +644,97 @@ describe('The cache audit replays live entries against the database', () => {
 		}, 60_000);
 
 		it(oneLine`
+			retires a descriptor whose entry is gone, and takes it back once the
+			entry is filled again
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('acme'));
+			await warm(() => readOwner('globex'));
+			await auditSettled({ collection: ROWS }, 2);
+
+			// The admin's two descriptors, by the query each was filled for.
+			async function rows(): Promise<Record<string, any>> {
+				const found = await db('directus_cache_stats_descriptors')
+					.where({ collection: ROWS, path: `/items/${ROWS}` })
+					.whereNot({ user_id: appUserId })
+					.whereIn('query', ['filter[owner][_eq]=acme', 'filter[owner][_eq]=globex'])
+					.select('query', 'last_filled', 'gone_at');
+
+				return Object.fromEntries(found.map((row: any) => [row.query, row]));
+			}
+
+			const held = await rows();
+			expect(held['filter[owner][_eq]=acme'].gone_at).toBeNull();
+			expect(held['filter[owner][_eq]=globex'].gone_at).toBeNull();
+
+			// Both entries gone: the run finds nothing of the collection to
+			// replay, and stamps the two out of the queue.
+			await clearCache();
+			const emptied = await recorded(await audit({ collection: ROWS }));
+			expect(emptied.scanned).toBe(0);
+
+			const retired = await rows();
+			expect(retired['filter[owner][_eq]=acme'].gone_at).not.toBeNull();
+			expect(retired['filter[owner][_eq]=globex'].gone_at).not.toBeNull();
+
+			// Filled again, acme is back in the queue; globex, still gone, is not
+			// walked again: the run examines exactly the one.
+			const refilledAfter = Date.now();
+			await warm(() => readOwner('acme'));
+
+			const resumed = await auditSettled({ collection: ROWS }, 1);
+			expect(resumed.scanned).toBe(1);
+			expect(resumed.counts.fresh).toBe(1);
+
+			const rearmed = await rows();
+			expect(rearmed['filter[owner][_eq]=acme'].gone_at).toBeNull();
+
+			expect(new Date(rearmed['filter[owner][_eq]=acme'].last_filled).getTime())
+				.toBeGreaterThanOrEqual(refilledAfter);
+
+			expect(rearmed['filter[owner][_eq]=globex'].gone_at).not.toBeNull();
+		}, 60_000);
+
+		it(oneLine`
+			stops on CACHE_AUDIT_MAX_DURATION after the page it began, and says so
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('acme'));
+			await warm(() => readOwner('globex'));
+			await auditSettled({ collection: ROWS }, 2);
+
+			// Flipped on this instance's own env, as the run reads it; put back
+			// whatever the witness finds.
+			async function budget(value: string) {
+				const set = await request(url)
+					.post('/env-inject/set')
+					.send({ key: 'CACHE_AUDIT_MAX_DURATION', value })
+					.set('Authorization', auth);
+
+				expect(set.statusCode).toBe(200);
+			}
+
+			await budget('1ms');
+
+			try {
+				const cut = await recorded(await audit({ collection: ROWS }));
+
+				// One page holds both, and is examined whole before the clock is
+				// read: nothing of it is left half done.
+				expect(cut.scanned).toBe(2);
+				expect(cut.timedOut).toBe(true);
+				expect(cut.error).toBeNull();
+				expect(cut.finishedAt).not.toBeNull();
+			}
+			finally {
+				await budget('10m');
+			}
+
+			const whole = await recorded(await audit({ collection: ROWS }));
+			expect(whole.timedOut).toBe(false);
+		}, 60_000);
+
+		it(oneLine`
 			calls an entry stale once its user may no longer read it: the replay
 			answers 403 where the cache still answers the rows
 		`, async () => {

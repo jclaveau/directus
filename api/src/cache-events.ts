@@ -724,6 +724,9 @@ interface CacheDescriptorRow {
 	bytes: number;
 	fill_ms: number;
 	last_filled: Date | null; // null = anomaly locator, never filled
+	// Written null on every fill: a refill puts the entry back where the audit
+	// found it gone (see `retireCacheAuditQueue`).
+	gone_at: null;
 }
 
 interface CacheAnomalyRow {
@@ -1022,6 +1025,7 @@ async function persistStreamBatch(
 				last_filled: f['ts']
 					? at
 					: null,
+				gone_at: null,
 			};
 
 			// Last write in the batch wins — a re-conflicting insert would throw.
@@ -1380,9 +1384,13 @@ export interface CacheAuditQueueFilter {
  * `cache_key` once `CACHE_KEY_HASH_ENABLED` is off, and is `''` on a row
  * written before the column existed — nothing to fetch by, so left out.
  *
- * Without tags: most of a page describes an entry the cache has dropped, and
- * the tags are for the replay of the ones it still holds — the audit asks
- * `readScopedCacheEntryTags` for those once the cache has said which.
+ * Without tags: a page can describe entries the cache has dropped since,
+ * and the tags are for the replay of the ones it still holds — the audit
+ * asks `readScopedCacheEntryTags` for those once the cache has said which.
+ * A descriptor the audit already found gone is out of the queue until its
+ * next fill (`retireCacheAuditQueue`): on a cache whose entries live hours
+ * and whose stats live weeks, most descriptors are that, and each would
+ * otherwise cost every round an `EXISTS` and a stamp.
  */
 export async function readCacheAuditQueue(
 	count: number,
@@ -1398,6 +1406,7 @@ export async function readCacheAuditQueue(
 	const query = db('directus_cache_stats_descriptors')
 		.whereNotNull('last_filled')
 		.whereNot('redis_key', '')
+		.whereNull('gone_at')
 		.whereRaw(`${CACHE_ENTRY_VERIFIED_AT} < ?`, [before])
 		.orderByRaw(CACHE_ENTRY_VERIFIED_AT)
 		// One run stamps a page at one instant: the older fill goes first among them.
@@ -1484,9 +1493,9 @@ export interface CacheAuditQueueState {
  * The guarantee the audit gives right now: everything it will get to, how much
  * of it no run has seen, and how far back the least recently verified entry
  * is — the same rows and the same expression the queue orders on, so the
- * horizon is exactly what the next run takes first. Descriptors whose entry
- * has since gone are counted along: they are only told apart by asking the
- * cache, which a dashboard number is not worth.
+ * horizon is exactly what the next run takes first. A descriptor whose entry
+ * went since the audit last saw it is counted along: only the cache tells,
+ * and the next run retires it.
  */
 export async function readCacheAuditQueueState(): Promise<CacheAuditQueueState> {
 	if (!cacheStatsConfigured()) {
@@ -1500,6 +1509,7 @@ export async function readCacheAuditQueueState(): Promise<CacheAuditQueueState> 
 	)
 		.whereNotNull('last_filled')
 		.whereNot('redis_key', '')
+		.whereNull('gone_at')
 		.first(
 			db.raw('COUNT(*) AS size'),
 			db.raw('SUM(CASE WHEN audited_at IS NULL THEN 1 ELSE 0 END) AS never_audited'),
@@ -1533,6 +1543,28 @@ export async function advanceCacheAuditQueue(
 	await getDatabase()('directus_cache_stats_descriptors')
 		.whereIn('cache_key', cacheKeys)
 		.update({ audited_at: at });
+}
+
+/**
+ * Take the descriptors whose entry the cache no longer holds out of the
+ * queue, as of when the cache was asked: they describe nothing to replay
+ * until the next fill, and the fill's own write clears the stamp.
+ * A fill drained between the ask and this stamp is left alone — its
+ * `last_filled` is past the ask — so an entry back in the cache is never
+ * retired on the strength of a look that predates it.
+ */
+export async function retireCacheAuditQueue(
+	cacheKeys: string[],
+	askedAt: Date,
+): Promise<void> {
+	if (cacheKeys.length === 0) {
+		return;
+	}
+
+	await getDatabase()('directus_cache_stats_descriptors')
+		.whereIn('cache_key', cacheKeys)
+		.where('last_filled', '<=', askedAt)
+		.update({ gone_at: askedAt });
 }
 
 /**

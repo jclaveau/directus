@@ -104,6 +104,12 @@ export function renderReport(report: CacheAuditReport): string {
 		}),
 	];
 
+	if (report.timedOut) {
+		lines.push(
+			'stopped on CACHE_AUDIT_MAX_DURATION; the next run resumes behind it',
+		);
+	}
+
 	for (const finding of report.findings) {
 		lines.push('', ...renderFinding(finding));
 	}

@@ -10,6 +10,7 @@ import {
 	type CacheAuditVerdict,
 } from './cache-audit.js';
 import type { CacheEntryPurgeRecord } from './cache-events.js';
+import { getCache } from './cache.js';
 import getDatabase from './database/index.js';
 import { cacheAuditEnabled } from './utils/cache-audit-enabled.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -50,6 +51,8 @@ export interface CacheAuditRun {
 	counts: Record<CacheAuditVerdict, number>;
 	evicted: number;
 	durationMs: number | null;
+	/** Stopped on `CACHE_AUDIT_MAX_DURATION`; what was left waits for the next run. */
+	timedOut: boolean;
 	error: string | null;
 }
 
@@ -74,12 +77,32 @@ export interface CacheAuditRunReport extends CacheAuditReport {
 }
 
 const DEFAULT_RETENTION_MS = 2_592_000_000; // 30d
+const DEFAULT_MAX_DURATION_MS = 600_000; // 10m
 const DEFAULT_LIST_WINDOW_MS = 604_800_000; // 7d
 const LIST_LIMIT = 200;
 const FINDINGS_BATCH = 200;
+// One run at a time, node-wide where the lock is in memory and deployment-wide
+// on Redis. The claim outlives the longest run it guards by this much, so a
+// run whose process died frees the audit without anyone's help.
+const RUN_LOCK = 'cache-audit:run';
+const RUN_LOCK_GRACE_MS = 60_000;
 
 function retentionMs(): number {
 	return getMilliseconds(useEnv()['CACHE_AUDIT_RETENTION'], DEFAULT_RETENTION_MS);
+}
+
+// How long a run may go on before it stops and leaves the rest to the next
+// one: what keeps a cron tick from outliving its interval on a large cache,
+// and the time budget the in-flight claim is sized to.
+function maxDurationMs(): number {
+	const configured = getMilliseconds(
+		useEnv()['CACHE_AUDIT_MAX_DURATION'],
+		DEFAULT_MAX_DURATION_MS,
+	);
+
+	return configured > 0
+		? configured
+		: DEFAULT_MAX_DURATION_MS;
 }
 
 // The slice a run examines when it names no limit of its own: the cron's
@@ -95,9 +118,19 @@ function defaultLimit(): number | undefined {
 
 /**
  * Run an audit and record it — the one entrypoint every surface goes through,
- * so no run escapes the history, none runs on a node that opted out, and a
- * run asking for no limit gets `CACHE_AUDIT_LIMIT`. The engine stays what it
- * was: a function over the cache that answers a report and stores nothing.
+ * so no run escapes the history, none runs on a node that opted out, none
+ * runs beside another, and a run asking for no limit gets `CACHE_AUDIT_LIMIT`
+ * and `CACHE_AUDIT_MAX_DURATION`. The engine stays what it was: a function
+ * over the cache that answers a report and stores nothing.
+ *
+ * Two runs at once would share the queue without replaying an entry twice —
+ * each stamps what it takes — but would put twice the load on the database,
+ * which is what the limit and the budget are there to bound. So a run that
+ * finds another in flight is refused rather than started: a cron tick that
+ * outlives its interval skips the next, and "Audit now" during one says so.
+ * The claim is a read then a write, not one atomic step: two asks landing
+ * within a round-trip of each other could both pass, which costs one doubled
+ * run and nothing else.
  */
 export async function runCacheAudit(
 	trigger: CacheAuditTrigger,
@@ -110,22 +143,47 @@ export async function runCacheAudit(
 		});
 	}
 
-	const sliced = { ...options, limit: options.limit ?? defaultLimit() };
-	const id = await startCacheAuditRun(trigger, sliced);
-	let report: CacheAuditReport;
+	const budgetMs = maxDurationMs();
+	const { lockCache } = getCache();
+	const inFlightSince = await lockCache.get(RUN_LOCK);
+
+	if (inFlightSince !== undefined) {
+		const since = new Date(Number(inFlightSince)).toISOString();
+
+		throw new ServiceUnavailableError({
+			service: 'cache-audit',
+			reason: `a cache audit is already running, since ${since}`,
+		});
+	}
+
+	await lockCache.set(RUN_LOCK, Date.now(), budgetMs + RUN_LOCK_GRACE_MS);
 
 	try {
-		report = await auditCache(sliced);
+		const sliced = {
+			...options,
+			limit: options.limit ?? defaultLimit(),
+			maxDurationMs: options.maxDurationMs ?? budgetMs,
+		};
+
+		const id = await startCacheAuditRun(trigger, sliced);
+		let report: CacheAuditReport;
+
+		try {
+			report = await auditCache(sliced);
+		}
+		catch (error) {
+			await failCacheAuditRun(id, error);
+
+			throw error;
+		}
+
+		await finishCacheAuditRun(id, report);
+
+		return { id, ...report };
 	}
-	catch (error) {
-		await failCacheAuditRun(id, error);
-
-		throw error;
+	finally {
+		await lockCache.delete(RUN_LOCK);
 	}
-
-	await finishCacheAuditRun(id, report);
-
-	return { id, ...report };
 }
 
 /**
@@ -174,6 +232,7 @@ export async function finishCacheAuditRun(
 				...report.counts,
 				evicted: report.evicted,
 				duration_ms: report.durationMs,
+				timed_out: report.timedOut,
 			});
 
 		const rows = report.findings.map((finding) => findingRow(id, finding));
@@ -335,6 +394,7 @@ function runOf(row: Record<string, unknown>): CacheAuditRun {
 		counts,
 		evicted: Number(row['evicted'] ?? 0),
 		durationMs: nullableNumber(row['duration_ms']),
+		timedOut: row['timed_out'] === true || row['timed_out'] === 1,
 		error: (row['error'] as string | null) ?? null,
 	};
 }

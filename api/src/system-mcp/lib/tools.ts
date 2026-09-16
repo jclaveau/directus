@@ -166,6 +166,11 @@ const RUN_PROPERTIES = {
 		description: 'How many stale or drifted entries `purge` dropped.',
 	},
 	durationMs: { type: ['number', 'null'] },
+	timedOut: {
+		type: 'boolean',
+		description: 'Stopped on `CACHE_AUDIT_MAX_DURATION`; what was left waits '
+			+ 'for the next run.',
+	},
 	error: {
 		type: ['string', 'null'],
 		description: 'Why it stopped, where it did not finish.',
@@ -892,7 +897,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				+ 'a run with a `limit` stops there while the next resumes behind '
 				+ 'it — every replay is an uncached read, so slice a large cache with '
 				+ '`limit` (`CACHE_AUDIT_LIMIT` when none is given), `user` or '
-				+ '`collection`. The run is answered as the history records it — '
+				+ '`collection`; a run also stops, `timedOut`, once '
+				+ '`CACHE_AUDIT_MAX_DURATION` is up. One runs at a time: asked '
+				+ 'during another, this is refused. '
+				+ 'The run is answered as the history records it — '
 				+ 'its verdict counts, not its findings; `read_cache_audit` pages '
 				+ 'through those by the `id` answered here.',
 			inputSchema: {

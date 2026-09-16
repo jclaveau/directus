@@ -308,6 +308,16 @@ const selectedFields = computed(() => {
 		});
 	}
 
+	if (run.timedOut) {
+		fields.push({
+			label: t('cache_audit_timed_out', 'Timed out'),
+			value: t(
+				'cache_audit_timed_out_note',
+				'Stopped on CACHE_AUDIT_MAX_DURATION; the next run resumes behind it',
+			),
+		});
+	}
+
 	if (run.error !== null) {
 		fields.push({ label: t('cache_audit_error', 'Error'), value: run.error });
 	}

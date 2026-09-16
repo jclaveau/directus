@@ -68,6 +68,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_AUDIT_ENABLED: 'boolean',
 	CACHE_AUDIT_SCHEDULE: 'string',
 	CACHE_AUDIT_LIMIT: 'number',
+	CACHE_AUDIT_MAX_DURATION: 'string',
 	CACHE_AUDIT_IGNORE_PATHS: 'array',
 	CACHE_AUDIT_RETENTION: 'string',
 	CACHE_STATUS_HEADER: 'string',

@@ -36,6 +36,14 @@ import { CACHE_ENTRY_VERIFIED_AT } from '../../utils/cache-entry-verified-at.js'
  * fractions could sort before the start it came after. The queue orders on
  * an expression over the two columns; Postgres indexes the expression itself,
  * the other dialects get the columns and sort the page.
+ *
+ * `gone_at` on the same table is where the audit found nothing to replay: an
+ * entry the cache had dropped, whose descriptor stays for the stats facts
+ * that name it. Stamped, it is out of the queue (and out of the Postgres
+ * index) until a fill writes it null again.
+ *
+ * `directus_cache_audits.timed_out` says a run stopped on
+ * `CACHE_AUDIT_MAX_DURATION`; whatever was left waits for the next one.
  */
 export async function up(knex: Knex): Promise<void> {
 	await knex.schema.createTable('directus_cache_audits', (table) => {
@@ -75,6 +83,10 @@ export async function up(knex: Knex): Promise<void> {
 .defaultTo(0);
 
 		table.integer('duration_ms').nullable();
+
+		table.boolean('timed_out').notNullable()
+.defaultTo(false);
+
 		table.text('error').nullable();
 		table.index('started_at');
 	});
@@ -115,13 +127,14 @@ export async function up(knex: Knex): Promise<void> {
 
 	await knex.schema.alterTable('directus_cache_stats_descriptors', (table) => {
 		table.timestamp('audited_at', { precision: 3 }).nullable();
+		table.timestamp('gone_at', { precision: 3 }).nullable();
 	});
 
 	if (getDatabaseClient(knex) === 'postgres') {
 		await knex.raw(
 			'CREATE INDEX directus_cache_stats_descriptors_audit_queue '
 			+ 'ON directus_cache_stats_descriptors '
-			+ `((${CACHE_ENTRY_VERIFIED_AT}), last_filled)`,
+			+ `((${CACHE_ENTRY_VERIFIED_AT}), last_filled) WHERE gone_at IS NULL`,
 		);
 	}
 	else {
@@ -142,6 +155,7 @@ export async function down(knex: Knex): Promise<void> {
 		);
 
 		table.dropColumn('audited_at');
+		table.dropColumn('gone_at');
 	});
 
 	await knex.schema.alterTable('directus_settings', (table) => {

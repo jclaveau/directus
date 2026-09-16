@@ -30,6 +30,7 @@ function run(overrides: Partial<CacheAuditRun> = {}): CacheAuditRun {
 		},
 		evicted: 0,
 		durationMs: 500,
+		timedOut: false,
 		error: null,
 		...overrides,
 	};

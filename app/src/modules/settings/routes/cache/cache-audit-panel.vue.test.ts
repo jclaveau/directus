@@ -95,6 +95,7 @@ function run(overrides: Partial<CacheAuditRun> = {}): CacheAuditRun {
 		},
 		evicted: 0,
 		durationMs: 2000,
+		timedOut: false,
 		error: null,
 		...overrides,
 	};
@@ -511,6 +512,28 @@ describe('the runs', () => {
 		expect(findings[1]!.textContent).toContain('User: u-1');
 		// Every finding the run stored is on the page: nothing more to say.
 		expect(document.body.textContent).not.toContain('the rest page through');
+
+		wrapper.unmount();
+	});
+
+	test('says when a run stopped on its time budget', async () => {
+		answer(envSchedule, [run({ timedOut: true })]);
+
+		const wrapper = await mounted();
+
+		await wrapper.find('.audit-table tbody tr, .audit-table .table-row')
+			.trigger('click');
+
+		await flushPromises();
+
+		const fields = [...document.body.querySelectorAll('.field')]
+			.map((field) => field.textContent);
+
+		expect(fields).toContainEqual(expect.stringContaining('Timed out'));
+
+		expect(fields).toContainEqual(expect.stringContaining(
+			'Stopped on CACHE_AUDIT_MAX_DURATION; the next run resumes behind it',
+		));
 
 		wrapper.unmount();
 	});

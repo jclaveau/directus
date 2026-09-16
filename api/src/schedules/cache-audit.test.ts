@@ -55,6 +55,7 @@ function report(
 		findings: [],
 		evicted: 0,
 		durationMs: 40,
+		timedOut: false,
 	};
 }
 
