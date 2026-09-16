@@ -62,7 +62,10 @@ const SCALING = {
  */
 const EXPECTED_CURVE = [1, 2, 3, 4, 5, 6, 3, 2, 1];
 
-/** How long a size has to be read for to count as held, not passed through. */
+/**
+ * How long a size has to be read for to count as held, not passed through:
+ * two readings, at the pace the watch reads.
+ */
 const HELD_MS = 1_000;
 
 interface Deployment {
@@ -85,7 +88,7 @@ interface Plateau {
 	to: number;
 }
 
-/** The pool's size read every quarter second for as long as the watch runs. */
+/** The pool's size, read for as long as the watch runs. */
 interface Watch {
 	readings: Reading[];
 	/** The pool's size once it is `size`, or whatever it is at the deadline. */
@@ -155,12 +158,13 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Reads the pool off the daemon every quarter second, so the whole walk is
- * kept and not only where it ended: a worker lost on the way, two added at
- * once or a release skipping a step all show in the readings and nowhere else.
- * Read without holding the event loop: the traffic the arm drives runs in
- * this process too, and a listing that blocked it would be the arm throttling
- * its own load.
+ * Reads the pool off the daemon a quarter second after each reading came
+ * back — a listing takes about half a second, so a reading every three
+ * quarters or so — and keeps the whole walk, not only where it ended: a
+ * worker lost on the way, two added at once or a release skipping a step all
+ * show in the readings and nowhere else. Read without holding the event loop:
+ * the traffic the arm drives runs in this process too, and a listing that
+ * blocked it would be the arm throttling its own load.
  */
 async function watchPool(rig: Rig): Promise<Watch> {
 	const started = Date.now();

@@ -9,6 +9,8 @@ import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	type Rig,
+	SUPERVISOR_TIMEOUT_MS,
+	WORKER_LISTEN_TIMEOUT_MS,
 	poolSize,
 	restartSupervisor,
 	startAutoscaler,
@@ -234,8 +236,9 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 	// the reads go on being answered, by a daemon that never heard of the scale
 	// still waiting in the autoscaler. Left unbounded, that ask would wait for
 	// good, and asked once at a time the prewarm would never be asked again.
-	// Bounded at the boots it asked for — eight at the fixture's ten seconds —
-	// it fails, and the pool the daemon came back with is asked to grow.
+	// Bounded at the boots it asked for — seven at the fixture's ten seconds,
+	// and a call's default on top — it fails, and the pool the daemon came back
+	// with is asked to grow.
 	it.each(vendors)('%s asks again for a prewarm the daemon lost', async (vendor) => {
 		const deployment = await deploy(vendor, '8', {
 			instances: 1,
@@ -272,6 +275,10 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 			`prewarming ${deployment.rig.appName} from 1 to 8 workers`,
 		]);
 
-		expect(logs).toContain('the supervisor did not answer a scale to 8 in 80000ms');
+		const bound = 7 * WORKER_LISTEN_TIMEOUT_MS + SUPERVISOR_TIMEOUT_MS;
+
+		expect(logs).toContain(
+			`the supervisor did not answer a scale to 8 in ${bound}ms`,
+		);
 	}, 300_000);
 });

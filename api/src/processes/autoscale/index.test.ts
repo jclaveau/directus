@@ -57,6 +57,7 @@ vi.mock('../supervisor/index.js', () => {
 		releaseWorker,
 		scaleApp,
 		watchWorkerMessages,
+		SUPERVISOR_TIMEOUT_MS: 15_000,
 	};
 });
 
@@ -151,8 +152,11 @@ const supervisor: AutoscaleSupervisor = {
 	waitReady: true,
 };
 
-/** A pool of `count` online workers, each past its warm-up. */
-function pool(count: number) {
+/**
+ * A pool of `count` online workers, each past its warm-up, under a
+ * declaration giving each boot `listenTimeout`.
+ */
+function pool(count: number, listenTimeout = supervisor.listenTimeout) {
 	const workers = Array.from({ length: count }, (_unused, index) => {
 		return { pid: 11 + index, cpuPercent: 70, memoryBytes: 0, mature: true };
 	});
@@ -162,7 +166,7 @@ function pool(count: number) {
 		warmingWorkers: 0,
 		onlineWorkers: workers,
 		restartsByWorker: new Map(workers.map((worker) => [worker.pid, 0])),
-		supervisor,
+		supervisor: { ...supervisor, listenTimeout },
 	};
 }
 
@@ -393,8 +397,9 @@ describe('runAutoscaler', () => {
 	// One scale for the whole target: pm2 boots the workers it adds one after
 	// another whatever the size asked, so nothing is gained by asking in parts.
 	// Given the bound the boots deserve rather than a call's default: pm2 waits
-	// `listen_timeout` at most on each worker it adds, so four boots and one
-	// more for margin at the fixture's fifteen seconds.
+	// `listen_timeout` at most on each worker it adds, four boots at
+	// production's three seconds, and the forks it does not clock get the
+	// fifteen seconds a call carries by default on top.
 	test('asks for the whole prewarm in one scale, bounded at its boots', async () => {
 		resolveConfig.mockReturnValue({
 			...config,
@@ -402,11 +407,11 @@ describe('runAutoscaler', () => {
 			maxWorkers: 8,
 		});
 
-		readPool.mockResolvedValueOnce(pool(1)).mockResolvedValue(pool(5));
+		readPool.mockResolvedValueOnce(pool(1, 3000)).mockResolvedValue(pool(5));
 
 		await ticks(2);
 
-		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 5, 75_000);
+		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 5, 27_000);
 
 		expect(recordAutoscaleTick).toHaveBeenNthCalledWith(1, expect.objectContaining({
 			lastDecision: expect.objectContaining({ reason: 'prewarming the pool' }),
@@ -484,11 +489,48 @@ describe('runAutoscaler', () => {
 
 		restarted.mockReturnValueOnce(false).mockReturnValueOnce(true);
 
-		await ticks(3);
+		// The restarted worker is a pool that grew, so the second ask waits out
+		// the two listen timeouts a scale could still be adding behind: thirty
+		// seconds from the second tick.
+		await ticks(32);
 
 		expect(scaleApp.mock.calls).toEqual([['api', 3, 45_000], ['api', 3, 30_000]]);
 		// The tick of the restart itself went to the rule that holds on one.
 		expect(decide).toHaveBeenCalledOnce();
+	});
+
+	// A failed ask does not say whether pm2 is still adding: the daemon may be
+	// gone, or alive and starved past the bound, and a second scale sent while
+	// the first is still adding grows the pool past the target. A scale still
+	// adding forks a worker at least every `listen_timeout`, so the pool is
+	// asked for again once it has not grown for two of them.
+	test('holds the second ask while the pool is still growing', async () => {
+		resolveConfig.mockReturnValue({
+			...config,
+			prewarmWorkers: 5,
+			maxWorkers: 8,
+		});
+
+		scaleApp.mockRejectedValueOnce(new Error('pm2 is not answering'));
+
+		readPool
+			.mockResolvedValueOnce(pool(1, 3000))
+			.mockResolvedValueOnce(pool(2, 3000))
+			.mockResolvedValue(pool(3, 3000));
+
+		// The pool last grew on the third tick; six seconds later is the ninth.
+		await ticks(9);
+
+		expect(scaleApp.mock.calls).toEqual([['api', 5, 27_000], ['api', 5, 21_000]]);
+
+		expect(recordAutoscaleTick).toHaveBeenCalledWith(expect.objectContaining({
+			lastDecision: expect.objectContaining({
+				workers: null,
+				reason: 'a scale may still be adding: the pool grew 1s ago',
+			}),
+		}));
+
+		expect(decide).not.toHaveBeenCalled();
 	});
 
 	// Every worker of a pool that is still arriving is idle because it has just

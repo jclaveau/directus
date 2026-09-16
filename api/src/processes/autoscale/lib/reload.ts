@@ -9,6 +9,7 @@ import {
 	SHARED_SETTINGS_COLUMNS,
 	readSharedSettings,
 } from '../../lib/shared-settings.js';
+import { SUPERVISOR_FALLBACKS } from './supervisor.js';
 import { reloadDeclaration } from './supervisor-shared-settings.js';
 
 /**
@@ -67,10 +68,10 @@ export function reloadBudgetMs(
 	workers: number,
 	declaration: Record<string, number>,
 ): number {
-	const perWorker = (declaration['listen_timeout'] ?? 3000)
-		+ (declaration['kill_timeout'] ?? 1600);
-
-	return Math.max(1, workers) * perWorker + RELOAD_SLACK_MS;
+	return Math.max(1, workers) * (
+		(declaration['listen_timeout'] ?? SUPERVISOR_FALLBACKS.listenTimeout)
+		+ (declaration['kill_timeout'] ?? SUPERVISOR_FALLBACKS.killTimeout)
+	) + RELOAD_SLACK_MS;
 }
 
 /**

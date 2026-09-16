@@ -30,7 +30,7 @@ export function supervisorAvailable(): boolean {
  * wrong pool: a scale names an absolute size, so the call after sends the same
  * one and the supervisor answers the second with the first still in flight.
  */
-const SUPERVISOR_TIMEOUT_MS = 15_000;
+export const SUPERVISOR_TIMEOUT_MS = 15_000;
 
 async function connect(): Promise<void> {
 	await promisify(pm2.connect.bind(pm2))();

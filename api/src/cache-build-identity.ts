@@ -221,7 +221,7 @@ export async function flushCachesIfBuildChanged(
 		// whole flush it waits out — the planner gives that one 120s.
 		const budget = getMilliseconds(
 			env['CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT'],
-			FLUSH_LOCK_MS,
+			30_000,
 		);
 
 		let waited: ReturnType<typeof setTimeout> | undefined;

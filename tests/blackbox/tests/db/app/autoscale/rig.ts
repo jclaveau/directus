@@ -12,6 +12,19 @@ import { promisify } from 'node:util';
 // as an api dependency; the same binary the published image runs Directus with.
 const pm2Bin = join(paths.cwd, '..', '..', 'api', 'node_modules', '.bin', 'pm2');
 
+/**
+ * How long pm2 waits on a fixture worker's `ready` before it moves on: what
+ * one boot costs a scale, whatever `readyDelayMs` says the worker takes.
+ */
+export const WORKER_LISTEN_TIMEOUT_MS = 10_000;
+
+/**
+ * The bound a supervisor call carries by default, `SUPERVISOR_TIMEOUT_MS` in
+ * `api/src/processes/supervisor/lib/client.ts`: what a prewarm's scale gets
+ * on top of the boots it asked for.
+ */
+export const SUPERVISOR_TIMEOUT_MS = 15_000;
+
 const workerScript = join(
 	paths.cwd,
 	'tests',
@@ -120,7 +133,7 @@ export function startPool(options: PoolOptions): Rig {
 					wait_ready: true,
 					autorestart: true,
 					...options.directusEnv === undefined
-						? { script: workerScript, listen_timeout: 10_000 }
+						? { script: workerScript, listen_timeout: WORKER_LISTEN_TIMEOUT_MS }
 						: {
 								// The CLI's entry file: `node` adds the
 								// extension, pm2 checks the path exists.
@@ -379,7 +392,6 @@ function listWorkers(rig: Rig): ListedProcess[] {
 
 	return listed.filter((worker) => worker.name === rig.appName);
 }
-
 
 /**
  * What each serving worker holds for one pm2 entry.

@@ -6,6 +6,7 @@ import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
 	releaseWorker,
+	SUPERVISOR_TIMEOUT_MS,
 	scaleApp,
 } from '../supervisor/index.js';
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
@@ -205,6 +206,9 @@ export async function runAutoscaler(): Promise<void> {
 	let prewarmed = false;
 	let prewarmBegun = false;
 	let prewarmAsked: Promise<void> | null = null;
+	// The epoch until the pool has been seen growing once.
+	let poolGrewAt = 0;
+	let workersBefore: number | null = null;
 	let restartsByWorker: Map<number, number> | null = null;
 	let lastRestartAt: number | null = null;
 
@@ -234,6 +238,13 @@ export async function runAutoscaler(): Promise<void> {
 			const onlineWorkers = cpu.measure(reading.onlineWorkers);
 			const workers = onlineWorkers.length + pendingWorkers;
 
+			// A worker the supervisor is starting counts from its fork, so this
+			// is when the supervisor was last seen adding one.
+			if (workersBefore !== null && workers > workersBefore) {
+				poolGrewAt = Date.now();
+			}
+
+			workersBefore = workers;
 			beginAskedReload(config.appName, workers);
 
 			// Held back while a reload is in flight: it replaces the pool a
@@ -326,6 +337,14 @@ export async function runAutoscaler(): Promise<void> {
 				lastScaleUpAt = Date.now();
 				lastScaleDownAt = Date.now();
 
+				// pm2 waits at most this long on each worker a scale adds before
+				// it moves to the next: what one boot costs the scale, whatever
+				// the worker itself takes.
+				const listenTimeout = reading.supervisor?.listenTimeout
+					?? SUPERVISOR_FALLBACKS.listenTimeout;
+
+				const sinceGrowthMs = Date.now() - poolGrewAt;
+
 				// Latched on the pool having reached the size, not on the scale
 				// having been asked for: only the read at the top of the tick says
 				// whether the workers a scale started have arrived.
@@ -336,6 +355,20 @@ export async function runAutoscaler(): Promise<void> {
 					decision = {
 						workers: null,
 						reason: `the prewarm to ${target} is still arriving`,
+					};
+				}
+				// A second scale sent while the first is still adding counts the
+				// workers added so far and adds the difference on top of the ones
+				// still to come, and a failed ask does not say whether pm2 is
+				// still adding: the daemon may be gone, or alive and starved past
+				// the bound. A scale still adding forks a worker at least every
+				// `listen_timeout`, so a pool that has not grown for two of them
+				// has no scale behind it.
+				else if (sinceGrowthMs < 2 * listenTimeout) {
+					decision = {
+						workers: null,
+						reason: 'a scale may still be adding: the pool grew '
+							+ `${Math.round(sinceGrowthMs / 1000)}s ago`,
 					};
 				}
 				else {
@@ -350,21 +383,17 @@ export async function runAutoscaler(): Promise<void> {
 					// pm2 answers it once every worker it added has reported ready,
 					// one boot after another, which for a pool of fifteen runs well
 					// past the bound a supervisor call carries by default. Bounded
-					// all the same, at the boots asked for: pm2 waits at most
-					// `listen_timeout` on each before it moves to the next, so a
-					// scale still unanswered past that many is one whose answer is
-					// not coming — the daemon it was sent to is gone and the one
-					// listening now never heard of it. Asked once at a time — a
-					// second scale sent while the first is still adding counts the
-					// workers added so far and adds the difference on top of the
-					// ones still to come.
-					const listenTimeout = reading.supervisor?.listenTimeout
-						?? SUPERVISOR_FALLBACKS.listenTimeout;
-
+					// all the same, at the boots asked for plus that default: pm2
+					// clocks `listen_timeout` from the worker's `online` event, so
+					// the fork before it is a cost the scale carries on top, one
+					// pm2 does not bound and a container booting the pool it just
+					// asked for stretches. A scale still unanswered past that is
+					// one whose answer is not coming — the daemon it was sent to is
+					// gone and the one listening now never heard of it.
 					prewarmAsked = scaleApp(
 						config.appName,
 						target,
-						(target - workers + 1) * listenTimeout,
+						(target - workers) * listenTimeout + SUPERVISOR_TIMEOUT_MS,
 					)
 						.catch((error: unknown) => {
 							logger.warn(
