@@ -34,6 +34,22 @@ Issue jclaveau/directus#498 on branch `v11.10.1-feat/cache-audit`, based on
    real pressure still yields `unreplayable:status_503` — honest, retry next tick.
 2. A `no_descriptor` finding rendered `user public` — unknown ≠ public; `-` now.
 
+**Blackbox witnesses beyond the obvious (both smoke-proven first):**
+- `raced`: a read hook that WRITES (`cache-audit-race` extension) — armed by a
+  flag row, the replay's own read moves the row through `services.ItemsService`
+  (purging the entry) and answers the moved value → diff over a gone entry.
+- `replay_status_403` → stale: revoke the permission by a RAW rename of its
+  `collection` (a permission written through the API flushes the response cache
+  along) then `POST /utils/cache/clear?targets=system` — targets are read off
+  the QUERY STRING, a JSON body silently defaults to `response`. The cache still
+  serves the rows to the revoked user (HIT), the replay answers 403.
+- Anomaly rows are one per reason+cacheKey and the listing carries no user, so
+  two users' entries on one path are told apart by `sample`; `path` there is
+  the pathname, `url` carries the query.
+- Not bb-reachable, unit-only: `expired` (Redis TTL = sidecar TTL), non-403
+  replay statuses, `replay_unrecognized`, `unreadable`, the `document/method/
+  query` plan reasons, and a non-empty `purgesSinceFilled`.
+
 **Why:** the audit replays through the same process that serves it, so every
 boot-time or load-time guard of the API (pressure limiter, deploy flush) turns
 into a self-inflicted audit failure; a bb suite warms the loop before auditing and
