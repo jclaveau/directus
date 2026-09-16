@@ -301,6 +301,59 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		a delete on a collection whose self-relation sets null purges the survivors
+		it rewrites, old slice and new
+	`, async () => {
+		// Row 2 hangs off the deleted row 1 through `parent`; the database rewrites
+		// it under the delete, so it is captured like an update: before, and again
+		// once committed.
+		tracker.on.select('test').responseOnce([{ id: 2 }]);
+
+		tracker.on.select('test').responseOnce([
+			{ id: 1, student: 'A' },
+			{ id: 2, student: 'B' },
+		]);
+
+		tracker.on.delete('test').response(1);
+		tracker.on.select('test').responseOnce([{ id: 2, student: 'B' }]);
+
+		await service(selfRefSchema).deleteMany([1]);
+
+		expect(tracker.history.select[0]?.sql).toMatch(
+			/where \("parent" in \(\?\)\) and "id" not in \(\?\)/,
+		);
+
+		expect(tracker.history.select[0]?.bindings).toEqual([1, 1]);
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+				{ collection: 'test', field: 'id', value: 2, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'B', type: 'string' },
+			],
+			expect.anything(),
+		);
+	});
+
+	it(oneLine`
+		a delete on a collection with no self-relation looks for no survivor
+	`, async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.delete('test').response(1);
+
+		await service().deleteMany([1]);
+
+		expect(tracker.history.select).toHaveLength(1);
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+	});
+
+	it(oneLine`
 		upsertMany (insert) purges the new slice — the committed row's scope value
 	`, async () => {
 		// No key in the payload → pure insert; the new slice comes from the committed row.

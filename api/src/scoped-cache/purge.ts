@@ -65,9 +65,8 @@ function scopedCacheCollectionSlicesKey(collection: string): string {
  *     the database changes there are ones the caller never named, so the snapshot
  *     taken from its keys does not cover them.
  *   - a DIRECT self-relation that only rewrites a foreign key is left out: the
- *     surviving children stay in place carrying a slice this walk cannot name. The
- *     delete purges those vacated slices precisely instead — see the collaborator's
- *     `vacatedSelfRelationTags`, unioned into the delete's snapshot.
+ *     surviving children stay in place, and the delete snapshots them by key like
+ *     an update's rows instead — see the collaborator's `selfRelationSurvivorKeys`.
  */
 export function scopedCacheCollectionsChangedByOnDelete(
 	schema: Pick<SchemaOverview, 'relations'>,
@@ -99,8 +98,9 @@ export function scopedCacheCollectionsChangedByOnDelete(
 				continue;
 			}
 
-			// Only a DIRECT self-relation is exempt, and only when it rewrites
-			// rather than deletes: its survivors are handled by vacatedSelfRelationTags.
+			// Only a DIRECT self-relation is exempt, and only when it rewrites rather
+			// than deletes: its survivors are snapshotted by key like an update's rows
+			// (`selfRelationSurvivorKeys`), so their slices purge precisely.
 			if (
 				parentCollection === collection
 				&& childCollection === collection

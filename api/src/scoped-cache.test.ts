@@ -1,6 +1,12 @@
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Filter, Item, Query } from '@directus/types';
-import type { A2MNode, AST, M2ONode, O2MNode } from './types/ast.js';
+import type {
+	A2MNode,
+	AST,
+	FunctionFieldNode,
+	M2ONode,
+	O2MNode,
+} from './types/ast.js';
 import type {
 	CollectionKey,
 	FieldMap,
@@ -353,8 +359,8 @@ describe('scopedCacheCollectionsChangedByOnDelete', () => {
 		.toEqual(['node']);
 	});
 
-	// Left out here on purpose: the delete purges those survivors' vacated slices
-	// precisely via vacatedSelfRelationTags, not through this walk's coarse fan-out.
+	// Left out here on purpose: the delete snapshots those survivors by key
+	// (selfRelationSurvivorKeys), not through this walk's coarse fan-out.
 	it('leaves itself out when a self-relation only nulls the foreign key', () => {
 		const schema = { relations: [nullifyRelation('node', 'node')] } as any;
 
@@ -2682,6 +2688,208 @@ describe('scopedCacheCollectionsBeyondNestedRows', () => {
 				aggregate: { count: ['owner.name'] },
 			}),
 		)]).toContain('owner');
+	});
+
+	it('names a collection a to-many node\'s own filter reads through', () => {
+		// The node's filter withholds courses; which ones is decided by teacher
+		// rows the response nested only in part.
+		expect([...scopedCacheCollectionsBeyondNestedRows(
+			schema,
+			astOf({}, {
+				children: [{
+					type: 'o2m',
+					name: 'owner',
+					fieldKey: 'owners',
+					children: [companyNode],
+					query: { filter: { company: { name: { _eq: 'acme' } } } },
+					cases: [],
+					whenCase: [],
+					relation: { collection: 'owner', field: 'company' },
+				} as unknown as O2MNode],
+			}),
+		)]).toContain('company');
+	});
+
+	it('names a collection an A2O node\'s own filter reads through', () => {
+		expect([...scopedCacheCollectionsBeyondNestedRows(
+			schema,
+			astOf({}, {
+				children: [{
+					type: 'a2o',
+					names: ['owner'],
+					fieldKey: 'subject',
+					children: { owner: [] },
+					query: { owner: { filter: { company: { name: { _eq: 'acme' } } } } },
+					cases: { owner: [] },
+					whenCase: [],
+					relation: {},
+				} as unknown as A2MNode],
+			}),
+		)]).toContain('company');
+	});
+
+	it('names a collection a function field\'s own filter reads through', () => {
+		expect([...scopedCacheCollectionsBeyondNestedRows(
+			schema,
+			astOf({}, {
+				children: [{
+					type: 'functionField',
+					name: 'count(owned_items)',
+					fieldKey: 'count(owned_items)',
+					relatedCollection: 'owned_item',
+					query: { filter: { owner: { name: { _eq: 'alice' } } } },
+					cases: [],
+					whenCase: [],
+				} as unknown as FunctionFieldNode],
+			}),
+		)]).toContain('owner');
+	});
+
+	describe('a to-many node', () => {
+		const toManySchema = () => {
+			const built = new SchemaBuilder()
+				.collection('student', (c) => {
+					c.field('id').id();
+					c.field('courses').o2m('course', 'student');
+				})
+				.collection('teacher', (c) => {
+					c.field('id').id();
+					c.field('name').string();
+				})
+				.collection('course', (c) => {
+					c.field('id').id();
+					c.field('title').string();
+					c.field('student').m2o('student');
+					c.field('teacher').m2o('teacher');
+					c.field('parts').o2m('part', 'course');
+				})
+				.collection('part', (c) => {
+					c.field('id').id();
+					c.field('note').string();
+					c.field('course').m2o('course');
+				})
+				.build();
+
+			built.collections['course']!.scopedCacheFields = ['student'];
+			built.collections['part']!.scopedCacheFields = ['course'];
+
+			return built;
+		};
+
+		const teacherNode = {
+			type: 'm2o',
+			name: 'teacher',
+			fieldKey: 'teacher',
+			children: [],
+			query: {},
+			cases: [],
+			whenCase: [],
+			relation: { related_collection: 'teacher' },
+		} as unknown as M2ONode;
+
+		const studentReading = (
+			coursesNode: Partial<O2MNode>,
+			cases: Filter[] = [],
+		): AST => {
+			return {
+				type: 'root',
+				name: 'student',
+				query: {},
+				cases,
+				children: [
+					{
+						type: 'o2m',
+						name: 'course',
+						fieldKey: 'courses',
+						children: [],
+						query: {},
+						cases: [],
+						whenCase: [],
+						relation: {
+							collection: 'course',
+							field: 'student',
+							related_collection: 'student',
+						},
+						...coursesNode,
+					} as O2MNode,
+				],
+			} as AST;
+		};
+
+		it('names a collection its filter reads through a parent', () => {
+			// Renaming a teacher this read never nested moves its course INTO the
+			// filtered set; the parent-key pin on courses catches no teacher write.
+			expect([...scopedCacheCollectionsBeyondNestedRows(
+				toManySchema(),
+				studentReading({
+					children: [teacherNode],
+					query: { filter: { teacher: { name: { _eq: 'alpha' } } } },
+				}),
+			)]).toContain('teacher');
+		});
+
+		it('names a collection its filter reads through its own children', () => {
+			expect([...scopedCacheCollectionsBeyondNestedRows(
+				toManySchema(),
+				studentReading({
+					query: { filter: { parts: { note: { _eq: 'x' } } } },
+				}),
+			)]).toContain('part');
+		});
+
+		it('names a collection it sorts on', () => {
+			expect([...scopedCacheCollectionsBeyondNestedRows(
+				toManySchema(),
+				studentReading({
+					children: [teacherNode],
+					query: { sort: ['teacher.name'], limit: 1 },
+				}),
+			)]).toContain('teacher');
+		});
+
+		it(oneLine`
+			spares itself when its own columns decide and its parent's key pins it
+		`, () => {
+			// Every write to a course of the student emits `course:student=<id>`,
+			// the pin `pinnedScopedCacheTagsFromO2mChildren` puts on this read.
+			expect([...scopedCacheCollectionsBeyondNestedRows(
+				toManySchema(),
+				studentReading({
+					query: { filter: { title: { _eq: 'shown' } }, sort: ['title'] },
+				}),
+			)]).not.toContain('course');
+		});
+
+		it('names itself when its own columns decide and nothing pins it', () => {
+			const unpinnable = toManySchema();
+
+			unpinnable.collections['course']!.scopedCacheFields = [];
+
+			expect([...scopedCacheCollectionsBeyondNestedRows(
+				unpinnable,
+				studentReading({
+					query: { filter: { title: { _eq: 'shown' } } },
+				}),
+			)]).toContain('course');
+		});
+
+		it('names a parent nested under it that reads under some cases only', () => {
+			expect([...scopedCacheCollectionsBeyondNestedRows(
+				toManySchema(),
+				studentReading({
+					children: [{ ...teacherNode, whenCase: [0] }],
+					cases: [{ title: { _eq: 'shown' } }, { title: { _eq: 'hidden' } }],
+				}),
+			)]).toContain('teacher');
+		});
+
+		it('leaves what it only projects', () => {
+			// Non-vacuity: walking the node is not what names its collections.
+			expect([...scopedCacheCollectionsBeyondNestedRows(
+				toManySchema(),
+				studentReading({ children: [teacherNode] }),
+			)]).toEqual([]);
+		});
 	});
 });
 

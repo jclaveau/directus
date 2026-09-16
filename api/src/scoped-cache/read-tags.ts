@@ -158,6 +158,22 @@ export function scopedCacheNestedCollections(ast: AST): Set<CollectionKey> {
 }
 
 /**
+ * The purge side emits `<child>:<fk>=<value>` only when the fk is a declared
+ * flat scope field; otherwise a child write emits just its pk slice, which an
+ * INSERT of a new child never carries — so a pin on the parent's key would serve
+ * stale. Pin only when the matching shallow tag is guaranteed on the write.
+ */
+function scopedCacheO2mChildPinnedByParentKey(
+	schema: SchemaOverview,
+	childCollection: CollectionKey,
+	reverseFk: string,
+): boolean {
+	return (schema.collections[childCollection]?.scopedCacheFields ?? [])
+		.filter((field) => !field.includes('.'))
+		.includes(reverseFk);
+}
+
+/**
  * The collections a read depends on BEYOND the parent rows it nested, so keying the
  * pin on those rows would leave the entry alive through a write that changes
  * what the read returns.
@@ -169,9 +185,10 @@ export function scopedCacheNestedCollections(ast: AST): Set<CollectionKey> {
  *   the rows it reaches are exactly those keys, which
  *   `pinnedScopedCacheTagsFromKeyedFilters` pins alongside whatever the response
  *   nested. Read off EVERY node's query, not only the root's: a nested node's
- *   filter withholds parents, and which ones it withholds is decided by every
+ *   filter withholds rows, and which ones it withholds is decided by every
  *   collection that filter reads — each of them one the response may have nested
- *   only in part.
+ *   only in part. A to-many node is walked like any other; only what its own
+ *   columns decide is covered, and only when its parent's key pins it.
  * - A nested node reads under only SOME of its parent's cases, so a parent it
  *   references can be withheld and arrive as a null slot — which
  *   `mergeWithParentItems` writes for a null foreign key too, leaving the two
@@ -196,10 +213,23 @@ export function scopedCacheCollectionsBeyondNestedRows(
 		collection: CollectionKey,
 		query: Query,
 		cases: Filter[],
+		// A to-many node pinned by its parent's key: every write to a row of the
+		// slice emits that pin, so what its own columns decide is covered and
+		// only a path reaching OUT of it depends on rows the read never nested.
+		ownColumnsCovered = false,
 	): void => {
+		const ownColumn = (
+			[path, entry]: [string, { collection: CollectionKey }],
+		): boolean => {
+			return path === '' && entry.collection === collection;
+		};
+
 		const queryFieldMap: FieldMap = { read: new Map(), other: new Map() };
 
 		extractFieldsFromQuery(collection, query, queryFieldMap, schema);
+
+		const queriedEntries = [...queryFieldMap.read, ...queryFieldMap.other]
+			.filter((entry) => !(ownColumnsCovered && ownColumn(entry)));
 
 		// An exempt node's own cases decide, per nested row, whether that row
 		// shows — its key pin already names those rows. Only a case reaching
@@ -214,9 +244,9 @@ export function scopedCacheCollectionsBeyondNestedRows(
 		);
 
 		const casedEntries = [...caseFieldMap.read, ...caseFieldMap.other]
-			.filter(([, entry]) => {
-				return !(
-					entry.collection === collection
+			.filter((entry) => {
+				return !(ownColumnsCovered && ownColumn(entry)) && !(
+					entry[1].collection === collection
 					&& exemptFromCaseGating.has(collection)
 				);
 			});
@@ -264,13 +294,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			groupedOrAggregated.add(entry.collection);
 		}
 
-		for (
-			const [, entry] of [
-				...queryFieldMap.read,
-				...queryFieldMap.other,
-				...casedEntries,
-			]
-		) {
+		for (const [, entry] of [...queriedEntries, ...casedEntries]) {
 			const queried = entry.collection;
 			const keying = keyingByCollection.get(queried);
 			const kind = keying?.kind;
@@ -311,12 +335,44 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			&& cases.every((_, index) => whenCase.includes(index));
 	};
 
-	const addWhatNestedM2oNodesDependOn = (
+	const addWhatNestedNodesDependOn = (
 		children: AST['children'],
 		cases: Filter[],
 	): void => {
 		for (const child of children) {
-			if (child.type !== 'm2o') {
+			if (child.type === 'field') {
+				continue;
+			}
+
+			if (child.type === 'functionField') {
+				addCollectionsQueriedBy(child.relatedCollection, child.query, child.cases);
+				continue;
+			}
+
+			if (child.type === 'a2o') {
+				for (const name of child.names) {
+					const namedCases = child.cases[name] ?? [];
+
+					addCollectionsQueriedBy(name, child.query[name] ?? {}, namedCases);
+					addWhatNestedNodesDependOn(child.children[name] ?? [], namedCases);
+				}
+
+				continue;
+			}
+
+			if (child.type === 'o2m') {
+				addCollectionsQueriedBy(
+					child.name,
+					child.query,
+					child.cases,
+					scopedCacheO2mChildPinnedByParentKey(
+						schema,
+						child.name,
+						child.relation.field,
+					),
+				);
+
+				addWhatNestedNodesDependOn(child.children, child.cases);
 				continue;
 			}
 
@@ -336,11 +392,11 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				beyond.add(child.relation.related_collection!);
 			}
 
-			addWhatNestedM2oNodesDependOn(child.children, child.cases);
+			addWhatNestedNodesDependOn(child.children, child.cases);
 		}
 	};
 
-	addWhatNestedM2oNodesDependOn(ast.children, ast.cases);
+	addWhatNestedNodesDependOn(ast.children, ast.cases);
 
 	return beyond;
 }
@@ -702,15 +758,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			continue;
 		}
 
-		// The purge side emits `<child>:<fk>=<value>` only when the fk is a declared
-		// flat scope field; otherwise a child write emits just its pk slice, which an
-		// INSERT of a new child never carries — so this pin would serve stale. Pin
-		// only when the matching shallow tag is guaranteed on the write.
-		if (
-			!(schema.collections[childCollection]?.scopedCacheFields ?? [])
-				.filter((field) => !field.includes('.'))
-				.includes(reverseFk)
-		) {
+		if (!scopedCacheO2mChildPinnedByParentKey(schema, childCollection, reverseFk)) {
 			reachedUnpinnably.add(childCollection);
 			continue;
 		}

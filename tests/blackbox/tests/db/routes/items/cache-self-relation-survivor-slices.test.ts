@@ -17,10 +17,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // Deleting a parent through a direct self-relation that SETS NULL / SETS DEFAULT
 // rewrites the surviving children's fk at the database level: they are changed
-// rows. The delete purges the vacated `parent=<deleted>` slice and nothing else of
-// theirs, so every other slice a survivor sits in — its own key, another scope
-// field — keeps serving the fk the database already rewrote, and the slice the
-// survivors ARRIVE in (the default) keeps missing them.
+// rows, and the delete captures them like an update — every slice a survivor sits
+// in (its own key, another scope field) drops, and so does the slice the survivors
+// ARRIVE in (the default). Purging only the vacated `parent=<deleted>` slice left
+// all of those serving the fk the database had already rewritten.
 const NODE = 'selfsurv_node';
 const OWNED = 'selfsurv_owned';
 const DEFAULTED = 'selfsurv_defaulted';

@@ -1676,9 +1676,17 @@ implements AbstractService<Item> {
 		// check and the activity rows all target `keys`, so a hook that returned a
 		// REWRITTEN array (rather than null to cancel) would otherwise purge rows that
 		// survive and leave the deleted ones cached.
-		const oldScopedCacheTags = await this.scopedCache.snapshot(keys, {
-			deleting: true,
-		});
+		//
+		// With them, the rows the delete rewrites through a self-relation: the database
+		// moves those between slices under the delete, so they take an update's old ∪
+		// new capture, the new half re-read once the rows are committed.
+		const selfRelationSurvivorKeys =
+			await this.scopedCache.selfRelationSurvivorKeys(keys);
+
+		const oldScopedCacheTags = await this.scopedCache.snapshot([
+			...keys,
+			...selfRelationSurvivorKeys,
+		]);
 
 		if (this.accountability) {
 			await validateAccess(
@@ -1744,8 +1752,16 @@ implements AbstractService<Item> {
 		}, opts.mutationTracker.snapshot());
 
 		if (shouldClearCache(this.cache, opts, this.collection)) {
+			const survivorScopedCacheTags =
+				await this.scopedCache.snapshot(selfRelationSurvivorKeys);
+
+			const scopedCacheTags =
+				oldScopedCacheTags === null || survivorScopedCacheTags === null
+					? null
+					: [...oldScopedCacheTags, ...survivorScopedCacheTags];
+
 			this.scopedCachePurged = await this.scopedCache.purge(
-				oldScopedCacheTags,
+				scopedCacheTags,
 				scopedCacheCollector,
 				scopedCacheCollectionsChangedByOnDelete(
 					this.schema,

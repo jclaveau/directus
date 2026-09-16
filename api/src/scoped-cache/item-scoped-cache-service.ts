@@ -262,16 +262,8 @@ export class ItemScopedCacheService {
 	 * declares scope fields or not: the read side pins that axis on every collection,
 	 * and a read pinning an axis the write never emits is never purged — stale, which
 	 * is worse than any hit ratio. It costs no query, since the keys are already here.
-	 *
-	 * `deleting` adds the slices the delete VACATES rather than occupies — rows that
-	 * survive it holding a foreign key it rewrites. They belong to the same snapshot
-	 * because they are read off the same keys and purged in the same pass; leaving
-	 * their union to the caller only asked it to redo the `null` handling below.
 	 */
-	async snapshot(
-		keys: PrimaryKey[],
-		{ deleting = false }: { deleting?: boolean } = {},
-	): Promise<ScopedCacheTag[] | null> {
+	async snapshot(keys: PrimaryKey[]): Promise<ScopedCacheTag[] | null> {
 		if (!scopedCachePurgeEnabled() || keys.length === 0) {
 			return [];
 		}
@@ -304,10 +296,6 @@ export class ItemScopedCacheService {
 		}
 
 		tags.push(...valueSliceTags);
-
-		if (deleting) {
-			tags.push(...this.vacatedSelfRelationTags(keys));
-		}
 
 		return tags;
 	}
@@ -436,42 +424,53 @@ export class ItemScopedCacheService {
 	}
 
 	/**
-	 * Slices a delete vacates through a DIRECT self-relation whose `on_delete`
-	 * rewrites the fk (SET NULL / SET DEFAULT). Deleting key X leaves surviving
-	 * children with `<field> = X` rewritten to null, so a read pinned to
-	 * `<field>=X` would go stale. Emitted only for a self-relation field the
-	 * collection scopes on (else no read pins it). Keyed by the deleted keys.
+	 * The rows a delete REWRITES rather than removes: children reaching the deleted
+	 * keys through a direct self-relation whose `on_delete` sets the fk to null or
+	 * to its default. The database changes them under the delete, so they are
+	 * snapshotted like an update — old slices before, new slices after — and none
+	 * of the slices they sit in stays warm: their key, every scope field, the
+	 * `<fk>=<deleted>` slice they leave and the one they land in.
+	 *
+	 * A self-relation that CASCADES is not here: its children go with the parent,
+	 * and `scopedCacheCollectionsChangedByOnDelete` takes the whole collection.
+	 * Nothing to read costs no query.
 	 */
-	private vacatedSelfRelationTags(deletedKeys: PrimaryKey[]): ScopedCacheTag[] {
-		if (!scopedCachePurgeEnabled() || deletedKeys.length === 0) {
+	async selfRelationSurvivorKeys(deletedKeys: PrimaryKey[]): Promise<PrimaryKey[]> {
+		const primaryKeyField = this.schema.collections[this.collection]?.primary;
+
+		if (
+			!scopedCachePurgeEnabled()
+			|| deletedKeys.length === 0
+			|| primaryKeyField === undefined
+		) {
 			return [];
 		}
 
-		const tags: ScopedCacheTag[] = [];
+		const rewritingFields = this.schema.relations
+			.filter((relation) => {
+				const rule = relation.schema?.on_delete;
 
-		for (const relation of this.schema.relations) {
-			const rule = relation.schema?.on_delete;
+				return relation.collection === this.collection
+					&& relation.related_collection === this.collection
+					&& (rule === 'SET NULL' || rule === 'SET DEFAULT');
+			})
+			.map((relation) => relation.field);
 
-			if (
-				relation.collection !== this.collection ||
-				relation.related_collection !== this.collection ||
-				!this.flatFields.includes(relation.field) ||
-				(rule !== 'SET NULL' && rule !== 'SET DEFAULT')
-			) {
-				continue;
-			}
-
-			for (const key of deletedKeys) {
-				tags.push({
-					collection: this.collection,
-					field: relation.field,
-					value: key,
-					type: this.fieldTypes[relation.field],
-				});
-			}
+		if (rewritingFields.length === 0) {
+			return [];
 		}
 
-		return tags;
+		const rows: Record<string, PrimaryKey>[] = await this.knex
+			.select(primaryKeyField)
+			.from(this.collection)
+			.where((builder) => {
+				for (const field of rewritingFields) {
+					builder.orWhereIn(field, deletedKeys);
+				}
+			})
+			.whereNotIn(primaryKeyField, deletedKeys);
+
+		return [...new Set(rows.map((row) => row[primaryKeyField]!))];
 	}
 
 	/**

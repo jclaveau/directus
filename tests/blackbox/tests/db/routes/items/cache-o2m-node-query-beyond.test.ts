@@ -18,10 +18,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // A to-many node's own query — its `deep` filter, sort and limit, and the
 // permission cases of what it nests — decides which children come back off rows
-// the response never carried. The root's query gets that treatment
-// (`scopedCacheCollectionsBeyondNestedRows`); a to-many node's does not, so a
-// collection it reaches through the child keeps only the pins of the rows the
-// response nested, and a write to any other row of it leaves the entry stale.
+// the response never carried, so a collection it reaches is depended on beyond
+// the rows the response nested (`scopedCacheCollectionsBeyondNestedRows`) and
+// tags bare, or by the one slice its chain back to the root bounds. Walking only
+// the root's query left such a collection with the pins of the nested rows
+// alone, and a write to any other row of it served stale.
 const STUDENT = 'o2mnode_student';
 const COURSE = 'o2mnode_course';
 const TEACHER = 'o2mnode_teacher';
@@ -285,8 +286,9 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a deep filter through the child's o2m bares that collection, so a hidden
-			course's part rewritten into the filter surfaces the course
+			a deep filter through the child's o2m slices that collection by the chain
+			back to the root, so a hidden course's part rewritten into the filter
+			surfaces the course
 		`, async () => {
 			const read = () => {
 				return readStudent(
@@ -299,7 +301,13 @@ describe(oneLine`
 
 			expect(titlesOf(missed)).toEqual(['shown']);
 			expectChildPinned(missed.headers[cacheTagsHeader]);
-			expectBare(missed.headers[cacheTagsHeader], PART);
+
+			// Not bare: the part's composed `course.student` path walks back to the
+			// root key, so that one slice names every part the filter can reach — the
+			// hidden course's included, which `part:course=<shown>` alone never did.
+			expect(missed.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${PART}:course\\.student=${studentId}(,|$)`),
+			);
 
 			await request(getUrl(vendor, env))
 				.patch(`/items/${PART}/${hiddenPartId}`)
