@@ -188,15 +188,16 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 		expect(held.body['checks']['processes:pool'][0]['status']).toBe('error');
 	}, 240_000);
 
-	// A scale is answered once every worker it names has reported ready, and the
-	// supervisor is asked for them one after another — so one scale costs the
-	// whole batch's boot while the call carrying it is bounded at fifteen
-	// seconds. A prewarm asked in a single step runs past that bound on a
-	// supervisor that is perfectly healthy: the workers it had already started
-	// go on arriving, nothing asks for the rest, and the deployment waits to be
-	// told it reached a size nothing is still growing towards
-	// (jclaveau/directus#490). Eight workers three seconds apart is twenty-one
-	// seconds of boot, which is that shape at a size a runner can hold.
+	// pm2 answers a scale once every worker it added has reported ready, and
+	// it boots them one after another, so a scale costs the whole batch's boot
+	// while a waited supervisor call is bounded at fifteen seconds. A prewarm
+	// waited on inside that bound was cut off on a supervisor that was
+	// perfectly healthy: the workers it had already started went on arriving,
+	// nothing asked for the rest, and the deployment waited to be told it had
+	// reached a size nothing was still growing towards
+	// (https://github.com/jclaveau/directus/issues/490). Eight workers three
+	// seconds apart is twenty-one seconds of boot, which is that shape at a
+	// size a runner can hold.
 	it.each(vendors)('%s reaches a prewarm one scale cannot carry', async (vendor) => {
 		const deployment = await deploy(vendor, '8', {
 			instances: 1,
@@ -220,24 +221,10 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 
 		expect(await healthTurns(deployment.url, 200, 60_000)).toBe(200);
 
-		// Where the prewarm went, and not only where it ended: the workers a
-		// scale started arrive whether or not anything is still waiting on it,
-		// so a pool of eight is reached either way and only the steps say the
-		// prewarm was the thing that asked for them.
-		const steps = [...deployment.rig.logs.join('').matchAll(
-			/prewarming \S+ from (\d+) to (\d+) of (\d+) workers/g,
-		)].map((asked) => {
-			return {
-				from: Number(asked[1]),
-				to: Number(asked[2]),
-				target: Number(asked[3]),
-			};
-		});
-
-		expect(steps.length).toBeGreaterThan(1);
-		expect(steps[0]?.from).toBe(1);
-		expect(steps.at(-1)?.to).toBe(8);
-		expect(steps.every((step) => step.to - step.from <= 2)).toBe(true);
-		expect(steps.every((step) => step.target === 8)).toBe(true);
+		// Asked for once, as one scale for the whole pool: a second scale sent
+		// while the first was still adding would have counted the workers added
+		// so far and grown the pool past eight.
+		expect(deployment.rig.logs.join('').match(/prewarming .+ workers/g))
+			.toEqual([`prewarming ${deployment.rig.appName} from 1 to 8 workers`]);
 	}, 240_000);
 });

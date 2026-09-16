@@ -203,6 +203,39 @@ test('a scale the supervisor never answers fails the call', async () => {
 	await failed;
 });
 
+// A scale is answered once every worker it added has reported ready, one boot
+// after another, so a caller growing a whole pool waits longer than the bound
+// and reads the pool itself to know where the scale got to.
+test('a scale asked for outright waits past the bound', async () => {
+	const { requestScale } = await import('./client.js');
+
+	let answer: (() => void) | null = null;
+
+	scale.mockImplementation((
+		_app: string,
+		_workers: number,
+		callback: (error: null) => void,
+	) => {
+		answer = () => callback(null);
+	});
+
+	let answered = false;
+
+	const scaling = requestScale('directus', 15).then(() => {
+		answered = true;
+	});
+
+	await vi.advanceTimersByTimeAsync(60_000);
+
+	expect(answered).toBe(false);
+	expect(disconnect).not.toHaveBeenCalled();
+
+	answer!();
+	await scaling;
+
+	expect(answered).toBe(true);
+});
+
 test('a scale the supervisor refuses keeps its connection', async () => {
 	const { scaleApp } = await import('./client.js');
 

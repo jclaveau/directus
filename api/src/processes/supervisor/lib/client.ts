@@ -238,7 +238,15 @@ interface ScalableSupervisor {
 }
 
 /**
- * Resizes the app to an absolute worker count.
+ * Asks the supervisor to resize the app to an absolute worker count, answered
+ * once the supervisor has: for a pool growing, that is after every worker the
+ * scale added has reported ready, and pm2 starts them one after another.
+ *
+ * Not bounded, unlike every other call here. The wait is the boots the scale
+ * asked for, so a pool of fifteen Directus workers answers well past the
+ * bound that tells a dead supervisor from a live one, and a caller reading the
+ * pool on its own ticks does not need this promise to say when it is done.
+ * A caller that does wait on the answer goes through `scaleApp`.
  *
  * pm2 answers a scale to the size it already has by calling back with an
  * error, and the only thing distinguishing it from a real failure is the
@@ -246,13 +254,10 @@ interface ScalableSupervisor {
  * treating it as a failure would log one a second while nothing is wrong,
  * and a reworded message should cost a stray log line rather than silence.
  */
-export async function scaleApp(
-	appName: string,
-	workers: number,
-): Promise<void> {
+export function requestScale(appName: string, workers: number): Promise<void> {
 	const supervisor = pm2 as unknown as ScalableSupervisor;
 
-	const scaled = new Promise<void>((resolve, reject) => {
+	return new Promise<void>((resolve, reject) => {
 		supervisor.scale(appName, workers, (error) => {
 			if (error && /same process number/i.test(error.message) === false) {
 				reject(error);
@@ -262,8 +267,14 @@ export async function scaleApp(
 			}
 		});
 	});
+}
 
-	await answeredInTime(`a scale to ${workers}`, scaled);
+/** Resizes the app to an absolute worker count, bounded like every other call. */
+export async function scaleApp(
+	appName: string,
+	workers: number,
+): Promise<void> {
+	await answeredInTime(`a scale to ${workers}`, requestScale(appName, workers));
 }
 
 /**

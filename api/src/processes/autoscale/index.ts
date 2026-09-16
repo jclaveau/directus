@@ -6,6 +6,7 @@ import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
 	releaseWorker,
+	requestScale,
 	scaleApp,
 } from '../supervisor/index.js';
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
@@ -38,53 +39,6 @@ import type { AutoscaleConfig, Decision } from './types.js';
  * for.
  */
 const SAMPLE_INTERVAL_MS = 1000;
-
-/**
- * How many workers one prewarm step asks the supervisor for.
- *
- * A scale is answered once the workers it named have started, and the call is
- * bounded so a daemon that died between the send and the reply cannot hold the
- * loop forever. A whole prewarm asked in one step puts those two against each
- * other: a pool of fifteen Directus workers does not finish booting inside that
- * bound, the call fails while the supervisor is perfectly healthy, and the
- * workers go on arriving behind a scale nobody is waiting for any more. Small
- * enough to be answered, and the pool is walked up a step a tick instead — which
- * also spreads the boot CPU a whole batch would spend at once.
- */
-const PREWARM_STEP_WORKERS = 2;
-
-/**
- * Walks the pool up towards `PM2_AUTOSCALE_PREWARM`, a step at a time.
- *
- * A deploy restarts the pool at its floor, so the first requests after one
- * land on a pool sized for an idle night. This is not the floor: the extra
- * workers are released like any others once the load does not justify them,
- * so a quiet deploy costs nothing lasting.
- *
- * Answers with the size it asked the supervisor for, and with `null` once the
- * pool is already the size the prewarm was for.
- */
-async function prewarm(
-	config: AutoscaleConfig,
-	workers: number,
-): Promise<number | null> {
-	const target = Math.min(config.prewarmWorkers, config.maxWorkers);
-
-	if (target <= workers) {
-		return null;
-	}
-
-	const step = Math.min(workers + PREWARM_STEP_WORKERS, target);
-
-	useLogger().info(
-		`[autoscale] prewarming ${config.appName} `
-		+ `from ${workers} to ${step} of ${target} workers`,
-	);
-
-	await scaleApp(config.appName, step);
-
-	return step;
-}
 
 /**
  * Shrinks the pool by stopping workers this picks, rather than a size pm2 picks
@@ -129,7 +83,10 @@ async function releaseWorkers(
  * The prewarm where one is asked for, because that is the whole of what it
  * asks: be this big before the deployment takes traffic. The floor otherwise,
  * and the floor too where scaling is off, since prewarm is one of the things
- * that does not run then.
+ * that does not run then. Not a floor itself: a deploy restarts the pool at
+ * its floor, sized for an idle night, and the workers prewarm adds for the
+ * first requests after it are released like any others once the load does
+ * not justify them.
  */
 export function targetPoolSize(config: AutoscaleConfig): number {
 	if (config.enabled === false) {
@@ -246,6 +203,7 @@ export async function runAutoscaler(): Promise<void> {
 	let lastScaleUpAt = Date.now();
 	let lastScaleDownAt = Date.now();
 	let prewarmed = false;
+	let prewarmAsked: Promise<void> | null = null;
 	let restartsByWorker: Map<number, number> | null = null;
 	let lastRestartAt: number | null = null;
 
@@ -360,19 +318,38 @@ export async function runAutoscaler(): Promise<void> {
 			let decision: Decision | null = null;
 
 			if (readyToPrewarm) {
-				const asked = await prewarm(config, workers);
+				const target = targetPoolSize(config);
 				lastScaleUpAt = Date.now();
 				lastScaleDownAt = Date.now();
 
-				// Latched on the pool having reached the size the prewarm was for,
-				// rather than on a step having been sent: a step the supervisor does
-				// not answer in time is asked for again on the next tick, and the
-				// workers that step already started count towards that ask.
-				if (asked === null) {
+				// Latched on the pool having reached the size, not on the scale
+				// having been asked for: only the read at the top of the tick says
+				// whether the workers a scale started have arrived.
+				if (target <= workers) {
 					prewarmed = true;
 				}
-				else {
-					decision = { workers: asked, reason: 'prewarming the pool' };
+				else if (prewarmAsked === null) {
+					logger.info(
+						`[autoscale] prewarming ${config.appName} `
+						+ `from ${workers} to ${target} workers`,
+					);
+
+					// One scale for the whole target, and not waited on: pm2 answers
+					// it once every worker it added has reported ready, one boot
+					// after another, which for a pool of fifteen runs well past the
+					// bound a waited call carries. Asked once at a time — a second
+					// scale sent while the first is still adding counts the workers
+					// added so far and adds the difference on top of the ones still
+					// to come.
+					prewarmAsked = requestScale(config.appName, target)
+						.catch((error: unknown) => {
+							logger.warn(error, '[autoscale] the prewarm scale was refused');
+						})
+						.finally(() => {
+							prewarmAsked = null;
+						});
+
+					decision = { workers: target, reason: 'prewarming the pool' };
 				}
 			}
 			else if (config.enabled && reloading() === false) {
