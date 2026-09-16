@@ -14,7 +14,7 @@ export const AUTOSCALE_DEFAULTS = {
 	maxWorkers: 4,
 	prewarmWorkers: 0,
 	minSecondsToScaleUp: 10,
-	minSecondsToScaleDown: 300,
+	minSecondsToScaleDown: 120,
 	warmupSeconds: 30,
 } as const;
 

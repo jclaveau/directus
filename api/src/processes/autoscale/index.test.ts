@@ -43,7 +43,7 @@ vi.mock('../../utils/report-unhandled-rejection.js', () => {
 const connectToSupervisor = vi.fn(async () => undefined);
 const disconnectFromSupervisor = vi.fn();
 const scaleApp = vi.fn(async () => undefined);
-const releaseWorker = vi.fn(async () => undefined);
+const releaseWorker = vi.fn<(pmId: number) => Promise<void>>(async () => undefined);
 const watchWorkerMessages = vi.fn();
 
 vi.mock('../supervisor/index.js', () => {
@@ -273,6 +273,87 @@ describe('runAutoscaler', () => {
 
 		expect(releaseWorker).toHaveBeenCalledWith(1);
 		expect(scaleApp).not.toHaveBeenCalled();
+	});
+
+	// The supervisor answers a release once the worker has drained, up to its
+	// `kill_timeout`, so a release of several workers asked for one after the
+	// other would hold the tick for the sum of the drains. Asked for together,
+	// the tick waits for the longest.
+	test('asks for every release of a tick before waiting on any', async () => {
+		readPool.mockResolvedValue({
+			pendingWorkers: 0,
+			warmingWorkers: 0,
+			onlineWorkers: [
+				{ pid: 11, pmId: 0, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 12, pmId: 1, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 13, pmId: 2, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 14, pmId: 3, cpuPercent: 5, memoryBytes: 0, mature: true },
+			],
+			restartsByWorker: new Map([[0, 0], [1, 0], [2, 0], [3, 0]]),
+			supervisor,
+		});
+
+		inFlightOf.mockImplementation((pmId) => {
+			return pmId === 0
+				? 4
+				: 0;
+		});
+
+		// Never answered, the way a worker mid-drain has not answered yet.
+		releaseWorker.mockImplementation(() => new Promise(() => undefined));
+		decide.mockReturnValue({ workers: 2, reason: 'the load went' });
+
+		// The first tick out of a deploy is prewarm's, whatever it decides.
+		await ticks(2);
+
+		expect(releaseWorker.mock.calls).toEqual([[1], [2]]);
+	});
+
+	// The release the supervisor refused is the failure the tick reports, and
+	// it reports it once the release beside it has been answered, so what the
+	// next tick reads is the pool both left.
+	test('fails the tick on a refused release once the others settle', async () => {
+		readPool.mockResolvedValue({
+			pendingWorkers: 0,
+			warmingWorkers: 0,
+			onlineWorkers: [
+				{ pid: 11, pmId: 0, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 12, pmId: 1, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 13, pmId: 2, cpuPercent: 5, memoryBytes: 0, mature: true },
+			],
+			restartsByWorker: new Map([[0, 0], [1, 0], [2, 0]]),
+			supervisor,
+		});
+
+		let answered = false;
+
+		releaseWorker.mockImplementation((pmId) => {
+			if (pmId === 1) {
+				return Promise.reject(new Error('pm2 did not answer'));
+			}
+
+			return new Promise<void>((resolve) => {
+				setTimeout(() => {
+					answered = true;
+					resolve();
+				}, 500);
+			});
+		});
+
+		decide.mockReturnValue({ workers: 1, reason: 'the load went' });
+
+		await ticks(2);
+
+		expect(logger.error).not.toHaveBeenCalled();
+
+		await vi.advanceTimersByTimeAsync(500);
+
+		expect(answered).toBe(true);
+
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ message: 'pm2 did not answer' }),
+			'[autoscale] a tick failed',
+		);
 	});
 
 	// A reload bumps the restart counter and leaves the retiring worker in the
