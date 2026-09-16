@@ -423,8 +423,8 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			const before = Date.now();
 
 			// Written through the scheduled node. The other node has no rule of
-			// its own, so a cron finding keyed in its namespace can only come off
-			// the bus.
+			// its own and is the only one that ever warmed globex (the namespaces
+			// differ), so a cron finding on that read can only come off the bus.
 			const written = await request(scheduledUrl)
 				.patch('/utils/cache/audit/schedule')
 				.send({ rule: '* * * * * *' })
@@ -438,10 +438,13 @@ describe('`directus cache audit` and the scheduled audit', () => {
 				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !finding; attempt++) {
 					finding = await db('directus_cache_audit_findings as f')
 						.join('directus_cache_audits as a', 'a.id', 'f.audit')
-						.where({ 'a.trigger': 'cron', 'f.verdict': 'stale' })
+						.where({
+							'a.trigger': 'cron',
+							'f.verdict': 'stale',
+							'f.url': `/items/${ROWS}?filter[owner][_eq]=globex`,
+						})
 						.where('a.started_at', '>', new Date(before))
-						.where('f.redis_key', 'like', `${env[vendor]['CACHE_NAMESPACE']}%`)
-						.select('f.url')
+						.select('f.diff')
 						.first();
 
 					if (!finding) {
@@ -449,9 +452,10 @@ describe('`directus cache audit` and the scheduled audit', () => {
 					}
 				}
 
-				expect(finding).toMatchObject({
-					url: `/items/${ROWS}?filter[owner][_eq]=globex`,
-				});
+				expect(finding).toBeDefined();
+
+				// A JSON column: parsed on Postgres, text on sqlite.
+				expect(JSON.stringify(finding.diff)).toContain('/data/0/amount');
 			}
 			finally {
 				await request(scheduledUrl)
