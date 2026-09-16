@@ -340,8 +340,8 @@ describe('the env panel', () => {
 	});
 
 	test('shows the Node options the process was started with', async () => {
-		// So a flag set in the supervisor config or NODE_OPTIONS can be confirmed
-		// live, rather than inferred from what the memory figures look like.
+		// So a flag pm2's `node_args` hands Node can be confirmed live, rather
+		// than inferred from what the memory figures look like.
 		const wrapper = await expanded();
 
 		expect(wrapper.find('.runtime').text())
