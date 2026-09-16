@@ -8,8 +8,9 @@ import request from 'supertest';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
 	type Rig,
-	countWorkers,
+	countWorkersAsync,
 	databaseEnv,
+	restartsOf,
 	startAutoscaler,
 	startPool,
 	stopRig,
@@ -157,24 +158,28 @@ function sleep(ms: number): Promise<void> {
  * Reads the pool off the daemon every quarter second, so the whole walk is
  * kept and not only where it ended: a worker lost on the way, two added at
  * once or a release skipping a step all show in the readings and nowhere else.
+ * Read without holding the event loop: the traffic the arm drives runs in
+ * this process too, and a listing that blocked it would be the arm throttling
+ * its own load.
  */
-function watchPool(rig: Rig): Watch {
+async function watchPool(rig: Rig): Promise<Watch> {
 	const started = Date.now();
 	const readings: Reading[] = [];
 	let running = true;
 
-	const read = () => {
-		readings.push({ at: Date.now() - started, size: countWorkers(rig) });
+	const read = async () => {
+		const size = await countWorkersAsync(rig);
+		readings.push({ at: Date.now() - started, size });
 	};
 
-	read();
+	await read();
 
 	void (async () => {
 		while (running) {
 			await sleep(250);
 
 			if (running) {
-				read();
+				await read();
 			}
 		}
 	})();
@@ -260,7 +265,7 @@ async function deploy(vendor: Vendor): Promise<Deployment> {
 		rig,
 		url: getUrl(vendor, { [vendor]: env } as never),
 		port,
-		watch: watchPool(rig),
+		watch: await watchPool(rig),
 	};
 }
 
@@ -319,6 +324,10 @@ describe('A prewarm is reached under traffic and released after it', () => {
 		console.info(`[prewarm-load] ${deployment.rig.appName} pool curve: ${steps}`);
 
 		expect(curve.map((plateau) => plateau.size)).toEqual(EXPECTED_CURVE);
+
+		// A worker that crashed and came back inside a second reads as a size
+		// the pool never left; the daemon's restart count is where it shows.
+		expect(restartsOf(deployment.rig)).toBe(0);
 
 		// One release a cooldown. Read from the daemon, a step begins once its
 		// victims are gone, so two steps are a cooldown apart give or take how

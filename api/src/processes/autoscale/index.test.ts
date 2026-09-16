@@ -42,10 +42,9 @@ vi.mock('../../utils/report-unhandled-rejection.js', () => {
 
 const connectToSupervisor = vi.fn(async () => undefined);
 const disconnectFromSupervisor = vi.fn();
-const scaleApp = vi.fn(async () => undefined);
 
-const requestScale = vi.fn<
-	(app: string, workers: number) => Promise<void>
+const scaleApp = vi.fn<
+	(app: string, workers: number, timeoutMs?: number) => Promise<void>
 >(async () => undefined);
 
 const releaseWorker = vi.fn<(pmId: number) => Promise<void>>(async () => undefined);
@@ -56,7 +55,6 @@ vi.mock('../supervisor/index.js', () => {
 		connectToSupervisor,
 		disconnectFromSupervisor,
 		releaseWorker,
-		requestScale,
 		scaleApp,
 		watchWorkerMessages,
 	};
@@ -387,14 +385,17 @@ describe('runAutoscaler', () => {
 		await ticks(2);
 
 		expect(decide).not.toHaveBeenCalled();
-		expect(requestScale).not.toHaveBeenCalled();
+		expect(scaleApp).not.toHaveBeenCalled();
 		// Still reported: an admin watching the restart is watching this.
 		expect(recordAutoscaleTick).toHaveBeenCalledTimes(2);
 	});
 
 	// One scale for the whole target: pm2 boots the workers it adds one after
 	// another whatever the size asked, so nothing is gained by asking in parts.
-	test('asks for the whole prewarm in one scale', async () => {
+	// Given the bound the boots deserve rather than a call's default: pm2 waits
+	// `listen_timeout` at most on each worker it adds, so four boots and one
+	// more for margin at the fixture's fifteen seconds.
+	test('asks for the whole prewarm in one scale, bounded at its boots', async () => {
 		resolveConfig.mockReturnValue({
 			...config,
 			prewarmWorkers: 5,
@@ -405,8 +406,7 @@ describe('runAutoscaler', () => {
 
 		await ticks(2);
 
-		expect(requestScale).toHaveBeenCalledExactlyOnceWith('api', 5);
-		expect(scaleApp).not.toHaveBeenCalled();
+		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 5, 75_000);
 
 		expect(recordAutoscaleTick).toHaveBeenNthCalledWith(1, expect.objectContaining({
 			lastDecision: expect.objectContaining({ reason: 'prewarming the pool' }),
@@ -421,12 +421,21 @@ describe('runAutoscaler', () => {
 	// pm2 has answered it.
 	test('asks once while the scale is still being answered', async () => {
 		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
-		requestScale.mockReturnValueOnce(new Promise(() => undefined));
+		scaleApp.mockReturnValueOnce(new Promise(() => undefined));
 
 		await ticks(4);
 
-		expect(requestScale).toHaveBeenCalledExactlyOnceWith('api', 3);
+		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 3, 45_000);
 		expect(decide).not.toHaveBeenCalled();
+
+		// A tick spent waiting says so, for the admin reading what the pool is
+		// being scaled on while a deploy fills.
+		expect(recordAutoscaleTick).toHaveBeenLastCalledWith(expect.objectContaining({
+			lastDecision: expect.objectContaining({
+				workers: null,
+				reason: 'the prewarm to 3 is still arriving',
+			}),
+		}));
 	});
 
 	// The defect the prewarm was rewritten for. Latched on the ask, a single
@@ -435,18 +444,51 @@ describe('runAutoscaler', () => {
 	// to be told it had reached a size nothing was growing towards.
 	test('asks again after a scale the supervisor refused', async () => {
 		resolveConfig.mockReturnValue({ ...config, prewarmWorkers: 3 });
-		requestScale.mockRejectedValueOnce(new Error('pm2 is not answering'));
+		scaleApp.mockRejectedValueOnce(new Error('pm2 is not answering'));
 
 		await ticks(2);
 
-		expect(requestScale.mock.calls).toEqual([['api', 3], ['api', 3]]);
+		expect(scaleApp.mock.calls).toEqual([['api', 3, 45_000], ['api', 3, 45_000]]);
 
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.any(Error),
-			'[autoscale] the prewarm scale was refused',
+			'[autoscale] the prewarm scale failed, asked again next tick',
 		);
 
 		expect(decide).not.toHaveBeenCalled();
+	});
+
+	// A pool carrying restarts before the prewarm was asked was crash-looping
+	// before the autoscaler arrived, and gets none. One restarting after the
+	// ask is a deployment still short of the size it asked for: the restart
+	// holds the prewarm for the warm-up, and it is asked for again after.
+	test('asks again after a worker of the filling pool restarted', async () => {
+		resolveConfig.mockReturnValue({
+			...config,
+			prewarmWorkers: 3,
+			warmupSeconds: 1,
+		});
+
+		scaleApp.mockRejectedValueOnce(new Error('pm2 is not answering'));
+
+		readPool
+			.mockResolvedValueOnce(pool(1))
+			.mockResolvedValue({
+				...pool(1),
+				onlineWorkers: [
+					...pool(1).onlineWorkers,
+					{ pid: 12, cpuPercent: 70, memoryBytes: 0, mature: true },
+				],
+				restartsByWorker: new Map([[11, 0], [12, 1]]),
+			});
+
+		restarted.mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+		await ticks(3);
+
+		expect(scaleApp.mock.calls).toEqual([['api', 3, 45_000], ['api', 3, 30_000]]);
+		// The tick of the restart itself went to the rule that holds on one.
+		expect(decide).toHaveBeenCalledOnce();
 	});
 
 	// Every worker of a pool that is still arriving is idle because it has just
@@ -469,7 +511,7 @@ describe('runAutoscaler', () => {
 
 		await ticks(3);
 
-		expect(requestScale).toHaveBeenCalledExactlyOnceWith('api', 3);
+		expect(scaleApp).toHaveBeenCalledExactlyOnceWith('api', 3, 45_000);
 		expect(decide).toHaveBeenCalledOnce();
 	});
 
@@ -489,7 +531,7 @@ describe('runAutoscaler', () => {
 
 		await ticks(1);
 
-		expect(requestScale).not.toHaveBeenCalled();
+		expect(scaleApp).not.toHaveBeenCalled();
 		expect(decide).toHaveBeenCalledOnce();
 	});
 

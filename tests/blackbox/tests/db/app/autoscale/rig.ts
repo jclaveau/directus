@@ -1,11 +1,12 @@
 import config, { paths } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
-import { ChildProcess, execFileSync, spawn } from 'child_process';
+import { ChildProcess, execFile, execFileSync, spawn } from 'child_process';
 import Redis from 'ioredis';
 import knex, { type Knex } from 'knex';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 // `paths.cwd` is tests/blackbox, so two levels up is the repo root. PM2 ships
 // as an api dependency; the same binary the published image runs Directus with.
@@ -379,6 +380,7 @@ function listWorkers(rig: Rig): ListedProcess[] {
 	return listed.filter((worker) => worker.name === rig.appName);
 }
 
+
 /**
  * What each serving worker holds for one pm2 entry.
  *
@@ -423,13 +425,6 @@ export async function declaredEverywhere(
 }
 
 /**
- * The workers the daemon is keeping.
- *
- * What is serving plus what is on its way to serving, which is the count the
- * autoscaler sizes a pool on. A worker it gave up on is neither, and neither is
- * one somebody stopped — a pool is short of both.
- */
-/**
  * The pm2 instance numbers the daemon is still keeping, in ascending order.
  *
  * Which worker a release stopped, rather than how many are left: pm2 walks the
@@ -437,19 +432,43 @@ export async function declaredEverywhere(
  * that took instance 0.
  */
 export function instancesOf(rig: Rig): number[] {
-	const gone = ['stopped', 'stopping', 'errored'];
-
 	return listWorkers(rig)
-		.filter((worker) => gone.includes(worker.pm2_env?.status ?? '') === false)
+		.filter((worker) => gone(worker) === false)
 		.map((worker) => Number(worker.pm2_env?.['NODE_APP_INSTANCE'] ?? -1))
 		.sort((left, right) => left - right);
 }
 
-export function countWorkers(rig: Rig): number {
-	const gone = ['stopped', 'stopping', 'errored'];
+/** A worker the pool is short of: given up on, or stopped by somebody. */
+function gone(worker: ListedProcess): boolean {
+	return ['stopped', 'stopping', 'errored']
+		.includes(worker.pm2_env?.status ?? '');
+}
 
-	return listWorkers(rig)
-		.filter((worker) => gone.includes(worker.pm2_env?.status ?? '') === false)
+/**
+ * The workers the daemon is keeping.
+ *
+ * What is serving plus what is on its way to serving, which is the count the
+ * autoscaler sizes a pool on. A worker it gave up on is neither, and neither is
+ * one somebody stopped — a pool is short of both.
+ */
+export function countWorkers(rig: Rig): number {
+	return listWorkers(rig).filter((worker) => gone(worker) === false).length;
+}
+
+/**
+ * `countWorkers`, without holding the event loop for the half second the
+ * listing takes: what a watcher reading the pool beside traffic it is itself
+ * driving asks for.
+ */
+export async function countWorkersAsync(rig: Rig): Promise<number> {
+	const { stdout } = await promisify(execFile)(pm2Bin, ['jlist'], {
+		env: { ...process.env, PM2_HOME: rig.pm2Home },
+		encoding: 'utf8',
+		maxBuffer: 32 * 1024 * 1024,
+	});
+
+	return (JSON.parse(stdout) as ListedProcess[])
+		.filter((worker) => worker.name === rig.appName && gone(worker) === false)
 		.length;
 }
 

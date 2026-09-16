@@ -101,6 +101,9 @@ beforeEach(() => {
 afterEach(() => {
 	vi.clearAllMocks();
 	vi.unstubAllGlobals();
+	// Here rather than at the end of the cases that fake the clock, so a failing
+	// assertion does not leave the next case on a clock nothing advances.
+	vi.useRealTimers();
 });
 
 describe('computeBuildIdentity', () => {
@@ -302,7 +305,7 @@ describe('flushCachesIfBuildChanged', () => {
 
 		const lockCache = makeLockCache();
 		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
-		env['CACHE_FLUSH_TIMEOUT'] = '5m';
+		env['CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT'] = '5m';
 
 		let finish!: () => void;
 
@@ -324,8 +327,6 @@ describe('flushCachesIfBuildChanged', () => {
 		await booting;
 
 		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
-
-		vi.useRealTimers();
 	});
 
 	/**
@@ -334,13 +335,16 @@ describe('flushCachesIfBuildChanged', () => {
 	 * Waited on for a budget and then left to finish: the boot it holds up is a
 	 * worker the pool is waiting for, and a flush given up on for good is one
 	 * that never records what it flushed for, so the boot after walks it again.
+	 * The budget is the boot's own: `CACHE_FLUSH_TIMEOUT` is a deploy step's,
+	 * sized for the whole flush it waits out.
 	 */
 	it('stops waiting on a long flush, which still records the build', async () => {
 		vi.useFakeTimers();
 
 		const lockCache = makeLockCache();
 		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
-		env['CACHE_FLUSH_TIMEOUT'] = '30s';
+		env['CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT'] = '30s';
+		env['CACHE_FLUSH_TIMEOUT'] = '120s';
 
 		let finish!: () => void;
 
@@ -361,7 +365,19 @@ describe('flushCachesIfBuildChanged', () => {
 
 		expect(lockCache.store.get('build-identity')).toEqual(expect.any(String));
 		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
+	});
 
-		vi.useRealTimers();
+	// A flush that failed flushed nothing: the build it was for is not recorded,
+	// so the next boot walks the keyspace again, and the lock it held is handed
+	// back rather than left to lapse.
+	it('hands back the lock and records no build when the flush failed', async () => {
+		const lockCache = makeLockCache();
+		vi.mocked(getCache).mockReturnValue({ lockCache } as any);
+		vi.mocked(flushCaches).mockRejectedValue(new Error('redis is gone'));
+
+		await flushCachesIfBuildChanged(managerOf([]));
+
+		expect(lockCache.store.has('build-identity')).toBe(false);
+		expect(lockCache.store.has('build-identity-flush-lock')).toBe(false);
 	});
 });

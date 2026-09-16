@@ -6,7 +6,6 @@ import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
 	releaseWorker,
-	requestScale,
 	scaleApp,
 } from '../supervisor/index.js';
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
@@ -32,6 +31,7 @@ import {
 } from './lib/resolve-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
 import { recordAutoscaleTick } from './lib/state.js';
+import { SUPERVISOR_FALLBACKS } from './lib/supervisor.js';
 import type { AutoscaleConfig, Decision } from './types.js';
 
 /**
@@ -203,6 +203,7 @@ export async function runAutoscaler(): Promise<void> {
 	let lastScaleUpAt = Date.now();
 	let lastScaleDownAt = Date.now();
 	let prewarmed = false;
+	let prewarmBegun = false;
 	let prewarmAsked: Promise<void> | null = null;
 	let restartsByWorker: Map<number, number> | null = null;
 	let lastRestartAt: number | null = null;
@@ -306,12 +307,15 @@ export async function runAutoscaler(): Promise<void> {
 			// A pool fresh out of a deploy, which is the one prewarm exists for,
 			// carries no restarts at all. One that does was crash-looping
 			// before the autoscaler arrived, and prewarm would hand it a batch
-			// of workers to crash.
+			// of workers to crash. A worker restarting once the prewarm is under
+			// way holds it for the warm-up, like any restart holds a decision,
+			// and no longer: the deployment still has to reach the size it asked
+			// for, and one still crashing keeps the warm-up running.
 			const readyToPrewarm = config.enabled
 				&& config.strategy !== 'legacy'
 				&& workers > 0
 				&& churning === false
-				&& carriesRestarts === false
+				&& (carriesRestarts === false || prewarmBegun)
 				&& prewarmed === false
 				&& reloading() === false;
 
@@ -328,22 +332,45 @@ export async function runAutoscaler(): Promise<void> {
 				if (target <= workers) {
 					prewarmed = true;
 				}
-				else if (prewarmAsked === null) {
+				else if (prewarmAsked !== null) {
+					decision = {
+						workers: null,
+						reason: `the prewarm to ${target} is still arriving`,
+					};
+				}
+				else {
+					prewarmBegun = true;
+
 					logger.info(
 						`[autoscale] prewarming ${config.appName} `
 						+ `from ${workers} to ${target} workers`,
 					);
 
-					// One scale for the whole target, and not waited on: pm2 answers
-					// it once every worker it added has reported ready, one boot
-					// after another, which for a pool of fifteen runs well past the
-					// bound a waited call carries. Asked once at a time — a second
-					// scale sent while the first is still adding counts the workers
-					// added so far and adds the difference on top of the ones still
-					// to come.
-					prewarmAsked = requestScale(config.appName, target)
+					// One scale for the whole target, not waited on by the tick:
+					// pm2 answers it once every worker it added has reported ready,
+					// one boot after another, which for a pool of fifteen runs well
+					// past the bound a supervisor call carries by default. Bounded
+					// all the same, at the boots asked for: pm2 waits at most
+					// `listen_timeout` on each before it moves to the next, so a
+					// scale still unanswered past that many is one whose answer is
+					// not coming — the daemon it was sent to is gone and the one
+					// listening now never heard of it. Asked once at a time — a
+					// second scale sent while the first is still adding counts the
+					// workers added so far and adds the difference on top of the
+					// ones still to come.
+					const listenTimeout = reading.supervisor?.listenTimeout
+						?? SUPERVISOR_FALLBACKS.listenTimeout;
+
+					prewarmAsked = scaleApp(
+						config.appName,
+						target,
+						(target - workers + 1) * listenTimeout,
+					)
 						.catch((error: unknown) => {
-							logger.warn(error, '[autoscale] the prewarm scale was refused');
+							logger.warn(
+								error,
+								'[autoscale] the prewarm scale failed, asked again next tick',
+							);
 						})
 						.finally(() => {
 							prewarmAsked = null;

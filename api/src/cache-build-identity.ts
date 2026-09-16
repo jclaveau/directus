@@ -213,11 +213,16 @@ export async function flushCachesIfBuildChanged(
 
 		// `createApp()` awaits this before the server listens, and a flush walks
 		// every key the response cache holds — 167s against a production keyspace
-		// (jclaveau/directus#468). Waited on for the budget a flush is given
-		// anywhere else and then left to finish on its own: the boot it holds up is
-		// a worker the pool is waiting for, and the flush records the build it
-		// flushed for whether or not anyone was still waiting on it.
-		const budget = getMilliseconds(env['CACHE_FLUSH_TIMEOUT'], FLUSH_LOCK_MS);
+		// (https://github.com/jclaveau/directus/issues/468). Waited on for a
+		// budget of its own and then left to finish: the boot it holds up is a
+		// worker the pool is waiting for, and the flush records the build it
+		// flushed for whether or not anyone was still waiting on it. Its own
+		// rather than `CACHE_FLUSH_TIMEOUT`, which a deploy step sizes for the
+		// whole flush it waits out — the planner gives that one 120s.
+		const budget = getMilliseconds(
+			env['CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT'],
+			FLUSH_LOCK_MS,
+		);
 
 		let waited: ReturnType<typeof setTimeout> | undefined;
 

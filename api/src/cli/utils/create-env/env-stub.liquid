@@ -212,6 +212,10 @@ CACHE_ENABLED=false
 # build's response shape until CACHE_TTL expires. Only acts with CACHE_STORE=redis. [true]
 # CACHE_AUTO_FLUSH_ON_DEPLOY=false
 
+# How long a boot waits on that flush before it listens with the flush still running;
+# the flush finishes on its own and records the build it flushed for. [30s]
+# CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT="30s"
+
 # Overrides the core build identity used by `CACHE_AUTO_FLUSH_ON_DEPLOY`. Set it to a per-build value
 # (e.g. the git commit SHA) when directus/version is pinned; unset, it falls back to the commit baked
 # in at build time, then `RAILWAY_GIT_COMMIT_SHA`, then the directus version string. Required for a

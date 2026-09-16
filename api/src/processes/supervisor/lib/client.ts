@@ -141,9 +141,25 @@ export function disconnectFromSupervisor(): void {
  */
 let reconnecting: Promise<void> | null = null;
 
+/**
+ * What fails each call that is waiting on the client for an answer with no
+ * bound of its own.
+ *
+ * pm2 holds a call's callback in the connection that carried it, and a
+ * connection taken apart drops them without a word: a call left waiting there
+ * is never answered and never failed. The bounded calls fail on their own
+ * clock; these are failed here, so that the reconnect leaves no call behind.
+ */
+const outstanding = new Set<() => void>();
+
 /** One reconnect at a time, however many callers found the supervisor gone. */
 function reconnectToSupervisor(): Promise<void> {
 	reconnecting ??= (async () => {
+		for (const fail of outstanding) {
+			fail();
+		}
+
+		outstanding.clear();
 		await disconnected();
 		await connect();
 	})()
@@ -242,11 +258,9 @@ interface ScalableSupervisor {
  * once the supervisor has: for a pool growing, that is after every worker the
  * scale added has reported ready, and pm2 starts them one after another.
  *
- * Not bounded, unlike every other call here. The wait is the boots the scale
- * asked for, so a pool of fifteen Directus workers answers well past the
- * bound that tells a dead supervisor from a live one, and a caller reading the
- * pool on its own ticks does not need this promise to say when it is done.
- * A caller that does wait on the answer goes through `scaleApp`.
+ * Not bounded here; `scaleApp` is where the bound is. Failed all the same when
+ * a bounded call gives up and rebuilds the connection, since the callback pm2
+ * owed this one went with it.
  *
  * pm2 answers a scale to the size it already has by calling back with an
  * error, and the only thing distinguishing it from a real failure is the
@@ -254,11 +268,22 @@ interface ScalableSupervisor {
  * treating it as a failure would log one a second while nothing is wrong,
  * and a reworded message should cost a stray log line rather than silence.
  */
-export function requestScale(appName: string, workers: number): Promise<void> {
+function requestScale(appName: string, workers: number): Promise<void> {
 	const supervisor = pm2 as unknown as ScalableSupervisor;
 
 	return new Promise<void>((resolve, reject) => {
+		const lost = () => {
+			reject(new Error(
+				'the supervisor connection was rebuilt before it answered '
+				+ `a scale to ${workers}`,
+			));
+		};
+
+		outstanding.add(lost);
+
 		supervisor.scale(appName, workers, (error) => {
+			outstanding.delete(lost);
+
 			if (error && /same process number/i.test(error.message) === false) {
 				reject(error);
 			}
@@ -269,12 +294,25 @@ export function requestScale(appName: string, workers: number): Promise<void> {
 	});
 }
 
-/** Resizes the app to an absolute worker count, bounded like every other call. */
+/**
+ * Resizes the app to an absolute worker count.
+ *
+ * Bounded like every other call, at the default for a scale that adds a worker
+ * or takes some away. A scale growing a pool by many is answered once the last
+ * of them has reported ready, one boot after another, which for fifteen
+ * Directus workers is well past the bound that tells a dead supervisor from a
+ * live one: such a caller passes the bound the boots it asked for deserve.
+ */
 export async function scaleApp(
 	appName: string,
 	workers: number,
+	timeoutMs: number = SUPERVISOR_TIMEOUT_MS,
 ): Promise<void> {
-	await answeredInTime(`a scale to ${workers}`, requestScale(appName, workers));
+	await answeredInTime(
+		`a scale to ${workers}`,
+		requestScale(appName, workers),
+		timeoutMs,
+	);
 }
 
 /**

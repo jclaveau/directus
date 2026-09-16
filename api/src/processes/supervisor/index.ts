@@ -6,7 +6,6 @@ export {
 	listSupervisedApps,
 	releaseWorker,
 	reloadApp,
-	requestScale,
 	scaleApp,
 	sendToSupervisedProcess,
 	supervisorAvailable,
