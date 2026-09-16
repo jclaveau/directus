@@ -1,6 +1,6 @@
 ---
 name: directus_issue498_cache_audit
-description: Issue #498 cache audit (replay every live entry against the database) — settled design points, the two defects only a hand-run smoke caught, and the verdict vocabulary
+description: Issue #498 cache audit (replay every live entry against the database) — settled design points, history tables + live schedule + MCP group + cache-page panel (PR #499), the traps each surface hit, the two defects only a hand-run smoke caught
 metadata:
   author: Jean Claveau
   type: project
@@ -24,7 +24,33 @@ Issue jclaveau/directus#498 on branch `v11.10.1-feat/cache-audit`, based on
 - The replay JWT carries `app_access: false, admin_access: false` — `verifyAccessJWT`
   REQUIRES those claims present and recomputes both from the DB anyway.
 - `purge: true` evicts per entry (`evictCacheEntry(redisKey)`), only stale/tag_drift.
-- No MCP tool yet.
+- History: `directus_cache_audits` (row per run, column per verdict, `trigger`
+  rest|cli|cron|mcp) + `directus_cache_audit_findings` (cascade); every surface
+  goes through `runCacheAudit` in `cache-audit-runs.ts`; `CACHE_AUDIT_RETENTION`
+  30d; `GET /utils/cache/audits[/:id]`. Live schedule: `directus_settings.
+  cache_audit_schedule` overrides env, `settings.update` action → bus
+  `cacheAuditScheduleChanged` → every node reschedules; `GET/PATCH
+  /utils/cache/audit/schedule`. MCP group `cache_audit` (own group, like
+  `autoscale_drill`, so an agent with `cache` reads doesn't get a run). Cache
+  page: `cache-audit-panel.vue` under the anomaly summary.
+
+**Traps hit wiring the history/GUI/MCP (PR #499):**
+- The `/utils/cache/anomalies` listing is the top 200 groups BY COUNT over a
+  shard-shared table: a fresh count-1 row falls off under load (the shard-5
+  "flake"). A bb wait must read `directus_cache_stats_anomalies` joined to
+  `_descriptors` directly — AND match path+query, since every earlier case's
+  anomaly on the same path is still in the table.
+- The three audit bb suites share `directus_settings` and the bus: a schedule
+  one PATCHes reschedules every instance in the shard → sequential chain.
+- `validateCron` (cron-parser) is lenient: `* * *` and 6 fields are VALID;
+  `hourly`, `60 * * * *`, 7 fields are not.
+- `system-mcp.test.ts` pins the exact tool list and all-readOnly → a group
+  with acting tools needs its own bb instance (`SYSTEM_MCP_TOOLS=cache,cache_audit`).
+- App: `formatDuration` takes SECONDS; `v-table` default cells render
+  `v-text-overflow` (unregistered in tests → empty) and treat `0` as null →
+  explicit `#item.x` slots; a hyphenated SFC-imported child DOES mount in the
+  parent's test → `stubs`; `vi.useFakeTimers({ toFake: ['Date'] })` or
+  knex-mock-client freezes.
 
 **Defects only the hand-run smoke caught (unit + bb suites were green):**
 1. The CLI boot answered its own loopback replays `503 Under pressure`:
