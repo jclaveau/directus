@@ -107,9 +107,11 @@ describe(oneLine`
 			survivorNodeId = nodes[0].id;
 			bystanderNodeId = nodes[1].id;
 
+			// The doomed root sits in a slice no reader pins: its own capture must not
+			// be what evicts the survivors' slice.
 			const ownedRoots = await CreateItem(vendor, {
 				collection: OWNED,
-				item: [{ owner: 1 }, { owner: 2 }],
+				item: [{ owner: 3 }, { owner: 2 }],
 			});
 
 			doomedOwnedId = ownedRoots[0].id;
@@ -263,7 +265,7 @@ describe(oneLine`
 			expect(affected.headers[cacheTagsHeader]).toBe(`${OWNED}:owner=1`);
 
 			expect(affected.body.data.map((row: { parent: number | null }) => row.parent))
-				.toEqual([null, doomedOwnedId, doomedOwnedId]);
+				.toEqual([doomedOwnedId, doomedOwnedId]);
 
 			expect((await readOwned(1)).headers[cacheStatusHeader]).toBe('HIT');
 
