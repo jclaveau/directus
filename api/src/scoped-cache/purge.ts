@@ -679,24 +679,74 @@ async function* scanScopedCacheKeys(match: string): AsyncGenerator<string[]> {
  * Reports how many keys Redis removed and how many commands it refused, so the
  * flush that called it can say what it cost, and say so honestly when the index is
  * still there (https://github.com/jclaveau/directus/issues/468).
+ *
+ * Runs AFTER `clearResponseCache`, always: that is where the wholesale counter
+ * moves, and a read that captured it earlier and files its tags between the unlink
+ * below and a move made after it would compare equal, keep its entry, and leave it
+ * indexed by a set this function just deleted — reachable to no later purge.
  */
 export async function dropScopedCacheIndex(): Promise<ScopedCacheUnlinkTally> {
 	if (!redisConfigAvailable()) {
 		return { dropped: 0, refused: 0 };
 	}
 
-	// BEFORE the scan, like every other sweep: a read that captured the counter
-	// earlier and files its tags between the unlink below and a bump made after it
-	// would compare equal, keep its entry, and leave it indexed by a set this
-	// function just deleted — reachable to no later purge. Bumping first is what
-	// makes such a read decline. Unconditional, so a flush finding no tag set still
-	// invalidates the reads in flight across the `cache.clear()` that preceded it.
-	// Names no collection, so it moves the wholesale counter every read captures.
-	await bumpScopedCacheEpochs(['*']);
-
 	// The keys the pre-scoped-cache-index layout left behind are not swept here:
 	// they went once, in `20260911A-drop-the-pre-scoped-cache-index-layout`.
 	return unlinkScopedCacheKeysMatching(`${scopedCacheIndexPrefix()}*`);
+}
+
+/**
+ * Drop every cached response, the way a read in flight can notice. The wholesale
+ * counter — the one every read captures, named for no collection — moves BEFORE
+ * the clear, as every purge's counters move before its sweep: a fill that rechecks
+ * after the move declines, and one that rechecked before it had written its entry
+ * before the clear, which takes it. A clear that moved the counter after itself
+ * left a fill rechecking in between kept — stale for its TTL, and once the index
+ * drop that follows unlinked its tag sets, reachable to no later purge. Moved
+ * whether or not the clear finds anything, since the reads in flight are what it
+ * is for.
+ *
+ * The entries only, so a flush that reports the index drop apart from the clear
+ * can; `flushResponseCache` is the two together.
+ */
+export async function clearResponseCache(cache: Keyv | null): Promise<void> {
+	await bumpScopedCacheEpochs(['*']);
+	await cache?.clear();
+}
+
+/**
+ * The flush a system service runs after a change that invalidates every read — a
+ * permission, policy, role, access or user change, a field or collection edit, a
+ * manual sort. Nothing sweeps the tag index after a raw `clear()`, and its sets
+ * would point at keys that no longer exist until their own expiry, or forever when
+ * `CACHE_TTL` is unset.
+ *
+ * Never throws: every caller runs it in a `finally` after its write committed, and
+ * Keyv already swallows the clear's own failure, so a scan Redis refuses must not
+ * be the one thing that turns a committed change into a failed request. The
+ * counter moved and the entries went, or will when Redis is back; sets left
+ * behind name keys that are gone and expire on their own.
+ */
+export async function flushResponseCache(cache: Keyv | null): Promise<void> {
+	await clearResponseCache(cache);
+
+	// Gated here, not in the drop: the flush command drops the index whatever the
+	// mode, so a store switched out of scoped purging leaves no sets behind — while
+	// this runs on every permission, field or collection change, and a scan that
+	// walks the whole keyspace for an index that cannot exist is a cost per write.
+	if (!scopedCachePurgeEnabled()) {
+		return;
+	}
+
+	try {
+		await dropScopedCacheIndex();
+	}
+	catch (error: any) {
+		useLogger().warn(
+			error,
+			`[scoped-cache] could not drop the tag index after a flush: ${error}`,
+		);
+	}
 }
 
 /**

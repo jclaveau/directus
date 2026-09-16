@@ -84,7 +84,7 @@ import {
 	collectProcesses,
 	processesReportEnabled,
 } from '../processes/index.js';
-import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { countScopedCacheTagMembers, flushResponseCache } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -333,7 +333,7 @@ export class UtilsService {
 		const { cache } = getCache();
 
 		if (shouldClearCache(cache, undefined, collection)) {
-			await cache.clear();
+			await flushResponseCache(cache);
 		}
 
 		emitter.emitAction(

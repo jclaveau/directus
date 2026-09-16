@@ -13,6 +13,7 @@ import type {
 	QueryPath,
 } from './permissions/modules/process-ast/types.js';
 import { oneLine } from '@directus/utils';
+import type { Keyv } from 'keyv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	assertScopedCacheRedisSupported,
@@ -42,6 +43,7 @@ import {
 	scopedCacheNestedCollections,
 	type ScopedCacheFilterKeying,
 	dropScopedCacheIndex,
+	flushResponseCache,
 	purgeCollectionScopedCache,
 	purgeScopedCache,
 	retryPendingScopedCachePurges,
@@ -1094,48 +1096,15 @@ describe('dropScopedCacheIndex', () => {
 	});
 
 	it(oneLine`
-		bumps the wholesale counter BEFORE the scan, so a read filing its tags across
-		the flush declines instead of keeping an entry the unlink orphaned
+		moves no counter of its own — \`clearResponseCache\` has, before it
 	`, async () => {
-		const calls: string[] = [];
-
-		const pipeline = {
-			incr: (key: string) => {
-				calls.push(`incr ${key}`);
-				return pipeline;
-			},
-			expire: () => pipeline,
-			unlink: () => {
-				calls.push('unlink');
-				return pipeline;
-			},
-			exec: async () => {
-				calls.push('exec');
-				return [];
-			},
-		};
-
-		vi.mocked(useRedis).mockReturnValue({
-			scan: async () => {
-				calls.push('scan');
-				return ['0', ['ns:scoped-cache-index:tag:articles']];
-			},
-			pipeline: () => pipeline,
-		} as any);
+		const { scan } = mockScan(['0', ['ns:scoped-cache-index:tag:articles']]);
+		const { incr } = vi.mocked(useRedis)().pipeline();
 
 		await dropScopedCacheIndex();
 
-		// The whole guard rests on a purge moving the counters before it sweeps. A
-		// bump made after the unlink leaves the window this closes: a read that
-		// captured earlier compares equal and keeps an entry indexed by a set that is
-		// gone.
-		expect(calls).toEqual([
-			'incr ns:epoch:*',
-			'exec',
-			'scan',
-			'unlink',
-			'exec',
-		]);
+		expect(scan).toHaveBeenCalledOnce();
+		expect(incr).not.toHaveBeenCalled();
 	});
 
 	it(oneLine`
@@ -1280,6 +1249,110 @@ describe('dropScopedCacheIndex', () => {
 
 		expect(scan)
 		.toHaveBeenCalledWith('0', 'MATCH', 'ns:scoped-cache-index:*', 'COUNT', 1000);
+	});
+});
+
+describe('flushResponseCache', () => {
+	function recordFlush() {
+		const calls: string[] = [];
+
+		const pipeline = {
+			incr: (key: string) => {
+				calls.push(`incr ${key}`);
+				return pipeline;
+			},
+			expire: () => pipeline,
+			unlink: () => {
+				calls.push('unlink');
+				return pipeline;
+			},
+			exec: async () => {
+				calls.push('exec');
+				return [];
+			},
+		};
+
+		vi.mocked(useRedis).mockReturnValue({
+			scan: async () => {
+				calls.push('scan');
+				return ['0', ['ns:scoped-cache-index:tag:articles']];
+			},
+			pipeline: () => pipeline,
+		} as any);
+
+		const cache = {
+			clear: vi.fn(async () => {
+				calls.push('clear');
+			}),
+		} as unknown as Keyv;
+
+		return { calls, cache };
+	}
+
+	it(oneLine`
+		moves the wholesale counter BEFORE the clear, then drops the index — a read
+		rechecking between a clear and a move made after it keeps an entry the
+		index drop then orphans
+	`, async () => {
+		const { calls, cache } = recordFlush();
+
+		await flushResponseCache(cache);
+
+		expect(calls).toEqual([
+			'incr ns:epoch:*',
+			'exec',
+			'clear',
+			'scan',
+			'unlink',
+			'exec',
+		]);
+	});
+
+	it(oneLine`
+		moves the counter with no cache to clear — the reads in flight are what the
+		move is for, and they captured it whether or not anything was stored
+	`, async () => {
+		const { calls } = recordFlush();
+
+		await flushResponseCache(null);
+
+		expect(calls).toEqual(['incr ns:epoch:*', 'exec', 'scan', 'unlink', 'exec']);
+	});
+
+	it(oneLine`
+		clears and nothing more with scoped purging off — there is no counter a read
+		captured and no index to drop, and the scan would still walk the whole
+		keyspace on every permission, field or collection change
+	`, async () => {
+		const { calls, cache } = recordFlush();
+		env['CACHE_AUTO_PURGE_MODE'] = 'full';
+
+		await flushResponseCache(cache);
+
+		expect(calls).toEqual(['clear']);
+	});
+
+	it(oneLine`
+		answers when the index scan is refused — a system service runs this in a
+		\`finally\` after its write committed, and a throw here would fail that
+		request over a cache the clear already left to Keyv to swallow
+	`, async () => {
+		const { calls, cache } = recordFlush();
+		const warn = vi.fn();
+		vi.mocked(useLogger).mockReturnValue({ info: vi.fn(), warn } as any);
+
+		vi.mocked(useRedis)().scan = async () => {
+			throw new Error('ECONNREFUSED');
+		};
+
+		await expect(flushResponseCache(cache)).resolves.toBeUndefined();
+
+		expect(calls).toEqual(['incr ns:epoch:*', 'exec', 'clear']);
+
+		expect(warn).toHaveBeenCalledWith(
+			expect.any(Error),
+			expect.stringContaining('index'),
+		);
 	});
 });
 

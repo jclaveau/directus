@@ -16,6 +16,7 @@ import jwt from 'jsonwebtoken';
 import type { StringValue } from 'ms';
 import { performance } from 'perf_hooks';
 import { clearSystemCache } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache.js';
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
@@ -666,7 +667,7 @@ export class UsersService extends ItemsService {
 		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
 
 		if (this.cache && opts?.autoPurgeCache !== false) {
-			await this.cache.clear();
+			await flushResponseCache(this.cache);
 		}
 	}
 }

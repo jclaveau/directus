@@ -21,6 +21,7 @@ vi.mock('./redis/index.js', () => ({ redisConfigAvailable: () => false }));
 // `refused` off it to decide whether the clear it was asked for actually happened.
 vi.mock('./scoped-cache.js', () => {
 	return {
+		clearResponseCache: vi.fn(async (cache) => cache?.clear()),
 		dropScopedCacheIndex: vi.fn(async () => ({ dropped: 0, refused: 0 })),
 	};
 });

@@ -10,7 +10,7 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { dropScopedCacheIndex } from './scoped-cache.js';
+import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -204,7 +204,7 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// calls this uncaught, and it keeps the one tier the flush command exists for
 	// out of the report that command reads its exit code from.
 	try {
-		await cache?.clear();
+		await clearResponseCache(cache);
 	}
 	catch (error: any) {
 		failures.push('response cache');
@@ -331,7 +331,7 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	}
 
 	if (targets.includes('response')) {
-		await cache?.clear();
+		await clearResponseCache(cache);
 		// The scoped-tag index lives in raw Redis outside the Keyv namespace, so the
 		// clear above misses it — drop it too so no orphan tag pointers linger.
 		refusedIndexKeys = (await dropScopedCacheIndex()).refused;

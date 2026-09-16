@@ -13,6 +13,7 @@ import {
 } from 'graphql';
 import { SchemaComposer } from 'graphql-compose';
 import { clearSystemCache, getCache } from '../../../cache.js';
+import { flushResponseCache } from '../../../scoped-cache.js';
 import { DEFAULT_AUTH_PROVIDER, REFRESH_COOKIE_OPTIONS, SESSION_COOKIE_OPTIONS } from '../../../constants.js';
 import { rateLimiter } from '../../../middleware/rate-limiter-registration.js';
 import { createDefaultAccountability } from '../../../permissions/utils/create-default-accountability.js';
@@ -427,7 +428,7 @@ export function globalResolvers(gql: GraphQLService, schemaComposer: SchemaCompo
 
 				const { cache } = getCache();
 
-				await cache?.clear();
+				await flushResponseCache(cache);
 				await clearSystemCache();
 
 				return;
