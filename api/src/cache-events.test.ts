@@ -24,6 +24,7 @@ import {
 	listPurgesCoveringEntry,
 	readCacheAuditQueue,
 	readCacheAuditQueueState,
+	readScopedCacheEntryTags,
 	readCacheDescriptorForRedisKey,
 	readCacheTombstone,
 	listCacheGroupLatencies,
@@ -3082,8 +3083,8 @@ describe('readCacheAuditQueue', () => {
 	}
 
 	it(oneLine`
-		answers the described entries least recently verified first, tags
-		joined in
+		answers the described entries least recently verified first, without
+		their tags
 	`, async () => {
 		rowsByTable['directus_cache_stats_descriptors'] = [
 			descriptorRow(),
@@ -3095,11 +3096,6 @@ describe('readCacheAuditQueue', () => {
 				path: '/graphql',
 				query: '{"query":"{ __typename }"}',
 			}),
-		];
-
-		rowsByTable['directus_cache_stats_scoped_entry_tags'] = [
-			{ cache_key: 'ck1', scoped_cache_tag: 'articles:owner=acme' },
-			{ cache_key: 'ck1', scoped_cache_tag: 'authors' },
 		];
 
 		const due = await readCacheAuditQueue(500, before);
@@ -3114,7 +3110,6 @@ describe('readCacheAuditQueue', () => {
 				userId: 'user-1',
 				query: 'fields[]=id',
 				lastFilled: new Date(5_000),
-				scopedCacheTags: ['articles:owner=acme', 'authors'],
 			},
 			{
 				cacheKey: 'ck2',
@@ -3125,9 +3120,13 @@ describe('readCacheAuditQueue', () => {
 				userId: null,
 				query: '{"query":"{ __typename }"}',
 				lastFilled: new Date(5_000),
-				scopedCacheTags: [],
 			},
 		]);
+
+		// The tags are for the entries the cache still holds, asked separately.
+		expect(mockDb).not.toHaveBeenCalledWith(
+			'directus_cache_stats_scoped_entry_tags',
+		);
 
 		// Least recently verified first: the audit, or the fill where later.
 		expect(builder.orderByRaw).toHaveBeenCalledWith(
@@ -3138,7 +3137,6 @@ describe('readCacheAuditQueue', () => {
 		expect(builder.orderBy).toHaveBeenCalledWith('last_filled', 'asc');
 
 		expect(builder.limit).toHaveBeenCalledWith(500);
-		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
 		// A descriptor that recorded a fill, never one only ever seen as a miss.
 		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
 		// Nor one written before it kept the key the cache is asked for.
@@ -3169,18 +3167,6 @@ describe('readCacheAuditQueue', () => {
 		expect(builder.where).toHaveBeenCalledWith('collection', 'authors');
 	});
 
-	it('asks the tags of nothing when nothing is due', async () => {
-		rowsByTable['directus_cache_stats_descriptors'] = [];
-
-		expect(await readCacheAuditQueue(500, before)).toEqual([]);
-
-		expect(mockDb).toHaveBeenCalledTimes(1);
-
-		expect(mockDb).not.toHaveBeenCalledWith(
-			'directus_cache_stats_scoped_entry_tags',
-		);
-	});
-
 	it(oneLine`
 		answers nothing without asking where stats are off, or for no room
 	`, async () => {
@@ -3189,6 +3175,35 @@ describe('readCacheAuditQueue', () => {
 		env['CACHE_STATS_ENABLED'] = false;
 
 		expect(await readCacheAuditQueue(500, before)).toEqual([]);
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('readScopedCacheEntryTags', () => {
+	it('answers the tags of a batch of entries by key, in one query', async () => {
+		rowsByTable['directus_cache_stats_scoped_entry_tags'] = [
+			{ cache_key: 'ck1', scoped_cache_tag: 'articles:owner=acme' },
+			{ cache_key: 'ck1', scoped_cache_tag: 'authors' },
+			{ cache_key: 'ck3', scoped_cache_tag: 'authors' },
+		];
+
+		const tags = await readScopedCacheEntryTags(['ck1', 'ck2', 'ck3']);
+
+		expect([...tags]).toEqual([
+			['ck1', ['articles:owner=acme', 'authors']],
+			['ck3', ['authors']],
+		]);
+
+		expect(mockDb).toHaveBeenCalledTimes(1);
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2', 'ck3']);
+	});
+
+	it('asks nothing for no keys, or where stats are off', async () => {
+		expect([...await readScopedCacheEntryTags([])]).toEqual([]);
+
+		env['CACHE_STATS_ENABLED'] = false;
+
+		expect([...await readScopedCacheEntryTags(['ck1'])]).toEqual([]);
 		expect(mockDb).not.toHaveBeenCalled();
 	});
 });

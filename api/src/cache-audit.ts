@@ -15,6 +15,7 @@ import {
 	listPurgesCoveringEntry,
 	queueCacheAnomaly,
 	readCacheAuditQueue,
+	readScopedCacheEntryTags,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
 import {
@@ -147,7 +148,7 @@ export interface CacheAuditReport {
 // the load the audit puts on the database, not a throughput knob.
 const REPLAY_CONCURRENCY = 4;
 // Descriptors read per page of the queue; most describe an entry the cache
-// has already dropped, and those cost one `getMany` miss each.
+// has already dropped, and those cost one `EXISTS` each and nothing more.
 const QUEUE_PAGE = 500;
 const DIFF_PATHS_REPORTED = 20;
 // Enough diff paths to find one an ignore glob does not cover.
@@ -162,6 +163,7 @@ interface LiveEntry {
 interface EntrySnapshot {
 	body: unknown;
 	createdAt: number | null;
+	expiresAt: number | null;
 }
 
 interface ReplayPlan {
@@ -236,24 +238,36 @@ export async function auditCache(
 			break;
 		}
 
-		const raws = await cache.getMany(due.map((descriptor) => descriptor.redisKey));
-
-		// A descriptor whose entry is gone is passed over, not examined: it
-		// describes nothing until the next fill. A page can hold more live
-		// entries than the limit has room for; those stay unstamped for the
-		// next run.
+		// Asked whether each is held before any body is fetched: a descriptor
+		// whose entry is gone is passed over, not examined — it describes
+		// nothing until the next fill — and a page can hold more live entries
+		// than the limit has room for; those stay unstamped for the next run.
+		// Only what will be examined has its body and tags read.
+		const held = await cache.hasMany(due.map((row) => row.redisKey));
 		const passed: string[] = [];
-		const batch: LiveEntry[] = [];
+		const taken: typeof due = [];
 
-		due.forEach((descriptor, index) => {
-			const raw = raws[index];
+		due.forEach((row, index) => {
+			if (held[index] !== true) {
+				passed.push(row.cacheKey);
+			}
+			else if (taken.length < room) {
+				taken.push(row);
+			}
+		});
 
-			if (raw === undefined) {
-				passed.push(descriptor.cacheKey);
-			}
-			else if (batch.length < room) {
-				batch.push({ descriptor, raw });
-			}
+		const [raws, tags] = await Promise.all([
+			cache.getMany(taken.map((row) => row.redisKey)),
+			readScopedCacheEntryTags(taken.map((row) => row.cacheKey)),
+		]);
+
+		// A body gone between the two asks is re-read by the judge and found
+		// missing: raced, as any entry that moves under the audit.
+		const batch: LiveEntry[] = taken.map((row, index) => {
+			return {
+				descriptor: { ...row, scopedCacheTags: tags.get(row.cacheKey) ?? [] },
+				raw: raws[index],
+			};
 		});
 
 		await advanceCacheAuditQueue(
@@ -382,7 +396,7 @@ class CacheAudit {
 			return { verdict: 'unreplayable', reason: 'unreadable' };
 		}
 
-		if (await this.expired(redisKey)) {
+		if (snapshot.expiresAt !== null && snapshot.expiresAt <= Date.now()) {
 			return { verdict: 'expired' };
 		}
 
@@ -458,8 +472,9 @@ class CacheAudit {
 
 	/**
 	 * The body as the page read handed it, or re-read from the cache when a
-	 * retry needs the current one. Null once the key is gone; `undefined` body
-	 * for a value that does not decompress.
+	 * retry needs the current one, with what its expiry sidecar says in one
+	 * read. Null once the key is gone; `undefined` body for a value that does
+	 * not decompress.
 	 */
 	private async snapshot(
 		redisKey: string,
@@ -484,7 +499,17 @@ class CacheAudit {
 			body = undefined;
 		}
 
-		return { body, createdAt: await this.createdAt(redisKey) };
+		const expiry = await getCacheValue(this.cache, `${redisKey}__expires_at`);
+
+		return {
+			body,
+			createdAt: typeof expiry?.createdAt === 'number'
+				? expiry.createdAt
+				: null,
+			expiresAt: typeof expiry?.exp === 'number'
+				? expiry.exp
+				: null,
+		};
 	}
 
 	private async createdAt(redisKey: string): Promise<number | null> {
@@ -493,12 +518,6 @@ class CacheAudit {
 		return typeof expiry?.createdAt === 'number'
 			? expiry.createdAt
 			: null;
-	}
-
-	private async expired(redisKey: string): Promise<boolean> {
-		const expiry = await getCacheValue(this.cache, `${redisKey}__expires_at`);
-
-		return typeof expiry?.exp === 'number' && expiry.exp <= Date.now();
 	}
 
 	// An entry filled before the expiry sidecar carried `createdAt` cannot be

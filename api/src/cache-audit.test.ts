@@ -20,6 +20,7 @@ import {
 	listPurgesCoveringEntry,
 	queueCacheAnomaly,
 	readCacheAuditQueue,
+	readScopedCacheEntryTags,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
 import {
@@ -41,13 +42,16 @@ vi.mock('./utils/get-secret.js', () => {
 	return { getSecret: () => 'audit-secret' };
 });
 
-// A Keyv as the audit sees it: the bodies of a page of keys at once, plus
-// `get`/`has` for the re-reads the race guard makes.
+// A Keyv as the audit sees it: whether a page of keys is held, the bodies of
+// the ones it takes, plus `get`/`has` for the re-reads the race guard makes.
 class FakeCache {
 	store = new Map<string, unknown>();
-
-	async getMany(keys: string[]): Promise<unknown[]> {
+	getMany = vi.fn(async (keys: string[]): Promise<unknown[]> => {
 		return keys.map((key) => this.store.get(key));
+	});
+
+	async hasMany(keys: string[]): Promise<boolean[]> {
+		return keys.map((key) => this.store.has(key));
 	}
 
 	async get(key: string): Promise<unknown> {
@@ -162,6 +166,14 @@ beforeEach(() => {
 			.slice(0, count);
 	});
 
+	vi.mocked(readScopedCacheEntryTags).mockImplementation(async (cacheKeys) => {
+		return new Map(
+			queue
+				.filter((each) => cacheKeys.includes(each.cacheKey))
+				.map((each) => [each.cacheKey, each.scopedCacheTags]),
+		);
+	});
+
 	vi.mocked(listPurgesCoveringEntry).mockResolvedValue([]);
 	vi.mocked(claimCacheAnomalyThrottleSlot).mockResolvedValue(true);
 
@@ -253,6 +265,54 @@ describe('the queue', () => {
 		expect(report.scanned).toBe(1);
 		expect(replay).toHaveBeenCalledTimes(1);
 		expect(advancedPast()).toEqual(['ck1', 'ck2']);
+
+		// Neither its body nor its tags were asked for: the cache said it was
+		// gone before either.
+		expect(cache.getMany).toHaveBeenCalledWith(['rk2']);
+		expect(readScopedCacheEntryTags).toHaveBeenCalledWith(['ck2']);
+	});
+
+	test(oneLine`
+		reads the bodies of what the limit has room for, not of the whole page
+	`, async () => {
+		fill('rk1', { data: [] });
+		fill('rk2', { data: [] });
+		fill('rk3', { data: [] });
+
+		described(
+			descriptor({ redisKey: 'rk1', cacheKey: 'ck1' }),
+			descriptor({ redisKey: 'rk2', cacheKey: 'ck2' }),
+			descriptor({ redisKey: 'rk3', cacheKey: 'ck3' }),
+		);
+
+		const report = await auditCache({
+			limit: 2,
+			replay: replayer(answer({ data: [] }), answer({ data: [] })),
+		});
+
+		expect(report.scanned).toBe(2);
+		expect(cache.getMany).toHaveBeenCalledTimes(1);
+		expect(cache.getMany).toHaveBeenCalledWith(['rk1', 'rk2']);
+		expect(readScopedCacheEntryTags).toHaveBeenCalledWith(['ck1', 'ck2']);
+		// The third stays unstamped for the next run.
+		expect(advancedPast()).toEqual(['ck1', 'ck2']);
+	});
+
+	test('an entry gone between the ask and the read is raced', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		cache.getMany.mockImplementationOnce(async () => {
+			cache.store.delete('rk');
+
+			return [undefined];
+		});
+
+		const replay = replayer();
+		const report = await auditCache({ replay });
+
+		expect(report.counts.raced).toBe(1);
+		expect(replay).not.toHaveBeenCalled();
 	});
 
 	test('an entry with no descriptor is not the audit\'s to see', async () => {
@@ -297,6 +357,9 @@ describe('a fresh entry', () => {
 		expect(report.counts.fresh).toBe(1);
 		expect(report.findings).toEqual([]);
 		expect(replay).toHaveBeenCalledTimes(1);
+		// Its expiry sidecar read once, for the fill time and the expiry both.
+		expect(getCacheValue).toHaveBeenCalledTimes(1);
+		expect(getCacheValue).toHaveBeenCalledWith(cache, 'rk__expires_at');
 
 		const request = replay.mock.calls[0]![0];
 		expect(request.method).toBe('GET');

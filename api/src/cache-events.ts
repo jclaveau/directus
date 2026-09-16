@@ -1340,7 +1340,13 @@ export async function readCacheDescriptorForRedisKey(
 }
 
 /** What the audit needs to replay one entry: its request, as sent, and its tags. */
-export interface CacheAuditDescriptor {
+export interface CacheAuditDescriptor extends CacheAuditQueueRow {
+	/** The tags it was filled under, in the printable form the purge side joins on. */
+	scopedCacheTags: string[];
+}
+
+/** A descriptor as the queue hands it out: the tags come once it is known live. */
+export interface CacheAuditQueueRow {
 	cacheKey: string;
 	redisKey: string;
 	method: string;
@@ -1349,8 +1355,6 @@ export interface CacheAuditDescriptor {
 	userId: string | null;
 	query: string;
 	lastFilled: Date;
-	/** The tags it was filled under, in the printable form the purge side joins on. */
-	scopedCacheTags: string[];
 }
 
 /** The narrowing a queue read is asked for; both name a descriptor column. */
@@ -1375,12 +1379,16 @@ export interface CacheAuditQueueFilter {
  * Read by `redis_key`, which is what the cache is asked for: it differs from
  * `cache_key` once `CACHE_KEY_HASH_ENABLED` is off, and is `''` on a row
  * written before the column existed — nothing to fetch by, so left out.
+ *
+ * Without tags: most of a page describes an entry the cache has dropped, and
+ * the tags are for the replay of the ones it still holds — the audit asks
+ * `readScopedCacheEntryTags` for those once the cache has said which.
  */
 export async function readCacheAuditQueue(
 	count: number,
 	before: Date,
 	filter: CacheAuditQueueFilter = {},
-): Promise<CacheAuditDescriptor[]> {
+): Promise<CacheAuditQueueRow[]> {
 	if (!cacheStatsConfigured() || count <= 0) {
 		return [];
 	}
@@ -1416,13 +1424,38 @@ export async function readCacheAuditQueue(
 
 	const rows: Record<string, unknown>[] = await query;
 
-	const tagRows: Record<string, unknown>[] = rows.length === 0
-		? []
-		: await db('directus_cache_stats_scoped_entry_tags')
-			.whereIn('cache_key', rows.map((row) => row['cache_key'] as string))
-			.select('cache_key', 'scoped_cache_tag');
+	return rows.map((row) => {
+		return {
+			cacheKey: row['cache_key'] as string,
+			redisKey: row['redis_key'] as string,
+			method: row['method'] as string,
+			path: row['path'] as string,
+			collection: (row['collection'] as string | null) ?? null,
+			userId: (row['user_id'] as string | null) ?? null,
+			query: row['query'] as string,
+			lastFilled: new Date(row['last_filled'] as string),
+		};
+	});
+}
 
+/**
+ * The tags these entries were filled under, by cache key; a key with none
+ * recorded is absent. One query for a batch, sized by the caller.
+ */
+export async function readScopedCacheEntryTags(
+	cacheKeys: string[],
+): Promise<Map<string, string[]>> {
 	const tagsByCacheKey = new Map<string, string[]>();
+
+	if (!cacheStatsConfigured() || cacheKeys.length === 0) {
+		return tagsByCacheKey;
+	}
+
+	const tagRows: Record<string, unknown>[] = await getDatabase()(
+		'directus_cache_stats_scoped_entry_tags',
+	)
+		.whereIn('cache_key', cacheKeys)
+		.select('cache_key', 'scoped_cache_tag');
 
 	for (const tagRow of tagRows) {
 		const cacheKey = tagRow['cache_key'] as string;
@@ -1431,21 +1464,7 @@ export async function readCacheAuditQueue(
 		tagsByCacheKey.set(cacheKey, tags);
 	}
 
-	return rows.map((row) => {
-		const cacheKey = row['cache_key'] as string;
-
-		return {
-			cacheKey,
-			redisKey: row['redis_key'] as string,
-			method: row['method'] as string,
-			path: row['path'] as string,
-			collection: (row['collection'] as string | null) ?? null,
-			userId: (row['user_id'] as string | null) ?? null,
-			query: row['query'] as string,
-			lastFilled: new Date(row['last_filled'] as string),
-			scopedCacheTags: tagsByCacheKey.get(cacheKey) ?? [],
-		};
-	});
+	return tagsByCacheKey;
 }
 
 /** How far the audit has got round the cache, as the panel reports it. */
