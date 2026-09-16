@@ -49,6 +49,7 @@ beforeAll(() => {
 
 beforeEach(() => {
 	delete env['CACHE_AUDIT_RETENTION'];
+	env['CACHE_AUDIT_ENABLED'] = true;
 	vi.mocked(getDatabase).mockReturnValue(db);
 	vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ['Date'] });
 });
@@ -234,6 +235,17 @@ describe('runCacheAudit', () => {
 		expect(auditCache).toHaveBeenCalledWith({ limit: 5 });
 		expect(tracker.history.insert[0]!.bindings).toContain('mcp');
 		expect(tracker.history.update).toHaveLength(1);
+	});
+
+	it('refuses on a node with CACHE_AUDIT_ENABLED off, before any row', async () => {
+		env['CACHE_AUDIT_ENABLED'] = false;
+
+		await expect(runCacheAudit('rest')).rejects.toThrow(
+			'CACHE_AUDIT_ENABLED is false on this node',
+		);
+
+		expect(auditCache).not.toHaveBeenCalled();
+		expect(tracker.history.insert).toHaveLength(0);
 	});
 
 	it('records the failure and rethrows when the engine throws', async () => {

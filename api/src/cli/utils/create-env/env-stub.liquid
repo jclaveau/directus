@@ -248,9 +248,18 @@ CACHE_STORE=memory
 # How long a miss can still be attributed to a just-expired entry (gap-since-expiry lookback). ["1h"]
 # CACHE_STATS_GAP_LOOKBACK="1h"
 
+# Whether this node audits the cache at all: the schedule below, `POST
+# /utils/cache/audit`, `directus cache audit` and the `cache_audit` MCP group.
+# Off, none of them exists here. Every replay is an uncached read against the
+# shared database, so a fleet keeps it on one node (the back-office) and off on
+# the ones serving traffic. [true]
+CACHE_AUDIT_ENABLED=true
+
 # When to replay every live cache entry against the database and report the
 # ones it no longer matches (`POST /utils/cache/audit`, `directus cache audit`).
-# Every replay is an uncached read: dev and preview only. Off when empty. [""]
+# Every replay is an uncached read: dev and preview only. Off when empty. The
+# rule is shared (`directus_settings` overrides it live), so every node with
+# CACHE_AUDIT_ENABLED runs it. [""]
 # CACHE_AUDIT_SCHEDULE="0 */10 * * * *"
 
 # JSON-pointer globs a cache audit ignores when comparing a stored body with a

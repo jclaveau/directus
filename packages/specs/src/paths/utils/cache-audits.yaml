@@ -31,5 +31,7 @@ get:
       description: Successful request
     '400':
       description: The `window` is not a duration such as "15m"
+    '404':
+      description: The node has `CACHE_AUDIT_ENABLED` off; the audit is elsewhere
   tags:
     - System Diagnostics

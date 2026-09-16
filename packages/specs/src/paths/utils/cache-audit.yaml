@@ -85,5 +85,7 @@ post:
       description: Successful request
     '400':
       description: A parameter was invalid
+    '404':
+      description: The node has `CACHE_AUDIT_ENABLED` off; the audit is elsewhere
   tags:
     - System Diagnostics

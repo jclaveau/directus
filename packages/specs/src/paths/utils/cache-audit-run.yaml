@@ -32,5 +32,7 @@ get:
       description: The `id` is not a positive integer
     '403':
       description: No run has that id
+    '404':
+      description: The node has `CACHE_AUDIT_ENABLED` off; the audit is elsewhere
   tags:
     - System Diagnostics

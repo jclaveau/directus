@@ -16,6 +16,8 @@ get:
               data:
                 $ref: '../../openapi.yaml#/components/schemas/CacheAuditSchedule'
       description: Successful request
+    '404':
+      description: The node has `CACHE_AUDIT_ENABLED` off; the audit is elsewhere
   tags:
     - System Diagnostics
 patch:
@@ -51,5 +53,7 @@ patch:
       description: Successful request
     '400':
       description: No `rule` was given, or it is not a cron rule
+    '404':
+      description: The node has `CACHE_AUDIT_ENABLED` off; the audit is elsewhere
   tags:
     - System Diagnostics

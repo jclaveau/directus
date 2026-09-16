@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { cacheAuditEnabled } from '../../utils/cache-audit-enabled.js';
 import type { SystemMcpToolGroup } from '../types/tool.js';
 
 /**
@@ -39,7 +40,10 @@ export function systemMcpToolGroups(): SystemMcpToolGroup[] {
 
 	return configured
 		.map((group) => String(group).trim())
-		.filter(isSystemMcpToolGroup);
+		.filter(isSystemMcpToolGroup)
+		// A node with CACHE_AUDIT_ENABLED off has no audit to offer, whatever
+		// the list names.
+		.filter((group) => group !== 'cache_audit' || cacheAuditEnabled());
 }
 
 /**

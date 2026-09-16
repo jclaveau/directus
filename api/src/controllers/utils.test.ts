@@ -1,6 +1,7 @@
 import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+const cacheAuditEnabled = vi.fn(() => true);
 const getCacheGroupLatencies = vi.fn();
 const auditCache = vi.fn();
 const getCacheAudits = vi.fn();
@@ -56,6 +57,7 @@ vi.mock('../services/import-export.js', () => {
 	return { ExportService: vi.fn(), ImportService: vi.fn() };
 });
 
+vi.mock('../utils/cache-audit-enabled.js', () => ({ cacheAuditEnabled }));
 vi.mock('../services/revisions.js', () => ({ RevisionsService: vi.fn() }));
 vi.mock('../middleware/respond.js', () => ({ respond: vi.fn() }));
 vi.mock('../middleware/collection-exists.js', () => ({ default: vi.fn() }));
@@ -119,6 +121,36 @@ describe('utils controller /cache/audit', () => {
 	function request(query: Record<string, unknown>, body: unknown = undefined) {
 		return { accountability: null, schema: {}, query, body } as any;
 	}
+
+	test(oneLine`
+		is absent — a 404, not a 403 — on a node with CACHE_AUDIT_ENABLED off,
+		history and schedule included
+	`, async () => {
+		// The one `router.use` layer in front of the audit routes.
+		const gate = router.stack.find((entry: any) => {
+			return entry.route === undefined && entry.regexp.test('/cache/audits/7');
+		})!.handle as any;
+
+		for (const originalUrl of [
+			'/utils/cache/audit',
+			'/utils/cache/audits',
+			'/utils/cache/audits/7',
+			'/utils/cache/audit/schedule',
+		]) {
+			cacheAuditEnabled.mockReturnValueOnce(false);
+			const refused = vi.fn();
+			await gate({ originalUrl }, {}, refused);
+
+			expect(refused.mock.calls[0]![0]).toMatchObject({
+				status: 404,
+				message: `Route ${originalUrl} doesn't exist.`,
+			});
+		}
+
+		const passed = vi.fn();
+		await gate({ originalUrl: '/utils/cache/audit' }, {}, passed);
+		expect(passed).toHaveBeenCalledWith();
+	});
 
 	test('runs the audit with defaults and answers its report', async () => {
 		const report = { scanned: 0, findings: [] };

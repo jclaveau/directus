@@ -22,6 +22,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 //
 // Its own instance, because `system-mcp.test.ts` pins the exact tool list of a
 // deployment that never named this group, and every tool there is read-only.
+// Beside it, a node with CACHE_AUDIT_ENABLED off — the traffic-serving shape:
+// it offers no audit tool, answers no audit route, and runs no schedule, while
+// the schedule the other node writes still reaches it over the bus.
 
 const ROWS = 'test_cache_audit_mcp_rows';
 
@@ -53,9 +56,15 @@ describe('Cache audit over the system MCP', () => {
 		env[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
 		env[vendor]['SYSTEM_MCP_TOOLS'] = 'cache,cache_audit';
 
+		const optedOutEnv = cloneDeep(env);
+		optedOutEnv[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-off-${vendor}`;
+		optedOutEnv[vendor]['CACHE_AUDIT_ENABLED'] = 'false';
+
 		let instance: ChildProcess;
+		let optedOut: ChildProcess;
 		let db: Knex;
 		let url: string;
+		let optedOutUrl: string;
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -78,6 +87,7 @@ describe('Cache audit over the system MCP', () => {
 				item: [
 					{ owner: 'acme', amount: '1' },
 					{ owner: 'globex', amount: '2' },
+					{ owner: 'initech', amount: '3' },
 				],
 			});
 
@@ -89,20 +99,33 @@ describe('Cache audit over the system MCP', () => {
 				env: env[vendor],
 			});
 
+			const optedOutPort = await getPort();
+			optedOutEnv[vendor].PORT = String(optedOutPort);
+
+			optedOut = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: optedOutEnv[vendor],
+			});
+
 			db = knex(config.knexConfig[vendor]!);
 			url = getUrl(vendor, env);
+			optedOutUrl = getUrl(vendor, optedOutEnv);
 
-			await awaitDirectusConnection(port);
+			await Promise.all([
+				awaitDirectusConnection(port),
+				awaitDirectusConnection(optedOutPort),
+			]);
 		}, 60_000);
 
 		afterAll(async () => {
 			instance.kill();
+			optedOut.kill();
 			await db.destroy();
 			await DeleteCollection(vendor, { collection: ROWS });
 		});
 
-		function call(body: unknown) {
-			return request(url)
+		function call(body: unknown, from = url) {
+			return request(from)
 				.post('/system-mcp')
 				.send(body as object)
 				.set('Authorization', auth);
@@ -117,8 +140,8 @@ describe('Cache audit over the system MCP', () => {
 			});
 		}
 
-		function readOwner(owner: string) {
-			return request(url)
+		function readOwner(owner: string, from = url) {
+			return request(from)
 				.get(`/items/${ROWS}`)
 				.query(`filter[owner][_eq]=${owner}`)
 				.set('Authorization', auth);
@@ -353,5 +376,105 @@ describe('Cache audit over the system MCP', () => {
 				nextRunAt: null,
 			});
 		});
+
+		it(oneLine`
+			a node with CACHE_AUDIT_ENABLED off offers no audit tool, answers no
+			audit route, and leaves the shared schedule to the other node
+		`, async () => {
+			const listed = await call({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}, optedOutUrl);
+
+			const names = listed.body.result.tools.map((tool: any) => tool.name);
+
+			expect(names).toContain('list_cache_entries');
+			expect(names).not.toEqual(expect.arrayContaining(auditToolNames));
+
+			for (const [method, path] of [
+				['post', '/utils/cache/audit'],
+				['get', '/utils/cache/audits'],
+				['get', '/utils/cache/audits/1'],
+				['get', '/utils/cache/audit/schedule'],
+				['patch', '/utils/cache/audit/schedule'],
+			] as const) {
+				const response = await request(optedOutUrl)[method](path)
+					.send({ rule: '0 3 * * *' })
+					.set('Authorization', auth);
+
+				expect(response.statusCode, `${method} ${path}`).toBe(404);
+				expect(response.body.errors[0].extensions.code).toBe('ROUTE_NOT_FOUND');
+			}
+
+			// A stale entry only that node holds, described so that a run over it
+			// would name the read — then the schedule every node hears, and no
+			// finding on that read while the other node audits every second.
+			await warm(() => readOwner('initech', optedOutUrl));
+
+			let described: unknown;
+
+			for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !described; attempt++) {
+				described = await db('directus_cache_stats_descriptors')
+					.where({ path: `/items/${ROWS}`, query: 'filter[owner][_eq]=initech' })
+					.first();
+
+				if (!described) {
+					await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+				}
+			}
+
+			expect(described).toBeDefined();
+
+			await db(ROWS).where({ owner: 'initech' })
+				.update({ amount: '9' });
+
+			const before = Date.now();
+
+			const written = await callTool('write_cache_audit_schedule', {
+				rule: '* * * * * *',
+			});
+
+			expect(written.body.result.isError).toBeUndefined();
+
+			try {
+				let cronRun: unknown;
+
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !cronRun; attempt++) {
+					cronRun = await db('directus_cache_audits')
+						.where({ trigger: 'cron' })
+						.where('started_at', '>', new Date(before))
+						.whereNotNull('finished_at')
+						.first();
+
+					if (!cronRun) {
+						await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+					}
+				}
+
+				expect(cronRun).toBeDefined();
+
+				await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+				const onThatNode = await db('directus_cache_audit_findings as f')
+					.join('directus_cache_audits as a', 'a.id', 'f.audit')
+					.where({
+						'a.trigger': 'cron',
+						'f.url': `/items/${ROWS}?filter[owner][_eq]=initech`,
+					})
+					.where('a.started_at', '>', new Date(before))
+					.first();
+
+				expect(onThatNode).toBeUndefined();
+
+				// Still stale, still served: nothing audited it.
+				const held = await readOwner('initech', optedOutUrl);
+				expect(held.headers[cacheStatusHeader]).toBe('HIT');
+				expect(held.body.data[0].amount).toBe('3');
+			}
+			finally {
+				await callTool('write_cache_audit_schedule', { rule: null });
+			}
+		}, 90_000);
 	});
 });

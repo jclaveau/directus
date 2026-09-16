@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCacheAudit, type CacheAuditRunReport } from '../cache-audit-runs.js';
 import getDatabase from '../database/index.js';
@@ -70,6 +71,7 @@ async function runScheduledJob(): Promise<void> {
 }
 
 beforeEach(() => {
+	env['CACHE_AUDIT_ENABLED'] = true;
 	env['CACHE_AUDIT_SCHEDULE'] = '*/15 * * * *';
 	settingsRow = { cache_audit_schedule: null };
 
@@ -110,6 +112,28 @@ describe('cache-audit schedule', () => {
 		expect(await cacheAuditSchedule()).toBe(false);
 		expect(scheduleSynchronizedJob).not.toHaveBeenCalled();
 		expect(resolvedCacheAuditSchedule()).toBeNull();
+	});
+
+	it(oneLine`
+		never schedules on a node with CACHE_AUDIT_ENABLED off, whichever rule
+		the settings or the env carry — but still relays a settings write
+	`, async () => {
+		env['CACHE_AUDIT_ENABLED'] = false;
+		settingsRow = { cache_audit_schedule: '0 3 * * *' };
+
+		expect(await cacheAuditSchedule()).toBe(false);
+		expect(scheduleSynchronizedJob).not.toHaveBeenCalled();
+		expect(resolvedCacheAuditSchedule()).toBe('0 3 * * *');
+
+		await busHandler({ rule: '*/5 * * * *' });
+		expect(scheduleSynchronizedJob).not.toHaveBeenCalled();
+
+		settingsUpdateHandler({ payload: { cache_audit_schedule: '0 4 * * *' } });
+
+		expect(mockBus.publish).toHaveBeenCalledWith(
+			'cacheAuditScheduleChanged',
+			{ rule: '0 4 * * *' },
+		);
 	});
 
 	it('stays off, and says so, on a rule that is not a cron', async () => {

@@ -7,6 +7,7 @@ import {
 import { type CacheAuditFinding, loopbackReplayer } from '../../../cache-audit.js';
 import { useLogger } from '../../../logger/index.js';
 import { createServer } from '../../../server.js';
+import { cacheAuditEnabled } from '../../../utils/cache-audit-enabled.js';
 import { drainStdout } from '../../utils/drain-stdout.js';
 import cacheAudit, { exitCodeFor, renderReport } from './audit.js';
 
@@ -23,6 +24,7 @@ vi.mock('../../../cache-audit-runs.js', () => ({ runCacheAudit: vi.fn() }));
 vi.mock('../../../logger/index.js');
 // A factory, not an automock: shaping one would load the whole app behind it.
 vi.mock('../../../server.js', () => ({ createServer: vi.fn() }));
+vi.mock('../../../utils/cache-audit-enabled.js');
 vi.mock('../../utils/drain-stdout.js');
 
 const error = vi.fn();
@@ -108,6 +110,7 @@ beforeEach(() => {
 	vi.mocked(createServer).mockResolvedValue(listeningServer() as never);
 	vi.mocked(loopbackReplayer).mockReturnValue('replayer' as never);
 	vi.mocked(drainStdout).mockResolvedValue();
+	vi.mocked(cacheAuditEnabled).mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -194,6 +197,19 @@ describe('the command', () => {
 
 		expect(error).toHaveBeenCalledWith(failure);
 		expect(written).toEqual([]);
+	});
+
+	test('refuses before the boot when CACHE_AUDIT_ENABLED is off', async () => {
+		vi.mocked(cacheAuditEnabled).mockReturnValue(false);
+
+		await expect(cacheAudit({})).rejects.toThrowError('exit:1');
+
+		expect(error).toHaveBeenCalledWith(
+			'CACHE_AUDIT_ENABLED is false on this node: nothing to run',
+		);
+
+		expect(createServer).not.toHaveBeenCalled();
+		expect(runCacheAudit).not.toHaveBeenCalled();
 	});
 
 	test('logs a boot that could not listen and exits 1', async () => {

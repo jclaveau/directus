@@ -3,6 +3,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { useBus } from '../bus/index.js';
 import { runCacheAudit } from '../cache-audit-runs.js';
 import { useLogger } from '../logger/index.js';
+import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
 import {
 	type ScheduledJob,
 	scheduleSynchronizedJob,
@@ -137,7 +138,9 @@ async function applyCacheAuditSchedule(): Promise<boolean> {
 
 	const rule = resolvedCacheAuditSchedule();
 
-	if (rule === null) {
+	// The rule is shared; whether this node runs it is not. A node that opted
+	// out still relays a settings write to the ones that did not.
+	if (rule === null || !cacheAuditEnabled()) {
 		return false;
 	}
 

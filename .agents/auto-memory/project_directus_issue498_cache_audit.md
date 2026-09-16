@@ -44,6 +44,18 @@ Issue jclaveau/directus#498 on branch `v11.10.1-feat/cache-audit`, based on
   one PATCHes reschedules every instance in the shard → sequential chain.
 - `validateCron` (cron-parser) is lenient: `* * *` and 6 fields are VALID;
   `hourly`, `60 * * * *`, 7 fields are not.
+- A finding's `redis_key` is the BARE digest (Keyv's iterator strips both the
+  `@keyv/redis` `<ns>_response::` and Keyv's `<ns>_response:` prefixes): no
+  namespace to `like` on. Tell two nodes' cron findings apart by `url` +
+  `started_at`, never by key prefix (shard-5 failure on d8ffef1815/7f9f381302).
+- The cron is CLUSTER-WIDE (`scheduleSynchronizedJob` + shared settings rule):
+  api nodes win ticks too. Per-node opt-out = `CACHE_AUDIT_ENABLED=false`
+  (default true; jean chose one master switch over a schedule-only one): no
+  job, REST audit routes 404 (`RouteNotFoundError`, like an unmounted
+  `/system-mcp`), `cache_audit` MCP group dropped, CLI refuses before boot,
+  `runCacheAudit` throws 503 as the last net; the node still relays a settings
+  write over the bus. Prod: bo on, api services off. Still no overlap guard,
+  no wall cap, REST/MCP run synchronous (proxy timeout on prod size).
 - `system-mcp.test.ts` pins the exact tool list and all-readOnly → a group
   with acting tools needs its own bb instance (`SYSTEM_MCP_TOOLS=cache,cache_audit`).
 - App: `formatDuration` takes SECONDS; `v-table` default cells render

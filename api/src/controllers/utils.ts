@@ -1,4 +1,9 @@
-import { InvalidPayloadError, InvalidQueryError, UnsupportedMediaTypeError } from '@directus/errors';
+import {
+	InvalidPayloadError,
+	InvalidQueryError,
+	RouteNotFoundError,
+	UnsupportedMediaTypeError,
+} from '@directus/errors';
 import type { CacheFlushTarget } from '@directus/types';
 import argon2 from 'argon2';
 import Busboy from 'busboy';
@@ -20,6 +25,7 @@ import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
+import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
 import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
@@ -325,6 +331,16 @@ router.get(
 		res.json({ data: await service.readCacheEntry(key) });
 	}),
 );
+
+// The audit surface is absent, not forbidden, on a node with
+// CACHE_AUDIT_ENABLED off: like `/system-mcp` on one that never opened it.
+router.use(['/cache/audit', '/cache/audits'], (req, _res, next) => {
+	if (cacheAuditEnabled()) {
+		return next();
+	}
+
+	return next(new RouteNotFoundError({ path: req.originalUrl }));
+});
 
 router.post(
 	'/cache/audit',

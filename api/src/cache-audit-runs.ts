@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { ServiceUnavailableError } from '@directus/errors';
 import { parseJSON } from '@directus/utils';
 import {
 	auditCache,
@@ -10,6 +11,7 @@ import {
 } from './cache-audit.js';
 import type { CacheEntryPurgeRecord } from './cache-events.js';
 import getDatabase from './database/index.js';
+import { cacheAuditEnabled } from './utils/cache-audit-enabled.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 
 /**
@@ -71,13 +73,21 @@ function retentionMs(): number {
 
 /**
  * Run an audit and record it — the one entrypoint every surface goes through,
- * so no run escapes the history. The engine stays what it was: a function
- * over the cache that answers a report and stores nothing.
+ * so no run escapes the history, and none runs on a node that opted out. The
+ * engine stays what it was: a function over the cache that answers a report
+ * and stores nothing.
  */
 export async function runCacheAudit(
 	trigger: CacheAuditTrigger,
 	options: CacheAuditOptions = {},
 ): Promise<CacheAuditRunReport> {
+	if (!cacheAuditEnabled()) {
+		throw new ServiceUnavailableError({
+			service: 'cache-audit',
+			reason: 'CACHE_AUDIT_ENABLED is false on this node',
+		});
+	}
+
 	const id = await startCacheAuditRun(trigger, options);
 	let report: CacheAuditReport;
 

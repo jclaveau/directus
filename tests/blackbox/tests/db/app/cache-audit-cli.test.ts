@@ -502,5 +502,28 @@ describe('`directus cache audit` and the scheduled audit', () => {
 
 			expect(own).toBeDefined();
 		}, 90_000);
+
+		it(oneLine`
+			refuses on a node with CACHE_AUDIT_ENABLED off, leaving no run behind
+		`, async () => {
+			const cliRuns = () => {
+				return db('directus_cache_audits')
+					.where({ trigger: 'cli' })
+					.count({ n: '*' })
+					.first()
+					.then((row) => Number(row?.['n']));
+			};
+
+			const before = await cliRuns();
+
+			const { code, output } = await runCacheAudit(['--json'], {
+				CACHE_AUDIT_ENABLED: 'false',
+			});
+
+			expect(code).toBe(1);
+			expect(output).toContain('CACHE_AUDIT_ENABLED is false on this node');
+			expect(output).not.toContain('"scanned"');
+			expect(await cliRuns()).toBe(before);
+		}, 60_000);
 	});
 });

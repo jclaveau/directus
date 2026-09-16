@@ -34,7 +34,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Two spawned instances and five CLI boots of the whole app.
 	'/tests/db/app/cache-audit-cli.test.ts': 100_000,
 	// One spawned instance; one case waits out the descriptor drain.
-	'/tests/db/app/cache-audit-mcp.test.ts': 40_000,
+	'/tests/db/app/cache-audit-mcp.test.ts': 60_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
 	// The `after` chain. The auth files spend their time waiting, not querying,
 	// so they cost the same on every vendor — and the wait is per case, so the

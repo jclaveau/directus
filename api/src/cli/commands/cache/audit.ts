@@ -8,6 +8,7 @@ import {
 } from '../../../cache-audit.js';
 import { useLogger } from '../../../logger/index.js';
 import { createServer } from '../../../server.js';
+import { cacheAuditEnabled } from '../../../utils/cache-audit-enabled.js';
 import { drainStdout } from '../../utils/drain-stdout.js';
 
 export interface CacheAuditCommandOptions {
@@ -33,6 +34,14 @@ export default async function cacheAudit(
 ): Promise<void> {
 	const logger = useLogger();
 	let report: CacheAuditReport | undefined;
+
+	// Before the boot: the whole app is not worth bringing up to be refused.
+	if (!cacheAuditEnabled()) {
+		logger.error('CACHE_AUDIT_ENABLED is false on this node: nothing to run');
+		await exitWhenPrinted(1);
+
+		return;
+	}
 
 	try {
 		const server = await createServer();
