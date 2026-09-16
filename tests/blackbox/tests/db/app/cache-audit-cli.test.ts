@@ -51,17 +51,17 @@ describe('`directus cache audit` and the scheduled audit', () => {
 		// hook's stamp is what it names, so the clock entry audits fresh here.
 		env[vendor]['CACHE_AUDIT_IGNORE_PATHS'] = '/data/*/served_at';
 
-		// A node auditing itself every other second, on its own namespace so the
-		// CLI arm's counts stay its own.
+		// A node auditing itself every other second, over the same cache: the
+		// descriptors are one table for the database, so a node that could not
+		// hold an entry would retire it for the node that does. Spawned for
+		// its own cases alone, once the CLI arm's are done, so its runs never
+		// hold the one in-flight claim when the CLI asks.
 		const scheduledEnv = cloneDeep(env);
-		scheduledEnv[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-cron-${vendor}`;
 		scheduledEnv[vendor]['CACHE_AUDIT_SCHEDULE'] = '*/2 * * * * *';
 
 		let instance: ChildProcess;
-		let scheduled: ChildProcess;
 		let db: Knex;
 		let url: string;
-		let scheduledUrl: string;
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
@@ -100,32 +100,19 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
-			const scheduledPort = await getPort();
-			scheduledEnv[vendor].PORT = String(scheduledPort);
-
 			instance = spawn('node', [paths.cli, 'start'], {
 				cwd: paths.cwd,
 				env: env[vendor],
 			});
 
-			scheduled = spawn('node', [paths.cli, 'start'], {
-				cwd: paths.cwd,
-				env: scheduledEnv[vendor],
-			});
-
 			db = knex(config.knexConfig[vendor]!);
 			url = getUrl(vendor, env);
-			scheduledUrl = getUrl(vendor, scheduledEnv);
 
-			await Promise.all([
-				awaitDirectusConnection(port),
-				awaitDirectusConnection(scheduledPort),
-			]);
+			await awaitDirectusConnection(port);
 		}, 60_000);
 
 		afterAll(async () => {
 			instance.kill();
-			scheduled.kill();
 			await db.destroy();
 			await DeleteCollection(vendor, { collection: ROWS });
 			await DeleteCollection(vendor, { collection: CLOCK });
@@ -396,121 +383,14 @@ describe('`directus cache audit` and the scheduled audit', () => {
 		}, 120_000);
 
 		it(oneLine`
-			the scheduled audit lands a stale entry on the cache page by itself
-		`, async () => {
-			await clearCache(scheduledUrl);
-			await warm(() => readOwner('initech', scheduledUrl));
-
-			await db(ROWS).where({ owner: 'initech' })
-				.update({ amount: '11' });
-
-			// Nothing calls the endpoint: the node's own schedule replays the
-			// entry, and the finding drains through the anomaly stream. Read off
-			// the table rather than the listing, which is the top 200 groups by
-			// count over a table every suite in the shard writes to.
-			let flagged: any;
-
-			for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !flagged; attempt++) {
-				flagged = await db('directus_cache_stats_anomalies as a')
-					.join(
-						'directus_cache_stats_descriptors as d',
-						'd.cache_key',
-						'a.cache_key',
-					)
-					.where({
-						'a.reason': 'stale_entry',
-						'd.path': `/items/${ROWS}`,
-						'd.query': 'filter[owner][_eq]=initech',
-					})
-					.select('a.detail')
-					.first();
-
-				if (!flagged) {
-					await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
-				}
-			}
-
-			expect(flagged).toBeDefined();
-			expect(flagged.detail).toContain('/data/0/amount');
-
-			const recorded = await db('directus_cache_audits')
-				.where({ trigger: 'cron' })
-				.where('stale', '>', 0)
-				.first();
-
-			expect(recorded).toBeDefined();
-
-			// Found, not fixed: the schedule reports, the entry stays for a purge
-			// or an operator.
-			const stillHeld = await readOwner('initech', scheduledUrl);
-			expect(stillHeld.headers[cacheStatusHeader]).toBe('HIT');
-		}, 90_000);
-
-		it(oneLine`
-			a schedule written on one node runs the audit on the other, over the bus
-		`, async () => {
-			await clearCache();
-			await warm(() => readOwner('globex'));
-			await settled();
-
-			await db(ROWS).where({ owner: 'globex' })
-				.update({ amount: '12' });
-
-			const before = Date.now();
-
-			// Written through the scheduled node. The other node has no rule of
-			// its own and is the only one that ever warmed globex (the namespaces
-			// differ), so a cron finding on that read can only come off the bus.
-			const written = await request(scheduledUrl)
-				.patch('/utils/cache/audit/schedule')
-				.send({ rule: '* * * * * *' })
-				.set('Authorization', auth);
-
-			expect(written.statusCode).toBe(200);
-
-			try {
-				let finding: any;
-
-				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !finding; attempt++) {
-					finding = await db('directus_cache_audit_findings as f')
-						.join('directus_cache_audits as a', 'a.id', 'f.audit')
-						.where({
-							'a.trigger': 'cron',
-							'f.verdict': 'stale',
-							'f.url': `/items/${ROWS}?filter[owner][_eq]=globex`,
-						})
-						.where('a.started_at', '>', new Date(before))
-						.select('f.diff')
-						.first();
-
-					if (!finding) {
-						await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
-					}
-				}
-
-				expect(finding).toBeDefined();
-
-				// A JSON column: parsed on Postgres, text on sqlite.
-				expect(JSON.stringify(finding.diff)).toContain('/data/0/amount');
-			}
-			finally {
-				await request(scheduledUrl)
-					.patch('/utils/cache/audit/schedule')
-					.send({ rule: null })
-					.set('Authorization', auth);
-			}
-		}, 90_000);
-
-		it(oneLine`
 			reaps the history past CACHE_AUDIT_RETENTION on every run
 		`, async () => {
-			// Over an empty cache: the case above left its stale entry for the
-			// operator, and a clean run is what exits 0 here.
+			// Over an empty cache: a clean run is what exits 0 here.
 			await clearCache();
 
-			// Every case above left runs behind, and the scheduled node adds one
-			// every other second: the cutoff is taken before the run boots, so
-			// whatever was older then is older than the run's own cutoff too.
+			// Every case above left runs behind: the cutoff is taken before the
+			// run boots, so whatever was older then is older than the run's own
+			// cutoff too.
 			const cutoff = new Date(Date.now() - 2_000);
 
 			const older = () => {
@@ -561,5 +441,146 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			expect(output).not.toContain('"scanned"');
 			expect(await cliRuns()).toBe(before);
 		}, 60_000);
+
+		describe('the scheduled audit', () => {
+			let scheduled: ChildProcess;
+			let scheduledUrl: string;
+
+			beforeAll(async () => {
+				const scheduledPort = await getPort();
+				scheduledEnv[vendor].PORT = String(scheduledPort);
+
+				scheduled = spawn('node', [paths.cli, 'start'], {
+					cwd: paths.cwd,
+					env: scheduledEnv[vendor],
+				});
+
+				scheduledUrl = getUrl(vendor, scheduledEnv);
+
+				await awaitDirectusConnection(scheduledPort);
+			}, 60_000);
+
+			afterAll(() => {
+				scheduled.kill();
+			});
+
+			function schedule(from: string) {
+				return request(from)
+					.get('/utils/cache/audit/schedule')
+					.set('Authorization', auth);
+			}
+
+			it(oneLine`
+				the scheduled audit lands a stale entry on the cache page by itself
+			`, async () => {
+				await clearCache(scheduledUrl);
+				await warm(() => readOwner('initech', scheduledUrl));
+
+				await db(ROWS).where({ owner: 'initech' })
+					.update({ amount: '11' });
+
+				// Nothing calls the endpoint: the node's own schedule replays the
+				// entry, and the finding drains through the anomaly stream. Read off
+				// the table rather than the listing, which is the top 200 groups by
+				// count over a table every suite in the shard writes to.
+				let flagged: any;
+
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !flagged; attempt++) {
+					flagged = await db('directus_cache_stats_anomalies as a')
+						.join(
+							'directus_cache_stats_descriptors as d',
+							'd.cache_key',
+							'a.cache_key',
+						)
+						.where({
+							'a.reason': 'stale_entry',
+							'd.path': `/items/${ROWS}`,
+							'd.query': 'filter[owner][_eq]=initech',
+						})
+						.select('a.detail')
+						.first();
+
+					if (!flagged) {
+						await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+					}
+				}
+
+				expect(flagged).toBeDefined();
+				expect(flagged.detail).toContain('/data/0/amount');
+
+				const recorded = await db('directus_cache_audits')
+					.where({ trigger: 'cron' })
+					.where('stale', '>', 0)
+					.first();
+
+				expect(recorded).toBeDefined();
+
+				// Found, not fixed: the schedule reports, the entry stays for a purge
+				// or an operator.
+				const stillHeld = await readOwner('initech', scheduledUrl);
+				expect(stillHeld.headers[cacheStatusHeader]).toBe('HIT');
+			}, 90_000);
+
+			it(oneLine`
+				a schedule written on one node reaches the other over the bus
+			`, async () => {
+				// The other node has no rule of its own: whatever it reports as in
+				// force after the write came off the bus. That the rule then runs is
+				// the REST suite's case; here both nodes share the cache, so a
+				// finding could not say which of them made it.
+				const unscheduled = await schedule(url);
+				expect(unscheduled.body.data).toMatchObject({ rule: null, source: null });
+
+				const written = await request(scheduledUrl)
+					.patch('/utils/cache/audit/schedule')
+					.send({ rule: '* * * * * *' })
+					.set('Authorization', auth);
+
+				expect(written.statusCode).toBe(200);
+
+				try {
+					let relayed: any;
+
+					for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !relayed; attempt++) {
+						const state = await schedule(url);
+
+						if (state.body.data.rule === '* * * * * *') {
+							relayed = state.body.data;
+						}
+						else {
+							await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+						}
+					}
+
+					expect(relayed).toMatchObject({
+						rule: '* * * * * *',
+						source: 'settings',
+						envRule: null,
+					});
+				}
+				finally {
+					await request(scheduledUrl)
+						.patch('/utils/cache/audit/schedule')
+						.send({ rule: null })
+						.set('Authorization', auth);
+				}
+
+				// Cleared the same way: the other node is back to no rule at all.
+				let cleared: any;
+
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !cleared; attempt++) {
+					const state = await schedule(url);
+
+					if (state.body.data.rule === null) {
+						cleared = state.body.data;
+					}
+					else {
+						await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+					}
+				}
+
+				expect(cleared).toMatchObject({ rule: null, source: null });
+			}, 60_000);
+		});
 	});
 });
