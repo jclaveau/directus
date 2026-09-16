@@ -237,7 +237,11 @@ describe('The cache audit replays live entries against the database', () => {
 		// table rather than `/utils/cache/anomalies`: that listing is the top 200
 		// groups BY COUNT over a table every suite in the shard writes to, and a
 		// fresh count-of-one row falls off its bottom under load.
-		async function anomaly(reason: string, path: string, sample?: string) {
+		async function anomaly(reason: string, url: string, sample?: string) {
+			// The whole request, query included: the anomalies every case before
+			// this one raised on the same path are still in the table.
+			const [path, query = ''] = url.split('?');
+
 			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
 				const rows = await db('directus_cache_stats_anomalies as a')
 					.join(
@@ -245,20 +249,15 @@ describe('The cache audit replays live entries against the database', () => {
 						'd.cache_key',
 						'a.cache_key',
 					)
-					.where({ 'a.reason': reason, 'd.path': path })
-					.select('a.detail', 'd.path', 'd.query');
+					.where({ 'a.reason': reason, 'd.path': path, 'd.query': query })
+					.select('a.detail');
 
 				const found = rows.find((row: any) => {
 					return sample === undefined || row.detail === sample;
 				});
 
 				if (found) {
-					return {
-						sample: found.detail,
-						url: found.query === ''
-							? found.path
-							: `${found.path}?${found.query}`,
-					};
+					return { sample: found.detail, url };
 				}
 
 				await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
@@ -323,7 +322,10 @@ describe('The cache audit replays live entries against the database', () => {
 
 			// Surfaced where the cache page reads, joined to the request that
 			// filled the entry, with the pointer in the detail.
-			const flagged = await anomaly('stale_entry', `/items/${ROWS}`);
+			const flagged = await anomaly(
+				'stale_entry',
+				`/items/${ROWS}?filter[owner][_eq]=acme`,
+			);
 
 			expect(flagged).toBeDefined();
 			expect(flagged.sample).toContain('/data/0/amount');
@@ -569,13 +571,11 @@ describe('The cache audit replays live entries against the database', () => {
 
 			const flagged = await anomaly(
 				'stale_entry',
-				`/items/${ROWS}`,
+				`/items/${ROWS}?filter[owner][_eq]=acme`,
 				'replay_status_403',
 			);
 
-			expect(flagged).toMatchObject({
-				url: `/items/${ROWS}?filter[owner][_eq]=acme`,
-			});
+			expect(flagged).toBeDefined();
 
 			await grant(ROWS);
 		}, 60_000);
@@ -770,11 +770,12 @@ describe('The cache audit replays live entries against the database', () => {
 
 			// Nothing calls the endpoint: the node's own schedule, taken off the
 			// bus, replays the entry and lands its finding.
-			const flagged = await anomaly('stale_entry', `/items/${ROWS}`);
+			const flagged = await anomaly(
+				'stale_entry',
+				`/items/${ROWS}?filter[owner][_eq]=globex`,
+			);
 
-			expect(flagged).toMatchObject({
-				url: `/items/${ROWS}?filter[owner][_eq]=globex`,
-			});
+			expect(flagged).toBeDefined();
 
 			const cronRun = await db('directus_cache_audits')
 				.where({ trigger: 'cron' })
