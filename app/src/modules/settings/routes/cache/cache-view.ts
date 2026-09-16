@@ -97,8 +97,11 @@ export interface QueryGroup {
 
 export type CacheAnomalyReason =
 	| 'missing_scope'
+	| 'unautopurgeable_scope'
 	| 'value_too_large'
-	| 'redis_error';
+	| 'redis_error'
+	| 'stale_entry'
+	| 'tag_drift';
 
 // Normalised to its descriptor: path/method/query come from the referenced
 // directus_cache_stats_descriptors row, so it drops into the tree at the same node.

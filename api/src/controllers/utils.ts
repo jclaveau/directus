@@ -325,6 +325,46 @@ router.get(
 	}),
 );
 
+const CacheAuditSchema = Joi.object<{
+	limit?: number;
+	user?: string;
+	collection?: string;
+	ignore: string[];
+	purge: boolean;
+}>({
+	limit: Joi.number()
+		.integer()
+		.min(1),
+	user: Joi.string(),
+	collection: Joi.string(),
+	ignore: Joi.array()
+		.items(Joi.string().pattern(/^\//))
+		.single()
+		.default([]),
+	purge: Joi.boolean().default(false),
+});
+
+router.post(
+	'/cache/audit',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		const { error, value } = CacheAuditSchema.validate(
+			{ ...req.query, ...req.body },
+			{ allowUnknown: true },
+		);
+
+		if (error) {
+			throw new InvalidQueryError({ reason: error.message });
+		}
+
+		res.json({ data: await service.auditCache(value) });
+	}),
+);
+
 router.delete(
 	'/cache',
 	asyncHandler(async (req, res) => {

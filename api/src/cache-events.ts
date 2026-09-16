@@ -116,11 +116,17 @@ export interface CacheDescriptor {
 //     value slice on a non-scoped field) without `manuallyPurged` — left uncached.
 //   - value_too_large: payload over CACHE_VALUE_MAX_SIZE.
 //   - redis_error: a Redis write failed.
+//   - stale_entry: the cache audit replayed the entry and the database answered
+//     something else (cache-audit.ts).
+//   - tag_drift: the audit's replay pinned other tags than the entry was filled
+//     under — same body today, one write to the uncovered tag from stale.
 export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'unautopurgeable_scope'
 	| 'value_too_large'
-	| 'redis_error';
+	| 'redis_error'
+	| 'stale_entry'
+	| 'tag_drift';
 
 export interface CacheAnomaly {
 	cacheKey: string;
@@ -1320,6 +1326,93 @@ export async function readCacheDescriptorForRedisKey(
 		cacheKey: found['cache_key'] as string,
 		lastFilled: new Date(found['last_filled'] as string),
 	};
+}
+
+/** What the audit needs to replay one entry: its request, as sent, and its tags. */
+export interface CacheAuditDescriptor {
+	cacheKey: string;
+	redisKey: string;
+	method: string;
+	path: string;
+	collection: string | null;
+	userId: string | null;
+	query: string;
+	lastFilled: Date;
+	/** The tags it was filled under, in the printable form the purge side joins on. */
+	scopedCacheTags: string[];
+}
+
+const AUDIT_DESCRIPTOR_CHUNK = 500;
+
+/**
+ * The descriptors behind a batch of live Redis keys, keyed by that Redis key.
+ *
+ * Read by `redis_key`, not `cache_key`: the two differ once
+ * `CACHE_KEY_HASH_ENABLED` is off, and the caller holds the Redis one. A key
+ * absent from the answer was filled while stats were off, or before the column
+ * existed — either way there is no request to replay it from.
+ */
+export async function readCacheAuditDescriptors(
+	redisKeys: string[],
+): Promise<Map<string, CacheAuditDescriptor>> {
+	const byRedisKey = new Map<string, CacheAuditDescriptor>();
+
+	if (!cacheStatsConfigured() || redisKeys.length === 0) {
+		return byRedisKey;
+	}
+
+	const db = getDatabase();
+
+	for (let at = 0; at < redisKeys.length; at += AUDIT_DESCRIPTOR_CHUNK) {
+		const rows: Record<string, unknown>[] = await db(
+			'directus_cache_stats_descriptors',
+		)
+			.whereIn('redis_key', redisKeys.slice(at, at + AUDIT_DESCRIPTOR_CHUNK))
+			.whereNotNull('last_filled')
+			.select(
+				'cache_key',
+				'redis_key',
+				'method',
+				'path',
+				'collection',
+				'user_id',
+				'query',
+				'last_filled',
+			);
+
+		const tagRows: Record<string, unknown>[] = rows.length === 0
+			? []
+			: await db('directus_cache_stats_scoped_entry_tags')
+				.whereIn('cache_key', rows.map((row) => row['cache_key'] as string))
+				.select('cache_key', 'scoped_cache_tag');
+
+		const tagsByCacheKey = new Map<string, string[]>();
+
+		for (const tagRow of tagRows) {
+			const cacheKey = tagRow['cache_key'] as string;
+			const tags = tagsByCacheKey.get(cacheKey) ?? [];
+			tags.push(tagRow['scoped_cache_tag'] as string);
+			tagsByCacheKey.set(cacheKey, tags);
+		}
+
+		for (const row of rows) {
+			const cacheKey = row['cache_key'] as string;
+
+			byRedisKey.set(row['redis_key'] as string, {
+				cacheKey,
+				redisKey: row['redis_key'] as string,
+				method: row['method'] as string,
+				path: row['path'] as string,
+				collection: (row['collection'] as string | null) ?? null,
+				userId: (row['user_id'] as string | null) ?? null,
+				query: row['query'] as string,
+				lastFilled: new Date(row['last_filled'] as string),
+				scopedCacheTags: tagsByCacheKey.get(cacheKey) ?? [],
+			});
+		}
+	}
+
+	return byRedisKey;
 }
 
 /**

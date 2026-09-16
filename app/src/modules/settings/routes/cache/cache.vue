@@ -542,8 +542,14 @@ async function load() {
 function anomalyLabel(reason: CacheAnomalyReason): string {
 	const labels: Record<CacheAnomalyReason, string> = {
 		missing_scope: t('cache_anomaly_missing_scope', 'Not cached · missing scope'),
+		unautopurgeable_scope: t(
+			'cache_anomaly_unautopurgeable_scope',
+			'Not cached · unpurgeable scope',
+		),
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
+		stale_entry: t('cache_anomaly_stale_entry', 'Stale · audit replay differs'),
+		tag_drift: t('cache_anomaly_tag_drift', 'Tag drift · audit replay pinned else'),
 	};
 
 	return labels[reason] ?? reason;

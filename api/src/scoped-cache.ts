@@ -506,7 +506,7 @@ export async function countScopedCacheTagMembers(
 // need the same answer to "whose sidecar is this?".
 const SCOPED_CACHE_SIDECAR_SUFFIXES = ['__expires_at', '__tags'];
 
-function scopedCacheSidecarOwner(member: string): string | null {
+export function scopedCacheSidecarOwner(member: string): string | null {
 	const suffix = SCOPED_CACHE_SIDECAR_SUFFIXES
 		.find((candidate) => member.endsWith(candidate));
 

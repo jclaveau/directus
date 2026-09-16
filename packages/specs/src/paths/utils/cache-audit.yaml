@@ -1,0 +1,148 @@
+post:
+  summary: Audit the cache
+  description: >
+    Replay every live response-cache entry against the database, as the user it
+    was filled for and through the same controller and hooks, and report the
+    entries the database no longer answers with: `stale` (the body differs, and
+    `purgesSinceFilled` says whether a purge covered the entry and left it, or
+    none ever named the write), `tag_drift` (same body, other tags — one write
+    from stale), `raced` (purged or refilled during the replay), `time_varying`
+    (two fresh reads disagree), `expired`, and `unreplayable` with a `reason`
+    (`no_descriptor`: filled while cache stats were off; `user_gone`;
+    `status_<code>`; `replay_unrecognized`). Every replay is an uncached read:
+    a dev, preview and e2e instrument. Stale and drifted entries are also
+    recorded as `stale_entry` / `tag_drift` cache anomalies. Admin only.
+  operationId: audit-cache
+  requestBody:
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            limit:
+              type: integer
+              minimum: 1
+              description: Stop after this many entries.
+            user:
+              type: string
+              description: Only the entries filled for this user id.
+            collection:
+              type: string
+              description: Only the entries whose root collection is this one.
+            ignore:
+              type: array
+              items:
+                type: string
+              description: >
+                JSON-pointer globs left out of a diff, on top of
+                CACHE_AUDIT_IGNORE_PATHS: `*` is one segment, `**` the rest.
+            purge:
+              type: boolean
+              default: false
+              description: Evict the stale and drifted entries once reported.
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  scanned:
+                    type: integer
+                  counts:
+                    type: object
+                    properties:
+                      fresh:
+                        type: integer
+                      stale:
+                        type: integer
+                      tag_drift:
+                        type: integer
+                      raced:
+                        type: integer
+                      time_varying:
+                        type: integer
+                      expired:
+                        type: integer
+                      unreplayable:
+                        type: integer
+                  findings:
+                    type: array
+                    description: One per entry that is not fresh.
+                    items:
+                      type: object
+                      properties:
+                        verdict:
+                          type: string
+                          enum:
+                            - stale
+                            - tag_drift
+                            - raced
+                            - time_varying
+                            - expired
+                            - unreplayable
+                        reason:
+                          type: string
+                          nullable: true
+                        redisKey:
+                          type: string
+                        cacheKey:
+                          type: string
+                          nullable: true
+                        method:
+                          type: string
+                          nullable: true
+                        url:
+                          type: string
+                          nullable: true
+                        query:
+                          type: string
+                          nullable: true
+                        user:
+                          type: string
+                          nullable: true
+                        collection:
+                          type: string
+                          nullable: true
+                        filledAt:
+                          type: integer
+                          nullable: true
+                        ageMs:
+                          type: integer
+                          nullable: true
+                        tags:
+                          type: array
+                          items:
+                            type: string
+                        replayTags:
+                          type: array
+                          nullable: true
+                          items:
+                            type: string
+                        diff:
+                          type: array
+                          nullable: true
+                          description: JSON pointers to the first differences.
+                          items:
+                            type: string
+                        purgesSinceFilled:
+                          type: array
+                          nullable: true
+                          description: >
+                            For a stale entry: the purges that covered it since
+                            its fill. Empty means its tags never named the
+                            write that changed it.
+                          items:
+                            type: object
+                  evicted:
+                    type: integer
+                  durationMs:
+                    type: integer
+      description: Successful request
+    '400':
+      description: A parameter was invalid
+  tags:
+    - System Diagnostics

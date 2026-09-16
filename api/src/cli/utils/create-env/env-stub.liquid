@@ -248,6 +248,16 @@ CACHE_STORE=memory
 # How long a miss can still be attributed to a just-expired entry (gap-since-expiry lookback). ["1h"]
 # CACHE_STATS_GAP_LOOKBACK="1h"
 
+# When to replay every live cache entry against the database and report the
+# ones it no longer matches (`POST /utils/cache/audit`, `directus cache audit`).
+# Every replay is an uncached read: dev and preview only. Off when empty. [""]
+# CACHE_AUDIT_SCHEDULE="0 */10 * * * *"
+
+# JSON-pointer globs a cache audit ignores when comparing a stored body with a
+# fresh one: `*` is one segment, `**` the rest. For bodies a hook stamps with a
+# clock. Comma-separated. [""]
+# CACHE_AUDIT_IGNORE_PATHS="/data/*/served_at"
+
 # How long assets will be cached for in the browser. Sets the max-age value of the Cache-Control header ["30d"]
 ASSETS_CACHE_TTL="30d"
 

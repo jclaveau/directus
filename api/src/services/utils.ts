@@ -19,6 +19,11 @@ import type {
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
+	auditCache,
+	type CacheAuditOptions,
+	type CacheAuditReport,
+} from '../cache-audit.js';
+import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
 	type CacheGroupLatencyRecord,
@@ -499,6 +504,17 @@ export class UtilsService {
 			filledAt,
 			purgesSinceFilled,
 		};
+	}
+
+	/**
+	 * Replay every live entry against the database and report the ones it no
+	 * longer matches — see `cache-audit.ts`. Every replay is an uncached read,
+	 * so this is a dev, preview and e2e instrument, not a production one.
+	 */
+	async auditCache(options: CacheAuditOptions = {}): Promise<CacheAuditReport> {
+		this.assertAdmin('audit the cache');
+
+		return auditCache(options);
 	}
 
 	async evictCacheEntry(redisKey: string): Promise<void> {

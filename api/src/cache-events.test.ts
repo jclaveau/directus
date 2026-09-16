@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
 	cacheStatsActive,
@@ -20,6 +21,7 @@ import {
 	listCacheAnomalies,
 	listCacheEntries,
 	listPurgesCoveringEntry,
+	readCacheAuditDescriptors,
 	readCacheDescriptorForRedisKey,
 	readCacheTombstone,
 	listCacheGroupLatencies,
@@ -3046,6 +3048,109 @@ describe('effectiveTtlByBucket', () => {
 		// force instead. Given nothing at all, the honest answer is nothing.
 		expect(effectiveTtlByBucket(buckets, [], null))
 			.toEqual([null, null, null, null, null]);
+	});
+});
+
+describe('readCacheAuditDescriptors', () => {
+	function descriptorRow(overrides: Record<string, unknown> = {}) {
+		return {
+			cache_key: 'ck1',
+			redis_key: 'rk1',
+			method: 'GET',
+			path: '/items/articles',
+			collection: 'articles',
+			user_id: 'user-1',
+			query: 'fields[]=id',
+			last_filled: new Date(5_000).toISOString(),
+			...overrides,
+		};
+	}
+
+	it('keys the described entries by their redis key, tags joined in', async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [
+			descriptorRow(),
+			descriptorRow({
+				cache_key: 'ck2',
+				redis_key: 'rk2',
+				collection: null,
+				user_id: null,
+				path: '/graphql',
+				query: '{"query":"{ __typename }"}',
+			}),
+		];
+
+		rowsByTable['directus_cache_stats_scoped_entry_tags'] = [
+			{ cache_key: 'ck1', scoped_cache_tag: 'articles:owner=acme' },
+			{ cache_key: 'ck1', scoped_cache_tag: 'authors' },
+		];
+
+		const described = await readCacheAuditDescriptors(['rk1', 'rk2', 'rk3']);
+
+		expect([...described.entries()]).toEqual([
+			['rk1', {
+				cacheKey: 'ck1',
+				redisKey: 'rk1',
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				userId: 'user-1',
+				query: 'fields[]=id',
+				lastFilled: new Date(5_000),
+				scopedCacheTags: ['articles:owner=acme', 'authors'],
+			}],
+			['rk2', {
+				cacheKey: 'ck2',
+				redisKey: 'rk2',
+				method: 'GET',
+				path: '/graphql',
+				collection: null,
+				userId: null,
+				query: '{"query":"{ __typename }"}',
+				lastFilled: new Date(5_000),
+				scopedCacheTags: [],
+			}],
+		]);
+
+		expect(builder.whereIn).toHaveBeenCalledWith('redis_key', ['rk1', 'rk2', 'rk3']);
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
+		// A descriptor that recorded a fill, never one only ever seen as a miss.
+		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
+	});
+
+	it('asks the tags of nothing when no key is described', async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [];
+
+		expect((await readCacheAuditDescriptors(['rk1'])).size).toBe(0);
+
+		expect(mockDb).toHaveBeenCalledTimes(1);
+
+		expect(mockDb).not.toHaveBeenCalledWith(
+			'directus_cache_stats_scoped_entry_tags',
+		);
+	});
+
+	it('asks in chunks of 500 keys', async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [];
+		const keys = Array.from({ length: 1_001 }, (_, i) => `rk${i}`);
+
+		await readCacheAuditDescriptors(keys);
+
+		const chunks = vi.mocked(builder.whereIn).mock.calls
+			.filter(([column]: [string]) => column === 'redis_key')
+			.map(([, values]: [string, string[]]) => values.length);
+
+		expect(chunks).toEqual([500, 500, 1]);
+	});
+
+	it(oneLine`
+		answers nothing without asking where stats are off, or for no key
+	`, async () => {
+		expect((await readCacheAuditDescriptors([])).size).toBe(0);
+
+		env['CACHE_STATS_ENABLED'] = false;
+
+		expect((await readCacheAuditDescriptors(['rk1'])).size).toBe(0);
+		expect(mockDb).not.toHaveBeenCalled();
 	});
 });
 

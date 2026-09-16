@@ -16,6 +16,7 @@ import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { shouldSkipCache } from '../utils/should-skip-cache.js';
 
 const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next) => {
@@ -30,6 +31,13 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 	// Reference point for the request→response duration telemetry: cache-serve
 	// latency on a HIT, response compute time (read by respond.ts) on a MISS.
 	res.locals['requestStart'] = Date.now();
+
+	// A cache-audit replay computes the answer the cache would be compared with,
+	// so it must neither be served from it nor be written back into it.
+	if (isCacheAuditReplay(req)) {
+		res.locals['cache'] = false;
+		return next();
+	}
 
 	if (shouldSkipCache(req)) {
 		if (env['CACHE_STATUS_HEADER']) res.setHeader(`${env['CACHE_STATUS_HEADER']}`, 'MISS');

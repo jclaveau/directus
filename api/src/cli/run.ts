@@ -17,6 +17,17 @@ if (command === 'cache' && subcommand === 'flush') {
 	);
 }
 
+// The audit boots the app to replay through its hooks. Booted from a shell
+// whose build identity differs from the running service's, that boot would
+// flush the very cache it is about to inspect — and store its own identity, so
+// the service flushes again on its next start. And the event loop it replays
+// through is the one that just booted: the pressure limiter samples it near
+// saturation and answers the first replays 503, though nobody else is served.
+if (command === 'cache' && subcommand === 'audit') {
+	useEnv()['CACHE_AUTO_FLUSH_ON_DEPLOY'] = false;
+	useEnv()['PRESSURE_LIMITER_ENABLED'] = false;
+}
+
 createCli()
 	.then((program) => program.parseAsync(process.argv))
 	.catch((err) => {

@@ -1,6 +1,8 @@
+import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const getCacheGroupLatencies = vi.fn();
+const auditCache = vi.fn();
 const readAutoscaleConfig = vi.fn();
 const updateAutoscaleConfig = vi.fn();
 const updateSupervisorConfig = vi.fn();
@@ -15,6 +17,7 @@ vi.mock('../services/utils.js', () => {
 		UtilsService: vi.fn(() => {
 			return {
 				getCacheGroupLatencies,
+				auditCache,
 				readAutoscaleConfig,
 				updateAutoscaleConfig,
 				updateSupervisorConfig,
@@ -99,6 +102,74 @@ describe('utils controller /cache/latencies', () => {
 		await handlerFor('/cache/latencies')(req, { locals: {} } as any, next);
 
 		expect(getCacheGroupLatencies).toHaveBeenCalledWith(undefined);
+	});
+});
+
+describe('utils controller /cache/audit', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	function request(query: Record<string, unknown>, body: unknown = undefined) {
+		return { accountability: null, schema: {}, query, body } as any;
+	}
+
+	test('runs the audit with defaults and answers its report', async () => {
+		const report = { scanned: 0, findings: [] };
+		auditCache.mockResolvedValueOnce(report);
+		const res = { json: vi.fn() } as any;
+
+		await handlerFor('/cache/audit', 'post')(request({}), res, vi.fn());
+
+		expect(auditCache).toHaveBeenCalledWith({ ignore: [], purge: false });
+		expect(res.json).toHaveBeenCalledWith({ data: report });
+	});
+
+	test(oneLine`
+		reads its options off the query and the body, the body winning
+	`, async () => {
+		auditCache.mockResolvedValueOnce({});
+
+		const req = request(
+			{ limit: '10', purge: 'false', ignore: '/meta/served_at' },
+			{ purge: true, user: 'user-1', collection: 'articles' },
+		);
+
+		await handlerFor('/cache/audit', 'post')(req, { json: vi.fn() } as any, vi.fn());
+
+		expect(auditCache).toHaveBeenCalledWith({
+			limit: 10,
+			purge: true,
+			user: 'user-1',
+			collection: 'articles',
+			ignore: ['/meta/served_at'],
+		});
+	});
+
+	test.each([
+		[
+			'a limit below one',
+			{ limit: 0 },
+			'"limit" must be greater than or equal to 1',
+		],
+		['a fractional limit', { limit: 1.5 }, '"limit" must be an integer'],
+		[
+			'an ignore pattern that is no JSON pointer',
+			{ ignore: ['data/*'] },
+			'"ignore[0]" with value "data/*" fails to match the required pattern',
+		],
+		['a purge that is not a boolean', { purge: 'yes' }, '"purge" must be a boolean'],
+	])('refuses %s', async (_case, body, reason) => {
+		const res = { json: vi.fn() } as any;
+		const next = vi.fn();
+
+		await handlerFor('/cache/audit', 'post')(request({}, body), res, next);
+
+		expect(next).toHaveBeenCalledWith(expect.objectContaining({
+			code: 'INVALID_QUERY',
+			message: expect.stringContaining(reason),
+		}));
+
+		expect(res.json).not.toHaveBeenCalled();
+		expect(auditCache).not.toHaveBeenCalled();
 	});
 });
 

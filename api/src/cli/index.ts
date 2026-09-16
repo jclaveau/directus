@@ -176,6 +176,30 @@ export async function createCli(
 			await cacheFlush();
 		});
 
+	cacheCommand
+		.command('audit')
+		.description(
+			'Replay every live cache entry against the database and report the stale ones',
+		)
+		.option('--json', 'print the report as JSON')
+		.option('--purge', 'evict the stale and tag-drifted entries once reported')
+		.option('--strict', 'exit 2 when an entry could not be replayed')
+		.option('--limit <count>', 'stop after this many entries')
+		.option('--user <id>', 'only the entries filled for this user')
+		.option('--collection <name>', 'only the entries reading this collection')
+		.action(async (options: {
+			json?: boolean;
+			purge?: boolean;
+			strict?: boolean;
+			limit?: string;
+			user?: string;
+			collection?: string;
+		}) => {
+			const { default: cacheAudit } = await import('./commands/cache/audit.js');
+
+			await cacheAudit(options);
+		});
+
 	const usersCommand = program.command('users');
 
 	usersCommand

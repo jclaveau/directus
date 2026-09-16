@@ -24,6 +24,8 @@ const CHANGED_BY_DECLARING: Record<string, string> = {
 	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: 'string("") -> array([])',
 	SYSTEM_MCP_ALLOWED_ORIGINS: 'string("") -> array([])',
 	PGBOUNCER_CONNECTIONS: 'string("") -> array([])',
+	// Spread into the audit's ignore list: a string would spread its characters.
+	CACHE_AUDIT_IGNORE_PATHS: 'string("") -> array([])',
 	FILES_MIME_TYPE_ALLOW_LIST: 'string("*/*") -> array(["*/*"])',
 	// cors documents string or array for this option.
 	CORS_EXPOSED_HEADERS: 'string("Content-Range") -> array(["Content-Range"])',

@@ -6,6 +6,7 @@ import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
+import { auditCache } from '../cache-audit.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
@@ -65,6 +66,7 @@ vi.mock('../../src/database/index', () => ({
 vi.mock('../permissions/modules/validate-access/validate-access.js');
 vi.mock('../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js');
 vi.mock('../cache.js');
+vi.mock('../cache-audit.js');
 vi.mock('../cache-events.js');
 vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
@@ -176,6 +178,14 @@ describe('Services / Utils', () => {
 			return new UtilsService({ knex: db, schema, accountability: nonAdmin });
 		}
 
+		function adminService() {
+			return new UtilsService({
+				knex: db,
+				schema,
+				accountability: { user: 'admin', admin: true } as Accountability,
+			});
+		}
+
 		it('getCacheEntries throws ForbiddenError for non-admin user', async () => {
 			const service = nonAdminService();
 
@@ -201,6 +211,28 @@ describe('Services / Utils', () => {
 				oneLine`'test-user' does not have permission to evict cache entries
 				as not being an admin`,
 			);
+		});
+
+		it('auditCache rejects a non-admin user', async () => {
+			await expect(nonAdminService().auditCache()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to audit the cache
+				as not being an admin`,
+			);
+
+			expect(auditCache).not.toHaveBeenCalled();
+		});
+
+		it(oneLine`
+			auditCache hands the options to the audit and answers its report
+		`, async () => {
+			const report = { scanned: 1, counts: { stale: 0 }, findings: [] };
+			vi.mocked(auditCache).mockResolvedValue(report as any);
+
+			await expect(
+				adminService().auditCache({ limit: 5, purge: true }),
+			).resolves.toBe(report);
+
+			expect(auditCache).toHaveBeenCalledWith({ limit: 5, purge: true });
 		});
 
 		it('readCacheEntry rejects a non-admin user', async () => {
