@@ -297,13 +297,15 @@ describe('Cache audit over the system MCP', () => {
 				findingsTotal: 0,
 			});
 
-			// A page the route refuses is one the tool refuses, as the tool's answer.
+			// A page the route refuses is one the tool's schema refuses, before it
+			// runs: a JSON-RPC invalid-params, as every schema refusal below.
 			const badPage = await callTool('read_cache_audit', {
 				id: run.id,
 				verdict: 'fresh',
 			});
 
-			expect(badPage.body.result.isError).toBe(true);
+			expect(badPage.body.error.code).toBe(-32602);
+			expect(badPage.body.error.message).toContain('verdict');
 
 			// The horizon: both entries were just verified, so nothing queued is
 			// known good later than now, and the queue holds at least the two.
