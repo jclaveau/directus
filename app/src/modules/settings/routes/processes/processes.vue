@@ -968,6 +968,7 @@ onUnmounted(() => {
 
 .runtime {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 16px;
 	color: var(--theme--foreground-subdued);
 	margin-block-end: 8px;

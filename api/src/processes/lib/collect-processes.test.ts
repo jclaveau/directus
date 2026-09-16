@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import type { ProcessRuntimeStats } from '@directus/types';
 import type { ProcessesReportMessage } from '../types/messages.js';
 
 const bus = vi.hoisted(() => {
@@ -131,6 +132,37 @@ test('Without a supervisor list the self-reports are all there is', () => {
 		.every((process) => process.supervisor === null);
 
 	expect(unsupervised).toBe(true);
+});
+
+// A deployment being replaced, or the other service still on its own build,
+// answers the same ask; the page reads the flags as a list whichever build
+// reported them.
+test('A runtime reported without a flags list is given an empty one', () => {
+	const runtime = {
+		rssBytes: 1,
+		heapUsedBytes: 2,
+		heapTotalBytes: 3,
+		externalBytes: 4,
+		uptimeMs: 5,
+		nodeVersion: 'v22.0.0',
+	} as ProcessRuntimeStats;
+
+	const [listed] = buildProcessesTree([
+		reply({
+			self: { ...reply().self, runtime },
+			supervisor: [supervised(100, 0)],
+		}),
+	]);
+
+	expect(listed!.replicas[0]!.processes[0]!.runtime)
+		.toEqual({ ...runtime, execArgv: [] });
+
+	const [unlisted] = buildProcessesTree([
+		reply({ self: { ...reply().self, runtime } }),
+	]);
+
+	expect(unlisted!.replicas[0]!.processes[0]!.runtime)
+		.toEqual({ ...runtime, execArgv: [] });
 });
 
 test('A supervised replica that answered nothing is unavailable', () => {
