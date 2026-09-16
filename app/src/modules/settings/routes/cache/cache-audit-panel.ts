@@ -67,6 +67,15 @@ export interface CacheAuditSchedule {
 	nextRunAt: number | null;
 }
 
+/** How far round the cache the audit is, per `GET /utils/cache/audit/queue`. */
+export interface CacheAuditQueue {
+	size: number;
+	neverAudited: number;
+	// The oldest moment any queued entry was last known to answer what the
+	// database does: every entry has been verified since. Null with none queued.
+	verifiedSince: number | null;
+}
+
 /**
  * What a run row leads with. `running` outranks everything (nothing is known
  * yet), `failed` outranks the counts (they are what the run got to before it

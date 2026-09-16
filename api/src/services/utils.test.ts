@@ -21,6 +21,7 @@ import {
 	listCacheEntries,
 	listCacheGroupLatencies,
 	listPurgesCoveringEntry,
+	readCacheAuditQueueState,
 	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
@@ -297,6 +298,18 @@ describe('Services / Utils', () => {
 			vi.mocked(cacheAuditScheduleState).mockReturnValue(state as any);
 
 			await expect(adminService().getCacheAuditSchedule()).resolves.toBe(state);
+		});
+
+		it('getCacheAuditQueue answers the queue state to an admin', async () => {
+			await expect(nonAdminService().getCacheAuditQueue()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect the cache audit
+				queue as not being an admin`,
+			);
+
+			const state = { size: 40, neverAudited: 3, verifiedSince: 1_700_000_000_000 };
+			vi.mocked(readCacheAuditQueueState).mockResolvedValue(state);
+
+			await expect(adminService().getCacheAuditQueue()).resolves.toBe(state);
 		});
 
 		it(oneLine`
@@ -577,6 +590,7 @@ describe('Services / Utils', () => {
 			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue({
 				cacheKey: 'h1',
 				lastFilled: new Date(1),
+				auditedAt: new Date(3),
 			});
 
 			vi.mocked(listPurgesCoveringEntry).mockResolvedValue([
@@ -604,6 +618,9 @@ describe('Services / Utils', () => {
 				sizes: { uncompressed: 14, compressed: 3 },
 				tombstone: 999,
 				filledAt: 1,
+				auditedAt: 3,
+				// Known good as of the audit, which came after the fill.
+				verifiedAt: 3,
 				purgesSinceFilled: [
 					{
 						time: 400,
@@ -632,6 +649,7 @@ describe('Services / Utils', () => {
 			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue({
 				cacheKey: 'h1',
 				lastFilled: new Date(1),
+				auditedAt: null,
 			});
 
 			vi.mocked(listPurgesCoveringEntry).mockResolvedValue([]);
@@ -645,6 +663,9 @@ describe('Services / Utils', () => {
 				sizes: null,
 				tombstone: null,
 				filledAt: 1,
+				auditedAt: null,
+				// Never audited: the fill is the last time it was known good.
+				verifiedAt: 1,
 				// Empty, not null: it has a fill to measure from and nothing
 				// covered it since.
 				purgesSinceFilled: [],
@@ -665,6 +686,7 @@ describe('Services / Utils', () => {
 			// would claim a proof this cannot give.
 			expect(entry.purgesSinceFilled).toBeNull();
 			expect(entry.filledAt).toBeNull();
+			expect(entry.verifiedAt).toBeNull();
 			expect(listPurgesCoveringEntry).not.toHaveBeenCalled();
 		});
 
@@ -681,6 +703,8 @@ describe('Services / Utils', () => {
 				sizes: null,
 				tombstone: null,
 				filledAt: null,
+				auditedAt: null,
+				verifiedAt: null,
 				purgesSinceFilled: null,
 			});
 

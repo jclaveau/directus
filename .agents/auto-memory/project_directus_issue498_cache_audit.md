@@ -137,3 +137,22 @@ unit, acceptance/Playwright, CodeQL) as of head `ef1588fd73`.
 - Still open: no overlap guard beyond the queue's own partitioning (two
   concurrent runs share the queue rather than double-replay), no wall cap;
   REST/MCP run synchronous.
+
+**Verified-at ordering (2026-09-16, replaces `audited_at NULLS FIRST`):**
+- A fill IS a verification (it reads the DB), so the queue orders on
+  `verified = max(audited_at, last_filled)`: `CACHE_ENTRY_VERIFIED_AT` in
+  `api/src/utils/cache-entry-verified-at.ts` is a `CASE WHEN audited_at IS
+  NULL OR audited_at < last_filled THEN last_filled ELSE audited_at END` —
+  CASE not GREATEST (MySQL/SQLite GREATEST is null-poisoned) and ONE spelling
+  shared by the query and the PG expression index `((expr), last_filled)`
+  (the planner matches on text). Queue: `WHERE verified < before ORDER BY
+  verified, last_filled`; a row refilled during the run falls out on its own.
+- Horizon = `MIN(verified)` over queued rows + `neverAudited` (SUM audited_at
+  IS NULL); dead descriptors (entry already purged) are counted along —
+  accepted. Surfaces: `GET /utils/cache/audit/queue` `{size, neverAudited,
+  verifiedSince}`, MCP `read_cache_audit_queue`, panel "horizon" line; entry
+  listing/read/MCP carry `auditedAt` + `verifiedAt`, cache page sorts/shows
+  "Verified" `(audit)`/`(fill)`.
+- Drain lag trap: descriptors land on the 1 s `CACHE_STATS_DRAIN_SCHEDULE`, a
+  refill on the same key keeps the old `last_filled` until then → a bb witness
+  of "refilled row drops behind" must poll `last_filled >= refill time` first.

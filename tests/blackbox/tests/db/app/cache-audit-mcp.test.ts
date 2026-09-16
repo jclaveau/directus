@@ -37,6 +37,7 @@ const auditToolNames = [
 	'list_cache_audits',
 	'read_cache_audit',
 	'read_cache_audit_schedule',
+	'read_cache_audit_queue',
 	'write_cache_audit_schedule',
 ];
 
@@ -274,6 +275,18 @@ describe('Cache audit over the system MCP', () => {
 				findings: report.findings,
 			});
 
+			// The horizon: both entries were just verified, so nothing queued is
+			// known good later than now, and the queue holds at least the two.
+			const queued = await callTool('read_cache_audit_queue');
+
+			expect(queued.body.result.isError).toBeUndefined();
+
+			const horizon = queued.body.result.structuredContent;
+
+			expect(horizon.size).toBeGreaterThanOrEqual(2);
+			expect(horizon.neverAudited).toBeGreaterThanOrEqual(0);
+			expect(horizon.verifiedSince).toBeLessThanOrEqual(Date.now());
+
 			// A run that was never recorded reads as forbidden, like an item that
 			// is not there: the tool's answer, not a protocol error.
 			const missing = await callTool('read_cache_audit', { id: 999_999_999 });
@@ -393,6 +406,7 @@ describe('Cache audit over the system MCP', () => {
 				['get', '/utils/cache/audits/1'],
 				['get', '/utils/cache/audit/schedule'],
 				['patch', '/utils/cache/audit/schedule'],
+				['get', '/utils/cache/audit/queue'],
 			] as const) {
 				const response = await request(optedOutUrl)[method](path)
 					.send({ rule: '0 3 * * *' })

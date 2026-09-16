@@ -86,6 +86,8 @@ const ENTRIES = [
 		createdAt: Date.now() - 5000,
 		expiresAt: Date.now() + 60000,
 		lastHitAt: Date.now() - 1000,
+		auditedAt: Date.now() - 3000,
+		verifiedAt: Date.now() - 3000,
 	},
 	{
 		key: 'bob-key-000000000000',
@@ -108,6 +110,8 @@ const ENTRIES = [
 		createdAt: Date.now() - 8000,
 		expiresAt: Date.now() + 30000,
 		lastHitAt: Date.now() - 2000,
+		auditedAt: null,
+		verifiedAt: Date.now() - 8000,
 	},
 	{
 		key: 'sys-key-000000000000',
@@ -130,6 +134,8 @@ const ENTRIES = [
 		createdAt: Date.now(),
 		expiresAt: null,
 		lastHitAt: null,
+		auditedAt: null,
+		verifiedAt: Date.now(),
 	},
 ];
 
@@ -859,6 +865,25 @@ describe('CachePage', () => {
 		expect(text).toContain('90s (lengthen)'); // recommended TTL + verdict
 		expect(text).toContain('Key varies on');
 		expect(text).toContain('"hello": "world"');
+		// Last known good by the audit's replay, which came after the fill.
+		expect(text).toContain('(audit)');
+		expect(text).not.toContain('(fill)');
+	});
+
+	it('dates an unaudited entry as verified by its fill', async () => {
+		mockCacheGet(ENTRIES);
+
+		const wrapper = mount(CachePage, { global });
+		await flushPromises();
+
+		const comments = wrapper.findAll('.endpoint-header')
+			.find((header) => header.text().includes('/items/comments'));
+
+		await comments!.trigger('click');
+		await wrapper.find('.query-header').trigger('click');
+
+		expect(wrapper.text()).toContain('(fill)');
+		expect(wrapper.text()).not.toContain('(audit)');
 	});
 
 	it('names a coarse-scope purge for an evicted coarse entry', async () => {
@@ -1000,6 +1025,8 @@ describe('CachePage', () => {
 				createdAt: Date.now(),
 				expiresAt: null,
 				lastHitAt: null,
+				auditedAt: null,
+				verifiedAt: Date.now(),
 			};
 		});
 
@@ -1040,6 +1067,8 @@ describe('CachePage', () => {
 				createdAt: Date.now(),
 				expiresAt: null,
 				lastHitAt: null,
+				auditedAt: null,
+				verifiedAt: Date.now(),
 			};
 		});
 

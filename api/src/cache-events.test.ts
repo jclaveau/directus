@@ -23,6 +23,7 @@ import {
 	listCacheEntries,
 	listPurgesCoveringEntry,
 	readCacheAuditQueue,
+	readCacheAuditQueueState,
 	readCacheDescriptorForRedisKey,
 	readCacheTombstone,
 	listCacheGroupLatencies,
@@ -200,6 +201,7 @@ beforeEach(() => {
 		groupBy: vi.fn(() => builder),
 		groupByRaw: vi.fn(() => builder),
 		orderBy: vi.fn(() => builder),
+		orderByRaw: vi.fn(() => builder),
 		limit: vi.fn(() => builder),
 		select: vi.fn(() => builder),
 		distinct: vi.fn(() => builder),
@@ -1996,6 +1998,7 @@ describe('listCacheEntries', () => {
 				fill_ms: '240',
 				hit_ms: '8.4',
 				recommended_ttl_ms: '320000.4',
+				audited_at: new Date(1500).toISOString(),
 			},
 			{
 				cache_key: 'k2',
@@ -2017,6 +2020,7 @@ describe('listCacheEntries', () => {
 				fill_ms: null,
 				hit_ms: null,
 				recommended_ttl_ms: null,
+				audited_at: null,
 			},
 		];
 
@@ -2050,6 +2054,9 @@ describe('listCacheEntries', () => {
 				createdAt: 1000,
 				expiresAt: 301000,
 				lastHitAt: 2000,
+				auditedAt: 1500,
+				// The audit came after the fill: known good as of the audit.
+				verifiedAt: 1500,
 			},
 			{
 				key: 'k2',
@@ -2075,6 +2082,9 @@ describe('listCacheEntries', () => {
 				createdAt: 500,
 				expiresAt: null,
 				lastHitAt: null,
+				auditedAt: null,
+				// Never audited: the fill is the last time it was known good.
+				verifiedAt: 500,
 			},
 		]);
 	});
@@ -3072,8 +3082,8 @@ describe('readCacheAuditQueue', () => {
 	}
 
 	it(oneLine`
-		answers the described entries least recently audited first, never audited
-		ones ahead, tags joined in
+		answers the described entries least recently verified first, tags
+		joined in
 	`, async () => {
 		rowsByTable['directus_cache_stats_descriptors'] = [
 			descriptorRow(),
@@ -3119,10 +3129,13 @@ describe('readCacheAuditQueue', () => {
 			},
 		]);
 
-		expect(builder.orderBy.mock.calls).toEqual([
-			['audited_at', 'asc', 'first'],
-			['last_filled', 'asc'],
-		]);
+		// Least recently verified first: the audit, or the fill where later.
+		expect(builder.orderByRaw).toHaveBeenCalledWith(
+			'CASE WHEN audited_at IS NULL OR audited_at < last_filled '
+			+ 'THEN last_filled ELSE audited_at END',
+		);
+
+		expect(builder.orderBy).toHaveBeenCalledWith('last_filled', 'asc');
 
 		expect(builder.limit).toHaveBeenCalledWith(500);
 		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
@@ -3132,13 +3145,16 @@ describe('readCacheAuditQueue', () => {
 		expect(builder.whereNot).toHaveBeenCalledWith('redis_key', '');
 	});
 
-	it('bounds the queue to what was audited before the run, or never', async () => {
+	it('bounds the queue to what was verified before the run began', async () => {
 		rowsByTable['directus_cache_stats_descriptors'] = [];
 
 		await readCacheAuditQueue(500, before);
 
-		expect(builder.whereNull).toHaveBeenCalledWith('audited_at');
-		expect(builder.orWhere).toHaveBeenCalledWith('audited_at', '<', before);
+		expect(builder.whereRaw).toHaveBeenCalledWith(
+			'CASE WHEN audited_at IS NULL OR audited_at < last_filled '
+			+ 'THEN last_filled ELSE audited_at END < ?',
+			[before],
+		);
 	});
 
 	it('narrows to a user and a collection in the query itself', async () => {
@@ -3173,6 +3189,59 @@ describe('readCacheAuditQueue', () => {
 		env['CACHE_STATS_ENABLED'] = false;
 
 		expect(await readCacheAuditQueue(500, before)).toEqual([]);
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('readCacheAuditQueueState', () => {
+	it(oneLine`
+		counts the queue and dates its horizon over the rows and the expression
+		the queue itself orders on
+	`, async () => {
+		mockDb.raw = vi.fn((sql: string) => sql);
+
+		firstRows = [{
+			size: '40',
+			never_audited: '3',
+			verified_since: new Date(1_700_000_000_000).toISOString(),
+		}];
+
+		await expect(readCacheAuditQueueState()).resolves.toEqual({
+			size: 40,
+			neverAudited: 3,
+			verifiedSince: 1_700_000_000_000,
+		});
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
+		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
+		expect(builder.whereNot).toHaveBeenCalledWith('redis_key', '');
+
+		expect(builder.first).toHaveBeenCalledWith(
+			'COUNT(*) AS size',
+			'SUM(CASE WHEN audited_at IS NULL THEN 1 ELSE 0 END) AS never_audited',
+			'MIN(CASE WHEN audited_at IS NULL OR audited_at < last_filled '
+			+ 'THEN last_filled ELSE audited_at END) AS verified_since',
+		);
+	});
+
+	it('has no horizon over an empty queue, asks nothing with stats off', async () => {
+		firstRows = [{ size: '0', never_audited: null, verified_since: null }];
+
+		await expect(readCacheAuditQueueState()).resolves.toEqual({
+			size: 0,
+			neverAudited: 0,
+			verifiedSince: null,
+		});
+
+		env['CACHE_STATS_ENABLED'] = false;
+		mockDb.mockClear();
+
+		await expect(readCacheAuditQueueState()).resolves.toEqual({
+			size: 0,
+			neverAudited: 0,
+			verifiedSince: null,
+		});
+
 		expect(mockDb).not.toHaveBeenCalled();
 	});
 });
@@ -3359,11 +3428,16 @@ describe('readCacheDescriptorForRedisKey', () => {
 	// so the primary-key arm answers on any hashing install and the TEXT scan is
 	// only ever paid by a readable-key one.
 	it('answers from the primary key without a second query', async () => {
-		firstRows = [{ cache_key: 'h1', last_filled: new Date(7).toISOString() }];
+		firstRows = [{
+			cache_key: 'h1',
+			last_filled: new Date(7).toISOString(),
+			audited_at: new Date(9).toISOString(),
+		}];
 
 		await expect(readCacheDescriptorForRedisKey('h1')).resolves.toEqual({
 			cacheKey: 'h1',
 			lastFilled: new Date(7),
+			auditedAt: new Date(9),
 		});
 
 		expect(builder.where).toHaveBeenCalledWith('cache_key', 'h1');
@@ -3374,12 +3448,12 @@ describe('readCacheDescriptorForRedisKey', () => {
 		// A readable Redis key: the identity column holds a digest it never equals.
 		firstRows = [
 			undefined,
-			{ cache_key: 'h2', last_filled: new Date(8).toISOString() },
+			{ cache_key: 'h2', last_filled: new Date(8).toISOString(), audited_at: null },
 		];
 
 		await expect(readCacheDescriptorForRedisKey('{"path":"/items/a"}'))
 			.resolves
-			.toEqual({ cacheKey: 'h2', lastFilled: new Date(8) });
+			.toEqual({ cacheKey: 'h2', lastFilled: new Date(8), auditedAt: null });
 
 		expect(builder.where).toHaveBeenCalledWith('redis_key', '{"path":"/items/a"}');
 	});

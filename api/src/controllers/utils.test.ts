@@ -7,6 +7,7 @@ const auditCache = vi.fn();
 const getCacheAudits = vi.fn();
 const getCacheAudit = vi.fn();
 const getCacheAuditSchedule = vi.fn();
+const getCacheAuditQueue = vi.fn();
 const updateCacheAuditSchedule = vi.fn();
 const readAutoscaleConfig = vi.fn();
 const updateAutoscaleConfig = vi.fn();
@@ -26,6 +27,7 @@ vi.mock('../services/utils.js', () => {
 				getCacheAudits,
 				getCacheAudit,
 				getCacheAuditSchedule,
+				getCacheAuditQueue,
 				updateCacheAuditSchedule,
 				readAutoscaleConfig,
 				updateAutoscaleConfig,
@@ -136,6 +138,7 @@ describe('utils controller /cache/audit', () => {
 			'/utils/cache/audits',
 			'/utils/cache/audits/7',
 			'/utils/cache/audit/schedule',
+			'/utils/cache/audit/queue',
 		]) {
 			cacheAuditEnabled.mockReturnValueOnce(false);
 			const refused = vi.fn();
@@ -256,6 +259,21 @@ describe('utils controller /cache/audits', () => {
 		const res = { locals: {} } as any;
 
 		await handlerFor('/cache/audit/schedule')(
+			{ accountability: null, schema: {}, query: {} } as any,
+			res,
+			vi.fn(),
+		);
+
+		expect(res.locals['cache']).toBe(false);
+		expect(res.locals['payload']).toEqual({ data: state });
+	});
+
+	test('answers how far round the cache the audit is, uncached', async () => {
+		const state = { size: 40, neverAudited: 3, verifiedSince: 1_700_000_000_000 };
+		getCacheAuditQueue.mockResolvedValueOnce(state);
+		const res = { locals: {} } as any;
+
+		await handlerFor('/cache/audit/queue')(
 			{ accountability: null, schema: {}, query: {} } as any,
 			res,
 			vi.fn(),

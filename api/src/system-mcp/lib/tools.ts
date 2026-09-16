@@ -642,8 +642,10 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			description:
 				'The live state of a single response-cache entry: whether its value '
 				+ 'is still held, its scoped-cache tags, when it was written and when '
-				+ 'it expires, its size raw and compressed, any tombstone, and the '
-				+ 'purges that covered it since it was filled. The cached response '
+				+ 'it expires, its size raw and compressed, any tombstone, when the '
+				+ 'audit last replayed it and when it was last known to answer what '
+				+ 'the database does, and the purges that covered it since it was '
+				+ 'filled. The cached response '
 				+ 'itself is not returned. Use it to follow up a row the entry '
 				+ 'listing returned, whose `redisKey` it takes — not its `key`, which '
 				+ 'is the stats identity the two differ by where the deployment does '
@@ -693,6 +695,19 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 							+ 'was never cached at all — a key known only from an anomaly '
 							+ 'has a descriptor but no fill.',
 					},
+					auditedAt: {
+						type: ['number', 'null'],
+						description:
+							'When the cache audit last replayed it against the database; '
+							+ 'null until it has.',
+					},
+					verifiedAt: {
+						type: ['number', 'null'],
+						description:
+							'When it was last known to answer what the database does: '
+							+ 'the audit, or the fill where that came later — a fill '
+							+ 'reads the database. Null where it was never filled.',
+					},
 					purgesSinceFilled: {
 						type: ['array', 'null'],
 						description:
@@ -734,6 +749,8 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					sizes: entry.sizes,
 					tombstone: entry.tombstone,
 					filledAt: entry.filledAt,
+					auditedAt: entry.auditedAt,
+					verifiedAt: entry.verifiedAt,
 					purgesSinceFilled: entry.purgesSinceFilled,
 				};
 			},
@@ -852,7 +869,8 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				+ 'the database answers now. Each entry comes back fresh, stale (a '
 				+ 'missed invalidation), tag_drift (same body, different scoped-cache '
 				+ 'tags — one write from stale), raced, time_varying, expired or '
-				+ 'unreplayable. Entries are taken least recently audited first, and '
+				+ 'unreplayable. Entries are taken least recently verified first (an '
+				+ 'audit, or a fill where that came later), and '
 				+ 'a run with a `limit` stops there while the next resumes behind '
 				+ 'it — every replay is an uncached read, so slice a large cache with '
 				+ '`limit` (`CACHE_AUDIT_LIMIT` when none is given), `user` or '
@@ -979,6 +997,40 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			outputSchema: { type: 'object', properties: SCHEDULE_PROPERTIES },
 			annotations: READ_ONLY,
 			run: async (_args, context) => utils(context).getCacheAuditSchedule(),
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_audit_queue',
+			group: 'cache_audit',
+			title: 'Read how far round the cache the audit is',
+			description:
+				'The guarantee the audit gives right now: how many described entries '
+				+ 'it works through, how many no run has replayed yet, and the oldest '
+				+ 'moment any of them was last known to answer what the database does '
+				+ '— every entry has been verified since then, by an audit or by the '
+				+ 'fill that wrote it. Read it beside the schedule and '
+				+ '`CACHE_AUDIT_LIMIT` to see how long a full pass takes.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: {
+				type: 'object',
+				properties: {
+					size: {
+						type: 'number',
+						description: 'Described entries the audit will get to.',
+					},
+					neverAudited: {
+						type: 'number',
+						description: 'Of those, the ones no run has replayed yet.',
+					},
+					verifiedSince: {
+						type: ['number', 'null'],
+						description:
+							'The oldest moment any queued entry was last verified, as a '
+							+ 'Unix millisecond timestamp; null with nothing queued.',
+					},
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).getCacheAuditQueue(),
 		}),
 		defineSystemMcpTool({
 			name: 'write_cache_audit_schedule',

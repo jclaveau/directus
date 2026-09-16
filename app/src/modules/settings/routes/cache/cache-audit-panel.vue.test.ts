@@ -107,10 +107,24 @@ const envSchedule: CacheAuditSchedule = {
 	nextRunAt: Date.UTC(2026, 8, 16, 4, 0, 0),
 };
 
-function answer(schedule: CacheAuditSchedule | null, runs: CacheAuditRun[]) {
+const queue: CacheAuditQueue = {
+	size: 40,
+	neverAudited: 3,
+	verifiedSince: Date.UTC(2026, 8, 16, 1, 0, 0),
+};
+
+function answer(
+	schedule: CacheAuditSchedule | null,
+	runs: CacheAuditRun[],
+	queued: CacheAuditQueue = queue,
+) {
 	vi.mocked(api.get).mockImplementation(((url: string) => {
 		if (url === '/utils/cache/audit/schedule') {
 			return Promise.resolve({ data: { data: schedule } });
+		}
+
+		if (url === '/utils/cache/audit/queue') {
+			return Promise.resolve({ data: { data: queued } });
 		}
 
 		if (url === '/utils/cache/audits') {
@@ -186,6 +200,49 @@ afterEach(() => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
 	document.body.innerHTML = '';
+});
+
+describe('the horizon', () => {
+	test('says since when every entry is known good, and how many never', async () => {
+		answer(envSchedule, []);
+
+		const wrapper = await mounted();
+		const horizon = wrapper.find('.horizon').text();
+
+		expect(horizon).toContain('Every entry verified since');
+		expect(horizon).toContain('40 entries, 3 never audited');
+
+		wrapper.unmount();
+	});
+
+	test('says so with nothing described yet, or every entry seen', async () => {
+		answer(envSchedule, [], { size: 0, neverAudited: 0, verifiedSince: null });
+
+		const empty = await mounted();
+		expect(empty.find('.horizon').text()).toBe('No entry described yet');
+		empty.unmount();
+
+		answer(envSchedule, [], { ...queue, neverAudited: 0 });
+
+		const seen = await mounted();
+		expect(seen.find('.horizon').text()).toContain('all audited at least once');
+		seen.unmount();
+	});
+
+	test('is read again once a run answered', async () => {
+		answer(envSchedule, []);
+
+		const wrapper = await mounted();
+		await wrapper.find('.v-button button').trigger('click');
+		await flushPromises();
+
+		const reads = vi.mocked(api.get).mock.calls
+			.filter(([url]) => url === '/utils/cache/audit/queue');
+
+		expect(reads).toHaveLength(2);
+
+		wrapper.unmount();
+	});
 });
 
 describe('the schedule', () => {

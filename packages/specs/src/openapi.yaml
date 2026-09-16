@@ -302,6 +302,8 @@ paths:
     $ref: './paths/utils/cache-audit-run.yaml'
   /utils/cache/audit/schedule:
     $ref: './paths/utils/cache-audit-schedule.yaml'
+  /utils/cache/audit/queue:
+    $ref: './paths/utils/cache-audit-queue.yaml'
   /utils/cache/anomalies:
     $ref: './paths/utils/cache-anomalies.yaml'
   /utils/cache/latencies:

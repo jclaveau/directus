@@ -158,8 +158,8 @@ describe('20260916A-create-cache-audits', () => {
 	});
 
 	it(oneLine`
-		gives the descriptors the audit's place in the cache, indexed as Postgres
-		reads it, nulls first
+		gives the descriptors the audit's place in the cache, indexed on Postgres
+		over the expression the queue orders on
 	`, async () => {
 		const knex = fakeKnex();
 
@@ -172,7 +172,9 @@ describe('20260916A-create-cache-audits', () => {
 
 		expect(knex.raw).toHaveBeenCalledWith(
 			'CREATE INDEX directus_cache_stats_descriptors_audit_queue '
-			+ 'ON directus_cache_stats_descriptors (audited_at NULLS FIRST, last_filled)',
+			+ 'ON directus_cache_stats_descriptors ((CASE WHEN audited_at IS NULL '
+			+ 'OR audited_at < last_filled THEN last_filled ELSE audited_at END), '
+			+ 'last_filled)',
 		);
 	});
 

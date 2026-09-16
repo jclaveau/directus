@@ -507,10 +507,10 @@ describe('The cache audit replays live entries against the database', () => {
 
 		it(oneLine`
 			stops a limited run there and resumes the next behind it, least recently
-			audited first, coming back round once every entry has had its turn
+			verified first, coming back round once every entry has had its turn
 		`, async () => {
+			const testStart = Date.now();
 			await clearCache();
-			const filledAfter = Date.now();
 			await warm(() => readOwner('acme'));
 			await warm(() => readOwner('globex'));
 
@@ -528,18 +528,24 @@ describe('The cache audit replays live entries against the database', () => {
 				return Object.fromEntries(found.map((row: any) => [row.query, row]));
 			}
 
-			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
-				const found = Object.values(await rows());
+			async function drained(owners: string[], filledAfter: number) {
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+					const found = await rows();
 
-				if (found.length === 2 && found.every((row) => {
-					return new Date(row.last_filled).getTime() >= filledAfter;
-				})) {
-					break;
+					if (owners.every((owner) => {
+						const row = found[`filter[owner][_eq]=${owner}`];
+
+						return row !== undefined
+							&& new Date(row.last_filled).getTime() >= filledAfter;
+					})) {
+						return;
+					}
+
+					await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
 				}
-
-				await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
 			}
 
+			await drained(['acme', 'globex'], testStart);
 			await auditSettled({}, 2);
 
 			// The stamp each run leaves on the descriptor it took.
@@ -564,6 +570,46 @@ describe('The cache audit replays live entries against the database', () => {
 
 			const third = await takenBy(() => audit({ limit: 1 }));
 			expect(third).toEqual(['filter[owner][_eq]=acme']);
+
+			// A refill is a read of the database too: globex, purged by a write
+			// through the API and read again, is verified as of now and waits its
+			// turn behind acme, audited before it was filled.
+			const refilledAfter = Date.now();
+
+			const globex = await db(ROWS)
+				.where({ owner: 'globex' })
+				.first('id');
+
+			await request(url)
+				.patch(`/items/${ROWS}/${globex.id}`)
+				.send({ amount: '2' })
+				.set('Authorization', auth);
+
+			await warm(() => readOwner('globex'));
+			await drained(['globex'], refilledAfter);
+
+			const fourth = await takenBy(() => audit({ limit: 1 }));
+			expect(fourth).toEqual(['filter[owner][_eq]=acme']);
+
+			// The horizon is the least recently verified entry of all: never
+			// later than either of these, whatever else the table holds.
+			const queued = await request(url)
+				.get('/utils/cache/audit/queue')
+				.set('Authorization', auth);
+
+			expect(queued.statusCode).toBe(200);
+
+			const verified = Object.values(await rows()).map((row) => {
+				return Math.max(
+					new Date(row.last_filled).getTime(),
+					new Date(row.audited_at).getTime(),
+				);
+			});
+
+			expect(queued.body.data.size).toBeGreaterThanOrEqual(2);
+
+			expect(queued.body.data.verifiedSince)
+				.toBeLessThanOrEqual(Math.min(...verified));
 		}, 60_000);
 
 		it(oneLine`

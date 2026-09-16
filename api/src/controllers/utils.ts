@@ -414,6 +414,22 @@ router.get(
 	respond,
 );
 
+router.get(
+	'/cache/audit/queue',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAuditQueue() };
+
+		return next();
+	}),
+	respond,
+);
+
 router.patch(
 	'/cache/audit/schedule',
 	asyncHandler(async (req, res) => {

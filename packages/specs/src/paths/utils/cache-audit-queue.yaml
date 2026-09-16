@@ -1,0 +1,38 @@
+get:
+  summary: Read how far round the cache the audit is
+  description: >
+    The guarantee the audit gives right now: how many described entries it
+    works through, how many no run has replayed yet, and the oldest moment any
+    of them was last known to answer what the database does — every entry has
+    been verified since then, by an audit or by the fill that wrote it. Beside
+    the schedule and `CACHE_AUDIT_LIMIT` it says how long a full pass takes.
+    Descriptors whose entry has since gone are counted along. Admin only.
+  operationId: read-cache-audit-queue
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  size:
+                    type: integer
+                    description: Described entries the audit will get to.
+                  neverAudited:
+                    type: integer
+                    description: Of those, the ones no run has replayed yet.
+                  verifiedSince:
+                    type: integer
+                    nullable: true
+                    description: >
+                      The oldest moment any queued entry was last verified,
+                      as a Unix millisecond timestamp; null with nothing
+                      queued.
+      description: Successful request
+    '404':
+      description: The node has `CACHE_AUDIT_ENABLED` off; the audit is elsewhere
+  tags:
+    - System Diagnostics

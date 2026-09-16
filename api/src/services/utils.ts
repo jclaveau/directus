@@ -30,6 +30,7 @@ import {
 } from '../cache-audit-runs.js';
 import {
 	type CacheAnomalyRecord,
+	type CacheAuditQueueState,
 	type CacheEntryRecord,
 	type CacheGroupLatencyRecord,
 	type CacheStatsState,
@@ -44,6 +45,7 @@ import {
 	type CacheEntryPurgeRecord,
 	listCacheGroupLatencies,
 	listPurgesCoveringEntry,
+	readCacheAuditQueueState,
 	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
@@ -444,6 +446,8 @@ export class UtilsService {
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
 		filledAt: number | null;
+		auditedAt: number | null;
+		verifiedAt: number | null;
 		purgesSinceFilled: CacheEntryPurgeRecord[] | null;
 	}> {
 		this.assertAdmin('inspect a cache entry');
@@ -458,6 +462,13 @@ export class UtilsService {
 			: await listPurgesCoveringEntry(descriptor.cacheKey, descriptor.lastFilled);
 
 		const filledAt = descriptor?.lastFilled.getTime() ?? null;
+		const auditedAt = descriptor?.auditedAt?.getTime() ?? null;
+
+		// Known good as of the audit, or the fill where that came later: a fill
+		// reads the database, so the body it wrote matched it then.
+		const verifiedAt = filledAt === null
+			? null
+			: Math.max(filledAt, auditedAt ?? 0);
 
 		const { cache } = getCache();
 
@@ -471,6 +482,8 @@ export class UtilsService {
 				sizes: null,
 				tombstone: null,
 				filledAt,
+				auditedAt,
+				verifiedAt,
 				purgesSinceFilled,
 			};
 		}
@@ -512,6 +525,8 @@ export class UtilsService {
 			// When this key last expired, if a miss-gap tombstone still lives.
 			tombstone: await readCacheTombstone(redisKey),
 			filledAt,
+			auditedAt,
+			verifiedAt,
 			purgesSinceFilled,
 		};
 	}
@@ -566,6 +581,13 @@ export class UtilsService {
 		this.assertAdmin('inspect the cache audit schedule');
 
 		return cacheAuditScheduleState();
+	}
+
+	/** How far round the cache the audit has got: its size, never seen, horizon. */
+	async getCacheAuditQueue(): Promise<CacheAuditQueueState> {
+		this.assertAdmin('inspect the cache audit queue');
+
+		return readCacheAuditQueueState();
 	}
 
 	/**

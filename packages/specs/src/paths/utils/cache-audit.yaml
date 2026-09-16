@@ -10,9 +10,9 @@ post:
     `time_varying` (two fresh reads disagree), `expired`, and `unreplayable`
     with a `reason` (`user_gone`; `status_<code>`; `replay_unrecognized`).
     Entries are taken off their cache-stats descriptors, least recently
-    audited first — an entry filled while cache stats were off has none and is
-    not seen — and a run with a `limit` stops there while the next resumes
-    behind it. Every replay is an uncached read. The run is recorded in the
+    verified first — audited, or filled where that came later; one filled
+    while cache stats were off has no descriptor and is not seen — and a run
+    with a `limit` stops there while the next resumes behind it. Every replay is an uncached read. The run is recorded in the
     audit history (`/utils/cache/audits`), and stale and drifted entries are
     also recorded as `stale_entry` / `tag_drift` cache anomalies. Admin only.
   operationId: audit-cache

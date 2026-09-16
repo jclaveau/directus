@@ -28,6 +28,7 @@ const service = vi.hoisted(() => {
 		getCacheAudits: vi.fn(),
 		getCacheAudit: vi.fn(),
 		getCacheAuditSchedule: vi.fn(),
+		getCacheAuditQueue: vi.fn(),
 		updateCacheAuditSchedule: vi.fn(),
 		constructed: [] as unknown[],
 	};
@@ -60,6 +61,7 @@ vi.mock('../../services/utils.js', () => {
 			getCacheAudits = service.getCacheAudits;
 			getCacheAudit = service.getCacheAudit;
 			getCacheAuditSchedule = service.getCacheAuditSchedule;
+			getCacheAuditQueue = service.getCacheAuditQueue;
 			updateCacheAuditSchedule = service.updateCacheAuditSchedule;
 		},
 	};
@@ -185,6 +187,7 @@ test('Every tool is described well enough for a model to choose it', () => {
 		'list_cache_audits',
 		'read_cache_audit',
 		'read_cache_audit_schedule',
+		'read_cache_audit_queue',
 		'write_cache_audit_schedule',
 	]);
 
@@ -334,6 +337,7 @@ test('A deployment that reports no processes offers no tool for them', () => {
 			'list_cache_audits',
 			'read_cache_audit',
 			'read_cache_audit_schedule',
+			'read_cache_audit_queue',
 			'write_cache_audit_schedule',
 		]);
 
@@ -399,6 +403,7 @@ test('Every tool declares the subsystem it reads', () => {
 		'cache',
 		'cache',
 		'cache',
+		'cache_audit',
 		'cache_audit',
 		'cache_audit',
 		'cache_audit',
@@ -660,6 +665,8 @@ test('The entry read never answers with the response inside it', async () => {
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
 		filledAt: 1,
+		auditedAt: 2,
+		verifiedAt: 2,
 		purgesSinceFilled: [],
 	});
 
@@ -674,6 +681,8 @@ test('The entry read never answers with the response inside it', async () => {
 		sizes: { uncompressed: 100, compressed: 40 },
 		tombstone: null,
 		filledAt: 1,
+		auditedAt: 2,
+		verifiedAt: 2,
 		purgesSinceFilled: [],
 	});
 
@@ -813,6 +822,17 @@ test('The audit schedule is read through the guarded service', async () => {
 	expect(service.getCacheAuditSchedule).toHaveBeenCalledOnce();
 });
 
+test('The audit queue is read through the guarded service', async () => {
+	const state = { size: 40, neverAudited: 3, verifiedSince: 1_700_000_000_000 };
+	service.getCacheAuditQueue.mockResolvedValue(state);
+
+	await expect(
+		findSystemMcpTool('read_cache_audit_queue')!.run({}, context),
+	).resolves.toEqual(state);
+
+	expect(service.getCacheAuditQueue).toHaveBeenCalledOnce();
+});
+
 // `null` clears the override, so its absence cannot mean the same thing.
 test('write_cache_audit_schedule refuses a call that names no rule', async () => {
 	await expect(
@@ -845,6 +865,7 @@ test('The audit group is opened on its own', () => {
 		'list_cache_audits',
 		'read_cache_audit',
 		'read_cache_audit_schedule',
+		'read_cache_audit_queue',
 		'write_cache_audit_schedule',
 	]);
 
@@ -934,6 +955,8 @@ test('Every declared output property is one the tool actually answers', () => {
 		read_cache_audit: Awaited<ReturnType<GuardedUtils['getCacheAudit']>>;
 		read_cache_audit_schedule:
 			Awaited<ReturnType<GuardedUtils['getCacheAuditSchedule']>>;
+		read_cache_audit_queue:
+			Awaited<ReturnType<GuardedUtils['getCacheAuditQueue']>>;
 		write_cache_audit_schedule:
 			Awaited<ReturnType<GuardedUtils['updateCacheAuditSchedule']>>;
 	} = {
@@ -1125,6 +1148,8 @@ test('Every declared output property is one the tool actually answers', () => {
 				createdAt: 1,
 				expiresAt: 2,
 				lastHitAt: 3,
+				auditedAt: 4,
+				verifiedAt: 4,
 			},
 		],
 		read_cache_entry: {
@@ -1135,6 +1160,8 @@ test('Every declared output property is one the tool actually answers', () => {
 			sizes: { uncompressed: 100, compressed: 40 },
 			tombstone: null,
 			filledAt: 1,
+			auditedAt: 2,
+			verifiedAt: 2,
 			purgesSinceFilled: [
 				{
 					time: 4,
@@ -1226,6 +1253,11 @@ test('Every declared output property is one the tool actually answers', () => {
 			source: 'settings',
 			envRule: null,
 			nextRunAt: 1_700_000_000_000,
+		},
+		read_cache_audit_queue: {
+			size: 40,
+			neverAudited: 3,
+			verifiedSince: 1_700_000_000_000,
 		},
 		write_cache_audit_schedule: {
 			rule: null,

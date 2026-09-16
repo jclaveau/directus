@@ -8,6 +8,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
 	type CacheAuditFinding,
+	type CacheAuditQueue,
 	type CacheAuditRun,
 	type CacheAuditRunWithFindings,
 	type CacheAuditSchedule,
@@ -25,6 +26,7 @@ const emit = defineEmits<{ audited: [] }>();
 const { t } = useI18n();
 
 const schedule = ref<CacheAuditSchedule | null>(null);
+const queue = ref<CacheAuditQueue | null>(null);
 const runs = ref<CacheAuditRun[]>([]);
 const error = ref<string | null>(null);
 const loading = ref(false);
@@ -87,12 +89,17 @@ async function loadRuns(): Promise<void> {
 	runs.value = response.data.data;
 }
 
+async function loadQueue(): Promise<void> {
+	const response = await api.get('/utils/cache/audit/queue');
+	queue.value = response.data.data;
+}
+
 async function load(): Promise<void> {
 	loading.value = true;
 	error.value = null;
 
 	try {
-		await Promise.all([loadSchedule(), loadRuns()]);
+		await Promise.all([loadSchedule(), loadRuns(), loadQueue()]);
 		pollWhileInFlight();
 	}
 	catch (err: any) {
@@ -136,7 +143,7 @@ async function runNow(): Promise<void> {
 
 	try {
 		await api.post('/utils/cache/audit', { purge: purge.value });
-		await loadRuns();
+		await Promise.all([loadRuns(), loadQueue()]);
 		emit('audited');
 	}
 	catch (err: any) {
@@ -230,6 +237,28 @@ const nextRun = computed(() => {
 	const stamp = formatStamp(schedule.value.nextRunAt);
 
 	return `${t('cache_audit_next_run', 'Next run')}: ${stamp}`;
+});
+
+// The guarantee the audit gives right now: everything served has been proven
+// to match the database since this moment, by a replay or by the fill itself.
+const horizon = computed(() => {
+	if (queue.value === null) {
+		return '';
+	}
+
+	if (queue.value.verifiedSince === null) {
+		return t('cache_audit_queue_empty', 'No entry described yet');
+	}
+
+	const since = formatStamp(queue.value.verifiedSince);
+	const size = `${queue.value.size} ${t('cache_audit_queue_entries', 'entries')}`;
+
+	const pending = queue.value.neverAudited === 0
+		? t('cache_audit_queue_all_seen', 'all audited at least once')
+		: `${queue.value.neverAudited} ${t('cache_audit_queue_never', 'never audited')}`;
+
+	return `${t('cache_audit_verified_since', 'Every entry verified since')} ${since}`
+		+ ` · ${size}, ${pending}`;
 });
 
 const schedulePlaceholder = computed(() => {
@@ -356,6 +385,13 @@ defineExpose({ load });
         </v-button>
       </div>
     </div>
+
+    <p
+      v-if="horizon"
+      class="horizon"
+    >
+      {{ horizon }}
+    </p>
 
     <v-notice
       v-if="error"
@@ -551,6 +587,11 @@ defineExpose({ load });
 .next-run {
 	color: var(--theme--foreground-subdued);
 	white-space: nowrap;
+}
+
+.horizon {
+	margin-block-end: 12px;
+	color: var(--theme--foreground-subdued);
 }
 
 .audit-table {

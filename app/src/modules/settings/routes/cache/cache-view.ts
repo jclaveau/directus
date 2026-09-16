@@ -14,6 +14,12 @@ export interface CacheEntry {
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
+	// When the audit last replayed it; null until it has.
+	auditedAt: number | null;
+	// When it was last known to answer what the database does: the audit, or
+	// the fill where that came later. The audit works through the cache in
+	// this order.
+	verifiedAt: number;
 	size: number;
 	hits: number;
 	misses: number;
@@ -301,6 +307,7 @@ export type EntrySortField =
 	| 'ratio'
 	| 'createdAt'
 	| 'lastHitAt'
+	| 'verifiedAt'
 	| 'expiresAt'
 	| 'size'
 	| 'key';
@@ -357,6 +364,7 @@ export function sortEntries(entries: CacheEntry[], sort: EntrySort): CacheEntry[
 		},
 		createdAt: (entry) => entry.createdAt,
 		lastHitAt: (entry) => entry.lastHitAt,
+		verifiedAt: (entry) => entry.verifiedAt,
 		expiresAt: (entry) => entry.expiresAt,
 		size: (entry) => entry.size,
 		key: (entry) => entry.redisKey,

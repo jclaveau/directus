@@ -34,12 +34,13 @@ import { getSecret } from './utils/get-secret.js';
  * controller, every read hook, GraphQL — as the user it was filled for, and the
  * two bodies are compared (https://github.com/jclaveau/directus/issues/498).
  *
- * The entries come off the descriptor table, least recently audited first,
- * and the cache is asked for their bodies: only a described entry can be
- * replayed, and a table orders, pages and remembers where a `SCAN` does none
- * of it. A run with a `limit` examines that many and stops; the next one
- * resumes behind them, so a schedule audits the whole cache in slices sized
- * to the load each may put on the database.
+ * The entries come off the descriptor table, least recently verified first
+ * (an audit, or a fill where that came later — a fill reads the database,
+ * so it matched then), and the cache is asked for their bodies: only a
+ * described entry can be replayed, and a table orders, pages and remembers
+ * where a `SCAN` does none of it. A run with a `limit` examines that many
+ * and stops; the next one resumes behind them, so a schedule audits the
+ * whole cache in slices sized to the load each may put on the database.
  *
  *   - fresh:         the replay answered the stored body.
  *   - stale:         a diff that held across two fresh reads. `purgesSinceFilled`

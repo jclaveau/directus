@@ -1,5 +1,6 @@
 import type { Knex } from 'knex';
 import { getDatabaseClient } from '../index.js';
+import { CACHE_ENTRY_VERIFIED_AT } from '../../utils/cache-entry-verified-at.js';
 
 /**
  * Where a cache audit leaves its report (jclaveau/directus#498).
@@ -28,12 +29,13 @@ import { getDatabaseClient } from '../index.js';
  * rule runs, or nothing does when that is empty too.
  *
  * `directus_cache_stats_descriptors.audited_at` is the audit's place in the
- * cache: a run takes the descriptors least recently audited (never, first)
- * and stamps the ones it passed, so a limited run resumes where the last one
- * stopped. Kept to the millisecond: a run reads what was stamped before it
- * began, and a stamp stored without fractions could sort before the start it
- * came after. The index is what the queue read pages on; Postgres only serves
- * `NULLS FIRST` off an index that sorts its nulls the same way.
+ * cache: a run takes the descriptors least recently verified — audited, or
+ * filled where that came later — and stamps the ones it passed, so a limited
+ * run resumes where the last one stopped. Kept to the millisecond: a run
+ * reads what was stamped before it began, and a stamp stored without
+ * fractions could sort before the start it came after. The queue orders on
+ * an expression over the two columns; Postgres indexes the expression itself,
+ * the other dialects get the columns and sort the page.
  */
 export async function up(knex: Knex): Promise<void> {
 	await knex.schema.createTable('directus_cache_audits', (table) => {
@@ -118,7 +120,8 @@ export async function up(knex: Knex): Promise<void> {
 	if (getDatabaseClient(knex) === 'postgres') {
 		await knex.raw(
 			'CREATE INDEX directus_cache_stats_descriptors_audit_queue '
-			+ 'ON directus_cache_stats_descriptors (audited_at NULLS FIRST, last_filled)',
+			+ 'ON directus_cache_stats_descriptors '
+			+ `((${CACHE_ENTRY_VERIFIED_AT}), last_filled)`,
 		);
 	}
 	else {
