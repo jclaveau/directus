@@ -42,6 +42,8 @@ describe(oneLine`
 
 		let instance: ChildProcess;
 		let scopedOwnerId: number;
+		let otherOwnerId: number;
+		let scopedUnitId: number;
 		let scopedCourseId: number;
 		let otherCourseId: number;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -88,14 +90,17 @@ describe(oneLine`
 			});
 
 			scopedOwnerId = owners[0].id;
+			otherOwnerId = owners[1].id;
 
 			const units = await CreateItem(vendor, {
 				collection: UNIT,
 				item: [
 					{ name: 'scoped unit', owner: scopedOwnerId },
-					{ name: 'other unit', owner: owners[1].id },
+					{ name: 'other unit', owner: otherOwnerId },
 				],
 			});
+
+			scopedUnitId = units[0].id;
 
 			// The hook scopes to the lowest course id, so the scoped one goes first.
 			const courses = await CreateItem(vendor, {
@@ -145,6 +150,13 @@ describe(oneLine`
 				.set('Authorization', auth);
 		}
 
+		function moveUnit(ownerId: number) {
+			return request(getUrl(vendor, env))
+				.patch(`/items/${UNIT}/${scopedUnitId}`)
+				.send({ owner: ownerId })
+				.set('Authorization', auth);
+		}
+
 		function clearCache() {
 			return request(getUrl(vendor, env))
 				.post('/utils/cache/clear')
@@ -154,6 +166,14 @@ describe(oneLine`
 		it('carries the composed-path tag the hook declared', async () => {
 			expect((await readRows()).headers[cacheTagsHeader]).toMatch(
 				new RegExp(`(^|, )${COURSE}:unit\\.owner=${scopedOwnerId}(,|$)`),
+			);
+		});
+
+		// The path crosses `unit`, whose `owner` column a unit write changes without
+		// touching any course: the slice the read depends on there has to ride along.
+		it("carries the intermediate's slice beside the composed path", async () => {
+			expect((await readRows()).headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${UNIT}:owner=${scopedOwnerId}(,|$)`),
 			);
 		});
 
@@ -182,6 +202,17 @@ describe(oneLine`
 			expect((await readRows()).headers[cacheStatusHeader]).toBe('HIT');
 
 			await updateCourse(scopedCourseId, 'scoped course, edited');
+
+			expect((await readRows()).headers[cacheStatusHeader]).toBe('MISS');
+		});
+
+		it('a unit moved under another owner evicts the read', async () => {
+			await clearCache();
+
+			expect((await readRows()).headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readRows()).headers[cacheStatusHeader]).toBe('HIT');
+
+			await moveUnit(otherOwnerId);
 
 			expect((await readRows()).headers[cacheStatusHeader]).toBe('MISS');
 		});
