@@ -201,9 +201,10 @@ describe(oneLine`
 			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
 		});
 
-		it('bares the collection when the filter names two scoped fields', async () => {
-			// Two different scoped fields name no single slice — the pin must decline to
-			// bare rather than mix the axes, and the bare tag still evicts soundly.
+		it('slices one axis when the filter names two scoped fields', async () => {
+			// An AND of two scoped fields is bounded by either one alone: every row
+			// returned has the first value, and a write to any tag row emits every
+			// slice of that row, so the one axis evicts soundly.
 			const readByTwoFields = () => {
 				return request(getUrl(vendor, env))
 					.get(`/items/${ROOT}`)
@@ -216,8 +217,8 @@ describe(oneLine`
 			};
 
 			const tags = (await readByTwoFields()).headers[cacheTagsHeader];
-			expect(tags).toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
-			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}:`));
+			expect(tags).toMatch(new RegExp(`(^|, )${TAG}:label=alpha(,|$)`));
+			expect(tags).not.toMatch(new RegExp(`(^|, )${TAG}(,|$)`));
 
 			await clearCache();
 			expect((await readByTwoFields()).headers[cacheStatusHeader]).toBe('MISS');

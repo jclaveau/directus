@@ -1,7 +1,6 @@
 import config, { getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
-	CreateFieldM2O,
 	CreateFieldO2M,
 	CreateItem,
 	DeleteCollection,
@@ -64,12 +63,6 @@ describe(oneLine`
 						fields: [{ field: 'title', type: 'string', meta: {} }],
 					},
 				],
-			});
-
-			await CreateFieldM2O(vendor, {
-				collection: COURSE,
-				field: 'student',
-				otherCollection: STUDENT,
 			});
 
 			await CreateFieldO2M(vendor, {

@@ -863,8 +863,9 @@ describe(oneLine`
 		`, async () => {
 			// The two ways out of tagging an M2O filter nothing. A sibling reading
 			// another of its columns has to read the far row after all — one alias
-			// is one joined row, so the key still says which. A sort reads rows no
-			// key named, so the collection goes back to bare.
+			// is one joined row, so the key still says which. A sort reads the far
+			// row too, and the key still names it: every returned row's owner is
+			// the one the filter keyed.
 			await clearCache();
 
 			const sibling = await request(getUrl(vendor, env))
@@ -895,8 +896,9 @@ describe(oneLine`
 
 			expect(sorted.headers[cacheStatusHeader]).toBe('MISS');
 
-			expect(sorted.headers[cacheTagsHeader])
-				.toMatch(new RegExp(`(^|, )${OWNER}(,|$)`));
+			expect(sorted.headers[cacheTagsHeader]).toMatch(
+				new RegExp(`(^|, )${OWNER}:id=${filteredOwnerId}(,|$)`),
+			);
 
 
 			// The `group` arm of the same set. Grouping ACROSS a relation
