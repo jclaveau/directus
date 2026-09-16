@@ -510,29 +510,49 @@ describe('The cache audit replays live entries against the database', () => {
 			audited first, coming back round once every entry has had its turn
 		`, async () => {
 			await clearCache();
+			const filledAfter = Date.now();
 			await warm(() => readOwner('acme'));
 			await warm(() => readOwner('globex'));
+
+			// The admin's two descriptors, by the query each was filled for. Both
+			// outlive the clear (the refill lands on the same key), so the audit
+			// sees them live at once while their fill time is still the previous
+			// one until the drain lands: the order under test is the new fills'.
+			async function rows(): Promise<Record<string, any>> {
+				const found = await db('directus_cache_stats_descriptors')
+					.where({ collection: ROWS, path: `/items/${ROWS}` })
+					.whereNot({ user_id: appUserId })
+					.whereIn('query', ['filter[owner][_eq]=acme', 'filter[owner][_eq]=globex'])
+					.select('query', 'last_filled', 'audited_at');
+
+				return Object.fromEntries(found.map((row: any) => [row.query, row]));
+			}
+
+			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+				const found = Object.values(await rows());
+
+				if (found.length === 2 && found.every((row) => {
+					return new Date(row.last_filled).getTime() >= filledAfter;
+				})) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+			}
+
 			await auditSettled({}, 2);
 
 			// The stamp each run leaves on the descriptor it took.
-			async function stamps(): Promise<Record<string, number>> {
-				const rows = await db('directus_cache_stats_descriptors')
-					.where({ collection: ROWS, path: `/items/${ROWS}` })
-					.whereIn('query', ['filter[owner][_eq]=acme', 'filter[owner][_eq]=globex'])
-					.select('query', 'audited_at');
-
-				return Object.fromEntries(rows.map((row: any) => {
-					return [row.query, new Date(row.audited_at).getTime()];
-				}));
-			}
-
 			async function takenBy(run: () => Promise<any>): Promise<string[]> {
-				const before = await stamps();
+				const before = await rows();
 				const response = await run();
 				expect(response.body.data.scanned).toBe(1);
-				const after = await stamps();
+				const after = await rows();
 
-				return Object.keys(after).filter((query) => after[query]! > before[query]!);
+				return Object.keys(after).filter((query) => {
+					return new Date(after[query].audited_at).getTime()
+						> new Date(before[query].audited_at).getTime();
+				});
 			}
 
 			// Both were stamped together, so the older fill goes first.
