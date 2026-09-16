@@ -104,7 +104,9 @@ export async function up(knex: Knex): Promise<void> {
 
 		table.string('verdict', 16).notNullable();
 		table.string('reason', 64).nullable();
-		table.string('redis_key').notNullable();
+		// Text, as on the descriptors: under CACHE_KEY_HASH_ENABLED=false the
+		// key is the readable request, longer than a name column holds.
+		table.text('redis_key').notNullable();
 		table.string('cache_key').notNullable();
 		table.string('method', 8).notNullable();
 		table.text('url').notNullable();

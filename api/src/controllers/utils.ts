@@ -350,9 +350,11 @@ router.post(
 			schema: req.schema,
 		});
 
+		// Stripped, not passed: the run takes more options than a caller may
+		// set (its time budget, where a replay goes).
 		const { error, value } = CacheAuditOptionsSchema.validate(
 			{ ...req.query, ...req.body },
-			{ allowUnknown: true },
+			{ allowUnknown: true, stripUnknown: true },
 		);
 
 		if (error) {

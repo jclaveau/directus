@@ -45,6 +45,13 @@ import { getSecret } from './utils/get-secret.js';
  * one resumes behind them, so a schedule audits the whole cache in slices
  * sized to the load each may put on the database.
  *
+ * The descriptor table is one for the database, and a descriptor the cache
+ * no longer holds is retired from the queue on the audit's word alone: every
+ * node that audits has to see the same cache as the nodes that fill it — one
+ * CACHE_NAMESPACE, and one store (CACHE_STORE=memory under a PM2 cluster is a
+ * cache per worker). A node that could not hold an entry would otherwise
+ * retire it for the node that does.
+ *
  *   - fresh:         the replay answered the stored body.
  *   - stale:         a diff that held across two fresh reads. `purgesSinceFilled`
  *                    says which side lost it: a purge that covered the entry's
@@ -157,13 +164,18 @@ const REPLAY_CONCURRENCY = 4;
 // dropped since costs one `EXISTS`, and leaves the queue until its next fill.
 const QUEUE_PAGE = 500;
 const DIFF_PATHS_REPORTED = 20;
-// Enough diff paths to find one an ignore glob does not cover.
+// Enough diff paths to find one an ignore glob does not cover. The bound is
+// also where the search stops: a body whose first 500 differing pointers are
+// all ignored (a list longer than that, each row stamped by a clock) hides a
+// real difference past them, and is judged fresh.
 const DIFF_PATHS_COMPARED = 500;
 const REPLAY_TOKEN_TTL = '60s';
 
 interface LiveEntry {
 	descriptor: CacheAuditDescriptor;
 	raw: unknown;
+	/** The expiry sidecar as stored, read in the same round trip as the body. */
+	rawExpiry: unknown;
 }
 
 interface EntrySnapshot {
@@ -251,7 +263,7 @@ export async function auditCache(
 		// limit has room for; those stay unstamped for the next run. Only what
 		// will be examined has its body and tags read.
 		const askedAt = new Date();
-		const held = await cache.hasMany(due.map((row) => row.redisKey));
+		const held = await askHeld(cache, due.map((row) => row.redisKey));
 		const gone: string[] = [];
 		const taken: typeof due = [];
 
@@ -264,8 +276,13 @@ export async function auditCache(
 			}
 		});
 
-		const [raws, tags] = await Promise.all([
-			cache.getMany(taken.map((row) => row.redisKey)),
+		// The body and its expiry sidecar in one read: the sidecar's fill time
+		// is what the race guard compares the cache's current one with, so it
+		// has to date from the same moment as the body — read minutes apart,
+		// an entry refilled in between would carry the new sidecar beside the
+		// old body and pass for held.
+		const [stored, tags] = await Promise.all([
+			cache.getMany(taken.flatMap((row) => [row.redisKey, expiryKey(row.redisKey)])),
 			readScopedCacheEntryTags(taken.map((row) => row.cacheKey)),
 		]);
 
@@ -274,7 +291,8 @@ export async function auditCache(
 		const batch: LiveEntry[] = taken.map((row, index) => {
 			return {
 				descriptor: { ...row, scopedCacheTags: tags.get(row.cacheKey) ?? [] },
-				raw: raws[index],
+				raw: stored[index * 2],
+				rawExpiry: stored[index * 2 + 1],
 			};
 		});
 
@@ -318,6 +336,45 @@ export async function auditCache(
 	report.durationMs = Date.now() - startedAt;
 
 	return report;
+}
+
+/**
+ * Whether the cache holds each key. A Keyv answers a store it cannot reach
+ * with "not held" for every key, which the loop above would take for a page
+ * of entries gone and retire: asked here with an ear on the store's error,
+ * so an outage fails the run and retires nothing.
+ */
+async function askHeld(cache: Keyv, redisKeys: string[]): Promise<boolean[]> {
+	let failure: unknown;
+
+	const onError = (error: unknown) => {
+		failure = error;
+	};
+
+	cache.on('error', onError);
+
+	try {
+		const held = await cache.hasMany(redisKeys);
+
+		if (failure !== undefined) {
+			throw new Error(
+				`The cache could not be asked what it holds: ${
+					failure instanceof Error
+						? failure.message
+						: String(failure)
+				}`,
+			);
+		}
+
+		return held;
+	}
+	finally {
+		cache.off('error', onError);
+	}
+}
+
+function expiryKey(redisKey: string): string {
+	return `${redisKey}__expires_at`;
 }
 
 function emptyCounts(): Record<CacheAuditVerdict, number> {
@@ -407,7 +464,7 @@ class CacheAudit {
 	private async judge(entry: LiveEntry): Promise<Verdict> {
 		const { descriptor } = entry;
 		const { redisKey } = descriptor;
-		let snapshot = await this.snapshot(redisKey, entry.raw);
+		let snapshot = await this.snapshot(redisKey, entry.raw, entry.rawExpiry);
 
 		if (snapshot === null) {
 			return { verdict: 'raced' };
@@ -461,7 +518,7 @@ class CacheAudit {
 			}
 
 			if (moved === 'refilled') {
-				snapshot = await this.snapshot(redisKey, undefined);
+				snapshot = await this.snapshot(redisKey, undefined, undefined);
 
 				if (snapshot === null || snapshot.body === undefined) {
 					return { verdict: 'raced' };
@@ -492,22 +549,33 @@ class CacheAudit {
 	}
 
 	/**
-	 * The body as the page read handed it, or re-read from the cache when a
-	 * retry needs the current one, with what its expiry sidecar says in one
-	 * read. Null once the key is gone; `undefined` body for a value that does
-	 * not decompress.
+	 * The body and its expiry sidecar as the page read handed them, or both
+	 * re-read from the cache when a retry needs the current pair. Null once
+	 * the key is gone; `undefined` body for a value that does not decompress.
 	 */
 	private async snapshot(
 		redisKey: string,
 		raw: unknown,
+		rawExpiry: unknown,
 	): Promise<EntrySnapshot | null> {
 		let stored = raw;
+		let expiry: unknown = undefined;
 
 		if (stored === undefined) {
 			stored = await this.cache.get(redisKey);
 
 			if (stored === undefined) {
 				return null;
+			}
+
+			expiry = await getCacheValue(this.cache, expiryKey(redisKey));
+		}
+		else if (rawExpiry !== undefined) {
+			try {
+				expiry = await decompress(rawExpiry as Parameters<typeof decompress>[0]);
+			}
+			catch {
+				expiry = undefined;
 			}
 		}
 
@@ -520,21 +588,23 @@ class CacheAudit {
 			body = undefined;
 		}
 
-		const expiry = await getCacheValue(this.cache, `${redisKey}__expires_at`);
+		const sidecar = isRecord(expiry)
+			? expiry
+			: {};
 
 		return {
 			body,
-			createdAt: typeof expiry?.createdAt === 'number'
-				? expiry.createdAt
+			createdAt: typeof sidecar['createdAt'] === 'number'
+				? sidecar['createdAt']
 				: null,
-			expiresAt: typeof expiry?.exp === 'number'
-				? expiry.exp
+			expiresAt: typeof sidecar['exp'] === 'number'
+				? sidecar['exp']
 				: null,
 		};
 	}
 
 	private async createdAt(redisKey: string): Promise<number | null> {
-		const expiry = await getCacheValue(this.cache, `${redisKey}__expires_at`);
+		const expiry = await getCacheValue(this.cache, expiryKey(redisKey));
 
 		return typeof expiry?.createdAt === 'number'
 			? expiry.createdAt
@@ -563,7 +633,16 @@ class CacheAudit {
 	private async replayBody(
 		request: CacheAuditReplayRequest,
 	): Promise<{ body: unknown; tags: string[] } | Verdict> {
-		const response = await this.replay(request);
+		let response: CacheAuditReplayResponse;
+
+		// A replay that never got an answer — the listener gone mid-reload, a
+		// socket reset — is that entry's to report, not the run's to die of.
+		try {
+			response = await this.replay(request);
+		}
+		catch {
+			return { verdict: 'unreplayable', reason: 'transport' };
+		}
 
 		// A 403 is what the user would now be served instead of the entry: the
 		// entry is stale for them, whichever permission moved.

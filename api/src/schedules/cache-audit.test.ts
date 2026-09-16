@@ -1,6 +1,10 @@
 import { oneLine } from '@directus/utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runCacheAudit, type CacheAuditRunReport } from '../cache-audit-runs.js';
+import {
+	type CacheAuditRunReport,
+	isCacheAuditInFlight,
+	runCacheAudit,
+} from '../cache-audit-runs.js';
 import getDatabase from '../database/index.js';
 import { scheduleSynchronizedJob, validateCron } from '../utils/schedule.js';
 import cacheAuditSchedule, {
@@ -9,7 +13,13 @@ import cacheAuditSchedule, {
 	resolvedCacheAuditSchedule,
 } from './cache-audit.js';
 
-vi.mock('../cache-audit-runs.js', () => ({ runCacheAudit: vi.fn() }));
+vi.mock('../cache-audit-runs.js', () => {
+	return {
+		runCacheAudit: vi.fn(),
+		isCacheAuditInFlight: vi.fn(() => false),
+	};
+});
+
 vi.mock('../utils/schedule.js');
 vi.mock('../database/index.js', () => ({ default: vi.fn() }));
 
@@ -276,6 +286,27 @@ describe('cache-audit schedule', () => {
 		);
 
 		expect(mockLogger.info).not.toHaveBeenCalled();
+	});
+
+	it(oneLine`
+		notes a tick that found the last run still going, as information
+	`, async () => {
+		const refused = Object.assign(new Error('Service is unavailable'), {
+			extensions: { reason: 'a cache audit is already running, since 12:00' },
+		});
+
+		vi.mocked(runCacheAudit).mockRejectedValue(refused);
+		vi.mocked(isCacheAuditInFlight).mockReturnValueOnce(true);
+
+		await expect(runScheduledJob()).resolves.toBeUndefined();
+
+		expect(isCacheAuditInFlight).toHaveBeenCalledWith(refused);
+
+		expect(mockLogger.info).toHaveBeenCalledWith(
+			'[cache-audit] tick skipped: a cache audit is already running, since 12:00',
+		);
+
+		expect(mockLogger.warn).not.toHaveBeenCalled();
 	});
 
 	it('warns on a run that failed, and keeps the schedule', async () => {

@@ -936,8 +936,11 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			outputSchema: { type: 'object', properties: RUN_PROPERTIES },
 			annotations: RUNS_AUDIT,
 			run: async (args, context) => {
+				// Stripped, not passed: the run takes more options than a caller
+				// may set (its time budget, where a replay goes).
 				const { error, value } = CacheAuditOptionsSchema.validate(args, {
 					allowUnknown: true,
+					stripUnknown: true,
 				});
 
 				if (error) {

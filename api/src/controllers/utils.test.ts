@@ -187,6 +187,26 @@ describe('utils controller /cache/audit', () => {
 		});
 	});
 
+	// The run takes options a caller may not set: its time budget, where a
+	// replay goes. Stripped rather than refused, so a client that sends a field
+	// from a newer spec is not turned away.
+	test('drops the options a caller may not set', async () => {
+		auditCache.mockResolvedValueOnce({});
+
+		const req = request(
+			{},
+			{ limit: 10, maxDurationMs: 0, replay: 'http://evil', unknown: 1 },
+		);
+
+		await handlerFor('/cache/audit', 'post')(req, { json: vi.fn() } as any, vi.fn());
+
+		expect(auditCache).toHaveBeenCalledWith({
+			limit: 10,
+			ignore: [],
+			purge: false,
+		});
+	});
+
 	test.each([
 		[
 			'a limit below one',

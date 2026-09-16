@@ -7,6 +7,7 @@ import {
 	DeleteCollection,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
+import { createRedisProxy } from '@common/redis-proxy';
 import { ROLE, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
@@ -1077,6 +1078,26 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(response.body.errors[0].extensions.code).toBe('INVALID_QUERY');
 		});
 
+		it(oneLine`
+			drops the options a caller may not set: a budget of nothing in the
+			body stops no run
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('acme'));
+
+			const report = await auditSettled({ collection: ROWS, maxDurationMs: 0 });
+
+			expect(report.scanned).toBe(1);
+			expect(report.timedOut).toBe(false);
+
+			expect(report.options).toEqual({
+				limit: null,
+				user: null,
+				collection: ROWS,
+				purge: false,
+			});
+		}, 60_000);
+
 		it('is published to administrators alone', async () => {
 			const [admin, anonymous] = await Promise.all([
 				request(url).get('/server/specs/oas')
@@ -1107,6 +1128,115 @@ describe('The cache audit replays live entries against the database', () => {
 			]) {
 				expect(anonymous.body.paths[path]).toBeUndefined();
 			}
+		});
+
+		// A second node over the same cache, reached through a proxy the case
+		// can cut: what a run finds when Redis is not there to say what it
+		// holds. Last, and on its own node: the one above keeps its connection.
+		describe('a node whose cache went away', () => {
+			let proxy: ReturnType<typeof createRedisProxy>;
+			let cutOff: ChildProcess;
+			let cutOffUrl: string;
+
+			beforeAll(async () => {
+				const proxyPort = await getPort();
+				proxy = createRedisProxy(6108, proxyPort);
+				await proxy.open();
+
+				const cutOffEnv = cloneDeep(env);
+				cutOffEnv[vendor]['REDIS'] = `redis://localhost:${proxyPort}`;
+				cutOffEnv[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
+				cutOffEnv[vendor]['REDIS_RETRY_MAX_DELAY'] = '50';
+
+				const cutOffPort = await getPort();
+				cutOffEnv[vendor].PORT = String(cutOffPort);
+
+				cutOff = spawn('node', [paths.cli, 'start'], {
+					cwd: paths.cwd,
+					env: cutOffEnv[vendor],
+				});
+
+				cutOffUrl = getUrl(vendor, cutOffEnv);
+				await awaitDirectusConnection(cutOffPort);
+			}, 60_000);
+
+			afterAll(async () => {
+				cutOff.kill();
+				await proxy.cut();
+			});
+
+			function auditFrom(from: string) {
+				return request(from)
+					.post('/utils/cache/audit')
+					.send({ collection: ROWS })
+					.set('Authorization', auth);
+			}
+
+			async function descriptor(): Promise<any> {
+				return db('directus_cache_stats_descriptors')
+					.where({
+						collection: ROWS,
+						path: `/items/${ROWS}`,
+						query: 'filter[owner][_eq]=acme',
+					})
+					.whereNot({ user_id: appUserId })
+					.select('gone_at', 'audited_at')
+					.first();
+			}
+
+			it(oneLine`
+				retires nothing while the cache cannot say what it holds, and
+				resumes over the same descriptors once it can
+			`, async () => {
+				await clearCache();
+				await warm(() => readOwner('acme'));
+				// Described, and examined once by the connected node.
+				await auditSettled({ collection: ROWS }, 1);
+				const { audited_at: examinedAt } = await descriptor();
+
+				await proxy.cut();
+
+				// The run fails rather than reading every entry as gone: a cache
+				// that answers nothing is not one that dropped everything.
+				const refused = await auditFrom(cutOffUrl);
+				expect(refused.statusCode).toBe(500);
+
+				const failed = await db('directus_cache_audits')
+					.orderBy('id', 'desc')
+					.first();
+
+				expect(failed.error)
+					.toContain('The cache could not be asked what it holds');
+
+				expect(failed.finished_at).not.toBeNull();
+				expect(failed.scanned).toBe(0);
+
+				const held = await descriptor();
+				expect(held.gone_at).toBeNull();
+
+				// Not stamped either: the entry was not examined.
+				expect(new Date(held.audited_at).getTime())
+					.toBe(new Date(examinedAt).getTime());
+
+				await proxy.open();
+
+				let resumed: any;
+
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+					const response = await auditFrom(cutOffUrl);
+
+					if (response.statusCode === 200 && response.body.data.scanned >= 1) {
+						resumed = response.body.data;
+						break;
+					}
+
+					await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+				}
+
+				expect(resumed).toMatchObject({ scanned: 1, error: null });
+				expect(resumed.counts.fresh).toBe(1);
+				expect((await descriptor()).gone_at).toBeNull();
+			}, 90_000);
 		});
 	});
 });

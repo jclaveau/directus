@@ -1,5 +1,9 @@
 import { useEnv } from '@directus/env';
-import { ServiceUnavailableError } from '@directus/errors';
+import {
+	ErrorCode,
+	isDirectusError,
+	ServiceUnavailableError,
+} from '@directus/errors';
 import { parseJSON } from '@directus/utils';
 import {
 	auditCache,
@@ -82,10 +86,18 @@ const DEFAULT_LIST_WINDOW_MS = 604_800_000; // 7d
 const LIST_LIMIT = 200;
 const FINDINGS_BATCH = 200;
 // One run at a time, node-wide where the lock is in memory and deployment-wide
-// on Redis. The claim outlives the longest run it guards by this much, so a
-// run whose process died frees the audit without anyone's help.
+// on Redis. The claim is short-lived and renewed while the run goes on, so a
+// run whose process died frees the audit within the TTL without anyone's
+// help, however long it was allowed to run. `POST /utils/cache/clear` over the
+// `locks` target drops it with every other lock: a run asked for right after
+// one runs beside the one in flight.
 const RUN_LOCK = 'cache-audit:run';
-const RUN_LOCK_GRACE_MS = 60_000;
+const RUN_LOCK_TTL_MS = 120_000;
+const RUN_LOCK_RENEW_MS = 30_000;
+// A run still open this long after it began did not finish: its process died
+// with the row open. Twice the budget, since a run overruns it by at most the
+// page it was on, plus an hour for a page slower than any budget expects.
+const ORPHAN_GRACE_MS = 3_600_000;
 
 function retentionMs(): number {
 	return getMilliseconds(useEnv()['CACHE_AUDIT_RETENTION'], DEFAULT_RETENTION_MS);
@@ -152,11 +164,18 @@ export async function runCacheAudit(
 
 		throw new ServiceUnavailableError({
 			service: 'cache-audit',
-			reason: `a cache audit is already running, since ${since}`,
+			reason: `${IN_FLIGHT_REASON}, since ${since}`,
 		});
 	}
 
-	await lockCache.set(RUN_LOCK, Date.now(), budgetMs + RUN_LOCK_GRACE_MS);
+	const since = Date.now();
+	await lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS);
+
+	const renewal = setInterval(() => {
+		void lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS).catch(() => {});
+	}, RUN_LOCK_RENEW_MS);
+
+	renewal.unref();
 
 	try {
 		const sliced = {
@@ -170,20 +189,35 @@ export async function runCacheAudit(
 
 		try {
 			report = await auditCache(sliced);
+			await finishCacheAuditRun(id, report);
 		}
 		catch (error) {
-			await failCacheAuditRun(id, error);
+			// Best effort: what stopped the run may be the database itself, in
+			// which case the failure it records is the one to surface.
+			await failCacheAuditRun(id, error).catch(() => {});
 
 			throw error;
 		}
 
-		await finishCacheAuditRun(id, report);
-
 		return { id, ...report };
 	}
 	finally {
+		clearInterval(renewal);
 		await lockCache.delete(RUN_LOCK);
+
+		// Once per run rather than on a schedule of its own: a history that is
+		// only written by runs only needs pruning when one happens — and a run
+		// that failed wrote to it too.
+		await reapCacheAuditRuns().catch(() => {});
 	}
+}
+
+const IN_FLIGHT_REASON = 'a cache audit is already running';
+
+/** Whether a run was refused because another was in flight. */
+export function isCacheAuditInFlight(error: unknown): boolean {
+	return isDirectusError(error, ErrorCode.ServiceUnavailable)
+		&& String(error.extensions.reason).startsWith(IN_FLIGHT_REASON);
 }
 
 /**
@@ -241,10 +275,6 @@ export async function finishCacheAuditRun(
 			await trx.batchInsert('directus_cache_audit_findings', rows, FINDINGS_BATCH);
 		}
 	});
-
-	// Once per run rather than on a schedule of its own: a history that is
-	// only written by runs only needs pruning when one happens.
-	await reapCacheAuditRuns();
 }
 
 /** Close the row with why the run stopped, keeping the failure in the history. */
@@ -271,9 +301,7 @@ function findingRow(audit: number, finding: CacheAuditFinding) {
 		query: finding.query,
 		user_id: finding.user,
 		collection: finding.collection,
-		filled_at: finding.filledAt === null
-			? null
-			: new Date(finding.filledAt),
+		filled_at: new Date(finding.filledAt),
 		age_ms: finding.ageMs,
 		tags: JSON.stringify(finding.tags),
 		replay_tags: jsonOrNull(finding.replayTags),
@@ -354,12 +382,25 @@ export async function readCacheAuditFindings(
 	};
 }
 
-/** Drop the runs past retention; their findings go with them. */
+/**
+ * Drop the runs past retention, their findings with them; and close the runs
+ * left open by a process that died, so the history stops reporting them as
+ * in flight.
+ */
 export async function reapCacheAuditRuns(): Promise<number> {
-	const cutoff = new Date(Date.now() - retentionMs());
+	const db = getDatabase();
+	const now = Date.now();
 
-	return getDatabase()('directus_cache_audits')
-		.where('started_at', '<', cutoff)
+	await db('directus_cache_audits')
+		.whereNull('finished_at')
+		.where('started_at', '<', new Date(now - 2 * maxDurationMs() - ORPHAN_GRACE_MS))
+		.update({
+			finished_at: new Date(now),
+			error: 'The run did not finish: its process died',
+		});
+
+	return db('directus_cache_audits')
+		.where('started_at', '<', new Date(now - retentionMs()))
 		.delete();
 }
 

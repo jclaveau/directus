@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import { CronExpressionParser } from 'cron-parser';
 import { useBus } from '../bus/index.js';
-import { runCacheAudit } from '../cache-audit-runs.js';
+import { isCacheAuditInFlight, runCacheAudit } from '../cache-audit-runs.js';
 import { useLogger } from '../logger/index.js';
 import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
 import {
@@ -122,6 +122,14 @@ async function runOnce(): Promise<void> {
 		}
 	}
 	catch (err: any) {
+		// A tick landing while the last run still goes on is the budget at
+		// work, not a failure: the next tick takes the rest.
+		if (isCacheAuditInFlight(err)) {
+			logger.info(`[cache-audit] tick skipped: ${err.extensions.reason}`);
+
+			return;
+		}
+
 		logger.warn(err, `[cache-audit] run failed. ${err.message}`);
 	}
 }

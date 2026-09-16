@@ -334,6 +334,22 @@ describe('Cache audit over the system MCP', () => {
 			expect(noRun.body.error.message).toContain('limit');
 			expect(noRun.body.result).toBeUndefined();
 
+			// An argument the tool does not take is dropped, not refused: the
+			// run's budget is not the caller's to set, so a budget of nothing in
+			// the call stops no run.
+			const budgeted = await callTool('run_cache_audit', {
+				collection: ROWS,
+				maxDurationMs: 0,
+			});
+
+			expect(budgeted.body.error).toBeUndefined();
+			expect(budgeted.body.result.isError).toBeUndefined();
+
+			expect(budgeted.body.result.structuredContent).toMatchObject({
+				options: { collection: ROWS, limit: null, user: null, purge: false },
+				timedOut: false,
+			});
+
 			const noId = await callTool('read_cache_audit', {});
 
 			expect(noId.body.error.code).toBe(-32602);

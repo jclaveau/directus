@@ -59,6 +59,10 @@ describe('`directus cache audit` and the scheduled audit', () => {
 		const scheduledEnv = cloneDeep(env);
 		scheduledEnv[vendor]['CACHE_AUDIT_SCHEDULE'] = '*/2 * * * * *';
 
+		// Keyed by the request itself rather than its digest: a key the history
+		// has to hold whole, however long the request was.
+		scheduledEnv[vendor]['CACHE_KEY_HASH_ENABLED'] = 'false';
+
 		let instance: ChildProcess;
 		let db: Knex;
 		let url: string;
@@ -442,6 +446,31 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			expect(await cliRuns()).toBe(before);
 		}, 60_000);
 
+		it(oneLine`
+			refuses a --limit that is not a count before the boot, leaving no run
+			behind
+		`, async () => {
+			const cliRuns = () => {
+				return db('directus_cache_audits')
+					.where({ trigger: 'cli' })
+					.count({ n: '*' })
+					.first()
+					.then((row) => Number(row?.['n']));
+			};
+
+			const before = await cliRuns();
+
+			const { code, output } = await runCacheAudit(['--json', '--limit', 'abc']);
+
+			expect(code).toBe(1);
+
+			expect(output)
+				.toContain('--limit has to be a whole number of 1 or more, not "abc"');
+
+			expect(output).not.toContain('"scanned"');
+			expect(await cliRuns()).toBe(before);
+		}, 60_000);
+
 		describe('the scheduled audit', () => {
 			let scheduled: ChildProcess;
 			let scheduledUrl: string;
@@ -519,6 +548,48 @@ describe('`directus cache audit` and the scheduled audit', () => {
 				// or an operator.
 				const stillHeld = await readOwner('initech', scheduledUrl);
 				expect(stillHeld.headers[cacheStatusHeader]).toBe('HIT');
+			}, 90_000);
+
+			it(oneLine`
+				keeps a finding whose readable key is longer than a name column holds
+			`, async () => {
+				// Sixty owners in one filter: under CACHE_KEY_HASH_ENABLED=false the
+				// Redis key carries the whole query, well past 255 characters.
+				const query = `filter[owner][_in]=${[
+					'initech',
+					...Array.from({ length: 60 }, (_, index) => `nobody-${index}`),
+				].join(',')}`;
+
+				await clearCache(scheduledUrl);
+
+				await warm(() => {
+					return request(scheduledUrl)
+						.get(`/items/${ROWS}`)
+						.query(query)
+						.set('Authorization', auth);
+				});
+
+				await db(ROWS).where({ owner: 'initech' })
+					.update({ amount: '12' });
+
+				let finding: any;
+
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !finding; attempt++) {
+					finding = await db('directus_cache_audit_findings')
+						.where({ verdict: 'stale', query })
+						.select('redis_key', 'url')
+						.first();
+
+					if (!finding) {
+						await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+					}
+				}
+
+				expect(finding).toBeDefined();
+				expect(finding.redis_key.length).toBeGreaterThan(255);
+				expect(finding.redis_key).toContain(`"path":"/items/${ROWS}"`);
+				expect(finding.redis_key).toContain('"nobody-59"');
+				expect(finding.url).toBe(`/items/${ROWS}?${query}`);
 			}, 90_000);
 
 			it(oneLine`

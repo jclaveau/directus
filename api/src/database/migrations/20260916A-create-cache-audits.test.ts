@@ -130,7 +130,7 @@ describe('20260916A-create-cache-audits', () => {
 				+ ' onDelete=CASCADE',
 				'string(16) verdict notNullable',
 				'string(64) reason nullable',
-				'string redis_key notNullable',
+				'text redis_key notNullable',
 				'string cache_key notNullable',
 				'string(8) method notNullable',
 				'text url notNullable',

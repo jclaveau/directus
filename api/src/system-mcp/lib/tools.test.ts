@@ -780,6 +780,22 @@ test('run_cache_audit validates its narrowing before running', async () => {
 	expect(service.auditCache).not.toHaveBeenCalled();
 });
 
+// Its time budget and where a replay goes are the run's, not the caller's:
+// dropped from what reaches the service, not refused.
+test('run_cache_audit drops the options a caller may not set', async () => {
+	service.auditCache.mockResolvedValueOnce({ id: 1 });
+
+	await findSystemMcpTool('run_cache_audit')!.run(
+		{ limit: 10, maxDurationMs: 0, replay: 'http://evil', unknown: 1 },
+		context,
+	);
+
+	expect(service.auditCache).toHaveBeenCalledWith(
+		{ limit: 10, ignore: [], purge: false },
+		'mcp',
+	);
+});
+
 test('run_cache_audit records the run as started over MCP', async () => {
 	service.auditCache.mockResolvedValue({ id: 7 });
 

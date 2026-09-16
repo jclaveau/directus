@@ -1,4 +1,5 @@
 import { oneLine } from '@directus/utils';
+import { ServiceUnavailableError } from '@directus/errors';
 import knex, { type Knex } from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +14,7 @@ import {
 	listCacheAuditRuns,
 	readCacheAuditFindings,
 	readCacheAuditRun,
+	isCacheAuditInFlight,
 	reapCacheAuditRuns,
 	runCacheAudit,
 	startCacheAuditRun,
@@ -176,7 +178,6 @@ describe('finishCacheAuditRun', () => {
 	it('closes the row with the counts and stores one row per finding', async () => {
 		tracker.on.update('directus_cache_audits').response(1);
 		tracker.on.insert('directus_cache_audit_findings').response([]);
-		tracker.on.delete('directus_cache_audits').response(0);
 
 		await finishCacheAuditRun(7, report);
 
@@ -209,13 +210,12 @@ describe('finishCacheAuditRun', () => {
 		expect(insert!.bindings).toContainEqual(new Date(1_699_999_990_000));
 		expect(insert!.bindings.filter((b) => b === 7)).toHaveLength(2);
 
-		// Then the history is pruned, once per run.
-		expect(tracker.history.delete).toHaveLength(1);
+		// Pruning the history is the run's, so a failed run prunes too.
+		expect(tracker.history.delete).toHaveLength(0);
 	});
 
 	it('stores no finding row for a clean run', async () => {
 		tracker.on.update('directus_cache_audits').response(1);
-		tracker.on.delete('directus_cache_audits').response(0);
 
 		await finishCacheAuditRun(7, { ...report, findings: [] });
 
@@ -262,14 +262,23 @@ describe('runCacheAudit', () => {
 		});
 
 		expect(tracker.history.insert[0]!.bindings).toContain('mcp');
-		expect(tracker.history.update).toHaveLength(1);
+		// The close, then the orphan sweep; then the history is pruned.
+		expect(tracker.history.update).toHaveLength(2);
+		expect(tracker.history.delete).toHaveLength(1);
 	});
 
 	it(oneLine`
-		holds the run's claim while it runs, for its time budget and a minute
-		over, and lets it go after
+		holds the run's claim for two minutes at a time, renewed every 30s while
+		it runs whatever its budget, and lets it go after
 	`, async () => {
-		env['CACHE_AUDIT_MAX_DURATION'] = '2m';
+		vi.useRealTimers();
+
+		vi.useFakeTimers({
+			now: 1_700_000_000_000,
+			toFake: ['Date', 'setInterval', 'clearInterval'],
+		});
+
+		env['CACHE_AUDIT_MAX_DURATION'] = '2h';
 		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
 		tracker.on.update('directus_cache_audits').response(1);
 		tracker.on.insert('directus_cache_audit_findings').response([]);
@@ -277,6 +286,11 @@ describe('runCacheAudit', () => {
 
 		vi.mocked(auditCache).mockImplementation(async () => {
 			expect(lockCache.held.get('cache-audit:run')).toBe(1_700_000_000_000);
+			expect(lockCache.set).toHaveBeenCalledTimes(1);
+
+			vi.advanceTimersByTime(90_000);
+
+			expect(lockCache.set).toHaveBeenCalledTimes(4);
 
 			return report;
 		});
@@ -285,14 +299,18 @@ describe('runCacheAudit', () => {
 
 		expect(auditCache).toHaveBeenCalledWith({
 			limit: undefined,
-			maxDurationMs: 120_000,
+			maxDurationMs: 7_200_000,
 		});
 
 		expect(lockCache.set)
-			.toHaveBeenCalledWith('cache-audit:run', 1_700_000_000_000, 180_000);
+			.toHaveBeenCalledWith('cache-audit:run', 1_700_000_000_000, 120_000);
 
 		expect(lockCache.delete).toHaveBeenCalledWith('cache-audit:run');
 		expect(lockCache.held.has('cache-audit:run')).toBe(false);
+
+		// Let go with the claim: no renewal outlives the run.
+		vi.advanceTimersByTime(90_000);
+		expect(lockCache.set).toHaveBeenCalledTimes(4);
 	});
 
 	it('refuses a run while another is in flight, before any row', async () => {
@@ -379,15 +397,60 @@ describe('runCacheAudit', () => {
 		expect(tracker.history.insert).toHaveLength(0);
 	});
 
-	it('records the failure and rethrows when the engine throws', async () => {
+	it(oneLine`
+		records the failure and rethrows when the engine throws, and still prunes
+		the history
+	`, async () => {
 		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
 		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.delete('directus_cache_audits').response(0);
 		vi.mocked(auditCache).mockRejectedValue(new Error('redis is away'));
 
 		await expect(runCacheAudit('cron')).rejects.toThrow('redis is away');
 
 		expect(tracker.history.update[0]!.bindings).toContain('redis is away');
 		expect(tracker.history.insert).toHaveLength(1);
+		expect(tracker.history.delete).toHaveLength(1);
+	});
+
+	it(oneLine`
+		records the failure when it is the close that fails, so a run that
+		audited but could not store its findings is not left in flight
+	`, async () => {
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+
+		tracker.on.insert('directus_cache_audit_findings')
+			.simulateError('disk full');
+
+		tracker.on.delete('directus_cache_audits').response(0);
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await expect(runCacheAudit('rest')).rejects.toThrow('disk full');
+
+		// The close's update, then the failure's, then the orphan sweep.
+		expect(tracker.history.update).toHaveLength(3);
+
+		expect(tracker.history.update[1]!.bindings)
+			.toContainEqual(expect.stringContaining('disk full'));
+
+		expect(lockCache.held.has('cache-audit:run')).toBe(false);
+	});
+});
+
+describe('isCacheAuditInFlight', () => {
+	it('tells the refusal for a run in flight from any other failure', async () => {
+		lockCache.held.set('cache-audit:run', 1_699_999_940_000);
+
+		const refused = await runCacheAudit('rest').catch((error) => error);
+
+		expect(isCacheAuditInFlight(refused)).toBe(true);
+		expect(isCacheAuditInFlight(new Error('redis is away'))).toBe(false);
+
+		expect(isCacheAuditInFlight(new ServiceUnavailableError({
+			service: 'cache-audit',
+			reason: 'something else',
+		}))).toBe(false);
 	});
 });
 
@@ -607,6 +670,7 @@ describe('readCacheAuditFindings', () => {
 
 describe('reapCacheAuditRuns', () => {
 	it('drops the runs started before retention, 30 days by default', async () => {
+		tracker.on.update('directus_cache_audits').response(0);
 		tracker.on.delete('directus_cache_audits').response(3);
 
 		expect(await reapCacheAuditRuns()).toBe(3);
@@ -615,8 +679,30 @@ describe('reapCacheAuditRuns', () => {
 			.toEqual([new Date(1_700_000_000_000 - 2_592_000_000)]);
 	});
 
+	it(oneLine`
+		closes a run left open twice its budget and an hour ago as one whose
+		process died, before pruning
+	`, async () => {
+		env['CACHE_AUDIT_MAX_DURATION'] = '10m';
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.delete('directus_cache_audits').response(0);
+
+		await reapCacheAuditRuns();
+
+		const [sweep] = tracker.history.update;
+
+		expect(sweep!.sql).toMatch(/finished_at. is null/);
+
+		expect(sweep!.bindings).toEqual([
+			new Date(1_700_000_000_000),
+			'The run did not finish: its process died',
+			new Date(1_700_000_000_000 - 2 * 600_000 - 3_600_000),
+		]);
+	});
+
 	it('takes CACHE_AUDIT_RETENTION', async () => {
 		env['CACHE_AUDIT_RETENTION'] = '2h';
+		tracker.on.update('directus_cache_audits').response(0);
 		tracker.on.delete('directus_cache_audits').response(0);
 
 		await reapCacheAuditRuns();

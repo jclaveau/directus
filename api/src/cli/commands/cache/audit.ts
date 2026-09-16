@@ -43,6 +43,22 @@ export default async function cacheAudit(
 		return;
 	}
 
+	const limit = options.limit === undefined
+		? undefined
+		: Number(options.limit);
+
+	// The same bound the route holds: a limit that is not a count would take
+	// no entry off the queue and read the same page until the budget is up.
+	if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+		logger.error(
+			`--limit has to be a whole number of 1 or more, not "${options.limit}"`,
+		);
+
+		await exitWhenPrinted(1);
+
+		return;
+	}
+
 	try {
 		const server = await createServer();
 
@@ -55,9 +71,7 @@ export default async function cacheAudit(
 		});
 
 		report = await runCacheAudit('cli', {
-			limit: options.limit === undefined
-				? undefined
-				: Number(options.limit),
+			limit,
 			user: options.user,
 			collection: options.collection,
 			purge: options.purge,

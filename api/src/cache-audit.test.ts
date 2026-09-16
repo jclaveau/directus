@@ -47,12 +47,29 @@ vi.mock('./utils/get-secret.js', () => {
 // the ones it takes, plus `get`/`has` for the re-reads the race guard makes.
 class FakeCache {
 	store = new Map<string, unknown>();
+	listeners = new Set<(error: unknown) => void>();
 	getMany = vi.fn(async (keys: string[]): Promise<unknown[]> => {
 		return keys.map((key) => this.store.get(key));
 	});
 
-	async hasMany(keys: string[]): Promise<boolean[]> {
+	// As @keyv/redis answers: a store that could not be reached is an 'error'
+	// event and every key absent.
+	hasMany = vi.fn(async (keys: string[]): Promise<boolean[]> => {
 		return keys.map((key) => this.store.has(key));
+	});
+
+	on(_event: 'error', listener: (error: unknown) => void): void {
+		this.listeners.add(listener);
+	}
+
+	off(_event: 'error', listener: (error: unknown) => void): void {
+		this.listeners.delete(listener);
+	}
+
+	emit(error: unknown): void {
+		for (const listener of this.listeners) {
+			listener(error);
+		}
 	}
 
 	async get(key: string): Promise<unknown> {
@@ -280,8 +297,33 @@ describe('the queue', () => {
 
 		// Neither its body nor its tags were asked for: the cache said it was
 		// gone before either.
-		expect(cache.getMany).toHaveBeenCalledWith(['rk2']);
+		expect(cache.getMany).toHaveBeenCalledWith(['rk2', 'rk2__expires_at']);
 		expect(readScopedCacheEntryTags).toHaveBeenCalledWith(['ck2']);
+	});
+
+	test(oneLine`
+		retires nothing, and stops, when the cache could not say what it holds
+	`, async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		cache.hasMany.mockImplementation(async (keys: string[]) => {
+			cache.emit(new Error('ECONNREFUSED'));
+
+			return keys.map(() => false);
+		});
+
+		const replay = replayer();
+
+		await expect(auditCache({ replay })).rejects.toThrow(
+			'The cache could not be asked what it holds: ECONNREFUSED',
+		);
+
+		expect(retireCacheAuditQueue).not.toHaveBeenCalled();
+		expect(advanceCacheAuditQueue).not.toHaveBeenCalled();
+		expect(replay).not.toHaveBeenCalled();
+		// Nothing left listening on the cache once the run is over.
+		expect(cache.listeners.size).toBe(0);
 	});
 
 	test('stops once its time is up, after the page it began', async () => {
@@ -344,7 +386,14 @@ describe('the queue', () => {
 
 		expect(report.scanned).toBe(2);
 		expect(cache.getMany).toHaveBeenCalledTimes(1);
-		expect(cache.getMany).toHaveBeenCalledWith(['rk1', 'rk2']);
+
+		expect(cache.getMany).toHaveBeenCalledWith([
+			'rk1',
+			'rk1__expires_at',
+			'rk2',
+			'rk2__expires_at',
+		]);
+
 		expect(readScopedCacheEntryTags).toHaveBeenCalledWith(['ck1', 'ck2']);
 		// The third stays unstamped for the next run.
 		expect(advancedPast()).toEqual(['ck1', 'ck2']);
@@ -410,9 +459,9 @@ describe('a fresh entry', () => {
 		expect(report.counts.fresh).toBe(1);
 		expect(report.findings).toEqual([]);
 		expect(replay).toHaveBeenCalledTimes(1);
-		// Its expiry sidecar read once, for the fill time and the expiry both.
-		expect(getCacheValue).toHaveBeenCalledTimes(1);
-		expect(getCacheValue).toHaveBeenCalledWith(cache, 'rk__expires_at');
+		// Its expiry sidecar came with the body, in the page's one read.
+		expect(cache.getMany).toHaveBeenCalledWith(['rk', 'rk__expires_at']);
+		expect(getCacheValue).not.toHaveBeenCalled();
 
 		const request = replay.mock.calls[0]![0];
 		expect(request.method).toBe('GET');
@@ -782,6 +831,29 @@ describe('the race guard', () => {
 		expect(report.counts.fresh).toBe(1);
 	});
 
+	test(oneLine`
+		a refill between the page read and the replay is told from the sidecar
+		the page read with the body, and judged again on the refill
+	`, async () => {
+		fill('rk', { data: [{ amount: '5' }] });
+		described(descriptor());
+		const fresh = { data: [{ amount: '7' }] };
+
+		cache.getMany.mockImplementationOnce(async (keys: string[]) => {
+			const page = keys.map((key) => cache.store.get(key));
+			fill('rk', fresh, 2_000);
+
+			return page;
+		});
+
+		const report = await auditCache({
+			replay: replayer(answer(fresh), answer(fresh)),
+		});
+
+		expect(report.counts.fresh).toBe(1);
+		expect(report.counts.stale).toBe(0);
+	});
+
 	test('an entry refilled under every replay is raced, not stale', async () => {
 		fill('rk', { data: [{ amount: '5' }] });
 		described(descriptor());
@@ -866,6 +938,21 @@ describe('an entry nothing can be replayed from', () => {
 		expect(report.counts.unreplayable).toBe(1);
 		expect(report.findings[0]).toMatchObject({ verdict: 'unreplayable', reason });
 		expect(queueCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test('transport: a replay that never got an answer', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+		const replay = vi.fn().mockRejectedValue(new Error('socket hang up'));
+
+		const report = await auditCache({ replay });
+
+		expect(report.scanned).toBe(1);
+
+		expect(report.findings[0]).toMatchObject({
+			verdict: 'unreplayable',
+			reason: 'transport',
+		});
 	});
 
 	test('unreadable: a stored value that does not decompress', async () => {

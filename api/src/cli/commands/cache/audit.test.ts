@@ -223,6 +223,20 @@ describe('the command', () => {
 		expect(runCacheAudit).not.toHaveBeenCalled();
 	});
 
+	test.each(['abc', '0', '-3', '2.5'])(
+		'refuses --limit %s before the boot',
+		async (limit) => {
+			await expect(cacheAudit({ limit })).rejects.toThrowError('exit:1');
+
+			expect(error).toHaveBeenCalledWith(
+				`--limit has to be a whole number of 1 or more, not "${limit}"`,
+			);
+
+			expect(createServer).not.toHaveBeenCalled();
+			expect(runCacheAudit).not.toHaveBeenCalled();
+		},
+	);
+
 	test('logs a boot that could not listen and exits 1', async () => {
 		const server = listeningServer();
 
