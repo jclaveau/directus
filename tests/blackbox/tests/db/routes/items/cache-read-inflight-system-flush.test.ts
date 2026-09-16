@@ -146,7 +146,7 @@ describe(oneLine`
 		function readSlot(slot: string) {
 			return request(getUrl(vendor, env))
 				.get(`/items/${COLLECTION}`)
-				.query({ 'filter[slot][_eq]': slot, fields: ['id', 'slot'] })
+				.query({ 'filter[slot][_eq]': slot, fields: ['id', 'slot', 'target'] })
 				.set('Authorization', auth);
 		}
 
