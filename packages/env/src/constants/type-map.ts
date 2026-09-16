@@ -57,6 +57,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_STORE: 'string',
 	CACHE_SKIP_ALLOWED: 'boolean',
 	CACHE_AUTO_FLUSH_ON_DEPLOY: 'boolean',
+	CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT: 'string',
+	CACHE_FLUSH_TIMEOUT: 'string',
 	CACHE_BUILD_ID: 'string',
 	CACHE_STATS_ENABLED: 'boolean',
 	CACHE_STATS_RETENTION: 'string',

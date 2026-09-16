@@ -203,6 +203,76 @@ test('a scale the supervisor never answers fails the call', async () => {
 	await failed;
 });
 
+// A scale is answered once every worker it added has reported ready, one boot
+// after another, so a caller growing a whole pool waits longer than the default
+// bound and passes the one its boots deserve.
+test('a scale given its own bound waits past the default one', async () => {
+	const { scaleApp } = await import('./client.js');
+
+	let answer: (() => void) | null = null;
+
+	scale.mockImplementation((
+		_app: string,
+		_workers: number,
+		callback: (error: null) => void,
+	) => {
+		answer = () => callback(null);
+	});
+
+	let answered = false;
+
+	const scaling = scaleApp('directus', 15, 60_000).then(() => {
+		answered = true;
+	});
+
+	await vi.advanceTimersByTimeAsync(59_000);
+
+	expect(answered).toBe(false);
+	expect(disconnect).not.toHaveBeenCalled();
+
+	answer!();
+	await scaling;
+
+	expect(answered).toBe(true);
+});
+
+test('a scale given its own bound fails at that one', async () => {
+	const { scaleApp } = await import('./client.js');
+
+	scale.mockImplementation(neverAnswers);
+
+	const failed = expect(scaleApp('directus', 15, 60_000)).rejects
+		.toThrow(/did not answer a scale to 15 in 60000ms/);
+
+	await vi.advanceTimersByTimeAsync(60_000);
+	await failed;
+
+	expect(disconnect).toHaveBeenCalledOnce();
+});
+
+// pm2 keeps a call's callback in the connection that carried it. A bounded call
+// giving up rebuilds that connection, and the scale left waiting in the old one
+// would otherwise sit out its own bound: a caller asking once at a time asks
+// again only once it has failed.
+test('a scale in flight fails with a connection another call gave up', async () => {
+	const { listSupervisedApps, scaleApp } = await import('./client.js');
+
+	scale.mockImplementation(neverAnswers);
+	list.mockImplementation(neverAnswers);
+
+	const lost = expect(scaleApp('directus', 15, 60_000)).rejects
+		.toThrow(/rebuilt before it answered a scale to 15/);
+
+	// The bounded call that finds the supervisor gone; its own failure is
+	// pinned above.
+	void listSupervisedApps().catch(() => undefined);
+
+	await vi.advanceTimersByTimeAsync(15_000);
+	await lost;
+
+	expect(connect).toHaveBeenCalledOnce();
+});
+
 test('a scale the supervisor refuses keeps its connection', async () => {
 	const { scaleApp } = await import('./client.js');
 

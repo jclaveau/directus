@@ -30,7 +30,7 @@ export function supervisorAvailable(): boolean {
  * wrong pool: a scale names an absolute size, so the call after sends the same
  * one and the supervisor answers the second with the first still in flight.
  */
-const SUPERVISOR_TIMEOUT_MS = 15_000;
+export const SUPERVISOR_TIMEOUT_MS = 15_000;
 
 async function connect(): Promise<void> {
 	await promisify(pm2.connect.bind(pm2))();
@@ -141,9 +141,25 @@ export function disconnectFromSupervisor(): void {
  */
 let reconnecting: Promise<void> | null = null;
 
+/**
+ * What fails each call that is waiting on the client for an answer with no
+ * bound of its own.
+ *
+ * pm2 holds a call's callback in the connection that carried it, and a
+ * connection taken apart drops them without a word: a call left waiting there
+ * is never answered and never failed. The bounded calls fail on their own
+ * clock; these are failed here, so that the reconnect leaves no call behind.
+ */
+const outstanding = new Set<() => void>();
+
 /** One reconnect at a time, however many callers found the supervisor gone. */
 function reconnectToSupervisor(): Promise<void> {
 	reconnecting ??= (async () => {
+		for (const fail of outstanding) {
+			fail();
+		}
+
+		outstanding.clear();
 		await disconnected();
 		await connect();
 	})()
@@ -238,7 +254,13 @@ interface ScalableSupervisor {
 }
 
 /**
- * Resizes the app to an absolute worker count.
+ * Asks the supervisor to resize the app to an absolute worker count, answered
+ * once the supervisor has: for a pool growing, that is after every worker the
+ * scale added has reported ready, and pm2 starts them one after another.
+ *
+ * Not bounded here; `scaleApp` is where the bound is. Failed all the same when
+ * a bounded call gives up and rebuilds the connection, since the callback pm2
+ * owed this one went with it.
  *
  * pm2 answers a scale to the size it already has by calling back with an
  * error, and the only thing distinguishing it from a real failure is the
@@ -246,14 +268,22 @@ interface ScalableSupervisor {
  * treating it as a failure would log one a second while nothing is wrong,
  * and a reworded message should cost a stray log line rather than silence.
  */
-export async function scaleApp(
-	appName: string,
-	workers: number,
-): Promise<void> {
+function requestScale(appName: string, workers: number): Promise<void> {
 	const supervisor = pm2 as unknown as ScalableSupervisor;
 
-	const scaled = new Promise<void>((resolve, reject) => {
+	return new Promise<void>((resolve, reject) => {
+		const lost = () => {
+			reject(new Error(
+				'the supervisor connection was rebuilt before it answered '
+				+ `a scale to ${workers}`,
+			));
+		};
+
+		outstanding.add(lost);
+
 		supervisor.scale(appName, workers, (error) => {
+			outstanding.delete(lost);
+
 			if (error && /same process number/i.test(error.message) === false) {
 				reject(error);
 			}
@@ -262,8 +292,27 @@ export async function scaleApp(
 			}
 		});
 	});
+}
 
-	await answeredInTime(`a scale to ${workers}`, scaled);
+/**
+ * Resizes the app to an absolute worker count.
+ *
+ * Bounded like every other call, at the default for a scale that adds a worker
+ * or takes some away. A scale growing a pool by many is answered once the last
+ * of them has reported ready, one boot after another, which for fifteen
+ * Directus workers is well past the bound that tells a dead supervisor from a
+ * live one: such a caller passes the bound the boots it asked for deserve.
+ */
+export async function scaleApp(
+	appName: string,
+	workers: number,
+	timeoutMs: number = SUPERVISOR_TIMEOUT_MS,
+): Promise<void> {
+	await answeredInTime(
+		`a scale to ${workers}`,
+		requestScale(appName, workers),
+		timeoutMs,
+	);
 }
 
 /**
