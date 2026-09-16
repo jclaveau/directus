@@ -20,6 +20,7 @@ import type {
 	User,
 } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
+import CacheAuditPanel from './cache-audit-panel.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
@@ -2125,6 +2126,8 @@ onUnmounted(() => {
 					:class="item.reason"
 				>{{ anomalyLabel(item.reason) }} ×{{ item.count }}</span>
 			</div>
+
+			<cache-audit-panel @audited="load" />
 
 			<v-info
 				v-if="!loading && groups.length === 0"

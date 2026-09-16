@@ -1,0 +1,36 @@
+get:
+  summary: Read one cache audit run
+  description: >
+    One audit run with every finding it stored — each entry it did not judge
+    `fresh`, as `POST /utils/cache/audit` reported it. Admin only.
+  operationId: read-cache-audit
+  parameters:
+    - name: id
+      in: path
+      required: true
+      description: The run, as `id` in the listing.
+      schema:
+        type: integer
+  responses:
+    '200':
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                allOf:
+                  - $ref: '../../openapi.yaml#/components/schemas/CacheAuditRun'
+                  - type: object
+                    properties:
+                      findings:
+                        type: array
+                        items:
+                          $ref: '../../openapi.yaml#/components/schemas/CacheAuditFinding'
+      description: Successful request
+    '400':
+      description: The `id` is not a positive integer
+    '403':
+      description: No run has that id
+  tags:
+    - System Diagnostics

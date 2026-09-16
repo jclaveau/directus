@@ -24,6 +24,11 @@ const service = vi.hoisted(() => {
 		getCacheGroupLatencies: vi.fn(),
 		getCacheTimeseries: vi.fn(),
 		getCacheStatsState: vi.fn(),
+		auditCache: vi.fn(),
+		getCacheAudits: vi.fn(),
+		getCacheAudit: vi.fn(),
+		getCacheAuditSchedule: vi.fn(),
+		updateCacheAuditSchedule: vi.fn(),
 		constructed: [] as unknown[],
 	};
 });
@@ -51,6 +56,11 @@ vi.mock('../../services/utils.js', () => {
 			getCacheGroupLatencies = service.getCacheGroupLatencies;
 			getCacheTimeseries = service.getCacheTimeseries;
 			getCacheStatsState = service.getCacheStatsState;
+			auditCache = service.auditCache;
+			getCacheAudits = service.getCacheAudits;
+			getCacheAudit = service.getCacheAudit;
+			getCacheAuditSchedule = service.getCacheAuditSchedule;
+			updateCacheAuditSchedule = service.updateCacheAuditSchedule;
 		},
 	};
 });
@@ -113,6 +123,8 @@ import {
 	type CacheGroupLatencyRecord,
 	type CacheStatsState,
 } from '../../cache-events.js';
+import type { CacheAuditFinding } from '../../cache-audit.js';
+import type { CacheAuditRun } from '../../cache-audit-runs.js';
 // Type-only, so the mock above still stands in for the module at runtime.
 import type { UtilsService as GuardedUtils } from '../../services/utils.js';
 import { allSystemMcpTools, findSystemMcpTool, systemMcpTools } from './tools.js';
@@ -135,6 +147,7 @@ beforeEach(() => {
 		'autoscale',
 		'autoscale_drill',
 		'cache',
+		'cache_audit',
 	]);
 
 	redis.available.mockReturnValue(true);
@@ -168,6 +181,11 @@ test('Every tool is described well enough for a model to choose it', () => {
 		'list_cache_latencies',
 		'read_cache_timeseries',
 		'read_cache_stats_state',
+		'run_cache_audit',
+		'list_cache_audits',
+		'read_cache_audit',
+		'read_cache_audit_schedule',
+		'write_cache_audit_schedule',
 	]);
 
 	for (const tool of allSystemMcpTools()) {
@@ -199,6 +217,8 @@ test('Only the reads declare themselves reads', () => {
 		'write_supervisor_config',
 		'restart_autoscale_pool',
 		'run_autoscale_drill',
+		'run_cache_audit',
+		'write_cache_audit_schedule',
 	]);
 });
 
@@ -242,6 +262,7 @@ test('Only the windowed reads take a window', () => {
 		'list_cache_anomalies',
 		'list_cache_latencies',
 		'read_cache_timeseries',
+		'list_cache_audits',
 	]);
 
 	expect(findSystemMcpTool('read_cache_timeseries')!.inputSchema.properties)
@@ -265,11 +286,15 @@ test('Each windowed read documents the default it actually takes', () => {
 	const defaultsTo10m = 'How far back to look, as a duration such as "15m", "6h" '
 		+ 'or "7d". Defaults to 10m, and is clamped to what telemetry retention holds.';
 
+	const defaultsTo7d = 'How far back to look, as a duration such as "15m", "6h" '
+		+ 'or "7d". Defaults to 7d, and is clamped to what telemetry retention holds.';
+
 	expect([...documented]).toEqual([
 		['list_cache_entries', defaultsTo10m],
 		['list_cache_anomalies', defaultsTo24h],
 		['list_cache_latencies', defaultsTo10m],
 		['read_cache_timeseries', defaultsTo24h],
+		['list_cache_audits', defaultsTo7d],
 	]);
 });
 
@@ -305,6 +330,11 @@ test('A deployment that reports no processes offers no tool for them', () => {
 			'list_cache_latencies',
 			'read_cache_timeseries',
 			'read_cache_stats_state',
+			'run_cache_audit',
+			'list_cache_audits',
+			'read_cache_audit',
+			'read_cache_audit_schedule',
+			'write_cache_audit_schedule',
 		]);
 
 	// Not merely unlisted: it cannot be called either.
@@ -369,6 +399,11 @@ test('Every tool declares the subsystem it reads', () => {
 		'cache',
 		'cache',
 		'cache',
+		'cache_audit',
+		'cache_audit',
+		'cache_audit',
+		'cache_audit',
+		'cache_audit',
 	]);
 });
 
@@ -722,6 +757,139 @@ test('The telemetry state takes no argument', async () => {
 	expect(service.getCacheStatsState).toHaveBeenCalledOnce();
 });
 
+// A run costs one uncached read per live entry, so the arguments are checked
+// before the service is asked: a bad `limit` must not start a full pass.
+test('run_cache_audit validates its narrowing before running', async () => {
+	await expect(
+		findSystemMcpTool('run_cache_audit')!.run({ limit: 0 }, context),
+	).rejects.toMatchObject({ code: 'INVALID_PAYLOAD' });
+
+	await expect(
+		findSystemMcpTool('run_cache_audit')!.run({ ignore: ['served_at'] }, context),
+	).rejects.toMatchObject({ code: 'INVALID_PAYLOAD' });
+
+	expect(service.auditCache).not.toHaveBeenCalled();
+});
+
+test('run_cache_audit records the run as started over MCP', async () => {
+	service.auditCache.mockResolvedValue({ id: 7 });
+
+	await expect(
+		findSystemMcpTool('run_cache_audit')!
+			.run({ limit: 5, collection: 'articles', purge: true }, context),
+	).resolves.toEqual({ id: 7 });
+
+	expect(service.auditCache).toHaveBeenCalledWith(
+		{ limit: 5, collection: 'articles', purge: true, ignore: [] },
+		'mcp',
+	);
+});
+
+test('list_cache_audits hands the window over unread', async () => {
+	service.getCacheAudits.mockResolvedValue([]);
+
+	await findSystemMcpTool('list_cache_audits')!.run({ window: '30d' }, context);
+
+	expect(service.getCacheAudits).toHaveBeenCalledWith('30d');
+});
+
+test('read_cache_audit hands the id over unread', async () => {
+	service.getCacheAudit.mockResolvedValue({ id: 7 });
+
+	await expect(findSystemMcpTool('read_cache_audit')!.run({ id: 7 }, context))
+		.resolves
+		.toEqual({ id: 7 });
+
+	expect(service.getCacheAudit).toHaveBeenCalledWith(7);
+});
+
+test('The audit schedule is read through the guarded service', async () => {
+	service.getCacheAuditSchedule.mockResolvedValue({ rule: null });
+
+	await expect(
+		findSystemMcpTool('read_cache_audit_schedule')!.run({}, context),
+	).resolves.toEqual({ rule: null });
+
+	expect(service.getCacheAuditSchedule).toHaveBeenCalledOnce();
+});
+
+// `null` clears the override, so its absence cannot mean the same thing.
+test('write_cache_audit_schedule refuses a call that names no rule', async () => {
+	await expect(
+		findSystemMcpTool('write_cache_audit_schedule')!.run({}, context),
+	).rejects.toMatchObject({ code: 'INVALID_PAYLOAD' });
+
+	expect(service.updateCacheAuditSchedule).not.toHaveBeenCalled();
+});
+
+test('write_cache_audit_schedule writes the rule, null included', async () => {
+	service.updateCacheAuditSchedule.mockResolvedValue({ rule: null });
+
+	await findSystemMcpTool('write_cache_audit_schedule')!
+		.run({ rule: '0 3 * * *' }, context);
+
+	await findSystemMcpTool('write_cache_audit_schedule')!
+		.run({ rule: null }, context);
+
+	expect(service.updateCacheAuditSchedule.mock.calls).toEqual([
+		['0 3 * * *'],
+		[null],
+	]);
+});
+
+test('The audit group is opened on its own', () => {
+	config.groups.mockReturnValue(['cache_audit']);
+
+	expect(systemMcpTools().map((tool) => tool.name)).toEqual([
+		'run_cache_audit',
+		'list_cache_audits',
+		'read_cache_audit',
+		'read_cache_audit_schedule',
+		'write_cache_audit_schedule',
+	]);
+
+	expect(findSystemMcpTool('list_cache_entries')).toBeUndefined();
+});
+
+const auditFinding: CacheAuditFinding = {
+	verdict: 'stale',
+	reason: null,
+	redisKey: 'scalabus_response::scalabus_response:abc',
+	cacheKey: 'abc',
+	method: 'GET',
+	url: '/items/articles',
+	query: null,
+	user: null,
+	collection: 'articles',
+	filledAt: 1_700_000_000_000,
+	ageMs: 1000,
+	tags: ['articles'],
+	replayTags: ['articles'],
+	diff: ['/data/0/title'],
+	purgesSinceFilled: [],
+};
+
+const auditRun: CacheAuditRun = {
+	id: 7,
+	startedAt: 1_700_000_000_000,
+	finishedAt: 1_700_000_000_012,
+	trigger: 'mcp',
+	options: { limit: null, user: null, collection: null, purge: false },
+	scanned: 2,
+	counts: {
+		fresh: 1,
+		stale: 1,
+		tag_drift: 0,
+		raced: 0,
+		time_varying: 0,
+		expired: 0,
+		unreplayable: 0,
+	},
+	evicted: 0,
+	durationMs: 12,
+	error: null,
+};
+
 // "Servers MUST provide structured results that conform to this schema."
 // https://modelcontextprotocol.io/specification/2025-06-18/server/tools#output-schema
 test('Every declared output property is one the tool actually answers', () => {
@@ -761,6 +929,13 @@ test('Every declared output property is one the tool actually answers', () => {
 		list_cache_latencies: CacheGroupLatencyRecord[];
 		read_cache_timeseries: CacheTimeseries;
 		read_cache_stats_state: CacheStatsState;
+		run_cache_audit: Awaited<ReturnType<GuardedUtils['auditCache']>>;
+		list_cache_audits: Awaited<ReturnType<GuardedUtils['getCacheAudits']>>;
+		read_cache_audit: Awaited<ReturnType<GuardedUtils['getCacheAudit']>>;
+		read_cache_audit_schedule:
+			Awaited<ReturnType<GuardedUtils['getCacheAuditSchedule']>>;
+		write_cache_audit_schedule:
+			Awaited<ReturnType<GuardedUtils['updateCacheAuditSchedule']>>;
 	} = {
 		read_autoscale_config: {
 			key: 'directus_settings.autoscale_settings',
@@ -1027,6 +1202,36 @@ test('Every declared output property is one the tool actually answers', () => {
 			budgetAlert: null,
 			bufferLength: 0,
 			droppedEvents: 0,
+		},
+		run_cache_audit: {
+			id: 7,
+			scanned: 2,
+			counts: {
+				fresh: 1,
+				stale: 1,
+				tag_drift: 0,
+				raced: 0,
+				time_varying: 0,
+				expired: 0,
+				unreplayable: 0,
+			},
+			findings: [auditFinding],
+			evicted: 0,
+			durationMs: 12,
+		},
+		list_cache_audits: [auditRun],
+		read_cache_audit: { ...auditRun, findings: [auditFinding] },
+		read_cache_audit_schedule: {
+			rule: '0 3 * * *',
+			source: 'settings',
+			envRule: null,
+			nextRunAt: 1_700_000_000_000,
+		},
+		write_cache_audit_schedule: {
+			rule: null,
+			source: null,
+			envRule: null,
+			nextRunAt: null,
 		},
 	};
 

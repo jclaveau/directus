@@ -1,0 +1,64 @@
+type: object
+description: One recorded cache audit run, without its findings.
+properties:
+  id:
+    type: integer
+  startedAt:
+    type: integer
+    description: Milliseconds since the epoch.
+  finishedAt:
+    type: integer
+    nullable: true
+    description: Null while the run is in flight — or forever, if its process died.
+  trigger:
+    type: string
+    enum:
+      - rest
+      - cli
+      - cron
+      - mcp
+    description: What started it.
+  options:
+    type: object
+    description: The narrowing it was asked for.
+    properties:
+      limit:
+        type: integer
+        nullable: true
+      user:
+        type: string
+        nullable: true
+      collection:
+        type: string
+        nullable: true
+      purge:
+        type: boolean
+  scanned:
+    type: integer
+  counts:
+    type: object
+    description: How many entries took each verdict.
+    properties:
+      fresh:
+        type: integer
+      stale:
+        type: integer
+      tag_drift:
+        type: integer
+      raced:
+        type: integer
+      time_varying:
+        type: integer
+      expired:
+        type: integer
+      unreplayable:
+        type: integer
+  evicted:
+    type: integer
+  durationMs:
+    type: integer
+    nullable: true
+  error:
+    type: string
+    nullable: true
+    description: Why it stopped, where it did not finish.

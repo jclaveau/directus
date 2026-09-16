@@ -47,6 +47,7 @@ export type Settings = {
 	public_favicon: string | null;
 	public_note: string | null;
 	cache_ttl: string | null;
+	cache_audit_schedule: string | null;
 	autoscale_settings: Record<string, unknown> | null;
 	supervisor_settings: Record<string, unknown> | null;
 	visual_editor_urls: Array<{ url: string }> | null;

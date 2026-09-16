@@ -20,6 +20,7 @@ import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
+import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -325,25 +326,6 @@ router.get(
 	}),
 );
 
-const CacheAuditSchema = Joi.object<{
-	limit?: number;
-	user?: string;
-	collection?: string;
-	ignore: string[];
-	purge: boolean;
-}>({
-	limit: Joi.number()
-		.integer()
-		.min(1),
-	user: Joi.string(),
-	collection: Joi.string(),
-	ignore: Joi.array()
-		.items(Joi.string().pattern(/^\//))
-		.single()
-		.default([]),
-	purge: Joi.boolean().default(false),
-});
-
 router.post(
 	'/cache/audit',
 	asyncHandler(async (req, res) => {
@@ -352,7 +334,7 @@ router.post(
 			schema: req.schema,
 		});
 
-		const { error, value } = CacheAuditSchema.validate(
+		const { error, value } = CacheAuditOptionsSchema.validate(
 			{ ...req.query, ...req.body },
 			{ allowUnknown: true },
 		);
@@ -362,6 +344,75 @@ router.post(
 		}
 
 		res.json({ data: await service.auditCache(value) });
+	}),
+);
+
+router.get(
+	'/cache/audits',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+
+		res.locals['payload'] = {
+			data: await service.getCacheAudits(req.query['window']),
+		};
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audits/:id',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAudit(req.params['id']) };
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audit/schedule',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAuditSchedule() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/audit/schedule',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		if (!req.body || 'rule' in req.body === false) {
+			throw new InvalidPayloadError({
+				reason: 'A `rule` is required: a cron rule, or null to clear the override',
+			});
+		}
+
+		res.json({ data: await service.updateCacheAuditSchedule(req.body.rule) });
 	}),
 );
 

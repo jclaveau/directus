@@ -1,11 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
-	auditCache,
-	type CacheAuditFinding,
-	type CacheAuditReport,
-	loopbackReplayer,
-} from '../../../cache-audit.js';
+	type CacheAuditRunReport,
+	runCacheAudit,
+} from '../../../cache-audit-runs.js';
+import { type CacheAuditFinding, loopbackReplayer } from '../../../cache-audit.js';
 import { useLogger } from '../../../logger/index.js';
 import { createServer } from '../../../server.js';
 import { drainStdout } from '../../utils/drain-stdout.js';
@@ -15,10 +14,11 @@ import cacheAudit, { exitCodeFor, renderReport } from './audit.js';
 vi.mock('../../../cache-audit.js', async (importOriginal) => {
 	return {
 		...await importOriginal<typeof import('../../../cache-audit.js')>(),
-		auditCache: vi.fn(),
 		loopbackReplayer: vi.fn(),
 	};
 });
+
+vi.mock('../../../cache-audit-runs.js', () => ({ runCacheAudit: vi.fn() }));
 
 vi.mock('../../../logger/index.js');
 // A factory, not an automock: shaping one would load the whole app behind it.
@@ -47,8 +47,9 @@ function listeningServer(port = 43210) {
 	return server;
 }
 
-function report(overrides: Partial<CacheAuditReport> = {}): CacheAuditReport {
+function report(overrides: Partial<CacheAuditRunReport> = {}): CacheAuditRunReport {
 	return {
+		id: 1,
 		scanned: 0,
 		counts: {
 			fresh: 0,
@@ -115,7 +116,7 @@ afterEach(() => {
 
 describe('the command', () => {
 	test('boots the app on a loopback port and replays through it', async () => {
-		vi.mocked(auditCache).mockResolvedValue(report());
+		vi.mocked(runCacheAudit).mockResolvedValue(report());
 		const server = listeningServer(48000);
 		vi.mocked(createServer).mockResolvedValue(server as never);
 
@@ -131,7 +132,7 @@ describe('the command', () => {
 			port: 48000,
 		});
 
-		expect(auditCache).toHaveBeenCalledWith({
+		expect(runCacheAudit).toHaveBeenCalledWith('cli', {
 			limit: undefined,
 			user: undefined,
 			collection: undefined,
@@ -141,7 +142,7 @@ describe('the command', () => {
 	});
 
 	test('hands the narrowing options over, the limit as a number', async () => {
-		vi.mocked(auditCache).mockResolvedValue(report());
+		vi.mocked(runCacheAudit).mockResolvedValue(report());
 
 		await expect(cacheAudit({
 			limit: '25',
@@ -150,7 +151,7 @@ describe('the command', () => {
 			purge: true,
 		})).rejects.toThrowError('exit:0');
 
-		expect(auditCache).toHaveBeenCalledWith(expect.objectContaining({
+		expect(runCacheAudit).toHaveBeenCalledWith('cli', expect.objectContaining({
 			limit: 25,
 			user: 'user-1',
 			collection: 'articles',
@@ -160,7 +161,7 @@ describe('the command', () => {
 
 	test('prints the report as JSON under --json', async () => {
 		const given = report({ scanned: 3 });
-		vi.mocked(auditCache).mockResolvedValue(given);
+		vi.mocked(runCacheAudit).mockResolvedValue(given);
 
 		await expect(cacheAudit({ json: true })).rejects.toThrowError('exit:0');
 
@@ -168,7 +169,7 @@ describe('the command', () => {
 	});
 
 	test('prints the rendered report otherwise', async () => {
-		vi.mocked(auditCache).mockResolvedValue(report({ scanned: 3 }));
+		vi.mocked(runCacheAudit).mockResolvedValue(report({ scanned: 3 }));
 
 		await expect(cacheAudit({})).rejects.toThrowError('exit:0');
 
@@ -176,7 +177,7 @@ describe('the command', () => {
 	});
 
 	test('exits 1 on a stale entry', async () => {
-		vi.mocked(auditCache).mockResolvedValue(report({
+		vi.mocked(runCacheAudit).mockResolvedValue(report({
 			scanned: 1,
 			counts: { ...report().counts, stale: 1 },
 			findings: [finding()],
@@ -187,7 +188,7 @@ describe('the command', () => {
 
 	test('logs a failed audit and exits 1', async () => {
 		const failure = new Error('redis is away');
-		vi.mocked(auditCache).mockRejectedValue(failure);
+		vi.mocked(runCacheAudit).mockRejectedValue(failure);
 
 		await expect(cacheAudit({})).rejects.toThrowError('exit:1');
 
@@ -209,14 +210,14 @@ describe('the command', () => {
 		await expect(cacheAudit({})).rejects.toThrowError('exit:1');
 
 		expect(error).toHaveBeenCalledWith(new Error('EADDRINUSE'));
-		expect(auditCache).not.toHaveBeenCalled();
+		expect(runCacheAudit).not.toHaveBeenCalled();
 	});
 
 	// `process.exit` discards whatever stdout still holds; the report is the
 	// first thing an immediate exit drops.
 	test('lets the report leave the process before it exits', async () => {
 		const order: string[] = [];
-		vi.mocked(auditCache).mockResolvedValue(report());
+		vi.mocked(runCacheAudit).mockResolvedValue(report());
 
 		vi.mocked(drainStdout).mockImplementation(async () => {
 			order.push('drained');

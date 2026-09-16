@@ -201,6 +201,9 @@ const global = {
 		},
 	},
 	components: { SearchInput, PrivateView, VPagination, VSelect },
+	// The audit panel reads its own routes and has its own tests; here it would
+	// only be handed this file's answers for the page's routes.
+	stubs: { CacheAuditPanel: true },
 	config: {
 		compilerOptions: {
 			isCustomElement: (tag: string) => {

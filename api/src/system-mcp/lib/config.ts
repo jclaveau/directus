@@ -13,6 +13,11 @@ export function systemMcpEnabled(): boolean {
 function isSystemMcpToolGroup(value: unknown): value is SystemMcpToolGroup {
 	return value === 'processes'
 		|| value === 'cache'
+		// Apart from `cache` for the same reason the drill is apart from
+		// `autoscale`: a run is one uncached read per live entry, and the
+		// schedule write changes what every node does at night. A deployment
+		// hands an agent the cache reads without handing it that.
+		|| value === 'cache_audit'
 		|| value === 'autoscale'
 		// Its own group rather than a corner of `autoscale`: the drill is the one
 		// tool here that spends the deployment it is describing, so a deployment

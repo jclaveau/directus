@@ -1,4 +1,5 @@
 import { InvalidPayloadError } from '@directus/errors';
+import { CACHE_AUDIT_VERDICTS } from '../../cache-audit.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
@@ -11,6 +12,7 @@ import {
 } from '../../processes/autoscale/lib/drill.js';
 import { redisConfigAvailable } from '../../redis/index.js';
 import { UtilsService } from '../../services/utils.js';
+import { CacheAuditOptionsSchema } from '../../utils/cache-audit-options.js';
 import {
 	defineSystemMcpTool,
 	type SystemMcpTool,
@@ -115,6 +117,74 @@ const DISTURBS_POOL = {
 	destructiveHint: true,
 	idempotentHint: false,
 	openWorldHint: false,
+} as const;
+
+/**
+ * A tool that spends the deployment on a read: an audit run is one uncached
+ * read of the database per live cache entry. Not destructive — with `purge`
+ * off it changes nothing, and with it on what it evicts is stale — but a
+ * client puts it in front of the user first, and a second run is a second
+ * pass over the cache.
+ */
+const RUNS_AUDIT = {
+	readOnlyHint: false,
+	destructiveHint: false,
+	idempotentHint: false,
+	openWorldHint: false,
+} as const;
+
+/** The verdict counts a run answers, one property per verdict. */
+const VERDICT_COUNTS = {
+	type: 'object',
+	description: 'How many entries took each verdict.',
+	properties: Object.fromEntries(
+		CACHE_AUDIT_VERDICTS.map((verdict) => [verdict, { type: 'number' }]),
+	),
+} as const;
+
+/** What a run answers, run row and report alike. */
+const RUN_PROPERTIES = {
+	id: { type: 'number', description: 'The run, as `read_cache_audit` takes it.' },
+	scanned: { type: 'number', description: 'How many live entries were examined.' },
+	counts: VERDICT_COUNTS,
+	evicted: {
+		type: 'number',
+		description: 'How many stale or drifted entries `purge` dropped.',
+	},
+	durationMs: { type: ['number', 'null'] },
+} as const;
+
+/** The finding rows a run stores: every entry that was not `fresh`. */
+const FINDINGS = {
+	type: 'array',
+	description:
+		'One per entry that was not fresh: its verdict and reason, the request '
+		+ 'that filled it (method, url, query, user, collection), the tags it was '
+		+ 'filled under against the ones the replay pinned, the JSON pointers '
+		+ 'where the stored body and the fresh one differ, and the purges that '
+		+ 'covered it since the fill. The bodies themselves are not answered.',
+	items: { type: 'object' },
+} as const;
+
+const SCHEDULE_PROPERTIES = {
+	rule: {
+		type: ['string', 'null'],
+		description: 'The cron rule in force, or null when no audit is scheduled.',
+	},
+	source: {
+		type: ['string', 'null'],
+		enum: ['settings', 'env', null],
+		description: 'Where the rule comes from: the live setting, or the '
+			+ 'CACHE_AUDIT_SCHEDULE environment variable it overrides.',
+	},
+	envRule: {
+		type: ['string', 'null'],
+		description: 'What the environment says, which a cleared setting falls back to.',
+	},
+	nextRunAt: {
+		type: ['number', 'null'],
+		description: 'When the rule next fires, as a Unix millisecond timestamp.',
+	},
 } as const;
 
 /** The lookback a cache read takes, described once for every default. */
@@ -771,6 +841,172 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			},
 			annotations: READ_ONLY,
 			run: async (_args, context) => utils(context).getCacheStatsState(),
+		}),
+		defineSystemMcpTool({
+			name: 'run_cache_audit',
+			group: 'cache_audit',
+			title: 'Audit the cache against the database',
+			description:
+				'Replay every live response-cache entry through the running app, as '
+				+ 'the user it was filled for, and compare the stored body with what '
+				+ 'the database answers now. Each entry comes back fresh, stale (a '
+				+ 'missed invalidation), tag_drift (same body, different scoped-cache '
+				+ 'tags — one write from stale), raced, time_varying, expired or '
+				+ 'unreplayable. Every replay is an uncached read, so narrow a large '
+				+ 'cache with `limit`, `user` or `collection`. The run is recorded; '
+				+ '`read_cache_audit` reads it back by the `id` answered here.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					limit: {
+						type: 'number',
+						minimum: 1,
+						description: 'Stop after this many entries.',
+					},
+					user: {
+						type: 'string',
+						description: 'Only the entries filled for this user id.',
+					},
+					collection: {
+						type: 'string',
+						description: 'Only the entries whose root collection is this one.',
+					},
+					purge: {
+						type: 'boolean',
+						description: 'Evict the stale and tag-drifted entries once '
+							+ 'reported. Off by default.',
+					},
+					ignore: {
+						type: 'array',
+						items: { type: 'string' },
+						description: 'JSON-pointer globs to ignore in a diff, such as '
+							+ '"/data/*/served_at", on top of CACHE_AUDIT_IGNORE_PATHS.',
+					},
+				},
+			},
+			outputSchema: {
+				type: 'object',
+				properties: { ...RUN_PROPERTIES, findings: FINDINGS },
+			},
+			annotations: RUNS_AUDIT,
+			run: async (args, context) => {
+				const { error, value } = CacheAuditOptionsSchema.validate(args, {
+					allowUnknown: true,
+				});
+
+				if (error) {
+					throw new InvalidPayloadError({ reason: error.message });
+				}
+
+				return utils(context).auditCache(value, 'mcp');
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'list_cache_audits',
+			group: 'cache_audit',
+			title: 'List cache audit runs',
+			description:
+				'The audit runs started in the window, newest first, whichever '
+				+ 'surface ran them (the schedule, the CLI, the REST route, this '
+				+ 'tool): when each started and finished, its verdict counts, and its '
+				+ 'error if it failed. A run with no `finishedAt` is still in flight, '
+				+ 'or died with its process. Use it to see whether the scheduled '
+				+ 'audit ran and whether stale entries are trending.',
+			inputSchema: { type: 'object', properties: windowProperty('7d') },
+			outputSchema: LIST_OUTPUT,
+			annotations: READ_ONLY,
+			run: async (args, context) => {
+				return utils(context).getCacheAudits(args['window']);
+			},
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_audit',
+			group: 'cache_audit',
+			title: 'Read one cache audit run',
+			description:
+				'One audit run with every finding it stored: which entries were '
+				+ 'stale or drifted, the request that filled each, its tags against '
+				+ 'the replay\'s, where the bodies differed, and which purges covered '
+				+ 'it since the fill. Takes the `id` from the run listing.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					id: { type: 'number', description: 'The run, as `id` in the listing.' },
+				},
+				required: ['id'],
+			},
+			outputSchema: {
+				type: 'object',
+				properties: {
+					...RUN_PROPERTIES,
+					startedAt: { type: 'number' },
+					finishedAt: {
+						type: ['number', 'null'],
+						description: 'Null while the run is in flight.',
+					},
+					trigger: {
+						type: 'string',
+						enum: ['rest', 'cli', 'cron', 'mcp'],
+						description: 'What started it.',
+					},
+					options: {
+						type: 'object',
+						description: 'The narrowing it was asked for.',
+					},
+					error: {
+						type: ['string', 'null'],
+						description: 'Why it stopped, where it did not finish.',
+					},
+					findings: FINDINGS,
+				},
+			},
+			annotations: READ_ONLY,
+			run: async (args, context) => utils(context).getCacheAudit(args['id']),
+		}),
+		defineSystemMcpTool({
+			name: 'read_cache_audit_schedule',
+			group: 'cache_audit',
+			title: 'Read the cache audit schedule',
+			description:
+				'The cron rule the recurring audit runs on, whether it comes from the '
+				+ 'live setting or the environment, and when it next fires. Read this '
+				+ 'when the run listing is empty: no rule means no scheduled audit.',
+			inputSchema: { type: 'object', properties: {} },
+			outputSchema: { type: 'object', properties: SCHEDULE_PROPERTIES },
+			annotations: READ_ONLY,
+			run: async (_args, context) => utils(context).getCacheAuditSchedule(),
+		}),
+		defineSystemMcpTool({
+			name: 'write_cache_audit_schedule',
+			group: 'cache_audit',
+			title: 'Change the cache audit schedule',
+			description:
+				'Set the cron rule the recurring audit runs on, which every node '
+				+ 'picks up at once — no redeploy. Pass null to clear it, handing the '
+				+ 'schedule back to CACHE_AUDIT_SCHEDULE. A rule that is not a cron is '
+				+ 'refused. Each run is one uncached read per live entry, so schedule '
+				+ 'it off-peak on a busy deployment.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					rule: {
+						type: ['string', 'null'],
+						description: 'A cron rule such as "0 3 * * *", or null to clear.',
+					},
+				},
+				required: ['rule'],
+			},
+			outputSchema: { type: 'object', properties: SCHEDULE_PROPERTIES },
+			annotations: CHANGES_CONFIG,
+			run: async (args, context) => {
+				if ('rule' in args === false) {
+					throw new InvalidPayloadError({
+						reason: 'A `rule` is required: a cron rule, or null to clear it',
+					});
+				}
+
+				return utils(context).updateCacheAuditSchedule(args['rule']);
+			},
 		}),
 	];
 }

@@ -233,23 +233,32 @@ describe('The cache audit replays live entries against the database', () => {
 		}
 
 		// One row per reason and entry: two entries on the same path (two users,
-		// say) are told apart by the sample their finding wrote.
+		// say) are told apart by the sample their finding wrote. Read off the
+		// table rather than `/utils/cache/anomalies`: that listing is the top 200
+		// groups BY COUNT over a table every suite in the shard writes to, and a
+		// fresh count-of-one row falls off its bottom under load.
 		async function anomaly(reason: string, path: string, sample?: string) {
 			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
-				const listed = await request(url)
-					.get('/utils/cache/anomalies')
-					.set('Authorization', auth);
+				const rows = await db('directus_cache_stats_anomalies as a')
+					.join(
+						'directus_cache_stats_descriptors as d',
+						'd.cache_key',
+						'a.cache_key',
+					)
+					.where({ 'a.reason': reason, 'd.path': path })
+					.select('a.detail', 'd.path', 'd.query');
 
-				expect(listed.statusCode).toBe(200);
-
-				const found = listed.body.data.find((row: any) => {
-					return row.reason === reason
-						&& row.path === path
-						&& (sample === undefined || row.sample === sample);
+				const found = rows.find((row: any) => {
+					return sample === undefined || row.detail === sample;
 				});
 
 				if (found) {
-					return found;
+					return {
+						sample: found.detail,
+						url: found.query === ''
+							? found.path
+							: `${found.path}?${found.query}`,
+					};
 				}
 
 				await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
@@ -619,6 +628,178 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(stillHeld.headers[cacheStatusHeader]).toBe('HIT');
 		}, 60_000);
 
+		it(oneLine`
+			records every run in the history, its findings with it, whichever way
+			it was asked for
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('acme'));
+
+			await db(ROWS).where({ owner: 'acme' })
+				.update({ amount: '12' });
+
+			const report = await auditSettled({ collection: ROWS });
+
+			expect(report.counts.stale).toBe(1);
+			expect(report.id).toEqual(expect.any(Number));
+
+			const listed = await request(url)
+				.get('/utils/cache/audits')
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+
+			// Newest first, so the run just answered leads whatever the other
+			// suites in this database recorded.
+			expect(listed.body.data[0]).toMatchObject({
+				id: report.id,
+				trigger: 'rest',
+				options: { limit: null, user: null, collection: ROWS, purge: false },
+				scanned: report.scanned,
+				counts: report.counts,
+				evicted: 0,
+				error: null,
+			});
+
+			expect(listed.body.data[0].finishedAt)
+				.toBeGreaterThanOrEqual(listed.body.data[0].startedAt);
+
+			// The listing carries no findings; the run does.
+			expect(listed.body.data[0].findings).toBeUndefined();
+
+			const read = await request(url)
+				.get(`/utils/cache/audits/${report.id}`)
+				.set('Authorization', auth);
+
+			expect(read.statusCode).toBe(200);
+			expect(read.body.data.id).toBe(report.id);
+			expect(read.body.data.findings).toEqual(report.findings);
+
+			// The window is read the way every cache listing reads it.
+			const badWindow = await request(url)
+				.get('/utils/cache/audits')
+				.query({ window: 'yesterday' })
+				.set('Authorization', auth);
+
+			expect(badWindow.statusCode).toBe(400);
+
+			const unknown = await request(url)
+				.get('/utils/cache/audits/999999999')
+				.set('Authorization', auth);
+
+			expect(unknown.statusCode).toBe(403);
+
+			const notAnId = await request(url)
+				.get('/utils/cache/audits/latest')
+				.set('Authorization', auth);
+
+			expect(notAnId.statusCode).toBe(400);
+
+			const forbidden = await request(url)
+				.get('/utils/cache/audits')
+				.set('Authorization', `Bearer ${USER.APP_ACCESS.TOKEN}`);
+
+			expect(forbidden.statusCode).toBe(403);
+		}, 60_000);
+
+		it(oneLine`
+			takes a schedule live off the settings, runs on it without a restart,
+			and hands it back to the environment when cleared
+		`, async () => {
+			// This node boots with no CACHE_AUDIT_SCHEDULE: nothing runs.
+			const unscheduled = await request(url)
+				.get('/utils/cache/audit/schedule')
+				.set('Authorization', auth);
+
+			expect(unscheduled.statusCode).toBe(200);
+
+			expect(unscheduled.body.data).toEqual({
+				rule: null,
+				source: null,
+				envRule: null,
+				nextRunAt: null,
+			});
+
+			const refused = await request(url)
+				.patch('/utils/cache/audit/schedule')
+				.send({ rule: 'hourly' })
+				.set('Authorization', auth);
+
+			expect(refused.statusCode).toBe(400);
+			expect(refused.body.errors[0].extensions.code).toBe('INVALID_PAYLOAD');
+			expect(refused.body.errors[0].message).toContain('hourly');
+
+			const unnamed = await request(url)
+				.patch('/utils/cache/audit/schedule')
+				.send({})
+				.set('Authorization', auth);
+
+			expect(unnamed.statusCode).toBe(400);
+
+			// A stale entry nothing has flagged yet, for the schedule to find.
+			await clearCache();
+			await warm(() => readOwner('globex'));
+
+			await db(ROWS).where({ owner: 'globex' })
+				.update({ amount: '13' });
+
+			const before = Date.now();
+
+			const scheduled = await request(url)
+				.patch('/utils/cache/audit/schedule')
+				.send({ rule: '* * * * * *' })
+				.set('Authorization', auth);
+
+			expect(scheduled.statusCode).toBe(200);
+
+			expect(scheduled.body.data).toMatchObject({
+				rule: '* * * * * *',
+				source: 'settings',
+				envRule: null,
+			});
+
+			expect(scheduled.body.data.nextRunAt).toBeGreaterThan(before);
+
+			// Durable, where every node re-reads it on boot.
+			const settings = await request(url)
+				.get('/settings')
+				.query({ fields: 'cache_audit_schedule' })
+				.set('Authorization', auth);
+
+			expect(settings.body.data.cache_audit_schedule).toBe('* * * * * *');
+
+			// Nothing calls the endpoint: the node's own schedule, taken off the
+			// bus, replays the entry and lands its finding.
+			const flagged = await anomaly('stale_entry', `/items/${ROWS}`);
+
+			expect(flagged).toMatchObject({
+				url: `/items/${ROWS}?filter[owner][_eq]=globex`,
+			});
+
+			const cronRun = await db('directus_cache_audits')
+				.where({ trigger: 'cron' })
+				.where('started_at', '>', new Date(before))
+				.where('stale', '>', 0)
+				.first();
+
+			expect(cronRun).toBeDefined();
+
+			const cleared = await request(url)
+				.patch('/utils/cache/audit/schedule')
+				.send({ rule: null })
+				.set('Authorization', auth);
+
+			expect(cleared.statusCode).toBe(200);
+			expect(cleared.body.data).toMatchObject({ rule: null, source: null });
+
+			const forbidden = await request(url)
+				.patch('/utils/cache/audit/schedule')
+				.send({ rule: null })
+				.set('Authorization', `Bearer ${USER.APP_ACCESS.TOKEN}`);
+
+			expect(forbidden.statusCode).toBe(403);
+		}, 90_000);
+
 		it('refuses a non-admin', async () => {
 			const response = await request(url)
 				.post('/utils/cache/audit')
@@ -644,7 +825,26 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(admin.body.paths['/utils/cache/audit'].post.operationId)
 				.toBe('audit-cache');
 
-			expect(anonymous.body.paths['/utils/cache/audit']).toBeUndefined();
+			expect(admin.body.paths['/utils/cache/audits'].get.operationId)
+				.toBe('list-cache-audits');
+
+			expect(admin.body.paths['/utils/cache/audits/{id}'].get.operationId)
+				.toBe('read-cache-audit');
+
+			expect(admin.body.paths['/utils/cache/audit/schedule'].get.operationId)
+				.toBe('read-cache-audit-schedule');
+
+			expect(admin.body.paths['/utils/cache/audit/schedule'].patch.operationId)
+				.toBe('update-cache-audit-schedule');
+
+			for (const path of [
+				'/utils/cache/audit',
+				'/utils/cache/audits',
+				'/utils/cache/audits/{id}',
+				'/utils/cache/audit/schedule',
+			]) {
+				expect(anonymous.body.paths[path]).toBeUndefined();
+			}
 		});
 	});
 });

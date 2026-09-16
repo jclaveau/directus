@@ -153,7 +153,7 @@ describe('`directus cache audit` and the scheduled audit', () => {
 		// The report is the last thing the command prints, after whatever the
 		// boot logged ahead of it.
 		function reportIn(output: string): any {
-			const start = output.indexOf('{\n  "scanned"');
+			const start = output.indexOf('{\n  "id"');
 			expect(start).toBeGreaterThanOrEqual(0);
 
 			return JSON.parse(output.slice(start));
@@ -246,6 +246,26 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			expect(output).toContain(`stale  GET /items/${ROWS}?filter[owner][_eq]=acme`);
 			expect(output).toContain('diff /data/0/amount');
 			expect(output).toContain('no purge covered it since the fill');
+
+			// Recorded like every other run, under the surface that ran it.
+			const recorded = await db('directus_cache_audits')
+				.where({ trigger: 'cli' })
+				.orderBy('id', 'desc')
+				.first();
+
+			expect(recorded).toMatchObject({ scanned: 1, stale: 1, evicted: 0 });
+			expect(recorded.finished_at).not.toBeNull();
+
+			const findings = await db('directus_cache_audit_findings')
+				.where({ audit: recorded.id });
+
+			expect(findings).toHaveLength(1);
+
+			expect(findings[0]).toMatchObject({
+				verdict: 'stale',
+				url: `/items/${ROWS}?filter[owner][_eq]=acme`,
+				collection: ROWS,
+			});
 		}, 90_000);
 
 		it(oneLine`
@@ -348,18 +368,25 @@ describe('`directus cache audit` and the scheduled audit', () => {
 				.update({ amount: '11' });
 
 			// Nothing calls the endpoint: the node's own schedule replays the
-			// entry, and the finding drains through the anomaly stream.
+			// entry, and the finding drains through the anomaly stream. Read off
+			// the table rather than the listing, which is the top 200 groups by
+			// count over a table every suite in the shard writes to.
 			let flagged: any;
 
 			for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !flagged; attempt++) {
-				const listed = await request(scheduledUrl)
-					.get('/utils/cache/anomalies')
-					.set('Authorization', auth);
-
-				flagged = listed.body.data.find((row: any) => {
-					return row.reason === 'stale_entry'
-						&& row.url === `/items/${ROWS}?filter[owner][_eq]=initech`;
-				});
+				flagged = await db('directus_cache_stats_anomalies as a')
+					.join(
+						'directus_cache_stats_descriptors as d',
+						'd.cache_key',
+						'a.cache_key',
+					)
+					.where({
+						'a.reason': 'stale_entry',
+						'd.path': `/items/${ROWS}`,
+						'd.query': 'filter[owner][_eq]=initech',
+					})
+					.select('a.detail')
+					.first();
 
 				if (!flagged) {
 					await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
@@ -367,7 +394,14 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			}
 
 			expect(flagged).toBeDefined();
-			expect(flagged.sample).toContain('/data/0/amount');
+			expect(flagged.detail).toContain('/data/0/amount');
+
+			const recorded = await db('directus_cache_audits')
+				.where({ trigger: 'cron' })
+				.where('stale', '>', 0)
+				.first();
+
+			expect(recorded).toBeDefined();
 
 			// Found, not fixed: the schedule reports, the entry stays for a purge
 			// or an operator.

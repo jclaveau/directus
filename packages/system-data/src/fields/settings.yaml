@@ -685,6 +685,14 @@ fields:
     width: half
     hidden: true
 
+  - field: cache_audit_schedule
+    interface: input
+    options:
+      iconRight: schedule
+      font: monospace
+    width: half
+    hidden: true
+
   - field: autoscale_settings
     special:
       - cast-json

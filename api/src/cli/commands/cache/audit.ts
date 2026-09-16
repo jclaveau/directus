@@ -1,6 +1,6 @@
 import type { AddressInfo } from 'node:net';
+import { runCacheAudit } from '../../../cache-audit-runs.js';
 import {
-	auditCache,
 	CACHE_AUDIT_VERDICTS,
 	type CacheAuditFinding,
 	type CacheAuditReport,
@@ -45,7 +45,7 @@ export default async function cacheAudit(
 				.once('error', reject);
 		});
 
-		report = await auditCache({
+		report = await runCacheAudit('cli', {
 			limit: options.limit === undefined
 				? undefined
 				: Number(options.limit),

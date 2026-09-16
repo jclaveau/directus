@@ -18,11 +18,16 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
+import type { CacheAuditOptions } from '../cache-audit.js';
 import {
-	auditCache,
-	type CacheAuditOptions,
-	type CacheAuditReport,
-} from '../cache-audit.js';
+	type CacheAuditRun,
+	type CacheAuditRunReport,
+	type CacheAuditRunWithFindings,
+	type CacheAuditTrigger,
+	listCacheAuditRuns,
+	readCacheAuditRun,
+	runCacheAudit,
+} from '../cache-audit-runs.js';
 import {
 	type CacheAnomalyRecord,
 	type CacheEntryRecord,
@@ -88,6 +93,11 @@ import {
 	collectProcesses,
 	processesReportEnabled,
 } from '../processes/index.js';
+import {
+	type CacheAuditScheduleState,
+	cacheAuditScheduleState,
+	refreshCacheAuditScheduleOverride,
+} from '../schedules/cache-audit.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -510,11 +520,81 @@ export class UtilsService {
 	 * Replay every live entry against the database and report the ones it no
 	 * longer matches — see `cache-audit.ts`. Every replay is an uncached read,
 	 * so this is a dev, preview and e2e instrument, not a production one.
+	 * The run lands in the audit history under `trigger`.
 	 */
-	async auditCache(options: CacheAuditOptions = {}): Promise<CacheAuditReport> {
+	async auditCache(
+		options: CacheAuditOptions = {},
+		trigger: Extract<CacheAuditTrigger, 'rest' | 'mcp'> = 'rest',
+	): Promise<CacheAuditRunReport> {
 		this.assertAdmin('audit the cache');
 
-		return auditCache(options);
+		return runCacheAudit(trigger, options);
+	}
+
+	/** The audit runs started in the window, newest first, without their findings. */
+	async getCacheAudits(window?: unknown): Promise<CacheAuditRun[]> {
+		this.assertAdmin('inspect the cache audits');
+
+		return listCacheAuditRuns(requestedStatsWindow(window));
+	}
+
+	/** One audit run with every finding it stored. */
+	async getCacheAudit(id: unknown): Promise<CacheAuditRunWithFindings> {
+		this.assertAdmin('inspect the cache audits');
+
+		const parsed = typeof id === 'number' || typeof id === 'string'
+			? Number(id)
+			: Number.NaN;
+
+		if (!Number.isInteger(parsed) || parsed < 1) {
+			throw new InvalidPayloadError({
+				reason: `'${String(id)}' is not an audit id`,
+			});
+		}
+
+		const run = await readCacheAuditRun(parsed);
+
+		if (run === null) {
+			throw new ForbiddenError();
+		}
+
+		return run;
+	}
+
+	/** The cron in force for the audit, where it came from, and when it next fires. */
+	async getCacheAuditSchedule(): Promise<CacheAuditScheduleState> {
+		this.assertAdmin('inspect the cache audit schedule');
+
+		return cacheAuditScheduleState();
+	}
+
+	/**
+	 * Lay a cron over `CACHE_AUDIT_SCHEDULE`, or clear it with null. Through the
+	 * settings singleton, which validates the rule, revisions the change and
+	 * fires the action every node reschedules on.
+	 */
+	async updateCacheAuditSchedule(rule: unknown): Promise<CacheAuditScheduleState> {
+		this.assertAdmin('change the cache audit schedule');
+
+		if (rule !== null && typeof rule !== 'string') {
+			throw new InvalidPayloadError({
+				reason: '`rule` has to be a cron rule, or null to clear the override',
+			});
+		}
+
+		const { SettingsService } = await import('./settings.js');
+
+		await new SettingsService({
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		}).upsertSingleton({ cache_audit_schedule: rule });
+
+		// The reschedule rides the bus and has not necessarily landed here yet;
+		// the answer reads the durable value it just wrote.
+		await refreshCacheAuditScheduleOverride();
+
+		return cacheAuditScheduleState();
 	}
 
 	async evictCacheEntry(redisKey: string): Promise<void> {

@@ -258,6 +258,10 @@ CACHE_STORE=memory
 # clock. Comma-separated. [""]
 # CACHE_AUDIT_IGNORE_PATHS="/data/*/served_at"
 
+# How long the audit history (`directus_cache_audits` and its findings) is kept.
+# Pruned after each run. ["30d"]
+CACHE_AUDIT_RETENTION="30d"
+
 # How long assets will be cached for in the browser. Sets the max-age value of the Cache-Control header ["30d"]
 ASSETS_CACHE_TTL="30d"
 
@@ -272,13 +276,14 @@ ASSETS_CACHE_TTL="30d"
 # Which subsystems to expose tools for: "processes" (the process tree),
 # "autoscale" (what each pool is being scaled on, changing it, the pm2 options
 # a restart carries, and asking for that restart), "autoscale_drill" (loading
-# the pool on purpose, gated on PM2_AUTOSCALE_DRILL_ENABLED as well) and
+# the pool on purpose, gated on PM2_AUTOSCALE_DRILL_ENABLED as well),
 # "cache" (listings, one entry by key, anomalies, latencies, timeseries,
-# telemetry state). A group left out is neither listed nor callable. The two
-# autoscale groups are the ones whose tools write, and the drill is its own
-# because it is the only one that spends the deployment it describes.
+# telemetry state) and "cache_audit" (run an audit, its history, its
+# schedule). A group left out is neither listed nor callable. The autoscale
+# and cache_audit groups are the ones whose tools write; the drill and the
+# audit are their own groups because each spends the deployment it describes.
 # ["processes,cache"]
-# SYSTEM_MCP_TOOLS="processes,autoscale,autoscale_drill,cache"
+# SYSTEM_MCP_TOOLS="processes,autoscale,autoscale_drill,cache,cache_audit"
 
 # Browser origins allowed to call the endpoint. Empty by default, so no browser
 # reaches it: the transport spec requires the Origin header to be validated,

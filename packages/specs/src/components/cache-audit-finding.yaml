@@ -1,0 +1,70 @@
+type: object
+description: One entry a cache audit did not judge fresh.
+properties:
+  verdict:
+    type: string
+    enum:
+      - stale
+      - tag_drift
+      - raced
+      - time_varying
+      - expired
+      - unreplayable
+  reason:
+    type: string
+    nullable: true
+    description: >
+      The `unreplayable` reason (`no_descriptor`, `user_gone`, `status_<code>`,
+      `replay_unrecognized`), or what a replay answered instead of a body.
+  redisKey:
+    type: string
+  cacheKey:
+    type: string
+    nullable: true
+  method:
+    type: string
+    nullable: true
+  url:
+    type: string
+    nullable: true
+  query:
+    type: string
+    nullable: true
+  user:
+    type: string
+    nullable: true
+    description: The user the entry was filled for; null for the public user.
+  collection:
+    type: string
+    nullable: true
+  filledAt:
+    type: integer
+    nullable: true
+  ageMs:
+    type: integer
+    nullable: true
+  tags:
+    type: array
+    description: The tags it was filled under.
+    items:
+      type: string
+  replayTags:
+    type: array
+    nullable: true
+    description: The tags the replay pinned, where one answered.
+    items:
+      type: string
+  diff:
+    type: array
+    nullable: true
+    description: JSON pointers to the first differences, stored body against fresh.
+    items:
+      type: string
+  purgesSinceFilled:
+    type: array
+    nullable: true
+    description: >
+      For a stale entry: the purges that covered it since its fill. Empty means
+      its tags never named the write that changed it.
+    items:
+      type: object

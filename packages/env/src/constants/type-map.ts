@@ -67,6 +67,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_STATS_GAP_LOOKBACK: 'string',
 	CACHE_AUDIT_SCHEDULE: 'string',
 	CACHE_AUDIT_IGNORE_PATHS: 'array',
+	CACHE_AUDIT_RETENTION: 'string',
 	CACHE_STATUS_HEADER: 'string',
 	CACHE_TAGS_HEADER: 'string',
 	CACHE_PURGED_TAGS_HEADER: 'string',

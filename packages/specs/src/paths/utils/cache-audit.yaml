@@ -10,7 +10,8 @@ post:
     (two fresh reads disagree), `expired`, and `unreplayable` with a `reason`
     (`no_descriptor`: filled while cache stats were off; `user_gone`;
     `status_<code>`; `replay_unrecognized`). Every replay is an uncached read:
-    a dev, preview and e2e instrument. Stale and drifted entries are also
+    a dev, preview and e2e instrument. The run is recorded in the audit
+    history (`/utils/cache/audits`), and stale and drifted entries are also
     recorded as `stale_entry` / `tag_drift` cache anomalies. Admin only.
   operationId: audit-cache
   requestBody:
@@ -50,6 +51,9 @@ post:
               data:
                 type: object
                 properties:
+                  id:
+                    type: integer
+                    description: The run, as `/utils/cache/audits/{id}` reads it.
                   scanned:
                     type: integer
                   counts:
@@ -73,70 +77,7 @@ post:
                     type: array
                     description: One per entry that is not fresh.
                     items:
-                      type: object
-                      properties:
-                        verdict:
-                          type: string
-                          enum:
-                            - stale
-                            - tag_drift
-                            - raced
-                            - time_varying
-                            - expired
-                            - unreplayable
-                        reason:
-                          type: string
-                          nullable: true
-                        redisKey:
-                          type: string
-                        cacheKey:
-                          type: string
-                          nullable: true
-                        method:
-                          type: string
-                          nullable: true
-                        url:
-                          type: string
-                          nullable: true
-                        query:
-                          type: string
-                          nullable: true
-                        user:
-                          type: string
-                          nullable: true
-                        collection:
-                          type: string
-                          nullable: true
-                        filledAt:
-                          type: integer
-                          nullable: true
-                        ageMs:
-                          type: integer
-                          nullable: true
-                        tags:
-                          type: array
-                          items:
-                            type: string
-                        replayTags:
-                          type: array
-                          nullable: true
-                          items:
-                            type: string
-                        diff:
-                          type: array
-                          nullable: true
-                          description: JSON pointers to the first differences.
-                          items:
-                            type: string
-                        purgesSinceFilled:
-                          type: array
-                          nullable: true
-                          description: >
-                            For a stale entry: the purges that covered it since
-                            its fill. Empty means its tags never named the
-                            write that changed it.
-                          items:
-                            type: object
+                      $ref: '../../openapi.yaml#/components/schemas/CacheAuditFinding'
                   evicted:
                     type: integer
                   durationMs:
