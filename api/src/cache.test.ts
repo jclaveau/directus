@@ -1559,6 +1559,59 @@ describe('clearCacheTargets', () => {
 	});
 });
 
+// A flush, like every purge, has to move the counters BEFORE it drops anything: a
+// read that captured earlier and rechecks between the clear and a bump made after
+// it compares equal, keeps the entry it just wrote, and the index drop that follows
+// unlinks the tag sets it was filed under — stale for its TTL, reachable to no
+// later purge. The clear is the first drop, so the bump goes in front of it.
+describe('the wholesale counter moves before the response clear', () => {
+	function recordFlushOrder() {
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			CACHE_AUTO_PURGE_MODE: 'scoped',
+		});
+
+		const calls: string[] = [];
+		const { cache } = getCache();
+
+		const clear = vi.spyOn(cache!, 'clear').mockImplementation(async () => {
+			calls.push('clear');
+		});
+
+		onTestFinished(() => clear.mockRestore());
+
+		redis._pipeline.incr.mockImplementation((key: string) => {
+			calls.push(`incr ${key}`);
+		});
+
+		redis.scan.mockImplementation(async () => {
+			calls.push('scan');
+			return ['0', []] as [string, string[]];
+		});
+
+		return calls;
+	}
+
+	test('in flushCaches', async () => {
+		const calls = recordFlushOrder();
+
+		await flushCaches(true);
+
+		expect(calls).toEqual(['incr scalabus:epoch:*', 'clear', 'scan']);
+	});
+
+	test('in clearCacheTargets', async () => {
+		const calls = recordFlushOrder();
+
+		await clearCacheTargets(['response']);
+
+		expect(calls).toEqual(['incr scalabus:epoch:*', 'clear', 'scan']);
+	});
+});
+
 describe('what the flush duration counts', () => {
 	// `startedAt` sat after `getCache()`, whose first call builds the four Keyv
 	// tiers — on the boot path exactly the work the caller waits through, and the
