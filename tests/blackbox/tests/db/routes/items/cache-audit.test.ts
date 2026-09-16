@@ -207,10 +207,10 @@ describe('The cache audit replays live entries against the database', () => {
 				.set('Authorization', auth);
 		}
 
-		// The descriptors the audit joins are drained to Postgres on a schedule,
-		// so a just-filled entry reads `unreplayable:no_descriptor` for up to a
-		// second: audit until every entry is described.
-		async function auditSettled(body: Record<string, unknown> = {}) {
+		// The audit takes its entries off the descriptors, which are drained to
+		// Postgres on a schedule: a just-filled entry is not its to see for up
+		// to a second. Audit until the entries warmed are all examined.
+		async function auditSettled(body: Record<string, unknown> = {}, warmed = 1) {
 			let report: any;
 
 			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
@@ -218,11 +218,7 @@ describe('The cache audit replays live entries against the database', () => {
 				expect(response.statusCode).toBe(200);
 				report = response.body.data;
 
-				const undescribed = report.findings.some((finding: any) => {
-					return finding.reason === 'no_descriptor';
-				});
-
-				if (report.scanned > 0 && !undescribed) {
+				if (report.scanned >= warmed) {
 					return report;
 				}
 
@@ -274,7 +270,7 @@ describe('The cache audit replays live entries against the database', () => {
 			await warm(() => readOwner('acme'));
 			await warm(() => readOwner('globex'));
 
-			const report = await auditSettled();
+			const report = await auditSettled({}, 2);
 
 			expect(report.scanned).toBe(2);
 			expect(report.counts.fresh).toBe(2);
@@ -495,7 +491,7 @@ describe('The cache audit replays live entries against the database', () => {
 			await warm(() => readOwner('acme', appUserToken));
 			await warm(() => readCollection(CLOCK));
 
-			const whole = await auditSettled();
+			const whole = await auditSettled({}, 3);
 			expect(whole.scanned).toBe(3);
 
 			const byCollection = await audit({ collection: ROWS });
@@ -510,12 +506,53 @@ describe('The cache audit replays live entries against the database', () => {
 		}, 60_000);
 
 		it(oneLine`
+			stops a limited run there and resumes the next behind it, least recently
+			audited first, coming back round once every entry has had its turn
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('acme'));
+			await warm(() => readOwner('globex'));
+			await auditSettled({}, 2);
+
+			// The stamp each run leaves on the descriptor it took.
+			async function stamps(): Promise<Record<string, number>> {
+				const rows = await db('directus_cache_stats_descriptors')
+					.where({ collection: ROWS, path: `/items/${ROWS}` })
+					.whereIn('query', ['filter[owner][_eq]=acme', 'filter[owner][_eq]=globex'])
+					.select('query', 'audited_at');
+
+				return Object.fromEntries(rows.map((row: any) => {
+					return [row.query, new Date(row.audited_at).getTime()];
+				}));
+			}
+
+			async function takenBy(run: () => Promise<any>): Promise<string[]> {
+				const before = await stamps();
+				const response = await run();
+				expect(response.body.data.scanned).toBe(1);
+				const after = await stamps();
+
+				return Object.keys(after).filter((query) => after[query]! > before[query]!);
+			}
+
+			// Both were stamped together, so the older fill goes first.
+			const first = await takenBy(() => audit({ limit: 1 }));
+			expect(first).toEqual(['filter[owner][_eq]=acme']);
+
+			const second = await takenBy(() => audit({ limit: 1 }));
+			expect(second).toEqual(['filter[owner][_eq]=globex']);
+
+			const third = await takenBy(() => audit({ limit: 1 }));
+			expect(third).toEqual(['filter[owner][_eq]=acme']);
+		}, 60_000);
+
+		it(oneLine`
 			reads its options off the query string as well
 		`, async () => {
 			await clearCache();
 			await warm(() => readOwner('acme'));
 			await warm(() => readOwner('globex'));
-			await auditSettled();
+			await auditSettled({}, 2);
 
 			const capped = await request(url)
 				.post('/utils/cache/audit')
@@ -602,7 +639,7 @@ describe('The cache audit replays live entries against the database', () => {
 		}, 60_000);
 
 		it(oneLine`
-			cannot replay an entry whose descriptor is gone, and leaves it in place
+			does not see an entry whose descriptor is gone, and leaves it in place
 		`, async () => {
 			await clearCache();
 			await warm(() => readOwner('acme'));
@@ -614,15 +651,9 @@ describe('The cache audit replays live entries against the database', () => {
 
 			const response = await audit();
 
-			expect(response.body.data.counts.unreplayable).toBe(1);
-
-			expect(response.body.data.findings[0]).toMatchObject({
-				verdict: 'unreplayable',
-				reason: 'no_descriptor',
-				redisKey: expect.any(String),
-				url: null,
-				collection: null,
-			});
+			expect(response.statusCode).toBe(200);
+			expect(response.body.data.scanned).toBe(0);
+			expect(response.body.data.findings).toEqual([]);
 
 			const stillHeld = await readOwner('acme');
 			expect(stillHeld.headers[cacheStatusHeader]).toBe('HIT');

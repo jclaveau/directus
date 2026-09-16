@@ -858,7 +858,7 @@ const auditFinding: CacheAuditFinding = {
 	cacheKey: 'abc',
 	method: 'GET',
 	url: '/items/articles',
-	query: null,
+	query: '',
 	user: null,
 	collection: 'articles',
 	filledAt: 1_700_000_000_000,

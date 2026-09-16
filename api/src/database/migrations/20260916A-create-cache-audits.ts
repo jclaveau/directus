@@ -1,4 +1,5 @@
 import type { Knex } from 'knex';
+import { getDatabaseClient } from '../index.js';
 
 /**
  * Where a cache audit leaves its report (jclaveau/directus#498).
@@ -25,6 +26,14 @@ import type { Knex } from 'knex';
  * `directus_settings.cache_audit_schedule` is the live cron the cache page
  * edits, laid over `CACHE_AUDIT_SCHEDULE`. `null` means no override; the env
  * rule runs, or nothing does when that is empty too.
+ *
+ * `directus_cache_stats_descriptors.audited_at` is the audit's place in the
+ * cache: a run takes the descriptors least recently audited (never, first)
+ * and stamps the ones it passed, so a limited run resumes where the last one
+ * stopped. Kept to the millisecond: a run reads what was stamped before it
+ * began, and a stamp stored without fractions could sort before the start it
+ * came after. The index is what the queue read pages on; Postgres only serves
+ * `NULLS FIRST` off an index that sorts its nulls the same way.
  */
 export async function up(knex: Knex): Promise<void> {
 	await knex.schema.createTable('directus_cache_audits', (table) => {
@@ -82,14 +91,14 @@ export async function up(knex: Knex): Promise<void> {
 		table.string('verdict', 16).notNullable();
 		table.string('reason', 64).nullable();
 		table.string('redis_key').notNullable();
-		table.string('cache_key').nullable();
-		table.string('method', 8).nullable();
-		table.text('url').nullable();
-		table.text('query').nullable();
+		table.string('cache_key').notNullable();
+		table.string('method', 8).notNullable();
+		table.text('url').notNullable();
+		table.text('query').notNullable();
 		table.string('user_id', 36).nullable();
 		table.string('collection').nullable();
-		table.timestamp('filled_at').nullable();
-		table.integer('age_ms').nullable();
+		table.timestamp('filled_at').notNullable();
+		table.integer('age_ms').notNullable();
 		table.json('tags').notNullable();
 		table.json('replay_tags').nullable();
 		table.json('diff').nullable();
@@ -101,9 +110,37 @@ export async function up(knex: Knex): Promise<void> {
 	await knex.schema.alterTable('directus_settings', (table) => {
 		table.string('cache_audit_schedule').nullable();
 	});
+
+	await knex.schema.alterTable('directus_cache_stats_descriptors', (table) => {
+		table.timestamp('audited_at', { precision: 3 }).nullable();
+	});
+
+	if (getDatabaseClient(knex) === 'postgres') {
+		await knex.raw(
+			'CREATE INDEX directus_cache_stats_descriptors_audit_queue '
+			+ 'ON directus_cache_stats_descriptors (audited_at NULLS FIRST, last_filled)',
+		);
+	}
+	else {
+		await knex.schema.alterTable('directus_cache_stats_descriptors', (table) => {
+			table.index(
+				['audited_at', 'last_filled'],
+				'directus_cache_stats_descriptors_audit_queue',
+			);
+		});
+	}
 }
 
 export async function down(knex: Knex): Promise<void> {
+	await knex.schema.alterTable('directus_cache_stats_descriptors', (table) => {
+		table.dropIndex(
+			['audited_at', 'last_filled'],
+			'directus_cache_stats_descriptors_audit_queue',
+		);
+
+		table.dropColumn('audited_at');
+	});
+
 	await knex.schema.alterTable('directus_settings', (table) => {
 		table.dropColumn('cache_audit_schedule');
 	});

@@ -40,14 +40,15 @@ export interface CacheAuditFinding {
 	verdict: CacheAuditVerdict;
 	reason: string | null;
 	redisKey: string;
-	cacheKey: string | null;
-	method: string | null;
-	url: string | null;
-	query: string | null;
+	cacheKey: string;
+	method: string;
+	url: string;
+	query: string;
+	/** Null for a public fill. */
 	user: string | null;
 	collection: string | null;
-	filledAt: number | null;
-	ageMs: number | null;
+	filledAt: number;
+	ageMs: number;
 	tags: string[];
 	replayTags: string[] | null;
 	diff: string[] | null;
@@ -143,18 +144,6 @@ export function scheduleRule(draft: string | null): string | null {
 	return trimmed === ''
 		? null
 		: trimmed;
-}
-
-/**
- * A finding's request, the way the CLI prints it: what was asked, or the key
- * where nothing says (an entry filled while stats were off has no descriptor).
- */
-export function findingRequest(finding: CacheAuditFinding): string {
-	if (finding.method === null || finding.url === null) {
-		return finding.redisKey;
-	}
-
-	return `${finding.method} ${finding.url}`;
 }
 
 /** The verdict, with its reason where one qualifies it: `unreplayable:user_gone`. */

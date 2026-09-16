@@ -4,7 +4,6 @@ import {
 	type CacheAuditFinding,
 	type CacheAuditRun,
 	describeOptions,
-	findingRequest,
 	findingVerdict,
 	runStatus,
 	scheduleDraft,
@@ -127,14 +126,7 @@ describe('scheduleDraft / scheduleRule', () => {
 	});
 });
 
-describe('findingRequest / findingVerdict', () => {
-	test('leads with the request, or the key where no descriptor says', () => {
-		expect(findingRequest(finding())).toBe('GET /items/articles?fields=title');
-
-		expect(findingRequest(finding({ method: null, url: null })))
-			.toBe('scalabus_response::scalabus_response:abc');
-	});
-
+describe('findingVerdict', () => {
 	test('qualifies the verdict with its reason', () => {
 		expect(findingVerdict(finding())).toBe('stale');
 

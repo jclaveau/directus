@@ -184,7 +184,11 @@ export async function createCli(
 		.option('--json', 'print the report as JSON')
 		.option('--purge', 'evict the stale and tag-drifted entries once reported')
 		.option('--strict', 'exit 2 when an entry could not be replayed')
-		.option('--limit <count>', 'stop after this many entries')
+		.option(
+			'--limit <count>',
+			'stop after this many entries; the next run resumes behind them '
+			+ '[CACHE_AUDIT_LIMIT]',
+		)
 		.option('--user <id>', 'only the entries filled for this user')
 		.option('--collection <name>', 'only the entries reading this collection')
 		.action(async (options: {

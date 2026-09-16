@@ -1342,77 +1342,120 @@ export interface CacheAuditDescriptor {
 	scopedCacheTags: string[];
 }
 
-const AUDIT_DESCRIPTOR_CHUNK = 500;
+/** The narrowing a queue read is asked for; both name a descriptor column. */
+export interface CacheAuditQueueFilter {
+	user?: string | undefined;
+	collection?: string | undefined;
+}
 
 /**
- * The descriptors behind a batch of live Redis keys, keyed by that Redis key.
+ * The next descriptors due an audit, least recently audited first — never
+ * audited ones ahead, oldest fill first among them. The descriptor table is
+ * the audit's index rather than Redis: an entry is only replayable from its
+ * descriptor, and a dimension row sorts and pages where a `SCAN` neither
+ * orders nor promises to yield a key once.
  *
- * Read by `redis_key`, not `cache_key`: the two differ once
- * `CACHE_KEY_HASH_ENABLED` is off, and the caller holds the Redis one. A key
- * absent from the answer was filled while stats were off, or before the column
- * existed — either way there is no request to replay it from.
+ * `before` — when the run began — bounds the queue to what it has not
+ * stamped: a row it advanced past sorts to the end, and reading the queue
+ * again without the bound would wrap around into it. A row a concurrent run
+ * stamped meanwhile falls out the same way, so two runs share the queue
+ * rather than replay it twice.
+ *
+ * Read by `redis_key`, which is what the cache is asked for: it differs from
+ * `cache_key` once `CACHE_KEY_HASH_ENABLED` is off, and is `''` on a row
+ * written before the column existed — nothing to fetch by, so left out.
  */
-export async function readCacheAuditDescriptors(
-	redisKeys: string[],
-): Promise<Map<string, CacheAuditDescriptor>> {
-	const byRedisKey = new Map<string, CacheAuditDescriptor>();
-
-	if (!cacheStatsConfigured() || redisKeys.length === 0) {
-		return byRedisKey;
+export async function readCacheAuditQueue(
+	count: number,
+	before: Date,
+	filter: CacheAuditQueueFilter = {},
+): Promise<CacheAuditDescriptor[]> {
+	if (!cacheStatsConfigured() || count <= 0) {
+		return [];
 	}
 
 	const db = getDatabase();
 
-	for (let at = 0; at < redisKeys.length; at += AUDIT_DESCRIPTOR_CHUNK) {
-		const rows: Record<string, unknown>[] = await db(
-			'directus_cache_stats_descriptors',
-		)
-			.whereIn('redis_key', redisKeys.slice(at, at + AUDIT_DESCRIPTOR_CHUNK))
-			.whereNotNull('last_filled')
-			.select(
-				'cache_key',
-				'redis_key',
-				'method',
-				'path',
-				'collection',
-				'user_id',
-				'query',
-				'last_filled',
-			);
+	const query = db('directus_cache_stats_descriptors')
+		.whereNotNull('last_filled')
+		.whereNot('redis_key', '')
+		.where((due) => {
+			due.whereNull('audited_at').orWhere('audited_at', '<', before);
+		})
+		.orderBy('audited_at', 'asc', 'first')
+		.orderBy('last_filled', 'asc')
+		.limit(count)
+		.select(
+			'cache_key',
+			'redis_key',
+			'method',
+			'path',
+			'collection',
+			'user_id',
+			'query',
+			'last_filled',
+		);
 
-		const tagRows: Record<string, unknown>[] = rows.length === 0
-			? []
-			: await db('directus_cache_stats_scoped_entry_tags')
-				.whereIn('cache_key', rows.map((row) => row['cache_key'] as string))
-				.select('cache_key', 'scoped_cache_tag');
-
-		const tagsByCacheKey = new Map<string, string[]>();
-
-		for (const tagRow of tagRows) {
-			const cacheKey = tagRow['cache_key'] as string;
-			const tags = tagsByCacheKey.get(cacheKey) ?? [];
-			tags.push(tagRow['scoped_cache_tag'] as string);
-			tagsByCacheKey.set(cacheKey, tags);
-		}
-
-		for (const row of rows) {
-			const cacheKey = row['cache_key'] as string;
-
-			byRedisKey.set(row['redis_key'] as string, {
-				cacheKey,
-				redisKey: row['redis_key'] as string,
-				method: row['method'] as string,
-				path: row['path'] as string,
-				collection: (row['collection'] as string | null) ?? null,
-				userId: (row['user_id'] as string | null) ?? null,
-				query: row['query'] as string,
-				lastFilled: new Date(row['last_filled'] as string),
-				scopedCacheTags: tagsByCacheKey.get(cacheKey) ?? [],
-			});
-		}
+	if (filter.user !== undefined) {
+		query.where('user_id', filter.user);
 	}
 
-	return byRedisKey;
+	if (filter.collection !== undefined) {
+		query.where('collection', filter.collection);
+	}
+
+	const rows: Record<string, unknown>[] = await query;
+
+	const tagRows: Record<string, unknown>[] = rows.length === 0
+		? []
+		: await db('directus_cache_stats_scoped_entry_tags')
+			.whereIn('cache_key', rows.map((row) => row['cache_key'] as string))
+			.select('cache_key', 'scoped_cache_tag');
+
+	const tagsByCacheKey = new Map<string, string[]>();
+
+	for (const tagRow of tagRows) {
+		const cacheKey = tagRow['cache_key'] as string;
+		const tags = tagsByCacheKey.get(cacheKey) ?? [];
+		tags.push(tagRow['scoped_cache_tag'] as string);
+		tagsByCacheKey.set(cacheKey, tags);
+	}
+
+	return rows.map((row) => {
+		const cacheKey = row['cache_key'] as string;
+
+		return {
+			cacheKey,
+			redisKey: row['redis_key'] as string,
+			method: row['method'] as string,
+			path: row['path'] as string,
+			collection: (row['collection'] as string | null) ?? null,
+			userId: (row['user_id'] as string | null) ?? null,
+			query: row['query'] as string,
+			lastFilled: new Date(row['last_filled'] as string),
+			scopedCacheTags: tagsByCacheKey.get(cacheKey) ?? [],
+		};
+	});
+}
+
+/**
+ * Move the queue past these descriptors: stamped `audited_at`, they sort
+ * behind everything not yet audited and behind everything audited earlier.
+ * Stamped before the replay, not after, so a run examines what it claimed
+ * and a concurrent one takes the rest — and a run that dies mid-page costs
+ * those entries one turn, not the queue a second replay of them.
+ */
+export async function advanceCacheAuditQueue(
+	cacheKeys: string[],
+	at: Date,
+): Promise<void> {
+	if (cacheKeys.length === 0) {
+		return;
+	}
+
+	await getDatabase()('directus_cache_stats_descriptors')
+		.whereIn('cache_key', cacheKeys)
+		.update({ audited_at: at });
 }
 
 /**

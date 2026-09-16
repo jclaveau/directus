@@ -116,24 +116,12 @@ function renderFinding(finding: CacheAuditFinding): string[] {
 		? finding.verdict
 		: `${finding.verdict}:${finding.reason}`;
 
-	const request = finding.method === null
-		? finding.redisKey
-		: `${finding.method} ${finding.url}`;
-
-	// Without a descriptor nothing says who filled the entry: not even that it
-	// was the public user.
-	const user = finding.cacheKey === null
-		? '-'
-		: finding.user ?? 'public';
-
 	const lines = [
-		`${verdict}  ${request}`,
+		`${verdict}  ${finding.method} ${finding.url}`,
 		`  key ${finding.redisKey}`,
-		`  user ${user}`
+		`  user ${finding.user ?? 'public'}`
 		+ `  collection ${finding.collection ?? '-'}`
-		+ `  age ${finding.ageMs === null
-			? '-'
-			: `${Math.round(finding.ageMs / 1000)}s`}`,
+		+ `  age ${Math.round(finding.ageMs / 1000)}s`,
 		`  tags ${finding.tags.join(', ') || '-'}`,
 	];
 
@@ -141,7 +129,7 @@ function renderFinding(finding: CacheAuditFinding): string[] {
 		lines.push(`  replay tags ${finding.replayTags.join(', ') || '-'}`);
 	}
 
-	if (finding.query !== null && finding.url?.startsWith('/graphql')) {
+	if (finding.url.startsWith('/graphql')) {
 		lines.push(`  document ${finding.query}`);
 	}
 

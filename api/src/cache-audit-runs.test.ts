@@ -49,6 +49,7 @@ beforeAll(() => {
 
 beforeEach(() => {
 	delete env['CACHE_AUDIT_RETENTION'];
+	delete env['CACHE_AUDIT_LIMIT'];
 	env['CACHE_AUDIT_ENABLED'] = true;
 	vi.mocked(getDatabase).mockReturnValue(db);
 	vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ['Date'] });
@@ -237,6 +238,44 @@ describe('runCacheAudit', () => {
 		expect(tracker.history.update).toHaveLength(1);
 	});
 
+	it(oneLine`
+		slices a run that names no limit by CACHE_AUDIT_LIMIT, and records the slice
+	`, async () => {
+		env['CACHE_AUDIT_LIMIT'] = 250;
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await runCacheAudit('cron');
+
+		expect(auditCache).toHaveBeenCalledWith({ limit: 250 });
+
+		expect(JSON.parse(tracker.history.insert[0]!.bindings[0] as string))
+			.toMatchObject({ limit: 250 });
+	});
+
+	it(oneLine`
+		leaves a run its own limit, and the whole queue when the env says 0
+	`, async () => {
+		env['CACHE_AUDIT_LIMIT'] = 250;
+		tracker.on.insert('directus_cache_audits').response([{ id: 7 }]);
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.insert('directus_cache_audit_findings').response([]);
+		tracker.on.delete('directus_cache_audits').response(0);
+		vi.mocked(auditCache).mockResolvedValue(report);
+
+		await runCacheAudit('rest', { limit: 5 });
+
+		expect(auditCache).toHaveBeenLastCalledWith({ limit: 5 });
+
+		env['CACHE_AUDIT_LIMIT'] = 0;
+		await runCacheAudit('rest');
+
+		expect(auditCache).toHaveBeenLastCalledWith({ limit: undefined });
+	});
+
 	it('refuses on a node with CACHE_AUDIT_ENABLED off, before any row', async () => {
 		env['CACHE_AUDIT_ENABLED'] = false;
 
@@ -369,16 +408,16 @@ describe('readCacheAuditRun', () => {
 				id: 2,
 				audit: 7,
 				verdict: 'unreplayable',
-				reason: 'no_descriptor',
-				redis_key: 'orphan',
-				cache_key: null,
-				method: null,
-				url: null,
-				query: null,
+				reason: 'status_503',
+				redis_key: 'def',
+				cache_key: 'def',
+				method: 'GET',
+				url: '/server/info',
+				query: '',
 				user_id: null,
 				collection: null,
-				filled_at: null,
-				age_ms: null,
+				filled_at: new Date(1_699_999_990_000),
+				age_ms: 10_000,
 				tags: '[]',
 				replay_tags: null,
 				diff: null,
@@ -394,16 +433,16 @@ describe('readCacheAuditRun', () => {
 			finding,
 			{
 				verdict: 'unreplayable',
-				reason: 'no_descriptor',
-				redisKey: 'orphan',
-				cacheKey: null,
-				method: null,
-				url: null,
-				query: null,
+				reason: 'status_503',
+				redisKey: 'def',
+				cacheKey: 'def',
+				method: 'GET',
+				url: '/server/info',
+				query: '',
 				user: null,
 				collection: null,
-				filledAt: null,
-				ageMs: null,
+				filledAt: 1_699_999_990_000,
+				ageMs: 10_000,
 				tags: [],
 				replayTags: null,
 				diff: null,

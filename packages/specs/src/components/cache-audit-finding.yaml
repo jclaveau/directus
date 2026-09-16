@@ -14,22 +14,19 @@ properties:
     type: string
     nullable: true
     description: >
-      The `unreplayable` reason (`no_descriptor`, `user_gone`, `status_<code>`,
+      The `unreplayable` reason (`user_gone`, `status_<code>`,
       `replay_unrecognized`), or what a replay answered instead of a body.
   redisKey:
     type: string
   cacheKey:
     type: string
-    nullable: true
   method:
     type: string
-    nullable: true
   url:
     type: string
-    nullable: true
   query:
     type: string
-    nullable: true
+    description: A GET's query string as sent; a GraphQL read's document.
   user:
     type: string
     nullable: true
@@ -39,10 +36,8 @@ properties:
     nullable: true
   filledAt:
     type: integer
-    nullable: true
   ageMs:
     type: integer
-    nullable: true
   tags:
     type: array
     description: The tags it was filled under.

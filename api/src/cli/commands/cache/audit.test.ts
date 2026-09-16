@@ -356,35 +356,6 @@ describe('the rendered report', () => {
 		expect(rendered).toContain('namespace *');
 	});
 
-	test('describes an undescribed entry by its key alone', () => {
-		const given = report({
-			findings: [finding({
-				verdict: 'unreplayable',
-				reason: 'no_descriptor',
-				cacheKey: null,
-				method: null,
-				url: null,
-				query: null,
-				user: null,
-				collection: null,
-				filledAt: null,
-				ageMs: null,
-				tags: [],
-				replayTags: null,
-				diff: null,
-				purgesSinceFilled: null,
-			})],
-		});
-
-		expect(renderReport(given)).toContain([
-			'unreplayable:no_descriptor  rk',
-			'  key rk',
-			'  user -  collection -  age -',
-			'  tags -',
-			'',
-		].join('\n'));
-	});
-
 	test('prints a GraphQL entry with its stored document', () => {
 		const given = report({
 			findings: [finding({

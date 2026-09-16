@@ -12,12 +12,14 @@ import {
 	loopbackTarget,
 } from './cache-audit.js';
 import {
+	advanceCacheAuditQueue,
 	type CacheAuditDescriptor,
+	cacheStatsConfigured,
 	claimCacheAnomalyThrottleSlot,
 	evictCacheEntry,
 	listPurgesCoveringEntry,
 	queueCacheAnomaly,
-	readCacheAuditDescriptors,
+	readCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
 import {
@@ -39,27 +41,13 @@ vi.mock('./utils/get-secret.js', () => {
 	return { getSecret: () => 'audit-secret' };
 });
 
-vi.mock('./scoped-cache.js', () => {
-	return {
-		scopedCacheSidecarOwner: (member: string) => {
-			const suffix = ['__expires_at', '__tags'].find((s) => member.endsWith(s));
-
-			return suffix === undefined
-				? null
-				: member.slice(0, -suffix.length);
-		},
-	};
-});
-
-// A Keyv as the audit sees it: an enumeration of unprefixed keys with their
-// values, plus `get`/`has` for the re-reads the race guard makes.
+// A Keyv as the audit sees it: the bodies of a page of keys at once, plus
+// `get`/`has` for the re-reads the race guard makes.
 class FakeCache {
 	store = new Map<string, unknown>();
 
-	async *iterator(_namespace: unknown): AsyncGenerator<[string, unknown]> {
-		for (const entry of [...this.store.entries()]) {
-			yield entry;
-		}
+	async getMany(keys: string[]): Promise<unknown[]> {
+		return keys.map((key) => this.store.get(key));
 	}
 
 	async get(key: string): Promise<unknown> {
@@ -72,6 +60,9 @@ class FakeCache {
 }
 
 let cache: FakeCache;
+// The descriptor table as the queue reads it: what was described, minus what
+// a run has advanced past, in the order it was described.
+let queue: CacheAuditDescriptor[];
 const users = new Map<string, { id: string; role: string | null }>();
 const userLookups = vi.fn();
 
@@ -135,9 +126,11 @@ function replayer(
 }
 
 function described(...descriptors: CacheAuditDescriptor[]): void {
-	vi.mocked(readCacheAuditDescriptors).mockResolvedValue(
-		new Map(descriptors.map((each) => [each.redisKey, each])),
-	);
+	queue = descriptors;
+}
+
+function advancedPast(): string[] {
+	return vi.mocked(advanceCacheAuditQueue).mock.calls.flatMap(([keys]) => keys);
 }
 
 beforeEach(() => {
@@ -153,7 +146,22 @@ beforeEach(() => {
 	});
 
 	vi.mocked(decompress).mockImplementation(async (value) => value);
-	vi.mocked(readCacheAuditDescriptors).mockResolvedValue(new Map());
+	vi.mocked(cacheStatsConfigured).mockReturnValue(true);
+	queue = [];
+
+	vi.mocked(readCacheAuditQueue).mockImplementation(async (count, _at, filter) => {
+		const stamped = new Set(advancedPast());
+
+		return queue
+			.filter((each) => !stamped.has(each.cacheKey))
+			.filter((each) => filter?.user === undefined || each.userId === filter.user)
+			.filter((each) => {
+				return filter?.collection === undefined
+					|| each.collection === filter.collection;
+			})
+			.slice(0, count);
+	});
+
 	vi.mocked(listPurgesCoveringEntry).mockResolvedValue([]);
 	vi.mocked(claimCacheAnomalyThrottleSlot).mockResolvedValue(true);
 
@@ -177,21 +185,101 @@ afterEach(() => {
 	userLookups.mockReset();
 });
 
-test('answers an empty report where there is no cache to enumerate', async () => {
+test('answers an empty report where there is no cache', async () => {
 	vi.mocked(getCache).mockReturnValue({ cache: null } as any);
 
 	const report = await auditCache({ replay: replayer() });
 
 	expect(report.scanned).toBe(0);
 	expect(report.findings).toEqual([]);
+	expect(readCacheAuditQueue).not.toHaveBeenCalled();
 });
 
-test('refuses a store Keyv cannot enumerate', async () => {
-	vi.mocked(getCache).mockReturnValue({ cache: {} } as any);
+test('refuses where no descriptor can have been written', async () => {
+	vi.mocked(cacheStatsConfigured).mockReturnValue(false);
 
 	await expect(auditCache({ replay: replayer() })).rejects.toThrowError(
-		'The cache store cannot be enumerated',
+		'CACHE_STATS_ENABLED is off',
 	);
+});
+
+describe('the queue', () => {
+	test(oneLine`
+		is read a page at a time, bounded by when the run began, and advanced past
+		what each page held
+	`, async () => {
+		fill('rk1', { data: [] });
+		fill('rk2', { data: [] });
+
+		described(
+			descriptor({ redisKey: 'rk1', cacheKey: 'ck1' }),
+			descriptor({ redisKey: 'rk2', cacheKey: 'ck2' }),
+		);
+
+		const startedAt = Date.now();
+
+		const report = await auditCache({
+			replay: replayer(answer({ data: [] }), answer({ data: [] })),
+		});
+
+		expect(report.scanned).toBe(2);
+
+		const [count, before, filter] = vi.mocked(readCacheAuditQueue).mock.calls[0]!;
+		expect(count).toBe(500);
+		expect(before.getTime()).toBeGreaterThanOrEqual(startedAt);
+		expect(before.getTime()).toBeLessThanOrEqual(Date.now());
+		expect(filter).toEqual({ user: undefined, collection: undefined });
+
+		// One page held both; the second read found the queue empty.
+		expect(readCacheAuditQueue).toHaveBeenCalledTimes(2);
+		expect(advancedPast()).toEqual(['ck1', 'ck2']);
+	});
+
+	test(oneLine`
+		passes over a descriptor whose entry is gone, advancing past it without
+		examining it
+	`, async () => {
+		fill('rk2', { data: [] });
+
+		described(
+			descriptor({ redisKey: 'rk1', cacheKey: 'ck1' }),
+			descriptor({ redisKey: 'rk2', cacheKey: 'ck2' }),
+		);
+
+		const replay = replayer(answer({ data: [] }));
+
+		const report = await auditCache({ replay });
+
+		expect(report.scanned).toBe(1);
+		expect(replay).toHaveBeenCalledTimes(1);
+		expect(advancedPast()).toEqual(['ck1', 'ck2']);
+	});
+
+	test('an entry with no descriptor is not the audit\'s to see', async () => {
+		fill('rk', { data: [] });
+		const replay = replayer();
+
+		const report = await auditCache({ replay });
+
+		expect(report.scanned).toBe(0);
+		expect(replay).not.toHaveBeenCalled();
+		expect(advanceCacheAuditQueue).not.toHaveBeenCalled();
+	});
+
+	test('is advanced before the replay, not after it', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		const replay = vi.fn(async () => {
+			expect(advancedPast()).toEqual(['ck']);
+
+			return answer({ data: [] });
+		});
+
+		await auditCache({ replay });
+
+		expect(replay).toHaveBeenCalledTimes(1);
+	});
 });
 
 describe('a fresh entry', () => {
@@ -633,7 +721,6 @@ describe('the race guard', () => {
 
 describe('an entry nothing can be replayed from', () => {
 	test.each([
-		['no_descriptor', () => undefined, answer({ data: [] })],
 		['user_gone', () => descriptor({ userId: 'user-9' }), answer({ data: [] })],
 		['method', () => descriptor({ method: 'POST' }), answer({ data: [] })],
 		['query', () => descriptor({ query: '{"filter":{}}' }), answer({ data: [] })],
@@ -656,11 +743,7 @@ describe('an entry nothing can be replayed from', () => {
 		['body', () => descriptor(), answer({}, { body: 'not json' })],
 	])('%s', async (reason, describe, reply) => {
 		fill('rk', { data: [] });
-		const each = describe();
-
-		if (each !== undefined) {
-			described(each);
-		}
+		described(describe());
 
 		const report = await auditCache({ replay: replayer(reply) });
 
@@ -679,30 +762,6 @@ describe('an entry nothing can be replayed from', () => {
 		expect(report.findings[0]).toMatchObject({
 			verdict: 'unreplayable',
 			reason: 'unreadable',
-		});
-	});
-
-	test('an undescribed entry carries what little is known of it', async () => {
-		fill('rk', { data: [] });
-
-		const report = await auditCache({ replay: replayer() });
-
-		expect(report.findings[0]).toEqual({
-			verdict: 'unreplayable',
-			reason: 'no_descriptor',
-			redisKey: 'rk',
-			cacheKey: null,
-			method: null,
-			url: null,
-			query: null,
-			user: null,
-			collection: null,
-			filledAt: null,
-			ageMs: null,
-			tags: [],
-			replayTags: null,
-			diff: null,
-			purgesSinceFilled: null,
 		});
 	});
 });
@@ -786,7 +845,7 @@ describe('narrowing the sweep', () => {
 	});
 
 	test(oneLine`
-		to one user leaves the other entries, described or not, unexamined
+		to one user is the queue's to narrow, and the others stay unexamined
 	`, async () => {
 		const replay = replayer(answer({ data: [] }));
 
@@ -794,6 +853,12 @@ describe('narrowing the sweep', () => {
 
 		expect(report.scanned).toBe(1);
 		expect(replay.mock.calls[0]![0].headers['authorization']).toMatch(/^Bearer /);
+
+		expect(readCacheAuditQueue).toHaveBeenCalledWith(
+			500,
+			expect.any(Date),
+			{ user: 'user-2', collection: undefined },
+		);
 	});
 
 	test('to one collection', async () => {
@@ -802,15 +867,30 @@ describe('narrowing the sweep', () => {
 		const report = await auditCache({ replay, collection: 'authors' });
 
 		expect(report.scanned).toBe(1);
+
+		expect(readCacheAuditQueue).toHaveBeenCalledWith(
+			500,
+			expect.any(Date),
+			{ user: undefined, collection: 'authors' },
+		);
 	});
 
-	test('to a limit stops the enumeration there', async () => {
+	test(oneLine`
+		to a limit stops there and leaves the rest of the page unstamped, so the next
+		run resumes behind the examined ones
+	`, async () => {
 		const replay = replayer(answer({ data: [] }), answer({ data: [] }));
 
 		const report = await auditCache({ replay, limit: 2 });
 
 		expect(report.scanned).toBe(2);
 		expect(replay).toHaveBeenCalledTimes(2);
+		expect(advancedPast()).toEqual(['ck1', 'ck2']);
+
+		const resumed = await auditCache({ replay: replayer(answer({ data: [] })) });
+
+		expect(resumed.scanned).toBe(1);
+		expect(advancedPast()).toEqual(['ck1', 'ck2', 'ck3']);
 	});
 
 	test('a limit wider than the cache reports the whole cache', async () => {
@@ -818,8 +898,8 @@ describe('narrowing the sweep', () => {
 
 		const report = await auditCache({ replay: replayer(...answers), limit: 50 });
 
-		expect(report.scanned).toBe(4);
-		expect(report.counts.unreplayable).toBe(1);
+		expect(report.scanned).toBe(3);
+		expect(report.counts.fresh).toBe(3);
 	});
 });
 

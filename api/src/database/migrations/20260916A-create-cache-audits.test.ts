@@ -1,5 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { oneLine } from '@directus/utils';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { down, up } from './20260916A-create-cache-audits.js';
+
+const dialect = vi.hoisted(() => ({ client: 'postgres' }));
+
+vi.mock('../index.js', () => {
+	return { getDatabaseClient: () => dialect.client };
+});
 
 // Records the column definitions rather than stubbing them away, so the shape is
 // asserted and not merely the fact that a table was asked for.
@@ -30,12 +37,22 @@ function recordingTable(columns: string[], indexes: string[]) {
 
 	return {
 		increments: (name: string) => column('increments', name),
-		timestamp: (name: string) => column('timestamp', name),
+		timestamp: (name: string, options?: { precision: number }) => {
+			return column(
+				options === undefined
+					? 'timestamp'
+					: `timestamp(${options.precision})`,
+				name,
+			);
+		},
 		string: (name: string, size?: number) => column('string', name, size),
 		text: (name: string) => column('text', name),
 		integer: (name: string) => column('integer', name),
 		json: (name: string) => column('json', name),
-		index: (name: string) => indexes.push(name),
+		index: (columns: string | string[], name?: string) => {
+			indexes.push(name ?? (columns as string));
+		},
+		dropIndex: (_columns: string[], name: string) => indexes.push(`drop ${name}`),
 		dropColumn: (name: string) => columns.push(`drop ${name}`),
 	};
 }
@@ -53,6 +70,7 @@ function fakeKnex() {
 	return {
 		tables,
 		dropped,
+		raw: vi.fn(),
 		schema: {
 			createTable: vi.fn(build),
 			alterTable: vi.fn(build),
@@ -64,6 +82,10 @@ function fakeKnex() {
 }
 
 describe('20260916A-create-cache-audits', () => {
+	beforeEach(() => {
+		dialect.client = 'postgres';
+	});
+
 	it('creates one row per run, one column per verdict', async () => {
 		const knex = fakeKnex();
 
@@ -106,15 +128,15 @@ describe('20260916A-create-cache-audits', () => {
 				'string(16) verdict notNullable',
 				'string(64) reason nullable',
 				'string redis_key notNullable',
-				'string cache_key nullable',
-				'string(8) method nullable',
-				'text url nullable',
-				'text query nullable',
+				'string cache_key notNullable',
+				'string(8) method notNullable',
+				'text url notNullable',
+				'text query notNullable',
 				// A bare value, not a foreign key: a finding outlives its user.
 				'string(36) user_id nullable',
 				'string collection nullable',
-				'timestamp filled_at nullable',
-				'integer age_ms nullable',
+				'timestamp filled_at notNullable',
+				'integer age_ms notNullable',
 				'json tags notNullable',
 				'json replay_tags nullable',
 				'json diff nullable',
@@ -135,6 +157,37 @@ describe('20260916A-create-cache-audits', () => {
 		});
 	});
 
+	it(oneLine`
+		gives the descriptors the audit's place in the cache, indexed as Postgres
+		reads it, nulls first
+	`, async () => {
+		const knex = fakeKnex();
+
+		await up(knex);
+
+		expect(knex.tables['directus_cache_stats_descriptors']).toEqual({
+			columns: ['timestamp(3) audited_at nullable'],
+			indexes: [],
+		});
+
+		expect(knex.raw).toHaveBeenCalledWith(
+			'CREATE INDEX directus_cache_stats_descriptors_audit_queue '
+			+ 'ON directus_cache_stats_descriptors (audited_at NULLS FIRST, last_filled)',
+		);
+	});
+
+	it('indexes the queue plainly on the other dialects', async () => {
+		dialect.client = 'sqlite';
+		const knex = fakeKnex();
+
+		await up(knex);
+
+		expect(knex.raw).not.toHaveBeenCalled();
+
+		expect(knex.tables['directus_cache_stats_descriptors']!.indexes)
+			.toEqual(['directus_cache_stats_descriptors_audit_queue']);
+	});
+
 	it('takes it all back down, findings before runs', async () => {
 		const knex = fakeKnex();
 
@@ -142,6 +195,11 @@ describe('20260916A-create-cache-audits', () => {
 
 		expect(knex.tables['directus_settings']!.columns)
 			.toEqual(['drop cache_audit_schedule']);
+
+		expect(knex.tables['directus_cache_stats_descriptors']).toEqual({
+			columns: ['drop audited_at'],
+			indexes: ['drop directus_cache_stats_descriptors_audit_queue'],
+		});
 
 		expect(knex.dropped).toEqual([
 			'directus_cache_audit_findings',

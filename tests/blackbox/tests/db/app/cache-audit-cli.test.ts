@@ -2,10 +2,11 @@ import config, { getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
 	CreateItem,
+	CreateUser,
 	DeleteCollection,
 } from '@common/functions';
 import vendors from '@common/get-dbs-to-test';
-import { USER } from '@common/variables';
+import { ROLE, USER } from '@common/variables';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { oneLine } from '@directus/utils';
 import { ChildProcess, spawn } from 'child_process';
@@ -160,11 +161,11 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			return JSON.parse(output.slice(start));
 		}
 
-		function readOwner(owner: string, from = url) {
+		function readOwner(owner: string, from = url, token = USER.ADMIN.TOKEN) {
 			return request(from)
 				.get(`/items/${ROWS}`)
 				.query(`filter[owner][_eq]=${owner}`)
-				.set('Authorization', auth);
+				.set('Authorization', `Bearer ${token}`);
 		}
 
 		async function warm(read: () => request.Test) {
@@ -178,21 +179,16 @@ describe('`directus cache audit` and the scheduled audit', () => {
 				.set('Authorization', auth);
 		}
 
-		// The descriptors the audit joins land on the one-second drain: wait for
-		// the running node to describe every entry before the CLI reads them.
-		async function settled(from = url) {
+		// The audit takes its entries off the descriptors, which land on the
+		// one-second drain: wait for the running node to describe every entry
+		// warmed before the CLI reads them.
+		async function settled(warmed = 1) {
 			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
-				const response = await request(from)
+				const response = await request(url)
 					.post('/utils/cache/audit')
 					.set('Authorization', auth);
 
-				const report = response.body.data;
-
-				const undescribed = report.findings.some((finding: any) => {
-					return finding.reason === 'no_descriptor';
-				});
-
-				if (report.scanned > 0 && !undescribed) {
+				if (response.body.data.scanned >= warmed) {
 					return;
 				}
 
@@ -207,7 +203,7 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			await clearCache();
 			await warm(() => readOwner('acme'));
 			await warm(() => readOwner('globex'));
-			await settled();
+			await settled(2);
 
 			const { code, output } = await runCacheAudit(['--json']);
 
@@ -293,15 +289,22 @@ describe('`directus cache audit` and the scheduled audit', () => {
 		it(oneLine`
 			exits 2 under --strict, and 0 without, over an entry it cannot replay
 		`, async () => {
+			const token = `cache-audit-cli-gone-${vendor}`;
+
+			const gone = await CreateUser(vendor, {
+				token,
+				email: `cache-audit-cli-gone-${vendor}@example.com`,
+				roleName: ROLE.ADMIN.NAME,
+			});
+
 			await clearCache();
-			await warm(() => readOwner('globex'));
+			await warm(() => readOwner('globex', url, token));
 			await settled();
 
-			// Drops the descriptors while the entry lives on: nothing to replay
-			// it from.
-			await request(url)
-				.post('/utils/cache/stats/truncate')
-				.set('Authorization', auth);
+			// The user goes behind the API, so the entry filled for them lives on
+			// with no one to replay it as.
+			await db('directus_users').where({ id: gone.id })
+				.delete();
 
 			const lenient = await runCacheAudit(['--json']);
 
@@ -309,7 +312,8 @@ describe('`directus cache audit` and the scheduled audit', () => {
 
 			expect(reportIn(lenient.output).findings[0]).toMatchObject({
 				verdict: 'unreplayable',
-				reason: 'no_descriptor',
+				reason: 'user_gone',
+				user: gone.id,
 			});
 
 			const strict = await runCacheAudit(['--strict']);
@@ -332,7 +336,7 @@ describe('`directus cache audit` and the scheduled audit', () => {
 					.set('Authorization', auth);
 			});
 
-			await settled();
+			await settled(3);
 
 			const capped = await runCacheAudit(['--json', '--limit', '1']);
 

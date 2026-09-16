@@ -7,6 +7,7 @@ import {
 	clampCacheStatsWindow,
 	claimCacheAnomalyThrottleSlot,
 	queueCacheAnomaly,
+	advanceCacheAuditQueue,
 	queueCachePurge,
 	queueMissLatency,
 	queueCacheHit,
@@ -21,7 +22,7 @@ import {
 	listCacheAnomalies,
 	listCacheEntries,
 	listPurgesCoveringEntry,
-	readCacheAuditDescriptors,
+	readCacheAuditQueue,
 	readCacheDescriptorForRedisKey,
 	readCacheTombstone,
 	listCacheGroupLatencies,
@@ -192,6 +193,7 @@ beforeEach(() => {
 			return builder;
 		}),
 		whereNull: vi.fn(() => builder),
+		whereNot: vi.fn(() => builder),
 		whereNotNull: vi.fn(() => builder),
 		whereNotIn: vi.fn(() => builder),
 		whereIn: vi.fn(() => builder),
@@ -204,6 +206,7 @@ beforeEach(() => {
 		first: vi.fn(() => Promise.resolve(firstRows.shift())),
 		pluck: vi.fn(() => Promise.resolve(pluckResult)),
 		delete: vi.fn(() => Promise.resolve(deleteCount)),
+		update: vi.fn(() => Promise.resolve(1)),
 		then: (resolve: any, reject: any) => {
 			const rows = rowsByTable[lastTable] ?? queryRows;
 			return Promise.resolve(rows).then(resolve, reject);
@@ -3051,7 +3054,9 @@ describe('effectiveTtlByBucket', () => {
 	});
 });
 
-describe('readCacheAuditDescriptors', () => {
+describe('readCacheAuditQueue', () => {
+	const before = new Date(9_000);
+
 	function descriptorRow(overrides: Record<string, unknown> = {}) {
 		return {
 			cache_key: 'ck1',
@@ -3066,7 +3071,10 @@ describe('readCacheAuditDescriptors', () => {
 		};
 	}
 
-	it('keys the described entries by their redis key, tags joined in', async () => {
+	it(oneLine`
+		answers the described entries least recently audited first, never audited
+		ones ahead, tags joined in
+	`, async () => {
 		rowsByTable['directus_cache_stats_descriptors'] = [
 			descriptorRow(),
 			descriptorRow({
@@ -3084,10 +3092,10 @@ describe('readCacheAuditDescriptors', () => {
 			{ cache_key: 'ck1', scoped_cache_tag: 'authors' },
 		];
 
-		const described = await readCacheAuditDescriptors(['rk1', 'rk2', 'rk3']);
+		const due = await readCacheAuditQueue(500, before);
 
-		expect([...described.entries()]).toEqual([
-			['rk1', {
+		expect(due).toEqual([
+			{
 				cacheKey: 'ck1',
 				redisKey: 'rk1',
 				method: 'GET',
@@ -3097,8 +3105,8 @@ describe('readCacheAuditDescriptors', () => {
 				query: 'fields[]=id',
 				lastFilled: new Date(5_000),
 				scopedCacheTags: ['articles:owner=acme', 'authors'],
-			}],
-			['rk2', {
+			},
+			{
 				cacheKey: 'ck2',
 				redisKey: 'rk2',
 				method: 'GET',
@@ -3108,19 +3116,47 @@ describe('readCacheAuditDescriptors', () => {
 				query: '{"query":"{ __typename }"}',
 				lastFilled: new Date(5_000),
 				scopedCacheTags: [],
-			}],
+			},
 		]);
 
-		expect(builder.whereIn).toHaveBeenCalledWith('redis_key', ['rk1', 'rk2', 'rk3']);
+		expect(builder.orderBy.mock.calls).toEqual([
+			['audited_at', 'asc', 'first'],
+			['last_filled', 'asc'],
+		]);
+
+		expect(builder.limit).toHaveBeenCalledWith(500);
 		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
 		// A descriptor that recorded a fill, never one only ever seen as a miss.
 		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
+		// Nor one written before it kept the key the cache is asked for.
+		expect(builder.whereNot).toHaveBeenCalledWith('redis_key', '');
 	});
 
-	it('asks the tags of nothing when no key is described', async () => {
+	it('bounds the queue to what was audited before the run, or never', async () => {
 		rowsByTable['directus_cache_stats_descriptors'] = [];
 
-		expect((await readCacheAuditDescriptors(['rk1'])).size).toBe(0);
+		await readCacheAuditQueue(500, before);
+
+		expect(builder.whereNull).toHaveBeenCalledWith('audited_at');
+		expect(builder.orWhere).toHaveBeenCalledWith('audited_at', '<', before);
+	});
+
+	it('narrows to a user and a collection in the query itself', async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [];
+
+		await readCacheAuditQueue(500, before, {
+			user: 'user-2',
+			collection: 'authors',
+		});
+
+		expect(builder.where).toHaveBeenCalledWith('user_id', 'user-2');
+		expect(builder.where).toHaveBeenCalledWith('collection', 'authors');
+	});
+
+	it('asks the tags of nothing when nothing is due', async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [];
+
+		expect(await readCacheAuditQueue(500, before)).toEqual([]);
 
 		expect(mockDb).toHaveBeenCalledTimes(1);
 
@@ -3129,27 +3165,32 @@ describe('readCacheAuditDescriptors', () => {
 		);
 	});
 
-	it('asks in chunks of 500 keys', async () => {
-		rowsByTable['directus_cache_stats_descriptors'] = [];
-		const keys = Array.from({ length: 1_001 }, (_, i) => `rk${i}`);
-
-		await readCacheAuditDescriptors(keys);
-
-		const chunks = vi.mocked(builder.whereIn).mock.calls
-			.filter(([column]: [string]) => column === 'redis_key')
-			.map(([, values]: [string, string[]]) => values.length);
-
-		expect(chunks).toEqual([500, 500, 1]);
-	});
-
 	it(oneLine`
-		answers nothing without asking where stats are off, or for no key
+		answers nothing without asking where stats are off, or for no room
 	`, async () => {
-		expect((await readCacheAuditDescriptors([])).size).toBe(0);
+		expect(await readCacheAuditQueue(0, before)).toEqual([]);
 
 		env['CACHE_STATS_ENABLED'] = false;
 
-		expect((await readCacheAuditDescriptors(['rk1'])).size).toBe(0);
+		expect(await readCacheAuditQueue(500, before)).toEqual([]);
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('advanceCacheAuditQueue', () => {
+	it('stamps the descriptors audited at the time given', async () => {
+		const at = new Date(9_500);
+
+		await advanceCacheAuditQueue(['ck1', 'ck2'], at);
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
+		expect(builder.update).toHaveBeenCalledWith({ audited_at: at });
+	});
+
+	it('asks nothing for no descriptor', async () => {
+		await advanceCacheAuditQueue([], new Date(9_500));
+
 		expect(mockDb).not.toHaveBeenCalled();
 	});
 });

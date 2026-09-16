@@ -98,3 +98,42 @@ self-protection in `cli/run.ts` before `createCli()`, and always smoke the built
 CLI once by hand (`curl -g` for `[`/`]` in URLs) — see
 [[project_directus_blackbox_cache_local_repro]] for the redis+sqlite hand-run
 recipe and [[reference_directus_useenv_mock_hoisted]] for the env mock pattern.
+
+**PR #499 CI-green, NOT merged yet** (waiting on explicit "merge it" — do not
+merge without it): history tables, live schedule, MCP group, cache-page panel,
+`CACHE_AUDIT_ENABLED` per-node switch — all landed and green (postgres shards,
+unit, acceptance/Playwright, CodeQL) as of head `ef1588fd73`.
+
+**Descriptor-driven queue (2026-09-16, replaces the Redis SCAN loop):**
+- Prod measured (read-only, `--scan --count 10000` + `comm` against
+  `select redis_key from directus_cache_stats_descriptors`): **47,833 live
+  response bodies, 0 without a descriptor**; 407k descriptors of which 88%
+  describe an entry already purged (kept by the events reference); keyspace
+  1.04M = 639k `scalabus:stats:tomb:*` + 144k `permissions:*` + 68k `rlflx`.
+  The 08-26 "270k keys" was TOTAL keys, not entries. Full-run cost ≈ 47.8k ×
+  replay latency / 4.
+- Engine: `readCacheAuditQueue(count, before, {user, collection})` pages
+  `directus_cache_stats_descriptors` `WHERE last_filled NOT NULL AND redis_key
+  <> '' AND (audited_at IS NULL OR audited_at < before) ORDER BY audited_at
+  NULLS FIRST, last_filled LIMIT 500`; `cache.getMany` for bodies; gone rows
+  passed over; `advanceCacheAuditQueue(cacheKeys, now)` stamps passed + examined
+  BEFORE the replay (claim); `before` = run start EXACTLY (a 1 s grace broke
+  back-to-back runs: the second skipped what the first stamped) so the column
+  is `timestamp(3)` (MySQL seconds would sort a stamp before its own run's
+  start → re-read loop). PG index `(audited_at NULLS FIRST, last_filled)` raw;
+  plain index elsewhere. `limit` = live entries examined; excess live rows of
+  the last page stay unstamped for the next run.
+- `CACHE_AUDIT_LIMIT` (number, default 0 = whole queue) is the default `limit`
+  for any run that names none, applied in `runCacheAudit` (recorded in the run
+  options): the cron's chunk knob AND what keeps "Audit now" bounded on prod.
+- `unreplayable:no_descriptor` is GONE (an undescribed entry is not in the
+  queue); `CacheAuditFinding.cacheKey/method/url/query/filledAt/ageMs` are no
+  longer nullable (api, app panel type, spec, finding columns notNullable);
+  stats off → `auditCache` throws "CACHE_STATS_ENABLED is off".
+- bb: `settled(warmed)` waits for `scanned >= warmed` (the old no_descriptor
+  signal no longer exists); `--strict` witness is now `user_gone` (raw
+  `directus_users` delete of a throwaway admin user, leaves the cache alone);
+  REST suite witnesses resume order via `audited_at` stamps: acme, globex, acme.
+- Still open: no overlap guard beyond the queue's own partitioning (two
+  concurrent runs share the queue rather than double-replay), no wall cap;
+  REST/MCP run synchronous.

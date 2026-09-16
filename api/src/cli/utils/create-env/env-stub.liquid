@@ -255,12 +255,18 @@ CACHE_STORE=memory
 # the ones serving traffic. [true]
 CACHE_AUDIT_ENABLED=true
 
-# When to replay every live cache entry against the database and report the
-# ones it no longer matches (`POST /utils/cache/audit`, `directus cache audit`).
-# Every replay is an uncached read: dev and preview only. Off when empty. The
-# rule is shared (`directus_settings` overrides it live), so every node with
+# When to replay the live cache entries against the database and report the
+# ones they no longer match (`POST /utils/cache/audit`, `directus cache audit`).
+# Every replay is an uncached read. Off when empty. The rule is shared
+# (`directus_settings` overrides it live), so every node with
 # CACHE_AUDIT_ENABLED runs it. [""]
 # CACHE_AUDIT_SCHEDULE="0 */10 * * * *"
+
+# How many entries one audit examines before stopping, when the run asks for no
+# limit of its own: the next run resumes behind them, least recently audited
+# first, so a schedule works through the whole cache in slices and the database
+# never sees more than one slice of uncached reads per tick. 0 is no limit. [0]
+CACHE_AUDIT_LIMIT=0
 
 # JSON-pointer globs a cache audit ignores when comparing a stored body with a
 # fresh one: `*` is one segment, `**` the rest. For bodies a hook stamps with a

@@ -158,21 +158,16 @@ describe('Cache audit over the system MCP', () => {
 				.set('Authorization', auth);
 		}
 
-		// The descriptors the audit joins land on the one-second drain: wait for
-		// the node to describe every entry before the tool reads them.
+		// The audit takes its entries off the descriptors, which land on the
+		// one-second drain: wait for the node to describe both entries warmed
+		// before the tool reads them.
 		async function settled() {
 			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
 				const response = await request(url)
 					.post('/utils/cache/audit')
 					.set('Authorization', auth);
 
-				const report = response.body.data;
-
-				const undescribed = report.findings.some((finding: any) => {
-					return finding.reason === 'no_descriptor';
-				});
-
-				if (report.scanned > 0 && !undescribed) {
+				if (response.body.data.scanned >= 2) {
 					return;
 				}
 

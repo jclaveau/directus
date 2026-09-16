@@ -1,18 +1,20 @@
 post:
   summary: Audit the cache
   description: >
-    Replay every live response-cache entry against the database, as the user it
-    was filled for and through the same controller and hooks, and report the
-    entries the database no longer answers with: `stale` (the body differs, and
-    `purgesSinceFilled` says whether a purge covered the entry and left it, or
-    none ever named the write), `tag_drift` (same body, other tags — one write
-    from stale), `raced` (purged or refilled during the replay), `time_varying`
-    (two fresh reads disagree), `expired`, and `unreplayable` with a `reason`
-    (`no_descriptor`: filled while cache stats were off; `user_gone`;
-    `status_<code>`; `replay_unrecognized`). Every replay is an uncached read:
-    a dev, preview and e2e instrument. The run is recorded in the audit
-    history (`/utils/cache/audits`), and stale and drifted entries are also
-    recorded as `stale_entry` / `tag_drift` cache anomalies. Admin only.
+    Replay the live response-cache entries against the database, as the user
+    each was filled for and through the same controller and hooks, and report
+    the entries the database no longer answers with: `stale` (the body differs,
+    and `purgesSinceFilled` says whether a purge covered the entry and left it,
+    or none ever named the write), `tag_drift` (same body, other tags — one
+    write from stale), `raced` (purged or refilled during the replay),
+    `time_varying` (two fresh reads disagree), `expired`, and `unreplayable`
+    with a `reason` (`user_gone`; `status_<code>`; `replay_unrecognized`).
+    Entries are taken off their cache-stats descriptors, least recently
+    audited first — an entry filled while cache stats were off has none and is
+    not seen — and a run with a `limit` stops there while the next resumes
+    behind it. Every replay is an uncached read. The run is recorded in the
+    audit history (`/utils/cache/audits`), and stale and drifted entries are
+    also recorded as `stale_entry` / `tag_drift` cache anomalies. Admin only.
   operationId: audit-cache
   requestBody:
     content:
@@ -23,7 +25,10 @@ post:
             limit:
               type: integer
               minimum: 1
-              description: Stop after this many entries.
+              description: >
+                Stop after this many entries; the next run resumes behind
+                them. `CACHE_AUDIT_LIMIT` when absent, the whole cache when
+                that is 0.
             user:
               type: string
               description: Only the entries filled for this user id.

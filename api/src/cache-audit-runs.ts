@@ -71,11 +71,22 @@ function retentionMs(): number {
 	return getMilliseconds(useEnv()['CACHE_AUDIT_RETENTION'], DEFAULT_RETENTION_MS);
 }
 
+// The slice a run examines when it names no limit of its own: the cron's
+// knob, and what keeps "Audit now" on a large cache from outliving the
+// request. 0 is the whole queue.
+function defaultLimit(): number | undefined {
+	const configured = Number(useEnv()['CACHE_AUDIT_LIMIT'] ?? 0);
+
+	return Number.isInteger(configured) && configured > 0
+		? configured
+		: undefined;
+}
+
 /**
  * Run an audit and record it — the one entrypoint every surface goes through,
- * so no run escapes the history, and none runs on a node that opted out. The
- * engine stays what it was: a function over the cache that answers a report
- * and stores nothing.
+ * so no run escapes the history, none runs on a node that opted out, and a
+ * run asking for no limit gets `CACHE_AUDIT_LIMIT`. The engine stays what it
+ * was: a function over the cache that answers a report and stores nothing.
  */
 export async function runCacheAudit(
 	trigger: CacheAuditTrigger,
@@ -88,11 +99,12 @@ export async function runCacheAudit(
 		});
 	}
 
-	const id = await startCacheAuditRun(trigger, options);
+	const sliced = { ...options, limit: options.limit ?? defaultLimit() };
+	const id = await startCacheAuditRun(trigger, sliced);
 	let report: CacheAuditReport;
 
 	try {
-		report = await auditCache(options);
+		report = await auditCache(sliced);
 	}
 	catch (error) {
 		await failCacheAuditRun(id, error);
@@ -293,22 +305,18 @@ function runOf(row: Record<string, unknown>): CacheAuditRun {
 }
 
 function findingOf(row: Record<string, unknown>): CacheAuditFinding {
-	const filledAt = row['filled_at'];
-
 	return {
 		verdict: row['verdict'] as CacheAuditVerdict,
 		reason: (row['reason'] as string | null) ?? null,
 		redisKey: row['redis_key'] as string,
-		cacheKey: (row['cache_key'] as string | null) ?? null,
-		method: (row['method'] as string | null) ?? null,
-		url: (row['url'] as string | null) ?? null,
-		query: (row['query'] as string | null) ?? null,
+		cacheKey: row['cache_key'] as string,
+		method: row['method'] as string,
+		url: row['url'] as string,
+		query: row['query'] as string,
 		user: (row['user_id'] as string | null) ?? null,
 		collection: (row['collection'] as string | null) ?? null,
-		filledAt: filledAt === null || filledAt === undefined
-			? null
-			: new Date(filledAt as string).getTime(),
-		ageMs: nullableNumber(row['age_ms']),
+		filledAt: new Date(row['filled_at'] as string).getTime(),
+		ageMs: Number(row['age_ms']),
 		tags: (json(row['tags']) as string[] | null) ?? [],
 		replayTags: json(row['replay_tags']) as string[] | null,
 		diff: json(row['diff']) as string[] | null,

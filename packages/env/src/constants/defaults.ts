@@ -118,6 +118,7 @@ export const DEFAULTS = {
 	// Off: a run replays every live entry uncached, a dev/preview cost only.
 	CACHE_AUDIT_ENABLED: true,
 	CACHE_AUDIT_SCHEDULE: '',
+	CACHE_AUDIT_LIMIT: 0,
 	CACHE_AUDIT_IGNORE_PATHS: '',
 	CACHE_AUDIT_RETENTION: '30d',
 

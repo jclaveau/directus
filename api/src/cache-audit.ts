@@ -5,17 +5,18 @@ import http from 'node:http';
 import pLimit from 'p-limit';
 import { getCache, getCacheValue } from './cache.js';
 import {
+	advanceCacheAuditQueue,
 	type CacheAnomalyReason,
 	type CacheAuditDescriptor,
 	type CacheEntryPurgeRecord,
+	cacheStatsConfigured,
 	claimCacheAnomalyThrottleSlot,
 	evictCacheEntry,
 	listPurgesCoveringEntry,
 	queueCacheAnomaly,
-	readCacheAuditDescriptors,
+	readCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
-import { scopedCacheSidecarOwner } from './scoped-cache.js';
 import {
 	CACHE_AUDIT_REPLAY_HEADER,
 	CACHE_AUDIT_TAGS_HEADER,
@@ -33,6 +34,13 @@ import { getSecret } from './utils/get-secret.js';
  * controller, every read hook, GraphQL — as the user it was filled for, and the
  * two bodies are compared (https://github.com/jclaveau/directus/issues/498).
  *
+ * The entries come off the descriptor table, least recently audited first,
+ * and the cache is asked for their bodies: only a described entry can be
+ * replayed, and a table orders, pages and remembers where a `SCAN` does none
+ * of it. A run with a `limit` examines that many and stops; the next one
+ * resumes behind them, so a schedule audits the whole cache in slices sized
+ * to the load each may put on the database.
+ *
  *   - fresh:         the replay answered the stored body.
  *   - stale:         a diff that held across two fresh reads. `purgesSinceFilled`
  *                    says which side lost it: a purge that covered the entry's
@@ -46,7 +54,9 @@ import { getSecret } from './utils/get-secret.js';
  *   - time_varying:  two fresh reads disagreed with each other ($NOW, a random
  *                    sort). Not decidable, not counted against the cache.
  *   - expired:       past its expiry and not yet evicted.
- *   - unreplayable:  nothing to replay it from; `reason` says why.
+ *   - unreplayable:  nothing to replay it from; `reason` says why. An entry
+ *                    with no descriptor at all is not in the queue: filled
+ *                    while stats were off, it waits for its next fill.
  */
 export type CacheAuditVerdict =
 	| 'fresh'
@@ -85,7 +95,7 @@ export type CacheAuditReplayer = (
 ) => Promise<CacheAuditReplayResponse>;
 
 export interface CacheAuditOptions {
-	/** Stop after this many entries have been examined. */
+	/** Stop after this many entries have been examined; the next run resumes. */
 	limit?: number | undefined;
 	/** Only the entries filled for this user id. */
 	user?: string | undefined;
@@ -104,15 +114,16 @@ export interface CacheAuditFinding {
 	/** The `unreplayable` reason, or what a replay answered instead of a body. */
 	reason: string | null;
 	redisKey: string;
-	cacheKey: string | null;
-	method: string | null;
-	url: string | null;
+	cacheKey: string;
+	method: string;
+	url: string;
 	/** A GET's query string as sent; a GraphQL read's document and variables. */
-	query: string | null;
+	query: string;
+	/** Null for a public fill. */
 	user: string | null;
 	collection: string | null;
-	filledAt: number | null;
-	ageMs: number | null;
+	filledAt: number;
+	ageMs: number;
 	/** The tags it was filled under. */
 	tags: string[];
 	/** The tags the replay pinned, where one answered. */
@@ -134,14 +145,16 @@ export interface CacheAuditReport {
 // Entries in flight at once. Each is one uncached read of the app, so this is
 // the load the audit puts on the database, not a throughput knob.
 const REPLAY_CONCURRENCY = 4;
-const DESCRIPTOR_BATCH = 200;
+// Descriptors read per page of the queue; most describe an entry the cache
+// has already dropped, and those cost one `getMany` miss each.
+const QUEUE_PAGE = 500;
 const DIFF_PATHS_REPORTED = 20;
 // Enough diff paths to find one an ignore glob does not cover.
 const DIFF_PATHS_COMPARED = 500;
 const REPLAY_TOKEN_TTL = '60s';
 
 interface LiveEntry {
-	redisKey: string;
+	descriptor: CacheAuditDescriptor;
 	raw: unknown;
 }
 
@@ -194,19 +207,60 @@ export async function auditCache(
 		return report;
 	}
 
-	if (typeof cache.iterator !== 'function') {
-		throw new Error('The cache store cannot be enumerated');
+	if (!cacheStatsConfigured()) {
+		throw new Error(
+			'The cache audit replays the request descriptors: CACHE_STATS_ENABLED is off',
+		);
 	}
 
 	const audit = new CacheAudit(cache, options);
 	const limit = pLimit(REPLAY_CONCURRENCY);
-	let batch: LiveEntry[] = [];
+	// What this run stamps is stamped after it began, so a read bounded by its
+	// start never wraps around into its own pages.
+	const before = new Date(startedAt);
+	const filter = { user: options.user, collection: options.collection };
 
-	const drain = async () => {
-		const findings = await audit.examine(batch, limit);
-		batch = [];
+	for (;;) {
+		const room = options.limit === undefined
+			? Number.POSITIVE_INFINITY
+			: options.limit - report.scanned;
 
-		for (const finding of findings) {
+		if (room <= 0) {
+			break;
+		}
+
+		const due = await readCacheAuditQueue(QUEUE_PAGE, before, filter);
+
+		if (due.length === 0) {
+			break;
+		}
+
+		const raws = await cache.getMany(due.map((descriptor) => descriptor.redisKey));
+
+		// A descriptor whose entry is gone is passed over, not examined: it
+		// describes nothing until the next fill. A page can hold more live
+		// entries than the limit has room for; those stay unstamped for the
+		// next run.
+		const passed: string[] = [];
+		const batch: LiveEntry[] = [];
+
+		due.forEach((descriptor, index) => {
+			const raw = raws[index];
+
+			if (raw === undefined) {
+				passed.push(descriptor.cacheKey);
+			}
+			else if (batch.length < room) {
+				batch.push({ descriptor, raw });
+			}
+		});
+
+		await advanceCacheAuditQueue(
+			[...passed, ...batch.map((entry) => entry.descriptor.cacheKey)],
+			new Date(),
+		);
+
+		for (const finding of await audit.examine(batch, limit)) {
 			report.scanned += 1;
 			report.counts[finding.verdict] += 1;
 
@@ -214,34 +268,7 @@ export async function auditCache(
 				report.findings.push(finding);
 			}
 		}
-	};
-
-	// Keyv owns the key prefixing, so it is asked for the entries rather than
-	// Redis scanned by a rebuilt prefix; it yields each key already unprefixed.
-	const entries = cache.iterator(undefined) as AsyncGenerator<[string, unknown]>;
-
-	for await (const [redisKey, raw] of entries) {
-		if (scopedCacheSidecarOwner(redisKey) !== null) {
-			continue;
-		}
-
-		batch.push({ redisKey, raw });
-
-		// A batch is examined whole, so it is sized to what the limit has left.
-		const room = options.limit === undefined
-			? DESCRIPTOR_BATCH
-			: Math.min(DESCRIPTOR_BATCH, options.limit - report.scanned);
-
-		if (batch.length >= room) {
-			await drain();
-		}
-
-		if (options.limit !== undefined && report.scanned >= options.limit) {
-			break;
-		}
 	}
-
-	await drain();
 
 	if (options.purge === true) {
 		for (const finding of report.findings) {
@@ -270,7 +297,7 @@ class CacheAudit {
 
 	constructor(
 		private readonly cache: Keyv,
-		private readonly options: CacheAuditOptions,
+		options: CacheAuditOptions,
 	) {
 		this.replay = options.replay ?? loopbackReplayer();
 
@@ -284,32 +311,12 @@ class CacheAudit {
 		batch: LiveEntry[],
 		limit: ReturnType<typeof pLimit>,
 	): Promise<CacheAuditFinding[]> {
-		const descriptors = await readCacheAuditDescriptors(
-			batch.map((entry) => entry.redisKey),
-		);
-
-		const findings = await Promise.all(batch.map((entry) => {
-			return limit(() => this.examineEntry(entry, descriptors.get(entry.redisKey)));
-		}));
-
-		return findings.filter((finding) => finding !== null);
+		return Promise.all(batch.map((entry) => limit(() => this.examineEntry(entry))));
 	}
 
-	private async examineEntry(
-		entry: LiveEntry,
-		descriptor: CacheAuditDescriptor | undefined,
-	): Promise<CacheAuditFinding | null> {
-		if (descriptor !== undefined && this.filteredOut(descriptor)) {
-			return null;
-		}
-
-		// A filter names a descriptor field, so an entry with no descriptor can
-		// neither match it nor be told apart from one that does not.
-		if (descriptor === undefined && this.hasFilter()) {
-			return null;
-		}
-
-		const verdict = await this.judge(entry, descriptor);
+	private async examineEntry(entry: LiveEntry): Promise<CacheAuditFinding> {
+		const { descriptor } = entry;
+		const verdict = await this.judge(entry);
 		const now = Date.now();
 
 		const finding: CacheAuditFinding = {
@@ -317,20 +324,16 @@ class CacheAudit {
 			reason: 'reason' in verdict
 				? verdict.reason
 				: null,
-			redisKey: entry.redisKey,
-			cacheKey: descriptor?.cacheKey ?? null,
-			method: descriptor?.method ?? null,
-			url: descriptor
-				? descriptorUrl(descriptor)
-				: null,
-			query: descriptor?.query ?? null,
-			user: descriptor?.userId ?? null,
-			collection: descriptor?.collection ?? null,
-			filledAt: descriptor?.lastFilled.getTime() ?? null,
-			ageMs: descriptor
-				? Math.max(now - descriptor.lastFilled.getTime(), 0)
-				: null,
-			tags: descriptor?.scopedCacheTags ?? [],
+			redisKey: descriptor.redisKey,
+			cacheKey: descriptor.cacheKey,
+			method: descriptor.method,
+			url: descriptorUrl(descriptor),
+			query: descriptor.query,
+			user: descriptor.userId,
+			collection: descriptor.collection,
+			filledAt: descriptor.lastFilled.getTime(),
+			ageMs: Math.max(now - descriptor.lastFilled.getTime(), 0),
+			tags: descriptor.scopedCacheTags,
 			replayTags: 'replayTags' in verdict
 				? verdict.replayTags
 				: null,
@@ -340,7 +343,7 @@ class CacheAudit {
 			purgesSinceFilled: null,
 		};
 
-		if (verdict.verdict === 'stale' && descriptor !== undefined) {
+		if (verdict.verdict === 'stale') {
 			finding.purgesSinceFilled = await listPurgesCoveringEntry(
 				descriptor.cacheKey,
 				descriptor.lastFilled,
@@ -353,7 +356,7 @@ class CacheAudit {
 			);
 		}
 
-		if (verdict.verdict === 'tag_drift' && descriptor !== undefined) {
+		if (verdict.verdict === 'tag_drift') {
 			await this.recordAnomaly(
 				descriptor,
 				'tag_drift',
@@ -365,24 +368,10 @@ class CacheAudit {
 		return finding;
 	}
 
-	private hasFilter(): boolean {
-		return this.options.user !== undefined || this.options.collection !== undefined;
-	}
-
-	private filteredOut(descriptor: CacheAuditDescriptor): boolean {
-		if (this.options.user !== undefined && descriptor.userId !== this.options.user) {
-			return true;
-		}
-
-		return this.options.collection !== undefined
-			&& descriptor.collection !== this.options.collection;
-	}
-
-	private async judge(
-		entry: LiveEntry,
-		descriptor: CacheAuditDescriptor | undefined,
-	): Promise<Verdict> {
-		let snapshot = await this.snapshot(entry.redisKey, entry.raw);
+	private async judge(entry: LiveEntry): Promise<Verdict> {
+		const { descriptor } = entry;
+		const { redisKey } = descriptor;
+		let snapshot = await this.snapshot(redisKey, entry.raw);
 
 		if (snapshot === null) {
 			return { verdict: 'raced' };
@@ -392,12 +381,8 @@ class CacheAudit {
 			return { verdict: 'unreplayable', reason: 'unreadable' };
 		}
 
-		if (await this.expired(entry.redisKey)) {
+		if (await this.expired(redisKey)) {
 			return { verdict: 'expired' };
-		}
-
-		if (descriptor === undefined) {
-			return { verdict: 'unreplayable', reason: 'no_descriptor' };
 		}
 
 		const plan = replayPlan(descriptor);
@@ -433,14 +418,14 @@ class CacheAudit {
 					: { verdict: 'tag_drift', replayTags: fresh.tags };
 			}
 
-			const moved = await this.movedSince(entry.redisKey, snapshot);
+			const moved = await this.movedSince(redisKey, snapshot);
 
 			if (moved === 'gone') {
 				return { verdict: 'raced' };
 			}
 
 			if (moved === 'refilled') {
-				snapshot = await this.snapshot(entry.redisKey, undefined);
+				snapshot = await this.snapshot(redisKey, undefined);
 
 				if (snapshot === null || snapshot.body === undefined) {
 					return { verdict: 'raced' };
@@ -471,7 +456,7 @@ class CacheAudit {
 	}
 
 	/**
-	 * The body as the enumeration handed it, or re-read from the cache when a
+	 * The body as the page read handed it, or re-read from the cache when a
 	 * retry needs the current one. Null once the key is gone; `undefined` body
 	 * for a value that does not decompress.
 	 */

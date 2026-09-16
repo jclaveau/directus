@@ -12,7 +12,6 @@ import {
 	type CacheAuditRunWithFindings,
 	type CacheAuditSchedule,
 	describeOptions,
-	findingRequest,
 	findingVerdict,
 	REPORTED_VERDICTS,
 	runStatus,
@@ -467,7 +466,9 @@ defineExpose({ load });
         >
           <div class="finding-head">
             <span class="finding-verdict">{{ findingVerdict(finding) }}</span>
-            <span class="finding-request">{{ findingRequest(finding) }}</span>
+            <span class="finding-request">
+              {{ finding.method }} {{ finding.url }}
+            </span>
           </div>
 
           <div class="finding-meta">
@@ -478,7 +479,7 @@ defineExpose({ load });
             <span v-if="finding.collection">
               {{ t('collection', 'Collection') }}: {{ finding.collection }}
             </span>
-            <span v-if="finding.ageMs !== null">
+            <span>
               {{ t('age', 'Age') }}: {{ formatDuration(finding.ageMs / 1000) }}
             </span>
           </div>

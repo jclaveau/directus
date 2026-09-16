@@ -852,16 +852,20 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				+ 'the database answers now. Each entry comes back fresh, stale (a '
 				+ 'missed invalidation), tag_drift (same body, different scoped-cache '
 				+ 'tags — one write from stale), raced, time_varying, expired or '
-				+ 'unreplayable. Every replay is an uncached read, so narrow a large '
-				+ 'cache with `limit`, `user` or `collection`. The run is recorded; '
-				+ '`read_cache_audit` reads it back by the `id` answered here.',
+				+ 'unreplayable. Entries are taken least recently audited first, and '
+				+ 'a run with a `limit` stops there while the next resumes behind '
+				+ 'it — every replay is an uncached read, so slice a large cache with '
+				+ '`limit` (`CACHE_AUDIT_LIMIT` when none is given), `user` or '
+				+ '`collection`. The run is recorded; `read_cache_audit` reads it '
+				+ 'back by the `id` answered here.',
 			inputSchema: {
 				type: 'object',
 				properties: {
 					limit: {
 						type: 'number',
 						minimum: 1,
-						description: 'Stop after this many entries.',
+						description: 'Stop after this many entries; the next run resumes '
+							+ 'behind them. Defaults to CACHE_AUDIT_LIMIT.',
 					},
 					user: {
 						type: 'string',
