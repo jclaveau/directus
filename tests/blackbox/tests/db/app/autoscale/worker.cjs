@@ -61,10 +61,13 @@ if (calmAfterMs > 0) {
 const inFlightReport = process.env['BB_IN_FLIGHT'];
 
 if (inFlightReport !== undefined) {
-	const busyInstance = process.env['BB_IN_FLIGHT_BUSY_INSTANCE'];
+	// Which workers report it, by pm2 instance number, comma-separated. Unset
+	// means all of them. A release of several workers is only proven to leave
+	// the working ones alone by a pool holding more of those than one.
+	const busyInstances = process.env['BB_IN_FLIGHT_BUSY_INSTANCES']?.split(',');
 
-	const inFlight = busyInstance === undefined
-		|| busyInstance === process.env['NODE_APP_INSTANCE']
+	const inFlight = busyInstances === undefined
+		|| busyInstances.includes(process.env['NODE_APP_INSTANCE'])
 		? Number(inFlightReport)
 		: 0;
 

@@ -64,7 +64,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// climb whose release is held by the cooldown the add re-armed, a third pool
 	// released at the worker that is not the one pm2 would have taken, and a
 	// fourth held whole because one of its two workers is carrying everything.
-	'/tests/db/app/autoscale-release.test.ts': 330_000,
+	'/tests/db/app/autoscale-release.test.ts': 240_000,
 	// Two pools held under a fixed window each, plus the grow the second
 	// arm waits out.
 	'/tests/db/app/autoscale-signal.test.ts': 130_000,

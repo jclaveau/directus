@@ -1,4 +1,4 @@
-import { REDACTED_TEXT } from '@directus/utils';
+import { REDACTED_TEXT } from '@directus/utils/values';
 
 export function redactQuery(originalPath: string) {
 	try {

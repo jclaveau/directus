@@ -1,6 +1,9 @@
 import { useEnv } from '@directus/env';
 import { compress as compressSnappy, uncompress as uncompressSnappy } from 'snappy';
-import { compress as compressJSON, decompress as decompressJSON } from '@directus/utils';
+import {
+	compress as compressJSON,
+	decompress as decompressJSON,
+} from '@directus/utils/values';
 
 type CacheValue = Record<string, any> | Record<string, any>[];
 

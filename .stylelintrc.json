@@ -39,7 +39,7 @@
 		"font-family-no-missing-generic-family-keyword": [true, { "ignoreFontFamilies": ["Material Symbols"] }],
 		"media-feature-range-notation": null,
 		"no-descending-specificity": null,
-		"property-no-vendor-prefix": [true, { "ignoreProperties": ["user-select", "appearance", "mask-image"] }],
+		"property-no-vendor-prefix": [true, { "ignoreProperties": ["/user-select$/", "/appearance$/", "/mask-image$/"] }],
 		"rule-empty-line-before": ["always", { "ignore": ["after-comment", "first-nested", "inside-block"] }],
 		"selector-class-pattern": null,
 		"selector-not-notation": null,

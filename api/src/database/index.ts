@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import type { SchemaInspector } from '@directus/schema';
 import { createInspector } from '@directus/schema';
-import { isObject } from '@directus/utils';
+import { isObject } from '@directus/utils/values';
 import type { DatabaseClient } from '@directus/types';
 import fse from 'fs-extra';
 import type { Knex } from 'knex';

@@ -64,10 +64,11 @@ export interface PoolOptions {
 	 */
 	inFlight?: number;
 	/**
-	 * Which worker reports `inFlight`, by pm2 instance number. Every other
-	 * worker reports none. Unset means all of them report it.
+	 * Which workers report `inFlight`, by pm2 instance number, several of them
+	 * comma-separated. Every other worker reports none. Unset means all of
+	 * them report it.
 	 */
-	inFlightBusyInstance?: string;
+	inFlightBusyInstances?: string;
 	/**
 	 * How many crashes the daemon puts a worker back for before it gives up and
 	 * leaves it errored, which is the state it calls a failure. One makes the
@@ -136,11 +137,11 @@ export function startPool(options: PoolOptions): Rig {
 						...options.inFlight === undefined
 							? {}
 							: { BB_IN_FLIGHT: String(options.inFlight) },
-						...options.inFlightBusyInstance === undefined
+						...options.inFlightBusyInstances === undefined
 							? {}
 							: {
-									BB_IN_FLIGHT_BUSY_INSTANCE:
-										options.inFlightBusyInstance,
+									BB_IN_FLIGHT_BUSY_INSTANCES:
+										options.inFlightBusyInstances,
 								},
 					},
 				},
@@ -587,4 +588,20 @@ export function decisionsOf(rig: Rig): string[] {
 		.join('')
 		.split('\n')
 		.filter((line) => line.includes('workers:'));
+}
+
+/**
+ * The resizes the autoscaler decided on, as `from -> to`, in order. How the
+ * pool got from one size to another is what a release of several workers at
+ * once has over a release of one a cooldown, and the sizes the pool passed
+ * through cannot say it: a poll sees the pool between deletes either way.
+ */
+export function resizesOf(rig: Rig): string[] {
+	return decisionsOf(rig).flatMap((line) => {
+		const resize = line.match(/(\d+ -> \d+) workers:/);
+
+		return resize === null
+			? []
+			: [resize[1]!];
+	});
 }

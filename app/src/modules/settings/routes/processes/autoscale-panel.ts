@@ -116,8 +116,9 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		field: 'releaseCpuThreshold',
 		variable: 'PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD',
 		kind: 'number',
-		description: 'Below this CPU the pool gives a worker back. Kept under the '
-			+ 'scale threshold, or a pool would grow and shrink on one reading.',
+		description: 'Below this CPU the pool gives workers back, half the way to '
+			+ 'the size the load would keep. Kept under the scale threshold, or a '
+			+ 'pool would grow and shrink on one reading.',
 		unit: '%',
 		min: AUTOSCALE_BOUNDS.releaseCpuThreshold.low,
 		max: AUTOSCALE_BOUNDS.releaseCpuThreshold.high,
@@ -174,8 +175,8 @@ export const AUTOSCALE_FIELDS: AutoscaleField[] = [
 		field: 'minSecondsToScaleDown',
 		variable: 'PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER',
 		kind: 'number',
-		description: 'How long after releasing a worker before another may go. '
-			+ 'Longer than the settling window, so a lull cannot empty the pool.',
+		description: 'How long after a release before the next may go. Longer '
+			+ 'than the settling window, so a lull cannot empty the pool.',
 		unit: 's',
 		min: AUTOSCALE_BOUNDS.minSecondsToScaleDown.low,
 		max: AUTOSCALE_BOUNDS.minSecondsToScaleDown.high,

@@ -96,8 +96,13 @@ async function prewarm(
  * the workers they already hold sockets to — and stopping it drops them: the
  * drain budget is the shutdown timeout, and a request already past it is a 502.
  *
- * One at a time and awaited, so a release that the supervisor does not answer
- * costs the workers after it rather than the pool's whole shape.
+ * Together rather than one after the other: the supervisor answers a release
+ * once the worker has drained, up to its `kill_timeout`, and a release of
+ * several workers waiting out each drain in turn would hold the tick for the
+ * sum of them. Every release is asked for before any is waited on, so the
+ * drains overlap and the tick waits for the longest. A release the supervisor
+ * does not answer fails the tick once the others have settled, the same as it
+ * fails a release of one, and the next tick reads the pool it left.
  */
 async function releaseWorkers(
 	pool: OnlineWorker[],
@@ -107,8 +112,14 @@ async function releaseWorkers(
 		return { pmId: worker.pmId, inFlight: inFlightOf(worker.pmId) };
 	});
 
-	for (const pmId of chooseVictims(candidates, count)) {
-		await releaseWorker(pmId);
+	const releases = await Promise.allSettled(
+		chooseVictims(candidates, count).map((pmId) => releaseWorker(pmId)),
+	);
+
+	for (const release of releases) {
+		if (release.status === 'rejected') {
+			throw release.reason;
+		}
 	}
 }
 
