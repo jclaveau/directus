@@ -139,6 +139,10 @@ test('Answers with what this process is and what it measured', async () => {
 
 	expect(message.self.runtime?.rssBytes).toBeGreaterThan(0);
 	expect(message.self.runtime?.nodeVersion).toBe(process.version);
+
+	// Reported so a flag pm2's `node_args` hands Node can be confirmed live,
+	// rather than inferred from what the memory figures look like.
+	expect(message.self.runtime?.execArgv).toEqual(process.execArgv);
 	expect(message.self.env).toHaveLength(1);
 });
 
@@ -161,6 +165,23 @@ test('The pool is answered however the query was narrowed', async () => {
 	autoscale.autoscaleState.mockReturnValue({ workers: 3 });
 
 	expect((await query(['env'])).self.autoscale).toEqual({ workers: 3 });
+});
+
+test('Reports the Node options it was started with', async () => {
+	// The point of carrying them: a flag pm2's `node_args` hands Node can be
+	// confirmed live, instead of being inferred from what the memory figures
+	// happen to look like.
+	const platform = process.execArgv;
+	process.execArgv = ['--max-semi-space-size=2'];
+
+	try {
+		const message = await query();
+
+		expect(message.self.runtime?.execArgv).toEqual(['--max-semi-space-size=2']);
+	}
+	finally {
+		process.execArgv = platform;
+	}
 });
 
 test('Carries the identity PM2 gave it', async () => {
