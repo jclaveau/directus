@@ -391,7 +391,10 @@ router.get(
 		});
 
 		res.locals['cache'] = false;
-		res.locals['payload'] = { data: await service.getCacheAudit(req.params['id']) };
+
+		res.locals['payload'] = {
+			data: await service.getCacheAudit(req.params['id'], req.query),
+		};
 
 		return next();
 	}),

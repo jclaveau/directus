@@ -211,16 +211,16 @@ describe('Cache audit over the system MCP', () => {
 		});
 
 		it(oneLine`
-			runs an audit, lands it in the history, and reads it back with its
-			findings
+			runs an audit, answers it as the history records it, and pages its
+			findings back from there
 		`, async () => {
 			await clearCache();
 			await warm(() => readOwner('acme'));
 			await warm(() => readOwner('globex'));
 			await settled();
 
-			// A write past the cache, which no purge covered.
-			await db(ROWS).where({ owner: 'acme' })
+			// Two writes past the cache, which no purge covered.
+			await db(ROWS).whereIn('owner', ['acme', 'globex'])
 				.update({ amount: '5' });
 
 			const ran = await callTool('run_cache_audit', { collection: ROWS });
@@ -228,52 +228,82 @@ describe('Cache audit over the system MCP', () => {
 			expect(ran.statusCode).toBe(200);
 			expect(ran.body.result.isError).toBeUndefined();
 
-			const report = ran.body.result.structuredContent;
+			const run = ran.body.result.structuredContent;
 
-			expect(JSON.parse(ran.body.result.content[0].text)).toEqual(report);
-			expect(typeof report.id).toBe('number');
-			expect(report.scanned).toBe(2);
-			expect(report.counts).toMatchObject({ fresh: 1, stale: 1 });
-			expect(report.evicted).toBe(0);
-			expect(report.findings).toHaveLength(1);
+			expect(JSON.parse(ran.body.result.content[0].text)).toEqual(run);
 
-			expect(report.findings[0]).toMatchObject({
-				verdict: 'stale',
-				url: `/items/${ROWS}?filter[owner][_eq]=acme`,
-				collection: ROWS,
-				diff: ['/data/0/amount'],
-			});
-
-			// The listing leads with it, under the surface that ran it, and
-			// carries the counts without the findings.
-			const listed = await callTool('list_cache_audits');
-
-			expect(listed.body.result.isError).toBeUndefined();
-
-			const [newest] = listed.body.result.structuredContent.items;
-
-			expect(newest).toMatchObject({
-				id: report.id,
+			// The run row, as the listing carries it: counts, not findings.
+			expect(run).toMatchObject({
+				id: expect.any(Number),
 				trigger: 'mcp',
 				options: { collection: ROWS, limit: null, user: null, purge: false },
 				scanned: 2,
-				counts: report.counts,
+				counts: expect.objectContaining({ fresh: 0, stale: 2 }),
 				evicted: 0,
 				error: null,
 			});
 
-			expect(newest.finishedAt).toBeGreaterThanOrEqual(newest.startedAt);
-			expect(newest).not.toHaveProperty('findings');
+			expect(run.finishedAt).toBeGreaterThanOrEqual(run.startedAt);
+			expect(run).not.toHaveProperty('findings');
 
-			const read = await callTool('read_cache_audit', { id: report.id });
+			const listed = await callTool('list_cache_audits');
+
+			expect(listed.body.result.isError).toBeUndefined();
+
+			expect(listed.body.result.structuredContent.items
+				.find((each: any) => each.id === run.id)).toEqual(run);
+
+			const read = await callTool('read_cache_audit', { id: run.id });
 
 			expect(read.body.result.isError).toBeUndefined();
 
-			expect(read.body.result.structuredContent).toMatchObject({
-				id: report.id,
-				trigger: 'mcp',
-				findings: report.findings,
+			const whole = read.body.result.structuredContent;
+
+			expect(whole).toMatchObject(run);
+			expect(whole.findingsTotal).toBe(2);
+
+			expect(whole.findings.map((finding: any) => finding.url)).toEqual([
+				`/items/${ROWS}?filter[owner][_eq]=acme`,
+				`/items/${ROWS}?filter[owner][_eq]=globex`,
+			]);
+
+			expect(whole.findings[0]).toMatchObject({
+				verdict: 'stale',
+				collection: ROWS,
+				diff: ['/data/0/amount'],
 			});
+
+			// Paged the way the route pages: a cut, the page behind it, one verdict.
+			const second = await callTool('read_cache_audit', {
+				id: run.id,
+				limit: 1,
+				offset: 1,
+			});
+
+			expect(second.body.result.structuredContent.findingsTotal).toBe(2);
+
+			expect(second.body.result.structuredContent.findings
+				.map((finding: any) => finding.url)).toEqual([
+				`/items/${ROWS}?filter[owner][_eq]=globex`,
+			]);
+
+			const drifted = await callTool('read_cache_audit', {
+				id: run.id,
+				verdict: 'tag_drift',
+			});
+
+			expect(drifted.body.result.structuredContent).toMatchObject({
+				findings: [],
+				findingsTotal: 0,
+			});
+
+			// A page the route refuses is one the tool refuses, as the tool's answer.
+			const badPage = await callTool('read_cache_audit', {
+				id: run.id,
+				verdict: 'fresh',
+			});
+
+			expect(badPage.body.result.isError).toBe(true);
 
 			// The horizon: both entries were just verified, so nothing queued is
 			// known good later than now, and the queue holds at least the two.

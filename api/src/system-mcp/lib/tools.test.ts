@@ -802,14 +802,23 @@ test('list_cache_audits hands the window over unread', async () => {
 	expect(service.getCacheAudits).toHaveBeenCalledWith('30d');
 });
 
-test('read_cache_audit hands the id over unread', async () => {
+test('read_cache_audit hands the id over unread, the page beside it', async () => {
 	service.getCacheAudit.mockResolvedValue({ id: 7 });
 
 	await expect(findSystemMcpTool('read_cache_audit')!.run({ id: 7 }, context))
 		.resolves
 		.toEqual({ id: 7 });
 
-	expect(service.getCacheAudit).toHaveBeenCalledWith(7);
+	expect(service.getCacheAudit).toHaveBeenCalledWith(7, {});
+
+	await findSystemMcpTool('read_cache_audit')!
+		.run({ id: 7, limit: 10, offset: 30, verdict: 'stale' }, context);
+
+	expect(service.getCacheAudit).toHaveBeenLastCalledWith(7, {
+		limit: 10,
+		offset: 30,
+		verdict: 'stale',
+	});
 });
 
 test('The audit schedule is read through the guarded service', async () => {
@@ -1230,24 +1239,9 @@ test('Every declared output property is one the tool actually answers', () => {
 			bufferLength: 0,
 			droppedEvents: 0,
 		},
-		run_cache_audit: {
-			id: 7,
-			scanned: 2,
-			counts: {
-				fresh: 1,
-				stale: 1,
-				tag_drift: 0,
-				raced: 0,
-				time_varying: 0,
-				expired: 0,
-				unreplayable: 0,
-			},
-			findings: [auditFinding],
-			evicted: 0,
-			durationMs: 12,
-		},
+		run_cache_audit: auditRun,
 		list_cache_audits: [auditRun],
-		read_cache_audit: { ...auditRun, findings: [auditFinding] },
+		read_cache_audit: { ...auditRun, findings: [auditFinding], findingsTotal: 1 },
 		read_cache_audit_schedule: {
 			rule: '0 3 * * *',
 			source: 'settings',

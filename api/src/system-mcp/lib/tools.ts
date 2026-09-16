@@ -142,9 +142,23 @@ const VERDICT_COUNTS = {
 	),
 } as const;
 
-/** What a run answers, run row and report alike. */
+/** A run as the history records it: what running one and reading one answer. */
 const RUN_PROPERTIES = {
 	id: { type: 'number', description: 'The run, as `read_cache_audit` takes it.' },
+	startedAt: { type: 'number' },
+	finishedAt: {
+		type: ['number', 'null'],
+		description: 'Null while the run is in flight.',
+	},
+	trigger: {
+		type: 'string',
+		enum: ['rest', 'cli', 'cron', 'mcp'],
+		description: 'What started it.',
+	},
+	options: {
+		type: 'object',
+		description: 'The narrowing it was asked for.',
+	},
 	scanned: { type: 'number', description: 'How many live entries were examined.' },
 	counts: VERDICT_COUNTS,
 	evicted: {
@@ -152,6 +166,10 @@ const RUN_PROPERTIES = {
 		description: 'How many stale or drifted entries `purge` dropped.',
 	},
 	durationMs: { type: ['number', 'null'] },
+	error: {
+		type: ['string', 'null'],
+		description: 'Why it stopped, where it did not finish.',
+	},
 } as const;
 
 /** The finding rows a run stores: every entry that was not `fresh`. */
@@ -874,8 +892,9 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				+ 'a run with a `limit` stops there while the next resumes behind '
 				+ 'it — every replay is an uncached read, so slice a large cache with '
 				+ '`limit` (`CACHE_AUDIT_LIMIT` when none is given), `user` or '
-				+ '`collection`. The run is recorded; `read_cache_audit` reads it '
-				+ 'back by the `id` answered here.',
+				+ '`collection`. The run is answered as the history records it — '
+				+ 'its verdict counts, not its findings; `read_cache_audit` pages '
+				+ 'through those by the `id` answered here.',
 			inputSchema: {
 				type: 'object',
 				properties: {
@@ -906,10 +925,7 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 					},
 				},
 			},
-			outputSchema: {
-				type: 'object',
-				properties: { ...RUN_PROPERTIES, findings: FINDINGS },
-			},
+			outputSchema: { type: 'object', properties: RUN_PROPERTIES },
 			annotations: RUNS_AUDIT,
 			run: async (args, context) => {
 				const { error, value } = CacheAuditOptionsSchema.validate(args, {
@@ -946,14 +962,29 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 			group: 'cache_audit',
 			title: 'Read one cache audit run',
 			description:
-				'One audit run with every finding it stored: which entries were '
-				+ 'stale or drifted, the request that filled each, its tags against '
-				+ 'the replay\'s, where the bodies differed, and which purges covered '
-				+ 'it since the fill. Takes the `id` from the run listing.',
+				'One audit run with a page of the findings it stored: which entries '
+				+ 'were stale or drifted, the request that filled each, its tags '
+				+ 'against the replay\'s, where the bodies differed, and which purges '
+				+ 'covered it since the fill. Takes the `id` from the run listing; '
+				+ '`findingsTotal` says how many there are, `offset` walks them, '
+				+ '`verdict` keeps one kind.',
 			inputSchema: {
 				type: 'object',
 				properties: {
 					id: { type: 'number', description: 'The run, as `id` in the listing.' },
+					limit: {
+						type: 'number',
+						description: 'Findings per page: 100 unless given, at most 1000.',
+					},
+					offset: {
+						type: 'number',
+						description: 'How many findings to skip, in stored order.',
+					},
+					verdict: {
+						type: 'string',
+						enum: CACHE_AUDIT_VERDICTS.filter((verdict) => verdict !== 'fresh'),
+						description: 'Only the findings of this verdict.',
+					},
 				},
 				required: ['id'],
 			},
@@ -961,29 +992,20 @@ export function allSystemMcpTools(): SystemMcpTool[] {
 				type: 'object',
 				properties: {
 					...RUN_PROPERTIES,
-					startedAt: { type: 'number' },
-					finishedAt: {
-						type: ['number', 'null'],
-						description: 'Null while the run is in flight.',
-					},
-					trigger: {
-						type: 'string',
-						enum: ['rest', 'cli', 'cron', 'mcp'],
-						description: 'What started it.',
-					},
-					options: {
-						type: 'object',
-						description: 'The narrowing it was asked for.',
-					},
-					error: {
-						type: ['string', 'null'],
-						description: 'Why it stopped, where it did not finish.',
-					},
 					findings: FINDINGS,
+					findingsTotal: {
+						type: 'number',
+						description: 'How many findings the run stored, of the verdict '
+							+ 'asked for — whatever the page.',
+					},
 				},
 			},
 			annotations: READ_ONLY,
-			run: async (args, context) => utils(context).getCacheAudit(args['id']),
+			run: async (args, context) => {
+				const { id, ...page } = args;
+
+				return utils(context).getCacheAudit(id, page);
+			},
 		}),
 		defineSystemMcpTool({
 			name: 'read_cache_audit_schedule',

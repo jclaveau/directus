@@ -21,10 +21,10 @@ import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import type { CacheAuditOptions } from '../cache-audit.js';
 import {
 	type CacheAuditRun,
-	type CacheAuditRunReport,
 	type CacheAuditRunWithFindings,
 	type CacheAuditTrigger,
 	listCacheAuditRuns,
+	readCacheAuditFindings,
 	readCacheAuditRun,
 	runCacheAudit,
 } from '../cache-audit-runs.js';
@@ -101,6 +101,7 @@ import {
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -532,18 +533,28 @@ export class UtilsService {
 	}
 
 	/**
-	 * Replay every live entry against the database and report the ones it no
-	 * longer matches — see `cache-audit.ts`. Every replay is an uncached read,
-	 * so this is a dev, preview and e2e instrument, not a production one.
-	 * The run lands in the audit history under `trigger`.
+	 * Replay the entries due an audit against the database — see
+	 * `cache-audit.ts`. Every replay is an uncached read, so this is a dev,
+	 * preview and e2e instrument, not a production one. The run lands in the
+	 * audit history under `trigger`, and is answered as the history carries
+	 * it: the findings are read from there, a page at a time, by `getCacheAudit`.
 	 */
 	async auditCache(
 		options: CacheAuditOptions = {},
 		trigger: Extract<CacheAuditTrigger, 'rest' | 'mcp'> = 'rest',
-	): Promise<CacheAuditRunReport> {
+	): Promise<CacheAuditRun> {
 		this.assertAdmin('audit the cache');
 
-		return runCacheAudit(trigger, options);
+		const { id } = await runCacheAudit(trigger, options);
+		const run = await readCacheAuditRun(id);
+
+		// Recorded by the run that just ended; only the reaper takes a run row,
+		// and it takes none younger than the retention window.
+		if (run === null) {
+			throw new Error(`Cache audit run ${id} was not recorded`);
+		}
+
+		return run;
 	}
 
 	/** The audit runs started in the window, newest first, without their findings. */
@@ -553,8 +564,11 @@ export class UtilsService {
 		return listCacheAuditRuns(requestedStatsWindow(window));
 	}
 
-	/** One audit run with every finding it stored. */
-	async getCacheAudit(id: unknown): Promise<CacheAuditRunWithFindings> {
+	/** One audit run with a page of the findings it stored. */
+	async getCacheAudit(
+		id: unknown,
+		page: unknown = {},
+	): Promise<CacheAuditRunWithFindings> {
 		this.assertAdmin('inspect the cache audits');
 
 		const parsed = typeof id === 'number' || typeof id === 'string'
@@ -567,13 +581,22 @@ export class UtilsService {
 			});
 		}
 
+		const { error, value } = CacheAuditFindingsPageSchema.validate(page, {
+			allowUnknown: true,
+			stripUnknown: true,
+		});
+
+		if (error) {
+			throw new InvalidPayloadError({ reason: error.message });
+		}
+
 		const run = await readCacheAuditRun(parsed);
 
 		if (run === null) {
 			throw new ForbiddenError();
 		}
 
-		return run;
+		return { ...run, ...await readCacheAuditFindings(parsed, value) };
 	}
 
 	/** The cron in force for the audit, where it came from, and when it next fires. */

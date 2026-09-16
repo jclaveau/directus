@@ -1,4 +1,4 @@
-import { ForbiddenError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, AutoscaleConfig } from '@directus/types';
@@ -8,6 +8,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import {
 	listCacheAuditRuns,
+	readCacheAuditFindings,
 	readCacheAuditRun,
 	runCacheAudit,
 } from '../cache-audit-runs.js';
@@ -235,20 +236,32 @@ describe('Services / Utils', () => {
 
 		it(oneLine`
 			auditCache hands the options to a recorded run, as REST unless told
-			otherwise, and answers its report
+			otherwise, and answers the run as the history recorded it
 		`, async () => {
 			const report = { id: 4, scanned: 1, counts: { stale: 0 }, findings: [] };
 			vi.mocked(runCacheAudit).mockResolvedValue(report as any);
+			const run = { id: 4, trigger: 'rest', scanned: 1 };
+			vi.mocked(readCacheAuditRun).mockResolvedValue(run as any);
 
 			await expect(
 				adminService().auditCache({ limit: 5, purge: true }),
-			).resolves.toBe(report);
+			).resolves.toBe(run);
 
 			expect(runCacheAudit).toHaveBeenCalledWith('rest', { limit: 5, purge: true });
+			expect(readCacheAuditRun).toHaveBeenCalledWith(4);
 
 			await adminService().auditCache({}, 'mcp');
 
 			expect(runCacheAudit).toHaveBeenLastCalledWith('mcp', {});
+		});
+
+		it('auditCache refuses to answer a run the history does not hold', async () => {
+			vi.mocked(runCacheAudit).mockResolvedValue({ id: 4 } as any);
+			vi.mocked(readCacheAuditRun).mockResolvedValue(null);
+
+			await expect(adminService().auditCache()).rejects.toThrowError(
+				'Cache audit run 4 was not recorded',
+			);
 		});
 
 		it('getCacheAudits refuses a non-admin, and lists for an admin', async () => {
@@ -265,19 +278,72 @@ describe('Services / Utils', () => {
 			expect(listCacheAuditRuns).toHaveBeenCalledWith(172_800_000);
 		});
 
-		it('getCacheAudit reads one run, refusing an id that is none', async () => {
-			const run = { id: 7, findings: [] };
+		it(oneLine`
+			getCacheAudit reads one run with the first page of its findings,
+			refusing an id that is none
+		`, async () => {
+			const run = { id: 7, trigger: 'rest' };
 			vi.mocked(readCacheAuditRun).mockResolvedValue(run as any);
 
-			await expect(adminService().getCacheAudit('7')).resolves.toBe(run);
+			const page = { findings: [{ verdict: 'stale' }], findingsTotal: 41 };
+			vi.mocked(readCacheAuditFindings).mockResolvedValue(page as any);
+
+			await expect(adminService().getCacheAudit('7')).resolves.toEqual({
+				...run,
+				...page,
+			});
 
 			expect(readCacheAuditRun).toHaveBeenCalledWith(7);
+
+			expect(readCacheAuditFindings).toHaveBeenCalledWith(7, {
+				limit: 100,
+				offset: 0,
+			});
 
 			for (const bad of ['seven', '0', '1.5', undefined]) {
 				await expect(adminService().getCacheAudit(bad)).rejects.toThrowError(
 					'is not an audit id',
 				);
 			}
+		});
+
+		it(oneLine`
+			getCacheAudit takes the page as sent, one verdict when asked, and
+			refuses a page it cannot cut
+		`, async () => {
+			vi.mocked(readCacheAuditRun).mockResolvedValue({ id: 7 } as any);
+
+			vi.mocked(readCacheAuditFindings).mockResolvedValue({
+				findings: [],
+				findingsTotal: 0,
+			});
+
+			await adminService().getCacheAudit(7, {
+				limit: '10',
+				offset: '30',
+				verdict: 'tag_drift',
+				window: '7d',
+			});
+
+			expect(readCacheAuditFindings).toHaveBeenCalledWith(7, {
+				limit: 10,
+				offset: 30,
+				verdict: 'tag_drift',
+			});
+
+			for (const bad of [
+				{ limit: 0 },
+				{ limit: 1001 },
+				{ offset: -1 },
+				{ verdict: 'fresh' },
+				{ verdict: 'wrong' },
+			]) {
+				await expect(adminService().getCacheAudit(7, bad)).rejects.toBeInstanceOf(
+					InvalidPayloadError,
+				);
+			}
+
+			expect(readCacheAuditRun).toHaveBeenCalledTimes(1);
 		});
 
 		it('getCacheAudit answers a run nobody recorded as forbidden', async () => {

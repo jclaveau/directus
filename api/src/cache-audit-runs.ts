@@ -53,8 +53,19 @@ export interface CacheAuditRun {
 	error: string | null;
 }
 
+/** The slice of a run's findings a read asks for. */
+export interface CacheAuditFindingsPage {
+	limit: number;
+	offset: number;
+	/** Only the findings with this verdict; every one without. */
+	verdict?: CacheAuditVerdict | undefined;
+}
+
 export interface CacheAuditRunWithFindings extends CacheAuditRun {
+	/** The page asked for, in the order the run stored them. */
 	findings: CacheAuditFinding[];
+	/** How many the run stored, of the verdict asked for — whatever the page. */
+	findingsTotal: number;
 }
 
 /** A report with the row it was recorded under. */
@@ -237,27 +248,51 @@ export async function listCacheAuditRuns(
 	return rows.map(runOf);
 }
 
-/** One run with everything it found, or null where no run has that id. */
-export async function readCacheAuditRun(
-	id: number,
-): Promise<CacheAuditRunWithFindings | null> {
-	const db = getDatabase();
-
-	const row: Record<string, unknown> | undefined = await db('directus_cache_audits')
+/** One run as the listing carries it, or null where no run has that id. */
+export async function readCacheAuditRun(id: number): Promise<CacheAuditRun | null> {
+	const row: Record<string, unknown> | undefined = await getDatabase()(
+		'directus_cache_audits',
+	)
 		.where({ id })
 		.first();
 
-	if (row === undefined) {
-		return null;
-	}
+	return row === undefined
+		? null
+		: runOf(row);
+}
 
-	const findingRows: Record<string, unknown>[] = await db(
-		'directus_cache_audit_findings',
-	)
-		.where({ audit: id })
-		.orderBy('id', 'asc');
+/**
+ * One page of what a run found, and how many findings it stored in all: a
+ * run over a large cache on a bad day stores tens of thousands, which no
+ * answer should carry whole. Read in the order they were stored.
+ */
+export async function readCacheAuditFindings(
+	id: number,
+	page: CacheAuditFindingsPage,
+): Promise<{ findings: CacheAuditFinding[]; findingsTotal: number }> {
+	const db = getDatabase();
 
-	return { ...runOf(row), findings: findingRows.map(findingOf) };
+	const stored = () => {
+		const query = db('directus_cache_audit_findings').where({ audit: id });
+
+		return page.verdict === undefined
+			? query
+			: query.where({ verdict: page.verdict });
+	};
+
+	const findingRows: Record<string, unknown>[] = await stored()
+		.orderBy('id', 'asc')
+		.limit(page.limit)
+		.offset(page.offset);
+
+	const counted: Record<string, unknown> | undefined = await stored()
+		.count('id as total')
+		.first();
+
+	return {
+		findings: findingRows.map(findingOf),
+		findingsTotal: Number(counted?.['total'] ?? 0),
+	};
 }
 
 /** Drop the runs past retention; their findings go with them. */

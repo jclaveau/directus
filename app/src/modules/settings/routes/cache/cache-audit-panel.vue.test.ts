@@ -115,7 +115,7 @@ const queue: CacheAuditQueue = {
 
 function answer(
 	schedule: CacheAuditSchedule | null,
-	runs: CacheAuditRun[],
+	runs: (CacheAuditRun & { findingsTotal?: number })[],
 	queued: CacheAuditQueue = queue,
 ) {
 	vi.mocked(api.get).mockImplementation(((url: string) => {
@@ -175,6 +175,7 @@ function answer(
 								purgesSinceFilled: null,
 							},
 						],
+						findingsTotal: found.findingsTotal ?? 2,
 					},
 				},
 			});
@@ -508,6 +509,27 @@ describe('the runs', () => {
 		expect(findings[0]!.textContent).toContain('No purge covered it since the fill');
 		expect(findings[1]!.textContent).toContain('Tags: +authors');
 		expect(findings[1]!.textContent).toContain('User: u-1');
+		// Every finding the run stored is on the page: nothing more to say.
+		expect(document.body.textContent).not.toContain('the rest page through');
+
+		wrapper.unmount();
+	});
+
+	test('says how many findings the page leaves out, and where', async () => {
+		answer(envSchedule, [{ ...run(), findingsTotal: 41 }]);
+
+		const wrapper = await mounted();
+
+		await wrapper.find('.audit-table tbody tr, .audit-table .table-row')
+			.trigger('click');
+
+		await flushPromises();
+
+		expect(document.body.querySelectorAll('.finding')).toHaveLength(2);
+
+		expect(document.body.textContent).toContain(
+			'The first 2 of 41; the rest page through GET /utils/cache/audits/7?offset=2',
+		);
 
 		wrapper.unmount();
 	});

@@ -155,7 +155,7 @@ async function runNow(): Promise<void> {
 }
 
 async function openRun(run: CacheAuditRun): Promise<void> {
-	selected.value = { ...run, findings: [] };
+	selected.value = { ...run, findings: [], findingsTotal: 0 };
 	selectedLoading.value = true;
 
 	try {
@@ -545,6 +545,19 @@ defineExpose({ load });
               )
               : t('cache_audit_purged_held', 'Purged since the fill, still held') }}
           </div>
+        </div>
+
+        <div
+          v-if="!selectedLoading
+            && selected.findingsTotal > selected.findings.length"
+          class="findings-note"
+        >
+          {{ t('cache_audit_findings_more', 'The first')
+            + ` ${selected.findings.length} ` + t('of', 'of')
+            + ` ${selected.findingsTotal}; `
+            + t('cache_audit_findings_rest', 'the rest page through')
+            + ` GET /utils/cache/audits/${selected.id}?offset=`
+            + `${selected.findings.length}` }}
         </div>
       </div>
     </v-drawer>

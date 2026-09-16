@@ -12,9 +12,12 @@ post:
     Entries are taken off their cache-stats descriptors, least recently
     verified first — audited, or filled where that came later; one filled
     while cache stats were off has no descriptor and is not seen — and a run
-    with a `limit` stops there while the next resumes behind it. Every replay is an uncached read. The run is recorded in the
-    audit history (`/utils/cache/audits`), and stale and drifted entries are
-    also recorded as `stale_entry` / `tag_drift` cache anomalies. Admin only.
+    with a `limit` stops there while the next resumes behind it. Every
+    replay is an uncached read. The run is recorded in the audit history and
+    answered as `/utils/cache/audits` lists it — its verdict counts, not its
+    findings, which `/utils/cache/audits/{id}` pages through. Stale and
+    drifted entries are also recorded as `stale_entry` / `tag_drift` cache
+    anomalies. Admin only.
   operationId: audit-cache
   requestBody:
     content:
@@ -54,40 +57,8 @@ post:
             type: object
             properties:
               data:
-                type: object
-                properties:
-                  id:
-                    type: integer
-                    description: The run, as `/utils/cache/audits/{id}` reads it.
-                  scanned:
-                    type: integer
-                  counts:
-                    type: object
-                    properties:
-                      fresh:
-                        type: integer
-                      stale:
-                        type: integer
-                      tag_drift:
-                        type: integer
-                      raced:
-                        type: integer
-                      time_varying:
-                        type: integer
-                      expired:
-                        type: integer
-                      unreplayable:
-                        type: integer
-                  findings:
-                    type: array
-                    description: One per entry that is not fresh.
-                    items:
-                      $ref: '../../openapi.yaml#/components/schemas/CacheAuditFinding'
-                  evicted:
-                    type: integer
-                  durationMs:
-                    type: integer
-      description: Successful request
+                $ref: '../../openapi.yaml#/components/schemas/CacheAuditRun'
+      description: The run as recorded; `id` is what `/utils/cache/audits/{id}` takes
     '400':
       description: A parameter was invalid
     '404':

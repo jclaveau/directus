@@ -207,6 +207,21 @@ describe('The cache audit replays live entries against the database', () => {
 				.set('Authorization', auth);
 		}
 
+		// A run answers as the history records it, findings apart: those are
+		// read back from the history, where every case below witnesses them.
+		async function recorded(response: request.Response) {
+			expect(response.statusCode).toBe(200);
+			expect(response.body.data.findings).toBeUndefined();
+
+			const read = await request(url)
+				.get(`/utils/cache/audits/${response.body.data.id}`)
+				.set('Authorization', auth);
+
+			expect(read.statusCode).toBe(200);
+
+			return read.body.data;
+		}
+
 		// The audit takes its entries off the descriptors, which are drained to
 		// Postgres on a schedule: a just-filled entry is not its to see for up
 		// to a second. Audit until the entries warmed are all examined.
@@ -214,9 +229,7 @@ describe('The cache audit replays live entries against the database', () => {
 			let report: any;
 
 			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
-				const response = await audit(body);
-				expect(response.statusCode).toBe(200);
-				report = response.body.data;
+				report = await recorded(await audit(body));
 
 				if (report.scanned >= warmed) {
 					return report;
@@ -275,6 +288,7 @@ describe('The cache audit replays live entries against the database', () => {
 			expect(report.scanned).toBe(2);
 			expect(report.counts.fresh).toBe(2);
 			expect(report.findings).toEqual([]);
+			expect(report.findingsTotal).toBe(0);
 			expect(report.evicted).toBe(0);
 
 			// Neither served from the cache nor written back: the entries the
@@ -719,26 +733,43 @@ describe('The cache audit replays live entries against the database', () => {
 
 			expect(response.statusCode).toBe(200);
 			expect(response.body.data.scanned).toBe(0);
-			expect(response.body.data.findings).toEqual([]);
+			expect(response.body.data.counts.fresh).toBe(0);
 
 			const stillHeld = await readOwner('acme');
 			expect(stillHeld.headers[cacheStatusHeader]).toBe('HIT');
 		}, 60_000);
 
 		it(oneLine`
-			records every run in the history, its findings with it, whichever way
-			it was asked for
+			records every run in the history and answers it as recorded, its
+			findings read back from there a page at a time
 		`, async () => {
 			await clearCache();
 			await warm(() => readOwner('acme'));
+			await warm(() => readOwner('globex'));
+			// Both examined once, so the run below takes both.
+			await auditSettled({ collection: ROWS }, 2);
 
-			await db(ROWS).where({ owner: 'acme' })
+			await db(ROWS).whereIn('owner', ['acme', 'globex'])
 				.update({ amount: '12' });
 
-			const report = await auditSettled({ collection: ROWS });
+			const answered = await audit({ collection: ROWS });
 
-			expect(report.counts.stale).toBe(1);
-			expect(report.id).toEqual(expect.any(Number));
+			expect(answered.statusCode).toBe(200);
+
+			const run = answered.body.data;
+
+			expect(run).toMatchObject({
+				id: expect.any(Number),
+				trigger: 'rest',
+				options: { limit: null, user: null, collection: ROWS, purge: false },
+				scanned: 2,
+				counts: expect.objectContaining({ stale: 2 }),
+				evicted: 0,
+				error: null,
+			});
+
+			expect(run.finishedAt).toBeGreaterThanOrEqual(run.startedAt);
+			expect(run.findings).toBeUndefined();
 
 			const listed = await request(url)
 				.get('/utils/cache/audits')
@@ -746,31 +777,64 @@ describe('The cache audit replays live entries against the database', () => {
 
 			expect(listed.statusCode).toBe(200);
 
-			// Newest first, so the run just answered leads whatever the other
-			// suites in this database recorded.
-			expect(listed.body.data[0]).toMatchObject({
-				id: report.id,
-				trigger: 'rest',
-				options: { limit: null, user: null, collection: ROWS, purge: false },
-				scanned: report.scanned,
-				counts: report.counts,
-				evicted: 0,
-				error: null,
-			});
+			// The same row the listing carries.
+			expect(listed.body.data.find((each: any) => each.id === run.id)).toEqual(run);
 
-			expect(listed.body.data[0].finishedAt)
-				.toBeGreaterThanOrEqual(listed.body.data[0].startedAt);
+			const readRun = (query: Record<string, unknown>) => {
+				return request(url)
+					.get(`/utils/cache/audits/${run.id}`)
+					.query(query)
+					.set('Authorization', auth);
+			};
 
-			// The listing carries no findings; the run does.
-			expect(listed.body.data[0].findings).toBeUndefined();
-
-			const read = await request(url)
-				.get(`/utils/cache/audits/${report.id}`)
-				.set('Authorization', auth);
+			// The first page, which is every finding here.
+			const read = await readRun({});
 
 			expect(read.statusCode).toBe(200);
-			expect(read.body.data.id).toBe(report.id);
-			expect(read.body.data.findings).toEqual(report.findings);
+			expect(read.body.data).toMatchObject(run);
+			expect(read.body.data.findingsTotal).toBe(2);
+
+			expect(read.body.data.findings.map((finding: any) => finding.url)).toEqual([
+				`/items/${ROWS}?filter[owner][_eq]=acme`,
+				`/items/${ROWS}?filter[owner][_eq]=globex`,
+			]);
+
+			// A page cut to one, then the one behind it; the total stays.
+			const first = await readRun({ limit: 1 });
+
+			expect(first.body.data.findings.map((finding: any) => finding.url)).toEqual([
+				`/items/${ROWS}?filter[owner][_eq]=acme`,
+			]);
+
+			expect(first.body.data.findingsTotal).toBe(2);
+
+			const second = await readRun({ limit: 1, offset: 1 });
+
+			expect(second.body.data.findings.map((finding: any) => finding.url)).toEqual([
+				`/items/${ROWS}?filter[owner][_eq]=globex`,
+			]);
+
+			// One verdict at a time, the total counted under the same narrowing.
+			const drifted = await readRun({ verdict: 'tag_drift' });
+
+			expect(drifted.body.data.findings).toEqual([]);
+			expect(drifted.body.data.findingsTotal).toBe(0);
+
+			const stale = await readRun({ verdict: 'stale' });
+
+			expect(stale.body.data.findings).toHaveLength(2);
+			expect(stale.body.data.findingsTotal).toBe(2);
+
+			for (const bad of [
+				{ limit: 0 },
+				{ limit: 1001 },
+				{ offset: -1 },
+				{ verdict: 'fresh' },
+			]) {
+				const refused = await readRun(bad);
+
+				expect(refused.statusCode).toBe(400);
+			}
 
 			// The window is read the way every cache listing reads it.
 			const badWindow = await request(url)

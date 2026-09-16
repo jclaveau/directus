@@ -56,7 +56,9 @@ export interface CacheAuditFinding {
 }
 
 export interface CacheAuditRunWithFindings extends CacheAuditRun {
+	/** The first page; `findingsTotal` says how many the run stored in all. */
 	findings: CacheAuditFinding[];
+	findingsTotal: number;
 }
 
 /** The schedule, as `GET /utils/cache/audit/schedule` answers it. */

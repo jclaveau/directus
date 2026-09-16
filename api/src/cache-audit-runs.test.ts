@@ -11,6 +11,7 @@ import {
 	failCacheAuditRun,
 	finishCacheAuditRun,
 	listCacheAuditRuns,
+	readCacheAuditFindings,
 	readCacheAuditRun,
 	reapCacheAuditRuns,
 	runCacheAudit,
@@ -381,8 +382,29 @@ describe('listCacheAuditRuns', () => {
 });
 
 describe('readCacheAuditRun', () => {
-	it('answers the run with its findings, as the report carried them', async () => {
+	it('answers the run as the listing carries it, without findings', async () => {
 		tracker.on.select('directus_cache_audits').response([runRow()]);
+
+		const run = await readCacheAuditRun(7);
+
+		expect(run).toMatchObject({ id: 7, trigger: 'rest' });
+		expect(run).not.toHaveProperty('findings');
+		expect(tracker.history.select).toHaveLength(1);
+		expect(tracker.history.select[0]!.bindings).toEqual([7, 1]);
+	});
+
+	it('answers null where no run has the id', async () => {
+		tracker.on.select('directus_cache_audits').response([]);
+
+		expect(await readCacheAuditRun(404)).toBeNull();
+		expect(tracker.history.select).toHaveLength(1);
+	});
+});
+
+describe('readCacheAuditFindings', () => {
+	it('answers a page of findings as the report carried them', async () => {
+		// Narrower first: both statements read the findings table.
+		tracker.on.select('count("id") as "total"').response([{ total: '41' }]);
 
 		tracker.on.select('directus_cache_audit_findings').response([
 			{
@@ -425,11 +447,11 @@ describe('readCacheAuditRun', () => {
 			},
 		]);
 
-		const run = await readCacheAuditRun(7);
+		const page = await readCacheAuditFindings(7, { limit: 100, offset: 0 });
 
-		expect(run).toMatchObject({ id: 7, trigger: 'rest' });
+		expect(page.findingsTotal).toBe(41);
 
-		expect(run!.findings).toEqual([
+		expect(page.findings).toEqual([
 			finding,
 			{
 				verdict: 'unreplayable',
@@ -450,14 +472,31 @@ describe('readCacheAuditRun', () => {
 			},
 		]);
 
-		expect(tracker.history.select[1]!.bindings).toEqual([7]);
+		const [rows, count] = tracker.history.select;
+		// Knex drops an offset of 0 from the statement.
+		expect(rows!.sql).toContain('order by "id" asc limit ?');
+		expect(rows!.bindings).toEqual([7, 100]);
+		// The total counts what the page is cut from, under the same narrowing.
+		expect(count!.sql).toContain('count("id") as "total"');
+		expect(count!.bindings).toEqual([7, 1]);
 	});
 
-	it('answers null where no run has the id', async () => {
-		tracker.on.select('directus_cache_audits').response([]);
+	it('walks the findings by offset, keeping to one verdict when asked', async () => {
+		tracker.on.select('count("id") as "total"').response([{ total: 0 }]);
+		tracker.on.select('directus_cache_audit_findings').response([]);
 
-		expect(await readCacheAuditRun(404)).toBeNull();
-		expect(tracker.history.select).toHaveLength(1);
+		const page = await readCacheAuditFindings(7, {
+			limit: 10,
+			offset: 30,
+			verdict: 'tag_drift',
+		});
+
+		expect(page).toEqual({ findings: [], findingsTotal: 0 });
+
+		const [rows, count] = tracker.history.select;
+		expect(rows!.sql).toContain('"verdict" = ?');
+		expect(rows!.bindings).toEqual([7, 'tag_drift', 10, 30]);
+		expect(count!.bindings).toEqual([7, 'tag_drift', 1]);
 	});
 });
 

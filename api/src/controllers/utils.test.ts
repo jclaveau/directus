@@ -155,15 +155,15 @@ describe('utils controller /cache/audit', () => {
 		expect(passed).toHaveBeenCalledWith();
 	});
 
-	test('runs the audit with defaults and answers its report', async () => {
-		const report = { scanned: 0, findings: [] };
-		auditCache.mockResolvedValueOnce(report);
+	test('runs the audit with defaults and answers the run recorded', async () => {
+		const run = { id: 3, scanned: 0 };
+		auditCache.mockResolvedValueOnce(run);
 		const res = { json: vi.fn() } as any;
 
 		await handlerFor('/cache/audit', 'post')(request({}), res, vi.fn());
 
 		expect(auditCache).toHaveBeenCalledWith({ ignore: [], purge: false });
-		expect(res.json).toHaveBeenCalledWith({ data: report });
+		expect(res.json).toHaveBeenCalledWith({ data: run });
 	});
 
 	test(oneLine`
@@ -237,18 +237,19 @@ describe('utils controller /cache/audits', () => {
 		expect(next).toHaveBeenCalledOnce();
 	});
 
-	test('reads one run by the id in the path', async () => {
-		const run = { id: 3, findings: [] };
+	test('reads one run by the path id, its findings page off the query', async () => {
+		const run = { id: 3, findings: [], findingsTotal: 0 };
 		getCacheAudit.mockResolvedValueOnce(run);
 		const res = { locals: {} } as any;
+		const query = { limit: '10', offset: '20', verdict: 'stale' };
 
 		await handlerFor('/cache/audits/:id')(
-			{ accountability: null, schema: {}, query: {}, params: { id: '3' } } as any,
+			{ accountability: null, schema: {}, query, params: { id: '3' } } as any,
 			res,
 			vi.fn(),
 		);
 
-		expect(getCacheAudit).toHaveBeenCalledWith('3');
+		expect(getCacheAudit).toHaveBeenCalledWith('3', query);
 		expect(res.locals['cache']).toBe(false);
 		expect(res.locals['payload']).toEqual({ data: run });
 	});
