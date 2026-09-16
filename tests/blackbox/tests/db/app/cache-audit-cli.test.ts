@@ -227,6 +227,38 @@ describe('`directus cache audit` and the scheduled audit', () => {
 		}, 90_000);
 
 		it(oneLine`
+			takes CACHE_AUDIT_LIMIT as the limit of a run that names none, and
+			resumes behind it on the next
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('acme'));
+			await warm(() => readOwner('globex'));
+			await settled(2);
+
+			const capped = { CACHE_AUDIT_LIMIT: '1' };
+
+			const first = reportIn((await runCacheAudit(['--json'], capped)).output);
+			expect(first.scanned).toBe(1);
+
+			// Recorded as the limit the run had, not as one it never named.
+			const recorded = await request(url)
+				.get(`/utils/cache/audits/${first.id}`)
+				.set('Authorization', auth);
+
+			expect(recorded.body.data.options.limit).toBe(1);
+
+			const second = reportIn((await runCacheAudit(['--json'], capped)).output);
+			expect(second.scanned).toBe(1);
+
+			// A named limit is the run's own.
+			const named = reportIn(
+				(await runCacheAudit(['--json', '--limit', '2'], capped)).output,
+			);
+
+			expect(named.scanned).toBe(2);
+		}, 90_000);
+
+		it(oneLine`
 			exits 1 on a stale entry, naming it in the report
 		`, async () => {
 			await clearCache();
