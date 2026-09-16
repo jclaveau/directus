@@ -147,7 +147,7 @@ const supervisor: AutoscaleSupervisor = {
 	waitReady: true,
 };
 
-/** A pool of `count` idle workers, each past its warm-up. */
+/** A pool of `count` online workers, each past its warm-up. */
 function pool(count: number) {
 	const workers = Array.from({ length: count }, (_unused, index) => {
 		return { pid: 11 + index, cpuPercent: 70, memoryBytes: 0, mature: true };

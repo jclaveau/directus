@@ -365,12 +365,9 @@ export async function runAutoscaler(): Promise<void> {
 				lastScaleDownAt = Date.now();
 
 				// Latched on the pool having reached the size the prewarm was for,
-				// rather than on a step having been sent. Latched before the await,
-				// a single scale the supervisor did not answer in time ended the
-				// prewarm for the life of the deployment: the workers that scale had
-				// already started went on arriving, nothing asked for the rest, and
-				// the deployment sat at 503 waiting to be told it had reached a size
-				// nothing was still growing towards.
+				// rather than on a step having been sent: a step the supervisor does
+				// not answer in time is asked for again on the next tick, and the
+				// workers that step already started count towards that ask.
 				if (asked === null) {
 					prewarmed = true;
 				}

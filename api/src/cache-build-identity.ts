@@ -211,11 +211,6 @@ export async function flushCachesIfBuildChanged(
 
 		logger.info('[cache] Build identity changed since last boot, flushing');
 
-		const flushed = flushHoldingTheLock(identity)
-			.catch((error: unknown) => {
-				logger.warn(error, '[cache] build-identity flush failed');
-			});
-
 		// `createApp()` awaits this before the server listens, and a flush walks
 		// every key the response cache holds — 167s against a production keyspace
 		// (jclaveau/directus#468). Waited on for the budget a flush is given
@@ -227,7 +222,9 @@ export async function flushCachesIfBuildChanged(
 		let waited: ReturnType<typeof setTimeout> | undefined;
 
 		const outcome = await Promise.race([
-			flushed,
+			flushHoldingTheLock(identity).catch((error: unknown) => {
+				logger.warn(error, '[cache] build-identity flush failed');
+			}),
 			new Promise<typeof STILL_FLUSHING>((resolve) => {
 				waited = setTimeout(() => resolve(STILL_FLUSHING), budget);
 			}),
