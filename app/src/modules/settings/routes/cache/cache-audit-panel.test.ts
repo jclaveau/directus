@@ -122,6 +122,7 @@ describe('scheduleDraft / scheduleRule', () => {
 
 	test('a blank draft clears the override', () => {
 		expect(scheduleRule('  ')).toBeNull();
+		expect(scheduleRule(null)).toBeNull();
 		expect(scheduleRule(' 0 4 * * * ')).toBe('0 4 * * *');
 	});
 });

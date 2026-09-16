@@ -32,10 +32,13 @@ const loading = ref(false);
 
 // The schedule input. Saving stores the cron in directus_settings, which the
 // API announces so every node reschedules at once; empty hands it back to env.
-const draft = ref('');
+// Null, not '', once the input is emptied: `v-input` is nullable by default.
+const draft = ref<string | null>('');
 const savingSchedule = ref(false);
 
-const dirty = computed(() => draft.value !== scheduleDraft(schedule.value));
+const dirty = computed(() => {
+	return scheduleRule(draft.value) !== scheduleRule(scheduleDraft(schedule.value));
+});
 
 const running = ref(false);
 const purge = ref(false);

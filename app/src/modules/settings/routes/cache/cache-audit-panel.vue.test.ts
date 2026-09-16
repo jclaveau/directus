@@ -273,7 +273,9 @@ describe('the schedule', () => {
 		const wrapper = await mounted();
 		const input = wrapper.find('.schedule-input input');
 
-		await input.setValue('  ');
+		// Emptied, not blanked: `v-input` hands an empty field back as null,
+		// which is what the browser sends when the rule is deleted.
+		await input.setValue('');
 		await input.trigger('keydown', { key: 'Enter' });
 		await flushPromises();
 

@@ -133,9 +133,12 @@ export function scheduleDraft(schedule: CacheAuditSchedule | null): string {
 		: '';
 }
 
-/** The rule a saved draft stores: a trimmed cron, or null to clear the override. */
-export function scheduleRule(draft: string): string | null {
-	const trimmed = draft.trim();
+/**
+ * The rule a saved draft stores: a trimmed cron, or null to clear the override.
+ * An emptied `v-input` hands back null rather than '', so both mean clear.
+ */
+export function scheduleRule(draft: string | null): string | null {
+	const trimmed = draft?.trim() ?? '';
 
 	return trimmed === ''
 		? null
