@@ -19,6 +19,7 @@ const env: Record<string, any> = {
 	CACHE_AUTO_PURGE: true,
 	CACHE_AUTO_PURGE_IGNORE_LIST: [],
 	CACHE_NAMESPACE: 'scalabus',
+	CACHE_SCOPED_MAX_PINS_PER_COLLECTION: 250,
 	MAX_BATCH_MUTATION: 100000,
 };
 
@@ -687,6 +688,7 @@ describe(oneLine`
 			(readMeta(result)?.scopedCacheTags ?? [])
 				.filter((tag) => tag.collection === 'holder'),
 		).toEqual([
+			{ collection: 'holder', field: 'id', value: 5, type: 'integer' },
 			{ collection: 'holder', field: 'owner', value: 9, type: 'integer' },
 		]);
 	});
@@ -964,6 +966,97 @@ describe(oneLine`
 			}
 			finally {
 				emitter.offFilter('student_enrollment.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			carries every collection a dotted scopeTo crosses, under the slice each one
+			emits, typed off the terminal column
+		`, async () => {
+			tracker.on.select('student_enrollment').response([{ id: 1, student: 'A' }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({
+					collection: 'student_course',
+					field: 'teaching_unit.discipline.enrollment.student',
+					value: 'A',
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('student_enrollment.items.read', declare);
+
+			try {
+				const result = await new ItemsService('student_enrollment', {
+					knex: db,
+					schema: composedChainSchema,
+				}).readByQuery({});
+
+				expect(readMeta(result)?.scopedCacheTags).toEqual([
+					{ collection: 'student_enrollment' },
+					{
+						collection: 'student_course',
+						field: 'teaching_unit.discipline.enrollment.student',
+						value: 'A',
+						type: 'string',
+					},
+					{
+						collection: 'student_teaching_unit',
+						field: 'discipline.enrollment.student',
+						value: 'A',
+						type: 'string',
+					},
+					{
+						collection: 'student_discipline',
+						field: 'enrollment.student',
+						value: 'A',
+						type: 'string',
+					},
+					{
+						collection: 'student_enrollment',
+						field: 'student',
+						value: 'A',
+						type: 'string',
+					},
+				]);
+			}
+			finally {
+				emitter.offFilter('student_enrollment.items.read', declare);
+			}
+		});
+
+		it(oneLine`
+			carries a crossed collection bare when it emits no slice for the suffix
+		`, async () => {
+			tracker.on.select('page').response([{ id: 1 }]);
+
+			const declare = async (payload: any, _meta: any, ctx: any) => {
+				ctx.scopedCache.scopeTo({
+					collection: 'course',
+					field: 'unit.owner',
+					value: 7,
+				});
+
+				return payload;
+			};
+
+			emitter.onFilter('page.items.read', declare);
+
+			try {
+				const result = await new ItemsService('page', {
+					knex: db,
+					schema: declaredDottedSchema,
+				}).readByQuery({});
+
+				expect(readMeta(result)?.scopedCacheTags).toEqual([
+					{ collection: 'page' },
+					{ collection: 'course', field: 'unit.owner', value: 7, type: 'integer' },
+					{ collection: 'unit' },
+				]);
+			}
+			finally {
+				emitter.offFilter('page.items.read', declare);
 			}
 		});
 
@@ -1492,6 +1585,25 @@ composedChain['student_course']!.scopedCacheFields = ['teaching_unit'];
 composedChain['student_teaching_unit']!.scopedCacheFields = ['discipline'];
 composedChain['student_discipline']!.scopedCacheFields = ['enrollment'];
 composedChain['student_enrollment']!.scopedCacheFields = ['student'];
+
+// A dotted path DECLARED on the course, with the unit it crosses declaring no scope
+// of its own: a unit write emits its key slice only, so nothing finer than the
+// bare unit tag names the rows the path reads there.
+const declaredDottedSchema = new SchemaBuilder()
+	.collection('page', (c) => {
+		c.field('id').id();
+	})
+	.collection('course', (c) => {
+		c.field('id').id();
+		c.field('unit').m2o('unit');
+	})
+	.collection('unit', (c) => {
+		c.field('id').id();
+		c.field('owner').integer();
+	})
+	.build();
+
+declaredDottedSchema.collections['course']!.scopedCacheFields = ['unit.owner'];
 
 // A read that EMBEDS its ancestor's rows. `holder` is fetched as rows, so its keyed
 // filter pin is not trusted — rows can arrive by a path the filter never keyed — and

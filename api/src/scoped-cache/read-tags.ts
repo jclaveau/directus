@@ -37,6 +37,30 @@ import {
 } from './tags.js';
 
 /**
+ * Whether a keyed filter's keys become pins: a field to canonicalize against
+ * that is not date-ish — the write canonicalizes those differently — and a key
+ * set within the per-collection ceiling. Past it the pin is dropped rather than
+ * trimmed, since a partial key set would leave the rows it omits covered by
+ * nothing; either way the collection is then named by no pin, and depended on
+ * beyond whatever rows the read nested.
+ */
+export function keyedFilterPinnable(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	keying: ScopedCacheFilterKeying,
+): keying is Extract<ScopedCacheFilterKeying, { kind: 'keyed' }> {
+	if (keying.kind !== 'keyed') {
+		return false;
+	}
+
+	const type = schema.collections[collection]?.fields[keying.field]?.type;
+
+	return type !== undefined
+		&& isPinnableScopeType(type)
+		&& keying.keys.size <= scopedCacheMaxPinsPerCollection();
+}
+
+/**
  * Scope a read's joined collections off the keys its filters named — the third
  * pinner beside `pinnedScopedCacheTagsFromFilter`, which bounds the root off the
  * same filter, and `pinnedScopedCacheTagsFromM2oParents`, which pins the nested
@@ -53,9 +77,6 @@ import {
  * The root is left out: its own filter bounds it through
  * `pinnedScopedCacheTagsFromFilter`, under a self-reference guard this analysis
  * does not reproduce.
- *
- * Past the per-collection ceiling the pin is dropped rather than trimmed — a
- * partial key set would leave the rows it omits covered by nothing.
  */
 export function pinnedScopedCacheTagsFromKeyedFilters(
 	schema: SchemaOverview,
@@ -65,22 +86,14 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();
 
 	for (const [collection, keying] of keyingByCollection) {
-		if (collection === rootCollection || keying.kind !== 'keyed') {
+		if (
+			collection === rootCollection
+			|| !keyedFilterPinnable(schema, collection, keying)
+		) {
 			continue;
 		}
 
-		const type = schema.collections[collection]?.fields[keying.field]?.type;
-
-		// No field to canonicalize against (collection/field absent), or a date-ish type
-		// the write canonicalizes differently — pin nothing; the bare tag covers it.
-		if (type === undefined || !isPinnableScopeType(type)) {
-			continue;
-		}
-
-		if (keying.keys.size > scopedCacheMaxPinsPerCollection()) {
-			continue;
-		}
-
+		const type = schema.collections[collection]!.fields[keying.field]!.type;
 		const tags: ScopedCacheTag[] = [];
 
 		// Deduped on the canonical token, not the raw value, so `7` and `'7'`
@@ -186,12 +199,27 @@ export function scopedCacheCollectionsBeyondNestedRows(
 	): void => {
 		const queryFieldMap: FieldMap = { read: new Map(), other: new Map() };
 
+		extractFieldsFromQuery(collection, query, queryFieldMap, schema);
+
+		// An exempt node's own cases decide, per nested row, whether that row
+		// shows — its key pin already names those rows. Only a case reaching
+		// OUT of it depends on rows the read never nested.
+		const caseFieldMap: FieldMap = { read: new Map(), other: new Map() };
+
 		extractFieldsFromQuery(
 			collection,
-			{ ...query, filter: joinFilterWithCases(query.filter, cases) },
-			queryFieldMap,
+			{ filter: joinFilterWithCases(null, cases) },
+			caseFieldMap,
 			schema,
 		);
+
+		const casedEntries = [...caseFieldMap.read, ...caseFieldMap.other]
+			.filter(([, entry]) => {
+				return !(
+					entry.collection === collection
+					&& exemptFromCaseGating.has(collection)
+				);
+			});
 
 		// `extractPathsFromQuery` files filter and sort under one group, so sort and
 		// group/aggregate paths are extracted on their own — apart from each other —
@@ -236,10 +264,19 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			groupedOrAggregated.add(entry.collection);
 		}
 
-		for (const [, entry] of [...queryFieldMap.read, ...queryFieldMap.other]) {
+		for (
+			const [, entry] of [
+				...queryFieldMap.read,
+				...queryFieldMap.other,
+				...casedEntries,
+			]
+		) {
 			const queried = entry.collection;
-			const kind = keyingByCollection.get(queried)?.kind;
-			const namedByFilter = kind === 'keyed' || kind === 'independent';
+			const keying = keyingByCollection.get(queried);
+			const kind = keying?.kind;
+
+			const namedByFilter = kind === 'independent'
+				|| (keying !== undefined && keyedFilterPinnable(schema, queried, keying));
 
 			// A sort only reorders a collection's rows; a per-slice pin catches the
 			// reorder because a write to the collection emits its slice. So a sort

@@ -43,6 +43,7 @@ import {
 	scopedCachePathReversesChain,
 } from './read-tags.js';
 import {
+	scopedCacheMaxPinsPerCollection,
 	scopedCacheTagKey,
 	scopedCacheTagsFromRows,
 	type FieldTypesByField,
@@ -741,14 +742,6 @@ export class ItemScopedCacheService {
 			...filterKeying.keys(),
 		]);
 
-		// Rows the response actually carried. A keyed filter bounds the JOINED rows,
-		// not necessarily the fetched ones — a declined O2M/A2O path nests rows no
-		// filter bounded — so it cannot stand in for a parent-key pin below. A
-		// filter-only collection is absent here, so its keyed slice is sound.
-		const collectionsFetchedAsRows = new Set(
-			[...fieldMap.other].map(([, entry]) => entry.collection),
-		);
-
 		// Every field-map path reaching a collection, deduped: the read and the other
 		// group file one path twice when a filter and a nesting share it.
 		const pathsTo = (
@@ -777,6 +770,26 @@ export class ItemScopedCacheService {
 		};
 
 		const effectiveFilter = joinFilterWithCases(updatedQuery.filter, ast.cases);
+
+		const rootPrimary = this.schema.collections[this.collection]?.primary;
+
+		// The root's key pins on their own, read off a run over the key axis alone:
+		// the pinner covers an `_or` only when EVERY branch binds a pinnable field,
+		// so with the key the one such field these exist exactly when the key bounds
+		// every row the root returned. The full run's key pins say less — an `_or`
+		// unions its branches, and a branch bound on another slice returns rows the
+		// key never named.
+		const rootKeyPins = rootPaths.size > 1 || rootPrimary === undefined
+			? []
+			: pinnedScopedCacheTagsFromFilter(
+				this.collection,
+				[],
+				effectiveFilter,
+				this.fieldTypes,
+				{},
+				[],
+				rootPrimary,
+			);
 
 		// The slices the write side emits for a collection — its key, its flat scope
 		// fields and its composed paths — read off the same derivation, so a slice
@@ -883,18 +896,10 @@ export class ItemScopedCacheService {
 					);
 				});
 
-				if (reversesChain) {
-					const rootPrimary = this.schema.collections[this.collection]?.primary;
-
-					const matched = rootScopedCacheTags.filter((pin) => {
-						return pin.field === rootPrimary;
+				if (reversesChain && rootKeyPins.length > 0) {
+					return rootKeyPins.map((pin) => {
+						return { collection, field: slice.field, value: pin.value, type };
 					});
-
-					if (matched.length > 0) {
-						return matched.map((pin) => {
-							return { collection, field: slice.field, value: pin.value, type };
-						});
-					}
 				}
 
 				if (!nestedRowsBounded) {
@@ -946,7 +951,13 @@ export class ItemScopedCacheService {
 					}
 				}
 
-				if (everyPathBound && bound.size > 0) {
+				// Past the ceiling the slice is dropped whole, never trimmed, like a
+				// keyed filter's pin: a partial set leaves the rows it omits uncovered.
+				if (
+					everyPathBound
+					&& bound.size > 0
+					&& bound.size <= scopedCacheMaxPinsPerCollection()
+				) {
 					return [...bound.values()];
 				}
 			}
@@ -1033,18 +1044,11 @@ export class ItemScopedCacheService {
 			// key, or the O2M child's parent-fk key. Where BOTH declined — an A2O
 			// hop, an O2M nested under another to-many, or no row to read a key
 			// from — the filter's keys cover one half of the dependency and say
-			// nothing about the other, so the bare tag is the honest answer. The
-			// exception is a collection reached ONLY through a filter that keyed it
-			// (nowhere fetched): the join reads only rows that key bounds, so its
-			// keyed slice covers the whole dependency and stands in for the pin.
+			// nothing about the other, so the bare tag is the honest answer.
 			if (
 				nestedCollections.has(collection) &&
 				!m2oParentPins.has(collection) &&
-				!o2mChildPins.has(collection) &&
-				!(
-					keyedFilterPins.has(collection) &&
-					!collectionsFetchedAsRows.has(collection)
-				)
+				!o2mChildPins.has(collection)
 			) {
 				pushSliceOrBare(collection);
 				continue;
@@ -1079,6 +1083,66 @@ export class ItemScopedCacheService {
 
 		// Fold in tags an `items.read` hook added via `context.scopedCache.scopeTo`.
 		tags.push(...scopedCacheCollector.tags);
+
+		// A hook naming a dotted slice (`course:unit.owner=O`) declares a dependency
+		// the purge answers from the course side only: a unit moved under another
+		// owner emits the unit's own slices and nothing of the course's. The read
+		// side carries the crossed collections itself when it derives such a tag,
+		// so a hook's gets the same: each collection the path crosses, under the
+		// suffix slice it emits, or bare when it emits none. The tag's own type is
+		// the terminal column's, which a hook rarely knows and the key needs.
+		const seenTagKeys = new Set(tags.map(scopedCacheTagKey));
+		const crossedTags: ScopedCacheTag[] = [];
+
+		tags = tags.map((tag) => {
+			if (
+				tag.field === undefined ||
+				!tag.field.includes('.') ||
+				!slicesOf(tag.collection).some(({ field }) => field === tag.field)
+			) {
+				return tag;
+			}
+
+			const resolved = new ItemScopedCacheService(
+				tag.collection,
+				this.schema,
+				this.knex,
+				this.cache,
+				this.accountability,
+			).resolvePath(tag.field);
+
+			if (resolved === null) {
+				return tag;
+			}
+
+			const { segments, joins, terminalCollection, terminalField } = resolved;
+
+			const type = tag.type
+				?? this.schema.collections[terminalCollection]?.fields[terminalField]?.type;
+
+			for (const [hop, join] of joins.entries()) {
+				const crossed = join.relatedCollection;
+				const suffix = segments.slice(hop + 1).join('.');
+
+				const crossedTag: ScopedCacheTag = slicesOf(crossed)
+					.some(({ field }) => field === suffix)
+					? { collection: crossed, field: suffix, value: tag.value, type }
+					: { collection: crossed };
+
+				const crossedKey = scopedCacheTagKey(crossedTag);
+
+				if (!seenTagKeys.has(crossedKey)) {
+					seenTagKeys.add(crossedKey);
+					crossedTags.push(crossedTag);
+				}
+			}
+
+			return type === undefined
+				? tag
+				: { ...tag, type };
+		});
+
+		tags.push(...crossedTags);
 
 		// A hook tag on a field its collection isn't scoped on can't be reproduced by
 		// that collection's auto-purge — the read would go stale — unless the hook

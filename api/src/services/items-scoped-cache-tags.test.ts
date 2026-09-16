@@ -1,8 +1,9 @@
 import { SchemaBuilder } from '@directus/schema-builder';
+import type { Filter } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import knex from 'knex';
 import { MockClient } from 'knex-mock-client';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 // Isolate from the real cache module (redis/bus) and force scoped mode on, so readByQuery runs its
 // tag-accumulation branch. runAst is the only DB-touching call in the read path; stub it out.
@@ -28,11 +29,28 @@ vi.mock('../scoped-cache/config.js', async (importOriginal) => {
 
 vi.mock('../database/run-ast/run-ast.js', () => ({ runAst: vi.fn(async () => []) }));
 
+vi.mock('../scoped-cache/tags.js', async (importOriginal) => {
+	return {
+		...(await importOriginal<typeof import('../scoped-cache/tags.js')>()),
+		scopedCacheMaxPinsPerCollection: vi.fn(() => 250),
+	};
+});
+
+vi.mock('../permissions/lib/fetch-policies.js', () => {
+	return { fetchPolicies: vi.fn(async () => ['policy']) };
+});
+
+vi.mock('../permissions/lib/fetch-permissions.js', () => {
+	return { fetchPermissions: vi.fn(async () => []) };
+});
+
 import {
 	scopedCachePurgeEnabled,
 	serializeScopedCacheTags,
 } from '../scoped-cache.js';
 import { runAst } from '../database/run-ast/run-ast.js';
+import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
+import { scopedCacheMaxPinsPerCollection } from '../scoped-cache/tags.js';
 import { readMeta } from '../utils/read-meta.js';
 import { ItemsService } from './items.js';
 
@@ -486,6 +504,194 @@ describe('read tags at the merge', () => {
 				filter: { student: { _eq: 3 }, parts: { status: { _eq: 'x' } } },
 				fields: ['parts.title'],
 			})).toEqual(['course:student=3', 'part']);
+		});
+
+		test(oneLine`
+			drops the slice the filter binds past the ceiling, never trimmed
+		`, async () => {
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(2);
+
+			const service = new ItemsService('course', {
+				knex: db,
+				schema: chain(['course']),
+				accountability: null,
+			});
+
+			feed([{ id: 20, student: 3 }]);
+
+			expect(await tagsOf(service, {
+				filter: { parts: { id: { _in: [200, 201, 202] } } },
+				fields: ['id'],
+			})).toEqual(['course', 'part']);
+
+			feed([{ id: 20, student: 3 }]);
+
+			expect(await tagsOf(service, {
+				filter: { parts: { id: { _in: [200, 201] } } },
+				fields: ['id'],
+			})).toEqual(['course', 'part:course=20', 'part:id=200', 'part:id=201']);
+
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(250);
+		});
+	});
+
+	describe('an injected ownership ancestor gated by a permission case', () => {
+		const ownership = new SchemaBuilder()
+			.collection('root', (c) => {
+				c.field('id').id();
+				c.field('name').string();
+			})
+			.collection('grandowner', (c) => {
+				c.field('id').id();
+				c.field('root').m2o('root');
+			})
+			.collection('owner', (c) => {
+				c.field('id').id();
+				c.field('grandowner').m2o('grandowner');
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('owner').m2o('owner');
+			})
+			.build();
+
+		ownership.collections['root']!.scopedCacheFields = ['name'];
+		ownership.collections['grandowner']!.scopedCacheFields = ['root'];
+		ownership.collections['owner']!.scopedCacheFields = ['grandowner'];
+		ownership.collections['note']!.scopedCacheFields = ['owner'];
+
+		const permitting = (cases: Record<string, Filter>): void => {
+			vi.mocked(fetchPermissions).mockImplementation(async () => {
+				return ['root', 'grandowner', 'owner', 'note'].map((collection, at) => {
+					return {
+						id: at + 1,
+						policy: 'policy',
+						collection,
+						action: 'read' as const,
+						fields: ['*'],
+						permissions: cases[collection] ?? { id: { _nnull: true } },
+						validation: null,
+						presets: null,
+					};
+				});
+			});
+		};
+
+		const asUser = (): ItemsService => {
+			return new ItemsService('note', {
+				knex: db,
+				schema: ownership,
+				accountability: {
+					user: 'u1',
+					role: 'r1',
+					roles: ['r1'],
+					admin: false,
+					app: true,
+					ip: null,
+				},
+			});
+		};
+
+		const rows = [{
+			id: 1,
+			owner: { id: 1, grandowner: { id: 1, root: { id: 1 } } },
+		}];
+
+		afterEach(() => {
+			vi.mocked(fetchPermissions).mockImplementation(async () => []);
+		});
+
+		test('keeps its key pin under a case on its own columns', async () => {
+			// The case decides per nested row whether that row shows, and the row is
+			// the one the key pin names — a write to it purges that pin.
+			permitting({});
+			feed(rows);
+
+			expect(await tagsOf(asUser(), {
+				fields: ['*'],
+				filter: { owner: { id: { _eq: 1 } } },
+			})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root:id=1']);
+		});
+
+		test('bares what a case hopping out of it reaches', async () => {
+			permitting({ grandowner: { root: { name: { _eq: 'open' } } } });
+			feed(rows);
+
+			expect(await tagsOf(asUser(), {
+				fields: ['*'],
+				filter: { owner: { id: { _eq: 1 } } },
+			})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
+		});
+	});
+
+	describe('a slice reversed off the root key', () => {
+		const schema = new SchemaBuilder()
+			.collection('student', (c) => {
+				c.field('id').id();
+				c.field('user').string();
+				c.field('courses').o2m('course', 'student');
+			})
+			.collection('course', (c) => {
+				c.field('id').id();
+				c.field('title').string();
+				c.field('student').m2o('student');
+			})
+			.build();
+
+		schema.collections['student']!.scopedCacheFields = ['user'];
+		schema.collections['course']!.scopedCacheFields = ['student'];
+
+		const rows = [
+			{ id: 1, user: 'a', courses: [{ id: 10, title: 'c10', student: 1 }] },
+			{ id: 5, user: 'x', courses: [{ id: 50, title: 'c50', student: 5 }] },
+		];
+
+		// One parent per branch, so the o2m pinner declines at a ceiling of 1 and
+		// the merge has to answer for the courses on its own.
+		beforeEach(() => {
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(1);
+		});
+
+		afterEach(() => {
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(250);
+		});
+
+		test(oneLine`
+			stays bare under an _or the key bounds one branch of: the other branch's
+			rows nest courses the reversed slice never names
+		`, async () => {
+			const service = new ItemsService('student', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(service, {
+				fields: ['*', 'courses.*'],
+				filter: { _or: [{ id: { _eq: 1 } }, { user: { _eq: 'x' } }] },
+			})).toEqual(['course', 'student:id=1', 'student:user=x']);
+		});
+
+		test('reverses onto every key when each branch binds one', async () => {
+			const service = new ItemsService('student', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(service, {
+				fields: ['*', 'courses.*'],
+				filter: { _or: [{ id: { _eq: 1 } }, { id: { _eq: 5 } }] },
+			})).toEqual([
+				'course:student=1',
+				'course:student=5',
+				'student:id=1',
+				'student:id=5',
+			]);
 		});
 	});
 });
