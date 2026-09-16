@@ -134,11 +134,12 @@ describe('`directus cache audit` and the scheduled audit', () => {
 		// for, not an in-process call.
 		function runCacheAudit(
 			args: string[] = [],
+			extraEnv: Record<string, string> = {},
 		): Promise<{ code: number | null; output: string }> {
 			return new Promise((resolve) => {
 				const cli = spawn('node', [paths.cli, 'cache', 'audit', ...args], {
 					cwd: paths.cwd,
-					env: { ...env[vendor], LOG_LEVEL: 'error' },
+					env: { ...env[vendor], LOG_LEVEL: 'error', ...extraEnv },
 				});
 
 				let output = '';
@@ -407,6 +408,95 @@ describe('`directus cache audit` and the scheduled audit', () => {
 			// or an operator.
 			const stillHeld = await readOwner('initech', scheduledUrl);
 			expect(stillHeld.headers[cacheStatusHeader]).toBe('HIT');
+		}, 90_000);
+
+		it(oneLine`
+			a schedule written on one node runs the audit on the other, over the bus
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('globex'));
+			await settled();
+
+			await db(ROWS).where({ owner: 'globex' })
+				.update({ amount: '12' });
+
+			const before = Date.now();
+
+			// Written through the scheduled node. The other node has no rule of
+			// its own, so a cron finding keyed in its namespace can only come off
+			// the bus.
+			const written = await request(scheduledUrl)
+				.patch('/utils/cache/audit/schedule')
+				.send({ rule: '* * * * * *' })
+				.set('Authorization', auth);
+
+			expect(written.statusCode).toBe(200);
+
+			try {
+				let finding: any;
+
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !finding; attempt++) {
+					finding = await db('directus_cache_audit_findings as f')
+						.join('directus_cache_audits as a', 'a.id', 'f.audit')
+						.where({ 'a.trigger': 'cron', 'f.verdict': 'stale' })
+						.where('a.started_at', '>', new Date(before))
+						.where('f.redis_key', 'like', `${env[vendor]['CACHE_NAMESPACE']}%`)
+						.select('f.url')
+						.first();
+
+					if (!finding) {
+						await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+					}
+				}
+
+				expect(finding).toMatchObject({
+					url: `/items/${ROWS}?filter[owner][_eq]=globex`,
+				});
+			}
+			finally {
+				await request(scheduledUrl)
+					.patch('/utils/cache/audit/schedule')
+					.send({ rule: null })
+					.set('Authorization', auth);
+			}
+		}, 90_000);
+
+		it(oneLine`
+			reaps the history past CACHE_AUDIT_RETENTION on every run
+		`, async () => {
+			// Over an empty cache: the case above left its stale entry for the
+			// operator, and a clean run is what exits 0 here.
+			await clearCache();
+
+			// Every case above left runs behind, and the scheduled node adds one
+			// every other second: the cutoff is taken before the run boots, so
+			// whatever was older then is older than the run's own cutoff too.
+			const cutoff = new Date(Date.now() - 2_000);
+
+			const older = () => {
+				return db('directus_cache_audits')
+					.where('started_at', '<', cutoff)
+					.count({ n: '*' })
+					.first()
+					.then((row) => Number(row?.['n']));
+			};
+
+			expect(await older()).toBeGreaterThan(0);
+
+			// The retention rides the process env, so this run reads a short one
+			// without touching the running nodes.
+			const { code, output } = await runCacheAudit(['--json'], {
+				CACHE_AUDIT_RETENTION: '2s',
+			});
+
+			expect(code).toBe(0);
+			expect(await older()).toBe(0);
+
+			const own = await db('directus_cache_audits')
+				.where({ id: reportIn(output).id })
+				.first();
+
+			expect(own).toBeDefined();
 		}, 90_000);
 	});
 });

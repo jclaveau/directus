@@ -162,8 +162,8 @@ export async function failCacheAuditRun(id: number, error: unknown): Promise<voi
 		.update({
 			finished_at: new Date(),
 			error: error instanceof Error
-? error.message
-: String(error),
+				? error.message
+				: String(error),
 		});
 }
 
@@ -180,8 +180,8 @@ function findingRow(audit: number, finding: CacheAuditFinding) {
 		user_id: finding.user,
 		collection: finding.collection,
 		filled_at: finding.filledAt === null
-? null
-: new Date(finding.filledAt),
+			? null
+			: new Date(finding.filledAt),
 		age_ms: finding.ageMs,
 		tags: JSON.stringify(finding.tags),
 		replay_tags: jsonOrNull(finding.replayTags),
@@ -192,8 +192,8 @@ function findingRow(audit: number, finding: CacheAuditFinding) {
 
 function jsonOrNull(value: unknown): string | null {
 	return value === null
-? null
-: JSON.stringify(value);
+		? null
+		: JSON.stringify(value);
 }
 
 /**
@@ -310,8 +310,8 @@ function findingOf(row: Record<string, unknown>): CacheAuditFinding {
 
 function nullableNumber(value: unknown): number | null {
 	return value === null || value === undefined
-? null
-: Number(value);
+		? null
+		: Number(value);
 }
 
 // A JSON column comes back parsed on Postgres and as text on sqlite.
@@ -321,6 +321,6 @@ function json(value: unknown): unknown {
 	}
 
 	return typeof value === 'string'
-? parseJSON(value)
-: value;
+		? parseJSON(value)
+		: value;
 }

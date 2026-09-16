@@ -736,6 +736,15 @@ describe('The cache audit replays live entries against the database', () => {
 
 			expect(unnamed.statusCode).toBe(400);
 
+			// The settings route writes the same singleton, and refuses the same.
+			const direct = await request(url)
+				.patch('/settings')
+				.send({ cache_audit_schedule: 'hourly' })
+				.set('Authorization', auth);
+
+			expect(direct.statusCode).toBe(400);
+			expect(direct.body.errors[0].message).toContain('hourly');
+
 			// A stale entry nothing has flagged yet, for the schedule to find.
 			await clearCache();
 			await warm(() => readOwner('globex'));

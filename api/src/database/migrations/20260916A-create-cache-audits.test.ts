@@ -6,8 +6,8 @@ import { down, up } from './20260916A-create-cache-audits.js';
 function recordingTable(columns: string[], indexes: string[]) {
 	function column(kind: string, name: string, size?: number) {
 		columns.push(size === undefined
-? `${kind} ${name}`
-: `${kind}(${size}) ${name}`);
+			? `${kind} ${name}`
+			: `${kind}(${size}) ${name}`);
 
 		const append = (suffix: string) => {
 			columns[columns.length - 1] += suffix;

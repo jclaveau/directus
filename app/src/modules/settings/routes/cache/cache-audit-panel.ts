@@ -138,8 +138,8 @@ export function scheduleRule(draft: string): string | null {
 	const trimmed = draft.trim();
 
 	return trimmed === ''
-? null
-: trimmed;
+		? null
+		: trimmed;
 }
 
 /**
