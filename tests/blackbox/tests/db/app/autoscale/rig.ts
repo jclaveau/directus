@@ -80,6 +80,15 @@ export interface PoolOptions {
 	 * not short of a worker somebody took out of it.
 	 */
 	giveUpAfterRestarts?: number;
+	/**
+	 * The API itself as the pool's worker, booted under this environment, in
+	 * place of the fixture.
+	 *
+	 * What a deployment's pool is made of: a worker's boot is a Directus boot,
+	 * and what it serves are Directus routes, so this is the pool an arm about
+	 * serving through a scale runs. The fixture's knobs above do not apply.
+	 */
+	directusEnv?: Record<string, string>;
 }
 
 /**
@@ -102,15 +111,29 @@ export function startPool(options: PoolOptions): Rig {
 			apps: [
 				{
 					name: options.appName,
-					script: workerScript,
 					exec_mode: 'cluster',
 					instances: options.instances,
 					// What the API's own ecosystem sets, and what makes a
 					// worker's `ready` the signal that paces scaling rather
 					// than a timer.
 					wait_ready: true,
-					listen_timeout: 10_000,
 					autorestart: true,
+					...options.directusEnv === undefined
+						? { script: workerScript, listen_timeout: 10_000 }
+						: {
+								// The CLI's entry file: `node` adds the
+								// extension, pm2 checks the path exists.
+								script: `${paths.cli}.js`,
+								args: ['start'],
+								// Where the suites spawn their own instances from.
+								cwd: paths.cwd,
+								// A Directus boot on a loaded runner, with the
+								// margin the fixture's ten seconds do not need.
+								listen_timeout: 60_000,
+								// The planner's, so a release drains the way a
+								// production one does.
+								kill_timeout: 20_000,
+							},
 					...options.giveUpAfterRestarts === undefined
 						? {}
 						: {
@@ -120,7 +143,7 @@ export function startPool(options: PoolOptions): Rig {
 								// than reading as a worker that had been up.
 								min_uptime: 30_000,
 							},
-					env: {
+					env: options.directusEnv ?? {
 						BB_BUSY_MS: String(options.busyMs ?? 0),
 						BB_IDLE_MS: String(options.idleMs ?? 100),
 						...options.readyDelayMs === undefined

@@ -88,6 +88,10 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// seconds a worker. Measured over the postgres run of 2026-09-14, plus the
 	// boot the third one spends.
 	'/tests/db/app/autoscale-prewarm-health.test.ts': 140_000,
+	// Six Directus workers booted one after another under traffic, then
+	// released back to one. Estimated from a 42s run plus six more seconds
+	// of warmup before the release.
+	'/tests/db/app/autoscale-prewarm-load.test.ts': 50_000,
 	// One CLI command per vendor: a module load, a query, and the few
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,
