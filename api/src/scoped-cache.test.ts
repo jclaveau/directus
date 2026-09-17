@@ -863,10 +863,10 @@ describe('collection slice index', () => {
 		await purgeCollectionScopedCache({ delete: vi.fn() } as any, 'articles');
 
 		expect(calls).toEqual([
-			'incr ns:epoch:articles',
+			'incr ns:scoped-cache-epoch:articles',
 			'exec',
 			'smembers ns:scoped-cache-index:slices:articles',
-			'incr ns:epoch:articles',
+			'incr ns:scoped-cache-epoch:articles',
 			'exec',
 			'eval',
 		]);
@@ -1178,7 +1178,7 @@ describe('dropScopedCacheIndex', () => {
 
 		// The bumps are their own pipeline, sent before the script — inside it they
 		// would have gone down with the refusal.
-		expect(bumped).toEqual(['ns:epoch:articles']);
+		expect(bumped).toEqual(['ns:scoped-cache-epoch:articles']);
 	});
 
 	it('counts what Redis removed, not what it was handed', async () => {
@@ -1299,7 +1299,7 @@ describe('flushResponseCache', () => {
 		await flushResponseCache(cache);
 
 		expect(calls).toEqual([
-			'incr ns:epoch:*',
+			'incr ns:scoped-cache-epoch:*',
 			'exec',
 			'clear',
 			'scan',
@@ -1316,7 +1316,13 @@ describe('flushResponseCache', () => {
 
 		await flushResponseCache(null);
 
-		expect(calls).toEqual(['incr ns:epoch:*', 'exec', 'scan', 'unlink', 'exec']);
+		expect(calls).toEqual([
+			'incr ns:scoped-cache-epoch:*',
+			'exec',
+			'scan',
+			'unlink',
+			'exec',
+		]);
 	});
 
 	it(oneLine`
@@ -1347,7 +1353,7 @@ describe('flushResponseCache', () => {
 
 		await expect(flushResponseCache(cache)).resolves.toBeUndefined();
 
-		expect(calls).toEqual(['incr ns:epoch:*', 'exec', 'clear']);
+		expect(calls).toEqual(['incr ns:scoped-cache-epoch:*', 'exec', 'clear']);
 
 		expect(warn).toHaveBeenCalledWith(
 			expect.any(Error),
@@ -4255,13 +4261,19 @@ describe('reading and bumping the purge counters', () => {
 			'*': '1',
 		});
 
-		expect(mget).toHaveBeenCalledWith(['ns:epoch:articles', 'ns:epoch:*']);
+		expect(mget).toHaveBeenCalledWith([
+			'ns:scoped-cache-epoch:articles',
+			'ns:scoped-cache-epoch:*',
+		]);
 	});
 
 	it('asks once for a collection named twice', async () => {
 		await readScopedCacheEpochs(['articles', 'articles']);
 
-		expect(mget).toHaveBeenCalledWith(['ns:epoch:articles', 'ns:epoch:*']);
+		expect(mget).toHaveBeenCalledWith([
+			'ns:scoped-cache-epoch:articles',
+			'ns:scoped-cache-epoch:*',
+		]);
 	});
 
 	// Every read pays this round trip, so it is skipped wherever its answer could
@@ -4341,11 +4353,15 @@ describe('reading and bumping the purge counters', () => {
 		await bumpScopedCacheEpochs(['articles', 'articles', 'authors']);
 
 		expect(counterPipeline.incr).toHaveBeenCalledTimes(2);
-		expect(counterPipeline.incr).toHaveBeenCalledWith('ns:epoch:articles');
-		expect(counterPipeline.incr).toHaveBeenCalledWith('ns:epoch:authors');
+
+		expect(counterPipeline.incr)
+			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles');
+
+		expect(counterPipeline.incr)
+			.toHaveBeenCalledWith('ns:scoped-cache-epoch:authors');
 
 		expect(counterPipeline.expire)
-			.toHaveBeenCalledWith('ns:epoch:articles', 24 * 60 * 60);
+			.toHaveBeenCalledWith('ns:scoped-cache-epoch:articles', 24 * 60 * 60);
 
 		expect(counterPipeline.exec).toHaveBeenCalledOnce();
 	});

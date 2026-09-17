@@ -25,9 +25,11 @@ const SCOPED_CACHE_EPOCH_TTL_SECONDS = 24 * 60 * 60;
 /**
  * A per-collection purge counter, bumped every time that collection's tags are
  * dropped. `*` is the wholesale entry, bumped by a flush that names no collection.
+ * Kept outside `scoped-cache-index:`: a flush bumps `*` and then unlinks that
+ * whole segment, and the counter has to survive the flush it counts.
  */
 function scopedCacheEpochKey(collection: string): string {
-	return `${env['CACHE_NAMESPACE']}:epoch:${collection}`;
+	return `${env['CACHE_NAMESPACE']}:scoped-cache-epoch:${collection}`;
 }
 
 /**

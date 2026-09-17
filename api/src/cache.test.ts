@@ -1625,7 +1625,7 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		await flushCaches(true);
 
-		expect(calls).toEqual(['incr scalabus:epoch:*', 'clear', 'scan']);
+		expect(calls).toEqual(['incr scalabus:scoped-cache-epoch:*', 'clear', 'scan']);
 	});
 
 	test('in clearCacheTargets', async () => {
@@ -1633,7 +1633,7 @@ describe('the wholesale counter moves before the response clear', () => {
 
 		await clearCacheTargets(['response']);
 
-		expect(calls).toEqual(['incr scalabus:epoch:*', 'clear', 'scan']);
+		expect(calls).toEqual(['incr scalabus:scoped-cache-epoch:*', 'clear', 'scan']);
 	});
 });
 
