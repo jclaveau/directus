@@ -101,6 +101,11 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// spawns answer in seconds; what the run measures is the boots.
 	'/tests/db/app/processes-missing-dependency.test.ts': 10_000,
 	'/tests/db/app/autoscale-drill.test.ts': 25_000,
+	// Three nodes to boot, then a poll that runs out its whole window for the
+	// announcement that must not arrive.
+	'/tests/db/app/cache-config-broadcast.test.ts': 21_000,
+	// One node to boot and three schema rebuilds watched on the wire.
+	'/tests/db/app/deployment-namespace.test.ts': 12_000,
 	'/tests/db/app/autoscale-mcp-levers.test.ts': 120_000,
 	'/tests/db/routes/items/m2o-max-batch-mutation.test.ts': 36_000,
 	'/tests/db/routes/items/batch-insert.test.ts': 2_000,
