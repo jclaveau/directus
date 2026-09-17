@@ -110,6 +110,8 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	REDIS_RETRY_MAX_DELAY: 'number',
 	REDIS_RETRY_MAX_ATTEMPTS: 'number',
 
+	BUS_NAMESPACE: 'string',
+
 	METRICS_TOKENS: 'array',
 	METRICS_SERVICES: 'array',
 	METRICS_ENABLED: 'boolean',

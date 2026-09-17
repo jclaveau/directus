@@ -2,6 +2,7 @@ import vendors from '@common/get-dbs-to-test';
 import Redis from 'ioredis';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+	busChannel,
 	closeSharedSettings,
 	countWorkers,
 	databaseEnv,
@@ -32,9 +33,9 @@ const vendor = vendors[0]!;
 
 const REDIS_PORT = 6108;
 
-// What `useBus` publishes on: the channel is namespaced by the bus rather than
-// by the deployment, so it is the same one for every process on this Redis.
-const RELOAD_CHANNEL = 'directus:bus:autoscaleReload';
+// What `useBus` publishes on for the autoscaler below, which runs under the
+// environment's default namespace.
+const RELOAD_CHANNEL = busChannel('autoscaleReload');
 
 describe('A restart carries the supervisor options stored for it', () => {
 	const redis = new Redis({ host: 'localhost', port: REDIS_PORT });

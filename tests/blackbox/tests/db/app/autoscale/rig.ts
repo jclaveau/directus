@@ -197,12 +197,20 @@ export function startPool(options: PoolOptions): Rig {
 /** The `directus_settings` columns the processes module lays over the env. */
 export type SharedSettingsColumn = 'autoscale_settings' | 'supervisor_settings';
 
-// The channel `useBus` publishes a change on. It is namespaced by the bus
-// rather than by the deployment, so it is the same one for every process on
-// the shared Redis.
-const CHANGED_CHANNEL = 'directus:bus:sharedSettingsChanged';
+// What the rig's autoscalers run under unless a suite names one: the
+// environment's default `CACHE_NAMESPACE`.
+const DEFAULT_NAMESPACE = 'scalabus';
 
 const REDIS_PORT = 6108;
+
+/**
+ * The channel `useBus` publishes `name` on for a process running under
+ * `namespace`. The bus follows the cache namespace, so processes of two
+ * suites sharing this Redis hear each other only when they share that too.
+ */
+export function busChannel(name: string, namespace = DEFAULT_NAMESPACE): string {
+	return `${namespace}:bus:${name}`;
+}
 
 const databases = new Map<Vendor, Knex>();
 
@@ -229,13 +237,14 @@ export function databaseEnv(vendor: Vendor): Record<string, string> {
  * because most of these suites run a pool and an autoscaler and no Directus at
  * all. `announce` is what a write through the service would have published,
  * and leaving it off is how a suite asks whether the re-read floor alone
- * carries a change to a node the bus never reached.
+ * carries a change to a node the bus never reached; `namespace` is the one
+ * the reading processes run under.
  */
 export async function storeSharedSettings(
 	vendor: Vendor,
 	column: SharedSettingsColumn,
 	settings: Record<string, unknown> | null,
-	announce = true,
+	options: { announce?: boolean; namespace?: string } = {},
 ): Promise<void> {
 	let database = databases.get(vendor);
 
@@ -257,9 +266,13 @@ export async function storeSharedSettings(
 		await database('directus_settings').insert({ [column]: stored });
 	}
 
-	if (announce) {
+	if (options.announce ?? true) {
 		announcer ??= new Redis({ host: 'localhost', port: REDIS_PORT });
-		await announcer.publish(CHANGED_CHANNEL, JSON.stringify({ column }));
+
+		await announcer.publish(
+			busChannel('sharedSettingsChanged', options.namespace),
+			JSON.stringify({ column }),
+		);
 	}
 }
 

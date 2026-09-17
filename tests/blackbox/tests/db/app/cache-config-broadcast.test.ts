@@ -14,21 +14,21 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 // from a node merely reading its own write, so the assertions below are made on the
 // node that did NOT write.
 //
-// `writer` and `peer` differ only by cache namespace: same DB, same Redis, so they
-// share the settings row and the bus while keeping their cache entries apart.
+// `writer` and `peer` differ only by cache namespace: same DB, same Redis and,
+// named for both, the same bus, so they share the settings row and the
+// broadcast while keeping their cache entries apart.
 describe('Cache config broadcast', () => {
 	const directusInstances = {} as { [vendor: string]: ChildProcess[] };
-	const envs = {} as Record<Vendor, { writer: Env; peer: Env }>;
+	const envs = {} as Record<Vendor, { writer: Env; peer: Env; stranger: Env }>;
 
 	beforeAll(async () => {
 		const promises = [];
 
 		for (const vendor of vendors) {
 			// Redis (localhost:6108) is shared across vendors, so the cache namespace
-			// must carry the vendor — same reasoning as cache.test.ts. The bus namespace
-			// is a fixed `directus:bus` and cannot be scoped, so a run covering several
-			// vendors at once has them publishing into each other's channel; CI runs one
-			// vendor per job, which is what keeps that from mattering.
+			// must carry the vendor — same reasoning as cache.test.ts. The bus
+			// follows the cache namespace, which would put the two on separate
+			// buses; the broadcast under test needs them on one.
 			const nsPrefix = `directus-cache-config-${vendor}`;
 
 			const writer = cloneDeep(config.envs);
@@ -37,26 +37,41 @@ describe('Cache config broadcast', () => {
 			writer[vendor]['REDIS_HOST'] = 'localhost';
 			writer[vendor]['REDIS_PORT'] = '6108';
 			writer[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_writer`;
+			writer[vendor]['BUS_NAMESPACE'] = `${nsPrefix}:bus`;
 			writer[vendor]['CACHE_TTL'] = '11m';
 
 			const peer = cloneDeep(writer);
 			peer[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_peer`;
 
+			// Another deployment on the same Redis and database: its bus is named
+			// after its own cache namespace, so nothing the writer announces
+			// reaches it.
+			const stranger = cloneDeep(writer);
+			stranger[vendor]['CACHE_NAMESPACE'] = `${nsPrefix}_stranger`;
+			delete stranger[vendor]['BUS_NAMESPACE'];
+
 			const writerPort = await getPort();
 			const peerPort = await getPort();
+			const strangerPort = await getPort();
 			writer[vendor].PORT = String(writerPort);
 			peer[vendor].PORT = String(peerPort);
+			stranger[vendor].PORT = String(strangerPort);
 
 			directusInstances[vendor] = [
 				spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: writer[vendor] }),
 				spawn('node', [paths.cli, 'start'], { cwd: paths.cwd, env: peer[vendor] }),
+				spawn('node', [paths.cli, 'start'], {
+					cwd: paths.cwd,
+					env: stranger[vendor],
+				}),
 			];
 
-			envs[vendor] = { writer, peer };
+			envs[vendor] = { writer, peer, stranger };
 
 			promises.push(
 				awaitDirectusConnection(writerPort),
 				awaitDirectusConnection(peerPort),
+				awaitDirectusConnection(strangerPort),
 			);
 		}
 
@@ -132,6 +147,25 @@ describe('Cache config broadcast', () => {
 				.expect(200);
 
 			expect(await awaitEffectiveTtl(vendor, peer, '3h')).toBe('3h');
+		});
+
+		it('leaves a node on another bus where it was', async () => {
+			// Redis pub/sub is global to the server, so what keeps one deployment's
+			// announcements out of another's is the bus name alone. The stranger
+			// shares the row the writer changed and still serves its boot-time
+			// value: a poll for the peer's new value runs out its whole window.
+			const { writer, peer, stranger } = envs[vendor]!;
+
+			expect(await awaitEffectiveTtl(vendor, stranger, '11m')).toBe('11m');
+
+			await request(getUrl(vendor, writer))
+				.patch('/settings')
+				.send({ cache_ttl: '3h' })
+				.set('Authorization', `Bearer ${USER.ADMIN.TOKEN}`)
+				.expect(200);
+
+			expect(await awaitEffectiveTtl(vendor, peer, '3h')).toBe('3h');
+			expect(await awaitEffectiveTtl(vendor, stranger, '3h')).toBe('11m');
 		});
 
 		it('flips both nodes when an import writes past SettingsService', async () => {
