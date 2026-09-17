@@ -305,18 +305,8 @@ describe('DELETE (Stop)', () => {
 		);
 
 		expect(res.locals['payload']).toEqual({ data: { expires: 86_400 } });
-
-		// The trail names the admin as the actor: they are themself again.
-		expect(activity.createOne).toHaveBeenCalledWith(
-			expect.objectContaining({
-				action: Action.IMPERSONATE_END,
-				user: 'admin',
-				impersonator: null,
-				collection: 'directus_users',
-				item: 'jane',
-			}),
-		);
-
+		// The trail is written where the row ends, with every other ending.
+		expect(activity.createOne).not.toHaveBeenCalled();
 		expect(next).toHaveBeenCalledOnce();
 	});
 });

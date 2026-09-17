@@ -356,19 +356,12 @@ router.delete(
 			throw new InvalidPayloadError({ reason: 'Not impersonating in session mode' });
 		}
 
+		// The IMPERSONATE_END row is written where the session ends, whoever
+		// ends it.
 		const { accessToken, expires } = await new AuthenticationService({
 			accountability,
 			schema: req.schema,
 		}).stopImpersonation(accountability.session);
-
-		await new ActivityService({ schema: req.schema }).createOne({
-			action: Action.IMPERSONATE_END,
-			...actorFields(accountability),
-			user: accountability.impersonator,
-			impersonator: null,
-			collection: 'directus_users',
-			item: accountability.user,
-		});
 
 		logger.info(
 			`[impersonation] ${accountability.impersonator} stops impersonating `
