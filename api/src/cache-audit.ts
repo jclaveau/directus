@@ -900,13 +900,17 @@ function globMatches(glob: string[], segments: string[]): boolean {
 	return glob.length === segments.length;
 }
 
+// As long as the findings table stores a reason; node's own codes are far
+// shorter, a userland one need not be.
+const REASON_MAX_LENGTH = 64;
+
 function transportReason(error: unknown): string {
 	const code = typeof error === 'object' && error !== null && 'code' in error
 		? error.code
 		: undefined;
 
 	return typeof code === 'string' && code !== ''
-		? `transport_${code.toLowerCase()}`
+		? `transport_${code.toLowerCase()}`.slice(0, REASON_MAX_LENGTH)
 		: 'transport';
 }
 

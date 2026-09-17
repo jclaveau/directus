@@ -981,6 +981,12 @@ describe('an entry nothing can be replayed from', () => {
 				code: 'HPE_HEADER_OVERFLOW',
 			}),
 		],
+		// Cut to what the findings table stores: 64 characters.
+		[
+			`transport_${'x'.repeat(54)}`,
+			Object.assign(new Error('a userland code'), { code: 'X'.repeat(80) }),
+		],
+		['transport', Object.assign(new Error('a numeric code'), { code: 7 })],
 	])('%s: a replay that never got an answer', async (reason, error) => {
 		fill('rk', { data: [] });
 		described(descriptor());
