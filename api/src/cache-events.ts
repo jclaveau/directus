@@ -87,8 +87,9 @@ export interface CachePurge {
 	scopedCacheTagCount: number; // that reach as a number, for every mode
 	evicted: number | null; // entries those sets held; null = whole-namespace clear
 	// Wall-clock of the purge itself. It is awaited inside the mutation, so this
-	// is time added to the write, not a background cost.
-	durationMs: number;
+	// is time added to the write, not a background cost — and null where no write
+	// waited on it (a retried purge), so the latency percentiles stay the write's.
+	durationMs: number | null;
 }
 
 export interface CacheDescriptor {
@@ -619,7 +620,11 @@ export function queueCachePurge(entry: CachePurge): void {
 		evicted: entry.evicted === null
 			? ''
 			: String(entry.evicted),
-		durationMs: String(entry.durationMs),
+		// Empty = no write waited on it, which the reader keeps out of the
+		// percentiles (a retried purge).
+		durationMs: entry.durationMs === null
+			? ''
+			: String(entry.durationMs),
 		ts: String(Date.now()),
 	});
 }
@@ -1899,20 +1904,18 @@ export async function evictCacheEntry(
 	cache: Keyv,
 	redisKey: string,
 ): Promise<boolean> {
-	// Read back rather than trusted. Keyv reports a store error by emitting `error`
+	// Proven rather than trusted. Keyv reports a store error by emitting `error`
 	// and answering `undefined`, so a swallowed delete is indistinguishable from a
 	// successful one at the call site — which is exactly what the in-flight purge
 	// guard must not assume, its whole job being to leave nothing stale behind.
-	// The read-back is swallowed the same way, so an empty answer is only trusted
-	// once the store proves it drops what it is asked to.
+	// The proof is a probe of the store, not a read-back of the key: two
+	// identical reads fill the same key, so the one evicting can find the other's
+	// fill where its own was — a live entry, not a swallowed delete — and
+	// recording that would have the drain purge every tag it carries (#507).
 	try {
 		await cache.delete(redisKey);
 		await cache.delete(cacheExpiresAtKey(redisKey));
 		await cache.delete(cacheTagsKey(redisKey));
-
-		if (await cache.get(redisKey) !== undefined) {
-			return false;
-		}
 
 		return await cacheStoreDropsEntries(cache);
 	}

@@ -433,10 +433,11 @@ describe(oneLine`
 				item: [{ subject: 'pair-a' }, { subject: 'pair-b' }],
 			})).map((note: { id: number }) => note.id);
 
+			// Inline rather than `.query()`: that encodes the comma, and the
+			// descriptor keeps the query string as sent.
 			function readPair() {
 				return request(url)
-					.get(`/items/${NOTE}`)
-					.query({ 'filter[id][_in]': pair.join(',') })
+					.get(`/items/${NOTE}?filter[id][_in]=${pair.join(',')}`)
 					.set('Authorization', auth);
 			}
 
@@ -524,6 +525,31 @@ describe(oneLine`
 			// Once, though two of the drained targets name it. The listing counts
 			// events per entry, so a per-target report would read 2 here.
 			expect(Number(named.count)).toBe(1);
+
+			// What the drain purged is recorded like the purge it finished, under
+			// one id and with no latency — no write waited on it (#507). Polled
+			// like the anomaly: it reaches Postgres on the stats drain too. These
+			// tags are this case's own, and the write's purge recorded nothing
+			// (it failed), so every row here is the drain's.
+			let purged: any[] = [];
+
+			for (let attempt = 0; attempt < 45 && purged.length < 2; attempt++) {
+				purged = await db('directus_cache_stats_scoped_purge_tags as t')
+					.join('directus_cache_stats_purges as p', 'p.purge_id', 't.purge_id')
+					.whereIn('t.scoped_cache_tag', pair.map((id) => `${NOTE}:id=${id}`))
+					.select('t.scoped_cache_tag', 'p.purge_id', 'p.mode', 'p.duration_ms');
+
+				if (purged.length < 2) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			mark(`recorded purges: ${JSON.stringify(purged)}`);
+
+			expect(purged).toHaveLength(2);
+			expect(new Set(purged.map((row) => row.purge_id)).size).toBe(1);
+			expect(purged.map((row) => row.mode)).toEqual(['slices', 'slices']);
+			expect(purged.map((row) => row.duration_ms)).toEqual([null, null]);
 		}, 60_000);
 
 		it(oneLine`

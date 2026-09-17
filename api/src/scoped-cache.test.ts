@@ -1429,6 +1429,47 @@ describe('retryPendingScopedCachePurges', () => {
 	});
 
 	it(oneLine`
+		records what it finished as a purge, with no latency: the page counts a
+		recovered entry as purged like any other, and no write waited on it (#507)
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:id=1'],
+				ids: [7],
+			},
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:id=2'],
+				ids: [8],
+			},
+		]);
+
+		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+
+		expect(await retryPendingScopedCachePurges()).toBe(2);
+
+		expect(queueCachePurge).toHaveBeenCalledTimes(2);
+
+		expect(queueCachePurge).toHaveBeenCalledWith({
+			purgeId: expect.any(String),
+			collection: 'articles',
+			mode: 'slices',
+			scopedCacheTags: ['articles:id=1'],
+			scopedCacheTagCount: 1,
+			evicted: 1,
+			durationMs: null,
+		});
+
+		// One id across the drain, so an entry two of its targets reach counts one
+		// purge.
+		const [first, second] = vi.mocked(queueCachePurge).mock.calls;
+		expect(second![0].purgeId).toBe(first![0].purgeId);
+	});
+
+	it(oneLine`
 		takes every slice the index names for a collection-mode record — it named no
 		tag because which slices changed was unresolvable when it failed
 	`, async () => {
@@ -1456,6 +1497,12 @@ describe('retryPendingScopedCachePurges', () => {
 		]]);
 
 		expect(cache.clear).not.toHaveBeenCalled();
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			collection: 'articles',
+			mode: 'collection',
+			durationMs: null,
+		}));
 	});
 
 	it('flushes the whole namespace for a namespace-mode record', async () => {
@@ -1471,6 +1518,13 @@ describe('retryPendingScopedCachePurges', () => {
 		expect(cache.clear).toHaveBeenCalledOnce();
 		expect(sweep.swept).toEqual([]);
 		expect(clearPendingScopedCachePurges).toHaveBeenCalledWith([7]);
+
+		expect(queueCachePurge).toHaveBeenCalledWith(expect.objectContaining({
+			collection: null,
+			mode: 'namespace',
+			evicted: null,
+			durationMs: null,
+		}));
 	});
 
 	it(oneLine`

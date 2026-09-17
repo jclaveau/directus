@@ -2582,16 +2582,27 @@ describe('evictCacheEntry', () => {
 		expect(cache.delete).toHaveBeenCalledWith('k1__tags');
 	});
 
-	it('reports an entry the delete left behind', async () => {
+	it(oneLine`
+		reports its own delete done when a concurrent identical read refilled the key
+		behind it, rather than reading the fresh fill as a delete the store swallowed
+		(#507)
+	`, async () => {
 		const cache = liveStore();
-		cache.delete.mockResolvedValue(false);
 
-		expect(await evictCacheEntry(cache as any, 'k1')).toBe(false);
+		// The sibling's fill lands the moment ours is gone.
+		cache.delete.mockImplementationOnce(async (key: string) => {
+			await cache.set(key, 'refilled');
+
+			return true;
+		});
+
+		expect(await evictCacheEntry(cache as any, 'k1')).toBe(true);
+		expect(await cache.get('k1')).toBe('refilled');
 	});
 
 	it(oneLine`
-		reports nothing evicted when the store swallows every call, since the empty
-		read-back then proves nothing
+		reports nothing evicted when the store swallows every call, since a probe it
+		never keeps then proves nothing
 	`, async () => {
 		// What an offline `@keyv/redis` looks like: each method emits `error` and
 		// resolves as if the key were absent.

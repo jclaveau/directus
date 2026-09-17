@@ -244,5 +244,65 @@ describe(oneLine`
 
 			expect(recorded).toEqual([]);
 		}, 60_000);
+
+		// The same net over ONE key: identical reads fill the same entry, so an
+		// eviction can find a sibling's fill where its own was, and must not read it
+		// as a delete the store swallowed. The deterministic case is the unit test
+		// on `evictCacheEntry`.
+		it(oneLine`
+			a burst of identical crossed reads leaves nothing recorded for retry — a
+			neighbour's fill of the same key is not a swallowed delete (#507)
+		`, async () => {
+			await request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			await db(PENDING)
+				.where({ collection: BURST })
+				.delete();
+
+			// The burst above left its own refusals under this detail.
+			await db(ANOMALIES)
+				.where({ reason: 'inflight_purge', detail: BURST })
+				.delete();
+
+			const crossed = await Promise.all(
+				Array.from({ length: BURST_WIDTH }, () => {
+					return request(getUrl(vendor, env))
+						.get(`/items/${BURST}`)
+						.query({ 'filter[slot][_eq]': '0' })
+						.set('Authorization', auth);
+				}),
+			);
+
+			for (const read of crossed) {
+				expect(read.headers[cacheStatusHeader]).toBe('MISS');
+			}
+
+			for (let attempt = 0; attempt < 40; attempt++) {
+				const refused = await db(ANOMALIES)
+					.where({ reason: 'inflight_purge', detail: BURST })
+					.select('id');
+
+				if (refused.length >= BURST_WIDTH) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			const refused = await db(ANOMALIES)
+				.where({ reason: 'inflight_purge', detail: BURST })
+				.select('cache_key');
+
+			expect(refused).toHaveLength(BURST_WIDTH);
+			expect(new Set(refused.map((row) => row.cache_key)).size).toBe(1);
+
+			const recorded = await db(PENDING)
+				.where({ collection: BURST })
+				.select('id');
+
+			expect(recorded).toEqual([]);
+		}, 60_000);
 	});
 });

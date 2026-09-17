@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { randomUUID } from 'node:crypto';
 import emitter from '../emitter.js';
 import {
 	resolvedCacheTtl,
@@ -759,7 +760,11 @@ export async function flushResponseCache(cache: Keyv | null): Promise<void> {
 export async function purgeCollectionScopedCache(
 	cache: Keyv,
 	collection: string,
-	scopedCachePurgeId?: string,
+	options: {
+		scopedCachePurgeId?: string | undefined;
+		// A retried purge is nothing's latency: no write waits on the drain.
+		retried?: boolean;
+	} = {},
 ): Promise<void> {
 	// Not the sweep's own bump repeated: this one has to precede the slice-index
 	// read below, which the sweep never sees. A read filing a NEW slice between that
@@ -784,13 +789,15 @@ export async function purgeCollectionScopedCache(
 	// No tag list: every slice the index happened to name is derived rather than
 	// chosen, and unbounded. `collection` plus the mode already state the reach.
 	queueCachePurge({
-		purgeId: scopedCachePurgeId,
+		purgeId: options.scopedCachePurgeId,
 		collection,
 		mode: 'collection',
 		scopedCacheTags: null,
 		scopedCacheTagCount: tagKeys.length,
 		evicted,
-		durationMs: Date.now() - startedAt,
+		durationMs: options.retried === true
+			? null
+			: Date.now() - startedAt,
 	});
 }
 
@@ -909,6 +916,11 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	let cleared = 0;
 	const reported = new Set<string>();
 
+	// Recorded like the purges it finishes, or the page would show the entries
+	// they evicted as never purged at all (#507). One id for the drain: what it
+	// drops, it drops in one pass, whatever the number of writes that recorded it.
+	const purgeId = randomUUID();
+
 	for (const target of pending) {
 		const tagKeys = target.scopedCacheTags.map(scopedCacheTagKeyFromLabel);
 
@@ -929,6 +941,16 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 
 			if (target.mode === 'namespace') {
 				await cache.clear();
+
+				queueCachePurge({
+					purgeId,
+					collection: null,
+					mode: 'namespace',
+					scopedCacheTags: null,
+					scopedCacheTagCount: 0,
+					evicted: null,
+					durationMs: null,
+				});
 			}
 			else if (target.mode === 'collection') {
 				if (target.collection === null) {
@@ -941,10 +963,23 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 					);
 				}
 
-				await purgeCollectionScopedCache(cache, target.collection);
+				await purgeCollectionScopedCache(cache, target.collection, {
+					scopedCachePurgeId: purgeId,
+					retried: true,
+				});
 			}
 			else {
-				await purgeScopedCacheTagKeys(cache, tagKeys);
+				const evicted = await purgeScopedCacheTagKeys(cache, tagKeys);
+
+				queueCachePurge({
+					purgeId,
+					collection: target.collection,
+					mode: 'slices',
+					scopedCacheTags: target.scopedCacheTags,
+					scopedCacheTagCount: tagKeys.length,
+					evicted,
+					durationMs: null,
+				});
 			}
 
 			await clearPendingScopedCachePurges(target.ids);
@@ -1160,11 +1195,9 @@ export async function purgeScopedCache(
 		// scan turned up.
 		await purgeOrRecord(
 			() => {
-				return purgeCollectionScopedCache(
-					cache,
-					collection,
-					options.scopedCachePurgeId,
-				);
+				return purgeCollectionScopedCache(cache, collection, {
+					scopedCachePurgeId: options.scopedCachePurgeId,
+				});
 			},
 			{ mode: 'collection', collection, scopedCacheTags: [] },
 		);
