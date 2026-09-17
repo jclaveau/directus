@@ -39,6 +39,8 @@ test.each([
 	['PATCH', '/users/me/track/page'],
 	['POST', '/graphql'],
 	['POST', '/graphql/system'],
+	['POST', '/auth/logout/'],
+	['POST', '/Auth/Refresh'],
 ])('lets an impersonated %s %s through', (method, path) => {
 	handler(request(method, path, 'admin'), {} as never, next);
 
@@ -78,6 +80,10 @@ test.each([
 	['POST', '/auth/password/reset'],
 	['POST', '/users/invite'],
 	['POST', '/users/register'],
+	// Express routes these to the same handlers
+	['POST', '/Users/Me/TFA/generate'],
+	['POST', '/users/me/tfa/generate/'],
+	['POST', '/users/invite/'],
 ])('refuses %s %s with writes on: credentials are never theirs', (method, path) => {
 	vi.mocked(useEnv).mockReturnValue({ IMPERSONATION_WRITES: true });
 

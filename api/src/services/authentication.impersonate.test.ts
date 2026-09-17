@@ -242,6 +242,23 @@ test.each([
 	).rejects.toThrow(ForbiddenError);
 });
 
+test('refuses a target that is no uuid before asking the database', async () => {
+	const users = new SchemaBuilder()
+		.collection('directus_users', (c) => {
+			c.field('id')
+				.uuid()
+				.primary();
+		})
+		.build();
+
+	await expect(
+		new AuthenticationService({ knex: db, schema: users })
+			.impersonate('not-a-uuid', { impersonator: 'admin', mode: 'json' }),
+	).rejects.toThrow(InvalidPayloadError);
+
+	expect(tracker.history.select).toHaveLength(0);
+});
+
 test('refuses an inactive impersonator: suspend a bot to kill it', async () => {
 	tracker.on.select('directus_users')
 		.response([{ ...admin, status: 'suspended' }, jane]);

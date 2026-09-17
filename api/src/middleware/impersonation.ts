@@ -34,7 +34,10 @@ export const handler = (req: Request, _res: Response, next: NextFunction) => {
 		return next();
 	}
 
-	if (CREDENTIAL_PATHS.some((path) => path.test(req.path))) {
+	// Express routes `/Users/me/tfa/` and `/users/me/tfa` to the same handler
+	const path = req.path.toLowerCase().replace(/\/+$/, '');
+
+	if (CREDENTIAL_PATHS.some((credential) => credential.test(path))) {
 		throw new ForbiddenError({ reason: 'impersonation_credentials' });
 	}
 
@@ -42,7 +45,7 @@ export const handler = (req: Request, _res: Response, next: NextFunction) => {
 		return next();
 	}
 
-	if (READ_METHODS.has(req.method) || WRITE_ALLOWLIST.has(req.path)) {
+	if (READ_METHODS.has(req.method) || WRITE_ALLOWLIST.has(path)) {
 		return next();
 	}
 
