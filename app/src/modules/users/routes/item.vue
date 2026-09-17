@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import api from '@/api';
 import { logout } from '@/auth';
 import { useEditsGuard } from '@/composables/use-edits-guard';
 import { useItem } from '@/composables/use-item';
@@ -6,7 +7,9 @@ import { useShortcut } from '@/composables/use-shortcut';
 import { useCollectionsStore } from '@/stores/collections';
 import { useFieldsStore } from '@/stores/fields';
 import { useServerStore } from '@/stores/server';
+import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
+import { unexpectedError } from '@/utils/unexpected-error';
 import { getAssetUrl } from '@/utils/get-asset-url';
 import { userName } from '@/utils/user-name';
 import CommentsSidebarDetail from '@/views/private/components/comments-sidebar-detail.vue';
@@ -34,6 +37,7 @@ const fieldsStore = useFieldsStore();
 const collectionsStore = useCollectionsStore();
 const userStore = useUserStore();
 const serverStore = useServerStore();
+const settingsStore = useSettingsStore();
 
 const { primaryKey } = toRefs(props);
 const { breadcrumb } = useBreadcrumb();
@@ -89,6 +93,24 @@ const { confirmLeave, leaveTo } = useEditsGuard(hasEdits);
 
 const confirmDelete = ref(false);
 const confirmArchive = ref(false);
+const confirmImpersonate = ref(false);
+const impersonating = ref(false);
+
+const impersonateAllowed = computed(() => {
+	if (!userStore.isAdmin || userStore.impersonator || isNew.value) {
+		return false;
+	}
+
+	const me = userStore.currentUser;
+
+	if (!item.value || !me || 'share' in me) {
+		return false;
+	}
+
+	return item.value.id !== me.id;
+});
+
+const projectUrl = computed(() => settingsStore.settings?.project_url ?? null);
 
 const avatarSrc = computed(() =>
 	item.value?.avatar ? getAssetUrl(`${item.value.avatar}?key=system-medium-cover`) : null,
@@ -262,6 +284,33 @@ async function toggleArchive() {
 	}
 }
 
+async function impersonate(mode: 'cookie' | 'session') {
+	if (impersonating.value) {
+		return;
+	}
+
+	impersonating.value = true;
+
+	try {
+		await api.post('/auth/impersonate', { user: props.primaryKey, mode });
+
+		if (mode === 'cookie') {
+			window.open(projectUrl.value as string, '_blank');
+			confirmImpersonate.value = false;
+		}
+		else {
+			// Every store holds the admin
+			window.location.reload();
+		}
+	}
+	catch (error) {
+		unexpectedError(error);
+	}
+	finally {
+		impersonating.value = false;
+	}
+}
+
 function revert(values: Record<string, any>) {
 	edits.value = {
 		...edits.value,
@@ -347,6 +396,53 @@ function revert(values: Record<string, any>) {
 						</v-button>
 						<v-button kind="warning" :loading="archiving" @click="toggleArchive">
 							{{ isArchived ? t('unarchive') : t('archive') }}
+						</v-button>
+					</v-card-actions>
+				</v-card>
+			</v-dialog>
+
+			<v-dialog
+				v-if="impersonateAllowed"
+				v-model="confirmImpersonate"
+				@esc="confirmImpersonate = false"
+			>
+				<template #activator="{ on }">
+					<v-button
+						v-tooltip.bottom="t('impersonate')"
+						rounded
+						icon
+						secondary
+						@click="on"
+					>
+						<v-icon name="theater_comedy" />
+					</v-button>
+				</template>
+
+				<v-card>
+					<v-card-title>
+						{{ t('impersonate_confirm', { user: title }) }}
+					</v-card-title>
+					<v-card-text>{{ t('impersonate_explain') }}</v-card-text>
+
+					<v-card-actions>
+						<v-button secondary @click="confirmImpersonate = false">
+							{{ t('cancel') }}
+						</v-button>
+						<v-button
+							v-tooltip.bottom="projectUrl ? null : t('impersonate_no_project_url')"
+							secondary
+							:disabled="!projectUrl"
+							:loading="impersonating"
+							@click="impersonate('cookie')"
+						>
+							{{ t('impersonate_in_project_website') }}
+						</v-button>
+						<v-button
+							kind="warning"
+							:loading="impersonating"
+							@click="impersonate('session')"
+						>
+							{{ t('impersonate_in_data_studio') }}
 						</v-button>
 					</v-card-actions>
 				</v-card>

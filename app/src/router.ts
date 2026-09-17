@@ -146,7 +146,11 @@ export const onBeforeEach: NavigationGuard = async (to) => {
 
 		if (userStore.currentUser && !('share' in userStore.currentUser)) {
 			if (to.path !== '/tfa-setup') {
-				if (userStore.currentUser.enforce_tfa && userStore.currentUser.tfa_secret === null) {
+				const { enforce_tfa, tfa_secret } = userStore.currentUser;
+				const tfaMissing = enforce_tfa && tfa_secret === null;
+
+				// The target's /users/me/tfa/* is refused under impersonation
+				if (tfaMissing && !userStore.impersonator) {
 					if (userStore.currentUser.last_page === to.fullPath) {
 						return '/tfa-setup';
 					} else {

@@ -42,6 +42,11 @@ const mockGlobalsResponse = {
 
 const mockRolesResponse: Pick<Role, 'id'>[] = [{ id: '00000000-0000-0000-0000-000000000000' }];
 
+const mockImpersonator = { id: 'admin', first_name: 'Ad', last_name: 'Min' };
+
+// null while no impersonation, undefined while the endpoint 404s (disabled)
+let impersonator: typeof mockImpersonator | null | undefined = null;
+
 vi.mock('@/api', () => {
 	return {
 		default: {
@@ -65,6 +70,12 @@ vi.mock('@/api', () => {
 								data: mockRolesResponse,
 							},
 						});
+					case '/auth/impersonate':
+						if (impersonator === undefined) {
+							return Promise.reject(new Error('404'));
+						}
+
+						return Promise.resolve({ data: { data: { impersonator } } });
 				}
 
 				return Promise.reject(new Error(`GET "${path}" is not mocked in this test`));
@@ -83,6 +94,7 @@ vi.mock('@/api', () => {
 });
 
 afterEach(() => {
+	impersonator = null;
 	vi.clearAllMocks();
 });
 
@@ -138,6 +150,24 @@ describe('actions', () => {
 			await userStore.hydrate();
 
 			expect(userStore.currentUser).toEqual({ ...mockUsersResponse, ...mockGlobalsResponse, roles: mockRolesResponse });
+			expect(userStore.impersonator).toBeNull();
+		});
+
+		test('holds the impersonator while impersonating', async () => {
+			impersonator = mockImpersonator;
+			const userStore = useUserStore();
+			await userStore.hydrate();
+
+			expect(userStore.impersonator).toEqual(mockImpersonator);
+		});
+
+		test('holds no impersonator while impersonation is disabled', async () => {
+			impersonator = undefined;
+			const userStore = useUserStore();
+			await userStore.hydrate();
+
+			expect(userStore.currentUser).not.toBeNull();
+			expect(userStore.impersonator).toBeNull();
 		});
 	});
 

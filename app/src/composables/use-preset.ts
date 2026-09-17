@@ -53,7 +53,11 @@ export function usePreset(
 	 * @param preset The preset that should be saved
 	 */
 	const savePreset = async (preset?: Partial<Preset>) => {
-		if (temporary) return;
+		// An impersonating admin never rewrites what the target sees
+		if (temporary || userStore.impersonator) {
+			return;
+		}
+
 		busy.value = true;
 
 		const updatedValues = await presetsStore.savePreset(preset ? preset : localPreset.value);
