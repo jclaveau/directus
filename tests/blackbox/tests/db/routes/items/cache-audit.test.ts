@@ -248,12 +248,6 @@ describe('The cache audit replays live entries against the database', () => {
 				.set('Authorization', auth);
 		}
 
-		function readWide() {
-			return request(url)
-				.get(`/items/${WIDE}?fields=*,parent.*&limit=-1`)
-				.set('Authorization', auth);
-		}
-
 		function readGraphql(owner: string) {
 			return request(url)
 				.post('/graphql')
@@ -610,11 +604,50 @@ describe('The cache audit replays live entries against the database', () => {
 		}, 60_000);
 
 		it(oneLine`
+			lists a run its process died on as finished, with the reason, rather
+			than in flight until the reap: no claim is held behind it
+		`, async () => {
+			// What a node killed mid-run leaves: the row it opened, never closed.
+			const [died] = await db('directus_cache_audits')
+				.insert({
+					started_at: new Date(Date.now() - 10_000),
+					trigger: 'cron',
+					options: JSON.stringify({
+						limit: null,
+						user: null,
+						collection: null,
+						purge: false,
+					}),
+				})
+				.returning('id');
+
+			const diedId = typeof died === 'object'
+				? died.id
+				: died;
+
+			const listed = await request(url).get('/utils/cache/audits')
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+
+			expect(listed.body.data.find((run: any) => run.id === diedId))
+				.toMatchObject({
+					finishedAt: expect.any(Number),
+					error: 'The run did not finish: its process died',
+				});
+		});
+
+		it(oneLine`
 			replays an entry whose tags outgrow node's 16KB header cap, one pin per
 			nested parent, and finds it fresh rather than unreplayable
 		`, async () => {
 			await clearCache();
-			await warm(() => readWide());
+
+			await warm(() => {
+				return request(url)
+					.get(`/items/${WIDE}?fields=*,parent.*&limit=-1`)
+					.set('Authorization', auth);
+			});
 
 			const report = await auditSettled({ collection: WIDE });
 
