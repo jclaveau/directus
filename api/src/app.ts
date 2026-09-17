@@ -90,6 +90,7 @@ import cache from './middleware/cache.js';
 import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
+import impersonation from './middleware/impersonation.js';
 import auditRequestQueries from './middleware/query-audit.js';
 import openRequestStore from './middleware/request-store.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
@@ -386,6 +387,8 @@ export default async function createApp(): Promise<express.Application> {
 	app.use('/extensions/registry', refuseExtensionChangeInProduction);
 
 	app.use(authenticate);
+
+	app.use(impersonation);
 
 	app.use(schema);
 

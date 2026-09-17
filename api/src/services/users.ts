@@ -41,6 +41,18 @@ const logger = useLogger();
 // Bounds the bind parameters of one update and the rows one cache snapshot holds.
 const UNLINK_CHUNK_SIZE = 10_000;
 
+const IMPERSONATION_CREDENTIAL_FIELDS = [
+	'password',
+	'email',
+	'token',
+	'tfa_secret',
+	'role',
+	'status',
+	'provider',
+	'external_identifier',
+	'auth_data',
+];
+
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_users', options);
@@ -238,6 +250,17 @@ export class UsersService extends ItemsService {
 		groups: UpdateGroup<Item>[],
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		// Whatever IMPERSONATION_WRITES says: these fields are the only callers
+		// of `clearUserSessions` on the target, so refusing them is what keeps
+		// an impersonation from ever ending the target's real sessions.
+		const touchesCredentials = groups.some(({ data }) => {
+			return IMPERSONATION_CREDENTIAL_FIELDS.some((field) => field in data);
+		});
+
+		if (this.accountability?.impersonator && touchesCredentials) {
+			throw new ForbiddenError({ reason: 'impersonation_credentials' });
+		}
+
 		const claimedEmails = new Set<string>();
 
 		// A user the batch gives a new email frees its old one; claimedEmails
