@@ -1764,6 +1764,8 @@ impersonate_explain: >-
   You will see and use the project as this user, read-only, until you stop. Everything you do is
   attributed to you.
 impersonate_in_project_website: In the project website
+impersonate_in_project_website_hint: >-
+  Opens the project website in a new tab as this user; your own login there, if any, is replaced.
 impersonate_in_data_studio: In the Data Studio
 impersonate_no_project_url: Set the Project URL in the settings first
 impersonation_banner: Impersonating {user} as {admin}

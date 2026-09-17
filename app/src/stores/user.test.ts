@@ -167,6 +167,15 @@ describe('actions', () => {
 
 			expect(userStore.currentUser).not.toBeNull();
 			expect(userStore.impersonator).toBeNull();
+			expect(userStore.impersonationAvailable).toBe(false);
+		});
+
+		test('knows impersonation is available while impersonating nobody', async () => {
+			const userStore = useUserStore();
+			await userStore.hydrate();
+
+			expect(userStore.impersonator).toBeNull();
+			expect(userStore.impersonationAvailable).toBe(true);
 		});
 	});
 
@@ -179,6 +188,7 @@ describe('actions', () => {
 
 			expect(userStore.currentUser).toBeNull();
 			expect(userStore.impersonator).toBeNull();
+			expect(userStore.impersonationAvailable).toBe(false);
 		});
 	});
 

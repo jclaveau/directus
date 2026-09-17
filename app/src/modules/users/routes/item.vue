@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import api from '@/api';
 import { logout } from '@/auth';
 import { useEditsGuard } from '@/composables/use-edits-guard';
+import { useImpersonate } from '@/composables/use-impersonate';
 import { useItem } from '@/composables/use-item';
 import { useShortcut } from '@/composables/use-shortcut';
 import { useCollectionsStore } from '@/stores/collections';
@@ -9,7 +9,6 @@ import { useFieldsStore } from '@/stores/fields';
 import { useServerStore } from '@/stores/server';
 import { useSettingsStore } from '@/stores/settings';
 import { useUserStore } from '@/stores/user';
-import { unexpectedError } from '@/utils/unexpected-error';
 import { getAssetUrl } from '@/utils/get-asset-url';
 import { userName } from '@/utils/user-name';
 import CommentsSidebarDetail from '@/views/private/components/comments-sidebar-detail.vue';
@@ -94,10 +93,14 @@ const { confirmLeave, leaveTo } = useEditsGuard(hasEdits);
 const confirmDelete = ref(false);
 const confirmArchive = ref(false);
 const confirmImpersonate = ref(false);
-const impersonating = ref(false);
+const { impersonating, impersonate } = useImpersonate();
 
 const impersonateAllowed = computed(() => {
-	if (!userStore.isAdmin || userStore.impersonator || isNew.value) {
+	if (!userStore.impersonationAvailable || !userStore.isAdmin) {
+		return false;
+	}
+
+	if (userStore.impersonator || isNew.value) {
 		return false;
 	}
 
@@ -284,30 +287,9 @@ async function toggleArchive() {
 	}
 }
 
-async function impersonate(mode: 'cookie' | 'session') {
-	if (impersonating.value) {
-		return;
-	}
-
-	impersonating.value = true;
-
-	try {
-		await api.post('/auth/impersonate', { user: props.primaryKey, mode });
-
-		if (mode === 'cookie') {
-			window.open(projectUrl.value as string, '_blank');
-			confirmImpersonate.value = false;
-		}
-		else {
-			// Every store holds the admin
-			window.location.reload();
-		}
-	}
-	catch (error) {
-		unexpectedError(error);
-	}
-	finally {
-		impersonating.value = false;
+async function impersonateAs(mode: 'cookie' | 'session') {
+	if (await impersonate(props.primaryKey, mode, projectUrl.value)) {
+		confirmImpersonate.value = false;
 	}
 }
 
@@ -429,18 +411,22 @@ function revert(values: Record<string, any>) {
 							{{ t('cancel') }}
 						</v-button>
 						<v-button
-							v-tooltip.bottom="projectUrl ? null : t('impersonate_no_project_url')"
+							v-tooltip.bottom="
+								projectUrl
+									? t('impersonate_in_project_website_hint')
+									: t('impersonate_no_project_url')
+							"
 							secondary
 							:disabled="!projectUrl"
 							:loading="impersonating"
-							@click="impersonate('cookie')"
+							@click="impersonateAs('cookie')"
 						>
 							{{ t('impersonate_in_project_website') }}
 						</v-button>
 						<v-button
 							kind="warning"
 							:loading="impersonating"
-							@click="impersonate('session')"
+							@click="impersonateAs('session')"
 						>
 							{{ t('impersonate_in_data_studio') }}
 						</v-button>
