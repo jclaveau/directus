@@ -33,6 +33,14 @@ const env = useEnv();
 
 const loginAttemptsLimiter = createRateLimiter('RATE_LIMITER', { duration: 0 });
 
+function accessTokenTtl(session: boolean | undefined): StringValue | number {
+	return env[
+		session
+			? 'SESSION_COOKIE_TTL'
+			: 'ACCESS_TOKEN_TTL'
+	] as StringValue | number;
+}
+
 export class AuthenticationService {
 	knex: Knex;
 	accountability: Accountability | null;
@@ -179,48 +187,14 @@ export class AuthenticationService {
 			}
 		}
 
-		const roles = await fetchRolesTree(user.role, this.knex);
-
-		const globalAccess = await fetchGlobalAccess(
-			{ roles, user: user.id, ip: this.accountability?.ip ?? null },
-			this.knex,
-		);
-
-		const tokenPayload: DirectusTokenPayload = {
-			id: user.id,
-			role: user.role,
-			app_access: globalAccess.app,
-			admin_access: globalAccess.admin,
-		};
-
 		const refreshToken = nanoid(64);
 		const refreshTokenExpiration = new Date(Date.now() + getMilliseconds(env['REFRESH_TOKEN_TTL'], 0));
 
-		if (options?.session) {
-			tokenPayload.session = refreshToken;
-		}
-
-		const customClaims = await emitter.emitFilter(
-			'auth.jwt',
-			tokenPayload,
-			{
-				status: 'pending',
-				user: user?.id,
-				provider: providerName,
-				type: 'login',
-			},
-			{
-				database: this.knex,
-				schema: this.schema,
-				accountability: this.accountability,
-			},
-		);
-
-		const TTL = env[options?.session ? 'SESSION_COOKIE_TTL' : 'ACCESS_TOKEN_TTL'] as StringValue | number;
-
-		const accessToken = jwt.sign(customClaims, getSecret(), {
-			expiresIn: TTL,
-			issuer: 'directus',
+		const { accessToken, expires } = await this.mint(user, {
+			provider: providerName,
+			type: 'login',
+			ttl: accessTokenTtl(options?.session),
+			...(options?.session && { session: refreshToken }),
 		});
 
 		await this.knex('directus_sessions').insert({
@@ -257,7 +231,7 @@ export class AuthenticationService {
 		return {
 			accessToken,
 			refreshToken,
-			expires: getMilliseconds(TTL),
+			expires,
 			id: user.id,
 		};
 	}
@@ -348,16 +322,8 @@ export class AuthenticationService {
 		const sessionDuration = env[options?.session ? 'SESSION_COOKIE_TTL' : 'REFRESH_TOKEN_TTL'];
 		const refreshTokenExpiration = new Date(Date.now() + getMilliseconds(sessionDuration, 0));
 
-		const tokenPayload: DirectusTokenPayload = {
-			id: record.user_id,
-			role: record.user_role,
-			app_access: globalAccess.app,
-			admin_access: globalAccess.admin,
-		};
-
 		if (options?.session) {
 			newRefreshToken = await this.updateStatefulSession(record, refreshToken, newRefreshToken, refreshTokenExpiration);
-			tokenPayload.session = newRefreshToken;
 		} else {
 			// Original stateless token behavior
 			await this.knex('directus_sessions')
@@ -368,41 +334,21 @@ export class AuthenticationService {
 				.where({ token: refreshToken });
 		}
 
-		if (record.share_id) {
-			tokenPayload.share = record.share_id;
-			tokenPayload.role = null;
-
-			tokenPayload.app_access = false;
-			tokenPayload.admin_access = false;
-
-			delete tokenPayload.id;
-		}
-
-		const customClaims = await emitter.emitFilter(
-			'auth.jwt',
-			tokenPayload,
+		const { accessToken, expires } = await this.mint(
+			{ id: record.user_id, role: record.user_role },
 			{
-				status: 'pending',
-				user: record.user_id,
 				provider: record.user_provider,
 				type: 'refresh',
-			},
-			{
-				database: this.knex,
-				schema: this.schema,
-				accountability: this.accountability,
+				ttl: accessTokenTtl(options?.session),
+				...(options?.session && { session: newRefreshToken }),
+				...(record.share_id && { share: record.share_id }),
 			},
 		);
 
-		const TTL = env[options?.session ? 'SESSION_COOKIE_TTL' : 'ACCESS_TOKEN_TTL'] as StringValue | number;
-
-		const accessToken = jwt.sign(customClaims, getSecret(), {
-			expiresIn: TTL,
-			issuer: 'directus',
-		});
-
 		if (record.user_id) {
-			await this.knex('directus_users').update({ last_access: new Date() }).where({ id: record.user_id });
+			await this.knex('directus_users')
+				.update({ last_access: new Date() })
+				.where({ id: record.user_id });
 		}
 
 		// Clear expired sessions for the current user
@@ -417,9 +363,77 @@ export class AuthenticationService {
 		return {
 			accessToken,
 			refreshToken: newRefreshToken,
-			expires: getMilliseconds(TTL),
+			expires,
 			id: record.user_id,
 		};
+	}
+
+	/**
+	 * Sign an access token for a user: the roles tree and global access are read
+	 * fresh, the claims pass the `auth.jwt` filter, and whatever the caller asks to
+	 * ride along (a session token, a share) is on the payload the filter sees. A
+	 * share token names no user and holds no access, whoever opened it.
+	 */
+	private async mint(
+		user: { id: string | null; role: string | null },
+		options: {
+			provider: string;
+			type: 'login' | 'refresh';
+			ttl: StringValue | number;
+			session?: string;
+			share?: string;
+		},
+	): Promise<{ accessToken: string; expires: number }> {
+		const roles = await fetchRolesTree(user.role, this.knex);
+
+		const globalAccess = await fetchGlobalAccess(
+			{ roles, user: user.id, ip: this.accountability?.ip ?? null },
+			this.knex,
+		);
+
+		const tokenPayload: DirectusTokenPayload = {
+			...(user.id !== null && { id: user.id }),
+			role: user.role,
+			app_access: globalAccess.app,
+			admin_access: globalAccess.admin,
+		};
+
+		if (options.session) {
+			tokenPayload.session = options.session;
+		}
+
+		if (options.share) {
+			tokenPayload.share = options.share;
+			tokenPayload.role = null;
+
+			tokenPayload.app_access = false;
+			tokenPayload.admin_access = false;
+
+			delete tokenPayload.id;
+		}
+
+		const customClaims = await emitter.emitFilter(
+			'auth.jwt',
+			tokenPayload,
+			{
+				status: 'pending',
+				user: user.id ?? undefined,
+				provider: options.provider,
+				type: options.type,
+			},
+			{
+				database: this.knex,
+				schema: this.schema,
+				accountability: this.accountability,
+			},
+		);
+
+		const accessToken = jwt.sign(customClaims, getSecret(), {
+			expiresIn: options.ttl,
+			issuer: 'directus',
+		});
+
+		return { accessToken, expires: getMilliseconds(options.ttl) };
 	}
 
 	private async updateStatefulSession(
