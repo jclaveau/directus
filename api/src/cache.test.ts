@@ -608,7 +608,7 @@ describe('scoped cache purging', () => {
 				namespace: 'scalabus_response',
 				store: {
 					namespace: 'scalabus_response',
-					client: { unlink },
+					getClient: async () => ({ unlink }),
 					createKeyPrefix: (key: string, namespace?: string) => {
 						return `${namespace}::${key}`;
 					},

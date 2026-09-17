@@ -9,16 +9,17 @@ const CACHE_DROP_CHUNK_KEYS = 500;
 
 type RedisBackedCacheStore = {
 	namespace?: string | undefined;
-	client: { unlink(keys: string[]): Promise<number> };
+	getClient(): Promise<{ unlink?(keys: string[]): Promise<number> }>;
 	createKeyPrefix(key: string, namespace?: string): string;
 };
 
 /**
  * The `@keyv/redis` store behind this cache, or null for any other store.
  *
- * `createKeyPrefix`, `client` and `namespace` are all public on `KeyvRedis`, but
- * `Keyv` accepts any store, and the memory one has none of them — so this asks
- * rather than assumes, and the caller keeps a path for the store that says no.
+ * `createKeyPrefix`, `getClient` and `namespace` are all public on `KeyvRedis`,
+ * but `Keyv` accepts any store, and the memory one has none of them — so this
+ * asks rather than assumes, and the caller keeps a path for the store that says
+ * no.
  */
 function redisBackedCacheStore(cache: Keyv): RedisBackedCacheStore | null {
 	const store = cache.store as Partial<RedisBackedCacheStore> | undefined;
@@ -27,7 +28,7 @@ function redisBackedCacheStore(cache: Keyv): RedisBackedCacheStore | null {
 		return null;
 	}
 
-	if (typeof store?.client?.unlink !== 'function') {
+	if (typeof store?.getClient !== 'function') {
 		return null;
 	}
 
@@ -58,7 +59,15 @@ export async function dropCacheEntries(
 
 	const store = redisBackedCacheStore(cache);
 
-	if (store === null) {
+	// `getClient()`, not the `client` it exposes as is: the store opens its client
+	// on its own first command, and a purge can be the first thing a fresh worker
+	// sends through it. UNLINK on the unopened client threw `The client is
+	// closed`, and that mutation's purge was recorded for retry instead of done.
+	const client = store === null
+		? null
+		: await store.getClient();
+
+	if (store === null || typeof client?.unlink !== 'function') {
 		const wasDeleted = await Promise.all(keys.map((key) => {
 			return cache.delete(key);
 		}));
@@ -75,7 +84,7 @@ export async function dropCacheEntries(
 	let dropped = 0;
 
 	for (let at = 0; at < rawKeys.length; at += CACHE_DROP_CHUNK_KEYS) {
-		dropped += await store.client.unlink(
+		dropped += await client.unlink(
 			rawKeys.slice(at, at + CACHE_DROP_CHUNK_KEYS),
 		);
 	}

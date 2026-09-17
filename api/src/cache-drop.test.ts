@@ -8,7 +8,7 @@ function redisBackedCache(unlink: ReturnType<typeof vi.fn>) {
 		namespace: 'scalabus_response',
 		store: {
 			namespace: 'scalabus_response',
-			client: { unlink },
+			getClient: async () => ({ unlink }),
 			createKeyPrefix: (key: string, namespace?: string) => {
 				return `${namespace}::${key}`;
 			},
@@ -90,13 +90,35 @@ describe('dropCacheEntries', () => {
 		expect(evicted).toBe(2);
 	});
 
+	test(oneLine`
+		sends UNLINK through the client the store opens, not the one it holds — a
+		purge can be the first command a fresh worker sends through the store
+	`, async () => {
+		const unopened = vi.fn().mockRejectedValue(new Error('The client is closed'));
+		const opened = vi.fn().mockResolvedValue(1);
+
+		const cache = {
+			namespace: 'scalabus_response',
+			store: {
+				namespace: 'scalabus_response',
+				client: { unlink: unopened },
+				getClient: async () => ({ unlink: opened }),
+				createKeyPrefix: (key: string) => key,
+			},
+		} as unknown as Keyv;
+
+		expect(await dropCacheEntries(cache, ['key-a'])).toBe(1);
+		expect(opened).toHaveBeenCalledWith(['scalabus_response:key-a']);
+		expect(unopened).not.toHaveBeenCalled();
+	});
+
 	test('falls back when the store has a client that cannot UNLINK', async () => {
 		const cache = {
 			namespace: 'scalabus_response',
 			delete: vi.fn().mockResolvedValue(true),
 			store: {
 				createKeyPrefix: (key: string) => key,
-				client: {},
+				getClient: async () => ({}),
 			},
 		} as unknown as Keyv;
 
