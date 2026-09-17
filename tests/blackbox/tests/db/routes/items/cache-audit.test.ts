@@ -1,6 +1,7 @@
 import config, { getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
+	CreateFieldM2O,
 	CreateItem,
 	CreatePermission,
 	CreateUser,
@@ -37,6 +38,12 @@ const RACE = 'test_cache_audit_race';
 const RACE_FLAG = 'test_cache_audit_race_flag';
 const HOLD = 'test_cache_audit_hold';
 const HOLD_FLAG = 'test_cache_audit_hold_flag';
+const WIDE = 'test_cache_audit_wide';
+const WIDE_PARENT = 'test_cache_audit_wide_parent';
+
+// Nested one per row and pinned one tag each, they run the replay's tags
+// header past node's 16KB parser default (jclaveau/directus#510).
+const WIDE_ROWS = 600;
 
 const cacheStatusHeader = 'x-cache-status';
 
@@ -58,6 +65,7 @@ describe('The cache audit replays live entries against the database', () => {
 		env[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-${vendor}`;
 		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
+		env[vendor]['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] = String(WIDE_ROWS);
 
 		let instance: ChildProcess;
 		let db: Knex;
@@ -115,7 +123,23 @@ describe('The cache audit replays live entries against the database', () => {
 						meta: {},
 						fields: [{ field: 'armed', type: 'string', meta: {} }],
 					},
+					{
+						collection: WIDE_PARENT,
+						meta: {},
+						fields: [{ field: 'label', type: 'string', meta: {} }],
+					},
+					{
+						collection: WIDE,
+						meta: {},
+						fields: [{ field: 'label', type: 'string', meta: {} }],
+					},
 				],
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: WIDE,
+				field: 'parent',
+				otherCollection: WIDE_PARENT,
 			});
 
 			await CreateItem(vendor, {
@@ -174,6 +198,18 @@ describe('The cache audit replays live entries against the database', () => {
 			db = knex(config.knexConfig[vendor]!);
 			url = getUrl(vendor, env);
 
+			await db.batchInsert(
+				WIDE_PARENT,
+				Array.from({ length: WIDE_ROWS }, (_, index) => ({ label: `p${index}` })),
+			);
+
+			const parentIds = await db(WIDE_PARENT).pluck('id');
+
+			await db.batchInsert(
+				WIDE,
+				parentIds.map((parent) => ({ label: 'wide', parent })),
+			);
+
 			await awaitDirectusConnection(port);
 		}, 60_000);
 
@@ -190,6 +226,8 @@ describe('The cache audit replays live entries against the database', () => {
 				RACE_FLAG,
 				HOLD,
 				HOLD_FLAG,
+				WIDE,
+				WIDE_PARENT,
 			]) {
 				await DeleteCollection(vendor, { collection });
 			}
@@ -207,6 +245,12 @@ describe('The cache audit replays live entries against the database', () => {
 		function readCollection(collection: string) {
 			return request(url)
 				.get(`/items/${collection}`)
+				.set('Authorization', auth);
+		}
+
+		function readWide() {
+			return request(url)
+				.get(`/items/${WIDE}?fields=*,parent.*&limit=-1`)
 				.set('Authorization', auth);
 		}
 
@@ -563,6 +607,38 @@ describe('The cache audit replays live entries against the database', () => {
 			// Let go with the run: the next ask is a run of its own.
 			const next = await audit({ collection: HOLD });
 			expect(next.statusCode).toBe(200);
+		}, 60_000);
+
+		it(oneLine`
+			replays an entry whose tags outgrow node's 16KB header cap, one pin per
+			nested parent, and finds it fresh rather than unreplayable
+		`, async () => {
+			await clearCache();
+			await warm(() => readWide());
+
+			const report = await auditSettled({ collection: WIDE });
+
+			expect(report.scanned).toBe(1);
+			expect(report.counts.unreplayable).toBe(0);
+			expect(report.counts.fresh).toBe(1);
+
+			// The witness holds only past the cap: the tags the entry was filled
+			// under are what the replay hands back, in one header.
+			const pinned: string[] = await db(
+				'directus_cache_stats_scoped_entry_tags as t',
+			)
+				.join(
+					'directus_cache_stats_descriptors as d',
+					'd.cache_key',
+					't.cache_key',
+				)
+				.where({ 'd.collection': WIDE, 'd.path': `/items/${WIDE}` })
+				.pluck('t.scoped_cache_tag');
+
+			expect(pinned.filter((tag) => tag.startsWith(`${WIDE_PARENT}:id=`)))
+				.toHaveLength(WIDE_ROWS);
+
+			expect(Buffer.byteLength(pinned.join(','))).toBeGreaterThan(16 * 1024);
 		}, 60_000);
 
 		it(oneLine`
