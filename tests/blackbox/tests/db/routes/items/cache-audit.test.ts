@@ -1137,6 +1137,8 @@ describe('The cache audit replays live entries against the database', () => {
 			let proxy: ReturnType<typeof createRedisProxy>;
 			let cutOff: ChildProcess;
 			let cutOffUrl: string;
+			// What the node said: a 500 names nothing on its own.
+			const cutOffLog: string[] = [];
 
 			beforeAll(async () => {
 				const proxyPort = await getPort();
@@ -1155,6 +1157,9 @@ describe('The cache audit replays live entries against the database', () => {
 					cwd: paths.cwd,
 					env: cutOffEnv[vendor],
 				});
+
+				cutOff.stdout?.on('data', (chunk) => cutOffLog.push(String(chunk)));
+				cutOff.stderr?.on('data', (chunk) => cutOffLog.push(String(chunk)));
 
 				cutOffUrl = getUrl(vendor, cutOffEnv);
 				await awaitDirectusConnection(cutOffPort);
@@ -1194,18 +1199,26 @@ describe('The cache audit replays live entries against the database', () => {
 				await auditSettled({ collection: ROWS }, 1);
 				const { audited_at: examinedAt } = await descriptor();
 
+				const cutAt = new Date();
 				await proxy.cut();
 
 				// The run fails rather than reading every entry as gone: a cache
 				// that answers nothing is not one that dropped everything.
 				const refused = await auditFrom(cutOffUrl);
-				expect(refused.statusCode).toBe(500);
+				const said = () => cutOffLog.join('').slice(-6000);
 
-				const failed = await db('directus_cache_audits')
-					.orderBy('id', 'desc')
-					.first();
+				expect(refused.statusCode, JSON.stringify(refused.body)).toBe(500);
 
-				expect(failed.error)
+				// One run since the cut, recorded as failed: what the node said
+				// is the failure's own words.
+				const since = await db('directus_cache_audits')
+					.where('started_at', '>=', cutAt)
+					.orderBy('id', 'desc');
+
+				expect(since, said()).toHaveLength(1);
+				const [failed] = since;
+
+				expect(failed.error, said())
 					.toContain('The cache could not be asked what it holds');
 
 				expect(failed.finished_at).not.toBeNull();

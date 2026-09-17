@@ -339,10 +339,11 @@ export async function auditCache(
 }
 
 /**
- * Whether the cache holds each key. A Keyv answers a store it cannot reach
- * with "not held" for every key, which the loop above would take for a page
- * of entries gone and retire: asked here with an ear on the store's error,
- * so an outage fails the run and retires nothing.
+ * Whether the cache holds each key. A Keyv answers a store it lost with "not
+ * held" for every key (and throws only for one it never reached), which the
+ * loop above would take for a page of entries gone and retire: asked here
+ * with an ear on the store's error, so an outage of either kind fails the run
+ * and retires nothing.
  */
 async function askHeld(cache: Keyv, redisKeys: string[]): Promise<boolean[]> {
 	let failure: unknown;
@@ -356,21 +357,24 @@ async function askHeld(cache: Keyv, redisKeys: string[]): Promise<boolean[]> {
 	try {
 		const held = await cache.hasMany(redisKeys);
 
-		if (failure !== undefined) {
-			throw new Error(
-				`The cache could not be asked what it holds: ${
-					failure instanceof Error
-						? failure.message
-						: String(failure)
-				}`,
-			);
+		if (failure === undefined) {
+			return held;
 		}
-
-		return held;
+	}
+	catch (error) {
+		failure = error;
 	}
 	finally {
 		cache.off('error', onError);
 	}
+
+	throw new Error(
+		`The cache could not be asked what it holds: ${
+			failure instanceof Error
+				? failure.message
+				: String(failure)
+		}`,
+	);
 }
 
 function expiryKey(redisKey: string): string {

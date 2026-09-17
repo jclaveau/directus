@@ -326,6 +326,22 @@ describe('the queue', () => {
 		expect(cache.listeners.size).toBe(0);
 	});
 
+	test('the same for a cache that throws, as one never reached does', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		cache.hasMany.mockRejectedValue(
+			new Error('Redis client is not connected or has failed to connect.'),
+		);
+
+		await expect(auditCache({ replay: replayer() })).rejects.toThrow(
+			'The cache could not be asked what it holds: Redis client is not connected',
+		);
+
+		expect(retireCacheAuditQueue).not.toHaveBeenCalled();
+		expect(cache.listeners.size).toBe(0);
+	});
+
 	test('stops once its time is up, after the page it began', async () => {
 		fill('rk1', { data: [] });
 		fill('rk2', { data: [] });
