@@ -1028,6 +1028,17 @@ describe('an entry nothing can be replayed from', () => {
 		expect(queueCacheAnomaly).not.toHaveBeenCalled();
 	});
 
+	test('an inactive target is a finding, another refusal a failure', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		impersonate.mockRejectedValue(
+			new ForbiddenError({ reason: 'impersonation_nested' }),
+		);
+
+		await expect(auditCache({ replay: replayer() })).rejects.toThrow(ForbiddenError);
+	});
+
 	test('transport: a replay that never got an answer', async () => {
 		fill('rk', { data: [] });
 		described(descriptor());

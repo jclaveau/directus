@@ -66,6 +66,7 @@ afterEach(() => {
 	vi.useRealTimers();
 	tracker.reset();
 	bus.subscribe.mockReset();
+	logger.warn.mockReset();
 });
 
 function ended() {
@@ -174,6 +175,23 @@ test('the periodic check ends a session socket whose row is gone', async () => {
 
 	expect(alive.close).not.toHaveBeenCalled();
 	expect(bearer.close).not.toHaveBeenCalled();
+});
+
+test('a database the periodic check cannot reach is a warning', async () => {
+	const held = client({ user: 'jane', session: 'held' });
+	controller.clients.add(held);
+
+	tracker.on.select('directus_sessions').simulateError('ECONNREFUSED');
+
+	await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+
+	expect(logger.warn).toHaveBeenCalledWith(
+		expect.anything(),
+		expect.stringContaining('Could not check the sessions'),
+	);
+
+	expect(held.close).not.toHaveBeenCalled();
 });
 
 test('the periodic check asks nothing when no socket holds a session', async () => {
