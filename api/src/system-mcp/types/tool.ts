@@ -13,6 +13,7 @@ export interface SystemMcpToolContext {
 export type SystemMcpToolGroup =
 	| 'processes'
 	| 'cache'
+	| 'cache_audit'
 	| 'autoscale'
 	| 'autoscale_drill';
 

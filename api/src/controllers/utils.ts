@@ -1,4 +1,9 @@
-import { InvalidPayloadError, InvalidQueryError, UnsupportedMediaTypeError } from '@directus/errors';
+import {
+	InvalidPayloadError,
+	InvalidQueryError,
+	RouteNotFoundError,
+	UnsupportedMediaTypeError,
+} from '@directus/errors';
 import type { CacheFlushTarget } from '@directus/types';
 import argon2 from 'argon2';
 import Busboy from 'busboy';
@@ -20,6 +25,8 @@ import { redisConfigAvailable } from '../redis/index.js';
 import { RevisionsService } from '../services/revisions.js';
 import { UtilsService } from '../services/utils.js';
 import asyncHandler from '../utils/async-handler.js';
+import { cacheAuditEnabled } from '../utils/cache-audit-enabled.js';
+import { CacheAuditOptionsSchema } from '../utils/cache-audit-options.js';
 import { generateHash } from '../utils/generate-hash.js';
 import { sanitizeQuery } from '../utils/sanitize-query.js';
 
@@ -322,6 +329,127 @@ router.get(
 		}
 
 		res.json({ data: await service.readCacheEntry(key) });
+	}),
+);
+
+// The audit surface is absent, not forbidden, on a node with
+// CACHE_AUDIT_ENABLED off: like `/system-mcp` on one that never opened it.
+router.use(['/cache/audit', '/cache/audits'], (req, _res, next) => {
+	if (cacheAuditEnabled()) {
+		return next();
+	}
+
+	return next(new RouteNotFoundError({ path: req.originalUrl }));
+});
+
+router.post(
+	'/cache/audit',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		// Stripped, not passed: the run takes more options than a caller may
+		// set (its time budget, where a replay goes).
+		const { error, value } = CacheAuditOptionsSchema.validate(
+			{ ...req.query, ...req.body },
+			{ allowUnknown: true, stripUnknown: true },
+		);
+
+		if (error) {
+			throw new InvalidQueryError({ reason: error.message });
+		}
+
+		res.json({ data: await service.auditCache(value) });
+	}),
+);
+
+router.get(
+	'/cache/audits',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+
+		res.locals['payload'] = {
+			data: await service.getCacheAudits(req.query['window']),
+		};
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audits/:id',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+
+		res.locals['payload'] = {
+			data: await service.getCacheAudit(req.params['id'], req.query),
+		};
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audit/schedule',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAuditSchedule() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.get(
+	'/cache/audit/queue',
+	asyncHandler(async (req, res, next) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		res.locals['cache'] = false;
+		res.locals['payload'] = { data: await service.getCacheAuditQueue() };
+
+		return next();
+	}),
+	respond,
+);
+
+router.patch(
+	'/cache/audit/schedule',
+	asyncHandler(async (req, res) => {
+		const service = new UtilsService({
+			accountability: req.accountability,
+			schema: req.schema,
+		});
+
+		if (!req.body || 'rule' in req.body === false) {
+			throw new InvalidPayloadError({
+				reason: 'A `rule` is required: a cron rule, or null to clear the override',
+			});
+		}
+
+		res.json({ data: await service.updateCacheAuditSchedule(req.body.rule) });
 	}),
 );
 

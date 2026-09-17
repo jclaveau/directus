@@ -53,6 +53,13 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-unautopurgeable-scope.test.ts',
 			'/tests/db/routes/items/cache-update-scope.test.ts',
 			'/tests/db/routes/items/redis-outage-survival.test.ts',
+			// The three audit suites share one settings singleton: a schedule one
+			// of them writes reaches every node on the bus, the others' included,
+			// so a `0 3 * * *` landing mid-wait would starve a sibling's per-second
+			// cron witness.
+			'/tests/db/routes/items/cache-audit.test.ts',
+			'/tests/db/app/cache-audit-cli.test.ts',
+			'/tests/db/app/cache-audit-mcp.test.ts',
 			'/tests/db/websocket/auth-public-connects.test.ts',
 			'/tests/db/websocket/auth-public-pings.test.ts',
 			'/tests/db/websocket/auth-handshake-connects.test.ts',

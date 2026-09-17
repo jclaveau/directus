@@ -1,0 +1,484 @@
+import { useEnv } from '@directus/env';
+import {
+	ErrorCode,
+	isDirectusError,
+	ServiceUnavailableError,
+} from '@directus/errors';
+import { parseJSON } from '@directus/utils';
+import {
+	auditCache,
+	CACHE_AUDIT_VERDICTS,
+	type CacheAuditFinding,
+	type CacheAuditOptions,
+	type CacheAuditReport,
+	type CacheAuditVerdict,
+} from './cache-audit.js';
+import type { CacheEntryPurgeRecord } from './cache-events.js';
+import { getCache } from './cache.js';
+import getDatabase from './database/index.js';
+import { cacheAuditEnabled } from './utils/cache-audit-enabled.js';
+import { getMilliseconds } from './utils/get-milliseconds.js';
+
+/**
+ * The audit history: one row per run in `directus_cache_audits`, one per
+ * non-fresh finding in `directus_cache_audit_findings` (see the migration for
+ * why). Every surface that runs an audit records through here, so the cache
+ * page, the MCP and a `SELECT` all read the same history whichever one ran it.
+ */
+
+/** What started a run. */
+export type CacheAuditTrigger = 'rest' | 'cli' | 'cron' | 'mcp';
+
+export const CACHE_AUDIT_TRIGGERS: readonly CacheAuditTrigger[] = [
+	'rest',
+	'cli',
+	'cron',
+	'mcp',
+];
+
+/** The narrowing a run was asked for, as stored with it. */
+export interface CacheAuditRunOptions {
+	limit: number | null;
+	user: string | null;
+	collection: string | null;
+	purge: boolean;
+}
+
+export interface CacheAuditRun {
+	id: number;
+	startedAt: number;
+	/** Null while the run is in flight — or forever, if its process died. */
+	finishedAt: number | null;
+	trigger: CacheAuditTrigger;
+	options: CacheAuditRunOptions;
+	scanned: number;
+	counts: Record<CacheAuditVerdict, number>;
+	evicted: number;
+	durationMs: number | null;
+	/** Stopped on `CACHE_AUDIT_MAX_DURATION`; what was left waits for the next run. */
+	timedOut: boolean;
+	error: string | null;
+}
+
+/** The slice of a run's findings a read asks for. */
+export interface CacheAuditFindingsPage {
+	limit: number;
+	offset: number;
+	/** Only the findings with this verdict; every one without. */
+	verdict?: CacheAuditVerdict | undefined;
+}
+
+export interface CacheAuditRunWithFindings extends CacheAuditRun {
+	/** The page asked for, in the order the run stored them. */
+	findings: CacheAuditFinding[];
+	/** How many the run stored, of the verdict asked for — whatever the page. */
+	findingsTotal: number;
+}
+
+/** A report with the row it was recorded under. */
+export interface CacheAuditRunReport extends CacheAuditReport {
+	id: number;
+}
+
+const DEFAULT_RETENTION_MS = 2_592_000_000; // 30d
+const DEFAULT_MAX_DURATION_MS = 600_000; // 10m
+const DEFAULT_LIST_WINDOW_MS = 604_800_000; // 7d
+const LIST_LIMIT = 200;
+const FINDINGS_BATCH = 200;
+// One run at a time, node-wide where the lock is in memory and deployment-wide
+// on Redis. The claim is short-lived and renewed while the run goes on, so a
+// run whose process died frees the audit within the TTL without anyone's
+// help, however long it was allowed to run. `POST /utils/cache/clear` over the
+// `locks` target drops it with every other lock: a run asked for right after
+// one runs beside the one in flight.
+const RUN_LOCK = 'cache-audit:run';
+const RUN_LOCK_TTL_MS = 120_000;
+const RUN_LOCK_RENEW_MS = 30_000;
+// A run still open this long after it began did not finish: its process died
+// with the row open. Twice the budget, since a run overruns it by at most the
+// page it was on, plus an hour for a page slower than any budget expects.
+const ORPHAN_GRACE_MS = 3_600_000;
+
+function retentionMs(): number {
+	return getMilliseconds(useEnv()['CACHE_AUDIT_RETENTION'], DEFAULT_RETENTION_MS);
+}
+
+// How long a run may go on before it stops and leaves the rest to the next
+// one: what keeps a cron tick from outliving its interval on a large cache,
+// and the time budget the in-flight claim is sized to.
+function maxDurationMs(): number {
+	const configured = getMilliseconds(
+		useEnv()['CACHE_AUDIT_MAX_DURATION'],
+		DEFAULT_MAX_DURATION_MS,
+	);
+
+	return configured > 0
+		? configured
+		: DEFAULT_MAX_DURATION_MS;
+}
+
+// The slice a run examines when it names no limit of its own: the cron's
+// knob, and what keeps "Audit now" on a large cache from outliving the
+// request. 0 is the whole queue.
+function defaultLimit(): number | undefined {
+	const configured = Number(useEnv()['CACHE_AUDIT_LIMIT'] ?? 0);
+
+	return Number.isInteger(configured) && configured > 0
+		? configured
+		: undefined;
+}
+
+/**
+ * Run an audit and record it — the one entrypoint every surface goes through,
+ * so no run escapes the history, none runs on a node that opted out, none
+ * runs beside another, and a run asking for no limit gets `CACHE_AUDIT_LIMIT`
+ * and `CACHE_AUDIT_MAX_DURATION`. The engine stays what it was: a function
+ * over the cache that answers a report and stores nothing.
+ *
+ * Two runs at once would share the queue without replaying an entry twice —
+ * each stamps what it takes — but would put twice the load on the database,
+ * which is what the limit and the budget are there to bound. So a run that
+ * finds another in flight is refused rather than started: a cron tick that
+ * outlives its interval skips the next, and "Audit now" during one says so.
+ * The claim is a read then a write, not one atomic step: two asks landing
+ * within a round-trip of each other could both pass, which costs one doubled
+ * run and nothing else.
+ */
+export async function runCacheAudit(
+	trigger: CacheAuditTrigger,
+	options: CacheAuditOptions = {},
+): Promise<CacheAuditRunReport> {
+	if (!cacheAuditEnabled()) {
+		throw new ServiceUnavailableError({
+			service: 'cache-audit',
+			reason: 'CACHE_AUDIT_ENABLED is false on this node',
+		});
+	}
+
+	const budgetMs = maxDurationMs();
+	const { lockCache } = getCache();
+	const inFlightSince = await lockCache.get(RUN_LOCK);
+
+	if (inFlightSince !== undefined) {
+		const since = new Date(Number(inFlightSince)).toISOString();
+
+		throw new ServiceUnavailableError({
+			service: 'cache-audit',
+			reason: `${IN_FLIGHT_REASON}, since ${since}`,
+		});
+	}
+
+	const since = Date.now();
+	await lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS);
+	let renewing: Promise<unknown> = Promise.resolve();
+
+	const renewal = setInterval(() => {
+		renewing = lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS).catch(() => {});
+	}, RUN_LOCK_RENEW_MS);
+
+	renewal.unref();
+
+	try {
+		const sliced = {
+			...options,
+			limit: options.limit ?? defaultLimit(),
+			maxDurationMs: options.maxDurationMs ?? budgetMs,
+		};
+
+		const id = await startCacheAuditRun(trigger, sliced);
+		let report: CacheAuditReport;
+
+		try {
+			report = await auditCache(sliced);
+			await finishCacheAuditRun(id, report);
+		}
+		catch (error) {
+			// Best effort: what stopped the run may be the database itself, in
+			// which case the failure it records is the one to surface.
+			await failCacheAuditRun(id, error).catch(() => {});
+
+			throw error;
+		}
+
+		return { id, ...report };
+	}
+	finally {
+		clearInterval(renewal);
+		// A renewal still on the wire would land after the release and hold
+		// the claim for one more TTL.
+		await renewing;
+		await lockCache.delete(RUN_LOCK);
+
+		// Once per run rather than on a schedule of its own: a history that is
+		// only written by runs only needs pruning when one happens — and a run
+		// that failed wrote to it too.
+		await reapCacheAuditRuns().catch(() => {});
+	}
+}
+
+const IN_FLIGHT_REASON = 'a cache audit is already running';
+
+/** Whether a run was refused because another was in flight. */
+export function isCacheAuditInFlight(error: unknown): boolean {
+	return isDirectusError(error, ErrorCode.ServiceUnavailable)
+		&& String(error.extensions.reason).startsWith(IN_FLIGHT_REASON);
+}
+
+/**
+ * Open the run's row before the first entry is examined, so a run in flight
+ * is one the page can see — and a run whose process dies leaves a row with no
+ * `finished_at` rather than no trace.
+ */
+export async function startCacheAuditRun(
+	trigger: CacheAuditTrigger,
+	options: CacheAuditOptions,
+): Promise<number> {
+	const stored: CacheAuditRunOptions = {
+		limit: options.limit ?? null,
+		user: options.user ?? null,
+		collection: options.collection ?? null,
+		purge: options.purge === true,
+	};
+
+	const [row] = await getDatabase()('directus_cache_audits')
+		.insert({
+			started_at: new Date(),
+			trigger,
+			options: JSON.stringify(stored),
+		})
+		.returning('id');
+
+	// A dialect answers `returning` with the value or with a `{ id }` record.
+	return typeof row === 'object' && row !== null
+		? Number((row as { id: number }).id)
+		: Number(row);
+}
+
+/** Close the row with what the run found, and store each finding under it. */
+export async function finishCacheAuditRun(
+	id: number,
+	report: CacheAuditReport,
+): Promise<void> {
+	const db = getDatabase();
+
+	await db.transaction(async (trx) => {
+		await trx('directus_cache_audits')
+			.where({ id })
+			.update({
+				finished_at: new Date(),
+				scanned: report.scanned,
+				...report.counts,
+				evicted: report.evicted,
+				duration_ms: report.durationMs,
+				timed_out: report.timedOut,
+			});
+
+		const rows = report.findings.map((finding) => findingRow(id, finding));
+
+		if (rows.length > 0) {
+			await trx.batchInsert('directus_cache_audit_findings', rows, FINDINGS_BATCH);
+		}
+	});
+}
+
+/** Close the row with why the run stopped, keeping the failure in the history. */
+export async function failCacheAuditRun(id: number, error: unknown): Promise<void> {
+	await getDatabase()('directus_cache_audits')
+		.where({ id })
+		.update({
+			finished_at: new Date(),
+			error: error instanceof Error
+				? error.message
+				: String(error),
+		});
+}
+
+function findingRow(audit: number, finding: CacheAuditFinding) {
+	return {
+		audit,
+		verdict: finding.verdict,
+		reason: finding.reason,
+		redis_key: finding.redisKey,
+		cache_key: finding.cacheKey,
+		method: finding.method,
+		url: finding.url,
+		query: finding.query,
+		user_id: finding.user,
+		collection: finding.collection,
+		filled_at: new Date(finding.filledAt),
+		age_ms: finding.ageMs,
+		tags: JSON.stringify(finding.tags),
+		replay_tags: jsonOrNull(finding.replayTags),
+		diff: jsonOrNull(finding.diff),
+		purges_since_filled: jsonOrNull(finding.purgesSinceFilled),
+	};
+}
+
+function jsonOrNull(value: unknown): string | null {
+	return value === null
+		? null
+		: JSON.stringify(value);
+}
+
+/**
+ * The runs started in the window, newest first. Without findings: a listing
+ * is what a trend reads off, and the findings are read per run.
+ */
+export async function listCacheAuditRuns(
+	windowMs?: number,
+): Promise<CacheAuditRun[]> {
+	const since = new Date(Date.now() - clampWindow(windowMs));
+
+	const db = getDatabase();
+
+	const rows: Record<string, unknown>[] = await db('directus_cache_audits')
+		.where('started_at', '>', since)
+		.orderBy('started_at', 'desc')
+		.limit(LIST_LIMIT);
+
+	return rows.map(runOf);
+}
+
+/** One run as the listing carries it, or null where no run has that id. */
+export async function readCacheAuditRun(id: number): Promise<CacheAuditRun | null> {
+	const row: Record<string, unknown> | undefined = await getDatabase()(
+		'directus_cache_audits',
+	)
+		.where({ id })
+		.first();
+
+	return row === undefined
+		? null
+		: runOf(row);
+}
+
+/**
+ * One page of what a run found, and how many findings it stored in all: a
+ * run over a large cache on a bad day stores tens of thousands, which no
+ * answer should carry whole. Read in the order they were stored.
+ */
+export async function readCacheAuditFindings(
+	id: number,
+	page: CacheAuditFindingsPage,
+): Promise<{ findings: CacheAuditFinding[]; findingsTotal: number }> {
+	const db = getDatabase();
+
+	const stored = () => {
+		const query = db('directus_cache_audit_findings').where({ audit: id });
+
+		return page.verdict === undefined
+			? query
+			: query.where({ verdict: page.verdict });
+	};
+
+	const findingRows: Record<string, unknown>[] = await stored()
+		.orderBy('id', 'asc')
+		.limit(page.limit)
+		.offset(page.offset);
+
+	const counted: Record<string, unknown> | undefined = await stored()
+		.count('id as total')
+		.first();
+
+	return {
+		findings: findingRows.map(findingOf),
+		findingsTotal: Number(counted?.['total'] ?? 0),
+	};
+}
+
+/**
+ * Drop the runs past retention, their findings with them; and close the runs
+ * left open by a process that died, so the history stops reporting them as
+ * in flight.
+ */
+export async function reapCacheAuditRuns(): Promise<number> {
+	const db = getDatabase();
+	const now = Date.now();
+
+	await db('directus_cache_audits')
+		.whereNull('finished_at')
+		.where('started_at', '<', new Date(now - 2 * maxDurationMs() - ORPHAN_GRACE_MS))
+		.update({
+			finished_at: new Date(now),
+			error: 'The run did not finish: its process died',
+		});
+
+	return db('directus_cache_audits')
+		.where('started_at', '<', new Date(now - retentionMs()))
+		.delete();
+}
+
+// A window is bounded by what the reaper leaves: asking past retention reads
+// rows that are gone.
+function clampWindow(requested: number | undefined): number {
+	if (requested === undefined || !Number.isFinite(requested) || requested <= 0) {
+		return Math.min(DEFAULT_LIST_WINDOW_MS, retentionMs());
+	}
+
+	return Math.min(requested, retentionMs());
+}
+
+function runOf(row: Record<string, unknown>): CacheAuditRun {
+	const counts = {} as Record<CacheAuditVerdict, number>;
+
+	for (const verdict of CACHE_AUDIT_VERDICTS) {
+		counts[verdict] = Number(row[verdict] ?? 0);
+	}
+
+	const finishedAt = row['finished_at'];
+
+	return {
+		id: Number(row['id']),
+		startedAt: new Date(row['started_at'] as string).getTime(),
+		finishedAt: finishedAt === null || finishedAt === undefined
+			? null
+			: new Date(finishedAt as string).getTime(),
+		trigger: row['trigger'] as CacheAuditTrigger,
+		options: json(row['options']) as CacheAuditRunOptions,
+		scanned: Number(row['scanned'] ?? 0),
+		counts,
+		evicted: Number(row['evicted'] ?? 0),
+		durationMs: nullableNumber(row['duration_ms']),
+		timedOut: row['timed_out'] === true || row['timed_out'] === 1,
+		error: (row['error'] as string | null) ?? null,
+	};
+}
+
+function findingOf(row: Record<string, unknown>): CacheAuditFinding {
+	return {
+		verdict: row['verdict'] as CacheAuditVerdict,
+		reason: (row['reason'] as string | null) ?? null,
+		redisKey: row['redis_key'] as string,
+		cacheKey: row['cache_key'] as string,
+		method: row['method'] as string,
+		url: row['url'] as string,
+		query: row['query'] as string,
+		user: (row['user_id'] as string | null) ?? null,
+		collection: (row['collection'] as string | null) ?? null,
+		filledAt: new Date(row['filled_at'] as string).getTime(),
+		ageMs: Number(row['age_ms']),
+		tags: (json(row['tags']) as string[] | null) ?? [],
+		replayTags: json(row['replay_tags']) as string[] | null,
+		diff: json(row['diff']) as string[] | null,
+		purgesSinceFilled: json(
+			row['purges_since_filled'],
+		) as CacheEntryPurgeRecord[] | null,
+	};
+}
+
+function nullableNumber(value: unknown): number | null {
+	return value === null || value === undefined
+		? null
+		: Number(value);
+}
+
+// A JSON column comes back parsed on Postgres and as text on sqlite.
+function json(value: unknown): unknown {
+	if (value === null || value === undefined) {
+		return null;
+	}
+
+	return typeof value === 'string'
+		? parseJSON(value)
+		: value;
+}

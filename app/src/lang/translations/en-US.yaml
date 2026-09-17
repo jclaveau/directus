@@ -1283,6 +1283,8 @@ directus_collection:
   directus_cache_stats_purges: Cache purge operations and their reach (telemetry)
   directus_cache_stats_scoped_entry_tags: Tags each cache entry was filled under (telemetry)
   directus_cache_stats_scoped_purge_tags: Tags each purge dropped, for attribution (telemetry)
+  directus_cache_audits: Cache audit runs, one row per replay of the live cache against the database
+  directus_cache_audit_findings: The entries a cache audit found stale, drifted or unreplayable
   directus_collections: Additional collection configuration and metadata
   directus_comments: Comments for items
   directus_dashboards: Dashboards within the Insights module

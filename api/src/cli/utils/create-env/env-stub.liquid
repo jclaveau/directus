@@ -256,6 +256,42 @@ CACHE_STORE=memory
 # How long a miss can still be attributed to a just-expired entry (gap-since-expiry lookback). ["1h"]
 # CACHE_STATS_GAP_LOOKBACK="1h"
 
+# Whether this node audits the cache at all: the schedule below, `POST
+# /utils/cache/audit`, `directus cache audit` and the `cache_audit` MCP group.
+# Off, none of them exists here. Every replay is an uncached read against the
+# shared database, so a fleet keeps it on one node (the back-office) and off on
+# the ones serving traffic. [true]
+CACHE_AUDIT_ENABLED=true
+
+# When to replay the live cache entries against the database and report the
+# ones they no longer match (`POST /utils/cache/audit`, `directus cache audit`).
+# Every replay is an uncached read. Off when empty. The rule is shared
+# (`directus_settings` overrides it live), so every node with
+# CACHE_AUDIT_ENABLED runs it. [""]
+# CACHE_AUDIT_SCHEDULE="0 */10 * * * *"
+
+# How many entries one audit examines before stopping, when the run asks for no
+# limit of its own: the next run resumes behind them, least recently verified
+# first, so a schedule works through the whole cache in slices and the database
+# never sees more than one slice of uncached reads per tick. 0 is no limit. [0]
+CACHE_AUDIT_LIMIT=0
+
+# How long one audit may run before it stops and leaves the rest to the next
+# one, whatever CACHE_AUDIT_LIMIT says: a cron tick never outlives its interval,
+# and "Audit now" answers. A run stopped this way is recorded as timed out. One
+# audit runs at a time; a run asked for while another is in flight is refused
+# (503). ["10m"]
+CACHE_AUDIT_MAX_DURATION="10m"
+
+# JSON-pointer globs a cache audit ignores when comparing a stored body with a
+# fresh one: `*` is one segment, `**` the rest. For bodies a hook stamps with a
+# clock. Comma-separated. [""]
+# CACHE_AUDIT_IGNORE_PATHS="/data/*/served_at"
+
+# How long the audit history (`directus_cache_audits` and its findings) is kept.
+# Pruned after each run. ["30d"]
+CACHE_AUDIT_RETENTION="30d"
+
 # How long assets will be cached for in the browser. Sets the max-age value of the Cache-Control header ["30d"]
 ASSETS_CACHE_TTL="30d"
 
@@ -270,13 +306,14 @@ ASSETS_CACHE_TTL="30d"
 # Which subsystems to expose tools for: "processes" (the process tree),
 # "autoscale" (what each pool is being scaled on, changing it, the pm2 options
 # a restart carries, and asking for that restart), "autoscale_drill" (loading
-# the pool on purpose, gated on PM2_AUTOSCALE_DRILL_ENABLED as well) and
+# the pool on purpose, gated on PM2_AUTOSCALE_DRILL_ENABLED as well),
 # "cache" (listings, one entry by key, anomalies, latencies, timeseries,
-# telemetry state). A group left out is neither listed nor callable. The two
-# autoscale groups are the ones whose tools write, and the drill is its own
-# because it is the only one that spends the deployment it describes.
+# telemetry state) and "cache_audit" (run an audit, its history, its
+# schedule). A group left out is neither listed nor callable. The autoscale
+# and cache_audit groups are the ones whose tools write; the drill and the
+# audit are their own groups because each spends the deployment it describes.
 # ["processes,cache"]
-# SYSTEM_MCP_TOOLS="processes,autoscale,autoscale_drill,cache"
+# SYSTEM_MCP_TOOLS="processes,autoscale,autoscale_drill,cache,cache_audit"
 
 # Browser origins allowed to call the endpoint. Empty by default, so no browser
 # reaches it: the transport spec requires the Origin header to be validated,

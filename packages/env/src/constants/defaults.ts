@@ -119,6 +119,13 @@ export const DEFAULTS = {
 	CACHE_STATS_MAX_BYTES: '2gb',
 	CACHE_STATS_MAX_BUFFER: 1_000_000,
 	CACHE_STATS_GAP_LOOKBACK: '1h',
+	CACHE_AUDIT_ENABLED: true,
+	// Unscheduled: a run replays every live entry uncached, a dev/preview cost.
+	CACHE_AUDIT_SCHEDULE: '',
+	CACHE_AUDIT_LIMIT: 0,
+	CACHE_AUDIT_MAX_DURATION: '10m',
+	CACHE_AUDIT_IGNORE_PATHS: '',
+	CACHE_AUDIT_RETENTION: '30d',
 
 	AUTH_PROVIDERS: '',
 	AUTH_DISABLE_DEFAULT: false,
