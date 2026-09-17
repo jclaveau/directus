@@ -25,6 +25,10 @@ const CREDENTIAL_PATHS = [
 	/^\/users\/register$/,
 ];
 
+// A login is a session of one's own: nothing to attribute. The GraphQL
+// `auth_login` resolver refuses it the same way.
+const LOGIN_PATH = /^\/auth\/login(\/|$)/;
+
 /**
  * The write guard of an impersonated request, after `authenticate`: reads
  * only unless IMPERSONATION_WRITES is on, and credentials never.
@@ -39,6 +43,10 @@ export const handler = (req: Request, _res: Response, next: NextFunction) => {
 
 	if (CREDENTIAL_PATHS.some((credential) => credential.test(path))) {
 		throw new ForbiddenError({ reason: 'impersonation_credentials' });
+	}
+
+	if (LOGIN_PATH.test(path)) {
+		throw new ForbiddenError({ reason: 'impersonation_login' });
 	}
 
 	if (useEnv()['IMPERSONATION_WRITES'] === true) {

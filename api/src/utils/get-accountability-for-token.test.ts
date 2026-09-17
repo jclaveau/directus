@@ -4,6 +4,7 @@ import getDatabase from '../database/index.js';
 import { getAccountabilityForToken } from './get-accountability-for-token.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
+import { BOTS_ROLE } from '../bots.js';
 
 vi.mock('@directus/env', () => {
 	return {
@@ -94,7 +95,7 @@ describe('getAccountabilityForToken', async () => {
 			})
 			.mockResolvedValueOnce({
 				app: false,
-				admin: false,
+				admin: true,
 				grantedDbConnections: ['premium'],
 			});
 
@@ -124,6 +125,7 @@ describe('getAccountabilityForToken', async () => {
 	test.each([
 		['suspended', { role: 'admin-role', status: 'suspended' }],
 		['gone', undefined],
+		['demoted', { role: 'admin-role', status: 'active' }],
 	])('an impersonated token dies with its impersonator (%s)', async (_, row) => {
 		const token = jwt.sign(
 			{
@@ -145,6 +147,31 @@ describe('getAccountabilityForToken', async () => {
 
 		await expect(getAccountabilityForToken(token))
 			.rejects.toThrow('Invalid user credentials.');
+	});
+
+	test('a bot impersonator needs no admin access', async () => {
+		const token = jwt.sign(
+			{
+				id: 'user-id',
+				role: 'role-id',
+				admin_access: 0,
+				app_access: 1,
+				impersonator: 'bot-id',
+			},
+			'super-secure-secret',
+			{ issuer: 'directus' },
+		);
+
+		vi.spyOn(getDatabase(), 'first')
+			.mockReturnValue({ role: BOTS_ROLE, status: 'active' } as any);
+
+		vi.mocked(fetchRolesTree).mockResolvedValue([]);
+
+		vi.mocked(fetchGlobalAccess)
+			.mockResolvedValue({ app: true, admin: false, grantedDbConnections: [] });
+
+		await expect(getAccountabilityForToken(token))
+			.resolves.toMatchObject({ user: 'user-id', impersonator: 'bot-id' });
 	});
 
 	test('throws token expired error', async () => {
