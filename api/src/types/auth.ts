@@ -29,6 +29,7 @@ export interface Session {
 	share: string;
 	impersonator: string | null;
 	impersonator_session: string | null;
+	next_token: string | null;
 }
 
 export type DirectusTokenPayload = {

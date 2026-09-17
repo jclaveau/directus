@@ -7,10 +7,9 @@ import type { Knex } from 'knex';
  * `directus_sessions.impersonator` names the user a session was opened by, and
  * cascades with them: a deleted impersonator takes the impersonation down.
  * `impersonator_session` is the impersonator's own session token, kept so a
- * Data Studio "Stop" can re-sign their cookie from it; it cascades on that row
- * too, which is what ends the impersonation when the impersonator is logged
- * out or kicked elsewhere — `clearUserSessions` selects on `user`, and the
- * impersonated row's `user` is the target.
+ * Data Studio "Stop" can re-sign their cookie from it. `endSessions` follows
+ * it on purpose (the trail and the socket kick need the row before it goes);
+ * the cascade is only the net under a row deleted by other means.
  *
  * `directus_activity.impersonator` keeps `user` as the target and names the
  * impersonator beside it, bare like `user` has been since `20201028A`: a trail

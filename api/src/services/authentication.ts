@@ -260,6 +260,7 @@ export class AuthenticationService {
 				session_next_token: 's.next_token',
 				session_impersonator: 's.impersonator',
 				session_impersonator_session: 's.impersonator_session',
+				impersonator_status: 'i.status',
 				user_id: 'u.id',
 				user_first_name: 'u.first_name',
 				user_last_name: 'u.last_name',
@@ -276,6 +277,7 @@ export class AuthenticationService {
 			})
 			.from('directus_sessions AS s')
 			.leftJoin('directus_users AS u', 's.user', 'u.id')
+			.leftJoin('directus_users AS i', 's.impersonator', 'i.id')
 			.leftJoin('directus_shares AS d', 's.share', 'd.id')
 			.where('s.token', refreshToken)
 			.andWhere('s.expires', '>=', new Date())
@@ -310,10 +312,18 @@ export class AuthenticationService {
 			this.knex,
 		);
 
+		const impersonated = record.session_impersonator !== null;
+
+		// A suspended impersonator acts for nobody; their kick ends this row when
+		// the status changes through the service, this is for one changed beside it
+		if (impersonated && record.impersonator_status !== 'active') {
+			await endSessions(this.knex, { tokens: [refreshToken] });
+			throw new InvalidCredentialsError();
+		}
+
 		// An impersonated session is the impersonator's doing, not the target's:
 		// oauth2/openid would rotate the target's IdP refresh token, LDAP re-bind as
 		// them, and `last_access` would say they were here.
-		const impersonated = record.session_impersonator !== null;
 
 		if (record.user_id && !impersonated) {
 			const provider = getAuthProvider(record.user_provider);
@@ -658,6 +668,7 @@ export class AuthenticationService {
 				'u.auth_data',
 				's.impersonator',
 				's.impersonator_session',
+				's.next_token',
 			)
 			.from('directus_sessions as s')
 			.innerJoin('directus_users as u', 's.user', 'u.id')
@@ -674,11 +685,12 @@ export class AuthenticationService {
 			}
 
 			// A logout under impersonation is a logout: the impersonator's own row
-			// goes with it, and Stop is the only way back to it.
+			// goes with it, and Stop is the only way back to it. A row rotated under
+			// the caller within the grace period goes too.
+			const tokens = [refreshToken, record.next_token, record.impersonator_session];
+
 			await endSessions(this.knex, {
-				tokens: record.impersonator_session === null
-					? [refreshToken]
-					: [refreshToken, record.impersonator_session],
+				tokens: tokens.filter((token): token is string => typeof token === 'string'),
 			});
 		}
 	}

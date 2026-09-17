@@ -285,6 +285,24 @@ describe('Impersonation', () => {
 				.expect(403);
 
 			expect(reason(tfa)).toBe('impersonation_credentials');
+
+			// The token dies with its impersonator, however it was suspended
+			const setAdminStatus = (status: string) => {
+				return db('directus_users')
+					.where({ id: adminId })
+					.update({ status });
+			};
+
+			await setAdminStatus('suspended');
+
+			try {
+				await me(token).expect(401);
+			}
+			finally {
+				await setAdminStatus('active');
+			}
+
+			await me(token).expect(200);
 		});
 
 		it('is read-only unless IMPERSONATION_WRITES is on', async () => {
@@ -487,6 +505,51 @@ describe('Impersonation', () => {
 
 			await expectEnded(targetWs);
 			await me(target).expect(401);
+		});
+
+		it(oneLine`
+			the admin's own session ending by its token ends what it opened, on record
+		`, async () => {
+			const target = await login(targetEmail, targetPassword);
+			const targetWs = socket(target);
+			await targetWs.waitForState(targetWs.conn.OPEN);
+
+			const adminSession = await login(USER.ADMIN.EMAIL, USER.ADMIN.PASSWORD);
+
+			const session = cookieValue(
+				await impersonate(adminSession, { user: targetId, mode: 'session' })
+					.expect(200),
+				SESSION_COOKIE,
+			);
+
+			const asTargetWs = socket(session);
+			await asTargetWs.waitForState(asTargetWs.conn.OPEN);
+
+			const ended = () => {
+				return db('directus_activity')
+					.where({ action: 'impersonate_end', item: targetId })
+					.count({ count: '*' })
+					.first()
+					.then((row) => Number(row?.count));
+			};
+
+			const before = await ended();
+
+			// An API client holding the admin's own session token logs it out: the
+			// impersonation is ended with it — its socket told, its trail written —
+			// not dropped by the foreign key behind its back
+			await request(url)
+				.post('/auth/logout')
+				.send({ mode: 'session' })
+				.set('Cookie', `${SESSION_COOKIE}=${adminSession}`)
+				.expect(204);
+
+			await expectEnded(asTargetWs);
+			await expectAlive(targetWs, target);
+			await me(session).expect(401);
+			expect(await ended()).toBe(before + 1);
+
+			targetWs.conn.close();
 		});
 	});
 });
