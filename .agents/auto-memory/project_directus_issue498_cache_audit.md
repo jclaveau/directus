@@ -235,3 +235,56 @@ unit, acceptance/Playwright, CodeQL) as of head `ef1588fd73`.
 - bb typecheck now shows ~280 pre-existing errors (main-tree node_modules
   drift) — grep the touched files only.
 
+## 2026-09-17 continued (0eb52062 → 17eedfdf: renewal race, PR body, the outage case's real blocker)
+
+- Cold re-review found one more race: releasing the run lock in `finally`
+  could fire before a pending renewal `setInterval` tick finished writing —
+  `0eb52062` awaits the renewal's in-flight write before `lockCache.delete`.
+  Witness red without the fix, green with it.
+- PR #499 body rewritten (16 KB) with the full design + every round's
+  disclosures. A body edit fires GitHub's `edited` event, which cancels the
+  in-flight preview tunnel — re-dispatch `preview-admin.yml` after.
+- The outage bb case (shard 6, "a node whose cache went away") went red six
+  rounds: the cut-off node (Redis behind `createRedisProxy`, cut mid-test)
+  answered 500 `MaxRetriesPerRequestError` on ANY request before the audit
+  was asked. Two per-node lookups on the request path go through a client
+  that raises (#366 "surviving ≠ answering"):
+  1. `getSchema` — the in-process schema cache is nulled by any node's
+     `schemaChanged` bus message (sibling suites churn schema constantly) and
+     rebuilt behind `useLock().increment` (ioredis). `CACHE_SCHEMA=false` on
+     the cut-off node reads schema from the DB per request.
+  2. permissions — `CacheMulti` (`packages/memory/src/cache/lib/multi.ts`):
+     `set`/`delete` publish `{type:'clear', key}` on the bus with the FIXED
+     namespace `permissions` (not CACHE_NAMESPACE-scoped), so every process
+     on the same Redis drops its local copy of that key. `withCache` keys are
+     `namespace-hash(args)` and identical for the admin across nodes → the
+     45 bb suites on redis 6108 keep dropping a node's warm admin keys; the
+     next lookup on the cut-off node is cold → ioredis → 500. Priming reads
+     and priming audits cannot keep them warm.
+  Fix = a bb hook extension `tests/blackbox/extensions/cache-audit-identity`
+  (`authenticate` filter: header `x-cache-audit-identity` = user token,
+  looked up in `directus_users`, returns an admin accountability; the
+  middleware short-circuits on a changed accountability so no cache is
+  touched on the way to the audit). Enabled per node by
+  `CACHE_AUDIT_IDENTITY_TOKEN` env. Same shape as the api-guard hook.
+- An "anonymous read first" probe was invalid, not refuting: the cache-key
+  builder calls `fetchPoliciesIpAccess` per accountability, and the public
+  one had never been looked up on that node → its own cold key
+  ([[feedback_failed_probe_may_be_invalid_not_refuting]]).
+- The CLI as an alternative rig was rejected: boot-time ioredis awaits with
+  the proxy cut never return.
+- `askHeld` message was empty for node-redis's `AggregateError` (message
+  `''`): now described by the last attempt's message / the error name.
+- Two flake classes seen on this branch's shards, NOT this PR:
+  - shard 4 `cache-cascade-delete.test.ts` "Field parent doesn't exist" +
+    `reading 'kill'` = stale-schema race (`schemaCache--done` bus message
+    carries another node's stale schema) against concurrent schema-crud
+    suites; rerun green every time — `gh run rerun <id> --failed`.
+  - the schedule case (`takes a schedule live off the settings`) once:
+    `cacheAuditScheduleChanged` reaches every node on the shared bus (foreign
+    suites' nodes, other CACHE_NAMESPACE) → the synchronized tick can be won
+    by a node that can't hold the entry → descriptor retired. A failed run
+    of the case leaves `* * * * * *` in settings → later-booted nodes run a
+    per-second cron. Hardening candidate if it recurs.
+- Still NOT merged; do not merge without an explicit "merge it".
+
