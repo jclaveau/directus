@@ -288,3 +288,11 @@ unit, acceptance/Playwright, CodeQL) as of head `ef1588fd73`.
     per-second cron. Hardening candidate if it recurs.
 - Still NOT merged; do not merge without an explicit "merge it".
 
+
+## 2026-09-17 — #500 comment, replay side effects (design settled, not built)
+
+- Bit name settled: `accountability.noSideEffects` (demand, `no…` flag idiom like `noKnex`); `cacheAuditReplay` / `synthetic` / `sideEffectFree` rejected. Effects only — lookup bypass + trust read `req.cacheAuditReplay` set by ONE marker middleware mounted before `rateLimiterGlobal`.
+- Flows on `items.read` shape the body → they RUN on a replay; the bit skips only `flows.ts:417` run-log; writing operations → `unreplayable:read_flow_writes` at plan time.
+- Marker is a static HMAC of a constant → bind it to the bearer token (`HMAC(SECRET, token)`, expiry via REPLAY_TOKEN_TTL, no admin gate — replays run as the audited user); bit is GET/HEAD only.
+- Cache key DOES fold the IP when an `ip_access` policy matches (`get-cache-key.ts:197-211`) — earlier "no IP in the key" was wrong.
+- Share reads collide with anonymous in the cache key (`share` absent from `getCacheKey`) — PLAUSIBLE, unwitnessed; tracked inside #500 item 10, own PR.
