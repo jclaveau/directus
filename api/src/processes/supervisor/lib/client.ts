@@ -229,11 +229,19 @@ async function answeredInTime<T>(
  * requests. Naming the worker is the whole of the difference: `delete` and
  * `scale` both reach `God.deleteProcessId`, and `delete` is the one pm2
  * publishes in its typings.
+ *
+ * Answered once the worker has exited, which is once it has drained what it
+ * was serving or run out its `kill_timeout`: a worker holding a request past
+ * the default bound is a supervisor busy doing what it was asked, and a caller
+ * that knows the declaration passes the bound that drain deserves.
  */
-export async function releaseWorker(pmId: number): Promise<void> {
+export async function releaseWorker(
+	pmId: number,
+	timeoutMs: number = SUPERVISOR_TIMEOUT_MS,
+): Promise<void> {
 	const deleted = promisify(pm2.delete.bind(pm2))(pmId);
 
-	await answeredInTime(`a release of worker ${pmId}`, deleted);
+	await answeredInTime(`a release of worker ${pmId}`, deleted, timeoutMs);
 }
 
 /** Every process the local daemon supervises, whatever app it belongs to. */

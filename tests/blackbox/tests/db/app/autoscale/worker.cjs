@@ -79,6 +79,19 @@ if (inFlightReport !== undefined) {
 	}, 500).unref();
 }
 
+// What a worker serving a request does with the supervisor's SIGINT: finish
+// it, then exit. pm2 answers a release once the worker has exited, so this is
+// how long a release takes to be answered — and the planner's drain runs past
+// the bound a supervisor call carries by default. Unset, the worker exits on
+// the signal at once.
+const drainMs = Number(process.env['BB_DRAIN_MS'] ?? 0);
+
+if (drainMs > 0) {
+	process.on('SIGINT', () => {
+		setTimeout(() => process.exit(0), drainMs);
+	});
+}
+
 function burn() {
 	const until = Date.now() + busyMs;
 

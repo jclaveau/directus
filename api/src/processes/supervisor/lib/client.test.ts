@@ -504,6 +504,54 @@ test('a release names the worker the supervisor is to stop', async () => {
 	expect(scale).not.toHaveBeenCalled();
 });
 
+// pm2 answers a release once the worker has exited, and a worker exits once it
+// has drained what it was serving or run out its `kill_timeout`. The planner
+// gives a worker twenty seconds, past the default bound: a caller that knows
+// the declaration passes the bound the drain deserves, and the late answer is
+// an answer rather than a supervisor gone.
+test('a release given its own bound waits past the default one', async () => {
+	const { releaseWorker } = await import('./client.js');
+
+	let answer: (() => void) | null = null;
+
+	deleteProcess.mockImplementation((
+		_pmId: number,
+		callback: (error: null) => void,
+	) => {
+		answer = () => callback(null);
+	});
+
+	let answered = false;
+
+	const releasing = releaseWorker(4, 35_000).then(() => {
+		answered = true;
+	});
+
+	await vi.advanceTimersByTimeAsync(34_000);
+
+	expect(answered).toBe(false);
+	expect(disconnect).not.toHaveBeenCalled();
+
+	answer!();
+	await releasing;
+
+	expect(answered).toBe(true);
+});
+
+test('a release given its own bound fails at that one', async () => {
+	const { releaseWorker } = await import('./client.js');
+
+	deleteProcess.mockImplementation(neverAnswers);
+
+	const failed = expect(releaseWorker(4, 35_000)).rejects
+		.toThrow(/did not answer a release of worker 4 in 35000ms/);
+
+	await vi.advanceTimersByTimeAsync(35_000);
+	await failed;
+
+	expect(disconnect).toHaveBeenCalledOnce();
+});
+
 // pm2 gives the bus its own socket and takes it down with the calling one, so a
 // reconnect that only rebuilt the calls would leave the autoscaler deciding
 // which worker to stop on reports that stopped arriving when the daemon
