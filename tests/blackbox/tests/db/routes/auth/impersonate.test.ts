@@ -402,17 +402,35 @@ describe('Impersonation', () => {
 			await expectAlive(adminWs, adminSession);
 			await expectAlive(targetWs, target);
 
-			// Logging out of the cookie-mode impersonation ends the admin's own
-			// session with it
+			// Logging out of the cookie-mode impersonation ends that row alone: the
+			// admin's Studio session is no part of it
 			await request(url)
 				.post('/auth/logout')
 				.send({ mode: 'cookie' })
 				.set('Cookie', `${REFRESH_COOKIE}=${refreshToken}`)
 				.expect(204);
 
+			await expectAlive(adminWs, adminSession);
+			await expectAlive(targetWs, target);
+
+			// Logging out of a session-mode impersonation is a logout: the admin's
+			// own session goes with it, Stop was the only way back
+			const again = cookieValue(
+				await impersonate(adminSession, { user: targetId, mode: 'session' })
+					.expect(200),
+				SESSION_COOKIE,
+			);
+
+			await request(url)
+				.post('/auth/logout')
+				.send({ mode: 'session' })
+				.set('Cookie', `${SESSION_COOKIE}=${again}`)
+				.expect(204);
+
 			await expectEnded(adminWs);
 			await expectAlive(targetWs, target);
 			await me(adminSession).expect(401);
+			await me(again).expect(401);
 
 			const minted = await db('directus_sessions')
 				.where({ impersonator: adminId });
@@ -424,6 +442,7 @@ describe('Impersonation', () => {
 				.select('user', 'impersonator');
 
 			expect(ends).toEqual([
+				{ user: adminId, impersonator: null },
 				{ user: adminId, impersonator: null },
 				{ user: adminId, impersonator: null },
 			]);
