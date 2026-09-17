@@ -72,6 +72,7 @@ describe('A pool the supervisor cannot keep whole reaches /server/health', () =>
 			startAutoscaler(rig, {
 				REDIS_HOST: 'localhost',
 				REDIS_PORT: '6108',
+				CACHE_NAMESPACE: env['CACHE_NAMESPACE']!,
 				PM2_AUTOSCALE_ENABLED: 'false',
 			});
 		}

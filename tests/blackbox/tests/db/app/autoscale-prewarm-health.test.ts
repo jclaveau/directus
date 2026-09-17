@@ -24,6 +24,8 @@ interface Deployment {
 	instance: ChildProcess;
 	url: string;
 	rig: Rig;
+	/** What its processes share a bus under; the autoscaler runs under it too. */
+	namespace: string;
 }
 
 /**
@@ -46,11 +48,12 @@ async function deploy(
 ): Promise<Deployment> {
 	const env = cloneDeep(config.envs)[vendor]!;
 	const port = await getPort();
+	const namespace = `blackbox-prewarm-health-${vendor}-${prewarm}`;
 
 	env['PORT'] = String(port);
 	env['REDIS_HOST'] = 'localhost';
 	env['REDIS_PORT'] = '6108';
-	env['CACHE_NAMESPACE'] = `blackbox-prewarm-health-${vendor}-${prewarm}`;
+	env['CACHE_NAMESPACE'] = namespace;
 	env['PM2_AUTOSCALE_PREWARM'] = prewarm;
 
 	const instance = spawn('node', [paths.cli, 'start'], {
@@ -70,6 +73,7 @@ async function deploy(
 			...pool,
 		}),
 		url: getUrl(vendor, { [vendor]: env } as never),
+		namespace,
 	};
 }
 
@@ -143,6 +147,7 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 		startAutoscaler(deployment.rig, {
 			REDIS_HOST: 'localhost',
 			REDIS_PORT: '6108',
+			CACHE_NAMESPACE: deployment.namespace,
 			PM2_AUTOSCALE_PREWARM: '2',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '2',
@@ -175,6 +180,7 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 		startAutoscaler(deployment.rig, {
 			REDIS_HOST: 'localhost',
 			REDIS_PORT: '6108',
+			CACHE_NAMESPACE: deployment.namespace,
 			PM2_AUTOSCALE_PREWARM: '2',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '2',
@@ -214,6 +220,7 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 		startAutoscaler(deployment.rig, {
 			REDIS_HOST: 'localhost',
 			REDIS_PORT: '6108',
+			CACHE_NAMESPACE: deployment.namespace,
 			PM2_AUTOSCALE_PREWARM: '8',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '8',
@@ -250,6 +257,7 @@ describe('A prewarm the deployment has not reached holds /server/health', () => 
 		startAutoscaler(deployment.rig, {
 			REDIS_HOST: 'localhost',
 			REDIS_PORT: '6108',
+			CACHE_NAMESPACE: deployment.namespace,
 			PM2_AUTOSCALE_PREWARM: '8',
 			PM2_AUTOSCALE_MIN_WORKERS: '1',
 			PM2_AUTOSCALE_MAX_WORKERS: '8',

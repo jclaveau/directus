@@ -295,7 +295,11 @@ describe('A prewarm is reached under traffic and released after it', () => {
 
 		const traffic = drive(deployment.url, 4);
 
-		startAutoscaler(deployment.rig, { ...databaseEnv(vendor), ...SCALING });
+		startAutoscaler(deployment.rig, {
+			...databaseEnv(vendor),
+			...SCALING,
+			CACHE_NAMESPACE: `blackbox-prewarm-load-${vendor}`,
+		});
 
 		expect(await deployment.watch.until(PREWARM, 180_000)).toBe(PREWARM);
 
