@@ -27,6 +27,8 @@ export interface Session {
 	token: string;
 	expires: Date;
 	share: string;
+	impersonator: string | null;
+	impersonator_session: string | null;
 }
 
 export type DirectusTokenPayload = {

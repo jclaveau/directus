@@ -520,7 +520,7 @@ export class AuthenticationService {
 		user: { id: string | null; role: string | null },
 		options: {
 			provider: string;
-			type: 'login' | 'refresh' | 'impersonate';
+			type: 'login' | 'refresh' | 'impersonate' | 'impersonate_end';
 			ttl: StringValue | number;
 			session?: string;
 			share?: string;
@@ -645,9 +645,20 @@ export class AuthenticationService {
 
 	async logout(refreshToken: string): Promise<void> {
 		const record = await this.knex
-			.select<
-				User & Session
-			>('u.id', 'u.first_name', 'u.last_name', 'u.email', 'u.password', 'u.status', 'u.role', 'u.provider', 'u.external_identifier', 'u.auth_data')
+			.select<User & Session>(
+				'u.id',
+				'u.first_name',
+				'u.last_name',
+				'u.email',
+				'u.password',
+				'u.status',
+				'u.role',
+				'u.provider',
+				'u.external_identifier',
+				'u.auth_data',
+				's.impersonator',
+				's.impersonator_session',
+			)
 			.from('directus_sessions as s')
 			.innerJoin('directus_users as u', 's.user', 'u.id')
 			.where('s.token', refreshToken)
@@ -656,11 +667,66 @@ export class AuthenticationService {
 		if (record) {
 			const user = record;
 
-			const provider = getAuthProvider(user.provider);
-			await provider.logout(clone(user));
+			// The IdP session behind the row is the target's own, not the
+			// impersonator's to end.
+			if (record.impersonator === null) {
+				await getAuthProvider(user.provider).logout(clone(user));
+			}
 
-			await endSessions(this.knex, { tokens: [refreshToken] });
+			// A logout under impersonation is a logout: the impersonator's own row
+			// goes with it, and Stop is the only way back to it.
+			await endSessions(this.knex, {
+				tokens: record.impersonator_session === null
+					? [refreshToken]
+					: [refreshToken, record.impersonator_session],
+			});
 		}
+	}
+
+	/**
+	 * Stop impersonating in session mode: end the impersonated row and sign the
+	 * impersonator's own session again. The row is the proof, no password.
+	 */
+	async stopImpersonation(
+		sessionToken: string,
+	): Promise<{ accessToken: string; expires: number }> {
+		const row = await this.knex
+			.select('token', 'next_token', 'impersonator', 'impersonator_session')
+			.from('directus_sessions')
+			.where({ token: sessionToken })
+			.first();
+
+		if (!row?.impersonator || !row.impersonator_session) {
+			throw new InvalidPayloadError({ reason: 'Not impersonating in session mode' });
+		}
+
+		// The row rotated under the caller within the grace period: end both.
+		await endSessions(this.knex, {
+			tokens: row.next_token === null
+				? [row.token]
+				: [row.token, row.next_token],
+		});
+
+		const impersonator = await this.knex
+			.select('u.id', 'u.role', 'u.provider', 'u.status')
+			.from('directus_sessions as s')
+			.innerJoin('directus_users as u', 's.user', 'u.id')
+			.where('s.token', row.impersonator_session)
+			.andWhere('s.expires', '>=', new Date())
+			.first();
+
+		// Their own session ended meanwhile (a kick, an expiry): the cookie the
+		// caller gets back would name a row that is gone, so give none.
+		if (impersonator?.status !== 'active') {
+			throw new InvalidCredentialsError();
+		}
+
+		return await this.mint(impersonator, {
+			provider: impersonator.provider,
+			type: 'impersonate_end',
+			ttl: accessTokenTtl(true),
+			session: row.impersonator_session,
+		});
 	}
 
 	async verifyPassword(userID: string, password: string): Promise<void> {

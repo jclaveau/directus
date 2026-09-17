@@ -142,6 +142,8 @@ paths:
     $ref: './paths/auth/refresh.yaml'
   /auth/logout:
     $ref: './paths/auth/logout.yaml'
+  /auth/impersonate:
+    $ref: './paths/auth/impersonate.yaml'
   /auth/password/request:
     $ref: './paths/auth/password-request.yaml'
   /auth/password/reset:
