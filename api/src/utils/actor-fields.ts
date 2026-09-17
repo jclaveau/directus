@@ -10,5 +10,6 @@ export function actorFields(accountability: Accountability | null | undefined) {
 		ip: accountability?.ip ?? null,
 		user_agent: accountability?.userAgent ?? null,
 		origin: accountability?.origin ?? null,
+		impersonator: accountability?.impersonator ?? null,
 	};
 }

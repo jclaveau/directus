@@ -96,6 +96,10 @@ data:
     many_field: user
     one_collection: directus_users
 
+  - many_collection: directus_activity
+    many_field: impersonator
+    one_collection: directus_users
+
   ### Settings
   - many_collection: directus_settings
     many_field: project_logo
@@ -167,6 +171,14 @@ data:
   - many_collection: directus_sessions
     many_field: share
     one_collection: directus_shares
+
+  - many_collection: directus_sessions
+    many_field: impersonator
+    one_collection: directus_users
+
+  - many_collection: directus_sessions
+    many_field: impersonator_session
+    one_collection: directus_sessions
 
   ### Dashboards
   - many_collection: directus_dashboards

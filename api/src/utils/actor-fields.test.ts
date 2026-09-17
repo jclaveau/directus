@@ -19,7 +19,16 @@ test('copies the four actor columns off the accountability', () => {
 		ip: '10.0.0.1',
 		user_agent: 'curl/8',
 		origin: 'https://example.com',
+		impersonator: null,
 	});
+});
+
+test('names the impersonator beside the user it acts as', () => {
+	expect(
+		actorFields(
+			createDefaultAccountability({ user: 'target', impersonator: 'admin' }),
+		),
+	).toMatchObject({ user: 'target', impersonator: 'admin' });
 });
 
 test('writes null, not undefined, for every missing attribute', () => {
@@ -28,6 +37,7 @@ test('writes null, not undefined, for every missing attribute', () => {
 		ip: null,
 		user_agent: null,
 		origin: null,
+		impersonator: null,
 	});
 
 	expect(actorFields(createDefaultAccountability())).toEqual({
@@ -35,5 +45,6 @@ test('writes null, not undefined, for every missing attribute', () => {
 		ip: null,
 		user_agent: null,
 		origin: null,
+		impersonator: null,
 	});
 });

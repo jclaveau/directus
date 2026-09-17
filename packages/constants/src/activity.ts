@@ -7,6 +7,8 @@ export enum Action {
 	COMMENT = 'comment',
 	UPLOAD = 'upload',
 	LOGIN = 'login',
+	IMPERSONATE = 'impersonate',
+	IMPERSONATE_END = 'impersonate_end',
 	RUN = 'run',
 	INSTALL = 'install',
 }
