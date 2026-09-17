@@ -1028,6 +1028,20 @@ describe('an entry nothing can be replayed from', () => {
 		expect(queueCacheAnomaly).not.toHaveBeenCalled();
 	});
 
+	test('an entry filled by a bot is a finding: never a target', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		impersonate.mockRejectedValue(
+			new ForbiddenError({ reason: 'impersonation_target_bot' }),
+		);
+
+		const report = await auditCache({ replay: replayer(answer({ data: [] })) });
+
+		expect(report.findings[0])
+			.toMatchObject({ verdict: 'unreplayable', reason: 'user_bot' });
+	});
+
 	test('an inactive target is a finding, another refusal a failure', async () => {
 		fill('rk', { data: [] });
 		described(descriptor());

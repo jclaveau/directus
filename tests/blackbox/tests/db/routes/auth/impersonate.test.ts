@@ -227,6 +227,9 @@ describe('Impersonation', () => {
 
 			const target = await login(targetEmail, targetPassword);
 			await impersonate(target, { user: adminId }).expect(403);
+
+			// Refused before the lookup: Postgres would answer a 500 to it
+			await impersonate(USER.ADMIN.TOKEN, { user: 'not-a-uuid' }).expect(400);
 		});
 
 		it('json mode: a token as the target, credited to the admin', async () => {
@@ -285,6 +288,15 @@ describe('Impersonation', () => {
 				.expect(403);
 
 			expect(reason(tfa)).toBe('impersonation_credentials');
+
+			// Express routes this to the same handler
+			const spelled = await request(url)
+				.post('/Users/Me/tfa/generate')
+				.send({ password: targetPassword })
+				.set('Authorization', `Bearer ${token}`)
+				.expect(403);
+
+			expect(reason(spelled)).toBe('impersonation_credentials');
 
 			// The token dies with its impersonator, however it was suspended
 			const setAdminStatus = (status: string) => {

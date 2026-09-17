@@ -3,8 +3,10 @@ post:
   description: >
     Act as another user. Admin only, and absent (404) unless IMPERSONATION_ENABLED
     is on. `json` answers a short-lived stateless token (IMPERSONATION_TTL);
-    `cookie` opens a refresh-token session and sets its cookie, leaving the
-    Data Studio session cookie untouched; `session` sets the session cookie over
+    `cookie` opens a refresh-token session and sets its cookie (over the
+    caller's own project login, if any; REFRESH_TOKEN_COOKIE_DOMAIN must reach
+    the project website), leaving the Data Studio session cookie untouched;
+    `session` sets the session cookie over
     the caller's own, which must be a session cookie itself. Every request made
     with the result names the impersonator on its claims and in the activity
     trail; writes are refused unless IMPERSONATION_WRITES is on, and the
@@ -48,7 +50,9 @@ post:
                     description: How long before the access token will expire.
                     example: 900000
     '400':
-      description: No `user`, an unknown `mode`, or `session` mode off a session cookie.
+      description: >
+        No `user` or one that is no uuid, an unknown `mode`, or `session` mode
+        off a session cookie.
     '403':
       description: >
         The caller is not an admin or is already impersonating (no nesting), the

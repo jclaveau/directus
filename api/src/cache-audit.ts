@@ -196,10 +196,10 @@ interface ReplayPlan {
 	url: string;
 }
 
-interface ReplayToken {
-	authorization: string;
-	expiresAt: number;
-}
+type ReplayToken =
+	| { authorization: string; expiresAt: number }
+	// A user the bot may not act as: the verdict's `reason`
+	| { refused: 'user_inactive' | 'user_bot' };
 
 type Verdict =
 	| { verdict: 'fresh' }
@@ -425,7 +425,7 @@ function emptyCounts(): Record<CacheAuditVerdict, number> {
 class CacheAudit {
 	private readonly replay: CacheAuditReplayer;
 	private readonly ignore: string[][];
-	private readonly tokens = new Map<string, Promise<ReplayToken | null>>();
+	private readonly tokens = new Map<string, Promise<ReplayToken>>();
 
 	constructor(
 		private readonly cache: Keyv,
@@ -526,8 +526,8 @@ class CacheAudit {
 
 		const authorization = await this.authorizationFor(descriptor.userId);
 
-		if (authorization === null) {
-			return { verdict: 'unreplayable', reason: 'user_inactive' };
+		if (typeof authorization !== 'string') {
+			return { verdict: 'unreplayable', reason: authorization.refused };
 		}
 
 		if (authorization !== '') {
@@ -734,11 +734,13 @@ class CacheAudit {
 
 	/**
 	 * A minted access token for the user the entry was filled for, `''` for a
-	 * public fill, null for a user that can no longer be impersonated. Minted
+	 * public fill, the refusal for a user that cannot be impersonated. Minted
 	 * once per user and run, again once it has expired: a run must not pay the
 	 * mint's queries once per entry.
 	 */
-	private async authorizationFor(userId: string | null): Promise<string | null> {
+	private async authorizationFor(
+		userId: string | null,
+	): Promise<string | { refused: string }> {
 		if (userId === null) {
 			return '';
 		}
@@ -752,7 +754,7 @@ class CacheAudit {
 
 		let token = await pending;
 
-		if (token !== null && token.expiresAt <= Date.now()) {
+		if ('expiresAt' in token && token.expiresAt <= Date.now()) {
 			// Another entry of the same user may have re-minted while this one
 			// awaited; take its token rather than minting beside it.
 			if (this.tokens.get(userId) === pending) {
@@ -762,12 +764,12 @@ class CacheAudit {
 			token = await this.tokens.get(userId)!;
 		}
 
-		return token === null
-			? null
+		return 'refused' in token
+			? token
 			: token.authorization;
 	}
 
-	private async mint(userId: string): Promise<ReplayToken | null> {
+	private async mint(userId: string): Promise<ReplayToken> {
 		const service = new AuthenticationService({
 			knex: getDatabase(),
 			schema: this.schema,
@@ -788,11 +790,14 @@ class CacheAudit {
 			};
 		}
 		catch (error) {
-			if (
-				isDirectusError<{ reason?: string }>(error, ErrorCode.Forbidden)
-				&& error.extensions.reason === 'impersonation_target_inactive'
-			) {
-				return null;
+			if (isDirectusError<{ reason?: string }>(error, ErrorCode.Forbidden)) {
+				if (error.extensions.reason === 'impersonation_target_inactive') {
+					return { refused: 'user_inactive' };
+				}
+
+				if (error.extensions.reason === 'impersonation_target_bot') {
+					return { refused: 'user_bot' };
+				}
 			}
 
 			throw error;

@@ -8,7 +8,8 @@ post:
     or none ever named the write), `tag_drift` (same body, other tags — one
     write from stale), `raced` (purged or refilled during the replay),
     `time_varying` (two fresh reads disagree), `expired`, and `unreplayable`
-    with a `reason` (`user_inactive`; `status_<code>`; `replay_unrecognized`).
+    with a `reason` (`user_inactive`; `user_bot`; `status_<code>`;
+    `replay_unrecognized`).
     Entries are taken off their cache-stats descriptors, least recently
     verified first — audited, or filled where that came later; one filled
     while cache stats were off has no descriptor and is not seen — and a run

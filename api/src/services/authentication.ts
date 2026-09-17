@@ -34,6 +34,7 @@ import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
 import { stall } from '../utils/stall.js';
+import { validateKeys } from '../utils/validate-keys.js';
 import { ActivityService } from './activity.js';
 import { SettingsService } from './settings.js';
 import { TFAService } from './tfa.js';
@@ -424,6 +425,9 @@ export class AuthenticationService {
 		},
 	): Promise<ImpersonationResult> {
 		const { nanoid } = await import('nanoid');
+
+		// The lookup below is raw: Postgres refuses a non-uuid with an error
+		validateKeys(this.schema, 'directus_users', 'id', target);
 
 		if (target === options.impersonator) {
 			throw new ForbiddenError({ reason: 'impersonation_self' });
