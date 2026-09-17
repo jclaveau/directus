@@ -284,6 +284,18 @@ describe('runCacheAudit', () => {
 		tracker.on.insert('directus_cache_audit_findings').response([]);
 		tracker.on.delete('directus_cache_audits').response(0);
 
+		// A renewal takes a round trip: the release has to wait for it, or the
+		// claim it renews outlives the run by a TTL.
+		const landed: Array<() => void> = [];
+
+		lockCache.set.mockImplementation(async (key, value) => {
+			if (lockCache.held.has(key)) {
+				await new Promise<void>((resolve) => landed.push(resolve));
+			}
+
+			lockCache.held.set(key, value);
+		});
+
 		vi.mocked(auditCache).mockImplementation(async () => {
 			expect(lockCache.held.get('cache-audit:run')).toBe(1_700_000_000_000);
 			expect(lockCache.set).toHaveBeenCalledTimes(1);
@@ -295,7 +307,18 @@ describe('runCacheAudit', () => {
 			return report;
 		});
 
-		await runCacheAudit('rest');
+		const run = runCacheAudit('rest');
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		expect(lockCache.delete).not.toHaveBeenCalled();
+
+		for (const land of landed) {
+			land();
+		}
+
+		await run;
+
+		expect(lockCache.delete).toHaveBeenCalledWith('cache-audit:run');
 
 		expect(auditCache).toHaveBeenCalledWith({
 			limit: undefined,

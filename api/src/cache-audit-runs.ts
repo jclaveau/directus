@@ -170,9 +170,10 @@ export async function runCacheAudit(
 
 	const since = Date.now();
 	await lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS);
+	let renewing: Promise<unknown> = Promise.resolve();
 
 	const renewal = setInterval(() => {
-		void lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS).catch(() => {});
+		renewing = lockCache.set(RUN_LOCK, since, RUN_LOCK_TTL_MS).catch(() => {});
 	}, RUN_LOCK_RENEW_MS);
 
 	renewal.unref();
@@ -203,6 +204,9 @@ export async function runCacheAudit(
 	}
 	finally {
 		clearInterval(renewal);
+		// A renewal still on the wire would land after the release and hold
+		// the claim for one more TTL.
+		await renewing;
 		await lockCache.delete(RUN_LOCK);
 
 		// Once per run rather than on a schedule of its own: a history that is
