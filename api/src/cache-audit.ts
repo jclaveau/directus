@@ -652,12 +652,13 @@ class CacheAudit {
 		let response: CacheAuditReplayResponse;
 
 		// A replay that never got an answer — the listener gone mid-reload, a
-		// socket reset — is that entry's to report, not the run's to die of.
+		// socket reset — is that entry's to report, not the run's to die of. The
+		// error's code is the only trace it leaves, so the reason carries it.
 		try {
 			response = await this.replay(request);
 		}
-		catch {
-			return { verdict: 'unreplayable', reason: 'transport' };
+		catch (error) {
+			return { verdict: 'unreplayable', reason: transportReason(error) };
 		}
 
 		// A 403 is what the user would now be served instead of the entry: the
@@ -899,11 +900,33 @@ function globMatches(glob: string[], segments: string[]): boolean {
 	return glob.length === segments.length;
 }
 
+// As long as the findings table stores a reason; node's own codes are far
+// shorter, a userland one need not be.
+const REASON_MAX_LENGTH = 64;
+
+function transportReason(error: unknown): string {
+	const code = typeof error === 'object' && error !== null && 'code' in error
+		? error.code
+		: undefined;
+
+	return typeof code === 'string' && code !== ''
+		? `transport_${code.toLowerCase()}`.slice(0, REASON_MAX_LENGTH)
+		: 'transport';
+}
+
 export interface LoopbackTarget {
 	host?: string | undefined;
 	port?: number | undefined;
 	socketPath?: string | undefined;
 }
+
+/**
+ * The replay's tags come back in one header, and a deep read pins one tag per
+ * related key: 370 of them ran past node's 16KB header cap and every audit of
+ * that entry ended `HPE_HEADER_OVERFLOW`. Room for the fan-out #392 leaves
+ * unbounded; the parser buffers only what a response actually sends.
+ */
+export const REPLAY_MAX_HEADER_SIZE = 1024 * 1024;
 
 /**
  * A replayer speaking to the app's own listener, never through PUBLIC_URL: the
@@ -921,6 +944,7 @@ export function loopbackReplayer(
 					method: request.method,
 					path: request.path,
 					headers: request.headers,
+					maxHeaderSize: REPLAY_MAX_HEADER_SIZE,
 				},
 				(incoming) => {
 					const chunks: Buffer[] = [];

@@ -70,8 +70,79 @@ function pollWhileInFlight(): void {
 
 		if (!inFlight.value) {
 			stopPolling();
+
+			// The refusal named a run that is over now: nothing left to say.
+			if (error.value === refusal) {
+				error.value = null;
+			}
+
+			refusal = null;
+			await loadSchedule().catch(() => undefined);
+			armNextRun();
 		}
 	}, 5000);
+}
+
+// What the lock answered the last ask with, so that notice alone goes with
+// the run it named — a failure of the page's own stays.
+let refusal: string | null = null;
+
+// The cron's run starts without this page knowing: read the runs again once
+// the schedule says it fired, so the button waits on that run instead of
+// being refused by its lock.
+let nextRunTimer: ReturnType<typeof setTimeout> | null = null;
+
+const NEXT_RUN_GRACE_MS = 1000;
+// Fired by this clock but not by the server's yet — a skew, or the run's row
+// not open yet: read again after the grace, while the miss is this small.
+const NEXT_RUN_SKEW_MS = 5000;
+const MAX_TIMEOUT_MS = 2 ** 31 - 1;
+
+function disarmNextRun(): void {
+	if (nextRunTimer !== null) {
+		clearTimeout(nextRunTimer);
+		nextRunTimer = null;
+	}
+}
+
+function armNextRun(): void {
+	disarmNextRun();
+
+	const nextRunAt = schedule.value?.nextRunAt ?? null;
+
+	if (nextRunAt === null) {
+		return;
+	}
+
+	const overdue = Date.now() - nextRunAt;
+
+	if (overdue > NEXT_RUN_SKEW_MS) {
+		return;
+	}
+
+	const delay = Math.max(-overdue, 0) + NEXT_RUN_GRACE_MS;
+
+	if (delay > MAX_TIMEOUT_MS) {
+		return;
+	}
+
+	nextRunTimer = setTimeout(async () => {
+		nextRunTimer = null;
+
+		try {
+			await Promise.all([loadRuns(), loadSchedule()]);
+		}
+		catch {
+			return;
+		}
+
+		if (inFlight.value) {
+			pollWhileInFlight();
+		}
+		else {
+			armNextRun();
+		}
+	}, delay);
 }
 
 function failed(err: any): string {
@@ -101,6 +172,7 @@ async function load(): Promise<void> {
 	try {
 		await Promise.all([loadSchedule(), loadRuns(), loadQueue()]);
 		pollWhileInFlight();
+		armNextRun();
 	}
 	catch (err: any) {
 		error.value = failed(err);
@@ -124,6 +196,7 @@ async function saveSchedule(): Promise<void> {
 
 		schedule.value = response.data.data;
 		draft.value = scheduleDraft(schedule.value);
+		armNextRun();
 	}
 	catch (err: any) {
 		notify({ type: 'error', title: failed(err) });
@@ -134,7 +207,7 @@ async function saveSchedule(): Promise<void> {
 }
 
 async function runNow(): Promise<void> {
-	if (running.value) {
+	if (running.value || inFlight.value) {
 		return;
 	}
 
@@ -148,6 +221,14 @@ async function runNow(): Promise<void> {
 	}
 	catch (err: any) {
 		error.value = failed(err);
+
+		// Refused by the run lock: a run this page had not seen yet is in
+		// flight. List it, so the button waits on it.
+		if (err?.response?.status === 503) {
+			refusal = error.value;
+			await loadRuns().catch(() => undefined);
+			pollWhileInFlight();
+		}
 	}
 	finally {
 		running.value = false;
@@ -261,6 +342,12 @@ const horizon = computed(() => {
 		+ ` · ${size}, ${pending}`;
 });
 
+const runNowTooltip = computed(() => {
+	return inFlight.value
+		? t('cache_audit_running', 'An audit is running')
+		: t('cache_audit_run_now', 'Replay every live entry now');
+});
+
 const schedulePlaceholder = computed(() => {
 	return schedule.value?.envRule
 		? `${t('cache_audit_env_rule', 'Env')}: ${schedule.value.envRule}`
@@ -339,7 +426,11 @@ function driftOf(finding: CacheAuditFinding): string | null {
 }
 
 onMounted(load);
-onUnmounted(stopPolling);
+
+onUnmounted(() => {
+	stopPolling();
+	disarmNextRun();
+});
 
 defineExpose({ load });
 </script>
@@ -386,9 +477,9 @@ defineExpose({ load });
         />
 
         <v-button
-          v-tooltip.bottom="t('cache_audit_run_now', 'Replay every live entry now')"
+          v-tooltip.bottom="runNowTooltip"
           small
-          :loading="running"
+          :loading="running || inFlight"
           @click="runNow"
         >
           {{ t('cache_audit_run', 'Audit now') }}
