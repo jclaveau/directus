@@ -33,6 +33,8 @@ describe('Schema Caching Tests', () => {
 					env1[vendor]['CACHE_STORE'] = 'memory';
 					env1[vendor]['CACHE_NAMESPACE'] = 'directus-schema-cache';
 					env1[vendor]['REDIS'] = `redis://localhost:6108/4`;
+					// Two caches, one bus: what the propagation runs over.
+					env1[vendor]['BUS_NAMESPACE'] = 'directus-schema-cache:bus';
 
 					const env2 = cloneDeep(env1);
 					env2[vendor]['CACHE_NAMESPACE'] = env1[vendor]['CACHE_NAMESPACE'] + '2';

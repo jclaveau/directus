@@ -197,12 +197,21 @@ export function startPool(options: PoolOptions): Rig {
 /** The `directus_settings` columns the processes module lays over the env. */
 export type SharedSettingsColumn = 'autoscale_settings' | 'supervisor_settings';
 
-// The channel `useBus` publishes a change on. It is namespaced by the bus
-// rather than by the deployment, so it is the same one for every process on
-// the shared Redis.
-const CHANGED_CHANNEL = 'directus:bus:sharedSettingsChanged';
+// What the rig's autoscalers run under: the environment's default
+// `CACHE_NAMESPACE`, which is also what the bus is named after.
+const DEFAULT_NAMESPACE = 'scalabus';
 
 const REDIS_PORT = 6108;
+
+/**
+ * The channel `useBus` publishes `name` on for the rig's autoscalers. The
+ * bus follows the cache namespace, so the autoscalers of two suites sharing
+ * this Redis hear each other, and a Directus naming its own namespace hears
+ * none of them.
+ */
+export function busChannel(name: string): string {
+	return `${DEFAULT_NAMESPACE}:bus:${name}`;
+}
 
 const databases = new Map<Vendor, Knex>();
 
@@ -235,7 +244,7 @@ export async function storeSharedSettings(
 	vendor: Vendor,
 	column: SharedSettingsColumn,
 	settings: Record<string, unknown> | null,
-	announce = true,
+	options: { announce?: boolean } = {},
 ): Promise<void> {
 	let database = databases.get(vendor);
 
@@ -257,9 +266,13 @@ export async function storeSharedSettings(
 		await database('directus_settings').insert({ [column]: stored });
 	}
 
-	if (announce) {
+	if (options.announce ?? true) {
 		announcer ??= new Redis({ host: 'localhost', port: REDIS_PORT });
-		await announcer.publish(CHANGED_CHANNEL, JSON.stringify({ column }));
+
+		await announcer.publish(
+			busChannel('sharedSettingsChanged'),
+			JSON.stringify({ column }),
+		);
 	}
 }
 

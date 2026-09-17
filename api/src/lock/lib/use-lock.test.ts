@@ -1,3 +1,4 @@
+import { useEnv } from '@directus/env';
 import { createKv, type KvLocal, type KvRedis } from '@directus/memory';
 import type { Redis } from 'ioredis';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -6,12 +7,14 @@ import { _cache, useLock } from './use-lock.js';
 
 vi.mock('../../redis/index.js');
 vi.mock('@directus/memory');
+vi.mock('@directus/env');
 
 let mockLock: KvLocal | KvRedis;
 
 beforeEach(() => {
 	mockLock = {} as unknown as KvLocal;
 	vi.mocked(createKv).mockReturnValue(mockLock);
+	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'scalabus' });
 });
 
 afterEach(() => {
@@ -37,10 +40,22 @@ test('Creates Redis based lock if Redis configuration is available', () => {
 	expect(createKv).toHaveBeenCalledWith({
 		type: 'redis',
 		redis: mockRedis,
-		namespace: 'directus:lock',
+		namespace: 'scalabus:lock',
 	});
 
 	expect(_cache.lock).toBe(mockLock);
+});
+
+test('Names the Redis lock after the deployment the cache namespace names', () => {
+	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(useRedis).mockReturnValue({} as unknown as Redis);
+	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+
+	useLock();
+
+	expect(createKv).toHaveBeenCalledWith(
+		expect.objectContaining({ namespace: 'planner-api:lock' }),
+	);
 });
 
 test('Creates Local lock if Redis configuration is unavailable', () => {

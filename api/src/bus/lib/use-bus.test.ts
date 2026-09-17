@@ -1,3 +1,4 @@
+import { useEnv } from '@directus/env';
 import { createBus, type BusLocal, type BusRedis } from '@directus/memory';
 import type { Redis } from 'ioredis';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -6,12 +7,14 @@ import { _cache, useBus } from './use-bus.js';
 
 vi.mock('../../redis/index.js');
 vi.mock('@directus/memory');
+vi.mock('@directus/env');
 
 let mockBus: BusLocal | BusRedis;
 
 beforeEach(() => {
 	mockBus = {} as unknown as BusLocal;
 	vi.mocked(createBus).mockReturnValue(mockBus);
+	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'scalabus' });
 });
 
 afterEach(() => {
@@ -37,10 +40,38 @@ test('Creates Redis based bus if Redis configuration is available', () => {
 	expect(createBus).toHaveBeenCalledWith({
 		type: 'redis',
 		redis: mockRedis,
-		namespace: 'directus:bus',
+		namespace: 'scalabus:bus',
 	});
 
 	expect(_cache.bus).toBe(mockBus);
+});
+
+test('Names the Redis bus after the deployment the cache namespace names', () => {
+	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(useRedis).mockReturnValue({} as unknown as Redis);
+	vi.mocked(useEnv).mockReturnValue({ CACHE_NAMESPACE: 'planner-api' });
+
+	useBus();
+
+	expect(createBus).toHaveBeenCalledWith(
+		expect.objectContaining({ namespace: 'planner-api:bus' }),
+	);
+});
+
+test('Names the Redis bus as the deployment asked when it did', () => {
+	vi.mocked(redisConfigAvailable).mockReturnValue(true);
+	vi.mocked(useRedis).mockReturnValue({} as unknown as Redis);
+
+	vi.mocked(useEnv).mockReturnValue({
+		CACHE_NAMESPACE: 'planner-api',
+		BUS_NAMESPACE: 'planner:bus',
+	});
+
+	useBus();
+
+	expect(createBus).toHaveBeenCalledWith(
+		expect.objectContaining({ namespace: 'planner:bus' }),
+	);
 });
 
 test('Creates Local bus if Redis configuration is unavailable', () => {

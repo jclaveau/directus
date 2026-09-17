@@ -171,6 +171,10 @@ CACHE_ENABLED=false
 # How to scope the cache data ["scalabus"]
 # CACHE_NAMESPACE="scalabus"
 
+# The channel prefix the processes of this deployment message each other on, for a
+# Redis shared with other deployments [CACHE_NAMESPACE + ":bus"]
+# BUS_NAMESPACE="scalabus:bus"
+
 # Automatically purge the cache on create, update, and delete actions. [false]
 # CACHE_AUTO_PURGE=true
 

@@ -45,7 +45,9 @@ describe('The autoscaler takes live configuration from the settings', () => {
 	// stores the layer with nothing to announce it and after the loop is
 	// already running, which is the only order the boot read cannot answer.
 	it('reaches a node the announcement never got to', async () => {
-		await storeSharedSettings(vendor, 'autoscale_settings', null, false);
+		await storeSharedSettings(vendor, 'autoscale_settings', null, {
+			announce: false,
+		});
 
 		const rig = startPool({
 			appName: 'autoscale-floor-only',
