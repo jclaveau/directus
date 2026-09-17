@@ -1229,12 +1229,8 @@ describe('The cache audit replays live entries against the database', () => {
 
 				// The node still answers what needs no cache: its own identity,
 				// and a read of the run history on the audit's own router. What
-				// a request needs on its way there is per node and warm.
-				// Anonymous first: the schema alone, no permission lookup.
-				const anonymous = await request(cutOffUrl).get('/server/info');
-
-				expect(anonymous.statusCode, said()).toBe(200);
-
+				// a request needs on its way there is per node and warm (an
+				// anonymous read is not: its policy lookups were never made).
 				const me = await request(cutOffUrl)
 					.get('/users/me')
 					.set('Authorization', auth);
