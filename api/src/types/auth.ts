@@ -49,3 +49,11 @@ export type ShareData = {
 };
 
 export type AuthenticationMode = 'json' | 'cookie' | 'session';
+
+export type ImpersonationResult = {
+	accessToken: string;
+	expires: number;
+	id: string;
+	/** Absent in `json` mode: a stateless token cannot be renewed. */
+	refreshToken?: string;
+};

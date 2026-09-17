@@ -1,8 +1,10 @@
 import { Action } from '@directus/constants';
 import { useEnv } from '@directus/env';
 import {
+	ForbiddenError,
 	InvalidCredentialsError,
 	InvalidOtpError,
+	InvalidPayloadError,
 	ServiceUnavailableError,
 	UserSuspendedError,
 } from '@directus/errors';
@@ -12,13 +14,20 @@ import type { Knex } from 'knex';
 import type { StringValue } from 'ms';
 import { performance } from 'perf_hooks';
 import { getAuthProvider } from '../auth.js';
+import { BOTS_ROLE } from '../bots.js';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
-import type { DirectusTokenPayload, Session, User } from '../types/index.js';
+import type {
+	AuthenticationMode,
+	DirectusTokenPayload,
+	ImpersonationResult,
+	Session,
+	User,
+} from '../types/index.js';
 import { actorFields } from '../utils/actor-fields.js';
 import { endSessions } from '../utils/end-sessions.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -382,6 +391,123 @@ export class AuthenticationService {
 			expires,
 			id: record.user_id,
 		};
+	}
+
+	/**
+	 * Act as another user. The token is the target's — their role, permissions and
+	 * `$CURRENT_USER` — and names the impersonator, so every row it writes does
+	 * too. Nothing of the login path runs: no provider, no rate limiter, no
+	 * activity, no `last_access`; the endpoint writes the trail's start, once.
+	 *
+	 * `json` is a stateless token capped by `IMPERSONATION_TTL` (it cannot be
+	 * ended from outside, so it stays short). `cookie` and `session` open a row
+	 * carrying the impersonator, ended by logout, Stop, or the cascade on the
+	 * impersonator's own session — which `session` records, since Stop re-signs
+	 * the impersonator's cookie from it.
+	 */
+	async impersonate(
+		target: string,
+		options: {
+			impersonator: string;
+			mode: AuthenticationMode;
+			ttl?: StringValue | number;
+		},
+	): Promise<ImpersonationResult> {
+		const { nanoid } = await import('nanoid');
+
+		if (target === options.impersonator) {
+			throw new ForbiddenError({ reason: 'impersonation_self' });
+		}
+
+		const users = await this.knex
+			.select('id', 'role', 'status', 'provider')
+			.from('directus_users')
+			.whereIn('id', [target, options.impersonator]);
+
+		const impersonator = users.find((user) => user.id === options.impersonator);
+		const user = users.find((user) => user.id === target);
+
+		// A suspended bot is that job's kill switch, a suspended admin no longer
+		// acts for anyone.
+		if (impersonator?.status !== 'active') {
+			throw new ForbiddenError({ reason: 'impersonation_impersonator_inactive' });
+		}
+
+		// The JWT path never checks a user's status: mint time is the one place.
+		if (user?.status !== 'active') {
+			throw new ForbiddenError({ reason: 'impersonation_target_inactive' });
+		}
+
+		if (user.role === BOTS_ROLE) {
+			throw new ForbiddenError({ reason: 'impersonation_target_bot' });
+		}
+
+		if (options.mode === 'session') {
+			// The app hydrates nothing without app access: a blank Data Studio.
+			const access = await fetchGlobalAccess(
+				{
+					roles: await fetchRolesTree(user.role, this.knex),
+					user: user.id,
+					ip: this.accountability?.ip ?? null,
+				},
+				this.knex,
+			);
+
+			if (!access.app) {
+				throw new ForbiddenError({ reason: 'impersonation_target_no_app_access' });
+			}
+
+			// Stop restores the impersonator's cookie from their own row; a caller
+			// without one has nothing to come back to.
+			if (!this.accountability?.session) {
+				throw new InvalidPayloadError({
+					reason: 'Session mode needs the impersonator to be on a session cookie',
+				});
+			}
+		}
+
+		if (options.mode === 'json') {
+			const { accessToken, expires } = await this.mint(user, {
+				provider: user.provider,
+				type: 'impersonate',
+				ttl: options.ttl ?? (env['IMPERSONATION_TTL'] as StringValue),
+				impersonator: impersonator.id,
+			});
+
+			return { accessToken, expires, id: user.id };
+		}
+
+		const session = options.mode === 'session';
+		const refreshToken = nanoid(64);
+
+		const { accessToken, expires } = await this.mint(user, {
+			provider: user.provider,
+			type: 'impersonate',
+			ttl: accessTokenTtl(session),
+			...(session && { session: refreshToken }),
+			impersonator: impersonator.id,
+		});
+
+		const rowTtl = env[
+			session
+				? 'SESSION_COOKIE_TTL'
+				: 'REFRESH_TOKEN_TTL'
+		];
+
+		await this.knex('directus_sessions').insert({
+			token: refreshToken,
+			user: user.id,
+			expires: new Date(Date.now() + getMilliseconds(rowTtl, 0)),
+			ip: this.accountability?.ip,
+			user_agent: this.accountability?.userAgent,
+			origin: this.accountability?.origin,
+			impersonator: impersonator.id,
+			impersonator_session: session
+				? this.accountability!.session
+				: null,
+		});
+
+		return { accessToken, refreshToken, expires, id: user.id };
 	}
 
 	/**
