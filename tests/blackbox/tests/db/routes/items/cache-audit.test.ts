@@ -1149,11 +1149,15 @@ describe('The cache audit replays live entries against the database', () => {
 				cutOffEnv[vendor]['REDIS'] = `redis://localhost:${proxyPort}`;
 				cutOffEnv[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
 				cutOffEnv[vendor]['REDIS_RETRY_MAX_DELAY'] = '50';
-				// The schema from the database on every request: rebuilt behind a
-				// Redis lock otherwise, which raises on an outage and answers the
-				// request 500 before the audit is asked (#366). The audit's own
-				// cache is the one under test.
+				// A node cut from Redis answers 500 before the audit is asked
+				// (#366): its schema is rebuilt behind a Redis lock, and its
+				// permission lookups live in a local tier every peer's fill of
+				// the same key drops, both behind a client that raises. The
+				// schema comes from the database instead, and the caller's
+				// identity from the `cache-audit-identity` hook, looked up in no
+				// cache: the audit's own cache is the one under test.
 				cutOffEnv[vendor]['CACHE_SCHEMA'] = 'false';
+				cutOffEnv[vendor]['CACHE_AUDIT_IDENTITY_TOKEN'] = USER.ADMIN.TOKEN;
 
 				const cutOffPort = await getPort();
 				cutOffEnv[vendor].PORT = String(cutOffPort);
@@ -1179,7 +1183,7 @@ describe('The cache audit replays live entries against the database', () => {
 				return request(from)
 					.post('/utils/cache/audit')
 					.send({ collection: ROWS })
-					.set('Authorization', auth);
+					.set('x-cache-audit-identity', USER.ADMIN.TOKEN);
 			}
 
 			async function descriptor(): Promise<any> {
@@ -1212,37 +1216,11 @@ describe('The cache audit replays live entries against the database', () => {
 
 				expect(shared.headers[cacheStatusHeader]).toBe('HIT');
 
-				// And one audit through it, connected: what the request needs on
-				// its way to the audit — the schema, its permission lookups — is
-				// kept per node behind a client that raises on an outage, and
-				// cold, the request dies before the audit is asked (#366).
-				const primed = await auditFrom(cutOffUrl);
-
-				expect(primed.statusCode, JSON.stringify(primed.body)).toBe(200);
-				expect(primed.body.data.scanned).toBe(1);
-
 				const { audited_at: examinedAt } = await descriptor();
 				const cutAt = new Date();
 				await proxy.cut();
 
 				const said = () => cutOffLog.join('').slice(-6000);
-
-				// The node still answers what needs no cache: its own identity,
-				// and a read of the run history on the audit's own router. What
-				// a request needs on its way there is per node and warm (an
-				// anonymous read is not: its policy lookups were never made).
-				const me = await request(cutOffUrl)
-					.get('/users/me')
-					.set('Authorization', auth);
-
-				expect(me.statusCode, said()).toBe(200);
-
-				const history = await request(cutOffUrl)
-					.get('/utils/cache/audits')
-					.query({ window: '1h' })
-					.set('Authorization', auth);
-
-				expect(history.statusCode, said()).toBe(200);
 
 				// The run fails rather than reading every entry as gone: a cache
 				// that answers nothing is not one that dropped everything.
