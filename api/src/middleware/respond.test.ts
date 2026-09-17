@@ -676,6 +676,13 @@ describe('respond middleware', () => {
 			},
 			expect.any(Error),
 		);
+
+		// The rows are gone once drained, so the log line is the only trace of
+		// why a slice got purged a minute later (#507).
+		expect(mocks.warn).toHaveBeenCalledWith(
+			expect.any(Error),
+			expect.stringContaining('eviction failed and was recorded for retry'),
+		);
 	});
 
 	test('records nothing when the eviction took', async () => {

@@ -266,16 +266,26 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 					// rows a purge already superseded for its whole TTL — the failure the
 					// guard exists to prevent, one step later.
 					if (await evictCacheEntry(cache, redisKey) === false) {
+						const error = new Error(
+							`in-flight purge of ${sweptDuringFill} left ${redisKey} cached`,
+						);
+
+						// Logged like a failed mutation purge is (`purgeOrRecord`): the
+						// recorded rows are gone once drained, so this line is the only
+						// trace of what the drain will purge, and why.
+						logger.warn(
+							error,
+							`[scoped-cache] eviction failed and was recorded for retry: `
+							+ `${error}`,
+						);
+
 						await recordPendingScopedCachePurge(
 							{
 								mode: 'slices',
 								collection: req.collection ?? null,
 								scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
 							},
-							new Error(
-								`in-flight purge of ${sweptDuringFill} left `
-								+ `${redisKey} cached`,
-							),
+							error,
 						);
 					}
 

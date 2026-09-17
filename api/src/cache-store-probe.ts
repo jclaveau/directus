@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Keyv } from 'keyv';
 
 /**
@@ -11,9 +12,14 @@ import type { Keyv } from 'keyv';
  *
  * The probe rides the cache's own namespace and carries a short ttl, so a process
  * that dies between the write and the delete leaves nothing behind for long.
+ *
+ * One key per call: every fill-guard eviction probes, and two probes sharing a
+ * key read each other's delete as a swallowed write — a false negative that
+ * records a pending purge for a fill that was evicted fine, and the drain then
+ * purges the whole slice (https://github.com/jclaveau/directus/issues/507).
  */
 export async function cacheStoreDropsEntries(cache: Keyv): Promise<boolean> {
-	const probeKey = '__cache_store_probe';
+	const probeKey = `__cache_store_probe:${randomUUID()}`;
 
 	try {
 		await cache.set(probeKey, 1, 30_000);

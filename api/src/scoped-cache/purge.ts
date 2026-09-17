@@ -907,6 +907,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 	}
 
 	let cleared = 0;
+	const reported = new Set<string>();
 
 	for (const target of pending) {
 		const tagKeys = target.scopedCacheTags.map(scopedCacheTagKeyFromLabel);
@@ -917,7 +918,7 @@ async function drainPendingScopedCachePurges(): Promise<number> {
 			// what makes the cache correct again, and a blocked one stays blocked for
 			// every later retry too.
 			try {
-				await reportRecoveredScopedCacheEntries(tagKeys);
+				await reportRecoveredScopedCacheEntries(tagKeys, reported);
 			}
 			catch (error: any) {
 				useLogger().warn(
@@ -1042,8 +1043,15 @@ export function startScopedCachePurgeRecovery(): void {
  *
  * Best-effort: an entry with no descriptor (stats were off when it was filled)
  * is purged all the same, it just cannot be named on the admin page.
+ *
+ * `reported` spans the drain: an entry is a member of every tag it was filled
+ * under, and a drain that retries several of them names it once, not once per
+ * target.
  */
-async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<void> {
+async function reportRecoveredScopedCacheEntries(
+	tagKeys: string[],
+	reported: Set<string>,
+): Promise<void> {
 	if (tagKeys.length === 0) {
 		return;
 	}
@@ -1055,10 +1063,11 @@ async function reportRecoveredScopedCacheEntries(tagKeys: string[]): Promise<voi
 	// The sidecars ride the same tag set as the entry they belong to, so they are
 	// the same stale entry counted two more times.
 	const members = [...new Set(memberLists.flat())].filter((member) => {
-		return cacheSidecarOwner(member) === null;
+		return cacheSidecarOwner(member) === null && !reported.has(member);
 	});
 
 	for (const member of members) {
+		reported.add(member);
 		const descriptor = await readCacheDescriptorForRedisKey(member);
 
 		if (descriptor === null) {

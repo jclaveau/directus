@@ -1738,6 +1738,38 @@ describe('retryPendingScopedCachePurges', () => {
 		});
 	});
 
+	// An entry is a member of every tag it was filled under, and one failed
+	// mutation records one row per tag (#507): naming it per target reported the
+	// same entry as many times as the drain had targets for it.
+	it(oneLine`
+		names an entry once per drain, not once per target it is a member of
+	`, async () => {
+		vi.mocked(listPendingScopedCachePurges).mockResolvedValue([
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:id=1'],
+				ids: [7],
+			},
+			{
+				mode: 'slices',
+				collection: 'articles',
+				scopedCacheTags: ['articles:author=3'],
+				ids: [8],
+			},
+		]);
+
+		redis.sweepMembers.mockResolvedValue(['ns:entry-a']);
+		redis.smembers.mockResolvedValue(['ns:entry-a']);
+
+		vi.mocked(readCacheDescriptorForRedisKey)
+			.mockResolvedValue({ cacheKey: 'GET /items/articles/1' } as any);
+
+		await retryPendingScopedCachePurges();
+
+		expect(queueCacheAnomaly).toHaveBeenCalledOnce();
+	});
+
 	it(oneLine`
 		purges an entry whose descriptor is gone all the same — stats were off when it
 		was filled, so it can be dropped but not named
