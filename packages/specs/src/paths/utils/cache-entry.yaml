@@ -50,6 +50,19 @@ get:
                       When it was last written, per its descriptor. Null where
                       it was never cached at all — a key known only from an
                       anomaly has a descriptor but no fill.
+                  auditedAt:
+                    type: integer
+                    nullable: true
+                    description: >
+                      When the cache audit last replayed it against the
+                      database; null until it has.
+                  verifiedAt:
+                    type: integer
+                    nullable: true
+                    description: >
+                      When it was last known to answer what the database
+                      does: the audit, or the fill where that came later — a
+                      fill reads the database. Null where it was never filled.
                   purgesSinceFilled:
                     type: array
                     nullable: true

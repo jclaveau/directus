@@ -1,0 +1,538 @@
+import config, { getUrl, paths } from '@common/config';
+import {
+	CreateCollections,
+	CreateItem,
+	DeleteCollection,
+} from '@common/functions';
+import vendors from '@common/get-dbs-to-test';
+import { USER } from '@common/variables';
+import { awaitDirectusConnection } from '@utils/await-connection';
+import { oneLine } from '@directus/utils';
+import { ChildProcess, spawn } from 'child_process';
+import getPort from 'get-port';
+import knex, { type Knex } from 'knex';
+import { cloneDeep } from 'lodash-es';
+import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+// The cache audit over the system MCP (jclaveau/directus#498): an agent runs
+// one, reads the history it landed in, and moves the schedule every node runs
+// it on. The group is its own, `cache_audit`, so a deployment can hand an agent
+// the cache reads without handing it a run that replays every live entry.
+//
+// Its own instance, because `system-mcp.test.ts` pins the exact tool list of a
+// deployment that never named this group, and every tool there is read-only.
+// Beside it, a node with CACHE_AUDIT_ENABLED off — the traffic-serving shape:
+// it offers no audit tool, answers no audit route, and runs no schedule, while
+// the schedule the other node writes still reaches it over the bus.
+
+const ROWS = 'test_cache_audit_mcp_rows';
+
+const cacheStatusHeader = 'x-cache-status';
+const SETTLE_ATTEMPTS = 30;
+const SETTLE_DELAY_MS = 500;
+
+const auditToolNames = [
+	'run_cache_audit',
+	'list_cache_audits',
+	'read_cache_audit',
+	'read_cache_audit_schedule',
+	'read_cache_audit_queue',
+	'write_cache_audit_schedule',
+];
+
+describe('Cache audit over the system MCP', () => {
+	describe.each(vendors)('%s', (vendor) => {
+		const env = cloneDeep(config.envs);
+
+		env[vendor]['REDIS'] = 'redis://localhost:6108';
+		env[vendor]['CACHE_ENABLED'] = 'true';
+		env[vendor]['CACHE_STATUS_HEADER'] = cacheStatusHeader;
+		env[vendor]['CACHE_AUTO_PURGE'] = 'true';
+		env[vendor]['CACHE_AUTO_PURGE_MODE'] = 'scoped';
+		env[vendor]['CACHE_STORE'] = 'redis';
+		env[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-mcp-${vendor}`;
+		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+		env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
+		env[vendor]['SYSTEM_MCP_ENABLED'] = 'true';
+		env[vendor]['SYSTEM_MCP_TOOLS'] = 'cache,cache_audit';
+
+		const optedOutEnv = cloneDeep(env);
+		optedOutEnv[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-off-${vendor}`;
+		optedOutEnv[vendor]['CACHE_AUDIT_ENABLED'] = 'false';
+
+		let instance: ChildProcess;
+		let optedOut: ChildProcess;
+		let db: Knex;
+		let url: string;
+		let optedOutUrl: string;
+
+		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
+
+		beforeAll(async () => {
+			await CreateCollections(vendor, {
+				collections: [
+					{
+						collection: ROWS,
+						meta: { scoped_cache_fields: ['owner'] },
+						fields: [
+							{ field: 'owner', type: 'string', meta: {} },
+							{ field: 'amount', type: 'string', meta: {} },
+						],
+					},
+				],
+			});
+
+			await CreateItem(vendor, {
+				collection: ROWS,
+				item: [
+					{ owner: 'acme', amount: '1' },
+					{ owner: 'globex', amount: '2' },
+					{ owner: 'initech', amount: '3' },
+				],
+			});
+
+			const port = await getPort();
+			env[vendor].PORT = String(port);
+
+			instance = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: env[vendor],
+			});
+
+			const optedOutPort = await getPort();
+			optedOutEnv[vendor].PORT = String(optedOutPort);
+
+			optedOut = spawn('node', [paths.cli, 'start'], {
+				cwd: paths.cwd,
+				env: optedOutEnv[vendor],
+			});
+
+			db = knex(config.knexConfig[vendor]!);
+			url = getUrl(vendor, env);
+			optedOutUrl = getUrl(vendor, optedOutEnv);
+
+			await Promise.all([
+				awaitDirectusConnection(port),
+				awaitDirectusConnection(optedOutPort),
+			]);
+		}, 60_000);
+
+		afterAll(async () => {
+			instance.kill();
+			optedOut.kill();
+			await db.destroy();
+			await DeleteCollection(vendor, { collection: ROWS });
+		});
+
+		function call(body: unknown, from = url) {
+			return request(from)
+				.post('/system-mcp')
+				.send(body as object)
+				.set('Authorization', auth);
+		}
+
+		function callTool(name: string, args: object = {}) {
+			return call({
+				jsonrpc: '2.0',
+				id: 7,
+				method: 'tools/call',
+				params: { name, arguments: args },
+			});
+		}
+
+		function readOwner(owner: string, from = url) {
+			return request(from)
+				.get(`/items/${ROWS}`)
+				.query(`filter[owner][_eq]=${owner}`)
+				.set('Authorization', auth);
+		}
+
+		async function warm(read: () => request.Test) {
+			await read();
+			const warmed = await read();
+			expect(warmed.headers[cacheStatusHeader]).toBe('HIT');
+		}
+
+		async function clearCache() {
+			await request(url).post('/utils/cache/clear')
+				.set('Authorization', auth);
+		}
+
+		// The audit takes its entries off the descriptors, which land on the
+		// one-second drain: wait for the node to describe both entries warmed
+		// before the tool reads them.
+		async function settled() {
+			for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+				const response = await request(url)
+					.post('/utils/cache/audit')
+					.set('Authorization', auth);
+
+				if (response.body.data.scanned >= 2) {
+					return;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+			}
+		}
+
+		it(oneLine`
+			lists the audit tools beside the cache reads, and marks the two that act
+		`, async () => {
+			const response = await call({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			});
+
+			expect(response.statusCode).toBe(200);
+
+			const tools = response.body.result.tools as {
+				name: string;
+				annotations: { readOnlyHint: boolean };
+			}[];
+
+			const names = tools.map((tool) => tool.name);
+
+			expect(names).toEqual(expect.arrayContaining(auditToolNames));
+			expect(names).toContain('list_cache_entries');
+
+			// The group named, not every group: the processes tool stays out.
+			expect(names).not.toContain('list_processes');
+
+			// A run replays every live entry and a schedule change reaches every
+			// node: neither is a read a client may call on its own initiative.
+			for (const tool of tools) {
+				const acts = ['run_cache_audit', 'write_cache_audit_schedule']
+					.includes(tool.name);
+
+				expect(tool.annotations.readOnlyHint, tool.name).toBe(!acts);
+			}
+		});
+
+		it(oneLine`
+			runs an audit, answers it as the history records it, and pages its
+			findings back from there
+		`, async () => {
+			await clearCache();
+			await warm(() => readOwner('acme'));
+			await warm(() => readOwner('globex'));
+			await settled();
+
+			// Two writes past the cache, which no purge covered.
+			await db(ROWS).whereIn('owner', ['acme', 'globex'])
+				.update({ amount: '5' });
+
+			const ran = await callTool('run_cache_audit', { collection: ROWS });
+
+			expect(ran.statusCode).toBe(200);
+			expect(ran.body.result.isError).toBeUndefined();
+
+			const run = ran.body.result.structuredContent;
+
+			expect(JSON.parse(ran.body.result.content[0].text)).toEqual(run);
+
+			// The run row, as the listing carries it: counts, not findings.
+			expect(run).toMatchObject({
+				id: expect.any(Number),
+				trigger: 'mcp',
+				options: { collection: ROWS, limit: null, user: null, purge: false },
+				scanned: 2,
+				counts: expect.objectContaining({ fresh: 0, stale: 2 }),
+				evicted: 0,
+				timedOut: false,
+				error: null,
+			});
+
+			expect(run.finishedAt).toBeGreaterThanOrEqual(run.startedAt);
+			expect(run).not.toHaveProperty('findings');
+
+			const listed = await callTool('list_cache_audits');
+
+			expect(listed.body.result.isError).toBeUndefined();
+
+			expect(listed.body.result.structuredContent.items
+				.find((each: any) => each.id === run.id)).toEqual(run);
+
+			const read = await callTool('read_cache_audit', { id: run.id });
+
+			expect(read.body.result.isError).toBeUndefined();
+
+			const whole = read.body.result.structuredContent;
+
+			expect(whole).toMatchObject(run);
+			expect(whole.findingsTotal).toBe(2);
+
+			expect(whole.findings.map((finding: any) => finding.url)).toEqual([
+				`/items/${ROWS}?filter[owner][_eq]=acme`,
+				`/items/${ROWS}?filter[owner][_eq]=globex`,
+			]);
+
+			expect(whole.findings[0]).toMatchObject({
+				verdict: 'stale',
+				collection: ROWS,
+				diff: ['/data/0/amount'],
+			});
+
+			// Paged the way the route pages: a cut, the page behind it, one verdict.
+			const second = await callTool('read_cache_audit', {
+				id: run.id,
+				limit: 1,
+				offset: 1,
+			});
+
+			expect(second.body.result.structuredContent.findingsTotal).toBe(2);
+
+			expect(second.body.result.structuredContent.findings
+				.map((finding: any) => finding.url)).toEqual([
+				`/items/${ROWS}?filter[owner][_eq]=globex`,
+			]);
+
+			const drifted = await callTool('read_cache_audit', {
+				id: run.id,
+				verdict: 'tag_drift',
+			});
+
+			expect(drifted.body.result.structuredContent).toMatchObject({
+				findings: [],
+				findingsTotal: 0,
+			});
+
+			// A page the route refuses is one the tool's schema refuses, before it
+			// runs: a JSON-RPC invalid-params, as every schema refusal below.
+			const badPage = await callTool('read_cache_audit', {
+				id: run.id,
+				verdict: 'fresh',
+			});
+
+			expect(badPage.body.error.code).toBe(-32602);
+			expect(badPage.body.error.message).toContain('verdict');
+
+			// The horizon: both entries were just verified, so nothing queued is
+			// known good later than now, and the queue holds at least the two.
+			const queued = await callTool('read_cache_audit_queue');
+
+			expect(queued.body.result.isError).toBeUndefined();
+
+			const horizon = queued.body.result.structuredContent;
+
+			expect(horizon.size).toBeGreaterThanOrEqual(2);
+			expect(horizon.neverAudited).toBeGreaterThanOrEqual(0);
+			expect(horizon.verifiedSince).toBeLessThanOrEqual(Date.now());
+
+			// A run that was never recorded reads as forbidden, like an item that
+			// is not there: the tool's answer, not a protocol error.
+			const missing = await callTool('read_cache_audit', { id: 999_999_999 });
+
+			expect(missing.body.result.isError).toBe(true);
+			expect(missing.body.error).toBeUndefined();
+
+			// An argument the tool would not take never became a run at all.
+			const noRun = await callTool('run_cache_audit', { limit: 0 });
+
+			expect(noRun.body.error.code).toBe(-32602);
+			expect(noRun.body.error.message).toContain('limit');
+			expect(noRun.body.result).toBeUndefined();
+
+			// An argument the tool does not take is dropped, not refused: the
+			// run's budget is not the caller's to set, so a budget of nothing in
+			// the call stops no run.
+			const budgeted = await callTool('run_cache_audit', {
+				collection: ROWS,
+				maxDurationMs: 0,
+			});
+
+			expect(budgeted.body.error).toBeUndefined();
+			expect(budgeted.body.result.isError).toBeUndefined();
+
+			expect(budgeted.body.result.structuredContent).toMatchObject({
+				options: { collection: ROWS, limit: null, user: null, purge: false },
+				timedOut: false,
+			});
+
+			const noId = await callTool('read_cache_audit', {});
+
+			expect(noId.body.error.code).toBe(-32602);
+
+			const noWindow = await callTool('list_cache_audits', {
+				window: 'yesterday',
+			});
+
+			expect(noWindow.body.error.code).toBe(-32602);
+			expect(noWindow.body.error.message).toContain('yesterday');
+		}, 60_000);
+
+		it(oneLine`
+			moves the schedule every node runs on, and hands it back to the
+			environment when cleared
+		`, async () => {
+			const unscheduled = await callTool('read_cache_audit_schedule');
+
+			expect(unscheduled.body.result.isError).toBeUndefined();
+
+			expect(unscheduled.body.result.structuredContent).toEqual({
+				rule: null,
+				source: null,
+				envRule: null,
+				nextRunAt: null,
+			});
+
+			// A rule that is not a cron is refused before anything is stored, and
+			// so is a call that names no rule at all.
+			const notACron = await callTool('write_cache_audit_schedule', {
+				rule: 'hourly',
+			});
+
+			expect(notACron.body.error.code).toBe(-32602);
+			expect(notACron.body.error.message).toContain('hourly');
+
+			const noRule = await callTool('write_cache_audit_schedule', {});
+
+			expect(noRule.body.error.code).toBe(-32602);
+
+			const before = Date.now();
+
+			const written = await callTool('write_cache_audit_schedule', {
+				rule: '0 3 * * *',
+			});
+
+			expect(written.body.result.isError).toBeUndefined();
+
+			expect(written.body.result.structuredContent).toMatchObject({
+				rule: '0 3 * * *',
+				source: 'settings',
+				envRule: null,
+			});
+
+			expect(written.body.result.structuredContent.nextRunAt)
+				.toBeGreaterThan(before);
+
+			// Stored where the settings page reads it, so it survives a restart
+			// and every node reads the same rule.
+			const stored = await request(url)
+				.get('/settings')
+				.query('fields=cache_audit_schedule')
+				.set('Authorization', auth);
+
+			expect(stored.body.data.cache_audit_schedule).toBe('0 3 * * *');
+
+			expect((await callTool('read_cache_audit_schedule'))
+				.body.result.structuredContent)
+				.toEqual(written.body.result.structuredContent);
+
+			const cleared = await callTool('write_cache_audit_schedule', {
+				rule: null,
+			});
+
+			expect(cleared.body.result.isError).toBeUndefined();
+
+			expect(cleared.body.result.structuredContent).toEqual({
+				rule: null,
+				source: null,
+				envRule: null,
+				nextRunAt: null,
+			});
+		});
+
+		it(oneLine`
+			a node with CACHE_AUDIT_ENABLED off offers no audit tool, answers no
+			audit route, and leaves the shared schedule to the other node
+		`, async () => {
+			const listed = await call({
+				jsonrpc: '2.0',
+				id: 1,
+				method: 'tools/list',
+			}, optedOutUrl);
+
+			const names = listed.body.result.tools.map((tool: any) => tool.name);
+
+			expect(names).toContain('list_cache_entries');
+			expect(names).not.toEqual(expect.arrayContaining(auditToolNames));
+
+			for (const [method, path] of [
+				['post', '/utils/cache/audit'],
+				['get', '/utils/cache/audits'],
+				['get', '/utils/cache/audits/1'],
+				['get', '/utils/cache/audit/schedule'],
+				['patch', '/utils/cache/audit/schedule'],
+				['get', '/utils/cache/audit/queue'],
+			] as const) {
+				const response = await request(optedOutUrl)[method](path)
+					.send({ rule: '0 3 * * *' })
+					.set('Authorization', auth);
+
+				expect(response.statusCode, `${method} ${path}`).toBe(404);
+				expect(response.body.errors[0].extensions.code).toBe('ROUTE_NOT_FOUND');
+			}
+
+			// A stale entry only that node holds, described so that a run over it
+			// would name the read — then the schedule every node hears, and no
+			// finding on that read while the other node audits every second.
+			await warm(() => readOwner('initech', optedOutUrl));
+
+			let described: unknown;
+
+			for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !described; attempt++) {
+				described = await db('directus_cache_stats_descriptors')
+					.where({ path: `/items/${ROWS}`, query: 'filter[owner][_eq]=initech' })
+					.first();
+
+				if (!described) {
+					await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+				}
+			}
+
+			expect(described).toBeDefined();
+
+			await db(ROWS).where({ owner: 'initech' })
+				.update({ amount: '9' });
+
+			const before = Date.now();
+
+			const written = await callTool('write_cache_audit_schedule', {
+				rule: '* * * * * *',
+			});
+
+			expect(written.body.result.isError).toBeUndefined();
+
+			try {
+				let cronRun: unknown;
+
+				for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !cronRun; attempt++) {
+					cronRun = await db('directus_cache_audits')
+						.where({ trigger: 'cron' })
+						.where('started_at', '>', new Date(before))
+						.whereNotNull('finished_at')
+						.first();
+
+					if (!cronRun) {
+						await new Promise((resolve) => setTimeout(resolve, SETTLE_DELAY_MS));
+					}
+				}
+
+				expect(cronRun).toBeDefined();
+
+				await new Promise((resolve) => setTimeout(resolve, 3_000));
+
+				const onThatNode = await db('directus_cache_audit_findings as f')
+					.join('directus_cache_audits as a', 'a.id', 'f.audit')
+					.where({
+						'a.trigger': 'cron',
+						'f.url': `/items/${ROWS}?filter[owner][_eq]=initech`,
+					})
+					.where('a.started_at', '>', new Date(before))
+					.first();
+
+				expect(onThatNode).toBeUndefined();
+
+				// Still stale, still served: nothing audited it.
+				const held = await readOwner('initech', optedOutUrl);
+				expect(held.headers[cacheStatusHeader]).toBe('HIT');
+				expect(held.body.data[0].amount).toBe('3');
+			}
+			finally {
+				await callTool('write_cache_audit_schedule', { rule: null });
+			}
+		}, 90_000);
+	});
+});

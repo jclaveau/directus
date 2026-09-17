@@ -20,6 +20,7 @@ import type {
 	User,
 } from '@directus/types';
 import SettingsNavigation from '../../components/navigation.vue';
+import CacheAuditPanel from './cache-audit-panel.vue';
 import AutoRefresh from '@/views/private/components/refresh-sidebar-detail.vue';
 import SearchInput from '@/views/private/components/search-input.vue';
 import {
@@ -244,6 +245,7 @@ const detailFields = computed(() => {
 		{ label: t('recommended_ttl', 'Recommended TTL'), value: recTtlLabel(entry) },
 		{ label: t('age', 'Age'), value: ageOf(entry.createdAt) },
 		{ label: t('last_hit', 'Last hit'), value: lastHitOf(entry.lastHitAt) },
+		{ label: t('verified', 'Verified'), value: verifiedOf(entry) },
 		{ label: t('expires_in', 'Expires in'), value: expiryOf(entry.expiresAt) },
 		{ label: t('key', 'Key'), value: entry.redisKey },
 	];
@@ -542,8 +544,14 @@ async function load() {
 function anomalyLabel(reason: CacheAnomalyReason): string {
 	const labels: Record<CacheAnomalyReason, string> = {
 		missing_scope: t('cache_anomaly_missing_scope', 'Not cached · missing scope'),
+		unautopurgeable_scope: t(
+			'cache_anomaly_unautopurgeable_scope',
+			'Not cached · unpurgeable scope',
+		),
 		value_too_large: t('cache_anomaly_value_too_large', 'Not cached · too large'),
 		redis_error: t('cache_anomaly_redis_error', 'Redis error'),
+		stale_entry: t('cache_anomaly_stale_entry', 'Stale · audit replay differs'),
+		tag_drift: t('cache_anomaly_tag_drift', 'Tag drift · audit replay pinned else'),
 	};
 
 	return labels[reason] ?? reason;
@@ -1667,6 +1675,16 @@ function expiryOf(expiresAt: number | null): string {
 	return formatExpiry(now.value, expiresAt, t('expired', 'expired'));
 }
 
+// How long since the entry was last known to answer what the database does,
+// and which read proved it: the audit's replay, or the fill itself.
+function verifiedOf(entry: CacheEntry): string {
+	const by = entry.auditedAt !== null && entry.auditedAt >= entry.createdAt
+		? t('cache_verified_by_audit', 'audit')
+		: t('cache_verified_by_fill', 'fill');
+
+	return `${formatAge(now.value, entry.verifiedAt)} (${by})`;
+}
+
 function userOf(user: CacheEntry['user']): string {
 	return formatUser(user, t('public_label', 'public'));
 }
@@ -2120,6 +2138,8 @@ onUnmounted(() => {
 				>{{ anomalyLabel(item.reason) }} ×{{ item.count }}</span>
 			</div>
 
+			<cache-audit-panel @audited="load" />
+
 			<v-info
 				v-if="!loading && groups.length === 0"
 				:title="emptyState.title"
@@ -2346,6 +2366,14 @@ onUnmounted(() => {
 												</th>
 												<th
 													class="num sortable"
+													:class="{ sorted: sortActive(q, 'verifiedAt') }"
+													@click="toggleEntrySort(q, 'verifiedAt')"
+												>
+													{{ t('verified', 'Verified') }}
+													<span class="arrow">{{ sortArrow(q, 'verifiedAt') }}</span>
+												</th>
+												<th
+													class="num sortable"
 													:class="{ sorted: sortActive(q, 'expiresAt') }"
 													@click="toggleEntrySort(q, 'expiresAt')"
 												>
@@ -2387,6 +2415,7 @@ onUnmounted(() => {
 												<td class="num">
 													{{ lastHitOf(entry.lastHitAt) }}
 												</td>
+												<td class="num">{{ verifiedOf(entry) }}</td>
 												<td class="num">
 													{{ expiryOf(entry.expiresAt) }}
 												</td>

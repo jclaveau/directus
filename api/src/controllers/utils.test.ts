@@ -1,6 +1,14 @@
+import { oneLine } from '@directus/utils';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+const cacheAuditEnabled = vi.fn(() => true);
 const getCacheGroupLatencies = vi.fn();
+const auditCache = vi.fn();
+const getCacheAudits = vi.fn();
+const getCacheAudit = vi.fn();
+const getCacheAuditSchedule = vi.fn();
+const getCacheAuditQueue = vi.fn();
+const updateCacheAuditSchedule = vi.fn();
 const readAutoscaleConfig = vi.fn();
 const updateAutoscaleConfig = vi.fn();
 const updateSupervisorConfig = vi.fn();
@@ -15,6 +23,12 @@ vi.mock('../services/utils.js', () => {
 		UtilsService: vi.fn(() => {
 			return {
 				getCacheGroupLatencies,
+				auditCache,
+				getCacheAudits,
+				getCacheAudit,
+				getCacheAuditSchedule,
+				getCacheAuditQueue,
+				updateCacheAuditSchedule,
 				readAutoscaleConfig,
 				updateAutoscaleConfig,
 				updateSupervisorConfig,
@@ -45,6 +59,7 @@ vi.mock('../services/import-export.js', () => {
 	return { ExportService: vi.fn(), ImportService: vi.fn() };
 });
 
+vi.mock('../utils/cache-audit-enabled.js', () => ({ cacheAuditEnabled }));
 vi.mock('../services/revisions.js', () => ({ RevisionsService: vi.fn() }));
 vi.mock('../middleware/respond.js', () => ({ respond: vi.fn() }));
 vi.mock('../middleware/collection-exists.js', () => ({ default: vi.fn() }));
@@ -99,6 +114,226 @@ describe('utils controller /cache/latencies', () => {
 		await handlerFor('/cache/latencies')(req, { locals: {} } as any, next);
 
 		expect(getCacheGroupLatencies).toHaveBeenCalledWith(undefined);
+	});
+});
+
+describe('utils controller /cache/audit', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	function request(query: Record<string, unknown>, body: unknown = undefined) {
+		return { accountability: null, schema: {}, query, body } as any;
+	}
+
+	test(oneLine`
+		is absent — a 404, not a 403 — on a node with CACHE_AUDIT_ENABLED off,
+		history and schedule included
+	`, async () => {
+		// The one `router.use` layer in front of the audit routes.
+		const gate = router.stack.find((entry: any) => {
+			return entry.route === undefined && entry.regexp.test('/cache/audits/7');
+		})!.handle as any;
+
+		for (const originalUrl of [
+			'/utils/cache/audit',
+			'/utils/cache/audits',
+			'/utils/cache/audits/7',
+			'/utils/cache/audit/schedule',
+			'/utils/cache/audit/queue',
+		]) {
+			cacheAuditEnabled.mockReturnValueOnce(false);
+			const refused = vi.fn();
+			await gate({ originalUrl }, {}, refused);
+
+			expect(refused.mock.calls[0]![0]).toMatchObject({
+				status: 404,
+				message: `Route ${originalUrl} doesn't exist.`,
+			});
+		}
+
+		const passed = vi.fn();
+		await gate({ originalUrl: '/utils/cache/audit' }, {}, passed);
+		expect(passed).toHaveBeenCalledWith();
+	});
+
+	test('runs the audit with defaults and answers the run recorded', async () => {
+		const run = { id: 3, scanned: 0 };
+		auditCache.mockResolvedValueOnce(run);
+		const res = { json: vi.fn() } as any;
+
+		await handlerFor('/cache/audit', 'post')(request({}), res, vi.fn());
+
+		expect(auditCache).toHaveBeenCalledWith({ ignore: [], purge: false });
+		expect(res.json).toHaveBeenCalledWith({ data: run });
+	});
+
+	test(oneLine`
+		reads its options off the query and the body, the body winning
+	`, async () => {
+		auditCache.mockResolvedValueOnce({});
+
+		const req = request(
+			{ limit: '10', purge: 'false', ignore: '/meta/served_at' },
+			{ purge: true, user: 'user-1', collection: 'articles' },
+		);
+
+		await handlerFor('/cache/audit', 'post')(req, { json: vi.fn() } as any, vi.fn());
+
+		expect(auditCache).toHaveBeenCalledWith({
+			limit: 10,
+			purge: true,
+			user: 'user-1',
+			collection: 'articles',
+			ignore: ['/meta/served_at'],
+		});
+	});
+
+	// The run takes options a caller may not set: its time budget, where a
+	// replay goes. Stripped rather than refused, so a client that sends a field
+	// from a newer spec is not turned away.
+	test('drops the options a caller may not set', async () => {
+		auditCache.mockResolvedValueOnce({});
+
+		const req = request(
+			{},
+			{ limit: 10, maxDurationMs: 0, replay: 'http://evil', unknown: 1 },
+		);
+
+		await handlerFor('/cache/audit', 'post')(req, { json: vi.fn() } as any, vi.fn());
+
+		expect(auditCache).toHaveBeenCalledWith({
+			limit: 10,
+			ignore: [],
+			purge: false,
+		});
+	});
+
+	test.each([
+		[
+			'a limit below one',
+			{ limit: 0 },
+			'"limit" must be greater than or equal to 1',
+		],
+		['a fractional limit', { limit: 1.5 }, '"limit" must be an integer'],
+		[
+			'an ignore pattern that is no JSON pointer',
+			{ ignore: ['data/*'] },
+			'"ignore[0]" with value "data/*" fails to match the required pattern',
+		],
+		['a purge that is not a boolean', { purge: 'yes' }, '"purge" must be a boolean'],
+	])('refuses %s', async (_case, body, reason) => {
+		const res = { json: vi.fn() } as any;
+		const next = vi.fn();
+
+		await handlerFor('/cache/audit', 'post')(request({}, body), res, next);
+
+		expect(next).toHaveBeenCalledWith(expect.objectContaining({
+			code: 'INVALID_QUERY',
+			message: expect.stringContaining(reason),
+		}));
+
+		expect(res.json).not.toHaveBeenCalled();
+		expect(auditCache).not.toHaveBeenCalled();
+	});
+});
+
+describe('utils controller /cache/audits', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	test('lists the runs live, the window handed down unread', async () => {
+		const runs = [{ id: 3, trigger: 'cron' }];
+		getCacheAudits.mockResolvedValueOnce(runs);
+		const res = { locals: {} } as any;
+		const next = vi.fn();
+
+		await handlerFor('/cache/audits')(
+			{ accountability: null, schema: {}, query: { window: '3d' } } as any,
+			res,
+			next,
+		);
+
+		expect(getCacheAudits).toHaveBeenCalledWith('3d');
+		expect(res.locals['cache']).toBe(false);
+		expect(res.locals['payload']).toEqual({ data: runs });
+		expect(next).toHaveBeenCalledOnce();
+	});
+
+	test('reads one run by the path id, its findings page off the query', async () => {
+		const run = { id: 3, findings: [], findingsTotal: 0 };
+		getCacheAudit.mockResolvedValueOnce(run);
+		const res = { locals: {} } as any;
+		const query = { limit: '10', offset: '20', verdict: 'stale' };
+
+		await handlerFor('/cache/audits/:id')(
+			{ accountability: null, schema: {}, query, params: { id: '3' } } as any,
+			res,
+			vi.fn(),
+		);
+
+		expect(getCacheAudit).toHaveBeenCalledWith('3', query);
+		expect(res.locals['cache']).toBe(false);
+		expect(res.locals['payload']).toEqual({ data: run });
+	});
+
+	test('answers the schedule in force, never from the cache', async () => {
+		const state = { rule: '0 3 * * *', source: 'env' };
+		getCacheAuditSchedule.mockResolvedValueOnce(state);
+		const res = { locals: {} } as any;
+
+		await handlerFor('/cache/audit/schedule')(
+			{ accountability: null, schema: {}, query: {} } as any,
+			res,
+			vi.fn(),
+		);
+
+		expect(res.locals['cache']).toBe(false);
+		expect(res.locals['payload']).toEqual({ data: state });
+	});
+
+	test('answers how far round the cache the audit is, uncached', async () => {
+		const state = { size: 40, neverAudited: 3, verifiedSince: 1_700_000_000_000 };
+		getCacheAuditQueue.mockResolvedValueOnce(state);
+		const res = { locals: {} } as any;
+
+		await handlerFor('/cache/audit/queue')(
+			{ accountability: null, schema: {}, query: {} } as any,
+			res,
+			vi.fn(),
+		);
+
+		expect(res.locals['cache']).toBe(false);
+		expect(res.locals['payload']).toEqual({ data: state });
+	});
+
+	test('writes the rule off the body, null clearing it', async () => {
+		const state = { rule: null, source: null };
+		updateCacheAuditSchedule.mockResolvedValueOnce(state);
+		const res = { json: vi.fn() } as any;
+
+		await handlerFor('/cache/audit/schedule', 'patch')(
+			{ accountability: null, schema: {}, body: { rule: null } } as any,
+			res,
+			vi.fn(),
+		);
+
+		expect(updateCacheAuditSchedule).toHaveBeenCalledWith(null);
+		expect(res.json).toHaveBeenCalledWith({ data: state });
+	});
+
+	test('refuses a schedule write that names no rule', async () => {
+		const next = vi.fn();
+
+		await handlerFor('/cache/audit/schedule', 'patch')(
+			{ accountability: null, schema: {}, body: {} } as any,
+			{ json: vi.fn() } as any,
+			next,
+		);
+
+		expect(next).toHaveBeenCalledWith(expect.objectContaining({
+			code: 'INVALID_PAYLOAD',
+			message: expect.stringContaining('A `rule` is required'),
+		}));
+
+		expect(updateCacheAuditSchedule).not.toHaveBeenCalled();
 	});
 });
 

@@ -14,6 +14,7 @@ import { resolvedCacheTtl } from './cache-config.js';
 import getDatabase from './database/index.js';
 import { useLogger } from './logger/index.js';
 import { redisConfigAvailable, useRedis } from './redis/index.js';
+import { CACHE_ENTRY_VERIFIED_AT } from './utils/cache-entry-verified-at.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
 import { printableScopedCacheTags } from './utils/printable-scoped-cache-tags.js';
 
@@ -116,11 +117,17 @@ export interface CacheDescriptor {
 //     value slice on a non-scoped field) without `manuallyPurged` — left uncached.
 //   - value_too_large: payload over CACHE_VALUE_MAX_SIZE.
 //   - redis_error: a Redis write failed.
+//   - stale_entry: the cache audit replayed the entry and the database answered
+//     something else (cache-audit.ts).
+//   - tag_drift: the audit's replay pinned other tags than the entry was filled
+//     under — same body today, one write to the uncovered tag from stale.
 export type CacheAnomalyReason =
 	| 'missing_scope'
 	| 'unautopurgeable_scope'
 	| 'value_too_large'
-	| 'redis_error';
+	| 'redis_error'
+	| 'stale_entry'
+	| 'tag_drift';
 
 export interface CacheAnomaly {
 	cacheKey: string;
@@ -169,6 +176,13 @@ export interface CacheEntryRecord {
 	createdAt: number;
 	expiresAt: number | null;
 	lastHitAt: number | null;
+	/** When the audit last replayed it; null until it has. */
+	auditedAt: number | null;
+	/**
+	 * When it was last known to answer what the database does: the audit, or
+	 * the fill where that came later. The audit queue orders on this.
+	 */
+	verifiedAt: number;
 }
 
 // What a latency percentile is measured over, in the funnel order the cache page
@@ -710,6 +724,9 @@ interface CacheDescriptorRow {
 	bytes: number;
 	fill_ms: number;
 	last_filled: Date | null; // null = anomaly locator, never filled
+	// Written null on every fill: a refill puts the entry back where the audit
+	// found it gone (see `retireCacheAuditQueue`).
+	gone_at: null;
 }
 
 interface CacheAnomalyRow {
@@ -1008,6 +1025,7 @@ async function persistStreamBatch(
 				last_filled: f['ts']
 					? at
 					: null,
+				gone_at: null,
 			};
 
 			// Last write in the batch wins — a re-conflicting insert would throw.
@@ -1295,7 +1313,7 @@ export async function listPurgesCoveringEntry(
  */
 export async function readCacheDescriptorForRedisKey(
 	redisKey: string,
-): Promise<{ cacheKey: string; lastFilled: Date } | null> {
+): Promise<{ cacheKey: string; lastFilled: Date; auditedAt: Date | null } | null> {
 	if (!cacheStatsConfigured() || redisKey === '') {
 		return null;
 	}
@@ -1304,11 +1322,11 @@ export async function readCacheDescriptorForRedisKey(
 
 	const byIdentity = await db('directus_cache_stats_descriptors')
 		.where('cache_key', redisKey)
-		.first('cache_key', 'last_filled');
+		.first('cache_key', 'last_filled', 'audited_at');
 
 	const found = byIdentity ?? await db('directus_cache_stats_descriptors')
 		.where('redis_key', redisKey)
-		.first('cache_key', 'last_filled');
+		.first('cache_key', 'last_filled', 'audited_at');
 
 	// `new Date(null)` is the epoch, so a locator would otherwise report having
 	// been filled on 1970-01-01 and take every purge recorded since with it.
@@ -1319,7 +1337,234 @@ export async function readCacheDescriptorForRedisKey(
 	return {
 		cacheKey: found['cache_key'] as string,
 		lastFilled: new Date(found['last_filled'] as string),
+		auditedAt: found['audited_at'] === null
+			? null
+			: new Date(found['audited_at'] as string),
 	};
+}
+
+/** What the audit needs to replay one entry: its request, as sent, and its tags. */
+export interface CacheAuditDescriptor extends CacheAuditQueueRow {
+	/** The tags it was filled under, in the printable form the purge side joins on. */
+	scopedCacheTags: string[];
+}
+
+/** A descriptor as the queue hands it out: the tags come once it is known live. */
+export interface CacheAuditQueueRow {
+	cacheKey: string;
+	redisKey: string;
+	method: string;
+	path: string;
+	collection: string | null;
+	userId: string | null;
+	query: string;
+	lastFilled: Date;
+}
+
+/** The narrowing a queue read is asked for; both name a descriptor column. */
+export interface CacheAuditQueueFilter {
+	user?: string | undefined;
+	collection?: string | undefined;
+}
+
+/**
+ * The next descriptors due an audit, least recently verified first: never
+ * audited and filled longest ago ahead, a refill counting as verified as of
+ * its fill. The descriptor table is the audit's index rather than Redis: an
+ * entry is only replayable from its descriptor, and a dimension row sorts
+ * and pages where a `SCAN` neither orders nor promises to yield a key once.
+ *
+ * `before` — when the run began — bounds the queue to what it has not
+ * stamped: a row it advanced past sorts to the end, and reading the queue
+ * again without the bound would wrap around into it. A row a concurrent run
+ * stamped meanwhile falls out the same way, so two runs share the queue
+ * rather than replay it twice; so does one refilled since the run began.
+ *
+ * Read by `redis_key`, which is what the cache is asked for: it differs from
+ * `cache_key` once `CACHE_KEY_HASH_ENABLED` is off, and is `''` on a row
+ * written before the column existed — nothing to fetch by, so left out.
+ *
+ * Without tags: a page can describe entries the cache has dropped since,
+ * and the tags are for the replay of the ones it still holds — the audit
+ * asks `readScopedCacheEntryTags` for those once the cache has said which.
+ * A descriptor the audit already found gone is out of the queue until its
+ * next fill (`retireCacheAuditQueue`): on a cache whose entries live hours
+ * and whose stats live weeks, most descriptors are that, and each would
+ * otherwise cost every round an `EXISTS` and a stamp.
+ */
+export async function readCacheAuditQueue(
+	count: number,
+	before: Date,
+	filter: CacheAuditQueueFilter = {},
+): Promise<CacheAuditQueueRow[]> {
+	if (!cacheStatsConfigured() || count <= 0) {
+		return [];
+	}
+
+	const db = getDatabase();
+
+	const query = db('directus_cache_stats_descriptors')
+		.whereNotNull('last_filled')
+		.whereNot('redis_key', '')
+		.whereNull('gone_at')
+		.whereRaw(`${CACHE_ENTRY_VERIFIED_AT} < ?`, [before])
+		.orderByRaw(CACHE_ENTRY_VERIFIED_AT)
+		// One run stamps a page at one instant: the older fill goes first among them.
+		.orderBy('last_filled', 'asc')
+		.limit(count)
+		.select(
+			'cache_key',
+			'redis_key',
+			'method',
+			'path',
+			'collection',
+			'user_id',
+			'query',
+			'last_filled',
+		);
+
+	if (filter.user !== undefined) {
+		query.where('user_id', filter.user);
+	}
+
+	if (filter.collection !== undefined) {
+		query.where('collection', filter.collection);
+	}
+
+	const rows: Record<string, unknown>[] = await query;
+
+	return rows.map((row) => {
+		return {
+			cacheKey: row['cache_key'] as string,
+			redisKey: row['redis_key'] as string,
+			method: row['method'] as string,
+			path: row['path'] as string,
+			collection: (row['collection'] as string | null) ?? null,
+			userId: (row['user_id'] as string | null) ?? null,
+			query: row['query'] as string,
+			lastFilled: new Date(row['last_filled'] as string),
+		};
+	});
+}
+
+/**
+ * The tags these entries were filled under, by cache key; a key with none
+ * recorded is absent. One query for a batch, sized by the caller.
+ */
+export async function readScopedCacheEntryTags(
+	cacheKeys: string[],
+): Promise<Map<string, string[]>> {
+	const tagsByCacheKey = new Map<string, string[]>();
+
+	if (!cacheStatsConfigured() || cacheKeys.length === 0) {
+		return tagsByCacheKey;
+	}
+
+	const tagRows: Record<string, unknown>[] = await getDatabase()(
+		'directus_cache_stats_scoped_entry_tags',
+	)
+		.whereIn('cache_key', cacheKeys)
+		.select('cache_key', 'scoped_cache_tag');
+
+	for (const tagRow of tagRows) {
+		const cacheKey = tagRow['cache_key'] as string;
+		const tags = tagsByCacheKey.get(cacheKey) ?? [];
+		tags.push(tagRow['scoped_cache_tag'] as string);
+		tagsByCacheKey.set(cacheKey, tags);
+	}
+
+	return tagsByCacheKey;
+}
+
+/** How far the audit has got round the cache, as the panel reports it. */
+export interface CacheAuditQueueState {
+	/** Described entries the audit will get to: filled, with a key to fetch by. */
+	size: number;
+	/** Of those, the ones no run has replayed yet. */
+	neverAudited: number;
+	/**
+	 * The oldest moment any of them was last known to answer what the database
+	 * does: every entry has been verified since. Null with nothing queued.
+	 */
+	verifiedSince: number | null;
+}
+
+/**
+ * The guarantee the audit gives right now: everything it will get to, how much
+ * of it no run has seen, and how far back the least recently verified entry
+ * is — the same rows and the same expression the queue orders on, so the
+ * horizon is exactly what the next run takes first. A descriptor whose entry
+ * went since the audit last saw it is counted along: only the cache tells,
+ * and the next run retires it.
+ */
+export async function readCacheAuditQueueState(): Promise<CacheAuditQueueState> {
+	if (!cacheStatsConfigured()) {
+		return { size: 0, neverAudited: 0, verifiedSince: null };
+	}
+
+	const db = getDatabase();
+
+	const row: Record<string, unknown> | undefined = await db(
+		'directus_cache_stats_descriptors',
+	)
+		.whereNotNull('last_filled')
+		.whereNot('redis_key', '')
+		.whereNull('gone_at')
+		.first(
+			db.raw('COUNT(*) AS size'),
+			db.raw('SUM(CASE WHEN audited_at IS NULL THEN 1 ELSE 0 END) AS never_audited'),
+			db.raw(`MIN(${CACHE_ENTRY_VERIFIED_AT}) AS verified_since`),
+		);
+
+	return {
+		size: Number(row?.['size'] ?? 0),
+		neverAudited: Number(row?.['never_audited'] ?? 0),
+		verifiedSince: row?.['verified_since'] == null
+			? null
+			: new Date(row['verified_since'] as string).getTime(),
+	};
+}
+
+/**
+ * Move the queue past these descriptors: stamped `audited_at`, they sort
+ * behind everything verified earlier.
+ * Stamped before the replay, not after, so a run examines what it claimed
+ * and a concurrent one takes the rest — and a run that dies mid-page costs
+ * those entries one turn, not the queue a second replay of them.
+ */
+export async function advanceCacheAuditQueue(
+	cacheKeys: string[],
+	at: Date,
+): Promise<void> {
+	if (cacheKeys.length === 0) {
+		return;
+	}
+
+	await getDatabase()('directus_cache_stats_descriptors')
+		.whereIn('cache_key', cacheKeys)
+		.update({ audited_at: at });
+}
+
+/**
+ * Take the descriptors whose entry the cache no longer holds out of the
+ * queue, as of when the cache was asked: they describe nothing to replay
+ * until the next fill, and the fill's own write clears the stamp.
+ * A fill drained between the ask and this stamp is left alone — its
+ * `last_filled` is past the ask — so an entry back in the cache is never
+ * retired on the strength of a look that predates it.
+ */
+export async function retireCacheAuditQueue(
+	cacheKeys: string[],
+	askedAt: Date,
+): Promise<void> {
+	if (cacheKeys.length === 0) {
+		return;
+	}
+
+	await getDatabase()('directus_cache_stats_descriptors')
+		.whereIn('cache_key', cacheKeys)
+		.where('last_filled', '<=', askedAt)
+		.update({ gone_at: askedAt });
 }
 
 /**
@@ -1429,6 +1674,7 @@ export async function listCacheEntries(
 				'd.bytes',
 				'd.fill_ms',
 				'd.last_filled',
+				'd.audited_at',
 			);
 
 	const descriptorsByKey = new Map<string, Record<string, unknown>>(
@@ -1482,6 +1728,10 @@ export async function listCacheEntries(
 		const lastHit = row['last_hit_at'] as string | null;
 		const userId = (row['user_id'] as string | null) || null;
 
+		const auditedAt = row['audited_at'] == null
+			? null
+			: new Date(row['audited_at'] as string).getTime();
+
 		return {
 			key: row['cache_key'] as string,
 			purges: purgesByKey.get(row['cache_key'] as string) ?? 0,
@@ -1519,6 +1769,8 @@ export async function listCacheEntries(
 			lastHitAt: lastHit
 				? new Date(lastHit).getTime()
 				: null,
+			auditedAt,
+			verifiedAt: Math.max(createdAt, auditedAt ?? 0),
 		};
 	});
 }
