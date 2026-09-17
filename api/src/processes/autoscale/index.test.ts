@@ -9,7 +9,7 @@ import {
 	vi,
 } from 'vitest';
 import { reportUnhandledRejection } from '../../utils/report-unhandled-rejection.js';
-import type { AutoscaleConfig } from './types.js';
+import type { AutoscaleConfig, PoolSample } from './types.js';
 
 const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
@@ -47,7 +47,10 @@ const scaleApp = vi.fn<
 	(app: string, workers: number, timeoutMs?: number) => Promise<void>
 >(async () => undefined);
 
-const releaseWorker = vi.fn<(pmId: number) => Promise<void>>(async () => undefined);
+const releaseWorker = vi.fn<
+	(pmId: number, timeoutMs: number) => Promise<void>
+>(async () => undefined);
+
 const watchWorkerMessages = vi.fn();
 
 vi.mock('../supervisor/index.js', () => {
@@ -94,7 +97,9 @@ vi.mock('./lib/resolve-config.js', () => {
 	};
 });
 
-const decide = vi.fn((): { workers: number | null; reason: string } => {
+const decide = vi.fn((
+	_sample: PoolSample,
+): { workers: number | null; reason: string } => {
 	return { workers: null, reason: 'steady' };
 });
 
@@ -294,8 +299,67 @@ describe('runAutoscaler', () => {
 
 		await ticks(2);
 
-		expect(releaseWorker).toHaveBeenCalledWith(1);
+		expect(releaseWorker).toHaveBeenCalledWith(1, expect.any(Number));
 		expect(scaleApp).not.toHaveBeenCalled();
+	});
+
+	// pm2 answers a release once the worker has drained, up to the
+	// declaration's `kill_timeout`, and the planner's is past the default a
+	// supervisor call carries. Bounded there, a worker holding a request past
+	// fifteen seconds is a supervisor that went away: the answer is dropped,
+	// the connection rebuilt under a daemon that was busy doing what it was
+	// asked, and the tick fails on a release that went through.
+	test('bounds a release at the drain the declaration allows', async () => {
+		readPool.mockResolvedValue({
+			pendingWorkers: 0,
+			warmingWorkers: 0,
+			onlineWorkers: [
+				{ pid: 11, pmId: 0, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 12, pmId: 1, cpuPercent: 5, memoryBytes: 0, mature: true },
+			],
+			restartsByWorker: new Map([[0, 0], [1, 0]]),
+			supervisor: { ...supervisor, killTimeout: 20_000 },
+		});
+
+		decide.mockReturnValue({ workers: 1, reason: 'the load went' });
+
+		await ticks(2);
+
+		expect(releaseWorker).toHaveBeenCalledWith(1, 35_000);
+	});
+
+	// The supervisor carries out a release whether or not it answered in time,
+	// so the clock the next release is held on moves either way: a tick that
+	// left it where it was reads the smaller pool a second later with its
+	// cooldown already satisfied, and releases again.
+	test('moves the release clock on a release it did not get answered', async () => {
+		readPool.mockResolvedValue({
+			pendingWorkers: 0,
+			warmingWorkers: 0,
+			onlineWorkers: [
+				{ pid: 11, pmId: 0, cpuPercent: 5, memoryBytes: 0, mature: true },
+				{ pid: 12, pmId: 1, cpuPercent: 5, memoryBytes: 0, mature: true },
+			],
+			restartsByWorker: new Map([[0, 0], [1, 0]]),
+			supervisor,
+		});
+
+		releaseWorker.mockRejectedValue(new Error('pm2 did not answer'));
+		decide.mockReturnValue({ workers: 1, reason: 'the load went' });
+
+		// The first tick is prewarm's; the second releases and fails; the third
+		// is the one that reads the clock the failure left.
+		await ticks(3);
+
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ message: 'pm2 did not answer' }),
+			'[autoscale] a tick failed',
+		);
+
+		const [deciding, decidingAfter] = decide.mock.calls.map(([sample]) => sample);
+
+		expect(decidingAfter!.lastScaleDownAt)
+			.toBeGreaterThan(deciding!.lastScaleDownAt);
 	});
 
 	// The supervisor answers a release once the worker has drained, up to its
@@ -329,7 +393,7 @@ describe('runAutoscaler', () => {
 		// The first tick out of a deploy is prewarm's, whatever it decides.
 		await ticks(2);
 
-		expect(releaseWorker.mock.calls).toEqual([[1], [2]]);
+		expect(releaseWorker.mock.calls.map(([pmId]) => pmId)).toEqual([1, 2]);
 	});
 
 	// The release the supervisor refused is the failure the tick reports, and

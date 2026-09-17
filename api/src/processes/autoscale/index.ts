@@ -58,17 +58,24 @@ const SAMPLE_INTERVAL_MS = 1000;
  * drains overlap and the tick waits for the longest. A release the supervisor
  * does not answer fails the tick once the others have settled, the same as it
  * fails a release of one, and the next tick reads the pool it left.
+ *
+ * Bounded at `timeoutMs` each, which the tick sets from the drain the
+ * declaration allows a worker rather than from a call's default: a worker
+ * holding a request past that default is still draining, and a bound under
+ * its drain reads the answer as a supervisor that went away.
  */
 async function releaseWorkers(
 	pool: OnlineWorker[],
 	count: number,
+	timeoutMs: number,
 ): Promise<void> {
 	const candidates = pool.map((worker) => {
 		return { pmId: worker.pmId, inFlight: inFlightOf(worker.pmId) };
 	});
 
 	const releases = await Promise.allSettled(
-		chooseVictims(candidates, count).map((pmId) => releaseWorker(pmId)),
+		chooseVictims(candidates, count)
+			.map((pmId) => releaseWorker(pmId, timeoutMs)),
 	);
 
 	for (const release of releases) {
@@ -437,21 +444,36 @@ export async function runAutoscaler(): Promise<void> {
 						+ `restarts: ${[...reading.restartsByWorker.values()].join(',')}`,
 					);
 
-					if (decision.workers < workers) {
-						await releaseWorkers(
-							onlineWorkers,
-							workers - decision.workers,
-						);
+					// The clocks move whether or not the supervisor answered:
+					// it carries out what it was asked either way, and a tick
+					// that failed on the answer alone would read the resized
+					// pool a second later with its cooldown unset and resize it
+					// again.
+					try {
+						if (decision.workers < workers) {
+							// pm2 answers a release once the worker has drained,
+							// up to the declaration's `kill_timeout`; the drains
+							// overlap, so the bound is one of them plus the
+							// default a supervisor call carries.
+							await releaseWorkers(
+								onlineWorkers,
+								workers - decision.workers,
+								(reading.supervisor?.killTimeout
+									?? SUPERVISOR_FALLBACKS.killTimeout)
+								+ SUPERVISOR_TIMEOUT_MS,
+							);
+						}
+						else {
+							await scaleApp(config.appName, decision.workers);
+						}
 					}
-					else {
-						await scaleApp(config.appName, decision.workers);
-					}
-
-					if (decision.workers > workers) {
-						lastScaleUpAt = Date.now();
-					}
-					else {
-						lastScaleDownAt = Date.now();
+					finally {
+						if (decision.workers > workers) {
+							lastScaleUpAt = Date.now();
+						}
+						else {
+							lastScaleDownAt = Date.now();
+						}
 					}
 				}
 			}

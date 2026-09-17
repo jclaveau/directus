@@ -2,6 +2,7 @@ import vendors from '@common/get-dbs-to-test';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeSharedSettings,
+	drainingOver,
 	instancesOf,
 	poolSize,
 	reportOf,
@@ -338,5 +339,50 @@ describe('The autoscaler gives back what the load no longer needs', () => {
 		// ones, or the survivors would not be exactly those two.
 		expect(resizesOf(rig)[0], reportOf(rig)).toBe('6 -> 4');
 		expect(instancesOf(rig), reportOf(rig)).toEqual([0, 1]);
+	}, 300_000);
+
+	// pm2 answers a release once the worker has exited, and a worker exits once
+	// it has finished what it was serving: the planner gives it twenty seconds,
+	// past the fifteen a supervisor call is given by default. Bounded there, a
+	// worker draining a long request is read as a supervisor that went away —
+	// the answer dropped, the connection rebuilt under a daemon busy doing what
+	// it was asked, the tick failed on a release that went through.
+	//
+	// The pool here is two idle workers, one of which holds its exit for the
+	// planner's twenty seconds once asked to go.
+	it('waits out a release that drains past the default bound', async () => {
+		const rig = startPool({
+			appName: 'autoscale-drain-bound',
+			instances: 2,
+			busyMs: 0,
+			idleMs: 100,
+			drainMs: 20_000,
+		});
+
+		rigs.push(rig);
+
+		startAutoscaler(rig, {
+			REDIS_ENABLED: 'false',
+			PM2_AUTOSCALE_SCALE_CPU_THRESHOLD: '80',
+			PM2_AUTOSCALE_RELEASE_CPU_THRESHOLD: '50',
+			PM2_AUTOSCALE_MIN_WORKERS: '1',
+			PM2_AUTOSCALE_MAX_WORKERS: '2',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_ADD_WORKER: '5',
+			PM2_AUTOSCALE_MIN_SECONDS_TO_RELEASE_WORKER: '5',
+			PM2_AUTOSCALE_WARMUP_SECONDS: '5',
+		});
+
+		// The pool is short of the victim from the moment it is asked to stop.
+		expect(await poolSize(rig, 1, 90_000), reportOf(rig)).toBe(1);
+
+		// Still on its way out once the default bound has passed, and then
+		// gone: the release outlasted the bound and was answered all the same.
+		expect(await drainingOver(rig, 16_000), reportOf(rig)).toEqual([1]);
+		expect((await drainingOver(rig, 30_000)).at(-1), reportOf(rig)).toBe(0);
+
+		expect(rig.logs.join(''), reportOf(rig))
+			.not.toMatch(/did not answer a release|a tick failed/);
+
+		expect(resizesOf(rig), reportOf(rig)).toEqual(['2 -> 1']);
 	}, 300_000);
 });

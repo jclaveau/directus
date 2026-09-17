@@ -69,6 +69,14 @@ export interface PoolOptions {
 	calmAfterMs?: number;
 	/** Milliseconds a worker serves before aborting, so pm2 restarts it. */
 	crashAfterMs?: number;
+	/**
+	 * Milliseconds a worker holds its exit after the supervisor asks for it,
+	 * the way one finishing the request it is serving does. The declaration
+	 * gives it that plus the planner's margin before pm2 kills it, so a
+	 * release is answered by the exit rather than by the kill. Unset, a
+	 * worker exits at once.
+	 */
+	drainMs?: number;
 	/** Which worker crashes, by pm2 instance number. Unset means all of them. */
 	crashOnlyInstance?: string;
 	/**
@@ -133,7 +141,13 @@ export function startPool(options: PoolOptions): Rig {
 					wait_ready: true,
 					autorestart: true,
 					...options.directusEnv === undefined
-						? { script: workerScript, listen_timeout: WORKER_LISTEN_TIMEOUT_MS }
+						? {
+								script: workerScript,
+								listen_timeout: WORKER_LISTEN_TIMEOUT_MS,
+								...options.drainMs === undefined
+									? {}
+									: { kill_timeout: options.drainMs + 5_000 },
+							}
 						: {
 								// The CLI's entry file: `node` adds the
 								// extension, pm2 checks the path exists.
@@ -171,6 +185,9 @@ export function startPool(options: PoolOptions): Rig {
 						...options.crashOnlyInstance === undefined
 							? {}
 							: { BB_CRASH_ONLY_INSTANCE: options.crashOnlyInstance },
+						...options.drainMs === undefined
+							? {}
+							: { BB_DRAIN_MS: String(options.drainMs) },
 						...options.inFlight === undefined
 							? {}
 							: { BB_IN_FLIGHT: String(options.inFlight) },
@@ -534,6 +551,34 @@ export async function neverExceeded(
 	}
 
 	return peak;
+}
+
+/**
+ * How many workers the supervisor is between asking to stop and seeing gone,
+ * every time it was read over the window, distinct and in the order first
+ * seen.
+ *
+ * A worker holds that state for as long as it takes to exit, which is what a
+ * release waits on: an arm about a release that outlasts a bound needs the
+ * victim still on its way out once the bound has passed, and then gone.
+ */
+export async function drainingOver(rig: Rig, windowMs: number): Promise<number[]> {
+	const deadline = Date.now() + windowMs;
+	const seen: number[] = [];
+
+	do {
+		const draining = listWorkers(rig)
+			.filter((worker) => worker.pm2_env?.status === 'stopping')
+			.length;
+
+		if (seen.includes(draining) === false) {
+			seen.push(draining);
+		}
+
+		await sleep(250);
+	} while (Date.now() < deadline);
+
+	return seen;
 }
 
 /**
