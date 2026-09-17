@@ -5,6 +5,7 @@ import {
 	RouteNotFoundError,
 } from '@directus/errors';
 import { Router } from 'express';
+import jwt from 'jsonwebtoken';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 // One object for the whole file: the controller reads `useEnv()` once, at import.
@@ -18,6 +19,7 @@ const auth = vi.hoisted(() => {
 	return {
 		impersonate: vi.fn(),
 		stopImpersonation: vi.fn(),
+		refresh: vi.fn(),
 		constructed: [] as unknown[],
 	};
 });
@@ -31,6 +33,7 @@ vi.mock('../services/authentication.js', () => {
 
 			impersonate = auth.impersonate;
 			stopImpersonation = auth.stopImpersonation;
+			refresh = auth.refresh;
 		},
 	};
 });
@@ -72,9 +75,9 @@ const { default: router } = await import('./auth.js');
 
 // router.post(path, asyncHandler(fn), respond) registers one Route layer whose
 // own stack holds [handler, respond]; drive the bare handler.
-function handlerFor(method: string) {
+function handlerFor(method: string, path = '/impersonate') {
 	return router.stack.find((entry: any) => {
-		return entry.route?.path === '/impersonate'
+		return entry.route?.path === path
 			&& entry.route.stack.some((handler: any) => handler.method === method);
 	})!.route!.stack[0]!.handle as (req: any, res: any, next: any) => Promise<void>;
 }
@@ -112,11 +115,13 @@ beforeEach(() => {
 	env['IMPERSONATION_ENABLED'] = true;
 	env['REFRESH_TOKEN_COOKIE_NAME'] = 'directus_refresh_token';
 	env['SESSION_COOKIE_NAME'] = 'directus_session_token';
+	env['SECRET'] = 'super-secure-secret';
 
 	next.mockReset();
 	activity.createOne.mockReset();
 	auth.impersonate.mockReset();
 	auth.stopImpersonation.mockReset();
+	auth.refresh.mockReset();
 	auth.constructed.length = 0;
 	logger.info.mockReset();
 });
@@ -343,5 +348,46 @@ describe('GET (banner)', () => {
 		expect(res.locals['payload']).toEqual({
 			data: { impersonator: { id: 'admin', first_name: 'Ada', last_name: null } },
 		});
+	});
+});
+
+describe('POST /refresh', () => {
+	test('session mode: the session named by the cookie, re-signed', async () => {
+		auth.refresh.mockResolvedValue({
+			accessToken: 'at',
+			refreshToken: 'sess',
+			expires: 900,
+			id: 'jane',
+		});
+
+		const cookie = jwt.sign(
+			{ session: 'sess', role: null, app_access: false, admin_access: false },
+			'super-secure-secret',
+			{ issuer: 'directus' },
+		);
+
+		const res = response();
+
+		await handlerFor('post', '/refresh')(
+			{
+				body: { mode: 'session' },
+				cookies: { directus_session_token: cookie },
+				headers: {},
+				socket: { remoteAddress: '10.0.0.1' },
+				get: () => undefined,
+			},
+			res,
+			next,
+		);
+
+		expect(auth.refresh).toHaveBeenCalledWith('sess', { session: true });
+
+		expect(res.cookie).toHaveBeenCalledWith(
+			'directus_session_token',
+			'at',
+			expect.objectContaining({ httpOnly: true }),
+		);
+
+		expect(res.locals['payload']).toEqual({ data: { expires: 900 } });
 	});
 });

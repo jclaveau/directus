@@ -14,9 +14,11 @@ import { oneLine } from '@directus/utils';
 import { awaitDirectusConnection } from '@utils/await-connection';
 import { sleep } from '@utils/sleep';
 import { ChildProcess, spawn } from 'child_process';
+import { createWriteStream } from 'node:fs';
 import getPort from 'get-port';
 import knex, { Knex } from 'knex';
 import { cloneDeep } from 'lodash-es';
+import { join } from 'node:path';
 import request, { type Response } from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -50,6 +52,8 @@ describe('Impersonation', () => {
 		env[vendor]['REDIS'] = 'redis://localhost:6108';
 		env[vendor]['IMPERSONATION_ENABLED'] = 'true';
 		env[vendor]['IMPERSONATION_WRITES'] = 'true';
+		// The websocket handshake only says why it failed at this level
+		env[vendor]['LOG_LEVEL'] = 'debug';
 
 		const readOnlyEnv = cloneDeep(config.envs);
 		readOnlyEnv[vendor]['IMPERSONATION_ENABLED'] = 'true';
@@ -161,11 +165,25 @@ describe('Impersonation', () => {
 			env[vendor].PORT = String(port);
 			readOnlyEnv[vendor].PORT = String(readOnlyPort);
 
-			for (const instanceEnv of [env, readOnlyEnv]) {
-				instances.push(spawn('node', [paths.cli, 'start'], {
+			const spawned = [['writes', env], ['read-only', readOnlyEnv]] as const;
+
+			for (const [name, instanceEnv] of spawned) {
+				const instance = spawn('node', [paths.cli, 'start'], {
 					cwd: paths.cwd,
 					env: instanceEnv[vendor],
-				}));
+				});
+
+				// Shown by the workflow's server-log tail on a failed shard
+				if (process.env['TEST_SAVE_LOGS']) {
+					const log = createWriteStream(
+						join(paths.cwd, `server-log-${vendor}-impersonation-${name}.txt`),
+					);
+
+					instance.stdout.pipe(log);
+					instance.stderr.pipe(log);
+				}
+
+				instances.push(instance);
 			}
 
 			db = knex(config.knexConfig[vendor]!);

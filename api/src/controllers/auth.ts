@@ -278,12 +278,13 @@ router.post(
 	asyncHandler(async (req, res, next) => {
 		const { accountability } = req;
 
-		if (accountability?.admin !== true || !accountability.user) {
-			throw new ForbiddenError();
+		// Whoever the impersonation runs as, it never opens another
+		if (accountability?.impersonator) {
+			throw new ForbiddenError({ reason: 'impersonation_nested' });
 		}
 
-		if (accountability.impersonator) {
-			throw new ForbiddenError({ reason: 'impersonation_nested' });
+		if (accountability?.admin !== true || !accountability.user) {
+			throw new ForbiddenError();
 		}
 
 		if (typeof req.body.user !== 'string') {

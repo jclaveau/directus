@@ -105,6 +105,10 @@ describe('onBeforeEach', () => {
 
 describe('enforce_tfa', () => {
 	beforeEach(() => {
+		// Every navigation here schedules a trackPage; a real timer would fire
+		// into the next describe's count
+		vi.useFakeTimers();
+
 		const appStore = useAppStore();
 		appStore.hydrated = true;
 		appStore.authenticated = true;
@@ -114,6 +118,11 @@ describe('enforce_tfa', () => {
 			tfa_secret: null,
 			last_page: null,
 		};
+	});
+
+	afterEach(() => {
+		vi.clearAllTimers();
+		vi.useRealTimers();
 	});
 
 	test('sends a user without a secret to the tfa setup', async () => {
