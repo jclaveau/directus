@@ -41,6 +41,7 @@ function mark(phase: string) {
 }
 
 const cacheStatusHeader = 'x-cache-status';
+const cacheTagsHeader = 'x-scoped-cache-tags';
 
 // A proxy we can kill and bring back, so the API keeps its config and only the
 // connection dies — what a real Redis blip looks like from the app's side.
@@ -156,6 +157,7 @@ describe(oneLine`
 			env[vendor]['REDIS_HOST'] = 'localhost';
 			env[vendor]['REDIS_PORT'] = String(proxyPort);
 			env[vendor]['CACHE_NAMESPACE'] = `directus-purge-recovery-${vendor}`;
+			env[vendor]['CACHE_TAGS_HEADER'] = cacheTagsHeader;
 
 			// The entries a recovered purge had been serving stale are named through
 			// their descriptors, and both the descriptor and the anomaly it carries
@@ -441,6 +443,14 @@ describe(oneLine`
 			const miss = await readPair();
 			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
 			expect((await readPair()).headers[cacheStatusHeader]).toBe('HIT');
+
+			// What makes the count below mean anything: the entry sits under BOTH key
+			// tags the write records, and not under the bare one, so a per-target
+			// report would have named it twice.
+			const pinned = String(miss.headers[cacheTagsHeader]).split(', ');
+			expect(pinned).toContain(`${NOTE}:id=${pair[0]}`);
+			expect(pinned).toContain(`${NOTE}:id=${pair[1]}`);
+			expect(pinned).not.toContain(NOTE);
 
 			let described = false;
 
