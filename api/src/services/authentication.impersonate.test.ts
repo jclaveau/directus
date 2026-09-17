@@ -53,6 +53,7 @@ vi.mock('@directus/env', () => {
 
 vi.mock('../permissions/modules/fetch-global-access/fetch-global-access.js');
 vi.mock('../permissions/lib/fetch-roles-tree.js');
+vi.mock('../bus/index.js', () => ({ useBus: () => ({ publish: vi.fn() }) }));
 
 const schema = new SchemaBuilder().build();
 
@@ -259,11 +260,12 @@ test('logout under impersonation ends the impersonator\'s row too', async () => 
 	]);
 
 	tracker.on.select('directus_sessions').response([
-		{ token: 'imp-token', user: 'jane' },
-		{ token: 'admin-session', user: 'admin' },
+		{ token: 'imp-token', user: 'jane', impersonator: 'admin' },
+		{ token: 'admin-session', user: 'admin', impersonator: null },
 	]);
 
 	tracker.on.delete('directus_sessions').response([]);
+	tracker.on.insert('directus_activity').response([]);
 
 	await new AuthenticationService({ knex: db, schema }).logout('imp-token');
 
@@ -282,7 +284,7 @@ test('a plain logout ends its row and tells the provider', async () => {
 	]);
 
 	tracker.on.select('directus_sessions')
-		.response([{ token: 'own-token', user: 'jane' }]);
+		.response([{ token: 'own-token', user: 'jane', impersonator: null }]);
 
 	tracker.on.delete('directus_sessions').response([]);
 
@@ -310,9 +312,10 @@ test('Stop ends the impersonated row and re-signs the impersonator', async () =>
 	});
 
 	tracker.on.select('directus_sessions')
-		.response([{ token: 'imp-token', user: 'jane' }]);
+		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
 
 	tracker.on.delete('directus_sessions').response([]);
+	tracker.on.insert('directus_activity').response([]);
 
 	const result = await new AuthenticationService({ knex: db, schema })
 		.stopImpersonation('imp-token');
@@ -342,11 +345,12 @@ test('Stop follows the row rotated under it within the grace period', async () =
 	});
 
 	tracker.on.select('directus_sessions').response([
-		{ token: 'imp-token', user: 'jane' },
-		{ token: 'imp-next', user: 'jane' },
+		{ token: 'imp-token', user: 'jane', impersonator: 'admin' },
+		{ token: 'imp-next', user: 'jane', impersonator: 'admin' },
 	]);
 
 	tracker.on.delete('directus_sessions').response([]);
+	tracker.on.insert('directus_activity').response([]);
 
 	await new AuthenticationService({ knex: db, schema })
 		.stopImpersonation('imp-token');
@@ -380,9 +384,10 @@ test('Stop gives no cookie back once the impersonator\'s row is gone', async () 
 	tracker.on.select((raw) => raw.sql.includes('inner join')).response(undefined);
 
 	tracker.on.select('directus_sessions')
-		.response([{ token: 'imp-token', user: 'jane' }]);
+		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
 
 	tracker.on.delete('directus_sessions').response([]);
+	tracker.on.insert('directus_activity').response([]);
 
 	await expect(
 		new AuthenticationService({ knex: db, schema }).stopImpersonation('imp-token'),
