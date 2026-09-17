@@ -15,6 +15,8 @@ export const useUserStore = defineStore('userStore', () => {
 
 	const currentUser = ref<AppUser | ShareUser | null>(null);
 	const impersonator = ref<Impersonator | null>(null);
+	// False while IMPERSONATION_ENABLED is off: the endpoint is a 404
+	const impersonationAvailable = ref(false);
 	const loading = ref(false);
 	const error = ref(null);
 
@@ -85,6 +87,7 @@ export const useUserStore = defineStore('userStore', () => {
 				roles: roles.data,
 			};
 
+			impersonationAvailable.value = impersonation !== null;
 			impersonator.value = impersonation?.data.data.impersonator ?? null;
 		} catch (error: any) {
 			error.value = error;
@@ -97,6 +100,7 @@ export const useUserStore = defineStore('userStore', () => {
 		currentUser.value = null;
 		requestedPage = null;
 		impersonator.value = null;
+		impersonationAvailable.value = false;
 		loading.value = false;
 		error.value = null;
 	};
@@ -178,6 +182,7 @@ export const useUserStore = defineStore('userStore', () => {
 	return {
 		currentUser,
 		impersonator,
+		impersonationAvailable,
 		loading,
 		error,
 		fullName,
