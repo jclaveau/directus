@@ -266,11 +266,14 @@ describe(oneLine`
 				.where({ reason: 'inflight_purge', detail: BURST })
 				.delete();
 
+			// A shape the burst above did not read: an anomaly is filed once per
+			// reason and key a minute, in a slot `cache/clear` does not release, so
+			// slot 0 read exactly as before would be refused in silence.
 			const crossed = await Promise.all(
 				Array.from({ length: BURST_WIDTH }, () => {
 					return request(getUrl(vendor, env))
 						.get(`/items/${BURST}`)
-						.query({ 'filter[slot][_eq]': '0' })
+						.query({ 'filter[slot][_eq]': '0', fields: 'id,slot' })
 						.set('Authorization', auth);
 				}),
 			);
@@ -279,24 +282,25 @@ describe(oneLine`
 				expect(read.headers[cacheStatusHeader]).toBe('MISS');
 			}
 
+			// One refusal for the eight — the same key claims the slot once — says
+			// the fills were crossed and the evictions ran.
 			for (let attempt = 0; attempt < 40; attempt++) {
 				const refused = await db(ANOMALIES)
 					.where({ reason: 'inflight_purge', detail: BURST })
 					.select('id');
 
-				if (refused.length >= BURST_WIDTH) {
+				if (refused.length >= 1) {
 					break;
 				}
 
 				await new Promise((resolve) => setTimeout(resolve, 1000));
 			}
 
-			const refused = await db(ANOMALIES)
-				.where({ reason: 'inflight_purge', detail: BURST })
-				.select('cache_key');
-
-			expect(refused).toHaveLength(BURST_WIDTH);
-			expect(new Set(refused.map((row) => row.cache_key)).size).toBe(1);
+			expect(
+				await db(ANOMALIES)
+					.where({ reason: 'inflight_purge', detail: BURST })
+					.select('id'),
+			).toHaveLength(1);
 
 			const recorded = await db(PENDING)
 				.where({ collection: BURST })

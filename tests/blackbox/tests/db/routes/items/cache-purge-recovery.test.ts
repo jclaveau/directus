@@ -526,30 +526,39 @@ describe(oneLine`
 			// events per entry, so a per-target report would read 2 here.
 			expect(Number(named.count)).toBe(1);
 
-			// What the drain purged is recorded like the purge it finished, under
-			// one id and with no latency — no write waited on it (#507). Polled
-			// like the anomaly: it reaches Postgres on the stats drain too. These
-			// tags are this case's own, and the write's purge recorded nothing
-			// (it failed), so every row here is the drain's.
-			let purged: any[] = [];
+			// What the drain purged is recorded like the purge it finished: one
+			// row per target under one id, with no latency — no write waited on it
+			// (#507). Polled like the anomaly: it reaches Postgres on the stats
+			// drain too. These tags are this case's own, and the write's purge
+			// recorded nothing (it failed), so the id they name is the drain's.
+			let tagged: any[] = [];
 
-			for (let attempt = 0; attempt < 45 && purged.length < 2; attempt++) {
-				purged = await db('directus_cache_stats_scoped_purge_tags as t')
-					.join('directus_cache_stats_purges as p', 'p.purge_id', 't.purge_id')
-					.whereIn('t.scoped_cache_tag', pair.map((id) => `${NOTE}:id=${id}`))
-					.select('t.scoped_cache_tag', 'p.purge_id', 'p.mode', 'p.duration_ms');
+			for (let attempt = 0; attempt < 45 && tagged.length < 2; attempt++) {
+				tagged = await db('directus_cache_stats_scoped_purge_tags')
+					.whereIn('scoped_cache_tag', pair.map((id) => `${NOTE}:id=${id}`))
+					.select('scoped_cache_tag', 'purge_id');
 
-				if (purged.length < 2) {
+				if (tagged.length < 2) {
 					await new Promise((resolve) => setTimeout(resolve, 1000));
 				}
 			}
 
+			mark(`recorded purge tags: ${JSON.stringify(tagged)}`);
+
+			expect(tagged).toHaveLength(2);
+			expect(new Set(tagged.map((row) => row.purge_id)).size).toBe(1);
+
+			const purged = await db('directus_cache_stats_purges')
+				.where({ purge_id: tagged[0].purge_id })
+				.select('mode', 'scoped_cache_tag_count', 'duration_ms');
+
 			mark(`recorded purges: ${JSON.stringify(purged)}`);
 
-			expect(purged).toHaveLength(2);
-			expect(new Set(purged.map((row) => row.purge_id)).size).toBe(1);
-			expect(purged.map((row) => row.mode)).toEqual(['slices', 'slices']);
-			expect(purged.map((row) => row.duration_ms)).toEqual([null, null]);
+			// The three targets recorded above: the bare tag and one per key.
+			expect(purged).toHaveLength(3);
+			expect(purged.map((row) => row.mode)).toEqual(['slices', 'slices', 'slices']);
+			expect(purged.map((row) => row.scoped_cache_tag_count)).toEqual([1, 1, 1]);
+			expect(purged.map((row) => row.duration_ms)).toEqual([null, null, null]);
 		}, 60_000);
 
 		it(oneLine`
