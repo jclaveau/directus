@@ -490,6 +490,15 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 
 		const keyvRedis = new KeyvRedis({ ...clientOptions, disableOfflineQueue: true });
 
+		// Dialed now rather than by the first command. `getClient()` hands the client
+		// over as soon as it is open, and node-redis is open from the moment it starts
+		// dialing — so of two commands a fresh worker sent at once, the second went
+		// out while the first was still connecting and was refused as offline (the
+		// queue above). A purge was that second command on the PR-736 preview, and
+		// was recorded for retry over a Redis that was never away. A dial that fails
+		// reports through the `error` the adapter forwards, like any later one.
+		void keyvRedis.getClient().catch(() => {});
+
 		config.store = keyvRedis;
 	}
 

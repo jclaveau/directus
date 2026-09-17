@@ -1093,6 +1093,31 @@ describe('getCache', () => {
 	});
 
 	test(oneLine`
+		dials the store's client as it is built, so the first two commands a fresh
+		worker sends at once do not find it open and not yet ready
+	`, async () => {
+		const { systemCache } = await reloadCacheWith({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'redis',
+			REDIS_HOST: 'localhost',
+			REDIS_PORT: '6108',
+		});
+
+		const store = systemCache.store as {
+			client: { isOpen: boolean; destroy(): void };
+		};
+
+		// Open is what `getClient()` returns early on — the dial has started, and
+		// nothing here waits for the socket to answer.
+		expect(store.client.isOpen).toBe(true);
+
+		// Nothing listens on that port here; stop the reconnects it would keep trying.
+		store.client.destroy();
+	});
+
+	test(oneLine`
 		and on the one built from a REDIS url, which reaches the adapter as options
 		rather than as a string, so both spellings back off the same way
 	`, async () => {
