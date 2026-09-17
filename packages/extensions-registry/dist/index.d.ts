@@ -1,0 +1,349 @@
+import { z } from "zod";
+import * as stream_web0 from "stream/web";
+import { ExtensionType } from "@directus/types";
+
+//#region src/modules/account/types/account-options.d.ts
+interface AccountOptions {
+  registry?: string;
+}
+//#endregion
+//#region src/modules/account/schemas/registry-account-response.d.ts
+declare const RegistryAccountResponse: z.ZodObject<{
+  data: z.ZodObject<{
+    id: z.ZodString;
+    username: z.ZodString;
+    verified: z.ZodBoolean;
+    github_username: z.ZodNullable<z.ZodString>;
+    github_avatar_url: z.ZodNullable<z.ZodString>;
+    github_name: z.ZodNullable<z.ZodString>;
+    github_company: z.ZodNullable<z.ZodString>;
+    github_blog: z.ZodNullable<z.ZodString>;
+    github_location: z.ZodNullable<z.ZodString>;
+    github_bio: z.ZodNullable<z.ZodString>;
+  }, z.core.$strip>;
+}, z.core.$strip>;
+type RegistryAccountResponse = z.infer<typeof RegistryAccountResponse>;
+//#endregion
+//#region src/modules/account/account.d.ts
+/**
+ * Retrieves account information from the extensions registry.
+ *
+ * This function fetches detailed account data for a specified user or organization
+ * from the Directus extensions registry. It validates API version compatibility
+ * and returns structured account information including profile details, published
+ * extensions, and other relevant metadata.
+ *
+ * @param id - The unique identifier of the account to retrieve (username or organization name)
+ * @param options - Optional configuration for the request
+ * @param options.registry - Custom registry URL to use instead of the default registry
+ * @returns Promise that resolves to validated account data from the registry
+ *
+ * @throws {Error} When API version compatibility check fails
+ * @throws {Error} When the account ID is not found in the registry
+ * @throws {Error} When network request fails or registry is unreachable
+ * @throws {Error} When response data fails validation against the expected schema
+ *
+ * @example
+ * ```typescript
+ * // Get account information using default registry
+ * const accountData = await account('directus');
+ * console.log(accountData.name); // Account name
+ * console.log(accountData.extensions); // Published extensions
+ *
+ * // Get account information from custom registry
+ * const customAccountData = await account('my-org', {
+ *   registry: 'https://custom-registry.example.com'
+ * });
+ *
+ * // Handle errors
+ * try {
+ *   const accountData = await account('non-existent-user');
+ * } catch (error) {
+ *   console.error('Failed to fetch account:', error.message);
+ * }
+ * ```
+ */
+declare const account: (id: string, options?: AccountOptions) => Promise<{
+  data: {
+    id: string;
+    username: string;
+    verified: boolean;
+    github_username: string | null;
+    github_avatar_url: string | null;
+    github_name: string | null;
+    github_company: string | null;
+    github_blog: string | null;
+    github_location: string | null;
+    github_bio: string | null;
+  };
+}>;
+//#endregion
+//#region src/modules/describe/types/describe-options.d.ts
+interface DescribeOptions {
+  registry?: string;
+}
+//#endregion
+//#region src/modules/describe/schemas/registry-describe-response.d.ts
+declare const RegistryDescribeResponse: z.ZodObject<{
+  data: z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    description: z.ZodUnion<readonly [z.ZodNull, z.ZodString]>;
+    total_downloads: z.ZodNumber;
+    downloads: z.ZodUnion<readonly [z.ZodNull, z.ZodArray<z.ZodObject<{
+      date: z.ZodString;
+      count: z.ZodNumber;
+    }, z.core.$strip>>]>;
+    verified: z.ZodBoolean;
+    readme: z.ZodUnion<readonly [z.ZodNull, z.ZodString]>;
+    type: z.ZodEnum<{
+      interface: "interface";
+      display: "display";
+      layout: "layout";
+      module: "module";
+      panel: "panel";
+      theme: "theme";
+      hook: "hook";
+      endpoint: "endpoint";
+      operation: "operation";
+      bundle: "bundle";
+    }>;
+    license: z.ZodNullable<z.ZodString>;
+    versions: z.ZodArray<z.ZodObject<{
+      id: z.ZodString;
+      version: z.ZodString;
+      verified: z.ZodBoolean;
+      type: z.ZodEnum<{
+        interface: "interface";
+        display: "display";
+        layout: "layout";
+        module: "module";
+        panel: "panel";
+        theme: "theme";
+        hook: "hook";
+        endpoint: "endpoint";
+        operation: "operation";
+        bundle: "bundle";
+      }>;
+      host_version: z.ZodString;
+      publish_date: z.ZodString;
+      unpacked_size: z.ZodNumber;
+      file_count: z.ZodNumber;
+      url_bugs: z.ZodUnion<readonly [z.ZodNull, z.ZodString]>;
+      url_homepage: z.ZodUnion<readonly [z.ZodNull, z.ZodString]>;
+      url_repository: z.ZodUnion<readonly [z.ZodNull, z.ZodString]>;
+      license: z.ZodNullable<z.ZodString>;
+      publisher: z.ZodObject<{
+        id: z.ZodString;
+        username: z.ZodString;
+        verified: z.ZodBoolean;
+        github_name: z.ZodNullable<z.ZodString>;
+        github_avatar_url: z.ZodNullable<z.ZodString>;
+      }, z.core.$strip>;
+      bundled: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        type: z.ZodString;
+      }, z.core.$strip>>;
+      maintainers: z.ZodNullable<z.ZodArray<z.ZodObject<{
+        accounts_id: z.ZodObject<{
+          id: z.ZodString;
+          username: z.ZodString;
+          verified: z.ZodBoolean;
+          github_name: z.ZodNullable<z.ZodString>;
+          github_avatar_url: z.ZodNullable<z.ZodString>;
+        }, z.core.$strip>;
+      }, z.core.$strip>>>;
+    }, z.core.$strip>>;
+  }, z.core.$strip>;
+}, z.core.$strip>;
+type RegistryDescribeResponse = z.infer<typeof RegistryDescribeResponse>;
+//#endregion
+//#region src/modules/describe/describe.d.ts
+declare const describe: (id: string, options?: DescribeOptions) => Promise<{
+  data: {
+    id: string;
+    name: string;
+    description: string | null;
+    total_downloads: number;
+    downloads: {
+      date: string;
+      count: number;
+    }[] | null;
+    verified: boolean;
+    readme: string | null;
+    type: "interface" | "display" | "layout" | "module" | "panel" | "theme" | "hook" | "endpoint" | "operation" | "bundle";
+    license: string | null;
+    versions: {
+      id: string;
+      version: string;
+      verified: boolean;
+      type: "interface" | "display" | "layout" | "module" | "panel" | "theme" | "hook" | "endpoint" | "operation" | "bundle";
+      host_version: string;
+      publish_date: string;
+      unpacked_size: number;
+      file_count: number;
+      url_bugs: string | null;
+      url_homepage: string | null;
+      url_repository: string | null;
+      license: string | null;
+      publisher: {
+        id: string;
+        username: string;
+        verified: boolean;
+        github_name: string | null;
+        github_avatar_url: string | null;
+      };
+      bundled: {
+        name: string;
+        type: string;
+      }[];
+      maintainers: {
+        accounts_id: {
+          id: string;
+          username: string;
+          verified: boolean;
+          github_name: string | null;
+          github_avatar_url: string | null;
+        };
+      }[] | null;
+    }[];
+  };
+}>;
+//#endregion
+//#region src/modules/download/types/download-options.d.ts
+interface DownloadOptions {
+  registry?: string;
+}
+//#endregion
+//#region src/modules/download/download.d.ts
+/**
+ * Downloads an extension version from the registry as a stream.
+ *
+ * This function retrieves the binary content of a specific extension version
+ * from the Directus extensions registry. It validates API version compatibility
+ * and returns a ReadableStream that can be used to process the downloaded content,
+ * such as saving to disk or streaming to a client.
+ *
+ * @param versionId - The unique identifier of the extension version to download
+ * @param requireSandbox - Whether to enable sandbox mode for the download (defaults to false)
+ * @param options - Optional configuration for the download request
+ * @param options.registry - Custom registry URL to use instead of the default registry
+ * @returns Promise that resolves to a ReadableStream containing the extension's binary content
+ *
+ * @throws {Error} When API version compatibility check fails
+ * @throws {Error} When the version ID is not found in the registry
+ * @throws {Error} When network request fails or registry is unreachable
+ * @throws {Error} When the response status indicates an error (4xx, 5xx)
+ *
+ * @example
+ * ```typescript
+ * // Download extension from default registry
+ * const stream = await download('my-extension-v1.0.0');
+ *
+ * // Save to file system
+ * import { createWriteStream } from 'fs';
+ * import { pipeline } from 'stream/promises';
+ *
+ * const fileStream = createWriteStream('./extension.zip');
+ * await pipeline(Readable.fromWeb(stream), fileStream);
+ *
+ * // Download with sandbox mode enabled
+ * const sandboxStream = await download('my-extension-v1.0.0', true);
+ *
+ * // Download from custom registry
+ * const customStream = await download('my-extension-v1.0.0', false, {
+ *   registry: 'https://custom-registry.example.com'
+ * });
+ *
+ * // Download with both sandbox and custom registry
+ * const customSandboxStream = await download('my-extension-v1.0.0', true, {
+ *   registry: 'https://custom-registry.example.com'
+ * });
+ *
+ * // Handle errors
+ * try {
+ *   const stream = await download('non-existent-version');
+ * } catch (error) {
+ *   console.error('Download failed:', error.message);
+ * }
+ * ```
+ */
+declare const download: (versionId: string, requireSandbox?: boolean, options?: DownloadOptions) => Promise<stream_web0.ReadableStream<any> | null>;
+//#endregion
+//#region src/modules/list/types/list-options.d.ts
+interface ListOptions {
+  registry?: string;
+}
+//#endregion
+//#region src/modules/list/types/list-query.d.ts
+interface ListQuery {
+  type?: ExtensionType;
+  search?: string;
+  limit?: number;
+  offset?: number;
+  by?: string;
+  sort?: 'popular' | 'recent' | 'downloads';
+  sandbox?: boolean;
+}
+//#endregion
+//#region src/modules/list/schemas/registry-list-response.d.ts
+declare const RegistryListResponse: z.ZodObject<{
+  meta: z.ZodObject<{
+    filter_count: z.ZodNumber;
+  }, z.core.$strip>;
+  data: z.ZodArray<z.ZodObject<{
+    id: z.ZodString;
+    name: z.ZodString;
+    description: z.ZodUnion<readonly [z.ZodNull, z.ZodString]>;
+    total_downloads: z.ZodNumber;
+    verified: z.ZodBoolean;
+    type: z.ZodEnum<{
+      interface: "interface";
+      display: "display";
+      layout: "layout";
+      module: "module";
+      panel: "panel";
+      theme: "theme";
+      hook: "hook";
+      endpoint: "endpoint";
+      operation: "operation";
+      bundle: "bundle";
+    }>;
+    last_updated: z.ZodString;
+    host_version: z.ZodString;
+    sandbox: z.ZodBoolean;
+    license: z.ZodNullable<z.ZodString>;
+    publisher: z.ZodObject<{
+      username: z.ZodString;
+      verified: z.ZodBoolean;
+      github_name: z.ZodNullable<z.ZodString>;
+    }, z.core.$strip>;
+  }, z.core.$strip>>;
+}, z.core.$strip>;
+type RegistryListResponse = z.infer<typeof RegistryListResponse>;
+//#endregion
+//#region src/modules/list/list.d.ts
+declare const list: (query: ListQuery, options?: ListOptions) => Promise<{
+  meta: {
+    filter_count: number;
+  };
+  data: {
+    id: string;
+    name: string;
+    description: string | null;
+    total_downloads: number;
+    verified: boolean;
+    type: "interface" | "display" | "layout" | "module" | "panel" | "theme" | "hook" | "endpoint" | "operation" | "bundle";
+    last_updated: string;
+    host_version: string;
+    sandbox: boolean;
+    license: string | null;
+    publisher: {
+      username: string;
+      verified: boolean;
+      github_name: string | null;
+    };
+  }[];
+}>;
+//#endregion
+export { type AccountOptions, type DescribeOptions, type DownloadOptions, type ListOptions, type ListQuery, type RegistryAccountResponse, type RegistryDescribeResponse, type RegistryListResponse, account, describe, download, list };

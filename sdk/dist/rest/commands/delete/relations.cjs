@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n)=>()=>(e.throwIfEmpty(t,`Collection cannot be empty`),e.throwIfEmpty(n,`Field cannot be empty`),{path:`/relations/${t}/${n}`,method:`DELETE`});exports.deleteRelation=t;
+//# sourceMappingURL=relations.cjs.map
