@@ -543,6 +543,74 @@ describe('the runs', () => {
 		wrapper.unmount();
 	});
 
+	test(oneLine`
+		waits on the saved rule's firing instead of the old one, and not at all
+		on one beyond setTimeout's reach
+	`, async () => {
+		vi.setSystemTime(Date.UTC(2026, 8, 17, 19, 14, 0));
+		answer({ ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 15, 0) }, []);
+
+		const saved = { ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 18, 0) };
+		vi.mocked(api.patch).mockResolvedValue({ data: { data: saved } });
+
+		const wrapper = await mounted();
+		const input = wrapper.find('.schedule-input input');
+		const reads = () => vi.mocked(api.get).mock.calls.length;
+
+		await input.setValue('0 18 19 * * *');
+		await input.trigger('keydown', { key: 'Enter' });
+		await flushPromises();
+
+		// The old firing passes unread.
+		const before = reads();
+		vi.advanceTimersByTime(61_000);
+		await flushPromises();
+
+		expect(reads()).toBe(before);
+
+		// The saved one is read.
+		vi.advanceTimersByTime(3 * 60_000);
+		await flushPromises();
+
+		expect(reads()).toBe(before + 2);
+
+		vi.mocked(api.patch).mockResolvedValue({
+			data: { data: { ...envSchedule, nextRunAt: Date.now() + 30 * 86_400_000 } },
+		});
+
+		await input.setValue('0 0 1 1 *');
+		await input.trigger('keydown', { key: 'Enter' });
+		await flushPromises();
+
+		vi.advanceTimersByTime(31 * 86_400_000);
+		await flushPromises();
+
+		expect(reads()).toBe(before + 2);
+
+		wrapper.unmount();
+	});
+
+	test('keeps what it shows when the re-read on the firing fails', async () => {
+		vi.setSystemTime(Date.UTC(2026, 8, 17, 19, 14, 0));
+		answer({ ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 15, 0) }, []);
+
+		const wrapper = await mounted();
+
+		vi.mocked(api.get).mockRejectedValue(new Error('Redis is away'));
+		vi.advanceTimersByTime(61_000);
+		await flushPromises();
+
+		// Neither polling nor armed again: nothing reads after the failed pair.
+		const reads = vi.mocked(api.get).mock.calls.length;
+		vi.advanceTimersByTime(10 * 60_000);
+		await flushPromises();
+
+		expect(vi.mocked(api.get).mock.calls.length).toBe(reads);
+		expect(wrapper.find('.v-notice').text()).toContain('No audit ran');
+
+		wrapper.unmount();
+	});
+
 	test('a run refused by the lock lists the run that holds it', async () => {
 		answer(envSchedule, []);
 
