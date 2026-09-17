@@ -70,11 +70,22 @@ function pollWhileInFlight(): void {
 
 		if (!inFlight.value) {
 			stopPolling();
+
+			// The refusal named a run that is over now: nothing left to say.
+			if (error.value === refusal) {
+				error.value = null;
+			}
+
+			refusal = null;
 			await loadSchedule().catch(() => undefined);
 			armNextRun();
 		}
 	}, 5000);
 }
+
+// What the lock answered the last ask with, so that notice alone goes with
+// the run it named — a failure of the page's own stays.
+let refusal: string | null = null;
 
 // The cron's run starts without this page knowing: read the runs again once
 // the schedule says it fired, so the button waits on that run instead of
@@ -82,6 +93,9 @@ function pollWhileInFlight(): void {
 let nextRunTimer: ReturnType<typeof setTimeout> | null = null;
 
 const NEXT_RUN_GRACE_MS = 1000;
+// Fired by this clock but not by the server's yet — a skew, or the run's row
+// not open yet: read again after the grace, while the miss is this small.
+const NEXT_RUN_SKEW_MS = 5000;
 const MAX_TIMEOUT_MS = 2 ** 31 - 1;
 
 function disarmNextRun(): void {
@@ -96,11 +110,17 @@ function armNextRun(): void {
 
 	const nextRunAt = schedule.value?.nextRunAt ?? null;
 
-	if (nextRunAt === null || nextRunAt <= Date.now()) {
+	if (nextRunAt === null) {
 		return;
 	}
 
-	const delay = nextRunAt - Date.now() + NEXT_RUN_GRACE_MS;
+	const overdue = Date.now() - nextRunAt;
+
+	if (overdue > NEXT_RUN_SKEW_MS) {
+		return;
+	}
+
+	const delay = Math.max(-overdue, 0) + NEXT_RUN_GRACE_MS;
 
 	if (delay > MAX_TIMEOUT_MS) {
 		return;
@@ -205,6 +225,7 @@ async function runNow(): Promise<void> {
 		// Refused by the run lock: a run this page had not seen yet is in
 		// flight. List it, so the button waits on it.
 		if (err?.response?.status === 503) {
+			refusal = error.value;
 			await loadRuns().catch(() => undefined);
 			pollWhileInFlight();
 		}

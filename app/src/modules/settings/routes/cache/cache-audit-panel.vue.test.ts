@@ -590,6 +590,61 @@ describe('the runs', () => {
 		wrapper.unmount();
 	});
 
+	test(oneLine`
+		reads again after the grace while the schedule has not moved on — the
+		server's clock a little behind — and waits on the firing it then names
+	`, async () => {
+		vi.setSystemTime(Date.UTC(2026, 8, 17, 19, 14, 0));
+		const firing = { ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 15, 0) };
+		answer(firing, []);
+
+		const wrapper = await mounted();
+		const reads = () => vi.mocked(api.get).mock.calls.length;
+
+		const before = reads();
+		vi.advanceTimersByTime(61_000);
+		await flushPromises();
+
+		expect(reads()).toBe(before + 2);
+
+		vi.advanceTimersByTime(1000);
+		await flushPromises();
+
+		expect(reads()).toBe(before + 4);
+
+		answer({ ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 20, 0) }, []);
+		vi.advanceTimersByTime(1000);
+		await flushPromises();
+
+		expect(reads()).toBe(before + 6);
+
+		vi.advanceTimersByTime(5 * 60_000);
+		await flushPromises();
+
+		expect(reads()).toBe(before + 8);
+
+		wrapper.unmount();
+	});
+
+	test('gives up on a firing the schedule never moves past', async () => {
+		vi.setSystemTime(Date.UTC(2026, 8, 17, 19, 14, 0));
+		answer({ ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 15, 0) }, []);
+
+		const wrapper = await mounted();
+		const reads = () => vi.mocked(api.get).mock.calls.length;
+
+		vi.advanceTimersByTime(70_000);
+		await flushPromises();
+
+		const settled = reads();
+		vi.advanceTimersByTime(10 * 60_000);
+		await flushPromises();
+
+		expect(reads()).toBe(settled);
+
+		wrapper.unmount();
+	});
+
 	test('keeps what it shows when the re-read on the firing fails', async () => {
 		vi.setSystemTime(Date.UTC(2026, 8, 17, 19, 14, 0));
 		answer({ ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 15, 0) }, []);
@@ -642,6 +697,38 @@ describe('the runs', () => {
 		await flushPromises();
 
 		expect(wrapper.find('.v-button .content').classes()).not.toContain('invisible');
+		// The refusal named a run that is over: nothing left to say about it.
+		expect(wrapper.find('.v-notice').exists()).toBe(false);
+
+		wrapper.unmount();
+	});
+
+	test(oneLine`
+		keeps a failure of its own on screen once the run it waited on ends
+	`, async () => {
+		vi.setSystemTime(Date.UTC(2026, 8, 17, 19, 14, 0));
+		const firing = { ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 15, 0) };
+		answer(firing, []);
+
+		vi.mocked(api.post).mockRejectedValue({
+			response: { data: { errors: [{ message: 'Redis is away' }] } },
+		});
+
+		const wrapper = await mounted();
+
+		await wrapper.find('.v-button button').trigger('click');
+		await flushPromises();
+
+		const after = { ...envSchedule, nextRunAt: Date.UTC(2026, 8, 17, 19, 20, 0) };
+		answer(after, [run({ id: 40, finishedAt: null, durationMs: null })]);
+		vi.advanceTimersByTime(61_000);
+		await flushPromises();
+
+		answer(after, [run({ id: 40 })]);
+		vi.advanceTimersByTime(5000);
+		await flushPromises();
+
+		expect(wrapper.find('.v-notice').text()).toBe('Redis is away');
 
 		wrapper.unmount();
 	});
