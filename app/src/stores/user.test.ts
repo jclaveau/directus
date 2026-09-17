@@ -170,6 +170,18 @@ describe('actions', () => {
 		});
 	});
 
+	describe('dehydrate', () => {
+		test('drops the user and the impersonator', async () => {
+			impersonator = mockImpersonator;
+			const userStore = useUserStore();
+			await userStore.hydrate();
+			await userStore.dehydrate();
+
+			expect(userStore.currentUser).toBeNull();
+			expect(userStore.impersonator).toBeNull();
+		});
+	});
+
 	describe('trackPage', () => {
 		const page = '/test';
 
