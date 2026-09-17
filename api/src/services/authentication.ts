@@ -24,6 +24,7 @@ import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import type { DirectusTokenPayload, Session, User } from '../types/index.js';
 import { actorFields } from '../utils/actor-fields.js';
+import { endSessions } from '../utils/end-sessions.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
@@ -340,7 +341,7 @@ export class AuthenticationService {
 		}
 
 		if (record.user_id && record.user_status !== 'active') {
-			await this.knex('directus_sessions').where({ token: refreshToken }).del();
+			await endSessions(this.knex, { tokens: [refreshToken] });
 
 			if (record.user_status === 'suspended') {
 				await stall(STALL_TIME, timeStart);
@@ -529,7 +530,7 @@ export class AuthenticationService {
 			const provider = getAuthProvider(user.provider);
 			await provider.logout(clone(user));
 
-			await this.knex.delete().from('directus_sessions').where('token', refreshToken);
+			await endSessions(this.knex, { tokens: [refreshToken] });
 		}
 	}
 
