@@ -48,9 +48,11 @@ describe(oneLine`
 			instance.kill();
 		});
 
+		// The admin: the stamp has to be readable for the witness to see it move,
+		// and app access alone does not read `last_access`.
 		const credentials = {
-			email: USER.APP_ACCESS.EMAIL,
-			password: USER.APP_ACCESS.PASSWORD,
+			email: USER.ADMIN.EMAIL,
+			password: USER.ADMIN.PASSWORD,
 		};
 
 		async function login() {
@@ -89,6 +91,7 @@ describe(oneLine`
 			const after = await readMe(refreshed.body.data.access_token);
 
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+			expect(filled.body.data.last_access).toEqual(expect.any(String));
 			expect(after.body.data.last_access).not.toBe(filled.body.data.last_access);
 		});
 
@@ -103,6 +106,7 @@ describe(oneLine`
 			const after = await readMe(first.access_token);
 
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+			expect(filled.body.data.last_access).toEqual(expect.any(String));
 			expect(after.body.data.last_access).not.toBe(filled.body.data.last_access);
 		});
 	});
