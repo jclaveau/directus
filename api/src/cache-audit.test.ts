@@ -969,19 +969,27 @@ describe('an entry nothing can be replayed from', () => {
 		expect(queueCacheAnomaly).not.toHaveBeenCalled();
 	});
 
-	test('transport: a replay that never got an answer', async () => {
+	test.each([
+		['transport', new Error('socket hang up')],
+		[
+			'transport_econnreset',
+			Object.assign(new Error('read'), { code: 'ECONNRESET' }),
+		],
+		[
+			'transport_hpe_header_overflow',
+			Object.assign(new Error('Parse Error: Header overflow'), {
+				code: 'HPE_HEADER_OVERFLOW',
+			}),
+		],
+	])('%s: a replay that never got an answer', async (reason, error) => {
 		fill('rk', { data: [] });
 		described(descriptor());
-		const replay = vi.fn().mockRejectedValue(new Error('socket hang up'));
+		const replay = vi.fn().mockRejectedValue(error);
 
 		const report = await auditCache({ replay });
 
 		expect(report.scanned).toBe(1);
-
-		expect(report.findings[0]).toMatchObject({
-			verdict: 'unreplayable',
-			reason: 'transport',
-		});
+		expect(report.findings[0]).toMatchObject({ verdict: 'unreplayable', reason });
 	});
 
 	test('unreadable: a stored value that does not decompress', async () => {
@@ -1241,6 +1249,33 @@ describe('the loopback replayer', () => {
 		});
 
 		expect(response.status).toBe(201);
+	});
+
+	test(oneLine`
+		reads a tags header past node's 16KB default: a deep read pins one tag per
+		related key, and 370 of them ended every audit of that entry in a header
+		overflow
+	`, async () => {
+		const tags = Array.from({ length: 370 }, (_, index) => {
+			return `student_course_part:teaching_unit.course=${6986500 + index}`;
+		}).join(',');
+
+		expect(Buffer.byteLength(tags)).toBeGreaterThan(16 * 1024);
+
+		server.removeAllListeners('request');
+
+		server.on('request', (_req, res) => {
+			res.setHeader('x-cache-audit-tags', tags);
+			res.end('{"data":[]}');
+		});
+
+		const response = await loopbackReplayer({ host: '127.0.0.1', port })({
+			method: 'GET',
+			path: '/items/student_discipline',
+			headers: {},
+		});
+
+		expect(response.headers['x-cache-audit-tags']).toBe(tags);
 	});
 
 	test('rejects when nothing listens there', async () => {
