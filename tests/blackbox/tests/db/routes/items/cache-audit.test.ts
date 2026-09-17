@@ -1149,6 +1149,11 @@ describe('The cache audit replays live entries against the database', () => {
 				cutOffEnv[vendor]['REDIS'] = `redis://localhost:${proxyPort}`;
 				cutOffEnv[vendor]['REDIS_RETRY_BASE_DELAY'] = '10';
 				cutOffEnv[vendor]['REDIS_RETRY_MAX_DELAY'] = '50';
+				// The schema from the database on every request: rebuilt behind a
+				// Redis lock otherwise, which raises on an outage and answers the
+				// request 500 before the audit is asked (#366). The audit's own
+				// cache is the one under test.
+				cutOffEnv[vendor]['CACHE_SCHEMA'] = 'false';
 
 				const cutOffPort = await getPort();
 				cutOffEnv[vendor].PORT = String(cutOffPort);
