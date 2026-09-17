@@ -23,7 +23,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const COLLECTION = 'read_inflight_purge';
 const FLUSHED = 'read_inflight_flush';
+const BURST = 'read_inflight_burst';
+const BURST_WIDTH = 8;
 const ANOMALIES = 'directus_cache_stats_anomalies';
+const PENDING = 'directus_scoped_cache_pending_purges';
 const cacheStatusHeader = 'x-cache-status';
 
 describe(oneLine`
@@ -51,7 +54,7 @@ describe(oneLine`
 
 		beforeAll(async () => {
 			await CreateCollections(vendor, {
-				collections: [COLLECTION, FLUSHED].map((collection) => {
+				collections: [COLLECTION, FLUSHED, BURST].map((collection) => {
 					return {
 						collection,
 						meta: { scoped_cache_fields: ['slot'] },
@@ -71,6 +74,12 @@ describe(oneLine`
 				CreateItem(vendor, {
 					collection: FLUSHED,
 					item: [{ slot: 'a', label: 'v1' }],
+				}),
+				CreateItem(vendor, {
+					collection: BURST,
+					item: Array.from({ length: BURST_WIDTH }, (_, slot) => {
+						return { slot: String(slot), label: 'v1' };
+					}),
 				}),
 			]);
 
@@ -93,6 +102,7 @@ describe(oneLine`
 			await db.destroy();
 			await DeleteCollection(vendor, { collection: COLLECTION });
 			await DeleteCollection(vendor, { collection: FLUSHED });
+			await DeleteCollection(vendor, { collection: BURST });
 		});
 
 		function readSlotAOf(collection: string) {
@@ -177,6 +187,62 @@ describe(oneLine`
 			// normally — which is what separates the refusal above from a collection
 			// that simply never caches.
 			expect((await readSlotAOf(FLUSHED)).headers[cacheStatusHeader]).toBe('HIT');
+		}, 60_000);
+
+		// A regression net rather than a witness: the race is between two evictions
+		// probing the store within one round trip of each other, and eight reads
+		// crossed at once only make it likely. The deterministic case is the unit
+		// test on `cacheStoreDropsEntries`.
+		it(oneLine`
+			a burst of crossed reads leaves nothing recorded for retry — every eviction
+			took, and none read a neighbour's probe as a store that swallows (#507)
+		`, async () => {
+			await request(getUrl(vendor, env))
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			await db(PENDING)
+				.where({ collection: BURST })
+				.delete();
+
+			const crossed = await Promise.all(
+				Array.from({ length: BURST_WIDTH }, (_, slot) => {
+					return request(getUrl(vendor, env))
+						.get(`/items/${BURST}`)
+						.query({ 'filter[slot][_eq]': String(slot) })
+						.set('Authorization', auth);
+				}),
+			);
+
+			for (const read of crossed) {
+				expect(read.headers[cacheStatusHeader]).toBe('MISS');
+			}
+
+			// One refusal per read says every fill was crossed and evicted — the
+			// probes ran — before the table is read as proof none of them was fooled.
+			for (let attempt = 0; attempt < 40; attempt++) {
+				const refused = await db(ANOMALIES)
+					.where({ reason: 'inflight_purge', detail: BURST })
+					.select('id');
+
+				if (refused.length >= BURST_WIDTH) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			expect(
+				await db(ANOMALIES)
+					.where({ reason: 'inflight_purge', detail: BURST })
+					.select('id'),
+			).toHaveLength(BURST_WIDTH);
+
+			const recorded = await db(PENDING)
+				.where({ collection: BURST })
+				.select('id');
+
+			expect(recorded).toEqual([]);
 		}, 60_000);
 	});
 });

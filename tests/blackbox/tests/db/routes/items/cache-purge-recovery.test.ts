@@ -415,6 +415,108 @@ describe(oneLine`
 		}, 60_000);
 
 		it(oneLine`
+			names an entry once per drain, not once per recorded tag it is a member of —
+			a batch write records one purge per key, and the read spanning both keys is
+			one stale entry, not two (#507)
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await emptyCache();
+			await db(PENDING).delete();
+
+			// Their own rows, so the anomaly count below is this case's alone: the
+			// listing groups by entry over a window that spans the earlier cases.
+			const pair: number[] = (await CreateItem(vendor, {
+				collection: NOTE,
+				item: [{ subject: 'pair-a' }, { subject: 'pair-b' }],
+			})).map((note: { id: number }) => note.id);
+
+			function readPair() {
+				return request(url)
+					.get(`/items/${NOTE}`)
+					.query({ 'filter[id][_in]': pair.join(',') })
+					.set('Authorization', auth);
+			}
+
+			const miss = await readPair();
+			expect(miss.headers[cacheStatusHeader]).toBe('MISS');
+			expect((await readPair()).headers[cacheStatusHeader]).toBe('HIT');
+
+			let described = false;
+
+			for (let attempt = 0; attempt < 45 && described === false; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				described = listed.body.data.some((row: any) => {
+					return row.path === `/items/${NOTE}`
+						&& String(row.query).includes(pair.join(','));
+				});
+
+				if (described === false) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			expect(described).toBe(true);
+
+			await proxy.cut();
+
+			// One failed purge, three recorded targets: the bare tag and one per key.
+			// The read above is a member of both key tags.
+			const written = await request(url)
+				.patch(`/items/${NOTE}`)
+				.send({ keys: pair, data: { subject: `renamed-${Date.now()}` } })
+				.set('Authorization', auth)
+				.catch(async (error: Error) => {
+					await assertInstanceAlive();
+					throw error;
+				});
+
+			await assertInstanceAlive();
+			expect(written.status).toBe(200);
+
+			await proxy.open();
+
+			for (let attempt = 0; attempt < 80; attempt++) {
+				if ((await db(PENDING).select('id')).length === 0) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+
+			let named: any;
+
+			for (let attempt = 0; attempt < 45; attempt++) {
+				const listed = await request(url).get('/utils/cache/anomalies')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				named = listed.body.data.find((row: any) => {
+					return row.reason === 'redis_error'
+						&& row.path === `/items/${NOTE}`
+						&& String(row.query).includes(pair.join(','));
+				});
+
+				if (named !== undefined) {
+					break;
+				}
+
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+			}
+
+			mark(`pair anomaly: ${JSON.stringify(named ?? null)}`);
+
+			expect(named).toBeDefined();
+
+			// Once, though two of the drained targets name it. The listing counts
+			// events per entry, so a per-target report would read 2 here.
+			expect(Number(named.count)).toBe(1);
+		}, 60_000);
+
+		it(oneLine`
 			a purge that succeeds records nothing — the table is written on failure only,
 			so it stays empty on every normal write
 		`, async () => {
