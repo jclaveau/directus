@@ -1220,10 +1220,27 @@ describe('The cache audit replays live entries against the database', () => {
 				const cutAt = new Date();
 				await proxy.cut();
 
+				const said = () => cutOffLog.join('').slice(-6000);
+
+				// The node still answers what needs no cache: its own identity,
+				// and a read of the run history on the audit's own router. What
+				// a request needs on its way there is per node and warm.
+				const me = await request(cutOffUrl)
+					.get('/users/me')
+					.set('Authorization', auth);
+
+				expect(me.statusCode, said()).toBe(200);
+
+				const history = await request(cutOffUrl)
+					.get('/utils/cache/audits')
+					.query({ window: '1h' })
+					.set('Authorization', auth);
+
+				expect(history.statusCode, said()).toBe(200);
+
 				// The run fails rather than reading every entry as gone: a cache
 				// that answers nothing is not one that dropped everything.
 				const refused = await auditFrom(cutOffUrl);
-				const said = () => cutOffLog.join('').slice(-6000);
 
 				expect(refused.statusCode, JSON.stringify(refused.body)).toBe(500);
 
