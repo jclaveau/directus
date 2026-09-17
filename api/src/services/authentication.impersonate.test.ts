@@ -45,7 +45,7 @@ vi.mock('@directus/env', () => {
 				ACCESS_TOKEN_TTL: '15m',
 				REFRESH_TOKEN_TTL: '7d',
 				SESSION_COOKIE_TTL: '1d',
-				IMPERSONATION_TTL: '5m',
+				IMPERSONATION_ENABLED: true,
 			};
 		},
 	};
@@ -81,6 +81,14 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
+function expectExpiresIn(bindings: unknown[], ms: number) {
+	const expires = bindings.find((value): value is Date => value instanceof Date);
+	const left = expires!.getTime() - Date.now();
+
+	expect(left).toBeGreaterThan(ms - 5_000);
+	expect(left).toBeLessThanOrEqual(ms);
+}
+
 test('json mode signs a stateless token naming the impersonator', async () => {
 	tracker.on.select('directus_users').response([admin, jane]);
 
@@ -89,9 +97,10 @@ test('json mode signs a stateless token naming the impersonator', async () => {
 	const result = await new AuthenticationService({ knex: db, schema })
 		.impersonate('jane', { impersonator: 'admin', mode: 'json' });
 
+	// One ACCESS_TOKEN_TTL, like every impersonation
 	expect(result).toEqual({
 		accessToken: expect.any(String),
-		expires: 5 * 60_000,
+		expires: 15 * 60_000,
 		id: 'jane',
 	});
 
@@ -146,6 +155,9 @@ test('cookie mode opens a row carrying the impersonator, no session', async () =
 
 	const [row] = tracker.history.insert;
 
+	// The row lives one access token, not REFRESH_TOKEN_TTL: a refresh rolls it
+	expectExpiresIn(row!.bindings, 15 * 60_000);
+
 	expect(row!.sql).toContain('"impersonator_session"');
 
 	expect(row!.bindings).toEqual(
@@ -166,7 +178,10 @@ test("session mode records the impersonator's own session for Stop", async () =>
 		}),
 	}).impersonate('jane', { impersonator: 'admin', mode: 'session' });
 
-	expect(result.expires).toBe(24 * 60 * 60_000);
+	// One access token, not SESSION_COOKIE_TTL: the Studio schedules its
+	// refresh from `expires`, and the row goes when none comes
+	expect(result.expires).toBe(15 * 60_000);
+	expectExpiresIn(tracker.history.insert[0]!.bindings, 15 * 60_000);
 
 	expect(jwt.verify(result.accessToken, 'super-secure-secret')).toMatchObject({
 		session: result.refreshToken,
@@ -308,9 +323,34 @@ test('logout ends the row rotated under the caller too', async () => {
 	await new AuthenticationService({ knex: db, schema }).logout('old');
 
 	expect(tracker.history.select[1]!.bindings)
-		.toEqual(['old', 'next', 'old', 'next']);
+		.toEqual(['old', 'next', 'old', 'next', 'jane']);
 
 	expect(tracker.history.delete[0]!.bindings).toEqual(['old', 'next']);
+});
+
+test('a logout ends every impersonation the caller runs, any mode', async () => {
+	tracker.on.select((raw) => raw.sql.includes('inner join')).response([
+		{ ...admin, impersonator: null, impersonator_session: null, next_token: null },
+	]);
+
+	tracker.on.select('directus_sessions').response([
+		{ token: 'admin-session', user: 'admin', impersonator: null },
+		{ token: 'cookie-imp', user: 'jane', impersonator: 'admin' },
+	]);
+
+	tracker.on.delete('directus_sessions').response([]);
+	tracker.on.insert('directus_activity').response([]);
+	vi.mocked(getAuthProvider).mockReturnValue({ logout: vi.fn() } as never);
+
+	await new AuthenticationService({ knex: db, schema }).logout('admin-session');
+
+	expect(tracker.history.select[1]!.sql).toMatch(/or "impersonator" = \?\)/);
+
+	expect(tracker.history.select[1]!.bindings)
+		.toEqual(['admin-session', 'admin-session', 'admin']);
+
+	expect(tracker.history.delete[0]!.bindings)
+		.toEqual(['admin-session', 'cookie-imp']);
 });
 
 test('a plain logout ends its row and tells the provider', async () => {

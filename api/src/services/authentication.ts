@@ -262,6 +262,7 @@ export class AuthenticationService {
 				session_impersonator: 's.impersonator',
 				session_impersonator_session: 's.impersonator_session',
 				impersonator_status: 'i.status',
+				impersonator_role: 'i.role',
 				user_id: 'u.id',
 				user_first_name: 'u.first_name',
 				user_last_name: 'u.last_name',
@@ -315,11 +316,8 @@ export class AuthenticationService {
 
 		const impersonated = record.session_impersonator !== null;
 
-		// A suspended impersonator acts for nobody; their kick ends this row when
-		// the status changes through the service, this is for one changed beside it
-		if (impersonated && record.impersonator_status !== 'active') {
-			await endSessions(this.knex, { tokens: [refreshToken] });
-			throw new InvalidCredentialsError();
+		if (impersonated) {
+			await this.refuseLapsedImpersonation(refreshToken, record);
 		}
 
 		// An impersonated session is the impersonator's doing, not the target's:
@@ -347,7 +345,17 @@ export class AuthenticationService {
 
 		let newRefreshToken = record.session_next_token ?? nanoid(64);
 		const sessionDuration = env[options?.session ? 'SESSION_COOKIE_TTL' : 'REFRESH_TOKEN_TTL'];
-		const refreshTokenExpiration = new Date(Date.now() + getMilliseconds(sessionDuration, 0));
+
+		// An impersonation lives one access token past its last refresh: a tab
+		// closed, a client gone, and it is over. The impersonator's own session
+		// keeps its own life.
+		const rowDuration = impersonated
+			? env['ACCESS_TOKEN_TTL']
+			: sessionDuration;
+
+		const refreshTokenExpiration = new Date(
+			Date.now() + getMilliseconds(rowDuration, 0),
+		);
 
 		if (options?.session) {
 			newRefreshToken = await this.updateStatefulSession(record, refreshToken, newRefreshToken, refreshTokenExpiration);
@@ -366,7 +374,9 @@ export class AuthenticationService {
 			{
 				provider: record.user_provider,
 				type: 'refresh',
-				ttl: accessTokenTtl(options?.session),
+				ttl: impersonated
+					? env['ACCESS_TOKEN_TTL'] as StringValue | number
+					: accessTokenTtl(options?.session),
 				...(options?.session && { session: newRefreshToken }),
 				...(record.share_id && { share: record.share_id }),
 				...(impersonated && { impersonator: record.session_impersonator }),
@@ -383,7 +393,9 @@ export class AuthenticationService {
 		// the impersonator's own row — and Stop re-signs their cookie from it.
 		if (record.session_impersonator_session) {
 			await this.knex('directus_sessions')
-				.update({ expires: refreshTokenExpiration })
+				.update({
+					expires: new Date(Date.now() + getMilliseconds(sessionDuration, 0)),
+				})
 				.where({ token: record.session_impersonator_session });
 		}
 
@@ -410,11 +422,12 @@ export class AuthenticationService {
 	 * too. Nothing of the login path runs: no provider, no rate limiter, no
 	 * activity, no `last_access`; the endpoint writes the trail's start, once.
 	 *
-	 * `json` is a stateless token capped by `IMPERSONATION_TTL` (it cannot be
-	 * ended from outside, so it stays short). `cookie` and `session` open a row
-	 * carrying the impersonator, ended by logout, Stop, or the cascade on the
-	 * impersonator's own session — which `session` records, since Stop re-signs
-	 * the impersonator's cookie from it.
+	 * Every token and row lives one `ACCESS_TOKEN_TTL`: `json` is stateless and
+	 * simply expires, `cookie` and `session` open a row carrying the impersonator
+	 * that a refresh rolls for another one, so an impersonation nobody refreshes
+	 * is over. A row also ends by logout — the impersonator's own included — by
+	 * Stop, or with the impersonator's session, which `session` records since
+	 * Stop re-signs the impersonator's cookie from it.
 	 */
 	async impersonate(
 		target: string,
@@ -484,7 +497,7 @@ export class AuthenticationService {
 			const { accessToken, expires } = await this.mint(user, {
 				provider: user.provider,
 				type: 'impersonate',
-				ttl: options.ttl ?? (env['IMPERSONATION_TTL'] as StringValue),
+				ttl: options.ttl ?? (env['ACCESS_TOKEN_TTL'] as StringValue | number),
 				impersonator: impersonator.id,
 			});
 
@@ -497,21 +510,15 @@ export class AuthenticationService {
 		const { accessToken, expires } = await this.mint(user, {
 			provider: user.provider,
 			type: 'impersonate',
-			ttl: accessTokenTtl(session),
+			ttl: env['ACCESS_TOKEN_TTL'] as StringValue | number,
 			...(session && { session: refreshToken }),
 			impersonator: impersonator.id,
 		});
 
-		const rowTtl = env[
-			session
-				? 'SESSION_COOKIE_TTL'
-				: 'REFRESH_TOKEN_TTL'
-		];
-
 		await this.knex('directus_sessions').insert({
 			token: refreshToken,
 			user: user.id,
-			expires: new Date(Date.now() + getMilliseconds(rowTtl, 0)),
+			expires: new Date(Date.now() + expires),
 			ip: this.accountability?.ip,
 			user_agent: this.accountability?.userAgent,
 			origin: this.accountability?.origin,
@@ -690,12 +697,50 @@ export class AuthenticationService {
 
 			// A logout under impersonation is a logout: the impersonator's own row
 			// goes with it, and Stop is the only way back to it. A row rotated under
-			// the caller within the grace period goes too.
+			// the caller within the grace period goes too. Either way the one logging
+			// out takes every impersonation they run along, whatever browser opened it.
 			const tokens = [refreshToken, record.next_token, record.impersonator_session];
 
 			await endSessions(this.knex, {
 				tokens: tokens.filter((token): token is string => typeof token === 'string'),
+				impersonator: record.impersonator ?? user.id,
 			});
+		}
+	}
+
+	/**
+	 * A row minted for someone whose impersonator may no longer open it: gone,
+	 * suspended, no longer an admin (a bot needs none), or the feature switched
+	 * off since. Their kick ends the row when it changes through the service;
+	 * this is for one changed beside it.
+	 */
+	private async refuseLapsedImpersonation(
+		refreshToken: string,
+		record: {
+			session_impersonator: string;
+			impersonator_status: string | null;
+			impersonator_role: string | null;
+		},
+	): Promise<void> {
+		let lapsed = env['IMPERSONATION_ENABLED'] !== true
+			|| record.impersonator_status !== 'active';
+
+		if (!lapsed && record.impersonator_role !== BOTS_ROLE) {
+			const access = await fetchGlobalAccess(
+				{
+					user: record.session_impersonator,
+					roles: await fetchRolesTree(record.impersonator_role, this.knex),
+					ip: this.accountability?.ip ?? null,
+				},
+				this.knex,
+			);
+
+			lapsed = !access.admin;
+		}
+
+		if (lapsed) {
+			await endSessions(this.knex, { tokens: [refreshToken] });
+			throw new InvalidCredentialsError();
 		}
 	}
 

@@ -4,7 +4,15 @@ import type { Accountability, MutationOptions } from '@directus/types';
 import { UserIntegrityCheckFlag } from '@directus/types';
 import knex from 'knex';
 import { MockClient, createTracker } from 'knex-mock-client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+	afterEach,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+	type MockInstance,
+} from 'vitest';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { verifyJWT } from '../utils/jwt.js';
 import { withMeta } from '../utils/read-meta.js';
@@ -449,6 +457,78 @@ describe('Integration Tests', () => {
 				expect(superUpdateManySpy.mock.lastCall![0]).toEqual([mockUser.id]);
 				expect(superUpdateManySpy.mock.lastCall![1]).toEqual({ role: 'invite-role' });
 			});
+
+			it('is refused under impersonation before any lookup', async () => {
+				const getUserByEmail = vi.spyOn(
+					UsersService.prototype as any,
+					'getUserByEmail',
+				);
+
+				const service = new UsersService({
+					knex: db,
+					schema,
+					accountability: {
+						role: 'test',
+						admin: true,
+						impersonator: 'admin-id',
+					} as Accountability,
+				});
+
+				await expect(service.inviteUser('user@example.com', 'invite-role', null))
+					.rejects
+					.toThrow(new ForbiddenError({ reason: 'impersonation_credentials' }));
+
+				expect(getUserByEmail).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('setTfaSecret', () => {
+			let superUpdateOneSpy: MockInstance;
+
+			beforeEach(() => {
+				superUpdateOneSpy = vi.spyOn(ItemsService.prototype, 'updateOne')
+					.mockResolvedValue('user-id-3');
+			});
+
+			afterEach(() => {
+				superUpdateOneSpy.mockRestore();
+			});
+
+			it('writes the secret where updateMany would refuse it', async () => {
+				const service = new UsersService({
+					knex: db,
+					schema,
+					accountability: { user: 'user-id-3', role: 'test' } as Accountability,
+				});
+
+				await service.setTfaSecret('user-id-3', 'secret');
+
+				expect(superUpdateOneSpy)
+					.toHaveBeenCalledWith('user-id-3', { tfa_secret: 'secret' });
+
+				expect(superUpdateManySpy).not.toHaveBeenCalled();
+			});
+
+			it.each([['a secret', 'secret'], ['a reset', null]])(
+				'%s is refused under impersonation: the factor is the target\'s',
+				async (_, secret) => {
+					const service = new UsersService({
+						knex: db,
+						schema,
+						accountability: {
+							user: 'user-id-3',
+							role: 'test',
+							impersonator: 'admin-id',
+						} as Accountability,
+					});
+
+					await expect(service.setTfaSecret('user-id-3', secret))
+						.rejects
+						.toThrow(new ForbiddenError({ reason: 'impersonation_credentials' }));
+
+					expect(superUpdateOneSpy).not.toHaveBeenCalled();
+				},
+			);
 		});
 
 		describe('acceptInvite', () => {

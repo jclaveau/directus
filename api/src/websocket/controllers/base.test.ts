@@ -17,6 +17,7 @@ vi.mock('@directus/env', () => {
 				WEBSOCKETS_REST_AUTH: 'handshake',
 				WEBSOCKETS_REST_AUTH_TIMEOUT: 10,
 				RATE_LIMITER_ENABLED: false,
+				RELATIONAL_BATCH_SIZE: 2,
 			};
 		},
 	};
@@ -175,6 +176,30 @@ test('the periodic check ends a session socket whose row is gone', async () => {
 
 	expect(alive.close).not.toHaveBeenCalled();
 	expect(bearer.close).not.toHaveBeenCalled();
+});
+
+test('the periodic check asks in batches of RELATIONAL_BATCH_SIZE', async () => {
+	const held = ['a', 'b', 'c'].map((session) => client({ user: 'jane', session }));
+
+	for (const each of held) {
+		controller.clients.add(each);
+	}
+
+	tracker.on.select('directus_sessions')
+		.responseOnce([{ token: 'a' }, { token: 'b' }]);
+
+	tracker.on.select('directus_sessions').responseOnce([]);
+
+	await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+	// Each batch settles on its own real-time turn
+	await vi.waitFor(() => expect(held[2]!.close).toHaveBeenCalled());
+
+	expect(tracker.history.select.map((query) => query.bindings))
+		.toEqual([['a', 'b'], ['c']]);
+
+	expect(held[0]!.close).not.toHaveBeenCalled();
+	expect(held[1]!.close).not.toHaveBeenCalled();
+	expect(held[2]!.close).toHaveBeenCalledOnce();
 });
 
 test('a database the periodic check cannot reach is a warning', async () => {

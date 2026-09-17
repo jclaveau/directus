@@ -65,6 +65,11 @@ export function globalResolvers(gql: GraphQLService, schemaComposer: SchemaCompo
 				otp: GraphQLString,
 			},
 			resolve: async (_, args, { req, res }) => {
+				// A login is a session of one's own: nothing to attribute
+				if (gql.accountability?.impersonator) {
+					throw new ForbiddenError({ reason: 'impersonation_login' });
+				}
+
 				const accountability: Accountability = createDefaultAccountability();
 
 				if (req?.ip) accountability.ip = req.ip;

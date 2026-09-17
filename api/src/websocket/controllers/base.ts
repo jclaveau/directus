@@ -23,6 +23,7 @@ import {
 	type SessionEndedEvent,
 } from '../../utils/end-sessions.js';
 import { getIPFromReq } from '../../utils/get-ip-from-req.js';
+import { chunk } from '../../utils/lodash-es-used.js';
 import { authenticateConnection, authenticationSuccess } from '../authenticate.js';
 import { WebSocketError, handleWebSocketError } from '../errors.js';
 import { AuthMode, WebSocketAuthMessage } from '../messages.js';
@@ -135,13 +136,18 @@ export default abstract class SocketController {
 			return;
 		}
 
-		const alive: { token: string }[] = await getDatabase()
-			.select('token')
-			.from('directus_sessions')
-			.whereIn('token', [...sessions.keys()]);
+		// One bind parameter per socket: kept under the driver's cap
+		const batchSize = Number(useEnv()['RELATIONAL_BATCH_SIZE']);
 
-		for (const row of alive) {
-			sessions.delete(row.token);
+		for (const tokens of chunk([...sessions.keys()], batchSize)) {
+			const alive: { token: string }[] = await getDatabase()
+				.select('token')
+				.from('directus_sessions')
+				.whereIn('token', tokens);
+
+			for (const row of alive) {
+				sessions.delete(row.token);
+			}
 		}
 
 		for (const clients of sessions.values()) {

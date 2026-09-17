@@ -262,14 +262,8 @@ export class UsersService extends ItemsService {
 		data: Partial<Item>,
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
-		// Whatever IMPERSONATION_WRITES says: these fields are the only callers
-		// of `clearUserSessions` on the target, so refusing them is what keeps
-		// an impersonation from ever ending the target's real sessions.
-		if (
-			this.accountability?.impersonator
-			&& IMPERSONATION_CREDENTIAL_FIELDS.some((field) => field in data)
-		) {
-			throw new ForbiddenError({ reason: 'impersonation_credentials' });
+		if (IMPERSONATION_CREDENTIAL_FIELDS.some((field) => field in data)) {
+			this.refuseCredentialsUnderImpersonation();
 		}
 
 		try {
@@ -372,7 +366,36 @@ export class UsersService extends ItemsService {
 		return keys;
 	}
 
+	/**
+	 * Whatever IMPERSONATION_WRITES says, the credentials are the target's own:
+	 * the fields above are the only callers of `clearUserSessions` on them, an
+	 * invite hands a third user a secret, and the TFA secret is a login factor.
+	 * Every service path to one of those ends here, so the transports' path
+	 * lists are a belt, not the guard.
+	 */
+	private refuseCredentialsUnderImpersonation(): void {
+		if (this.accountability?.impersonator) {
+			throw new ForbiddenError({ reason: 'impersonation_credentials' });
+		}
+	}
+
+	/**
+	 * The one write of `tfa_secret`: `updateMany` refuses it from every caller,
+	 * the TFA flow sets it here once the OTP proved the secret (or clears it).
+	 */
+	async setTfaSecret(key: PrimaryKey, secret: string | null): Promise<void> {
+		this.refuseCredentialsUnderImpersonation();
+
+		await new ItemsService('directus_users', {
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		}).updateOne(key, { tfa_secret: secret });
+	}
+
 	async inviteUser(email: string | string[], role: string, url: string | null, subject?: string | null): Promise<void> {
+		this.refuseCredentialsUnderImpersonation();
+
 		const opts: MutationOptions = {};
 
 		try {

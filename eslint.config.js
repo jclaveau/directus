@@ -249,6 +249,26 @@ export default typescriptEslint.config(
 		},
 	},
 
+	// A write to directus_users through the generic service skips every rule
+	// UsersService holds: the password policy, e-mail uniqueness, the manual
+	// tfa_secret refusal, the session clearing, the last-admin check and the
+	// impersonation credential guard. UsersService itself owns the one raw
+	// write (`setTfaSecret`); a dynamic collection goes through getService().
+	// https://github.com/jclaveau/directus/issues/502
+	{
+		files: ['api/src/**/*.ts'],
+		ignores: ['api/src/services/users.ts'],
+		rules: {
+			'no-restricted-syntax': [
+				'error',
+				{
+					selector: "NewExpression[callee.name='ItemsService'][arguments.0.value='directus_users']",
+					message: 'Use UsersService (or getService() for a dynamic collection): its guards must run.',
+				},
+			],
+		},
+	},
+
 	// Every process of a deployment builds this program — the workers, the
 	// autoscaler, each one-shot call a deploy makes — and a command's module is the
 	// API graph behind it: express, knex, every controller and service for `start`

@@ -14,6 +14,9 @@ import { handleWebSocketError } from '../errors.js';
 import { ConnectionParams } from '../messages.js';
 import type { AuthenticationState, GraphQLSocket, UpgradeContext, WebSocketClient } from '../types.js';
 import { getMessageType } from '../utils/message.js';
+import {
+	refuseImpersonatedMutation,
+} from '../utils/refuse-impersonated-mutation.js';
 import SocketController from './base.js';
 import { registerWebSocketEvents } from './hooks.js';
 
@@ -41,6 +44,9 @@ export class GraphQLSubscriptionController extends SocketController {
 				});
 
 				return service.getSchema();
+			},
+			onSubscribe: (ctx, _id, payload) => {
+				return refuseImpersonatedMutation(ctx.extra.client.accountability, payload);
 			},
 		});
 

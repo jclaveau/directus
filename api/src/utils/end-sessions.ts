@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import { useBus } from '../bus/index.js';
 
 export type SessionSelector =
-	| { tokens: string[] }
+	/** The rows named, and every impersonation this user runs, any mode */
+	| { tokens: string[]; impersonator?: string | undefined }
 	| { users: PrimaryKey[]; exceptToken?: string | undefined };
 
 export type EndedSession = {
@@ -58,6 +59,10 @@ export async function endSessions(
 			rows
 				.whereIn('token', selector.tokens)
 				.orWhereIn('impersonator_session', selector.tokens);
+
+			if (selector.impersonator) {
+				rows.orWhere('impersonator', selector.impersonator);
+			}
 		});
 	}
 	else {

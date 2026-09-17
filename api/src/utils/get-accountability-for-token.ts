@@ -1,5 +1,6 @@
 import { InvalidCredentialsError } from '@directus/errors';
 import type { Accountability } from '@directus/types';
+import { BOTS_ROLE } from '../bots.js';
 import getDatabase from '../database/index.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
@@ -50,8 +51,9 @@ export async function getAccountabilityForToken(
 			accountability.grantedDbConnections = grantedDbConnections;
 
 			// The identity is the target's, the pool the impersonator's: a bot's
-			// policy says which one its job runs on. A suspended one acts for
-			// nobody, whatever a token minted before says.
+			// policy says which one its job runs on. One suspended, or no longer
+			// the admin who could open it, acts for nobody, whatever a token
+			// minted before says.
 			if (payload.impersonator) {
 				const impersonator = await database
 					.select('role', 'status')
@@ -71,6 +73,10 @@ export async function getAccountabilityForToken(
 					},
 					database,
 				);
+
+				if (!own.admin && impersonator.role !== BOTS_ROLE) {
+					throw new InvalidCredentialsError();
+				}
 
 				accountability.grantedDbConnections = own.grantedDbConnections;
 			}

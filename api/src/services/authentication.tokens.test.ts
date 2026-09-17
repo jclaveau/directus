@@ -5,6 +5,7 @@ import knex from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { getAuthProvider } from '../auth.js';
+import { BOTS_ROLE } from '../bots.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import {
 	fetchGlobalAccess,
@@ -68,21 +69,20 @@ vi.mock('../rate-limiter.js', () => {
 	};
 });
 
-vi.mock('@directus/env', () => {
+const env = vi.hoisted(() => {
 	return {
-		useEnv: () => {
-			return {
-				SECRET: 'super-secure-secret',
-				EMAIL_TEMPLATES_PATH: './templates',
-				ACCESS_TOKEN_TTL: '15m',
-				REFRESH_TOKEN_TTL: '7d',
-				SESSION_COOKIE_TTL: '1d',
-				SESSION_REFRESH_GRACE_PERIOD: '10s',
-				LOGIN_STALL_TIME: 0,
-			};
-		},
+		SECRET: 'super-secure-secret',
+		EMAIL_TEMPLATES_PATH: './templates',
+		ACCESS_TOKEN_TTL: '15m',
+		REFRESH_TOKEN_TTL: '7d',
+		SESSION_COOKIE_TTL: '1d',
+		SESSION_REFRESH_GRACE_PERIOD: '10s',
+		LOGIN_STALL_TIME: 0,
+		IMPERSONATION_ENABLED: true,
 	};
 });
+
+vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 vi.mock('../permissions/modules/fetch-global-access/fetch-global-access.js');
 vi.mock('../permissions/lib/fetch-roles-tree.js');
@@ -104,6 +104,7 @@ const session = {
 	session_impersonator: null,
 	session_impersonator_session: null,
 	impersonator_status: null,
+	impersonator_role: null,
 	user_id: 'jane',
 	user_status: 'active',
 	user_provider: 'default',
@@ -240,13 +241,32 @@ test('refresh rotates the row, asks the provider, touches last_access', async ()
 		.toEqual(expect.arrayContaining(['jane']));
 });
 
+const impersonatedSession = {
+	...session,
+	session_impersonator: 'admin',
+	session_impersonator_session: 'admin-session',
+	impersonator_status: 'active',
+	impersonator_role: 'admin-role',
+};
+
+const target = { app: true, admin: false, grantedDbConnections: [] };
+const stillAdmin = { app: true, admin: true, grantedDbConnections: [] };
+
+function expectExpiresIn(bindings: unknown[], ms: number) {
+	const expires = bindings.find((value): value is Date => value instanceof Date);
+	const left = expires!.getTime() - Date.now();
+
+	expect(left).toBeGreaterThan(ms - 5_000);
+	expect(left).toBeLessThanOrEqual(ms);
+}
+
 test('refresh of an impersonated session keeps the target out of it', async () => {
-	tracker.on.select('directus_sessions').response({
-		...session,
-		session_impersonator: 'admin',
-		session_impersonator_session: 'admin-session',
-		impersonator_status: 'active',
-	});
+	tracker.on.select('directus_sessions').response(impersonatedSession);
+
+	// The target's access, then the impersonator's own: still the admin who opened it
+	vi.mocked(fetchGlobalAccess)
+		.mockResolvedValueOnce(target)
+		.mockResolvedValueOnce(stillAdmin);
 
 	// updateStatefulSession: the grace-period update claims the row
 	tracker.on.update('directus_sessions').response([{ next_token: 'x' }]);
@@ -272,12 +292,78 @@ test('refresh of an impersonated session keeps the target out of it', async () =
 	const sqls = tracker.history.update.map((query) => query.sql);
 	expect(sqls.some((sql) => sql.includes('last_access'))).toBe(false);
 
-	// The impersonator's own row lives as long as the impersonated one
+	expect(fetchGlobalAccess).toHaveBeenNthCalledWith(
+		2,
+		expect.objectContaining({ user: 'admin' }),
+		expect.anything(),
+	);
+
+	// The impersonation rolls one access token; the impersonator's own row
+	// lives its own session out
+	expect(result.expires).toBe(15 * 60_000);
+	expectExpiresIn(tracker.history.insert[0]!.bindings, 15 * 60_000);
+
 	const own = tracker.history.update.find((query) => {
 		return query.bindings.includes('admin-session');
 	});
 
 	expect(own!.sql).toContain('expires');
+	expectExpiresIn(own!.bindings, 24 * 60 * 60_000);
+});
+
+test.each([
+	['demoted from admin', {}, { admin: false }],
+	['switched off', { IMPERSONATION_ENABLED: false }, stillAdmin],
+])('refresh dies with its impersonator %s', async (_, flags, own) => {
+	Object.assign(env, flags);
+
+	tracker.on.select('directus_sessions').responseOnce(impersonatedSession);
+
+	tracker.on.select('directus_sessions')
+		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
+
+	tracker.on.delete('directus_sessions').response([]);
+	tracker.on.insert('directus_activity').response([]);
+
+	vi.mocked(fetchGlobalAccess)
+		.mockResolvedValueOnce(target)
+		.mockResolvedValueOnce({ ...target, ...own });
+
+	try {
+		await expect(
+			new AuthenticationService({ knex: db, schema })
+				.refresh('imp-token', { session: true }),
+		).rejects.toThrow(InvalidCredentialsError);
+	}
+	finally {
+		env.IMPERSONATION_ENABLED = true;
+	}
+
+	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token']);
+	expect(tracker.history.update).toHaveLength(0);
+
+	expect(tracker.history.insert.map((query) => query.sql))
+		.not.toContain('directus_sessions');
+});
+
+test('a bot impersonator needs no admin access to refresh', async () => {
+	tracker.on.select('directus_sessions').response({
+		...impersonatedSession,
+		session_impersonator_session: null,
+		impersonator_role: BOTS_ROLE,
+	});
+
+	tracker.on.update('directus_sessions').response([]);
+	tracker.on.delete('directus_sessions').response([]);
+
+	const result = await new AuthenticationService({ knex: db, schema })
+		.refresh('imp-token');
+
+	expect(jwt.verify(result.accessToken, 'super-secure-secret'))
+		.toMatchObject({ impersonator: 'admin' });
+
+	// Only the target's access was read
+	expect(fetchGlobalAccess).toHaveBeenCalledTimes(2);
 });
 
 test('refresh of an impersonated session ends with its impersonator', async () => {

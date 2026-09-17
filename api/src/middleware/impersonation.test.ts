@@ -99,3 +99,19 @@ test.each([
 
 	expect(next).not.toHaveBeenCalled();
 });
+
+test.each([
+	['/auth/login'],
+	['/auth/login/ldap'],
+	['/Auth/Login/'],
+])('refuses POST %s with writes on: no login as another', (path) => {
+	vi.mocked(useEnv).mockReturnValue({ IMPERSONATION_WRITES: true });
+
+	expect(() => {
+		handler(request('POST', path, 'admin'), {} as never, next);
+	}).toThrow(
+		expect.objectContaining({ extensions: { reason: 'impersonation_login' } }),
+	);
+
+	expect(next).not.toHaveBeenCalled();
+});
