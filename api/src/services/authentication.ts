@@ -23,6 +23,7 @@ import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fe
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
 import { scopedCachePurgeEnabled } from '../scoped-cache/index.js';
 import type { DirectusTokenPayload, Session, User } from '../types/index.js';
+import { actorFields } from '../utils/actor-fields.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
@@ -269,10 +270,8 @@ export class AuthenticationService {
 		if (this.accountability) {
 			await this.activityService.createOne({
 				action: Action.LOGIN,
+				...actorFields(this.accountability),
 				user: user.id,
-				ip: this.accountability.ip,
-				user_agent: this.accountability.userAgent,
-				origin: this.accountability.origin,
 				collection: 'directus_users',
 				item: user.id,
 			});
