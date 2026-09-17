@@ -70,6 +70,7 @@ describe('getAccountabilityForToken', async () => {
 				role: 'role-id',
 				admin_access: 1,
 				app_access: 1,
+				impersonator: 'admin-id',
 			},
 			'super-secure-secret',
 			{ issuer: 'directus' },
@@ -93,6 +94,7 @@ describe('getAccountabilityForToken', async () => {
 			roles: [],
 			ip: null,
 			share: 'share-id',
+			impersonator: 'admin-id',
 			grantedDbConnections: ['premium'],
 		});
 	});

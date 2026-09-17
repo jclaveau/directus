@@ -31,6 +31,10 @@ export async function getAccountabilityForToken(
 
 			if (payload.share) accountability.share = payload.share;
 
+			if (payload.impersonator) {
+				accountability.impersonator = payload.impersonator;
+			}
+
 			if (payload.id) accountability.user = payload.id;
 
 			accountability.role = payload.role;

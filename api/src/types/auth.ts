@@ -36,6 +36,7 @@ export type DirectusTokenPayload = {
 	app_access: boolean | number;
 	admin_access: boolean | number;
 	share?: string;
+	impersonator?: string;
 };
 
 export type ShareData = {

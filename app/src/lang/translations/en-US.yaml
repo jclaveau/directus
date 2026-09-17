@@ -1317,6 +1317,7 @@ fields:
     collection: Collection
     timestamp: Action On
     user: Action By
+    impersonator: Impersonator
     comment: Comment
     user_agent: User Agent
     origin: Origin
@@ -1538,6 +1539,8 @@ field_options:
     create: Create
     update: Update
     delete: Delete
+    impersonate: Impersonate
+    impersonate_end: Stop Impersonating
   directus_collections:
     track_activity_revisions: Track Activity & Revisions
     only_track_activity: Only Track Activity

@@ -249,6 +249,8 @@ export class AuthenticationService {
 			.select({
 				session_expires: 's.expires',
 				session_next_token: 's.next_token',
+				session_impersonator: 's.impersonator',
+				session_impersonator_session: 's.impersonator_session',
 				user_id: 'u.id',
 				user_first_name: 'u.first_name',
 				user_last_name: 'u.last_name',
@@ -299,7 +301,12 @@ export class AuthenticationService {
 			this.knex,
 		);
 
-		if (record.user_id) {
+		// An impersonated session is the impersonator's doing, not the target's:
+		// oauth2/openid would rotate the target's IdP refresh token, LDAP re-bind as
+		// them, and `last_access` would say they were here.
+		const impersonated = record.session_impersonator !== null;
+
+		if (record.user_id && !impersonated) {
 			const provider = getAuthProvider(record.user_provider);
 
 			await provider.refresh({
@@ -342,13 +349,22 @@ export class AuthenticationService {
 				ttl: accessTokenTtl(options?.session),
 				...(options?.session && { session: newRefreshToken }),
 				...(record.share_id && { share: record.share_id }),
+				...(impersonated && { impersonator: record.session_impersonator }),
 			},
 		);
 
-		if (record.user_id) {
+		if (record.user_id && !impersonated) {
 			await this.knex('directus_users')
 				.update({ last_access: new Date() })
 				.where({ id: record.user_id });
+		}
+
+		// The browser holds the impersonated cookie now, so nothing else refreshes
+		// the impersonator's own row — and Stop re-signs their cookie from it.
+		if (record.session_impersonator_session) {
+			await this.knex('directus_sessions')
+				.update({ expires: refreshTokenExpiration })
+				.where({ token: record.session_impersonator_session });
 		}
 
 		// Clear expired sessions for the current user
@@ -378,10 +394,11 @@ export class AuthenticationService {
 		user: { id: string | null; role: string | null },
 		options: {
 			provider: string;
-			type: 'login' | 'refresh';
+			type: 'login' | 'refresh' | 'impersonate';
 			ttl: StringValue | number;
 			session?: string;
 			share?: string;
+			impersonator?: string;
 		},
 	): Promise<{ accessToken: string; expires: number }> {
 		const roles = await fetchRolesTree(user.role, this.knex);
@@ -400,6 +417,10 @@ export class AuthenticationService {
 
 		if (options.session) {
 			tokenPayload.session = options.session;
+		}
+
+		if (options.impersonator) {
+			tokenPayload.impersonator = options.impersonator;
 		}
 
 		if (options.share) {
@@ -485,6 +506,8 @@ export class AuthenticationService {
 			token: newSessionToken,
 			user: sessionRecord['user_id'],
 			share: sessionRecord['share_id'],
+			impersonator: sessionRecord['session_impersonator'],
+			impersonator_session: sessionRecord['session_impersonator_session'],
 			expires: sessionExpiration,
 			ip: this.accountability?.ip,
 			user_agent: this.accountability?.userAgent,
