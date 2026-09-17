@@ -20,6 +20,7 @@ import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
+import { endSessions } from '../utils/end-sessions.js';
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
@@ -120,15 +121,7 @@ export class UsersService extends ItemsService {
 	 * Clear users' sessions to log them out
 	 */
 	private async clearUserSessions(userKeys: PrimaryKey[], excludeSession?: string): Promise<void> {
-		if (excludeSession) {
-			await this.knex
-				.from('directus_sessions')
-				.whereIn('user', userKeys)
-				.andWhereNot('token', '=', excludeSession)
-				.delete();
-		} else {
-			await this.knex.from('directus_sessions').whereIn('user', userKeys).delete();
-		}
+		await endSessions(this.knex, { users: userKeys, exceptToken: excludeSession });
 	}
 
 	/**
