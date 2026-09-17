@@ -1199,6 +1199,18 @@ describe('The cache audit replays live entries against the database', () => {
 				await auditSettled({ collection: ROWS }, 1);
 				const { audited_at: examinedAt } = await descriptor();
 
+				// One read through the node before the cut: the same entry, so
+				// the two share the cache; and its permission lookups, which the
+				// node keeps locally — cold, they reach Redis through a client
+				// that raises on an outage, and the request dies before the audit
+				// is asked (the permission cache is not the audit's, see #366).
+				const shared = await request(cutOffUrl)
+					.get(`/items/${ROWS}`)
+					.query('filter[owner][_eq]=acme')
+					.set('Authorization', auth);
+
+				expect(shared.headers[cacheStatusHeader]).toBe('HIT');
+
 				const cutAt = new Date();
 				await proxy.cut();
 

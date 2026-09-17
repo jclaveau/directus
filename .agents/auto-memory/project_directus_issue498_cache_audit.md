@@ -156,3 +156,82 @@ unit, acceptance/Playwright, CodeQL) as of head `ef1588fd73`.
 - Drain lag trap: descriptors land on the 1 s `CACHE_STATS_DRAIN_SCHEDULE`, a
   refill on the same key keeps the old `last_filled` until then → a bb witness
   of "refilled row drops behind" must poll `last_filled >= refill time` first.
+
+**Run answer, retire, time budget, in-flight claim (2026-09-17, heads
+23b00f76 → fe7f6e90 → f7c35c99):**
+- Page/tags split (6db34d33): bodies and tags are fetched only for the
+  entries a page will examine, gated on EXISTS; the expiry sidecar is read
+  ONCE per page.
+- A run answers as the history records it (`runOf(row)`), findings are
+  paged from `directus_cache_audit_findings` (`GET /utils/cache/audits/:id/
+  findings`); the report is no longer the in-memory object.
+- `gone_at` (timestamp(3), descriptors): the audit stamps it when
+  `cache.hasMany` says the entry is not held (`retireCacheAuditQueue(keys,
+  askedAt)` guarded `last_filled <= askedAt`); every fill writes `gone_at:
+  null` through the descriptor merge; queue + horizon filter `gone_at IS
+  NULL`; PG index is partial on it. Descriptors are KEPT (the stats
+  dimension; the reaper handles orphans) — retire only takes them out of the
+  walk. Consequence: `cache_key` is namespace-agnostic, so two
+  `CACHE_NAMESPACE`s on one DB is UNSUPPORTED (a node retires what it cannot
+  hold) — the CLI bb rig had exactly that and lost six cases on fe7f6e90;
+  the scheduled node now shares the namespace and spawns last (f7c35c99).
+  The three audit suites are already serialised in `sequential-tests.ts`,
+  so no cross-file retire.
+- `CACHE_AUDIT_MAX_DURATION` ('10m', TYPE_MAP string, ≤0 → default) checked
+  AFTER each page → `timedOut` on report/row (`timed_out`)/MCP/spec/panel/
+  CLI ("stopped on CACHE_AUDIT_MAX_DURATION; the next run resumes behind it").
+- One run at a time: `getCache().lockCache` key `cache-audit:run` (value
+  `Date.now()`, TTL budget+60 s), second ask → `ServiceUnavailableError` 503
+  "a cache audit is already running, since <iso>"; read-then-write, not
+  atomic (documented); released in `finally`; lock lives in the
+  `<ns>_lock` Keyv so it is per namespace.
+- MCP: a Joi refusal inside a tool answers JSON-RPC `-32602` (handle-request
+  .ts), NOT `isError` — assert `body.error.code`.
+- bb env-inject extension: `POST /env-inject/set {key, value}` on a spawned
+  instance mutates its `useEnv()` object (used for the 1 ms budget witness;
+  restore in `finally`).
+- Typecheck: `npx tsc -p api --noEmit` gets SIGTERM'd when the box's swap is
+  full → `~/.local/share/pnpm/tsgo -p api --noEmit` (rc 0) is the fallback.
+- Still open (jean's call / PR body disclosure): #4 diff CPU on the event
+  loop, #6 horizon full scan, #7 rate limiter ignores the replay marker,
+  #9 `jwt.sign` per entry. PR body update pending (never right after a push).
+
+## 2026-09-17 review round (60d47113) — what changed, what is parked
+
+- A Keyv `hasMany` over an unreachable store answers `[false × n]` and emits
+  `error` on the store (Keyv re-emits, `emitErrors` default true) → the
+  audit read a whole page as gone and RETIRED it. `askHeld()` listens on
+  `cache.on('error')` around the ask and throws "The cache could not be
+  asked what it holds: …" → run fails, nothing stamped. bb witness: a
+  second REST node behind `createRedisProxy` (now `tests/blackbox/common/
+  redis-proxy.ts`, shared with the outage suite), same namespace, nested
+  describe LAST.
+- Expiry sidecar read in the page's `getMany` (`[key, key__expires_at]`
+  pairs), decompressed in `snapshot()`; a refill between page read and
+  replay is now `refilled`→re-judged, not `held`→stale.
+- Run lock: `RUN_LOCK_TTL_MS` 120 s renewed every 30 s (`setInterval`
+  `.unref()`), not budget+60 s. Reap moved from `finishCacheAuditRun` to
+  `runCacheAudit`'s `finally` (runs on the fail path too) and now also
+  closes orphans (`finished_at IS NULL AND started_at < now − 2·budget − 1 h`,
+  error "The run did not finish: its process died"). A failing
+  `finishCacheAuditRun` is recorded via `failCacheAuditRun` (knex prefixes
+  the SQL to the message → assert `stringContaining`).
+- `isCacheAuditInFlight(err)` exported; the schedule logs a 503 tick as
+  `info` "tick skipped: …", not warn.
+- REST + MCP validate with `{ allowUnknown: true, stripUnknown: true }` —
+  `maxDurationMs`/`replay` in a body are DROPPED (were a 400). CLI refuses
+  `--limit` not a whole number ≥ 1 before boot (exit 1).
+- `directus_cache_audit_findings.redis_key` is `text` (readable keys under
+  `CACHE_KEY_HASH_ENABLED=false` exceed 255); the CLI bb scheduled node runs
+  with hash off and a 61-owner `_in` filter as witness.
+- PARKED as #500: replay ignores language / negotiated content type /
+  `CACHE_VARY_REQUEST_HEADERS` / ip key dimensions → false `stale` on such
+  deployments; proposed `vary` JSON on the descriptor + replay headers +
+  `unreplayable:ip`.
+- Disclosures still owed in the PR body: `/utils/cache/clear` `locks`
+  target drops the run claim; `DIFF_PATHS_COMPARED` 500 bound hides a real
+  diff past 500 ignored pointers; memory store under a PM2 cluster is a
+  cache per worker (unsupported topology); #500.
+- bb typecheck now shows ~280 pre-existing errors (main-tree node_modules
+  drift) — grep the touched files only.
+
