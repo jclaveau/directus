@@ -19,6 +19,7 @@ import {
 	retireCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
+import { UNDER_PRESSURE_REASON } from './middleware/shed-under-pressure.js';
 import {
 	CACHE_AUDIT_REPLAY_HEADER,
 	CACHE_AUDIT_TAGS_HEADER,
@@ -672,6 +673,10 @@ class CacheAudit {
 			};
 		}
 
+		if (response.status === 503 && shedUnderPressure(response.body)) {
+			return { verdict: 'unreplayable', reason: 'status_503_under_pressure' };
+		}
+
 		if (response.status < 200 || response.status >= 300) {
 			return { verdict: 'unreplayable', reason: `status_${response.status}` };
 		}
@@ -758,6 +763,25 @@ class CacheAudit {
 			queueCacheAnomaly({ cacheKey: descriptor.cacheKey, reason, detail });
 		}
 	}
+}
+
+// The pressure limiter's refusal, told from a route's own 503 by the reason
+// it writes in the body (jclaveau/directus#508). This build lets a replay past
+// the limiter; one that reaches a worker of an older build in the same cluster
+// does not, and the report has to say which 503 it got.
+function shedUnderPressure(body: string): boolean {
+	let parsed: { errors?: { extensions?: { reason?: unknown } }[] };
+
+	try {
+		parsed = JSON.parse(body);
+	}
+	catch {
+		return false;
+	}
+
+	return parsed.errors?.some((error) => {
+		return error.extensions?.reason === UNDER_PRESSURE_REASON;
+	}) === true;
 }
 
 function descriptorUrl(descriptor: CacheAuditDescriptor): string {

@@ -953,6 +953,33 @@ describe('an entry nothing can be replayed from', () => {
 		],
 		['status_500', () => descriptor(), { status: 500, headers: {}, body: '' }],
 		[
+			'status_503',
+			() => descriptor(),
+			{
+				status: 503,
+				headers: {},
+				body: JSON.stringify({
+					errors: [{ extensions: { reason: 'WebSocket server is disabled' } }],
+				}),
+			},
+		],
+		[
+			'status_503',
+			() => descriptor(),
+			{ status: 503, headers: {}, body: '<html>Bad Gateway</html>' },
+		],
+		[
+			'status_503_under_pressure',
+			() => descriptor(),
+			{
+				status: 503,
+				headers: {},
+				body: JSON.stringify({
+					errors: [{ extensions: { reason: 'Under pressure' } }],
+				}),
+			},
+		],
+		[
 			'replay_unrecognized',
 			() => descriptor(),
 			{ status: 200, headers: {}, body: '{}' },

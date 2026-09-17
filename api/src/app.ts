@@ -1,6 +1,5 @@
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
-import { handlePressure } from '@directus/pressure';
 import cookieParser from 'cookie-parser';
 import type { Request, RequestHandler, Response } from 'express';
 import express from 'express';
@@ -76,6 +75,10 @@ import rateLimiter, {
 } from './middleware/rate-limiter-ip.js';
 import sanitizeQuery from './middleware/sanitize-query.js';
 import schema from './middleware/schema.js';
+import {
+	shedUnderPressure,
+	UNDER_PRESSURE_REASON,
+} from './middleware/shed-under-pressure.js';
 import { assertPgBouncerConnections } from './pgbouncer/index.js';
 import { initProcessReports } from './processes/index.js';
 import cacheAuditSchedule from './schedules/cache-audit.js';
@@ -165,13 +168,16 @@ export default async function createApp(): Promise<express.Application> {
 		}
 
 		app.use(
-			handlePressure({
+			shedUnderPressure({
 				sampleInterval,
 				maxEventLoopUtilization: env['PRESSURE_LIMITER_MAX_EVENT_LOOP_UTILIZATION'] as number,
 				maxEventLoopDelay: env['PRESSURE_LIMITER_MAX_EVENT_LOOP_DELAY'] as number,
 				maxMemoryRss: env['PRESSURE_LIMITER_MAX_MEMORY_RSS'] as number,
 				maxMemoryHeapUsed: env['PRESSURE_LIMITER_MAX_MEMORY_HEAP_USED'] as number,
-				error: new ServiceUnavailableError({ service: 'api', reason: 'Under pressure' }),
+				error: new ServiceUnavailableError({
+					service: 'api',
+					reason: UNDER_PRESSURE_REASON,
+				}),
 				retryAfter: env['PRESSURE_LIMITER_RETRY_AFTER'] as string,
 			}),
 		);
