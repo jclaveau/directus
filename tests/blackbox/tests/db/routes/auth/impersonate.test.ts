@@ -106,15 +106,15 @@ describe('Impersonation', () => {
 		}
 
 		async function expectEnded(ws: ReturnType<typeof socket>) {
-			const messages = await ws.getMessages(1);
+			// The kick lands while the request that caused it is still in flight;
+			// waiting for OPEN on a socket the server already closed times out
+			const messages = await ws.getMessages(1, { targetState: ws.conn.CLOSED });
 
 			expect(messages![0]).toMatchObject({
 				type: 'auth',
 				status: 'error',
 				error: { code: 'SESSION_ENDED' },
 			});
-
-			await ws.waitForState(ws.conn.CLOSED);
 		}
 
 		async function expectAlive(ws: ReturnType<typeof socket>, token: string) {
