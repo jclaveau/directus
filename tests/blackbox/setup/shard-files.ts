@@ -28,6 +28,13 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts': 13_000,
 	'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts': 13_000,
 	'/tests/db/routes/items/cache-purge-recovery.test.ts': 20_000,
+	// One spawned instance; every case waits out the one-second descriptor
+	// drain before it audits. Estimated; to be measured.
+	'/tests/db/routes/items/cache-audit.test.ts': 75_000,
+	// Two spawned instances and five CLI boots of the whole app.
+	'/tests/db/app/cache-audit-cli.test.ts': 115_000,
+	// One spawned instance; one case waits out the descriptor drain.
+	'/tests/db/app/cache-audit-mcp.test.ts': 60_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
 	// The `after` chain. The auth files spend their time waiting, not querying,
 	// so they cost the same on every vendor — and the wait is per case, so the
@@ -64,7 +71,7 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// climb whose release is held by the cooldown the add re-armed, a third pool
 	// released at the worker that is not the one pm2 would have taken, and a
 	// fourth held whole because one of its two workers is carrying everything.
-	'/tests/db/app/autoscale-release.test.ts': 330_000,
+	'/tests/db/app/autoscale-release.test.ts': 240_000,
 	// Two pools held under a fixed window each, plus the grow the second
 	// arm waits out.
 	'/tests/db/app/autoscale-signal.test.ts': 130_000,
@@ -83,10 +90,16 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// A boot, a pool losing a worker, and an autoscaler started after it to
 	// report on. Measured over the postgres run of 2026-09-14.
 	'/tests/db/app/autoscale-pool-health.test.ts': 13_000,
-	// Two deployments, each booting a Directus and a pool for it, one of them
-	// waiting out the hold it is asserting. Measured over the postgres run of
-	// 2026-09-14.
-	'/tests/db/app/autoscale-prewarm-health.test.ts': 80_000,
+	// Four deployments, each booting a Directus and a pool for it: one waits
+	// out the hold it is asserting, and two walk a pool of eight up three
+	// seconds a worker, one of them twice around a supervisor restart and the
+	// eighty seconds the lost scale takes to fail. Measured over the postgres
+	// run of 2026-09-14, plus the boots and the wait the last two spend.
+	'/tests/db/app/autoscale-prewarm-health.test.ts': 260_000,
+	// Six Directus workers booted one after another under traffic, then
+	// released back to one. Measured at 41s over the postgres run of
+	// 2026-09-16, with the margin a loaded runner adds to six boots.
+	'/tests/db/app/autoscale-prewarm-load.test.ts': 50_000,
 	// One CLI command per vendor: a module load, a query, and the few
 	// milliseconds the rejection it boots through takes to arrive.
 	'/tests/db/app/cli-boot-redis-outage.test.ts': 10_000,

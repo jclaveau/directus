@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { version } from 'directus/version';
 import { flushCaches, getCache } from './cache.js';
+import { getMilliseconds } from './utils/get-milliseconds.js';
 import type { ExtensionManager } from './extensions/manager.js';
 import { useLogger } from './logger/index.js';
 
@@ -120,6 +121,50 @@ export async function computeBuildIdentity(
 		.digest('hex');
 }
 
+/**
+ * How long the lock naming the instance that is flushing stands on its own.
+ *
+ * Refreshed for as long as the flush runs, so what this bounds is a flusher
+ * that died with its process rather than the work it was doing. Left to expire
+ * under a flush still running, the lock is handed back while its holder is
+ * mid-scan and every instance booting after that starts a flush of its own — on
+ * a deploy that is the whole pool, each one walking the same keyspace while the
+ * workers beside it are trying to boot.
+ */
+const FLUSH_LOCK_MS = 30_000;
+
+/** Well inside the TTL, so a busy event loop cannot let the lock lapse. */
+const FLUSH_LOCK_REFRESH_MS = 10_000;
+
+/** What the race resolves with when the flush is the one still going. */
+const STILL_FLUSHING = Symbol('still flushing');
+
+/**
+ * Flushes, holding the lock for as long as that takes, and records the build it
+ * flushed for once it is done.
+ */
+async function flushHoldingTheLock(identity: string): Promise<void> {
+	const { lockCache } = getCache();
+
+	const refresh = setInterval(() => {
+		lockCache
+			.set(BUILD_IDENTITY_FLUSH_LOCK, true, FLUSH_LOCK_MS)
+			.catch(() => undefined);
+	}, FLUSH_LOCK_REFRESH_MS);
+
+	// Nothing about a cache flush should hold a process that is otherwise done.
+	refresh.unref();
+
+	try {
+		await flushCaches(true);
+		await lockCache.set(BUILD_IDENTITY_KEY, identity);
+	}
+	finally {
+		clearInterval(refresh);
+		await lockCache.delete(BUILD_IDENTITY_FLUSH_LOCK).catch(() => undefined);
+	}
+}
+
 export async function flushCachesIfBuildChanged(
 	extensionManager: ExtensionManager,
 ): Promise<void> {
@@ -149,13 +194,13 @@ export async function flushCachesIfBuildChanged(
 		// Redis-gate so exactly one instance flushes when several boot together on
 		// a deploy. The lock + stored fingerprint live in lockCache, which
 		// flushCaches() leaves untouched. Non-atomic get-then-set: a loser returns
-		// here trusting the holder to flush, so two deploys inside the 30s lock can
-		// drop the later flush — bounded by CACHE_TTL, accepted.
+		// here trusting the holder to flush, so two deploys inside one flush can
+		// drop the later one — bounded by CACHE_TTL, accepted.
 		if (await lockCache.get(BUILD_IDENTITY_FLUSH_LOCK)) {
 			return;
 		}
 
-		await lockCache.set(BUILD_IDENTITY_FLUSH_LOCK, true, 30000);
+		await lockCache.set(BUILD_IDENTITY_FLUSH_LOCK, true, FLUSH_LOCK_MS);
 
 		// Re-read under the lock: another instance may have flushed and stored the
 		// new id since our check.
@@ -166,9 +211,38 @@ export async function flushCachesIfBuildChanged(
 
 		logger.info('[cache] Build identity changed since last boot, flushing');
 
-		await flushCaches(true);
-		await lockCache.set(BUILD_IDENTITY_KEY, identity);
-		await lockCache.delete(BUILD_IDENTITY_FLUSH_LOCK);
+		// `createApp()` awaits this before the server listens, and a flush walks
+		// every key the response cache holds — 167s against a production keyspace
+		// (https://github.com/jclaveau/directus/issues/468). Waited on for a
+		// budget of its own and then left to finish: the boot it holds up is a
+		// worker the pool is waiting for, and the flush records the build it
+		// flushed for whether or not anyone was still waiting on it. Its own
+		// rather than `CACHE_FLUSH_TIMEOUT`, which a deploy step sizes for the
+		// whole flush it waits out — the planner gives that one 120s.
+		const budget = getMilliseconds(
+			env['CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT'],
+			30_000,
+		);
+
+		let waited: ReturnType<typeof setTimeout> | undefined;
+
+		const outcome = await Promise.race([
+			flushHoldingTheLock(identity).catch((error: unknown) => {
+				logger.warn(error, '[cache] build-identity flush failed');
+			}),
+			new Promise<typeof STILL_FLUSHING>((resolve) => {
+				waited = setTimeout(() => resolve(STILL_FLUSHING), budget);
+			}),
+		]);
+
+		clearTimeout(waited);
+
+		if (outcome === STILL_FLUSHING) {
+			logger.warn(
+				`[cache] still flushing after ${budget}ms, booting without waiting `
+				+ 'for the rest of it',
+			);
+		}
 	}
 	catch (err) {
 		logger.warn(err, '[cache] build-identity self-heal failed');

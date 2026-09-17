@@ -317,6 +317,8 @@ describe('Processes Report Tests', () => {
 				expect(node.nodeId).toBeTruthy();
 				expect(node.runtime!.rssBytes).toBeGreaterThan(0);
 				expect(node.runtime!.nodeVersion).toMatch(/^v\d+\./);
+				// Started with no Node flag, and says so rather than leaving it out.
+				expect(node.runtime!.execArgv).toEqual([]);
 				expect(node.runtime!.uptimeMs).toBeGreaterThan(0);
 			}
 

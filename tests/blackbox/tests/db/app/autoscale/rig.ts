@@ -1,15 +1,29 @@
 import config, { paths } from '@common/config';
 import vendors, { type Vendor } from '@common/get-dbs-to-test';
-import { ChildProcess, execFileSync, spawn } from 'child_process';
+import { ChildProcess, execFile, execFileSync, spawn } from 'child_process';
 import Redis from 'ioredis';
 import knex, { type Knex } from 'knex';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 
 // `paths.cwd` is tests/blackbox, so two levels up is the repo root. PM2 ships
 // as an api dependency; the same binary the published image runs Directus with.
 const pm2Bin = join(paths.cwd, '..', '..', 'api', 'node_modules', '.bin', 'pm2');
+
+/**
+ * How long pm2 waits on a fixture worker's `ready` before it moves on: what
+ * one boot costs a scale, whatever `readyDelayMs` says the worker takes.
+ */
+export const WORKER_LISTEN_TIMEOUT_MS = 10_000;
+
+/**
+ * The bound a supervisor call carries by default, `SUPERVISOR_TIMEOUT_MS` in
+ * `api/src/processes/supervisor/lib/client.ts`: what a prewarm's scale gets
+ * on top of the boots it asked for.
+ */
+export const SUPERVISOR_TIMEOUT_MS = 15_000;
 
 const workerScript = join(
 	paths.cwd,
@@ -37,6 +51,15 @@ export interface PoolOptions {
 	busyMs?: number;
 	idleMs?: number;
 	/**
+	 * Milliseconds a worker takes to report ready.
+	 *
+	 * `wait_ready` holds the supervisor's answer to a scale until every
+	 * worker that scale named has reported, and it starts them one after
+	 * another — so this is what makes a scale cost what a pool of booting
+	 * Directus workers costs rather than what a pool of empty ones does.
+	 */
+	readyDelayMs?: number;
+	/**
 	 * Which worker spins, by pm2 instance number. Unset means all of them, so
 	 * every worker reports the same percent. Naming one stages a pool where
 	 * they differ, which is the only pool an average can be wrong about.
@@ -55,10 +78,11 @@ export interface PoolOptions {
 	 */
 	inFlight?: number;
 	/**
-	 * Which worker reports `inFlight`, by pm2 instance number. Every other
-	 * worker reports none. Unset means all of them report it.
+	 * Which workers report `inFlight`, by pm2 instance number, several of them
+	 * comma-separated. Every other worker reports none. Unset means all of
+	 * them report it.
 	 */
-	inFlightBusyInstance?: string;
+	inFlightBusyInstances?: string;
 	/**
 	 * How many crashes the daemon puts a worker back for before it gives up and
 	 * leaves it errored, which is the state it calls a failure. One makes the
@@ -70,6 +94,15 @@ export interface PoolOptions {
 	 * not short of a worker somebody took out of it.
 	 */
 	giveUpAfterRestarts?: number;
+	/**
+	 * The API itself as the pool's worker, booted under this environment, in
+	 * place of the fixture.
+	 *
+	 * What a deployment's pool is made of: a worker's boot is a Directus boot,
+	 * and what it serves are Directus routes, so this is the pool an arm about
+	 * serving through a scale runs. The fixture's knobs above do not apply.
+	 */
+	directusEnv?: Record<string, string>;
 }
 
 /**
@@ -92,15 +125,29 @@ export function startPool(options: PoolOptions): Rig {
 			apps: [
 				{
 					name: options.appName,
-					script: workerScript,
 					exec_mode: 'cluster',
 					instances: options.instances,
 					// What the API's own ecosystem sets, and what makes a
 					// worker's `ready` the signal that paces scaling rather
 					// than a timer.
 					wait_ready: true,
-					listen_timeout: 10_000,
 					autorestart: true,
+					...options.directusEnv === undefined
+						? { script: workerScript, listen_timeout: WORKER_LISTEN_TIMEOUT_MS }
+						: {
+								// The CLI's entry file: `node` adds the
+								// extension, pm2 checks the path exists.
+								script: `${paths.cli}.js`,
+								args: ['start'],
+								// Where the suites spawn their own instances from.
+								cwd: paths.cwd,
+								// A Directus boot on a loaded runner, with the
+								// margin the fixture's ten seconds do not need.
+								listen_timeout: 60_000,
+								// The planner's, so a release drains the way a
+								// production one does.
+								kill_timeout: 20_000,
+							},
 					...options.giveUpAfterRestarts === undefined
 						? {}
 						: {
@@ -110,9 +157,12 @@ export function startPool(options: PoolOptions): Rig {
 								// than reading as a worker that had been up.
 								min_uptime: 30_000,
 							},
-					env: {
+					env: options.directusEnv ?? {
 						BB_BUSY_MS: String(options.busyMs ?? 0),
 						BB_IDLE_MS: String(options.idleMs ?? 100),
+						...options.readyDelayMs === undefined
+							? {}
+							: { BB_READY_DELAY_MS: String(options.readyDelayMs) },
 						BB_CALM_AFTER_MS: String(options.calmAfterMs ?? 0),
 						...options.busyOnlyInstance === undefined
 							? {}
@@ -124,11 +174,11 @@ export function startPool(options: PoolOptions): Rig {
 						...options.inFlight === undefined
 							? {}
 							: { BB_IN_FLIGHT: String(options.inFlight) },
-						...options.inFlightBusyInstance === undefined
+						...options.inFlightBusyInstances === undefined
 							? {}
 							: {
-									BB_IN_FLIGHT_BUSY_INSTANCE:
-										options.inFlightBusyInstance,
+									BB_IN_FLIGHT_BUSY_INSTANCES:
+										options.inFlightBusyInstances,
 								},
 					},
 				},
@@ -387,13 +437,6 @@ export async function declaredEverywhere(
 }
 
 /**
- * The workers the daemon is keeping.
- *
- * What is serving plus what is on its way to serving, which is the count the
- * autoscaler sizes a pool on. A worker it gave up on is neither, and neither is
- * one somebody stopped — a pool is short of both.
- */
-/**
  * The pm2 instance numbers the daemon is still keeping, in ascending order.
  *
  * Which worker a release stopped, rather than how many are left: pm2 walks the
@@ -401,19 +444,43 @@ export async function declaredEverywhere(
  * that took instance 0.
  */
 export function instancesOf(rig: Rig): number[] {
-	const gone = ['stopped', 'stopping', 'errored'];
-
 	return listWorkers(rig)
-		.filter((worker) => gone.includes(worker.pm2_env?.status ?? '') === false)
+		.filter((worker) => gone(worker) === false)
 		.map((worker) => Number(worker.pm2_env?.['NODE_APP_INSTANCE'] ?? -1))
 		.sort((left, right) => left - right);
 }
 
-export function countWorkers(rig: Rig): number {
-	const gone = ['stopped', 'stopping', 'errored'];
+/** A worker the pool is short of: given up on, or stopped by somebody. */
+function gone(worker: ListedProcess): boolean {
+	return ['stopped', 'stopping', 'errored']
+		.includes(worker.pm2_env?.status ?? '');
+}
 
-	return listWorkers(rig)
-		.filter((worker) => gone.includes(worker.pm2_env?.status ?? '') === false)
+/**
+ * The workers the daemon is keeping.
+ *
+ * What is serving plus what is on its way to serving, which is the count the
+ * autoscaler sizes a pool on. A worker it gave up on is neither, and neither is
+ * one somebody stopped — a pool is short of both.
+ */
+export function countWorkers(rig: Rig): number {
+	return listWorkers(rig).filter((worker) => gone(worker) === false).length;
+}
+
+/**
+ * `countWorkers`, without holding the event loop for the half second the
+ * listing takes: what a watcher reading the pool beside traffic it is itself
+ * driving asks for.
+ */
+export async function countWorkersAsync(rig: Rig): Promise<number> {
+	const { stdout } = await promisify(execFile)(pm2Bin, ['jlist'], {
+		env: { ...process.env, PM2_HOME: rig.pm2Home },
+		encoding: 'utf8',
+		maxBuffer: 32 * 1024 * 1024,
+	});
+
+	return (JSON.parse(stdout) as ListedProcess[])
+		.filter((worker) => worker.name === rig.appName && gone(worker) === false)
 		.length;
 }
 
@@ -575,4 +642,20 @@ export function decisionsOf(rig: Rig): string[] {
 		.join('')
 		.split('\n')
 		.filter((line) => line.includes('workers:'));
+}
+
+/**
+ * The resizes the autoscaler decided on, as `from -> to`, in order. How the
+ * pool got from one size to another is what a release of several workers at
+ * once has over a release of one a cooldown, and the sizes the pool passed
+ * through cannot say it: a poll sees the pool between deletes either way.
+ */
+export function resizesOf(rig: Rig): string[] {
+	return decisionsOf(rig).flatMap((line) => {
+		const resize = line.match(/(\d+ -> \d+) workers:/);
+
+		return resize === null
+			? []
+			: [resize[1]!];
+	});
 }

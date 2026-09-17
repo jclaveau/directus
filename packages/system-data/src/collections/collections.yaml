@@ -155,3 +155,15 @@ data:
     icon: memory
     note: $t:directus_collection.directus_cache_stats_scoped_purge_tags
     accountability: null
+
+  - collection: directus_cache_audits
+    hidden: true
+    icon: fact_check
+    note: $t:directus_collection.directus_cache_audits
+    accountability: null
+
+  - collection: directus_cache_audit_findings
+    hidden: true
+    icon: fact_check
+    note: $t:directus_collection.directus_cache_audit_findings
+    accountability: null

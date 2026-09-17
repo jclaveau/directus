@@ -50,6 +50,28 @@ describe('SettingsService.upsertSingleton', () => {
 		},
 	);
 
+	it('persists a valid cache_audit_schedule, and a cleared one', async () => {
+		await service().upsertSingleton({ cache_audit_schedule: '0 3 * * *' });
+
+		expect(ItemsService.prototype.upsertSingleton)
+			.toHaveBeenCalledWith({ cache_audit_schedule: '0 3 * * *' }, undefined);
+
+		await service().upsertSingleton({ cache_audit_schedule: null });
+
+		expect(ItemsService.prototype.upsertSingleton)
+			.toHaveBeenCalledWith({ cache_audit_schedule: null }, undefined);
+	});
+
+	it.each(['hourly', '60 * * * *', '99 99 * * *'])(
+		'rejects a cache_audit_schedule that is not a cron (%s) before persisting',
+		async (bad) => {
+			await expect(service().upsertSingleton({ cache_audit_schedule: bad }))
+				.rejects.toThrow(/Invalid cache_audit_schedule/);
+
+			expect(ItemsService.prototype.upsertSingleton).not.toHaveBeenCalled();
+		},
+	);
+
 	it('leaves a payload that does not touch cache_ttl alone', async () => {
 		await service().upsertSingleton({ project_name: 'Acme' });
 

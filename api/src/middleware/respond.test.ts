@@ -95,6 +95,13 @@ vi.mock('../utils/get-string-byte-size.js', () => {
 	return { stringByteSize: mocks.stringByteSize };
 });
 
+vi.mock('../utils/cache-audit-replay.js', () => {
+	return {
+		CACHE_AUDIT_TAGS_HEADER: 'x-cache-audit-tags',
+		isCacheAuditReplay: vi.fn(() => false),
+	};
+});
+
 vi.mock('../utils/report-cache-anomaly.js', () => {
 	return { reportCacheAnomaly: mocks.reportCacheAnomaly };
 });
@@ -139,6 +146,7 @@ vi.mock('../services/import-export.js', () => {
 });
 
 import { setCacheValue } from '../cache.js';
+import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { withMeta } from '../utils/read-meta.js';
 import { respond } from './respond.js';
@@ -189,6 +197,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.mocked(isCacheAuditReplay).mockReturnValue(false);
 });
 
 describe('respond middleware', () => {
@@ -548,6 +557,46 @@ describe('respond middleware', () => {
 			[{ collection: 'articles' }],
 			[],
 		);
+	});
+
+	test(oneLine`
+		a cache-audit replay answers the tags a fill would pin, and stores nothing
+	`, async () => {
+		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
+
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				cache: false,
+				scopedCacheTags: [
+					{ collection: 'articles', field: 'owner', value: 'U1' },
+					{ collection: 'authors' },
+				],
+			},
+		);
+
+		await respond(makeReq(), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'x-cache-audit-tags',
+			'articles:owner=U1,authors',
+		);
+
+		expect(res.json).toHaveBeenCalledWith({ data: [{ id: 1 }] });
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(tagScopedCacheKeys).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		a replay of a tagless collection-less read answers an empty tags header
+	`, async () => {
+		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
+		const res = makeRes({ data: {} }, { cache: false });
+		const req = makeReq({ collection: undefined, originalUrl: '/server/info' });
+
+		await respond(req, res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith('x-cache-audit-tags', '');
 	});
 
 	test('skips caching a collection-less response in scoped mode', async () => {

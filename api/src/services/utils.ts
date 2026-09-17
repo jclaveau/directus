@@ -19,8 +19,19 @@ import type {
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
 import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
+import type { CacheAuditOptions } from '../cache-audit.js';
+import {
+	type CacheAuditRun,
+	type CacheAuditRunWithFindings,
+	type CacheAuditTrigger,
+	listCacheAuditRuns,
+	readCacheAuditFindings,
+	readCacheAuditRun,
+	runCacheAudit,
+} from '../cache-audit-runs.js';
 import {
 	type CacheAnomalyRecord,
+	type CacheAuditQueueState,
 	type CacheEntryRecord,
 	type CacheGroupLatencyRecord,
 	type CacheStatsState,
@@ -35,6 +46,7 @@ import {
 	type CacheEntryPurgeRecord,
 	listCacheGroupLatencies,
 	listPurgesCoveringEntry,
+	readCacheAuditQueueState,
 	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
@@ -84,7 +96,13 @@ import {
 	collectProcesses,
 	processesReportEnabled,
 } from '../processes/index.js';
+import {
+	type CacheAuditScheduleState,
+	cacheAuditScheduleState,
+	refreshCacheAuditScheduleOverride,
+} from '../schedules/cache-audit.js';
 import { countScopedCacheTagMembers, flushResponseCache } from '../scoped-cache.js';
+import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { stringByteSize } from '../utils/get-string-byte-size.js';
@@ -430,6 +448,8 @@ export class UtilsService {
 		sizes: { uncompressed: number; compressed: number } | null;
 		tombstone: number | null;
 		filledAt: number | null;
+		auditedAt: number | null;
+		verifiedAt: number | null;
 		purgesSinceFilled: CacheEntryPurgeRecord[] | null;
 	}> {
 		this.assertAdmin('inspect a cache entry');
@@ -444,6 +464,13 @@ export class UtilsService {
 			: await listPurgesCoveringEntry(descriptor.cacheKey, descriptor.lastFilled);
 
 		const filledAt = descriptor?.lastFilled.getTime() ?? null;
+		const auditedAt = descriptor?.auditedAt?.getTime() ?? null;
+
+		// Known good as of the audit, or the fill where that came later: a fill
+		// reads the database, so the body it wrote matched it then.
+		const verifiedAt = filledAt === null
+			? null
+			: Math.max(filledAt, auditedAt ?? 0);
 
 		const { cache } = getCache();
 
@@ -457,6 +484,8 @@ export class UtilsService {
 				sizes: null,
 				tombstone: null,
 				filledAt,
+				auditedAt,
+				verifiedAt,
 				purgesSinceFilled,
 			};
 		}
@@ -501,8 +530,120 @@ export class UtilsService {
 			// When this key last expired, if a miss-gap tombstone still lives.
 			tombstone: await readCacheTombstone(redisKey),
 			filledAt,
+			auditedAt,
+			verifiedAt,
 			purgesSinceFilled,
 		};
+	}
+
+	/**
+	 * Replay the entries due an audit against the database — see
+	 * `cache-audit.ts`. Every replay is an uncached read, so this is a dev,
+	 * preview and e2e instrument, not a production one. The run lands in the
+	 * audit history under `trigger`, and is answered as the history carries
+	 * it: the findings are read from there, a page at a time, by `getCacheAudit`.
+	 */
+	async auditCache(
+		options: CacheAuditOptions = {},
+		trigger: Extract<CacheAuditTrigger, 'rest' | 'mcp'> = 'rest',
+	): Promise<CacheAuditRun> {
+		this.assertAdmin('audit the cache');
+
+		const { id } = await runCacheAudit(trigger, options);
+		const run = await readCacheAuditRun(id);
+
+		// Recorded by the run that just ended; only the reaper takes a run row,
+		// and it takes none younger than the retention window.
+		if (run === null) {
+			throw new Error(`Cache audit run ${id} was not recorded`);
+		}
+
+		return run;
+	}
+
+	/** The audit runs started in the window, newest first, without their findings. */
+	async getCacheAudits(window?: unknown): Promise<CacheAuditRun[]> {
+		this.assertAdmin('inspect the cache audits');
+
+		return listCacheAuditRuns(requestedStatsWindow(window));
+	}
+
+	/** One audit run with a page of the findings it stored. */
+	async getCacheAudit(
+		id: unknown,
+		page: unknown = {},
+	): Promise<CacheAuditRunWithFindings> {
+		this.assertAdmin('inspect the cache audits');
+
+		const parsed = typeof id === 'number' || typeof id === 'string'
+			? Number(id)
+			: Number.NaN;
+
+		if (!Number.isInteger(parsed) || parsed < 1) {
+			throw new InvalidPayloadError({
+				reason: `'${String(id)}' is not an audit id`,
+			});
+		}
+
+		const { error, value } = CacheAuditFindingsPageSchema.validate(page, {
+			allowUnknown: true,
+			stripUnknown: true,
+		});
+
+		if (error) {
+			throw new InvalidPayloadError({ reason: error.message });
+		}
+
+		const run = await readCacheAuditRun(parsed);
+
+		if (run === null) {
+			throw new ForbiddenError();
+		}
+
+		return { ...run, ...await readCacheAuditFindings(parsed, value) };
+	}
+
+	/** The cron in force for the audit, where it came from, and when it next fires. */
+	async getCacheAuditSchedule(): Promise<CacheAuditScheduleState> {
+		this.assertAdmin('inspect the cache audit schedule');
+
+		return cacheAuditScheduleState();
+	}
+
+	/** How far round the cache the audit has got: its size, never seen, horizon. */
+	async getCacheAuditQueue(): Promise<CacheAuditQueueState> {
+		this.assertAdmin('inspect the cache audit queue');
+
+		return readCacheAuditQueueState();
+	}
+
+	/**
+	 * Lay a cron over `CACHE_AUDIT_SCHEDULE`, or clear it with null. Through the
+	 * settings singleton, which validates the rule, revisions the change and
+	 * fires the action every node reschedules on.
+	 */
+	async updateCacheAuditSchedule(rule: unknown): Promise<CacheAuditScheduleState> {
+		this.assertAdmin('change the cache audit schedule');
+
+		if (rule !== null && typeof rule !== 'string') {
+			throw new InvalidPayloadError({
+				reason: '`rule` has to be a cron rule, or null to clear the override',
+			});
+		}
+
+		const { SettingsService } = await import('./settings.js');
+
+		await new SettingsService({
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		}).upsertSingleton({ cache_audit_schedule: rule });
+
+		// The reschedule rides the bus and has not necessarily landed here yet;
+		// the answer reads the durable value it just wrote.
+		await refreshCacheAuditScheduleOverride();
+
+		return cacheAuditScheduleState();
 	}
 
 	async evictCacheEntry(redisKey: string): Promise<void> {

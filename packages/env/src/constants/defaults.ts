@@ -91,6 +91,10 @@ export const DEFAULTS = {
 	// platform-specific per-request headers here; globs allowed.
 	CACHE_VARY_REQUEST_HEADERS_EXCLUDED: '',
 	CACHE_AUTO_FLUSH_ON_DEPLOY: true,
+	// How long a boot waits on the flush a changed build starts before it listens
+	// with the flush still running. The flush walks the whole response cache, and
+	// every worker of a deployment waits behind the one doing it.
+	CACHE_AUTO_FLUSH_ON_DEPLOY_TIMEOUT: '30s',
 	// How long `directus cache flush` waits before giving up. A command issued
 	// while Redis is unreachable waits on the next reconnect, and the retry policy
 	// spaces those out — the serverless recipe puts them 15 minutes apart — so
@@ -116,6 +120,13 @@ export const DEFAULTS = {
 	CACHE_STATS_MAX_BYTES: '2gb',
 	CACHE_STATS_MAX_BUFFER: 1_000_000,
 	CACHE_STATS_GAP_LOOKBACK: '1h',
+	CACHE_AUDIT_ENABLED: true,
+	// Unscheduled: a run replays every live entry uncached, a dev/preview cost.
+	CACHE_AUDIT_SCHEDULE: '',
+	CACHE_AUDIT_LIMIT: 0,
+	CACHE_AUDIT_MAX_DURATION: '10m',
+	CACHE_AUDIT_IGNORE_PATHS: '',
+	CACHE_AUDIT_RETENTION: '30d',
 
 	AUTH_PROVIDERS: '',
 	AUTH_DISABLE_DEFAULT: false,

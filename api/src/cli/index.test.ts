@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { runAutoscaler } from '../processes/autoscale/index.js';
 import { startServer } from '../server.js';
 import bootstrap from './commands/bootstrap/index.js';
+import cacheAudit from './commands/cache/audit.js';
 import cacheFlush from './commands/cache/flush.js';
 import count from './commands/count/index.js';
 import dbInstall from './commands/database/install.js';
@@ -25,6 +26,7 @@ vi.mock('../emitter.js', () => ({ useEmitter: () => ({ emitInit }) }));
 vi.mock('../server.js', () => ({ startServer: vi.fn() }));
 vi.mock('../processes/autoscale/index.js', () => ({ runAutoscaler: vi.fn() }));
 vi.mock('./commands/bootstrap/index.js', () => ({ default: vi.fn() }));
+vi.mock('./commands/cache/audit.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/cache/flush.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/count/index.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/database/install.js', () => ({ default: vi.fn() }));
@@ -67,6 +69,31 @@ describe('createCli', () => {
 		[['database', 'migrate:up'], dbMigrate, ['up']],
 		[['database', 'migrate:down'], dbMigrate, ['down']],
 		[['cache', 'flush'], cacheFlush, []],
+		[['cache', 'audit'], cacheAudit, [{}]],
+		[
+			[
+				'cache',
+				'audit',
+				'--json',
+				'--purge',
+				'--strict',
+				'--limit',
+				'50',
+				'--user',
+				'u1',
+				'--collection',
+				'articles',
+			],
+			cacheAudit,
+			[{
+				json: true,
+				purge: true,
+				strict: true,
+				limit: '50',
+				user: 'u1',
+				collection: 'articles',
+			}],
+		],
 		[['count', 'articles'], count, ['articles']],
 		[
 			['users', 'create', '--email', 'a@b.c', '--password', 'pw', '--role', 'r'],

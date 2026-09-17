@@ -1,4 +1,4 @@
-import { ForbiddenError } from '@directus/errors';
+import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
 import { SchemaBuilder } from '@directus/schema-builder';
 import type { Accountability, AutoscaleConfig } from '@directus/types';
@@ -6,6 +6,12 @@ import knex, { type Knex } from 'knex';
 import { MockClient, Tracker, createTracker } from 'knex-mock-client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
+import {
+	listCacheAuditRuns,
+	readCacheAuditFindings,
+	readCacheAuditRun,
+	runCacheAudit,
+} from '../cache-audit-runs.js';
 import {
 	CACHE_TIMESERIES_MAX_BUCKETS,
 	CACHE_TIMESERIES_MIN_BUCKETS,
@@ -16,6 +22,7 @@ import {
 	listCacheEntries,
 	listCacheGroupLatencies,
 	listPurgesCoveringEntry,
+	readCacheAuditQueueState,
 	readCacheDescriptorForRedisKey,
 	readCacheTimeseries,
 	readCacheTombstone,
@@ -53,8 +60,13 @@ import {
 import { collectProcesses, processesReportEnabled } from '../processes/index.js';
 import { fetchAllowedFields } from '../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js';
 import { validateAccess } from '../permissions/modules/validate-access/validate-access.js';
+import {
+	cacheAuditScheduleState,
+	refreshCacheAuditScheduleOverride,
+} from '../schedules/cache-audit.js';
 import { countScopedCacheTagMembers } from '../scoped-cache.js';
 import { compress } from '../utils/compress.js';
+import { SettingsService } from './settings.js';
 import { UtilsService } from './utils.js';
 
 vi.mock('../../src/database/index', () => ({
@@ -65,6 +77,8 @@ vi.mock('../../src/database/index', () => ({
 vi.mock('../permissions/modules/validate-access/validate-access.js');
 vi.mock('../permissions/modules/fetch-allowed-fields/fetch-allowed-fields.js');
 vi.mock('../cache.js');
+vi.mock('../cache-audit-runs.js');
+vi.mock('../schedules/cache-audit.js');
 vi.mock('../cache-events.js');
 vi.mock('../scoped-cache.js');
 vi.mock('../utils/compress.js');
@@ -176,6 +190,14 @@ describe('Services / Utils', () => {
 			return new UtilsService({ knex: db, schema, accountability: nonAdmin });
 		}
 
+		function adminService() {
+			return new UtilsService({
+				knex: db,
+				schema,
+				accountability: { user: 'admin', admin: true } as Accountability,
+			});
+		}
+
 		it('getCacheEntries throws ForbiddenError for non-admin user', async () => {
 			const service = nonAdminService();
 
@@ -201,6 +223,197 @@ describe('Services / Utils', () => {
 				oneLine`'test-user' does not have permission to evict cache entries
 				as not being an admin`,
 			);
+		});
+
+		it('auditCache rejects a non-admin user', async () => {
+			await expect(nonAdminService().auditCache()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to audit the cache
+				as not being an admin`,
+			);
+
+			expect(runCacheAudit).not.toHaveBeenCalled();
+		});
+
+		it(oneLine`
+			auditCache hands the options to a recorded run, as REST unless told
+			otherwise, and answers the run as the history recorded it
+		`, async () => {
+			const report = { id: 4, scanned: 1, counts: { stale: 0 }, findings: [] };
+			vi.mocked(runCacheAudit).mockResolvedValue(report as any);
+			const run = { id: 4, trigger: 'rest', scanned: 1 };
+			vi.mocked(readCacheAuditRun).mockResolvedValue(run as any);
+
+			await expect(
+				adminService().auditCache({ limit: 5, purge: true }),
+			).resolves.toBe(run);
+
+			expect(runCacheAudit).toHaveBeenCalledWith('rest', { limit: 5, purge: true });
+			expect(readCacheAuditRun).toHaveBeenCalledWith(4);
+
+			await adminService().auditCache({}, 'mcp');
+
+			expect(runCacheAudit).toHaveBeenLastCalledWith('mcp', {});
+		});
+
+		it('auditCache refuses to answer a run the history does not hold', async () => {
+			vi.mocked(runCacheAudit).mockResolvedValue({ id: 4 } as any);
+			vi.mocked(readCacheAuditRun).mockResolvedValue(null);
+
+			await expect(adminService().auditCache()).rejects.toThrowError(
+				'Cache audit run 4 was not recorded',
+			);
+		});
+
+		it('getCacheAudits refuses a non-admin, and lists for an admin', async () => {
+			await expect(nonAdminService().getCacheAudits()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect the cache audits
+				as not being an admin`,
+			);
+
+			const runs = [{ id: 1 }];
+			vi.mocked(listCacheAuditRuns).mockResolvedValue(runs as any);
+
+			await expect(adminService().getCacheAudits('2d')).resolves.toBe(runs);
+
+			expect(listCacheAuditRuns).toHaveBeenCalledWith(172_800_000);
+		});
+
+		it(oneLine`
+			getCacheAudit reads one run with the first page of its findings,
+			refusing an id that is none
+		`, async () => {
+			const run = { id: 7, trigger: 'rest' };
+			vi.mocked(readCacheAuditRun).mockResolvedValue(run as any);
+
+			const page = { findings: [{ verdict: 'stale' }], findingsTotal: 41 };
+			vi.mocked(readCacheAuditFindings).mockResolvedValue(page as any);
+
+			await expect(adminService().getCacheAudit('7')).resolves.toEqual({
+				...run,
+				...page,
+			});
+
+			expect(readCacheAuditRun).toHaveBeenCalledWith(7);
+
+			expect(readCacheAuditFindings).toHaveBeenCalledWith(7, {
+				limit: 100,
+				offset: 0,
+			});
+
+			for (const bad of ['seven', '0', '1.5', undefined]) {
+				await expect(adminService().getCacheAudit(bad)).rejects.toThrowError(
+					'is not an audit id',
+				);
+			}
+		});
+
+		it(oneLine`
+			getCacheAudit takes the page as sent, one verdict when asked, and
+			refuses a page it cannot cut
+		`, async () => {
+			vi.mocked(readCacheAuditRun).mockResolvedValue({ id: 7 } as any);
+
+			vi.mocked(readCacheAuditFindings).mockResolvedValue({
+				findings: [],
+				findingsTotal: 0,
+			});
+
+			await adminService().getCacheAudit(7, {
+				limit: '10',
+				offset: '30',
+				verdict: 'tag_drift',
+				window: '7d',
+			});
+
+			expect(readCacheAuditFindings).toHaveBeenCalledWith(7, {
+				limit: 10,
+				offset: 30,
+				verdict: 'tag_drift',
+			});
+
+			for (const bad of [
+				{ limit: 0 },
+				{ limit: 1001 },
+				{ offset: -1 },
+				{ verdict: 'fresh' },
+				{ verdict: 'wrong' },
+			]) {
+				await expect(adminService().getCacheAudit(7, bad)).rejects.toBeInstanceOf(
+					InvalidPayloadError,
+				);
+			}
+
+			expect(readCacheAuditRun).toHaveBeenCalledTimes(1);
+		});
+
+		it('getCacheAudit answers a run nobody recorded as forbidden', async () => {
+			vi.mocked(readCacheAuditRun).mockResolvedValue(null);
+
+			await expect(adminService().getCacheAudit(99)).rejects.toBeInstanceOf(
+				ForbiddenError,
+			);
+		});
+
+		it('getCacheAuditSchedule answers the state in force to an admin', async () => {
+			await expect(nonAdminService().getCacheAuditSchedule()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect the cache audit
+				schedule as not being an admin`,
+			);
+
+			const state = { rule: '0 3 * * *', source: 'env' };
+			vi.mocked(cacheAuditScheduleState).mockReturnValue(state as any);
+
+			await expect(adminService().getCacheAuditSchedule()).resolves.toBe(state);
+		});
+
+		it('getCacheAuditQueue answers the queue state to an admin', async () => {
+			await expect(nonAdminService().getCacheAuditQueue()).rejects.toThrowError(
+				oneLine`'test-user' does not have permission to inspect the cache audit
+				queue as not being an admin`,
+			);
+
+			const state = { size: 40, neverAudited: 3, verifiedSince: 1_700_000_000_000 };
+			vi.mocked(readCacheAuditQueueState).mockResolvedValue(state);
+
+			await expect(adminService().getCacheAuditQueue()).resolves.toBe(state);
+		});
+
+		it(oneLine`
+			updateCacheAuditSchedule writes through the settings singleton and
+			answers the value it just wrote
+		`, async () => {
+			// The settings service is a real ItemsService underneath, which reads
+			// the cache handle on construction.
+			vi.mocked(getCache).mockReturnValue({ cache: null } as any);
+
+			const upsert = vi
+				.spyOn(SettingsService.prototype, 'upsertSingleton')
+				.mockResolvedValue(1);
+
+			const state = { rule: '0 4 * * *', source: 'settings' };
+			vi.mocked(cacheAuditScheduleState).mockReturnValue(state as any);
+
+			await expect(adminService().updateCacheAuditSchedule('0 4 * * *'))
+				.resolves.toBe(state);
+
+			expect(upsert).toHaveBeenCalledWith({ cache_audit_schedule: '0 4 * * *' });
+			expect(refreshCacheAuditScheduleOverride).toHaveBeenCalledOnce();
+
+			await adminService().updateCacheAuditSchedule(null);
+
+			expect(upsert).toHaveBeenLastCalledWith({ cache_audit_schedule: null });
+		});
+
+		it('updateCacheAuditSchedule refuses a rule neither text nor null', async () => {
+			await expect(adminService().updateCacheAuditSchedule(5)).rejects.toThrowError(
+				'`rule` has to be a cron rule, or null to clear the override',
+			);
+
+			await expect(nonAdminService().updateCacheAuditSchedule(null))
+				.rejects.toThrowError(
+					oneLine`'test-user' does not have permission to change the cache
+					audit schedule as not being an admin`,
+				);
 		});
 
 		it('readCacheEntry rejects a non-admin user', async () => {
@@ -443,6 +656,7 @@ describe('Services / Utils', () => {
 			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue({
 				cacheKey: 'h1',
 				lastFilled: new Date(1),
+				auditedAt: new Date(3),
 			});
 
 			vi.mocked(listPurgesCoveringEntry).mockResolvedValue([
@@ -470,6 +684,9 @@ describe('Services / Utils', () => {
 				sizes: { uncompressed: 14, compressed: 3 },
 				tombstone: 999,
 				filledAt: 1,
+				auditedAt: 3,
+				// Known good as of the audit, which came after the fill.
+				verifiedAt: 3,
 				purgesSinceFilled: [
 					{
 						time: 400,
@@ -498,6 +715,7 @@ describe('Services / Utils', () => {
 			vi.mocked(readCacheDescriptorForRedisKey).mockResolvedValue({
 				cacheKey: 'h1',
 				lastFilled: new Date(1),
+				auditedAt: null,
 			});
 
 			vi.mocked(listPurgesCoveringEntry).mockResolvedValue([]);
@@ -511,6 +729,9 @@ describe('Services / Utils', () => {
 				sizes: null,
 				tombstone: null,
 				filledAt: 1,
+				auditedAt: null,
+				// Never audited: the fill is the last time it was known good.
+				verifiedAt: 1,
 				// Empty, not null: it has a fill to measure from and nothing
 				// covered it since.
 				purgesSinceFilled: [],
@@ -531,6 +752,7 @@ describe('Services / Utils', () => {
 			// would claim a proof this cannot give.
 			expect(entry.purgesSinceFilled).toBeNull();
 			expect(entry.filledAt).toBeNull();
+			expect(entry.verifiedAt).toBeNull();
 			expect(listPurgesCoveringEntry).not.toHaveBeenCalled();
 		});
 
@@ -547,6 +769,8 @@ describe('Services / Utils', () => {
 				sizes: null,
 				tombstone: null,
 				filledAt: null,
+				auditedAt: null,
+				verifiedAt: null,
 				purgesSinceFilled: null,
 			});
 

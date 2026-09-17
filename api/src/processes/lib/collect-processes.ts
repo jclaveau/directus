@@ -2,6 +2,7 @@ import type {
 	ProcessDetail,
 	ProcessNode,
 	ProcessReplica,
+	ProcessRuntimeStats,
 	ProcessService,
 	ProcessSupervisorState,
 	ProcessesReport,
@@ -20,6 +21,24 @@ import {
 	reportedProcessDetails,
 } from './processes-config.js';
 
+/**
+ * The bus carries the reports of every build running beside this one — the
+ * deployment being replaced, the other service still on its own build — and
+ * one of those may describe its runtime without the flags list. The page reads
+ * the list as a list, so it is filled here rather than guarded there.
+ */
+function runtimeOf(
+	report: ProcessesReportMessage | undefined,
+): ProcessRuntimeStats | null {
+	const runtime = report?.self.runtime;
+
+	if (!runtime) {
+		return null;
+	}
+
+	return { ...runtime, execArgv: runtime.execArgv ?? [] };
+}
+
 function nodeFromReport(report: ProcessesReportMessage): ProcessNode {
 	return {
 		nodeId: report.self.nodeId,
@@ -28,7 +47,7 @@ function nodeFromReport(report: ProcessesReportMessage): ProcessNode {
 		name: report.self.name,
 		instance: report.self.instance,
 		responding: true,
-		runtime: report.self.runtime,
+		runtime: runtimeOf(report),
 		supervisor: null,
 		env: report.self.env,
 		autoscale: report.self.autoscale,
@@ -76,7 +95,7 @@ function replicaProcesses(reports: ProcessesReportMessage[]): ProcessNode[] {
 			name: supervised.name,
 			instance: supervised.instance,
 			responding: report !== undefined,
-			runtime: report?.self.runtime ?? null,
+			runtime: runtimeOf(report),
 			supervisor: supervised.stats,
 			env: report?.self.env ?? null,
 			autoscale: report?.self.autoscale ?? null,

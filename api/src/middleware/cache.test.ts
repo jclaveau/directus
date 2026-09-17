@@ -1,3 +1,4 @@
+import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -76,7 +77,12 @@ vi.mock('../utils/report-cache-anomaly.js', () => {
 	return { reportCacheAnomaly: vi.fn(() => Promise.resolve()) };
 });
 
+vi.mock('../utils/cache-audit-replay.js', () => {
+	return { isCacheAuditReplay: vi.fn(() => false) };
+});
+
 import checkCacheMiddleware from './cache.js';
+import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
 import {
 	cacheStatsActive,
 	queueCacheHit,
@@ -158,6 +164,7 @@ beforeEach(() => {
 
 	vi.mocked(cacheStatsActive).mockReturnValue(false);
 	vi.mocked(readCacheMissGap).mockResolvedValue(null);
+	vi.mocked(isCacheAuditReplay).mockReturnValue(false);
 
 	// Answered from the per-key mock every fixture below already sets, so a batched
 	// read means exactly what the same keys read one at a time meant — including
@@ -172,6 +179,23 @@ afterEach(() => {
 });
 
 describe('checkCacheMiddleware', () => {
+	test(oneLine`
+		a cache-audit replay is neither served from the cache nor stored
+	`, async () => {
+		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
+		primeHit('articles:owner=U1');
+
+		const res = makeRes();
+
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		expect(next).toHaveBeenCalled();
+		expect(res.locals['cache']).toBe(false);
+		expect(res.json).not.toHaveBeenCalled();
+		expect(getCacheValue).not.toHaveBeenCalled();
+		expect(res.setHeader).not.toHaveBeenCalled();
+	});
+
 	test('HIT emits the __tags sibling under CACHE_TAGS_HEADER', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		primeHit('articles:owner=U1');

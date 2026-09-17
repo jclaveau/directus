@@ -30,6 +30,10 @@ import {
 import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
+import {
+	CACHE_AUDIT_TAGS_HEADER,
+	isCacheAuditReplay,
+} from '../utils/cache-audit-replay.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
 import { readMeta } from '../utils/read-meta.js';
@@ -118,6 +122,19 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const scopedCacheTags = readTags?.length && countsWholeCollection === false
 		? readTags
 		: [...(readTags ?? []), ...collectionFallbackTags];
+
+	// The tags a fill of this request would be indexed under, in the form the
+	// entry-tags table records — what the audit diffs against the tags the entry
+	// was filled under. Always set on a replay, even empty: its presence is how
+	// the audit knows the response came through this stack at all.
+	if (isCacheAuditReplay(req)) {
+		res.setHeader(
+			CACHE_AUDIT_TAGS_HEADER,
+			printableScopedCacheTags(
+				scopedCacheTags.map(scopedCacheTagLabel).join(','),
+			),
+		);
+	}
 
 	// No tags AND no collection (/server, /schema, a GraphQL query hitting nothing): a
 	// scoped purge can never target it; caching would orphan a stale entry. Skip it.

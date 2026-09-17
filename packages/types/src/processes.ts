@@ -54,6 +54,14 @@ export interface ProcessRuntimeStats {
 	externalBytes: number;
 	uptimeMs: number;
 	nodeVersion: string;
+	/**
+	 * The flags Node itself was started with — what pm2's `node_args` hands it —
+	 * so one can be confirmed live rather than inferred from what the memory
+	 * figures look like. Script arguments are not here, and neither is
+	 * `NODE_OPTIONS`: Node keeps it out of `execArgv`, and being an environment
+	 * variable it reaches the report with the rest of the env.
+	 */
+	execArgv: string[];
 }
 
 /** One process: a PM2 app instance, or the lone process when unsupervised. */

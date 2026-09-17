@@ -9,7 +9,7 @@ import type { SupervisedProcessEnv } from '../../supervisor/index.js';
  * up on after three seconds, and a pool whose workers take longer than that to
  * boot is one where the number matters most.
  */
-const SUPERVISOR_FALLBACKS = {
+export const SUPERVISOR_FALLBACKS = {
 	instances: 1,
 	execMode: 'fork_mode',
 	listenTimeout: 3000,

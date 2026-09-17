@@ -67,6 +67,10 @@ describe('The autoscaler describes itself to the processes report', () => {
 					'start',
 					cliScript,
 					'--name', autoscalerAppName,
+					// A flag the supervisor's declaration hands Node, so the report can
+					// be checked against what the process was actually started with.
+					'--node-args',
+					'--max-semi-space-size=2',
 					// Everything past the separator is the CLI's own argv.
 					'--', 'autoscale',
 				],
@@ -141,6 +145,8 @@ describe('The autoscaler describes itself to the processes report', () => {
 		// Answering means answering in full: it is a process like any other.
 		expect(node.runtime!.rssBytes).toBeGreaterThan(0);
 		expect(node.runtime!.nodeVersion).toBe(process.version);
+		// The flag pm2 was told to start it with, read back off the process itself.
+		expect(node.runtime!.execArgv).toContain('--max-semi-space-size=2');
 		expect(node.supervisor!.status).toBe('online');
 
 		// The admin panel reads the pool off this block and nowhere else: the

@@ -48,6 +48,21 @@ test('Only the configured subsystems are exposed', () => {
 
 	vi.mocked(useEnv).mockReturnValue({});
 	expect(systemMcpToolGroups()).toEqual([]);
+
+	// The audit group needs the node to audit at all.
+	vi.mocked(useEnv).mockReturnValue({
+		SYSTEM_MCP_TOOLS: ['cache', 'cache_audit'],
+		CACHE_AUDIT_ENABLED: true,
+	});
+
+	expect(systemMcpToolGroups()).toEqual(['cache', 'cache_audit']);
+
+	vi.mocked(useEnv).mockReturnValue({
+		SYSTEM_MCP_TOOLS: ['cache', 'cache_audit'],
+		CACHE_AUDIT_ENABLED: false,
+	});
+
+	expect(systemMcpToolGroups()).toEqual(['cache']);
 });
 
 // "Servers MUST validate the Origin header on all incoming connections to

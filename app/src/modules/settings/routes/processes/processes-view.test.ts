@@ -59,6 +59,7 @@ function runtime(rssBytes: number): ProcessNode['runtime'] {
 		externalBytes: 3,
 		uptimeMs: 4,
 		nodeVersion: 'v22.0.0',
+		execArgv: [],
 	};
 }
 

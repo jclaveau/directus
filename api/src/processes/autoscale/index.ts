@@ -6,6 +6,7 @@ import {
 	connectToSupervisor,
 	disconnectFromSupervisor,
 	releaseWorker,
+	SUPERVISOR_TIMEOUT_MS,
 	scaleApp,
 } from '../supervisor/index.js';
 import { guardUnhandledRejections } from '../../utils/report-unhandled-rejection.js';
@@ -31,6 +32,7 @@ import {
 } from './lib/resolve-config.js';
 import { WorkerCpu } from './lib/worker-cpu.js';
 import { recordAutoscaleTick } from './lib/state.js';
+import { SUPERVISOR_FALLBACKS } from './lib/supervisor.js';
 import type { AutoscaleConfig, Decision } from './types.js';
 
 /**
@@ -38,34 +40,6 @@ import type { AutoscaleConfig, Decision } from './types.js';
  * for.
  */
 const SAMPLE_INTERVAL_MS = 1000;
-
-/**
- * Brings the pool to `PM2_AUTOSCALE_PREWARM` in one step.
- *
- * A deploy restarts the pool at its floor, so the first requests after one
- * land on a pool sized for an idle night. This is not the floor: the extra
- * workers are released like any others once the load does not justify them,
- * so a quiet deploy costs nothing lasting.
- */
-async function prewarm(
-	config: AutoscaleConfig,
-	workers: number,
-): Promise<number | null> {
-	const target = Math.min(config.prewarmWorkers, config.maxWorkers);
-
-	if (target <= workers) {
-		return null;
-	}
-
-	useLogger().info(
-		`[autoscale] prewarming ${config.appName} `
-		+ `from ${workers} to ${target} workers`,
-	);
-
-	await scaleApp(config.appName, target);
-
-	return target;
-}
 
 /**
  * Shrinks the pool by stopping workers this picks, rather than a size pm2 picks
@@ -77,8 +51,13 @@ async function prewarm(
  * the workers they already hold sockets to — and stopping it drops them: the
  * drain budget is the shutdown timeout, and a request already past it is a 502.
  *
- * One at a time and awaited, so a release that the supervisor does not answer
- * costs the workers after it rather than the pool's whole shape.
+ * Together rather than one after the other: the supervisor answers a release
+ * once the worker has drained, up to its `kill_timeout`, and a release of
+ * several workers waiting out each drain in turn would hold the tick for the
+ * sum of them. Every release is asked for before any is waited on, so the
+ * drains overlap and the tick waits for the longest. A release the supervisor
+ * does not answer fails the tick once the others have settled, the same as it
+ * fails a release of one, and the next tick reads the pool it left.
  */
 async function releaseWorkers(
 	pool: OnlineWorker[],
@@ -88,8 +67,14 @@ async function releaseWorkers(
 		return { pmId: worker.pmId, inFlight: inFlightOf(worker.pmId) };
 	});
 
-	for (const pmId of chooseVictims(candidates, count)) {
-		await releaseWorker(pmId);
+	const releases = await Promise.allSettled(
+		chooseVictims(candidates, count).map((pmId) => releaseWorker(pmId)),
+	);
+
+	for (const release of releases) {
+		if (release.status === 'rejected') {
+			throw release.reason;
+		}
 	}
 }
 
@@ -99,7 +84,10 @@ async function releaseWorkers(
  * The prewarm where one is asked for, because that is the whole of what it
  * asks: be this big before the deployment takes traffic. The floor otherwise,
  * and the floor too where scaling is off, since prewarm is one of the things
- * that does not run then.
+ * that does not run then. Not a floor itself: a deploy restarts the pool at
+ * its floor, sized for an idle night, and the workers prewarm adds for the
+ * first requests after it are released like any others once the load does
+ * not justify them.
  */
 export function targetPoolSize(config: AutoscaleConfig): number {
 	if (config.enabled === false) {
@@ -216,6 +204,11 @@ export async function runAutoscaler(): Promise<void> {
 	let lastScaleUpAt = Date.now();
 	let lastScaleDownAt = Date.now();
 	let prewarmed = false;
+	let prewarmBegun = false;
+	let prewarmAsked: Promise<void> | null = null;
+	// The epoch until the pool has been seen growing once.
+	let poolGrewAt = 0;
+	let workersBefore: number | null = null;
 	let restartsByWorker: Map<number, number> | null = null;
 	let lastRestartAt: number | null = null;
 
@@ -245,6 +238,13 @@ export async function runAutoscaler(): Promise<void> {
 			const onlineWorkers = cpu.measure(reading.onlineWorkers);
 			const workers = onlineWorkers.length + pendingWorkers;
 
+			// A worker the supervisor is starting counts from its fork, so this
+			// is when the supervisor was last seen adding one.
+			if (workersBefore !== null && workers > workersBefore) {
+				poolGrewAt = Date.now();
+			}
+
+			workersBefore = workers;
 			beginAskedReload(config.appName, workers);
 
 			// Held back while a reload is in flight: it replaces the pool a
@@ -318,24 +318,93 @@ export async function runAutoscaler(): Promise<void> {
 			// A pool fresh out of a deploy, which is the one prewarm exists for,
 			// carries no restarts at all. One that does was crash-looping
 			// before the autoscaler arrived, and prewarm would hand it a batch
-			// of workers to crash.
+			// of workers to crash. A worker restarting once the prewarm is under
+			// way holds it for the warm-up, like any restart holds a decision,
+			// and no longer: the deployment still has to reach the size it asked
+			// for, and one still crashing keeps the warm-up running.
 			const readyToPrewarm = config.enabled
 				&& config.strategy !== 'legacy'
 				&& workers > 0
 				&& churning === false
-				&& carriesRestarts === false
+				&& (carriesRestarts === false || prewarmBegun)
 				&& prewarmed === false
 				&& reloading() === false;
 
 			let decision: Decision | null = null;
 
 			if (readyToPrewarm) {
-				prewarmed = true;
-				const target = await prewarm(config, workers);
+				const target = targetPoolSize(config);
 				lastScaleUpAt = Date.now();
 				lastScaleDownAt = Date.now();
 
-				if (target !== null) {
+				// pm2 waits at most this long on each worker a scale adds before
+				// it moves to the next: what one boot costs the scale, whatever
+				// the worker itself takes.
+				const listenTimeout = reading.supervisor?.listenTimeout
+					?? SUPERVISOR_FALLBACKS.listenTimeout;
+
+				const sinceGrowthMs = Date.now() - poolGrewAt;
+
+				// Latched on the pool having reached the size, not on the scale
+				// having been asked for: only the read at the top of the tick says
+				// whether the workers a scale started have arrived.
+				if (target <= workers) {
+					prewarmed = true;
+				}
+				else if (prewarmAsked !== null) {
+					decision = {
+						workers: null,
+						reason: `the prewarm to ${target} is still arriving`,
+					};
+				}
+				// A second scale sent while the first is still adding counts the
+				// workers added so far and adds the difference on top of the ones
+				// still to come, and a failed ask does not say whether pm2 is
+				// still adding: the daemon may be gone, or alive and starved past
+				// the bound. A scale still adding forks a worker at least every
+				// `listen_timeout`, so a pool that has not grown for two of them
+				// has no scale behind it.
+				else if (sinceGrowthMs < 2 * listenTimeout) {
+					decision = {
+						workers: null,
+						reason: 'a scale may still be adding: the pool grew '
+							+ `${Math.round(sinceGrowthMs / 1000)}s ago`,
+					};
+				}
+				else {
+					prewarmBegun = true;
+
+					logger.info(
+						`[autoscale] prewarming ${config.appName} `
+						+ `from ${workers} to ${target} workers`,
+					);
+
+					// One scale for the whole target, not waited on by the tick:
+					// pm2 answers it once every worker it added has reported ready,
+					// one boot after another, which for a pool of fifteen runs well
+					// past the bound a supervisor call carries by default. Bounded
+					// all the same, at the boots asked for plus that default: pm2
+					// clocks `listen_timeout` from the worker's `online` event, so
+					// the fork before it is a cost the scale carries on top, one
+					// pm2 does not bound and a container booting the pool it just
+					// asked for stretches. A scale still unanswered past that is
+					// one whose answer is not coming — the daemon it was sent to is
+					// gone and the one listening now never heard of it.
+					prewarmAsked = scaleApp(
+						config.appName,
+						target,
+						(target - workers) * listenTimeout + SUPERVISOR_TIMEOUT_MS,
+					)
+						.catch((error: unknown) => {
+							logger.warn(
+								error,
+								'[autoscale] the prewarm scale failed, asked again next tick',
+							);
+						})
+						.finally(() => {
+							prewarmAsked = null;
+						});
+
 					decision = { workers: target, reason: 'prewarming the pool' };
 				}
 			}

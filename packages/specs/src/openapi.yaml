@@ -294,6 +294,16 @@ paths:
     $ref: './paths/utils/cache-entries.yaml'
   /utils/cache/entry:
     $ref: './paths/utils/cache-entry.yaml'
+  /utils/cache/audit:
+    $ref: './paths/utils/cache-audit.yaml'
+  /utils/cache/audits:
+    $ref: './paths/utils/cache-audits.yaml'
+  /utils/cache/audits/{id}:
+    $ref: './paths/utils/cache-audit-run.yaml'
+  /utils/cache/audit/schedule:
+    $ref: './paths/utils/cache-audit-schedule.yaml'
+  /utils/cache/audit/queue:
+    $ref: './paths/utils/cache-audit-queue.yaml'
   /utils/cache/anomalies:
     $ref: './paths/utils/cache-anomalies.yaml'
   /utils/cache/latencies:
@@ -355,6 +365,12 @@ components:
       $ref: './components/autoscale-reload.yaml'
     AutoscaleSupervisorPatch:
       $ref: './components/autoscale-supervisor-patch.yaml'
+    CacheAuditFinding:
+      $ref: './components/cache-audit-finding.yaml'
+    CacheAuditRun:
+      $ref: './components/cache-audit-run.yaml'
+    CacheAuditSchedule:
+      $ref: './components/cache-audit-schedule.yaml'
     Presets:
       $ref: './components/preset.yaml'
     Collections:

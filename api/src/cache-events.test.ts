@@ -7,6 +7,7 @@ import {
 	clampCacheStatsWindow,
 	claimCacheAnomalyThrottleSlot,
 	queueCacheAnomaly,
+	advanceCacheAuditQueue,
 	queueCachePurge,
 	queueMissLatency,
 	queueCacheHit,
@@ -21,6 +22,10 @@ import {
 	listCacheAnomalies,
 	listCacheEntries,
 	listPurgesCoveringEntry,
+	readCacheAuditQueue,
+	readCacheAuditQueueState,
+	retireCacheAuditQueue,
+	readScopedCacheEntryTags,
 	readCacheDescriptorForRedisKey,
 	readCacheTombstone,
 	listCacheGroupLatencies,
@@ -191,18 +196,21 @@ beforeEach(() => {
 			return builder;
 		}),
 		whereNull: vi.fn(() => builder),
+		whereNot: vi.fn(() => builder),
 		whereNotNull: vi.fn(() => builder),
 		whereNotIn: vi.fn(() => builder),
 		whereIn: vi.fn(() => builder),
 		groupBy: vi.fn(() => builder),
 		groupByRaw: vi.fn(() => builder),
 		orderBy: vi.fn(() => builder),
+		orderByRaw: vi.fn(() => builder),
 		limit: vi.fn(() => builder),
 		select: vi.fn(() => builder),
 		distinct: vi.fn(() => builder),
 		first: vi.fn(() => Promise.resolve(firstRows.shift())),
 		pluck: vi.fn(() => Promise.resolve(pluckResult)),
 		delete: vi.fn(() => Promise.resolve(deleteCount)),
+		update: vi.fn(() => Promise.resolve(1)),
 		then: (resolve: any, reject: any) => {
 			const rows = rowsByTable[lastTable] ?? queryRows;
 			return Promise.resolve(rows).then(resolve, reject);
@@ -808,6 +816,8 @@ describe('drainCacheEvents', () => {
 				bytes: 42,
 				fill_ms: 240,
 				last_filled: new Date(3000),
+				// Merged on a refill: back in the audit queue where it was found gone.
+				gone_at: null,
 			},
 		]);
 
@@ -1992,6 +2002,7 @@ describe('listCacheEntries', () => {
 				fill_ms: '240',
 				hit_ms: '8.4',
 				recommended_ttl_ms: '320000.4',
+				audited_at: new Date(1500).toISOString(),
 			},
 			{
 				cache_key: 'k2',
@@ -2013,6 +2024,7 @@ describe('listCacheEntries', () => {
 				fill_ms: null,
 				hit_ms: null,
 				recommended_ttl_ms: null,
+				audited_at: null,
 			},
 		];
 
@@ -2046,6 +2058,9 @@ describe('listCacheEntries', () => {
 				createdAt: 1000,
 				expiresAt: 301000,
 				lastHitAt: 2000,
+				auditedAt: 1500,
+				// The audit came after the fill: known good as of the audit.
+				verifiedAt: 1500,
 			},
 			{
 				key: 'k2',
@@ -2071,6 +2086,9 @@ describe('listCacheEntries', () => {
 				createdAt: 500,
 				expiresAt: null,
 				lastHitAt: null,
+				auditedAt: null,
+				// Never audited: the fill is the last time it was known good.
+				verifiedAt: 500,
 			},
 		]);
 	});
@@ -3092,6 +3110,244 @@ describe('effectiveTtlByBucket', () => {
 	});
 });
 
+describe('readCacheAuditQueue', () => {
+	const before = new Date(9_000);
+
+	function descriptorRow(overrides: Record<string, unknown> = {}) {
+		return {
+			cache_key: 'ck1',
+			redis_key: 'rk1',
+			method: 'GET',
+			path: '/items/articles',
+			collection: 'articles',
+			user_id: 'user-1',
+			query: 'fields[]=id',
+			last_filled: new Date(5_000).toISOString(),
+			...overrides,
+		};
+	}
+
+	it(oneLine`
+		answers the described entries least recently verified first, without
+		their tags
+	`, async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [
+			descriptorRow(),
+			descriptorRow({
+				cache_key: 'ck2',
+				redis_key: 'rk2',
+				collection: null,
+				user_id: null,
+				path: '/graphql',
+				query: '{"query":"{ __typename }"}',
+			}),
+		];
+
+		const due = await readCacheAuditQueue(500, before);
+
+		expect(due).toEqual([
+			{
+				cacheKey: 'ck1',
+				redisKey: 'rk1',
+				method: 'GET',
+				path: '/items/articles',
+				collection: 'articles',
+				userId: 'user-1',
+				query: 'fields[]=id',
+				lastFilled: new Date(5_000),
+			},
+			{
+				cacheKey: 'ck2',
+				redisKey: 'rk2',
+				method: 'GET',
+				path: '/graphql',
+				collection: null,
+				userId: null,
+				query: '{"query":"{ __typename }"}',
+				lastFilled: new Date(5_000),
+			},
+		]);
+
+		// The tags are for the entries the cache still holds, asked separately.
+		expect(mockDb).not.toHaveBeenCalledWith(
+			'directus_cache_stats_scoped_entry_tags',
+		);
+
+		// Least recently verified first: the audit, or the fill where later.
+		expect(builder.orderByRaw).toHaveBeenCalledWith(
+			'CASE WHEN audited_at IS NULL OR audited_at < last_filled '
+			+ 'THEN last_filled ELSE audited_at END',
+		);
+
+		expect(builder.orderBy).toHaveBeenCalledWith('last_filled', 'asc');
+
+		expect(builder.limit).toHaveBeenCalledWith(500);
+		// A descriptor that recorded a fill, never one only ever seen as a miss.
+		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
+		// Nor one written before it kept the key the cache is asked for.
+		expect(builder.whereNot).toHaveBeenCalledWith('redis_key', '');
+		// Nor one the audit found gone, until a fill clears that.
+		expect(builder.whereNull).toHaveBeenCalledWith('gone_at');
+	});
+
+	it('bounds the queue to what was verified before the run began', async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [];
+
+		await readCacheAuditQueue(500, before);
+
+		expect(builder.whereRaw).toHaveBeenCalledWith(
+			'CASE WHEN audited_at IS NULL OR audited_at < last_filled '
+			+ 'THEN last_filled ELSE audited_at END < ?',
+			[before],
+		);
+	});
+
+	it('narrows to a user and a collection in the query itself', async () => {
+		rowsByTable['directus_cache_stats_descriptors'] = [];
+
+		await readCacheAuditQueue(500, before, {
+			user: 'user-2',
+			collection: 'authors',
+		});
+
+		expect(builder.where).toHaveBeenCalledWith('user_id', 'user-2');
+		expect(builder.where).toHaveBeenCalledWith('collection', 'authors');
+	});
+
+	it(oneLine`
+		answers nothing without asking where stats are off, or for no room
+	`, async () => {
+		expect(await readCacheAuditQueue(0, before)).toEqual([]);
+
+		env['CACHE_STATS_ENABLED'] = false;
+
+		expect(await readCacheAuditQueue(500, before)).toEqual([]);
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('readScopedCacheEntryTags', () => {
+	it('answers the tags of a batch of entries by key, in one query', async () => {
+		rowsByTable['directus_cache_stats_scoped_entry_tags'] = [
+			{ cache_key: 'ck1', scoped_cache_tag: 'articles:owner=acme' },
+			{ cache_key: 'ck1', scoped_cache_tag: 'authors' },
+			{ cache_key: 'ck3', scoped_cache_tag: 'authors' },
+		];
+
+		const tags = await readScopedCacheEntryTags(['ck1', 'ck2', 'ck3']);
+
+		expect([...tags]).toEqual([
+			['ck1', ['articles:owner=acme', 'authors']],
+			['ck3', ['authors']],
+		]);
+
+		expect(mockDb).toHaveBeenCalledTimes(1);
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2', 'ck3']);
+	});
+
+	it('asks nothing for no keys, or where stats are off', async () => {
+		expect([...await readScopedCacheEntryTags([])]).toEqual([]);
+
+		env['CACHE_STATS_ENABLED'] = false;
+
+		expect([...await readScopedCacheEntryTags(['ck1'])]).toEqual([]);
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('readCacheAuditQueueState', () => {
+	it(oneLine`
+		counts the queue and dates its horizon over the rows and the expression
+		the queue itself orders on
+	`, async () => {
+		mockDb.raw = vi.fn((sql: string) => sql);
+
+		firstRows = [{
+			size: '40',
+			never_audited: '3',
+			verified_since: new Date(1_700_000_000_000).toISOString(),
+		}];
+
+		await expect(readCacheAuditQueueState()).resolves.toEqual({
+			size: 40,
+			neverAudited: 3,
+			verifiedSince: 1_700_000_000_000,
+		});
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
+		expect(builder.whereNotNull).toHaveBeenCalledWith('last_filled');
+		expect(builder.whereNot).toHaveBeenCalledWith('redis_key', '');
+		expect(builder.whereNull).toHaveBeenCalledWith('gone_at');
+
+		expect(builder.first).toHaveBeenCalledWith(
+			'COUNT(*) AS size',
+			'SUM(CASE WHEN audited_at IS NULL THEN 1 ELSE 0 END) AS never_audited',
+			'MIN(CASE WHEN audited_at IS NULL OR audited_at < last_filled '
+			+ 'THEN last_filled ELSE audited_at END) AS verified_since',
+		);
+	});
+
+	it('has no horizon over an empty queue, asks nothing with stats off', async () => {
+		firstRows = [{ size: '0', never_audited: null, verified_since: null }];
+
+		await expect(readCacheAuditQueueState()).resolves.toEqual({
+			size: 0,
+			neverAudited: 0,
+			verifiedSince: null,
+		});
+
+		env['CACHE_STATS_ENABLED'] = false;
+		mockDb.mockClear();
+
+		await expect(readCacheAuditQueueState()).resolves.toEqual({
+			size: 0,
+			neverAudited: 0,
+			verifiedSince: null,
+		});
+
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('advanceCacheAuditQueue', () => {
+	it('stamps the descriptors audited at the time given', async () => {
+		const at = new Date(9_500);
+
+		await advanceCacheAuditQueue(['ck1', 'ck2'], at);
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
+		expect(builder.update).toHaveBeenCalledWith({ audited_at: at });
+	});
+
+	it('asks nothing for no descriptor', async () => {
+		await advanceCacheAuditQueue([], new Date(9_500));
+
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
+describe('retireCacheAuditQueue', () => {
+	it(oneLine`
+		stamps the descriptors gone as of the ask, leaving one filled since alone
+	`, async () => {
+		const askedAt = new Date(9_500);
+
+		await retireCacheAuditQueue(['ck1', 'ck2'], askedAt);
+
+		expect(mockDb).toHaveBeenCalledWith('directus_cache_stats_descriptors');
+		expect(builder.whereIn).toHaveBeenCalledWith('cache_key', ['ck1', 'ck2']);
+		expect(builder.where).toHaveBeenCalledWith('last_filled', '<=', askedAt);
+		expect(builder.update).toHaveBeenCalledWith({ gone_at: askedAt });
+	});
+
+	it('asks nothing for no descriptor', async () => {
+		await retireCacheAuditQueue([], new Date(9_500));
+
+		expect(mockDb).not.toHaveBeenCalled();
+	});
+});
+
 describe('listPurgesCoveringEntry', () => {
 	// The two reaches answer separately — a purge names a tag the entry was filled
 	// under, or it names none and its collection is its reach — so the merge, the
@@ -3256,11 +3512,16 @@ describe('readCacheDescriptorForRedisKey', () => {
 	// so the primary-key arm answers on any hashing install and the TEXT scan is
 	// only ever paid by a readable-key one.
 	it('answers from the primary key without a second query', async () => {
-		firstRows = [{ cache_key: 'h1', last_filled: new Date(7).toISOString() }];
+		firstRows = [{
+			cache_key: 'h1',
+			last_filled: new Date(7).toISOString(),
+			audited_at: new Date(9).toISOString(),
+		}];
 
 		await expect(readCacheDescriptorForRedisKey('h1')).resolves.toEqual({
 			cacheKey: 'h1',
 			lastFilled: new Date(7),
+			auditedAt: new Date(9),
 		});
 
 		expect(builder.where).toHaveBeenCalledWith('cache_key', 'h1');
@@ -3271,12 +3532,12 @@ describe('readCacheDescriptorForRedisKey', () => {
 		// A readable Redis key: the identity column holds a digest it never equals.
 		firstRows = [
 			undefined,
-			{ cache_key: 'h2', last_filled: new Date(8).toISOString() },
+			{ cache_key: 'h2', last_filled: new Date(8).toISOString(), audited_at: null },
 		];
 
 		await expect(readCacheDescriptorForRedisKey('{"path":"/items/a"}'))
 			.resolves
-			.toEqual({ cacheKey: 'h2', lastFilled: new Date(8) });
+			.toEqual({ cacheKey: 'h2', lastFilled: new Date(8), auditedAt: null });
 
 		expect(builder.where).toHaveBeenCalledWith('redis_key', '{"path":"/items/a"}');
 	});
