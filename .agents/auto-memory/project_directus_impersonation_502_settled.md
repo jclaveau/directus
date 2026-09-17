@@ -17,11 +17,20 @@ review. Settled, do not re-litigate:
   "Cache audit bot" (first_name=job, last_name=bot), fixed-uuid migration. Bots are
   never targets, never login (password null). Non-identity attrs
   (`grantedDbConnections`) come from the impersonator, identity from the target.
-- **Logout under impersonation ends BOTH rows** (impersonated + admin's own);
-  `DELETE /auth/impersonate` (Stop) is the only restore path.
+- **Logout under a SESSION-mode impersonation ends BOTH rows** (impersonated +
+  admin's own); `DELETE /auth/impersonate` (Stop) is the only restore path. A
+  cookie-mode row links no `impersonator_session`: its logout ends itself only,
+  and the admin's Studio logout leaves it alone (symmetric, bb-pinned).
 - **`impersonator_session` FK → `directus_sessions.token` ON DELETE CASCADE**
-  (token is PK) — that is how the admin's own kick ends the impersonation;
-  `clearUserSessions` is user-keyed and would miss it.
+  (token is PK) is only the net: `endSessions({tokens})` selects
+  `impersonator_session IN tokens` too, so a session-mode impersonation ended
+  through its admin's row leaves its `impersonate_end` trail and kicks its
+  socket (review 2026-09-17 #1); a user-keyed kick (`clearUserSessions`) reaches
+  impersonations via `impersonator IN users`.
+- **Identity is the target's, the pool the impersonator's**:
+  `getAccountabilityForToken` overrides `grantedDbConnections` from the
+  impersonator's own roles/policies and 401s when the impersonator is no longer
+  active (json tokens die with a suspended admin, not only rows).
 - **`refresh()` skips `provider.refresh()`** on impersonated rows (oauth2/openid
   rotate the TARGET's IdP token) and leaves `last_access` alone.
 - **Write guard**: allow GET/HEAD/OPTIONS/SEARCH + `/graphql*` (reads are POST);

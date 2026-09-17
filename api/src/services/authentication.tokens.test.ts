@@ -103,6 +103,7 @@ const session = {
 	session_next_token: null,
 	session_impersonator: null,
 	session_impersonator_session: null,
+	impersonator_status: null,
 	user_id: 'jane',
 	user_status: 'active',
 	user_provider: 'default',
@@ -244,6 +245,7 @@ test('refresh of an impersonated session keeps the target out of it', async () =
 		...session,
 		session_impersonator: 'admin',
 		session_impersonator_session: 'admin-session',
+		impersonator_status: 'active',
 	});
 
 	// updateStatefulSession: the grace-period update claims the row
@@ -276,6 +278,29 @@ test('refresh of an impersonated session keeps the target out of it', async () =
 	});
 
 	expect(own!.sql).toContain('expires');
+});
+
+test('refresh of an impersonated session ends with its impersonator', async () => {
+	tracker.on.select('directus_sessions').responseOnce({
+		...session,
+		session_impersonator: 'admin',
+		session_impersonator_session: null,
+		impersonator_status: 'suspended',
+	});
+
+	tracker.on.select('directus_sessions')
+		.response([{ token: 'imp-token', user: 'jane', impersonator: 'admin' }]);
+
+	tracker.on.delete('directus_sessions').response([]);
+	tracker.on.insert('directus_activity').response([]);
+
+	await expect(
+		new AuthenticationService({ knex: db, schema }).refresh('imp-token'),
+	).rejects.toThrow(InvalidCredentialsError);
+
+	// The row is ended, not left to refresh for the rest of its TTL
+	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token']);
+	expect(tracker.history.update).toHaveLength(0);
 });
 
 test('refresh of a share session signs a share token', async () => {

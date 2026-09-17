@@ -275,6 +275,27 @@ test('logout under impersonation ends the impersonator\'s row too', async () => 
 		.toEqual(['imp-token', 'admin-session']);
 });
 
+test('logout ends the row rotated under the caller too', async () => {
+	tracker.on.select((raw) => raw.sql.includes('inner join')).response([
+		{ ...jane, impersonator: null, impersonator_session: null, next_token: 'next' },
+	]);
+
+	tracker.on.select('directus_sessions').response([
+		{ token: 'old', user: 'jane', impersonator: null },
+		{ token: 'next', user: 'jane', impersonator: null },
+	]);
+
+	tracker.on.delete('directus_sessions').response([]);
+	vi.mocked(getAuthProvider).mockReturnValue({ logout: vi.fn() } as never);
+
+	await new AuthenticationService({ knex: db, schema }).logout('old');
+
+	expect(tracker.history.select[1]!.bindings)
+		.toEqual(['old', 'next', 'old', 'next']);
+
+	expect(tracker.history.delete[0]!.bindings).toEqual(['old', 'next']);
+});
+
 test('a plain logout ends its row and tells the provider', async () => {
 	const provider = { logout: vi.fn() };
 	vi.mocked(getAuthProvider).mockReturnValue(provider as never);

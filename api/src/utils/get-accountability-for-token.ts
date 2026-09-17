@@ -48,6 +48,32 @@ export async function getAccountabilityForToken(
 			accountability.admin = admin;
 			accountability.app = app;
 			accountability.grantedDbConnections = grantedDbConnections;
+
+			// The identity is the target's, the pool the impersonator's: a bot's
+			// policy says which one its job runs on. A suspended one acts for
+			// nobody, whatever a token minted before says.
+			if (payload.impersonator) {
+				const impersonator = await database
+					.select('role', 'status')
+					.from('directus_users')
+					.where({ id: payload.impersonator })
+					.first();
+
+				if (impersonator?.status !== 'active') {
+					throw new InvalidCredentialsError();
+				}
+
+				const own = await fetchGlobalAccess(
+					{
+						user: payload.impersonator,
+						roles: await fetchRolesTree(impersonator.role, database),
+						ip: accountability.ip,
+					},
+					database,
+				);
+
+				accountability.grantedDbConnections = own.grantedDbConnections;
+			}
 		} else {
 			const user = await database
 				.select('directus_users.id', 'directus_users.role')

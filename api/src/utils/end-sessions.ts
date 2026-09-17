@@ -51,7 +51,14 @@ export async function endSessions(
 		.from('directus_sessions');
 
 	if ('tokens' in selector) {
-		query.whereIn('token', selector.tokens);
+		// A session-mode impersonation goes with the session it was opened from;
+		// ended here, so it leaves its trail and its sockets are told, where the
+		// FK cascade would only drop the row.
+		query.where((rows) => {
+			rows
+				.whereIn('token', selector.tokens)
+				.orWhereIn('impersonator_session', selector.tokens);
+		});
 	}
 	else {
 		query.where((rows) => {
