@@ -342,6 +342,19 @@ describe('the queue', () => {
 		expect(cache.listeners.size).toBe(0);
 	});
 
+	test('names the attempt behind a bare AggregateError', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		cache.hasMany.mockRejectedValue(
+			new AggregateError([new Error('connect ECONNREFUSED 127.0.0.1:6379')]),
+		);
+
+		await expect(auditCache({ replay: replayer() })).rejects.toThrow(
+			'The cache could not be asked what it holds: connect ECONNREFUSED',
+		);
+	});
+
 	test('stops once its time is up, after the page it began', async () => {
 		fill('rk1', { data: [] });
 		fill('rk2', { data: [] });

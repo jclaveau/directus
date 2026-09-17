@@ -369,12 +369,24 @@ async function askHeld(cache: Keyv, redisKeys: string[]): Promise<boolean[]> {
 	}
 
 	throw new Error(
-		`The cache could not be asked what it holds: ${
-			failure instanceof Error
-				? failure.message
-				: String(failure)
-		}`,
+		`The cache could not be asked what it holds: ${describeFailure(failure)}`,
 	);
+}
+
+// node-redis reports a lost connection as an AggregateError with no message
+// of its own: what it carries is one error per attempt.
+function describeFailure(failure: unknown): string {
+	if (failure instanceof AggregateError) {
+		const attempts = failure.errors.map(describeFailure);
+
+		return attempts.at(-1) ?? failure.name;
+	}
+
+	if (failure instanceof Error) {
+		return failure.message || failure.name;
+	}
+
+	return String(failure);
 }
 
 function expiryKey(redisKey: string): string {
