@@ -34,6 +34,18 @@ import { SettingsService } from './settings.js';
 const env = useEnv();
 const logger = useLogger();
 
+const IMPERSONATION_CREDENTIAL_FIELDS = [
+	'password',
+	'email',
+	'token',
+	'tfa_secret',
+	'role',
+	'status',
+	'provider',
+	'external_identifier',
+	'auth_data',
+];
+
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
 		super('directus_users', options);
@@ -250,6 +262,16 @@ export class UsersService extends ItemsService {
 		data: Partial<Item>,
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		// Whatever IMPERSONATION_WRITES says: these fields are the only callers
+		// of `clearUserSessions` on the target, so refusing them is what keeps
+		// an impersonation from ever ending the target's real sessions.
+		if (
+			this.accountability?.impersonator
+			&& IMPERSONATION_CREDENTIAL_FIELDS.some((field) => field in data)
+		) {
+			throw new ForbiddenError({ reason: 'impersonation_credentials' });
+		}
+
 		try {
 			if (data['email']) {
 				if (keys.length > 1) {

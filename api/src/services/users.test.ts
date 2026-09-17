@@ -267,6 +267,46 @@ describe('Integration Tests', () => {
 					});
 				});
 
+				describe('under impersonation, whatever the target may do', () => {
+					const service = new UsersService({
+						knex: db,
+						schema,
+						accountability: {
+							user: 'user-id-14',
+							role: 'admin',
+							admin: true,
+							impersonator: 'admin-id',
+						} as Accountability,
+					});
+
+					it.each([
+						'password',
+						'email',
+						'token',
+						'tfa_secret',
+						'role',
+						'status',
+						'provider',
+						'external_identifier',
+						'auth_data',
+					])('%s is refused before anything runs', async (field) => {
+						await expect(
+							service.updateMany(['user-id-14'], { [field]: 'test' }),
+						).rejects.toThrow(
+							new ForbiddenError({ reason: 'impersonation_credentials' }),
+						);
+
+						expect(superUpdateManySpy).not.toHaveBeenCalled();
+						expect(clearUserSessionsSpy).not.toBeCalled();
+					});
+
+					it('any other field goes through', async () => {
+						await service.updateMany(['user-id-14'], { first_name: 'Jane' });
+
+						expect(superUpdateManySpy).toHaveBeenCalled();
+					});
+				});
+
 				describe.each([
 					['admin users', { role: 'admin', admin: true } as Accountability],
 					['null accountability', null],

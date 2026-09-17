@@ -172,6 +172,11 @@ router.patch(
 			throw new InvalidPayloadError({ reason: `"last_page" key is required` });
 		}
 
+		// The app tracks every navigation; the target's `last_page` stays theirs.
+		if (req.accountability.impersonator) {
+			return next();
+		}
+
 		const service = new UsersService({ schema: req.schema });
 		await service.updateOne(req.accountability.user, { last_page: req.body.last_page }, { autoPurgeCache: false });
 

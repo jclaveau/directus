@@ -23,6 +23,9 @@ vi.mock('../../services', () => ({
 	MetaService: vi.fn(),
 }));
 
+const env = vi.hoisted(() => ({} as Record<string, unknown>));
+vi.mock('@directus/env', () => ({ useEnv: () => env }));
+
 function mockClient() {
 	return {
 		on: vi.fn(),
@@ -46,6 +49,78 @@ describe('WebSocket heartbeat handler', () => {
 		vi.useRealTimers();
 		emitter.offAll();
 		vi.clearAllMocks();
+		delete env['IMPERSONATION_WRITES'];
+	});
+
+	describe('under impersonation', () => {
+		function impersonated(action: string) {
+			(getSchema as Mock).mockImplementation(() => ({ collections: { test: [] } }));
+			const fakeClient = mockClient();
+			(fakeClient as any).accountability = { user: 'jane', impersonator: 'admin' };
+
+			emitter.emitAction(
+				'websocket.message',
+				{
+					client: fakeClient,
+					message: { type: 'items', collection: 'test', action, data: {}, id: 1 },
+				},
+				{} as EventContext,
+			);
+
+			return fakeClient;
+		}
+
+		test.each(['create', 'update', 'delete'])('%s is refused', async (action) => {
+			const service = {
+				createOne: vi.fn(),
+				updateOne: vi.fn(),
+				deleteOne: vi.fn(),
+			};
+
+			(ItemsService as Mock).mockImplementation(() => service);
+
+			const fakeClient = impersonated(action);
+
+			await vi.runAllTimersAsync();
+
+			expect(fakeClient.send)
+				.toBeCalledWith(expect.stringContaining('"FORBIDDEN"'));
+
+			expect(fakeClient.send)
+				.toBeCalledWith(expect.stringContaining('impersonation_read_only'));
+
+			expect(service.createOne).not.toBeCalled();
+			expect(service.updateOne).not.toBeCalled();
+			expect(service.deleteOne).not.toBeCalled();
+		});
+
+		test('read goes through', async () => {
+			const readOne = vi.fn();
+			(ItemsService as Mock).mockImplementation(() => ({ readOne }));
+
+			const fakeClient = impersonated('read');
+
+			await vi.runAllTimersAsync();
+
+			expect(readOne).toBeCalled();
+
+			expect(fakeClient.send)
+				.not.toBeCalledWith(expect.stringContaining('FORBIDDEN'));
+		});
+
+		test('writes go through once IMPERSONATION_WRITES is on', async () => {
+			env['IMPERSONATION_WRITES'] = true;
+			const createOne = vi.fn();
+
+			(ItemsService as Mock)
+				.mockImplementation(() => ({ createOne, readOne: vi.fn() }));
+
+			impersonated('create');
+
+			await vi.runAllTimersAsync();
+
+			expect(createOne).toBeCalled();
+		});
 	});
 
 	test('ignore other message types', async () => {
