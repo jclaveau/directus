@@ -87,8 +87,11 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/app/autoscale-redis-outage.test.ts': 85_000,
 	// A climb, a whole pool falling idle, and the walk back down, plus a second
 	// climb whose release is held by the cooldown the add re-armed, and a third
-	// pool released at the worker that is not the one pm2 would have taken.
-	'/tests/db/app/autoscale-release.test.ts': 115_000,
+	// pool released at the worker that is not the one pm2 would have taken, and
+	// a fourth whose victim holds its exit for twenty seconds, watched draining
+	// and then gone. 253s on a runner, plus the twenty-second drain the
+	// teardown now waits out.
+	'/tests/db/app/autoscale-release.test.ts': 275_000,
 	// Four pools, each released by as much as the load that is left allows.
 	'/tests/db/app/autoscale-release-proportional.test.ts': 120_000,
 	// Two pools held under a fixed window each, plus the grow the second
