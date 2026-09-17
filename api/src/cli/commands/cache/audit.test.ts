@@ -21,6 +21,11 @@ vi.mock('../../../cache-audit.js', async (importOriginal) => {
 
 vi.mock('../../../cache-audit-runs.js', () => ({ runCacheAudit: vi.fn() }));
 
+// A factory: the service reaches the auth drivers and, through them, the app.
+vi.mock('../../../services/authentication.js', () => {
+	return { AuthenticationService: class {} };
+});
+
 vi.mock('../../../logger/index.js');
 // A factory, not an automock: shaping one would load the whole app behind it.
 vi.mock('../../../server.js', () => ({ createServer: vi.fn() }));

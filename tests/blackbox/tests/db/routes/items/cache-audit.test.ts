@@ -804,7 +804,7 @@ describe('The cache audit replays live entries against the database', () => {
 
 			expect(report.findings[0]).toMatchObject({
 				verdict: 'unreplayable',
-				reason: 'user_gone',
+				reason: 'user_inactive',
 				user: appUserId,
 				url: `/items/${ROWS}?filter[owner][_eq]=acme`,
 			});

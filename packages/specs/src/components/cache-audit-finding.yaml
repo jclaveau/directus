@@ -14,7 +14,7 @@ properties:
     type: string
     nullable: true
     description: >
-      The `unreplayable` reason (`user_gone`, `status_<code>`,
+      The `unreplayable` reason (`user_inactive`, `status_<code>`,
       `replay_unrecognized`), or what a replay answered instead of a body.
   redisKey:
     type: string

@@ -67,6 +67,11 @@ vi.mock('../../services/utils.js', () => {
 	};
 });
 
+// A factory: the service reaches the auth drivers and, through them, the app.
+vi.mock('../../services/authentication.js', () => {
+	return { AuthenticationService: class {} };
+});
+
 const config = vi.hoisted(() => {
 	return { groups: vi.fn() };
 });

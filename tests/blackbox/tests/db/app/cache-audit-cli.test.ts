@@ -335,7 +335,7 @@ describe('`directus cache audit` and the scheduled audit', () => {
 
 			expect(reportIn(lenient.output).findings[0]).toMatchObject({
 				verdict: 'unreplayable',
-				reason: 'user_gone',
+				reason: 'user_inactive',
 				user: gone.id,
 			});
 

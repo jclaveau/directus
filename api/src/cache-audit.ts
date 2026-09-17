@@ -1,8 +1,10 @@
 import { useEnv } from '@directus/env';
-import jwt from 'jsonwebtoken';
+import { ErrorCode, isDirectusError } from '@directus/errors';
+import type { SchemaOverview } from '@directus/types';
 import type Keyv from 'keyv';
 import http from 'node:http';
 import pLimit from 'p-limit';
+import { CACHE_AUDIT_BOT } from './bots.js';
 import { getCache, getCacheValue } from './cache.js';
 import {
 	advanceCacheAuditQueue,
@@ -19,13 +21,15 @@ import {
 	retireCacheAuditQueue,
 } from './cache-events.js';
 import getDatabase from './database/index.js';
+import { useLogger } from './logger/index.js';
+import { AuthenticationService } from './services/authentication.js';
 import {
 	CACHE_AUDIT_REPLAY_HEADER,
 	CACHE_AUDIT_TAGS_HEADER,
 	cacheAuditReplayToken,
 } from './utils/cache-audit-replay.js';
 import { decompress } from './utils/compress.js';
-import { getSecret } from './utils/get-secret.js';
+import { getSchema } from './utils/get-schema.js';
 
 /**
  * Every scoped-cache guarantee is a proof by construction: a read derives tags,
@@ -170,6 +174,9 @@ const DIFF_PATHS_REPORTED = 20;
 // real difference past them, and is judged fresh.
 const DIFF_PATHS_COMPARED = 500;
 const REPLAY_TOKEN_TTL = '60s';
+// A token is re-minted this long before it expires, so one handed to a replay
+// still verifies once the request reaches the app.
+const REPLAY_TOKEN_EXPIRY_MARGIN_MS = 10_000;
 
 interface LiveEntry {
 	descriptor: CacheAuditDescriptor;
@@ -189,9 +196,9 @@ interface ReplayPlan {
 	url: string;
 }
 
-interface ReplayUser {
-	id: string;
-	role: string | null;
+interface ReplayToken {
+	authorization: string;
+	expiresAt: number;
 }
 
 type Verdict =
@@ -235,7 +242,23 @@ export async function auditCache(
 		);
 	}
 
-	const audit = new CacheAudit(cache, options);
+	// Suspending the bot is the audit's kill switch: nothing can be replayed
+	// on its behalf, so the run has nothing to examine.
+	const bot = await getDatabase()('directus_users')
+		.where({ id: CACHE_AUDIT_BOT.user })
+		.first('status');
+
+	if (bot?.status !== 'active') {
+		useLogger().warn(
+			`[cache-audit] Skipped: the cache audit bot is ${bot?.status ?? 'missing'}`,
+		);
+
+		report.durationMs = Date.now() - startedAt;
+
+		return report;
+	}
+
+	const audit = new CacheAudit(cache, await getSchema(), options);
 	const limit = pLimit(REPLAY_CONCURRENCY);
 	// What this run stamps is stamped after it began, so a read bounded by its
 	// start never wraps around into its own pages.
@@ -402,10 +425,11 @@ function emptyCounts(): Record<CacheAuditVerdict, number> {
 class CacheAudit {
 	private readonly replay: CacheAuditReplayer;
 	private readonly ignore: string[][];
-	private readonly users = new Map<string, Promise<ReplayUser | null>>();
+	private readonly tokens = new Map<string, Promise<ReplayToken | null>>();
 
 	constructor(
 		private readonly cache: Keyv,
+		private readonly schema: SchemaOverview,
 		options: CacheAuditOptions,
 	) {
 		this.replay = options.replay ?? loopbackReplayer();
@@ -503,7 +527,7 @@ class CacheAudit {
 		const authorization = await this.authorizationFor(descriptor.userId);
 
 		if (authorization === null) {
-			return { verdict: 'unreplayable', reason: 'user_gone' };
+			return { verdict: 'unreplayable', reason: 'user_inactive' };
 		}
 
 		if (authorization !== '') {
@@ -710,42 +734,69 @@ class CacheAudit {
 
 	/**
 	 * A minted access token for the user the entry was filled for, `''` for a
-	 * public fill, null for a user that no longer exists. `{ id, role }` is all
-	 * the token needs to carry: the app rebuilds the rest from the database, as
-	 * it does for any access token.
+	 * public fill, null for a user that can no longer be impersonated. Minted
+	 * once per user and run, again once it has expired: a run must not pay the
+	 * mint's queries once per entry.
 	 */
 	private async authorizationFor(userId: string | null): Promise<string | null> {
 		if (userId === null) {
 			return '';
 		}
 
-		let lookup = this.users.get(userId);
+		let pending = this.tokens.get(userId);
 
-		if (lookup === undefined) {
-			lookup = getDatabase()('directus_users')
-				.where({ id: userId })
-				.first('id', 'role')
-				.then((row: ReplayUser | undefined) => row ?? null);
-
-			this.users.set(userId, lookup);
+		if (pending === undefined) {
+			pending = this.mint(userId);
+			this.tokens.set(userId, pending);
 		}
 
-		const user = await lookup;
+		let token = await pending;
 
-		if (user === null) {
-			return null;
+		if (token !== null && token.expiresAt <= Date.now()) {
+			// Another entry of the same user may have re-minted while this one
+			// awaited; take its token rather than minting beside it.
+			if (this.tokens.get(userId) === pending) {
+				this.tokens.set(userId, this.mint(userId));
+			}
+
+			token = await this.tokens.get(userId)!;
 		}
 
-		// The access claims are required to be present and read from nowhere:
-		// `getAccountabilityForToken` recomputes both from the database, which is
-		// the point — the replay runs as the user is today, not as it was.
-		const token = jwt.sign(
-			{ id: user.id, role: user.role, app_access: false, admin_access: false },
-			getSecret(),
-			{ expiresIn: REPLAY_TOKEN_TTL, issuer: 'directus' },
-		);
+		return token === null
+			? null
+			: token.authorization;
+	}
 
-		return `Bearer ${token}`;
+	private async mint(userId: string): Promise<ReplayToken | null> {
+		const service = new AuthenticationService({
+			knex: getDatabase(),
+			schema: this.schema,
+		});
+
+		try {
+			// The replay runs as the user is today, not as it was: the claims are
+			// read back from the database, as for any access token.
+			const { accessToken, expires } = await service.impersonate(userId, {
+				impersonator: CACHE_AUDIT_BOT.user,
+				mode: 'json',
+				ttl: REPLAY_TOKEN_TTL,
+			});
+
+			return {
+				authorization: `Bearer ${accessToken}`,
+				expiresAt: Date.now() + expires - REPLAY_TOKEN_EXPIRY_MARGIN_MS,
+			};
+		}
+		catch (error) {
+			if (
+				isDirectusError<{ reason?: string }>(error, ErrorCode.Forbidden)
+				&& error.extensions.reason === 'impersonation_target_inactive'
+			) {
+				return null;
+			}
+
+			throw error;
+		}
 	}
 
 	private async recordAnomaly(
