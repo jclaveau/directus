@@ -13,6 +13,7 @@ import { computed, provide, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import HeaderBar from './components/header-bar.vue';
+import ImpersonationBanner from './components/impersonation-banner.vue';
 import ModuleBar from './components/module-bar.vue';
 import NotificationDialogs from './components/notification-dialogs.vue';
 import NotificationsDrawer from './components/notifications-drawer.vue';
@@ -329,6 +330,8 @@ const showLicenseBanner = computed(() => userStore.isAdmin && settingsStore.sett
 		<skip-menu section="main" />
 
 		<div id="main-content" ref="contentEl" class="content">
+			<impersonation-banner />
+
 			<header-bar
 				ref="headerBarEl"
 				:small="smallHeader || splitView"

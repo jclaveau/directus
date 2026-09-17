@@ -15,6 +15,7 @@ import { useAppStore } from '@directus/stores';
 import { RouteLocationRaw } from 'vue-router';
 import { Events, emitter } from './events';
 import { useServerStore } from './stores/server';
+import { useUserStore } from './stores/user';
 
 type LoginCredentials = {
 	identifier?: string;
@@ -104,7 +105,15 @@ export async function refresh({ navigate }: LogoutOptions = { navigate: true }):
 	try {
 		// Skip access token refreshing if it is still fresh but validate the session
 		if (appStore.accessTokenExpiry && Date.now() < appStore.accessTokenExpiry - SDK_AUTH_REFRESH_BEFORE_EXPIRES) {
-			await sdk.request(readMe({ fields: ['id'] }));
+			const { id } = await sdk.request(readMe({ fields: ['id'] }));
+			const currentUser = useUserStore().currentUser;
+
+			// Another tab started or stopped an impersonation: the stores hold
+			// the previous user
+			if (currentUser && !('share' in currentUser) && currentUser.id !== id) {
+				window.location.reload();
+			}
+
 			return;
 		}
 
