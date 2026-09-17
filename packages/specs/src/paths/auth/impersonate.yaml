@@ -1,0 +1,118 @@
+post:
+  summary: Impersonate
+  description: >
+    Act as another user. Admin only, and absent (404) unless IMPERSONATION_ENABLED
+    is on. `json` answers a short-lived stateless token (IMPERSONATION_TTL);
+    `cookie` opens a refresh-token session and sets its cookie, leaving the
+    Data Studio session cookie untouched; `session` sets the session cookie over
+    the caller's own, which must be a session cookie itself. Every request made
+    with the result names the impersonator on its claims and in the activity
+    trail; writes are refused unless IMPERSONATION_WRITES is on, and the
+    target's credentials are never writable.
+  tags:
+    - Authentication
+  operationId: impersonate
+  requestBody:
+    content:
+      application/json:
+        schema:
+          type: object
+          required:
+            - user
+          properties:
+            user:
+              type: string
+              description: The id of the user to act as.
+              example: 8cbb43fe-4cdf-4991-8352-c461779cec02
+            mode:
+              type: string
+              enum: [json, cookie, session]
+              default: cookie
+  responses:
+    '200':
+      description: Request successful
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                    description: Absent in `session` mode, where the cookie carries it.
+                    example: eyJhbGciOiJI...
+                  expires:
+                    type: integer
+                    description: How long before the access token will expire.
+                    example: 900000
+    '400':
+      description: No `user`, an unknown `mode`, or `session` mode off a session cookie.
+    '403':
+      description: >
+        The caller is not an admin or is already impersonating (no nesting), the
+        target is the caller, inactive, a bot, or lacks app access in `session` mode.
+    '404':
+      $ref: '../../openapi.yaml#/components/responses/NotFoundError'
+delete:
+  summary: Stop Impersonating
+  description: >
+    End a `session`-mode impersonation and hand the caller their own session
+    cookie back. No password: the impersonator's own session row is the proof.
+  tags:
+    - Authentication
+  operationId: stopImpersonating
+  responses:
+    '200':
+      description: Request successful
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  expires:
+                    type: integer
+                    example: 86400000
+    '400':
+      description: The caller is not impersonating in `session` mode.
+    '401':
+      $ref: '../../openapi.yaml#/components/responses/UnauthorizedError'
+    '404':
+      $ref: '../../openapi.yaml#/components/responses/NotFoundError'
+get:
+  summary: Who Is Impersonating
+  description: >
+    The impersonator behind the current request, for the app banner, or null.
+    Never served from the response cache.
+  tags:
+    - Authentication
+  operationId: impersonator
+  responses:
+    '200':
+      description: Request successful
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  impersonator:
+                    type: object
+                    nullable: true
+                    properties:
+                      id:
+                        type: string
+                      first_name:
+                        type: string
+                        nullable: true
+                      last_name:
+                        type: string
+                        nullable: true
+    '404':
+      $ref: '../../openapi.yaml#/components/responses/NotFoundError'

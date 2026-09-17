@@ -1,9 +1,14 @@
-import { ForbiddenError, InvalidPayloadError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidCredentialsError,
+	InvalidPayloadError,
+} from '@directus/errors';
 import { SchemaBuilder } from '@directus/schema-builder';
 import jwt from 'jsonwebtoken';
 import knex from 'knex';
 import { createTracker, MockClient, type Tracker } from 'knex-mock-client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import { getAuthProvider } from '../auth.js';
 import { BOTS_ROLE } from '../bots.js';
 import emitter from '../emitter.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
@@ -246,4 +251,142 @@ test('refuses an inactive impersonator: suspend a bot to kill it', async () => {
 	).rejects.toMatchObject({
 		extensions: { reason: 'impersonation_impersonator_inactive' },
 	});
+});
+
+test('logout under impersonation ends the impersonator\'s row too', async () => {
+	tracker.on.select((raw) => raw.sql.includes('inner join')).response([
+		{ ...jane, impersonator: 'admin', impersonator_session: 'admin-session' },
+	]);
+
+	tracker.on.select('directus_sessions').response([
+		{ token: 'imp-token', user: 'jane' },
+		{ token: 'admin-session', user: 'admin' },
+	]);
+
+	tracker.on.delete('directus_sessions').response([]);
+
+	await new AuthenticationService({ knex: db, schema }).logout('imp-token');
+
+	expect(getAuthProvider).not.toHaveBeenCalled();
+
+	expect(tracker.history.delete[0]!.bindings)
+		.toEqual(['imp-token', 'admin-session']);
+});
+
+test('a plain logout ends its row and tells the provider', async () => {
+	const provider = { logout: vi.fn() };
+	vi.mocked(getAuthProvider).mockReturnValue(provider as never);
+
+	tracker.on.select((raw) => raw.sql.includes('inner join')).response([
+		{ ...jane, impersonator: null, impersonator_session: null },
+	]);
+
+	tracker.on.select('directus_sessions')
+		.response([{ token: 'own-token', user: 'jane' }]);
+
+	tracker.on.delete('directus_sessions').response([]);
+
+	await new AuthenticationService({ knex: db, schema }).logout('own-token');
+
+	expect(provider.logout)
+		.toHaveBeenCalledWith(expect.objectContaining({ id: 'jane' }));
+
+	expect(tracker.history.delete[0]!.bindings).toEqual(['own-token']);
+});
+
+test('Stop ends the impersonated row and re-signs the impersonator', async () => {
+	tracker.on.select((raw) => raw.sql.includes('"next_token"')).response({
+		token: 'imp-token',
+		next_token: null,
+		impersonator: 'admin',
+		impersonator_session: 'admin-session',
+	});
+
+	tracker.on.select((raw) => raw.sql.includes('inner join')).response({
+		id: 'admin',
+		role: 'admins',
+		provider: 'default',
+		status: 'active',
+	});
+
+	tracker.on.select('directus_sessions')
+		.response([{ token: 'imp-token', user: 'jane' }]);
+
+	tracker.on.delete('directus_sessions').response([]);
+
+	const result = await new AuthenticationService({ knex: db, schema })
+		.stopImpersonation('imp-token');
+
+	expect(result.expires).toBe(24 * 60 * 60_000);
+	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token']);
+
+	const claims = jwt.verify(result.accessToken, 'super-secure-secret');
+
+	expect(claims).toMatchObject({ id: 'admin', session: 'admin-session' });
+	expect(claims).not.toHaveProperty('impersonator');
+});
+
+test('Stop follows the row rotated under it within the grace period', async () => {
+	tracker.on.select((raw) => raw.sql.includes('"next_token"')).response({
+		token: 'imp-token',
+		next_token: 'imp-next',
+		impersonator: 'admin',
+		impersonator_session: 'admin-session',
+	});
+
+	tracker.on.select((raw) => raw.sql.includes('inner join')).response({
+		id: 'admin',
+		role: 'admins',
+		provider: 'default',
+		status: 'active',
+	});
+
+	tracker.on.select('directus_sessions').response([
+		{ token: 'imp-token', user: 'jane' },
+		{ token: 'imp-next', user: 'jane' },
+	]);
+
+	tracker.on.delete('directus_sessions').response([]);
+
+	await new AuthenticationService({ knex: db, schema })
+		.stopImpersonation('imp-token');
+
+	expect(tracker.history.delete[0]!.bindings).toEqual(['imp-token', 'imp-next']);
+});
+
+test('Stop refuses a session that is not an impersonation', async () => {
+	tracker.on.select('directus_sessions').response({
+		token: 'own-token',
+		next_token: null,
+		impersonator: null,
+		impersonator_session: null,
+	});
+
+	await expect(
+		new AuthenticationService({ knex: db, schema }).stopImpersonation('own-token'),
+	).rejects.toThrow(InvalidPayloadError);
+
+	expect(tracker.history.delete).toHaveLength(0);
+});
+
+test('Stop gives no cookie back once the impersonator\'s row is gone', async () => {
+	tracker.on.select((raw) => raw.sql.includes('"next_token"')).response({
+		token: 'imp-token',
+		next_token: null,
+		impersonator: 'admin',
+		impersonator_session: 'admin-session',
+	});
+
+	tracker.on.select((raw) => raw.sql.includes('inner join')).response(undefined);
+
+	tracker.on.select('directus_sessions')
+		.response([{ token: 'imp-token', user: 'jane' }]);
+
+	tracker.on.delete('directus_sessions').response([]);
+
+	await expect(
+		new AuthenticationService({ knex: db, schema }).stopImpersonation('imp-token'),
+	).rejects.toThrow(InvalidCredentialsError);
+
+	expect(tracker.history.delete).toHaveLength(1);
 });
