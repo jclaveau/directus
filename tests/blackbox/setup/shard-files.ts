@@ -55,6 +55,9 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	// Two spawned instances, and one case holds a pool saturated for six seconds.
 	'/tests/db/app/pgbouncer.test.ts': 40_000,
 	'/tests/db/app/system-mcp.test.ts': 50_000,
+	// Two spawned instances and a handful of socket waits. Estimated; to be
+	// measured.
+	'/tests/db/routes/auth/impersonate.test.ts': 40_000,
 	// A pm2 daemon per arm, and each assertion is a pool settling or a window
 	// spent proving it did not move. Measured over the postgres runs of
 	// 2026-09-08.
