@@ -154,6 +154,12 @@ describe('Cache config broadcast', () => {
 			// announcements out of another's is the bus name alone. The stranger
 			// shares the row the writer changed and still serves its boot-time
 			// value: a poll for the peer's new value runs out its whole window.
+			//
+			// What this arm cannot tell apart is a stranger that heard nothing
+			// from one whose subscription is dead: the writer's own mirror moves
+			// before the bus does, so no write on the stranger can witness its
+			// bus. The subscribe path is the peer's, exercised above on the same
+			// build.
 			const { writer, peer, stranger } = envs[vendor]!;
 
 			expect(await awaitEffectiveTtl(vendor, stranger, '11m')).toBe('11m');

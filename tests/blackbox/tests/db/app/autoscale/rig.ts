@@ -197,19 +197,20 @@ export function startPool(options: PoolOptions): Rig {
 /** The `directus_settings` columns the processes module lays over the env. */
 export type SharedSettingsColumn = 'autoscale_settings' | 'supervisor_settings';
 
-// What the rig's autoscalers run under unless a suite names one: the
-// environment's default `CACHE_NAMESPACE`.
+// What the rig's autoscalers run under: the environment's default
+// `CACHE_NAMESPACE`, which is also what the bus is named after.
 const DEFAULT_NAMESPACE = 'scalabus';
 
 const REDIS_PORT = 6108;
 
 /**
- * The channel `useBus` publishes `name` on for a process running under
- * `namespace`. The bus follows the cache namespace, so processes of two
- * suites sharing this Redis hear each other only when they share that too.
+ * The channel `useBus` publishes `name` on for the rig's autoscalers. The
+ * bus follows the cache namespace, so the autoscalers of two suites sharing
+ * this Redis hear each other, and a Directus naming its own namespace hears
+ * none of them.
  */
-export function busChannel(name: string, namespace = DEFAULT_NAMESPACE): string {
-	return `${namespace}:bus:${name}`;
+export function busChannel(name: string): string {
+	return `${DEFAULT_NAMESPACE}:bus:${name}`;
 }
 
 const databases = new Map<Vendor, Knex>();
@@ -237,14 +238,13 @@ export function databaseEnv(vendor: Vendor): Record<string, string> {
  * because most of these suites run a pool and an autoscaler and no Directus at
  * all. `announce` is what a write through the service would have published,
  * and leaving it off is how a suite asks whether the re-read floor alone
- * carries a change to a node the bus never reached; `namespace` is the one
- * the reading processes run under.
+ * carries a change to a node the bus never reached.
  */
 export async function storeSharedSettings(
 	vendor: Vendor,
 	column: SharedSettingsColumn,
 	settings: Record<string, unknown> | null,
-	options: { announce?: boolean; namespace?: string } = {},
+	options: { announce?: boolean } = {},
 ): Promise<void> {
 	let database = databases.get(vendor);
 
@@ -270,7 +270,7 @@ export async function storeSharedSettings(
 		announcer ??= new Redis({ host: 'localhost', port: REDIS_PORT });
 
 		await announcer.publish(
-			busChannel('sharedSettingsChanged', options.namespace),
+			busChannel('sharedSettingsChanged'),
 			JSON.stringify({ column }),
 		);
 	}

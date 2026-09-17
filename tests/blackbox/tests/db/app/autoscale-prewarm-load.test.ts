@@ -73,6 +73,8 @@ interface Deployment {
 	url: string;
 	port: number;
 	watch: Watch;
+	/** What its processes share a bus under; the autoscaler runs under it too. */
+	namespace: string;
 }
 
 /** The pool's size, `at` milliseconds into the watch. */
@@ -254,9 +256,10 @@ function plateausOf(readings: Reading[], heldMs: number): Plateau[] {
 async function deploy(vendor: Vendor): Promise<Deployment> {
 	const env = cloneDeep(config.envs)[vendor]!;
 	const port = await getPort();
+	const namespace = `blackbox-prewarm-load-${vendor}`;
 
 	env['PORT'] = String(port);
-	env['CACHE_NAMESPACE'] = `blackbox-prewarm-load-${vendor}`;
+	env['CACHE_NAMESPACE'] = namespace;
 	env['LOG_LEVEL'] = 'error';
 
 	const rig = startPool({
@@ -270,6 +273,7 @@ async function deploy(vendor: Vendor): Promise<Deployment> {
 		url: getUrl(vendor, { [vendor]: env } as never),
 		port,
 		watch: await watchPool(rig),
+		namespace,
 	};
 }
 
@@ -298,7 +302,7 @@ describe('A prewarm is reached under traffic and released after it', () => {
 		startAutoscaler(deployment.rig, {
 			...databaseEnv(vendor),
 			...SCALING,
-			CACHE_NAMESPACE: `blackbox-prewarm-load-${vendor}`,
+			CACHE_NAMESPACE: deployment.namespace,
 		});
 
 		expect(await deployment.watch.until(PREWARM, 180_000)).toBe(PREWARM);
