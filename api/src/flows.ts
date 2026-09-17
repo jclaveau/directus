@@ -29,6 +29,7 @@ import { FlowsService } from './services/flows.js';
 import * as services from './services/index.js';
 import { RevisionsService } from './services/revisions.js';
 import type { EventHandler } from './types/index.js';
+import { actorFields } from './utils/actor-fields.js';
 import { constructFlowTree } from './utils/construct-flow-tree.js';
 import { getSchema } from './utils/get-schema.js';
 import { getService } from './utils/get-service.js';
@@ -424,11 +425,8 @@ class FlowManager {
 
 			const activity = await activityService.createOne({
 				action: Action.RUN,
-				user: accountability?.user ?? null,
+				...actorFields(accountability),
 				collection: 'directus_flows',
-				ip: accountability?.ip ?? null,
-				user_agent: accountability?.userAgent ?? null,
-				origin: accountability?.origin ?? null,
 				item: flow.id,
 			});
 

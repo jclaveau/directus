@@ -19,6 +19,7 @@ import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
 import type { DirectusTokenPayload, Session, User } from '../types/index.js';
+import { actorFields } from '../utils/actor-fields.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
 import { clone, cloneDeep } from '../utils/lodash-es-used.js';
@@ -235,10 +236,8 @@ export class AuthenticationService {
 		if (this.accountability) {
 			await this.activityService.createOne({
 				action: Action.LOGIN,
+				...actorFields(this.accountability),
 				user: user.id,
-				ip: this.accountability.ip,
-				user_agent: this.accountability.userAgent,
-				origin: this.accountability.origin,
 				collection: 'directus_users',
 				item: user.id,
 			});
