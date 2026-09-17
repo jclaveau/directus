@@ -6,11 +6,16 @@ vi.mock('@directus/env', () => ({ useEnv: () => env }));
 
 const { parseGraphQL } = await import('./graphql.js');
 
+// asyncHandler hands back the promise its RequestHandler type hides
+type Handle = (req: unknown, res: unknown, next: unknown) => Promise<void>;
+const handle = parseGraphQL as Handle;
+
 const next = vi.fn();
 
-function run(req: Record<string, unknown>) {
+async function run(req: Record<string, unknown>) {
 	const res = { locals: {} as Record<string, unknown> };
-	return parseGraphQL(req as never, res as never, next).then(() => res);
+	await handle(req, res, next);
+	return res;
 }
 
 beforeEach(() => {
