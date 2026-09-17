@@ -15,9 +15,13 @@ import { getAuthProvider } from '../auth.js';
 import { DEFAULT_AUTH_PROVIDER } from '../constants.js';
 import getDatabase from '../database/index.js';
 import emitter from '../emitter.js';
+import {
+	createScopedCacheExtensionHandle,
+} from '../extensions/lib/scoped-cache-handle.js';
 import { fetchRolesTree } from '../permissions/lib/fetch-roles-tree.js';
 import { fetchGlobalAccess } from '../permissions/modules/fetch-global-access/fetch-global-access.js';
 import { RateLimiterRes, createRateLimiter } from '../rate-limiter.js';
+import { scopedCachePurgeEnabled } from '../scoped-cache.js';
 import type { DirectusTokenPayload, Session, User } from '../types/index.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getSecret } from '../utils/get-secret.js';
@@ -42,6 +46,26 @@ export class AuthenticationService {
 		this.accountability = options.accountability || null;
 		this.activityService = new ActivityService({ knex: this.knex, schema: options.schema });
 		this.schema = options.schema;
+	}
+
+	/**
+	 * `last_access` is written raw — no activity, no revision, no hook — so the
+	 * scoped purge never hears of it: a `/users/me` read served `fields=*` stayed
+	 * stale on it until its TTL, and every session refresh re-staled it. Full mode
+	 * keeps upstream's silence: a whole-cache flush per login is not worth a
+	 * timestamp.
+	 */
+	private async touchLastAccess(userId: string): Promise<void> {
+		await this.knex('directus_users')
+			.update({ last_access: new Date() })
+			.where({ id: userId });
+
+		if (!scopedCachePurgeEnabled()) {
+			return;
+		}
+
+		await createScopedCacheExtensionHandle(async () => this.schema)
+			.purgeForMutatedRows('directus_users', [{ id: userId }]);
 	}
 
 	/**
@@ -244,7 +268,7 @@ export class AuthenticationService {
 			});
 		}
 
-		await this.knex('directus_users').update({ last_access: new Date() }).where({ id: user.id });
+		await this.touchLastAccess(user.id);
 
 		emitStatus('success');
 
@@ -402,7 +426,7 @@ export class AuthenticationService {
 		});
 
 		if (record.user_id) {
-			await this.knex('directus_users').update({ last_access: new Date() }).where({ id: record.user_id });
+			await this.touchLastAccess(record.user_id);
 		}
 
 		// Clear expired sessions for the current user
