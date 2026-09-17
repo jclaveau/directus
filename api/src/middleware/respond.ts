@@ -32,6 +32,7 @@ import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
+import { readMeta } from '../utils/read-meta.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
@@ -49,6 +50,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const { cache } = getCache();
 
+	// A read service rides its tags, its unautopurgeable ones and its epoch capture
+	// on what it returns (`withMeta`). The items controller copies them into
+	// `res.locals`; a system controller hands the result over as the payload and
+	// nothing else, so they are read off the payload here. Only a payload that never
+	// went through a read (a hand-rolled /settings, GraphQL) carries no meta.
+	const payloadMeta = readMeta(res.locals['payload']?.data);
+
+	const readTags: ScopedCacheTag[] | undefined =
+		res.locals['scopedCacheTags'] ?? payloadMeta?.scopedCacheTags;
+
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
 	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
 	// smoke test can assert per-user scoping with no redis client. Never set in prod
@@ -56,12 +67,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// shows an absent header, not a masked one. A cache HIT skips this middleware —
 	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
 	if (env['CACHE_TAGS_HEADER']) {
-		const pins = res.locals['scopedCacheTags'];
-
-		if (Array.isArray(pins) && pins.length) {
+		if (Array.isArray(readTags) && readTags.length) {
 			res.setHeader(
 				`${env['CACHE_TAGS_HEADER']}`,
-				printableScopedCacheTags(serializeScopedCacheTags(pins)),
+				printableScopedCacheTags(serializeScopedCacheTags(readTags)),
 			);
 		}
 	}
@@ -92,14 +101,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 	}
 
-	// A custom read controller (e.g. /settings) may set `payload` with no tags
-	// (ItemsService reads set them; a hand-written one often does not). Fall back to
+	// A response with no read tags at all (a hand-rolled /settings) falls back to
 	// the bare collection tag so a mutation there still purges it (settings reask).
 	const collectionFallbackTags: ScopedCacheTag[] = req.collection
 		? [{ collection: req.collection }]
 		: [];
-
-	const controllerTags = res.locals['scopedCacheTags'];
 
 	// `total_count` drops the query filter and counts the whole collection
 	// (`MetaService.totalCount`), so a response carrying it depends on every row —
@@ -109,9 +115,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const countsWholeCollection =
 		req.sanitizedQuery.meta?.includes(Meta.TOTAL_COUNT) === true;
 
-	const scopedCacheTags = controllerTags?.length && countsWholeCollection === false
-		? controllerTags
-		: [...(controllerTags ?? []), ...collectionFallbackTags];
+	const scopedCacheTags = readTags?.length && countsWholeCollection === false
+		? readTags
+		: [...(readTags ?? []), ...collectionFallbackTags];
 
 	// No tags AND no collection (/server, /schema, a GraphQL query hitting nothing): a
 	// scoped purge can never target it; caching would orphan a stale entry. Skip it.
@@ -122,9 +128,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// A read hook scoped this response to unautopurgeable tags (value slices on fields
 	// the target collection isn't scoped on) without `manuallyPurged`: no write can
 	// auto-purge them, so caching would serve stale. Skip caching + surface them.
-	const unautopurgeableScopeTags = res.locals['scopedCacheUnautopurgeableTags'] as
-		| ScopedCacheTag[]
-		| undefined;
+	const unautopurgeableScopeTags: ScopedCacheTag[] | undefined =
+		res.locals['scopedCacheUnautopurgeableTags']
+		?? payloadMeta?.scopedCacheUnautopurgeableTags;
 
 	const unautopurgeableScope =
 		Array.isArray(unautopurgeableScopeTags) &&
@@ -151,12 +157,12 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	// Taken before the read's query; what it guards against, and why it is compared
 	// after the fill rather than before, is in `fill-guard.ts`. A read service hands
-	// its capture over through the controller; a system route's comes from
-	// `useCollection`, taken for the collection its fallback tag names. Where both
-	// exist the earlier reading wins per collection.
+	// its capture over through the controller or on the payload; a system route's
+	// also comes from `useCollection`, taken for the collection its fallback tag
+	// names. Where both exist the earlier reading wins per collection.
 	const capturedEpochs = mergedScopedCacheEpochs(
 		res.locals['scopedCacheEpochsAtRequest'] as ScopedCacheEpochs | undefined,
-		res.locals['scopedCacheEpochs'] as ScopedCacheEpochs | undefined,
+		res.locals['scopedCacheEpochs'] ?? payloadMeta?.scopedCacheEpochs,
 	);
 
 	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
@@ -272,15 +278,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.
 			if (env['CACHE_TAGS_HEADER']) {
-				const pins = res.locals['scopedCacheTags'];
-
-				if (Array.isArray(pins) && pins.length) {
+				if (Array.isArray(readTags) && readTags.length) {
 					// Object, not a bare string: setCacheValue's compress expects
 					// a CacheValue (object) — a raw string won't round-trip.
 					await setCacheValue(
 						cache,
 						cacheTagsKey(redisKey),
-						{ tags: serializeScopedCacheTags(pins) },
+						{ tags: serializeScopedCacheTags(readTags) },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}

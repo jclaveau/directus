@@ -140,6 +140,7 @@ vi.mock('../services/import-export.js', () => {
 
 import { setCacheValue } from '../cache.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
+import { withMeta } from '../utils/read-meta.js';
 import { respond } from './respond.js';
 
 const next = vi.fn();
@@ -183,6 +184,7 @@ beforeEach(() => {
 	delete env['CACHE_PURGED_TAGS_HEADER'];
 	permissionsCachable.mockResolvedValue(true);
 	mocks.queryCachable.mockReturnValue(true);
+	mocks.scopedCachePurgeEnabled.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -361,6 +363,92 @@ describe('respond middleware', () => {
 			'cache-key',
 			[{ collection: 'articles' }],
 			[],
+		);
+	});
+
+	test(oneLine`
+		reads the tags off the payload when the controller forwarded none — a system
+		route hands over the service's result as is, and the relations it nested
+		would otherwise be invisible to every purge (#505)
+	`, async () => {
+		await respond(
+			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
+			makeRes({
+				data: withMeta({ id: 'u1', student_profile: [] }, {
+					scopedCacheTags: [
+						{ collection: 'directus_users', field: 'id', value: 'u1', type: 'uuid' },
+						{ collection: 'student' },
+					],
+				}),
+			}),
+			next,
+		);
+
+		expect(tagScopedCacheKeys).toHaveBeenCalledWith(
+			'cache-key',
+			[
+				{ collection: 'directus_users', field: 'id', value: 'u1', type: 'uuid' },
+				{ collection: 'student' },
+			],
+			[],
+		);
+	});
+
+	test(oneLine`
+		guards the payload's tags by the capture the read took, folded into the one
+		useCollection took for the route's own collection
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		await respond(
+			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
+			makeRes(
+				{
+					data: withMeta({ id: 'u1' }, {
+						scopedCacheTags: [
+							{ collection: 'directus_users' },
+							{ collection: 'student' },
+						],
+						scopedCacheEpochs: { directus_users: '4', student: '5', '*': '1' },
+					}),
+				},
+				{ scopedCacheEpochsAtRequest: { directus_users: '3', '*': '1' } },
+			),
+			next,
+		);
+
+		expect(mocks.scopedCacheSweptDuringFill).toHaveBeenCalledWith(
+			{ directus_users: '3', student: '5', '*': '1' },
+		);
+
+		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test(oneLine`
+		refuses to cache a payload whose meta names unautopurgeable tags, the same as
+		when a controller forwards them
+	`, async () => {
+		mocks.scopedCachePurgeEnabled.mockReturnValue(true);
+
+		await respond(
+			makeReq({ originalUrl: '/users/me', collection: 'directus_users' }),
+			makeRes({
+				data: withMeta({ id: 'u1' }, {
+					scopedCacheTags: [{ collection: 'directus_users' }],
+					scopedCacheUnautopurgeableTags: [
+						{ collection: 'student', field: 'level', value: 3, type: 'integer' },
+					],
+				}),
+			}),
+			next,
+		);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+
+		expect(mocks.reportCacheAnomaly).toHaveBeenCalledWith(
+			expect.anything(),
+			'unautopurgeable_scope',
+			'student:level',
 		);
 	});
 
