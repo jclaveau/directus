@@ -69,6 +69,7 @@ import cache from './middleware/cache.js';
 import cors from './middleware/cors.js';
 import { errorHandler } from './middleware/error-handler.js';
 import extractToken from './middleware/extract-token.js';
+import impersonation from './middleware/impersonation.js';
 import rateLimiterGlobal from './middleware/rate-limiter-global.js';
 import rateLimiter, {
 	resolvedRateLimiterCharge,
@@ -320,6 +321,8 @@ export default async function createApp(): Promise<express.Application> {
 	app.get('/server/ping', (_req, res) => res.send('pong'));
 
 	app.use(authenticate);
+
+	app.use(impersonation);
 
 	app.use(schema);
 

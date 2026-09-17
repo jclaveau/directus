@@ -19,6 +19,7 @@ const nonPublicRoutes = ['first', 'second', 'third'].map((route) => ({
 let router: Router;
 const authRefresh = vi.fn();
 const userStoreTrackPage = vi.fn();
+const userStore: Record<string, unknown> = { trackPage: userStoreTrackPage };
 
 vi.mock('@/auth', () => ({
 	refresh: authRefresh,
@@ -38,11 +39,7 @@ vi.mock('@/stores/server', () => ({
 }));
 
 vi.mock('@/stores/user', () => ({
-	useUserStore: vi.fn().mockImplementation(() => {
-		return {
-			trackPage: userStoreTrackPage,
-		};
-	}),
+	useUserStore: vi.fn().mockImplementation(() => userStore),
 }));
 
 beforeEach(async () => {
@@ -68,6 +65,8 @@ afterEach(() => {
 	// is reset before every test
 	vi.resetModules();
 
+	delete userStore['currentUser'];
+	delete userStore['impersonator'];
 	vi.clearAllMocks();
 });
 
@@ -101,6 +100,48 @@ describe('onBeforeEach', () => {
 		await router.push('/login');
 
 		expect(authRefresh).not.toHaveBeenCalled();
+	});
+});
+
+describe('enforce_tfa', () => {
+	beforeEach(() => {
+		// Every navigation here schedules a trackPage; a real timer would fire
+		// into the next describe's count
+		vi.useFakeTimers();
+
+		const appStore = useAppStore();
+		appStore.hydrated = true;
+		appStore.authenticated = true;
+
+		userStore['currentUser'] = {
+			enforce_tfa: true,
+			tfa_secret: null,
+			last_page: null,
+		};
+	});
+
+	afterEach(() => {
+		vi.clearAllTimers();
+		vi.useRealTimers();
+	});
+
+	test('sends a user without a secret to the tfa setup', async () => {
+		router.push('/');
+		await router.isReady();
+
+		await router.push('/first');
+
+		expect(router.currentRoute.value.path).toBe('/tfa-setup');
+	});
+
+	test('is skipped under impersonation', async () => {
+		userStore['impersonator'] = { id: 'admin' };
+		router.push('/');
+		await router.isReady();
+
+		await router.push('/first');
+
+		expect(router.currentRoute.value.path).toBe('/first');
 	});
 });
 

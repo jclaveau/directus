@@ -1,11 +1,24 @@
 # NOTE: Activity/collections/fields/presets/relations/revisions will have an extra hardcoded filter
 # to filter out collections you don't have read access
 
+# Every column but `impersonator`: who acted as the user is the admins' to
+# see, and a policy's to grant, never the implicit app grant's.
 - collection: directus_activity
   action: read
   permissions:
     user:
       _eq: $CURRENT_USER
+  fields:
+    - id
+    - action
+    - user
+    - timestamp
+    - ip
+    - user_agent
+    - origin
+    - collection
+    - item
+    - revisions
 
 - collection: directus_comments
   action: read

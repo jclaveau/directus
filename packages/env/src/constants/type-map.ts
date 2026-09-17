@@ -212,6 +212,9 @@ export const TYPE_MAP: Record<string, EnvType> = {
 
 	USER_INVITE_TOKEN_TTL: 'string',
 
+	IMPERSONATION_ENABLED: 'boolean',
+	IMPERSONATION_WRITES: 'boolean',
+
 	LOGIN_STALL_TIME: 'number',
 
 	REGISTER_STALL_TIME: 'number',

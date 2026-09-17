@@ -20,6 +20,7 @@ import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import { validateRemainingAdminUsers } from '../permissions/modules/validate-remaining-admin/validate-remaining-admin-users.js';
 import { createDefaultAccountability } from '../permissions/utils/create-default-accountability.js';
+import { endSessions } from '../utils/end-sessions.js';
 import { getSecret } from '../utils/get-secret.js';
 import isUrlAllowed from '../utils/is-url-allowed.js';
 import { verifyJWT } from '../utils/jwt.js';
@@ -32,6 +33,18 @@ import { SettingsService } from './settings.js';
 
 const env = useEnv();
 const logger = useLogger();
+
+const IMPERSONATION_CREDENTIAL_FIELDS = [
+	'password',
+	'email',
+	'token',
+	'tfa_secret',
+	'role',
+	'status',
+	'provider',
+	'external_identifier',
+	'auth_data',
+];
 
 export class UsersService extends ItemsService {
 	constructor(options: AbstractServiceOptions) {
@@ -120,15 +133,7 @@ export class UsersService extends ItemsService {
 	 * Clear users' sessions to log them out
 	 */
 	private async clearUserSessions(userKeys: PrimaryKey[], excludeSession?: string): Promise<void> {
-		if (excludeSession) {
-			await this.knex
-				.from('directus_sessions')
-				.whereIn('user', userKeys)
-				.andWhereNot('token', '=', excludeSession)
-				.delete();
-		} else {
-			await this.knex.from('directus_sessions').whereIn('user', userKeys).delete();
-		}
+		await endSessions(this.knex, { users: userKeys, exceptToken: excludeSession });
 	}
 
 	/**
@@ -257,6 +262,10 @@ export class UsersService extends ItemsService {
 		data: Partial<Item>,
 		opts: MutationOptions = {},
 	): Promise<PrimaryKey[]> {
+		if (IMPERSONATION_CREDENTIAL_FIELDS.some((field) => field in data)) {
+			this.refuseCredentialsUnderImpersonation();
+		}
+
 		try {
 			if (data['email']) {
 				if (keys.length > 1) {
@@ -357,7 +366,36 @@ export class UsersService extends ItemsService {
 		return keys;
 	}
 
+	/**
+	 * Whatever IMPERSONATION_WRITES says, the credentials are the target's own:
+	 * the fields above are the only callers of `clearUserSessions` on them, an
+	 * invite hands a third user a secret, and the TFA secret is a login factor.
+	 * Every service path to one of those ends here, so the transports' path
+	 * lists are a belt, not the guard.
+	 */
+	private refuseCredentialsUnderImpersonation(): void {
+		if (this.accountability?.impersonator) {
+			throw new ForbiddenError({ reason: 'impersonation_credentials' });
+		}
+	}
+
+	/**
+	 * The one write of `tfa_secret`: `updateMany` refuses it from every caller,
+	 * the TFA flow sets it here once the OTP proved the secret (or clears it).
+	 */
+	async setTfaSecret(key: PrimaryKey, secret: string | null): Promise<void> {
+		this.refuseCredentialsUnderImpersonation();
+
+		await new ItemsService('directus_users', {
+			knex: this.knex,
+			schema: this.schema,
+			accountability: this.accountability,
+		}).updateOne(key, { tfa_secret: secret });
+	}
+
 	async inviteUser(email: string | string[], role: string, url: string | null, subject?: string | null): Promise<void> {
+		this.refuseCredentialsUnderImpersonation();
+
 		const opts: MutationOptions = {};
 
 		try {

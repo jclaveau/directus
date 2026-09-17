@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { ItemsService } from '../../services/items.js';
+import { getService } from '../../utils/get-service.js';
 import config from './index.js';
 
 vi.mock('../../services/items.js', () => {
@@ -12,6 +13,17 @@ vi.mock('../../services/items.js', () => {
 });
 
 const getSchema = vi.fn().mockResolvedValue({});
+
+// The collection's own service: `directus_users` must land in UsersService
+vi.mock('../../utils/get-service.js', async () => {
+	const { ItemsService } = await import('../../services/items.js');
+
+	return {
+		getService: vi.fn((collection: string, options: unknown) => {
+			return new ItemsService(collection, options as never);
+		}),
+	};
+});
 
 vi.mock('../../utils/get-accountability-for-role.js', () => ({
 	getAccountabilityForRole: vi.fn((role: string | null, _context) => Promise.resolve(role)),
@@ -25,6 +37,16 @@ const testAccountability = { user: testId, role: testId };
 describe('Operations / Item Delete', () => {
 	afterEach(() => {
 		vi.clearAllMocks();
+	});
+
+	test('a system collection lands in its own service', async () => {
+		await config.handler(
+			{ collection: 'directus_users', key: 1 } as any,
+			{ accountability: testAccountability, getSchema } as any,
+		);
+
+		expect(vi.mocked(getService))
+			.toHaveBeenCalledWith('directus_users', expect.anything());
 	});
 
 	test.each([

@@ -12,3 +12,5 @@ export type AppUser = User & {
 	enforce_tfa: boolean;
 	roles: Role[];
 };
+
+export type Impersonator = Pick<User, 'id' | 'first_name' | 'last_name'>;

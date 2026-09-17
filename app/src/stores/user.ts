@@ -2,7 +2,7 @@ import api, { RequestConfig } from '@/api';
 import { RTL_LANGUAGES } from '@/constants/text-direction';
 import { setLanguage } from '@/lang/set-language';
 import { useServerStore } from '@/stores/server';
-import { AppUser, ShareUser } from '@/types/user';
+import { AppUser, Impersonator, ShareUser } from '@/types/user';
 import { userName } from '@/utils/user-name';
 import { isIn } from '@directus/utils';
 import { merge } from 'lodash';
@@ -14,6 +14,9 @@ export const useUserStore = defineStore('userStore', () => {
 	const serverStore = useServerStore();
 
 	const currentUser = ref<AppUser | ShareUser | null>(null);
+	const impersonator = ref<Impersonator | null>(null);
+	// False while IMPERSONATION_ENABLED is off: the endpoint is a 404
+	const impersonationAvailable = ref(false);
 	const loading = ref(false);
 	const error = ref(null);
 
@@ -68,11 +71,14 @@ export const useUserStore = defineStore('userStore', () => {
 		try {
 			const fields = ['*', 'role.id'];
 
-			const [{ data: user }, { data: globals }, { data: roles }] = await Promise.all([
-				api.get('/users/me', { params: { fields } }),
-				api.get('/policies/me/globals'),
-				api.get('/roles/me', { params: { fields: ['id'] } }),
-			]);
+			const [{ data: user }, { data: globals }, { data: roles }, impersonation] =
+				await Promise.all([
+					api.get('/users/me', { params: { fields } }),
+					api.get('/policies/me/globals'),
+					api.get('/roles/me', { params: { fields: ['id'] } }),
+					// 404 while impersonation is disabled
+					api.get('/auth/impersonate').catch(() => null),
+				]);
 
 			currentUser.value = {
 				...user.data,
@@ -80,6 +86,9 @@ export const useUserStore = defineStore('userStore', () => {
 				...globals.data,
 				roles: roles.data,
 			};
+
+			impersonationAvailable.value = impersonation !== null;
+			impersonator.value = impersonation?.data.data.impersonator ?? null;
 		} catch (error: any) {
 			error.value = error;
 		} finally {
@@ -89,6 +98,8 @@ export const useUserStore = defineStore('userStore', () => {
 
 	const dehydrate = async () => {
 		currentUser.value = null;
+		impersonator.value = null;
+		impersonationAvailable.value = false;
 		loading.value = false;
 		error.value = null;
 	};
@@ -130,6 +141,8 @@ export const useUserStore = defineStore('userStore', () => {
 
 	return {
 		currentUser,
+		impersonator,
+		impersonationAvailable,
 		loading,
 		error,
 		fullName,

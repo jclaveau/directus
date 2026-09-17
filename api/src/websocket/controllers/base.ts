@@ -11,11 +11,19 @@ import type internal from 'stream';
 import { parse } from 'url';
 import WebSocket, { WebSocketServer, type Server } from 'ws';
 import { fromZodError } from 'zod-validation-error';
+import { useBus } from '../../bus/index.js';
+import getDatabase from '../../database/index.js';
 import emitter from '../../emitter.js';
 import { useLogger } from '../../logger/index.js';
 import { createDefaultAccountability } from '../../permissions/utils/create-default-accountability.js';
 import { createRateLimiter } from '../../rate-limiter.js';
+import {
+	hashSessionToken,
+	SESSION_ENDED_CHANNEL,
+	type SessionEndedEvent,
+} from '../../utils/end-sessions.js';
 import { getIPFromReq } from '../../utils/get-ip-from-req.js';
+import { chunk } from '../../utils/lodash-es-used.js';
 import { authenticateConnection, authenticationSuccess } from '../authenticate.js';
 import { WebSocketError, handleWebSocketError } from '../errors.js';
 import { AuthMode, WebSocketAuthMessage } from '../messages.js';
@@ -55,6 +63,96 @@ export default abstract class SocketController {
 
 		httpServer.on('upgrade', this.handleUpgrade.bind(this));
 		this.checkClientTokens();
+
+		// A session ended elsewhere reaches its sockets here; without Redis the
+		// bus is local and the kick reaches this worker only.
+		useBus().subscribe<SessionEndedEvent>(SESSION_ENDED_CHANNEL, (event) => {
+			this.endSessions(event);
+		});
+	}
+
+	/**
+	 * Close every client whose session the event names: by its own token, or
+	 * by being one of the users' sockets — theirs or run as them — save the
+	 * session that did the ending.
+	 */
+	endSessions(event: SessionEndedEvent) {
+		for (const client of this.clients) {
+			const { accountability } = client;
+
+			if (!accountability) {
+				continue;
+			}
+
+			const token = accountability.session
+				? hashSessionToken(accountability.session)
+				: null;
+
+			if (token !== null && event.exceptTokens.includes(token)) {
+				continue;
+			}
+
+			const { user, impersonator } = accountability;
+
+			if (
+				(token !== null && event.tokens.includes(token))
+				|| (user !== null && event.users.includes(user))
+				|| (impersonator !== undefined && event.users.includes(impersonator))
+			) {
+				this.endSession(client);
+			}
+		}
+	}
+
+	private endSession(client: WebSocketClient) {
+		client.accountability = null;
+		client.expires_at = null;
+
+		handleWebSocketError(
+			client,
+			new WebSocketError('auth', 'SESSION_ENDED', 'The session has ended.'),
+			'auth',
+		);
+
+		client.close();
+	}
+
+	/**
+	 * A session socket whose row is gone is ended even where no event reached
+	 * this worker: the ending may have happened without Redis, or before it.
+	 */
+	private async endOrphanedSessions() {
+		const sessions = new Map<string, WebSocketClient[]>();
+
+		for (const client of this.clients) {
+			const session = client.accountability?.session;
+
+			if (session) {
+				sessions.set(session, [...(sessions.get(session) ?? []), client]);
+			}
+		}
+
+		if (sessions.size === 0) {
+			return;
+		}
+
+		// One bind parameter per socket: kept under the driver's cap
+		const batchSize = Number(useEnv()['RELATIONAL_BATCH_SIZE']);
+
+		for (const tokens of chunk([...sessions.keys()], batchSize)) {
+			const alive: { token: string }[] = await getDatabase()
+				.select('token')
+				.from('directus_sessions')
+				.whereIn('token', tokens);
+
+			for (const row of alive) {
+				sessions.delete(row.token);
+			}
+		}
+
+		for (const clients of sessions.values()) {
+			clients.forEach((client) => this.endSession(client));
+		}
 	}
 
 	protected getEnvironmentConfig(configPrefix: string): {
@@ -423,6 +521,10 @@ export default abstract class SocketController {
 				if (client.expires_at === null || client.auth_timer !== null) continue;
 				this.setTokenExpireTimer(client);
 			}
+
+			this.endOrphanedSessions().catch((error) => {
+				logger.warn(error, `[websocket] Could not check the sessions. ${error}`);
+			});
 		}, TOKEN_CHECK_INTERVAL);
 	}
 

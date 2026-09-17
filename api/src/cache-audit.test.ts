@@ -1,8 +1,9 @@
+import { ForbiddenError } from '@directus/errors';
 import { oneLine } from '@directus/utils';
-import jwt from 'jsonwebtoken';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { CACHE_AUDIT_BOT } from './bots.js';
 import { getCache, getCacheValue } from './cache.js';
 import {
 	auditCache,
@@ -39,8 +40,23 @@ vi.mock('./cache-events.js');
 vi.mock('./database/index.js');
 vi.mock('./utils/compress.js');
 
-vi.mock('./utils/get-secret.js', () => {
-	return { getSecret: () => 'audit-secret' };
+vi.mock('./utils/get-schema.js', () => {
+	return { getSchema: async () => ({}) };
+});
+
+const logger = vi.hoisted(() => ({ warn: vi.fn() }));
+vi.mock('./logger/index.js', () => ({ useLogger: () => logger }));
+
+// The service's own tests pin what a token carries; here what matters is
+// whom the audit asks for one, and how often.
+const impersonate = vi.hoisted(() => vi.fn());
+
+vi.mock('./services/authentication.js', () => {
+	return {
+		AuthenticationService: class {
+			impersonate = impersonate;
+		},
+	};
 });
 
 // A Keyv as the audit sees it: whether a page of keys is held, the bodies of
@@ -85,8 +101,8 @@ let cache: FakeCache;
 // The descriptor table as the queue reads it: what was described, minus what
 // a run has advanced past, in the order it was described.
 let queue: CacheAuditDescriptor[];
-const users = new Map<string, { id: string; role: string | null }>();
-const userLookups = vi.fn();
+const users = new Set<string>();
+let bot: { status: string } | undefined;
 
 function descriptor(
 	overrides: Partial<CacheAuditDescriptor> = {},
@@ -163,7 +179,16 @@ beforeEach(() => {
 	cache = new FakeCache();
 	envRef.current = { CACHE_AUDIT_IGNORE_PATHS: [] };
 	users.clear();
-	users.set('user-1', { id: 'user-1', role: 'role-1' });
+	users.add('user-1');
+	bot = { status: 'active' };
+
+	impersonate.mockImplementation(async (userId: string) => {
+		if (!users.has(userId)) {
+			throw new ForbiddenError({ reason: 'impersonation_target_inactive' });
+		}
+
+		return { accessToken: `token-for-${userId}`, expires: 60_000, id: userId };
+	});
 
 	vi.mocked(getCache).mockReturnValue({ cache } as any);
 
@@ -204,9 +229,9 @@ beforeEach(() => {
 			where: (clause: { id: string }) => {
 				return {
 					first: async () => {
-						userLookups(table, clause.id);
-
-						return users.get(clause.id);
+						return table === 'directus_users' && clause.id === CACHE_AUDIT_BOT.user
+							? bot
+							: undefined;
 					},
 				};
 			},
@@ -216,7 +241,8 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.restoreAllMocks();
-	userLookups.mockReset();
+	impersonate.mockReset();
+	logger.warn.mockReset();
 });
 
 test('answers an empty report where there is no cache', async () => {
@@ -499,16 +525,13 @@ describe('a fresh entry', () => {
 		expect(request.headers['accept']).toBe('application/json');
 		expect(request.headers[CACHE_AUDIT_REPLAY_HEADER]).toBe(cacheAuditReplayToken());
 
-		const token = String(request.headers['authorization']).replace('Bearer ', '');
-		const claims = jwt.verify(token, 'audit-secret') as Record<string, unknown>;
-		expect(claims['id']).toBe('user-1');
-		expect(claims['role']).toBe('role-1');
-		expect(claims['iss']).toBe('directus');
-		expect(claims['exp']).toBeGreaterThan(Date.now() / 1000);
-		// Present because the verifier refuses a token without them; false
-		// because the verifier reads the real grants back from the database.
-		expect(claims['app_access']).toBe(false);
-		expect(claims['admin_access']).toBe(false);
+		expect(request.headers['authorization']).toBe('Bearer token-for-user-1');
+
+		expect(impersonate).toHaveBeenCalledWith('user-1', {
+			impersonator: CACHE_AUDIT_BOT.user,
+			mode: 'json',
+			ttl: '60s',
+		});
 	});
 
 	test('filled for nobody is replayed with no authorization at all', async () => {
@@ -519,7 +542,7 @@ describe('a fresh entry', () => {
 		await auditCache({ replay });
 
 		expect(replay.mock.calls[0]![0].headers['authorization']).toBeUndefined();
-		expect(userLookups).not.toHaveBeenCalled();
+		expect(impersonate).not.toHaveBeenCalled();
 	});
 
 	test('skips the sidecars beside it rather than replaying them', async () => {
@@ -548,7 +571,7 @@ describe('a fresh entry', () => {
 	});
 
 	test(oneLine`
-		looks a user up once however many entries were filled for them
+		mints a user's token once however many entries were filled for them
 	`, async () => {
 		fill('rk1', { data: [] });
 		fill('rk2', { data: [] });
@@ -562,8 +585,44 @@ describe('a fresh entry', () => {
 			replay: replayer(answer({ data: [] }), answer({ data: [] })),
 		});
 
-		expect(userLookups).toHaveBeenCalledTimes(1);
-		expect(userLookups).toHaveBeenCalledWith('directus_users', 'user-1');
+		expect(impersonate).toHaveBeenCalledTimes(1);
+	});
+
+	test('mints again once the token is about to expire', async () => {
+		fill('rk1', { data: [] });
+		fill('rk2', { data: [] });
+
+		described(
+			descriptor({ redisKey: 'rk1', cacheKey: 'ck1' }),
+			descriptor({ redisKey: 'rk2', cacheKey: 'ck2' }),
+		);
+
+		// Expiring within the margin a replay is allowed to take.
+		impersonate.mockResolvedValue({
+			accessToken: 't',
+			expires: 10_000,
+			id: 'user-1',
+		});
+
+		await auditCache({
+			replay: replayer(answer({ data: [] }), answer({ data: [] })),
+		});
+
+		expect(impersonate).toHaveBeenCalledTimes(2);
+	});
+
+	test('is skipped, and says so, while the bot is suspended', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+		bot = { status: 'suspended' };
+		const replay = replayer(answer({ data: [] }));
+
+		const report = await auditCache({ replay });
+
+		expect(report.scanned).toBe(0);
+		expect(replay).not.toHaveBeenCalled();
+		expect(readCacheAuditQueue).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('suspended'));
 	});
 });
 
@@ -938,7 +997,7 @@ describe('the race guard', () => {
 
 describe('an entry nothing can be replayed from', () => {
 	test.each([
-		['user_gone', () => descriptor({ userId: 'user-9' }), answer({ data: [] })],
+		['user_inactive', () => descriptor({ userId: 'user-9' }), answer({ data: [] })],
 		['method', () => descriptor({ method: 'POST' }), answer({ data: [] })],
 		['query', () => descriptor({ query: '{"filter":{}}' }), answer({ data: [] })],
 		[
@@ -967,6 +1026,31 @@ describe('an entry nothing can be replayed from', () => {
 		expect(report.counts.unreplayable).toBe(1);
 		expect(report.findings[0]).toMatchObject({ verdict: 'unreplayable', reason });
 		expect(queueCacheAnomaly).not.toHaveBeenCalled();
+	});
+
+	test('an entry filled by a bot is a finding: never a target', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		impersonate.mockRejectedValue(
+			new ForbiddenError({ reason: 'impersonation_target_bot' }),
+		);
+
+		const report = await auditCache({ replay: replayer(answer({ data: [] })) });
+
+		expect(report.findings[0])
+			.toMatchObject({ verdict: 'unreplayable', reason: 'user_bot' });
+	});
+
+	test('an inactive target is a finding, another refusal a failure', async () => {
+		fill('rk', { data: [] });
+		described(descriptor());
+
+		impersonate.mockRejectedValue(
+			new ForbiddenError({ reason: 'impersonation_nested' }),
+		);
+
+		await expect(auditCache({ replay: replayer() })).rejects.toThrow(ForbiddenError);
 	});
 
 	test('transport: a replay that never got an answer', async () => {
@@ -1073,7 +1157,7 @@ describe('narrowing the sweep', () => {
 			descriptor({ redisKey: 'rk3', cacheKey: 'ck3', collection: 'authors' }),
 		);
 
-		users.set('user-2', { id: 'user-2', role: null });
+		users.add('user-2');
 	});
 
 	test(oneLine`

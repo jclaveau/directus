@@ -17,3 +17,7 @@ fields:
     width: half
   - field: next_token
     width: half
+  - field: impersonator
+    width: half
+  - field: impersonator_session
+    width: half

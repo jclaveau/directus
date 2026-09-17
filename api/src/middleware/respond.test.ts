@@ -1,3 +1,4 @@
+import type { Accountability } from '@directus/types';
 import { oneLine } from '@directus/utils';
 import type { Request, Response } from 'express';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -544,6 +545,23 @@ describe('respond middleware', () => {
 			expect.any(Number),
 			'other',
 		);
+	});
+
+	test('the impersonation banner is never cached', async () => {
+		const res = makeRes({ data: { impersonator: { id: 'admin' } } });
+
+		// The key is the target's `user`: two admins on one target would read
+		// each other's banner from it.
+		const req = makeReq({
+			collection: undefined,
+			originalUrl: '/auth/impersonate',
+			accountability: { user: 'jane', impersonator: 'admin' } as Accountability,
+		});
+
+		await respond(req, res, next);
+
+		expect(vi.mocked(setCacheValue)).not.toHaveBeenCalled();
+		expect(mocks.reportCacheAnomaly).not.toHaveBeenCalled();
 	});
 
 	test('a scoped-mode collection-less response flags missing_scope', async () => {

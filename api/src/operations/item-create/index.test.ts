@@ -6,11 +6,23 @@ vi.mock('../../services/items.js', () => {
 	return { ItemsService };
 });
 
+// The collection's own service: `directus_users` must land in UsersService
+vi.mock('../../utils/get-service.js', async () => {
+	const { ItemsService } = await import('../../services/items.js');
+
+	return {
+		getService: vi.fn((collection: string, options: unknown) => {
+			return new ItemsService(collection, options as never);
+		}),
+	};
+});
+
 vi.mock('../../utils/get-accountability-for-role.js', () => ({
 	getAccountabilityForRole: vi.fn((role: string | null, _context) => Promise.resolve(role)),
 }));
 
 import { ItemsService } from '../../services/items.js';
+import { getService } from '../../utils/get-service.js';
 import config from './index.js';
 
 const testCollection = 'test';
@@ -21,6 +33,16 @@ const getSchema = vi.fn().mockResolvedValue({});
 
 afterEach(() => {
 	vi.clearAllMocks();
+});
+
+test('a system collection lands in its own service', async () => {
+	await config.handler(
+		{ collection: 'directus_users', payload: {} } as any,
+		{ accountability: testAccountability, getSchema } as any,
+	);
+
+	expect(vi.mocked(getService))
+			.toHaveBeenCalledWith('directus_users', expect.anything());
 });
 
 test.each([

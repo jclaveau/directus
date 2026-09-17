@@ -159,7 +159,7 @@ export function scheduleRule(draft: string | null): string | null {
 		: trimmed;
 }
 
-/** The verdict, with its reason where one qualifies it: `unreplayable:user_gone`. */
+/** The verdict, with its reason where one qualifies it: `unreplayable:<reason>`. */
 export function findingVerdict(finding: CacheAuditFinding): string {
 	return finding.reason === null
 		? finding.verdict

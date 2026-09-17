@@ -9,7 +9,8 @@ Issue #502 (label `bug`): admin acts as another user, `json` (stateless short to
 
 Settled:
 - Radical `impersonat*`: `Accountability.impersonator`, `DirectusTokenPayload.impersonator`, `directus_sessions.impersonator` + `impersonator_session` (admin's own session TOKEN — Stop re-signs the cookie from it, an id can't), `directus_activity.impersonator` (no FK, parity with `user`), `Action.IMPERSONATE` / `IMPERSONATE_END`, one path `/auth/impersonate` with POST/DELETE/GET, `IMPERSONATION_{ENABLED,TTL,WRITES}`.
-- `login()` is NOT reusable as a block (auth.login hooks, limiter, `provider.login()` → IdP, LOGIN row, last_access, stall, always a row + refresh token): extract private `mint()`; `impersonate()` is silent (no activity/log — 47.8k replays/run), accepts `impersonator: null` (scheduled audit runs), refuses inactive targets and, session mode, targets without `app_access`.
+- `login()` is NOT reusable as a block (auth.login hooks, limiter, `provider.login()` → IdP, LOGIN row, last_access, stall, always a row + refresh token): extract private `mint()`; `impersonate()` is silent (no activity/log — 47.8k replays/run), refuses inactive targets and, session mode, targets without `app_access`.
+  **SUPERSEDED 2026-09-17**: `impersonator: null` for scheduled audit runs was dropped — every guard would need `'impersonator' in payload` instead of truthiness, and a private per-caller marker was rejected too. Settled instead: machine callers are real `directus_users` bot rows (radical `bot`, role `Bots`), so `impersonator` is always a non-null string, never null, never absent. See [[project_directus_impersonation_502_settled]].
 - `json` = access token only, no row (else `refresh()` stretches it to 7d); `IMPERSONATION_TTL` caps json ONLY. Session mode = ordinary sliding session, no own cliff: app's failed-refresh path never calls `/auth/logout` and an expired cookie dies in `authenticate` → an expiring impersonation strands the admin on /login. Kick replaces the TTL. Refresh copies both columns on rotation (stateful insert + stateless update + ws refresh_token path) and bumps the admin's own row.
 - Writes gate at the transports (HTTP method middleware + GraphQL Mutation root + ws items handler), NOT `validateAccess` (early-returns on admin, 9 services never call it). `/users/me/track/page` no-op 204 under impersonation. Credentials are field-level in `UsersService.updateMany`.
 - Attribution: `actorFields(accountability)` helper replaces 6 copy-pasted actor blocks (ActivityService built without accountability everywhere). Target may see `impersonator` in own activity — by design, field permission if a role must not.
@@ -20,6 +21,29 @@ Settled:
 - Out: share impersonation; the bb `cache-audit-identity` rig stays; absolute session cap (`IMPERSONATION_SESSION_TTL`) parked.
 - Follow-ups ruled on (issue section): account switch = linked sessions via `directus_sessions.group` + `/auth/switch` (ask why accounts multiply first — several policies per user already fit); teacher/parent access = OWN identity + relational permission filter, reopens the parked multi-owner cache scoping, NOT impersonation; scoped impersonation = `directus_policies.impersonate_access` + `impersonate_filter`, read-only, target never above impersonator — the only real #502 phase 2.
 - PR order inside: actorFields + endSessions (neutral) → mint → service/endpoints/guards → ws kick → app.
+- **Backend DONE 2026-09-17** (5 commits: 21ac79c985 mint/impersonate, 8d599745cd
+  cache-audit→impersonate(bot), c81f8394a1 /auth/impersonate POST/DELETE/GET,
+  914849f3df write guards, 0531f1d1e0 ws kick). **App DONE** 6638c112ca (user
+  page action + dialog, `impersonation-banner.vue` above the header bar, store
+  `impersonator` off GET /auth/impersonate with catch→null, refresh id-compare
+  reload, preset guard, tfa skip). **Blackbox DONE** 89fc6d5a9b
+  (`tests/db/routes/auth/impersonate.test.ts`, two spawned instances, in the
+  serialised `after` chain). Remaining: PR into `v11.10.1-hhh-dev` (ask first).
+- The Data Studio option is NOT client-gated on the target's `app_access`: it is
+  a policy flag (`fetchGlobalAccess`) the app cannot resolve for another user;
+  the server's `impersonation_target_no_app_access` toast is the gate. The issue
+  body says "only offered when the target has app_access" — deviation, say so in
+  the PR.
+- The user page can't hide the bot rows either (`BOTS_ROLE` is api-only); the
+  server's `impersonation_target_bot` is the gate.
+- `endSessions` grew beyond delete: it now also writes the IMPERSONATE_END trail
+  for every impersonated row it ends (Stop, logout, kick alike) and publishes
+  `session.ended` on the bus itself — callers stopped doing either by hand.
+- Kick has an FK-cascade blind spot: `impersonator_session`→`sessions.token`
+  CASCADE only unwinds a *session-mode* impersonation when the admin's own row
+  dies. A user's kick now explicitly ends any *cookie-mode* impersonations they
+  were running too, since cascade can't reach those (no session-mode row to
+  cascade from).
 
 **Why:** the audit, #500's `noSideEffects` and impersonation are one "on behalf of" family on `Accountability`; building them apart duplicates the mint.
 **How to apply:** when touching #500 items 2/3 or the replay token, mint through `impersonate()`; see [[project-directus-issue498-cache-audit]].

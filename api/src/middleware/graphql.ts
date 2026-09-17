@@ -3,7 +3,12 @@ import type { RequestHandler } from 'express';
 import type { DocumentNode } from 'graphql';
 import type { GraphQLParams } from '@directus/types';
 import { getOperationAST, parse, Source } from 'graphql';
-import { InvalidPayloadError, InvalidQueryError, MethodNotAllowedError } from '@directus/errors';
+import {
+	ForbiddenError,
+	InvalidPayloadError,
+	InvalidQueryError,
+	MethodNotAllowedError,
+} from '@directus/errors';
 import { GraphQLValidationError } from '../services/graphql/errors/validation.js';
 import asyncHandler from '../utils/async-handler.js';
 import { useEnv } from '@directus/env';
@@ -67,6 +72,14 @@ export const parseGraphQL: RequestHandler = asyncHandler(async (req, res, next) 
 	// Prevent caching responses when mutations are made
 	if (operationAST?.operation === 'mutation') {
 		res.locals['cache'] = false;
+
+		// The write guard lets every GraphQL POST through: reads are POSTs too.
+		if (
+			req.accountability?.impersonator
+			&& useEnv()['IMPERSONATION_WRITES'] !== true
+		) {
+			throw new ForbiddenError({ reason: 'impersonation_read_only' });
+		}
 	}
 
 	res.locals['graphqlParams'] = {

@@ -106,6 +106,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// waiting on before it will report itself ready at all.
 			'/tests/db/app/autoscale-prewarm-health.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
+			// Two spawned instances, and sockets whose silence is the claim: a kick
+			// that never comes is told apart from one still on its way by a wait.
+			'/tests/db/routes/auth/impersonate.test.ts',
 		],
 		// If specified, only run these tests sequentially
 		only: [
