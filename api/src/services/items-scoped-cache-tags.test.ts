@@ -694,4 +694,241 @@ describe('read tags at the merge', () => {
 			]);
 		});
 	});
+
+	describe('a to-many nested twice under aliases', () => {
+		const schema = new SchemaBuilder()
+			.collection('round', (c) => {
+				c.field('id').id();
+				c.field('days').o2m('day', 'round');
+			})
+			.collection('day', (c) => {
+				c.field('id').id();
+				c.field('date').string();
+				c.field('round').m2o('round');
+			})
+			.build();
+
+		schema.collections['day']!.scopedCacheFields = ['round'];
+
+		const first = { id: 1, date: '2023-11-17', round: 1 };
+		const last = { id: 2, date: '2023-11-19', round: 1 };
+
+		test(oneLine`
+			pins the child on its parent key through the alias, which names no field
+		`, async () => {
+			const service = new ItemsService('round', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+
+			feed([{ id: 1, days: [first, last], start: [first], end: [last] }]);
+
+			expect(await tagsOf(service, {
+				fields: ['id', 'days.date', 'start.date', 'end.date'],
+				alias: { start: 'days', end: 'days' },
+				filter: { id: { _eq: 1 } },
+				deep: {
+					start: { _sort: ['date'], _limit: 1 },
+					end: { _sort: ['-date'], _limit: 1 },
+				},
+			})).toEqual(['day:round=1', 'round:id=1']);
+		});
+	});
+
+	describe('a to-one target nested again as a to-many under it', () => {
+		const schema = new SchemaBuilder()
+			.collection('slot', (c) => {
+				c.field('id').id();
+				c.field('part').m2o('part');
+			})
+			.collection('part', (c) => {
+				c.field('id').id();
+				c.field('course').m2o('course');
+			})
+			.collection('course', (c) => {
+				c.field('id').id();
+				c.field('parts').o2m('part', 'course');
+			})
+			.build();
+
+		schema.collections['part']!.scopedCacheFields = ['course'];
+
+		const fields = ['id', 'part.id', 'part.course.id', 'part.course.parts.id'];
+		const filter = { id: { _in: [1, 2] } };
+
+		const slot = (id: number, course: number | null) => {
+			return {
+				id,
+				part: {
+					id,
+					course: course === null
+						? null
+						: { id: course, parts: [{ id, course }] },
+				},
+			};
+		};
+
+		test(oneLine`
+			pins it on the parent key when the to-many hangs off its own foreign key
+		`, async () => {
+			const service = new ItemsService('slot', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+
+			feed([slot(1, 1), slot(2, 2)]);
+
+			expect(await tagsOf(service, { fields, filter })).toEqual([
+				'course:id=1',
+				'course:id=2',
+				'part:course=1',
+				'part:course=2',
+				'slot:id=1',
+				'slot:id=2',
+			]);
+		});
+
+		// The o2m pins are one per distinct course, the m2o pins one per distinct
+		// part, and each part has one course: the o2m pins pass the ceiling only
+		// when the m2o pins do, so no path is left pinned over the dropped slice.
+		test(oneLine`
+			leaves it bare when the parent-key pins covering it pass the ceiling
+		`, async () => {
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(1);
+
+			const service = new ItemsService('slot', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+
+			feed([slot(1, 1), slot(2, 2)]);
+
+			expect(await tagsOf(service, { fields, filter })).toEqual([
+				'course',
+				'part',
+				'slot:id=1',
+				'slot:id=2',
+			]);
+
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(250);
+		});
+
+		test(oneLine`
+			leaves it bare when a row reached has that foreign key empty
+		`, async () => {
+			const service = new ItemsService('slot', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+
+			feed([slot(1, 1), slot(2, null)]);
+
+			expect(await tagsOf(service, { fields, filter })).toEqual([
+				'course:id=1',
+				'part',
+				'slot:id=1',
+				'slot:id=2',
+			]);
+		});
+	});
+
+	describe('a to-many sorted through to-one hops', () => {
+		const schema = new SchemaBuilder()
+			.collection('round', (c) => {
+				c.field('id').id();
+				c.field('slots').o2m('slot', 'round');
+			})
+			.collection('slot', (c) => {
+				c.field('id').id();
+				c.field('round').m2o('round');
+				c.field('part').m2o('part');
+			})
+			.collection('part', (c) => {
+				c.field('id').id();
+				c.field('sort').integer();
+				c.field('course').m2o('course');
+			})
+			.collection('course', (c) => {
+				c.field('id').id();
+				c.field('sort').integer();
+			})
+			.build();
+
+		schema.collections['slot']!.scopedCacheFields = ['round'];
+		schema.collections['part']!.scopedCacheFields = ['course'];
+
+		const rows = [{
+			id: 1,
+			slots: [1, 2, 3].map((id) => {
+				return { id, round: 1, part: { id, sort: 1, course: { id, sort: id } } };
+			}),
+		}];
+
+		const sorted = (node: Record<string, unknown>) => {
+			return {
+				fields: ['id', 'slots.id', 'slots.part.id', 'slots.part.course.id'],
+				filter: { id: { _eq: 1 } },
+				deep: {
+					slots: { _sort: ['part.course.sort', 'part.sort', 'id'], ...node },
+				},
+			};
+		};
+
+		const whole = [
+			'course:id=1',
+			'course:id=2',
+			'course:id=3',
+			'part:id=1',
+			'part:id=2',
+			'part:id=3',
+			'round:id=1',
+			'slot:round=1',
+		];
+
+		const service = () => {
+			return new ItemsService('round', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+		};
+
+		test.each([
+			['under the default limit', {}],
+			['under a limit the rows stay short of', { _limit: 4 }],
+			['with no limit', { _limit: -1 }],
+		])('keeps the key pins %s', async (_shape, node) => {
+			feed(rows);
+
+			expect(await tagsOf(service(), sorted(node))).toEqual(whole);
+		});
+
+		test.each([
+			['cut at the limit', { _limit: 3 }],
+			['on a later page', { _limit: 5, _page: 2 }],
+			['past an offset', { _limit: 5, _offset: 1 }],
+		])('bares the sorted-through collections %s', async (_shape, node) => {
+			feed(rows);
+
+			expect(await tagsOf(service(), sorted(node))).toEqual([
+				'course',
+				'part',
+				'round:id=1',
+				'slot:round=1',
+			]);
+		});
+
+		test('keeps the key pins when the cut sorts on an own column', async () => {
+			feed(rows);
+
+			expect(await tagsOf(service(), {
+				...sorted({ _limit: 3 }),
+				deep: { slots: { _sort: ['id'], _limit: 3 } },
+			})).toEqual(whole);
+		});
+	});
 });
