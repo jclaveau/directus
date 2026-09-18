@@ -28,6 +28,7 @@ import type {
 	Query,
 	SchemaOverview,
 	ScopedCachePath,
+	Type,
 } from '@directus/types';
 import {
 	isPinnableScopeType,
@@ -604,9 +605,15 @@ function scopedCacheFilterKeyingByAlias(
 
 			// Crossing the relation reads the foreign key of every row of THIS
 			// collection that could be joined, so the hop itself names none of
-			// them. A sibling condition naming this alias's key still wins, by
-			// the conjunction rule: they describe one row.
-			parts.push(new Map([[alias, KEYING_UNKEYED]]));
+			// them — unless the chain it walks is a scope path of this collection
+			// ending on a value, which bounds its rows to that slice. A sibling
+			// condition naming this alias's key still wins, by the conjunction
+			// rule: they describe one row.
+			parts.push(new Map([[
+				alias,
+				scopePathKeying(schema, collection, fieldName, conditions)
+					?? KEYING_UNKEYED,
+			]]));
 
 			continue;
 		}
@@ -638,6 +645,112 @@ function scopedCacheFilterKeyingByAlias(
  * drop its tag altogether, and a bare tag is the cheaper way to be right about a
  * query that returns nothing.
  */
+/**
+ * The slice a crossing condition names, when its chain is a scope path: the hop
+ * and the single-key chain under it walk M2O hops to one column, compared under
+ * one `_eq`/`_in`, and the dotted path is one this collection pins by —
+ * declared, or composed off its flat scope fields. The write side emits that
+ * slice for every row whose chain lands on the value, so the filter bounds the
+ * collection to the rows it can return the way a column condition does.
+ */
+function scopePathKeying(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	fieldName: string,
+	conditions: Record<string, unknown>,
+): ScopedCacheFilterKeying | null {
+	const segments = [fieldName];
+	let node: Record<string, unknown> = conditions;
+
+	for (;;) {
+		const named = Object.keys(node);
+
+		if (named.length !== 1) {
+			return null;
+		}
+
+		const key = named[0]!;
+
+		if (key.startsWith('_')) {
+			break;
+		}
+
+		const under = node[key];
+
+		if (!isFilterNode(under)) {
+			return null;
+		}
+
+		segments.push(key);
+		node = under as Record<string, unknown>;
+	}
+
+	// Every dotted path the collection pins by: its declared dotted scope fields
+	// and the ones composed off its flat ones, as the write side lists them.
+	const field = segments.join('.');
+
+	const pinnedBy = [
+		...(schema.collections[collection]?.scopedCacheFields ?? [])
+			.filter((scopeField) => scopeField.includes('.')),
+		...composeScopedCachePaths(schema, collection).map((path) => path.field),
+	];
+
+	if (!pinnedBy.includes(field)) {
+		return null;
+	}
+
+	const keys = '_eq' in node
+		? new Set([node['_eq']])
+		: new Set(
+			Array.isArray(node['_in'])
+				? node['_in']
+				: [],
+		);
+
+	if (keys.size === 0) {
+		return null;
+	}
+
+	const type = scopedCacheKeyedFieldType(schema, collection, field);
+
+	if (type === undefined || !isPinnableScopeType(type)) {
+		return null;
+	}
+
+	return { kind: 'keyed', field, keys };
+}
+
+/**
+ * The type a keyed field's values canonicalize by: the column's own for a flat
+ * field, the terminal column's for a dotted scope path — the write side types
+ * that slice the same way — or undefined when the path resolves to no column.
+ */
+export function scopedCacheKeyedFieldType(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	field: string,
+): Type | undefined {
+	const segments = field.split('.');
+
+	if (segments.length === 1) {
+		return schema.collections[collection]?.fields[field]?.type;
+	}
+
+	const joins = resolveScopedCacheM2oJoinChainFromPath(
+		schema,
+		collection,
+		segments.slice(0, -1),
+	);
+
+	const terminal = joins?.[joins.length - 1]?.relatedCollection;
+
+	if (terminal === undefined) {
+		return undefined;
+	}
+
+	return schema.collections[terminal]?.fields[segments[segments.length - 1]!]?.type;
+}
+
 // The pk, or a flat scoped_cache_field, of a pin-safe type: a filter naming it by
 // value bounds the collection to that value, and the write side emits the same
 // slice — the pk slice always, a scoped field's from the flat-scope-field branch —

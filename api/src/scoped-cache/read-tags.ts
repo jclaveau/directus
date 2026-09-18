@@ -27,6 +27,7 @@ import {
 	m2oParentRowsAtPathEnd,
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheFilterKeyingByCollection,
+	scopedCacheKeyedFieldType,
 } from './paths.js';
 import {
 	FieldTypesByField,
@@ -53,7 +54,7 @@ export function keyedFilterPinnable(
 		return false;
 	}
 
-	const type = schema.collections[collection]?.fields[keying.field]?.type;
+	const type = scopedCacheKeyedFieldType(schema, collection, keying.field);
 
 	return type !== undefined
 		&& isPinnableScopeType(type)
@@ -93,7 +94,7 @@ export function pinnedScopedCacheTagsFromKeyedFilters(
 			continue;
 		}
 
-		const type = schema.collections[collection]!.fields[keying.field]!.type;
+		const type = scopedCacheKeyedFieldType(schema, collection, keying.field)!;
 		const tags: ScopedCacheTag[] = [];
 
 		// Deduped on the canonical token, not the raw value, so `7` and `'7'`
