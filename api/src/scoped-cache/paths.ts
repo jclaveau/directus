@@ -675,14 +675,11 @@ function scopePathKeying(
 			break;
 		}
 
-		const under = node[key];
-
-		if (!isFilterNode(under)) {
-			return null;
-		}
-
+		// Always a node here: `expandRelatedKeyFilters` wrapped every leaf under a
+		// named key in `_eq`, and a path carrying on past a column fails the query
+		// before any tag is derived.
 		segments.push(key);
-		node = under as Record<string, unknown>;
+		node = node[key] as Record<string, unknown>;
 	}
 
 	// Every dotted path the collection pins by: its declared dotted scope fields
