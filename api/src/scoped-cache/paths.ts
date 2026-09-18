@@ -634,18 +634,6 @@ function scopedCacheFilterKeyingByAlias(
 }
 
 /**
- * What one column's conditions say about the rows they can match. Only the
- * primary key under `_eq`/`_in` names them: any other column matches rows by a
- * value a write can move onto a row this read never saw, and any other operator
- * describes rows by what they are NOT. A function key (`year(created_on)`)
- * reads the column through a transform, so it names nothing either.
- *
- * An empty `_in` matches no row and so depends on none, but it is reported
- * unkeyed rather than as an empty key set: pinning a collection to nothing would
- * drop its tag altogether, and a bare tag is the cheaper way to be right about a
- * query that returns nothing.
- */
-/**
  * The slice a crossing condition names, when its chain is a scope path: the hop
  * and the single-key chain under it walk M2O hops to one column, compared under
  * one `_eq`/`_in`, and the dotted path is one this collection pins by —
@@ -675,24 +663,34 @@ function scopePathKeying(
 			break;
 		}
 
-		// Always a node here: `expandRelatedKeyFilters` wrapped every leaf under a
-		// named key in `_eq`, and a path carrying on past a column fails the query
-		// before any tag is derived.
+		const next = node[key];
+
+		// A leaf under a named key is a node by now (`expandRelatedKeyFilters`
+		// wrapped it in `_eq`), and a path carrying on past a column fails the
+		// query before any tag is derived; a string handed straight to the
+		// service would still walk here, `Object.keys` indexing its first
+		// character over and over until `segments` overflows.
+		if (!isFilterNode(next)) {
+			return null;
+		}
+
 		segments.push(key);
-		node = node[key] as Record<string, unknown>;
+		node = next as Record<string, unknown>;
 	}
 
 	// Every dotted path the collection pins by: its declared dotted scope fields
 	// and the ones composed off its flat ones, as the write side lists them.
-	const field = segments.join('.');
-
 	const pinnedBy = [
 		...(schema.collections[collection]?.scopedCacheFields ?? [])
 			.filter((scopeField) => scopeField.includes('.')),
 		...composeScopedCachePaths(schema, collection).map((path) => path.field),
 	];
 
-	if (!pinnedBy.includes(field)) {
+	const field = pinnedBy.includes(segments.join('.'))
+		? segments.join('.')
+		: scopePathBeforeRelatedKey(schema, collection, segments, pinnedBy);
+
+	if (field === null) {
 		return null;
 	}
 
@@ -715,6 +713,32 @@ function scopePathKeying(
 	}
 
 	return { kind: 'keyed', field, keys };
+}
+
+/**
+ * The pinned path a chain names through the related key of its terminal M2O
+ * (`owner: { id: { _eq } }`, how a rule authored on `user.id` is spelled): the
+ * chain minus that key, when it is one this collection pins by. The root pinner
+ * unwraps the same spelling through `relatedPks`.
+ */
+function scopePathBeforeRelatedKey(
+	schema: SchemaOverview,
+	collection: CollectionKey,
+	segments: string[],
+	pinnedBy: string[],
+): string | null {
+	const path = segments.slice(0, -1);
+	const field = path.join('.');
+
+	if (!pinnedBy.includes(field)) {
+		return null;
+	}
+
+	const joins = resolveScopedCacheM2oJoinChainFromPath(schema, collection, path);
+
+	return joins?.[joins.length - 1]?.relatedPk === segments[segments.length - 1]
+		? field
+		: null;
 }
 
 /**
@@ -775,6 +799,18 @@ function isScopedCacheKeyableField(
 	return isPinnableScopeType(keyType);
 }
 
+/**
+ * What one column's conditions say about the rows they can match. Only the
+ * primary key under `_eq`/`_in` names them: any other column matches rows by a
+ * value a write can move onto a row this read never saw, and any other operator
+ * describes rows by what they are NOT. A function key (`year(created_on)`)
+ * reads the column through a transform, so it names nothing either.
+ *
+ * An empty `_in` matches no row and so depends on none, but it is reported
+ * unkeyed rather than as an empty key set: pinning a collection to nothing would
+ * drop its tag altogether, and a bare tag is the cheaper way to be right about a
+ * query that returns nothing.
+ */
 function keyingOfColumnConditions(
 	schema: SchemaOverview,
 	collection: CollectionKey,
