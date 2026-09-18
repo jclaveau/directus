@@ -110,7 +110,11 @@ const maxCommandsPerFanFill =
 	Number(process.env['PERF_CACHE_MAX_COMMANDS_FAN_FILL'] ?? 900);
 
 const maxKilobytesPerFanFill =
-	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 70);
+	// Up from 70 for the two key renames that landed after that ceiling was set
+	// (`scoped-cache-index:` over `tag:`, `scoped-cache-epoch:` over `epoch:`):
+	// the fill sends the same 817 commands, each naming a longer key, 70.3 KB
+	// where 62.8 set the previous ceiling.
+	Number(process.env['PERF_CACHE_MAX_KB_FAN_FILL'] ?? 78);
 
 const maxWriteCommandScaling =
 	// Down from 3.2 now that a purge sends one UNLINK per 500 keys rather than one
