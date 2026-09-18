@@ -673,7 +673,7 @@ class CacheAudit {
 			};
 		}
 
-		if (response.status === 503 && shedUnderPressure(response.body)) {
+		if (response.status === 503 && answeredUnderPressure(response.body)) {
 			return { verdict: 'unreplayable', reason: 'status_503_under_pressure' };
 		}
 
@@ -769,8 +769,8 @@ class CacheAudit {
 // it writes in the body (jclaveau/directus#508). This build lets a replay past
 // the limiter; one that reaches a worker of an older build in the same cluster
 // does not, and the report has to say which 503 it got.
-function shedUnderPressure(body: string): boolean {
-	let parsed: { errors?: { extensions?: { reason?: unknown } }[] };
+function answeredUnderPressure(body: string): boolean {
+	let parsed: { errors?: { extensions?: { reason?: unknown } }[] } | null;
 
 	try {
 		parsed = JSON.parse(body);
@@ -779,7 +779,7 @@ function shedUnderPressure(body: string): boolean {
 		return false;
 	}
 
-	return parsed.errors?.some((error) => {
+	return parsed?.errors?.some((error) => {
 		return error.extensions?.reason === UNDER_PRESSURE_REASON;
 	}) === true;
 }

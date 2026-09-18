@@ -968,6 +968,7 @@ describe('an entry nothing can be replayed from', () => {
 			() => descriptor(),
 			{ status: 503, headers: {}, body: '<html>Bad Gateway</html>' },
 		],
+		['status_503', () => descriptor(), { status: 503, headers: {}, body: 'null' }],
 		[
 			'status_503_under_pressure',
 			() => descriptor(),
