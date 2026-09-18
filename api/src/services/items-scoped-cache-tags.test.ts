@@ -540,6 +540,8 @@ describe('read tags at the merge', () => {
 			.collection('root', (c) => {
 				c.field('id').id();
 				c.field('name').string();
+				c.field('kind').string();
+				c.field('since').dateTime();
 			})
 			.collection('grandowner', (c) => {
 				c.field('id').id();
@@ -555,7 +557,7 @@ describe('read tags at the merge', () => {
 			})
 			.build();
 
-		ownership.collections['root']!.scopedCacheFields = ['name'];
+		ownership.collections['root']!.scopedCacheFields = ['name', 'since'];
 		ownership.collections['grandowner']!.scopedCacheFields = ['root'];
 		ownership.collections['owner']!.scopedCacheFields = ['grandowner'];
 		ownership.collections['note']!.scopedCacheFields = ['owner'];
@@ -613,14 +615,386 @@ describe('read tags at the merge', () => {
 			})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root:id=1']);
 		});
 
-		test('bares what a case hopping out of it reaches', async () => {
-			permitting({ grandowner: { root: { name: { _eq: 'open' } } } });
+		test(oneLine`
+			slices what a case hopping out of it reaches along a scope path: the
+			write side emits that slice for every row the chain lands on the value
+		`, async () => {
+			permitting({
+				grandowner: { root: { name: { _eq: 'open' } } },
+				root: { name: { _eq: 'open' } },
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(asUser(), {
+				fields: ['*'],
+				filter: { owner: { id: { _eq: 1 } } },
+			})).toEqual([
+				'grandowner:id=1',
+				'grandowner:root.name=open',
+				'note:owner=1',
+				'owner:id=1',
+				'root:id=1',
+				'root:name=open',
+			]);
+		});
+
+		test(oneLine`
+			bares what a case hopping out of it reaches off any scope path
+		`, async () => {
+			permitting({ grandowner: { root: { kind: { _eq: 'open' } } } });
 			feed(rows);
 
 			expect(await tagsOf(asUser(), {
 				fields: ['*'],
 				filter: { owner: { id: { _eq: 1 } } },
 			})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
+		});
+
+		test('slices one value per key the case lists', async () => {
+			permitting({
+				grandowner: { root: { name: { _in: ['open', 'ajar'] } } },
+				root: { name: { _in: ['open', 'ajar'] } },
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(asUser(), {
+				fields: ['*'],
+				filter: { owner: { id: { _eq: 1 } } },
+			})).toEqual([
+				'grandowner:id=1',
+				'grandowner:root.name=ajar',
+				'grandowner:root.name=open',
+				'note:owner=1',
+				'owner:id=1',
+				'root:id=1',
+				'root:name=ajar',
+				'root:name=open',
+			]);
+		});
+
+		// Off any request but the date's: `validateFilter` rejects the empty
+		// list, and `parseFilter` lists the value, splits the columns into `_and`
+		// and wraps the leaf in `_eq` before any tag is derived — only a filter
+		// handed straight to the service carries those shapes.
+		test.each([
+			['an empty list', { name: { _in: [] } }],
+			['a list that is no list', { name: { _in: 'open' } }],
+			['a column no slice can name', { since: { _eq: '2026-01-01' } }],
+			['two columns at once', { name: { _eq: 'open' }, kind: { _eq: 'x' } }],
+			['a leaf that is no node', { name: { open: 'x' } }],
+		])(
+			'bares what a case hopping out of it reaches on %s',
+			async (_shape, condition) => {
+				permitting({ grandowner: { root: condition } as Filter });
+				feed(rows);
+
+				expect(await tagsOf(asUser(), {
+					fields: ['*'],
+					filter: { owner: { id: { _eq: 1 } } },
+				})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
+			},
+		);
+
+		test(oneLine`
+			bares what a case reaches on a declared path whose hop is no relation
+		`, async () => {
+			ownership.collections['grandowner']!.scopedCacheFields = [
+				'root',
+				'root.kind.x',
+			];
+
+			try {
+				permitting({ grandowner: { root: { kind: { x: { _eq: 1 } } } } as Filter });
+				feed(rows);
+
+				expect(await tagsOf(asUser(), {
+					fields: ['*'],
+					filter: { owner: { id: { _eq: 1 } } },
+				})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
+			}
+			finally {
+				ownership.collections['grandowner']!.scopedCacheFields = ['root'];
+			}
+		});
+	});
+
+	describe('a nested node whose case hops out along a scope path', () => {
+		// The planner's review-round enrichment: a method-range configuration read
+		// nests the range's time slots, their part and course, and every collection
+		// is scoped by the fk toward its owner while every read policy filters on
+		// the composed path to the user.
+		const cursus = new SchemaBuilder()
+			.collection('student', (c) => {
+				c.field('id').id();
+				c.field('user').string();
+				c.field('name').string();
+			})
+			.collection('enrollment', (c) => {
+				c.field('id').id();
+				c.field('student').m2o('student');
+			})
+			.collection('discipline', (c) => {
+				c.field('id').id();
+				c.field('enrollment').m2o('enrollment');
+			})
+			.collection('tu', (c) => {
+				c.field('id').id();
+				c.field('discipline').m2o('discipline');
+			})
+			.collection('course', (c) => {
+				c.field('id').id();
+				c.field('tu').m2o('tu');
+				c.field('parts').o2m('part', 'course');
+				c.field('notes').o2m('note', 'course');
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('course').m2o('course');
+			})
+			.collection('part', (c) => {
+				c.field('id').id();
+				c.field('course').m2o('course');
+			})
+			.collection('slot', (c) => {
+				c.field('id').id();
+				c.field('part').m2o('part');
+				c.field('range').m2o('range');
+			})
+			.collection('range', (c) => {
+				c.field('id').id();
+				c.field('user_created').string();
+				c.field('tu').m2o('tu');
+				c.field('time_slots').o2m('slot', 'range');
+			})
+			.collection('configuration', (c) => {
+				c.field('id').id();
+				c.field('collection').string();
+				c.field('item').string();
+				c.field('range').m2o('range');
+			})
+			.build();
+
+		cursus.collections['student']!.scopedCacheFields = ['user'];
+		cursus.collections['enrollment']!.scopedCacheFields = ['student'];
+		cursus.collections['discipline']!.scopedCacheFields = ['enrollment'];
+		cursus.collections['tu']!.scopedCacheFields = ['discipline'];
+		cursus.collections['course']!.scopedCacheFields = ['tu'];
+		cursus.collections['note']!.scopedCacheFields = ['course'];
+		cursus.collections['part']!.scopedCacheFields = ['course'];
+		cursus.collections['slot']!.scopedCacheFields = ['part', 'range'];
+		cursus.collections['range']!.scopedCacheFields = ['user_created', 'tu'];
+		cursus.collections['configuration']!.scopedCacheFields = ['range', 'item'];
+
+		const toUser = { user: { _eq: 'u1' } };
+
+		// Every policy but the range's reaches the student, `onStudent` being
+		// what it says of them.
+		const casesReaching = (onStudent: Filter): Record<string, Filter> => {
+			const from = (path: string[]): Filter => {
+				return path.reduceRight<Record<string, unknown>>(
+					(inner, hop) => ({ [hop]: inner }),
+					{ student: onStudent },
+				) as Filter;
+			};
+
+			return {
+				student: onStudent,
+				enrollment: from([]),
+				discipline: from(['enrollment']),
+				tu: from(['discipline', 'enrollment']),
+				course: from(['tu', 'discipline', 'enrollment']),
+				note: from(['course', 'tu', 'discipline', 'enrollment']),
+				part: from(['course', 'tu', 'discipline', 'enrollment']),
+				slot: from(['part', 'course', 'tu', 'discipline', 'enrollment']),
+				range: { user_created: { _eq: 'u1' } },
+				configuration: { range: { user_created: { _eq: 'u1' } } },
+			};
+		};
+
+		const permitting = (onStudent: Filter = toUser): void => {
+			const cases = casesReaching(onStudent);
+
+			vi.mocked(fetchPermissions).mockImplementation(async () => {
+				return Object.keys(cases).map((collection, at) => {
+					return {
+						id: at + 1,
+						policy: 'policy',
+						collection,
+						action: 'read' as const,
+						fields: ['*'],
+						permissions: { _and: [cases[collection]!] },
+						validation: null,
+						presets: null,
+					};
+				});
+			});
+		};
+
+		const asUser = (): ItemsService => {
+			return new ItemsService('configuration', {
+				knex: db,
+				schema: cursus,
+				accountability: {
+					user: 'u1',
+					role: 'r1',
+					roles: ['r1'],
+					admin: false,
+					app: true,
+					ip: null,
+				},
+			});
+		};
+
+		afterEach(() => {
+			vi.mocked(fetchPermissions).mockImplementation(async () => []);
+		});
+
+		const rows = [{
+			id: 100,
+			item: '7',
+			range: {
+				id: 50,
+				user_created: 'u1',
+				tu: {
+					id: 30,
+					discipline: {
+						id: 20,
+						enrollment: { id: 10, student: { id: 1, user: 'u1' } },
+					},
+				},
+				time_slots: [{
+					id: 1,
+					range: 50,
+					part: {
+						id: 2,
+						course: {
+							id: 3,
+							tu: 30,
+							parts: [{ id: 2, course: 3 }],
+							notes: [4],
+						},
+					},
+				}],
+			},
+		}];
+
+		const query = {
+			fields: [
+				'item',
+				'range.id',
+				'range.user_created',
+				'range.tu',
+				'range.time_slots.*',
+				'range.time_slots.part.*',
+				'range.time_slots.part.course.*',
+				'range.time_slots.part.course.parts.*',
+			],
+			filter: { collection: { _eq: 'round' }, item: { _in: ['7'] } },
+			deep: {
+				range: { time_slots: { _sort: ['part.course.id', 'part.id', 'id'] } },
+			},
+		};
+
+		test(oneLine`
+			slices every collection the cases hop through by the path to the user:
+			nothing on the way is bare
+		`, async () => {
+			permitting();
+			feed(rows);
+
+			expect(await tagsOf(asUser(), query)).toEqual([
+				'configuration:item=7',
+				'configuration:range.user_created=u1',
+				'course:id=3',
+				'course:tu.discipline.enrollment.student.user=u1',
+				'discipline:enrollment.student.user=u1',
+				'discipline:id=20',
+				'enrollment:id=10',
+				'enrollment:student.user=u1',
+				'note:course.tu.discipline.enrollment.student.user=u1',
+				'note:course=3',
+				'part:course.tu.discipline.enrollment.student.user=u1',
+				'part:course=3',
+				'range:id=50',
+				'range:user_created=u1',
+				'slot:part.course.tu.discipline.enrollment.student.user=u1',
+				'slot:range=50',
+				'student:id=1',
+				'student:user=u1',
+				'tu:discipline.enrollment.student.user=u1',
+				'tu:id=30',
+			]);
+		});
+
+		test(oneLine`
+			slices every collection by the student's key when the cases name the
+			student through it: how a rule authored on the student is spelled
+		`, async () => {
+			permitting({ id: { _eq: 1 } });
+			feed(rows);
+
+			expect(await tagsOf(asUser(), query)).toEqual([
+				'configuration:item=7',
+				'configuration:range.user_created=u1',
+				'course:id=3',
+				'course:tu.discipline.enrollment.student=1',
+				'discipline:enrollment.student=1',
+				'discipline:id=20',
+				'enrollment:id=10',
+				'enrollment:student=1',
+				'note:course.tu.discipline.enrollment.student=1',
+				'note:course=3',
+				'part:course.tu.discipline.enrollment.student=1',
+				'part:course=3',
+				'range:id=50',
+				'range:user_created=u1',
+				'slot:part.course.tu.discipline.enrollment.student=1',
+				'slot:range=50',
+				'student:id=1',
+				'tu:discipline.enrollment.student=1',
+				'tu:id=30',
+			]);
+		});
+
+		test(oneLine`
+			bares every hop when the cases name the student by a column no slice
+			can name: the hop is the scope path, the column under it is not
+		`, async () => {
+			permitting({ name: { _eq: 'Ada' } });
+			feed(rows);
+
+			expect(await tagsOf(asUser(), query)).toEqual([
+				'configuration:item=7',
+				'configuration:range.user_created=u1',
+				'course',
+				'discipline',
+				'enrollment',
+				'note:course=3',
+				'part',
+				'range:id=50',
+				'range:user_created=u1',
+				'slot:range=50',
+				'student',
+				'tu',
+			]);
+		});
+
+		test(oneLine`
+			still bares the to-many whose scope lacks the fk it hangs off: the case
+			bounds the rows the filter reaches, not the ones the parent nested
+		`, async () => {
+			cursus.collections['slot']!.scopedCacheFields = ['part'];
+			permitting();
+			feed(rows);
+
+			try {
+				expect(await tagsOf(asUser(), query)).toContain('slot');
+			}
+			finally {
+				cursus.collections['slot']!.scopedCacheFields = ['part', 'range'];
+			}
 		});
 	});
 
