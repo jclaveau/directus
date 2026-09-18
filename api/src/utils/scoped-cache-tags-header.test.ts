@@ -22,7 +22,7 @@ describe('setScopedCacheTagsHeader', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '1kb';
 		const res = makeRes();
 
-		setScopedCacheTagsHeader(res, NAME, 'a:b=1, a:b=2');
+		setScopedCacheTagsHeader(res, NAME, ['a:b=1', 'a:b=2']);
 
 		expect(res.setHeader).toHaveBeenCalledTimes(1);
 		expect(res.setHeader).toHaveBeenCalledWith(NAME, 'a:b=1, a:b=2');
@@ -32,7 +32,7 @@ describe('setScopedCacheTagsHeader', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '12b';
 		const res = makeRes();
 
-		setScopedCacheTagsHeader(res, NAME, 'a:b=1, a:b=2, a:b=3, a:b=4');
+		setScopedCacheTagsHeader(res, NAME, ['a:b=1', 'a:b=2', 'a:b=3', 'a:b=4']);
 
 		expect(res.setHeader).toHaveBeenCalledTimes(2);
 		expect(res.setHeader).toHaveBeenCalledWith(NAME, 'a:b=1, a:b=2');
@@ -43,7 +43,7 @@ describe('setScopedCacheTagsHeader', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
 		const res = makeRes();
 
-		setScopedCacheTagsHeader(res, NAME, 'a:b=1, a:b=2');
+		setScopedCacheTagsHeader(res, NAME, ['a:b=1', 'a:b=2']);
 
 		expect(res.setHeader).toHaveBeenCalledWith(NAME, 'a:b=1');
 		expect(res.setHeader).toHaveBeenCalledWith(`${NAME}-omitted`, '1');
@@ -53,7 +53,7 @@ describe('setScopedCacheTagsHeader', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '4b';
 		const res = makeRes();
 
-		setScopedCacheTagsHeader(res, NAME, 'a:b=1, a:b=2');
+		setScopedCacheTagsHeader(res, NAME, ['a:b=1', 'a:b=2']);
 
 		expect(res.setHeader).toHaveBeenCalledTimes(1);
 		expect(res.setHeader).toHaveBeenCalledWith(`${NAME}-omitted`, '2');
@@ -64,7 +64,7 @@ describe('setScopedCacheTagsHeader', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '9b';
 		const res = makeRes();
 
-		setScopedCacheTagsHeader(res, NAME, 'a:b=é, a:b=1');
+		setScopedCacheTagsHeader(res, NAME, ['a:b=é', 'a:b=1']);
 
 		expect(res.setHeader).toHaveBeenCalledTimes(1);
 		expect(res.setHeader).toHaveBeenCalledWith(`${NAME}-omitted`, '2');
@@ -78,29 +78,41 @@ describe('setScopedCacheTagsHeader', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = value;
 		const res = makeRes();
 
-		setScopedCacheTagsHeader(res, NAME, 'a:b=1, a:b=é');
+		setScopedCacheTagsHeader(res, NAME, ['a:b=1', 'a:b=é']);
 
 		expect(res.setHeader).toHaveBeenCalledTimes(1);
 		expect(res.setHeader).toHaveBeenCalledWith(NAME, 'a:b=1, a:b=%C3%A9');
 	});
 
-	test('emits nothing for an empty serialization', () => {
+	test('emits nothing for no tags', () => {
 		const res = makeRes();
 
-		setScopedCacheTagsHeader(res, NAME, '');
+		setScopedCacheTagsHeader(res, NAME, []);
 
 		expect(res.setHeader).not.toHaveBeenCalled();
+	});
+
+	// The label is the Redis key, so a value may hold the separator: it is one
+	// tag, kept or omitted whole, never cut at the separator inside it.
+	test('keeps a tag whose value holds the separator whole', () => {
+		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
+		const res = makeRes();
+
+		setScopedCacheTagsHeader(res, NAME, ['a:b=x, y', 'c']);
+
+		expect(res.setHeader).toHaveBeenCalledTimes(1);
+		expect(res.setHeader).toHaveBeenCalledWith(`${NAME}-omitted`, '2');
 	});
 
 	test('a clamped header never makes res.setHeader throw', () => {
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '4kb';
 		const res = new ServerResponse(new IncomingMessage(new Socket()));
 
-		const serialized = Array.from({ length: 400 }, (_, i) => {
+		const labels = Array.from({ length: 400 }, (_, i) => {
 			return `t:id=${String(i).padStart(36, '0')}`;
-		}).join(', ');
+		});
 
-		expect(() => setScopedCacheTagsHeader(res, NAME, serialized)).not.toThrow();
+		expect(() => setScopedCacheTagsHeader(res, NAME, labels)).not.toThrow();
 		expect(String(res.getHeader(NAME)).length).toBeLessThanOrEqual(4 * 1024);
 		expect(res.getHeader(`${NAME}-omitted`)).toBe('305');
 	});

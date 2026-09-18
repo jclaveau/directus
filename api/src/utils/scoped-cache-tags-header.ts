@@ -9,18 +9,20 @@ const SEPARATOR = ', ';
 // 16kb of headers (UND_ERR_HEADERS_OVERFLOW): the caller then sees a failed
 // request over a write that went through. Whole tags are kept up to
 // CACHE_TAGS_HEADER_MAX_SIZE, the rest counted in a `<name>-omitted` sibling.
+// Labels, not their joined form: a value may hold the separator, and splitting
+// on it would cut such a tag in two and count it twice.
 export function setScopedCacheTagsHeader(
 	res: Pick<ServerResponse, 'setHeader'>,
 	name: string,
-	serialized: string,
+	labels: readonly string[],
 ): void {
-	if (serialized === '') {
+	if (labels.length === 0) {
 		return;
 	}
 
 	const env = useEnv();
 	const maxSize = parseBytesConfiguration(String(env['CACHE_TAGS_HEADER_MAX_SIZE']));
-	const tags = serialized.split(SEPARATOR).map(printableScopedCacheTags);
+	const tags = labels.map(printableScopedCacheTags);
 
 	if (!maxSize) {
 		res.setHeader(name, tags.join(SEPARATOR));

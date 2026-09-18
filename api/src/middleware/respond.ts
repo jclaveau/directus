@@ -20,7 +20,6 @@ import {
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
 	scopedCacheTagLabel,
-	serializeScopedCacheTags,
 	tagScopedCacheKeys,
 	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
@@ -77,7 +76,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_TAGS_HEADER']}`,
-				serializeScopedCacheTags(readTags),
+				readTags.map(scopedCacheTagLabel),
 			);
 		}
 	}
@@ -89,7 +88,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			setScopedCacheTagsHeader(
 				res,
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				serializeScopedCacheTags(purged),
+				purged.map(scopedCacheTagLabel),
 			);
 		}
 	}
@@ -310,12 +309,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// the read that builds them) can still emit them, via cache.ts.
 			if (env['CACHE_TAGS_HEADER']) {
 				if (Array.isArray(readTags) && readTags.length) {
-					// Object, not a bare string: setCacheValue's compress expects
-					// a CacheValue (object) — a raw string won't round-trip.
+					// An object: setCacheValue's compress expects a CacheValue. The
+					// labels as a list, so a value holding the separator reads back
+					// as the one tag it is.
 					await setCacheValue(
 						cache,
 						cacheTagsKey(redisKey),
-						{ tags: serializeScopedCacheTags(readTags) },
+						{ tags: readTags.map(scopedCacheTagLabel) },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}

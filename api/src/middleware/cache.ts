@@ -2,7 +2,11 @@ import { useEnv } from '@directus/env';
 import type { RequestHandler } from 'express';
 import { getCache, getCacheValue, getCacheValues } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
-import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
+import {
+	cacheExpiresAtKey,
+	cacheTagsKey,
+	storedScopedCacheTagLabels,
+} from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
 	queueCacheHit,
@@ -115,8 +119,10 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 				// Same guard utils.ts puts on this sidecar: anything else flattens into
 				// a garbled header instead of being skipped.
-				if (typeof stored?.tags === 'string' && stored.tags !== '') {
-					setScopedCacheTagsHeader(res, `${env['CACHE_TAGS_HEADER']}`, stored.tags);
+				const labels = storedScopedCacheTagLabels(stored);
+
+				if (labels) {
+					setScopedCacheTagsHeader(res, `${env['CACHE_TAGS_HEADER']}`, labels);
 				}
 			}
 			catch (err: any) {

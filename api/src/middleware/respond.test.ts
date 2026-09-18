@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => {
 		mockCache: { get: vi.fn(), set: vi.fn(), delete: vi.fn() },
 		tagScopedCacheKeys: vi.fn(),
 		scopedCachePurgeEnabled: vi.fn(() => false),
-		serializeScopedCacheTags: vi.fn(() => 'SERIALIZED'),
 		warn: vi.fn(),
 		permissionsCachable: vi.fn(),
 		queryCachable: vi.fn(() => true),
@@ -62,7 +61,6 @@ vi.mock('../scoped-cache.js', async (importOriginal) => {
 	return {
 		tagScopedCacheKeys: mocks.tagScopedCacheKeys,
 		scopedCachePurgeEnabled: mocks.scopedCachePurgeEnabled,
-		serializeScopedCacheTags: mocks.serializeScopedCacheTags,
 		scopedCacheSweptDuringFill: mocks.scopedCacheSweptDuringFill,
 		// Real, so the unguarded cases below assert the predicate rather than a
 		// stand-in agreeing with them: it is pure, and reaches no Redis.
@@ -1167,13 +1165,13 @@ describe('respond middleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Tags',
-			'SERIALIZED',
+			'articles:owner=U1',
 		);
 
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
 			'cache-key__tags',
-			{ tags: 'SERIALIZED' },
+			{ tags: ['articles:owner=U1'] },
 			expect.any(Number),
 		);
 
@@ -1200,7 +1198,7 @@ describe('respond middleware', () => {
 
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Purged-Tags',
-			'SERIALIZED',
+			'articles:owner=U2',
 		);
 	});
 
@@ -1208,7 +1206,6 @@ describe('respond middleware', () => {
 	// on the way out — `res.setHeader` throws ERR_INVALID_CHAR otherwise.
 	test('escapes a control byte on its way into the header', async () => {
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
-		mocks.serializeScopedCacheTags.mockReturnValue('articles:owner=\u0000null');
 
 		const res = makeRes(
 			{ data: { id: 1 } },
@@ -1233,14 +1230,15 @@ describe('respond middleware', () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
 		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
 		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
-		mocks.serializeScopedCacheTags.mockReturnValue('a:b=1, a:b=2');
+
+		const pins = [
+			{ collection: 'a', field: 'b', value: '1' },
+			{ collection: 'a', field: 'b', value: '2' },
+		];
 
 		const res = makeRes(
 			{ data: [{ id: 1 }] },
-			{
-				scopedCacheTags: [{ collection: 'a', field: 'b', value: '1' }],
-				scopedCachePurged: [{ collection: 'a', field: 'b', value: '1' }],
-			},
+			{ scopedCacheTags: pins, scopedCachePurged: pins },
 		);
 
 		await respond(makeReq(), res, next);
@@ -1261,7 +1259,7 @@ describe('respond middleware', () => {
 		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
 			mockCache,
 			'cache-key__tags',
-			{ tags: 'a:b=1, a:b=2' },
+			{ tags: ['a:b=1', 'a:b=2'] },
 			expect.any(Number),
 		);
 	});

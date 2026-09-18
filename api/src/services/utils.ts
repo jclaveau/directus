@@ -18,7 +18,11 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
-import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
+import {
+	cacheExpiresAtKey,
+	cacheTagsKey,
+	storedScopedCacheTagLabels,
+} from '../cache-sidecars.js';
 import type { CacheAuditOptions } from '../cache-audit.js';
 import {
 	type CacheAuditRun,
@@ -497,11 +501,9 @@ export class UtilsService {
 
 		const tagged = await getCacheValue(cache, cacheTagsKey(redisKey));
 
-		// `__tags` stores the comma-joined scoped-cache tags (only when the
-		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).
-		const tags = typeof tagged?.tags === 'string'
-			? tagged.tags.split(', ').filter(Boolean)
-			: null;
+		// `__tags` lists the scoped-cache tag labels (only when the dev-only
+		// CACHE_TAGS_HEADER is on, which is what writes this sidecar).
+		const tags = storedScopedCacheTagLabels(tagged);
 
 		// Re-compress the payload to size its Redis footprint against the raw response.
 		let sizes: { uncompressed: number; compressed: number } | null = null;
