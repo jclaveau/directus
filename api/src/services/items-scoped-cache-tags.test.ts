@@ -242,7 +242,13 @@ describe('read tags at the merge', () => {
 		ownership.collections['enrollment']!.scopedCacheFields = ['student'];
 		ownership.collections['student']!.scopedCacheFields = ['user'];
 
-		const rows = [{ id: 1, enrollment: { id: 10, student: { id: 100 } } }];
+		// As run-ast returns them: the injected chain under its alias, beside the
+		// foreign key `*` asked for.
+		const rows = [{
+			id: 1,
+			enrollment: 10,
+			__scoped_cache_enrollment: { id: 10, student: { id: 100 } },
+		}];
 
 		test(oneLine`
 			stays bare: the filter reads enrollment rows the injected pin never named
@@ -268,13 +274,25 @@ describe('read tags at the merge', () => {
 				accountability: null,
 			});
 
-			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*'] }))
-				.toEqual(['enrollment.id', 'enrollment.student.id']);
+			expect(service.scopedCache.ownershipInjections({ fields: ['*'] }))
+				.toEqual([
+					{
+						path: 'enrollment.id',
+						aliasedPath: '__scoped_cache_enrollment.id',
+					},
+					{
+						path: 'enrollment.student.id',
+						aliasedPath: '__scoped_cache_enrollment.student.id',
+					},
+				]);
 
-			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*.*'] }))
-				.toEqual(['enrollment.student.id']);
+			expect(service.scopedCache.ownershipInjections({ fields: ['*.*'] }))
+				.toEqual([{
+					path: 'enrollment.student.id',
+					aliasedPath: 'enrollment.__scoped_cache_student.id',
+				}]);
 
-			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*.*.*'] }))
+			expect(service.scopedCache.ownershipInjections({ fields: ['*.*.*'] }))
 				.toEqual([]);
 		});
 
@@ -285,7 +303,12 @@ describe('read tags at the merge', () => {
 				accountability: null,
 			});
 
-			feed(rows);
+			// `*.*` nests enrollment itself, so only the student is injected, under
+			// the enrollment row the caller asked for.
+			feed([{
+				id: 1,
+				enrollment: { id: 10, student: 100, __scoped_cache_student: { id: 100 } },
+			}]);
 
 			const result = await service.readByQuery(
 				{ fields: ['*.*'] },
@@ -735,7 +758,8 @@ describe('read tags at the merge', () => {
 
 		const rows = [{
 			id: 1,
-			owner: { id: 1, grandowner: { id: 1, root: { id: 1 } } },
+			owner: 1,
+			__scoped_cache_owner: { id: 1, grandowner: { id: 1, root: { id: 1 } } },
 		}];
 
 		afterEach(() => {
@@ -996,7 +1020,8 @@ describe('read tags at the merge', () => {
 			range: {
 				id: 50,
 				user_created: 'u1',
-				tu: {
+				tu: 30,
+				__scoped_cache_tu: {
 					id: 30,
 					discipline: {
 						id: 20,
@@ -1160,26 +1185,41 @@ describe('read tags at the merge', () => {
 			});
 		});
 
-		test(oneLine`
-			tags no ancestor the ownership injection nested through a null hop: a
-			chain reaching no row leaves the response as it was
-		`, async () => {
+		test.each([
+			['a null hop', { tu: null, __scoped_cache_tu: null }],
+			['a hop whose case withheld its row', { tu: 30, __scoped_cache_tu: null }],
+		])(oneLine`
+			tags no ancestor the ownership injection nested through %s: a chain
+			reaching no row leaves the response as it was
+		`, async (_shape, hop) => {
 			permitting();
 
 			feed([{
 				...rows[0]!,
-				range: { ...rows[0]!.range, tu: null },
+				range: { ...rows[0]!.range, ...hop },
 			}]);
 
-			const tags = await tagsOf(asUser(), query);
+			const service = asUser();
+			const tags = await tagsOf(service, query);
 
 			for (const ancestor of ['tu', 'discipline', 'enrollment', 'student']) {
 				expect(tags).not.toContain(ancestor);
-				expect(tags).not.toContain(`${ancestor}:id=`);
+				expect(tags.some((tag) => tag.startsWith(`${ancestor}:id=`))).toBe(false);
 			}
 
 			expect(tags).toContain('tu:discipline.enrollment.student.user=u1');
 			expect(tags).toContain('range:id=50');
+
+			// The foreign key the caller asked for is what the row carried, not what
+			// the injected hop came back as.
+			feed([{
+				...rows[0]!,
+				range: { ...rows[0]!.range, ...hop },
+			}]);
+
+			const [row] = await service.readByQuery(query, { emitEvents: false });
+
+			expect((row as { range: { tu: unknown } }).range.tu).toBe(hop.tu);
 		});
 	});
 

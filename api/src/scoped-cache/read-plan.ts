@@ -18,6 +18,7 @@ import type {
 } from '../permissions/modules/process-ast/types.js';
 import type { AST } from '../types/ast.js';
 import { scopedCachePurgeEnabled } from './config.js';
+import type { ScopedCacheOwnershipInjection } from './ownership-injection.js';
 import {
 	resolveScopedCacheM2oJoinChainFromPath,
 	scopedCacheFilterKeyingByCollection,
@@ -72,7 +73,7 @@ export class ScopedCacheReadPlan {
 		private collection: string,
 		private schema: SchemaOverview,
 		ast: AST,
-		injectedOwnershipPaths: string[],
+		injections: ScopedCacheOwnershipInjection[],
 	) {
 		const enabled = scopedCachePurgeEnabled();
 
@@ -101,8 +102,8 @@ export class ScopedCacheReadPlan {
 			: new Map();
 
 		this.injectedAncestorPaths = new Set(
-			injectedOwnershipPaths.map((path) => {
-				return path
+			injections.map(({ aliasedPath }) => {
+				return aliasedPath
 					.split('.')
 					.slice(0, -1)
 					.join('.');
@@ -116,7 +117,7 @@ export class ScopedCacheReadPlan {
 		// the nested ones, whichever way it came to be nested.
 		const injectedAncestors = new Set<CollectionKey>();
 
-		for (const path of injectedOwnershipPaths) {
+		for (const { path } of injections) {
 			const joins = resolveScopedCacheM2oJoinChainFromPath(
 				schema,
 				collection,

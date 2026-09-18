@@ -27,9 +27,10 @@ import {
 	foldHandedOverScopedCacheEpochs,
 	ItemScopedCacheService,
 	readScopedCacheEpochs,
-	requestedFieldNestsPast,
 	scopedCacheCollectionsChangedByOnDelete,
+	stripScopedCacheOwnershipInjections,
 	takenOverScopedCacheKey,
+	withScopedCacheOwnershipInjections,
 } from '../scoped-cache.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import { getAstFromQuery } from '../database/get-ast-from-query/get-ast-from-query.js';
@@ -733,21 +734,16 @@ implements AbstractService<Item> {
 				)
 				: query;
 
-		const injectedOwnershipPaths =
-			this.scopedCache.ownershipPathsToInject(updatedQuery);
+		const ownershipInjections =
+			this.scopedCache.ownershipInjections(updatedQuery);
 
 		let ast = await getAstFromQuery(
 			{
 				collection: this.collection,
-				query: injectedOwnershipPaths.length > 0
-					? {
-						...updatedQuery,
-						fields: [
-							...(updatedQuery.fields ?? ['*']),
-							...injectedOwnershipPaths,
-						],
-					}
-					: updatedQuery,
+				query: withScopedCacheOwnershipInjections(
+					updatedQuery,
+					ownershipInjections,
+				),
 				accountability: this.accountability,
 			},
 			{
@@ -763,7 +759,7 @@ implements AbstractService<Item> {
 
 		const scopedCachePlan = this.scopedCache.planRead(
 			ast,
-			injectedOwnershipPaths,
+			ownershipInjections,
 		);
 
 		// Before the query, so it predates any purge racing this read.
@@ -844,15 +840,10 @@ implements AbstractService<Item> {
 			);
 		}
 
-		if (injectedOwnershipPaths.length > 0) {
-			stripInjectedOwnershipNesting(
-				filteredRecords as Item[],
-				injectedOwnershipPaths,
-				updatedQuery,
-				this.schema,
-				this.collection,
-			);
-		}
+		stripScopedCacheOwnershipInjections(
+			filteredRecords as Item[],
+			ownershipInjections,
+		);
 
 		// TODO an `items.read` hook returning a non-object (emitFilter propagates a
 		// listener's return verbatim, and the cast above asserts rather than checks)
@@ -1850,84 +1841,5 @@ implements AbstractService<Item> {
 		}
 
 		return await this.createOne(data, opts);
-	}
-}
-
-// Recursive undo of the injected nesting — kept out of its one caller by choice.
-// eslint-disable-next-line local/no-single-caller-function
-export function stripInjectedOwnershipNesting(
-	records: AnyItem[],
-	injectedPaths: string[],
-	query: Query,
-	schema: SchemaOverview,
-	rootCollection: string,
-): void {
-	const fields = query.fields ?? ['*'];
-
-	// The caller asked for the relation's rows, so the injected nesting under it is
-	// theirs — wildcards included, since `*.*` nests every one-hop relation.
-	const nestedByCaller = (prefix: string[]): boolean => {
-		return fields.some((field) => requestedFieldNestsPast(field, prefix));
-	};
-
-	// The caller asked for the relation as a column, which surfaces its key.
-	const surfacesAsScalar = (prefix: string[], field: string): boolean => {
-		return fields.some((requested) => {
-			const segments = requested.split('.');
-
-			return (
-				segments.length === prefix.length + 1 &&
-				requestedFieldNestsPast(requested, prefix) &&
-				(segments[prefix.length] === '*' || segments[prefix.length] === field)
-			);
-		});
-	};
-
-	const collapse = (
-		node: Record<string, any>,
-		collection: string,
-		segments: string[],
-		index: number,
-		prefix: string[],
-	): void => {
-		if (node === null || typeof node !== 'object' || index >= segments.length - 1) {
-			return;
-		}
-
-		const field = segments[index]!;
-		const childPrefix = [...prefix, field];
-
-		const childCollection = schema.relations.find(
-			(candidate) =>
-				candidate.collection === collection && candidate.field === field,
-		)?.related_collection;
-
-		const child = node[field];
-
-		if (!childCollection || child === null || typeof child !== 'object') {
-			return;
-		}
-
-		if (nestedByCaller(childPrefix)) {
-			collapse(child, childCollection, segments, index + 1, childPrefix);
-			return;
-		}
-
-		const childPrimaryKey = schema.collections[childCollection]?.primary;
-
-		if (childPrimaryKey && surfacesAsScalar(prefix, field)) {
-			node[field] = child[childPrimaryKey];
-		}
-		else {
-			delete node[field];
-		}
-	};
-
-	for (const path of injectedPaths) {
-		const segments = path.split('.');
-
-		for (const record of records) {
-			collapse(record, rootCollection, segments, 0, []);
-		}
 	}
 }

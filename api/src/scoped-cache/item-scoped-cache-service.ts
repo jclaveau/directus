@@ -24,10 +24,12 @@ import {
 } from '../permissions/modules/process-ast/utils/collections-in-field-map.js';
 import type { AST } from '../types/ast.js';
 import {
+	scopedCacheOwnershipInjections,
+	type ScopedCacheOwnershipInjection,
+} from './ownership-injection.js';
+import {
 	composeScopedCachePaths,
-	requestedFieldNestsPast,
 	resolveScopedCacheM2oJoinChainFromPath,
-	scopedCacheOwnershipNestedPkPaths,
 	type ScopedCacheM2oJoin,
 } from './paths.js';
 import { ScopedCacheReadPlan } from './read-plan.js';
@@ -478,33 +480,31 @@ export class ItemScopedCacheService {
 	 * than by the bare tag a `fields: ['*']` read would over-purge on. Stripped from
 	 * the response again once the tags are built.
 	 */
-	ownershipPathsToInject(query: Query): string[] {
+	ownershipInjections(query: Query): ScopedCacheOwnershipInjection[] {
 		if (!scopedCachePurgeEnabled()) {
 			return [];
 		}
 
-		return scopedCacheOwnershipNestedPkPaths(this.schema, this.collection)
-			.filter((path) => {
-				const ancestorPath = path.split('.').slice(0, -1);
-
-				// The caller already nests past this prefix — its rows come back on
-				// their own, so neither inject nor strip it.
-				return !(query.fields ?? []).some((field) => {
-					return requestedFieldNestsPast(field, ancestorPath);
-				});
-			});
+		return scopedCacheOwnershipInjections(
+			this.schema,
+			this.collection,
+			query.fields ?? [],
+		);
 	}
 
 	/**
 	 * Everything this read's tags need that the AST alone decides, resolved before
 	 * the query runs. The plan fills its own row-dependent half from inside it.
 	 */
-	planRead(ast: AST, injectedOwnershipPaths: string[]): ScopedCacheReadPlan {
+	planRead(
+		ast: AST,
+		injections: ScopedCacheOwnershipInjection[],
+	): ScopedCacheReadPlan {
 		return new ScopedCacheReadPlan(
 			this.collection,
 			this.schema,
 			ast,
-			injectedOwnershipPaths,
+			injections,
 		);
 	}
 

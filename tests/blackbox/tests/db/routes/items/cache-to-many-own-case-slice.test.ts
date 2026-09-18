@@ -55,6 +55,7 @@ describe(oneLine`
 		let userId: string;
 		let rangeId: number;
 		let untaughtRangeId: number;
+		let strangerTaughtRangeId: number;
 		let strangerTuId: number;
 		let ownedPartId: number;
 		let ownedSlotId: number;
@@ -253,11 +254,14 @@ describe(oneLine`
 				item: [
 					{ method: 'spaced', user_created: userId, tu: tus[0].id },
 					{ method: 'untaught', user_created: userId, tu: null },
+					// Visible by its own column, taught by a unit the case withholds.
+					{ method: 'stranger-taught', user_created: userId, tu: tus[1].id },
 				],
 			});
 
 			rangeId = ranges[0].id;
 			untaughtRangeId = ranges[1].id;
+			strangerTaughtRangeId = ranges[2].id;
 
 			const slots = await CreateItem(vendor, {
 				collection: SLOT,
@@ -403,6 +407,42 @@ describe(oneLine`
 				.set('Authorization', admin);
 
 			expect((await readUntaught()).headers[cacheStatusHeader]).toBe('HIT');
+		});
+
+		it(oneLine`
+			answers the foreign key the caller asked for when the hop's case withheld
+			its row: the injected nesting merges under a key of its own
+		`, async () => {
+			const readTaught = () => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${RANGE}/${strangerTaughtRangeId}`)
+					.query({ fields: '*' })
+					.set('Authorization', asUser);
+			};
+
+			const response = await expectCached(readTaught);
+
+			expect(response.body.data).toMatchObject({
+				id: strangerTaughtRangeId,
+				method: 'stranger-taught',
+				tu: strangerTuId,
+			});
+
+			expect(Object.keys(response.body.data)).not.toContain('__scoped_cache_tu');
+
+			// Nothing of the withheld unit is in the response, so no tag names it:
+			// a write to it leaves the read cached.
+			const tags: string = response.headers[cacheTagsHeader];
+
+			expect(tags, tags).not.toMatch(new RegExp(`(^|, )${TU}(,|$)`));
+			expect(tags, tags).not.toMatch(new RegExp(`(^|, )${TU}:id=`));
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TU}/${strangerTuId}`)
+				.send({ name: 'UE stranger renamed again' })
+				.set('Authorization', admin);
+
+			expect((await readTaught()).headers[cacheStatusHeader]).toBe('HIT');
 		});
 	});
 });
