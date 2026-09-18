@@ -361,6 +361,145 @@ describe('read tags at the merge', () => {
 		});
 	});
 
+	describe('a collection two reverse fks reach and disagree on', () => {
+		const grading = new SchemaBuilder()
+			.collection('enrollment', (c) => {
+				c.field('id').id();
+				c.field('pinned_note').m2o('note');
+				c.field('discipline').m2o('discipline');
+				c.field('unit').m2o('unit');
+			})
+			.collection('discipline', (c) => {
+				c.field('id').id();
+				c.field('notes').o2m('note', 'discipline');
+			})
+			.collection('unit', (c) => {
+				c.field('id').id();
+				c.field('notes').o2m('note', 'unit');
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('body').string();
+				c.field('discipline').m2o('discipline');
+				c.field('unit').m2o('unit');
+			})
+			.build();
+
+		grading.collections['note']!.scopedCacheFields = ['discipline', 'unit'];
+
+		const service = () => {
+			return new ItemsService('enrollment', {
+				knex: db,
+				schema: grading,
+				accountability: null,
+			});
+		};
+
+		test(oneLine`
+			keyed by a filter through all three paths, it is bare: the key one path
+			binds names nothing the reverse fks nest
+		`, async () => {
+			// Only the field asked for: the paths a filter alone crosses nest no row.
+			feed([{ id: 1 }]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['id'],
+				filter: {
+					_and: [
+						{ pinned_note: { id: { _eq: 7 } } },
+						{ discipline: { notes: { id: { _eq: 7 } } } },
+						{ unit: { notes: { id: { _eq: 7 } } } },
+					],
+				},
+			});
+
+			expect(tags).toContain('note');
+			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+		});
+
+		test(oneLine`
+			nested through both, each node's own filter slices the rows it returns,
+			whichever fk reached them
+		`, async () => {
+			feed([{
+				id: 1,
+				discipline: {
+					id: 1,
+					notes: [{ id: 7, body: 'a', discipline: 1, unit: 2 }],
+				},
+				unit: {
+					id: 2,
+					notes: [{ id: 8, body: 'b', discipline: 3, unit: 2 }],
+				},
+			}]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['discipline.notes.body', 'unit.notes.body'],
+				deep: {
+					discipline: { notes: { _filter: { discipline: { _eq: 1 } } } },
+					unit: { notes: { _filter: { unit: { _eq: 2 } } } },
+				},
+			});
+
+			expect(tags).toContain('note:discipline=1');
+			expect(tags).toContain('note:unit=2');
+			expect(tags).not.toContain('note');
+		});
+
+		test(oneLine`
+			nested through both and filtered on beyond them, it is bare: the nodes'
+			slices name only the rows they returned
+		`, async () => {
+			feed([{
+				id: 1,
+				discipline: {
+					id: 1,
+					notes: [{ id: 7, body: 'a', discipline: 1, unit: 2 }],
+				},
+				unit: {
+					id: 2,
+					notes: [{ id: 8, body: 'b', discipline: 3, unit: 2 }],
+				},
+			}]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['discipline.notes.body', 'unit.notes.body'],
+				filter: { discipline: { notes: { body: { _eq: 'a' } } } },
+				deep: {
+					discipline: { notes: { _filter: { discipline: { _eq: 1 } } } },
+					unit: { notes: { _filter: { unit: { _eq: 2 } } } },
+				},
+			});
+
+			expect(tags).toContain('note');
+			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+		});
+
+		test(oneLine`
+			nested through both with a node nothing bounds, it is bare
+		`, async () => {
+			feed([{
+				id: 1,
+				discipline: {
+					id: 1,
+					notes: [{ id: 7, body: 'a', discipline: 1, unit: 2 }],
+				},
+				unit: {
+					id: 2,
+					notes: [{ id: 8, body: 'b', discipline: 3, unit: 2 }],
+				},
+			}]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['discipline.notes.body', 'unit.notes.body'],
+				deep: { unit: { notes: { _filter: { unit: { _eq: 2 } } } } },
+			});
+
+			expect(tags).toContain('note');
+			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+		});
+	});
+
 	describe('a to-many reached over a foreign key outside its scope', () => {
 		const reviewing = new SchemaBuilder()
 			.collection('owner', (c) => {
