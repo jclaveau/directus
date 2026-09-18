@@ -729,6 +729,7 @@ describe('read tags at the merge', () => {
 			.collection('student', (c) => {
 				c.field('id').id();
 				c.field('user').string();
+				c.field('name').string();
 			})
 			.collection('enrollment', (c) => {
 				c.field('id').id();
@@ -786,29 +787,35 @@ describe('read tags at the merge', () => {
 		cursus.collections['range']!.scopedCacheFields = ['user_created', 'tu'];
 		cursus.collections['configuration']!.scopedCacheFields = ['range', 'item'];
 
-		const toUser = { student: { user: { _eq: 'u1' } } };
+		const toUser = { user: { _eq: 'u1' } };
 
-		const toUserFrom = (path: string[]): Filter => {
-			return path.reduceRight<Record<string, unknown>>(
-				(inner, hop) => ({ [hop]: inner }),
-				toUser,
-			) as Filter;
+		// Every policy but the range's reaches the student, `onStudent` being
+		// what it says of them.
+		const casesReaching = (onStudent: Filter): Record<string, Filter> => {
+			const from = (path: string[]): Filter => {
+				return path.reduceRight<Record<string, unknown>>(
+					(inner, hop) => ({ [hop]: inner }),
+					{ student: onStudent },
+				) as Filter;
+			};
+
+			return {
+				student: onStudent,
+				enrollment: from([]),
+				discipline: from(['enrollment']),
+				tu: from(['discipline', 'enrollment']),
+				course: from(['tu', 'discipline', 'enrollment']),
+				note: from(['course', 'tu', 'discipline', 'enrollment']),
+				part: from(['course', 'tu', 'discipline', 'enrollment']),
+				slot: from(['part', 'course', 'tu', 'discipline', 'enrollment']),
+				range: { user_created: { _eq: 'u1' } },
+				configuration: { range: { user_created: { _eq: 'u1' } } },
+			};
 		};
 
-		const cases: Record<string, Filter> = {
-			student: { user: { _eq: 'u1' } },
-			enrollment: toUserFrom([]),
-			discipline: toUserFrom(['enrollment']),
-			tu: toUserFrom(['discipline', 'enrollment']),
-			course: toUserFrom(['tu', 'discipline', 'enrollment']),
-			note: toUserFrom(['course', 'tu', 'discipline', 'enrollment']),
-			part: toUserFrom(['course', 'tu', 'discipline', 'enrollment']),
-			slot: toUserFrom(['part', 'course', 'tu', 'discipline', 'enrollment']),
-			range: { user_created: { _eq: 'u1' } },
-			configuration: { range: { user_created: { _eq: 'u1' } } },
-		};
+		const permitting = (onStudent: Filter = toUser): void => {
+			const cases = casesReaching(onStudent);
 
-		const permitting = (): void => {
 			vi.mocked(fetchPermissions).mockImplementation(async () => {
 				return Object.keys(cases).map((collection, at) => {
 					return {
@@ -918,6 +925,59 @@ describe('read tags at the merge', () => {
 				'student:user=u1',
 				'tu:discipline.enrollment.student.user=u1',
 				'tu:id=30',
+			]);
+		});
+
+		test(oneLine`
+			slices every collection by the student's key when the cases name the
+			student through it: how a rule authored on the student is spelled
+		`, async () => {
+			permitting({ id: { _eq: 1 } });
+			feed(rows);
+
+			expect(await tagsOf(asUser(), query)).toEqual([
+				'configuration:item=7',
+				'configuration:range.user_created=u1',
+				'course:id=3',
+				'course:tu.discipline.enrollment.student=1',
+				'discipline:enrollment.student=1',
+				'discipline:id=20',
+				'enrollment:id=10',
+				'enrollment:student=1',
+				'note:course.tu.discipline.enrollment.student=1',
+				'note:course=3',
+				'part:course.tu.discipline.enrollment.student=1',
+				'part:course=3',
+				'range:id=50',
+				'range:user_created=u1',
+				'slot:part.course.tu.discipline.enrollment.student=1',
+				'slot:range=50',
+				'student:id=1',
+				'tu:discipline.enrollment.student=1',
+				'tu:id=30',
+			]);
+		});
+
+		test(oneLine`
+			bares every hop when the cases name the student by a column no slice
+			can name: the hop is the scope path, the column under it is not
+		`, async () => {
+			permitting({ name: { _eq: 'Ada' } });
+			feed(rows);
+
+			expect(await tagsOf(asUser(), query)).toEqual([
+				'configuration:item=7',
+				'configuration:range.user_created=u1',
+				'course',
+				'discipline',
+				'enrollment',
+				'note:course=3',
+				'part',
+				'range:id=50',
+				'range:user_created=u1',
+				'slot:range=50',
+				'student',
+				'tu',
 			]);
 		});
 
