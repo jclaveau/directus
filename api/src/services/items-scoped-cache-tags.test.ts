@@ -674,11 +674,16 @@ describe('read tags at the merge', () => {
 			]);
 		});
 
+		// Off any request but the date's: `validateFilter` rejects the empty
+		// list, and `parseFilter` lists the value, splits the columns into `_and`
+		// and wraps the leaf in `_eq` before any tag is derived — only a filter
+		// handed straight to the service carries those shapes.
 		test.each([
 			['an empty list', { name: { _in: [] } }],
 			['a list that is no list', { name: { _in: 'open' } }],
 			['a column no slice can name', { since: { _eq: '2026-01-01' } }],
 			['two columns at once', { name: { _eq: 'open' }, kind: { _eq: 'x' } }],
+			['a leaf that is no node', { name: { open: 'x' } }],
 		])(
 			'bares what a case hopping out of it reaches on %s',
 			async (_shape, condition) => {

@@ -529,8 +529,8 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a hop comparing two columns at once names no single slice: the near
-			collection stays bare while the crossed one keeps its path slice
+			a column condition beside the hop keeps the path slice: the two describe
+			one row, and the request splits them before any tag is derived
 		`, async () => {
 			const missed = await expectCached(() => {
 				return readParts({
@@ -545,8 +545,44 @@ describe(oneLine`
 
 			const tags = missed.headers[cacheTagsHeader];
 
-			expectBare(tags, PART);
+			expectSlice(tags, `${PART}:course.tu.owner.user=${userId}`);
 			expectSlice(tags, `${COURSE}:tu.owner.user=${userId}`);
+		});
+
+		it(oneLine`
+			a path naming its owner through the owner's key slices every hop by
+			that key, and the stranger's teaching unit handed to it purges the read
+		`, async () => {
+			const readByOwnerKey = () => {
+				return readParts({
+					course: { tu: { owner: { id: { _eq: ownerId } } } },
+				});
+			};
+
+			const missed = await expectCached(readByOwnerKey);
+
+			expect(missed.body.data).toHaveLength(2);
+
+			const tags = missed.headers[cacheTagsHeader];
+
+			expectSlice(tags, `${PART}:course.tu.owner=${ownerId}`);
+			expectSlice(tags, `${COURSE}:tu.owner=${ownerId}`);
+			expectSlice(tags, `${TU}:owner=${ownerId}`);
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TU}/${strangerTuId}`)
+				.send({ owner: ownerId })
+				.set('Authorization', admin);
+
+			const after = await readByOwnerKey();
+
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+			expect(after.body.data).toHaveLength(3);
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${TU}/${strangerTuId}`)
+				.send({ owner: strangerOwnerId })
+				.set('Authorization', admin);
 		});
 
 		it(oneLine`
