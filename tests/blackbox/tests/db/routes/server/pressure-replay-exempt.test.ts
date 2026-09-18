@@ -45,16 +45,20 @@ describe('/server under pressure', () => {
 		}
 
 		// The usual readiness wait needs a 200 from `/server/ping`, which this
-		// instance refuses by design: up is any answer at all.
+		// instance refuses by design: up is the refusal. A 200 is the listener
+		// up before the limiter's first sample, and is waited out like a refused
+		// connection.
 		for (const vendor of vendors) {
 			for (let attempt = 0; attempt < 100; attempt++) {
-				try {
-					await request(`http://127.0.0.1:${ports[vendor]}`).get('/server/ping');
+				const probe = await request(`http://127.0.0.1:${ports[vendor]}`)
+					.get('/server/ping')
+					.catch(() => undefined);
+
+				if (probe?.statusCode === 503) {
 					break;
 				}
-				catch {
-					await sleep(1000);
-				}
+
+				await sleep(1000);
 			}
 		}
 	}, 180_000);
