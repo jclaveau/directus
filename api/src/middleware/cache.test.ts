@@ -155,6 +155,7 @@ function primeEnrichedHit() {
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	delete env['CACHE_TAGS_HEADER'];
+	delete env['CACHE_TAGS_HEADER_MAX_SIZE'];
 	shouldSkipCache.mockReturnValue(false);
 
 	getCacheKey.mockResolvedValue({
@@ -209,6 +210,20 @@ describe('checkCacheMiddleware', () => {
 			'articles:owner=U1',
 		);
 
+		expect(res.json).toHaveBeenCalledWith({ data: [1] });
+	});
+
+	test('HIT clamps the re-emitted sibling to the header size cap', async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
+		primeHit('a:b=1, a:b=2');
+
+		const res = makeRes();
+
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags', 'a:b=1');
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags-omitted', '1');
 		expect(res.json).toHaveBeenCalledWith({ data: [1] });
 	});
 

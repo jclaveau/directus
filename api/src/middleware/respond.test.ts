@@ -190,6 +190,7 @@ beforeEach(() => {
 	env['CACHE_VALUE_MAX_SIZE'] = false;
 	delete env['CACHE_TAGS_HEADER'];
 	delete env['CACHE_PURGED_TAGS_HEADER'];
+	delete env['CACHE_TAGS_HEADER_MAX_SIZE'];
 	permissionsCachable.mockResolvedValue(true);
 	mocks.queryCachable.mockReturnValue(true);
 	mocks.scopedCachePurgeEnabled.mockReturnValue(false);
@@ -1223,6 +1224,45 @@ describe('respond middleware', () => {
 		expect(res.setHeader).toHaveBeenCalledWith(
 			'X-Scoped-Cache-Purged-Tags',
 			'articles:owner=%00null',
+		);
+	});
+
+	// A batch write pins one tag per row; past CACHE_TAGS_HEADER_MAX_SIZE the header
+	// stops and the __tags sibling still keeps every pin.
+	test('clamps both tag headers, the sibling keeps every pin', async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		env['CACHE_PURGED_TAGS_HEADER'] = 'X-Scoped-Cache-Purged-Tags';
+		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
+		mocks.serializeScopedCacheTags.mockReturnValue('a:b=1, a:b=2');
+
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [{ collection: 'a', field: 'b', value: '1' }],
+				scopedCachePurged: [{ collection: 'a', field: 'b', value: '1' }],
+			},
+		);
+
+		await respond(makeReq(), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags', 'a:b=1');
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags-omitted', '1');
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'X-Scoped-Cache-Purged-Tags',
+			'a:b=1',
+		);
+
+		expect(res.setHeader).toHaveBeenCalledWith(
+			'X-Scoped-Cache-Purged-Tags-omitted',
+			'1',
+		);
+
+		expect(vi.mocked(setCacheValue)).toHaveBeenCalledWith(
+			mockCache,
+			'cache-key__tags',
+			{ tags: 'a:b=1, a:b=2' },
+			expect.any(Number),
 		);
 	});
 

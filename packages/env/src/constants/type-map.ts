@@ -76,6 +76,7 @@ export const TYPE_MAP: Record<string, EnvType> = {
 	CACHE_AUDIT_RETENTION: 'string',
 	CACHE_STATUS_HEADER: 'string',
 	CACHE_TAGS_HEADER: 'string',
+	CACHE_TAGS_HEADER_MAX_SIZE: 'string',
 	CACHE_PURGED_TAGS_HEADER: 'string',
 	CACHE_AUTO_PURGE_IGNORE_LIST: 'array',
 	CACHE_VARY_CONTENT_TYPES: 'array',
