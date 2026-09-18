@@ -20,14 +20,18 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 // #438 while #402 had pinned every one of them:
 //
 // - an o2m aliased twice with a `deep` sort and `_limit: 1` (`start`/`end` over
-//   `days`), where the child's parent-fk slice covers every row of the parent;
+//   `days`): the field map files the node under its alias, which names no
+//   relation until it is read back through the field it stands for;
 // - a to-many node sorted through to-one hops (`part.course.sort`) it also
-//   projects, so the rows the sort depends on are the nested rows themselves;
+//   projects: nested whole, the sort reorders rows the key pins name, and only
+//   a node its limit cut depends on a row the read never carried;
 // - a collection reached by an m2o (`time_slots.part`) and by the o2m hanging
 //   off that very row's own parent (`part.course.parts`), where the o2m's
-//   parent-key slice names every m2o-reached row too;
-// - the ownership ancestors of a root filtered on one of them, under the
-//   per-collection permission cases of a non-admin.
+//   parent-key slice names every m2o-reached row too.
+//
+// The non-admin reads under a per-row case on every collection. A case on an
+// m2o node's own columns keeps that node bare (a withheld parent is a null slot
+// no key pin names), so only the to-many children and the root are pinned there.
 const OWNER = 'npb_owner';
 const TU = 'npb_tu';
 const RR = 'npb_rr';
@@ -54,6 +58,8 @@ describe(oneLine`
 		env[vendor]['REDIS_HOST'] = 'localhost';
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-nested-paths-not-bare-${vendor}`;
+		// The suite default is 5; the configuration read nests six hops deep.
+		env[vendor]['MAX_RELATIONAL_DEPTH'] = '15';
 
 		let instance: ChildProcess;
 		let tuId: number;
@@ -101,7 +107,7 @@ describe(oneLine`
 					},
 					{
 						collection: TS,
-						meta: { scoped_cache_fields: ['part'] },
+						meta: { scoped_cache_fields: ['mr', 'part'] },
 						fields: [{ field: 'note', type: 'string', meta: {} }],
 					},
 					{
@@ -397,21 +403,24 @@ describe(oneLine`
 
 			const withParts = [...cfgFields, 'mr.time_slots.part.course.parts.*'];
 
-			const sortedThroughCourse = JSON.stringify({
-				mr: { time_slots: { _sort: ['part.course.sort', 'part.sort', 'id'] } },
-			});
+			const sortedThroughCourse = (limit?: number) => {
+				return JSON.stringify({
+					mr: {
+						time_slots: {
+							_sort: ['part.course.sort', 'part.sort', 'id'],
+							...(limit === undefined
+								? {}
+								: { _limit: limit }),
+						},
+					},
+				});
+			};
 
-			it.each([
-				['unsorted, no parts', cfgFields, undefined],
-				['sorted by id, no parts', cfgFields, JSON.stringify({
-					mr: { time_slots: { _sort: ['id'] } },
-				})],
-				['sorted through the course, no parts', cfgFields, sortedThroughCourse],
-				['unsorted, with parts', withParts, undefined],
-				['sorted through the course, with parts', withParts, sortedThroughCourse],
-			])(oneLine`
-				pins the time slots, parts and courses a configuration read nests: %s
-			`, async (shape, fields, deep) => {
+			const configurationRead = async (
+				shape: string,
+				fields: string[],
+				deep: string | undefined,
+			): Promise<[string, string]> => {
 				const name = `configuration ${shape} ${who}`;
 
 				const query: Record<string, string> = {
@@ -427,13 +436,61 @@ describe(oneLine`
 				const tags = await tagsOf(name, `/items/${CFG}`, query, authorization());
 
 				expectSlice(tags, `${CFG}:item=${rrId}`, name);
+				expectSlice(tags, `${TS}:mr=${mrId}`, name);
+				expectNotBare(tags, TS, name);
+				expectNotBare(tags, TU, name);
 
-				for (const collection of [MR, TS, PART, COURSE, TU]) {
+				return [tags, name];
+			};
+
+			it.each([
+				['unsorted, no parts', cfgFields, undefined],
+				['sorted by id, no parts', cfgFields, JSON.stringify({
+					mr: { time_slots: { _sort: ['id'] } },
+				})],
+				['sorted through the course, no parts', cfgFields, sortedThroughCourse()],
+				['unsorted, with parts', withParts, undefined],
+				['sorted through the course, with parts', withParts, sortedThroughCourse()],
+				// Three time slots under a limit of four: nested whole.
+				[
+					'sorted through the course, under a limit',
+					withParts,
+					sortedThroughCourse(4),
+				],
+			])(oneLine`
+				pins the time slots, parts and courses a configuration read nests: %s
+			`, async (shape, fields, deep) => {
+				const [tags, name] = await configurationRead(shape, fields, deep);
+
+				// The row case on each m2o node keeps it bare for the non-admin.
+				if (who !== 'as admin') {
+					return;
+				}
+
+				for (const collection of [MR, PART, COURSE]) {
 					expectNotBare(tags, collection, name);
 				}
 
 				for (const course of courseIds) {
 					expectSlice(tags, `${COURSE}:id=${course}`, name);
+					expectSlice(tags, `${PART}:course=${course}`, name);
+				}
+			});
+
+			it(oneLine`
+				bares the parts and courses a configuration read sorts through when
+				the time slots are cut at the limit
+			`, async () => {
+				// Three time slots at a limit of three: one more may hide behind the cut.
+				const [tags, name] = await configurationRead(
+					'sorted through the course, cut by a limit',
+					withParts,
+					sortedThroughCourse(3),
+				);
+
+				for (const collection of [PART, COURSE]) {
+					expect(tags, `${name}: ${collection} pinned — ${whatItPinned(tags)}`)
+						.toMatch(new RegExp(`(^|, )${collection}(,|$)`));
 				}
 			});
 		});
