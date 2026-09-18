@@ -541,6 +541,7 @@ describe('read tags at the merge', () => {
 				c.field('id').id();
 				c.field('name').string();
 				c.field('kind').string();
+				c.field('since').dateTime();
 			})
 			.collection('grandowner', (c) => {
 				c.field('id').id();
@@ -556,7 +557,7 @@ describe('read tags at the merge', () => {
 			})
 			.build();
 
-		ownership.collections['root']!.scopedCacheFields = ['name'];
+		ownership.collections['root']!.scopedCacheFields = ['name', 'since'];
 		ownership.collections['grandowner']!.scopedCacheFields = ['root'];
 		ownership.collections['owner']!.scopedCacheFields = ['grandowner'];
 		ownership.collections['note']!.scopedCacheFields = ['owner'];
@@ -648,6 +649,69 @@ describe('read tags at the merge', () => {
 				fields: ['*'],
 				filter: { owner: { id: { _eq: 1 } } },
 			})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
+		});
+
+		test('slices one value per key the case lists', async () => {
+			permitting({
+				grandowner: { root: { name: { _in: ['open', 'ajar'] } } },
+				root: { name: { _in: ['open', 'ajar'] } },
+			});
+
+			feed(rows);
+
+			expect(await tagsOf(asUser(), {
+				fields: ['*'],
+				filter: { owner: { id: { _eq: 1 } } },
+			})).toEqual([
+				'grandowner:id=1',
+				'grandowner:root.name=ajar',
+				'grandowner:root.name=open',
+				'note:owner=1',
+				'owner:id=1',
+				'root:id=1',
+				'root:name=ajar',
+				'root:name=open',
+			]);
+		});
+
+		test.each([
+			['an empty list', { name: { _in: [] } }],
+			['a list that is no list', { name: { _in: 'open' } }],
+			['a column no slice can name', { since: { _eq: '2026-01-01' } }],
+			['two columns at once', { name: { _eq: 'open' }, kind: { _eq: 'x' } }],
+		])(
+			'bares what a case hopping out of it reaches on %s',
+			async (_shape, condition) => {
+				permitting({ grandowner: { root: condition } as Filter });
+				feed(rows);
+
+				expect(await tagsOf(asUser(), {
+					fields: ['*'],
+					filter: { owner: { id: { _eq: 1 } } },
+				})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
+			},
+		);
+
+		test(oneLine`
+			bares what a case reaches on a declared path whose hop is no relation
+		`, async () => {
+			ownership.collections['grandowner']!.scopedCacheFields = [
+				'root',
+				'root.kind.x',
+			];
+
+			try {
+				permitting({ grandowner: { root: { kind: { x: { _eq: 1 } } } } as Filter });
+				feed(rows);
+
+				expect(await tagsOf(asUser(), {
+					fields: ['*'],
+					filter: { owner: { id: { _eq: 1 } } },
+				})).toEqual(['grandowner:id=1', 'note:owner=1', 'owner:id=1', 'root']);
+			}
+			finally {
+				ownership.collections['grandowner']!.scopedCacheFields = ['root'];
+			}
 		});
 	});
 
