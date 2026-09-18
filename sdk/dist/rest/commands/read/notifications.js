@@ -1,0 +1,2 @@
+import{throwIfEmpty as e}from"../../utils/throw-if-empty.js";const t=e=>()=>({path:`/notifications`,params:e??{},method:`GET`}),n=(t,n)=>()=>(e(String(t),`Key cannot be empty`),{path:`/notifications/${t}`,params:n??{},method:`GET`});export{n as readNotification,t as readNotifications};
+//# sourceMappingURL=notifications.js.map
