@@ -39,6 +39,9 @@ describe(oneLine`
 		env[vendor]['REDIS_PORT'] = '6108';
 		env[vendor]['CACHE_NAMESPACE'] = `directus-tags-header-clamp-${vendor}`;
 
+		// The shared config caps a batch at 100 rows, well under the header cap.
+		env[vendor]['MAX_BATCH_MUTATION'] = String(ROWS);
+
 		let instance: ChildProcess;
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
 
