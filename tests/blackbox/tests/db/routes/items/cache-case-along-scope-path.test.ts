@@ -71,11 +71,16 @@ describe(oneLine`
 					{
 						collection: OWNER,
 						meta: { scoped_cache_fields: ['user'] },
-						fields: [{ field: 'user', type: 'string', meta: {} }],
+						fields: [
+							{ field: 'user', type: 'string', meta: {} },
+							{ field: 'since', type: 'dateTime', meta: {} },
+						],
 					},
 					{
 						collection: TU,
-						meta: { scoped_cache_fields: ['owner'] },
+						// `owner.since` is declared so a read can pin by it: a date is
+						// no slice, which is what its arm below witnesses.
+						meta: { scoped_cache_fields: ['owner', 'owner.since'] },
 						fields: [{ field: 'name', type: 'string', meta: {} }],
 					},
 					{
@@ -192,7 +197,10 @@ describe(oneLine`
 
 			const owners = await CreateItem(vendor, {
 				collection: OWNER,
-				item: [{ user: userId }, { user: 'someone-else' }],
+				item: [
+					{ user: userId, since: '2026-01-01T00:00:00' },
+					{ user: 'someone-else', since: '2026-02-01T00:00:00' },
+				],
 			});
 
 			ownerId = owners[0].id;
@@ -446,6 +454,119 @@ describe(oneLine`
 				.patch(`/items/${PART}/${strangerPartId}`)
 				.send({ course: strangerCourseId })
 				.set('Authorization', admin);
+		});
+
+		// Off the cases now: the same crossing, written by the admin as a query
+		// filter, keyed or not by the shape of what the hop compares.
+		const readParts = (filter: Record<string, unknown>) => {
+			return request(getUrl(vendor, env))
+				.get(`/items/${PART}`)
+				.query({ fields: 'id,name', sort: 'name', filter: JSON.stringify(filter) })
+				.set('Authorization', admin);
+		};
+
+		function expectBare(tags: string, collection: string): void {
+			expect(tags, `${collection} not bare — ${whatItPinned(tags)}`)
+				.toMatch(new RegExp(`(^|, )${collection}(,|$)`));
+		}
+
+		it(oneLine`
+			a filter listing the values a scope path may land on slices every hop
+			by each of them, and the owner moved off one of them purges the read
+		`, async () => {
+			const readListed = () => {
+				return readParts({
+					course: { tu: { owner: { user: { _in: [userId, 'someone-else'] } } } },
+				});
+			};
+
+			const missed = await expectCached(readListed);
+
+			expect(missed.body.data).toHaveLength(3);
+
+			const tags = missed.headers[cacheTagsHeader];
+
+			for (const value of [userId, 'someone-else']) {
+				expectSlice(tags, `${PART}:course.tu.owner.user=${value}`);
+				expectSlice(tags, `${COURSE}:tu.owner.user=${value}`);
+				expectSlice(tags, `${TU}:owner.user=${value}`);
+				expectSlice(tags, `${OWNER}:user=${value}`);
+			}
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNER}/${strangerOwnerId}`)
+				.send({ user: 'someone-third' })
+				.set('Authorization', admin);
+
+			const after = await readListed();
+
+			expect(after.headers[cacheStatusHeader]).toBe('MISS');
+			expect(after.body.data).toHaveLength(2);
+
+			await request(getUrl(vendor, env))
+				.patch(`/items/${OWNER}/${strangerOwnerId}`)
+				.send({ user: 'someone-else' })
+				.set('Authorization', admin);
+		});
+
+		it(oneLine`
+			a filter naming no value along the path bounds the hop to nothing, so
+			every collection it crosses stays bare
+		`, async () => {
+			const missed = await expectCached(() => {
+				return readParts({
+					course: { tu: { owner: { user: { _neq: 'someone-else' } } } },
+				});
+			});
+
+			expect(missed.body.data).toHaveLength(2);
+
+			const tags = missed.headers[cacheTagsHeader];
+
+			for (const collection of [PART, COURSE, TU, OWNER]) {
+				expectBare(tags, collection);
+			}
+		});
+
+		it(oneLine`
+			a hop comparing two columns at once names no single slice: the near
+			collection stays bare while the crossed one keeps its path slice
+		`, async () => {
+			const missed = await expectCached(() => {
+				return readParts({
+					course: {
+						tu: { owner: { user: { _eq: userId } } },
+						name: { _eq: 'Course 1' },
+					},
+				});
+			});
+
+			expect(missed.body.data).toHaveLength(1);
+
+			const tags = missed.headers[cacheTagsHeader];
+
+			expectBare(tags, PART);
+			expectSlice(tags, `${COURSE}:tu.owner.user=${userId}`);
+		});
+
+		it(oneLine`
+			a declared path ending on a column no slice can name leaves the near
+			collection bare
+		`, async () => {
+			const missed = await expectCached(() => {
+				return request(getUrl(vendor, env))
+					.get(`/items/${TU}`)
+					.query({
+						fields: 'id,name',
+						filter: JSON.stringify({
+							owner: { since: { _eq: '2026-01-01T00:00:00' } },
+						}),
+					})
+					.set('Authorization', admin);
+			});
+
+			expect(missed.body.data).toHaveLength(1);
+			expectBare(missed.headers[cacheTagsHeader], TU);
 		});
 	});
 });
