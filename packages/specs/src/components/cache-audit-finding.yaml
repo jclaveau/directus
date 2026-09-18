@@ -15,7 +15,10 @@ properties:
     nullable: true
     description: >
       The `unreplayable` reason (`user_gone`, `status_<code>`,
-      `replay_unrecognized`), or what a replay answered instead of a body.
+      `status_503_under_pressure` for a 503 the pressure limiter answered,
+      `replay_unrecognized`, `transport` or `transport_<code>` for a replay
+      that got no answer, with the error's code), or what a replay answered
+      instead of a body.
   redisKey:
     type: string
   cacheKey:

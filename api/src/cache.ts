@@ -10,7 +10,7 @@ import {
 	type ConnectionEvents,
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
-import { dropScopedCacheIndex } from './scoped-cache.js';
+import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -204,7 +204,7 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 	// calls this uncaught, and it keeps the one tier the flush command exists for
 	// out of the report that command reads its exit code from.
 	try {
-		await cache?.clear();
+		await clearResponseCache(cache);
 	}
 	catch (error: any) {
 		failures.push('response cache');
@@ -331,7 +331,7 @@ export async function clearCacheTargets(targets: CacheFlushTarget[]): Promise<vo
 	}
 
 	if (targets.includes('response')) {
-		await cache?.clear();
+		await clearResponseCache(cache);
 		// The scoped-tag index lives in raw Redis outside the Keyv namespace, so the
 		// clear above misses it — drop it too so no orphan tag pointers linger.
 		refusedIndexKeys = (await dropScopedCacheIndex()).refused;
@@ -407,6 +407,31 @@ export async function setCacheValue(
 	await cache.set(key, compressed, ttl);
 }
 
+/**
+ * Read several entries in one round trip.
+ *
+ * The response cache never reads a payload without also reading the sidecar it is
+ * stored beside, and awaiting them in turn cost two round trips on every HIT —
+ * which on a redis that is a network hop is the whole of what serving from cache
+ * saves. `@keyv/redis` answers this with one MGET.
+ *
+ * A key the store has nothing for comes back `undefined`, in its own position: the
+ * caller tells a missing payload from a missing sidecar by index, as it did when
+ * the two were separate reads.
+ */
+export async function getCacheValues(
+	cache: Keyv,
+	keys: string[],
+): Promise<any[]> {
+	const values = await cache.getMany(keys);
+
+	return Promise.all(values.map((value) => {
+		return value
+			? decompress(value)
+			: undefined;
+	}));
+}
+
 export async function getCacheValue(cache: Keyv, key: string): Promise<any> {
 	const value = await cache.get(key);
 
@@ -464,6 +489,15 @@ function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSu
 			: connection;
 
 		const keyvRedis = new KeyvRedis({ ...clientOptions, disableOfflineQueue: true });
+
+		// Dialed now rather than by the first command. `getClient()` hands the client
+		// over as soon as it is open, and node-redis is open from the moment it starts
+		// dialing — so of two commands a fresh worker sent at once, the second went
+		// out while the first was still connecting and was refused as offline (the
+		// queue above). A purge was that second command on the PR-736 preview, and
+		// was recorded for retry over a Redis that was never away. A dial that fails
+		// reports through the `error` the adapter forwards, like any later one.
+		void keyvRedis.getClient().catch(() => {});
 
 		config.store = keyvRedis;
 	}

@@ -22,6 +22,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 /** Long enough to observe, short enough to wait out inside one case. */
 const DRILL_SECONDS = 3;
 
+// The guard on a start asks every autoscaler on the bus how busy its pool
+// is, and the bus namespace is fixed: a pool another suite is loading on the
+// same Redis refuses a drill here. Ask again until that pool quiets down —
+// the traffic those suites send stops within a minute.
+const IDLE_ATTEMPTS = 60;
+const IDLE_DELAY_MS = 1000;
+const WORKING_REFUSAL = 'the pool is already working';
+
 describe('The autoscale load drill', () => {
 	const instances = {} as Record<Vendor, ChildProcess>;
 	const envs = {} as Record<Vendor, Env>;
@@ -69,10 +77,31 @@ describe('The autoscale load drill', () => {
 	});
 
 	function start(vendor: Vendor, body: object) {
-		return request(getUrl(vendor, envs[vendor]))
-			.post('/utils/autoscale/drill')
-			.set('Authorization', auth)
-			.send(body);
+		return oncePoolIdle(() => {
+			return request(getUrl(vendor, envs[vendor]))
+				.post('/utils/autoscale/drill')
+				.set('Authorization', auth)
+				.send(body);
+		});
+	}
+
+	async function oncePoolIdle(ask: () => request.Test): Promise<request.Response> {
+		let response = await ask();
+
+		for (let attempt = 1; attempt < IDLE_ATTEMPTS; attempt++) {
+			// The REST refusal, or the MCP's protocol error carrying the same.
+			const refusal = response.body.errors?.[0]?.message
+				?? response.body.error?.message;
+
+			if (!refusal?.includes(WORKING_REFUSAL)) {
+				break;
+			}
+
+			await new Promise((resolve) => setTimeout(resolve, IDLE_DELAY_MS));
+			response = await ask();
+		}
+
+		return response;
 	}
 
 	function stop(vendor: Vendor) {
@@ -88,15 +117,17 @@ describe('The autoscale load drill', () => {
 	}
 
 	function callMcp(vendor: Vendor, name: string, args: object) {
-		return request(getUrl(vendor, envs[vendor]))
-			.post('/system-mcp')
-			.set('Authorization', auth)
-			.send({
-				jsonrpc: '2.0',
-				id: 1,
-				method: 'tools/call',
-				params: { name, arguments: args },
-			});
+		return oncePoolIdle(() => {
+			return request(getUrl(vendor, envs[vendor]))
+				.post('/system-mcp')
+				.set('Authorization', auth)
+				.send({
+					jsonrpc: '2.0',
+					id: 1,
+					method: 'tools/call',
+					params: { name, arguments: args },
+				});
+		});
 	}
 
 	// The lever exists where a deployment asked for it and nowhere else, which
@@ -136,7 +167,7 @@ describe('The autoscale load drill', () => {
 			const over = await read(vendor);
 
 			expect(over.body.data.until).toBeNull();
-		});
+		}, 90_000);
 	});
 
 	// A worker that never yields answers nothing, and a drill that takes the
@@ -152,7 +183,7 @@ describe('The autoscale load drill', () => {
 			expect(ping.statusCode).toBe(200);
 
 			await stop(vendor);
-		});
+		}, 90_000);
 	});
 
 	describe('can be called off before its deadline', () => {
@@ -173,7 +204,7 @@ describe('The autoscale load drill', () => {
 			const over = await read(vendor);
 
 			expect(over.body.data.until).toBeNull();
-		});
+		}, 90_000);
 	});
 
 	// The cap is what makes a lost stop harmless, so a request past it is
@@ -231,7 +262,7 @@ describe('The autoscale load drill', () => {
 			});
 
 			expect(stopped.body.result.structuredContent.until).toBeNull();
-		});
+		}, 90_000);
 	});
 
 	// The bounds belong to the service both surfaces call, so an agent asking

@@ -70,6 +70,7 @@ beforeEach(() => {
 	delete env['CACHE_AUDIT_RETENTION'];
 	delete env['CACHE_AUDIT_LIMIT'];
 	delete env['CACHE_AUDIT_MAX_DURATION'];
+	delete env['CACHE_STORE'];
 	env['CACHE_AUDIT_ENABLED'] = true;
 	lockCache.held.clear();
 	vi.mocked(getDatabase).mockReturnValue(db);
@@ -175,7 +176,10 @@ describe('startCacheAuditRun', () => {
 });
 
 describe('finishCacheAuditRun', () => {
-	it('closes the row with the counts and stores one row per finding', async () => {
+	it(oneLine`
+		closes the row with the counts and stores one row per finding, clearing
+		an error a listing wrote on it while its claim was lost
+	`, async () => {
 		tracker.on.update('directus_cache_audits').response(1);
 		tracker.on.insert('directus_cache_audit_findings').response([]);
 
@@ -183,8 +187,11 @@ describe('finishCacheAuditRun', () => {
 
 		const [update] = tracker.history.update;
 
+		expect(update!.sql).toMatch(/.error. = \?/);
+
 		expect(update!.bindings).toEqual([
 			new Date(1_700_000_000_000),
+			null,
 			3,
 			1,
 			1,
@@ -537,6 +544,48 @@ describe('listCacheAuditRuns', () => {
 			.toMatchObject({ finishedAt: null, durationMs: null, scanned: 0 });
 
 		expect(runs[1]).toMatchObject({ id: 6, error: 'redis is away' });
+	});
+
+	it(oneLine`
+		closes a run left open with no claim behind it before answering: its
+		process died, and the page would otherwise wait on it for the reap's grace
+	`, async () => {
+		env['CACHE_STORE'] = 'redis';
+		tracker.on.update('directus_cache_audits').response(1);
+		tracker.on.select('directus_cache_audits').response([]);
+
+		await listCacheAuditRuns();
+
+		const [closed] = tracker.history.update;
+
+		expect(closed!.sql).toMatch(/where .finished_at. is null/);
+		expect(closed!.sql).toMatch(/.started_at. </);
+
+		expect(closed!.bindings).toEqual([
+			new Date(1_700_000_000_000),
+			'The run did not finish: its process died',
+			new Date(1_700_000_000_000 - 5000),
+		]);
+	});
+
+	it('leaves an open run alone while its claim is held', async () => {
+		env['CACHE_STORE'] = 'redis';
+		lockCache.held.set('cache-audit:run', 1_699_999_999_000);
+		tracker.on.select('directus_cache_audits').response([]);
+
+		await listCacheAuditRuns();
+
+		expect(tracker.history.update).toHaveLength(0);
+	});
+
+	it('leaves it to the reap where the claim is one per process', async () => {
+		env['CACHE_STORE'] = 'memory';
+		tracker.on.select('directus_cache_audits').response([]);
+
+		await listCacheAuditRuns();
+
+		expect(lockCache.get).not.toHaveBeenCalled();
+		expect(tracker.history.update).toHaveLength(0);
 	});
 
 	// sqlite hands a JSON column back as text.

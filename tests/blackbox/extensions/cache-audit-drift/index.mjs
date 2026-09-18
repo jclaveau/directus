@@ -7,20 +7,27 @@
 const DRIFT = 'test_cache_audit_drift';
 const DRIFT_DEP = 'test_cache_audit_drift_dep';
 
-export default function registerHooks({ filter }) {
+export default function registerHooks({ filter }, { services }) {
 	filter(`${DRIFT}.items.read`, async (records, _meta, context) => {
-		const dependency = await context.database(DRIFT_DEP).first('owner');
+		// Through the service, not raw knex: the pin below names a collection the
+		// host captured no purge counter for, and only a read's own capture, handed
+		// over with the tag, keeps the response cacheable (`unguarded_scope`).
+		const dependencies = await new services.ItemsService(DRIFT_DEP, {
+			schema: context.schema,
+			knex: context.database,
+		}).readByQuery({ fields: ['owner'], limit: 1 }, { emitEvents: false });
+
+		const [dependency] = dependencies;
 
 		// Seeded after DRIFT: the create's own read-back finds no row to pin on.
 		if (dependency === undefined) {
 			return records;
 		}
 
-		context.scopedCache?.scopeTo({
-			collection: DRIFT_DEP,
-			field: 'owner',
-			value: dependency.owner,
-		});
+		context.scopedCache?.scopeTo(
+			{ collection: DRIFT_DEP, field: 'owner', value: dependency.owner },
+			{ epochs: dependencies.getMeta?.()?.scopedCacheEpochs },
+		);
 
 		return records;
 	});

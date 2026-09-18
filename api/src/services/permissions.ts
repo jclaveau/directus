@@ -11,6 +11,7 @@ import type {
 	WithMeta,
 } from '@directus/types';
 import { clearSystemCache } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache.js';
 import { fetchPermissions } from '../permissions/lib/fetch-permissions.js';
 import { fetchPolicies } from '../permissions/lib/fetch-policies.js';
 import { withAppMinimalPermissions } from '../permissions/lib/with-app-minimal-permissions.js';
@@ -29,7 +30,7 @@ export class PermissionsService extends ItemsService {
 		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
 
 		if (this.cache && opts?.autoPurgeCache !== false) {
-			await this.cache.clear();
+			await flushResponseCache(this.cache);
 		}
 	}
 

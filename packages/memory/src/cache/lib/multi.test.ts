@@ -82,6 +82,96 @@ describe('get', () => {
 		expect(cache['redis'].get).toHaveBeenCalledWith(mockKey);
 		expect(result).toBe(mockRedisValue);
 	});
+
+	test('Keeps the redis value locally, without telling the peers', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		await cache.get(mockKey);
+
+		// The point of the tier: a second lookup of a key this process never set
+		// must not reach redis again.
+		expect(cache['local'].set).toHaveBeenCalledWith(mockKey, mockRedisValue);
+
+		// And no clear goes out — nothing changed, so a peer's copy is still good.
+		expect(cache['bus'].publish).not.toHaveBeenCalled();
+	});
+
+	test('Keeps nothing when redis has nothing either', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+		vi.mocked(cache['redis'].get).mockResolvedValue(undefined);
+
+		await cache.get(mockKey);
+
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
+
+	test('Keeps nothing when a clear of its own crossed the redis read', async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		let resolveRead!: (value: string) => void;
+
+		vi.mocked(cache['redis'].get).mockReturnValue(
+			new Promise<string>((resolve) => (resolveRead = resolve)) as never,
+		);
+
+		const pending = cache.get(mockKey);
+		await vi.waitFor(() => expect(cache['redis'].get).toHaveBeenCalled());
+
+		// A permission change flushes every tier while the value read before it is
+		// still being decompressed; refilling it would revive what the flush dropped.
+		await cache.clear();
+		resolveRead(mockRedisValue);
+
+		expect(await pending).toBe(mockRedisValue);
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
+
+	test("Keeps nothing when a peer's clear crossed the redis read", async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		let resolveRead!: (value: string) => void;
+
+		vi.mocked(cache['redis'].get).mockReturnValue(
+			new Promise<string>((resolve) => (resolveRead = resolve)) as never,
+		);
+
+		const pending = cache.get(mockKey);
+		await vi.waitFor(() => expect(cache['redis'].get).toHaveBeenCalled());
+
+		const onMessage = vi.mocked(cache['bus'].subscribe).mock.calls[0]![1] as (
+			payload: unknown,
+		) => Promise<void>;
+
+		await onMessage({ type: 'clear', origin: 'another-process', key: mockKey });
+		resolveRead(mockRedisValue);
+
+		expect(await pending).toBe(mockRedisValue);
+		expect(cache['local'].set).not.toHaveBeenCalled();
+	});
+
+	test("Ignores its own clear message, which cleared nothing here", async () => {
+		vi.mocked(cache['local'].get).mockResolvedValue(undefined);
+
+		let resolveRead!: (value: string) => void;
+
+		vi.mocked(cache['redis'].get).mockReturnValue(
+			new Promise<string>((resolve) => (resolveRead = resolve)) as never,
+		);
+
+		const pending = cache.get(mockKey);
+		await vi.waitFor(() => expect(cache['redis'].get).toHaveBeenCalled());
+
+		const onMessage = vi.mocked(cache['bus'].subscribe).mock.calls[0]![1] as (
+			payload: unknown,
+		) => Promise<void>;
+
+		await onMessage({ type: 'clear', origin: cache.processId, key: mockKey });
+		resolveRead(mockRedisValue);
+
+		await pending;
+
+		expect(cache['local'].set).toHaveBeenCalledWith(mockKey, mockRedisValue);
+	});
 });
 
 describe('set', () => {

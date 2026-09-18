@@ -20,7 +20,9 @@ router.get(
 		const service = new SchemaService({ accountability: req.accountability });
 		const currentSnapshot = await service.snapshot();
 		res.locals['payload'] = { data: currentSnapshot };
-		res.locals['scopedCacheTags'] = readMeta(currentSnapshot)?.scopedCacheTags;
+		const snapshotMeta = readMeta(currentSnapshot);
+		res.locals['scopedCacheTags'] = snapshotMeta?.scopedCacheTags;
+		res.locals['scopedCacheEpochs'] = snapshotMeta?.scopedCacheEpochs;
 
 		return next();
 	}),

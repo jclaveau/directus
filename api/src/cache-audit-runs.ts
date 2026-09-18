@@ -5,6 +5,7 @@ import {
 	ServiceUnavailableError,
 } from '@directus/errors';
 import { parseJSON } from '@directus/utils';
+import type { Knex } from 'knex';
 import {
 	auditCache,
 	CACHE_AUDIT_VERDICTS,
@@ -98,6 +99,10 @@ const RUN_LOCK_RENEW_MS = 30_000;
 // with the row open. Twice the budget, since a run overruns it by at most the
 // page it was on, plus an hour for a page slower than any budget expects.
 const ORPHAN_GRACE_MS = 3_600_000;
+const DIED_ERROR = 'The run did not finish: its process died';
+// A row opened right after the claim was read is a run starting, not one
+// that died: leave a row younger than this to the next listing.
+const UNCLAIMED_MARGIN_MS = 5000;
 
 function retentionMs(): number {
 	return getMilliseconds(useEnv()['CACHE_AUDIT_RETENTION'], DEFAULT_RETENTION_MS);
@@ -266,6 +271,7 @@ export async function finishCacheAuditRun(
 			.where({ id })
 			.update({
 				finished_at: new Date(),
+				error: null,
 				scanned: report.scanned,
 				...report.counts,
 				evicted: report.evicted,
@@ -330,6 +336,7 @@ export async function listCacheAuditRuns(
 	const since = new Date(Date.now() - clampWindow(windowMs));
 
 	const db = getDatabase();
+	await closeUnclaimedCacheAuditRuns(db);
 
 	const rows: Record<string, unknown>[] = await db('directus_cache_audits')
 		.where('started_at', '>', since)
@@ -337,6 +344,33 @@ export async function listCacheAuditRuns(
 		.limit(LIST_LIMIT);
 
 	return rows.map(runOf);
+}
+
+/**
+ * The claim is the truth on what is in flight: on Redis it is one for the
+ * deployment, and a run whose process died drops it within the TTL. A row
+ * still open with no claim behind it is that run's residue, and the page
+ * would wait on it for the reap's hour-long grace — the reap that only a
+ * later run brings. A memory claim is one per process, so there it says
+ * nothing about a run on another worker, and the grace is all there is.
+ */
+async function closeUnclaimedCacheAuditRuns(db: Knex): Promise<void> {
+	if (useEnv()['CACHE_STORE'] !== 'redis') {
+		return;
+	}
+
+	const claimed = await getCache().lockCache.get(RUN_LOCK);
+
+	if (claimed !== undefined) {
+		return;
+	}
+
+	const now = Date.now();
+
+	await db('directus_cache_audits')
+		.whereNull('finished_at')
+		.where('started_at', '<', new Date(now - UNCLAIMED_MARGIN_MS))
+		.update({ finished_at: new Date(now), error: DIED_ERROR });
 }
 
 /** One run as the listing carries it, or null where no run has that id. */
@@ -398,10 +432,7 @@ export async function reapCacheAuditRuns(): Promise<number> {
 	await db('directus_cache_audits')
 		.whereNull('finished_at')
 		.where('started_at', '<', new Date(now - 2 * maxDurationMs() - ORPHAN_GRACE_MS))
-		.update({
-			finished_at: new Date(now),
-			error: 'The run did not finish: its process died',
-		});
+		.update({ finished_at: new Date(now), error: DIED_ERROR });
 
 	return db('directus_cache_audits')
 		.where('started_at', '<', new Date(now - retentionMs()))

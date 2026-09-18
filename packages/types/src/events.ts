@@ -9,16 +9,33 @@ export type EventContext = {
 	schema: SchemaOverview | null;
 	accountability: Accountability | null;
 	/**
-	 * Scoped-cache tag channel, carrying ONLY the method for this filter's event:
-	 * `scopeTo` on `items.read`, `purgeBy` on `items.create`/`update`/`delete`.
+	 * Scoped-cache tag channel, carrying ONLY the methods for this filter's event:
+	 * `scopeTo` and `dependOn` on `items.read`, `purgeBy` on
+	 * `items.create`/`update`/`delete`. Absent on every other event. A hook does not
+	 * see this union: `register.filter` hands a read handler `ReadEventContext` and a
+	 * mutation handler `MutationEventContext`, resolved from the event name.
 	 */
 	scopedCache?: ScopedCacheScopeHandle | ScopedCachePurgeHandle;
 };
 
-export type FilterHandler<TIn = unknown, TOut = TIn> = (
+/** What an `ItemsService` read filter receives: the read handle is always there. */
+export type ReadEventContext = Omit<EventContext, 'scopedCache'> & {
+	scopedCache: ScopedCacheScopeHandle;
+};
+
+/** What an `ItemsService` create/update/delete filter receives. */
+export type MutationEventContext = Omit<EventContext, 'scopedCache'> & {
+	scopedCache: ScopedCachePurgeHandle;
+};
+
+export type FilterHandler<
+	TIn = unknown,
+	TOut = TIn,
+	TContext extends EventContext = EventContext,
+> = (
 	payload: TIn,
 	meta: Record<string, any>,
-	context: EventContext,
+	context: TContext,
 ) => TIn | TOut | Promise<TIn | TOut>;
 export type ActionHandler = (meta: Record<string, any>, context: EventContext) => void;
 export type InitHandler = (meta: Record<string, any>) => void;

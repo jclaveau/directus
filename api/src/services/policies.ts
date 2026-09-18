@@ -3,6 +3,7 @@ import type { AbstractServiceOptions, MutationOptions, Policy, PrimaryKey } from
 import { UserIntegrityCheckFlag } from '@directus/types';
 import { getMatch } from 'ip-matching';
 import { clearSystemCache } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache.js';
 import { clearCache as clearPermissionsCache } from '../permissions/cache.js';
 import { ItemsService } from './items.js';
 
@@ -15,7 +16,7 @@ export class PoliciesService extends ItemsService<Policy> {
 		await clearSystemCache({ autoPurgeCache: opts?.autoPurgeCache });
 
 		if (this.cache && opts?.autoPurgeCache !== false) {
-			await this.cache.clear();
+			await flushResponseCache(this.cache);
 		}
 	}
 

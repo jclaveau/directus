@@ -190,6 +190,17 @@ describe(oneLine`
 
 			await Promise.all([readSummary('acme'), readSummary('globex')]);
 
+			// Both MISSes below are the whole assertion, so both entries have to be
+			// warm first — unwarmed they MISS for the ordinary reason and the batch
+			// path's deferred purge goes untested.
+			const [warmAcme, warmGlobex] = await Promise.all([
+				readSummary('acme'),
+				readSummary('globex'),
+			]);
+
+			expect(warmAcme.headers[cacheStatusHeader]).toBe('HIT');
+			expect(warmGlobex.headers[cacheStatusHeader]).toBe('HIT');
+
 			// Array body → updateBatch: each row forks an autoPurgeCache-off child, so a
 			// purgeBy lands only via a shared collector threaded through the batch.
 			await request(url)

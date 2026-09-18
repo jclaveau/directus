@@ -1,6 +1,7 @@
 import config, { getUrl, paths } from '@common/config';
 import {
 	CreateCollections,
+	CreateFieldM2O,
 	CreateItem,
 	CreatePermission,
 	CreateUser,
@@ -35,6 +36,14 @@ const DRIFT = 'test_cache_audit_drift';
 const DRIFT_DEP = 'test_cache_audit_drift_dep';
 const RACE = 'test_cache_audit_race';
 const RACE_FLAG = 'test_cache_audit_race_flag';
+const HOLD = 'test_cache_audit_hold';
+const HOLD_FLAG = 'test_cache_audit_hold_flag';
+const WIDE = 'test_cache_audit_wide';
+const WIDE_PARENT = 'test_cache_audit_wide_parent';
+
+// Nested one per row and pinned one tag each, they run the replay's tags
+// header past node's 16KB parser default (jclaveau/directus#510).
+const WIDE_ROWS = 600;
 
 const cacheStatusHeader = 'x-cache-status';
 
@@ -56,12 +65,14 @@ describe('The cache audit replays live entries against the database', () => {
 		env[vendor]['CACHE_NAMESPACE'] = `directus-cache-audit-${vendor}`;
 		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 		env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
+		env[vendor]['CACHE_SCOPED_MAX_PINS_PER_COLLECTION'] = String(WIDE_ROWS);
 
 		let instance: ChildProcess;
 		let db: Knex;
 		let url: string;
 		let appUserId: string;
 		let raceFlagId: string;
+		let holdFlagId: string;
 		const appUserToken = `cache-audit-${vendor}`;
 
 		const auth = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -102,7 +113,33 @@ describe('The cache audit replays live entries against the database', () => {
 						meta: {},
 						fields: [{ field: 'armed', type: 'string', meta: {} }],
 					},
+					{
+						collection: HOLD,
+						meta: {},
+						fields: [{ field: 'label', type: 'string', meta: {} }],
+					},
+					{
+						collection: HOLD_FLAG,
+						meta: {},
+						fields: [{ field: 'armed', type: 'string', meta: {} }],
+					},
+					{
+						collection: WIDE_PARENT,
+						meta: {},
+						fields: [{ field: 'label', type: 'string', meta: {} }],
+					},
+					{
+						collection: WIDE,
+						meta: {},
+						fields: [{ field: 'label', type: 'string', meta: {} }],
+					},
 				],
+			});
+
+			await CreateFieldM2O(vendor, {
+				collection: WIDE,
+				field: 'parent',
+				otherCollection: WIDE_PARENT,
 			});
 
 			await CreateItem(vendor, {
@@ -124,6 +161,15 @@ describe('The cache audit replays live entries against the database', () => {
 			});
 
 			raceFlagId = flag.id;
+
+			await CreateItem(vendor, { collection: HOLD, item: { label: 'held' } });
+
+			const holdFlag = await CreateItem(vendor, {
+				collection: HOLD_FLAG,
+				item: { armed: 'no' },
+			});
+
+			holdFlagId = holdFlag.id;
 
 			// A non-admin reader of ROWS, so an entry can be filled for a user the
 			// audit then finds gone.
@@ -152,6 +198,18 @@ describe('The cache audit replays live entries against the database', () => {
 			db = knex(config.knexConfig[vendor]!);
 			url = getUrl(vendor, env);
 
+			await db.batchInsert(
+				WIDE_PARENT,
+				Array.from({ length: WIDE_ROWS }, (_, index) => ({ label: `p${index}` })),
+			);
+
+			const parentIds = await db(WIDE_PARENT).pluck('id');
+
+			await db.batchInsert(
+				WIDE,
+				parentIds.map((parent) => ({ label: 'wide', parent })),
+			);
+
 			await awaitDirectusConnection(port);
 		}, 60_000);
 
@@ -159,7 +217,18 @@ describe('The cache audit replays live entries against the database', () => {
 			instance.kill();
 			await db.destroy();
 
-			for (const collection of [ROWS, CLOCK, DRIFT, DRIFT_DEP, RACE, RACE_FLAG]) {
+			for (const collection of [
+				ROWS,
+				CLOCK,
+				DRIFT,
+				DRIFT_DEP,
+				RACE,
+				RACE_FLAG,
+				HOLD,
+				HOLD_FLAG,
+				WIDE,
+				WIDE_PARENT,
+			]) {
 				await DeleteCollection(vendor, { collection });
 			}
 		});
@@ -473,6 +542,136 @@ describe('The cache audit replays live entries against the database', () => {
 
 			expect(listed.body.data.filter((row: any) => row.path === `/items/${RACE}`))
 				.toEqual([]);
+		}, 60_000);
+
+		it(oneLine`
+			lists a run open while it is in flight, refuses a second one for as long
+			as it runs, and lists it finished once it is
+		`, async () => {
+			await clearCache();
+			await warm(() => readCollection(HOLD));
+
+			// Into the queue before the hook is armed: a run that finds nothing to
+			// replay is over before anything could see it open.
+			await auditSettled({ collection: HOLD });
+
+			await request(url)
+				.patch(`/items/${HOLD_FLAG}/${holdFlagId}`)
+				.send({ armed: 'yes' })
+				.set('Authorization', auth);
+
+			const askedAt = Date.now();
+
+			// On the wire now, answered once the held replay lets it go.
+			const held = audit({ collection: HOLD }).then((response) => response);
+
+			let open: any;
+
+			for (let attempt = 0; attempt < SETTLE_ATTEMPTS && !open; attempt++) {
+				const listed = await request(url)
+					.get('/utils/cache/audits')
+					.set('Authorization', auth);
+
+				open = listed.body.data.find((run: any) => {
+					return run.finishedAt === null && run.startedAt >= askedAt;
+				});
+
+				if (!open) {
+					await new Promise((resolve) => setTimeout(resolve, 100));
+				}
+			}
+
+			expect(open).toMatchObject({ trigger: 'rest', scanned: 0 });
+
+			const refused = await audit({ collection: HOLD });
+
+			expect(refused.statusCode).toBe(503);
+			expect(refused.body.errors[0].extensions.code).toBe('SERVICE_UNAVAILABLE');
+
+			expect(refused.body.errors[0].message)
+				.toContain('a cache audit is already running, since');
+
+			const report = await recorded(await held);
+
+			expect(report.id).toBe(open.id);
+			expect(report.scanned).toBe(1);
+			expect(report.counts.fresh).toBe(1);
+			expect(report.finishedAt).not.toBeNull();
+
+			// Let go with the run: the next ask is a run of its own.
+			const next = await audit({ collection: HOLD });
+			expect(next.statusCode).toBe(200);
+		}, 60_000);
+
+		it(oneLine`
+			lists a run its process died on as finished, with the reason, rather
+			than in flight until the reap: no claim is held behind it
+		`, async () => {
+			// What a node killed mid-run leaves: the row it opened, never closed.
+			const [died] = await db('directus_cache_audits')
+				.insert({
+					started_at: new Date(Date.now() - 10_000),
+					trigger: 'cron',
+					options: JSON.stringify({
+						limit: null,
+						user: null,
+						collection: null,
+						purge: false,
+					}),
+				})
+				.returning('id');
+
+			const diedId = typeof died === 'object'
+				? died.id
+				: died;
+
+			const listed = await request(url).get('/utils/cache/audits')
+				.set('Authorization', auth);
+
+			expect(listed.statusCode).toBe(200);
+
+			expect(listed.body.data.find((run: any) => run.id === diedId))
+				.toMatchObject({
+					finishedAt: expect.any(Number),
+					error: 'The run did not finish: its process died',
+				});
+		});
+
+		it(oneLine`
+			replays an entry whose tags outgrow node's 16KB header cap, one pin per
+			nested parent, and finds it fresh rather than unreplayable
+		`, async () => {
+			await clearCache();
+
+			await warm(() => {
+				return request(url)
+					.get(`/items/${WIDE}?fields=*,parent.*&limit=-1`)
+					.set('Authorization', auth);
+			});
+
+			const report = await auditSettled({ collection: WIDE });
+
+			expect(report.scanned).toBe(1);
+			expect(report.counts.unreplayable).toBe(0);
+			expect(report.counts.fresh).toBe(1);
+
+			// The witness holds only past the cap: the tags the entry was filled
+			// under are what the replay hands back, in one header.
+			const pinned: string[] = await db(
+				'directus_cache_stats_scoped_entry_tags as t',
+			)
+				.join(
+					'directus_cache_stats_descriptors as d',
+					'd.cache_key',
+					't.cache_key',
+				)
+				.where({ 'd.collection': WIDE, 'd.path': `/items/${WIDE}` })
+				.pluck('t.scoped_cache_tag');
+
+			expect(pinned.filter((tag) => tag.startsWith(`${WIDE_PARENT}:id=`)))
+				.toHaveLength(WIDE_ROWS);
+
+			expect(Buffer.byteLength(pinned.join(','))).toBeGreaterThan(16 * 1024);
 		}, 60_000);
 
 		it(oneLine`

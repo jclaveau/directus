@@ -18,6 +18,7 @@ import { addFieldFlag } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache.js';
 import { ALIAS_TYPES } from '../constants.js';
 import type { Helpers } from '../database/helpers/index.js';
 import { getHelpers } from '../database/helpers/index.js';
@@ -220,7 +221,7 @@ export class CollectionsService {
 			return payload.collection;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -270,7 +271,7 @@ export class CollectionsService {
 			return collections;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -471,7 +472,7 @@ export class CollectionsService {
 			return collectionKey;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -532,7 +533,7 @@ export class CollectionsService {
 			});
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -584,7 +585,7 @@ export class CollectionsService {
 			return collectionKeys;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -772,7 +773,7 @@ export class CollectionsService {
 			return collectionKey;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -822,7 +823,7 @@ export class CollectionsService {
 			return collectionKeys;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {

@@ -47,6 +47,9 @@ describe(oneLine`
 		env[vendor]['CACHE_PURGED_TAGS_HEADER'] = purgedTagsHeader;
 		env[vendor]['CACHE_TAGS_HEADER'] = tagsHeader;
 		env[vendor]['CACHE_STATUS_HEADER'] = statusHeader;
+		// The admin cache tree resolves an entry through its descriptor, which is
+		// written by the stats pipeline rather than by the fill.
+		env[vendor]['CACHE_STATS_ENABLED'] = 'true';
 
 		let instance: ChildProcess;
 
@@ -135,6 +138,65 @@ describe(oneLine`
 			expect(carriesControlByte(header)).toBe(false);
 			expect(header.split(', ')).toContain(`${COLLECTION}:owner=%00null`);
 		});
+
+		// The other place the raw token has to survive: the blast radius the admin
+		// tree shows is an SCARD of the tag's own Redis key, rebuilt from the display
+		// label. A label spelled `null` where the key holds `\x00null` scards a key
+		// that does not exist and reports 0 — a slice indexing entries would read as
+		// reaching none of them.
+		it(oneLine`
+			counts the members of a null scope slice, whose Redis key the display label
+			has to be turned back into
+		`, async () => {
+			const url = getUrl(vendor, env);
+
+			await request(url)
+				.post('/utils/cache/clear')
+				.set('Authorization', auth);
+
+			const miss = await request(url)
+				.get(`/items/${COLLECTION}`)
+				.query({ filter: JSON.stringify({ owner: { _eq: null } }) })
+				.set('Authorization', auth);
+
+			expect(miss.headers[statusHeader]).toBe('MISS');
+
+			// The descriptor drains on the stats cron, so the entry is listable a few
+			// ticks after the fill that created it.
+			let filled: any;
+
+			for (let attempt = 0; attempt < 45 && filled === undefined; attempt++) {
+				const listed = await request(url).get('/utils/cache')
+					.set('Authorization', auth);
+
+				expect(listed.statusCode).toBe(200);
+
+				filled = listed.body.data.find((row: any) => {
+					return row.path === `/items/${COLLECTION}` && row.redisKey;
+				});
+
+				if (filled === undefined) {
+					await new Promise((resolve) => setTimeout(resolve, 1000));
+				}
+			}
+
+			expect(filled).toBeDefined();
+
+			const entry = await request(url).get('/utils/cache/entry')
+				.query({ key: filled.redisKey })
+				.set('Authorization', auth);
+
+			expect(entry.statusCode).toBe(200);
+			expect(entry.body.data.exists).toBe(true);
+
+			const nullTag = `${COLLECTION}:owner=\u0000null`;
+
+			expect(entry.body.data.tags).toContain(nullTag);
+
+			// Zero is exactly what a mis-spelled key returns, so this is the whole
+			// assertion — the entry and its sidecars are all filed under the slice.
+			expect(entry.body.data.tagCounts[nullTag]).toBeGreaterThan(0);
+		}, 60_000);
 
 		// The control: a present scope value was never affected, so a regression that
 		// broke escaping wholesale would still show up here.

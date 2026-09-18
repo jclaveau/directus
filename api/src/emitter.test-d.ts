@@ -1,4 +1,9 @@
-import type { FilterHandler, RegisterFunctions } from '@directus/types';
+import type {
+	FilterHandler,
+	RegisterFunctions,
+	ScopedCachePurgeHandle,
+	ScopedCacheScopeHandle,
+} from '@directus/types';
 import { expectTypeOf, test } from 'vitest';
 import emitter from './emitter.js';
 
@@ -59,4 +64,41 @@ test('offFilter accepts the same typed handler shape as onFilter', () => {
 
 	emitter.onFilter<Item, number>('items.create', handler);
 	emitter.offFilter<Item, number>('items.create', handler);
+});
+
+test('register.filter hands a read handler the read handle, unnarrowed', () => {
+	const register = {} as RegisterFunctions;
+	const collection = 'article';
+
+	register.filter<Item[]>(`${collection}.items.read`, async (rows, _, context) => {
+		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCacheScopeHandle>();
+		return context.scopedCache.dependOn(Promise.resolve(rows));
+	});
+});
+
+test('register.filter hands a mutation handler the purge handle', () => {
+	const register = {} as RegisterFunctions;
+
+	register.filter<Item>('items.update', (payload, _meta, context) => {
+		expectTypeOf(context.scopedCache).toEqualTypeOf<ScopedCachePurgeHandle>();
+		context.scopedCache.purgeBy({ collection: 'article' });
+		return payload;
+	});
+});
+
+test('register.filter leaves the handle optional on a bare or runtime event', () => {
+	const register = {} as RegisterFunctions;
+	const event: string = 'auth.login';
+
+	register.filter('auth.create', (_payload, _meta, context) => {
+		expectTypeOf(context.scopedCache).toEqualTypeOf<
+			ScopedCacheScopeHandle | ScopedCachePurgeHandle | undefined
+		>();
+	});
+
+	register.filter(event, (_payload, _meta, context) => {
+		expectTypeOf(context.scopedCache).toEqualTypeOf<
+			ScopedCacheScopeHandle | ScopedCachePurgeHandle | undefined
+		>();
+	});
 });

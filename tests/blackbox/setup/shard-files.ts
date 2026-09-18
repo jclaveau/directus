@@ -28,9 +28,16 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/items/cache-m2o-parent-key-pin.test.ts': 13_000,
 	'/tests/db/routes/items/cache-m2o-parent-pin-staleness.test.ts': 13_000,
 	'/tests/db/routes/items/cache-purge-recovery.test.ts': 20_000,
+	// One spawned instance; two bursts wait out the anomaly drain.
+	'/tests/db/routes/items/cache-read-inflight-purge.test.ts': 30_000,
 	// One spawned instance; every case waits out the one-second descriptor
 	// drain before it audits. Estimated; to be measured.
 	'/tests/db/routes/items/cache-audit.test.ts': 75_000,
+	// One spawned instance; the run under test blocks the loop 2.4s and the
+	// settle loop waits out the descriptor drain.
+	'/tests/db/routes/items/cache-audit-under-pressure.test.ts': 20_000,
+	// One spawned instance, held overloaded from boot.
+	'/tests/db/routes/server/pressure-replay-exempt.test.ts': 12_000,
 	// Two spawned instances and five CLI boots of the whole app.
 	'/tests/db/app/cache-audit-cli.test.ts': 115_000,
 	// One spawned instance; one case waits out the descriptor drain.

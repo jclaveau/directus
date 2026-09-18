@@ -18,6 +18,7 @@ import type {
 } from '@directus/types';
 import type { Knex } from 'knex';
 import { clearCacheTargets, getCache, getCacheValue } from '../cache.js';
+import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
 import type { CacheAuditOptions } from '../cache-audit.js';
 import {
 	type CacheAuditRun,
@@ -100,7 +101,7 @@ import {
 	cacheAuditScheduleState,
 	refreshCacheAuditScheduleOverride,
 } from '../schedules/cache-audit.js';
-import { countScopedCacheTagMembers } from '../scoped-cache.js';
+import { countScopedCacheTagMembers, flushResponseCache } from '../scoped-cache.js';
 import { CacheAuditFindingsPageSchema } from '../utils/cache-audit-options.js';
 import { compress } from '../utils/compress.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
@@ -350,7 +351,7 @@ export class UtilsService {
 		const { cache } = getCache();
 
 		if (shouldClearCache(cache, undefined, collection)) {
-			await cache.clear();
+			await flushResponseCache(cache);
 		}
 
 		emitter.emitAction(
@@ -490,8 +491,11 @@ export class UtilsService {
 		}
 
 		const value = await getCacheValue(cache, redisKey);
-		const expiry = (await getCacheValue(cache, `${redisKey}__expires_at`)) ?? null;
-		const tagged = await getCacheValue(cache, `${redisKey}__tags`);
+
+		const expiry =
+			(await getCacheValue(cache, cacheExpiresAtKey(redisKey))) ?? null;
+
+		const tagged = await getCacheValue(cache, cacheTagsKey(redisKey));
 
 		// `__tags` stores the comma-joined scoped-cache tags (only when the
 		// dev-only CACHE_TAGS_HEADER is on, which is what writes this sidecar).

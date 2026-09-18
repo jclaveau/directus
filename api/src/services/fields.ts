@@ -24,6 +24,7 @@ import { addFieldFlag, getRelations, toArray } from '@directus/utils';
 import type Keyv from 'keyv';
 import type { Knex } from 'knex';
 import { clearSystemCache, getCache, getCacheValue, setCacheValue } from '../cache.js';
+import { flushResponseCache } from '../scoped-cache.js';
 import { ALIAS_TYPES, ALLOWED_DB_DEFAULT_FUNCTIONS } from '../constants.js';
 import { translateDatabaseError } from '../database/errors/translate.js';
 import type { Helpers } from '../database/helpers/index.js';
@@ -474,7 +475,7 @@ export class FieldsService {
 			}
 
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -627,7 +628,7 @@ export class FieldsService {
 			}
 
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -664,7 +665,7 @@ export class FieldsService {
 			return fieldNames;
 		} finally {
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {
@@ -855,7 +856,7 @@ export class FieldsService {
 			}
 
 			if (shouldClearCache(this.cache, opts)) {
-				await this.cache.clear();
+				await flushResponseCache(this.cache);
 			}
 
 			if (opts?.autoPurgeSystemCache !== false) {

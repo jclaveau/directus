@@ -4,8 +4,10 @@ import { parse as parseBytesConfiguration } from 'bytes';
 import type { RequestHandler } from 'express';
 import { getCache, setCacheValue } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
+import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
+	evictCacheEntry,
 	queueCacheDescriptor,
 	queueMissLatency,
 	writeCacheTombstone,
@@ -13,11 +15,18 @@ import {
 import getDatabase from '../database/index.js';
 import { useLogger } from '../logger/index.js';
 import {
+	mergedScopedCacheEpochs,
+	scopedCacheCollectionsWithoutGuard,
 	scopedCachePurgeEnabled,
-	serializeScopedCacheTags,
+	scopedCacheSweptDuringFill,
 	scopedCacheTagLabel,
+	serializeScopedCacheTags,
 	tagScopedCacheKeys,
+	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
+import {
+	recordPendingScopedCachePurge,
+} from '../scoped-cache-pending-purges.js';
 import { ExportService } from '../services/import-export.js';
 import { Meta } from '../types/meta.js';
 import asyncHandler from '../utils/async-handler.js';
@@ -27,6 +36,7 @@ import {
 } from '../utils/cache-audit-replay.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
+import { readMeta } from '../utils/read-meta.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import {
 	getGraphqlQueryAndVariables,
@@ -44,6 +54,16 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 	const { cache } = getCache();
 
+	// A read service rides its tags, its unautopurgeable ones and its epoch capture
+	// on what it returns (`withMeta`). The items controller copies them into
+	// `res.locals`; a system controller hands the result over as the payload and
+	// nothing else, so they are read off the payload here. Only a payload that never
+	// went through a read (a hand-rolled /settings, GraphQL) carries no meta.
+	const payloadMeta = readMeta(res.locals['payload']?.data);
+
+	const readTags: ScopedCacheTag[] | undefined =
+		res.locals['scopedCacheTags'] ?? payloadMeta?.scopedCacheTags;
+
 	// Dev-only: CACHE_TAGS_HEADER / CACHE_PURGED_TAGS_HEADER name the headers (like
 	// CACHE_STATUS_HEADER) exposing the scope tags a request pinned / purged, so a
 	// smoke test can assert per-user scoping with no redis client. Never set in prod
@@ -51,12 +71,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// shows an absent header, not a masked one. A cache HIT skips this middleware —
 	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
 	if (env['CACHE_TAGS_HEADER']) {
-		const pins = res.locals['scopedCacheTags'];
-
-		if (Array.isArray(pins) && pins.length) {
+		if (Array.isArray(readTags) && readTags.length) {
 			res.setHeader(
 				`${env['CACHE_TAGS_HEADER']}`,
-				printableScopedCacheTags(serializeScopedCacheTags(pins)),
+				printableScopedCacheTags(serializeScopedCacheTags(readTags)),
 			);
 		}
 	}
@@ -87,14 +105,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		}
 	}
 
-	// A custom read controller (e.g. /settings) may set `payload` with no tags
-	// (ItemsService reads set them; a hand-written one often does not). Fall back to
+	// A response with no read tags at all (a hand-rolled /settings) falls back to
 	// the bare collection tag so a mutation there still purges it (settings reask).
 	const collectionFallbackTags: ScopedCacheTag[] = req.collection
 		? [{ collection: req.collection }]
 		: [];
-
-	const controllerTags = res.locals['scopedCacheTags'];
 
 	// `total_count` drops the query filter and counts the whole collection
 	// (`MetaService.totalCount`), so a response carrying it depends on every row —
@@ -104,9 +119,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	const countsWholeCollection =
 		req.sanitizedQuery.meta?.includes(Meta.TOTAL_COUNT) === true;
 
-	const scopedCacheTags = controllerTags?.length && countsWholeCollection === false
-		? controllerTags
-		: [...(controllerTags ?? []), ...collectionFallbackTags];
+	const scopedCacheTags = readTags?.length && countsWholeCollection === false
+		? readTags
+		: [...(readTags ?? []), ...collectionFallbackTags];
 
 	// The tags a fill of this request would be indexed under, in the form the
 	// entry-tags table records — what the audit diffs against the tags the entry
@@ -130,9 +145,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// A read hook scoped this response to unautopurgeable tags (value slices on fields
 	// the target collection isn't scoped on) without `manuallyPurged`: no write can
 	// auto-purge them, so caching would serve stale. Skip caching + surface them.
-	const unautopurgeableScopeTags = res.locals['scopedCacheUnautopurgeableTags'] as
-		| ScopedCacheTag[]
-		| undefined;
+	const unautopurgeableScopeTags: ScopedCacheTag[] | undefined =
+		res.locals['scopedCacheUnautopurgeableTags']
+		?? payloadMeta?.scopedCacheUnautopurgeableTags;
 
 	const unautopurgeableScope =
 		Array.isArray(unautopurgeableScopeTags) &&
@@ -157,6 +172,23 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		!req.sanitizedQuery.export &&
 		res.locals['cache'] !== false;
 
+	// Taken before the read's query; what it guards against, and why it is compared
+	// after the fill rather than before, is in `fill-guard.ts`. A read service hands
+	// its capture over through the controller or on the payload; a system route's
+	// also comes from `useCollection`, taken for the collection its fallback tag
+	// names. Where both exist the earlier reading wins per collection.
+	const capturedEpochs = mergedScopedCacheEpochs(
+		res.locals['scopedCacheEpochsAtRequest'] as ScopedCacheEpochs | undefined,
+		res.locals['scopedCacheEpochs'] ?? payloadMeta?.scopedCacheEpochs,
+	);
+
+	const unguardedScopeCollections = scopedCacheCollectionsWithoutGuard(
+		capturedEpochs,
+		scopedCacheTags,
+	);
+
+	const unguardedScope = unguardedScopeCollections.length > 0;
+
 	let filled = false;
 
 	if (
@@ -165,6 +197,7 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		exceedsMaxSize === false &&
 		orphansInScopedMode === false &&
 		unautopurgeableScope === false &&
+		unguardedScope === false &&
 		dynamicQueryFilter === false &&
 		(await permissionsCachable(
 			req.collection,
@@ -177,47 +210,108 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	) {
 		filled = true;
 
-		const { redisKey, cacheKey } = await getCacheKey(req);
+		// Built by the cache middleware for the lookup that missed. It returns early
+		// without one for a request it never looks up (a skip rule, the cache off),
+		// which is the only path that still pays for its own.
+		const { redisKey, cacheKey } = res.locals['httpRequestCacheKey']
+			?? await getCacheKey(req);
 
 		try {
 			const now = Date.now();
 			const ttlMs = getMilliseconds(resolvedCacheTtl());
 			const expiresAt = now + getMilliseconds(resolvedCacheTtl(), 0);
 
-			await setCacheValue(cache, redisKey, res.locals['payload'], ttlMs);
-
-			// Enriched so a HIT reads age/TTL off this sibling — no extra read. Pass
-			// `ttlMs` explicitly so it tracks the live override, not the Keyv default
-			// TTL frozen at the response cache's construction.
-			await setCacheValue(cache, `${redisKey}__expires_at`, {
-				exp: expiresAt,
-				createdAt: now,
-				ttlMs: ttlMs ?? null,
-			}, ttlMs);
-
-			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
-			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
-
+			// Index BEFORE the value exists. The two writes are not atomic, and the
+			// failure modes are not symmetric: a tag naming a key that was never
+			// written costs one miss on the purge's `del`, while a value written
+			// under no tag is unreachable to every purge and serves stale for its
+			// whole TTL. So tag first and let a throw here skip the value entirely.
 			await tagScopedCacheKeys(
 				redisKey,
 				scopedCacheTags,
 				env['CACHE_TAGS_HEADER']
-					? [`${redisKey}__tags`]
+					? [cacheTagsKey(redisKey)]
 					: [],
 			);
+
+			// Handed over together rather than awaited in turn: node-redis corks its
+			// socket and drains the whole queue per tick, so the pair costs one round
+			// trip. Neither reads the other's answer, and a sidecar left behind by a
+			// failed payload write is an orphan its own TTL collects.
+			await Promise.all([
+				setCacheValue(cache, redisKey, res.locals['payload'], ttlMs),
+
+				// Enriched so a HIT reads age/TTL off this sibling — no extra read.
+				// Pass `ttlMs` explicitly so it tracks the live override, not the Keyv
+				// default TTL frozen at the response cache's construction. Stored raw:
+				// three numbers do not repay a snappy pass on every fill and a second
+				// one on every hit, and `decompress` sniffs the Buffer rather than the
+				// setting, so a reader takes it either way.
+				cache.set(cacheExpiresAtKey(redisKey), {
+					exp: expiresAt,
+					createdAt: now,
+					ttlMs: ttlMs ?? null,
+				}, ttlMs),
+			]);
+
+			if (capturedEpochs) {
+				const sweptDuringFill =
+					await scopedCacheSweptDuringFill(capturedEpochs);
+
+				if (sweptDuringFill !== undefined) {
+					// This is the one purge that knows precisely which key is stale, and
+					// everywhere else a purge that could not run is recorded for a retry.
+					// A store that swallowed the delete answers `undefined` rather than
+					// throwing, so without reading the eviction back the entry would serve
+					// rows a purge already superseded for its whole TTL — the failure the
+					// guard exists to prevent, one step later.
+					if (await evictCacheEntry(cache, redisKey) === false) {
+						const error = new Error(
+							`in-flight purge of ${sweptDuringFill} left ${redisKey} cached`,
+						);
+
+						// Logged like a failed mutation purge is (`purgeOrRecord`): the
+						// recorded rows are gone once drained, so this line is the only
+						// trace of what the drain will purge, and why.
+						logger.warn(
+							error,
+							`[scoped-cache] eviction failed and was recorded for retry: `
+							+ `${error}`,
+						);
+
+						await recordPendingScopedCachePurge(
+							{
+								mode: 'slices',
+								collection: req.collection ?? null,
+								scopedCacheTags: scopedCacheTags.map(scopedCacheTagLabel),
+							},
+							error,
+						);
+					}
+
+					if (cacheStatsActive()) {
+						void reportCacheAnomaly(
+							req,
+							'inflight_purge',
+							sweptDuringFill,
+						).catch(() => {});
+					}
+				}
+			}
+
+			// Tombstone outlives the entry so a later miss can measure gap-since-expiry.
+			void writeCacheTombstone(redisKey, expiresAt).catch(() => {});
 
 			// Dev-only: persist pins next to the entry so a cache HIT (which skips
 			// the read that builds them) can still emit them, via cache.ts.
 			if (env['CACHE_TAGS_HEADER']) {
-				const pins = res.locals['scopedCacheTags'];
-
-				if (Array.isArray(pins) && pins.length) {
+				if (Array.isArray(readTags) && readTags.length) {
 					// Object, not a bare string: setCacheValue's compress expects
 					// a CacheValue (object) — a raw string won't round-trip.
 					await setCacheValue(
 						cache,
-						`${redisKey}__tags`,
-						{ tags: serializeScopedCacheTags(pins) },
+						cacheTagsKey(redisKey),
+						{ tags: serializeScopedCacheTags(readTags) },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}
@@ -344,6 +438,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 
 			void reportCacheAnomaly(req, 'unautopurgeable_scope', detail).catch(() => {});
 		}
+		else if (unguardedScope) {
+			void reportCacheAnomaly(
+				req,
+				'unguarded_scope',
+				unguardedScopeCollections.join(', '),
+			).catch(() => {});
+		}
 	}
 
 	// Every cacheable-by-method request reaching here was a miss (hits are served
@@ -357,7 +458,8 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		);
 
 		const anomalous =
-			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope;
+			exceedsMaxSize || orphansInScopedMode || unautopurgeableScope
+			|| unguardedScope;
 
 		queueMissLatency(
 			missMs,

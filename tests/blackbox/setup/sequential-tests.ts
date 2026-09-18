@@ -43,6 +43,7 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			'/tests/db/routes/items/cache-raw-purge.test.ts',
 			'/tests/db/routes/items/cache-raw-purge-relational.test.ts',
 			'/tests/db/routes/items/cache-read-scope.test.ts',
+			'/tests/db/routes/items/cache-read-inflight-purge.test.ts',
 			// Spawns an instance and builds a relation on a collection it has just
 			// created. Left in the parallel middle that create-then-relate gap is
 			// wide enough to lose: under a shard that packed it beside heavier
