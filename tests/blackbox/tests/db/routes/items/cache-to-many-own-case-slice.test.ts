@@ -192,8 +192,6 @@ describe(oneLine`
 				return response.body.data.id;
 			};
 
-			const ownRange = { user_created: { _eq: '$CURRENT_USER' } };
-
 			userId = await createUser('own case slice user', userToken, {
 				[OWNER]: toUser,
 				[TU]: { owner: toUser },
@@ -202,18 +200,19 @@ describe(oneLine`
 				[SLOT]: { part: { course: { tu: { owner: toUser } } } },
 				// Off the range's own column, not its tu: a range taught by no
 				// unit stays visible.
-				[RANGE]: ownRange,
+				[RANGE]: { user_created: { _eq: '$CURRENT_USER' } },
 			});
 
 			// The same reach, the slot gated on a column of its own that no
-			// slice names.
+			// slice names. The ranges belong to the first user, so this one
+			// reads them by that user's id rather than its own.
 			await createUser('own case column user', columnCaseUserToken, {
 				[OWNER]: toUser,
 				[TU]: { owner: toUser },
 				[COURSE]: { tu: { owner: toUser } },
 				[PART]: { course: { tu: { owner: toUser } } },
 				[SLOT]: { note: { _nnull: true } },
-				[RANGE]: ownRange,
+				[RANGE]: { user_created: { _eq: userId } },
 			});
 
 			const owners = await CreateItem(vendor, {

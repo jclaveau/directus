@@ -175,19 +175,25 @@ describe(oneLine`
 		it('a leaf given to the root evicts the read', async () => {
 			await expectCached(emptyRootId);
 
-			const mids = await CreateItem(vendor, {
-				collection: MID,
-				item: [{ name: 'late mid', root: emptyRootId }],
-			});
+			// Written through the cached instance: only its own purge reaches the
+			// entry this read holds, the seed helpers write to the shared one.
+			const mid = await request(getUrl(vendor, env))
+				.post(`/items/${MID}`)
+				.send({ name: 'late mid', root: emptyRootId })
+				.set('Authorization', admin);
+
+			expect(mid.status).toBe(200);
 
 			// Creating the mid evicts through `mid:root`; read again so the
 			// leaf's own slice is the one under test.
 			await expectCached(emptyRootId);
 
-			await CreateItem(vendor, {
-				collection: LEAF,
-				item: [{ body: 'late leaf', mid: mids[0].id }],
-			});
+			const leaf = await request(getUrl(vendor, env))
+				.post(`/items/${LEAF}`)
+				.send({ body: 'late leaf', mid: mid.body.data.id })
+				.set('Authorization', admin);
+
+			expect(leaf.status).toBe(200);
 
 			const response = await readRoot(emptyRootId);
 
