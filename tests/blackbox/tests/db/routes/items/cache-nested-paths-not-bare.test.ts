@@ -65,6 +65,8 @@ describe(oneLine`
 		let tuId: number;
 		let rrId: number;
 		let mrId: number;
+		let orphanRrId: number;
+		let orphanMrId: number;
 		let courseIds: number[];
 		const userToken = `npb-${vendor}-00000000000000000000000000`;
 		const admin = `Bearer ${USER.ADMIN.TOKEN}`;
@@ -287,6 +289,36 @@ describe(oneLine`
 				item: parts.map((part: { id: number }) => ({ mr: mrId, part: part.id })),
 			});
 
+			// A second round whose only time slot points at a part of no course.
+			const orphanRounds = await CreateItem(vendor, {
+				collection: RR,
+				item: [{ name: 'orphan round', tu: tuId }],
+			});
+
+			orphanRrId = orphanRounds[0].id;
+
+			const orphanMrs = await CreateItem(vendor, {
+				collection: MR,
+				item: [{ tu: tuId, user_created: 'u1' }],
+			});
+
+			orphanMrId = orphanMrs[0].id;
+
+			await CreateItem(vendor, {
+				collection: CFG,
+				item: [{ collection: RR, item: orphanRrId, mr: orphanMrId }],
+			});
+
+			const orphanParts = await CreateItem(vendor, {
+				collection: PART,
+				item: [{ name: 'Partie orpheline', sort: 1, course: null }],
+			});
+
+			await CreateItem(vendor, {
+				collection: TS,
+				item: [{ mr: orphanMrId, part: orphanParts[0].id }],
+			});
+
 			const port = await getPort();
 			env[vendor].PORT = String(port);
 
@@ -343,6 +375,11 @@ describe(oneLine`
 		function expectSlice(tags: string, slice: string, name: string) {
 			expect(tags, `${name}: ${slice} missing — ${whatItPinned(tags)}`)
 				.toMatch(new RegExp(`(^|, )${slice}(,|$)`));
+		}
+
+		function expectBare(tags: string, collection: string, name: string) {
+			expect(tags, `${name}: ${collection} pinned — ${whatItPinned(tags)}`)
+				.toMatch(new RegExp(`(^|, )${collection}(,|$)`));
 		}
 
 		const roundReadQueries = {
@@ -403,16 +440,14 @@ describe(oneLine`
 
 			const withParts = [...cfgFields, 'mr.time_slots.part.course.parts.*'];
 
-			const sortedThroughCourse = (limit?: number) => {
-				return JSON.stringify({
-					mr: {
-						time_slots: {
-							_sort: ['part.course.sort', 'part.sort', 'id'],
-							...(limit === undefined
-								? {}
-								: { _limit: limit }),
-						},
-					},
+			const timeSlotsQuery = (node: Record<string, unknown>) => {
+				return JSON.stringify({ mr: { time_slots: node } });
+			};
+
+			const sortedThroughCourse = (node: Record<string, unknown> = {}) => {
+				return timeSlotsQuery({
+					_sort: ['part.course.sort', 'part.sort', 'id'],
+					...node,
 				});
 			};
 
@@ -420,13 +455,14 @@ describe(oneLine`
 				shape: string,
 				fields: string[],
 				deep: string | undefined,
+				round = rrId,
 			): Promise<[string, string]> => {
 				const name = `configuration ${shape} ${who}`;
 
 				const query: Record<string, string> = {
 					fields: fields.join(','),
 					'filter[collection][_eq]': RR,
-					'filter[item][_in]': String(rrId),
+					'filter[item][_in]': String(round),
 				};
 
 				if (deep !== undefined) {
@@ -435,8 +471,7 @@ describe(oneLine`
 
 				const tags = await tagsOf(name, `/items/${CFG}`, query, authorization());
 
-				expectSlice(tags, `${CFG}:item=${rrId}`, name);
-				expectSlice(tags, `${TS}:mr=${mrId}`, name);
+				expectSlice(tags, `${CFG}:item=${round}`, name);
 				expectNotBare(tags, TS, name);
 				expectNotBare(tags, TU, name);
 
@@ -445,9 +480,13 @@ describe(oneLine`
 
 			it.each([
 				['unsorted, no parts', cfgFields, undefined],
-				['sorted by id, no parts', cfgFields, JSON.stringify({
-					mr: { time_slots: { _sort: ['id'] } },
-				})],
+				['sorted by id, no parts', cfgFields, timeSlotsQuery({ _sort: ['id'] })],
+				// The cut only matters to a sort reaching through the time slots.
+				[
+					'sorted by id, cut at the limit',
+					cfgFields,
+					timeSlotsQuery({ _sort: ['id'], _limit: 3 }),
+				],
 				['sorted through the course, no parts', cfgFields, sortedThroughCourse()],
 				['unsorted, with parts', withParts, undefined],
 				['sorted through the course, with parts', withParts, sortedThroughCourse()],
@@ -455,12 +494,19 @@ describe(oneLine`
 				[
 					'sorted through the course, under a limit',
 					withParts,
-					sortedThroughCourse(4),
+					sortedThroughCourse({ _limit: 4 }),
+				],
+				[
+					'sorted through the course, with no limit',
+					withParts,
+					sortedThroughCourse({ _limit: -1 }),
 				],
 			])(oneLine`
 				pins the time slots, parts and courses a configuration read nests: %s
 			`, async (shape, fields, deep) => {
 				const [tags, name] = await configurationRead(shape, fields, deep);
+
+				expectSlice(tags, `${TS}:mr=${mrId}`, name);
 
 				// The row case on each m2o node keeps it bare for the non-admin.
 				if (who !== 'as admin') {
@@ -477,21 +523,39 @@ describe(oneLine`
 				}
 			});
 
-			it(oneLine`
-				bares the parts and courses a configuration read sorts through when
-				the time slots are cut at the limit
-			`, async () => {
+			it.each([
 				// Three time slots at a limit of three: one more may hide behind the cut.
+				['cut at the limit', { _limit: 3 }],
+				['on a later page', { _limit: 5, _page: 2 }],
+				['past an offset', { _limit: 5, _offset: 1 }],
+			])(oneLine`
+				bares the parts and courses a configuration read sorts through when
+				the time slots are %s
+			`, async (cut, node) => {
 				const [tags, name] = await configurationRead(
-					'sorted through the course, cut by a limit',
+					`sorted through the course, ${cut}`,
 					withParts,
-					sortedThroughCourse(3),
+					sortedThroughCourse(node),
 				);
 
-				for (const collection of [PART, COURSE]) {
-					expect(tags, `${name}: ${collection} pinned — ${whatItPinned(tags)}`)
-						.toMatch(new RegExp(`(^|, )${collection}(,|$)`));
-				}
+				expectSlice(tags, `${TS}:mr=${mrId}`, name);
+				expectBare(tags, PART, name);
+				expectBare(tags, COURSE, name);
+			});
+
+			it(oneLine`
+				bares the parts when a time slot's part hangs off no course, so the
+				parts o2m under the course names it in no slice
+			`, async () => {
+				const [tags, name] = await configurationRead(
+					'orphan part, with parts',
+					withParts,
+					undefined,
+					orphanRrId,
+				);
+
+				expectSlice(tags, `${TS}:mr=${orphanMrId}`, name);
+				expectBare(tags, PART, name);
 			});
 		});
 	});
