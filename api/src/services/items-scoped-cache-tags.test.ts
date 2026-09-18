@@ -981,20 +981,66 @@ describe('read tags at the merge', () => {
 			]);
 		});
 
-		test(oneLine`
-			still bares the to-many whose scope lacks the fk it hangs off: the case
-			bounds the rows the filter reaches, not the ones the parent nested
-		`, async () => {
-			cursus.collections['slot']!.scopedCacheFields = ['part'];
-			permitting();
-			feed(rows);
+		describe('a to-many whose scope lacks the fk it hangs off', () => {
+			// No parent-key pin can name the slots: only what bounds the node's own
+			// rows is left to.
+			beforeEach(() => {
+				cursus.collections['slot']!.scopedCacheFields = ['part'];
+			});
 
-			try {
-				expect(await tagsOf(asUser(), query)).toContain('slot');
-			}
-			finally {
+			afterEach(() => {
 				cursus.collections['slot']!.scopedCacheFields = ['part', 'range'];
+			});
+
+			test(oneLine`
+				slices it by its own case: the node's WHERE gates every row it
+				returns, whichever way the read reached it
+			`, async () => {
+				permitting();
+				feed(rows);
+
+				const tags = await tagsOf(asUser(), query);
+
+				expect(tags).toContain(
+					'slot:part.course.tu.discipline.enrollment.student.user=u1',
+				);
+
+				expect(tags).not.toContain('slot');
+			});
+
+			test(oneLine`
+				keeps it bare when its case names no slice
+			`, async () => {
+				permitting({ name: { _eq: 'Ada' } });
+				feed(rows);
+
+				const tags = await tagsOf(asUser(), query);
+
+				expect(tags).toContain('slot');
+				expect(tags.filter((tag) => tag.startsWith('slot:'))).toEqual([]);
+			});
+		});
+
+		test(oneLine`
+			tags no ancestor the ownership injection nested through a null hop: a
+			chain reaching no row leaves the response as it was
+		`, async () => {
+			permitting();
+
+			feed([{
+				...rows[0]!,
+				range: { ...rows[0]!.range, tu: null },
+			}]);
+
+			const tags = await tagsOf(asUser(), query);
+
+			for (const ancestor of ['tu', 'discipline', 'enrollment', 'student']) {
+				expect(tags).not.toContain(ancestor);
+				expect(tags).not.toContain(`${ancestor}:id=`);
 			}
+
+			expect(tags).toContain('tu:discipline.enrollment.student.user=u1');
+			expect(tags).toContain('range:id=50');
 		});
 	});
 

@@ -795,9 +795,10 @@ export class ItemScopedCacheService {
 		// pinned here is one a write reproduces.
 		type Slice = { field: string; segments: string[] };
 		const slicesMemo = new Map<string, Slice[]>();
+		const relatedServices = new Map<string, ItemScopedCacheService>();
 
-		const slicesOf = (collection: string): Slice[] => {
-			const memoized = slicesMemo.get(collection);
+		const relatedServiceOf = (collection: string): ItemScopedCacheService => {
+			const memoized = relatedServices.get(collection);
 
 			if (memoized) {
 				return memoized;
@@ -810,6 +811,20 @@ export class ItemScopedCacheService {
 				this.cache,
 				this.accountability,
 			);
+
+			relatedServices.set(collection, related);
+
+			return related;
+		};
+
+		const slicesOf = (collection: string): Slice[] => {
+			const memoized = slicesMemo.get(collection);
+
+			if (memoized) {
+				return memoized;
+			}
+
+			const related = relatedServiceOf(collection);
 
 			const primary = this.schema.collections[collection]?.primary;
 
@@ -967,24 +982,82 @@ export class ItemScopedCacheService {
 			return [];
 		};
 
-		const pushSliceOrBare = (collection: string): void => {
+		// The slice every node of a collection bounds its rows to, or none. A node's
+		// filter and cases gate every row that node returns whichever path reached
+		// it — unlike the root's filter, which bounds nothing it nested — so a slice
+		// all of them bind, run through the pinner the root's filter runs through
+		// over the collection's own scope, names every row the read carries of it:
+		// a row entering or leaving the slice is a write that emits it. It names the
+		// NESTED rows only; a filter, sort or group reaching the collection depends
+		// on rows beyond them, which the caller settles first.
+		const nodeBoundTagsFor = (collection: string): ScopedCacheTag[] => {
+			const bounds = plan.nodeBounds.get(collection) ?? [];
+
+			if (collection === this.collection || bounds.length === 0) {
+				return [];
+			}
+
+			const related = relatedServiceOf(collection);
+			const bound = new Map<string, ScopedCacheTag>();
+
+			for (const nodeBound of bounds) {
+				const nodeTags = nodeBound === null
+					? []
+					: pinnedScopedCacheTagsFromFilter(
+						collection,
+						related.flatFields,
+						nodeBound,
+						related.fieldTypes,
+						related.relatedPks,
+						related.paths,
+						this.schema.collections[collection]?.primary,
+					);
+
+				if (nodeTags.length === 0) {
+					return [];
+				}
+
+				for (const tag of nodeTags) {
+					bound.set(scopedCacheTagKey(tag), tag);
+				}
+			}
+
+			return bound.size <= scopedCacheMaxPinsPerCollection()
+				? [...bound.values()]
+				: [];
+		};
+
+		// A slice bounding the whole collection stands alone; the nodes' slice names
+		// the nested rows and rides beside the pins a filter named; neither leaves
+		// the bare tag.
+		const pushSliceOrBare = (
+			collection: string,
+			pins: Map<string, ScopedCacheTag>,
+		): void => {
 			const sliceTags = sliceTagsFor(collection);
 
-			tags.push(...(sliceTags.length > 0
-				? sliceTags
-				: [{ collection }]));
+			if (sliceTags.length > 0) {
+				tags.push(...sliceTags);
+				return;
+			}
+
+			const nodeTags = nodeBoundTagsFor(collection);
+
+			if (nodeTags.length === 0) {
+				tags.push({ collection });
+				return;
+			}
+
+			for (const tag of nodeTags) {
+				pins.set(scopedCacheTagKey(tag), tag);
+			}
+
+			tags.push(...pins.values());
 		};
 
 		for (const collection of taggedCollections) {
 			if (collection === this.collection && rootScopedCacheTags.length > 0) {
 				tags.push(...rootScopedCacheTags);
-				continue;
-			}
-
-			// Conflicted reverse fks: a branch's M2O/keyed pin misses the rows nested
-			// through the conflict, so only the bare tag is sound.
-			if (o2mConflicted.has(collection)) {
-				tags.push({ collection });
 				continue;
 			}
 
@@ -1041,23 +1114,46 @@ export class ItemScopedCacheService {
 				continue;
 			}
 
+			// Conflicted reverse fks: a branch's M2O/keyed pin misses the rows nested
+			// through the conflict, so only the nodes' own slice names them, or the
+			// bare tag.
+			if (o2mConflicted.has(collection)) {
+				pushSliceOrBare(collection, pins);
+				continue;
+			}
+
+			// An ancestor the ownership injection alone nested carries nothing the
+			// response returns: a chain reaching its rows pins them by key, and one
+			// reaching none — a null hop, or a parent the node's case withheld —
+			// leaves the response exactly as it was. What a filter or case elsewhere
+			// keyed it on is the whole dependency, and no tag at all is the rest.
+			const paths = pathsTo(collection);
+
+			if (
+				paths.length > 0 &&
+				paths.every((path) => plan.injectedAncestorPaths.has(path))
+			) {
+				tags.push(...pins.values());
+				continue;
+			}
+
 			// A collection the response NESTED is depended on for the rows it
-			// carried, which only a parent-key pin can name — the M2O ancestor's
-			// key, or the O2M child's parent-fk key. Where BOTH declined — an A2O
-			// hop, an O2M nested under another to-many, or no row to read a key
-			// from — the filter's keys cover one half of the dependency and say
-			// nothing about the other, so the bare tag is the honest answer.
+			// carried, which a parent-key pin names — the M2O ancestor's key, or
+			// the O2M child's parent-fk key. Where BOTH declined — an A2O hop, an
+			// O2M nested under another to-many, or no row to read a key from — the
+			// filter's keys cover one half of the dependency and say nothing about
+			// the other: a slice bounding the rows stands in, or the bare tag.
 			if (
 				nestedCollections.has(collection) &&
 				!m2oParentPins.has(collection) &&
 				!o2mChildPins.has(collection)
 			) {
-				pushSliceOrBare(collection);
+				pushSliceOrBare(collection, pins);
 				continue;
 			}
 
 			if (pins.size === 0) {
-				pushSliceOrBare(collection);
+				pushSliceOrBare(collection, pins);
 				continue;
 			}
 

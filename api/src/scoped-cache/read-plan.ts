@@ -1,5 +1,6 @@
 import { useEnv } from '@directus/env';
 import type {
+	Filter,
 	Item,
 	SchemaOverview,
 	ScopedCacheTag,
@@ -28,6 +29,7 @@ import {
 	pinnedScopedCacheTagsFromO2mChildren,
 	scopedCacheCollectionsBeyondNestedRows,
 	scopedCacheFieldNamesByAliasedPath,
+	scopedCacheNodeBoundsByCollection,
 	scopedCacheRowsAtPathEnd,
 	scopedCacheUnaliasedPath,
 	type ScopedCacheSortDeferral,
@@ -56,6 +58,11 @@ export class ScopedCacheReadPlan {
 	// What a to-many node's sort reaches beyond the nested rows only when the
 	// node's limit cut them, which `pinFromRows` settles.
 	readonly sortDeferred = new Map<CollectionKey, ScopedCacheSortDeferral[]>();
+	// The paths the ownership injection nested an ancestor at, minus the pk it
+	// reads there: what the field map files that ancestor under.
+	readonly injectedAncestorPaths: ReadonlySet<string>;
+	// What bounds each node's rows, per collection — its filter and its cases.
+	readonly nodeBounds: ReadonlyMap<CollectionKey, Array<Filter | null>>;
 
 	m2oParentPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
 	o2mChildPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
@@ -87,6 +94,19 @@ export class ScopedCacheReadPlan {
 			schema,
 			collection,
 			this.filterKeying,
+		);
+
+		this.nodeBounds = enabled
+			? scopedCacheNodeBoundsByCollection(ast)
+			: new Map();
+
+		this.injectedAncestorPaths = new Set(
+			injectedOwnershipPaths.map((path) => {
+				return path
+					.split('.')
+					.slice(0, -1)
+					.join('.');
+			}),
 		);
 
 		// An injected ancestor is nested to pin by key, and the case gating its node
