@@ -790,6 +790,32 @@ describe('read tags at the merge', () => {
 			]);
 		});
 
+		// The o2m pins are one per distinct course, the m2o pins one per distinct
+		// part, and each part has one course: the o2m pins pass the ceiling only
+		// when the m2o pins do, so no path is left pinned over the dropped slice.
+		test(oneLine`
+			leaves it bare when the parent-key pins covering it pass the ceiling
+		`, async () => {
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(1);
+
+			const service = new ItemsService('slot', {
+				knex: db,
+				schema,
+				accountability: null,
+			});
+
+			feed([slot(1, 1), slot(2, 2)]);
+
+			expect(await tagsOf(service, { fields, filter })).toEqual([
+				'course',
+				'part',
+				'slot:id=1',
+				'slot:id=2',
+			]);
+
+			vi.mocked(scopedCacheMaxPinsPerCollection).mockReturnValue(250);
+		});
+
 		test(oneLine`
 			leaves it bare when a row reached has that foreign key empty
 		`, async () => {
