@@ -158,6 +158,60 @@ export function scopedCacheNestedCollections(ast: AST): Set<CollectionKey> {
 }
 
 /**
+ * The field each nested node's path stands for, keyed by the path the field map
+ * and the rows carry — every hop under its alias (`alias[start]=days` files the
+ * node under `start`) — so a pin resolves the relation behind an alias where the
+ * schema knows only the field.
+ */
+export function scopedCacheFieldNamesByAliasedPath(ast: AST): Map<string, string> {
+	const names = new Map<string, string>();
+
+	const addNamesUnder = (children: AST['children'], prefix: string[]): void => {
+		for (const child of children) {
+			if (child.type === 'field' || child.type === 'functionField') {
+				continue;
+			}
+
+			const path = [...prefix, child.fieldKey];
+
+			if (child.type === 'a2o') {
+				names.set(path.join('.'), child.relation.field);
+
+				for (const name of child.names) {
+					addNamesUnder(child.children[name] ?? [], path);
+				}
+
+				continue;
+			}
+
+			names.set(path.join('.'), child.type === 'o2m'
+				? child.relation.meta?.one_field ?? child.fieldKey
+				: child.relation.field);
+
+			addNamesUnder(child.children, path);
+		}
+	};
+
+	addNamesUnder(ast.children, []);
+
+	return names;
+}
+
+/**
+ * A field-map path with each alias replaced by the field it stands for: what
+ * the schema's relations are looked up by, where the rows are still descended by
+ * the aliased one.
+ */
+export function scopedCacheUnaliasedPath(
+	fieldNames: ReadonlyMap<string, string>,
+	segments: QueryPath,
+): QueryPath {
+	return segments.map((segment, at) => {
+		return fieldNames.get(segments.slice(0, at + 1).join('.')) ?? segment;
+	});
+}
+
+/**
  * The purge side emits `<child>:<fk>=<value>` only when the fk is a declared
  * flat scope field; otherwise a child write emits just its pk slice, which an
  * INSERT of a new child never carries — so a pin on the parent's key would serve
@@ -172,6 +226,18 @@ function scopedCacheO2mChildPinnedByParentKey(
 		.filter((field) => !field.includes('.'))
 		.includes(reverseFk);
 }
+
+/**
+ * A to-many node's sort reaching a collection the rows must settle: the node's
+ * aliased path, to descend the rows to what it nested, and the cut it applies.
+ */
+export type ScopedCacheSortDeferral = {
+	nodePath: string[];
+	// The node's own limit; null leaves the query default to decide.
+	limit: number | null;
+	// A page or offset drops rows ahead of the cut, so the node is never whole.
+	paged: boolean;
+};
 
 /**
  * The collections a read depends on BEYOND the parent rows it nested, so keying the
@@ -206,6 +272,12 @@ export function scopedCacheCollectionsBeyondNestedRows(
 	// pin by key. Only that gating is waived — a filter, sort or group reaching one
 	// of them still depends on rows it never nested, and marks it all the same.
 	exemptFromCaseGating: ReadonlySet<CollectionKey> = new Set(),
+	// Populated with the collections a to-many node's sort alone reaches over
+	// to-one hops, which only the rows can settle: nested whole, the sort
+	// reorders rows the key pins name, and a write to any of them purges; cut by
+	// the node's limit, a row beyond the cut decides the order and is named by
+	// nothing. `ScopedCacheReadPlan.pinFromRows` marks the cut ones.
+	sortDeferredOut?: Map<CollectionKey, ScopedCacheSortDeferral[]>,
 ): Set<CollectionKey> {
 	const beyond = new Set<CollectionKey>();
 
@@ -217,6 +289,8 @@ export function scopedCacheCollectionsBeyondNestedRows(
 		// slice emits that pin, so what its own columns decide is covered and
 		// only a path reaching OUT of it depends on rows the read never nested.
 		ownColumnsCovered = false,
+		// The aliased path of a to-many node, whose sort may be deferred to the rows.
+		nodePath: string[] | null = null,
 	): void => {
 		const ownColumn = (
 			[path, entry]: [string, { collection: CollectionKey }],
@@ -285,6 +359,27 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			sorted.add(entry.collection);
 		}
 
+		// What the node's filter alone reaches, to tell a collection its sort
+		// alone reaches — reorder only — from one a filter withholds rows by.
+		const filteredFieldMap: FieldMap = { read: new Map(), other: new Map() };
+		const filteredQuery: Query = {};
+
+		if (query.filter) {
+			filteredQuery.filter = query.filter;
+		}
+
+		if (query.search) {
+			filteredQuery.search = query.search;
+		}
+
+		extractFieldsFromQuery(collection, filteredQuery, filteredFieldMap, schema);
+
+		const filtered = new Set<CollectionKey>();
+
+		for (const [, entry] of [...filteredFieldMap.read, ...filteredFieldMap.other]) {
+			filtered.add(entry.collection);
+		}
+
 		const groupedOrAggregated = new Set<CollectionKey>();
 
 		for (const [, entry] of [
@@ -294,8 +389,8 @@ export function scopedCacheCollectionsBeyondNestedRows(
 			groupedOrAggregated.add(entry.collection);
 		}
 
-		for (const [, entry] of [...queriedEntries, ...casedEntries]) {
-			const queried = entry.collection;
+		for (const entry of [...queriedEntries, ...casedEntries]) {
+			const queried = entry[1].collection;
 			const keying = keyingByCollection.get(queried);
 			const kind = keying?.kind;
 
@@ -319,6 +414,34 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				continue;
 			}
 
+			// Reached by the node's sort and nothing else, over to-one hops from
+			// the nested rows: the rows decide whether the node holds them whole.
+			const sortAlone =
+				nodePath !== null
+				&& sortDeferredOut !== undefined
+				&& sorted.has(queried)
+				&& !filtered.has(queried)
+				&& !groupedOrAggregated.has(queried)
+				&& !casedEntries.some(([, cased]) => cased.collection === queried)
+				&& resolveScopedCacheM2oJoinChainFromPath(
+					schema,
+					collection,
+					entry[0].split('.'),
+				) !== null;
+
+			if (sortAlone) {
+				const deferrals = sortDeferredOut.get(queried) ?? [];
+
+				deferrals.push({
+					nodePath,
+					limit: query.limit ?? null,
+					paged: (query.page ?? 0) > 1 || (query.offset ?? 0) > 0,
+				});
+
+				sortDeferredOut.set(queried, deferrals);
+				continue;
+			}
+
 			beyond.add(queried);
 		}
 	};
@@ -338,6 +461,7 @@ export function scopedCacheCollectionsBeyondNestedRows(
 	const addWhatNestedNodesDependOn = (
 		children: AST['children'],
 		cases: Filter[],
+		prefix: string[],
 	): void => {
 		for (const child of children) {
 			if (child.type === 'field') {
@@ -349,12 +473,14 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				continue;
 			}
 
+			const path = [...prefix, child.fieldKey];
+
 			if (child.type === 'a2o') {
 				for (const name of child.names) {
 					const namedCases = child.cases[name] ?? [];
 
 					addCollectionsQueriedBy(name, child.query[name] ?? {}, namedCases);
-					addWhatNestedNodesDependOn(child.children[name] ?? [], namedCases);
+					addWhatNestedNodesDependOn(child.children[name] ?? [], namedCases, path);
 				}
 
 				continue;
@@ -370,9 +496,10 @@ export function scopedCacheCollectionsBeyondNestedRows(
 						child.name,
 						child.relation.field,
 					),
+					path,
 				);
 
-				addWhatNestedNodesDependOn(child.children, child.cases);
+				addWhatNestedNodesDependOn(child.children, child.cases, path);
 				continue;
 			}
 
@@ -392,11 +519,11 @@ export function scopedCacheCollectionsBeyondNestedRows(
 				beyond.add(child.relation.related_collection!);
 			}
 
-			addWhatNestedNodesDependOn(child.children, child.cases);
+			addWhatNestedNodesDependOn(child.children, child.cases, path);
 		}
 	};
 
-	addWhatNestedNodesDependOn(ast.children, ast.cases);
+	addWhatNestedNodesDependOn(ast.children, ast.cases, []);
 
 	return beyond;
 }
@@ -424,6 +551,8 @@ export function pinnedScopedCacheTagsFromM2oParents(
 	rootCollection: CollectionKey,
 	fieldMap: FieldMap,
 	records: Item[],
+	// What each aliased path is the field of; the rows keep the alias.
+	fieldNames: ReadonlyMap<string, string> = new Map(),
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// A set per collection: the field map carries the same path under both its read
 	// and its other group, and walking one path twice would double every row.
@@ -458,7 +587,8 @@ export function pinnedScopedCacheTagsFromM2oParents(
 
 		for (const path of paths) {
 			const segments = path.split('.');
-			const lastField = segments[segments.length - 1];
+			const fields = scopedCacheUnaliasedPath(fieldNames, segments);
+			const lastField = fields[fields.length - 1];
 
 			// A pure-M2O path resolves directly. A path that crosses a to-many still
 			// pins its end collection when the LAST hop is M2O — an M2O parent reached
@@ -469,7 +599,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 			if (resolveScopedCacheM2oJoinChainFromPath(
 				schema,
 				rootCollection,
-				segments,
+				fields,
 			) !== null) {
 				parentRows = m2oParentRowsAtPathEnd(records, segments);
 			}
@@ -477,7 +607,7 @@ export function pinnedScopedCacheTagsFromM2oParents(
 				const parentCollection = scopedCacheCollectionAtPathEnd(
 					schema,
 					rootCollection,
-					segments.slice(0, -1),
+					fields.slice(0, -1),
 				);
 
 				if (
@@ -616,7 +746,7 @@ function scopedCacheCollectionAtPathEnd(
  * yields the parent rows the pin keys on. Null when the response cannot answer the
  * path: a segment it never carried, or a scalar where a relation was expected.
  */
-function scopedCacheRowsAtPathEnd(
+export function scopedCacheRowsAtPathEnd(
 	records: Item[],
 	segments: QueryPath,
 ): Item[] | null {
@@ -686,6 +816,8 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 	// disagreeing reverse fks, or a path that is no scoped o2m at all — the case a
 	// single ownership slice can't cover, so the caller must leave bare.
 	conflictedOut?: Set<CollectionKey>,
+	// What each aliased path is the field of; the rows keep the alias.
+	fieldNames: ReadonlyMap<string, string> = new Map(),
 ): Map<CollectionKey, ScopedCacheTag[]> {
 	// One bucket per child collection: it can be nested under several paths, and
 	// every parent key it is keyed by must be gathered before the cap so no path
@@ -696,9 +828,18 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		fieldType: Type | undefined;
 		rows: Item[];
 		conflicted: boolean;
+		// The prefixes the o2m hangs off, so an m2o path into the child can be
+		// checked against them once every path is in.
+		prefixes: Set<string>;
 	}>();
 
 	const reachedUnpinnably = new Set<CollectionKey>();
+
+	// The child reached through an m2o, kept aside: such a row lies in the
+	// parent-key slice when the o2m hangs off that very row's own fk — the path
+	// walked on by the reverse fk is where the o2m's parents were nested — and
+	// outside every slice when it does not.
+	const reachedByM2o = new Map<CollectionKey, Set<string>>();
 
 	for (const [path, entry] of [...fieldMap.read, ...fieldMap.other]) {
 		const childCollection = entry.collection;
@@ -708,7 +849,8 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		}
 
 		const segments = path.split('.');
-		const aliasField = segments[segments.length - 1];
+		const fields = scopedCacheUnaliasedPath(fieldNames, segments);
+		const aliasField = fields[fields.length - 1];
 
 		if (aliasField === undefined) {
 			continue;
@@ -724,7 +866,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			const resolved = scopedCacheCollectionAtPathEnd(
 				schema,
 				rootCollection,
-				prefix,
+				fields.slice(0, -1),
 			);
 
 			if (resolved === null) {
@@ -740,6 +882,13 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			parentCollection,
 			aliasField,
 		);
+
+		if (relationType === 'm2o' && relation?.related_collection === childCollection) {
+			const paths = reachedByM2o.get(childCollection) ?? new Set<string>();
+			paths.add(path);
+			reachedByM2o.set(childCollection, paths);
+			continue;
+		}
 
 		if (
 			relationType !== 'o2m' ||
@@ -781,6 +930,7 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			fieldType,
 			rows: [],
 			conflicted: false,
+			prefixes: new Set<string>(),
 		};
 
 		if (keying.reverseFk !== reverseFk) {
@@ -788,6 +938,8 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 			keyingByChild.set(childCollection, keying);
 			continue;
 		}
+
+		keying.prefixes.add(fields.slice(0, -1).join('.'));
 
 		for (const parentRow of parentRows) {
 			// Carry the parent key under the child's fk name so `scopedCacheTagsFromRows`
@@ -802,6 +954,25 @@ export function pinnedScopedCacheTagsFromO2mChildren(
 		}
 
 		keyingByChild.set(childCollection, keying);
+	}
+
+	for (const [collection, paths] of reachedByM2o) {
+		const keying = keyingByChild.get(collection);
+
+		// A row reached with its fk empty hangs no o2m and lies in no slice.
+		const covered = keying !== undefined && [...paths].every((path) => {
+			const segments = path.split('.');
+			const rows = scopedCacheRowsAtPathEnd(records, segments);
+			const fields = scopedCacheUnaliasedPath(fieldNames, segments);
+
+			return keying.prefixes.has(`${fields.join('.')}.${keying.reverseFk}`)
+				&& rows !== null
+				&& rows.every((row) => row[keying.reverseFk] != null);
+		});
+
+		if (!covered) {
+			reachedUnpinnably.add(collection);
+		}
 	}
 
 	const pinned = new Map<CollectionKey, ScopedCacheTag[]>();

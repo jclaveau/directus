@@ -1,3 +1,4 @@
+import { useEnv } from '@directus/env';
 import type {
 	Item,
 	SchemaOverview,
@@ -26,6 +27,10 @@ import {
 	pinnedScopedCacheTagsFromM2oParents,
 	pinnedScopedCacheTagsFromO2mChildren,
 	scopedCacheCollectionsBeyondNestedRows,
+	scopedCacheFieldNamesByAliasedPath,
+	scopedCacheRowsAtPathEnd,
+	scopedCacheUnaliasedPath,
+	type ScopedCacheSortDeferral,
 } from './read-tags.js';
 
 const NO_FIELD_MAP: FieldMap = { read: new Map(), other: new Map() };
@@ -46,6 +51,11 @@ export class ScopedCacheReadPlan {
 	readonly filterKeying: Map<CollectionKey, ScopedCacheFilterKeying>;
 	readonly keyedFilterPins: Map<CollectionKey, ScopedCacheTag[]>;
 	readonly beyondNestedRows: Set<CollectionKey>;
+	// The field behind each nested path, which the field map files under its alias.
+	readonly fieldNames: ReadonlyMap<string, string>;
+	// What a to-many node's sort reaches beyond the nested rows only when the
+	// node's limit cut them, which `pinFromRows` settles.
+	readonly sortDeferred = new Map<CollectionKey, ScopedCacheSortDeferral[]>();
 
 	m2oParentPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
 	o2mChildPins: Map<CollectionKey, ScopedCacheTag[]> = new Map();
@@ -62,6 +72,10 @@ export class ScopedCacheReadPlan {
 		this.fieldMap = enabled
 			? fieldMapFromAst(ast, schema)
 			: NO_FIELD_MAP;
+
+		this.fieldNames = enabled
+			? scopedCacheFieldNamesByAliasedPath(ast)
+			: new Map();
 
 		// A collection this read's filters name by primary key depends on those
 		// rows and no others, so it is pinned even when no row of it was nested.
@@ -102,6 +116,7 @@ export class ScopedCacheReadPlan {
 				ast,
 				this.filterKeying,
 				injectedAncestors,
+				this.sortDeferred,
 			)
 			: new Set<string>();
 	}
@@ -119,11 +134,14 @@ export class ScopedCacheReadPlan {
 			return;
 		}
 
+		this.markSortsCutByALimit(toArray(rows));
+
 		this.m2oParentPins = pinnedScopedCacheTagsFromM2oParents(
 			this.schema,
 			this.collection,
 			this.fieldMap,
 			toArray(rows),
+			this.fieldNames,
 		);
 
 		this.o2mChildPins = pinnedScopedCacheTagsFromO2mChildren(
@@ -132,7 +150,56 @@ export class ScopedCacheReadPlan {
 			this.fieldMap,
 			toArray(rows),
 			this.o2mConflicted,
+			this.fieldNames,
 		);
+	}
+
+	/**
+	 * A to-many node sorted through to-one hops holds its rows whole when every
+	 * parent nested fewer than the node's limit — `mergeWithParentItems` cuts each
+	 * parent's set at that limit — and then the sort reorders only rows the key
+	 * pins name. A parent at the limit may hide a row ahead of the cut, whose write
+	 * is named by nothing: the sorted-through collection goes beyond the rows.
+	 */
+	private markSortsCutByALimit(rows: Item[]): void {
+		const env = useEnv();
+
+		for (const [collection, deferrals] of this.sortDeferred) {
+			const whole = deferrals.every(({ nodePath, limit, paged }) => {
+				const effectiveLimit = limit ?? Number(env['QUERY_LIMIT_DEFAULT']);
+
+				if (paged) {
+					return false;
+				}
+
+				if (effectiveLimit === -1) {
+					return true;
+				}
+
+				const alias = nodePath[nodePath.length - 1]!;
+				const prefix = nodePath.slice(0, -1);
+
+				const parents = prefix.length === 0
+					? rows
+					: scopedCacheRowsAtPathEnd(rows, prefix);
+
+				// A parent shown without the field nested nothing under it.
+				return parents !== null && parents.every((parent) => {
+					const nested = parent[alias];
+
+					return !Array.isArray(nested) || nested.length < effectiveLimit;
+				});
+			});
+
+			if (!whole) {
+				this.beyondNestedRows.add(collection);
+			}
+		}
+	}
+
+	/** A field-map path by the fields behind its aliases, for a schema lookup. */
+	unaliased(path: string): string[] {
+		return scopedCacheUnaliasedPath(this.fieldNames, path.split('.'));
 	}
 
 	/**

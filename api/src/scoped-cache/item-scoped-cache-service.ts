@@ -764,7 +764,7 @@ export class ItemScopedCacheService {
 			return resolveScopedCacheM2oJoinChainFromPath(
 				this.schema,
 				this.collection,
-				path.split('.'),
+				plan.unaliased(path),
 			) !== null;
 		};
 
@@ -889,7 +889,7 @@ export class ItemScopedCacheService {
 					return scopedCachePathReversesChain(
 						this.schema,
 						this.collection,
-						path.split('.'),
+						plan.unaliased(path),
 						collection,
 						slice.segments,
 					);
@@ -920,8 +920,11 @@ export class ItemScopedCacheService {
 				const bound = new Map<string, ScopedCacheTag>();
 				let everyPathBound = true;
 
+				// By field, not alias: a filter names fields, and so do the paths the
+				// pinner walks it by.
 				for (const path of paths) {
-					const prefixed = `${path}.${slice.field}`;
+					const fields = plan.unaliased(path);
+					const prefixed = `${fields.join('.')}.${slice.field}`;
 
 					const relatedPks = relatedPk === undefined
 						? {}
@@ -935,7 +938,7 @@ export class ItemScopedCacheService {
 						relatedPks,
 						[{
 							field: prefixed,
-							segments: [...path.split('.'), ...slice.segments],
+							segments: [...fields, ...slice.segments],
 						}],
 					);
 
