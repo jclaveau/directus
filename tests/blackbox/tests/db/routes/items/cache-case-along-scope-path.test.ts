@@ -62,8 +62,10 @@ describe(oneLine`
 		let strangerCourseId: number;
 		let strangerPartId: number;
 		const userToken = `csp-${vendor}-00000000000000000000000000`;
+		const ownerKeyUserToken = `csp-key-${vendor}-0000000000000000000000`;
 		const admin = `Bearer ${USER.ADMIN.TOKEN}`;
 		const asUser = `Bearer ${userToken}`;
+		const asOwnerKeyUser = `Bearer ${ownerKeyUserToken}`;
 
 		beforeAll(async () => {
 			await CreateCollections(vendor, {
@@ -145,55 +147,64 @@ describe(oneLine`
 
 			const toUser = { user: { _eq: '$CURRENT_USER' } };
 
-			const userResponse = await request(getUrl(vendor, env))
-				.post('/users')
-				.set('Authorization', admin)
-				.send({
-					first_name: 'case along scope path user',
-					token: userToken,
-					policies: {
-						create: [{
-							policy: {
-								name: 'case along scope path policy',
-								app_access: true,
-								permissions: {
-									create: Object.entries({
-										[OWNER]: toUser,
-										[TU]: { owner: toUser },
-										[COURSE]: { tu: { owner: toUser } },
-										[PART]: { course: { tu: { owner: toUser } } },
-										// Off the range, not the part: a slot whose part is withheld
-										// stays visible as a null slot.
-										[TS]: { mr: { tu: { owner: toUser } } },
-										[MR]: { tu: { owner: toUser } },
-									}).map(([collection, permissions]) => {
-										return {
-											policy: '+',
-											permissions: { _and: [permissions] },
-											validation: null,
-											fields: ['*'],
-											presets: null,
-											collection,
-											action: 'read',
-										};
-									}),
-									update: [],
-									delete: [],
+			const createUser = async (
+				name: string,
+				token: string,
+				caseByCollection: Record<string, Record<string, unknown>>,
+			): Promise<string> => {
+				const response = await request(getUrl(vendor, env))
+					.post('/users')
+					.set('Authorization', admin)
+					.send({
+						first_name: name,
+						token,
+						policies: {
+							create: [{
+								policy: {
+									name: `${name} policy`,
+									app_access: true,
+									permissions: {
+										create: Object.entries(caseByCollection)
+											.map(([collection, permissions]) => {
+												return {
+													policy: '+',
+													permissions: { _and: [permissions] },
+													validation: null,
+													fields: ['*'],
+													presets: null,
+													collection,
+													action: 'read',
+												};
+											}),
+										update: [],
+										delete: [],
+									},
 								},
-							},
-						}],
-						update: [],
-						delete: [],
-					},
-				});
+							}],
+							update: [],
+							delete: [],
+						},
+					});
 
-			if (!userResponse.ok) {
-				throw new Error(
-					`Could not create user: ${JSON.stringify(userResponse.body)}`,
-				);
-			}
+				if (!response.ok) {
+					throw new Error(
+						`Could not create user: ${JSON.stringify(response.body)}`,
+					);
+				}
 
-			userId = userResponse.body.data.id;
+				return response.body.data.id;
+			};
+
+			userId = await createUser('case along scope path user', userToken, {
+				[OWNER]: toUser,
+				[TU]: { owner: toUser },
+				[COURSE]: { tu: { owner: toUser } },
+				[PART]: { course: { tu: { owner: toUser } } },
+				// Off the range, not the part: a slot whose part is withheld
+				// stays visible as a null slot.
+				[TS]: { mr: { tu: { owner: toUser } } },
+				[MR]: { tu: { owner: toUser } },
+			});
 
 			const owners = await CreateItem(vendor, {
 				collection: OWNER,
@@ -205,6 +216,19 @@ describe(oneLine`
 
 			ownerId = owners[0].id;
 			strangerOwnerId = owners[1].id;
+
+			// The same reach, the owner named through its key: how a rule authored
+			// on the owner rather than on a column of the owner is spelled.
+			const toOwner = { id: { _eq: ownerId } };
+
+			await createUser('case along owner key user', ownerKeyUserToken, {
+				[OWNER]: toOwner,
+				[TU]: { owner: toOwner },
+				[COURSE]: { tu: { owner: toOwner } },
+				[PART]: { course: { tu: { owner: toOwner } } },
+				[TS]: { mr: { tu: { owner: toOwner } } },
+				[MR]: { tu: { owner: toOwner } },
+			});
 
 			const tus = await CreateItem(vendor, {
 				collection: TU,
@@ -275,7 +299,7 @@ describe(oneLine`
 			}
 		});
 
-		const readRange = () => {
+		const readRangeAs = (auth: string) => {
 			return request(getUrl(vendor, env))
 				.get(`/items/${MR}`)
 				.query({
@@ -288,8 +312,10 @@ describe(oneLine`
 					].join(','),
 					deep: JSON.stringify({ time_slots: { _sort: 'note' } }),
 				})
-				.set('Authorization', asUser);
+				.set('Authorization', auth);
 		};
+
+		const readRange = () => readRangeAs(asUser);
 
 		const partNamesOf = (response: request.Response): (string | null)[] => {
 			return response.body.data[0].time_slots.map(
@@ -550,24 +576,27 @@ describe(oneLine`
 		});
 
 		it(oneLine`
-			a path naming its owner through the owner's key slices every hop by
-			that key, and the stranger's teaching unit handed to it purges the read
+			cases naming the owner through its key slice every hop by that key,
+			and the stranger's teaching unit handed to the owner fills the null slot
 		`, async () => {
-			const readByOwnerKey = () => {
-				return readParts({
-					course: { tu: { owner: { id: { _eq: ownerId } } } },
-				});
-			};
+			const readByOwnerKey = () => readRangeAs(asOwnerKeyUser);
 
 			const missed = await expectCached(readByOwnerKey);
 
-			expect(missed.body.data).toHaveLength(2);
+			expect(partNamesOf(missed)).toEqual(['Partie 1', 'Partie 2', null]);
 
 			const tags = missed.headers[cacheTagsHeader];
 
-			expectSlice(tags, `${PART}:course.tu.owner=${ownerId}`);
-			expectSlice(tags, `${COURSE}:tu.owner=${ownerId}`);
+			for (const collection of [TU, COURSE, PART, TS, MR]) {
+				expect(tags, `${collection} bare — ${whatItPinned(tags)}`)
+					.not.toMatch(new RegExp(`(^|, )${collection}(,|$)`));
+			}
+
 			expectSlice(tags, `${TU}:owner=${ownerId}`);
+			expectSlice(tags, `${COURSE}:tu.owner=${ownerId}`);
+			expectSlice(tags, `${PART}:course.tu.owner=${ownerId}`);
+			expectSlice(tags, `${TS}:mr.tu.owner=${ownerId}`);
+			expectSlice(tags, `${MR}:tu.owner=${ownerId}`);
 
 			await request(getUrl(vendor, env))
 				.patch(`/items/${TU}/${strangerTuId}`)
@@ -577,12 +606,17 @@ describe(oneLine`
 			const after = await readByOwnerKey();
 
 			expect(after.headers[cacheStatusHeader]).toBe('MISS');
-			expect(after.body.data).toHaveLength(3);
+
+			expect(partNamesOf(after))
+				.toEqual(['Partie 1', 'Partie 2', 'Partie stranger']);
 
 			await request(getUrl(vendor, env))
 				.patch(`/items/${TU}/${strangerTuId}`)
 				.send({ owner: strangerOwnerId })
 				.set('Authorization', admin);
+
+			expect(partNamesOf(await readByOwnerKey()))
+				.toEqual(['Partie 1', 'Partie 2', null]);
 		});
 
 		it(oneLine`
