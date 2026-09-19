@@ -644,7 +644,7 @@ describe('Services / Utils', () => {
 				}
 
 				if (key === 'k1__tags') {
-					return Promise.resolve({ tags: 'articles, articles:id=5' });
+					return Promise.resolve({ tags: ['articles', 'articles:id=5'] });
 				}
 
 				return Promise.resolve(undefined);

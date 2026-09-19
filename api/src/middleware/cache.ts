@@ -2,7 +2,11 @@ import { useEnv } from '@directus/env';
 import type { RequestHandler } from 'express';
 import { getCache, getCacheValue, getCacheValues } from '../cache.js';
 import { resolvedCacheTtl } from '../cache-config.js';
-import { cacheExpiresAtKey, cacheTagsKey } from '../cache-sidecars.js';
+import {
+	cacheExpiresAtKey,
+	cacheTagsKey,
+	storedScopedCacheTagLabels,
+} from '../cache-sidecars.js';
 import {
 	cacheStatsActive,
 	queueCacheHit,
@@ -14,7 +18,7 @@ import { useLogger } from '../logger/index.js';
 import { useMetrics } from '../metrics/index.js';
 import asyncHandler from '../utils/async-handler.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
-import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
+import { setScopedCacheTagsHeader } from '../utils/scoped-cache-tags-header.js';
 import { getMilliseconds } from '../utils/get-milliseconds.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import { isCacheAuditReplay } from '../utils/cache-audit-replay.js';
@@ -115,11 +119,10 @@ const checkCacheMiddleware: RequestHandler = asyncHandler(async (req, res, next)
 
 				// Same guard utils.ts puts on this sidecar: anything else flattens into
 				// a garbled header instead of being skipped.
-				if (typeof stored?.tags === 'string' && stored.tags !== '') {
-					res.setHeader(
-						`${env['CACHE_TAGS_HEADER']}`,
-						printableScopedCacheTags(stored.tags),
-					);
+				const labels = storedScopedCacheTagLabels(stored);
+
+				if (labels) {
+					setScopedCacheTagsHeader(res, `${env['CACHE_TAGS_HEADER']}`, labels);
 				}
 			}
 			catch (err: any) {

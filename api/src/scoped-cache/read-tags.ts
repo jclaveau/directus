@@ -159,6 +159,61 @@ export function scopedCacheNestedCollections(ast: AST): Set<CollectionKey> {
 }
 
 /**
+ * What bounds the rows each node of a collection returns — its own filter joined
+ * with its cases, the WHERE its query runs under — one entry per node, `null` for
+ * a node nothing bounds. Unlike the root's filter, which bounds nothing it
+ * nested, a node's bound gates every row that node returns whichever way the
+ * read reached it: a to-many under another to-many, a junction whose reverse fk
+ * is no scope field, an M2O whose parent a case withholds. So a slice every
+ * node's bound binds names every row the read carries of that collection, and a
+ * write to any row entering or leaving that slice emits it.
+ */
+export function scopedCacheNodeBoundsByCollection(
+	ast: AST,
+): Map<CollectionKey, Array<Filter | null>> {
+	const bounds = new Map<CollectionKey, Array<Filter | null>>();
+
+	const addBound = (
+		collection: CollectionKey,
+		query: Query,
+		cases: Filter[],
+	): void => {
+		const known = bounds.get(collection) ?? [];
+		known.push(joinFilterWithCases(query.filter, cases));
+		bounds.set(collection, known);
+	};
+
+	const addBoundsOf = (children: AST['children']): void => {
+		for (const child of children) {
+			if (child.type === 'field') {
+				continue;
+			}
+
+			if (child.type === 'functionField') {
+				addBound(child.relatedCollection, child.query, child.cases);
+				continue;
+			}
+
+			if (child.type === 'a2o') {
+				for (const name of child.names) {
+					addBound(name, child.query[name] ?? {}, child.cases[name] ?? []);
+					addBoundsOf(child.children[name] ?? []);
+				}
+
+				continue;
+			}
+
+			addBound(child.name, child.query, child.cases);
+			addBoundsOf(child.children);
+		}
+	};
+
+	addBoundsOf(ast.children);
+
+	return bounds;
+}
+
+/**
  * The field each nested node's path stands for, keyed by the path the field map
  * and the rows carry — every hop under its alias (`alias[start]=days` files the
  * node under `start`) — so a pin resolves the relation behind an alias where the

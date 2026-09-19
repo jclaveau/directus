@@ -32,3 +32,20 @@ export function cacheSidecarOwner(member: string): string | null {
 		? null
 		: member.slice(0, -suffix.length);
 }
+
+/**
+ * The labels the tags sidecar holds, or null when it holds anything else — an
+ * entry written before the sidecar listed them, or a store answering garbage —
+ * so nothing flattens into a garbled header or listing.
+ */
+export function storedScopedCacheTagLabels(stored: unknown): string[] | null {
+	const tags = (stored as { tags?: unknown } | undefined)?.tags;
+
+	if (!Array.isArray(tags) || tags.length === 0) {
+		return null;
+	}
+
+	return tags.every((tag) => typeof tag === 'string')
+		? tags
+		: null;
+}

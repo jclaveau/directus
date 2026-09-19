@@ -155,6 +155,7 @@ function primeEnrichedHit() {
 beforeEach(() => {
 	env['CACHE_ENABLED'] = true;
 	delete env['CACHE_TAGS_HEADER'];
+	delete env['CACHE_TAGS_HEADER_MAX_SIZE'];
 	shouldSkipCache.mockReturnValue(false);
 
 	getCacheKey.mockResolvedValue({
@@ -183,7 +184,7 @@ describe('checkCacheMiddleware', () => {
 		a cache-audit replay is neither served from the cache nor stored
 	`, async () => {
 		vi.mocked(isCacheAuditReplay).mockReturnValue(true);
-		primeHit('articles:owner=U1');
+		primeHit(['articles:owner=U1']);
 
 		const res = makeRes();
 
@@ -198,7 +199,7 @@ describe('checkCacheMiddleware', () => {
 
 	test('HIT emits the __tags sibling under CACHE_TAGS_HEADER', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
-		primeHit('articles:owner=U1');
+		primeHit(['articles:owner=U1']);
 
 		const res = makeRes();
 
@@ -209,6 +210,20 @@ describe('checkCacheMiddleware', () => {
 			'articles:owner=U1',
 		);
 
+		expect(res.json).toHaveBeenCalledWith({ data: [1] });
+	});
+
+	test('HIT clamps the re-emitted sibling to the header size cap', async () => {
+		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
+		env['CACHE_TAGS_HEADER_MAX_SIZE'] = '5b';
+		primeHit(['a:b=1', 'a:b=2']);
+
+		const res = makeRes();
+
+		await checkCacheMiddleware(makeReq(), res, next);
+
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags', 'a:b=1');
+		expect(res.setHeader).toHaveBeenCalledWith('X-Scoped-Cache-Tags-omitted', '1');
 		expect(res.json).toHaveBeenCalledWith({ data: [1] });
 	});
 
@@ -224,11 +239,12 @@ describe('checkCacheMiddleware', () => {
 		expect(names).not.toContain('X-Scoped-Cache-Tags');
 	});
 
-	// utils.ts reads this sidecar behind `typeof tagged?.tags === 'string'`; without
-	// the same guard a non-string flattens into a garbled header instead of skipping.
-	test('HIT skips the tags header when the sibling is not a string', async () => {
+	// The same reader utils.ts puts on this sidecar: an entry written before the
+	// sidecar listed its labels, or anything else, is skipped rather than
+	// flattened into a garbled header.
+	test('HIT skips the tags header when the sibling lists no labels', async () => {
 		env['CACHE_TAGS_HEADER'] = 'X-Scoped-Cache-Tags';
-		primeHit(['articles:owner=U1']);
+		primeHit('articles:owner=U1');
 
 		const res = makeRes();
 

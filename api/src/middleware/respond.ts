@@ -20,7 +20,6 @@ import {
 	scopedCachePurgeEnabled,
 	scopedCacheSweptDuringFill,
 	scopedCacheTagLabel,
-	serializeScopedCacheTags,
 	tagScopedCacheKeys,
 	type ScopedCacheEpochs,
 } from '../scoped-cache.js';
@@ -36,6 +35,7 @@ import {
 } from '../utils/cache-audit-replay.js';
 import { getCacheControlHeader } from '../utils/get-cache-headers.js';
 import { printableScopedCacheTags } from '../utils/printable-scoped-cache-tags.js';
+import { setScopedCacheTagsHeader } from '../utils/scoped-cache-tags-header.js';
 import { readMeta } from '../utils/read-meta.js';
 import { getCacheKey } from '../utils/get-cache-key.js';
 import {
@@ -70,11 +70,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 	// — tags carry owner ids. Raw pins are emitted, so a regression pinning nothing
 	// shows an absent header, not a masked one. A cache HIT skips this middleware —
 	// pins are also written to a __tags sibling (below), re-emitted from cache.ts.
+	// Both headers stop at CACHE_TAGS_HEADER_MAX_SIZE, the sibling keeps every pin.
 	if (env['CACHE_TAGS_HEADER']) {
 		if (Array.isArray(readTags) && readTags.length) {
-			res.setHeader(
+			setScopedCacheTagsHeader(
+				res,
 				`${env['CACHE_TAGS_HEADER']}`,
-				printableScopedCacheTags(serializeScopedCacheTags(readTags)),
+				readTags.map(scopedCacheTagLabel),
 			);
 		}
 	}
@@ -83,9 +85,10 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 		const purged = res.locals['scopedCachePurged'];
 
 		if (Array.isArray(purged) && purged.length) {
-			res.setHeader(
+			setScopedCacheTagsHeader(
+				res,
 				`${env['CACHE_PURGED_TAGS_HEADER']}`,
-				printableScopedCacheTags(serializeScopedCacheTags(purged)),
+				purged.map(scopedCacheTagLabel),
 			);
 		}
 	}
@@ -306,12 +309,13 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 			// the read that builds them) can still emit them, via cache.ts.
 			if (env['CACHE_TAGS_HEADER']) {
 				if (Array.isArray(readTags) && readTags.length) {
-					// Object, not a bare string: setCacheValue's compress expects
-					// a CacheValue (object) — a raw string won't round-trip.
+					// An object: setCacheValue's compress expects a CacheValue. The
+					// labels as a list, so a value holding the separator reads back
+					// as the one tag it is.
 					await setCacheValue(
 						cache,
 						cacheTagsKey(redisKey),
-						{ tags: serializeScopedCacheTags(readTags) },
+						{ tags: readTags.map(scopedCacheTagLabel) },
 						getMilliseconds(resolvedCacheTtl()),
 					);
 				}

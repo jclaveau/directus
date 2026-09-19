@@ -242,7 +242,13 @@ describe('read tags at the merge', () => {
 		ownership.collections['enrollment']!.scopedCacheFields = ['student'];
 		ownership.collections['student']!.scopedCacheFields = ['user'];
 
-		const rows = [{ id: 1, enrollment: { id: 10, student: { id: 100 } } }];
+		// As run-ast returns them: the injected chain under its alias, beside the
+		// foreign key `*` asked for.
+		const rows = [{
+			id: 1,
+			enrollment: 10,
+			__scoped_cache_enrollment: { id: 10, student: { id: 100 } },
+		}];
 
 		test(oneLine`
 			stays bare: the filter reads enrollment rows the injected pin never named
@@ -268,13 +274,25 @@ describe('read tags at the merge', () => {
 				accountability: null,
 			});
 
-			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*'] }))
-				.toEqual(['enrollment.id', 'enrollment.student.id']);
+			expect(service.scopedCache.ownershipInjections({ fields: ['*'] }))
+				.toEqual([
+					{
+						path: 'enrollment.id',
+						aliasedPath: '__scoped_cache_enrollment.id',
+					},
+					{
+						path: 'enrollment.student.id',
+						aliasedPath: '__scoped_cache_enrollment.student.id',
+					},
+				]);
 
-			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*.*'] }))
-				.toEqual(['enrollment.student.id']);
+			expect(service.scopedCache.ownershipInjections({ fields: ['*.*'] }))
+				.toEqual([{
+					path: 'enrollment.student.id',
+					aliasedPath: 'enrollment.__scoped_cache_student.id',
+				}]);
 
-			expect(service.scopedCache.ownershipPathsToInject({ fields: ['*.*.*'] }))
+			expect(service.scopedCache.ownershipInjections({ fields: ['*.*.*'] }))
 				.toEqual([]);
 		});
 
@@ -285,7 +303,12 @@ describe('read tags at the merge', () => {
 				accountability: null,
 			});
 
-			feed(rows);
+			// `*.*` nests enrollment itself, so only the student is injected, under
+			// the enrollment row the caller asked for.
+			feed([{
+				id: 1,
+				enrollment: { id: 10, student: 100, __scoped_cache_student: { id: 100 } },
+			}]);
 
 			const result = await service.readByQuery(
 				{ fields: ['*.*'] },
@@ -358,6 +381,145 @@ describe('read tags at the merge', () => {
 
 			expect(await tagsOf(service, { fields: ['comments.body'] }))
 				.toEqual(['article', 'comment:article=1']);
+		});
+	});
+
+	describe('a collection two reverse fks reach and disagree on', () => {
+		const grading = new SchemaBuilder()
+			.collection('enrollment', (c) => {
+				c.field('id').id();
+				c.field('pinned_note').m2o('note');
+				c.field('discipline').m2o('discipline');
+				c.field('unit').m2o('unit');
+			})
+			.collection('discipline', (c) => {
+				c.field('id').id();
+				c.field('notes').o2m('note', 'discipline');
+			})
+			.collection('unit', (c) => {
+				c.field('id').id();
+				c.field('notes').o2m('note', 'unit');
+			})
+			.collection('note', (c) => {
+				c.field('id').id();
+				c.field('body').string();
+				c.field('discipline').m2o('discipline');
+				c.field('unit').m2o('unit');
+			})
+			.build();
+
+		grading.collections['note']!.scopedCacheFields = ['discipline', 'unit'];
+
+		const service = () => {
+			return new ItemsService('enrollment', {
+				knex: db,
+				schema: grading,
+				accountability: null,
+			});
+		};
+
+		test(oneLine`
+			keyed by a filter through all three paths, it is bare: the key one path
+			binds names nothing the reverse fks nest
+		`, async () => {
+			// Only the field asked for: the paths a filter alone crosses nest no row.
+			feed([{ id: 1 }]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['id'],
+				filter: {
+					_and: [
+						{ pinned_note: { id: { _eq: 7 } } },
+						{ discipline: { notes: { id: { _eq: 7 } } } },
+						{ unit: { notes: { id: { _eq: 7 } } } },
+					],
+				},
+			});
+
+			expect(tags).toContain('note');
+			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+		});
+
+		test(oneLine`
+			nested through both, each node's own filter slices the rows it returns,
+			whichever fk reached them
+		`, async () => {
+			feed([{
+				id: 1,
+				discipline: {
+					id: 1,
+					notes: [{ id: 7, body: 'a', discipline: 1, unit: 2 }],
+				},
+				unit: {
+					id: 2,
+					notes: [{ id: 8, body: 'b', discipline: 3, unit: 2 }],
+				},
+			}]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['discipline.notes.body', 'unit.notes.body'],
+				deep: {
+					discipline: { notes: { _filter: { discipline: { _eq: 1 } } } },
+					unit: { notes: { _filter: { unit: { _eq: 2 } } } },
+				},
+			});
+
+			expect(tags).toContain('note:discipline=1');
+			expect(tags).toContain('note:unit=2');
+			expect(tags).not.toContain('note');
+		});
+
+		test(oneLine`
+			nested through both and filtered on beyond them, it is bare: the nodes'
+			slices name only the rows they returned
+		`, async () => {
+			feed([{
+				id: 1,
+				discipline: {
+					id: 1,
+					notes: [{ id: 7, body: 'a', discipline: 1, unit: 2 }],
+				},
+				unit: {
+					id: 2,
+					notes: [{ id: 8, body: 'b', discipline: 3, unit: 2 }],
+				},
+			}]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['discipline.notes.body', 'unit.notes.body'],
+				filter: { discipline: { notes: { body: { _eq: 'a' } } } },
+				deep: {
+					discipline: { notes: { _filter: { discipline: { _eq: 1 } } } },
+					unit: { notes: { _filter: { unit: { _eq: 2 } } } },
+				},
+			});
+
+			expect(tags).toContain('note');
+			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
+		});
+
+		test(oneLine`
+			nested through both with a node nothing bounds, it is bare
+		`, async () => {
+			feed([{
+				id: 1,
+				discipline: {
+					id: 1,
+					notes: [{ id: 7, body: 'a', discipline: 1, unit: 2 }],
+				},
+				unit: {
+					id: 2,
+					notes: [{ id: 8, body: 'b', discipline: 3, unit: 2 }],
+				},
+			}]);
+
+			const tags = await tagsOf(service(), {
+				fields: ['discipline.notes.body', 'unit.notes.body'],
+				deep: { unit: { notes: { _filter: { unit: { _eq: 2 } } } } },
+			});
+
+			expect(tags).toContain('note');
+			expect(tags.filter((tag) => tag.startsWith('note:'))).toEqual([]);
 		});
 	});
 
@@ -596,7 +758,8 @@ describe('read tags at the merge', () => {
 
 		const rows = [{
 			id: 1,
-			owner: { id: 1, grandowner: { id: 1, root: { id: 1 } } },
+			owner: 1,
+			__scoped_cache_owner: { id: 1, grandowner: { id: 1, root: { id: 1 } } },
 		}];
 
 		afterEach(() => {
@@ -857,7 +1020,8 @@ describe('read tags at the merge', () => {
 			range: {
 				id: 50,
 				user_created: 'u1',
-				tu: {
+				tu: 30,
+				__scoped_cache_tu: {
 					id: 30,
 					discipline: {
 						id: 20,
@@ -981,20 +1145,81 @@ describe('read tags at the merge', () => {
 			]);
 		});
 
-		test(oneLine`
-			still bares the to-many whose scope lacks the fk it hangs off: the case
-			bounds the rows the filter reaches, not the ones the parent nested
-		`, async () => {
-			cursus.collections['slot']!.scopedCacheFields = ['part'];
-			permitting();
-			feed(rows);
+		describe('a to-many whose scope lacks the fk it hangs off', () => {
+			// No parent-key pin can name the slots: only what bounds the node's own
+			// rows is left to.
+			beforeEach(() => {
+				cursus.collections['slot']!.scopedCacheFields = ['part'];
+			});
 
-			try {
-				expect(await tagsOf(asUser(), query)).toContain('slot');
-			}
-			finally {
+			afterEach(() => {
 				cursus.collections['slot']!.scopedCacheFields = ['part', 'range'];
+			});
+
+			test(oneLine`
+				slices it by its own case: the node's WHERE gates every row it
+				returns, whichever way the read reached it
+			`, async () => {
+				permitting();
+				feed(rows);
+
+				const tags = await tagsOf(asUser(), query);
+
+				expect(tags).toContain(
+					'slot:part.course.tu.discipline.enrollment.student.user=u1',
+				);
+
+				expect(tags).not.toContain('slot');
+			});
+
+			test(oneLine`
+				keeps it bare when its case names no slice
+			`, async () => {
+				permitting({ name: { _eq: 'Ada' } });
+				feed(rows);
+
+				const tags = await tagsOf(asUser(), query);
+
+				expect(tags).toContain('slot');
+				expect(tags.filter((tag) => tag.startsWith('slot:'))).toEqual([]);
+			});
+		});
+
+		test.each([
+			['a null hop', { tu: null, __scoped_cache_tu: null }],
+			['a hop whose case withheld its row', { tu: 30, __scoped_cache_tu: null }],
+		])(oneLine`
+			tags no ancestor the ownership injection nested through %s: a chain
+			reaching no row leaves the response as it was
+		`, async (_shape, hop) => {
+			permitting();
+
+			feed([{
+				...rows[0]!,
+				range: { ...rows[0]!.range, ...hop },
+			}]);
+
+			const service = asUser();
+			const tags = await tagsOf(service, query);
+
+			for (const ancestor of ['tu', 'discipline', 'enrollment', 'student']) {
+				expect(tags).not.toContain(ancestor);
+				expect(tags.some((tag) => tag.startsWith(`${ancestor}:id=`))).toBe(false);
 			}
+
+			expect(tags).toContain('tu:discipline.enrollment.student.user=u1');
+			expect(tags).toContain('range:id=50');
+
+			// The foreign key the caller asked for is what the row carried, not what
+			// the injected hop came back as.
+			feed([{
+				...rows[0]!,
+				range: { ...rows[0]!.range, ...hop },
+			}]);
+
+			const [row] = await service.readByQuery(query, { emitEvents: false });
+
+			expect((row as { range: { tu: unknown } }).range.tu).toBe(hop.tu);
 		});
 	});
 

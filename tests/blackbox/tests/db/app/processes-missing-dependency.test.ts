@@ -134,7 +134,11 @@ describe.each(vendors)('%s', (vendor) => {
 				.set('Authorization', auth);
 
 			expect(response.status).toBe(200);
-			expect(response.body['status']).toBe('ok');
+
+			// Not `ok`: a busy shard pushes a response-time check into `warn`,
+			// and only the hold this test refutes answers `error`.
+			expect(response.body['status'], JSON.stringify(response.body['checks']))
+				.not.toBe('error');
 
 			// Nothing to answer for: no process of this deployment can see the
 			// pool, and a check saying otherwise would be reporting a reading
