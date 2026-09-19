@@ -1,0 +1,2 @@
+const e=require(`../../utils/throw-if-empty.cjs`),t=(t,n,r)=>()=>(e.throwIfEmpty(t,`Keys cannot be empty`),{path:`/panels`,params:r??{},body:JSON.stringify({keys:t,data:n}),method:`PATCH`}),n=(e,t)=>()=>({path:`/panels`,params:t??{},body:JSON.stringify(e),method:`PATCH`}),r=(t,n,r)=>()=>(e.throwIfEmpty(t,`Key cannot be empty`),{path:`/panels/${t}`,params:r??{},body:JSON.stringify(n),method:`PATCH`});exports.updatePanel=r,exports.updatePanels=t,exports.updatePanelsBatch=n;
+//# sourceMappingURL=panels.cjs.map
