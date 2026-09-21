@@ -1006,6 +1006,43 @@ describe('getCache', () => {
 		expect(caches.lockCache.namespace).toBe('scalabus_lock');
 	});
 
+	test(oneLine`
+		every tier stores its entries in the fork's envelope, not @keyv/serialize's
+	`, async () => {
+		const {
+			deserializeCacheEnvelope,
+			serializeCacheEnvelope,
+		} = await import('./cache-envelope.js');
+
+		setEnv({
+			CACHE_ENABLED: true,
+			CACHE_NAMESPACE: 'scalabus',
+			CACHE_TTL: '5m',
+			CACHE_STORE: 'memory',
+		});
+
+		const caches = getCache();
+
+		for (const tier of [
+			caches.cache!,
+			caches.systemCache,
+			caches.localSchemaCache,
+			caches.lockCache,
+		]) {
+			expect(tier.serialize).toBe(serializeCacheEnvelope);
+			expect(tier.deserialize).toBe(deserializeCacheEnvelope);
+		}
+
+		// The memory store serializes too, so what it holds is the envelope itself.
+		await caches.cache!.set('k', Buffer.from('bytes'));
+
+		const held = (caches.cache!.store as Map<string, string>)
+			.get('scalabus_response:k');
+
+		expect(held).toMatch(/^\{"envelope":2,"base64":"/);
+		expect((await caches.cache!.get('k') as Buffer).toString()).toBe('bytes');
+	});
+
 	test('narrows CACHE_STORE=redis through the store ternary', () => {
 		setEnv({
 			CACHE_ENABLED: true,

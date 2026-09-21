@@ -257,6 +257,11 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 				}, ttlMs),
 			]);
 
+			// The fill is done once the entry is written, not once the payload is
+			// ready: the SET is part of what a miss costs, and on a large entry the
+			// serialization before it is most of it.
+			const filledAt = Date.now();
+
 			if (capturedEpochs) {
 				const sweptDuringFill =
 					await scopedCacheSweptDuringFill(capturedEpochs);
@@ -351,9 +356,9 @@ export const respond: RequestHandler = asyncHandler(async (req, res) => {
 							(tag) => tag.collection === req.collection && tag.field === undefined,
 						);
 
-					// Compute cost of this miss: request entry (cache mw) → response ready.
+					// Compute cost of this miss: request entry (cache mw) → entry written.
 					const fillMs = Math.max(
-						now - Number(res.locals['requestStart'] ?? now),
+						filledAt - Number(res.locals['requestStart'] ?? filledAt),
 						0,
 					);
 

@@ -1,3 +1,5 @@
+import { compress as compressJSON } from '@directus/utils/values';
+import { compress as compressSnappy, uncompress as uncompressSnappy } from 'snappy';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 const env: Record<string, any> = { CACHE_COMPRESSION_ENABLED: true };
@@ -18,6 +20,19 @@ describe('cache compress / decompress', () => {
 
 		expect(Buffer.isBuffer(compressed)).toBe(true);
 		expect(await decompress(compressed)).toEqual(value);
+	});
+
+	test('the Buffer is snappy over the JSON text, nothing in between', async () => {
+		const compressed = await compress(value);
+
+		expect(await uncompressSnappy(compressed as Buffer, { asBuffer: false }))
+			.toBe(JSON.stringify(value));
+	});
+
+	test('an entry tokenized before the tokenizer went still reads', async () => {
+		const legacy = await compressSnappy(compressJSON(value));
+
+		expect(await decompress(legacy)).toEqual(value);
 	});
 
 	test('CACHE_COMPRESSION_ENABLED=false stores the raw value (no Buffer)', async () => {

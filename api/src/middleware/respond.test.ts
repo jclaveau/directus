@@ -322,6 +322,40 @@ describe('respond middleware', () => {
 	});
 
 	test(oneLine`
+		the fill cost counts the write of the entry, not only the read
+	`, async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(1000);
+
+		// A SET that takes 300 ms: the miss is not filled until it lands, so the
+		// number the descriptor reports has to hold it.
+		vi.mocked(setCacheValue).mockImplementationOnce(async () => {
+			vi.setSystemTime(1300);
+		});
+
+		const res = makeRes(
+			{ data: [{ id: 1 }] },
+			{
+				scopedCacheTags: [{ collection: 'articles' }],
+				requestStart: 900,
+			},
+		);
+
+		try {
+			await respond(makeReq(), res, next);
+		}
+		finally {
+			vi.useRealTimers();
+		}
+
+		expect(mocks.queueMissLatency).toHaveBeenCalledWith(400, 'fill', 'cache-hash');
+
+		expect(mocks.queueCacheDescriptor).toHaveBeenCalledWith(
+			expect.objectContaining({ fillMs: 400 }),
+		);
+	});
+
+	test(oneLine`
 		reuses the size-gate serialization for the descriptor bytes (one stringify)
 	`, async () => {
 		env['CACHE_VALUE_MAX_SIZE'] = '1mb';

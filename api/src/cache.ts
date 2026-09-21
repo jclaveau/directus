@@ -3,6 +3,10 @@ import { ServiceUnavailableError } from '@directus/errors';
 import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
+import {
+	deserializeCacheEnvelope,
+	serializeCacheEnvelope,
+} from './cache-envelope.js';
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { redisConfigAvailable } from './redis/index.js';
@@ -460,6 +464,8 @@ function getKeyvInstance(
 function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSuffix = ''): KeyvOptions {
 	const config: KeyvOptions = {
 		namespace: `${env['CACHE_NAMESPACE']}${namespaceSuffix}`,
+		serialize: serializeCacheEnvelope,
+		deserialize: deserializeCacheEnvelope,
 		...(ttl && { ttl }),
 	};
 
