@@ -352,8 +352,18 @@ export async function createCli(
 			'the 4xx status the ruleset answers a blocked path with',
 			'404',
 		)
-		.option('--include <path>', 'a root segment to allow too, like /status (repeatable)', collect, [])
-		.option('--exclude <path>', 'a root segment to leave out, like /admin (repeatable)', collect, [])
+		.option(
+			'--include <path>',
+			'a root segment to allow too, like /status (repeatable)',
+			collect,
+			[],
+		)
+		.option(
+			'--exclude <path>',
+			'a root segment to leave out, like /admin (repeatable)',
+			collect,
+			[],
+		)
 		.argument('[path]', 'the file to write instead of stdout, which the logs share')
 		.action(async (
 			path: string | undefined,
