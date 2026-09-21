@@ -252,6 +252,69 @@ describe(oneLine`
 	});
 
 	it(oneLine`
+		updateMany with purgeCollectionTag:false drops the row's own slices and leaves
+		the bare tag warm — the reads it names never decided on the written column
+	`, async () => {
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.update('test').response(1);
+
+		await service().updateMany(
+			[1],
+			{ name: 'renamed' },
+			{ purgeCollectionTag: false },
+		);
+
+		expect(purgeScopedCache).toHaveBeenCalledTimes(1);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			[
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+				{ collection: 'test', field: 'id', value: 1, type: 'integer' },
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			],
+			expect.anything(),
+			{ includeCollectionTag: false },
+		);
+	});
+
+	it(oneLine`
+		purgeCollectionTag:false holds through a delete that cascades into another
+		collection — the child takes its coarse purge, the parent keeps its bare tag
+	`, async () => {
+		purgeScopedCache.mockResolvedValue([]);
+		tracker.on.select('test').response([{ id: 1, student: 'A' }]);
+		tracker.on.delete('test').response(1);
+
+		await service(cascadeChildSchema).deleteMany(
+			[1],
+			{ purgeCollectionTag: false },
+		);
+
+		expect(purgeScopedCache).toHaveBeenCalledTimes(2);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test',
+			expect.arrayContaining([
+				{ collection: 'test', field: 'student', value: 'A', type: 'string' },
+			]),
+			expect.anything(),
+			{ includeCollectionTag: false, scopedCachePurgeId: expect.any(String) },
+		);
+
+		expect(purgeScopedCache).toHaveBeenCalledWith(
+			expect.anything(),
+			'test_child',
+			null,
+			expect.anything(),
+			{ scopedCachePurgeId: expect.any(String) },
+		);
+	});
+
+	it(oneLine`
 		updateMany falls back to a coarse purge (null) when a pre-update row is missing
 		the scope field
 	`, async () => {
