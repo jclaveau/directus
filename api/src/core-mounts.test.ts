@@ -50,3 +50,37 @@ test('lists each root once, the root handlers first', () => {
 test('leaves the admin app out when it is not served', () => {
 	expect(coreRootPaths()).not.toContain('/admin');
 });
+
+test('adds each websocket controller on, on the root of its own path', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		WEBSOCKETS_ENABLED: true,
+		WEBSOCKETS_REST_ENABLED: true,
+		WEBSOCKETS_REST_PATH: '/websocket',
+		WEBSOCKETS_GRAPHQL_ENABLED: false,
+		WEBSOCKETS_GRAPHQL_PATH: '/graphql',
+		WEBSOCKETS_LOGS_ENABLED: true,
+		WEBSOCKETS_LOGS_PATH: '/ws/logs',
+	});
+
+	const roots = coreRootPaths();
+
+	expect(roots.slice(0, 5)).toEqual([
+		'/',
+		'/robots.txt',
+		'/websocket',
+		'/ws',
+		'/auth',
+	]);
+
+	expect(roots.filter((root) => root === '/graphql')).toHaveLength(1);
+});
+
+test('leaves the websocket paths out when websockets are off', () => {
+	vi.mocked(useEnv).mockReturnValue({
+		WEBSOCKETS_ENABLED: false,
+		WEBSOCKETS_REST_ENABLED: true,
+		WEBSOCKETS_REST_PATH: '/websocket',
+	});
+
+	expect(coreRootPaths()).not.toContain('/websocket');
+});

@@ -6,6 +6,7 @@ import getDatabase, {
 	isInstalled,
 	validateDatabaseConnection,
 } from '../../../database/index.js';
+import emitter from '../../../emitter.js';
 import { getExtensionManager } from '../../../extensions/index.js';
 import { useLogger } from '../../../logger/index.js';
 import { drainStdout } from '../../utils/drain-stdout.js';
@@ -72,6 +73,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.clearAllMocks();
+	emitter.offAll();
 });
 
 test('prints the core and extension roots as a Railway ruleset', async () => {
@@ -167,6 +169,52 @@ test('says which extension route no prefix can stand for', async () => {
 
 	expect(warn).toHaveBeenCalledExactlyOnceWith(
 		'An extension answers on any root path (/:pk); '
+		+ 'no prefix stands for it, so the allow-list leaves it out',
+	);
+
+	expect(printed()).toBe('/\n/admin\n/items\n/server\n/studying\n');
+});
+
+test('adds what the hooks mount, in the order the app emits', async () => {
+	const events: string[] = [];
+
+	emitter.onInit('app.before', ({ event }) => {
+		events.push(event);
+	});
+
+	emitter.onInit('routes.custom.after', ({ event, app }) => {
+		events.push(event);
+		app.get('/hooked/ping', () => {});
+
+		app.use((_request: unknown, _response: unknown, next: () => void) => {
+			next();
+		});
+	});
+
+	emitter.onInit('app.after', ({ event }) => {
+		events.push(event);
+	});
+
+	const run = edgeAllowList(undefined, options({ format: 'plain' }));
+
+	await expect(run).rejects.toThrow('exit:0');
+
+	expect(events).toEqual(['app.before', 'routes.custom.after', 'app.after']);
+	expect(printed()).toBe('/\n/admin\n/hooked\n/items\n/server\n/studying\n');
+	expect(warn).not.toHaveBeenCalled();
+});
+
+test('says which hook route no prefix can stand for', async () => {
+	emitter.onInit('routes.after', ({ app }) => {
+		app.get('/:slug', () => {});
+	});
+
+	const run = edgeAllowList(undefined, options({ format: 'plain' }));
+
+	await expect(run).rejects.toThrow('exit:0');
+
+	expect(warn).toHaveBeenCalledExactlyOnceWith(
+		'An extension answers on any root path (/:slug); '
 		+ 'no prefix stands for it, so the allow-list leaves it out',
 	);
 

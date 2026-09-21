@@ -1,15 +1,53 @@
+import express, { type Router } from 'express';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import getDatabase, {
 	isInstalled,
 	validateDatabaseConnection,
 } from '../../../database/index.js';
+import emitter from '../../../emitter.js';
 import { getExtensionManager } from '../../../extensions/index.js';
 import { useLogger } from '../../../logger/index.js';
 import { coreRootPaths } from '../../../core-mounts.js';
 import { routerRootPaths } from '../../../utils/router-root-paths.js';
 import { drainStdout } from '../../utils/drain-stdout.js';
 import { railwayAllowListRuleset } from './railway.js';
+
+/** The init events `createApp` hands the app to, in the order it emits them. */
+const APP_INIT_EVENTS = [
+	'app.before',
+	'middlewares.before',
+	'middlewares.after',
+	'routes.before',
+	'routes.custom.before',
+	'routes.custom.after',
+	'routes.after',
+	'app.after',
+];
+
+/**
+ * What the enabled hooks mount on the app themselves, read by handing them an
+ * app of their own through the init events `createApp` emits. A middleware
+ * that matches its path inside its handler mounts nothing, so it stays out of
+ * sight here: `--include` is for those.
+ */
+async function hookRootPaths(): Promise<ReturnType<typeof routerRootPaths>> {
+	const app = express();
+
+	for (const event of APP_INIT_EVENTS) {
+		await emitter.emitInit(event, { app });
+	}
+
+	// Express builds the app's router on the first mount: none means no hook
+	// mounted anything
+	const router: Router | undefined = app._router;
+
+	if (router === undefined) {
+		return { paths: [], dynamic: [] };
+	}
+
+	return routerRootPaths(router);
+}
 
 export type AllowListOptions = {
 	format: 'railway' | 'plain';
@@ -81,15 +119,21 @@ export default async function edgeAllowList(
 		await extensionManager.initialize({ schedule: false, watch: false });
 
 		const custom = routerRootPaths(extensionManager.getEndpointRouter());
+		const hooked = await hookRootPaths();
 
-		for (const path of custom.dynamic) {
+		for (const path of [...custom.dynamic, ...hooked.dynamic]) {
 			logger.warn(
 				`An extension answers on any root path (${path}); `
 				+ `no prefix stands for it, so the allow-list leaves it out`,
 			);
 		}
 
-		const rootPaths = [...coreRootPaths(), ...custom.paths, ...options.include]
+		const rootPaths = [
+			...coreRootPaths(),
+			...custom.paths,
+			...hooked.paths,
+			...options.include,
+		]
 			.filter((path) => options.exclude.includes(path) === false)
 			.filter((path, index, all) => all.indexOf(path) === index)
 			.sort();

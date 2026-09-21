@@ -1,4 +1,5 @@
 import { useEnv } from '@directus/env';
+import { toBoolean } from '@directus/utils';
 import { systemMcpEnabled } from './system-mcp/lib/config.js';
 import { rootOf } from './utils/router-root-paths.js';
 
@@ -80,10 +81,29 @@ export function coreMountPaths(): CoreMountPath[] {
 		.map((mount) => mount.path);
 }
 
+const WEBSOCKET_CONTROLLERS = ['REST', 'GRAPHQL', 'LOGS'] as const;
+
+/**
+ * The websocket controllers hang off the http server rather than the app, each
+ * on the path its env names, gated as `createServer` and `startWebSocketHandlers`
+ * gate them. An upgrade request still passes the edge first.
+ */
+function websocketRootPaths(): string[] {
+	const env = useEnv();
+
+	if (toBoolean(env['WEBSOCKETS_ENABLED']) === false) {
+		return [];
+	}
+
+	return WEBSOCKET_CONTROLLERS
+		.filter((controller) => toBoolean(env[`WEBSOCKETS_${controller}_ENABLED`]))
+		.map((controller) => rootOf(String(env[`WEBSOCKETS_${controller}_PATH`])));
+}
+
 /**
  * Every root path the core API answers on in this environment: the root
- * handlers and the first segment of each mount that is on, once each, in the
- * order they are registered.
+ * handlers, the websocket controllers and the first segment of each mount that
+ * is on, once each, in the order they are registered.
  */
 export function coreRootPaths(): string[] {
 	const paths = new Set<string>();
@@ -92,6 +112,10 @@ export function coreRootPaths(): string[] {
 		if (handler.when?.() ?? true) {
 			paths.add(handler.path);
 		}
+	}
+
+	for (const path of websocketRootPaths()) {
+		paths.add(path);
 	}
 
 	for (const path of coreMountPaths()) {
