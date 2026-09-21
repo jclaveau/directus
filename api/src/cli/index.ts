@@ -14,6 +14,7 @@ export const BUILT_IN_COMMANDS = new Set([
 	'cache',
 	'count',
 	'database',
+	'edge',
 	'init',
 	'roles',
 	'schema',
@@ -39,6 +40,11 @@ function needsExtensions(argv: string[]): boolean {
 	const named = argv.find((argument) => argument.startsWith('-') === false);
 
 	return named === undefined || BUILT_IN_COMMANDS.has(named) === false;
+}
+
+/** Commander's accumulator for an option given more than once. */
+function collect(value: string, previous: string[]): string[] {
+	return [...previous, value];
 }
 
 /**
@@ -326,6 +332,53 @@ export async function createCli(
 			const { default: diff } = await import('./commands/schema/diff.js');
 
 			await diff(path, options);
+		});
+
+	const edgeCommands = program.command('edge');
+
+	edgeCommands
+		.command('allow-list')
+		.description(
+			'Print the root paths this deployment answers on, as the allow-list '
+			+ 'an edge in front of it can enforce',
+		)
+		.addOption(
+			new Option('--format <format>', 'a Railway edge ruleset, or one path per line')
+				.choices(['railway', 'plain'])
+				.default('railway'),
+		)
+		.option(
+			'--block-status <status>',
+			'the 4xx status the ruleset answers a blocked path with',
+			'404',
+		)
+		.option(
+			'--include <path>',
+			'a root segment to allow too, like /status (repeatable)',
+			collect,
+			[],
+		)
+		.option(
+			'--exclude <path>',
+			'a root segment to leave out, like /admin (repeatable)',
+			collect,
+			[],
+		)
+		.argument('[path]', 'the file to write instead of stdout, which the logs share')
+		.action(async (
+			path: string | undefined,
+			options: {
+				format: 'railway' | 'plain';
+				blockStatus: string;
+				include: string[];
+				exclude: string[];
+			},
+		) => {
+			const { default: edgeAllowList } = await import(
+				'./commands/edge/allow-list.js'
+			);
+
+			await edgeAllowList(path, options);
 		});
 
 	await emitter?.emitInit('cli.after', { program });
