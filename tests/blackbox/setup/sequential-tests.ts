@@ -107,6 +107,9 @@ export const sequentialTestsList: Record<'db' | 'common', SequentialTestsList> =
 			// waiting on before it will report itself ready at all.
 			'/tests/db/app/autoscale-prewarm-health.test.ts',
 			'/tests/db/routes/collections/schema-cache.test.ts',
+			// Reads the whole schema back against a snapshot taken a moment before:
+			// a sibling creating its collections in between is a drift.
+			'/tests/db/app/schema-diff-cli.test.ts',
 		],
 		// If specified, only run these tests sequentially
 		only: [

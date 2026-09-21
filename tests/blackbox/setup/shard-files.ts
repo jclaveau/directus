@@ -40,6 +40,8 @@ const DURATION_HINTS_MS: Record<string, number> = {
 	'/tests/db/routes/server/pressure-replay-exempt.test.ts': 12_000,
 	// Two spawned instances and five CLI boots of the whole app.
 	'/tests/db/app/cache-audit-cli.test.ts': 115_000,
+	// Seven CLI boots of the whole app.
+	'/tests/db/app/schema-diff-cli.test.ts': 15_000,
 	// One spawned instance; one case waits out the descriptor drain.
 	'/tests/db/app/cache-audit-mcp.test.ts': 60_000,
 	'/tests/db/database/db-connection-priority.test.ts': 8_000,
