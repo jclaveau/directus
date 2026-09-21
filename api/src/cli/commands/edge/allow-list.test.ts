@@ -238,19 +238,38 @@ test.each([
 	expect(getDatabase).not.toHaveBeenCalled();
 });
 
-test('refuses a path that does not start with a slash', async () => {
+test.each([
+	['nope'],
+	['/status/'],
+	['/files/tus'],
+])('refuses %s, which is not one root segment', async (path) => {
 	const run = edgeAllowList(undefined, options({
 		include: ['/ok'],
-		exclude: ['nope'],
+		exclude: [path],
 	}));
 
 	await expect(run).rejects.toThrow('exit:2');
 
 	expect(error).toHaveBeenCalledExactlyOnceWith(
-		'A path starts with "/", got "nope"',
+		`A path is one root segment like "/status", got "${path}"`,
 	);
 
 	expect(getDatabase).not.toHaveBeenCalled();
+});
+
+test('says when an exclude names a root nothing answers on', async () => {
+	const run = edgeAllowList(undefined, options({
+		format: 'plain',
+		exclude: ['/nothing', '/admin'],
+	}));
+
+	await expect(run).rejects.toThrow('exit:0');
+
+	expect(warn).toHaveBeenCalledExactlyOnceWith(
+		'Nothing answers on /nothing; --exclude /nothing changes nothing',
+	);
+
+	expect(printed()).toBe('/\n/items\n/server\n/studying\n');
 });
 
 test('exits 1 when Directus is not installed', async () => {

@@ -26,6 +26,11 @@ export type RailwayRuleset = { version: 1; rules: Rule[] };
  * through, which is the kind of path the block is for. The clauses are dealt
  * into as many allow rules as the per-rule cap needs, in priority order, and the
  * block rule comes last; the first rule a request matches decides it.
+ *
+ * Railway compares paths case-sensitively where Express does not: `/Items`
+ * reaches the API bare but stops at the edge. The count of rules a service may
+ * hold is a plan limit the docs leave unnamed; `validateServiceEdgeRules`
+ * reports it before an apply.
  */
 export function railwayAllowListRuleset(
 	rootPaths: string[],

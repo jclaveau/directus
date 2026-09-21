@@ -49,6 +49,8 @@ async function hookRootPaths(): Promise<ReturnType<typeof routerRootPaths>> {
 	return routerRootPaths(router);
 }
 
+const ROOT_PATH = /^\/[\w.~-]*$/;
+
 export type AllowListOptions = {
 	format: 'railway' | 'plain';
 	blockStatus: string;
@@ -91,11 +93,13 @@ export default async function edgeAllowList(
 		process.exit(2);
 	}
 
+	// One literal root segment, as the list holds them: `/files/tus` would
+	// stand next to `/files` without narrowing it
 	const malformed = [...options.include, ...options.exclude]
-		.find((path) => path.startsWith('/') === false);
+		.find((path) => ROOT_PATH.test(path) === false);
 
 	if (malformed !== undefined) {
-		logger.error(`A path starts with "/", got "${malformed}"`);
+		logger.error(`A path is one root segment like "/status", got "${malformed}"`);
 		process.exit(2);
 	}
 
@@ -128,12 +132,20 @@ export default async function edgeAllowList(
 			);
 		}
 
-		const rootPaths = [
+		const found = [
 			...coreRootPaths(),
 			...custom.paths,
 			...hooked.paths,
 			...options.include,
-		]
+		];
+
+		for (const path of options.exclude) {
+			if (found.includes(path) === false) {
+				logger.warn(`Nothing answers on ${path}; --exclude ${path} changes nothing`);
+			}
+		}
+
+		const rootPaths = found
 			.filter((path) => options.exclude.includes(path) === false)
 			.filter((path, index, all) => all.indexOf(path) === index)
 			.sort();
