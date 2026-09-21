@@ -11,6 +11,10 @@ import {
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
 import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache.js';
+import {
+	deserializeCacheEnvelope,
+	serializeCacheEnvelope,
+} from './utils/cache-envelope.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
@@ -460,6 +464,8 @@ function getKeyvInstance(
 function getConfig(store: Store = 'memory', ttl: number | undefined, namespaceSuffix = ''): KeyvOptions {
 	const config: KeyvOptions = {
 		namespace: `${env['CACHE_NAMESPACE']}${namespaceSuffix}`,
+		serialize: serializeCacheEnvelope,
+		deserialize: deserializeCacheEnvelope,
 		...(ttl && { ttl }),
 	};
 

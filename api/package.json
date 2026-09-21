@@ -190,6 +190,7 @@
 		"@directus/schema-builder": "workspace:*",
 		"@directus/tsconfig": "catalog:",
 		"@directus/types": "workspace:*",
+		"@keyv/serialize": "catalog:",
 		"@ngneat/falso": "catalog:",
 		"@types/async": "catalog:",
 		"@types/busboy": "catalog:",

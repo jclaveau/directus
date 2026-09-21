@@ -120,6 +120,9 @@ catalogs:
     '@keyv/redis':
       specifier: 5.1.6
       version: 5.1.6
+    '@keyv/serialize':
+      specifier: 1.1.1
+      version: 1.1.1
     '@mapbox/mapbox-gl-draw':
       specifier: 1.5.1
       version: 1.5.1
@@ -1314,6 +1317,9 @@ importers:
       '@directus/types':
         specifier: workspace:*
         version: link:../packages/types
+      '@keyv/serialize':
+        specifier: 'catalog:'
+        version: 1.1.1
       '@ngneat/falso':
         specifier: 'catalog:'
         version: 8.0.2
@@ -3078,6 +3084,9 @@ importers:
       seedrandom:
         specifier: 3.0.5
         version: 3.0.5
+      snappy:
+        specifier: 'catalog:'
+        version: 7.3.3(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)
       supertest:
         specifier: 7.2.2
         version: 7.2.2
