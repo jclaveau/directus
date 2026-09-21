@@ -1,7 +1,7 @@
 import { useEnv } from '@directus/env';
 import { InvalidPayloadError, ServiceUnavailableError } from '@directus/errors';
 import cookieParser from 'cookie-parser';
-import type { Request, RequestHandler, Response } from 'express';
+import type { Request, RequestHandler, Response, Router } from 'express';
 import express from 'express';
 import type { ServerResponse } from 'http';
 import { readFile } from 'node:fs/promises';
@@ -53,6 +53,7 @@ import {
 } from './database/index.js';
 import { initAutoscaleDrill } from './processes/autoscale/lib/drill.js';
 import { flushCachesIfBuildChanged } from './cache-build-identity.js';
+import { type CoreMountPath, coreMountPaths } from './core-mounts.js';
 import { initCacheConfig } from './cache-config.js';
 import { PROCESSES_BOOLEAN_ENV } from './processes/lib/boolean-env.js';
 import { validateBooleanEnv } from './utils/validate-env.js';
@@ -91,7 +92,6 @@ import {
 	assertScopedCacheRedisSupported,
 	startScopedCachePurgeRecovery,
 } from './scoped-cache.js';
-import { systemMcpEnabled } from './system-mcp/index.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { merge } from './utils/lodash-es-used.js';
 import { Url } from './utils/url.js';
@@ -354,57 +354,47 @@ export default async function createApp(): Promise<express.Application> {
 
 	await emitter.emitInit('routes.before', { app });
 
-	app.use('/auth', authRouter);
+	const coreRouters: Record<CoreMountPath, Router> = {
+		'/auth': authRouter,
+		'/graphql': graphqlRouter,
+		'/activity': activityRouter,
+		'/access': accessRouter,
+		'/assets': assetsRouter,
+		'/collections': collectionsRouter,
+		'/comments': commentsRouter,
+		'/dashboards': dashboardsRouter,
+		'/extensions': extensionsRouter,
+		'/fields': fieldsRouter,
+		'/files/tus': tusRouter,
+		'/files': filesRouter,
+		'/flows': flowsRouter,
+		'/folders': foldersRouter,
+		'/items': itemsRouter,
+		'/system-mcp': systemMcpRouter,
+		'/metrics': metricsRouter,
+		'/notifications': notificationsRouter,
+		'/operations': operationsRouter,
+		'/panels': panelsRouter,
+		'/permissions': permissionsRouter,
+		'/policies': policiesRouter,
+		'/presets': presetsRouter,
+		'/translations': translationsRouter,
+		'/relations': relationsRouter,
+		'/revisions': revisionsRouter,
+		'/roles': rolesRouter,
+		'/schema': schemaRouter,
+		'/server': serverRouter,
+		'/settings': settingsRouter,
+		'/shares': sharesRouter,
+		'/users': usersRouter,
+		'/utils': utilsRouter,
+		'/versions': versionsRouter,
+		'/webhooks': webhooksRouter,
+	};
 
-	app.use('/graphql', graphqlRouter);
-
-	app.use('/activity', activityRouter);
-	app.use('/access', accessRouter);
-	app.use('/assets', assetsRouter);
-	app.use('/collections', collectionsRouter);
-	app.use('/comments', commentsRouter);
-	app.use('/dashboards', dashboardsRouter);
-	app.use('/extensions', extensionsRouter);
-	app.use('/fields', fieldsRouter);
-
-	if (env['TUS_ENABLED'] === true) {
-		app.use('/files/tus', tusRouter);
+	for (const path of coreMountPaths()) {
+		app.use(path, coreRouters[path]);
 	}
-
-	app.use('/files', filesRouter);
-	app.use('/flows', flowsRouter);
-	app.use('/folders', foldersRouter);
-	app.use('/items', itemsRouter);
-
-	// Not `/mcp`: upstream Directus serves its own MCP there, over the content
-	// API. Its own top-level path rather than under `/admin`, which the Data
-	// Studio's `/admin/*` catch-all would answer before any router here.
-	if (systemMcpEnabled()) {
-		app.use('/system-mcp', systemMcpRouter);
-	}
-
-	if (env['METRICS_ENABLED'] === true) {
-		app.use('/metrics', metricsRouter);
-	}
-
-	app.use('/notifications', notificationsRouter);
-	app.use('/operations', operationsRouter);
-	app.use('/panels', panelsRouter);
-	app.use('/permissions', permissionsRouter);
-	app.use('/policies', policiesRouter);
-	app.use('/presets', presetsRouter);
-	app.use('/translations', translationsRouter);
-	app.use('/relations', relationsRouter);
-	app.use('/revisions', revisionsRouter);
-	app.use('/roles', rolesRouter);
-	app.use('/schema', schemaRouter);
-	app.use('/server', serverRouter);
-	app.use('/settings', settingsRouter);
-	app.use('/shares', sharesRouter);
-	app.use('/users', usersRouter);
-	app.use('/utils', utilsRouter);
-	app.use('/versions', versionsRouter);
-	app.use('/webhooks', webhooksRouter);
 
 	// Register custom endpoints
 	await emitter.emitInit('routes.custom.before', { app });
