@@ -52,8 +52,17 @@ export type MutationOptions = {
 
 	/**
 	 * Flag to disable the auto purging of the cache. Is ignored when CACHE_AUTO_PURGE isn't enabled.
+	 * `true` is the default, so a caller deciding at runtime passes its answer as is.
 	 */
-	autoPurgeCache?: false | undefined;
+	autoPurgeCache?: boolean | undefined;
+
+	/**
+	 * `false` keeps the collection's bare tag out of the scoped purge: the mutated
+	 * rows' own slices drop, the reads the bare tag names (unpinned listings,
+	 * relational hops) keep serving the pre-write rows. For a write whose column no
+	 * such read decides on, issued at a rate that would otherwise drain them.
+	 */
+	purgeCollectionTag?: boolean | undefined;
 
 	/**
 	 * Flag to disable the auto purging of the system cache.

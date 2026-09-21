@@ -706,6 +706,8 @@ implements AbstractService<Item> {
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheTags,
 				scopedCacheCollector,
+				[],
+				{ includeCollectionTag: opts.purgeCollectionTag !== false },
 			);
 		}
 
@@ -1028,9 +1030,11 @@ implements AbstractService<Item> {
 						: [...oldScopedCacheTags, ...newScopedCacheTags];
 
 				this.scopedCachePurged = await this.scopedCache.purge(
-				scopedCacheTags,
-				scopedCacheCollector,
-			);
+					scopedCacheTags,
+					scopedCacheCollector,
+					[],
+					{ includeCollectionTag: opts.purgeCollectionTag !== false },
+				);
 			}
 		}
 
@@ -1414,6 +1418,8 @@ implements AbstractService<Item> {
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheTags,
 				scopedCacheCollector,
+				[],
+				{ includeCollectionTag: opts.purgeCollectionTag !== false },
 			);
 		}
 
@@ -1545,6 +1551,8 @@ implements AbstractService<Item> {
 			this.scopedCachePurged = await this.scopedCache.purge(
 				scopedCacheTags,
 				scopedCacheCollector,
+				[],
+				{ includeCollectionTag: opts.purgeCollectionTag !== false },
 			);
 		}
 
@@ -1758,6 +1766,7 @@ implements AbstractService<Item> {
 					this.schema,
 					this.collection,
 				),
+				{ includeCollectionTag: opts.purgeCollectionTag !== false },
 			);
 		}
 

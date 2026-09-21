@@ -282,7 +282,7 @@ export async function flushCaches(forced?: boolean): Promise<CacheFlushReport> {
 
 export async function clearSystemCache(opts?: {
 	forced?: boolean | undefined;
-	autoPurgeCache?: false | undefined;
+	autoPurgeCache?: boolean | undefined;
 }): Promise<void> {
 	const { systemCache, localSchemaCache, lockCache } = getCache();
 

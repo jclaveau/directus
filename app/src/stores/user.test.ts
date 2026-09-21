@@ -3,6 +3,7 @@ import { setActivePinia } from 'pinia';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RouteLocationNormalized } from 'vue-router';
 
+import api from '@/api';
 import { AppUser } from '@/types/user';
 import { Role, User, Globals } from '@directus/types';
 import { useUserStore } from './user';
@@ -68,7 +69,7 @@ vi.mock('@/api', () => {
 
 				return Promise.reject(new Error(`GET "${path}" is not mocked in this test`));
 			},
-			patch: (path: string) => {
+			patch: vi.fn((path: string) => {
 				if (path === '/users/me/track/page') {
 					return Promise.resolve({
 						data: {},
@@ -76,7 +77,7 @@ vi.mock('@/api', () => {
 				}
 
 				return Promise.reject(new Error(`PATCH "${path}" is not mocked in this test`));
-			},
+			}),
 		},
 	};
 });
@@ -156,6 +157,101 @@ describe('actions', () => {
 			await userStore.trackPage({ path: page, fullPath: page } as RouteLocationNormalized);
 
 			expect((userStore.currentUser as User).last_page).toBe(page);
+		});
+
+		test('should not track the page the user is already on', async () => {
+			const userStore = useUserStore();
+			await userStore.hydrate();
+			const route = { path: page, fullPath: page } as RouteLocationNormalized;
+			await userStore.trackPage(route);
+			await userStore.trackPage(route);
+
+			expect(api.patch).toHaveBeenCalledTimes(1);
+		});
+
+		test('sends overlapping writes one at a time, in navigation order', async () => {
+			const userStore = useUserStore();
+			await userStore.hydrate();
+
+			let land!: () => void;
+
+			vi.mocked(api.patch).mockImplementationOnce(() => {
+				return new Promise((resolve) => {
+					land = () => resolve({ data: {} });
+				});
+			});
+
+			const routeA = { path: '/a', fullPath: '/a' } as RouteLocationNormalized;
+			const routeB = { path: '/b', fullPath: '/b' } as RouteLocationNormalized;
+			const first = userStore.trackPage(routeA);
+			const second = userStore.trackPage(routeB);
+
+			// The first write is out and unanswered; the second waits behind it.
+			await vi.waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+
+			await Promise.resolve();
+			expect(api.patch).toHaveBeenCalledTimes(1);
+
+			land();
+			await Promise.all([first, second]);
+
+			expect(api.patch).toHaveBeenCalledTimes(2);
+
+			expect(vi.mocked(api.patch).mock.calls.map(([, body]) => body)).toEqual([
+				{ last_page: '/a' },
+				{ last_page: '/b' },
+			]);
+
+			expect((userStore.currentUser as User).last_page).toBe('/b');
+		});
+
+		test('does not re-send a page whose write is still in flight', async () => {
+			const userStore = useUserStore();
+			await userStore.hydrate();
+
+			let land!: () => void;
+
+			vi.mocked(api.patch).mockImplementationOnce(() => {
+				return new Promise((resolve) => {
+					land = () => resolve({ data: {} });
+				});
+			});
+
+			const route = { path: page, fullPath: page } as RouteLocationNormalized;
+			const both = [userStore.trackPage(route), userStore.trackPage(route)];
+
+			await vi.waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+			land();
+			await Promise.all(both);
+
+			expect(api.patch).toHaveBeenCalledTimes(1);
+		});
+
+		test('asks a page again after its write failed', async () => {
+			const userStore = useUserStore();
+			await userStore.hydrate();
+
+			vi.mocked(api.patch).mockRejectedValueOnce(new Error('offline'));
+
+			const route = { path: page, fullPath: page } as RouteLocationNormalized;
+			await expect(userStore.trackPage(route)).rejects.toThrow('offline');
+			await userStore.trackPage(route);
+
+			expect(api.patch).toHaveBeenCalledTimes(2);
+			expect((userStore.currentUser as User).last_page).toBe(page);
+		});
+
+		test('asks the page again after a dehydrate, for the next sign-in', async () => {
+			const userStore = useUserStore();
+			await userStore.hydrate();
+			const route = { path: page, fullPath: page } as RouteLocationNormalized;
+			await userStore.trackPage(route);
+
+			await userStore.dehydrate();
+			await userStore.hydrate();
+			await userStore.trackPage(route);
+
+			expect(api.patch).toHaveBeenCalledTimes(2);
 		});
 	});
 });

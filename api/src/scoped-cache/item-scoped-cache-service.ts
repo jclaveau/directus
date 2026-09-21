@@ -524,8 +524,9 @@ export class ItemScopedCacheService {
 		tags: ScopedCacheTag[] | null,
 		collector?: Pick<ScopedCacheCollector, 'tags'>,
 		changedCollections: string[] = [],
-		// `false` leaves this collection's bare tag warm (a filter-cancel wrote nothing,
-		// so its global reads stay), purging only the tags a hook declared.
+		// `false` leaves this collection's bare tag warm: a filter-cancel wrote
+		// nothing, so its global reads stay; a mutation opting out through
+		// `purgeCollectionTag` keeps them on purpose and drops the rows' own slices.
 		{ includeCollectionTag = true }: { includeCollectionTag?: boolean } = {},
 	): Promise<ScopedCacheTag[] | null> {
 		// Callers reach here through `shouldClearCache`, which already rules out a
@@ -595,7 +596,9 @@ export class ItemScopedCacheService {
 				this.collection,
 				[...ownTags, ...hookTags],
 				context,
-				{ scopedCachePurgeId },
+				includeCollectionTag
+					? { scopedCachePurgeId }
+					: { includeCollectionTag: false, scopedCachePurgeId },
 			));
 		}
 		else {
