@@ -7,6 +7,7 @@ import cacheFlush from './commands/cache/flush.js';
 import count from './commands/count/index.js';
 import dbInstall from './commands/database/install.js';
 import dbMigrate from './commands/database/migrate.js';
+import edgeAllowList from './commands/edge/allow-list.js';
 import init from './commands/init/index.js';
 import rolesCreate from './commands/roles/create.js';
 import { apply } from './commands/schema/apply.js';
@@ -32,6 +33,7 @@ vi.mock('./commands/cache/flush.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/count/index.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/database/install.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/database/migrate.js', () => ({ default: vi.fn() }));
+vi.mock('./commands/edge/allow-list.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/init/index.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/roles/create.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/schema/apply.js', () => ({ apply: vi.fn() }));
@@ -132,6 +134,38 @@ describe('createCli', () => {
 			schemaDiff,
 			['snap.json', { quiet: true, ignoreRules: 'a,b.c' }],
 		],
+		[
+			['edge', 'allow-list'],
+			edgeAllowList,
+			[
+				undefined,
+				{ format: 'railway', blockStatus: '404', include: [], exclude: [] },
+			],
+		],
+		[
+			[
+				'edge',
+				'allow-list',
+				'--format',
+				'plain',
+				'--block-status',
+				'410',
+				'--include',
+				'/a',
+				'--include',
+				'/b',
+				'--exclude',
+				'/c',
+				'rules.json',
+			],
+			edgeAllowList,
+			['rules.json', {
+				format: 'plain',
+				blockStatus: '410',
+				include: ['/a', '/b'],
+				exclude: ['/c'],
+			}],
+		],
 	])('runs %j against its own module', async (argv, command, args) => {
 		vi.mocked(command).mockClear();
 
@@ -152,6 +186,7 @@ describe('createCli', () => {
 		['database', 'migrate:latest'],
 		['schema', 'apply', 'snapshot.yaml'],
 		['schema', 'diff', 'snapshot.yaml'],
+		['edge', 'allow-list'],
 		['count', 'articles'],
 	])('leaves the extensions alone for %s', async (...argv) => {
 		vi.mocked(loadExtensions).mockClear();
