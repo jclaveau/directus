@@ -3,9 +3,9 @@ import getDatabase, {
 	isInstalled,
 	validateDatabaseConnection,
 } from '../../../database/index.js';
-import { useLogger } from '../../../logger/index.js';
 import { getSnapshotDiff } from '../../../utils/get-snapshot-diff.js';
 import { getSnapshot } from '../../../utils/get-snapshot.js';
+import { validateSnapshot } from '../../../utils/validate-snapshot.js';
 import { drainStdout } from '../../utils/drain-stdout.js';
 import { loadSnapshotFile } from './load-snapshot.js';
 import {
@@ -13,6 +13,8 @@ import {
 	formatSnapshotDiff,
 	isEmptySnapshotDiff,
 } from './report-diff.js';
+
+/* eslint-disable no-console */
 
 /**
  * Say whether the database matches a snapshot, as an exit code a deploy step or
@@ -24,12 +26,14 @@ import {
  * skips the diff when the database's hash equals the one recorded at export, so
  * a collection file edited by hand never reaches it and nothing says so. This is
  * the read of the database that tells.
+ *
+ * The report goes to the console rather than the logger: the exit code is the
+ * contract, and what explains it must not depend on LOG_LEVEL.
  */
 export default async function schemaDiff(
 	snapshotPath: string,
 	options?: { quiet?: boolean; ignoreRules?: string },
 ): Promise<void> {
-	const logger = useLogger();
 	const database = getDatabase();
 	let report: string | undefined;
 
@@ -45,7 +49,15 @@ export default async function schemaDiff(
 
 		const filename = path.resolve(process.cwd(), snapshotPath);
 		const snapshot = await loadSnapshotFile(filename);
+
+		// The shape check alone: the version and vendor may differ on purpose
+		validateSnapshot(snapshot, true);
+
+		// Several statements off the pool, not one transaction: the snapshot's
+		// queries run in parallel, and pg deprecates queueing them on one connection.
+		// A schema change committed mid-read shows as a drift the next run clears.
 		const currentSnapshot = await getSnapshot({ database });
+
 		let snapshotDiff = getSnapshotDiff(currentSnapshot, snapshot);
 
 		if (options?.ignoreRules) {
@@ -59,7 +71,7 @@ export default async function schemaDiff(
 			: formatSnapshotDiff(snapshotDiff);
 	}
 	catch (error: any) {
-		logger.error(error);
+		console.error(error);
 	}
 
 	database.destroy();
@@ -71,14 +83,13 @@ export default async function schemaDiff(
 	}
 	else if (report === '') {
 		if (!options?.quiet) {
-			logger.info('Schema matches the snapshot');
+			console.log('Schema matches the snapshot');
 		}
 
 		await exitWhenLogged(0);
 	}
 	else {
 		if (!options?.quiet) {
-			// eslint-disable-next-line no-console
 			console.log(`Schema differs from the snapshot:\n\n${report}`);
 		}
 
