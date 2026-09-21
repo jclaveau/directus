@@ -10,7 +10,7 @@ Branch `v11.10.1-perf/cache-envelope` off `origin/v11.10.1-hhh-dev` (2026-09-21)
 addresses #520 (large-entry HIT/MISS cost sits in the Keyv envelope, not Redis).
 
 **What landed**
-- `api/src/utils/cache-envelope.ts`: `serializeCacheEnvelope`/`deserializeCacheEnvelope`
+- `api/src/cache-envelope.ts`: `serializeCacheEnvelope`/`deserializeCacheEnvelope`
   wired into every tier via `getConfig` in `cache.ts`. Document = `{"envelope":2,`
   + `value` (plain JSON) or `base64` (the ONE Buffer a tier ever gets: the whole
   snappy payload from `compress.ts`) + `expires`. Head sniffed on the first bytes;

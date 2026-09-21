@@ -1012,7 +1012,7 @@ describe('getCache', () => {
 		const {
 			deserializeCacheEnvelope,
 			serializeCacheEnvelope,
-		} = await import('./utils/cache-envelope.js');
+		} = await import('./cache-envelope.js');
 
 		setEnv({
 			CACHE_ENABLED: true,

@@ -3,6 +3,10 @@ import { ServiceUnavailableError } from '@directus/errors';
 import type { CacheFlushTarget, SchemaOverview } from '@directus/types';
 import Keyv, { type KeyvOptions } from 'keyv';
 import { useBus } from './bus/index.js';
+import {
+	deserializeCacheEnvelope,
+	serializeCacheEnvelope,
+} from './cache-envelope.js';
 import { useLogger } from './logger/index.js';
 import { clearCache as clearPermissionCache } from './permissions/cache.js';
 import { redisConfigAvailable } from './redis/index.js';
@@ -11,10 +15,6 @@ import {
 	warnOncePerConnectionOutage,
 } from './redis/lib/warn-once-per-connection-outage.js';
 import { clearResponseCache, dropScopedCacheIndex } from './scoped-cache.js';
-import {
-	deserializeCacheEnvelope,
-	serializeCacheEnvelope,
-} from './utils/cache-envelope.js';
 import { compress, decompress } from './utils/compress.js';
 import { getConfigFromEnv } from './utils/get-config-from-env.js';
 import { getMilliseconds } from './utils/get-milliseconds.js';
