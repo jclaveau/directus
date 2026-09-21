@@ -302,6 +302,32 @@ export async function createCli(
 			await apply(path, options);
 		});
 
+	schemaCommands
+		.command('diff')
+		.description(
+			'Report how the current database differs from a snapshot file, or a '
+			+ 'schema-sync partial header; '
+			+ 'exits 0 when it matches, 1 when it differs',
+		)
+		.option(
+			'-q, --quiet',
+			'Exit with the code only, without listing the changes',
+		)
+		.option(
+			'--ignoreRules <value>',
+			'Comma-separated list of collections and or fields to ignore, '
+			+ 'as "schema apply" takes it',
+		)
+		.argument('<path>', 'Path to snapshot file')
+		.action(async (
+			path: string,
+			options: { quiet?: boolean; ignoreRules?: string },
+		) => {
+			const { default: diff } = await import('./commands/schema/diff.js');
+
+			await diff(path, options);
+		});
+
 	await emitter?.emitInit('cli.after', { program });
 
 	return program;

@@ -10,6 +10,7 @@ import dbMigrate from './commands/database/migrate.js';
 import init from './commands/init/index.js';
 import rolesCreate from './commands/roles/create.js';
 import { apply } from './commands/schema/apply.js';
+import schemaDiff from './commands/schema/diff.js';
 import { snapshot } from './commands/schema/snapshot.js';
 import keyGenerate from './commands/security/key.js';
 import secretGenerate from './commands/security/secret.js';
@@ -34,6 +35,7 @@ vi.mock('./commands/database/migrate.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/init/index.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/roles/create.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/schema/apply.js', () => ({ apply: vi.fn() }));
+vi.mock('./commands/schema/diff.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/schema/snapshot.js', () => ({ snapshot: vi.fn() }));
 vi.mock('./commands/security/key.js', () => ({ default: vi.fn() }));
 vi.mock('./commands/security/secret.js', () => ({ default: vi.fn() }));
@@ -125,6 +127,11 @@ describe('createCli', () => {
 			apply,
 			['snap.yaml', { yes: true, dryRun: false }],
 		],
+		[
+			['schema', 'diff', '--quiet', '--ignoreRules', 'a,b.c', 'snap.json'],
+			schemaDiff,
+			['snap.json', { quiet: true, ignoreRules: 'a,b.c' }],
+		],
 	])('runs %j against its own module', async (argv, command, args) => {
 		vi.mocked(command).mockClear();
 
@@ -144,6 +151,7 @@ describe('createCli', () => {
 		['start'],
 		['database', 'migrate:latest'],
 		['schema', 'apply', 'snapshot.yaml'],
+		['schema', 'diff', 'snapshot.yaml'],
 		['count', 'articles'],
 	])('leaves the extensions alone for %s', async (...argv) => {
 		vi.mocked(loadExtensions).mockClear();
