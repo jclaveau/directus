@@ -126,8 +126,10 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 
 				const env = instanceEnv(namespace);
 				env[vendor]['REDIS_PORT'] = String(proxyPort);
-				// The fill cost lands on the descriptor, and only with stats on.
+				// The fill cost lands on the descriptor, and only with stats on; the
+				// audit queues off the same descriptor.
 				env[vendor]['CACHE_STATS_ENABLED'] = 'true';
+				env[vendor]['CACHE_STATS_DRAIN_SCHEDULE'] = '* * * * * *';
 
 				instance = await boot(env);
 				url = getUrl(vendor, env);
@@ -207,6 +209,113 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 
 				expect(hit.headers[cacheStatusHeader]).toBe('HIT');
 				expect(hit.body).toEqual(legacy);
+			});
+
+			it(oneLine`
+				an expiry sidecar written before the change still tells a HIT how long
+				it has left
+			`, async () => {
+				const now = Date.now();
+				const key = await entryKey(namespace);
+
+				await redis.set(`${key}__expires_at`, JSON.stringify({
+					value: { exp: now + 60_000, createdAt: now, ttlMs: 60_000 },
+					expires: now + 60_000,
+				}));
+
+				const hit = await readRows(url);
+
+				expect(hit.headers[cacheStatusHeader]).toBe('HIT');
+				// An unreadable sidecar answers `no-cache` instead.
+				expect(hit.headers['cache-control']).toMatch(/max-age=([1-9]|[1-5]\d|60)\b/);
+			});
+
+			it(oneLine`
+				the audit replays an entry written before the change, and reads its
+				body well enough to name the field the database disagrees on
+			`, async () => {
+				await request(url)
+					.post('/utils/cache/clear')
+					.set('Authorization', auth)
+					.expect(200);
+
+				const miss = await readRows(url);
+				expect(miss.headers[cacheStatusHeader]).toBe('MISS');
+
+				const key = await entryKey(namespace);
+				const now = Date.now();
+				const before = cloneDeep(miss.body);
+				before.data[0].note = 'from-before';
+
+				await redis.set(key, JSON.stringify({
+					value: `:base64:${(await snappy(tokenize(before))).toString('base64')}`,
+					expires: now + 60_000,
+				}));
+
+				await redis.set(`${key}__expires_at`, JSON.stringify({
+					value: { exp: now + 60_000, createdAt: now, ttlMs: 60_000 },
+					expires: now + 60_000,
+				}));
+
+				// An entry the audit cannot decode is `unreplayable`/`unreadable`; a
+				// diff on the one field moved is the body read back whole.
+				for (let attempt = 0; attempt < 30; attempt++) {
+					const run = await request(url)
+						.post('/utils/cache/audit')
+						.set('Authorization', auth)
+						.expect(200);
+
+					const report = await request(url)
+						.get(`/utils/cache/audits/${run.body.data.id}`)
+						.set('Authorization', auth)
+						.expect(200);
+
+					const finding = report.body.data.findings.find((candidate: any) => {
+						return candidate.url === `/items/${COLLECTION}?sort=label`;
+					});
+
+					if (finding) {
+						expect(finding).toMatchObject({
+							verdict: 'stale',
+							diff: ['/data/0/note'],
+						});
+
+						return;
+					}
+
+					await new Promise((resolve) => setTimeout(resolve, 500));
+				}
+
+				throw new Error('the audit never reported the entry');
+			}, 60_000);
+
+			it(oneLine`
+				an audit run lock left by the previous build is honoured, down to the
+				time it was taken
+			`, async () => {
+				const since = Date.now() - 5_000;
+				const [lockKey] = await redis.keys(`${namespace}_lock:*`);
+				const lockPrefix = lockKey!.slice(0, lockKey!.lastIndexOf(':') + 1);
+
+				await redis.set(`${lockPrefix}cache-audit:run`, JSON.stringify({
+					value: since,
+					expires: since + 120_000,
+				}));
+
+				try {
+					const refused = await request(url)
+						.post('/utils/cache/audit')
+						.set('Authorization', auth);
+
+					expect(refused.statusCode).toBe(503);
+
+					expect(refused.body.errors[0].message).toContain(
+						new Date(since).toISOString(),
+					);
+				}
+				finally {
+					await redis.del(`${lockPrefix}cache-audit:run`);
+				}
 			});
 
 			it(oneLine`
@@ -304,6 +413,85 @@ describe('a cached response is stored in the fork\'s envelope (#520)', () => {
 				expect(hit.headers[cacheStatusHeader]).toBe('HIT');
 				expect(hit.body.data[0].note).toBe(':from-before');
 			});
+
+		// The build identity is the one key `flushCaches` keeps, so on every
+		// deploy the new build reads what the old one stored through the old
+		// envelope — misread, every boot would flush.
+		describe('the build identity the previous build stored', () => {
+			const namespace = `directus-envelope-identity-${vendor}`;
+			let env: ReturnType<typeof instanceEnv>;
+			let identityKey: string;
+			let identity: string;
+
+			async function bootAndRead() {
+				const instance = await boot(env);
+
+				try {
+					return await readRows(getUrl(vendor, env));
+				}
+				finally {
+					instance.kill();
+				}
+			}
+
+			beforeAll(async () => {
+				env = instanceEnv(namespace);
+				const instance = await boot(env);
+				const url = getUrl(vendor, env);
+
+				await request(url)
+					.post('/utils/cache/clear')
+					.set('Authorization', auth)
+					.expect(200);
+
+				await readRows(url);
+				const hit = await readRows(url);
+				expect(hit.headers[cacheStatusHeader]).toBe('HIT');
+
+				instance.kill();
+
+				const lockKeys = await redis.keys(`${namespace}_lock:*`);
+				identityKey = lockKeys.find((key) => key.endsWith(':build-identity'))!;
+				expect(identityKey).toBeDefined();
+
+				const raw = await redis.get(identityKey);
+				expect(raw).toMatch(/^\{"envelope":2,"value":"/);
+				identity = JSON.parse(raw!).value;
+			}, 60_000);
+
+			it(oneLine`
+				a node booting on an identity the old envelope stored reads it as its
+				own, and keeps the cache
+			`, async () => {
+				await redis.set(identityKey, JSON.stringify({ value: identity }));
+
+				const read = await bootAndRead();
+
+				expect(read.headers[cacheStatusHeader]).toBe('HIT');
+
+				// Left as it was: a matching identity is not rewritten.
+				expect(await redis.get(identityKey)).toBe(
+					JSON.stringify({ value: identity }),
+				);
+			}, 60_000);
+
+			it(oneLine`
+				and flushes on one that names another build, then stores its own
+			`, async () => {
+				await redis.set(identityKey, JSON.stringify({
+					value: `${identity}-previous-build`,
+				}));
+
+				const read = await bootAndRead();
+
+				expect(read.headers[cacheStatusHeader]).toBe('MISS');
+
+				expect(JSON.parse((await redis.get(identityKey))!)).toEqual({
+					envelope: 2,
+					value: identity,
+				});
+			}, 60_000);
+		});
 		});
 	});
 });
