@@ -50,8 +50,28 @@ Buffer inside a value goes through `toJSON` (`{type:'Buffer',data}`) — same as
 `res.json` would send; no `@keyv/serialize` runtime dep (reviver inlined);
 `CACHE_AUTO_FLUSH_ON_DEPLOY` is what actually drops legacy entries in prod.
 
-**Follow-ups noted, out of scope**: 3× `JSON.stringify` of the payload per MISS
-(CACHE_VALUE_MAX_SIZE gate, compress, res.json); planner-side field narrowing.
+**Review outcome (2026-09-21, merged)**: envelope lives at `api/src/cache-envelope.ts`
+(cache layer, not utils — `compress.ts` stays under utils, upstream placement, own
+chore if ever); exact-version head sniff kept (an unknown version would fall into
+the legacy reviver — harden only when a v3 exists); base64 +33% on the stored
+Buffer accepted; old-node-reads-new during the rolling overlap = bounded MISS
+ping-pong (compressed) / leading-`:` strip on user strings (uncompressed, dev
+only); `fill_ms` now includes the SET so the cache page's fill percentiles step
+on deploy day.
+
+**PARKED follow-ups (jean: response time + memory are the goals)**, ranked:
+1. Serve a HIT as text: `middleware/cache.ts` HIT path does unsnappy → `JSON.parse`
+   (~10 ms) → `res.json` re-stringify (~15 ms) on 1.48 MB, and nothing touches the
+   object in between. `res.type('application/json').send(text)` → HIT ~5 ms and
+   no object graph in V8 heap per hit (the real API-RAM lever). Needs a
+   text-returning `decompress`; uncompressed store keeps `res.json`. No Express
+   `json spaces`/replacer configured, bytes identical.
+2. Stringify the MISS payload once (size gate `respond.ts:101`, `compress`,
+   `res.json` ~15 ms each) → MISS −30 ms.
+3. Raw snappy bytes instead of base64 (Keyv bypass, Buffer GET/SET on the
+   response tier): −25% Redis memory (654 → 490 KB; prod 218 → ~165 MB).
+4. zstd over snappy: more Redis savings, costs API CPU — only if Redis RAM binds.
+Also: planner-side field narrowing.
 
 Related: [[project_directus_big_entry_hit_cost]], [[project_directus_keyv_raw_key_shape]],
 [[project_directus_blackbox_spawn_own_instance]], [[reference_directus_blackbox_supertest_query_encoding]].
