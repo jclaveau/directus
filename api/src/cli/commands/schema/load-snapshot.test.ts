@@ -44,6 +44,26 @@ test('reads a whole JSON snapshot as is', async () => {
 	expect(await loadSnapshotFile(filename)).toEqual(snapshot);
 });
 
+// The extension's whole layout keeps its `hash` beside the snapshot, and its
+// older one nested the snapshot under `snapshot`; neither key is a snapshot's.
+test('drops the hash the extension writes beside a whole snapshot', async () => {
+	const filename = await write('schema.json', { hash: 'abc', ...header });
+
+	expect(await loadSnapshotFile(filename)).toEqual(header);
+});
+
+test('unwraps the older layout nesting the snapshot under `snapshot`', async () => {
+	const filename = await write('schema.json', {
+		hash: 'abc',
+		snapshot: { ...header, collections: [{ collection: 'a', meta: {} }] },
+	});
+
+	expect(await loadSnapshotFile(filename)).toEqual({
+		...header,
+		collections: [{ collection: 'a', meta: {} }],
+	});
+});
+
 test('reads a whole YAML snapshot as is', async () => {
 	const filename = await write(
 		'schema.yaml',
@@ -102,6 +122,38 @@ test('stitches a partial header from the collection files beside it', async () =
 			},
 		],
 	});
+});
+
+// The extension refuses to import from an empty directory rather than read it as
+// a snapshot with nothing in it; a diff that reported deleting everything would
+// be answering a different question.
+test('refuses a partial header with no collection file beside it', async () => {
+	const filename = await write('schema.json', { ...header, partial: true });
+	await fs.mkdir(path.join(directory, 'schema'));
+
+	await expect(loadSnapshotFile(filename)).rejects.toThrowError(
+		`No collection files found in ${path.join(directory, 'schema')}`,
+	);
+});
+
+// `Object.assign({ collection }, field)` in the extension: a `collection` written
+// in the file wins over the file's name, and the diff has to read what the
+// import would.
+test('lets a collection named in the file win over the file name', async () => {
+	const filename = await write('schema.json', { ...header, partial: true });
+
+	await write('schema/articles.json', {
+		collection: 'articles',
+		meta: {},
+		schema: null,
+		fields: [{ collection: 'pages', field: 'title', type: 'string' }],
+		relations: [{ collection: 'pages', field: 'author' }],
+	});
+
+	const { fields, relations } = await loadSnapshotFile(filename);
+
+	expect(fields).toEqual([{ collection: 'pages', field: 'title', type: 'string' }]);
+	expect(relations).toEqual([{ collection: 'pages', field: 'author' }]);
 });
 
 test('stitches in the order of the file names, not of the directory', async () => {
